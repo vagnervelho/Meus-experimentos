@@ -1,0 +1,2026 @@
+<script>
+/*
+ * Inbox Intelligence — cliente (ES2019, sem dependências).
+ * Regras: todo dado vindo do servidor (e, portanto, de e-mails) é texto não confiável.
+ * O DOM é montado só com createElement/textContent; links externos passam por validação.
+ */
+(function () {
+  'use strict';
+
+  var TZ = 'America/Sao_Paulo';
+  var doc = document;
+  function $(id) { return doc.getElementById(id); }
+  var S = {
+    boot: null, ai: null, cats: [], catMap: {}, sync: null, route: null, screenKey: '', navigated: false,
+    detail: null, sheet: null, items: {}, local: {}, fbOpen: {}, uid: 0,
+    radarPeriod: '', inbox: null, newsPeriod: '7d', sendersPeriod: '30d', sendersOnlySugg: false,
+    tasksStatus: 'OPEN', oppStatus: 'OPEN', searchQ: '', searchPage: 1, focusSearch: false, quality: {}
+  };
+
+  // ------------------------------------------------------------------ DOM ----
+  var BLOCKED_ATTR = /^(on|href$|src$|srcdoc$|action$|formaction$|style$|xlink)/i;
+  function h(tag, a) {
+    var el = doc.createElement(tag);
+    var late = null;
+    if (a) Object.keys(a).forEach(function (k) {
+      var v = a[k];
+      if (v === null || v === undefined || v === false) return;
+      if (k === 'class') el.className = v;
+      else if (k === 'text') el.textContent = String(v);
+      else if (k === 'on') Object.keys(v).forEach(function (ev) { el.addEventListener(ev, v[ev]); });
+      else if (k === 'value' || k === 'checked') { late = late || {}; late[k] = v; }
+      else if (BLOCKED_ATTR.test(k)) throw new Error('Atributo não permitido: ' + k);
+      else el.setAttribute(k, v === true ? '' : String(v));
+    });
+    for (var i = 2; i < arguments.length; i++) add(el, arguments[i]);
+    if (late) Object.keys(late).forEach(function (k) { el[k] = late[k]; });
+    return el;
+  }
+  function add(el, c) {
+    if (c === null || c === undefined || c === false || c === '') return;
+    if (Array.isArray(c)) { for (var i = 0; i < c.length; i++) add(el, c[i]); return; }
+    el.appendChild(c instanceof Node ? c : doc.createTextNode(String(c)));
+  }
+  function sr(t) { return h('span', { class: 'sr' }, t); }
+  function uid(p) { S.uid += 1; return (p || 'u') + S.uid; }
+  function str(v) { return typeof v === 'string' ? v : v === null || v === undefined ? '' : String(v); }
+  function arr(v) { return Array.isArray(v) ? v : []; }
+  function obj(v) { return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; }
+  function isNum(v) { return typeof v === 'number' && isFinite(v); }
+  function trunc(s, n) { s = str(s); return s.length > n ? s.slice(0, n - 1) + '…' : s; }
+
+  var SVGNS = 'http://www.w3.org/2000/svg';
+  var ICONS = {
+    radar: 'M12 3a9 9 0 1 0 9 9M12 7.5a4.5 4.5 0 1 0 4.5 4.5M12 12l6.5-6.5',
+    inbox: 'M3 13h5l1.5 3h5l1.5-3h5M5.5 5h13L21 13v6H3v-6z',
+    check: 'M8.5 11.5l3 3 8-8M20 12.5V19H4V5h11',
+    briefcase: 'M4 7.5h16V19H4zM9 7.5V5h6v2.5M4 12.5h16',
+    news: 'M5 5h11v14H6.5A1.5 1.5 0 0 1 5 17.5zM16 9h3v8.5a1.5 1.5 0 0 1-3 0M8 9h5M8 12.5h5M8 16h3',
+    users: 'M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM2.5 20a6.5 6.5 0 0 1 13 0M15.5 4.3a3.5 3.5 0 0 1 0 6.4M21.5 20a6.5 6.5 0 0 0-3.5-5.8',
+    search: 'M10.5 17.5a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20.5 20.5l-5-5',
+    activity: 'M3 12h4l2.5-7 5 14 2.5-7h4',
+    settings: 'M4 6.5h9M17 6.5h3M4 12h3M11 12h9M4 17.5h11M19 17.5h1M15 4.5v4M9 10v4M17 15.5v4',
+    refresh: 'M19.5 10.5A7.5 7.5 0 0 0 5.6 7.5M4.5 4v4h4M4.5 13.5a7.5 7.5 0 0 0 13.9 3M19.5 20v-4h-4',
+    ext: 'M14 4h6v6M20 4l-8.5 8.5M18 14v6H4V6h6',
+    x: 'M6 6l12 12M18 6L6 18',
+    more: 'M5 12h.01M12 12h.01M19 12h.01',
+    alert: 'M12 3.5l9.5 16.5h-19zM12 10v4M12 17.2v.01',
+    shield: 'M12 3l7.5 3v5.5c0 4.7-3.2 8-7.5 9.5-4.3-1.5-7.5-4.8-7.5-9.5V6z',
+    star: 'M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.8L12 16.8l-5.2 2.8 1-5.8-4.3-4.1 5.9-.8z',
+    mail: 'M3.5 6h17v12h-17zM3.5 6.5l8.5 6.5 8.5-6.5',
+    spark: 'M12 3.5l1.9 5.1 5.1 1.9-5.1 1.9L12 17.5l-1.9-5.1L5 10.5l5.1-1.9zM18.5 16l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z',
+    list: 'M9 6.5h11M9 12h11M9 17.5h11M4.5 6.5h.01M4.5 12h.01M4.5 17.5h.01',
+    cal: 'M4 6h16v14H4zM4 10.5h16M8.5 3.5v4M15.5 3.5v4',
+    lock: 'M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3',
+    info: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 11v5.5M12 7.8v.01',
+    ok: 'M5 12.5l4.5 4.5L19 7.5'
+  };
+  function icon(name, label) {
+    var s = doc.createElementNS(SVGNS, 'svg');
+    s.setAttribute('viewBox', '0 0 24 24');
+    s.setAttribute('class', 'ico');
+    s.setAttribute('focusable', 'false');
+    if (label) { s.setAttribute('role', 'img'); s.setAttribute('aria-label', label); } else s.setAttribute('aria-hidden', 'true');
+    var p = doc.createElementNS(SVGNS, 'path');
+    p.setAttribute('d', ICONS[name] || '');
+    s.appendChild(p);
+    return s;
+  }
+
+  // ------------------------------------------------------------- formatos ----
+  var NF = new Intl.NumberFormat('pt-BR');
+  var PF = new Intl.NumberFormat('pt-BR', { style: 'percent', maximumFractionDigits: 0 });
+  var UF = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  var DTF = new Intl.DateTimeFormat('pt-BR', { timeZone: TZ, day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+  var YF = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' });
+  var WF = new Intl.DateTimeFormat('pt-BR', { timeZone: 'UTC', weekday: 'short' });
+  function num(v) { return isNum(v) ? NF.format(v) : '—'; }
+  function dec(v, d) { return isNum(v) ? v.toLocaleString('pt-BR', { minimumFractionDigits: d, maximumFractionDigits: d }) : '—'; }
+  function pct(v) { return isNum(v) ? PF.format(v) : '—'; }
+  function usd(v) { return isNum(v) ? UF.format(v) : '—'; }
+  function bytes(b) {
+    if (!isNum(b)) return '—';
+    var u = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+    var i = 0;
+    while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+    return b.toLocaleString('pt-BR', { maximumFractionDigits: i && b < 100 ? 1 : 0 }) + ' ' + u[i];
+  }
+  function dur(ms) {
+    if (!isNum(ms)) return '—';
+    if (ms < 1000) return num(Math.round(ms)) + ' ms';
+    var s = Math.round(ms / 1000);
+    if (s < 60) return s + ' s';
+    return Math.floor(s / 60) + ' min' + (s % 60 ? ' ' + (s % 60) + ' s' : '');
+  }
+  function toDate(iso) { if (!iso || typeof iso !== 'string') return null; var d = new Date(iso); return isNaN(d.getTime()) ? null : d; }
+  function dparts(iso) { var d = toDate(iso); if (!d) return null; var o = {}; DTF.formatToParts(d).forEach(function (p) { o[p.type] = p.value; }); return o; }
+  function fDate(iso) { var p = dparts(iso); return p ? p.day + '/' + p.month + '/' + p.year : '—'; }
+  function fDT(iso) { var p = dparts(iso); return p ? p.day + '/' + p.month + '/' + p.year + ' às ' + p.hour + ':' + p.minute : '—'; }
+  function fTime(iso) { var p = dparts(iso); return p ? p.hour + ':' + p.minute : '—'; }
+  function ymdOf(d) { return YF.format(d); }
+  function today() { return ymdOf(new Date()); }
+  function isYmd(s) { return typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s); }
+  function ymdUtc(s) { var p = s.split('-'); return Date.UTC(+p[0], +p[1] - 1, +p[2]); }
+  function ymdDays(a, b) { return Math.round((ymdUtc(b) - ymdUtc(a)) / 864e5); }
+  function fYmd(s) { if (!isYmd(s)) return '—'; var p = s.split('-'); return p[2] + '/' + p[1] + '/' + p[0]; }
+  function fYmdShort(s) { if (!isYmd(s)) return '—'; var p = s.split('-'); return p[2] + '/' + p[1]; }
+  function weekday(s) { return isYmd(s) ? WF.format(new Date(ymdUtc(s))).replace('.', '') : ''; }
+  function fRel(iso) {
+    var d = toDate(iso);
+    if (!d) return '—';
+    var s = (Date.now() - d.getTime()) / 1000;
+    if (s < 60) return 'agora';
+    if (s < 3600) return 'há ' + Math.floor(s / 60) + ' min';
+    if (s < 86400) return 'há ' + Math.floor(s / 3600) + ' h';
+    var days = ymdDays(ymdOf(d), today());
+    if (days <= 1) return 'ontem';
+    if (days < 7) return 'há ' + days + ' dias';
+    var p = dparts(iso);
+    return p.day + '/' + p.month + (p.year !== today().slice(0, 4) ? '/' + p.year : '');
+  }
+  function dueRel(s) {
+    if (!isYmd(s)) return '';
+    var d = ymdDays(today(), s);
+    if (d === 0) return 'hoje';
+    if (d === 1) return 'amanhã';
+    if (d === -1) return 'ontem';
+    if (d > 1 && d < 7) return 'em ' + d + ' dias';
+    if (d < -1) return 'há ' + (-d) + ' dias';
+    return '';
+  }
+
+  // ------------------------------------------------------------- rótulos ----
+  var LV = { CRITICAL: 'Crítica', HIGH: 'Alta', MEDIUM: 'Média', LOW: 'Baixa' };
+  var CERT = { EXPLICIT: 'Explícito', INFERRED: 'Inferido' };
+  var CERT_WHY = { EXPLICIT: 'a data aparece literalmente no e-mail junto de uma palavra de prazo', INFERRED: 'deduzido de uma data relativa ou de pistas indiretas; confira no e-mail' };
+  var USTAT = { RESOLVED: 'Resolvida', SAVED: 'Salva', DISMISSED: 'Descartada' };
+  var PROVIDER = { anthropic: 'Claude (Anthropic)', gemini: 'Gemini (Google)', none: 'Nenhum' };
+  var POLICY = {
+    OFF: ['Desligada', 'Nada é enviado. Tudo é classificado por regras, dentro do próprio Apps Script.'],
+    BROADCAST: ['Só conteúdo de massa', 'Somente newsletters, alertas de plataformas e notícias enviados para muita gente. Correspondência pessoal e categorias sensíveis nunca saem.'],
+    REDACTED: ['Tudo, exceto sensíveis', 'Todas as mensagens, menos as de categorias sensíveis (contas, finanças, saúde, segurança da conta, governo e jurídico), com dados pessoais redigidos.'],
+    FULL: ['Tudo, com redação', 'Todas as mensagens elegíveis, inclusive as sensíveis, com dados pessoais redigidos (CPF, cartões, contas, telefones, códigos e senhas). Segurança da conta e spam nunca vão.']
+  };
+  var TASK_WHY = {
+    RESOLVED: 'Você marcou como resolvida.',
+    DISMISSED: 'Você descartou esta tarefa.',
+    AUTO_REPLIED: 'Encerrada automaticamente: você respondeu na conversa depois desta mensagem.',
+    AUTO_ARCHIVED: 'Encerrada automaticamente: a mensagem saiu da caixa de entrada.',
+    AUTO_EXPIRED: 'Encerrada automaticamente: o prazo venceu há mais de 3 dias.',
+    AUTO_STALE: 'Encerrada automaticamente: sem prazo e aberta há mais de 14 dias.'
+  };
+  var TASK_ST = { OPEN: 'Aberta', RESOLVED: 'Resolvida', DISMISSED: 'Descartada', AUTO_REPLIED: 'Respondida', AUTO_ARCHIVED: 'Arquivada', AUTO_EXPIRED: 'Prazo vencido', AUTO_STALE: 'Sem atividade' };
+  var OWNER = { me: 'Você', other: 'Outra pessoa', unknown: 'Responsável não identificado' };
+  var WORK = { remote: 'Remoto', hybrid: 'Híbrido', onsite: 'Presencial' };
+  var OPP_TYPE = { job: 'Vaga', business: 'Negócio', networking: 'Networking', investment: 'Investimento', event: 'Evento' };
+  var SOURCE = { recruiter: 'Recrutador', job_board: 'Plataforma de vagas', referral: 'Indicação', network: 'Rede de contatos', other: 'Outra fonte' };
+  var SUGG = { FILTER: ['Filtrar', 'b-warn'], UNSUBSCRIBE: ['Descadastrar', 'b-err'], PRIORITY: ['Priorizar', 'b-ok'] };
+  var ENT = { person: 'pessoa', company: 'empresa', organization: 'organização', product: 'produto', place: 'lugar', other: 'outro' };
+  var RUNK = { PIPELINE: 'Sincronização', SYNC: 'Sincronização', MAINTENANCE: 'Manutenção', BACKFILL: 'Histórico', SETUP: 'Configuração' };
+  var TRIG = { TIME: 'agendada', CLOCK: 'agendada', MANUAL: 'manual', ON_DEMAND: 'sob demanda', WEBAPP: 'pelo app' };
+  var COUNTS = { discovered: 'descobertas', fetched: 'baixadas', processed: 'processadas', ingested: 'ingeridas', analyzed: 'analisadas', ai: 'com IA', aiOk: 'com IA', aiFailed: 'falhas de IA', rules: 'só regras', skipped: 'ignoradas', quarantined: 'quarentena', states: 'estados', written: 'gravadas', duplicates: 'duplicadas', rescored: 'repontuadas', feedback: 'feedbacks' };
+  var BLOCK = { sensitive: 'Categoria sensível', policy: 'Fora da política', outbound: 'Enviadas por você', not_eligible: 'Não elegível (spam, marketing, segurança)', ineligible: 'Não elegível', private_notifier: 'Notificação de mensagem privada', personal: 'Correspondência pessoal', not_bulk: 'Não é conteúdo de massa', discussion_list: 'Lista de discussão', primary_tab: 'Aba Principal', sensitive_domain: 'Domínio sensível', sensitive_subject: 'Assunto sensível', quarantined: 'Em quarentena', budget: 'Teto de custo' };
+  var REDACT = { cpf: 'CPF', cnpj: 'CNPJ', card: 'cartão', bank_account: 'conta bancária', boleto: 'boleto', pix_key: 'chave Pix', otp: 'código', password: 'senha', token: 'token', phone: 'telefone', email: 'e-mail', name: 'nome', cep: 'CEP', rg: 'RG', cnh: 'CNH', ip: 'IP', plate: 'placa', birth: 'nascimento', owner: 'você' };
+  var ERR = {
+    CONFIG: 'A configuração do app está incompleta. Confira a tela Sistema ou a configuração inicial.',
+    AUTH: 'Acesso negado: este app só responde à conta dona. Recarregue a página ou entre com a conta correta.',
+    DENIED: 'Acesso negado: este app só responde à conta dona.',
+    VALIDATION: 'O pedido foi recusado por dados inválidos.',
+    QUOTA: 'Uma cota do Google foi atingida. Tente de novo mais tarde.',
+    RATE: 'Muitas solicitações em pouco tempo. Aguarde alguns segundos e tente de novo.',
+    TIMEOUT: 'A consulta demorou demais para responder.',
+    UPSTREAM: 'Um serviço externo (Gmail, BigQuery ou IA) não respondeu.',
+    QUERY_FAILED: 'Falha ao consultar o BigQuery.',
+    NOT_FOUND: 'Item não encontrado. Ele pode ter sido removido ou expirado.',
+    INTERNAL: 'Erro interno do app.',
+    TRANSPORT: 'Sem resposta do servidor do Apps Script. Verifique a conexão e tente de novo.',
+    RENDER: 'Os dados chegaram num formato inesperado e não puderam ser exibidos.'
+  };
+  function friendly(e) { var c = e && e.code; return ERR[c] || ERR.INTERNAL; }
+  function catLabel(id, fallback) { return S.catMap[id] || fallback || id || 'Sem categoria'; }
+  function statusTone(s) { s = str(s).toUpperCase(); return /FAIL|ERROR|DENIED|ABORT/.test(s) ? 'err' : /PARTIAL|WARN|SKIP|TIMEOUT|BUDGET|LOCK/.test(s) ? 'warn' : /OK|SUCCESS|DONE|COMPLETE/.test(s) ? 'ok' : ''; }
+  function statusText(s) {
+    var m = { OK: 'concluída', SUCCESS: 'concluída', DONE: 'concluída', PARTIAL: 'parcial', FAILED: 'falhou', ERROR: 'com erro', RUNNING: 'em execução', DENIED: 'negada', SKIPPED: 'ignorada', TIMEOUT: 'tempo esgotado' };
+    return m[str(s).toUpperCase()] || str(s).toLowerCase() || 'desconhecido';
+  }
+  function pctOf(v) { return isNum(v) ? (v > 1 ? v / 100 : v) : null; }
+
+  // ------------------------------------------------------------- links ----
+  function safeUrl(u) {
+    if (typeof u !== 'string') return null;
+    var s = u.trim();
+    if (!s || s.length > 2048 || /[\s<>"'`\\\u0000-\u001f\u007f]/.test(s) || !/^https?:\/\//i.test(s)) return null;
+    var x;
+    try { x = new URL(s); } catch (e) { return null; }
+    if ((x.protocol !== 'https:' && x.protocol !== 'http:') || x.username || x.password || !x.hostname) return null;
+    return x;
+  }
+  function gmailUrl(u) {
+    var x = safeUrl(u);
+    return x && x.protocol === 'https:' && x.host === 'mail.google.com' && str(u).trim().indexOf('https://mail.google.com/') === 0 ? x : null;
+  }
+  function extLink(x, content, attrs) {
+    var a = h('a', attrs || {}, content, sr(' (abre em nova aba)'));
+    a.href = x.href;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.referrerPolicy = 'no-referrer';
+    return a;
+  }
+  function hostOf(x) { return x.hostname.replace(/^www\./, ''); }
+  function schemeOf(u) { var m = /^\s*([a-z][a-z0-9+.-]{0,15}):/i.exec(str(u)); return m ? m[1].toLowerCase() : ''; }
+  function textDomainMismatch(text, host) {
+    var m = /(?:^|[\s(<"'])((?:[a-z0-9-]+\.)+[a-z]{2,})(?=$|[\s/)>"':?#])/i.exec(str(text));
+    if (!m) return '';
+    var t = m[1].toLowerCase().replace(/^www\./, '');
+    var hh = host.toLowerCase();
+    return hh === t || hh.slice(-(t.length + 1)) === '.' + t || t.slice(-(hh.length + 1)) === '.' + hh ? '' : t;
+  }
+  function route(hash) { if (!/^#\/[a-z]/.test(hash)) throw new Error('Rota inválida'); return hash; }
+  function navLink(hash, content, attrs) { var a = h('a', attrs || {}, content); a.setAttribute('href', route(hash)); return a; }
+
+  // --------------------------------------------------------------- API ----
+  function ApiError(code, message) { var e = new Error(str(message)); e.code = code; return e; }
+  function api(name, req) {
+    return new Promise(function (resolve, reject) {
+      var g = window.google;
+      var run = g && g.script && g.script.run;
+      if (!run || typeof run.withSuccessHandler !== 'function') { reject(ApiError('TRANSPORT', 'google.script.run indisponível')); return; }
+      var r = run.withSuccessHandler(function (env) {
+        if (!env || typeof env !== 'object') { reject(ApiError('INTERNAL', 'Resposta vazia do servidor.')); return; }
+        if (env.ok === true) { resolve({ data: env.data, meta: obj(env.meta) }); return; }
+        var e = obj(env.error);
+        reject(ApiError(ERR[e.code] ? e.code : 'INTERNAL', trunc(e.message, 300)));
+      }).withFailureHandler(function (err) {
+        reject(ApiError('TRANSPORT', trunc(err && err.message ? err.message : err, 300)));
+      });
+      if (typeof r[name] !== 'function') { reject(ApiError('INTERNAL', 'Função indisponível: ' + name)); return; }
+      // google.script.run só aceita valores simples: o JSON elimina Date, funções e nós DOM.
+      if (req === undefined) r[name](); else r[name](JSON.parse(JSON.stringify(req)));
+    });
+  }
+
+  // ------------------------------------------------------- componentes ----
+  function setState(el, st) { el.setAttribute('data-state', st); el.setAttribute('aria-busy', st === 'loading' ? 'true' : 'false'); }
+  function load(box, o) {
+    var seq = (box._seq || 0) + 1;
+    box._seq = seq;
+    box.textContent = '';
+    box.appendChild(o.sk ? o.sk() : skItems(4));
+    setState(box, 'loading');
+    return api(o.name, o.req).then(function (r) {
+      if (box._seq !== seq || !box.isConnected) return;
+      box.textContent = '';
+      var data = obj(r.data);
+      try {
+        var e = o.empty ? o.empty(data) : null;
+        if (e) { box.appendChild(e); setState(box, 'empty'); return; }
+        o.render(data, box, r.meta);
+        setState(box, 'ready');
+      } catch (err) {
+        if (window.console) console.error('Falha ao exibir ' + o.name, err);
+        box.textContent = '';
+        box.appendChild(errorState(ApiError('RENDER', err && err.message), function () { load(box, o); }, o.title, o.hl));
+        setState(box, 'error');
+      }
+    }, function (err) {
+      if (box._seq !== seq || !box.isConnected) return;
+      box.textContent = '';
+      box.appendChild(errorState(err, function () { load(box, o); }, o.title, o.hl));
+      setState(box, 'error');
+    });
+  }
+  function skLines(n) {
+    var w = h('div', { class: 'sk-wrap' }, sr('Carregando…'));
+    for (var i = 0; i < n; i++) { var l = h('span', { class: 'sk sk-line', 'aria-hidden': 'true' }); l.style.width = (92 - (i * 17) % 40) + '%'; w.appendChild(l); }
+    return w;
+  }
+  function skItems(n) {
+    var w = h('div', null, sr('Carregando…'));
+    for (var i = 0; i < n; i++) {
+      var a = h('span', { class: 'sk sk-line' });
+      a.style.width = (80 - (i * 13) % 35) + '%';
+      w.appendChild(h('div', { class: 'sk-item', 'aria-hidden': 'true' }, h('span', { class: 'sk sk-line' }), h('span', { class: 'sk sk-title' }), a));
+      w.lastChild.firstChild.style.width = '30%';
+    }
+    return w;
+  }
+  function skBlocks(n) {
+    var w = h('div', { class: 'sk-wrap' }, sr('Carregando…'));
+    var k = h('div', { class: 'kpis', 'aria-hidden': 'true' });
+    for (var i = 0; i < 4; i++) k.appendChild(h('span', { class: 'sk sk-block' }));
+    w.appendChild(h('span', { class: 'sk sk-block', 'aria-hidden': 'true' }));
+    w.appendChild(k);
+    for (var j = 0; j < (n || 1); j++) w.appendChild(h('div', { class: 'card', 'aria-hidden': 'true' }, skItems(3)));
+    return w;
+  }
+  function stateBox(cls, ic, title, text, action, hl) {
+    return h('div', { class: 'state ' + (cls || '') }, h('div', { class: 'ico-wrap' }, icon(ic)), h(hl || 'h2', null, title), text ? h('p', null, text) : null, action || null);
+  }
+  function emptyState(title, text, action, o) { o = o || {}; return stateBox('state-empty' + (o.small ? ' small-state' : ''), o.icon || 'inbox', title, text, action, o.hl); }
+  function errorState(err, retry, title, hl) {
+    var b = stateBox('state-error', 'alert', title || 'Não foi possível carregar', friendly(err), null, hl);
+    b.setAttribute('role', 'alert');
+    var detail = str(err && err.message);
+    b.appendChild(h('p', { class: 'detail' }, 'Código ' + str(err && err.code) + (detail ? ' · ' + trunc(detail, 200) : '')));
+    if (retry) b.appendChild(h('button', { class: 'btn btn-primary', type: 'button', on: { click: retry } }, icon('refresh'), 'Tentar de novo'));
+    return b;
+  }
+  function pageHead(title, sub, actions) {
+    return h('div', { class: 'ph' },
+      h('div', { class: 'ph-text' }, h('h1', { tabindex: '-1' }, title), sub ? (sub instanceof Node ? sub : h('p', { class: 'ph-sub' }, sub)) : null),
+      actions ? h('div', { class: 'ph-actions' }, actions) : null);
+  }
+  function card(title, o) {
+    o = o || {};
+    var id = uid('c');
+    var body = h('div', { class: 'card-b' + (o.flush ? ' flush' : '') });
+    var c = h('section', { class: 'card ' + (o.cls || ''), 'aria-labelledby': id },
+      h('div', { class: 'card-h' }, h(o.hl || 'h2', { id: id }, o.icon ? icon(o.icon) : null, title, isNum(o.count) ? h('span', { class: 'count-pill' }, num(o.count)) : null), o.actions || null),
+      body, o.foot ? h('div', { class: 'card-f' }, o.foot) : null);
+    c._b = body;
+    return c;
+  }
+  function seg(label, opts, value, onChange) {
+    var g = h('div', { class: 'seg', role: 'group', 'aria-label': label });
+    opts.forEach(function (o) {
+      g.appendChild(h('button', { type: 'button', 'aria-pressed': o[0] === value ? 'true' : 'false', 'data-v': o[0], on: { click: function () {
+        Array.prototype.forEach.call(g.children, function (b) { b.setAttribute('aria-pressed', b.getAttribute('data-v') === o[0] ? 'true' : 'false'); });
+        onChange(o[0]);
+      } } }, o[1]));
+    });
+    return g;
+  }
+  function selectField(label, opts, value, onChange, cls) {
+    var id = uid('f');
+    var sel = h('select', { id: id, on: { change: function () { onChange(sel.value); } } }, opts.map(function (o) { return h('option', { value: o[0] }, o[1]); }));
+    sel.value = value;
+    return h('div', { class: 'field ' + (cls || '') }, h('label', { for: id }, label), sel);
+  }
+  function checkbox(label, checked, onChange, attrs) {
+    var inp = h('input', Object.assign({ type: 'checkbox', checked: !!checked, on: { change: function () { onChange(inp.checked); } } }, attrs || {}));
+    return h('label', { class: 'check' }, inp, h('span', null, label));
+  }
+  function levelBadge(p) {
+    p = obj(p);
+    var l = LV[p.level] ? p.level : 'LOW';
+    return h('span', { class: 'badge lv-' + l, title: p.overflow ? 'Elegível a crítica, mas o limite diário de críticas foi atingido' : 'Nível de prioridade' },
+      sr('Prioridade: '), LV[l] + (p.overflow ? ' (crítica excedente)' : ''));
+  }
+  function axisLevel(v) { return v >= 0.6 ? 3 : v >= 0.3 ? 2 : 1; }
+  var AXL = ['', 'baixa', 'média', 'alta'];
+  function axes(ax) {
+    ax = obj(ax);
+    return [['relevance', 'Relevância'], ['urgency', 'Urgência'], ['action', 'Ação']].map(function (k) {
+      var v = ax[k[0]];
+      if (!isNum(v)) return null;
+      var l = axisLevel(v);
+      return h('span', { class: 'ax', 'data-v': l, title: k[1] + ': ' + pct(v) }, h('i', { 'aria-hidden': 'true' }, h('b'), h('b'), h('b')), k[1] + ' ' + AXL[l]);
+    });
+  }
+  function dueChip(ymd, certainty, prefix) {
+    if (!isYmd(ymd)) return null;
+    var d = ymdDays(today(), ymd);
+    var rel = dueRel(ymd);
+    return h('span', { class: 'due' + (d < 0 ? ' over' : d <= 1 ? ' soon' : ''), title: certainty && CERT[certainty] ? 'Prazo ' + CERT[certainty].toLowerCase() + ': ' + CERT_WHY[certainty] : null },
+      icon('cal'), (prefix === undefined ? 'Prazo ' : prefix) + weekday(ymd) + ' ' + fYmdShort(ymd) + (rel ? ' (' + rel + ')' : ''),
+      certainty && CERT[certainty] ? ' · ' + CERT[certainty] : '');
+  }
+  function methodBadge(m, long) {
+    return m === 'AI' ? h('span', { class: 'badge b-accent' }, icon('spark'), long ? 'Analisada por IA' : 'IA') : h('span', { class: 'badge b-neutral' }, icon('list'), long ? 'Analisada por regras' : 'Regras');
+  }
+  function meter(label, value, max, fmt, note) {
+    var ratio = isNum(value) && isNum(max) && max > 0 ? Math.min(1, value / max) : null;
+    var bar = h('div', { class: 'bar' + (ratio === null ? '' : ratio >= 0.9 ? ' err' : ratio >= 0.7 ? ' warn' : ''), 'aria-hidden': 'true' }, h('span'));
+    bar.firstChild.style.width = ratio === null ? '0' : Math.max(1, Math.round(ratio * 100)) + '%';
+    return h('div', { class: 'meter' },
+      h('div', { class: 'meter-h' }, h('span', null, label), h('span', null, fmt(value) + (isNum(max) ? ' de ' + fmt(max) : '') + (ratio !== null ? ' (' + pct(ratio) + ')' : ''))),
+      bar, note ? h('p', { class: 'hint' }, note) : null);
+  }
+  function kv(pairs) {
+    return h('dl', { class: 'kv' }, pairs.filter(Boolean).map(function (p) { return h('div', null, h('dt', null, p[0]), h('dd', null, p[1])); }));
+  }
+  function toast(msg, o) {
+    o = o || {};
+    var box = $('toasts');
+    var t = h('div', { class: 'toast' + (o.kind === 'err' ? ' t-err' : ''), role: o.kind === 'err' ? 'alert' : null }, h('div', { class: 'msg' }, msg));
+    var tm = 0;
+    function rm() { clearTimeout(tm); if (t.parentNode) t.parentNode.removeChild(t); }
+    if (o.action) t.appendChild(h('button', { class: 'btn btn-sm', type: 'button', on: { click: function () { rm(); o.action.fn(); } } }, o.action.label));
+    t.appendChild(h('button', { class: 'btn btn-sm btn-icon', type: 'button', 'aria-label': 'Fechar aviso', on: { click: rm } }, icon('x')));
+    box.appendChild(t);
+    while (box.children.length > 3) box.removeChild(box.firstChild);
+    tm = setTimeout(rm, o.ms || (o.action ? 10000 : 6000));
+    return t;
+  }
+
+  // ------------------------------------------------------------ diálogos ----
+  var FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]:not([tabindex="-1"])';
+  function setInert(on) {
+    ['shell', 'skip'].forEach(function (id) { var e = $(id); if (!e) return; if (on) e.setAttribute('inert', ''); else e.removeAttribute('inert'); });
+  }
+  function dialog(o) {
+    var id = uid('d');
+    var opener = doc.activeElement;
+    var root = $('dlg-root');
+    var title = h('h2', { class: 'dlg-t' + (o.titleCls ? ' ' + o.titleCls : ''), id: id }, o.title || '');
+    function req() { if (o.onRequestClose) o.onRequestClose(); else close(); }
+    var bd = h('div', { class: 'dlg-bd', on: { click: req } });
+    var body = h('div', { class: 'dlg-b' });
+    var el = h('div', { class: 'dlg ' + (o.cls || ''), role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': id, tabindex: '-1' },
+      h('div', { class: 'dlg-h' }, title, h('button', { class: 'btn btn-ghost btn-icon', type: 'button', 'aria-label': 'Fechar', on: { click: req } }, icon('x'))), body);
+    el.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); req(); return; }
+      if (ev.key !== 'Tab') return;
+      var f = Array.prototype.filter.call(el.querySelectorAll(FOCUSABLE), function (x) { return x.getClientRects().length > 0; });
+      if (!f.length) { ev.preventDefault(); return; }
+      var first = f[0];
+      var last = f[f.length - 1];
+      if (ev.shiftKey && (doc.activeElement === first || doc.activeElement === el)) { ev.preventDefault(); last.focus(); }
+      else if (!ev.shiftKey && (doc.activeElement === last || !el.contains(doc.activeElement))) { ev.preventDefault(); first.focus(); }
+    });
+    root.appendChild(bd);
+    root.appendChild(el);
+    setInert(true);
+    el.focus();
+    function close(noFocus) {
+      if (!el.parentNode) return;
+      root.removeChild(bd);
+      root.removeChild(el);
+      if (!root.querySelector('.dlg')) setInert(false);
+      if (!noFocus) {
+        if (opener && opener.isConnected && typeof opener.focus === 'function' && opener !== doc.body) opener.focus();
+        else { var hh = $('view').querySelector('h1'); if (hh) hh.focus(); }
+      }
+      if (o.onClose) o.onClose();
+    }
+    return { el: el, body: body, title: title, close: close };
+  }
+
+  // -------------------------------------------------------------- roteador ----
+  var SCREENS = [
+    { id: 'radar', label: 'Radar', icon: 'radar', g: 0, tab: 1, render: renderRadar },
+    { id: 'caixa', label: 'Caixa inteligente', short: 'Caixa', icon: 'inbox', g: 1, tab: 1, render: renderInbox },
+    { id: 'tarefas', label: 'Central de tarefas', short: 'Tarefas', icon: 'check', g: 1, tab: 1, render: renderTasks },
+    { id: 'carreira', label: 'Radar de carreira', short: 'Carreira', icon: 'briefcase', g: 1, tab: 1, render: renderCareer },
+    { id: 'noticias', label: 'Notícias', icon: 'news', g: 1, render: renderNews },
+    { id: 'remetentes', label: 'Remetentes', icon: 'users', g: 1, render: renderSenders },
+    { id: 'busca', label: 'Busca e memória', short: 'Busca', icon: 'search', g: 1, render: renderSearch },
+    { id: 'sistema', label: 'Sistema', icon: 'activity', g: 2, render: renderSystem },
+    { id: 'config', label: 'Configurações', icon: 'settings', g: 2, render: renderConfig }
+  ];
+  var GROUPS = ['', 'Caixa de entrada', 'Administração'];
+  function screen(id) { for (var i = 0; i < SCREENS.length; i++) if (SCREENS[i].id === id) return SCREENS[i]; return null; }
+  function parseHash(hash) {
+    var raw = str(hash).replace(/^#\/?/, '');
+    var q = raw.indexOf('?');
+    var id = (q >= 0 ? raw.slice(0, q) : raw).replace(/\/+$/, '');
+    if (!screen(id)) return null;
+    return { id: id, params: new URLSearchParams(q >= 0 ? raw.slice(q + 1) : '') };
+  }
+  function hashFor(id, params) { var qs = params ? params.toString() : ''; return '#/' + id + (qs ? '?' + qs : ''); }
+  function keyOf(r) { var p = new URLSearchParams(r.params); p.delete('m'); return r.id + '?' + p.toString(); }
+  function setParam(k, v) {
+    if (!S.route) return;
+    if (v) S.route.params.set(k, v); else S.route.params.delete(k);
+    S.screenKey = keyOf(S.route);
+    try { history.replaceState(null, '', hashFor(S.route.id, S.route.params)); } catch (e) { /* sem histórico: o estado fica só em memória */ }
+    topHash();
+  }
+  function topHash() {
+    try {
+      var g = window.google;
+      if (g && g.script && g.script.history && typeof g.script.history.replace === 'function') g.script.history.replace(null, {}, location.hash.slice(1));
+    } catch (e) { /* opcional */ }
+  }
+  function detailHref(id) {
+    var r = S.route || { id: 'radar', params: new URLSearchParams('') };
+    var p = new URLSearchParams(r.params);
+    p.set('m', str(id));
+    return hashFor(r.id, p);
+  }
+  function closeDetail() {
+    var d = S.detail;
+    if (!d) return;
+    var p = new URLSearchParams(S.route.params);
+    p.delete('m');
+    if (d.pushed) history.back();
+    else location.replace(hashFor(S.route.id, p));
+  }
+  function onRoute() {
+    var r = parseHash(location.hash);
+    if (!r) { location.replace('#/radar'); return; }
+    var prevKey = S.screenKey;
+    var key = keyOf(r);
+    S.route = r;
+    if (S.sheet) { var sh = S.sheet; S.sheet = null; sh.close(true); }
+    if (key !== prevKey) {
+      var sameScreen = prevKey.split('?')[0] === r.id;
+      S.screenKey = key;
+      renderScreen(r, !sameScreen);
+    }
+    var m = r.params.get('m');
+    if (m) {
+      if (!S.detail || S.detail.id !== m) {
+        if (S.detail) { var old = S.detail; S.detail = null; old.dlg.close(true); }
+        openDetail(m, prevKey === key);
+      }
+    } else if (S.detail) {
+      var dd = S.detail;
+      S.detail = null;
+      dd.dlg.close();
+    }
+    topHash();
+  }
+  function renderScreen(r, focus) {
+    var sc = screen(r.id);
+    var view = $('view');
+    view.textContent = '';
+    view.setAttribute('data-route', r.id);
+    view.removeAttribute('aria-busy');
+    view.removeAttribute('data-state');
+    setNav(r.id);
+    doc.title = sc.label + ' · Inbox Intelligence';
+    sc.render(view, r.params);
+    if (focus && S.navigated) {
+      window.scrollTo(0, 0);
+      var h1 = view.querySelector('h1');
+      if (h1) h1.focus({ preventScroll: true });
+    }
+    S.navigated = true;
+    if (S.focusSearch) { S.focusSearch = false; var q = $('q'); if (q) q.focus(); }
+  }
+  function setNav(id) {
+    Array.prototype.forEach.call(doc.querySelectorAll('[data-nav]'), function (a) {
+      if (a.getAttribute('data-nav') === id) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+    });
+  }
+  function setNavCount(id, n, label) {
+    Array.prototype.forEach.call(doc.querySelectorAll('.nav-link[data-nav="' + id + '"] .count'), function (c) { c.parentNode.removeChild(c); });
+    if (!n) return;
+    Array.prototype.forEach.call(doc.querySelectorAll('.side .nav-link[data-nav="' + id + '"]'), function (a) {
+      a.appendChild(h('span', { class: 'count' }, num(n), sr(' ' + label)));
+    });
+  }
+
+  // ---------------------------------------------------------------- casca ----
+  function brand(tag) {
+    var v = S.boot && S.boot.app ? str(S.boot.app.version) : '';
+    return navLink('#/radar', [h('span', { class: 'brand-mark' }, icon('radar')), h('span', null, 'Inbox Intelligence', tag ? h('small', null, 'Gmail · somente leitura' + (v ? ' · v' + v : '')) : null)], { class: 'brand', 'aria-label': 'Inbox Intelligence — ir para o Radar' });
+  }
+  function navList(cls) {
+    var nav = h('div', { class: 'nav-wrap' });
+    GROUPS.forEach(function (gt, gi) {
+      var ul = h('ul', { role: 'list', class: 'nav-group' });
+      SCREENS.filter(function (s) { return s.g === gi; }).forEach(function (s) {
+        ul.appendChild(h('li', null, navLink('#/' + s.id, [icon(s.icon), h('span', null, s.label)], { class: cls, 'data-nav': s.id })));
+      });
+      nav.appendChild(h('div', { class: 'nav-sec' }, gt ? h('div', { class: 'nav-title', 'aria-hidden': 'true' }, gt) : null, ul));
+    });
+    return nav;
+  }
+  function buildShell() {
+    var side = $('side');
+    side.textContent = '';
+    side.appendChild(brand(true));
+    side.appendChild(h('nav', { 'aria-label': 'Seções' }, navList('nav-link')));
+    side.appendChild(h('div', { class: 'side-foot' }, h('div', { class: 'sync-box', id: 'sync-box' }), userLine()));
+    var top = $('topbar');
+    top.textContent = '';
+    top.appendChild(brand(false));
+    top.appendChild(navLink('#/busca', icon('search'), { class: 'btn btn-ghost btn-icon', 'aria-label': 'Buscar' }));
+    top.appendChild(h('button', { class: 'btn btn-ghost btn-icon', type: 'button', 'aria-label': 'Sincronizar agora', on: { click: function (e) { syncNow(e.currentTarget); } } }, icon('refresh')));
+    var tb = $('tabbar');
+    tb.textContent = '';
+    SCREENS.filter(function (s) { return s.tab; }).forEach(function (s) {
+      tb.appendChild(navLink('#/' + s.id, [icon(s.icon), h('span', null, s.short || s.label)], { class: 'tab', 'data-nav': s.id }));
+    });
+    var more = h('button', { class: 'tab', type: 'button', 'aria-haspopup': 'dialog', 'aria-expanded': 'false', on: { click: function () { openMore(more); } } }, icon('more'), h('span', null, 'Mais'));
+    tb.appendChild(more);
+    renderSyncBox();
+  }
+  function userLine() {
+    var b = S.boot || {};
+    return h('div', { class: 'user-line' },
+      h('strong', null, str(b.user && b.user.email) || 'conta não identificada'),
+      h('span', { class: 'ro' }, icon('lock'), 'Gmail somente leitura' + (b.app && b.app.version ? ' · v' + str(b.app.version) : '')));
+  }
+  function openMore(btn) {
+    btn.setAttribute('aria-expanded', 'true');
+    var d = dialog({ cls: 'sheet', title: 'Todas as seções', onClose: function () { btn.setAttribute('aria-expanded', 'false'); S.sheet = null; } });
+    S.sheet = d;
+    d.body.appendChild(h('nav', { 'aria-label': 'Todas as seções' }, navList('nav-link')));
+    d.body.appendChild(h('div', { class: 'sync-box', id: 'sync-box-m' }));
+    d.body.appendChild(userLine());
+    setNav(S.route ? S.route.id : '');
+    renderSyncBox();
+  }
+  function syncData() {
+    var s = S.sync;
+    if (s) return { at: str(s.lastSuccessAt), status: str(s.lastStatus), quarantined: s.quarantined, backfill: s.backfill };
+    var l = S.boot && S.boot.lastSync;
+    return l ? { at: str(l.at), status: str(l.status) } : { at: '', status: '' };
+  }
+  function renderSyncBox() {
+    ['sync-box', 'sync-box-m'].forEach(function (id) {
+      var box = $(id);
+      if (!box) return;
+      var s = syncData();
+      box.textContent = '';
+      box.appendChild(h('div', { class: 'sync-line' }, h('span', { class: 'dot ' + statusTone(s.status || (s.at ? 'OK' : '')) }),
+        s.at ? h('span', null, 'Sincronizado ', h('time', { datetime: s.at, title: fDT(s.at) }, fRel(s.at))) : h('span', null, 'Ainda não sincronizado')));
+      if (s.status && statusTone(s.status) !== 'ok') box.appendChild(h('div', { class: 'small muted' }, 'Última execução: ' + statusText(s.status)));
+      if (s.backfill && s.backfill.done === false) box.appendChild(h('div', { class: 'small muted' }, 'Importando histórico até ' + fYmd(s.backfill.floorDate)));
+      box.appendChild(h('button', { class: 'btn btn-sm', type: 'button', on: { click: function (e) { syncNow(e.currentTarget); } } }, icon('refresh'), 'Sincronizar agora'));
+    });
+  }
+  function syncNow(btn) {
+    if (btn) btn.disabled = true;
+    api('apiRunSyncNow').then(function (r) {
+      var d = obj(r.data);
+      if (d.scheduled) toast('Sincronização agendada' + (d.at ? ' para ~' + fTime(d.at) : '') + '. Os dados aparecem depois que ela rodar (cerca de 1 a 5 min).');
+      else toast(d.reason ? 'Sincronização não agendada: ' + trunc(d.reason, 160) : 'Já existe uma sincronização agendada.');
+    }, function (e) {
+      toast('Não foi possível agendar: ' + friendly(e), { kind: 'err', action: { label: 'Tentar de novo', fn: function () { syncNow(); } } });
+    }).then(function () { if (btn && btn.isConnected) btn.disabled = false; });
+  }
+  function syncButton(primary) {
+    return h('button', { class: 'btn' + (primary ? ' btn-primary' : ''), type: 'button', on: { click: function (e) { syncNow(e.currentTarget); } } }, icon('refresh'), 'Sincronizar agora');
+  }
+  function noMessagesState(hl) {
+    return emptyState('Nenhuma mensagem ainda', 'A primeira sincronização roda em até 1 h depois da configuração. Você também pode pedir agora.', syncButton(true), { hl: hl });
+  }
+  function aiBanners() {
+    var ai = S.ai;
+    if (!ai) return null;
+    var out = [];
+    var until = toDate(ai.circuitOpenUntil);
+    if (until && until.getTime() > Date.now()) out.push(h('div', { class: 'banner warn', role: 'status' }, icon('alert'), h('div', { class: 'grow' }, h('strong', null, 'IA pausada até ' + fDT(ai.circuitOpenUntil)), h('span', null, 'O provedor falhou várias vezes seguidas. Novas mensagens usam só regras até lá.'))));
+    var b = obj(ai.budget);
+    var lim = obj(b.limits);
+    var tdy = obj(b.today);
+    var mon = obj(b.month);
+    if ((isNum(lim.costDay) && lim.costDay > 0 && tdy.cost >= lim.costDay) || (isNum(lim.costMonth) && lim.costMonth > 0 && mon.cost >= lim.costMonth)) {
+      out.push(h('div', { class: 'banner warn', role: 'status' }, icon('alert'), h('div', { class: 'grow' }, h('strong', null, 'IA pausada pelo teto de custo'), h('span', null, 'Hoje: ' + usd(tdy.cost) + ' de ' + usd(lim.costDay) + ' · mês: ' + usd(mon.cost) + ' de ' + usd(lim.costMonth) + '. Ajuste os limites em Configurações.'))));
+    }
+    if (ai.provider && ai.provider !== 'none' && ai.policy === 'OFF' && !(ai.consent && ai.consent.given)) {
+      out.push(h('div', { class: 'banner info' }, icon('info'), h('div', { class: 'grow' }, h('span', null, 'A IA está desligada até você revisar o que seria enviado e dar consentimento. Tudo continua funcionando por regras.')),
+        navLink('#/config?s=ia', 'Revisar', { class: 'btn btn-sm' })));
+    }
+    return out.length ? out : null;
+  }
+
+  // ---------------------------------------------------------- itens ----
+  function fromText(f) { f = obj(f); return str(f.name) || str(f.email) || 'Remetente desconhecido'; }
+  // O feedback só é aplicado no servidor na próxima sincronização: reaplica o estado local às cópias recém-chegadas.
+  function overlay(it) { var l = S.local[it.id]; if (l) Object.assign(it, l); return it; }
+  function itemCard(it, o) {
+    o = o || {};
+    overlay(it);
+    S.items[it.id] = it;
+    var p = obj(it.priority);
+    var lvl = LV[p.level] ? p.level : 'LOW';
+    var done = it.userStatus === 'RESOLVED' || it.userStatus === 'DISMISSED';
+    var tid = uid('it');
+    var top = h('div', { class: 'item-top' },
+      o.blind ? null : levelBadge(p),
+      h('span', { class: 'chip' }, catLabel(it.category, it.categoryLabel)),
+      USTAT[it.userStatus] ? h('span', { class: 'badge b-ok' }, icon('ok'), USTAT[it.userStatus]) : null,
+      it.authFail ? h('span', { class: 'badge b-err' }, icon('shield'), 'Falha de autenticação') : null,
+      it.starred ? h('span', { class: 'badge b-neutral', title: 'Com estrela no Gmail' }, icon('star'), sr('Com estrela')) : null,
+      h('time', { datetime: str(it.date), title: fDT(it.date) }, fRel(it.date)));
+    var title = h('h3', { class: 'item-title', id: tid },
+      it.unread ? [h('span', { class: 'unread-dot', 'aria-hidden': 'true' }), sr('Não lida: ')] : null,
+      o.blind ? h('span', null, str(it.subject) || '(sem assunto)') : navLink(detailHref(it.id), str(it.subject) || '(sem assunto)', { class: 'item-open', 'data-open-id': str(it.id) }));
+    var f = obj(it.from);
+    var p0 = arr(p.top)[0];
+    var body = h('div', { class: 'item-body' }, top, title,
+      h('div', { class: 'item-from' }, fromText(f), f.domain ? h('span', { class: 'dom' }, ' · ' + str(f.domain)) : null),
+      it.summary ? h('p', { class: 'item-sum' }, str(it.summary)) : null,
+      o.blind ? null : h('div', { class: 'item-meta' }, axes(p.axes), it.deadline ? dueChip(it.deadline.date, it.deadline.certainty) : null, it.action ? h('span', { class: 'badge b-neutral' }, 'Pede ação') : null),
+      !o.blind && !o.compact && p0 ? h('p', { class: 'why' }, h('b', null, 'Motivo principal: '), str(p0.why) || str(p0.label)) : null,
+      it.injection ? h('p', { class: 'note-inj' }, icon('alert'), 'Conteúdo com instruções suspeitas — tratado como texto') : null);
+    var art = h('article', { class: 'item lvl-' + (o.blind ? 'none' : lvl) + (it.unread ? ' is-unread' : '') + (done ? ' is-done' : '') + (o.compact ? ' compact' : ''), 'data-item-id': str(it.id), 'aria-labelledby': tid }, body,
+      o.feedback ? feedbackBar(it) : null, o.quality ? qualityBar(it) : null);
+    art._opts = o;
+    return art;
+  }
+  function itemList(items, o) {
+    var ul = h('ul', { class: 'list', role: 'list' });
+    arr(items).forEach(function (it) { if (it && it.id) ul.appendChild(h('li', null, itemCard(it, o))); });
+    return ul;
+  }
+  var FB = [['RELEVANT', 'Relevante', 'r'], ['IRRELEVANT', 'Irrelevante', 'r'], ['SHOULD_BE_HIGHER', 'Deveria ser mais alta', 'r'], ['RESOLVED', 'Resolvida', 's'], ['SAVED', 'Salvar', 's']];
+  function feedbackBar(it, alwaysOpen) {
+    var actId = uid('fb');
+    var open = alwaysOpen || S.fbOpen[it.id];
+    var wrap = h('div', { class: 'fb' + (open ? ' is-open' : ''), role: 'group', 'aria-label': 'Avaliar mensagem' });
+    var toggle = alwaysOpen ? null : h('button', { class: 'btn btn-sm fb-toggle', type: 'button', 'aria-expanded': open ? 'true' : 'false', 'aria-controls': actId, on: { click: function () {
+      var on = !wrap.classList.contains('is-open');
+      wrap.classList.toggle('is-open', on);
+      toggle.setAttribute('aria-expanded', on ? 'true' : 'false');
+      S.fbOpen[it.id] = on;
+    } } }, 'Avaliar');
+    var acts = h('div', { class: 'fb-act chips', id: actId });
+    FB.forEach(function (f) {
+      var pressed = f[2] === 'r' ? it.userRelevance === f[0] : it.userStatus === f[0];
+      acts.appendChild(h('button', { class: 'btn btn-sm', type: 'button', 'aria-pressed': pressed ? 'true' : 'false', 'data-fb': f[0], on: { click: function () { itemFeedback(it.id, f[0]); } } }, f[1]));
+    });
+    var catBoxId = uid('cat');
+    var catBtn = h('button', { class: 'btn btn-sm', type: 'button', 'aria-expanded': 'false', 'aria-controls': catBoxId, 'data-fb': 'MISCLASSIFIED' }, 'Categoria errada');
+    var selId = uid('sel');
+    var sel = h('select', { id: selId }, S.cats.filter(function (c) { return c.id !== it.category; }).map(function (c) { return h('option', { value: c.id }, c.label); }));
+    var catBox = h('div', { class: 'fb-cat', id: catBoxId, hidden: true },
+      h('label', { for: selId, class: 'small' }, 'Categoria correta'), sel,
+      h('button', { class: 'btn btn-sm btn-primary', type: 'button', 'data-fb': 'MISCLASSIFIED-OK', on: { click: function () { if (sel.value) itemFeedback(it.id, 'MISCLASSIFIED', { correctCategory: sel.value }); } } }, 'Aplicar'),
+      h('button', { class: 'btn btn-sm btn-ghost', type: 'button', on: { click: function () { catBox.hidden = true; catBtn.setAttribute('aria-expanded', 'false'); catBtn.focus(); } } }, 'Cancelar'));
+    catBtn.addEventListener('click', function () {
+      var on = catBox.hidden;
+      catBox.hidden = !on;
+      catBtn.setAttribute('aria-expanded', on ? 'true' : 'false');
+      if (on) sel.focus();
+    });
+    acts.appendChild(catBtn);
+    acts.appendChild(catBox);
+    add(wrap, [toggle, acts]);
+    return wrap;
+  }
+  var FB_MSG = { RELEVANT: 'Marcada como relevante.', IRRELEVANT: 'Marcada como irrelevante.', SHOULD_BE_HIGHER: 'Registrado: deveria ser mais alta.', RESOLVED: 'Marcada como resolvida.', SAVED: 'Mensagem salva.', REOPEN: 'Status removido.', MISCLASSIFIED: 'Categoria corrigida.', DISMISSED: 'Descartada.' };
+  function itemFeedback(id, type, payload) {
+    var it = S.items[id];
+    if (!it) return;
+    var send = type;
+    if ((type === 'RESOLVED' || type === 'SAVED') && it.userStatus === type) send = 'REOPEN';
+    else if (FB.some(function (f) { return f[0] === type && f[2] === 'r'; }) && it.userRelevance === type) { toast('Isso já foi registrado para esta mensagem.'); return; }
+    var prev = { userStatus: it.userStatus, userRelevance: it.userRelevance, category: it.category, categoryLabel: it.categoryLabel };
+    if (send === 'REOPEN') it.userStatus = '';
+    else if (send === 'RESOLVED' || send === 'SAVED') it.userStatus = send;
+    else if (send === 'MISCLASSIFIED') { it.category = payload.correctCategory; it.categoryLabel = catLabel(payload.correctCategory); }
+    else it.userRelevance = send;
+    var hadLocal = S.local[id];
+    S.local[id] = { userStatus: it.userStatus, userRelevance: it.userRelevance, category: it.category, categoryLabel: it.categoryLabel };
+    refreshItem(id, type);
+    var req = { targetType: 'MESSAGE', targetId: id, type: send, payload: payload || {} };
+    submitFeedback(req, FB_MSG[send], function () {
+      Object.assign(it, prev);
+      if (hadLocal) S.local[id] = hadLocal; else delete S.local[id];
+      refreshItem(id, type);
+    }, function () { itemFeedback(id, type, payload); });
+  }
+  function submitFeedback(req, okMsg, revert, retry, undo) {
+    return api('apiSubmitFeedback', req).then(function (r) {
+      var pend = obj(r.data).pending;
+      toast(okMsg + (pend > 0 ? ' Aplicado na próxima sincronização.' : ''), undo ? { action: { label: 'Desfazer', fn: undo } } : null);
+    }, function (e) {
+      revert();
+      toast('Não foi possível registrar. ' + friendly(e), { kind: 'err', action: { label: 'Tentar de novo', fn: retry } });
+    });
+  }
+  function refreshItem(id, focusFb) {
+    var it = S.items[id];
+    var active = doc.activeElement;
+    Array.prototype.forEach.call(doc.querySelectorAll('[data-item-id]'), function (el) {
+      if (el.getAttribute('data-item-id') !== id || !el._opts) return;
+      var had = el.contains(active);
+      var n = itemCard(it, el._opts);
+      el.parentNode.replaceChild(n, el);
+      if (had) { var b = n.querySelector('[data-fb="' + focusFb + '"]') || n.querySelector('.item-open'); if (b) b.focus(); }
+    });
+    Array.prototype.forEach.call(doc.querySelectorAll('[data-fb-for]'), function (box) {
+      if (box.getAttribute('data-fb-for') !== id) return;
+      var had = box.contains(active);
+      box.textContent = '';
+      box.appendChild(feedbackBar(it, true));
+      if (had) { var b = box.querySelector('[data-fb="' + focusFb + '"]'); if (b) b.focus(); }
+    });
+  }
+  function qualityBar(it) {
+    var mark = S.quality[it.id] || '';
+    var g = h('div', { class: 'fb blind', role: 'group', 'aria-label': 'Avaliação cega' });
+    [['OK', 'Está ok'], ['SHOULD_BE_HIGHER', 'Deveria ser mais alta']].forEach(function (o) {
+      g.appendChild(h('button', { class: 'btn btn-sm', type: 'button', 'aria-pressed': mark === o[0] ? 'true' : 'false', 'data-fb': 'Q-' + o[0], on: { click: function () {
+        if (S.quality[it.id]) return;
+        S.quality[it.id] = o[0];
+        if (o[0] === 'SHOULD_BE_HIGHER') itemFeedback(it.id, 'SHOULD_BE_HIGHER');
+        else { refreshItem(it.id, 'Q-OK'); toast('Marcada como ok. A prioridade não muda.'); }
+        updateQualityProgress();
+      } } }, o[1]));
+    });
+    return g;
+  }
+  function updateQualityProgress() {
+    var p = $('q-progress');
+    if (!p) return;
+    var total = Number(p.getAttribute('data-total')) || 0;
+    var done = Object.keys(S.quality).length;
+    p.textContent = num(Math.min(done, total)) + ' de ' + num(total) + ' avaliadas';
+  }
+
+  // ---------------------------------------------------------------- Radar ----
+  function defPeriod() { var p = S.boot && S.boot.ui && S.boot.ui.defaultPeriod; return ['today', '7d', '30d'].indexOf(p) >= 0 ? p : '7d'; }
+  function periodText(p) {
+    p = obj(p);
+    var a = isYmd(p.start) ? fYmd(p.start) : fDate(p.start);
+    var b = isYmd(p.end) ? fYmd(p.end) : fDate(p.end);
+    return (p.label ? str(p.label) + ' · ' : '') + (a === b ? a : a + ' a ' + b);
+  }
+  function renderRadar(view, params) {
+    var per = params.get('p');
+    if (['today', '7d', '30d'].indexOf(per) < 0) per = S.radarPeriod || defPeriod();
+    S.radarPeriod = per;
+    var sub = h('p', { class: 'ph-sub' }, 'Briefing, prioridades e prazos');
+    var body = h('div', { class: 'col box' });
+    view.appendChild(pageHead('Radar', sub, seg('Período do Radar', [['today', 'Hoje'], ['7d', '7 dias'], ['30d', '30 dias']], per, function (v) { S.radarPeriod = v; setParam('p', v); go(); })));
+    view.appendChild(body);
+    function go() {
+      load(body, {
+        name: 'apiGetRadar', req: { period: S.radarPeriod }, sk: function () { return skBlocks(2); }, title: 'Não foi possível carregar o Radar',
+        empty: function (d) {
+          var k = obj(d.kpis);
+          if (d.sync) { S.sync = d.sync; renderSyncBox(); }
+          if (k.received || arr(d.attention).length || arr(d.news).length || arr(d.tasks).length || arr(d.opportunities).length) return null;
+          sub.textContent = d.period ? periodText(d.period) : '';
+          return syncData().at ? emptyState('Nenhuma mensagem neste período', 'Nada chegou ' + (S.radarPeriod === 'today' ? 'hoje' : 'no período') + '. Tente um período maior.', null, { icon: 'radar' }) : noMessagesState();
+        },
+        render: function (d, box) { sub.textContent = d.period ? periodText(d.period) : ''; radarBody(box, d); }
+      });
+    }
+    go();
+  }
+  function radarBody(box, d) {
+    arr(d.attention).concat(arr(d.news)).forEach(function (it) { if (it && it.id) S.items[it.id] = it; });
+    setNavCount('radar', arr(d.attention).length, 'exigem atenção');
+    var since = obj(d.sinceLastVisit);
+    var s = syncData();
+    add(box, aiBanners());
+    box.appendChild(h('div', { class: 'strip', role: 'status' },
+      since.since ? h('span', null, icon('mail'), h('strong', null, num(since.count) + (since.count === 1 ? ' nova' : ' novas')), ' desde a sua última visita (' + fDT(since.since) + ')') : h('span', null, icon('mail'), 'Primeira visita: tudo é novidade.'),
+      h('span', null, h('span', { class: 'dot ' + statusTone(s.status || (s.at ? 'OK' : '')) }), s.at ? 'Sincronizado ' + fRel(s.at) : 'Ainda não sincronizado', s.status && statusTone(s.status) !== 'ok' ? ' · última execução ' + statusText(s.status) : ''),
+      s.backfill && s.backfill.done === false ? h('span', null, 'Importando histórico: ' + fYmd(s.backfill.cursorDate) + ' → ' + fYmd(s.backfill.floorDate)) : null,
+      s.quarantined ? h('span', null, icon('alert'), num(s.quarantined) + ' em quarentena') : null));
+    box.appendChild(briefingCard(d.briefing));
+    box.appendChild(kpiGrid(obj(d.kpis)));
+    var att = card('Exige atenção', { count: arr(d.attention).length, flush: true, foot: navLink('#/caixa?level=CRITICAL,HIGH', 'Ver todas na Caixa'), icon: 'alert' });
+    att._b.appendChild(arr(d.attention).length ? itemList(d.attention, {}) : emptyState('Nada exige atenção agora', 'Nenhuma mensagem aberta de prioridade alta com ação ou urgência no período.', null, { small: true, hl: 'h3', icon: 'ok' }));
+    var right = h('div', { class: 'col' }, tasksCard(arr(d.tasks)), oppsMini(arr(d.opportunities)));
+    box.appendChild(h('div', { class: 'grid g-main' }, att, right));
+    var news = card('Notícias e novidades', { count: arr(d.news).length, flush: true, foot: navLink('#/noticias', 'Abrir Notícias'), icon: 'news' });
+    news._b.appendChild(arr(d.news).length ? itemList(d.news, { compact: true }) : emptyState('Sem notícias no período', 'Newsletters e notícias relevantes aparecem aqui.', null, { small: true, hl: 'h3', icon: 'news' }));
+    box.appendChild(h('div', { class: 'grid g-main' }, news, h('div', { class: 'col' }, topicsCard(arr(d.topics)), categoriesCard(arr(d.categories)))));
+  }
+  function briefingCard(b) {
+    var id = uid('b');
+    var c = h('section', { class: 'card brief', 'aria-labelledby': id });
+    b = obj(b);
+    var head = h('div', { class: 'brief-h' }, h('h2', { class: 'overline', id: id }, 'Briefing'),
+      b.headline ? h('div', { class: 'chips' }, b.method === 'AI' ? h('span', { class: 'badge b-accent' }, icon('spark'), 'Gerado por IA') : h('span', { class: 'badge b-neutral' }, icon('list'), 'Gerado por regras (sem IA)'),
+        b.generatedAt ? h('span', { class: 'small muted' }, 'atualizado ' + fRel(b.generatedAt)) : null) : null);
+    c.appendChild(head);
+    if (!b.headline) { c.appendChild(h('p', { class: 'muted' }, 'O briefing deste período ainda não foi gerado. Ele é montado depois da próxima sincronização.')); return c; }
+    c.appendChild(h('p', { class: 'brief-head' }, str(b.headline)));
+    var ul = h('ul', { role: 'list' });
+    arr(b.bullets).forEach(function (bl) {
+      bl = obj(bl);
+      var refs = arr(bl.refs).filter(function (r) { return typeof r === 'string' && r; }).slice(0, 6);
+      ul.appendChild(h('li', null, h('span', null, str(bl.text),
+        refs.length ? h('span', { class: 'refs' }, refs.map(function (r, i) {
+          var it = S.items[r];
+          var label = it ? trunc(it.subject, 80) : 'mensagem ' + (i + 1);
+          return navLink(detailHref(r), String(i + 1), { class: 'ref', title: label, 'aria-label': 'Abrir mensagem citada: ' + label });
+        })) : null)));
+    });
+    c.appendChild(ul);
+    return c;
+  }
+  function delta(cur, prev) {
+    if (!isNum(cur) || !isNum(prev)) return h('p', { class: 'kpi-d' }, 'sem comparação');
+    var d = cur - prev;
+    var p = prev > 0 ? Math.abs(d) / prev : null;
+    var sign = d > 0 ? '+' : d < 0 ? '−' : '';
+    return h('p', { class: 'kpi-d' }, h('span', { class: d > 0 ? 'up' : d < 0 ? 'down' : '' }, h('span', { 'aria-hidden': 'true' }, d > 0 ? '▲ ' : d < 0 ? '▼ ' : '= '),
+      d === 0 ? 'igual' : sign + num(Math.abs(d)) + (p !== null ? ' (' + sign + pct(p) + ')' : '')), ' vs. anterior (' + num(prev) + ')');
+  }
+  function kpi(label, value, extra, cls) {
+    return h('div', { class: 'kpi ' + (cls || '') }, h('p', { class: 'kpi-l' }, label), h('p', { class: 'kpi-v' }, value), extra || null);
+  }
+  function kpiGrid(k) {
+    var t = obj(k.triage);
+    var noise = pctOf(k.noisePct);
+    return h('section', { 'aria-label': 'Indicadores do período' }, h('div', { class: 'kpis' },
+      kpi('Recebidas', num(k.received), delta(k.received, k.receivedPrev)),
+      kpi('Exigem atenção', num(k.attention), delta(k.attention, k.attentionPrev)),
+      kpi('Pedem ação', num(k.actions), delta(k.actions, k.actionsPrev)),
+      kpi('Oportunidades', num(k.opportunities), h('p', { class: 'kpi-d' }, 'vagas e contatos de negócio')),
+      kpi('Newsletters', num(k.newsletters), h('p', { class: 'kpi-d' }, 'ruído ' + pct(noise) + ' (marketing e spam)')),
+      kpi('Só por regras', num(k.rulesOnly), h('p', { class: 'kpi-d' }, 'analisadas sem IA')),
+      kpi([h('span', null, 'Triagem estimada'), h('span', { class: 'est' }, 'estimativa')],
+        isNum(t.minMinutes) ? [num(t.minMinutes) + '–' + num(t.maxMinutes), h('small', null, ' min')] : '—',
+        h('p', { class: 'kpi-d' }, isNum(t.count) ? num(t.count) + ' e-mails triados sem abrir. ' : '', 'Fórmula: ' + (str(t.formula) || 'não lidos de baixa prioridade × 5–15 s') + '. É uma faixa calculada, não uma medição.'), 'wide')));
+  }
+  function tasksCard(tasks) {
+    var c = card('Prazos e tarefas', { count: tasks.length, flush: true, foot: navLink('#/tarefas', 'Abrir Central de tarefas'), icon: 'cal' });
+    if (!tasks.length) { c._b.appendChild(emptyState('Sem prazos no período', 'Pedidos e prazos extraídos dos e-mails aparecem aqui.', null, { small: true, hl: 'h3', icon: 'cal' })); return c; }
+    var ul = h('ul', { class: 'rows', role: 'list' });
+    tasks.slice(0, 8).forEach(function (t) { ul.appendChild(taskRow(t, null, true)); });
+    c._b.appendChild(ul);
+    return c;
+  }
+  function oppsMini(opps) {
+    var c = card('Oportunidades', { count: opps.length, flush: true, foot: navLink('#/carreira', 'Abrir Radar de carreira'), icon: 'briefcase' });
+    if (!opps.length) { c._b.appendChild(emptyState('Nenhuma oportunidade nova', 'Vagas e contatos de negócio identificados aparecem aqui.', null, { small: true, hl: 'h3', icon: 'briefcase' })); return c; }
+    var ul = h('ul', { class: 'rows', role: 'list' });
+    opps.slice(0, 5).forEach(function (o) {
+      var mid = arr(o.messageIds)[0];
+      ul.appendChild(h('li', null, h('div', { class: 'row-main' },
+        h('span', { class: 'row-title' }, mid ? navLink(detailHref(mid), str(o.title) || str(o.role) || 'Oportunidade') : str(o.title) || 'Oportunidade'),
+        h('span', { class: 'row-sub' }, [str(o.company), str(o.role) !== str(o.title) ? str(o.role) : '', WORK[o.workMode] || ''].filter(Boolean).join(' · ')),
+        isYmd(o.deadline) ? dueChip(o.deadline, '') : null),
+        h('div', { class: 'row-side' }, isNum(o.fit) ? h('span', { class: 'badge ' + (o.fit >= 0.7 ? 'b-ok' : 'b-neutral') }, 'Aderência ' + pct(o.fit)) : null, o.isMass ? h('span', { class: 'badge b-neutral' }, 'Alerta em massa') : null)));
+    });
+    c._b.appendChild(ul);
+    return c;
+  }
+  function topicsCard(topics) {
+    var c = card('Temas em alta', { icon: 'spark' });
+    if (!topics.length) { c._b.appendChild(h('p', { class: 'muted small' }, 'Nenhum tema de interesse apareceu no período. Ajuste seus interesses em Configurações.')); return c; }
+    c._b.appendChild(h('div', { class: 'chips' }, topics.map(function (t) { t = obj(t); return h('span', { class: 'chip' }, str(t.topic), h('span', { class: 'n' }, num(t.count))); })));
+    return c;
+  }
+  function categoriesCard(cats) {
+    var c = card('Categorias', { icon: 'list' });
+    if (!cats.length) { c._b.appendChild(h('p', { class: 'muted small' }, 'Sem mensagens categorizadas no período.')); return c; }
+    var max = Math.max.apply(null, cats.map(function (x) { return Number(x.count) || 0; }).concat([1]));
+    var list = h('div', { class: 'dist' });
+    cats.slice(0, 10).forEach(function (x) {
+      x = obj(x);
+      var bar = h('div', { class: 'bar', 'aria-hidden': 'true' }, h('span'));
+      bar.firstChild.style.width = Math.round(((Number(x.count) || 0) / max) * 100) + '%';
+      var d = isNum(x.countPrev) ? x.count - x.countPrev : null;
+      list.appendChild(h('div', { class: 'dist-row' },
+        navLink('#/caixa?cat=' + encodeURIComponent(str(x.id)), catLabel(x.id, x.label), { class: 'linkbtn' }), bar,
+        h('span', { class: 'num small' }, num(x.count), d !== null && d !== 0 ? h('span', { class: 'muted' }, ' (' + (d > 0 ? '+' : '−') + num(Math.abs(d)) + ')') : null)));
+    });
+    c._b.appendChild(list);
+    return c;
+  }
+
+  // --------------------------------------------------------------- Caixa ----
+  var PERIODS = [['7d', '7 dias'], ['30d', '30 dias'], ['90d', '90 dias'], ['365d', '12 meses']];
+  function pageSize() { var n = S.boot && S.boot.ui && Number(S.boot.ui.pageSize); return n >= 10 && n <= 100 ? n : 30; }
+  function inboxState(params) {
+    if (!S.inbox) S.inbox = { f: { categories: [], levels: [], action: '', deadline: '', unread: '', period: defPeriod() === '30d' ? '30d' : '7d', sender: '', status: '' }, sort: 'priority', page: 1, more: false };
+    var st = S.inbox;
+    if (params.has('cat')) { st.f.categories = params.get('cat').split(',').filter(function (c) { return S.catMap[c]; }); st.page = 1; }
+    if (params.has('level')) { st.f.levels = params.get('level').split(',').filter(function (l) { return LV[l]; }); st.page = 1; }
+    return st;
+  }
+  function activeFilters(f) {
+    return f.categories.length + f.levels.length + (f.action ? 1 : 0) + (f.deadline ? 1 : 0) + (f.unread ? 1 : 0) + (f.sender ? 1 : 0) + (f.status ? 1 : 0);
+  }
+  function renderInbox(view, params) {
+    var st = inboxState(params);
+    view.appendChild(pageHead('Caixa inteligente', 'Mensagens ordenadas por prioridade explicável. Avalie para ensinar o ranking.'));
+    var listBox = h('div', { class: 'box' });
+    var cardEl = h('section', { class: 'card', 'aria-label': 'Mensagens' }, filterPanel(st, reload), listBox);
+    view.appendChild(cardEl);
+    function reload(reset) {
+      if (reset) st.page = 1;
+      var f = st.f;
+      load(listBox, {
+        name: 'apiListMessages', req: { filters: f, sort: st.sort, page: st.page, pageSize: pageSize() }, title: 'Não foi possível carregar a caixa',
+        empty: function (d) {
+          if (arr(d.items).length) return null;
+          if (st.page > 1) return emptyState('Não há mais mensagens', 'Você chegou ao fim da lista.', h('button', { class: 'btn', type: 'button', on: { click: function () { st.page = 1; reload(); } } }, 'Voltar à página 1'));
+          if (activeFilters(f) || f.period !== '365d') return emptyState('Nenhuma mensagem com esses filtros', 'Amplie o período ou limpe os filtros.', h('button', { class: 'btn', type: 'button', on: { click: function () { clearFilters(st); S.screenKey = ''; onRoute(); } } }, 'Limpar filtros'), { icon: 'search' });
+          return noMessagesState();
+        },
+        render: function (d, box) {
+          box.appendChild(itemList(d.items, { feedback: true }));
+          box.appendChild(pager(st.page, !!d.hasMore, arr(d.items).length, function (p) { st.page = p; reload(); cardEl.scrollIntoView({ block: 'start' }); }));
+        }
+      });
+    }
+    reload();
+  }
+  function clearFilters(st) {
+    var p = st.f.period;
+    st.f = { categories: [], levels: [], action: '', deadline: '', unread: '', period: p, sender: '', status: '' };
+    st.page = 1;
+    if (S.route) { S.route.params.delete('cat'); S.route.params.delete('level'); setParam('x', ''); }
+  }
+  function pager(page, hasMore, count, go) {
+    if (page <= 1 && !hasMore) return h('div', { class: 'pager' }, h('span', null, num(count) + (count === 1 ? ' mensagem' : ' mensagens')));
+    return h('nav', { class: 'pager', 'aria-label': 'Paginação' }, h('span', null, 'Página ' + num(page) + ' · ' + num(count) + ' nesta página'),
+      h('div', null,
+        h('button', { class: 'btn btn-sm', type: 'button', disabled: page <= 1, on: { click: function () { go(page - 1); } } }, 'Anterior'),
+        h('button', { class: 'btn btn-sm', type: 'button', disabled: !hasMore, on: { click: function () { go(page + 1); } } }, 'Próxima')));
+  }
+  function filterPanel(st, reload) {
+    var f = st.f;
+    var wrap = h('div', { class: 'filters', role: 'search', 'aria-label': 'Filtros da caixa' });
+    var catId = uid('cats');
+    var catCount = h('span', { class: 'count-pill' });
+    var catBtn = h('button', { class: 'btn', type: 'button', 'aria-expanded': 'false', 'aria-controls': catId }, 'Categorias', catCount);
+    function updCat() { catCount.textContent = f.categories.length ? String(f.categories.length) : ''; catCount.hidden = !f.categories.length; }
+    updCat();
+    var catPop = h('fieldset', { class: 'cat-pop', id: catId, hidden: true }, h('legend', { class: 'sr' }, 'Categorias'),
+      h('div', { class: 'checks' }, S.cats.map(function (c) {
+        return checkbox(c.label, f.categories.indexOf(c.id) >= 0, function (on) {
+          f.categories = f.categories.filter(function (x) { return x !== c.id; });
+          if (on) f.categories.push(c.id);
+          updCat(); upd(); reload(true);
+        });
+      })));
+    catBtn.addEventListener('click', function () { var on = catPop.hidden; catPop.hidden = !on; catBtn.setAttribute('aria-expanded', on ? 'true' : 'false'); });
+    var lvLbl = uid('lv');
+    var lv = h('div', { class: 'lv-toggles', role: 'group', 'aria-labelledby': lvLbl }, ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map(function (l) {
+      var b = h('button', { class: 'btn btn-sm', type: 'button', 'aria-pressed': f.levels.indexOf(l) >= 0 ? 'true' : 'false', on: { click: function () {
+        var on = f.levels.indexOf(l) < 0;
+        f.levels = f.levels.filter(function (x) { return x !== l; });
+        if (on) f.levels.push(l);
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        upd(); reload(true);
+      } } }, LV[l]);
+      return b;
+    }));
+    var moreId = uid('more');
+    var moreBtn = h('button', { class: 'btn', type: 'button', 'aria-expanded': st.more ? 'true' : 'false', 'aria-controls': moreId }, 'Mais filtros');
+    var senderId = uid('snd');
+    var tmr = 0;
+    var sender = h('input', { class: 'input', id: senderId, type: 'search', value: f.sender, placeholder: 'nome, e-mail ou domínio', autocomplete: 'off', on: {
+      input: function () { clearTimeout(tmr); tmr = setTimeout(function () { f.sender = sender.value.trim(); upd(); reload(true); }, 450); },
+      keydown: function (e) { if (e.key === 'Enter') { e.preventDefault(); clearTimeout(tmr); f.sender = sender.value.trim(); upd(); reload(true); } }
+    } });
+    var more = h('div', { class: 'filters-more', id: moreId, hidden: !st.more },
+      selectField('Ação', [['', 'Todas'], ['yes', 'Pedem ação'], ['no', 'Sem ação']], f.action, function (v) { f.action = v; upd(); reload(true); }),
+      selectField('Prazo', [['', 'Todos'], ['yes', 'Com prazo'], ['no', 'Sem prazo']], f.deadline, function (v) { f.deadline = v; upd(); reload(true); }),
+      selectField('Leitura', [['', 'Lidas e não lidas'], ['yes', 'Só não lidas'], ['no', 'Só lidas']], f.unread, function (v) { f.unread = v; upd(); reload(true); }),
+      selectField('Status', [['', 'Todos'], ['OPEN', 'Em aberto'], ['RESOLVED', 'Resolvidas'], ['SAVED', 'Salvas'], ['DISMISSED', 'Descartadas']], f.status, function (v) { f.status = v; upd(); reload(true); }),
+      h('div', { class: 'field' }, h('label', { for: senderId }, 'Remetente'), sender));
+    moreBtn.addEventListener('click', function () { st.more = more.hidden; more.hidden = !st.more; moreBtn.setAttribute('aria-expanded', st.more ? 'true' : 'false'); });
+    var clear = h('button', { class: 'btn btn-ghost', type: 'button', on: { click: function () { clearFilters(st); S.screenKey = ''; onRoute(); } } }, 'Limpar filtros');
+    var summary = h('span', { class: 'small muted', 'aria-live': 'polite' });
+    function upd() { var n = activeFilters(f); clear.hidden = !n; summary.textContent = n ? n + (n === 1 ? ' filtro ativo' : ' filtros ativos') : ''; }
+    upd();
+    wrap.appendChild(h('div', { class: 'filters-row' },
+      h('div', { class: 'field' }, h('span', { class: 'lbl', id: lvLbl }, 'Prioridade'), lv),
+      selectField('Período', PERIODS, f.period, function (v) { f.period = v; reload(true); }),
+      selectField('Ordenar por', [['priority', 'Prioridade'], ['date', 'Mais recentes'], ['deadline', 'Prazo mais próximo'], ['relevance', 'Relevância'], ['urgency', 'Urgência']], st.sort, function (v) { st.sort = v; reload(true); }),
+      h('div', { class: 'field' }, h('span', { class: 'lbl', 'aria-hidden': 'true' }, ' '), h('div', { class: 'chips' }, catBtn, moreBtn, clear)), summary));
+    wrap.appendChild(catPop);
+    wrap.appendChild(more);
+    return wrap;
+  }
+
+  // -------------------------------------------------------------- Detalhe ----
+  function skDetail() { return h('div', null, skLines(3), h('div', { class: 'sk sk-block', 'aria-hidden': 'true' }), skLines(6)); }
+  function openDetail(id, pushed) {
+    var dlg = dialog({ cls: 'drawer', title: 'Carregando mensagem…', titleCls: 'd-subject', onRequestClose: closeDetail });
+    S.detail = { id: id, dlg: dlg, pushed: pushed };
+    load(dlg.body, {
+      name: 'apiGetMessage', req: { id: id }, sk: skDetail, title: 'Não foi possível abrir a mensagem', hl: 'h3',
+      render: function (d, box) { renderDetail(dlg, box, d); }
+    });
+    dlg.body.addEventListener('click', function (e) { var t = e.target; if (t && t.closest && t.closest('[data-retry-close]')) closeDetail(); });
+  }
+  function sec(title, content, extra) {
+    if (!content || (Array.isArray(content) && !content.filter(Boolean).length)) return null;
+    return h('section', { class: 'd-sec' }, h('h3', null, title, extra || null), content);
+  }
+  function renderDetail(dlg, box, d) {
+    if (!d.id) throw new Error('mensagem sem id');
+    overlay(d);
+    S.items[d.id] = d;
+    var p = obj(d.priority);
+    var f = obj(d.from);
+    dlg.title.textContent = str(d.subject) || '(sem assunto)';
+    var g = gmailUrl(d.gmailUrl);
+    var gs = gmailUrl(d.gmailSearchUrl);
+    var untrusted = d.authFail || d.category === 'spam';
+    box.appendChild(h('div', { class: 'd-head' },
+      h('div', { class: 'chips' }, levelBadge(p), h('span', { class: 'chip' }, catLabel(d.category, d.categoryLabel)),
+        arr(d.secondary).map(function (s) { s = obj(s); return h('span', { class: 'chip' }, catLabel(s.id, s.label)); }),
+        methodBadge(d.method, true), USTAT[d.userStatus] ? h('span', { class: 'badge b-ok' }, USTAT[d.userStatus]) : null,
+        d.unread ? h('span', { class: 'badge b-neutral' }, 'Não lida') : null, d.starred ? h('span', { class: 'badge b-neutral' }, icon('star'), 'Com estrela') : null),
+      h('dl', { class: 'd-meta' },
+        h('dt', null, 'De'), h('dd', null, str(f.name) ? str(f.name) + ' <' + str(f.email) + '>' : str(f.email) || '—'),
+        arr(d.to).length ? [h('dt', null, 'Para'), h('dd', null, arr(d.to).map(str).join(', '))] : null,
+        arr(d.cc).length ? [h('dt', null, 'Cópia'), h('dd', null, arr(d.cc).map(str).join(', '))] : null,
+        h('dt', null, 'Recebida'), h('dd', null, fDT(d.date) + ' (' + fRel(d.date) + ')')),
+      h('div', { class: 'd-actions' },
+        g ? extLink(g, [icon('mail'), 'Abrir no Gmail'], { class: 'btn btn-primary' }) : null,
+        gs ? extLink(gs, [icon('search'), 'Buscar no Gmail'], { class: 'btn' }) : null),
+      !g && !gs ? h('p', { class: 'hint' }, 'Link do Gmail indisponível para esta mensagem.') : h('p', { class: 'hint' }, 'Se o Gmail abrir na conta errada, ajuste o índice da conta (u/N) em Configurações. “Buscar no Gmail” localiza a mensagem pelo identificador.')));
+    if (d.injection) box.appendChild(h('div', { class: 'banner warn', role: 'note' }, icon('alert'), h('div', { class: 'grow' }, h('strong', null, 'Conteúdo com instruções suspeitas — tratado como texto'), h('span', null, 'O e-mail contém frases que tentam dar ordens a sistemas de IA. Elas foram ignoradas na análise e são exibidas apenas como texto.'))));
+    if (untrusted) box.appendChild(h('div', { class: 'banner err', role: 'note' }, icon('shield'), h('div', { class: 'grow' }, h('strong', null, d.authFail ? 'Falha de autenticação do remetente' : 'Spam provável'), h('span', null, 'O remetente não passou nas verificações (SPF/DKIM/DMARC) ou parece spam. Links desativados e prioridade limitada a Média.'))));
+    if (d.parseStatus && !/^(OK|FULL|DONE)$/i.test(str(d.parseStatus))) box.appendChild(h('div', { class: 'banner', role: 'note' }, icon('info'), h('div', { class: 'grow' }, 'Mensagem processada parcialmente (' + str(d.parseStatus).toLowerCase() + '): algumas informações podem faltar.')));
+    box.appendChild(h('div', { 'data-fb-for': d.id }, feedbackBar(d, true)));
+    var sk = d.summaryKind === 'ABSTRACTIVE' ? 'resumo gerado por IA' : d.summaryKind === 'EXTRACTIVE' ? 'trechos do próprio e-mail' : '';
+    add(box, sec('Resumo', [d.summary ? h('p', { class: 'd-sum' }, str(d.summary)) : h('p', { class: 'muted' }, 'Sem resumo disponível.'),
+      d.whatsNew ? h('div', { class: 'quote' }, h('strong', null, 'O que há de novo: '), str(d.whatsNew)) : null], sk ? h('span', { class: 'badge b-neutral' }, sk) : null));
+    var facts = arr(d.facts).map(function (x) { return str(x && typeof x === 'object' ? x.fact : x); }).filter(Boolean);
+    add(box, sec('Fatos', facts.length ? h('ul', { class: 'facts' }, facts.map(function (x) { return h('li', null, x); })) : null));
+    var dl = obj(d.deadline);
+    var acts = arr(d.actions);
+    add(box, sec('Prazo e ações', [
+      isYmd(dl.date) ? h('div', { class: 'chips' }, dueChip(dl.date, dl.certainty), h('span', { class: 'small muted' }, CERT_WHY[dl.certainty] ? CERT[dl.certainty] + ': ' + CERT_WHY[dl.certainty] + '.' : '')) : h('p', { class: 'muted small' }, 'Nenhum prazo identificado.'),
+      acts.length ? h('ul', { class: 'rows card', role: 'list' }, acts.map(function (t) { return taskRow(t, null, true, true); })) : (d.action ? h('p', { class: 'small' }, 'Pede ação, mas nenhuma tarefa específica foi extraída.') : null)]));
+    if (d.opportunity) add(box, sec('Oportunidade', oppCard(obj(d.opportunity), true)));
+    add(box, sec('Por que essa prioridade?', whyBlock(d)));
+    var ents = arr(d.entities).filter(function (e) { return e && e.name; });
+    var tops = arr(d.topics).map(str).filter(Boolean);
+    add(box, sec('Entidades e temas', ents.length || tops.length ? h('div', { class: 'chips' },
+      ents.map(function (e) { return h('span', { class: 'chip' }, str(e.name), ENT[e.type] ? h('span', { class: 'muted' }, ' · ' + ENT[e.type]) : null); }),
+      tops.map(function (t) { return h('span', { class: 'chip' }, '#' + t); })) : null));
+    add(box, sec('Evidências citadas', evidenceBlock(obj(d.evidence))));
+    add(box, sec('Trecho do e-mail', excerptBlock(d)));
+    add(box, sec('Links', linksBlock(arr(d.links), untrusted)));
+    var att = arr(d.attachments);
+    add(box, sec('Anexos', att.length ? h('ul', { class: 'facts' }, att.map(function (a) { a = obj(a); return h('li', null, str(a.filename) || '(sem nome)', h('span', { class: 'muted small' }, ' · ' + (str(a.mime_type) || 'tipo desconhecido') + (isNum(a.size) ? ' · ' + bytes(a.size) : ''))); })) : null, h('span', { class: 'muted' }, '(só os nomes)')));
+    var uu = safeUrl(d.unsubscribeUrl);
+    if (uu && !untrusted) add(box, sec('Descadastro', h('div', { class: 'd-sec' }, extLink(uu, ['Página de descadastro em ', h('span', { class: 'host' }, hostOf(uu)), icon('ext')], { class: 'ext' }), h('p', { class: 'hint' }, 'Abre o site do remetente; nada é feito automaticamente.'))));
+    var hist = arr(d.history);
+    add(box, sec('Histórico de análise', hist.length ? h('ul', { class: 'hist', role: 'list' }, hist.map(function (x) {
+      x = obj(x);
+      return h('li', null, methodBadge(x.method), h('span', null, [PROVIDER[x.provider] && x.provider !== 'none' ? PROVIDER[x.provider] : '', str(x.model)].filter(Boolean).join(' · ') || (x.method === 'AI' ? 'IA' : 'Motor de regras')), h('span', { class: 'muted' }, fDT(x.at)));
+    })) : null));
+  }
+  function whyBlock(d) {
+    var p = obj(d.priority);
+    var comps = arr(d.components).map(obj);
+    var weighted = comps.filter(function (c) { return isNum(c.weight) && c.weight > 0; });
+    var adj = comps.filter(function (c) { return !(isNum(c.weight) && c.weight > 0); });
+    var raw = weighted.reduce(function (s, c) { return s + (isNum(c.contribution) ? c.contribution : 0); }, 0);
+    var score = isNum(p.score) ? p.score : null;
+    var mult = score !== null && raw > 0 ? score / raw : null;
+    var fid = obj(d.fidelity);
+    var lastAi = arr(d.history).filter(function (x) { return x && x.method === 'AI'; }).pop();
+    var out = [h('div', { class: 'score-sum' },
+      h('span', null, h('span', { class: 'score-big' }, score !== null ? num(Math.round(score * 100)) : '—'), h('span', { class: 'muted' }, ' / 100')), levelBadge(p),
+      p.overflow ? h('span', { class: 'small' }, 'Elegível a crítica, mas o limite diário de críticas foi atingido.') : null),
+      kv([['Confiança da classificação', pct(d.confidence)],
+        ['Evidências verificadas', isNum(fid.total) && fid.total > 0 ? num(fid.verified) + ' de ' + num(fid.total) : 'nenhuma citada'],
+        ['Método', d.method === 'AI' ? 'IA' + (lastAi && lastAi.model ? ' · ' + str(lastAi.model) : '') : 'Regras (sem IA)'],
+        d.reason ? ['Justificativa', str(d.reason)] : null])];
+    if (weighted.length) {
+      var tb = h('tbody');
+      weighted.forEach(function (c) {
+        tb.appendChild(h('tr', null, h('td', { 'data-label': 'Componente', class: 'full' }, h('strong', null, str(c.label) || str(c.key))),
+          h('td', { class: 'r', 'data-label': 'Valor' }, pct(c.value)), h('td', { class: 'r', 'data-label': 'Peso' }, pct(c.weight)),
+          h('td', { class: 'r', 'data-label': 'Contribuição' }, dec(c.contribution * 100, 1) + ' pts'), h('td', { 'data-label': 'Por quê', class: 'full' }, str(c.why))));
+      });
+      out.push(h('table', { class: 'tbl stack' }, h('caption', { class: 'sr' }, 'Componentes do score: valor × peso = contribuição'),
+        h('thead', null, h('tr', null, h('th', { scope: 'col' }, 'Componente'), h('th', { scope: 'col', class: 'r' }, 'Valor'), h('th', { scope: 'col', class: 'r' }, 'Peso'), h('th', { scope: 'col', class: 'r' }, 'Contribuição'), h('th', { scope: 'col' }, 'Por quê'))),
+        tb, h('tfoot', null, h('tr', null, h('td', { class: 'full', 'data-label': 'Total' }, 'Soma ponderada'), h('td', { class: 'r' }), h('td', { class: 'r' }), h('td', { class: 'r', 'data-label': 'Pontos' }, dec(raw * 100, 1) + ' pts'), h('td', { class: 'full' },
+          mult !== null && Math.abs(mult - 1) > 0.005 ? '× ' + dec(mult, 2) + ' (confiabilidade do remetente e ruído da categoria) = ' + num(Math.round(score * 100)) : '= score final')))));
+    }
+    if (adj.length) out.push(h('ul', { class: 'facts small' }, adj.map(function (c) { return h('li', null, h('strong', null, str(c.label) + ': '), str(c.why)); })));
+    return out;
+  }
+  function evidenceBlock(ev) {
+    var groups = [['facts', 'Fatos'], ['actions', 'Ações'], ['classification', 'Classificação']].map(function (g) {
+      var list = arr(ev[g[0]]).map(str).filter(Boolean);
+      return list.length ? h('div', { class: 'd-sec' }, h('p', { class: 'small muted' }, g[1]), list.map(function (q) { return h('blockquote', { class: 'quote' }, trunc(q, 400)); })) : null;
+    }).filter(Boolean);
+    var op = typeof ev.opportunity === 'string' ? ev.opportunity : '';
+    if (op) groups.push(h('div', { class: 'd-sec' }, h('p', { class: 'small muted' }, 'Oportunidade'), h('blockquote', { class: 'quote' }, trunc(op, 400))));
+    if (!groups.length) return null;
+    return h('details', { class: 'more' }, h('summary', null, 'Ver trechos literais usados como evidência'), h('div', { class: 'd-sec' }, groups));
+  }
+  function excerptBlock(d) {
+    if (d.excerpt === null || d.excerpt === undefined || d.excerptHidden) return h('p', { class: 'muted' }, 'Trecho expirado pela política de retenção. O resumo e os metadados continuam disponíveis; o texto completo está no Gmail.');
+    if (!str(d.excerpt).trim()) return h('p', { class: 'muted' }, 'Sem trecho de texto para esta mensagem.');
+    return [h('pre', { class: 'excerpt', tabindex: '0', 'aria-label': 'Trecho do e-mail, somente texto' }, str(d.excerpt)), h('p', { class: 'hint' }, 'Exibido como texto simples: o HTML do e-mail nunca é interpretado.')];
+  }
+  function linksBlock(links, disabled) {
+    if (!links.length) return null;
+    return h('ul', { class: 'links', role: 'list' }, links.slice(0, 20).map(function (l) {
+      l = obj(l);
+      var x = safeUrl(l.url);
+      var text = str(l.text).trim();
+      if (!x) return h('li', null, h('span', { class: 'link-text' }, 'Link omitido: endereço não seguro' + (schemeOf(l.url) ? ' (' + schemeOf(l.url) + ':)' : '') + (text ? ' — “' + trunc(text, 80) + '”' : '')));
+      var mis = textDomainMismatch(text, x.hostname);
+      var path = trunc(x.pathname + x.search, 90);
+      return h('li', null,
+        disabled ? h('span', { class: 'ext' }, h('span', { class: 'host' }, hostOf(x)), h('span', { class: 'muted' }, ' — link desativado')) : extLink(x, [h('span', { class: 'host' }, hostOf(x)), icon('ext')], { class: 'ext' }),
+        text ? h('span', { class: 'link-text' }, 'Texto: “' + trunc(text, 140) + '”') : null,
+        path && path !== '/' ? h('span', { class: 'link-text mono' }, path) : null,
+        mis ? h('span', { class: 'note-inj' }, icon('alert'), 'O texto mostra “' + mis + '”, mas o link leva a ' + hostOf(x) + '.') : null,
+        x.protocol === 'http:' && !disabled ? h('span', { class: 'link-text' }, 'Sem criptografia (http).') : null);
+    }));
+  }
+
+  // -------------------------------------------------------------- Tarefas ----
+  function taskRow(t, rerender, compact, inDetail) {
+    t = obj(t);
+    var open = t.status === 'OPEN' || !t.status;
+    var f = obj(t.from);
+    var label = str(t.statusLabel) || TASK_ST[t.status] || str(t.status);
+    var acts = compact ? null : h('div', { class: 'row-actions' }, open ? [
+      h('button', { class: 'btn btn-sm', type: 'button', 'data-task': 'RESOLVED', on: { click: function () { taskFeedback(t, 'RESOLVED', rerender); } } }, icon('ok'), 'Resolver'),
+      h('button', { class: 'btn btn-sm btn-ghost', type: 'button', 'data-task': 'DISMISSED', on: { click: function () { taskFeedback(t, 'DISMISSED', rerender); } } }, 'Descartar')
+    ] : h('button', { class: 'btn btn-sm', type: 'button', 'data-task': 'REOPEN', on: { click: function () { taskFeedback(t, 'REOPEN', rerender); } } }, 'Reabrir'),
+      (function () { var g = gmailUrl(t.gmailUrl); return g ? extLink(g, ['Abrir no Gmail', icon('ext')], { class: 'btn btn-sm btn-ghost' }) : null; })());
+    return h('li', { 'data-task-id': str(t.id) },
+      h('div', { class: 'row-main' },
+        h('span', { class: 'row-title' }, str(t.description) || 'Tarefa sem descrição'),
+        inDetail ? null : h('span', { class: 'row-sub' }, t.messageId ? navLink(detailHref(t.messageId), str(t.subject) || '(sem assunto)') : str(t.subject), f.name || f.email ? ' · ' + (str(f.name) || str(f.email)) : ''),
+        h('div', { class: 'chips' }, isYmd(t.dueDate) ? dueChip(t.dueDate, t.dueCertainty, 'Vence ') : h('span', { class: 'small muted' }, 'Sem prazo'),
+          !compact && OWNER[t.owner] && t.owner !== 'me' ? h('span', { class: 'chip' }, OWNER[t.owner]) : null),
+        !open && TASK_WHY[t.status] && !compact ? h('span', { class: 'row-sub' }, TASK_WHY[t.status] + ' Você pode reabrir.') : null,
+        acts),
+      h('div', { class: 'row-side' }, LV[t.priorityLevel] ? h('span', { class: 'badge lv-' + t.priorityLevel }, LV[t.priorityLevel]) : null,
+        !open ? h('span', { class: 'badge ' + (/^AUTO_/.test(str(t.status)) ? 'b-neutral' : 'b-ok'), title: TASK_WHY[t.status] || null }, label) : null,
+        compact ? null : methodBadge(t.method)));
+  }
+  var TASK_MSG = { RESOLVED: 'Tarefa resolvida.', DISMISSED: 'Tarefa descartada.', REOPEN: 'Tarefa reaberta.' };
+  function taskFeedback(t, type, rerender) {
+    var prev = { status: t.status, statusLabel: t.statusLabel };
+    t.status = type === 'REOPEN' ? 'OPEN' : type;
+    t.statusLabel = TASK_ST[t.status];
+    if (rerender) rerender(t, type);
+    submitFeedback({ targetType: 'ACTION', targetId: t.id, messageId: t.messageId, type: type, payload: {} }, TASK_MSG[type],
+      function () { t.status = prev.status; t.statusLabel = prev.statusLabel; if (rerender) rerender(t, type); },
+      function () { taskFeedback(t, type, rerender); },
+      type !== 'REOPEN' ? function () { taskFeedback(t, 'REOPEN', rerender); } : null);
+  }
+  function bucket(t) {
+    if (!isYmd(t.dueDate)) return 4;
+    var d = ymdDays(today(), t.dueDate);
+    return d < 0 ? 0 : d === 0 ? 1 : d <= 7 ? 2 : 3;
+  }
+  var BUCKETS = ['Atrasadas', 'Hoje', 'Próximos 7 dias', 'Mais adiante', 'Sem prazo'];
+  function renderTasks(view) {
+    var box = h('div', { class: 'box' });
+    view.appendChild(pageHead('Central de tarefas', 'Ações e prazos extraídos dos e-mails. Algumas se encerram sozinhas — o motivo aparece em cada uma.',
+      seg('Situação das tarefas', [['OPEN', 'Abertas'], ['DONE', 'Concluídas'], ['ALL', 'Todas']], S.tasksStatus, function (v) { S.tasksStatus = v; go(); })));
+    view.appendChild(box);
+    function go() {
+      load(box, {
+        name: 'apiListTasks', req: { status: S.tasksStatus }, title: 'Não foi possível carregar as tarefas',
+        empty: function (d) { return arr(d.items).length ? null : S.tasksStatus === 'OPEN' ? emptyState('Nenhuma tarefa aberta', 'Quando um e-mail pedir algo a você ou tiver prazo, a tarefa aparece aqui.', null, { icon: 'check' }) : emptyState('Nenhuma tarefa ' + (S.tasksStatus === 'DONE' ? 'concluída' : 'registrada'), 'As tarefas resolvidas por você ou encerradas automaticamente aparecem aqui.', null, { icon: 'check' }); },
+        render: function (d, b) {
+          var items = arr(d.items).map(obj);
+          var c = h('div', { class: 'card' });
+          var groups = [[], [], [], [], []];
+          items.forEach(function (t) { groups[S.tasksStatus === 'OPEN' ? bucket(t) : 4].push(t); });
+          function rerender(t, type) {
+            var old = c.querySelector('[data-task-id="' + CSS.escape(str(t.id)) + '"]');
+            if (!old) return;
+            var n = taskRow(t, rerender);
+            old.parentNode.replaceChild(n, old);
+            var btn = n.querySelector('[data-task]');
+            if (btn) btn.focus();
+          }
+          groups.forEach(function (g, i) {
+            if (!g.length) return;
+            if (S.tasksStatus === 'OPEN') c.appendChild(h('h2', { class: 'group-h' }, BUCKETS[i] + ' · ' + g.length));
+            c.appendChild(h('ul', { class: 'rows', role: 'list' }, g.map(function (t) { return taskRow(t, rerender); })));
+          });
+          b.appendChild(c);
+        }
+      });
+    }
+    go();
+  }
+
+  // ------------------------------------------------------------- Carreira ----
+  function oppCard(o, inDetail) {
+    var fit = isNum(o.fit) ? o.fit : null;
+    var bar = h('div', { class: 'bar' + (fit !== null && fit >= 0.7 ? ' ok' : ''), 'aria-hidden': 'true' }, h('span'));
+    bar.firstChild.style.width = fit === null ? '0' : Math.round(fit * 100) + '%';
+    var tid = uid('op');
+    var mid = arr(o.messageIds)[0];
+    var g = gmailUrl(o.gmailUrl);
+    var dismissed = o.status === 'DISMISSED';
+    var saved = o.status === 'SAVED';
+    var el = h(inDetail ? 'div' : 'article', { class: (inDetail ? 'card ' : 'card ') + 'opp' + (dismissed ? ' is-dismissed' : ''), 'aria-labelledby': inDetail ? null : tid, 'data-opp': str(o.key) },
+      h('div', { class: 'opp-h' }, h('div', null, h(inDetail ? 'p' : 'h2', { class: 'opp-t', id: tid }, str(o.title) || str(o.role) || 'Oportunidade'),
+        h('p', { class: 'opp-c' }, [str(o.company) || 'Empresa não informada', str(o.role) && str(o.role) !== str(o.title) ? str(o.role) : '', str(o.seniority)].filter(Boolean).join(' · '))),
+        h('div', { class: 'chips' }, h('span', { class: 'badge b-neutral' }, OPP_TYPE[o.type] || 'Oportunidade'), o.isMass ? h('span', { class: 'badge b-neutral', title: 'Alerta de plataforma enviado para muitas pessoas' }, 'Alerta em massa') : null,
+          saved ? h('span', { class: 'badge b-ok' }, 'Salva') : null, dismissed ? h('span', { class: 'badge b-neutral' }, 'Descartada') : null)),
+      h('div', { class: 'fit' }, h('span', { class: 'fit-v' }, fit !== null ? pct(fit) : '—'), h('span', { class: 'small muted' }, 'aderência ao perfil'), bar),
+      arr(o.fitReasons).length ? h('ul', { class: 'reasons' }, arr(o.fitReasons).slice(0, 5).map(function (r) { return h('li', null, str(r)); })) : null,
+      kv([['Modelo de trabalho', WORK[o.workMode] || 'Não informado'], ['Local', str(o.location) || 'Não informado'],
+        ['Remuneração', str(o.compensation) ? '“' + str(o.compensation) + '” (texto do e-mail)' : 'Não informada'],
+        ['Etapa', str(o.stage) || '—'], ['Próximo passo', str(o.nextStep) || '—'],
+        ['Prazo', isYmd(o.deadline) ? fYmd(o.deadline) + (dueRel(o.deadline) ? ' (' + dueRel(o.deadline) + ')' : '') : 'Sem prazo']]),
+      inDetail ? null : h('p', { class: 'small muted' }, num(o.mentions || arr(o.messageIds).length) + (o.mentions === 1 ? ' menção' : ' menções') +
+        (o.firstSeen ? ' · desde ' + (isYmd(o.firstSeen) ? fYmd(o.firstSeen) : fDate(o.firstSeen)) : '') + (o.lastSeen ? ' · última ' + (isYmd(o.lastSeen) ? fYmd(o.lastSeen) : fRel(o.lastSeen)) : '') +
+        (arr(o.sources).length ? ' · fontes: ' + arr(o.sources).map(function (s) { return SOURCE[s] || str(s); }).join(', ') : '')),
+      inDetail ? null : h('div', { class: 'row-actions' },
+        h('button', { class: 'btn btn-sm', type: 'button', 'aria-pressed': saved ? 'true' : 'false', 'data-opp-act': 'SAVED', on: { click: function () { oppFeedback(o, saved ? 'REOPEN' : 'SAVED', el); } } }, saved ? 'Salva' : 'Salvar'),
+        h('button', { class: 'btn btn-sm btn-ghost', type: 'button', 'data-opp-act': 'DISMISSED', on: { click: function () { oppFeedback(o, dismissed ? 'REOPEN' : 'DISMISSED', el); } } }, dismissed ? 'Restaurar' : 'Descartar'),
+        mid ? navLink(detailHref(mid), 'Ver mensagem', { class: 'btn btn-sm btn-ghost' }) : null,
+        g ? extLink(g, ['Abrir no Gmail', icon('ext')], { class: 'btn btn-sm btn-ghost' }) : null));
+    return el;
+  }
+  var OPP_MSG = { SAVED: 'Oportunidade salva.', DISMISSED: 'Oportunidade descartada.', REOPEN: 'Oportunidade restaurada.' };
+  function oppFeedback(o, type, el) {
+    var prev = o.status;
+    o.status = type === 'REOPEN' ? '' : type;
+    var n = oppCard(o);
+    el.parentNode.replaceChild(n, el);
+    var b = n.querySelector('[data-opp-act="' + (type === 'REOPEN' ? (prev === 'SAVED' ? 'SAVED' : 'DISMISSED') : type) + '"]');
+    if (b) b.focus();
+    submitFeedback({ targetType: 'OPPORTUNITY', targetId: o.key, type: type, payload: {} }, OPP_MSG[type],
+      function () { o.status = prev; if (n.parentNode) n.parentNode.replaceChild(oppCard(o), n); },
+      function () { var cur = doc.querySelector('[data-opp="' + CSS.escape(str(o.key)) + '"]'); o.status = prev; if (cur) oppFeedback(o, type, cur); });
+  }
+  function renderCareer(view) {
+    var box = h('div', { class: 'box' });
+    view.appendChild(pageHead('Radar de carreira', 'Vagas e contatos deduplicados, com aderência ao seu perfil. Remuneração só aparece quando o e-mail informa.',
+      seg('Situação das oportunidades', [['OPEN', 'Em aberto'], ['SAVED', 'Salvas'], ['DISMISSED', 'Descartadas'], ['ALL', 'Todas']], S.oppStatus, function (v) { S.oppStatus = v; go(); })));
+    view.appendChild(box);
+    function go() {
+      load(box, {
+        name: 'apiListOpportunities', req: { status: S.oppStatus }, title: 'Não foi possível carregar as oportunidades', sk: function () { return h('div', { class: 'opps' }, [0, 1, 2].map(function () { return h('div', { class: 'card' }, skItems(2)); })); },
+        empty: function (d) { return arr(d.items).length ? null : emptyState(S.oppStatus === 'OPEN' ? 'Nenhuma oportunidade em aberto' : 'Nada por aqui', 'Vagas, recrutadores e convites de negócio identificados nos e-mails aparecem aqui. Ajuste cargos-alvo e senioridade em Configurações.', navLink('#/config', 'Ajustar perfil', { class: 'btn' }), { icon: 'briefcase' }); },
+        render: function (d, b) { b.appendChild(h('div', { class: 'opps' }, arr(d.items).map(function (o) { return oppCard(obj(o)); }))); }
+      });
+    }
+    go();
+  }
+
+  // ------------------------------------------------------------- Notícias ----
+  function renderNews(view) {
+    var box = h('div', { class: 'col box' });
+    view.appendChild(pageHead('Notícias', 'Itens informativos ordenados por relevância para os seus temas — separados da fila de atenção.',
+      seg('Período das notícias', [['7d', '7 dias'], ['30d', '30 dias']], S.newsPeriod, function (v) { S.newsPeriod = v; go(); })));
+    view.appendChild(box);
+    function go() {
+      load(box, {
+        name: 'apiGetNews', req: { period: S.newsPeriod }, title: 'Não foi possível carregar as notícias',
+        empty: function (d) { return arr(d.items).length ? null : emptyState('Sem notícias no período', 'Newsletters e alertas informativos aparecem aqui, ordenados pelos seus interesses.', null, { icon: 'news' }); },
+        render: function (d, b) {
+          var tp = arr(d.topics);
+          if (tp.length) b.appendChild(h('section', { class: 'card', 'aria-label': 'Temas' }, h('div', { class: 'card-b' }, h('div', { class: 'chips' }, h('span', { class: 'small muted' }, 'Temas:'), tp.map(function (t) { t = obj(t); return h('span', { class: 'chip' }, str(t.topic), h('span', { class: 'n' }, num(t.count))); })))));
+          var c = card('Mais relevantes', { count: arr(d.items).length, flush: true });
+          c._b.appendChild(itemList(d.items, { feedback: true }));
+          b.appendChild(c);
+        }
+      });
+    }
+    go();
+  }
+
+  // ----------------------------------------------------------- Remetentes ----
+  function renderSenders(view) {
+    var box = h('div', { class: 'box' });
+    var only = checkbox('Só com sugestão', S.sendersOnlySugg, function (v) { S.sendersOnlySugg = v; go(); });
+    view.appendChild(pageHead('Remetentes', 'Quem mais escreve, o que vira prioridade e o que é ruído. Sugestões nunca são aplicadas automaticamente.',
+      [only, seg('Período dos remetentes', [['30d', '30 dias'], ['90d', '90 dias']], S.sendersPeriod, function (v) { S.sendersPeriod = v; go(); })]));
+    view.appendChild(box);
+    function go() {
+      load(box, {
+        name: 'apiGetSenders', req: { period: S.sendersPeriod }, title: 'Não foi possível carregar os remetentes',
+        empty: function (d) {
+          var items = arr(d.items).filter(function (s) { return !S.sendersOnlySugg || (s && s.suggestion); });
+          return items.length ? null : emptyState(arr(d.items).length ? 'Nenhum remetente com sugestão' : 'Nenhum remetente no período', arr(d.items).length ? 'Desmarque “Só com sugestão” para ver todos.' : 'Os remetentes aparecem depois das primeiras sincronizações.', null, { icon: 'users' });
+        },
+        render: function (d, b) {
+          var tb = h('tbody');
+          arr(d.items).map(obj).filter(function (s) { return !S.sendersOnlySugg || s.suggestion; }).forEach(function (s) {
+            var dd = isNum(s.countPrev) ? s.count - s.countPrev : null;
+            var sg = SUGG[s.suggestion];
+            var uu = safeUrl(s.unsubscribeUrl);
+            tb.appendChild(h('tr', null,
+              h('td', { 'data-label': 'Remetente', class: 'full' }, h('strong', null, str(s.name) || str(s.email)), h('div', { class: 'small muted' }, str(s.email) + (s.domain && str(s.email).indexOf(s.domain) < 0 ? ' · ' + str(s.domain) : '')),
+                s.allAuthPass === false ? h('span', { class: 'badge b-err' }, icon('shield'), 'Autenticação falhou') : null),
+              h('td', { class: 'r', 'data-label': 'Mensagens' }, num(s.count), dd !== null && dd !== 0 ? h('div', { class: 'small muted' }, h('span', { 'aria-hidden': 'true' }, dd > 0 ? '▲ ' : '▼ '), (dd > 0 ? '+' : '−') + num(Math.abs(dd)) + ' vs. anterior') : null),
+              h('td', { class: 'r', 'data-label': 'Alta prioridade' }, pct(s.highShare)),
+              h('td', { class: 'r', 'data-label': 'Não lidas' }, pct(s.unreadShare)),
+              h('td', { class: 'r', 'data-label': 'Em massa' }, pct(s.massShare)),
+              h('td', { 'data-label': 'Categorias', class: 'full' }, h('div', { class: 'chips' }, arr(s.categories).slice(0, 3).map(function (c) { c = obj(c); return h('span', { class: 'chip' }, catLabel(c.id, c.label), h('span', { class: 'n' }, num(c.n))); }))),
+              h('td', { 'data-label': 'Sugestão', class: 'full' }, sg ? h('div', { class: 'd-sec' }, h('span', null, h('span', { class: 'badge ' + sg[1] }, sg[0])), s.suggestionWhy ? h('span', { class: 'small' }, str(s.suggestionWhy)) : null,
+                s.suggestion === 'UNSUBSCRIBE' && uu && s.allAuthPass !== false ? h('span', { class: 'small' }, extLink(uu, ['Página de descadastro em ', h('span', { class: 'host' }, hostOf(uu)), icon('ext')], { class: 'ext' }), h('span', { class: 'hint' }, ' Abre o site do remetente; nada é feito automaticamente.')) : null,
+                s.suggestion === 'FILTER' ? h('span', { class: 'hint' }, 'Crie o filtro no Gmail (Configurações → Filtros); este app não altera sua caixa.') : null) : h('span', { class: 'muted' }, '—'))));
+          });
+          b.appendChild(h('div', { class: 'card' }, h('table', { class: 'tbl stack' }, h('caption', { class: 'sr' }, 'Remetentes no período'),
+            h('thead', null, h('tr', null, ['Remetente', 'Mensagens', 'Alta prioridade', 'Não lidas', 'Em massa', 'Categorias', 'Sugestão'].map(function (t, i) { return h('th', { scope: 'col', class: i >= 1 && i <= 4 ? 'r' : null }, t); }))), tb)));
+        }
+      });
+    }
+    go();
+  }
+
+  // ---------------------------------------------------------------- Busca ----
+  function norm(s) { return str(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase(); }
+  function highlight(text, terms) {
+    text = str(text);
+    if (!terms.length || !text) return text;
+    var map = [];
+    var ns = '';
+    for (var i = 0; i < text.length; i++) { var c = norm(text[i]); for (var j = 0; j < c.length; j++) { ns += c[j]; map.push(i); } }
+    var ranges = [];
+    terms.forEach(function (t) {
+      var nt = norm(t);
+      if (nt.length < 2) return;
+      var k = ns.indexOf(nt);
+      while (k >= 0 && ranges.length < 50) { ranges.push([map[k], map[k + nt.length - 1] + 1]); k = ns.indexOf(nt, k + nt.length); }
+    });
+    if (!ranges.length) return text;
+    ranges.sort(function (a, b) { return a[0] - b[0]; });
+    var out = [];
+    var pos = 0;
+    ranges.forEach(function (r) {
+      if (r[0] < pos) return;
+      if (r[0] > pos) out.push(text.slice(pos, r[0]));
+      out.push(h('mark', null, text.slice(r[0], r[1])));
+      pos = r[1];
+    });
+    if (pos < text.length) out.push(text.slice(pos));
+    return out;
+  }
+  function renderSearch(view, params) {
+    var q0 = params.get('q');
+    if (q0 !== null) { if (q0 !== S.searchQ) S.searchPage = 1; S.searchQ = q0; }
+    var box = h('div', { class: 'box' });
+    var inp = h('input', { class: 'input', id: 'q', type: 'search', value: S.searchQ, autocomplete: 'off', 'aria-describedby': 'q-hint', placeholder: 'Ex.: proposta pricing de:recrutadora categoria:carreira' });
+    function submit(e) { if (e) e.preventDefault(); S.searchQ = inp.value.trim(); S.searchPage = 1; setParam('q', S.searchQ); go(); }
+    var form = h('form', { role: 'search', 'aria-label': 'Buscar na memória', on: { submit: submit } },
+      h('div', { class: 'field' }, h('label', { for: 'q' }, 'O que você procura?'), h('div', { class: 'searchbar' }, inp, h('button', { class: 'btn btn-primary', type: 'submit' }, icon('search'), 'Buscar'))));
+    var hints = h('div', { class: 'chips', id: 'q-hint' }, h('span', { class: 'small muted' }, 'Operadores:'),
+      [['de:', 'de:remetente'], ['categoria:', 'categoria:carreira'], ['"', '"frase exata"']].map(function (o) {
+        return h('button', { class: 'chip', type: 'button', on: { click: function () {
+          var v = inp.value;
+          inp.value = (v && !/\s$/.test(v) ? v + ' ' : v) + (o[0] === '"' ? '""' : o[0]);
+          inp.focus();
+          var p = inp.value.length - (o[0] === '"' ? 1 : 0);
+          inp.setSelectionRange(p, p);
+        } } }, h('code', null, o[1]));
+      }), h('span', { class: 'small muted' }, 'Sem acentos e sem diferenciar maiúsculas.'));
+    view.appendChild(pageHead('Busca e memória', 'Procure em tudo o que já foi sincronizado: assuntos, remetentes, resumos e trechos ainda retidos.'));
+    view.appendChild(h('section', { class: 'card', 'aria-label': 'Formulário de busca' }, h('div', { class: 'card-b' }, form, hints)));
+    view.appendChild(box);
+    function go() {
+      if (!S.searchQ) {
+        box.textContent = '';
+        box.appendChild(h('div', { class: 'card' }, emptyState('Busque por pessoas, empresas ou assuntos', 'Combine palavras com operadores: de:fulano@exemplo.com, categoria:contas ou "frase exata".', null, { icon: 'search' })));
+        setState(box, 'idle');
+        return;
+      }
+      load(box, {
+        name: 'apiSearch', req: { q: S.searchQ, page: S.searchPage }, title: 'Não foi possível buscar',
+        empty: function (d) {
+          if (arr(d.items).length) return null;
+          return h('div', { class: 'card' }, emptyState(S.searchPage > 1 ? 'Sem mais resultados' : 'Nada encontrado para “' + trunc(S.searchQ, 60) + '”', 'Tente menos palavras, remova operadores ou confira a grafia. Trechos antigos podem ter expirado pela retenção.', S.searchPage > 1 ? h('button', { class: 'btn', type: 'button', on: { click: function () { S.searchPage = 1; go(); } } }, 'Voltar à página 1') : null, { icon: 'search' }));
+        },
+        render: function (d, b) {
+          var terms = arr(d.terms).map(str).filter(function (t) { return t.length >= 2; }).slice(0, 10);
+          var c = card('Resultados', { flush: true });
+          var ul = itemList(d.items, { feedback: true });
+          if (terms.length) Array.prototype.forEach.call(ul.querySelectorAll('.item-open, .item-sum'), function (el) { var t = el.textContent; el.textContent = ''; add(el, highlight(t, terms)); });
+          c._b.appendChild(ul);
+          c._b.appendChild(pager(S.searchPage, !!d.hasMore, arr(d.items).length, function (p) { S.searchPage = p; go(); }));
+          b.appendChild(c);
+        }
+      });
+    }
+    go();
+  }
+
+  // -------------------------------------------------------------- Sistema ----
+  function renderSystem(view) {
+    var box = h('div', { class: 'col box' });
+    view.appendChild(pageHead('Sistema', 'Saúde da sincronização, filas, cotas gratuitas e qualidade do ranking.', syncButton(true)));
+    view.appendChild(box);
+    load(box, { name: 'apiGetSystemStatus', title: 'Não foi possível carregar o status', sk: function () { return skBlocks(2); }, render: systemBody });
+    view.appendChild(qualityCard());
+  }
+  function countsText(c) {
+    c = obj(c);
+    var ks = Object.keys(c).filter(function (k) { return isNum(c[k]) && c[k] > 0; });
+    return ks.length ? ks.slice(0, 6).map(function (k) { return num(c[k]) + ' ' + (COUNTS[k] || k.replace(/_/g, ' ')); }).join(' · ') : '—';
+  }
+  function errorsText(errs) {
+    var m = {};
+    arr(errs).forEach(function (e) { e = obj(e); var k = str(e.code) || 'ERRO'; m[k] = m[k] || { n: 0, mods: {} }; m[k].n++; if (e.module) m[k].mods[str(e.module)] = 1; });
+    var ks = Object.keys(m);
+    return ks.length ? ks.map(function (k) { return k + ' ×' + m[k].n + (Object.keys(m[k].mods).length ? ' (' + Object.keys(m[k].mods).join(', ') + ')' : ''); }).join('; ') : '';
+  }
+  function systemBody(d, box) {
+    if (d.sync) { S.sync = d.sync; renderSyncBox(); }
+    if (d.ai) S.ai = d.ai;
+    var hl = obj(d.health);
+    var pd = obj(d.pending);
+    var q = obj(d.quotas);
+    var ai = obj(d.ai);
+    var bud = obj(ai.budget);
+    var lim = obj(bud.limits);
+    var au = obj(q.aiUsage);
+    var lag = hl.lagMinutes;
+    add(box, aiBanners());
+    box.appendChild(h('section', { 'aria-label': 'Saúde' }, h('div', { class: 'kpis' },
+      kpi('Última sincronização', hl.lastSuccessAt ? fRel(hl.lastSuccessAt) : 'nunca', h('p', { class: 'kpi-d' }, hl.lastSuccessAt ? fDT(hl.lastSuccessAt) : 'aguardando a primeira execução')),
+      kpi('Atraso', isNum(lag) ? num(lag) + ' min' : '—', h('p', { class: 'kpi-d' }, isNum(lag) && lag > 120 ? h('span', { class: 'up' }, 'acima do esperado (≤ 1 h)') : 'esperado: até 60 min')),
+      kpi('Execuções em 24 h', num(hl.runs24h), h('p', { class: 'kpi-d' }, num(hl.fails24h) + (hl.fails24h === 1 ? ' falha' : ' falhas'))),
+      kpi('Duração média', dur(hl.avgMs), h('p', { class: 'kpi-d' }, 'limite por execução: 6 min')),
+      kpi('IA em 30 dias', usd(hl.aiCost30d), h('p', { class: 'kpi-d' }, num(hl.aiRequests30d) + ' requisições')))));
+    var g1 = h('div', { class: 'grid g-2' });
+    var pc = card('Fila e pendências', { icon: 'list' });
+    pc._b.appendChild(kv([['Mensagens na base', num(pd.total)], ['Analisadas por IA', num(pd.aiDone)], ['Aguardando IA', num(pd.aiPending)], ['Falhas de IA', num(pd.aiFailed)],
+      ['Em quarentena', num(pd.quarantined)], ['Críticas hoje', num(pd.criticalToday)], ['Alta prioridade (7 dias)', pct(pctOf(pd.highShare7d))],
+      ['Período coberto', pd.oldest || pd.newest ? (isYmd(pd.oldest) ? fYmd(pd.oldest) : fDate(pd.oldest)) + ' a ' + (isYmd(pd.newest) ? fYmd(pd.newest) : fDate(pd.newest)) : '—']]));
+    if (pd.quarantined > 0) pc._b.appendChild(h('p', { class: 'hint' }, 'Mensagens em quarentena travaram o processamento antes e ficaram só com metadados, para não bloquear a fila.'));
+    var qc = card('Cotas gratuitas', { icon: 'activity' });
+    qc._b.appendChild(meter('Minutos de gatilho (24 h)', q.triggerMinutes24h, q.triggerBudgetMin, function (v) { return isNum(v) ? dec(v, v < 10 ? 1 : 0) + ' min' : '—'; }, 'Orçamento do app; o Apps Script permite 90 min/dia somados entre todos os seus projetos.'));
+    qc._b.appendChild(meter('BigQuery: armazenamento vitalício gravado', q.bqBytesWrittenLifetime, q.bqLifetimeLimit, bytes, 'Cota vitalícia do sandbox; a gravação não essencial para antes do limite.'));
+    qc._b.appendChild(meter('BigQuery: bytes consultados no mês', q.bqQueryBytesMonth, 1099511627776, bytes, 'Referência: 1 TiB/mês gratuito.'));
+    var td = obj(au.today);
+    var mo = obj(au.month);
+    qc._b.appendChild(meter('IA hoje', td.cost, lim.costDay, usd, num(td.req) + ' requisições hoje'));
+    qc._b.appendChild(meter('IA no mês', mo.cost, lim.costMonth, usd, num(mo.req) + ' requisições no mês'));
+    add(g1, [pc, qc]);
+    box.appendChild(g1);
+    var g2 = h('div', { class: 'grid g-2' });
+    var ac = card('IA', { icon: 'spark', actions: navLink('#/config?s=ia', 'IA e privacidade', { class: 'btn btn-sm' }) });
+    var cons = obj(ai.consent);
+    var until = toDate(ai.circuitOpenUntil);
+    ac._b.appendChild(kv([['Provedor', PROVIDER[ai.provider] || '—'], ['Modelo', str(ai.model) || '—'],
+      ['Política efetiva', POLICY[ai.policy] ? POLICY[ai.policy][0] + ' (' + ai.policy + ')' : '—'],
+      ['Consentimento', cons.given ? 'Dado em ' + fDT(cons.at) + ' para ' + str(cons.policy) : 'Não dado'],
+      ['Circuito', until && until.getTime() > Date.now() ? 'Aberto até ' + fDT(ai.circuitOpenUntil) : 'Normal']]));
+    var sc = card('Sincronização', { icon: 'refresh' });
+    var sy = obj(d.sync);
+    var bf = obj(sy.backfill);
+    sc._b.appendChild(kv([['Última com sucesso', sy.lastSuccessAt ? fDT(sy.lastSuccessAt) : 'nunca'], ['Última execução', statusText(sy.lastStatus)],
+      ['Histórico (backfill)', sy.backfill ? (bf.done ? 'Concluído' : 'Em andamento') : '—'],
+      sy.backfill && !bf.done ? ['Progresso', 'em ' + fYmd(bf.cursorDate) + ', indo até ' + fYmd(bf.floorDate)] : null,
+      ['Janelas pendentes', num(sy.windows)], ['Em quarentena', num(sy.quarantined)]]));
+    var trg = arr(d.triggers);
+    sc._b.appendChild(h('div', null, h('p', { class: 'small muted' }, 'Gatilhos instalados'),
+      trg.length ? h('ul', { class: 'facts small' }, trg.map(function (t) { t = obj(t); return h('li', null, h('code', null, str(t.handler)), ' · ' + str(t.type).toLowerCase().replace(/_/g, ' ')); }))
+        : h('p', { class: 'small', role: 'note' }, h('strong', null, 'Nenhum gatilho instalado. '), 'Execute setupTriggers() no editor do Apps Script.')));
+    add(g2, [ac, sc]);
+    box.appendChild(g2);
+    var runs = arr(d.runs);
+    var rc = card('Últimas execuções', { count: runs.length, flush: true, icon: 'activity' });
+    if (!runs.length) rc._b.appendChild(emptyState('Nenhuma execução registrada', 'A primeira sincronização aparece aqui assim que rodar.', null, { small: true, hl: 'h3', icon: 'activity' }));
+    else {
+      var tb = h('tbody');
+      runs.slice(0, 15).forEach(function (r) {
+        r = obj(r);
+        var et = errorsText(r.errors);
+        tb.appendChild(h('tr', null, h('td', { 'data-label': 'Início' }, fDT(r.startedAt)), h('td', { 'data-label': 'Tipo' }, (RUNK[r.kind] || str(r.kind)) + (r.trigger ? ' · ' + (TRIG[r.trigger] || str(r.trigger).toLowerCase()) : '')),
+          h('td', { 'data-label': 'Status' }, h('span', { class: 'badge ' + ({ ok: 'b-ok', warn: 'b-warn', err: 'b-err' }[statusTone(r.status)] || 'b-neutral') }, statusText(r.status))),
+          h('td', { class: 'r', 'data-label': 'Duração' }, dur(r.durationMs)), h('td', { 'data-label': 'Contagens', class: 'full' }, countsText(r.counts), isNum(r.aiRequests) && r.aiRequests > 0 ? h('div', { class: 'small muted' }, 'IA: ' + num(r.aiRequests) + ' req · ' + usd(r.aiCostUsd)) : null),
+          h('td', { 'data-label': 'Erros', class: 'full' }, et ? h('span', { class: 'mono' }, et) : h('span', { class: 'muted' }, 'nenhum'))));
+      });
+      rc._b.appendChild(h('table', { class: 'tbl stack' }, h('caption', { class: 'sr' }, 'Últimas execuções'), h('thead', null, h('tr', null, ['Início', 'Tipo', 'Status', 'Duração', 'Contagens', 'Erros por código'].map(function (t, i) { return h('th', { scope: 'col', class: i === 3 ? 'r' : null }, t); }))), tb));
+    }
+    box.appendChild(rc);
+    var tables = arr(d.tables);
+    var tc = card('Tabelas do BigQuery', { flush: true, icon: 'list' });
+    if (!tables.length) tc._b.appendChild(emptyState('Nenhuma tabela encontrada', 'Execute setup() para criar o dataset e as tabelas.', null, { small: true, hl: 'h3', icon: 'list' }));
+    else {
+      var tb2 = h('tbody');
+      tables.forEach(function (t) {
+        t = obj(t);
+        var soon = isNum(t.expiresInDays) && t.expiresInDays < 10;
+        tb2.appendChild(h('tr', { class: soon ? 'hl' : null }, h('td', { 'data-label': 'Tabela', class: 'full' }, h('strong', null, str(t.name)), t.physical ? h('div', { class: 'mono muted' }, str(t.physical)) : null),
+          h('td', { class: 'r', 'data-label': 'Geração' }, num(t.generation)), h('td', { class: 'r', 'data-label': 'Idade' }, isNum(t.ageDays) ? num(t.ageDays) + ' d' : '—'),
+          h('td', { class: 'r', 'data-label': 'Expira em' }, soon ? h('span', { class: 'badge b-err' }, icon('alert'), num(t.expiresInDays) + ' dias') : isNum(t.expiresInDays) ? num(t.expiresInDays) + ' dias' : 'não expira'),
+          h('td', { class: 'r', 'data-label': 'Linhas' }, num(t.rows)), h('td', { class: 'r', 'data-label': 'Tamanho' }, bytes(t.bytes))));
+      });
+      tc._b.appendChild(h('table', { class: 'tbl stack' }, h('caption', { class: 'sr' }, 'Tabelas e expiração'), h('thead', null, h('tr', null, ['Tabela', 'Geração', 'Idade', 'Expira em', 'Linhas', 'Tamanho'].map(function (t, i) { return h('th', { scope: 'col', class: i ? 'r' : null }, t); }))), tb2));
+      if (tables.some(function (t) { return t && isNum(t.expiresInDays) && t.expiresInDays < 10; })) tc._b.appendChild(h('p', { class: 'banner warn', role: 'note' }, icon('alert'), 'Há tabelas perto de expirar (sandbox: 60 dias). A manutenção diária renova por geração; se o destaque persistir, rode runMaintenance() no editor.'));
+    }
+    box.appendChild(tc);
+    var qual = arr(d.quality);
+    var ag = obj(d.agreement);
+    var qlc = card('Qualidade por categoria', { flush: true, icon: 'ok' });
+    qlc._b.appendChild(h('div', { class: 'card-b' }, h('p', { class: 'small' }, 'Concordância regras × IA: ', h('strong', null, isNum(ag.rate) ? pct(pctOf(ag.rate)) : '—'),
+      isNum(ag.n) ? ' (' + num(ag.agree) + ' de ' + num(ag.n) + ' mensagens analisadas pelos dois). É um indicador indireto, não uma medida de acurácia.' : '')));
+    if (qual.length) {
+      var tb3 = h('tbody');
+      qual.forEach(function (x) {
+        x = obj(x);
+        var nn = Number(x.n) || 0;
+        function share(v) { return nn ? pct((Number(v) || 0) / nn) + ' (' + num(v) + ')' : num(v); }
+        tb3.appendChild(h('tr', null, h('td', { 'data-label': 'Categoria', class: 'full' }, catLabel(x.category, x.label)), h('td', { class: 'r', 'data-label': 'Mensagens' }, num(x.n)),
+          h('td', { class: 'r', 'data-label': 'Irrelevantes' }, share(x.irrelevant)), h('td', { class: 'r', 'data-label': 'Corrigidas' }, share(x.corrected)), h('td', { class: 'r', 'data-label': 'Deveriam ser mais altas' }, share(x.shouldBeHigher))));
+      });
+      qlc._b.appendChild(h('table', { class: 'tbl stack' }, h('caption', { class: 'sr' }, 'Qualidade por categoria a partir do seu feedback'), h('thead', null, h('tr', null, ['Categoria', 'Mensagens', 'Irrelevantes', 'Corrigidas', 'Deveriam ser mais altas'].map(function (t, i) { return h('th', { scope: 'col', class: i ? 'r' : null }, t); }))), tb3));
+    } else qlc._b.appendChild(h('p', { class: 'card-b muted small' }, 'Ainda não há feedback suficiente. Use os botões de avaliação nas mensagens.'));
+    box.appendChild(qlc);
+  }
+  function qualityCard() {
+    var c = card('Avaliação de qualidade (amostra cega)', { icon: 'search' });
+    var box = h('div', { class: 'box' });
+    c._b.appendChild(h('p', { class: 'small' }, 'Mensagens de prioridade Média e Baixa sorteadas, sem mostrar o nível. Marque as que deveriam estar mais altas: isso mede o que o ranking deixa passar.'));
+    var start = h('button', { class: 'btn', type: 'button', on: { click: function () { S.quality = {}; go(); } } }, 'Carregar amostra');
+    c._b.appendChild(h('div', { class: 'form-actions' }, start, h('span', { class: 'small muted', id: 'q-progress', 'aria-live': 'polite' })));
+    c._b.appendChild(box);
+    function go() {
+      load(box, {
+        name: 'apiGetQualitySample', title: 'Não foi possível carregar a amostra', hl: 'h3',
+        empty: function (d) { return arr(d.items).length ? null : emptyState('Amostra vazia', 'Ainda não há mensagens de prioridade Média ou Baixa suficientes para avaliar.', null, { small: true, hl: 'h3' }); },
+        render: function (d, b) {
+          b.appendChild(h('div', { class: 'card' }, itemList(d.items, { blind: true, quality: true, compact: true })));
+          var p = $('q-progress');
+          if (p) p.setAttribute('data-total', String(arr(d.items).length));
+          updateQualityProgress();
+          start.textContent = 'Nova amostra';
+        }
+      });
+    }
+    return c;
+  }
+
+  // ------------------------------------------------------- Configurações ----
+  var LISTS = [
+    ['profile.interests', 'Temas de interesse', 'Um por linha. Ex.: inteligência artificial, pricing.', 'text'],
+    ['profile.targetRoles', 'Cargos-alvo', 'Um por linha. Usado na aderência das vagas.', 'text'],
+    ['profile.seniorityKeywords', 'Senioridade desejada', 'Um termo por linha. Ex.: sênior, especialista, gerente.', 'text'],
+    ['profile.prioritySenders', 'Remetentes prioritários', 'Um e-mail por linha.', 'email'],
+    ['profile.prioritySenderDomains', 'Domínios prioritários', 'Um domínio por linha. Ex.: empresa.com.br.', 'domain'],
+    ['profile.mutedSenders', 'Remetentes silenciados', 'Um e-mail ou domínio por linha. Ficam sempre em Baixa.', 'any']
+  ];
+  var NUMS = [
+    ['ai.maxCostUsdPerDay', 'Teto de custo por dia (US$)', 0, 50, 0.5, 'IA para de ser chamada ao atingir.'],
+    ['ai.maxCostUsdPerMonth', 'Teto de custo por mês (US$)', 0, 500, 1, ''],
+    ['ai.maxRequestsPerRun', 'Requisições de IA por execução', 0, 40, 1, 'Limita o tempo de cada sincronização.'],
+    ['ai.backfillDays', 'Dias de histórico analisados por IA', 0, 365, 1, 'Mensagens mais antigas ficam só com regras.'],
+    ['scoring.criticalDailyCap', 'Teto diário de críticas', 0, 20, 1, 'O excedente aparece como “Alta (crítica excedente)”.'],
+    ['storage.excerptRetentionDays', 'Retenção de trechos (dias)', 0, 365, 1, 'Depois disso o trecho do e-mail é apagado; ficam resumo e metadados.'],
+    ['gmail.accountIndex', 'Índice da conta no Gmail (u/N)', 0, 9, 1, 'O número N em mail.google.com/mail/u/N. Use 0 se só tiver uma conta.'],
+    ['gmail.backfillDays', 'Dias de histórico importados', 1, 365, 1, ''],
+    ['ui.pageSize', 'Itens por página', 10, 100, 1, '']
+  ];
+  var WORKMODES = [['remoto', 'Remoto'], ['hibrido', 'Híbrido'], ['presencial', 'Presencial']];
+  function getPath(o, p) { return p.split('.').reduce(function (a, k) { return a && typeof a === 'object' ? a[k] : undefined; }, o); }
+  function setPath(o, p, v) { var ks = p.split('.'); var cur = o; ks.slice(0, -1).forEach(function (k) { cur[k] = cur[k] && typeof cur[k] === 'object' ? cur[k] : {}; cur = cur[k]; }); cur[ks[ks.length - 1]] = v; }
+  function renderConfig(view, params) {
+    var box = h('div', { class: 'col box' });
+    view.appendChild(pageHead('Configurações', 'Perfil, IA e privacidade, retenção e preferências. Mudanças valem a partir da próxima sincronização.'));
+    view.appendChild(box);
+    load(box, {
+      name: 'apiGetSettings', title: 'Não foi possível carregar as configurações', sk: function () { return skBlocks(1); },
+      render: function (d, b) {
+        settingsBody(d, b);
+        if (params.get('s') === 'ia') { var el = $('sec-ia'); if (el) { el.scrollIntoView({ block: 'start' }); var t = el.querySelector('h2'); if (t) { t.setAttribute('tabindex', '-1'); t.focus({ preventScroll: true }); } } }
+      }
+    });
+  }
+  function settingsBody(d, box) {
+    var cfg = obj(d.config);
+    var orig = JSON.parse(JSON.stringify(cfg));
+    if (arr(d.categories).length && !S.cats.length) { S.cats = d.categories; S.cats.forEach(function (c) { S.catMap[c.id] = c.label; }); }
+    var fields = {};
+    var dirty = h('span', { class: 'small muted', 'aria-live': 'polite' });
+    var errs = h('ul', { class: 'errlist', role: 'alert', hidden: true });
+    function mark() { dirty.textContent = 'Alterações não salvas.'; }
+    var form = h('form', { class: 'form', novalidate: true, 'aria-label': 'Configurações', on: { submit: function (e) { e.preventDefault(); save(); }, input: mark, change: mark } });
+    var prof = card('Perfil', { hl: 'h2' });
+    var fl = h('div', { class: 'fields' });
+    LISTS.forEach(function (l) {
+      var id = uid('cf');
+      var ta = h('textarea', { id: id, 'aria-describedby': id + 'h', rows: 5, spellcheck: 'false', value: arr(getPath(cfg, l[0])).map(str).join('\n') });
+      fields[l[0]] = ta;
+      fl.appendChild(h('div', { class: 'field' }, h('label', { for: id }, l[1]), ta, h('p', { class: 'hint', id: id + 'h' }, l[2])));
+    });
+    var wm = arr(getPath(cfg, 'profile.preferredWorkModes')).map(str);
+    var extraWm = wm.filter(function (w) { return !WORKMODES.some(function (x) { return x[0] === w; }); });
+    var wmBox = h('fieldset', null, h('legend', null, 'Modelos de trabalho preferidos'), h('div', { class: 'checks' }, WORKMODES.map(function (w) { return checkbox(w[1], wm.indexOf(w[0]) >= 0, function () {}, { 'data-wm': w[0] }); })));
+    prof._b.appendChild(fl);
+    prof._b.appendChild(wmBox);
+    var sugg = arr(d.prioritySuggestions).filter(function (s) { return s && s.email; });
+    if (sugg.length) {
+      var su = h('ul', { class: 'rows card', role: 'list' });
+      sugg.slice(0, 8).forEach(function (s) {
+        var btn = h('button', { class: 'btn btn-sm', type: 'button' }, 'Adicionar');
+        btn.addEventListener('click', function () {
+          var ta = fields['profile.prioritySenders'];
+          var cur = ta.value.split(/\r?\n/).map(function (x) { return x.trim().toLowerCase(); });
+          if (cur.indexOf(str(s.email).toLowerCase()) < 0) ta.value = (ta.value.trim() ? ta.value.trim() + '\n' : '') + str(s.email);
+          btn.textContent = 'Adicionado';
+          btn.disabled = true;
+          mark();
+          toast(str(s.email) + ' adicionado aos prioritários. Salve para aplicar.');
+          var next = su.querySelector('button:not([disabled])');
+          (next || ta).focus();
+        });
+        su.appendChild(h('li', null, h('div', { class: 'row-main' }, h('span', { class: 'row-title' }, str(s.email)), h('span', { class: 'row-sub' }, 'Você respondeu ' + num(s.n) + (s.n === 1 ? ' vez' : ' vezes'))), h('div', { class: 'row-side' }, btn)));
+      });
+      prof._b.appendChild(h('div', { class: 'd-sec' }, h('h3', null, 'Sugestões de remetentes prioritários'), h('p', { class: 'hint' }, 'Pessoas a quem você mais responde. Adicionar não muda nada até você salvar.'), su));
+    }
+    form.appendChild(prof);
+    var aiSec = card('Limites, retenção e preferências', { hl: 'h2' });
+    var nf = h('div', { class: 'fields' });
+    var provId = uid('cf');
+    var prov = h('select', { id: provId }, [['auto', 'Automático (pela chave configurada)'], ['anthropic', 'Claude (Anthropic)'], ['gemini', 'Gemini (Google)'], ['none', 'Nenhum — só regras']].map(function (o) { return h('option', { value: o[0] }, o[1]); }));
+    prov.value = str(getPath(cfg, 'ai.provider')) || 'auto';
+    fields['ai.provider'] = prov;
+    nf.appendChild(h('div', { class: 'field' }, h('label', { for: provId }, 'Provedor de IA'), prov, h('p', { class: 'hint' }, 'O que é enviado é definido em “IA e privacidade”, abaixo.')));
+    NUMS.forEach(function (x) {
+      var id = uid('cf');
+      var v = getPath(cfg, x[0]);
+      var inp = h('input', { class: 'input', id: id, type: 'number', inputmode: 'decimal', min: x[2], max: x[3], step: x[4], value: isNum(v) ? String(v) : '', 'aria-describedby': x[5] ? id + 'h' : null });
+      fields[x[0]] = inp;
+      nf.appendChild(h('div', { class: 'field' }, h('label', { for: id }, x[1]), inp, x[5] ? h('p', { class: 'hint', id: id + 'h' }, x[5]) : null));
+    });
+    var perId = uid('cf');
+    var per = h('select', { id: perId }, [['today', 'Hoje'], ['7d', '7 dias'], ['30d', '30 dias']].map(function (o) { return h('option', { value: o[0] }, o[1]); }));
+    per.value = str(getPath(cfg, 'ui.defaultPeriod')) || '7d';
+    fields['ui.defaultPeriod'] = per;
+    nf.appendChild(h('div', { class: 'field' }, h('label', { for: perId }, 'Período padrão do Radar'), per));
+    aiSec._b.appendChild(nf);
+    form.appendChild(aiSec);
+    var saveBtn = h('button', { class: 'btn btn-primary', type: 'submit' }, 'Salvar configurações');
+    form.appendChild(h('div', { class: 'card' }, h('div', { class: 'card-b' }, errs, h('div', { class: 'form-actions' }, saveBtn, dirty))));
+    box.appendChild(form);
+    box.appendChild(aiPrivacyCard(obj(d.secrets)));
+    box.appendChild(secretsCard(obj(d.secrets)));
+
+    function collect() {
+      var out = {};
+      var bad = [];
+      LISTS.forEach(function (l) {
+        var lines = fields[l[0]].value.split(/\r?\n/).map(function (x) { return x.trim(); }).filter(Boolean);
+        var seen = {};
+        lines = lines.filter(function (x) { var k = x.toLowerCase(); if (seen[k]) return false; seen[k] = 1; return true; });
+        var invalid = lines.filter(function (x) {
+          if (x.length > 120) return true;
+          if (l[3] === 'email') return !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x);
+          if (l[3] === 'domain') return !/^(?:[a-z0-9-]+\.)+[a-z]{2,}$/i.test(x);
+          if (l[3] === 'any') return !/^([^\s@]+@)?(?:[a-z0-9-]+\.)+[a-z]{2,}$/i.test(x);
+          return false;
+        });
+        fields[l[0]].setAttribute('aria-invalid', invalid.length || lines.length > 200 ? 'true' : 'false');
+        if (invalid.length) bad.push(l[1] + ': ' + invalid.slice(0, 3).map(function (x) { return '“' + trunc(x, 40) + '”'; }).join(', ') + (invalid.length > 3 ? ' e mais ' + (invalid.length - 3) : '') + ' não ' + (invalid.length === 1 ? 'é válido' : 'são válidos') + '.');
+        if (lines.length > 200) bad.push(l[1] + ': no máximo 200 linhas.');
+        out[l[0]] = lines.map(function (x) { return l[3] === 'text' ? x : x.toLowerCase(); });
+      });
+      var wmv = Array.prototype.filter.call(wmBox.querySelectorAll('input[data-wm]'), function (i) { return i.checked; }).map(function (i) { return i.getAttribute('data-wm'); });
+      out['profile.preferredWorkModes'] = wmv.concat(extraWm);
+      out['ai.provider'] = prov.value;
+      out['ui.defaultPeriod'] = per.value;
+      NUMS.forEach(function (x) {
+        var el = fields[x[0]];
+        var raw = el.value.trim().replace(',', '.');
+        if (raw === '' && getPath(orig, x[0]) === undefined) { el.setAttribute('aria-invalid', 'false'); return; }
+        var v = Number(raw);
+        var ok = raw !== '' && isFinite(v) && v >= x[2] && v <= x[3] && (x[4] < 1 || Math.floor(v) === v);
+        el.setAttribute('aria-invalid', ok ? 'false' : 'true');
+        if (!ok) bad.push(x[1] + ': use um número entre ' + num(x[2]) + ' e ' + num(x[3]) + (x[4] >= 1 ? ' (inteiro)' : '') + '.');
+        else out[x[0]] = v;
+      });
+      return { values: out, errors: bad };
+    }
+    function save() {
+      var c = collect();
+      errs.textContent = '';
+      errs.hidden = !c.errors.length;
+      if (c.errors.length) { c.errors.forEach(function (e) { errs.appendChild(h('li', null, e)); }); var inv = form.querySelector('[aria-invalid="true"]'); if (inv) inv.focus(); return; }
+      var patch = {};
+      var changed = 0;
+      Object.keys(c.values).forEach(function (k) {
+        var before = getPath(orig, k);
+        if (JSON.stringify(before === undefined ? null : before) !== JSON.stringify(c.values[k])) { setPath(patch, k, c.values[k]); changed++; }
+      });
+      if (!changed) { toast('Nenhuma alteração para salvar.'); dirty.textContent = ''; return; }
+      saveBtn.disabled = true;
+      api('apiSaveSettings', { patch: patch }).then(function (r) {
+        var dd = obj(r.data);
+        if (dd.saved) {
+          Object.keys(c.values).forEach(function (k) { setPath(orig, k, c.values[k]); });
+          if (S.boot) { S.boot.ui = S.boot.ui || {}; if (c.values['ui.pageSize']) S.boot.ui.pageSize = c.values['ui.pageSize']; S.boot.ui.defaultPeriod = c.values['ui.defaultPeriod']; }
+          dirty.textContent = 'Salvo.';
+          toast('Configurações salvas. Valem a partir da próxima sincronização.');
+        } else {
+          arr(dd.errors).forEach(function (e) { errs.appendChild(h('li', null, str(e))); });
+          if (!arr(dd.errors).length) errs.appendChild(h('li', null, 'O servidor recusou as alterações.'));
+          errs.hidden = false;
+        }
+      }, function (e) {
+        errs.appendChild(h('li', null, friendly(e) + (e.message ? ' (' + trunc(e.message, 160) + ')' : '')));
+        errs.hidden = false;
+      }).then(function () { saveBtn.disabled = false; });
+    }
+  }
+  function secretsCard(sec) {
+    var c = card('Chaves e projeto', { icon: 'lock' });
+    var rows = [['projectId', 'GCP_PROJECT_ID', 'Projeto do Google Cloud com o BigQuery Sandbox (obrigatório).'], ['anthropicKey', 'ANTHROPIC_API_KEY', 'Chave da API do Claude (opcional).'], ['geminiKey', 'GEMINI_API_KEY', 'Chave da API do Gemini (opcional).']];
+    c._b.appendChild(h('ul', { class: 'rows card', role: 'list' }, rows.map(function (r) {
+      var ok = sec[r[0]] === true;
+      return h('li', null, h('div', { class: 'row-main' }, h('span', { class: 'row-title' }, h('code', null, r[1])), h('span', { class: 'row-sub' }, r[2])),
+        h('div', { class: 'row-side' }, h('span', { class: 'badge ' + (ok ? 'b-ok' : 'b-neutral') }, ok ? [icon('ok'), 'Configurada'] : 'Não configurada')));
+    })));
+    c._b.appendChild(h('p', { class: 'hint' }, 'Para configurar: no editor do Apps Script, abra Configurações do projeto (engrenagem) → Propriedades do script → Adicionar propriedade de script. Os valores nunca são exibidos nem trafegam para esta página.'));
+    return c;
+  }
+  function aiPrivacyCard(secrets) {
+    var c = card('IA e privacidade', { icon: 'shield' });
+    c.id = 'sec-ia';
+    function draw() {
+      var b = c._b;
+      b.textContent = '';
+      var ai = obj(S.ai);
+      var prov = str(ai.provider) || 'none';
+      var cons = obj(ai.consent);
+      var allowed = arr(ai.allowedPolicies).length ? arr(ai.allowedPolicies) : ['OFF'];
+      var on = ai.policy && ai.policy !== 'OFF' && cons.given;
+      b.appendChild(h('p', null, 'A IA é opcional. Sem ela, um motor de regras classifica e prioriza tudo dentro do Apps Script. Com ela, só o que a política permitir é enviado ao provedor — sempre com dados pessoais redigidos antes do envio, e nunca links, mensagens enviadas por você ou segurança da conta.'));
+      b.appendChild(kv([['Provedor', PROVIDER[prov] || prov], ['Modelo', str(ai.model) || '—'], ['Política em uso', POLICY[ai.policy] ? POLICY[ai.policy][0] : 'Desligada'],
+        ['Consentimento', cons.given ? 'Dado em ' + fDT(cons.at) + ' (' + (POLICY[cons.policy] ? POLICY[cons.policy][0] : str(cons.policy)) + ')' : 'Não dado']]));
+      if (prov === 'gemini') b.appendChild(h('div', { class: 'banner warn', role: 'note' }, icon('alert'), h('div', { class: 'grow' }, 'No plano gratuito do Gemini, o Google pode usar o conteúdo para melhorar seus produtos e pode haver revisão humana. Por isso, com Gemini, no máximo conteúdo de massa é enviado.')));
+      if (prov === 'anthropic') b.appendChild(h('p', { class: 'hint' }, 'Pela API da Anthropic (termos comerciais), o conteúdo não é usado para treinar modelos.'));
+      if (prov === 'none') {
+        b.appendChild(h('div', { class: 'banner info', role: 'note' }, icon('info'), h('div', { class: 'grow' }, h('strong', null, 'Nenhuma chave de IA configurada.'),
+          h('span', null, 'Tudo funciona por regras. Para usar IA, adicione ANTHROPIC_API_KEY (Claude) ou GEMINI_API_KEY nas Propriedades do script e recarregue esta página.'))));
+        return;
+      }
+      if (on) {
+        var rv = h('button', { class: 'btn btn-danger', type: 'button', on: { click: function () { consent('OFF', false, rv); } } }, 'Revogar consentimento e desligar a IA');
+        b.appendChild(h('div', { class: 'banner info' }, icon('spark'), h('div', { class: 'grow' }, h('strong', null, 'IA ligada: ' + POLICY[ai.policy][0] + '.'), h('span', null, POLICY[ai.policy][1])), rv));
+      }
+      var name = uid('pol');
+      var selected = on ? ai.policy : (allowed.indexOf(str(ai.requestedPolicy)) >= 0 && ai.requestedPolicy !== 'OFF' ? ai.requestedPolicy : allowed.filter(function (p) { return p !== 'OFF'; })[0] || 'OFF');
+      var fs = h('fieldset', null, h('legend', null, on ? 'Mudar a política' : 'O que pode ser enviado?'));
+      var prevBox = h('div', { class: 'box', 'aria-live': 'polite' });
+      ['OFF', 'BROADCAST', 'REDACTED', 'FULL'].forEach(function (p) {
+        var ok = allowed.indexOf(p) >= 0 || p === 'OFF';
+        var id = uid('pp');
+        var r = h('input', { type: 'radio', name: name, id: id, value: p, checked: p === selected, disabled: !ok, on: { change: function () { selected = p; prevBox.textContent = ''; prevBox.removeAttribute('data-state'); actions(); } } });
+        fs.appendChild(h('label', { class: 'radio-card', for: id }, r, h('span', null, h('strong', null, POLICY[p][0] + (p !== 'OFF' ? ' (' + p + ')' : '')), h('span', { class: 'small' }, POLICY[p][1]),
+          !ok ? h('span', { class: 'small muted' }, ' Não disponível com ' + (PROVIDER[prov] || prov) + '.') : null)));
+      });
+      b.appendChild(fs);
+      var act = h('div', { class: 'form-actions' });
+      b.appendChild(act);
+      b.appendChild(prevBox);
+      function actions() {
+        act.textContent = '';
+        if (selected === 'OFF') {
+          if (on) act.appendChild(h('button', { class: 'btn', type: 'button', on: { click: function (e) { consent('OFF', false, e.currentTarget); } } }, 'Desligar a IA'));
+          else act.appendChild(h('span', { class: 'small muted' }, 'A IA continua desligada.'));
+          return;
+        }
+        act.appendChild(h('button', { class: 'btn', type: 'button', 'data-act': 'dry-run', on: { click: function () { preview(selected); } } }, icon('search'), 'Ver prévia do envio'));
+        act.appendChild(h('span', { class: 'small muted' }, 'Mostra quantas mensagens iriam e o texto exato de uma amostra. Nada é enviado.'));
+      }
+      actions();
+      function preview(pol) {
+        load(prevBox, {
+          name: 'apiAiDryRun', req: { policy: pol }, title: 'Não foi possível gerar a prévia', hl: 'h3', sk: function () { return skLines(4); },
+          render: function (dd, pb) {
+            var blocked = obj(dd.blocked);
+            var byCat = obj(dd.byCategory);
+            var smp = dd.sample ? obj(dd.sample) : null;
+            pb.appendChild(h('div', { class: 'd-sec' }, h('h3', null, 'Prévia: ' + (POLICY[pol] ? POLICY[pol][0] : pol)),
+              h('p', null, h('strong', null, num(dd.allowed) + ' de ' + num(dd.total)), ' mensagens recentes seriam enviadas a ' + (PROVIDER[dd.provider] || PROVIDER[prov] || 'IA') + '.'),
+              Object.keys(blocked).length ? h('div', null, h('p', { class: 'small muted' }, 'Bloqueadas, por motivo'), h('div', { class: 'chips' }, Object.keys(blocked).map(function (k) { return h('span', { class: 'chip' }, BLOCK[k] || k.replace(/_/g, ' '), h('span', { class: 'n' }, num(blocked[k]))); }))) : null,
+              Object.keys(byCat).length ? h('div', null, h('p', { class: 'small muted' }, 'Enviadas, por categoria'), h('div', { class: 'chips' }, Object.keys(byCat).map(function (k) { return h('span', { class: 'chip' }, catLabel(k), h('span', { class: 'n' }, num(byCat[k]))); }))) : null,
+              smp ? h('div', { class: 'policy-sample' }, h('p', { class: 'small muted' }, 'Amostra — exatamente o texto que sairia (já redigido):'),
+                h('dl', { class: 'd-meta' }, h('dt', null, 'Assunto'), h('dd', null, str(smp.subject)), h('dt', null, 'De'), h('dd', null, str(smp.from))),
+                h('pre', { class: 'excerpt', tabindex: '0', 'aria-label': 'Texto da amostra que seria enviado' }, str(smp.text)),
+                Object.keys(obj(smp.redactions)).length ? h('div', { class: 'chips' }, h('span', { class: 'small muted' }, 'Redações:'), Object.keys(obj(smp.redactions)).filter(function (k) { return smp.redactions[k] > 0; }).map(function (k) { return h('span', { class: 'chip' }, REDACT[k] || k, h('span', { class: 'n' }, '×' + num(smp.redactions[k]))); })) : null)
+                : h('p', { class: 'small muted' }, 'Nenhuma mensagem recente passaria por esta política, então não há amostra.')));
+            var chkId = uid('ok');
+            var go = h('button', { class: 'btn btn-primary', type: 'button', disabled: true, 'data-act': 'consent', on: { click: function (e) { consent(pol, true, e.currentTarget); } } }, 'Habilitar IA: ' + (POLICY[pol] ? POLICY[pol][0].toLowerCase() : pol));
+            var chk = h('input', { type: 'checkbox', id: chkId, on: { change: function () { go.disabled = !chk.checked; } } });
+            pb.appendChild(h('div', { class: 'card' }, h('div', { class: 'card-b' }, h('label', { class: 'check', for: chkId }, chk, h('span', null, h('strong', null, 'Entendi o que será enviado'), ' — e que posso revogar a qualquer momento nesta tela.')), h('div', { class: 'form-actions' }, go))));
+          }
+        });
+      }
+    }
+    function consent(pol, accept, btn) {
+      if (btn) btn.disabled = true;
+      api('apiSetAiConsent', { policy: pol, accept: accept }).then(function (r) {
+        S.ai = obj(r.data);
+        toast(accept ? 'IA habilitada: ' + (POLICY[pol] ? POLICY[pol][0].toLowerCase() : pol) + '. Vale a partir da próxima sincronização.' : 'IA desligada. Nada mais será enviado.');
+        draw();
+        var t = c.querySelector('h2');
+        if (t) { t.setAttribute('tabindex', '-1'); t.focus(); }
+      }, function (e) {
+        if (btn && btn.isConnected) btn.disabled = false;
+        toast('Não foi possível alterar a IA. ' + friendly(e), { kind: 'err', action: { label: 'Tentar de novo', fn: function () { consent(pol, accept); } } });
+      });
+    }
+    draw();
+    return c;
+  }
+
+  // ------------------------------------------------- configuração inicial ----
+  var MISSING = [
+    [/project|gcp|bigquery_project/i, 'Crie um projeto no Google Cloud (sem faturamento), abra o BigQuery uma vez e salve o ID do projeto em Propriedades do script como GCP_PROJECT_ID.'],
+    [/owner|dono|setup|auth/i, 'Execute a função setup() no editor do Apps Script uma vez e autorize os acessos (Gmail somente leitura, BigQuery).'],
+    [/dataset|table|tabela|schema|view/i, 'Execute setup() novamente para criar o dataset e as tabelas no BigQuery Sandbox.'],
+    [/trigger|gatilho/i, 'Execute setupTriggers() no editor do Apps Script para agendar a sincronização de hora em hora.'],
+    [/gmail/i, 'Ative o serviço avançado “Gmail API” no editor do Apps Script (Serviços → Gmail API).']
+  ];
+  function shellMode(setup) {
+    var sh = $('shell');
+    ['side', 'topbar', 'tabbar'].forEach(function (id) { $(id).hidden = setup; });
+    sh.style.display = setup ? 'block' : '';
+  }
+  function renderSetup(d) {
+    shellMode(true);
+    var view = $('view');
+    view.textContent = '';
+    view.setAttribute('data-route', 'setup');
+    doc.title = 'Configuração inicial · Inbox Intelligence';
+    var miss = arr(obj(d.setup).missing).map(str).filter(Boolean);
+    var wrap = h('div', { class: 'setup', 'data-state': 'ready' },
+      h('div', { class: 'brand' }, h('span', { class: 'brand-mark' }, icon('radar')), h('span', null, 'Inbox Intelligence')),
+      h('h1', { tabindex: '-1' }, 'Configuração inicial'),
+      h('p', { class: 'muted' }, 'Faltam alguns passos para começar a ler sua caixa — sempre em modo somente leitura. Nada é enviado, apagado ou arquivado no seu Gmail.'));
+    var c = card('O que falta', { count: miss.length, icon: 'alert' });
+    c._b.appendChild(miss.length ? h('ul', { class: 'missing', role: 'list' }, miss.map(function (m) {
+      var tip = '';
+      for (var i = 0; i < MISSING.length; i++) if (MISSING[i][0].test(m)) { tip = MISSING[i][1]; break; }
+      return h('li', null, icon('alert'), h('div', null, h('strong', null, m), tip ? h('p', { class: 'small' }, tip) : null));
+    })) : h('p', null, 'O servidor informou que a configuração está incompleta, sem detalhar o item.'));
+    wrap.appendChild(c);
+    var s = card('Passo a passo (cerca de 20 min, só no navegador)', { icon: 'list' });
+    s._b.appendChild(h('ol', { class: 'steps' },
+      h('li', null, 'Crie um projeto no Google Cloud sem faturamento e abra o BigQuery (o sandbox é ativado na hora).'),
+      h('li', null, 'No editor do Apps Script, em Configurações do projeto → Propriedades do script, adicione GCP_PROJECT_ID e, se quiser IA, ANTHROPIC_API_KEY ou GEMINI_API_KEY.'),
+      h('li', null, 'Execute setup() uma vez e autorize. Depois execute setupTriggers().'),
+      h('li', null, 'Implante como App da Web: executar como você, acesso somente você.'),
+      h('li', null, 'Volte aqui e clique em “Verificar novamente”.')));
+    wrap.appendChild(s);
+    var b = S.boot || d;
+    wrap.appendChild(h('div', { class: 'form-actions' }, h('button', { class: 'btn btn-primary', type: 'button', on: { click: boot } }, icon('refresh'), 'Verificar novamente'),
+      h('span', { class: 'small muted' }, 'Conectado como ' + (str(b.user && b.user.email) || 'conta não identificada') + (b.app && b.app.version ? ' · versão ' + str(b.app.version) : ''))));
+    view.appendChild(wrap);
+    view.setAttribute('data-state', 'ready');
+    view.setAttribute('aria-busy', 'false');
+  }
+  function renderFatal(e) {
+    shellMode(true);
+    var view = $('view');
+    view.textContent = '';
+    view.setAttribute('data-route', 'fatal');
+    var w = h('div', { class: 'setup' }, h('div', { class: 'brand' }, h('span', { class: 'brand-mark' }, icon('radar')), h('span', null, 'Inbox Intelligence')),
+      h('h1', { tabindex: '-1' }, 'Não foi possível iniciar'), h('div', { class: 'card' }, errorState(e, boot, 'O app não respondeu', 'h2')));
+    view.appendChild(w);
+    view.setAttribute('data-state', 'error');
+    view.setAttribute('aria-busy', 'false');
+  }
+
+  // -------------------------------------------------------------- início ----
+  function initialHash(cb) {
+    var done = false;
+    function once() { if (!done) { done = true; cb(); } }
+    try {
+      var g = window.google;
+      if (!location.hash && g && g.script && g.script.url && typeof g.script.url.getLocation === 'function') {
+        g.script.url.getLocation(function (loc) {
+          var hs = loc && typeof loc.hash === 'string' ? loc.hash : '';
+          if (/^\/[a-z]/.test(hs)) { try { history.replaceState(null, '', '#' + hs); } catch (e) { /* ignora */ } }
+          once();
+        });
+        setTimeout(once, 1500);
+        return;
+      }
+    } catch (e) { /* segue sem deep link */ }
+    once();
+  }
+  function boot() {
+    var view = $('view');
+    view.textContent = '';
+    view.appendChild(h('div', { class: 'sk-wrap' }, skBlocks(1)));
+    setState(view, 'loading');
+    api('apiBootstrap').then(function (r) {
+      var d = obj(r.data);
+      S.boot = d;
+      S.ai = d.ai || null;
+      S.cats = arr(d.categories).filter(function (c) { return c && c.id; });
+      S.catMap = {};
+      S.cats.forEach(function (c) { S.catMap[c.id] = str(c.label) || c.id; });
+      view.removeAttribute('data-state');
+      view.removeAttribute('aria-busy');
+      if (d.setup && d.setup.ok === false) { renderSetup(d); return; }
+      shellMode(false);
+      buildShell();
+      initialHash(function () {
+        S.screenKey = '';
+        if (!S.started) { S.started = true; window.addEventListener('hashchange', onRoute); }
+        onRoute();
+      });
+      api('apiMarkVisit').then(function () {}, function () {});
+    }, renderFatal);
+  }
+  $('skip').addEventListener('click', function (e) { e.preventDefault(); var h1 = $('view').querySelector('h1') || $('main'); h1.focus(); });
+  doc.addEventListener('keydown', function (e) {
+    if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || doc.querySelector('.dlg') || !S.started) return;
+    var t = e.target;
+    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+    if (e.key === '/') {
+      e.preventDefault();
+      if (S.route && S.route.id === 'busca') { var q = $('q'); if (q) q.focus(); } else { S.focusSearch = true; location.hash = '#/busca'; }
+    } else if (e.key === 'j' || e.key === 'k') {
+      var links = Array.prototype.slice.call($('view').querySelectorAll('.item-open'));
+      if (!links.length) return;
+      var i = links.indexOf(doc.activeElement);
+      var n = e.key === 'j' ? Math.min(links.length - 1, i + 1) : Math.max(0, i < 0 ? 0 : i - 1);
+      e.preventDefault();
+      links[n].focus();
+      links[n].scrollIntoView({ block: 'nearest' });
+    }
+  });
+  boot();
+})();
+</script>
