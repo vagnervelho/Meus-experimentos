@@ -1,0 +1,21 @@
+{
+  "name": "inbox-intelligence",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Central de inteligência pessoal para o Gmail — Google Apps Script + BigQuery Sandbox + IA opcional (Claude ou Gemini), custo zero.",
+  "license": "UNLICENSED",
+  "scripts": {
+    "build": "node scripts/export-sql.js --write-docs",
+    "test": "node --test tests/*.test.js",
+    "typecheck": "tsc -p tsconfig.json",
+    "sql:check": "python3 scripts/validate_sql.py",
+    "ui:check": "node scripts/ui-check.js",
+    "eval": "node eval/run-eval.js",
+    "check": "npm run build && npm run typecheck && npm test && npm run sql:check"
+  },
+  "devDependencies": {
+    "@types/google-apps-script": "2.0.12",
+    "axe-core": "4.10.3",
+    "typescript": "5.9.3"
+  }
+}
