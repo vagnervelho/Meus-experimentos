@@ -51,10 +51,11 @@
           var req = args[0];
           var bad = args.length > 1 ? 'mais de um argumento' : checkArg(req, 'req');
           window.__calls.push({ name: name, req: bad ? String(bad) : clone(req), at: Date.now() });
+          // A falha simulada é decidida no momento da chamada (não da resposta), para não pegar respostas pendentes.
+          var fail = window.__mockFailNext === name;
+          if (fail) window.__mockFailNext = '';
           setTimeout(function () {
             if (bad) { window.__violations.push({ name: name, error: bad }); if (failure) failure(new Error('Invalid argument: ' + bad), userObj); return; }
-            var fail = window.__mockFailNext === name;
-            if (fail) window.__mockFailNext = '';
             var transport = (variant === 'transport' && name !== 'apiBootstrap');
             if (transport) { if (failure) failure(new Error('NetworkError: Connection failure due to HTTP 0'), userObj); return; }
             var env;

@@ -138,10 +138,10 @@
     { id: 'a04', messageId: 'm06', threadId: 't-m06', description: XSS_IMG + 'Conferir fatura de outubro', owner: 'unknown', dueDate: ymd(-2), dueCertainty: 'INFERRED', priorityLevel: 'MEDIUM', status: 'OPEN', statusLabel: 'Aberta', subject: BY.m06.subject, from: { name: 'Loja <b>Exemplo</b>', email: 'faturas@loja.example' }, receivedDate: ymd(-1), method: 'RULES', gmailUrl: 'javascript:alert(7)' },
     { id: 'a05', messageId: 'm16', threadId: 't-m16', description: 'Inscrever-se no encontro de dados', owner: 'me', dueDate: ymd(12), dueCertainty: 'EXPLICIT', priorityLevel: 'MEDIUM', status: 'OPEN', statusLabel: 'Aberta', subject: BY.m16.subject, from: { name: 'Comunidade Dados BR', email: 'eventos@dadosbr.example' }, receivedDate: ymd(-4), method: 'RULES', gmailUrl: gm('m16') },
     { id: 'a06', messageId: 'm11', threadId: 't-m11', description: 'Responder convite da Paula para conversa', owner: 'me', dueDate: '', dueCertainty: 'NONE', priorityLevel: 'HIGH', status: 'OPEN', statusLabel: 'Aberta', subject: BY.m11.subject, from: { name: 'Paula Rocha', email: 'paula@rocha-consultoria.example' }, receivedDate: ymd(-2), method: 'AI', gmailUrl: gm('m11') },
-    { id: 'a07', messageId: 'm15', threadId: 't-m15', description: 'Confirmar recebimento do pedido 4821', owner: 'me', dueDate: '', dueCertainty: 'NONE', priorityLevel: 'LOW', status: 'RESOLVED', statusLabel: 'Resolvida', subject: BY.m15.subject, from: { name: 'Entregas Rápidas', email: 'nao-responda@entregas.example' }, receivedDate: ymd(-4), method: 'RULES', gmailUrl: gm('m15') },
-    { id: 'a08', messageId: 'm03', threadId: 't-m03', description: 'Enviar planilha de premissas', owner: 'other', dueDate: ymd(-1), dueCertainty: 'INFERRED', priorityLevel: 'MEDIUM', status: 'AUTO_REPLIED', statusLabel: 'Respondida', subject: BY.m03.subject, from: { name: 'Rafael Lima', email: 'rafael.lima@prisma.example' }, receivedDate: ymd(-6), method: 'AI', gmailUrl: gm('m03') },
-    { id: 'a09', messageId: 'm12', threadId: 't-m12', description: 'Levar exames anteriores à consulta', owner: 'me', dueDate: ymd(-8), dueCertainty: 'EXPLICIT', priorityLevel: 'MEDIUM', status: 'AUTO_EXPIRED', statusLabel: 'Prazo vencido', subject: BY.m12.subject, from: { name: 'Clínica Horizonte', email: 'agenda@clinicahorizonte.example' }, receivedDate: ymd(-12), method: 'RULES', gmailUrl: gm('m12') },
-    { id: 'a10', messageId: 'm14', threadId: 't-m14', description: 'Avaliar vagas do portal', owner: 'me', dueDate: '', dueCertainty: 'NONE', priorityLevel: 'LOW', status: 'DISMISSED', statusLabel: 'Descartada', subject: BY.m14.subject, from: { name: 'Portal de Vagas', email: 'alertas@vagas.example' }, receivedDate: ymd(-3), method: 'RULES', gmailUrl: gm('m14') }
+    { id: 'a07', messageId: 'm15', threadId: 't-m15', description: 'Confirmar recebimento do pedido 4821', owner: 'me', dueDate: '', dueCertainty: 'NONE', priorityLevel: 'LOW', status: 'RESOLVED', statusLabel: 'Resolvida por você', subject: BY.m15.subject, from: { name: 'Entregas Rápidas', email: 'nao-responda@entregas.example' }, receivedDate: ymd(-4), method: 'RULES', gmailUrl: gm('m15') },
+    { id: 'a08', messageId: 'm03', threadId: 't-m03', description: 'Enviar planilha de premissas', owner: 'other', dueDate: ymd(-1), dueCertainty: 'INFERRED', priorityLevel: 'MEDIUM', status: 'AUTO_REPLIED', statusLabel: 'Concluída: você respondeu na conversa', subject: BY.m03.subject, from: { name: 'Rafael Lima', email: 'rafael.lima@prisma.example' }, receivedDate: ymd(-6), method: 'AI', gmailUrl: gm('m03') },
+    { id: 'a09', messageId: 'm12', threadId: 't-m12', description: 'Levar exames anteriores à consulta', owner: 'me', dueDate: ymd(-8), dueCertainty: 'EXPLICIT', priorityLevel: 'MEDIUM', status: 'AUTO_EXPIRED', statusLabel: 'Encerrada: o prazo passou há mais de 3 dias', subject: BY.m12.subject, from: { name: 'Clínica Horizonte', email: 'agenda@clinicahorizonte.example' }, receivedDate: ymd(-12), method: 'RULES', gmailUrl: gm('m12') },
+    { id: 'a10', messageId: 'm14', threadId: 't-m14', description: 'Avaliar vagas do portal', owner: 'me', dueDate: '', dueCertainty: 'NONE', priorityLevel: 'LOW', status: 'DISMISSED', statusLabel: 'Descartada por você', subject: BY.m14.subject, from: { name: 'Portal de Vagas', email: 'alertas@vagas.example' }, receivedDate: ymd(-3), method: 'RULES', gmailUrl: gm('m14') }
   ];
   var OPPS = [
     { key: 'lumen|cientista dados senior pricing', type: 'job', title: 'Cientista de Dados Sênior — Pricing', company: 'Lumen', role: 'Cientista de Dados', seniority: 'Sênior', location: 'São Paulo (remoto)', workMode: 'remote',
@@ -161,7 +161,7 @@
   var SENDERS = [
     { email: 'news@radartech.example', name: 'Radar Tech', domain: 'radartech.example', count: 28, countPrev: 22, categories: [{ id: 'tecnologia', label: LBL.tecnologia, n: 24 }, { id: 'newsletters', label: LBL.newsletters, n: 28 }], avgScore: 0.41, highShare: 0.04, unreadShare: 0.32, massShare: 1, noiseScore: 0.3, suggestion: '', suggestionWhy: '', unsubscribeUrl: 'https://radartech.example/descadastro?u=1', allAuthPass: true },
     { email: 'promo@ofertas.example', name: '<script>alert(5)</' + 'script>Ofertas', domain: 'ofertas.example', count: 41, countPrev: 30, categories: [{ id: 'marketing', label: LBL.marketing, n: 41 }], avgScore: 0.07, highShare: 0, unreadShare: 0.95, massShare: 1, noiseScore: 0.92, suggestion: 'UNSUBSCRIBE', suggestionWhy: '95% não lidas e 100% em massa nos últimos 30 dias.', unsubscribeUrl: 'https://ofertas.example/sair?id=abc', allAuthPass: true },
-    { email: 'premio@sorteio.example', name: 'Promoções', domain: 'sorteio.example', count: 12, countPrev: 3, categories: [{ id: 'spam', label: LBL.spam, n: 12 }], avgScore: 0.02, highShare: 0, unreadShare: 1, massShare: 1, noiseScore: 0.99, suggestion: 'FILTER', suggestionWhy: 'Spam provável com falha de autenticação.', unsubscribeUrl: 'javascript:alert(6)', allAuthPass: false },
+    { email: 'premio@sorteio.example', name: 'Promoções', domain: 'sorteio.example', count: 12, countPrev: 3, categories: [{ id: 'spam', label: LBL.spam, n: 12 }], avgScore: 0.02, highShare: 0, unreadShare: 1, massShare: 1, noiseScore: 0.99, suggestion: '', suggestionWhy: 'Há mensagens com sinais de spam deste remetente.', unsubscribeUrl: 'javascript:alert(6)', allAuthPass: false },
     { email: 'rafael.lima@prisma.example', name: 'Rafael Lima', domain: 'prisma.example', count: 9, countPrev: 11, categories: [{ id: 'trabalho', label: LBL.trabalho, n: 8 }, { id: 'tarefas', label: LBL.tarefas, n: 3 }], avgScore: 0.63, highShare: 0.67, unreadShare: 0.1, massShare: 0, noiseScore: 0, suggestion: 'PRIORITY', suggestionWhy: 'Você responde a 8 de cada 10 mensagens dele.', unsubscribeUrl: '', allAuthPass: true },
     { email: 'cobranca@belavista.example', name: 'Administradora Bela Vista', domain: 'belavista.example', count: 3, countPrev: 3, categories: [{ id: 'contas', label: LBL.contas, n: 3 }], avgScore: 0.6, highShare: 0.66, unreadShare: 0.33, massShare: 0.33, noiseScore: 0.05, suggestion: '', suggestionWhy: '', unsubscribeUrl: '', allAuthPass: true },
     { email: 'alertas@vagas.example', name: 'Portal de Vagas', domain: 'vagas.example', count: 17, countPrev: 25, categories: [{ id: 'carreira', label: LBL.carreira, n: 17 }], avgScore: 0.38, highShare: 0, unreadShare: 0.5, massShare: 1, noiseScore: 0.4, suggestion: 'FILTER', suggestionWhy: 'Alertas em massa; só 1 de 17 virou oportunidade salva.', unsubscribeUrl: 'https://vagas.example/alertas', allAuthPass: true }
@@ -198,6 +198,9 @@
       evidence: { facts: [], actions: [], classification: [], opportunity: '' }, reason: '', components: components(it), actions: [], opportunity: null, links: [], attachments: [],
       fidelity: { total: 0, verified: 0 }, unsubscribeUrl: '', history: [{ method: 'RULES', provider: 'none', model: '', at: it.date }], parseStatus: 'OK'
     }, DETAIL_EXTRA[it.id] || {});
+    var raw = d.components.reduce(function (a, c) { return a + c.contribution; }, 0);
+    var mult = it.authFail ? 0.72 : it.category === 'marketing' ? 0.4 : it.category === 'newsletters' ? 0.85 : 1;
+    if (!DETAIL_EXTRA[it.id] || !DETAIL_EXTRA[it.id].keepScore) d.priority = Object.assign({}, it.priority, { score: Math.round(raw * mult * 1000) / 1000 });
     if (noai) { d.method = 'RULES'; d.summaryKind = 'EXTRACTIVE'; d.history = d.history.filter(function (x) { return x.method === 'RULES'; }); if (!d.history.length) d.history = [{ method: 'RULES', provider: 'none', model: '', at: it.date }]; }
     return d;
   }
@@ -214,7 +217,7 @@
     var items = empty ? [] : ITEMS.map(function (it) { var c = Object.assign({}, it); if (noai) { c.method = 'RULES'; c.summaryKind = 'EXTRACTIVE'; } return c; });
     var state = { ai: aiInfo(variant), feedback: 0 };
     var sync = empty ? { lastSuccessAt: '', lastStatus: '', backfill: null, windows: 0, quarantined: 0 }
-      : { lastSuccessAt: iso(12 * 60e3), lastStatus: 'OK', backfill: { done: false, cursorDate: ymd(-41), floorDate: ymd(-90) }, windows: 3, quarantined: 1 };
+      : { lastSuccessAt: iso(12 * 60e3), lastStatus: 'DONE', backfill: { done: false, cursorDate: ymd(-41), floorDate: ymd(-90) }, windows: 3, quarantined: 1 };
     function byId(id) { for (var i = 0; i < items.length; i++) if (items[i].id === id) return items[i]; return null; }
     var tasks = empty ? [] : TASKS;
     var opps = empty ? [] : OPPS;
@@ -222,8 +225,8 @@
     var H_ = {
       apiBootstrap: function () {
         return { user: { email: 'voce@exemplo.com.br' }, app: { version: '1.0.0' }, ai: state.ai,
-          setup: variant === 'nosetup' ? { ok: false, missing: ['GCP_PROJECT_ID não configurado', 'setup() ainda não foi executado (dono não registrado)', 'Gatilhos não instalados', XSS_IMG + 'item com HTML'] } : { ok: true, missing: [] },
-          lastSync: empty ? null : { at: sync.lastSuccessAt, status: 'OK' }, categories: CATS, ui: { pageSize: 10, defaultPeriod: '7d' }, previousVisitAt: empty ? '' : iso(20 * H) };
+          setup: variant === 'nosetup' ? { ok: false, missing: ['GCP_PROJECT_ID nas Propriedades do script (ID do projeto do BigQuery Sandbox).', 'Executar a função setup() no editor do Apps Script (cria o banco e os gatilhos).', 'Gatilho de sincronização ausente: execute setupTriggers().', XSS_IMG + 'item com HTML'] } : { ok: true, missing: [] },
+          lastSync: empty ? null : { at: sync.lastSuccessAt, status: 'DONE' }, categories: CATS, ui: { pageSize: 10, defaultPeriod: '7d' }, previousVisitAt: empty ? '' : iso(20 * H) };
       },
       apiMarkVisit: function () { return { previousVisitAt: empty ? '' : iso(20 * H) }; },
       apiGetRadar: function (req) {
@@ -245,7 +248,7 @@
             method: noai ? 'RULES' : 'AI', generatedAt: iso(40 * 60e3)
           },
           kpis: empty ? { received: 0, receivedPrev: 0, attention: 0, attentionPrev: 0, actions: 0, actionsPrev: 0, opportunities: 0, newsletters: 0, noisePct: 0, rulesOnly: 0, triage: { count: 0, minMinutes: 0, maxMinutes: 0, formula: 'não lidos de prioridade baixa ou ruído × 5–15 s por triagem' } }
-            : { received: 312, receivedPrev: 287, attention: att.length, attentionPrev: 7, actions: 14, actionsPrev: 14, opportunities: 3, newsletters: 96, noisePct: 0.38, rulesOnly: noai ? 312 : 41,
+            : { received: 312, receivedPrev: 287, attention: att.length, attentionPrev: 7, actions: 14, actionsPrev: 14, opportunities: 3, newsletters: 96, noisePct: 38, rulesOnly: noai ? 312 : 41,
               triage: { count: 118, minMinutes: 10, maxMinutes: 30, formula: 'não lidos de prioridade baixa ou ruído × 5–15 s por triagem' } },
           attention: att, tasks: tasks.filter(function (t) { return t.status === 'OPEN'; }), opportunities: opps.filter(function (o) { return o.status !== 'DISMISSED'; }), news: news.slice(0, 5),
           topics: empty ? [] : [{ topic: 'pricing', count: 9 }, { topic: 'inteligencia artificial', count: 7 }, { topic: 'mercado financeiro', count: 4 }, { topic: '<u>tema com html</u>', count: 1 }],
@@ -306,15 +309,17 @@
       apiGetSystemStatus: function () {
         return {
           runs: empty ? [] : [
-            { runId: 'r-104', kind: 'PIPELINE', trigger: 'TIME', startedAt: iso(12 * 60e3), finishedAt: iso(10 * 60e3), status: 'OK', durationMs: 131000, counts: { discovered: 6, fetched: 6, analyzed: 6, ai: 4 }, errors: [], aiCostUsd: 0.08, aiRequests: 2, gmailUnits: 420 },
-            { runId: 'r-103', kind: 'PIPELINE', trigger: 'TIME', startedAt: iso(72 * 60e3), finishedAt: iso(69 * 60e3), status: 'PARTIAL', durationMs: 182000, counts: { discovered: 9, fetched: 9, analyzed: 9, ai: 5, aiFailed: 2 }, errors: [{ code: 'UPSTREAM', module: 'AiClient' }, { code: 'UPSTREAM', module: 'AiClient' }, { code: 'TIMEOUT', module: 'BigQueryClient' }], aiCostUsd: 0.11, aiRequests: 4, gmailUnits: 610 },
-            { runId: 'r-102', kind: 'MAINTENANCE', trigger: 'TIME', startedAt: iso(6 * H), finishedAt: iso(6 * H - 50e3), status: 'OK', durationMs: 50000, counts: { rescored: 120 }, errors: [], aiCostUsd: 0, aiRequests: 0, gmailUnits: 0 },
-            { runId: 'r-101', kind: 'BACKFILL', trigger: 'MANUAL', startedAt: iso(9 * H), finishedAt: iso(9 * H - 270e3), status: 'FAILED', durationMs: 270000, counts: { fetched: 300 }, errors: [{ code: 'QUOTA', module: 'GmailClient' }], aiCostUsd: 0, aiRequests: 0, gmailUnits: 18000 }
+            { runId: 'r-104', kind: 'PIPELINE', trigger: 'TIME', startedAt: iso(12 * 60e3), finishedAt: iso(10 * 60e3), status: 'DONE', durationMs: 131000, counts: { to_fetch: 6, ingested: 6, ai_done: 4, level_HIGH: 1 }, errors: [], aiCostUsd: 0.08, aiRequests: 2, gmailUnits: 420 },
+            { runId: 'r-103', kind: 'PIPELINE', trigger: 'ONE_SHOT', startedAt: iso(72 * 60e3), finishedAt: iso(69 * 60e3), status: 'PARTIAL', durationMs: 182000, counts: { to_fetch: 9, ingested: 9, ai_done: 5, ai_failed: 2 }, errors: [{ code: 'UPSTREAM', module: 'AiClient' }, { code: 'UPSTREAM', module: 'AiClient' }, { code: 'TIMEOUT', module: 'BigQueryClient' }], aiCostUsd: 0.11, aiRequests: 4, gmailUnits: 610 },
+            { runId: 'r-102', kind: 'MAINTENANCE', trigger: 'TIME', startedAt: iso(6 * H), finishedAt: iso(6 * H - 50e3), status: 'DONE', durationMs: 50000, counts: { views_refreshed: 7 }, errors: [], aiCostUsd: 0, aiRequests: 0, gmailUnits: 0 },
+            { runId: 'r-101', kind: 'BACKFILL', trigger: 'MANUAL', startedAt: iso(9 * H), finishedAt: iso(9 * H - 270e3), status: 'FAILED', durationMs: 270000, counts: { to_fetch: 300, fetch_errors: 12 }, errors: [{ code: 'QUOTA', module: 'GmailClient' }], aiCostUsd: 0, aiRequests: 0, gmailUnits: 18000 }
           ],
           health: empty ? { lastSuccessAt: '', lagMinutes: null, fails24h: 0, runs24h: 0, avgMs: null, aiCost30d: 0, aiRequests30d: 0 } : { lastSuccessAt: sync.lastSuccessAt, lagMinutes: 12, fails24h: 1, runs24h: 23, avgMs: 142000, aiCost30d: 11.8, aiRequests30d: 240 },
-          pending: empty ? { total: 0, aiDone: 0, aiPending: 0, aiFailed: 0, quarantined: 0, criticalToday: 0, highShare7d: 0, oldest: '', newest: '' } : { total: 4380, aiDone: 1210, aiPending: 37, aiFailed: 4, quarantined: 1, criticalToday: 1, highShare7d: 0.08, oldest: ymd(-49), newest: ymd(0) },
+          pending: empty ? { total: 0, aiDone: 0, aiPending: 0, aiFailed: 0, quarantined: 0, unclassified: 0, criticalToday: 0, highShare7d: 0, oldest: '', newest: '' } : { total: 4380, aiDone: 1210, aiPending: 37, aiFailed: 4, quarantined: 1, unclassified: 2, criticalToday: 1, highShare7d: 0.08, oldest: ymd(-49), newest: ymd(0) },
           quality: empty ? [] : [{ category: 'carreira', label: LBL.carreira, n: 140, irrelevant: 6, corrected: 3, shouldBeHigher: 2 }, { category: 'marketing', label: LBL.marketing, n: 900, irrelevant: 2, corrected: 11, shouldBeHigher: 0 }, { category: 'contas', label: LBL.contas, n: 60, irrelevant: 0, corrected: 1, shouldBeHigher: 4 }],
           agreement: empty ? { n: 0, agree: 0, rate: null } : { n: 1210, agree: 1004, rate: 0.83 },
+          aiQuality: empty ? null : { analyzed30d: 1210, costUsd30d: 11.8, costPer1000Usd: 9.75, avgLatencyMs: 8400, evidenceVerifiedRate: 0.94 },
+          errors: empty ? ['Setup ainda não executado.'] : [],
           quotas: empty ? { triggerMinutes24h: 0, triggerBudgetMin: 60, bqBytesWrittenLifetime: 0, bqLifetimeLimit: 10737418240, bqQueryBytesMonth: 0, aiUsage: { today: { cost: 0, req: 0 }, month: { cost: 0, req: 0 } } }
             : { triggerMinutes24h: 47.5, triggerBudgetMin: 60, bqBytesWrittenLifetime: 36700160, bqLifetimeLimit: 10737418240, bqQueryBytesMonth: 64424509440, aiUsage: { today: { cost: 0.42, req: 6 }, month: { cost: 11.8, req: 240 } } },
           ai: state.ai, triggers: empty ? [] : [{ handler: 'runPipeline', type: 'CLOCK' }, { handler: 'runMaintenance', type: 'CLOCK' }],
@@ -352,8 +357,8 @@
         return ai;
       },
       apiAiDryRun: function (req) {
-        if (req.policy === 'BROADCAST') return { policy: 'BROADCAST', provider: state.ai.provider, total: 120, allowed: 0, blocked: { personal: 80, sensitive: 25, outbound: 15 }, byCategory: {}, sample: null };
-        return { policy: req.policy, provider: state.ai.provider, total: 120, allowed: req.policy === 'FULL' ? 104 : 87, blocked: req.policy === 'FULL' ? { not_eligible: 13, outbound: 3 } : { sensitive: 21, not_eligible: 9, outbound: 3 },
+        if (req.policy === 'BROADCAST') return { policy: 'BROADCAST', provider: state.ai.provider, total: 120, allowed: 0, blocked: { 'remetente pessoa (política BROADCAST)': 80, 'conteúdo sensível': 25, 'mensagem enviada': 15 }, byCategory: {}, sample: null };
+        return { policy: req.policy, provider: state.ai.provider, total: 120, allowed: req.policy === 'FULL' ? 104 : 87, blocked: req.policy === 'FULL' ? { 'categoria proibida para IA': 13, 'mensagem enviada': 3 } : { 'conteúdo sensível': 21, 'categoria proibida para IA': 9, 'mensagem enviada': 3 },
           byCategory: { carreira: 12, tecnologia: 30, trabalho: 18, newsletters: 27 },
           sample: { subject: 'Proposta: Cientista de Dados Sênior (Pricing)', from: '[NOME] <[EMAIL]>', text: 'Olá [VOCE],\nSou a [NOME], da Lumen. Meu telefone é [TELEFONE] e o CPF para cadastro é [CPF].\n<script>alert(8)</' + 'script>\nVocê poderia confirmar seu interesse até amanhã?', redactions: { owner: 1, name: 2, phone: 1, cpf: 1, email: 1 } } };
       },
