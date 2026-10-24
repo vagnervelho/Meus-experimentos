@@ -314,6 +314,7 @@ var Pipeline = (function () {
       var gone = Object.keys(deleted).filter(function (id) {
         return existing[id];
       });
+      Monitoring.count(ctx.run, 'duplicates_avoided', Object.keys(added).length - fresh.length);
       var ing = ingest_(ctx, fresh, { source: 'INCREMENTAL', ageDays: 0 });
       ok = ing.ok && !ing.stoppedEarly && !ing.retryLater;
       var st = refreshStates_(ctx, touched, changed, added, gone);
@@ -429,6 +430,7 @@ var Pipeline = (function () {
     var fresh = page.ids.filter(function (x) {
       return !existing[x.id];
     });
+    Monitoring.count(ctx.run, 'duplicates_avoided', page.ids.length - fresh.length);
     var age = Math.max(0, Util.daysBetween(Util.addDays(w.end, -1), ctx.today));
     var ing = ingest_(ctx, fresh, { source: w.kind, ageDays: age });
     if (!ing.ok || ing.stoppedEarly) return { ok: false };

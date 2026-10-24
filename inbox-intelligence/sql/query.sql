@@ -234,7 +234,7 @@ LIMIT 100;
 
 -- query/system_status
 SELECT
-  ARRAY(SELECT AS STRUCT run_id, kind, trigger_source, started_at, finished_at, status, duration_ms, counts_json, errors_json,
+  ARRAY(SELECT AS STRUCT run_id, kind, trigger_source, started_at, finished_at, status, duration_ms, counts_json, errors_json, stages_json,
       ai_cost_usd, ai_requests, gmail_units
     FROM `meu-projeto.inbox_intelligence.v_runs` ORDER BY started_at DESC LIMIT 25) AS runs,
   (SELECT AS STRUCT MAX(IF(status = 'SUCCESS' AND kind = 'PIPELINE', finished_at, NULL)) AS last_success,
@@ -246,7 +246,7 @@ SELECT
    FROM `meu-projeto.inbox_intelligence.v_runs`) AS health,
   (SELECT AS STRUCT COUNT(*) AS total, COUNTIF(method = 'AI') AS ai_done,
      COUNTIF(method = 'RULES' AND COALESCE(ai_status, '') IN ('PENDING', 'FAILED')) AS ai_pending,
-     COUNTIF(ai_status = 'FAILED') AS ai_failed, COUNTIF(parse_status = 'QUARANTINED') AS quarantined,
+     COUNTIF(ai_status = 'FAILED') AS ai_failed, COUNTIF(parse_status = 'QUARANTINED') AS quarantined, COUNTIF(analysis_id IS NULL) AS unclassified,
      COUNTIF(display_level = 'CRITICAL' AND received_date = CURRENT_DATE('America/Sao_Paulo')) AS critical_today,
      SAFE_DIVIDE(COUNTIF(display_level IN ('CRITICAL', 'HIGH') AND received_date >= DATE_SUB(CURRENT_DATE('America/Sao_Paulo'), INTERVAL 7 DAY)),
        COUNTIF(received_date >= DATE_SUB(CURRENT_DATE('America/Sao_Paulo'), INTERVAL 7 DAY))) AS high_share_7d,
@@ -261,7 +261,9 @@ SELECT
          QUALIFY ROW_NUMBER() OVER (PARTITION BY message_id ORDER BY version_ts DESC) = 1) r
    JOIN (SELECT message_id, primary_category FROM `meu-projeto.inbox_intelligence.analyses__g1` WHERE method = 'AI'
          QUALIFY ROW_NUMBER() OVER (PARTITION BY message_id ORDER BY version_ts DESC) = 1) a
-   ON a.message_id = r.message_id) AS agreement;
+   ON a.message_id = r.message_id) AS agreement,
+  (SELECT AS STRUCT COUNT(*) AS n, SUM(cost_usd) AS cost, AVG(latency_ms) AS latency_ms, SUM(evidence_total) AS ev_total, SUM(evidence_verified) AS ev_verified
+   FROM `meu-projeto.inbox_intelligence.analyses__g1` WHERE method = 'AI' AND version_ts >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 30 DAY)) AS ai_quality;
 
 -- query/blind_sample
 SELECT message_id, subject, from_name, summary, summary_kind, display_level, primary_category, internal_ts

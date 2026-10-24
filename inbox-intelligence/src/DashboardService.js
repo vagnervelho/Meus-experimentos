@@ -481,7 +481,7 @@ var DashboardService = (function () {
   function systemStatus() {
     var cfg = Config.get();
     var out = {
-      runs: [], health: {}, pending: {}, quality: [], agreement: { n: 0, agree: 0, rate: null },
+      runs: [], health: {}, pending: {}, quality: [], agreement: { n: 0, agree: 0, rate: null }, aiQuality: null,
       quotas: {
         triggerMinutes24h: Monitoring.triggerMinutesLast24h(), triggerBudgetMin: cfg.pipeline.dailyTriggerBudgetMin,
         bqBytesWrittenLifetime: BigQueryClient.lifetimeBytes(), bqLifetimeLimit: cfg.storage.lifetimeLimitBytes,
@@ -498,7 +498,7 @@ var DashboardService = (function () {
       out.runs = (row.runs || []).map(function (r) {
         return {
           runId: r.run_id, kind: r.kind, trigger: r.trigger_source, startedAt: r.started_at, finishedAt: r.finished_at, status: r.status,
-          durationMs: num_(r.duration_ms), counts: json_(r.counts_json, {}), errors: json_(r.errors_json, []).map(function (e) {
+          durationMs: num_(r.duration_ms), counts: json_(r.counts_json, {}), stagesMs: json_(r.stages_json, {}), errors: json_(r.errors_json, []).map(function (e) {
             return { code: e.code, module: e.module };
           }), aiCostUsd: num_(r.ai_cost_usd), aiRequests: num_(r.ai_requests), gmailUnits: num_(r.gmail_units),
         };
@@ -512,6 +512,7 @@ var DashboardService = (function () {
       var p = row.pending || {};
       out.pending = {
         total: num_(p.total), aiDone: num_(p.ai_done), aiPending: num_(p.ai_pending), aiFailed: num_(p.ai_failed), quarantined: num_(p.quarantined),
+        unclassified: num_(p.unclassified),
         criticalToday: num_(p.critical_today), highShare7d: Util.round(num_(p.high_share_7d), 3), oldest: p.oldest || '', newest: p.newest || '',
       };
       out.quality = (row.quality || []).map(function (q) {
@@ -519,6 +520,13 @@ var DashboardService = (function () {
       });
       var a = row.agreement || {};
       out.agreement = { n: num_(a.n), agree: num_(a.agree), rate: num_(a.n) ? Util.round(num_(a.agree) / num_(a.n), 3) : null };
+      var aq = row.ai_quality || {};
+      out.aiQuality = {
+        analyzed30d: num_(aq.n), costUsd30d: Util.round(num_(aq.cost), 4),
+        costPer1000Usd: num_(aq.n) ? Util.round((1000 * num_(aq.cost)) / num_(aq.n), 2) : null,
+        avgLatencyMs: Math.round(num_(aq.latency_ms)),
+        evidenceVerifiedRate: num_(aq.ev_total) ? Util.round(num_(aq.ev_verified) / num_(aq.ev_total), 3) : null,
+      };
     } catch (e) {
       out.errors.push('Consulta de status falhou (' + Monitoring.classify(e, 'status').code + ').');
     }

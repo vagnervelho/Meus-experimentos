@@ -250,7 +250,7 @@ var Repository = (function () {
 
     system_status:
       'SELECT\n' +
-      '  ARRAY(SELECT AS STRUCT run_id, kind, trigger_source, started_at, finished_at, status, duration_ms, counts_json, errors_json,\n' +
+      '  ARRAY(SELECT AS STRUCT run_id, kind, trigger_source, started_at, finished_at, status, duration_ms, counts_json, errors_json, stages_json,\n' +
       '      ai_cost_usd, ai_requests, gmail_units\n' +
       '    FROM {{v:runs}} ORDER BY started_at DESC LIMIT 25) AS runs,\n' +
       "  (SELECT AS STRUCT MAX(IF(status = 'SUCCESS' AND kind = 'PIPELINE', finished_at, NULL)) AS last_success,\n" +
@@ -262,7 +262,7 @@ var Repository = (function () {
       '   FROM {{v:runs}}) AS health,\n' +
       "  (SELECT AS STRUCT COUNT(*) AS total, COUNTIF(method = 'AI') AS ai_done,\n" +
       "     COUNTIF(method = 'RULES' AND COALESCE(ai_status, '') IN ('PENDING', 'FAILED')) AS ai_pending,\n" +
-      "     COUNTIF(ai_status = 'FAILED') AS ai_failed, COUNTIF(parse_status = 'QUARANTINED') AS quarantined,\n" +
+      "     COUNTIF(ai_status = 'FAILED') AS ai_failed, COUNTIF(parse_status = 'QUARANTINED') AS quarantined, COUNTIF(analysis_id IS NULL) AS unclassified,\n" +
       "     COUNTIF(display_level = 'CRITICAL' AND received_date = CURRENT_DATE(" + TZ + ')) AS critical_today,\n' +
       "     SAFE_DIVIDE(COUNTIF(display_level IN ('CRITICAL', 'HIGH') AND received_date >= DATE_SUB(CURRENT_DATE(" + TZ + '), INTERVAL 7 DAY)),\n' +
       '       COUNTIF(received_date >= DATE_SUB(CURRENT_DATE(' + TZ + '), INTERVAL 7 DAY))) AS high_share_7d,\n' +
@@ -277,7 +277,9 @@ var Repository = (function () {
       '         QUALIFY ROW_NUMBER() OVER (PARTITION BY message_id ORDER BY version_ts DESC) = 1) r\n' +
       "   JOIN (SELECT message_id, primary_category FROM {{t:analyses}} WHERE method = 'AI'\n" +
       '         QUALIFY ROW_NUMBER() OVER (PARTITION BY message_id ORDER BY version_ts DESC) = 1) a\n' +
-      '   ON a.message_id = r.message_id) AS agreement',
+      '   ON a.message_id = r.message_id) AS agreement,\n' +
+      "  (SELECT AS STRUCT COUNT(*) AS n, SUM(cost_usd) AS cost, AVG(latency_ms) AS latency_ms, SUM(evidence_total) AS ev_total, SUM(evidence_verified) AS ev_verified\n" +
+      "   FROM {{t:analyses}} WHERE method = 'AI' AND version_ts >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 30 DAY)) AS ai_quality",
 
     blind_sample:
       'SELECT message_id, subject, from_name, summary, summary_kind, display_level, primary_category, internal_ts\n' +

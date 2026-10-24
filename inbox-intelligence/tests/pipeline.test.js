@@ -228,7 +228,7 @@ function claudeHandler(gas, opts) {
       ref, primary_category: (opts && opts.category) || 'trabalho', secondary_categories: [], topics: ['contrato'], summary: 'Pedido de assinatura de contrato com prazo.',
       key_facts: [{ fact: 'Resposta pedida', evidence: 'Preciso da sua resposta até 30/10/2026' }], whats_new: '', relevance: 4, importance: 4, urgency: 4,
       action_required: true, actions: [{ description: 'Responder sobre a revisão', owner: 'me', due_date: '2026-10-30', due_certainty: 'EXPLICIT', evidence: 'Preciso da sua resposta até 30/10/2026' }],
-      deadline: { date: '2026-10-30', certainty: 'EXPLICIT', evidence: 'até 30/10/2026' }, entities: [{ name: 'Ana Souza', type: 'person' }],
+      deadline: { date: '2026-10-30', certainty: 'EXPLICIT', evidence: 'Preciso da sua resposta até 30/10/2026' }, entities: [{ name: 'Ana Souza', type: 'person' }],
       opportunity: { type: 'none', title: '', company: '', role: '', seniority: '', location: '', work_mode: 'unknown', compensation: '', requirements: [], stage: '', next_step: '', evidence: '' },
       confidence: 0.9, reason: 'Pedido direto com prazo.', evidence: ['Podemos revisar o modelo de precificação'], injection_suspected: false,
     }));
@@ -391,4 +391,90 @@ test('manutenção falha de propósito (e-mail do Apps Script) quando algo expir
   for (const v of gas.G.Schema.VIEW_ORDER) gas.bq.tableMeta['v_' + v] = { creationTime: String(NOW), expirationTime: String(NOW + 50 * DAY), type: 'VIEW' };
   gas.bq.tableMeta['runs__g1'].expirationTime = String(NOW + 5 * DAY);
   assert.throws(() => gas.G.runMaintenance(), /precisa de atenção/);
+});
+
+/** Linhas com schema tipado (BOOL/FLOAT64/REPEATED) para o mock do BigQuery. */
+function typed(rowsIn) {
+  const names = [...new Set(rowsIn.flatMap((r) => Object.keys(r)))];
+  const fields = names.map((n) => {
+    const v = rowsIn.map((r) => r[n]).find((x) => x !== null && x !== undefined);
+    if (Array.isArray(v)) return { name: n, type: 'STRING', mode: 'REPEATED' };
+    if (typeof v === 'boolean') return { name: n, type: 'BOOL' };
+    if (typeof v === 'number') return { name: n, type: Number.isInteger(v) ? 'INT64' : 'FLOAT64' };
+    return { name: n, type: 'STRING' };
+  });
+  return { rows: rowsIn, fields };
+}
+
+function pendingRow(over) {
+  return Object.assign({
+    message_id: 'abc123', thread_id: 'abc123', internal_ts: '2026-10-23T12:00:00.000Z', received_date: '2026-10-23', direction: 'INBOUND',
+    from_email: 'bruno@consultoria-exemplo.com.br', from_name: 'Bruno Lima', from_domain: 'consultoria-exemplo.com.br', subject: 'Revisão do modelo de precificação',
+    user_in_to: true, is_bulk: false, is_automated: false, has_list_unsubscribe: false, list_id: null, gmail_category: 'PERSONAL', auth_fail: false, auth_pass: true,
+    content_hash: 'h1', label_ids: ['INBOX'], body_excerpt: 'Oi! Podemos revisar o modelo de precificação na quinta? Preciso da sua resposta até 30/10/2026.',
+    analysis_id: 'a1', model_category: 'tarefas', secondary_categories: [], topics: [], summary: 'Oi! Podemos revisar o modelo de precificação na quinta?',
+    key_facts_json: '[]', action_required: true, actions_json: '[]', deadline_date: '2026-10-30', deadline_certainty: 'EXPLICIT', deadline_evidence: 'até 30/10/2026',
+    entities_json: '[]', opportunity_json: null, evidence_json: '{"facts":[]}', evidence_total: null, evidence_verified: null, confidence: 0.6, reason: 'pedido',
+    is_newsletter: false, is_marketing: false, is_probable_spam: false, sensitive: false, ai_eligible: true, ai_status: 'PENDING', ai_attempts: 0, ai_error: '',
+    injection_suspected: false, features_json: JSON.stringify({ importance: 0.6, action: 1, interest: 0.5 }), score: 0.5, correct_category: null, user_relevance: '',
+  }, over || {});
+}
+
+test('backlog de IA: analisa pendentes, bloqueia sensíveis pela política e registra falhas com tentativas', () => {
+  const gas = boot();
+  gas.props.script.setProperty('ANTHROPIC_API_KEY', 'sk-test-falsa');
+  const seen = claudeHandler(gas);
+  gas.G.AiClient.recordConsent('REDACTED');
+  gas.bq.handlers.pending_ai = () => typed([
+    pendingRow(),
+    pendingRow({ message_id: 'def456', thread_id: 'def456', subject: 'Resultado de exame', body_excerpt: 'Seu laudo está disponível.', sensitive: true, model_category: 'saude' }),
+  ]);
+  const r = gas.G.runPipeline();
+  assert.notEqual(r.status, 'FAILED', JSON.stringify(r.errors));
+  assert.equal(r.counts.ai_backlog_done, 1);
+  assert.equal(r.counts.ai_backlog_blocked, 1);
+  const an = rows(gas, 'analyses__g1');
+  const ai = an.find((a) => a.message_id === 'abc123' && a.method === 'AI');
+  assert.ok(ai, 'análise de IA gravada');
+  assert.equal(ai.evidence_verified, ai.evidence_total, 'evidências literais verificadas');
+  const blocked = an.find((a) => a.message_id === 'def456');
+  assert.equal(blocked.ai_status, 'BLOCKED');
+  assert.equal(blocked.ai_error, 'REDACTED');
+  assert.ok(!seen.some((b) => b.messages[0].content.includes('laudo')));
+  const sc = rows(gas, 'scores__g1').find((s) => s.message_id === 'abc123');
+  assert.equal(sc.source, 'AI_BACKLOG');
+  assert.equal(sc.analysis_id, ai.analysis_id);
+
+  // Falha não transitória do provedor: tentativa contada, sem novo score.
+  const gas2 = boot();
+  gas2.props.script.setProperty('ANTHROPIC_API_KEY', 'sk-test-falsa');
+  gas2.http.handler = () => ({ code: 400, body: { error: { type: 'invalid_request_error', message: 'bad' } } });
+  gas2.G.AiClient.recordConsent('REDACTED');
+  gas2.bq.handlers.pending_ai = () => typed([pendingRow({ ai_attempts: 1, ai_status: 'FAILED' })]);
+  gas2.G.runPipeline();
+  const failed = rows(gas2, 'analyses__g1').find((a) => a.message_id === 'abc123');
+  assert.equal(failed.ai_status, 'FAILED');
+  assert.equal(failed.ai_attempts, 2);
+  assert.equal(rows(gas2, 'scores__g1').length, 0);
+});
+
+test('briefing por IA: no máximo um a cada 3 h, com refs convertidas em ids de mensagem', () => {
+  const gas = boot();
+  gas.props.script.setProperty('ANTHROPIC_API_KEY', 'sk-test-falsa');
+  claudeHandler(gas);
+  gas.G.AiClient.recordConsent('REDACTED');
+  const mk = (id, level) => ({ message_id: id, thread_id: id, subject: 'Assunto ' + id, from_domain: 'exemplo.com', from_name: 'X', primary_category: 'trabalho',
+    summary: 'Resumo ' + id, summary_kind: 'EXTRACTIVE', display_level: level, deadline_date: null, action_required: true, method: 'RULES', is_automated: false, is_bulk: false,
+    has_list_unsubscribe: false, list_id: null, gmail_category: 'PERSONAL', sensitive: false, ai_eligible: true, is_probable_spam: false, auth_fail: false, direction: 'INBOUND',
+    info_score: 0.4, score: 0.6, opportunity_json: null });
+  gas.bq.handlers.briefing_input = () => typed([mk('aa01', 'HIGH'), mk('aa02', 'HIGH'), mk('aa03', 'MEDIUM')]);
+  const r = gas.G.runPipeline();
+  assert.equal(r.counts.briefing_ai, 1, JSON.stringify(r));
+  const b = rows(gas, 'briefings__g1')[0];
+  assert.equal(b.period, 'today');
+  assert.equal(b.period_end, '2026-10-24');
+  const content = JSON.parse(b.content_json);
+  assert.deepEqual(content.bullets[0].refs, ['aa01']);
+  const r2 = gas.G.runPipeline();
+  assert.equal(r2.counts.briefing_ai, undefined, 'intervalo mínimo de 3 h');
 });

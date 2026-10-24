@@ -462,7 +462,7 @@ function makeHtmlService(ctxRef) {
   function evaluateTemplate(src, data) {
     // Suporte mínimo a scriptlets de impressão: <?!= expr ?> (sem escape) e <?= expr ?> (escapado).
     return src.replace(/<\?(!?=)([\s\S]*?)\?>/g, (_, kind, expr) => {
-      const fn = vm.runInContext('(function(__d){ with(__d){ return (' + expr + '); } })', ctxRef.ctx);
+      const fn = vm.runInContext('(function(__d){ with(__d){ return (' + expr.trim().replace(/;\s*$/, '') + '); } })', ctxRef.ctx);
       const v = fn(data);
       const s = v == null ? '' : String(v);
       return kind === '!=' ? s : s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
