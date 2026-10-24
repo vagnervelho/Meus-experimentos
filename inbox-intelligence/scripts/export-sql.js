@@ -40,6 +40,8 @@ if (process.argv.includes('--with-schema')) {
   const tables = {};
   for (const t of G.Schema.TABLES) for (const g of [1, 2]) tables[t.name + '__g' + g] = Object.fromEntries(t.columns.map((c) => [c[0], c[1]]));
   process.stdout.write(JSON.stringify({ items: out, tables, project: 'meu-projeto', dataset: G.Config.datasetId() }));
+} else if (process.argv.includes('--quiet')) {
+  process.stdout.write(out.length + ' instruções SQL exportadas para sql/\n');
 } else {
   process.stdout.write(JSON.stringify(out));
 }

@@ -320,7 +320,7 @@ var Config = (function () {
       accountIndex: 0,
       backfillDays: 90,
       backfillWindowDays: 7,
-      listQueryExtra: '-in:chats',
+      listQueryExtra: '-in:chats -in:drafts',
       includeSent: true,
       maxFetchPerRun: 300,
       fetchBatchSize: 15,
