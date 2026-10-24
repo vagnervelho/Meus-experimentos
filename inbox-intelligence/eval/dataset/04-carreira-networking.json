@@ -1,0 +1,337 @@
+[
+  {
+    "id": "carreira-linkedin-alerta-pricing",
+    "description": "Alerta de vagas em massa do LinkedIn, alinhado ao perfil",
+    "refToday": "2026-10-20",
+    "message": {
+      "from": "LinkedIn Job Alerts <jobalerts-noreply@linkedin.com>",
+      "to": "Rafael Moura <rafael.moura.dados@gmail.com>",
+      "subject": "12 novas vagas para \"Pricing Manager\" em São Paulo",
+      "date": "2026-10-20T10:15:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": {
+        "List-Unsubscribe": "<https://www.linkedin.com/e/v2?e=unsub-jobalert>",
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@linkedin.com; spf=pass smtp.mailfrom=bounce.linkedin.com; dmarc=pass header.from=linkedin.com"
+      },
+      "text": "Suas vagas recomendadas para \"Pricing Manager\"\n\nGerente de Pricing — Varejo Sol Nascente · São Paulo (Híbrido)\nPricing Manager — Lumen Pay · São Paulo (Remoto)\nCoordenador de Precificação — Rede Farma Mais · Barueri (Presencial)\nSenior Pricing Analyst — Northwind Commerce · Remoto\n\nVer todas as 12 vagas: https://www.linkedin.com/jobs/search/?alert=8812\n\nVocê está recebendo alertas de vagas. Cancelar inscrição."
+    },
+    "expected": { "categories": ["carreira"], "levelMin": "LOW", "levelMax": "MEDIUM", "action": false, "deadline": null, "opportunity": true, "injection": false, "notes": "Alerta de plataforma (massa), aderente." }
+  },
+  {
+    "id": "carreira-candidatura-recebida-gupy",
+    "description": "Confirmação automática de candidatura recebida",
+    "refToday": "2026-10-19",
+    "message": {
+      "from": "Varejo Sol Nascente via Gupy <naoresponda@gupy.io>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Recebemos sua candidatura — Especialista em Pricing",
+      "date": "2026-10-19T16:00:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@gupy.io; spf=pass smtp.mailfrom=gupy.io; dmarc=pass header.from=gupy.io" },
+      "text": "Olá, Rafael!\n\nRecebemos sua candidatura para a vaga Especialista em Pricing (Sênior) na Varejo Sol Nascente.\n\nNosso time vai analisar seu perfil e você será avisado sobre as próximas etapas por e-mail ou pela plataforma.\n\nBoa sorte!\nTime de Atração de Talentos"
+    },
+    "expected": { "categories": ["carreira"], "levelMin": "LOW", "levelMax": "MEDIUM", "action": false, "deadline": null, "opportunity": true, "injection": false, "notes": "Acompanhamento de processo em andamento." }
+  },
+  {
+    "id": "carreira-case-tecnico-prazo-gupy",
+    "description": "Processo seletivo avança para case técnico com prazo de 4 dias (remetente automático)",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Varejo Sol Nascente via Gupy <naoresponda@gupy.io>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Próxima etapa: case técnico — Especialista em Pricing",
+      "date": "2026-10-22T19:30:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": {
+        "List-Unsubscribe": "<https://gupy.io/unsubscribe?c=771>",
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@gupy.io; spf=pass smtp.mailfrom=gupy.io; dmarc=pass header.from=gupy.io"
+      },
+      "text": "Olá, Rafael!\n\nParabéns, você avançou para a etapa de case técnico do processo seletivo para Especialista em Pricing (Sênior).\n\nO case está disponível na plataforma e deve ser entregue até 26/10/2026 às 23h59. Após o prazo, a candidatura será encerrada automaticamente.\n\nBoa sorte!\nTime de Atração de Talentos — Varejo Sol Nascente"
+    },
+    "expected": { "categories": ["carreira"], "levelMin": "HIGH", "levelMax": "CRITICAL", "action": true, "deadline": "2026-10-26", "opportunity": true, "injection": false, "notes": "Automático mas decisivo: perder o prazo encerra a candidatura." }
+  },
+  {
+    "id": "carreira-recrutadora-head-pricing-1a1",
+    "description": "Recrutadora 1:1 com vaga de Head de Pricing remota e faixa salarial (fit alto)",
+    "refToday": "2026-10-20",
+    "message": {
+      "from": "Camila Rocha <camila.rocha@talentosprime.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Head de Pricing — conversa rápida?",
+      "date": "2026-10-20T14:50:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_PERSONAL"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@talentosprime.com.br; spf=pass smtp.mailfrom=talentosprime.com.br; dmarc=pass header.from=talentosprime.com.br" },
+      "text": "Olá, Rafael, tudo bem?\n\nSou recrutadora na Talentos Prime e estou conduzindo uma posição de Head de Pricing para uma rede varejista nacional (cliente confidencial). A posição é remota, CLT, com faixa salarial de R$ 28 mil a R$ 32 mil + bônus.\n\nSeu histórico com elasticidade de preços e modelos de margem chamou bastante atenção. Teria disponibilidade para uma conversa de 20 minutos nesta quinta ou sexta?\n\nAbraços,\nCamila Rocha\nTalent Acquisition — Talentos Prime"
+    },
+    "expected": { "categories": ["carreira", "networking"], "levelMin": "HIGH", "levelMax": "HIGH", "action": true, "deadline": "any", "opportunity": true, "injection": false, "notes": "Oportunidade sênior aderente, pede resposta." }
+  },
+  {
+    "id": "carreira-recrutador-vaga-junior-presencial",
+    "description": "Recrutador oferece vaga júnior presencial fora do perfil",
+    "refToday": "2026-10-21",
+    "message": {
+      "from": "Diego Lima <selecao@rhnorte-recrutamento.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Vaga: Analista de Suporte Jr — presencial em Manaus",
+      "date": "2026-10-21T15:20:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_PERSONAL"],
+      "text": "Olá!\n\nEncontramos seu currículo em nosso banco de talentos e temos uma vaga de Analista de Suporte Júnior, presencial em Manaus/AM, salário de R$ 2.300 + VT + VR.\n\nCaso tenha interesse, responda este e-mail com seu currículo atualizado.\n\nDiego Lima\nRH Norte Recrutamento"
+    },
+    "expected": { "categories": ["carreira", "networking"], "levelMin": "LOW", "levelMax": "MEDIUM", "action": null, "deadline": null, "opportunity": true, "injection": false, "notes": "É uma vaga real dirigida ao dono, mas sem aderência." }
+  },
+  {
+    "id": "carreira-entrevista-amanha-confirmar-hoje",
+    "description": "Recrutadora confirma entrevista amanhã e pede confirmação até hoje às 18h",
+    "refToday": "2026-10-22",
+    "tags": ["pedido_direto_prazo"],
+    "message": {
+      "from": "Larissa Mendes <larissa.mendes@lumenpay.com.br>",
+      "to": "Rafael Moura <rafael.moura.dados@gmail.com>",
+      "subject": "Entrevista amanhã (23/10) às 10h — confirmação",
+      "date": "2026-10-22T12:10:00Z",
+      "labelIds": ["INBOX", "UNREAD", "IMPORTANT", "CATEGORY_PERSONAL"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@lumenpay.com.br; spf=pass smtp.mailfrom=lumenpay.com.br; dmarc=pass header.from=lumenpay.com.br" },
+      "text": "Oi, Rafael!\n\nConforme combinamos, sua entrevista com o Head de Dados para a vaga de Senior Pricing Data Scientist está marcada para amanhã, 23/10, às 10h, pelo Google Meet (link abaixo).\n\nPor favor, me confirme até hoje às 18h se o horário continua de pé.\n\nhttps://meet.google.com/xyz-abcd-efg\n\nObrigada!\nLarissa Mendes\nTalent Acquisition — Lumen Pay"
+    },
+    "context": { "knownContacts": ["larissa.mendes@lumenpay.com.br"] },
+    "expected": { "categories": ["carreira", "agenda"], "levelMin": "CRITICAL", "levelMax": "CRITICAL", "action": true, "deadline": "2026-10-22", "opportunity": true, "injection": false, "notes": "Confirmação hoje para entrevista amanhã de vaga aderente." }
+  },
+  {
+    "id": "carreira-inmail-en-senior-pricing-remoto",
+    "description": "InMail em inglês de recrutador estrangeiro, vaga remota em USD (fit alto)",
+    "refToday": "2026-10-21",
+    "message": {
+      "from": "Ethan Clarke via LinkedIn <inmail-hit-reply@linkedin.com>",
+      "to": "Rafael Moura <rafael.moura.dados@gmail.com>",
+      "subject": "Senior Pricing Data Scientist — fully remote (USD)",
+      "date": "2026-10-21T18:05:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_SOCIAL"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@linkedin.com; spf=pass smtp.mailfrom=bounce.linkedin.com; dmarc=pass header.from=linkedin.com" },
+      "text": "Hi Rafael,\n\nI'm a Talent Partner at Northwind Commerce, a US e-commerce marketplace expanding its LatAm team. We're hiring a Senior Pricing Data Scientist — fully remote, contractor, USD 6,000–8,000/month.\n\nYour work on price elasticity and promotion optimization looks like a great match. Would you be open to a quick chat next week?\n\nBest,\nEthan Clarke\nTalent Partner, Northwind Commerce"
+    },
+    "expected": { "categories": ["carreira", "networking"], "levelMin": "HIGH", "levelMax": "HIGH", "action": true, "deadline": "any", "opportunity": true, "injection": false, "notes": "Vaga sênior remota aderente; vem pelo notificador do LinkedIn." }
+  },
+  {
+    "id": "carreira-processo-reprovado",
+    "description": "Devolutiva negativa de processo seletivo",
+    "refToday": "2026-10-20",
+    "message": {
+      "from": "Lumen Pay via Gupy <naoresponda@gupy.io>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Atualização sobre sua candidatura — Analista de Pricing Pleno",
+      "date": "2026-10-20T20:00:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@gupy.io; spf=pass smtp.mailfrom=gupy.io; dmarc=pass header.from=gupy.io" },
+      "text": "Olá, Rafael.\n\nAgradecemos seu interesse em fazer parte da Lumen Pay e o tempo dedicado ao processo seletivo para Analista de Pricing Pleno.\n\nApós análise, decidimos seguir com outros candidatos cujo perfil está mais alinhado ao momento da vaga. Seu currículo continuará em nosso banco de talentos.\n\nDesejamos sucesso!\nTime de Talentos — Lumen Pay"
+    },
+    "expected": { "categories": ["carreira"], "levelMin": "LOW", "levelMax": "LOW", "action": false, "deadline": null, "opportunity": false, "injection": false, "notes": "Processo encerrado: não há oportunidade aberta." }
+  },
+  {
+    "id": "carreira-carta-proposta-aceite",
+    "description": "Carta proposta com prazo de aceite na segunda (3 dias)",
+    "refToday": "2026-10-23",
+    "tags": ["pedido_direto_prazo"],
+    "message": {
+      "from": "Fernanda Castro <people@lumenpay.com.br>",
+      "to": "Rafael Moura <rafael.moura.dados@gmail.com>",
+      "subject": "Carta proposta — Senior Pricing Data Scientist",
+      "date": "2026-10-23T18:00:00Z",
+      "labelIds": ["INBOX", "UNREAD", "IMPORTANT", "CATEGORY_PERSONAL"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@lumenpay.com.br; spf=pass smtp.mailfrom=lumenpay.com.br; dmarc=pass header.from=lumenpay.com.br" },
+      "text": "Olá, Rafael!\n\nÉ com muita alegria que enviamos a sua carta proposta para a posição de Senior Pricing Data Scientist.\n\nRemuneração: R$ 26.500,00 mensais (CLT) + bônus anual de até 3 salários + PLR. Modelo de trabalho remoto.\n\nPedimos que você nos retorne com o aceite assinado até 26/10/2026 (segunda-feira). Se quiser conversar sobre algum ponto da proposta antes, me avise.\n\nAbraços,\nFernanda Castro\nPeople — Lumen Pay",
+      "attachments": [{ "filename": "carta-proposta-rafael-moura.pdf", "mimeType": "application/pdf", "size": 88000 }]
+    },
+    "context": { "knownContacts": ["larissa.mendes@lumenpay.com.br"] },
+    "expected": { "categories": ["carreira"], "levelMin": "CRITICAL", "levelMax": "CRITICAL", "action": true, "deadline": "2026-10-26", "opportunity": true, "injection": false, "notes": "Decisão de carreira com prazo curto: o e-mail mais importante da semana." }
+  },
+  {
+    "id": "mkt-curso-garanta-sua-vaga",
+    "description": "Curso pago usando 'vaga' no sentido de matrícula (falso positivo de carreira)",
+    "refToday": "2026-10-21",
+    "tags": ["promo"],
+    "message": {
+      "from": "Escola DataPro <contato@escoladatapro.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Últimas vagas: turma de Data Science para Pricing com 30% OFF",
+      "date": "2026-10-21T22:00:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_PROMOTIONS"],
+      "headers": {
+        "List-Unsubscribe": "<https://escoladatapro.com.br/descadastro>",
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@escoladatapro.com.br; spf=pass smtp.mailfrom=escoladatapro.com.br; dmarc=pass header.from=escoladatapro.com.br"
+      },
+      "text": "Garanta sua vaga na nova turma de Data Science para Pricing!\n\nAprenda modelos de elasticidade, precificação dinâmica e testes A/B com Python. Inscrições até 31/10 com 30% de desconto.\n\nVagas limitadas — aproveite!\n\nQuero me inscrever: https://escoladatapro.com.br/pricing\n\nDescadastre-se aqui."
+    },
+    "expected": { "categories": ["marketing"], "levelMin": "LOW", "levelMax": "LOW", "action": false, "deadline": null, "opportunity": false, "injection": false, "notes": "Venda de curso; tema de interesse não o torna oportunidade." }
+  },
+  {
+    "id": "carreira-indeed-alerta-irrelevante",
+    "description": "Alerta de vagas em massa totalmente fora do perfil",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Indeed <alert@indeed.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Novas vagas para você em São Paulo",
+      "date": "2026-10-22T09:00:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": {
+        "List-Unsubscribe": "<https://br.indeed.com/unsubscribe?id=55>",
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@indeed.com; spf=pass smtp.mailfrom=indeed.com; dmarc=pass header.from=indeed.com"
+      },
+      "text": "Vagas recomendadas para você:\n\nVendedor externo — Distribuidora Exemplo · São Paulo\nMotorista entregador — Transportes Rápidos · Guarulhos\nAuxiliar de estoque — Atacadão Bairro · Osasco\n\nVer mais vagas no Indeed.\n\nCancelar alertas de vagas."
+    },
+    "expected": { "categories": ["carreira"], "levelMin": "LOW", "levelMax": "LOW", "action": false, "deadline": null, "opportunity": false, "injection": false, "notes": "Nenhuma vaga aderente: não é oportunidade para o dono." }
+  },
+  {
+    "id": "carreira-fwd-indicacao-amigo-head-rm",
+    "description": "Amigo encaminha vaga de Head de Revenue Management e oferece indicação",
+    "refToday": "2026-10-21",
+    "message": {
+      "from": "Gustavo Henrique <gustavo.henrique.rm@gmail.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Fwd: Vaga Head de Revenue Management — acho que é a sua cara",
+      "date": "2026-10-21T13:00:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_PERSONAL"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@gmail.com; spf=pass smtp.mailfrom=gmail.com; dmarc=pass header.from=gmail.com" },
+      "text": "Rafa, olha isso! Acho que é a sua cara. Se quiser, te indico internamente, conheço o diretor.\n\n---------- Forwarded message ---------\nDe: Vagas Grupo Viagem Fácil <vagas@grupoviagemfacil.com.br>\nDate: ter., 20 de out. de 2026\nSubject: Vaga Head de Revenue Management\n\nO Grupo Viagem Fácil busca Head de Revenue Management para liderar a precificação dinâmica de passagens e hotéis.\n\nRequisitos: experiência sênior em pricing, Python, SQL e modelos de demanda. Modelo híbrido em São Paulo.\n\nInscrições até 06/11/2026."
+    },
+    "context": { "knownContacts": ["gustavo.henrique.rm@gmail.com"] },
+    "expected": { "categories": ["carreira", "networking"], "levelMin": "HIGH", "levelMax": "HIGH", "action": null, "deadline": "2026-11-06", "opportunity": true, "injection": false, "notes": "Indicação de amigo para vaga muito aderente." }
+  },
+  {
+    "id": "carreira-thread-recrutadora-horarios",
+    "description": "Resposta em thread da recrutadora propondo dois horários",
+    "refToday": "2026-10-23",
+    "message": {
+      "from": "Camila Rocha <camila.rocha@talentosprime.com.br>",
+      "to": "Rafael Moura <rafael.moura.dados@gmail.com>",
+      "subject": "Re: Conversa sobre a posição de Pricing Lead",
+      "date": "2026-10-23T12:40:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_PERSONAL"],
+      "headers": {
+        "In-Reply-To": "<CAR7z1@mail.gmail.com>",
+        "References": "<CAQ3k2@talentosprime.com.br> <CAR7z1@mail.gmail.com>",
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@talentosprime.com.br; spf=pass smtp.mailfrom=talentosprime.com.br; dmarc=pass header.from=talentosprime.com.br"
+      },
+      "text": "Oi Rafael, que bom que tem interesse!\n\nO gestor da vaga tem disponibilidade na terça (27/10) às 10h ou na quarta (28/10) às 15h. Qual prefere? Assim que você me responder, envio o convite.\n\nAbs,\nCamila\n\nEm qui., 22 de out. de 2026 às 18:03, Rafael Moura <rafael.moura.dados@gmail.com> escreveu:\n> Oi Camila, tenho interesse sim na posição de Pricing Lead.\n> Podemos conversar na próxima semana.\n"
+    },
+    "context": { "knownContacts": ["camila.rocha@talentosprime.com.br"] },
+    "expected": { "categories": ["carreira", "agenda", "networking"], "levelMin": "HIGH", "levelMax": "HIGH", "action": true, "deadline": "any", "opportunity": true, "injection": false, "notes": "Processo em andamento; precisa escolher horário." }
+  },
+  {
+    "id": "carreira-newsletter-curadoria-vagas",
+    "description": "Newsletter semanal de curadoria de vagas sênior em dados",
+    "refToday": "2026-10-19",
+    "tags": ["newsletter"],
+    "message": {
+      "from": "Vagas em Dados <vagasemdados@beehiiv.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Edição #87: 15 vagas sênior em dados e pricing",
+      "date": "2026-10-19T11:00:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": {
+        "List-Unsubscribe": "<https://vagasemdados.beehiiv.com/unsubscribe>",
+        "List-Id": "Vagas em Dados <vagasemdados.beehiiv.com>",
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@beehiiv.com; spf=pass smtp.mailfrom=beehiiv.com; dmarc=pass header.from=beehiiv.com"
+      },
+      "text": "Vagas em Dados — edição #87\n\nAs melhores vagas sênior da semana:\n\n• Senior Data Scientist (Pricing) — Lumen Pay · remoto\n• Lead de Analytics — Rede Farma Mais · híbrido SP\n• Especialista em Revenue Management — Hotéis Litoral · remoto\n\nVer todas as 15 vagas no site.\n\nVocê está recebendo este e-mail porque assinou a newsletter Vagas em Dados."
+    },
+    "expected": { "categories": ["carreira", "newsletters"], "levelMin": "LOW", "levelMax": "MEDIUM", "action": false, "deadline": null, "opportunity": true, "injection": false, "notes": "Massa, mas com vagas aderentes." }
+  },
+  {
+    "id": "spam-vaga-falsa-renda-extra",
+    "description": "Golpe de 'vaga home office' com renda irreal e contato por WhatsApp",
+    "refToday": "2026-10-20",
+    "tags": ["phishing"],
+    "message": {
+      "from": "Oportunidade Digital <contato@rendacasa-oportunidade.net>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Vaga home office: ganhe R$ 5.000 por semana só curtindo vídeos",
+      "date": "2026-10-20T03:30:00Z",
+      "labelIds": ["INBOX", "UNREAD"],
+      "text": "Estamos contratando! Trabalho 100% remoto, sem experiência.\n\nGanhe dinheiro rápido curtindo vídeos no YouTube: até R$ 5.000 por semana. Renda extra garantida e sem risco!\n\nVagas limitadas. Chame agora no WhatsApp (11) 90000-0000 e informe o código PROMO77."
+    },
+    "expected": { "categories": ["spam"], "levelMin": "LOW", "levelMax": "LOW", "action": false, "deadline": null, "opportunity": false, "injection": false, "notes": "Golpe clássico disfarçado de vaga." }
+  },
+  {
+    "id": "networking-convite-conexao-recrutadora",
+    "description": "Convite de conexão do LinkedIn de uma recrutadora",
+    "refToday": "2026-10-21",
+    "message": {
+      "from": "Mariana Lopes via LinkedIn <invitations@linkedin.com>",
+      "to": "Rafael Moura <rafael.moura.dados@gmail.com>",
+      "subject": "Mariana Lopes quer se conectar",
+      "date": "2026-10-21T11:20:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_SOCIAL"],
+      "headers": {
+        "List-Unsubscribe": "<https://www.linkedin.com/e/v2?e=unsub-invite>",
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@linkedin.com; spf=pass smtp.mailfrom=bounce.linkedin.com; dmarc=pass header.from=linkedin.com"
+      },
+      "text": "Mariana Lopes\nTech Recruiter na Lumen Pay\n\nMariana Lopes quer se conectar com você no LinkedIn.\n\nAceitar convite: https://www.linkedin.com/comm/mynetwork/invite-accept\n\nVocê está recebendo e-mails de convites. Cancelar inscrição."
+    },
+    "expected": { "categories": ["networking"], "levelMin": "LOW", "levelMax": "MEDIUM", "action": null, "deadline": null, "opportunity": false, "injection": false, "notes": "Contato potencialmente útil, mas sem proposta." }
+  },
+  {
+    "id": "networking-ex-colega-cafe-sociedade",
+    "description": "Ex-colega propõe café para falar de parceria em consultoria de pricing",
+    "refToday": "2026-10-21",
+    "message": {
+      "from": "André Figueiredo <andre.figueiredo@margemcerta.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Café semana que vem?",
+      "date": "2026-10-21T20:10:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_PERSONAL"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@margemcerta.com.br; spf=pass smtp.mailfrom=margemcerta.com.br; dmarc=pass header.from=margemcerta.com.br" },
+      "text": "Fala, Rafael! Quanto tempo.\n\nEstou montando uma consultoria de pricing para o varejo médio (já temos dois clientes fechados) e queria te contar a ideia — talvez faça sentido você entrar como sócio ou parceiro em alguns projetos.\n\nVamos tomar um café semana que vem? Me diz um dia bom pra você.\n\nAbraço,\nAndré"
+    },
+    "context": { "knownContacts": ["andre.figueiredo@margemcerta.com.br"] },
+    "expected": { "categories": ["networking", "negocios", "carreira"], "levelMin": "MEDIUM", "levelMax": "HIGH", "action": true, "deadline": null, "opportunity": true, "injection": false, "notes": "Oportunidade de negócio de contato conhecido." }
+  },
+  {
+    "id": "networking-pedido-mentoria",
+    "description": "Pessoa desconhecida pede mentoria de carreira",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Beatriz Saito <bia.saito.dados@gmail.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Pedido de mentoria — carreira em pricing",
+      "date": "2026-10-22T01:10:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_PERSONAL"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@gmail.com; spf=pass smtp.mailfrom=gmail.com; dmarc=pass header.from=gmail.com" },
+      "text": "Oi Rafael, tudo bem?\n\nVi sua palestra no meetup de analytics e queria muito uma conversa de 30 minutos sobre carreira em pricing. Estou terminando a pós em ciência de dados e pensando em migrar para a área.\n\nVocê teria disponibilidade nas próximas semanas?\n\nObrigada!\nBeatriz Saito"
+    },
+    "expected": { "categories": ["networking", "tarefas"], "levelMin": "MEDIUM", "levelMax": "MEDIUM", "action": true, "deadline": null, "opportunity": false, "injection": false, "notes": "Pedido pessoal sem urgência." }
+  },
+  {
+    "id": "networking-linkedin-impressoes-post",
+    "description": "Notificação do LinkedIn sobre impressões de um post",
+    "refToday": "2026-10-23",
+    "message": {
+      "from": "LinkedIn <notifications-noreply@linkedin.com>",
+      "to": "Rafael Moura <rafael.moura.dados@gmail.com>",
+      "subject": "Seu post teve 1.234 impressões",
+      "date": "2026-10-23T15:00:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_SOCIAL"],
+      "headers": {
+        "List-Unsubscribe": "<https://www.linkedin.com/e/v2?e=unsub-notif>",
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@linkedin.com; spf=pass smtp.mailfrom=bounce.linkedin.com; dmarc=pass header.from=linkedin.com"
+      },
+      "text": "Seu post \"3 erros comuns em modelos de elasticidade\" teve 1.234 impressões esta semana.\n\n18 pessoas reagiram e 4 comentaram.\n\nVer análise do post: https://www.linkedin.com/analytics/post/123"
+    },
+    "expected": { "categories": ["outros", "networking"], "levelMin": "LOW", "levelMax": "LOW", "action": false, "deadline": null, "opportunity": false, "injection": false, "notes": "Métrica de vaidade." }
+  },
+  {
+    "id": "networking-linkedin-mensagem-indicacao",
+    "description": "Mensagem de contato no LinkedIn oferecendo indicação para vaga aderente",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Carlos Menezes via LinkedIn <messages-noreply@linkedin.com>",
+      "to": "Rafael Moura <rafael.moura.dados@gmail.com>",
+      "subject": "Carlos enviou uma mensagem",
+      "date": "2026-10-22T17:45:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_SOCIAL"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@linkedin.com; spf=pass smtp.mailfrom=bounce.linkedin.com; dmarc=pass header.from=linkedin.com" },
+      "text": "Carlos Menezes\nGerente de Dados na Rede Farma Mais\n\n\"Rafael, viu que abrimos uma vaga de Coordenador de Pricing aqui? Acho que tem tudo a ver com você. Posso te indicar, só me manda seu CV atualizado.\"\n\nResponder: https://www.linkedin.com/messaging/thread/2-abc"
+    },
+    "expected": { "categories": ["networking", "carreira"], "levelMin": "MEDIUM", "levelMax": "HIGH", "action": true, "deadline": null, "opportunity": true, "injection": false, "notes": "Pessoa real, mediada por notificador." }
+  }
+]
