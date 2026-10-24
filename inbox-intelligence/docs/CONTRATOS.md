@@ -262,3 +262,14 @@ Opp  = {key, type, title, company, role, seniority, location, workMode, compensa
 
 `AiInfo = {provider: 'anthropic'|'gemini'|'none', model, policy /* efetiva */, requestedPolicy, allowedPolicies: [], consent: {given, policy, provider, at} | null, circuitOpenUntil: ISO|'', budget: {today: {cost, req}, month: {cost, req}, limits: {costDay, costMonth}}}`
 `SyncInfo = {lastSuccessAt: ISO|'', lastStatus, backfill: {done, cursorDate, floorDate} | null, windows: n, quarantined: n}`
+
+## Adendo de qualidade e segurança (vigente)
+
+- **MessageParser:** `direction = 'OUTBOUND'` **somente** com label `SENT` (um From forjado do dono chega como INBOUND). Novos campos só de memória: `hidden_text` (≤ 2000 chars do HTML oculto — `display:none`, `font-size:0` etc. — para detectar instruções escondidas; nunca persistido) e `is_discussion_list` (Google Groups e similares: conversa humana, não newsletter).
+- **Extractors:** `findDeadlines` pode devolver `kind: 'VALIDITY'` (validade de promoção, link, código ou SLA de terceiro), que **nunca** é prazo do dono; `detectInjection(text, opts)` ignora padrões citados entre aspas; `redactPii` cobre também RG, CNH, nascimento, endereço, CEP, IP, placa, códigos de verificação em qualquer ordem e tokens em parâmetros de URL.
+- **RulesClassifier:** devolve também `untrusted` (bool), `spoof_signals` (`AUTH_FAIL`, `BRAND_DOMAIN_MISMATCH`, `DISPLAY_NAME_IMPERSONATION`, `REPLY_TO_MISMATCH`, `FREEMAIL_EXECUTIVE`…) e `severity` (0..1). Mensagem não confiável não tem ações nem prazo.
+- **AiSchema.merge:** suspeita de injection limita a confiança a 0,5 e descarta importância/urgência/relevância da IA; ação da IA só vale fora de envio em massa ou em categoria transacional; repassa `untrusted`/`spoof_signals`/`severity`.
+- **Scoring:** `untrusted` ou injection limitam nível **e** score a Média; "irrelevante" limita o score a Baixa; `severity` soma bônus de importância.
+- **AiClient.allowedByPolicy:** categorias com `aiEligible: false` (ex.: segurança da conta) bloqueiam em **todas** as políticas, inclusive FULL e quando secundárias; mensagens `untrusted` e listas de discussão nunca saem.
+- **Feedback:** novo tipo `LEVEL_OK` ("está ok" na amostra cega; não altera score; é o denominador da taxa de falso negativo). `apiGetSystemStatus` devolve `blindReview: {judged, shouldBeHigher, rate}`.
+- **Repository:** resumo, fatos, ações, oportunidade e evidências são gravados com PII redigida (o corpo completo nunca é persistido).
