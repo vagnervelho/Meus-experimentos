@@ -1,6 +1,6 @@
 # Avaliação offline — classificador por regras + ranking
 
-Gerado por `node eval/run-eval.js` em 2026-10-24T23:19:01.227Z. Sem IA (`AiSchema.merge(rules, null)`).
+Gerado por `node eval/run-eval.js` em 2026-10-24T23:25:30.040Z. Sem IA (`AiSchema.merge(rules, null)`).
 
 - Casos: **94** (sintéticos; arquivos: `h1-financas-contas-servicos.json`, `h2-trabalho-carreira-oportunidades.json`, `h3-conteudo-social-adversarial.json`)
 - Hash do dataset: `0394934af1c1df50` · classificador `rules-2026.10.2` · parser `parser-2026.10.2` · configVersion `8cee049994`
@@ -38,6 +38,27 @@ Gerado por `node eval/run-eval.js` em 2026-10-24T23:19:01.227Z. Sem IA (`AiSchem
 Taxa de oportunidades esperada pelos rótulos: 9.6%. ↓ = quanto menor, melhor.
 
 Definições: *precisão de Crítica* = das preditas Críticas, quantas tinham `levelMax = CRITICAL`; *recall de Crítica* = dos casos com `levelMin = CRITICAL`, quantos saíram Críticos (idem para "Alta ou crítica"). Ação, injection e prazo só contam casos com rótulo (`null`/`any` = não avaliado).
+
+## Comparação com o baseline
+
+| Métrica | Baseline | Atual | Δ (p.p.) | Tolerância |
+|---|---:|---:|---:|---:|
+| `category_top1` | 60.6% | 60.6% | 0.0 | 3.0 |
+| `category_acceptable` | 86.2% | 86.2% | 0.0 | 3.0 |
+| `macro_f1_strict` | 55.6% | 55.6% | 0.0 | 3.0 |
+| `macro_f1_lenient` | 82.2% | 82.2% | 0.0 | 3.0 |
+| `level_in_range` | 90.4% | 90.4% | 0.0 | 3.0 |
+| `high_plus_precision` | 93.3% | 93.3% | 0.0 | 6.7 |
+| `high_plus_recall` | 71.4% | 71.4% | 0.0 | 14.3 |
+| `action_precision` | 100.0% | 100.0% | 0.0 | 3.4 |
+| `action_recall` | 78.4% | 78.4% | 0.0 | 3.0 |
+| `deadline_accuracy` | 90.2% | 90.2% | 0.0 | 3.0 |
+| `injection_precision` | 100.0% | 100.0% | 0.0 | 33.3 |
+| `injection_recall` | 100.0% | 100.0% | 0.0 | 33.3 |
+| `opportunity_precision` | 71.4% | 71.4% | 0.0 | 14.3 |
+| `opportunity_recall` | 55.6% | 55.6% | 0.0 | 11.1 |
+
+Nenhuma regressão acima da tolerância.
 
 ## Casos por categoria ideal
 

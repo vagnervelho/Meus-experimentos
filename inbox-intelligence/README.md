@@ -23,7 +23,7 @@ Central de inteligência pessoal sobre o seu Gmail. Lê a caixa em **modo soment
 | **Tarefas** | Ações extraídas, com status automáticos (respondida, arquivada, prazo vencido) |
 | **Remetentes** | Volume, variação, % de prioridade alta e de não lidas, e sugestões (filtrar, descadastrar, priorizar). Só sugestões: nada é feito automaticamente |
 | **Busca** | Busca na memória (metadados, trechos retidos e análises), com `de:`, `categoria:` e `"frase exata"` |
-| **Sistema** | Saúde das execuções, cotas, tabelas do BigQuery e prazo de expiração, qualidade por categoria e concordância regras × IA |
+| **Sistema** | Saúde das execuções (latência por etapa, mensagens sem classificação), cotas, tabelas do BigQuery e prazo de expiração, qualidade por categoria, concordância regras × IA e **amostra cega** para você avaliar o nível atribuído |
 | **Configurações** | Perfil (interesses, cargos-alvo, remetentes prioritários), IA e privacidade (prévia do que seria enviado e consentimento), limites |
 
 ## Como funciona
@@ -113,7 +113,7 @@ Abra a URL `/exec`. A primeira sincronização roda no próximo gatilho (até 1 
 - [ ] Em *Acionadores*, há exatamente `runPipeline` (de hora em hora) e `runMaintenance` (diário)
 - [ ] Depois de uma execução, a tela **Sistema** mostra status `SUCCESS` e o backfill avançando
 - [ ] Um e-mail recebido aparece no Radar em até 1 h, e "Abrir no Gmail" abre a mensagem certa (se você usa várias contas no navegador, ajuste o índice `u/N` em Configurações)
-- [ ] Rode `diagnose()` no editor e guarde o relatório (sem segredos nem conteúdo)
+- [ ] Rode `diagnose()` no editor e guarde o relatório. Ele faz checagens reais e somente leitura (perfil e listagem do Gmail, consulta e objetos do BigQuery, view da caixa, gatilhos, IA) e não contém segredos nem conteúdo
 
 ## IA (opcional) e privacidade
 
@@ -162,11 +162,12 @@ Requer Node 18+ (testado no 22) e, para validar o SQL, Python 3 com `sqlglot`.
 
 ```bash
 npm install
-npm test             # unitários e de integração (mocks fiéis do Apps Script, Gmail e BigQuery)
+npm test             # 200 testes unitários e de integração (mocks fiéis do Apps Script, Gmail e BigQuery)
 npm run typecheck    # tsc --checkJs contra @types/google-apps-script
 npm run sql:check    # todo o SQL: sintaxe BigQuery + resolução de TODAS as colunas (sqlglot)
-npm run ui:check     # interface no Chromium (Playwright): telas, 390px/1366px, claro/escuro, axe, XSS
-npm run eval         # avaliação offline do classificador e do ranking (dataset sintético rotulado)
+npm run ui:check     # interface no Chromium (Playwright): 9 telas, 390px/1366px, claro/escuro, axe, XSS
+npm run eval         # avaliação offline do classificador e do ranking (dev set: 126 casos rotulados)
+npm run eval -- --holdout   # mesmo relatório no holdout (94 casos escritos às cegas); use só para medir, nunca para ajustar regras
 npm run check        # build + typecheck + testes + SQL
 ```
 
@@ -176,6 +177,6 @@ Convenções: um namespace por arquivo, sem dependência em tempo de carga (um t
 
 - **Validação real pendente:** daqui não há acesso ao seu Gmail nem ao BigQuery. Toda a integração foi testada contra mocks fiéis das APIs, typecheck e validação de SQL. O primeiro deploy (checklist acima) é a validação real.
 - **Corpos grandes:** partes de texto que a Gmail API entrega só como anexo (`attachmentId`) não são baixadas.
-- **Regras:** classificação por regras tem limites (veja `eval/report.md`). Assinaturas sem `-- ` e citações intercaladas podem ficar no texto.
+- **Regras:** classificação por regras tem limites. No holdout, o nível fica dentro do esperado em ~90% dos casos e a recuperação de ações em ~78% (números e intervalos em [`docs/RELATORIO_FASE1.md`](docs/RELATORIO_FASE1.md); detalhe por caso em `eval/report.md` e `eval/report-holdout.md`). Assinaturas sem `-- ` e citações intercaladas podem ficar no texto.
 - **Busca:** é por termos normalizados (sem acento), não semântica.
 - **Relógio:** datas relativas ("sexta", "amanhã") são resolvidas a partir da data de recebimento, no fuso de São Paulo.
