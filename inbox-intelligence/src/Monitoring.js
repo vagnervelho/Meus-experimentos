@@ -12,7 +12,7 @@
 var Monitoring = (function () {
   var CODES = ['CONFIG', 'AUTH', 'NOT_FOUND', 'RATE', 'QUOTA', 'TIMEOUT', 'UPSTREAM', 'PARSE', 'BUDGET', 'LOCKED',
     'HISTORY_EXPIRED', 'LOAD_FAILED', 'QUERY_FAILED', 'VALIDATION', 'QUARANTINED', 'DENIED', 'INTERNAL'];
-  var KEYS = { heartbeat: 'RUN_HEARTBEAT', runtime: 'TRIGGER_RUNTIME', quarantine: 'QUARANTINE_IDS', lastRun: 'LAST_RUN' };
+  var KEYS = { heartbeat: 'RUN_HEARTBEAT', runtime: 'TRIGGER_RUNTIME', quarantine: 'QUARANTINE_IDS', deep: 'QUARANTINE_DEEP_IDS', lastRun: 'LAST_RUN' };
   var SAFE_KEY = /^[a-z_][a-z0-9_]*$/i;
 
   /** Classifica um erro em {code, module, http} sem carregar o texto original. */
@@ -159,11 +159,26 @@ var Monitoring = (function () {
     return { runId: hb.run_id, kind: hb.kind, stage: hb.stage, quarantined: hb.processing || '' };
   }
 
+  /**
+   * Quarentena: a mensagem passa a ser buscada só com metadados. Se ela falhar
+   * de novo já em quarentena, vira quarentena PROFUNDA (nem parser nem regras).
+   */
   function quarantine(messageId) {
     var p = PropertiesService.getScriptProperties();
     var list = Util.safeJsonParse(p.getProperty(KEYS.quarantine), []) || [];
-    if (list.indexOf(messageId) < 0) list.push(messageId);
+    if (list.indexOf(messageId) >= 0) {
+      var deep = Util.safeJsonParse(p.getProperty(KEYS.deep), []) || [];
+      if (deep.indexOf(messageId) < 0) deep.push(messageId);
+      p.setProperty(KEYS.deep, JSON.stringify(deep.slice(-100)));
+      return;
+    }
+    list.push(messageId);
     p.setProperty(KEYS.quarantine, JSON.stringify(list.slice(-200)));
+  }
+
+  function isDeepQuarantined(messageId) {
+    var list = Util.safeJsonParse(PropertiesService.getScriptProperties().getProperty(KEYS.deep), []) || [];
+    return list.indexOf(messageId) >= 0;
   }
 
   function isQuarantined(messageId) {
@@ -219,6 +234,7 @@ var Monitoring = (function () {
     recoverStale: recoverStale,
     quarantine: quarantine,
     isQuarantined: isQuarantined,
+    isDeepQuarantined: isDeepQuarantined,
     quarantinedIds: quarantinedIds,
     addTriggerRuntime: addTriggerRuntime,
     triggerMinutesLast24h: triggerMinutesLast24h,

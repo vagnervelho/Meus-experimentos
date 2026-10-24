@@ -21,11 +21,14 @@ var Pipeline = (function () {
     backfill: 'BACKFILL_STATE',
     fetchFails: 'FETCH_FAILS',
     partial: 'PARTIAL_COMMIT_IDS',
+    aiRetry: 'AI_RETRY_IDS',
+    rescore: 'RESCORE_PENDING',
     briefing: 'BRIEFING_STATE',
   };
   var TRIGGER_SOURCES = ['TIME', 'ONE_SHOT'];
   var STATE_FETCH_CAP = 150;
-  var DEFERRED_AI_ERRORS = ['BUDGET', 'TIME', 'CIRCUIT_OPEN', 'NO_CONSENT', 'DISABLED'];
+  // Erros de infraestrutura/orçamento não contam tentativa: a mensagem volta quando o provedor voltar.
+  var DEFERRED_AI_ERRORS = ['BUDGET', 'TIME', 'CIRCUIT_OPEN', 'NO_CONSENT', 'DISABLED', 'RATE', 'QUOTA_DAY', 'TRANSIENT', 'CONFIG', 'CREDIT'];
 
   function props_() {
     return PropertiesService.getScriptProperties();
@@ -101,6 +104,7 @@ var Pipeline = (function () {
    * @param {string=} triggerSource 'TIME' | 'ONE_SHOT' | 'MANUAL'
    */
   function run(triggerSource) {
+    Util.resetMemo();
     var cfg = Config.get();
     var lock = LockService.getScriptLock();
     if (!lock.tryLock(5000)) {
@@ -152,8 +156,9 @@ var Pipeline = (function () {
       r.bq_bytes_processed = Math.max(0, BigQueryClient.monthlyQueryBytes() - bq0.processed);
       r.bq_bytes_written = Math.max(0, BigQueryClient.lifetimeBytes() - bq0.written);
       r.checkpoint = checkpoint_();
+      // Trabalho pendente por falha de busca, histórico parado ou corte por tempo: nunca SUCCESS.
+      if (!status && (r.counts.history_not_advanced || r.counts.fetch_errors || r.counts.stopped_early || r.counts.history_incomplete)) status = 'PARTIAL';
       Monitoring.finishRun(r, status || undefined);
-      if (r.status !== 'FAILED') props_().setProperty('LAST_SYNC_OK_AT', r.finished_at);
       try {
         if (Triggers.isSetupDone()) Repository.append('runs', [Monitoring.runRow(r)], r.run_id + ':run');
       } catch (e2) {
@@ -197,7 +202,12 @@ var Pipeline = (function () {
     }).map(function (row) {
       return row.target_id;
     }));
-    if (ids.length) rescore(ctx.run, ids, ctx.budget);
+    // A fila já foi apagada: os ids a reescorar ficam guardados até o reescore gravar.
+    var pending = Util.uniq((getJson_(KEYS.rescore, []) || []).concat(ids)).slice(-300);
+    if (!pending.length) return;
+    setJson_(KEYS.rescore, pending);
+    rescore(ctx.run, pending, ctx.budget);
+    props_().deleteProperty(KEYS.rescore);
   }
 
   /**
@@ -254,41 +264,33 @@ var Pipeline = (function () {
     Monitoring.count(ctx.run, 'initialized');
   }
 
+  /**
+   * Histórico incremental, aplicado e confirmado PÁGINA A PÁGINA: o checkpoint
+   * (GMAIL_HISTORY_ID) avança para o último registro da página só depois do
+   * commit, então uma operação em massa (milhares de registros) não trava a fila.
+   */
   function syncIncremental_(ctx) {
     var start = props_().getProperty(KEYS.historyId);
     if (!start) {
       initialize_(ctx);
       return;
     }
-    var added = {};
-    var changed = {};
-    var deleted = {};
     var pageToken = '';
-    var latest = start;
     var pages = 0;
+    var cursor = start;
     try {
       do {
         var page = GmailClient.historyPage(start, pageToken, ctx.limiter, ctx.budget);
-        page.history.forEach(function (h) {
-          (h.messagesAdded || []).forEach(function (x) {
-            var m = x.message || {};
-            if (m.id) added[m.id] = { id: m.id, threadId: m.threadId, labelIds: m.labelIds || [] };
-          });
-          (h.labelsAdded || []).concat(h.labelsRemoved || []).forEach(function (x) {
-            var m = x.message || {};
-            if (m.id) changed[m.id] = { id: m.id, threadId: m.threadId, labelIds: m.labelIds || [] };
-          });
-          (h.messagesDeleted || []).forEach(function (x) {
-            var m = x.message || {};
-            if (!m.id) return;
-            deleted[m.id] = { id: m.id, threadId: m.threadId };
-            delete added[m.id];
-            delete changed[m.id];
-          });
-        });
-        if (page.historyId) latest = page.historyId;
+        var applied = applyHistoryPage_(ctx, page.history);
+        if (!applied.ok) {
+          Monitoring.count(ctx.run, 'history_not_advanced');
+          return;
+        }
         pageToken = page.nextPageToken;
         pages++;
+        var lastRec = page.history.length ? String(page.history[page.history.length - 1].id || '') : '';
+        cursor = pageToken ? lastRec || cursor : page.historyId || lastRec || cursor;
+        props_().setProperty(KEYS.historyId, cursor);
       } while (pageToken && ctx.budget.hasTime(120000) && pages < 40);
     } catch (e) {
       if (e && e.code === 'HISTORY_EXPIRED') {
@@ -297,35 +299,88 @@ var Pipeline = (function () {
       }
       throw e;
     }
-    var complete = !pageToken;
+    if (pageToken) {
+      // Continua do checkpoint na próxima execução.
+      Monitoring.count(ctx.run, 'history_incomplete');
+      return;
+    }
+    props_().setProperty(KEYS.lastSync, ctx.today);
+    props_().setProperty('LAST_SYNC_OK_AT', Util.nowIso());
+  }
+
+  /** Aplica uma página do histórico: novas, resgatadas (Spam/Lixeira → caixa), estados e exclusões. */
+  function applyHistoryPage_(ctx, history) {
+    var added = {};
+    var changed = {};
+    var deleted = {};
+    history.forEach(function (h) {
+      (h.messagesAdded || []).forEach(function (x) {
+        var m = x.message || {};
+        if (m.id) added[m.id] = { id: m.id, threadId: m.threadId, labelIds: m.labelIds || [] };
+      });
+      (h.labelsAdded || []).concat(h.labelsRemoved || []).forEach(function (x) {
+        var m = x.message || {};
+        if (m.id) changed[m.id] = { id: m.id, threadId: m.threadId, labelIds: m.labelIds || [] };
+      });
+      (h.messagesDeleted || []).forEach(function (x) {
+        var m = x.message || {};
+        if (!m.id) return;
+        deleted[m.id] = { id: m.id, threadId: m.threadId };
+        delete added[m.id];
+        delete changed[m.id];
+      });
+    });
     var ids = Util.uniq(Object.keys(added).concat(Object.keys(changed), Object.keys(deleted)));
     Monitoring.count(ctx.run, 'history_events', ids.length);
-    var ok = true;
-    if (ids.length) {
-      var existing = Repository.existingMessageIds(ids);
-      var fresh = Object.keys(added).filter(function (id) {
-        return !existing[id];
-      }).map(function (id) {
-        return added[id];
-      });
-      var touched = Util.uniq(Object.keys(added).concat(Object.keys(changed))).filter(function (id) {
-        return existing[id];
-      });
-      var gone = Object.keys(deleted).filter(function (id) {
-        return existing[id];
-      });
-      Monitoring.count(ctx.run, 'duplicates_avoided', Object.keys(added).length - fresh.length);
-      var ing = ingest_(ctx, fresh, { source: 'INCREMENTAL', ageDays: 0 });
-      ok = ing.ok && !ing.stoppedEarly && !ing.retryLater;
-      var st = refreshStates_(ctx, touched, changed, added, gone);
-      ok = ok && st.ok;
+    if (!ids.length) return { ok: true };
+    var existing = Repository.existingMessageIds(ids);
+    // Labels mais recentes vencem (a mensagem pode ter chegado no Spam e sido resgatada na mesma página).
+    function latest(id) {
+      return changed[id] && changed[id].labelIds.length ? changed[id] : added[id];
     }
-    if (ok && complete) {
-      props_().setProperty(KEYS.historyId, latest);
-      props_().setProperty(KEYS.lastSync, ctx.today);
-    } else {
-      Monitoring.count(ctx.run, 'history_not_advanced');
-    }
+    var fresh = Object.keys(added).filter(function (id) {
+      return !existing[id];
+    }).map(latest);
+    var rescued = Object.keys(changed).filter(function (id) {
+      return !existing[id] && !added[id];
+    });
+    var touched = Util.uniq(Object.keys(added).concat(Object.keys(changed))).filter(function (id) {
+      return existing[id];
+    });
+    var gone = Object.keys(deleted).filter(function (id) {
+      return existing[id];
+    });
+    Monitoring.count(ctx.run, 'duplicates_avoided', Object.keys(added).length - fresh.length);
+    var candidates = fresh.concat(rescuedRefs_(ctx, rescued, changed));
+    var ing = ingest_(ctx, candidates, { source: 'INCREMENTAL', ageDays: 0 });
+    var st = refreshStates_(ctx, touched, changed, added, gone);
+    return { ok: ing.ok && !ing.stoppedEarly && !ing.retryLater && st.ok };
+  }
+
+  /**
+   * Mensagens ainda não gravadas que só aparecem como mudança de label (ex.:
+   * chegaram no Spam e foram resgatadas). Um get minimal confirma labels e data;
+   * entram só se elegíveis e dentro do horizonte do backfill.
+   */
+  function rescuedRefs_(ctx, ids, changed) {
+    var out = [];
+    var candidates = ids.filter(function (id) {
+      var el = GmailClient.eligibility((changed[id] || {}).labelIds || [], undefined);
+      return el.action !== 'SKIP' && el.action !== 'STATE_ONLY';
+    }).slice(0, 100);
+    if (!candidates.length) return out;
+    var floor = Util.addDays(ctx.today, -ctx.cfg.gmail.backfillDays);
+    var res = GmailClient.getMessages(candidates.map(function (id) {
+      return { id: id, format: 'minimal' };
+    }), ctx.limiter, ctx.budget);
+    res.items.forEach(function (it) {
+      if (it.status !== 'OK') return;
+      var ymd = Util.ymd(Number(it.message.internalDate || 0));
+      if (ymd < floor) return;
+      out.push({ id: it.id, threadId: it.message.threadId, labelIds: it.message.labelIds || [], ageDays: Math.max(0, Util.daysBetween(ymd, ctx.today)) });
+    });
+    Monitoring.count(ctx.run, 'rescued_candidates', out.length);
+    return out;
   }
 
   /** O histórico expirou: novo ponto de partida + janela de resync desde a última sync boa. */
@@ -384,10 +439,22 @@ var Pipeline = (function () {
       var windows = getJson_(KEYS.windows, []) || [];
       if (windows.length) {
         var w = windows[0];
+        if (w.phase === 'RECONCILE') {
+          var rc = reconcileWindow_(ctx, w);
+          if (!rc.ok) return;
+          if (rc.done) windows.shift();
+          else windows[0].offset = rc.offset;
+          setJson_(KEYS.windows, windows);
+          continue;
+        }
         var r = processWindowPage_(ctx, w);
         if (!r.ok) return;
-        if (r.done) windows.shift();
-        else windows[0].pageToken = r.nextPageToken;
+        if (r.done) {
+          // Depois de listar, o resync reconcilia o estado do que já estava gravado.
+          windows[0] = { kind: w.kind, start: w.start, end: w.end, phase: 'RECONCILE', offset: 0 };
+        } else {
+          windows[0].pageToken = r.nextPageToken;
+        }
         setJson_(KEYS.windows, windows);
         continue;
       }
@@ -433,8 +500,38 @@ var Pipeline = (function () {
     Monitoring.count(ctx.run, 'duplicates_avoided', page.ids.length - fresh.length);
     var age = Math.max(0, Util.daysBetween(Util.addDays(w.end, -1), ctx.today));
     var ing = ingest_(ctx, fresh, { source: w.kind, ageDays: age });
-    if (!ing.ok || ing.stoppedEarly) return { ok: false };
+    // Falha de busca também segura a página: a mensagem só é descartada após 3 tentativas.
+    if (!ing.ok || ing.stoppedEarly || ing.retryLater) return { ok: false };
     return { ok: true, done: !page.nextPageToken, nextPageToken: page.nextPageToken };
+  }
+
+  /**
+   * Resync: o histórico perdido pode conter leituras, arquivamentos e exclusões
+   * de mensagens já gravadas. Tira um snapshot (get minimal) de cada uma na
+   * janela, em lotes; NOT_FOUND vira DELETED.
+   */
+  function reconcileWindow_(ctx, w) {
+    var ids = Repository.idsInWindow(w.start, w.end);
+    var offset = Number(w.offset || 0);
+    if (offset >= ids.length) return { ok: true, done: true, offset: offset };
+    var slice = ids.slice(offset, offset + STATE_FETCH_CAP);
+    var res = GmailClient.getMessages(slice.map(function (id) {
+      return { id: id, format: 'minimal' };
+    }), ctx.limiter, ctx.budget);
+    var meta = { source: 'RESYNC', runId: ctx.run.run_id, versionTs: ctx.versionTs };
+    var rows = [];
+    res.items.forEach(function (it) {
+      if (it.status === 'OK') rows.push(Repository.stateRow(it.id, it.message.threadId, it.message.labelIds || [], meta));
+      else if (it.status === 'NOT_FOUND') rows.push(Repository.stateRow(it.id, '', [], Object.assign({ gone: 'DELETED' }, meta)));
+    });
+    if (rows.length) {
+      var ap = Repository.append('message_state', rows, ctx.run.run_id + ':reconcile:' + w.start + ':' + offset, ctx.budget);
+      if (!ap.ok) return { ok: false };
+    }
+    Monitoring.count(ctx.run, 'resync_reconciled', rows.length);
+    var next = offset + res.items.length;
+    if (res.stoppedEarly && !res.items.length) return { ok: false };
+    return { ok: true, done: next >= ids.length, offset: next };
   }
 
   // ------------------------------------------------------------- ingestão ----
@@ -442,7 +539,7 @@ var Pipeline = (function () {
    * Busca, interpreta, classifica, (opcionalmente) analisa com IA, pontua e
    * grava mensagens novas, em lotes pequenos com commit por lote.
    * @param {Object} ctx
-   * @param {Array<{id: string, threadId?: string, labelIds?: string[]}>} refs
+   * @param {Array<{id: string, threadId?: string, labelIds?: string[], ageDays?: number}>} refs
    * @param {{source: string, ageDays: number}} opts
    * @return {{ok: boolean, stoppedEarly: boolean, retryLater: boolean, committed: number}}
    */
@@ -454,17 +551,22 @@ var Pipeline = (function () {
     var partial = getJson_(KEYS.partial, []) || [];
     var todo = [];
     refs.forEach(function (ref) {
-      var el = GmailClient.eligibility(ref.labelIds, { ageDays: opts.ageDays, fullWindowDays: cfg.storage.excerptRetentionDays });
+      var age = ref.ageDays !== undefined ? ref.ageDays : opts.ageDays;
+      var el = GmailClient.eligibility(ref.labelIds, { ageDays: age, fullWindowDays: cfg.storage.excerptRetentionDays });
       if (ref.labelIds && ref.labelIds.length && (el.action === 'SKIP' || el.action === 'STATE_ONLY')) return;
-      if ((fails[ref.id] || 0) >= 3) return;
+      if ((fails[ref.id] || 0) >= 3) {
+        Monitoring.count(ctx.run, 'gave_up_after_retries');
+        return;
+      }
       var quarantined = Monitoring.isQuarantined(ref.id);
-      todo.push({ id: ref.id, format: quarantined || el.action === 'METADATA' ? 'metadata' : 'full', quarantined: quarantined });
+      todo.push({ id: ref.id, format: quarantined || el.action === 'METADATA' ? 'metadata' : 'full', quarantined: quarantined, ageDays: age });
     });
     Monitoring.count(ctx.run, 'to_fetch', todo.length);
     var chunks = Util.chunk(todo, cfg.gmail.fetchBatchSize);
     for (var c = 0; c < chunks.length; c++) {
       if (!ctx.budget.hasTime(cfg.pipeline.safetyMarginMs)) {
         out.stoppedEarly = true;
+        Monitoring.count(ctx.run, 'stopped_early');
         break;
       }
       var r = ingestChunk_(ctx, chunks[c], fails, partial, opts);
@@ -517,20 +619,34 @@ var Pipeline = (function () {
         return;
       }
       var t = byId[it.id];
-      var el = GmailClient.eligibility(it.message.labelIds || [], { ageDays: opts.ageDays, fullWindowDays: cfg.storage.excerptRetentionDays });
+      var labels = it.message.labelIds || [];
+      var el = GmailClient.eligibility(labels, { ageDays: t.ageDays, fullWindowDays: cfg.storage.excerptRetentionDays });
       if (el.action === 'SKIP' || el.action === 'STATE_ONLY') {
         Monitoring.count(ctx.run, 'skipped_' + el.reason);
         return;
       }
       try {
         Monitoring.markProcessing(ctx.run, it.id);
-        var p = MessageParser.parse(it.message, { ownerEmail: ctx.owner, excerptChars: cfg.storage.excerptChars, maxDecodedBodyChars: cfg.gmail.maxDecodedBodyChars });
-        if (p.direction === 'OUTBOUND') AiClient.rememberOwnerName(p.from_name);
-        var rules = RulesClassifier.classify(p, { refYmd: p.received_date, taxonomy: ctx.taxonomy, profile: cfg.profile, knownContacts: ctx.knownContacts() });
-        parsedList.push({ p: p, rules: rules, metadataOnly: t.format !== 'full' || el.action === 'METADATA', quarantined: t.quarantined, labelIds: it.message.labelIds || [] });
+        var p;
+        var rules;
+        if (Monitoring.isDeepQuarantined(it.id)) {
+          // Já derrubou o parser mais de uma vez: nem parser nem regras, só metadados mínimos.
+          p = minimalParsed_(it.message);
+          rules = minimalRules_();
+          Monitoring.count(ctx.run, 'minimal_rows');
+        } else {
+          p = MessageParser.parse(it.message, { ownerEmail: ctx.owner, excerptChars: cfg.storage.excerptChars, maxDecodedBodyChars: cfg.gmail.maxDecodedBodyChars });
+          rules = RulesClassifier.classify(p, { refYmd: p.received_date, taxonomy: ctx.taxonomy, profile: cfg.profile, knownContacts: ctx.knownContacts() });
+        }
+        // Só o label SENT prova que foi o dono: um From forjado não ensina o nome dele.
+        if (labels.indexOf('SENT') >= 0) AiClient.rememberOwnerName(p.from_name);
+        parsedList.push({ p: p, rules: rules, metadataOnly: t.format !== 'full' || el.action === 'METADATA', quarantined: t.quarantined, labelIds: labels });
       } catch (e) {
+        // Quarentena (a segunda vira profunda: só metadados mínimos) e nova tentativa na próxima execução.
         Monitoring.addError(ctx.run, { code: 'PARSE' }, 'parse');
         Monitoring.quarantine(it.id);
+        fails[it.id] = (fails[it.id] || 0) + 1;
+        retryLater = true;
       }
     });
     Monitoring.heartbeat(ctx.run, 'ingest');
@@ -545,6 +661,10 @@ var Pipeline = (function () {
           parsedList.forEach(function (x) {
             if (partial.indexOf(x.p.message_id) < 0) partial.push(x.p.message_id);
           });
+        } else if (batch.aiIds.length) {
+          // A análise de IA pode ter sido gravada: na nova tentativa, reaproveita em vez de pagar de novo.
+          var retry = getJson_(KEYS.aiRetry, []) || [];
+          setJson_(KEYS.aiRetry, Util.uniq(retry.concat(batch.aiIds)).slice(-300));
         }
         return { ok: false, committed: 0, stoppedEarly: res.stoppedEarly, retryLater: retryLater };
       }
@@ -565,7 +685,7 @@ var Pipeline = (function () {
     var cfg = ctx.cfg;
     var run = ctx.run;
     var meta = { runId: run.run_id, versionTs: ctx.versionTs };
-    var batch = { messages: [], states: [], analyses: [], scores: [], key: Util.shortHash(list.map(function (x) { return x.p.message_id; }).join(','), 12) };
+    var batch = { messages: [], states: [], analyses: [], scores: [], aiIds: [], key: Util.shortHash(list.map(function (x) { return x.p.message_id; }).join(','), 12) };
 
     // Commit anterior gravou tudo menos `messages`: só falta o marcador.
     var fresh = [];
@@ -622,6 +742,7 @@ var Pipeline = (function () {
           redactions: a.redactions, usage: a.usage, aiStatus: 'DONE',
         }, meta));
         batch.analyses.push(finalRow);
+        batch.aiIds.push(p.message_id);
       }
       var result = Scoring.compute(finalFeatures, cfg, ctx.today);
       batch.scores.push(Repository.scoreRow(p, finalRow.analysis_id, result, Object.assign({
@@ -645,6 +766,30 @@ var Pipeline = (function () {
         x.rules.ai_eligible !== false && !x.p.auth_fail;
     });
     if (!cands.length) return out;
+    // Commit anterior falhou depois da IA: reaproveita a análise já gravada (sem nova cobrança).
+    var retry = getJson_(KEYS.aiRetry, []) || [];
+    var retryIds = cands.map(function (x) { return x.p.message_id; }).filter(function (id) { return retry.indexOf(id) >= 0; });
+    if (retryIds.length) {
+      var stored = safeRead_(ctx.run, 'existing_ai', function () {
+        return Repository.existingAiAnalyses(retryIds);
+      }, {});
+      Object.keys(stored).forEach(function (id) {
+        var row = stored[id];
+        out[id] = {
+          status: 'DONE', analysis: aiFromRow_(row), provider: row.provider, model: row.model, policy: policy, redactions: {}, usage: null,
+          fidelity: row.evidence_total === null || row.evidence_total === undefined ? null : { evidence_total: row.evidence_total, evidence_verified: row.evidence_verified },
+        };
+        Monitoring.count(ctx.run, 'ai_reused');
+      });
+      setJson_(KEYS.aiRetry, retry.filter(function (id) { return retryIds.indexOf(id) < 0; }));
+      cands = cands.filter(function (x) { return !out[x.p.message_id]; });
+      if (!cands.length) return out;
+    }
+    // Só prepara (redação, leituras) o que cabe nas requisições restantes desta execução.
+    var leftNow = aiRequestsLeft_(ctx);
+    var perReq = AiClient.provider() === 'anthropic' ? cfg.ai.anthropic.batchSize : cfg.ai.batchSize;
+    if (leftNow <= 0) return out;
+    cands = cands.slice(0, leftNow * perReq);
     var threadCtx = {};
     var replyThreads = Util.uniq(cands.filter(function (x) { return x.p.is_reply; }).map(function (x) { return x.p.thread_id; }));
     if (replyThreads.length) {
@@ -689,6 +834,67 @@ var Pipeline = (function () {
       }
     });
     return out;
+  }
+
+  /** Reconstrói a análise de IA gravada no formato de AiSchema.validateItem (para merge). */
+  function aiFromRow_(r) {
+    var ev = Util.safeJsonParse(r.evidence_json, {}) || {};
+    var facts = Util.safeJsonParse(r.key_facts_json, []) || [];
+    var acts = Util.safeJsonParse(r.actions_json, []) || [];
+    var opp = Util.safeJsonParse(r.opportunity_json, null);
+    return {
+      primary_category: r.primary_category, secondary_categories: r.secondary_categories || [], topics: r.topics || [], summary: r.summary || '',
+      key_facts: facts.map(function (f, i) { return { fact: f.fact || '', evidence: (ev.facts || [])[i] || '' }; }),
+      whats_new: r.whats_new || '', relevance: r.relevance, importance: r.importance, urgency: r.urgency, action_required: !!r.action_required,
+      actions: acts.map(function (a, i) {
+        return { description: a.description || '', owner: a.owner || 'unknown', due_date: a.due_date || '', due_certainty: a.due_certainty || 'NONE', evidence: (ev.actions || [])[i] || '' };
+      }),
+      deadline: r.deadline_date ? { date: r.deadline_date, certainty: r.deadline_certainty || 'INFERRED', evidence: r.deadline_evidence || '' } : null,
+      entities: Util.safeJsonParse(r.entities_json, []) || [],
+      opportunity: opp ? Object.assign({}, opp, { evidence: ev.opportunity || '' }) : null,
+      confidence: Number(r.confidence || 0.5), reason: r.reason || '', evidence: ev.classification || [], injection_suspected: !!r.injection_suspected,
+    };
+  }
+
+  /**
+   * Mensagem em quarentena profunda: linha mínima a partir dos metadados, sem
+   * passar pelo parser (cabeçalhos truncados, nada de corpo).
+   */
+  function minimalParsed_(msg) {
+    var labels = msg.labelIds || [];
+    var ms = Number(msg.internalDate || Util.now());
+    var hdr = {};
+    ((msg.payload && msg.payload.headers) || []).forEach(function (h) {
+      var k = String(h.name || '').toLowerCase();
+      if (!hdr[k]) hdr[k] = String(h.value || '').slice(0, 300);
+    });
+    var em = (/[A-Z0-9._%+-]{1,64}@[A-Z0-9.-]{1,120}\.[A-Z]{2,24}/i.exec(hdr.from || '') || [''])[0].toLowerCase();
+    var subject = Util.truncate(Util.collapseWhitespace(hdr.subject || ''), 200);
+    function has(l) {
+      return labels.indexOf(l) >= 0;
+    }
+    return {
+      message_id: msg.id, thread_id: msg.threadId || msg.id, rfc822_message_id: String(hdr['message-id'] || '').replace(/^<|>$/g, '').slice(0, 200),
+      history_id: String(msg.historyId || ''), internal_ts: Util.toIso(ms), received_date: Util.ymd(ms), direction: has('SENT') ? 'OUTBOUND' : 'INBOUND',
+      from_email: em, from_name: '', from_domain: Util.emailDomain(em), reply_to_email: '', to_emails: [], cc_emails: [], recipient_count: 0,
+      user_in_to: false, user_in_cc: false, subject: subject, snippet: '', body_text: '', body_excerpt: '', body_chars: 0, body_truncated: false,
+      has_html: false, quoted_removed: false, signature_removed: false, footer_removed: false, is_forwarded: false, is_reply: false, links: [],
+      unsubscribe_url: '', has_list_unsubscribe: !!hdr['list-unsubscribe'], list_id: '', precedence_bulk: false, is_bulk: false, is_automated: false,
+      auth_pass: null, auth_fail: null, attachments: [], attachment_count: 0, label_ids: labels, gmail_category: '', is_unread: has('UNREAD'),
+      is_starred: has('STARRED'), is_important: has('IMPORTANT'), in_inbox: has('INBOX'), is_trash: has('TRASH'), is_spam: has('SPAM'), is_sent: has('SENT'),
+      content_hash: Util.shortHash(subject + '|' + em, 16), search_text: Util.normalizeText(subject + ' ' + em), size_estimate: Number(msg.sizeEstimate || 0),
+      parser_version: 'minimal',
+    };
+  }
+
+  function minimalRules_() {
+    return {
+      primary_category: 'outros', secondary_categories: [], category_scores: {}, confidence: 0.3, reason: 'Quarentena: processada só com metadados',
+      signals: ['quarantine'], is_newsletter: false, is_marketing: false, is_probable_spam: false, is_automated: false, is_bulk: false,
+      action_required: false, action_score: 0, actions: [], deadline: null, opportunity: null, summary: '', key_facts: [], topics: [],
+      interest_score: 0, entities: [], sensitive: false, ai_eligible: false, injection: { suspected: false, signals: [] },
+      untrusted: false, spoof_signals: [], severity: 0,
+    };
   }
 
   // ---------------------------------------------------- backlog de IA ----
@@ -792,15 +998,16 @@ var Pipeline = (function () {
     }
     if (!analyses.length) return;
     var key = ctx.run.run_id + ':ai_backlog:' + Util.shortHash(rows.map(function (x) { return x.message_id; }).join(','), 10);
-    var a1 = Repository.append('analyses', analyses, key + ':a', ctx.budget);
-    if (!a1.ok) {
-      Monitoring.addError(ctx.run, { code: 'LOAD_FAILED' }, 'ai_backlog_analyses');
-      return;
-    }
+    // A análise é o marcador (pending_ai sai dela): scores primeiro; se a análise falhar, tudo é refeito.
     if (scores.length) {
       var a2 = Repository.append('scores', scores, key + ':s', ctx.budget);
-      if (!a2.ok) Monitoring.addError(ctx.run, { code: 'LOAD_FAILED' }, 'ai_backlog_scores');
+      if (!a2.ok) {
+        Monitoring.addError(ctx.run, { code: 'LOAD_FAILED' }, 'ai_backlog_scores');
+        return;
+      }
     }
+    var a1 = Repository.append('analyses', analyses, key + ':a', ctx.budget);
+    if (!a1.ok) Monitoring.addError(ctx.run, { code: 'LOAD_FAILED' }, 'ai_backlog_analyses');
   }
 
   // ------------------------------------------------------------ briefing ----
@@ -816,7 +1023,11 @@ var Pipeline = (function () {
     if (st.day !== ctx.today) st = { day: ctx.today, count: 0, lastAt: 0, lastHigh: -1 };
     if (st.count >= cfg.ai.briefingMaxPerDay) return;
     if (st.lastAt && Util.now() - st.lastAt < 3 * 3600000) return;
-    var rows = Repository.query('briefing_input', { start: Repository.date(ctx.today), end: Repository.date(ctx.today) }, { maxRows: 40 }).rows;
+    var all = Repository.query('briefing_input', { start: Repository.date(ctx.today), end: Repository.date(ctx.today) }, { maxRows: 40 }).rows;
+    // Conteúdo com suspeita de injection nunca entra no briefing por IA (só na contagem).
+    var rows = all.filter(function (r) {
+      return !r.injection_suspected && !r.auth_fail && !r.is_probable_spam;
+    });
     if (rows.length < 3) return;
     var high = rows.filter(function (r) {
       return r.display_level === 'CRITICAL' || r.display_level === 'HIGH';
@@ -836,10 +1047,11 @@ var Pipeline = (function () {
         deadline: r.deadline_date ? Util.formatBrDate(r.deadline_date) : '', action: !!r.action_required,
       };
     });
-    var res = AiClient.generateBriefing({ periodLabel: 'Hoje, ' + Util.formatBrDate(ctx.today), stats: { mensagens: rows.length, prioridade_alta: high, por_categoria: byCat }, items: items });
+    var res = AiClient.generateBriefing({ periodLabel: 'Hoje, ' + Util.formatBrDate(ctx.today), stats: { mensagens: all.length, prioridade_alta: high, por_categoria: byCat, excluidas_por_seguranca: all.length - rows.length }, items: items });
     ctx.run.ai_requests += 1;
     ctx.run.ai_cost_usd += res.cost_usd || 0;
-    st.lastAt = Util.now();
+    // Truncado/transitório não segura o próximo intervalo de 3 h.
+    if (['TRUNCATED', 'TRANSIENT', 'NETWORK', 'RATE'].indexOf(res.error) < 0) st.lastAt = Util.now();
     if (!res.ok) {
       setJson_(KEYS.briefing, st);
       Monitoring.count(ctx.run, 'briefing_failed');

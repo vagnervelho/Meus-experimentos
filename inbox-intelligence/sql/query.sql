@@ -96,6 +96,7 @@ WITH base AS (
   FROM base WHERE received_date >= @start
 ), prev AS (
   SELECT primary_category, display_level, action_required FROM base WHERE received_date < @start
+    AND (@period != 'today' OR internal_ts <= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 24 HOUR))
 )
 SELECT
   (SELECT AS STRUCT COUNT(*) AS received,
@@ -108,23 +109,27 @@ SELECT
      COUNTIF(method = 'RULES') AS rules_only
    FROM cur) AS kpis,
   (SELECT AS STRUCT COUNT(*) AS received, COUNTIF(display_level IN ('CRITICAL', 'HIGH')) AS attention, COUNTIF(COALESCE(action_required, FALSE)) AS actions FROM prev) AS kpis_prev,
-  ARRAY(SELECT AS STRUCT message_id, thread_id, rfc822_message_id, subject, from_name, from_email, from_domain, internal_ts,
+  ARRAY(SELECT AS STRUCT message_id, thread_id, rfc822_message_id, subject, from_name, from_email, from_domain, internal_ts, received_date,
       primary_category, secondary_categories, summary, summary_kind, method, display_level, critical_overflow, score,
       relevance_axis, urgency_axis, action_axis, components_json, action_required, deadline_date, deadline_certainty,
-      is_unread, is_starred, confidence, user_status, injection_suspected, auth_fail
-    FROM cur WHERE display_level IN ('CRITICAL', 'HIGH') AND user_status NOT IN ('RESOLVED', 'DISMISSED') AND user_relevance != 'IRRELEVANT'
+      is_unread, is_starred, confidence, user_status, user_relevance, injection_suspected, auth_fail
+    FROM `meu-projeto.inbox_intelligence.v_inbox` WHERE direction = 'INBOUND' AND received_date >= DATE_SUB(@end, INTERVAL 60 DAY)
+      AND (received_date BETWEEN @start AND @end OR deadline_date BETWEEN DATE_SUB(@end, INTERVAL 3 DAY) AND DATE_ADD(@end, INTERVAL 3 DAY) OR display_level = 'CRITICAL')
+      AND display_level IN ('CRITICAL', 'HIGH') AND user_status NOT IN ('RESOLVED', 'DISMISSED') AND user_relevance != 'IRRELEVANT'
       AND (COALESCE(action_required, FALSE) OR COALESCE(urgency_axis, 0) >= @min_urgency) AND in_inbox
     ORDER BY IF(display_level = 'CRITICAL', 0, 1), score DESC LIMIT 12) AS attention,
-  ARRAY(SELECT AS STRUCT message_id, thread_id, rfc822_message_id, subject, from_name, from_email, from_domain, internal_ts,
-      primary_category, secondary_categories, summary, summary_kind, method, display_level, score, info_score, relevance_axis,
-      is_unread, confidence, injection_suspected, auth_fail
+  ARRAY(SELECT AS STRUCT message_id, thread_id, rfc822_message_id, subject, from_name, from_email, from_domain, internal_ts, received_date,
+      primary_category, secondary_categories, summary, summary_kind, method, display_level, critical_overflow, score, info_score,
+      relevance_axis, urgency_axis, action_axis, components_json, action_required, deadline_date, deadline_certainty,
+      is_unread, is_starred, confidence, user_status, user_relevance, injection_suspected, auth_fail
     FROM cur WHERE (COALESCE(is_newsletter, FALSE) OR primary_category IN ('noticias', 'economia', 'tecnologia', 'negocios'))
       AND NOT COALESCE(is_marketing, FALSE) AND user_relevance != 'IRRELEVANT'
     ORDER BY info_score DESC LIMIT 8) AS news,
   ARRAY(SELECT AS STRUCT topic, COUNT(*) AS n FROM cur, UNNEST(topics) AS topic GROUP BY topic ORDER BY n DESC LIMIT 8) AS topics,
   ARRAY(SELECT AS STRUCT primary_category AS category, COUNT(*) AS n FROM cur GROUP BY category ORDER BY n DESC) AS by_category,
   ARRAY(SELECT AS STRUCT primary_category AS category, COUNT(*) AS n FROM prev GROUP BY category) AS by_category_prev,
-  ARRAY(SELECT AS STRUCT action_id, message_id, description, owner, due_date, due_certainty, status, subject, from_name, priority_level
+  ARRAY(SELECT AS STRUCT action_id, message_id, thread_id, description, owner, due_date, due_certainty, status, subject, from_name, from_email,
+      priority_level, received_date, method
     FROM `meu-projeto.inbox_intelligence.v_actions` WHERE status = 'OPEN' ORDER BY due_date IS NULL, due_date, score DESC LIMIT 10) AS tasks,
   ARRAY(SELECT AS STRUCT opp_key, latest_json, first_seen, last_seen, mentions, message_ids, best_score, user_status
     FROM `meu-projeto.inbox_intelligence.v_opportunities` WHERE last_seen >= DATE_SUB(@end, INTERVAL 30 DAY) AND COALESCE(user_status, '') != 'DISMISSED'
@@ -160,6 +165,7 @@ SELECT message_id, thread_id, rfc822_message_id, subject, from_name, from_email,
 FROM r
 ORDER BY
   CASE WHEN @sort = 'match' THEN match_score END DESC,
+  CASE WHEN @sort = 'priority' THEN CASE display_level WHEN 'CRITICAL' THEN 4 WHEN 'HIGH' THEN 3 WHEN 'MEDIUM' THEN 2 ELSE 1 END END DESC,
   CASE WHEN @sort = 'priority' THEN score END DESC,
   CASE WHEN @sort = 'relevance' THEN relevance_axis END DESC,
   CASE WHEN @sort = 'urgency' THEN urgency_axis END DESC,
@@ -276,7 +282,7 @@ LIMIT 10;
 -- query/briefing_input
 SELECT message_id, thread_id, subject, from_domain, from_name, primary_category, summary, summary_kind, display_level, deadline_date,
   action_required, method, is_automated, is_bulk, has_list_unsubscribe, list_id, gmail_category, sensitive, ai_eligible,
-  is_probable_spam, auth_fail, direction, info_score, score, opportunity_json
+  is_probable_spam, auth_fail, direction, info_score, score, opportunity_json, injection_suspected
 FROM `meu-projeto.inbox_intelligence.v_inbox`
 WHERE direction = 'INBOUND' AND received_date BETWEEN @start AND @end AND user_status NOT IN ('RESOLVED', 'DISMISSED')
 ORDER BY score DESC

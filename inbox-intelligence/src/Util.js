@@ -255,6 +255,22 @@ var Util = (function () {
   }
 
   // ----------------------------------------------------- sanitização ----
+  // ------------------------------------------------ memo por execução ----
+  // Cada execução do Apps Script começa com o módulo zerado; nos testes, os
+  // pontos de entrada chamam resetMemo() para simular isso.
+  var memo_ = {};
+  /** Memoiza uma leitura cara (ex.: PropertiesService) durante a execução. */
+  function memo(key, fn) {
+    if (!Object.prototype.hasOwnProperty.call(memo_, key)) memo_[key] = fn();
+    return memo_[key];
+  }
+  function forget(key) {
+    delete memo_[key];
+  }
+  function resetMemo() {
+    memo_ = {};
+  }
+
   /**
    * Erro da aplicação com código do enum de Monitoring (CONFIG, AUTH, BUDGET...).
    * @param {string} code
@@ -372,5 +388,8 @@ var Util = (function () {
     createBudget: createBudget,
     sanitizeError: sanitizeError,
     appError: appError,
+    memo: memo,
+    forget: forget,
+    resetMemo: resetMemo,
   };
 })();

@@ -84,37 +84,46 @@ function apiMarkVisit() {
 function runPipeline(e) {
   Triggers.assertTriggerOwner();
   var fromTrigger = !!(e && e.triggerUid);
+  if (!fromTrigger) Api.assertOwner();
   var oneShot = Triggers.consumeOneShot(e);
   return Pipeline.run(fromTrigger ? (oneShot ? 'ONE_SHOT' : 'TIME') : 'MANUAL');
 }
 
 function runMaintenance(e) {
   Triggers.assertTriggerOwner();
+  if (!(e && e.triggerUid)) Api.assertOwner();
   return Triggers.maintenance(e && e.triggerUid ? 'TIME' : 'MANUAL');
 }
 
 // ---------------------------------------------------------------- editor ----
+// Funções de editor também são chamáveis por google.script.run: exigem o dono
+// (no editor, o usuário ativo é quem executa).
 function setup() {
+  Api.assertOwner();
   var r = Triggers.setup();
   console.log(JSON.stringify(r));
   return r;
 }
 
 function setupTriggers() {
+  Api.assertOwner();
   return Triggers.install();
 }
 
 function uninstallTriggers() {
+  Api.assertOwner();
   return Triggers.uninstall();
 }
 
 function runBackfillNow() {
+  Api.assertOwner();
   Pipeline.restartBackfill();
   return Triggers.scheduleOneShot();
 }
 
 /** Relatório de diagnóstico sem segredos nem conteúdo (para o log do editor). */
 function diagnose() {
+  Api.assertOwner();
   var report = {
     version: Config.APP_VERSION,
     setupDone: Triggers.isSetupDone(),

@@ -18,7 +18,8 @@ var DashboardService = (function () {
     AUTO_EXPIRED: 'Encerrada: o prazo passou há mais de 3 dias',
     AUTO_STALE: 'Encerrada: sem prazo e sem movimento há mais de 14 dias',
   };
-  var USER_KEYS = { lastVisit: 'LAST_VISIT_AT' };
+  var USER_KEYS = { lastVisit: 'LAST_VISIT_AT', prevVisit: 'PREV_VISIT_AT' };
+  var VISIT_GAP_MS = 30 * 60000;
 
   // ----------------------------------------------------------- utilidades ----
   function label_(id) {
@@ -196,7 +197,7 @@ var DashboardService = (function () {
   function bootstrap() {
     var missing = Triggers.missingSetup();
     var last = Monitoring.lastRun();
-    var visit = PropertiesService.getUserProperties().getProperty(USER_KEYS.lastVisit) || '';
+    var visit = PropertiesService.getUserProperties().getProperty(USER_KEYS.prevVisit) || '';
     var ui = Config.get().ui;
     return {
       user: { email: String(Session.getActiveUser().getEmail() || '') },
@@ -212,17 +213,23 @@ var DashboardService = (function () {
     };
   }
 
+  /**
+   * Uma "visita" é uma sessão: aberturas com menos de 30 min de intervalo não
+   * movem o marco anterior. O Radar compara com PREV_VISIT_AT (o fim da sessão
+   * anterior), nunca com o horário da visita atual.
+   */
   function markVisit() {
     var p = PropertiesService.getUserProperties();
-    var prev = p.getProperty(USER_KEYS.lastVisit) || '';
+    var last = p.getProperty(USER_KEYS.lastVisit) || '';
+    if (last && Util.now() - Date.parse(last) > VISIT_GAP_MS) p.setProperty(USER_KEYS.prevVisit, last);
     p.setProperty(USER_KEYS.lastVisit, Util.nowIso());
-    return { previousVisitAt: prev };
+    return { previousVisitAt: p.getProperty(USER_KEYS.prevVisit) || '' };
   }
 
   function radar(req) {
     var per = period_(req && req.period);
     if (per.key !== 'today' && per.key !== '7d' && per.key !== '30d') per = period_('7d');
-    var visit = PropertiesService.getUserProperties().getProperty(USER_KEYS.lastVisit) || Util.toIso(Util.now() - 24 * 3600000);
+    var visit = PropertiesService.getUserProperties().getProperty(USER_KEYS.prevVisit) || Util.toIso(Util.now() - 24 * 3600000);
     var sinceTs = visit.slice(0, 16) + ':00Z';
     if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00Z$/.test(sinceTs)) sinceTs = Util.toIso(Util.now() - 24 * 3600000);
     var params = {
@@ -379,7 +386,8 @@ var DashboardService = (function () {
       links: links,
       attachments: json_(r.attachments_json, []).slice(0, 20),
       fidelity: { total: num_(r.evidence_total), verified: num_(r.evidence_verified) },
-      unsubscribeUrl: httpUrl_(r.unsubscribe_url),
+      // Link de descadastro só de remetente autenticado e com List-Unsubscribe (golpes usam "descadastrar" como isca).
+      unsubscribeUrl: r.has_list_unsubscribe && r.auth_pass && !r.auth_fail && !r.is_probable_spam && r.primary_category !== 'spam' ? httpUrl_(r.unsubscribe_url) : '',
       history: (r.history || []).map(function (h) {
         return { method: h.method, provider: h.provider, model: h.model, at: h.version_ts };
       }),
@@ -472,7 +480,7 @@ var DashboardService = (function () {
           avgScore: Util.round(s.avg_score, 3), highShare: Util.round(s.high_share, 3), unreadShare: Util.round(s.unread_share, 3),
           massShare: Util.round(s.mass_share, 3),
           noiseScore: Util.round(s.mass_share * (1 - s.high_share) * (0.5 + 0.5 * s.unread_share), 3),
-          suggestion: sug.s, suggestionWhy: sug.why, unsubscribeUrl: httpUrl_(r.unsubscribe_url), allAuthPass: !!r.all_auth_pass,
+          suggestion: sug.s, suggestionWhy: sug.why, unsubscribeUrl: r.all_auth_pass && !r.any_spam && r.has_unsub ? httpUrl_(r.unsubscribe_url) : '', allAuthPass: !!r.all_auth_pass,
         };
       }),
     };

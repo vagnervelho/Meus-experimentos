@@ -351,7 +351,7 @@ var Schema = (function () {
       'LEFT JOIN ' + viewRef_('user_state') + " u ON u.target_type = 'MESSAGE' AND u.target_id = m.message_id\n" +
       "WHERE COALESCE(s.gmail_state, 'ACTIVE') NOT IN ('DELETED', 'SPAM', 'TRASHED')\n" +
       '), flagged AS (\n' +
-      "  SELECT *, COALESCE(level = 'CRITICAL' AND user_status NOT IN ('RESOLVED', 'DISMISSED') AND user_relevance != 'IRRELEVANT'\n" +
+      "  SELECT *, COALESCE(level = 'CRITICAL' AND in_inbox AND user_status NOT IN ('RESOLVED', 'DISMISSED') AND user_relevance != 'IRRELEVANT'\n" +
       '    AND (received_date >= ' + daysAgo_(o.criticalRecencyDays) + ' OR deadline_date >= CURRENT_DATE(' + TZ_SQL + ')), FALSE) AS critical_candidate\n' +
       '  FROM base\n' +
       ')\n' +
@@ -369,7 +369,9 @@ var Schema = (function () {
       '    i.in_inbox, i.user_status, i.display_level, i.score, act, off\n' +
       '  FROM ' + viewRef_('inbox') + ' i\n' +
       "  CROSS JOIN UNNEST(JSON_QUERY_ARRAY(COALESCE(i.actions_json, '[]'))) AS act WITH OFFSET off\n" +
-      "  WHERE i.direction = 'INBOUND'\n" +
+      // Golpe, spam ou falha de autenticação nunca viram tarefa, nem mensagens sem ação vigente.
+      "  WHERE i.direction = 'INBOUND' AND COALESCE(i.action_required, FALSE)\n" +
+      '    AND NOT COALESCE(i.is_probable_spam, FALSE) AND NOT COALESCE(i.auth_fail, FALSE)\n' +
       '  QUALIFY DENSE_RANK() OVER (PARTITION BY i.thread_id ORDER BY i.internal_ts DESC, i.message_id) = 1\n' +
       '), replies AS (\n' +
       '  SELECT thread_id, MAX(internal_ts) AS last_sent FROM ' + viewRef_('messages') + " WHERE direction = 'OUTBOUND' GROUP BY thread_id\n" +

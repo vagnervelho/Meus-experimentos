@@ -220,7 +220,7 @@ function claudeHandler(gas, opts) {
     seen.push(body);
     const content = body.messages[0].content;
     if (/briefing/i.test(body.system[0].text)) {
-      const refs = [...content.matchAll(/^(b\d+) \|/gm)].map((x) => x[1]);
+      const refs = [...content.matchAll(/ref=(b\d+)>>>/g)].map((x) => x[1]);
       return { code: 200, body: { content: [{ type: 'text', text: JSON.stringify({ headline: 'Dia com um contrato para assinar.', bullets: [{ text: 'Assinar contrato', refs: refs.slice(0, 1) }] }) }], usage: { input_tokens: 500, output_tokens: 80 }, stop_reason: 'end_turn' } };
     }
     const refs = [...content.matchAll(/ref=(m\d+)>>>/g)].map((x) => x[1]).filter((v, i, a) => a.indexOf(v) === i);

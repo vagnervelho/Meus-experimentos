@@ -55,6 +55,7 @@ var Api = (function () {
    */
   function handle(name, req, fn) {
     var t0 = Util.now();
+    Util.resetMemo();
     try {
       assertOwner();
       var data = fn(req && typeof req === 'object' ? req : {});

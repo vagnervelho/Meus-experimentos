@@ -80,7 +80,7 @@ LEFT JOIN `meu-projeto.inbox_intelligence.v_scores` sc ON sc.message_id = m.mess
 LEFT JOIN `meu-projeto.inbox_intelligence.v_user_state` u ON u.target_type = 'MESSAGE' AND u.target_id = m.message_id
 WHERE COALESCE(s.gmail_state, 'ACTIVE') NOT IN ('DELETED', 'SPAM', 'TRASHED')
 ), flagged AS (
-  SELECT *, COALESCE(level = 'CRITICAL' AND user_status NOT IN ('RESOLVED', 'DISMISSED') AND user_relevance != 'IRRELEVANT'
+  SELECT *, COALESCE(level = 'CRITICAL' AND in_inbox AND user_status NOT IN ('RESOLVED', 'DISMISSED') AND user_relevance != 'IRRELEVANT'
     AND (received_date >= DATE_SUB(CURRENT_DATE('America/Sao_Paulo'), INTERVAL 7 DAY) OR deadline_date >= CURRENT_DATE('America/Sao_Paulo')), FALSE) AS critical_candidate
   FROM base
 )
@@ -98,7 +98,8 @@ WITH acts AS (
     i.in_inbox, i.user_status, i.display_level, i.score, act, off
   FROM `meu-projeto.inbox_intelligence.v_inbox` i
   CROSS JOIN UNNEST(JSON_QUERY_ARRAY(COALESCE(i.actions_json, '[]'))) AS act WITH OFFSET off
-  WHERE i.direction = 'INBOUND'
+  WHERE i.direction = 'INBOUND' AND COALESCE(i.action_required, FALSE)
+    AND NOT COALESCE(i.is_probable_spam, FALSE) AND NOT COALESCE(i.auth_fail, FALSE)
   QUALIFY DENSE_RANK() OVER (PARTITION BY i.thread_id ORDER BY i.internal_ts DESC, i.message_id) = 1
 ), replies AS (
   SELECT thread_id, MAX(internal_ts) AS last_sent FROM `meu-projeto.inbox_intelligence.v_messages` WHERE direction = 'OUTBOUND' GROUP BY thread_id

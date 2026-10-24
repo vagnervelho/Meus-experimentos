@@ -150,6 +150,7 @@ var Triggers = (function () {
 
   // --------------------------------------------------------- manutenção ----
   function maintenance(triggerSource) {
+    Util.resetMemo();
     var lock = LockService.getScriptLock();
     if (!lock.tryLock(60000)) {
       Monitoring.log('info', 'maintenance_locked', {});
@@ -240,8 +241,11 @@ var Triggers = (function () {
       if (!info.exists) throw Util.appError('QUERY_FAILED', 'Renovação não criou a tabela ' + names[i]);
       BigQueryClient.addLifetimeBytes(info.numBytes);
     }
+    // Se a recriação das views falhar no meio, o pipeline as refaz (VIEWS_DIRTY) e o descarte espera.
+    props_().setProperty('VIEWS_DIRTY', '1');
     Schema.setGeneration(next);
     recreateViews_(next);
+    props_().deleteProperty('VIEWS_DIRTY');
     Schema.setPendingDrop(gen);
     props_().setProperty(KEYS.dropAt, String(Util.now() + 20 * 3600000));
     Repository.bumpDataVersion();
@@ -255,6 +259,11 @@ var Triggers = (function () {
     var prev = Schema.pendingDrop();
     if (!prev) return;
     if (Util.now() < Number(props_().getProperty(KEYS.dropAt) || 0)) return;
+    if (props_().getProperty('VIEWS_DIRTY')) {
+      // Views ainda podem apontar para a geração anterior: recria antes de descartar.
+      recreateViews_(Schema.generation());
+      props_().deleteProperty('VIEWS_DIRTY');
+    }
     dropGeneration_(prev);
     Schema.setPendingDrop(0);
     props_().deleteProperty(KEYS.dropAt);

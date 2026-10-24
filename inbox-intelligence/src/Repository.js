@@ -111,7 +111,9 @@ var Repository = (function () {
       '    is_newsletter, is_marketing, is_bulk, opportunity_json, in_inbox\n' +
       '  FROM base WHERE received_date >= @start\n' +
       '), prev AS (\n' +
+      // Em "Hoje", o dia anterior é comparado só até o mesmo horário (dia parcial × dia parcial).
       '  SELECT primary_category, display_level, action_required FROM base WHERE received_date < @start\n' +
+      "    AND (@period != 'today' OR internal_ts <= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 24 HOUR))\n" +
       ')\n' +
       'SELECT\n' +
       '  (SELECT AS STRUCT COUNT(*) AS received,\n' +
@@ -124,23 +126,28 @@ var Repository = (function () {
       "     COUNTIF(method = 'RULES') AS rules_only\n" +
       '   FROM cur) AS kpis,\n' +
       "  (SELECT AS STRUCT COUNT(*) AS received, COUNTIF(display_level IN ('CRITICAL', 'HIGH')) AS attention, COUNTIF(COALESCE(action_required, FALSE)) AS actions FROM prev) AS kpis_prev,\n" +
-      '  ARRAY(SELECT AS STRUCT message_id, thread_id, rfc822_message_id, subject, from_name, from_email, from_domain, internal_ts,\n' +
+      // "Exige atenção" inclui mensagens mais antigas cujo prazo está próximo (o reescore diário as mantém altas).
+      '  ARRAY(SELECT AS STRUCT message_id, thread_id, rfc822_message_id, subject, from_name, from_email, from_domain, internal_ts, received_date,\n' +
       '      primary_category, secondary_categories, summary, summary_kind, method, display_level, critical_overflow, score,\n' +
       '      relevance_axis, urgency_axis, action_axis, components_json, action_required, deadline_date, deadline_certainty,\n' +
-      '      is_unread, is_starred, confidence, user_status, injection_suspected, auth_fail\n' +
-      "    FROM cur WHERE display_level IN ('CRITICAL', 'HIGH') AND user_status NOT IN ('RESOLVED', 'DISMISSED') AND user_relevance != 'IRRELEVANT'\n" +
+      '      is_unread, is_starred, confidence, user_status, user_relevance, injection_suspected, auth_fail\n' +
+      "    FROM {{v:inbox}} WHERE direction = 'INBOUND' AND received_date >= DATE_SUB(@end, INTERVAL 60 DAY)\n" +
+      "      AND (received_date BETWEEN @start AND @end OR deadline_date BETWEEN DATE_SUB(@end, INTERVAL 3 DAY) AND DATE_ADD(@end, INTERVAL 3 DAY) OR display_level = 'CRITICAL')\n" +
+      "      AND display_level IN ('CRITICAL', 'HIGH') AND user_status NOT IN ('RESOLVED', 'DISMISSED') AND user_relevance != 'IRRELEVANT'\n" +
       '      AND (COALESCE(action_required, FALSE) OR COALESCE(urgency_axis, 0) >= @min_urgency) AND in_inbox\n' +
       "    ORDER BY IF(display_level = 'CRITICAL', 0, 1), score DESC LIMIT 12) AS attention,\n" +
-      '  ARRAY(SELECT AS STRUCT message_id, thread_id, rfc822_message_id, subject, from_name, from_email, from_domain, internal_ts,\n' +
-      '      primary_category, secondary_categories, summary, summary_kind, method, display_level, score, info_score, relevance_axis,\n' +
-      '      is_unread, confidence, injection_suspected, auth_fail\n' +
+      '  ARRAY(SELECT AS STRUCT message_id, thread_id, rfc822_message_id, subject, from_name, from_email, from_domain, internal_ts, received_date,\n' +
+      '      primary_category, secondary_categories, summary, summary_kind, method, display_level, critical_overflow, score, info_score,\n' +
+      '      relevance_axis, urgency_axis, action_axis, components_json, action_required, deadline_date, deadline_certainty,\n' +
+      '      is_unread, is_starred, confidence, user_status, user_relevance, injection_suspected, auth_fail\n' +
       "    FROM cur WHERE (COALESCE(is_newsletter, FALSE) OR primary_category IN ('noticias', 'economia', 'tecnologia', 'negocios'))\n" +
       "      AND NOT COALESCE(is_marketing, FALSE) AND user_relevance != 'IRRELEVANT'\n" +
       '    ORDER BY info_score DESC LIMIT 8) AS news,\n' +
       '  ARRAY(SELECT AS STRUCT topic, COUNT(*) AS n FROM cur, UNNEST(topics) AS topic GROUP BY topic ORDER BY n DESC LIMIT 8) AS topics,\n' +
       '  ARRAY(SELECT AS STRUCT primary_category AS category, COUNT(*) AS n FROM cur GROUP BY category ORDER BY n DESC) AS by_category,\n' +
       '  ARRAY(SELECT AS STRUCT primary_category AS category, COUNT(*) AS n FROM prev GROUP BY category) AS by_category_prev,\n' +
-      '  ARRAY(SELECT AS STRUCT action_id, message_id, description, owner, due_date, due_certainty, status, subject, from_name, priority_level\n' +
+      '  ARRAY(SELECT AS STRUCT action_id, message_id, thread_id, description, owner, due_date, due_certainty, status, subject, from_name, from_email,\n' +
+      '      priority_level, received_date, method\n' +
       "    FROM {{v:actions}} WHERE status = 'OPEN' ORDER BY due_date IS NULL, due_date, score DESC LIMIT 10) AS tasks,\n" +
       '  ARRAY(SELECT AS STRUCT opp_key, latest_json, first_seen, last_seen, mentions, message_ids, best_score, user_status\n' +
       "    FROM {{v:opportunities}} WHERE last_seen >= DATE_SUB(@end, INTERVAL 30 DAY) AND COALESCE(user_status, '') != 'DISMISSED'\n" +
@@ -176,6 +183,8 @@ var Repository = (function () {
       'FROM r\n' +
       'ORDER BY\n' +
       "  CASE WHEN @sort = 'match' THEN match_score END DESC,\n" +
+      // Nível exibido primeiro: "irrelevante" (LOW) ou limitado por confiabilidade não fica acima de Altas.
+      "  CASE WHEN @sort = 'priority' THEN CASE display_level WHEN 'CRITICAL' THEN 4 WHEN 'HIGH' THEN 3 WHEN 'MEDIUM' THEN 2 ELSE 1 END END DESC,\n" +
       "  CASE WHEN @sort = 'priority' THEN score END DESC,\n" +
       "  CASE WHEN @sort = 'relevance' THEN relevance_axis END DESC,\n" +
       "  CASE WHEN @sort = 'urgency' THEN urgency_axis END DESC,\n" +
@@ -292,7 +301,7 @@ var Repository = (function () {
     briefing_input:
       'SELECT message_id, thread_id, subject, from_domain, from_name, primary_category, summary, summary_kind, display_level, deadline_date,\n' +
       '  action_required, method, is_automated, is_bulk, has_list_unsubscribe, list_id, gmail_category, sensitive, ai_eligible,\n' +
-      '  is_probable_spam, auth_fail, direction, info_score, score, opportunity_json\n' +
+      '  is_probable_spam, auth_fail, direction, info_score, score, opportunity_json, injection_suspected\n' +
       'FROM {{v:inbox}}\n' +
       "WHERE direction = 'INBOUND' AND received_date BETWEEN @start AND @end AND user_status NOT IN ('RESOLVED', 'DISMISSED')\n" +
       'ORDER BY score DESC\n' +
@@ -418,23 +427,27 @@ var Repository = (function () {
    * (retidas); fatos, ações e oportunidade são gravados sem elas.
    */
   function analysisRow(msg, merged, meta) {
-    var facts = (merged.key_facts || []).slice(0, 6);
+    // Tudo que é texto derivado do corpo passa pela redação de PII antes de gravar.
+    var facts = (merged.key_facts || []).slice(0, 6).map(function (f) {
+      return { fact: redact_(f.fact || ''), evidence: redact_(f.evidence || '') };
+    });
     var actions = (merged.actions || []).slice(0, 5).map(function (a) {
-      return { id: actionId(msg.message_id, a), description: a.description, owner: a.owner || 'unknown', due_date: a.due_date || '', due_certainty: a.due_certainty || 'NONE' };
+      return { id: actionId(msg.message_id, a), description: redact_(a.description || ''), owner: a.owner || 'unknown', due_date: a.due_date || '', due_certainty: a.due_certainty || 'NONE' };
     });
     var op = merged.opportunity || null;
     var opStored = null;
     if (op) {
       opStored = {};
       Object.keys(op).forEach(function (k) {
-        if (k !== 'evidence') opStored[k] = op[k];
+        if (k === 'evidence') return;
+        opStored[k] = ['title', 'next_step', 'stage', 'compensation'].indexOf(k) >= 0 && typeof op[k] === 'string' ? redact_(op[k]) : op[k];
       });
     }
     var evidence = {
       facts: facts.map(function (f) { return f.evidence || ''; }),
-      actions: (merged.actions || []).slice(0, 5).map(function (a) { return a.evidence || ''; }),
-      classification: merged.evidence || [],
-      opportunity: op && op.evidence ? op.evidence : '',
+      actions: (merged.actions || []).slice(0, 5).map(function (a) { return redact_(a.evidence || ''); }),
+      classification: (merged.evidence || []).map(function (e) { return redact_(e); }),
+      opportunity: op && op.evidence ? redact_(op.evidence) : '',
     };
     var isAi = merged.method === 'AI';
     var entities = merged.entities || [];
@@ -452,8 +465,8 @@ var Repository = (function () {
       method: merged.method, provider: meta.provider || 'rules', model: meta.model || '', classifier_version: Config.CLASSIFIER_VERSION,
       config_version: Config.configVersion(), prompt_version: isAi ? AiSchema.PROMPT_VERSION : '', send_policy: meta.policy || 'OFF',
       primary_category: merged.primary_category, secondary_categories: merged.secondary_categories || [], topics: merged.topics || [],
-      summary: merged.summary || '', summary_kind: isAi ? 'ABSTRACTIVE' : 'EXTRACTIVE',
-      key_facts_json: JSON.stringify(facts.map(function (f) { return { fact: f.fact }; })), whats_new: merged.whats_new || '',
+      summary: redact_(merged.summary || ''), summary_kind: isAi ? 'ABSTRACTIVE' : 'EXTRACTIVE',
+      key_facts_json: JSON.stringify(facts.map(function (f) { return { fact: f.fact }; })), whats_new: redact_(merged.whats_new || ''),
       relevance: merged.relevance || null, importance: merged.importance || null, urgency: merged.urgency || null,
       action_required: !!merged.action_required, actions_json: JSON.stringify(actions),
       deadline_date: merged.deadline ? merged.deadline.date : null, deadline_certainty: merged.deadline ? merged.deadline.certainty : null,
@@ -532,12 +545,14 @@ var Repository = (function () {
 
   /** Enfileira um evento (gravação atômica nas Properties; sem lock nem BigQuery). */
   function queueFeedback(ev) {
-    if (TARGET_TYPES.indexOf(ev.targetType) < 0 || FEEDBACK_TYPES.indexOf(ev.type) < 0) throw new Error('Feedback inválido.');
-    if (!/^[A-Za-z0-9:_|.@-]{1,200}$/.test(String(ev.targetId || ''))) throw new Error('Alvo inválido.');
+    if (TARGET_TYPES.indexOf(ev.targetType) < 0 || FEEDBACK_TYPES.indexOf(ev.type) < 0) throw Util.appError('VALIDATION', 'Feedback inválido.');
+    // Chaves de oportunidade têm espaços ("empresa|cargo normalizado"); as demais, só [A-Za-z0-9:_|.@-].
+    var targetRe = ev.targetType === 'OPPORTUNITY' ? /^[a-z0-9 :_|.@-]{1,200}$/ : /^[A-Za-z0-9:_|.@-]{1,200}$/;
+    if (!targetRe.test(String(ev.targetId || ''))) throw Util.appError('VALIDATION', 'Alvo inválido.');
     var payload = {};
     if (ev.type === 'MISCLASSIFIED') {
       var cat = ev.payload && ev.payload.correctCategory;
-      if (Config.categoryIds().indexOf(cat) < 0) throw new Error('Categoria inválida.');
+      if (Config.categoryIds().indexOf(cat) < 0) throw Util.appError('VALIDATION', 'Categoria inválida.');
       payload.correctCategory = cat;
     }
     var now = Util.nowIso();
