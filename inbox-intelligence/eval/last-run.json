@@ -1,6 +1,6 @@
 {
   "meta": {
-    "generatedAt": "2026-10-24T19:11:16.534Z",
+    "generatedAt": "2026-10-24T23:19:00.107Z",
     "datasetHash": "6e95cd74ae2698a4",
     "datasetFiles": [
       "01-contas-financas.json",
@@ -11,66 +11,66 @@
       "06-spam-pessoal-adversarial.json"
     ],
     "n": 126,
-    "classifierVersion": "rules-2026.10.1",
-    "parserVersion": "parser-2026.10.1",
-    "configVersion": "8546a2ef1d",
+    "classifierVersion": "rules-2026.10.2",
+    "parserVersion": "parser-2026.10.2",
+    "configVersion": "8cee049994",
     "ownerEmail": "rafael.moura.dados@gmail.com"
   },
   "metrics": {
     "category_top1": {
       "label": "Categoria: top-1 = ideal",
-      "k": 79,
-      "n": 126,
-      "value": 0.626984126984127,
-      "ci_low": 0.53995802557443,
-      "ci_high": 0.7064961154712749,
-      "kind": "proportion"
-    },
-    "category_acceptable": {
-      "label": "Categoria: top-1 ∈ aceitáveis",
-      "k": 101,
-      "n": 126,
-      "value": 0.8015873015873016,
-      "ci_low": 0.7234887276997605,
-      "ci_high": 0.8618398572837888,
-      "kind": "proportion"
-    },
-    "macro_f1_strict": {
-      "label": "Macro-F1 (verdade = ideal)",
-      "value": 0.6057004227282864,
-      "n": 126,
-      "k": null,
-      "ci_low": 0.4994783456770857,
-      "ci_high": 0.6619665287995596,
-      "kind": "bootstrap",
-      "classes": 19
-    },
-    "macro_f1_lenient": {
-      "label": "Macro-F1 (aceitável conta como acerto)",
-      "value": 0.7613878435941334,
-      "n": 126,
-      "k": null,
-      "ci_low": 0.6671326345302953,
-      "ci_high": 0.8104804344958506,
-      "kind": "bootstrap",
-      "classes": 19
-    },
-    "level_exact": {
-      "label": "Nível exato (casos com nível único esperado)",
-      "k": 34,
-      "n": 47,
-      "value": 0.723404255319149,
-      "ci_low": 0.5824116429931004,
-      "ci_high": 0.8306359400884707,
-      "kind": "proportion"
-    },
-    "level_in_range": {
-      "label": "Nível dentro de [levelMin, levelMax]",
       "k": 100,
       "n": 126,
       "value": 0.7936507936507936,
       "ci_low": 0.7148135106579152,
       "ci_high": 0.8551116905102774,
+      "kind": "proportion"
+    },
+    "category_acceptable": {
+      "label": "Categoria: top-1 ∈ aceitáveis",
+      "k": 121,
+      "n": 126,
+      "value": 0.9603174603174603,
+      "ci_low": 0.9104631226702407,
+      "ci_high": 0.9829331386204399,
+      "kind": "proportion"
+    },
+    "macro_f1_strict": {
+      "label": "Macro-F1 (verdade = ideal)",
+      "value": 0.7386386106786954,
+      "n": 126,
+      "k": null,
+      "ci_low": 0.6396571512067403,
+      "ci_high": 0.8349172396231219,
+      "kind": "bootstrap",
+      "classes": 19
+    },
+    "macro_f1_lenient": {
+      "label": "Macro-F1 (aceitável conta como acerto)",
+      "value": 0.9543209876543209,
+      "n": 126,
+      "k": null,
+      "ci_low": 0.8959150326797385,
+      "ci_high": 0.9900058788947678,
+      "kind": "bootstrap",
+      "classes": 18
+    },
+    "level_exact": {
+      "label": "Nível exato (casos com nível único esperado)",
+      "k": 43,
+      "n": 47,
+      "value": 0.9148936170212766,
+      "ci_low": 0.8006819480497736,
+      "ci_high": 0.9664064205302869,
+      "kind": "proportion"
+    },
+    "level_in_range": {
+      "label": "Nível dentro de [levelMin, levelMax]",
+      "k": 121,
+      "n": 126,
+      "value": 0.9603174603174603,
+      "ci_low": 0.9104631226702407,
+      "ci_high": 0.9829331386204399,
       "kind": "proportion"
     },
     "level_over": {
@@ -85,150 +85,150 @@
     },
     "level_under": {
       "label": "Nível ABAIXO do intervalo (subpriorização)",
-      "k": 23,
+      "k": 2,
       "n": 126,
-      "value": 0.18253968253968253,
-      "ci_low": 0.12482691576112775,
-      "ci_high": 0.25903773162460997,
+      "value": 0.015873015873015872,
+      "ci_low": 0.00436371038878235,
+      "ci_high": 0.05602987687446764,
       "kind": "proportion",
       "lowerIsBetter": true
     },
     "critical_precision": {
       "label": "Crítica: precisão (predita e aceitável)",
-      "k": 1,
-      "n": 1,
-      "value": 1,
-      "ci_low": 0.20654329147389294,
-      "ci_high": 1,
+      "k": 5,
+      "n": 6,
+      "value": 0.8333333333333334,
+      "ci_low": 0.43649056343635395,
+      "ci_high": 0.9699474141282697,
       "kind": "proportion"
     },
     "critical_recall": {
       "label": "Crítica: recall (levelMin = Crítica)",
-      "k": 1,
+      "k": 4,
       "n": 4,
-      "value": 0.25,
-      "ci_low": 0.045586062644636216,
-      "ci_high": 0.6993639475573634,
+      "value": 1,
+      "ci_low": 0.5100999795960008,
+      "ci_high": 1,
       "kind": "proportion"
     },
     "high_plus_precision": {
       "label": "Alta ou crítica: precisão",
-      "k": 16,
-      "n": 18,
-      "value": 0.8888888888888888,
-      "ci_low": 0.6719975513339578,
-      "ci_high": 0.9689811315464172,
+      "k": 25,
+      "n": 27,
+      "value": 0.9259259259259259,
+      "ci_low": 0.7663002270926937,
+      "ci_high": 0.9794457783026165,
       "kind": "proportion"
     },
     "high_plus_recall": {
       "label": "Alta ou crítica: recall (levelMin ≥ Alta)",
-      "k": 12,
+      "k": 20,
       "n": 21,
-      "value": 0.5714285714285714,
-      "ci_low": 0.3654621629703244,
-      "ci_high": 0.7553030051347894,
+      "value": 0.9523809523809523,
+      "ci_low": 0.7733018341376452,
+      "ci_high": 0.9915442305280766,
       "kind": "proportion"
     },
     "action_precision": {
       "label": "Ação: precisão",
-      "k": 26,
-      "n": 31,
-      "value": 0.8387096774193549,
-      "ci_low": 0.6736529727502113,
-      "ci_high": 0.9290748009456006,
+      "k": 40,
+      "n": 40,
+      "value": 1,
+      "ci_low": 0.9123754607496077,
+      "ci_high": 1,
       "kind": "proportion"
     },
     "action_recall": {
       "label": "Ação: recall",
-      "k": 26,
+      "k": 40,
       "n": 40,
-      "value": 0.65,
-      "ci_low": 0.4950559699353738,
-      "ci_high": 0.7786566682895086,
+      "value": 1,
+      "ci_low": 0.9123754607496077,
+      "ci_high": 1,
       "kind": "proportion"
     },
     "action_accuracy": {
       "label": "Ação: acurácia (casos com rótulo)",
-      "k": 90,
+      "k": 109,
       "n": 109,
-      "value": 0.8256880733944955,
-      "ci_low": 0.7437283944421205,
-      "ci_high": 0.8854721840679327,
+      "value": 1,
+      "ci_low": 0.9659558177126165,
+      "ci_high": 0.9999999999999999,
       "kind": "proportion"
     },
     "deadline_accuracy": {
       "label": "Prazo: acurácia (data exata ou ausência correta)",
-      "k": 89,
+      "k": 111,
       "n": 111,
-      "value": 0.8018018018018018,
-      "ci_low": 0.7181000473756158,
-      "ci_high": 0.8653122352815399,
+      "value": 1,
+      "ci_low": 0.9665487070887205,
+      "ci_high": 1,
       "kind": "proportion"
     },
     "deadline_date_recall": {
       "label": "Prazo: data certa quando há prazo",
-      "k": 33,
+      "k": 35,
       "n": 35,
-      "value": 0.9428571428571428,
-      "ci_low": 0.8139261926062996,
-      "ci_high": 0.984187170385956,
+      "value": 1,
+      "ci_low": 0.9010957324106112,
+      "ci_high": 1,
       "kind": "proportion"
     },
     "deadline_spurious": {
       "label": "Prazo espúrio (esperado nenhum, veio data)",
-      "k": 20,
+      "k": 0,
       "n": 76,
-      "value": 0.2631578947368421,
-      "ci_low": 0.1772926637089946,
-      "ci_high": 0.371814568610999,
+      "value": 0,
+      "ci_low": 0,
+      "ci_high": 0.04811526823109757,
       "kind": "proportion",
       "lowerIsBetter": true
     },
     "injection_precision": {
       "label": "Injection: precisão",
-      "k": 3,
+      "k": 4,
       "n": 4,
-      "value": 0.75,
-      "ci_low": 0.3006360524426366,
-      "ci_high": 0.9544139373553637,
+      "value": 1,
+      "ci_low": 0.5100999795960008,
+      "ci_high": 1,
       "kind": "proportion"
     },
     "injection_recall": {
       "label": "Injection: recall",
-      "k": 3,
+      "k": 4,
       "n": 4,
-      "value": 0.75,
-      "ci_low": 0.3006360524426366,
-      "ci_high": 0.9544139373553637,
+      "value": 1,
+      "ci_low": 0.5100999795960008,
+      "ci_high": 1,
       "kind": "proportion"
     },
     "opportunity_rate": {
       "label": "Taxa de oportunidades detectadas (todas as mensagens)",
-      "k": 15,
+      "k": 13,
       "n": 126,
-      "value": 0.11904761904761904,
-      "ci_low": 0.07348600427891415,
-      "ci_high": 0.18715157258397108,
+      "value": 0.10317460317460317,
+      "ci_low": 0.061291686584249556,
+      "ci_high": 0.1685391226479226,
       "kind": "proportion",
       "informative": true,
       "expectedRate": 0.10317460317460317
     },
     "opportunity_precision": {
       "label": "Oportunidade: precisão",
-      "k": 11,
-      "n": 15,
-      "value": 0.7333333333333333,
-      "ci_low": 0.4804911034231324,
-      "ci_high": 0.8910272389681718,
+      "k": 13,
+      "n": 13,
+      "value": 1,
+      "ci_low": 0.7718981569447083,
+      "ci_high": 1,
       "kind": "proportion"
     },
     "opportunity_recall": {
       "label": "Oportunidade: recall",
-      "k": 11,
+      "k": 13,
       "n": 13,
-      "value": 0.8461538461538461,
-      "ci_low": 0.5776482949136899,
-      "ci_high": 0.9567427368172621,
+      "value": 1,
+      "ci_low": 0.7718981569447083,
+      "ci_high": 1,
       "kind": "proportion"
     }
   },
@@ -248,14 +248,7 @@
         "inj-recrutador-falso-instrucoes",
         "inj-zero-width-aprovacao-pagamento"
       ],
-      "violations": [
-        {
-          "id": "phish-fraude-ceo-pix-gmail",
-          "level": "HIGH",
-          "score": 0.552,
-          "category": "tarefas"
-        }
-      ]
+      "violations": []
     },
     {
       "key": "marketing_not_critical",
@@ -281,21 +274,9 @@
       "key": "newsletter_not_critical",
       "label": "Newsletter nunca Crítica",
       "covered": [
-        "compras-delivery-entregue-com-cupom",
-        "agenda-webinar-comeca-hoje",
         "saude-newsletter-bem-estar",
         "gov-justica-eleitoral-informativo",
-        "trabalho-slack-mensagens-nao-lidas",
-        "trabalho-github-review-solicitado-en",
-        "trabalho-dependabot-vulnerabilidade",
-        "trabalho-town-hall-convite-interno",
-        "trabalho-pesquisa-clima-lembrete",
-        "carreira-linkedin-alerta-pricing",
-        "carreira-case-tecnico-prazo-gupy",
-        "carreira-indeed-alerta-irrelevante",
         "carreira-newsletter-curadoria-vagas",
-        "networking-convite-conexao-recrutadora",
-        "networking-linkedin-impressoes-post",
         "news-tldr-ai-en",
         "news-valor-copom-selic",
         "news-substack-pricing-letter",
@@ -306,14 +287,7 @@
         "news-ultima-chance-evento",
         "news-research-carteira-recomendada",
         "inj-newsletter-instrucao-oculta-html",
-        "news-artigo-sobre-prompt-injection",
-        "mkt-trial-saas-expira",
-        "mkt-pesquisa-satisfacao",
-        "social-instagram-curtidas",
-        "social-facebook-aniversarios",
-        "social-youtube-novo-video",
-        "pessoal-lista-familia-churrasco",
-        "pessoal-sindico-assembleia"
+        "news-artigo-sobre-prompt-injection"
       ],
       "violations": []
     },
@@ -330,26 +304,7 @@
         "en-cliente-deck-amanha-eod",
         "trabalho-reply-chefe-resumo-amanha-cedo"
       ],
-      "violations": [
-        {
-          "id": "pessoal-irmao-rg-cartorio-hoje",
-          "level": "MEDIUM",
-          "score": 0.538,
-          "category": "governo_juridico"
-        },
-        {
-          "id": "en-cliente-deck-amanha-eod",
-          "level": "MEDIUM",
-          "score": 0.5496,
-          "category": "negocios"
-        },
-        {
-          "id": "trabalho-reply-chefe-resumo-amanha-cedo",
-          "level": "MEDIUM",
-          "score": 0.3794,
-          "category": "outros"
-        }
-      ]
+      "violations": []
     }
   ],
   "results": [
@@ -370,12 +325,12 @@
       "got": {
         "category": "contas",
         "secondary": [],
-        "confidence": 0.95,
-        "level": "HIGH",
-        "score": 0.5642,
+        "confidence": 0.942,
+        "level": "MEDIUM",
+        "score": 0.5112,
         "urgency": 0.3679,
         "action": true,
-        "action_score": 0.5,
+        "action_score": 0.663,
         "deadline": "2026-10-23",
         "deadline_certainty": "EXPLICIT",
         "deadline_kind": "DEADLINE",
@@ -392,21 +347,21 @@
         "signals": [],
         "gate": [],
         "top_components": [
-          "Importância 0.85 (Categoria e conteúdo de alta importância)",
+          "Importância 0.75 (Categoria e conteúdo de alta importância)",
           "Ação pendente 1 (Pede uma ação sua diretamente)",
           "Urgência 0.368 (Prazo explícito em 3 dias)",
-          "Remetente 0.4 (Pessoa (não automático))"
+          "Novidade 1 (Conteúdo novo)"
         ],
         "top_scores": [
           "contas:24",
-          "tarefas:3",
+          "tarefas:4",
           "noticias:2",
           "economia:1"
         ]
       },
       "parsed": {
         "is_bulk": false,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": false,
         "auth_pass": true,
         "user_in_to": true,
@@ -437,10 +392,10 @@
         "category": "contas",
         "secondary": [],
         "confidence": 0.844,
-        "level": "MEDIUM",
-        "score": 0.5155,
+        "level": "LOW",
+        "score": 0.2825,
         "urgency": 0.097,
-        "action": true,
+        "action": false,
         "action_score": 0,
         "deadline": "2026-10-28",
         "deadline_certainty": "EXPLICIT",
@@ -454,14 +409,14 @@
         "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: fatura, vencimento, debito automatico, conta · pedido de ação · prazo 28/10/2026",
+        "reason": "Termos: fatura, vencimento, debito automatico, conta · prazo 28/10/2026",
         "signals": [],
         "gate": [],
         "top_components": [
-          "Importância 0.85 (Categoria e conteúdo de alta importância)",
-          "Ação pendente 1 (Pede uma ação sua diretamente)",
-          "Remetente 0.4 (Pessoa (não automático))",
-          "Novidade 1 (Conteúdo novo)"
+          "Importância 0.75 (Categoria e conteúdo de alta importância)",
+          "Novidade 1 (Conteúdo novo)",
+          "Urgência 0.097 (Prazo explícito em 7 dias)",
+          "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
           "contas:18",
@@ -472,7 +427,7 @@
       },
       "parsed": {
         "is_bulk": false,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": false,
         "auth_pass": true,
         "user_in_to": true,
@@ -482,14 +437,7 @@
         "received_date": "2026-10-21",
         "body_chars": 278
       },
-      "errors": [
-        {
-          "field": "ação",
-          "exp": "false",
-          "got": "true (action_score 0)",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "contas-condominio-vence-hoje",
@@ -510,12 +458,12 @@
         "secondary": [],
         "confidence": 0.93,
         "level": "HIGH",
-        "score": 0.564,
-        "urgency": 0.6,
+        "score": 0.625,
+        "urgency": 1,
         "action": true,
         "action_score": 0,
         "deadline": "2026-10-21",
-        "deadline_certainty": "INFERRED",
+        "deadline_certainty": "EXPLICIT",
         "deadline_kind": "DEADLINE",
         "opportunity": false,
         "opportunity_type": null,
@@ -532,10 +480,10 @@
           "Ação com prazo próximo"
         ],
         "top_components": [
-          "Importância 0.7 (Categoria e conteúdo de alta importância)",
+          "Importância 0.75 (Categoria e conteúdo de alta importância)",
+          "Urgência 1 (Prazo explícito hoje)",
           "Ação pendente 1 (Pede uma ação sua diretamente)",
-          "Urgência 0.6 (Prazo inferido hoje)",
-          "Remetente 0.4 (Pessoa (não automático))"
+          "Novidade 1 (Conteúdo novo)"
         ],
         "top_scores": [
           "contas:30",
@@ -546,7 +494,7 @@
       },
       "parsed": {
         "is_bulk": false,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": false,
         "auth_pass": true,
         "user_in_to": true,
@@ -576,12 +524,12 @@
       "got": {
         "category": "contas",
         "secondary": [],
-        "confidence": 0.939,
-        "level": "MEDIUM",
-        "score": 0.454,
+        "confidence": 0.924,
+        "level": "HIGH",
+        "score": 0.55,
         "urgency": 0.0498,
         "action": true,
-        "action_score": 0.5,
+        "action_score": 0.833,
         "deadline": "2026-10-31",
         "deadline_certainty": "EXPLICIT",
         "deadline_kind": "DEADLINE",
@@ -595,18 +543,22 @@
         "is_marketing": false,
         "is_spam": false,
         "reason": "Termos: @gov.br, iptu, cobranca, gov.br · pedido de ação · prazo 31/10/2026",
-        "signals": [],
-        "gate": [],
+        "signals": [
+          "severity:governo_juridico"
+        ],
+        "gate": [
+          "Consequência séria com ação e prazo explícito"
+        ],
         "top_components": [
-          "Importância 0.75 (Categoria e conteúdo de alta importância)",
+          "Importância 0.96 (Categoria e conteúdo de alta importância · notificação séria (gravidade 0.7))",
           "Ação pendente 1 (Pede uma ação sua diretamente)",
           "Novidade 1 (Conteúdo novo)",
-          "Remetente 0.15 (Envio automático ou em massa)"
+          "Piso de prioridade 0.55 (Notificação grave (gravidade 0.7) que pede uma ação: no mínimo Alta)"
         ],
         "top_scores": [
           "contas:23",
+          "tarefas:5",
           "governo_juridico:4",
-          "tarefas:3",
           "noticias:2"
         ]
       },
@@ -622,14 +574,7 @@
         "received_date": "2026-10-22",
         "body_chars": 337
       },
-      "errors": [
-        {
-          "field": "nível",
-          "exp": "HIGH",
-          "got": "MEDIUM (score 0.454)",
-          "severity": "abaixo"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "financas-comprovante-pix-enviado",
@@ -651,14 +596,14 @@
         "category": "financas",
         "secondary": [],
         "confidence": 0.95,
-        "level": "MEDIUM",
-        "score": 0.356,
-        "urgency": 0.6,
+        "level": "LOW",
+        "score": 0.195,
+        "urgency": 0,
         "action": false,
         "action_score": 0,
-        "deadline": "2026-10-19",
-        "deadline_certainty": "INFERRED",
-        "deadline_kind": "EVENT",
+        "deadline": null,
+        "deadline_certainty": null,
+        "deadline_kind": null,
         "opportunity": false,
         "opportunity_type": null,
         "opportunity_fit": null,
@@ -668,25 +613,24 @@
         "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: @itau.com.br, pix enviado, banco, pix · prazo 19/10/2026",
+        "reason": "Termos: @itau.com.br, pix enviado, banco, pix",
         "signals": [],
         "gate": [],
         "top_components": [
-          "Importância 0.6 (Categoria e conteúdo de alta importância)",
-          "Urgência 0.6 (Prazo inferido hoje)",
-          "Remetente 0.4 (Pessoa (não automático))",
-          "Novidade 1 (Conteúdo novo)"
+          "Importância 0.5 (Importância moderada)",
+          "Novidade 1 (Conteúdo novo)",
+          "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
           "financas:14",
           "noticias:2",
-          "agenda:2",
-          "contas:2"
+          "contas:2",
+          "carreira:0"
         ]
       },
       "parsed": {
         "is_bulk": false,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": false,
         "auth_pass": true,
         "user_in_to": true,
@@ -696,14 +640,7 @@
         "received_date": "2026-10-19",
         "body_chars": 230
       },
-      "errors": [
-        {
-          "field": "prazo",
-          "exp": "null",
-          "got": "2026-10-19 (EVENT, INFERRED)",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "contas-telefonia-fatura-9d",
@@ -724,10 +661,10 @@
         "secondary": [],
         "confidence": 0.95,
         "level": "MEDIUM",
-        "score": 0.507,
+        "score": 0.454,
         "urgency": 0.0498,
         "action": true,
-        "action_score": 0,
+        "action_score": 0.5,
         "deadline": "2026-10-30",
         "deadline_certainty": "EXPLICIT",
         "deadline_kind": "DEADLINE",
@@ -746,21 +683,21 @@
         "signals": [],
         "gate": [],
         "top_components": [
-          "Importância 0.85 (Categoria e conteúdo de alta importância)",
+          "Importância 0.75 (Categoria e conteúdo de alta importância)",
           "Ação pendente 1 (Pede uma ação sua diretamente)",
-          "Remetente 0.4 (Pessoa (não automático))",
-          "Novidade 1 (Conteúdo novo)"
+          "Novidade 1 (Conteúdo novo)",
+          "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
           "contas:28",
           "trabalho:3",
-          "noticias:2",
-          "financas:1"
+          "tarefas:3",
+          "noticias:2"
         ]
       },
       "parsed": {
         "is_bulk": false,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": false,
         "auth_pass": true,
         "user_in_to": true,
@@ -792,13 +729,13 @@
         "secondary": [],
         "confidence": 0.92,
         "level": "LOW",
-        "score": 0.0222,
-        "urgency": 0.0026,
+        "score": 0.022,
+        "urgency": 0,
         "action": false,
         "action_score": 0,
-        "deadline": "2026-10-31",
-        "deadline_certainty": "EXPLICIT",
-        "deadline_kind": "DEADLINE",
+        "deadline": null,
+        "deadline_certainty": null,
+        "deadline_kind": null,
         "opportunity": false,
         "opportunity_type": null,
         "opportunity_fit": null,
@@ -808,21 +745,18 @@
         "is_newsletter": false,
         "is_marketing": true,
         "is_spam": false,
-        "reason": "Termos: oferta, desconto, aproveite, oferta exclusiva · envio em massa · prazo 31/10/2026",
-        "signals": [
-          "bulk_list"
-        ],
+        "reason": "Termos: oferta, desconto, aproveite, oferta exclusiva · envio em massa",
+        "signals": [],
         "gate": [],
         "top_components": [
           "Novidade 1 (Conteúdo novo)",
-          "Remetente 0.15 (Envio automático ou em massa)",
-          "Urgência 0.003 (Prazo explícito em 11 dias (prazo de baixa confiabilidade para a categoria))"
+          "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
           "marketing:22",
           "contas:5",
-          "newsletters:4",
-          "carreira:0"
+          "carreira:0",
+          "networking:0"
         ]
       },
       "parsed": {
@@ -837,14 +771,7 @@
         "received_date": "2026-10-20",
         "body_chars": 234
       },
-      "errors": [
-        {
-          "field": "prazo",
-          "exp": "null",
-          "got": "2026-10-31 (DEADLINE, EXPLICIT)",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "contas-aluguel-boleto-novembro",
@@ -1070,13 +997,13 @@
         "secondary": [],
         "confidence": 0.883,
         "level": "LOW",
-        "score": 0.2394,
-        "urgency": 0.48,
+        "score": 0.153,
+        "urgency": 0,
         "action": false,
         "action_score": 0,
-        "deadline": "2026-10-19",
-        "deadline_certainty": "INFERRED",
-        "deadline_kind": "EVENT",
+        "deadline": null,
+        "deadline_certainty": null,
+        "deadline_kind": null,
         "opportunity": false,
         "opportunity_type": null,
         "opportunity_fit": null,
@@ -1086,12 +1013,11 @@
         "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: compra aprovada, compra · prazo 19/10/2026",
+        "reason": "Termos: compra aprovada, compra",
         "signals": [],
         "gate": [],
         "top_components": [
           "Importância 0.35 (Importância moderada)",
-          "Urgência 0.48 (Prazo inferido hoje (prazo de baixa confiabilidade para a categoria))",
           "Novidade 1 (Conteúdo novo)",
           "Remetente 0.15 (Envio automático ou em massa)"
         ],
@@ -1099,7 +1025,7 @@
           "compras:12",
           "financas:4",
           "noticias:2",
-          "agenda:2"
+          "carreira:0"
         ]
       },
       "parsed": {
@@ -1120,12 +1046,6 @@
           "exp": "financas / compras (ideal: financas)",
           "got": "compras",
           "severity": "aceitável"
-        },
-        {
-          "field": "prazo",
-          "exp": "null",
-          "got": "2026-10-19 (EVENT, INFERRED)",
-          "severity": "erro"
         }
       ]
     },
@@ -1148,7 +1068,7 @@
         "secondary": [],
         "confidence": 0.95,
         "level": "LOW",
-        "score": 0.248,
+        "score": 0.195,
         "urgency": 0,
         "action": false,
         "action_score": 0,
@@ -1168,9 +1088,9 @@
         "signals": [],
         "gate": [],
         "top_components": [
-          "Importância 0.6 (Categoria e conteúdo de alta importância)",
-          "Remetente 0.4 (Pessoa (não automático))",
-          "Novidade 1 (Conteúdo novo)"
+          "Importância 0.5 (Importância moderada)",
+          "Novidade 1 (Conteúdo novo)",
+          "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
           "financas:23",
@@ -1181,7 +1101,7 @@
       },
       "parsed": {
         "is_bulk": false,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": false,
         "auth_pass": true,
         "user_in_to": true,
@@ -1278,14 +1198,14 @@
         "category": "financas",
         "secondary": [],
         "confidence": 0.93,
-        "level": "MEDIUM",
-        "score": 0.356,
-        "urgency": 0.6,
+        "level": "LOW",
+        "score": 0.195,
+        "urgency": 0,
         "action": false,
         "action_score": 0,
-        "deadline": "2026-10-22",
-        "deadline_certainty": "INFERRED",
-        "deadline_kind": "EVENT",
+        "deadline": null,
+        "deadline_certainty": null,
+        "deadline_kind": null,
         "opportunity": false,
         "opportunity_type": null,
         "opportunity_fit": null,
@@ -1295,25 +1215,24 @@
         "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: @nubank.com.br, pix recebido, pix · prazo 22/10/2026",
+        "reason": "Termos: @nubank.com.br, pix recebido, pix",
         "signals": [],
         "gate": [],
         "top_components": [
-          "Importância 0.6 (Categoria e conteúdo de alta importância)",
-          "Urgência 0.6 (Prazo inferido hoje)",
-          "Remetente 0.4 (Pessoa (não automático))",
-          "Novidade 1 (Conteúdo novo)"
+          "Importância 0.5 (Importância moderada)",
+          "Novidade 1 (Conteúdo novo)",
+          "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
           "financas:10",
           "noticias:2",
-          "agenda:2",
-          "contas:1"
+          "contas:1",
+          "carreira:0"
         ]
       },
       "parsed": {
         "is_bulk": false,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": false,
         "auth_pass": true,
         "user_in_to": true,
@@ -1323,14 +1242,7 @@
         "received_date": "2026-10-22",
         "body_chars": 141
       },
-      "errors": [
-        {
-          "field": "prazo",
-          "exp": "null",
-          "got": "2026-10-22 (EVENT, INFERRED)",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "seguranca-transacao-suspeita-banco",
@@ -1350,19 +1262,17 @@
       "got": {
         "category": "financas",
         "secondary": [
-          "tarefas",
-          "agenda",
           "compras"
         ],
         "confidence": 0.528,
-        "level": "HIGH",
-        "score": 0.5906,
-        "urgency": 0.6,
+        "level": "MEDIUM",
+        "score": 0.4618,
+        "urgency": 0,
         "action": true,
-        "action_score": 0.5,
-        "deadline": "2026-10-22",
-        "deadline_certainty": "INFERRED",
-        "deadline_kind": "EVENT",
+        "action_score": 0.254,
+        "deadline": null,
+        "deadline_certainty": null,
+        "deadline_kind": null,
         "opportunity": false,
         "opportunity_type": null,
         "opportunity_fit": null,
@@ -1372,27 +1282,27 @@
         "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: @itau.com.br · pedido de ação · prazo 22/10/2026",
-        "signals": [],
-        "gate": [
-          "Ação com prazo próximo"
+        "reason": "Termos: @itau.com.br · pedido de ação",
+        "signals": [
+          "severity:conta_comprometida"
         ],
+        "gate": [],
         "top_components": [
-          "Importância 0.795 (Categoria e conteúdo de alta importância)",
+          "Importância 0.81 (Categoria e conteúdo de alta importância · notificação séria (gravidade 0.7))",
           "Ação pendente 1 (Pede uma ação sua diretamente)",
-          "Urgência 0.6 (Prazo inferido hoje)",
-          "Remetente 0.4 (Pessoa (não automático))"
+          "Novidade 1 (Conteúdo novo)",
+          "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
           "financas:4",
-          "tarefas:3",
-          "agenda:3",
-          "compras:3"
+          "compras:3",
+          "noticias:2",
+          "agenda:1"
         ]
       },
       "parsed": {
         "is_bulk": false,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": false,
         "auth_pass": true,
         "user_in_to": true,
@@ -1406,14 +1316,8 @@
         {
           "field": "categoria",
           "exp": "seguranca_conta / financas (ideal: seguranca_conta)",
-          "got": "financas [+tarefas, agenda, compras]",
+          "got": "financas [+compras]",
           "severity": "aceitável"
-        },
-        {
-          "field": "prazo",
-          "exp": "null",
-          "got": "2026-10-22 (EVENT, INFERRED)",
-          "severity": "erro"
         }
       ]
     },
@@ -1439,13 +1343,13 @@
         ],
         "confidence": 0.682,
         "level": "LOW",
-        "score": 0.0587,
-        "urgency": 0.0036,
+        "score": 0.0584,
+        "urgency": 0,
         "action": false,
         "action_score": 0,
-        "deadline": "2026-10-30",
-        "deadline_certainty": "EXPLICIT",
-        "deadline_kind": "DEADLINE",
+        "deadline": null,
+        "deadline_certainty": null,
+        "deadline_kind": null,
         "opportunity": false,
         "opportunity_type": null,
         "opportunity_fit": null,
@@ -1455,22 +1359,19 @@
         "is_newsletter": false,
         "is_marketing": true,
         "is_spam": false,
-        "reason": "Termos: oferta, aproveite, oferta · envio em massa · prazo 30/10/2026",
-        "signals": [
-          "bulk_list"
-        ],
+        "reason": "Termos: oferta, aproveite, oferta · envio em massa",
+        "signals": [],
         "gate": [],
         "top_components": [
           "Importância 0.325 (Baixa importância)",
           "Novidade 1 (Conteúdo novo)",
-          "Remetente 0.15 (Envio automático ou em massa)",
-          "Urgência 0.004 (Prazo explícito em 10 dias (prazo de baixa confiabilidade para a categoria))"
+          "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
           "marketing:11",
           "financas:10",
-          "newsletters:4",
-          "carreira:0"
+          "carreira:0",
+          "networking:0"
         ]
       },
       "parsed": {
@@ -1485,14 +1386,7 @@
         "received_date": "2026-10-20",
         "body_chars": 213
       },
-      "errors": [
-        {
-          "field": "prazo",
-          "exp": "null",
-          "got": "2026-10-30 (DEADLINE, EXPLICIT)",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "contas-fatura-cartao-html-pesado",
@@ -1514,7 +1408,7 @@
         "secondary": [],
         "confidence": 0.922,
         "level": "MEDIUM",
-        "score": 0.532,
+        "score": 0.479,
         "urgency": 0.1889,
         "action": true,
         "action_score": 0.5,
@@ -1534,10 +1428,10 @@
         "signals": [],
         "gate": [],
         "top_components": [
-          "Importância 0.85 (Categoria e conteúdo de alta importância)",
+          "Importância 0.75 (Categoria e conteúdo de alta importância)",
           "Ação pendente 1 (Pede uma ação sua diretamente)",
-          "Remetente 0.4 (Pessoa (não automático))",
-          "Novidade 1 (Conteúdo novo)"
+          "Novidade 1 (Conteúdo novo)",
+          "Urgência 0.189 (Prazo explícito em 5 dias)"
         ],
         "top_scores": [
           "contas:18",
@@ -1548,7 +1442,7 @@
       },
       "parsed": {
         "is_bulk": false,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": false,
         "auth_pass": true,
         "user_in_to": true,
@@ -1581,7 +1475,7 @@
         ],
         "confidence": 0.627,
         "level": "LOW",
-        "score": 0.209,
+        "score": 0.2258,
         "urgency": 0,
         "action": false,
         "action_score": 0,
@@ -1598,10 +1492,12 @@
         "is_marketing": false,
         "is_spam": false,
         "reason": "Termos: codigo de acesso",
-        "signals": [],
+        "signals": [
+          "severity:codigo_ou_redefinicao"
+        ],
         "gate": [],
         "top_components": [
-          "Importância 0.55 (Importância moderada)",
+          "Importância 0.61 (Categoria e conteúdo de alta importância)",
           "Novidade 1 (Conteúdo novo)",
           "Remetente 0.15 (Envio automático ou em massa)"
         ],
@@ -1644,14 +1540,14 @@
         "category": "seguranca_conta",
         "secondary": [],
         "confidence": 0.95,
-        "level": "LOW",
-        "score": 0.345,
-        "urgency": 0.6,
+        "level": "MEDIUM",
+        "score": 0.35,
+        "urgency": 0,
         "action": false,
         "action_score": 0,
-        "deadline": "2026-10-20",
-        "deadline_certainty": "INFERRED",
-        "deadline_kind": "EVENT",
+        "deadline": null,
+        "deadline_certainty": null,
+        "deadline_kind": null,
         "opportunity": false,
         "opportunity_type": null,
         "opportunity_fit": null,
@@ -1661,20 +1557,22 @@
         "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: @accounts.google.com, novo login, alerta de seguranca, login · prazo 20/10/2026",
-        "signals": [],
+        "reason": "Termos: @accounts.google.com, novo login, alerta de seguranca, login",
+        "signals": [
+          "severity:conta_comprometida"
+        ],
         "gate": [],
         "top_components": [
-          "Importância 0.65 (Categoria e conteúdo de alta importância)",
-          "Urgência 0.6 (Prazo inferido hoje)",
+          "Importância 0.86 (Categoria e conteúdo de alta importância · notificação séria (gravidade 0.7))",
+          "Piso de prioridade 0.35 (Notificação séria (gravidade 0.7): no mínimo Média)",
           "Novidade 1 (Conteúdo novo)",
           "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
           "seguranca_conta:24",
           "noticias:3",
-          "agenda:2",
-          "contas:2"
+          "contas:2",
+          "carreira:0"
         ]
       },
       "parsed": {
@@ -1689,20 +1587,7 @@
         "received_date": "2026-10-20",
         "body_chars": 304
       },
-      "errors": [
-        {
-          "field": "nível",
-          "exp": "MEDIUM–HIGH",
-          "got": "LOW (score 0.345)",
-          "severity": "abaixo"
-        },
-        {
-          "field": "prazo",
-          "exp": "null",
-          "got": "2026-10-20 (EVENT, INFERRED)",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "seguranca-senha-alterada-marketplace",
@@ -1725,13 +1610,13 @@
         ],
         "confidence": 0.44,
         "level": "MEDIUM",
-        "score": 0.37,
-        "urgency": 0.6,
-        "action": false,
-        "action_score": 0.35,
-        "deadline": "2026-10-21",
-        "deadline_certainty": "INFERRED",
-        "deadline_kind": "EVENT",
+        "score": 0.4478,
+        "urgency": 0,
+        "action": true,
+        "action_score": 0.22,
+        "deadline": null,
+        "deadline_certainty": null,
+        "deadline_kind": null,
         "opportunity": false,
         "opportunity_type": null,
         "opportunity_fit": null,
@@ -1741,25 +1626,27 @@
         "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: senha, seguranca · prazo 21/10/2026",
-        "signals": [],
+        "reason": "Termos: senha, seguranca · pedido de ação",
+        "signals": [
+          "severity:conta_comprometida"
+        ],
         "gate": [],
         "top_components": [
-          "Importância 0.65 (Categoria e conteúdo de alta importância)",
-          "Urgência 0.6 (Prazo inferido hoje)",
-          "Remetente 0.4 (Pessoa (não automático))",
-          "Novidade 1 (Conteúdo novo)"
+          "Importância 0.76 (Categoria e conteúdo de alta importância · notificação séria (gravidade 0.7))",
+          "Ação pendente 1 (Pede uma ação sua diretamente)",
+          "Novidade 1 (Conteúdo novo)",
+          "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
           "compras:4",
           "seguranca_conta:4",
           "noticias:2",
-          "agenda:2"
+          "economia:1"
         ]
       },
       "parsed": {
         "is_bulk": false,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": false,
         "auth_pass": true,
         "user_in_to": true,
@@ -1769,14 +1656,7 @@
         "received_date": "2026-10-21",
         "body_chars": 252
       },
-      "errors": [
-        {
-          "field": "prazo",
-          "exp": "null",
-          "got": "2026-10-21 (EVENT, INFERRED)",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "seguranca-github-2fa-desativado-en",
@@ -1797,11 +1677,11 @@
         "category": "seguranca_conta",
         "secondary": [],
         "confidence": 0.912,
-        "level": "LOW",
-        "score": 0.209,
+        "level": "MEDIUM",
+        "score": 0.4478,
         "urgency": 0,
-        "action": false,
-        "action_score": 0.25,
+        "action": true,
+        "action_score": 0.19,
         "deadline": null,
         "deadline_certainty": null,
         "deadline_kind": null,
@@ -1814,11 +1694,14 @@
         "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: reset your password, two-factor, password",
-        "signals": [],
+        "reason": "Termos: reset your password, two-factor, password · pedido de ação",
+        "signals": [
+          "severity:conta_comprometida"
+        ],
         "gate": [],
         "top_components": [
-          "Importância 0.55 (Importância moderada)",
+          "Importância 0.76 (Categoria e conteúdo de alta importância · notificação séria (gravidade 0.7))",
+          "Ação pendente 1 (Pede uma ação sua diretamente)",
           "Novidade 1 (Conteúdo novo)",
           "Remetente 0.15 (Envio automático ou em massa)"
         ],
@@ -1841,14 +1724,7 @@
         "received_date": "2026-10-21",
         "body_chars": 312
       },
-      "errors": [
-        {
-          "field": "nível",
-          "exp": "MEDIUM–HIGH",
-          "got": "LOW (score 0.209)",
-          "severity": "abaixo"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "seguranca-reset-senha-streaming",
@@ -1869,13 +1745,13 @@
         "secondary": [],
         "confidence": 0.873,
         "level": "LOW",
-        "score": 0.2864,
-        "urgency": 0.4299,
+        "score": 0.2258,
+        "urgency": 0,
         "action": false,
         "action_score": 0,
-        "deadline": "2026-10-24",
-        "deadline_certainty": "INFERRED",
-        "deadline_kind": "DEADLINE",
+        "deadline": null,
+        "deadline_certainty": null,
+        "deadline_kind": null,
         "opportunity": false,
         "opportunity_type": null,
         "opportunity_fit": null,
@@ -1885,12 +1761,13 @@
         "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: redefinicao de senha, senha, password · prazo 24/10/2026",
-        "signals": [],
+        "reason": "Termos: redefinicao de senha, senha, password",
+        "signals": [
+          "severity:codigo_ou_redefinicao"
+        ],
         "gate": [],
         "top_components": [
-          "Importância 0.55 (Importância moderada)",
-          "Urgência 0.43 (Prazo inferido amanhã)",
+          "Importância 0.61 (Categoria e conteúdo de alta importância)",
           "Novidade 1 (Conteúdo novo)",
           "Remetente 0.15 (Envio automático ou em massa)"
         ],
@@ -1913,14 +1790,7 @@
         "received_date": "2026-10-23",
         "body_chars": 272
       },
-      "errors": [
-        {
-          "field": "prazo",
-          "exp": "null",
-          "got": "2026-10-24 (DEADLINE, INFERRED)",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "compras-pedido-confirmado-marketplace",
@@ -1941,10 +1811,10 @@
         "secondary": [],
         "confidence": 0.95,
         "level": "LOW",
-        "score": 0.206,
+        "score": 0.153,
         "urgency": 0,
         "action": false,
-        "action_score": 0.35,
+        "action_score": 0,
         "deadline": null,
         "deadline_certainty": null,
         "deadline_kind": null,
@@ -1961,9 +1831,9 @@
         "signals": [],
         "gate": [],
         "top_components": [
-          "Importância 0.45 (Importância moderada)",
-          "Remetente 0.4 (Pessoa (não automático))",
-          "Novidade 1 (Conteúdo novo)"
+          "Importância 0.35 (Importância moderada)",
+          "Novidade 1 (Conteúdo novo)",
+          "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
           "compras:17",
@@ -1974,7 +1844,7 @@
       },
       "parsed": {
         "is_bulk": false,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": false,
         "auth_pass": true,
         "user_in_to": true,
@@ -2069,7 +1939,7 @@
         "secondary": [],
         "confidence": 0.869,
         "level": "LOW",
-        "score": 0.206,
+        "score": 0.153,
         "urgency": 0,
         "action": false,
         "action_score": 0,
@@ -2089,9 +1959,9 @@
         "signals": [],
         "gate": [],
         "top_components": [
-          "Importância 0.45 (Importância moderada)",
-          "Remetente 0.4 (Pessoa (não automático))",
-          "Novidade 1 (Conteúdo novo)"
+          "Importância 0.35 (Importância moderada)",
+          "Novidade 1 (Conteúdo novo)",
+          "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
           "compras:16",
@@ -2102,7 +1972,7 @@
       },
       "parsed": {
         "is_bulk": false,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": false,
         "auth_pass": true,
         "user_in_to": true,
@@ -2133,13 +2003,13 @@
         "secondary": [],
         "confidence": 0.95,
         "level": "LOW",
-        "score": 0.1614,
-        "urgency": 0.0465,
+        "score": 0.153,
+        "urgency": 0,
         "action": false,
         "action_score": 0,
-        "deadline": "2026-10-28",
-        "deadline_certainty": "INFERRED",
-        "deadline_kind": "DEADLINE",
+        "deadline": null,
+        "deadline_certainty": null,
+        "deadline_kind": null,
         "opportunity": false,
         "opportunity_type": null,
         "opportunity_fit": null,
@@ -2149,14 +2019,13 @@
         "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: @shopee.com.br, seu pedido, reembolso, pedido · prazo 28/10/2026",
+        "reason": "Termos: @shopee.com.br, seu pedido, reembolso, pedido",
         "signals": [],
         "gate": [],
         "top_components": [
           "Importância 0.35 (Importância moderada)",
           "Novidade 1 (Conteúdo novo)",
-          "Remetente 0.15 (Envio automático ou em massa)",
-          "Urgência 0.047 (Prazo inferido em 7 dias (prazo de baixa confiabilidade para a categoria))"
+          "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
           "compras:19",
@@ -2177,14 +2046,7 @@
         "received_date": "2026-10-21",
         "body_chars": 177
       },
-      "errors": [
-        {
-          "field": "prazo",
-          "exp": "null",
-          "got": "2026-10-28 (DEADLINE, INFERRED)",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "compras-recibo-assinatura-musica",
@@ -2267,12 +2129,12 @@
       "got": {
         "category": "compras",
         "secondary": [],
-        "confidence": 0.685,
-        "level": "LOW",
-        "score": 0.167,
+        "confidence": 0.912,
+        "level": "MEDIUM",
+        "score": 0.431,
         "urgency": 0.0776,
-        "action": false,
-        "action_score": 0.21,
+        "action": true,
+        "action_score": 0.688,
         "deadline": "2026-10-28",
         "deadline_certainty": "EXPLICIT",
         "deadline_kind": "DEADLINE",
@@ -2285,20 +2147,24 @@
         "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: @correios.com.br, entrega · prazo 28/10/2026",
-        "signals": [],
-        "gate": [],
+        "reason": "Termos: @correios.com.br, tentativa de entrega, aguardando retirada, disponivel para retirada · pedido de ação · prazo 28/10/2026",
+        "signals": [
+          "severity:retirada_com_prazo"
+        ],
+        "gate": [
+          "Consequência séria com ação e prazo explícito"
+        ],
         "top_components": [
-          "Importância 0.35 (Importância moderada)",
+          "Importância 0.65 (Categoria e conteúdo de alta importância · notificação séria (gravidade 0.5))",
+          "Ação pendente 1 (Pede uma ação sua diretamente)",
           "Novidade 1 (Conteúdo novo)",
-          "Remetente 0.15 (Envio automático ou em massa)",
-          "Urgência 0.078 (Prazo explícito em 7 dias (prazo de baixa confiabilidade para a categoria))"
+          "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
-          "compras:5",
+          "compras:20",
+          "tarefas:5",
           "noticias:2",
-          "trabalho:1",
-          "tarefas:1"
+          "trabalho:1"
         ]
       },
       "parsed": {
@@ -2313,20 +2179,7 @@
         "received_date": "2026-10-21",
         "body_chars": 267
       },
-      "errors": [
-        {
-          "field": "nível",
-          "exp": "MEDIUM–HIGH",
-          "got": "LOW (score 0.167)",
-          "severity": "abaixo"
-        },
-        {
-          "field": "ação",
-          "exp": "true",
-          "got": "false (action_score 0.21)",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "compras-delivery-entregue-com-cupom",
@@ -2345,15 +2198,13 @@
       },
       "got": {
         "category": "compras",
-        "secondary": [
-          "newsletters"
-        ],
-        "confidence": 0.946,
+        "secondary": [],
+        "confidence": 0.95,
         "level": "LOW",
-        "score": 0.1301,
+        "score": 0.153,
         "urgency": 0,
         "action": false,
-        "action_score": 0,
+        "action_score": 0.195,
         "deadline": null,
         "deadline_certainty": null,
         "deadline_kind": null,
@@ -2363,13 +2214,11 @@
         "opportunity_mass": null,
         "injection": false,
         "injection_signals": [],
-        "is_newsletter": true,
+        "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
         "reason": "Termos: @ifood.com.br, seu pedido, foi entregue, pedido · envio em massa",
-        "signals": [
-          "bulk_list"
-        ],
+        "signals": [],
         "gate": [],
         "top_components": [
           "Importância 0.35 (Importância moderada)",
@@ -2378,9 +2227,9 @@
         ],
         "top_scores": [
           "compras:26",
-          "newsletters:4",
           "marketing:3",
-          "noticias:2"
+          "noticias:2",
+          "carreira:0"
         ]
       },
       "parsed": {
@@ -2415,12 +2264,12 @@
       "got": {
         "category": "compras",
         "secondary": [],
-        "confidence": 0.873,
-        "level": "LOW",
-        "score": 0.206,
+        "confidence": 0.841,
+        "level": "MEDIUM",
+        "score": 0.428,
         "urgency": 0.2943,
-        "action": false,
-        "action_score": 0,
+        "action": true,
+        "action_score": 0.809,
         "deadline": "2026-10-25",
         "deadline_certainty": "EXPLICIT",
         "deadline_kind": "DEADLINE",
@@ -2433,20 +2282,20 @@
         "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: @netflix.com, sua assinatura, pagamento · prazo 25/10/2026",
+        "reason": "Termos: @netflix.com, sua assinatura, pagamento · pedido de ação · prazo 25/10/2026",
         "signals": [],
         "gate": [],
         "top_components": [
-          "Importância 0.35 (Importância moderada)",
+          "Ação pendente 1 (Pede uma ação sua diretamente)",
+          "Importância 0.5 (Importância moderada)",
           "Urgência 0.294 (Prazo explícito em 3 dias (prazo de baixa confiabilidade para a categoria))",
-          "Novidade 1 (Conteúdo novo)",
-          "Remetente 0.15 (Envio automático ou em massa)"
+          "Novidade 1 (Conteúdo novo)"
         ],
         "top_scores": [
           "compras:11",
+          "tarefas:5",
           "contas:4",
-          "noticias:2",
-          "trabalho:1"
+          "noticias:2"
         ]
       },
       "parsed": {
@@ -2461,20 +2310,7 @@
         "received_date": "2026-10-22",
         "body_chars": 260
       },
-      "errors": [
-        {
-          "field": "nível",
-          "exp": "MEDIUM",
-          "got": "LOW (score 0.206)",
-          "severity": "abaixo"
-        },
-        {
-          "field": "ação",
-          "exp": "true",
-          "got": "false (action_score 0)",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "compras-recibo-viagem-app",
@@ -2557,12 +2393,12 @@
       "got": {
         "category": "agenda",
         "secondary": [],
-        "confidence": 0.95,
+        "confidence": 0.942,
         "level": "MEDIUM",
-        "score": 0.3814,
+        "score": 0.542,
         "urgency": 0.4299,
-        "action": false,
-        "action_score": 0,
+        "action": true,
+        "action_score": 0.783,
         "deadline": "2026-10-22",
         "deadline_certainty": "INFERRED",
         "deadline_kind": "EVENT",
@@ -2575,25 +2411,27 @@
         "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: @latam.com, check-in, voo, embarque · prazo 22/10/2026",
-        "signals": [],
+        "reason": "Termos: @latam.com, check-in, voo, embarque · pedido de ação · prazo 22/10/2026",
+        "signals": [
+          "severity:viagem_iminente"
+        ],
         "gate": [],
         "top_components": [
-          "Importância 0.8 (Categoria e conteúdo de alta importância)",
+          "Importância 0.82 (Categoria e conteúdo de alta importância)",
+          "Ação pendente 1 (Pede uma ação sua diretamente)",
           "Urgência 0.43 (Prazo inferido amanhã)",
-          "Remetente 0.4 (Pessoa (não automático))",
           "Novidade 1 (Conteúdo novo)"
         ],
         "top_scores": [
           "agenda:30",
+          "tarefas:5",
           "noticias:2",
-          "carreira:0",
-          "networking:0"
+          "carreira:0"
         ]
       },
       "parsed": {
         "is_bulk": false,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": false,
         "auth_pass": true,
         "user_in_to": true,
@@ -2607,14 +2445,8 @@
         {
           "field": "nível",
           "exp": "HIGH",
-          "got": "MEDIUM (score 0.3814)",
+          "got": "MEDIUM (score 0.542)",
           "severity": "abaixo"
-        },
-        {
-          "field": "ação",
-          "exp": "true",
-          "got": "false (action_score 0)",
-          "severity": "erro"
         }
       ]
     },
@@ -2704,11 +2536,11 @@
           "tarefas"
         ],
         "confidence": 0.545,
-        "level": "LOW",
-        "score": 0.276,
+        "level": "MEDIUM",
+        "score": 0.403,
         "urgency": 0,
-        "action": false,
-        "action_score": 0.49,
+        "action": true,
+        "action_score": 0.5,
         "deadline": null,
         "deadline_certainty": null,
         "deadline_kind": null,
@@ -2721,13 +2553,14 @@
         "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: @airbnb.com, reserva",
+        "reason": "Termos: @airbnb.com, reserva · pedido de ação",
         "signals": [],
         "gate": [],
         "top_components": [
-          "Importância 0.7 (Categoria e conteúdo de alta importância)",
-          "Remetente 0.4 (Pessoa (não automático))",
-          "Novidade 1 (Conteúdo novo)"
+          "Ação pendente 1 (Pede uma ação sua diretamente)",
+          "Importância 0.6 (Categoria e conteúdo de alta importância)",
+          "Novidade 1 (Conteúdo novo)",
+          "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
           "agenda:5",
@@ -2738,7 +2571,7 @@
       },
       "parsed": {
         "is_bulk": false,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": false,
         "auth_pass": true,
         "user_in_to": true,
@@ -2748,20 +2581,7 @@
         "received_date": "2026-10-20",
         "body_chars": 245
       },
-      "errors": [
-        {
-          "field": "nível",
-          "exp": "MEDIUM–HIGH",
-          "got": "LOW (score 0.276)",
-          "severity": "abaixo"
-        },
-        {
-          "field": "ação",
-          "exp": "true",
-          "got": "false (action_score 0.49)",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "agenda-convite-reuniao-calendar",
@@ -2781,12 +2601,11 @@
       "got": {
         "category": "agenda",
         "secondary": [
-          "trabalho",
-          "negocios"
+          "trabalho"
         ],
         "confidence": 0.825,
-        "level": "MEDIUM",
-        "score": 0.3814,
+        "level": "LOW",
+        "score": 0.3284,
         "urgency": 0.3081,
         "action": false,
         "action_score": 0,
@@ -2806,21 +2625,21 @@
         "signals": [],
         "gate": [],
         "top_components": [
-          "Importância 0.7 (Categoria e conteúdo de alta importância)",
+          "Importância 0.6 (Categoria e conteúdo de alta importância)",
           "Urgência 0.308 (Prazo inferido em 2 dias)",
           "Interesse 0.5 (Casa com seus temas de interesse)",
-          "Remetente 0.4 (Pessoa (não automático))"
+          "Novidade 1 (Conteúdo novo)"
         ],
         "top_scores": [
           "agenda:18",
-          "negocios:9",
           "trabalho:9",
-          "carreira:3"
+          "carreira:3",
+          "noticias:2"
         ]
       },
       "parsed": {
         "is_bulk": false,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": false,
         "auth_pass": true,
         "user_in_to": true,
@@ -2830,7 +2649,14 @@
         "received_date": "2026-10-20",
         "body_chars": 323
       },
-      "errors": []
+      "errors": [
+        {
+          "field": "nível",
+          "exp": "MEDIUM–HIGH",
+          "got": "LOW (score 0.3284)",
+          "severity": "abaixo"
+        }
+      ]
     },
     {
       "id": "agenda-meetup-inscricao-confirmada",
@@ -2848,16 +2674,13 @@
       },
       "got": {
         "category": "agenda",
-        "secondary": [
-          "tecnologia",
-          "negocios"
-        ],
-        "confidence": 0.79,
+        "secondary": [],
+        "confidence": 0.93,
         "level": "LOW",
         "score": 0.3284,
         "urgency": 0.0299,
         "action": false,
-        "action_score": 0,
+        "action_score": 0.25,
         "deadline": "2026-10-29",
         "deadline_certainty": "INFERRED",
         "deadline_kind": "EVENT",
@@ -2881,9 +2704,9 @@
         ],
         "top_scores": [
           "agenda:15",
-          "tecnologia:9",
-          "negocios:9",
-          "carreira:3"
+          "carreira:3",
+          "noticias:2",
+          "newsletters:1"
         ]
       },
       "parsed": {
@@ -2916,16 +2739,12 @@
         "notes": "Evento opcional de interesse."
       },
       "got": {
-        "category": "tecnologia",
-        "secondary": [
-          "newsletters",
-          "negocios",
-          "agenda"
-        ],
-        "confidence": 0.685,
-        "level": "LOW",
-        "score": 0.2715,
-        "urgency": 0.12,
+        "category": "agenda",
+        "secondary": [],
+        "confidence": 0.799,
+        "level": "MEDIUM",
+        "score": 0.431,
+        "urgency": 0.6,
         "action": false,
         "action_score": 0,
         "deadline": "2026-10-22",
@@ -2937,30 +2756,28 @@
         "opportunity_mass": null,
         "injection": false,
         "injection_signals": [],
-        "is_newsletter": true,
+        "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: machine learning, dados · envio em massa · prazo 22/10/2026",
-        "signals": [
-          "bulk_list"
-        ],
+        "reason": "Termos: zoom, webinar · envio em massa · prazo 22/10/2026",
+        "signals": [],
         "gate": [],
         "top_components": [
-          "Importância 0.51 (Importância moderada)",
+          "Importância 0.6 (Categoria e conteúdo de alta importância)",
+          "Urgência 0.6 (Prazo inferido hoje)",
           "Interesse 1 (Casa com seus temas de interesse)",
-          "Novidade 1 (Conteúdo novo)",
-          "Urgência 0.12 (Prazo inferido hoje (prazo de baixa confiabilidade para a categoria))"
+          "Novidade 1 (Conteúdo novo)"
         ],
         "top_scores": [
-          "tecnologia:10",
-          "negocios:9",
           "agenda:8",
-          "newsletters:4"
+          "seguranca_conta:3",
+          "noticias:2",
+          "carreira:0"
         ]
       },
       "parsed": {
         "is_bulk": true,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": false,
         "auth_pass": true,
         "user_in_to": true,
@@ -2970,14 +2787,7 @@
         "received_date": "2026-10-22",
         "body_chars": 163
       },
-      "errors": [
-        {
-          "field": "categoria",
-          "exp": "agenda / tecnologia (ideal: agenda)",
-          "got": "tecnologia [+newsletters, negocios, agenda]",
-          "severity": "aceitável"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "agenda-save-the-date-casamento",
@@ -3062,11 +2872,11 @@
         "category": "saude",
         "secondary": [],
         "confidence": 0.95,
-        "level": "LOW",
-        "score": 0.276,
+        "level": "MEDIUM",
+        "score": 0.35,
         "urgency": 0,
         "action": false,
-        "action_score": 0,
+        "action_score": 0.19,
         "deadline": null,
         "deadline_certainty": null,
         "deadline_kind": null,
@@ -3080,12 +2890,15 @@
         "is_marketing": false,
         "is_spam": false,
         "reason": "Termos: @fleury.com.br, resultados de exames, exames, medico",
-        "signals": [],
+        "signals": [
+          "severity:resultado_saude"
+        ],
         "gate": [],
         "top_components": [
-          "Importância 0.7 (Categoria e conteúdo de alta importância)",
-          "Remetente 0.4 (Pessoa (não automático))",
-          "Novidade 1 (Conteúdo novo)"
+          "Importância 0.78 (Categoria e conteúdo de alta importância · notificação séria (gravidade 0.6))",
+          "Piso de prioridade 0.35 (Notificação séria (gravidade 0.6): no mínimo Média)",
+          "Novidade 1 (Conteúdo novo)",
+          "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
           "saude:15",
@@ -3096,7 +2909,7 @@
       },
       "parsed": {
         "is_bulk": false,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": false,
         "auth_pass": true,
         "user_in_to": true,
@@ -3106,14 +2919,7 @@
         "received_date": "2026-10-21",
         "body_chars": 303
       },
-      "errors": [
-        {
-          "field": "nível",
-          "exp": "MEDIUM–HIGH",
-          "got": "LOW (score 0.276)",
-          "severity": "abaixo"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "saude-consulta-amanha-confirmar-hoje",
@@ -3136,12 +2942,12 @@
           "saude",
           "agenda"
         ],
-        "confidence": 0.714,
+        "confidence": 0.737,
         "level": "HIGH",
         "score": 0.606,
         "urgency": 0.6,
         "action": true,
-        "action_score": 0.63,
+        "action_score": 0.76,
         "deadline": "2026-10-22",
         "deadline_certainty": "INFERRED",
         "deadline_kind": "DEADLINE",
@@ -3166,7 +2972,7 @@
           "Remetente 0.4 (Pessoa (não automático))"
         ],
         "top_scores": [
-          "tarefas:11",
+          "tarefas:12",
           "saude:9",
           "agenda:6",
           "compras:1"
@@ -3213,7 +3019,7 @@
         "secondary": [],
         "confidence": 0.938,
         "level": "LOW",
-        "score": 0.276,
+        "score": 0.223,
         "urgency": 0,
         "action": false,
         "action_score": 0,
@@ -3233,9 +3039,9 @@
         "signals": [],
         "gate": [],
         "top_components": [
-          "Importância 0.7 (Categoria e conteúdo de alta importância)",
-          "Remetente 0.4 (Pessoa (não automático))",
-          "Novidade 1 (Conteúdo novo)"
+          "Importância 0.6 (Categoria e conteúdo de alta importância)",
+          "Novidade 1 (Conteúdo novo)",
+          "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
           "saude:17",
@@ -3246,7 +3052,7 @@
       },
       "parsed": {
         "is_bulk": false,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": false,
         "auth_pass": true,
         "user_in_to": true,
@@ -3317,7 +3123,7 @@
       },
       "parsed": {
         "is_bulk": true,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": false,
         "auth_pass": true,
         "user_in_to": true,
@@ -3346,14 +3152,15 @@
       "got": {
         "category": "trabalho",
         "secondary": [
+          "tarefas",
           "negocios"
         ],
-        "confidence": 0.685,
-        "level": "LOW",
-        "score": 0.304,
+        "confidence": 0.627,
+        "level": "MEDIUM",
+        "score": 0.484,
         "urgency": 0,
-        "action": false,
-        "action_score": 0.35,
+        "action": true,
+        "action_score": 0.663,
         "deadline": null,
         "deadline_certainty": null,
         "deadline_kind": null,
@@ -3366,19 +3173,20 @@
         "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: segue em anexo, em anexo",
+        "reason": "Termos: segue em anexo, em anexo · pedido de ação",
         "signals": [],
         "gate": [],
         "top_components": [
           "Importância 0.8 (Categoria e conteúdo de alta importância)",
+          "Ação pendente 1 (Pede uma ação sua diretamente)",
           "Remetente 0.4 (Pessoa (não automático))",
           "Novidade 1 (Conteúdo novo)"
         ],
         "top_scores": [
           "trabalho:6",
+          "tarefas:4",
           "negocios:3",
-          "agenda:1",
-          "carreira:0"
+          "agenda:1"
         ]
       },
       "parsed": {
@@ -3397,19 +3205,7 @@
         {
           "field": "categoria",
           "exp": "saude",
-          "got": "trabalho [+negocios]",
-          "severity": "erro"
-        },
-        {
-          "field": "nível",
-          "exp": "MEDIUM–HIGH",
-          "got": "LOW (score 0.304)",
-          "severity": "abaixo"
-        },
-        {
-          "field": "ação",
-          "exp": "true",
-          "got": "false (action_score 0.35)",
+          "got": "trabalho [+tarefas, negocios]",
           "severity": "erro"
         }
       ]
@@ -3435,11 +3231,11 @@
           "governo_juridico"
         ],
         "confidence": 0.772,
-        "level": "LOW",
-        "score": 0.251,
+        "level": "HIGH",
+        "score": 0.55,
         "urgency": 0,
-        "action": false,
-        "action_score": 0,
+        "action": true,
+        "action_score": 0.6,
         "deadline": null,
         "deadline_certainty": null,
         "deadline_kind": null,
@@ -3452,19 +3248,22 @@
         "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: @receita.fazenda.gov.br, receita federal, irpf, declaracao",
-        "signals": [],
+        "reason": "Termos: @receita.fazenda.gov.br, receita federal, irpf, declaracao · pedido de ação",
+        "signals": [
+          "severity:governo_juridico"
+        ],
         "gate": [],
         "top_components": [
-          "Importância 0.7 (Categoria e conteúdo de alta importância)",
-          "Novidade 1 (Conteúdo novo)",
-          "Remetente 0.15 (Envio automático ou em massa)"
+          "Importância 0.91 (Categoria e conteúdo de alta importância · notificação séria (gravidade 0.7))",
+          "Ação pendente 1 (Pede uma ação sua diretamente)",
+          "Piso de prioridade 0.55 (Notificação grave (gravidade 0.7) que pede uma ação: no mínimo Alta)",
+          "Novidade 1 (Conteúdo novo)"
         ],
         "top_scores": [
           "contas:20",
           "governo_juridico:13",
-          "financas:3",
-          "noticias:2"
+          "tarefas:4",
+          "financas:3"
         ]
       },
       "parsed": {
@@ -3485,18 +3284,6 @@
           "exp": "governo_juridico / contas (ideal: governo_juridico)",
           "got": "contas [+governo_juridico]",
           "severity": "aceitável"
-        },
-        {
-          "field": "nível",
-          "exp": "HIGH",
-          "got": "LOW (score 0.251)",
-          "severity": "abaixo"
-        },
-        {
-          "field": "ação",
-          "exp": "true",
-          "got": "false (action_score 0)",
-          "severity": "erro"
         }
       ]
     },
@@ -3520,12 +3307,12 @@
         "secondary": [
           "tarefas"
         ],
-        "confidence": 0.825,
+        "confidence": 0.767,
         "level": "HIGH",
         "score": 0.6274,
         "urgency": 0.2636,
         "action": true,
-        "action_score": 0.5,
+        "action_score": 0.833,
         "deadline": "2026-10-27",
         "deadline_certainty": "EXPLICIT",
         "deadline_kind": "DEADLINE",
@@ -3539,17 +3326,21 @@
         "is_marketing": false,
         "is_spam": false,
         "reason": "Termos: audiencia, processo · pedido de ação · prazo 27/10/2026",
-        "signals": [],
-        "gate": [],
+        "signals": [
+          "severity:governo_juridico"
+        ],
+        "gate": [
+          "Consequência séria com ação e prazo explícito"
+        ],
         "top_components": [
-          "Importância 1 (Categoria e conteúdo de alta importância)",
+          "Importância 1 (Categoria e conteúdo de alta importância · notificação séria (gravidade 0.7))",
           "Ação pendente 1 (Pede uma ação sua diretamente)",
           "Remetente 0.8 (Contato com quem você já trocou e-mails)",
           "Urgência 0.264 (Prazo explícito em 4 dias)"
         ],
         "top_scores": [
           "governo_juridico:12",
-          "tarefas:6",
+          "tarefas:8",
           "agenda:2",
           "compras:1"
         ]
@@ -3586,14 +3377,15 @@
       "got": {
         "category": "contas",
         "secondary": [
+          "tarefas",
           "governo_juridico"
         ],
         "confidence": 0.809,
-        "level": "MEDIUM",
-        "score": 0.4452,
+        "level": "HIGH",
+        "score": 0.55,
         "urgency": 0.0013,
         "action": true,
-        "action_score": 0.21,
+        "action_score": 0.76,
         "deadline": "2026-11-10",
         "deadline_certainty": "EXPLICIT",
         "deadline_kind": "DEADLINE",
@@ -3607,19 +3399,23 @@
         "is_marketing": false,
         "is_spam": false,
         "reason": "Termos: @gov.br, detran, gov.br · pedido de ação · prazo 10/11/2026",
-        "signals": [],
-        "gate": [],
+        "signals": [
+          "severity:governo_juridico"
+        ],
+        "gate": [
+          "Consequência séria com ação e prazo explícito"
+        ],
         "top_components": [
-          "Importância 0.75 (Categoria e conteúdo de alta importância)",
+          "Importância 0.96 (Categoria e conteúdo de alta importância · notificação séria (gravidade 0.7))",
           "Ação pendente 1 (Pede uma ação sua diretamente)",
-          "Novidade 1 (Conteúdo novo)",
-          "Remetente 0.15 (Envio automático ou em massa)"
+          "Piso de prioridade 0.55 (Notificação grave (gravidade 0.7) que pede uma ação: no mínimo Alta)",
+          "Novidade 1 (Conteúdo novo)"
         ],
         "top_scores": [
           "contas:11",
+          "tarefas:6",
           "governo_juridico:6",
-          "networking:3",
-          "noticias:2"
+          "networking:3"
         ]
       },
       "parsed": {
@@ -3638,7 +3434,7 @@
         {
           "field": "categoria",
           "exp": "governo_juridico / contas (ideal: governo_juridico)",
-          "got": "contas [+governo_juridico]",
+          "got": "contas [+tarefas, governo_juridico]",
           "severity": "aceitável"
         }
       ]
@@ -3661,12 +3457,10 @@
       },
       "got": {
         "category": "governo_juridico",
-        "secondary": [
-          "newsletters"
-        ],
-        "confidence": 0.44,
+        "secondary": [],
+        "confidence": 0.615,
         "level": "LOW",
-        "score": 0.1896,
+        "score": 0.223,
         "urgency": 0,
         "action": false,
         "action_score": 0,
@@ -3679,13 +3473,11 @@
         "opportunity_mass": null,
         "injection": false,
         "injection_signals": [],
-        "is_newsletter": true,
+        "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
         "reason": "Termos: @jus.br · envio em massa",
-        "signals": [
-          "bulk_list"
-        ],
+        "signals": [],
         "gate": [],
         "top_components": [
           "Importância 0.6 (Categoria e conteúdo de alta importância)",
@@ -3693,15 +3485,15 @@
           "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
-          "newsletters:4",
           "governo_juridico:4",
           "noticias:2",
-          "marketing:1"
+          "marketing:1",
+          "carreira:0"
         ]
       },
       "parsed": {
         "is_bulk": true,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": false,
         "auth_pass": true,
         "user_in_to": true,
@@ -3733,14 +3525,14 @@
         "secondary": [
           "trabalho"
         ],
-        "confidence": 0.645,
-        "level": "HIGH",
-        "score": 0.6574,
-        "urgency": 0.4299,
+        "confidence": 0.771,
+        "level": "CRITICAL",
+        "score": 0.72,
+        "urgency": 0.7165,
         "action": true,
-        "action_score": 0.63,
+        "action_score": 0.944,
         "deadline": "2026-10-22",
-        "deadline_certainty": "INFERRED",
+        "deadline_certainty": "EXPLICIT",
         "deadline_kind": "DEADLINE",
         "opportunity": false,
         "opportunity_type": null,
@@ -3753,15 +3545,18 @@
         "is_spam": false,
         "reason": "Termos: preciso que · pedido de ação · prazo 22/10/2026",
         "signals": [],
-        "gate": [],
+        "gate": [
+          "Ação com prazo próximo",
+          "Pedido direto de contato conhecido com prazo até amanhã"
+        ],
         "top_components": [
           "Importância 1 (Categoria e conteúdo de alta importância)",
           "Ação pendente 1 (Pede uma ação sua diretamente)",
-          "Remetente 0.8 (Contato com quem você já trocou e-mails)",
-          "Urgência 0.43 (Prazo inferido amanhã)"
+          "Urgência 0.717 (Prazo explícito amanhã)",
+          "Remetente 0.8 (Contato com quem você já trocou e-mails)"
         ],
         "top_scores": [
-          "tarefas:7",
+          "tarefas:9",
           "trabalho:5",
           "marketing:1",
           "carreira:0"
@@ -3785,12 +3580,6 @@
           "exp": "trabalho / tarefas (ideal: trabalho)",
           "got": "tarefas [+trabalho]",
           "severity": "aceitável"
-        },
-        {
-          "field": "nível",
-          "exp": "CRITICAL",
-          "got": "HIGH (score 0.6574)",
-          "severity": "abaixo"
         }
       ]
     },
@@ -3884,16 +3673,18 @@
       },
       "got": {
         "category": "trabalho",
-        "secondary": [],
-        "confidence": 0.795,
-        "level": "LOW",
-        "score": 0.29,
-        "urgency": 0,
-        "action": false,
-        "action_score": 0,
-        "deadline": null,
-        "deadline_certainty": null,
-        "deadline_kind": null,
+        "secondary": [
+          "tarefas"
+        ],
+        "confidence": 0.645,
+        "level": "MEDIUM",
+        "score": 0.51,
+        "urgency": 0.0498,
+        "action": true,
+        "action_score": 0.775,
+        "deadline": "2026-10-30",
+        "deadline_certainty": "EXPLICIT",
+        "deadline_kind": "DEADLINE",
         "opportunity": false,
         "opportunity_type": null,
         "opportunity_fit": null,
@@ -3903,24 +3694,29 @@
         "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: @atlassian.net, jira, entrega",
-        "signals": [],
-        "gate": [],
+        "reason": "Termos: @atlassian.net, jira, entrega · pedido de ação · prazo 30/10/2026",
+        "signals": [
+          "severity:tarefa_atribuida"
+        ],
+        "gate": [
+          "Consequência séria com ação e prazo explícito"
+        ],
         "top_components": [
-          "Importância 0.75 (Categoria e conteúdo de alta importância)",
-          "Remetente 0.4 (Pessoa (não automático))",
-          "Novidade 1 (Conteúdo novo)"
+          "Importância 0.95 (Categoria e conteúdo de alta importância · notificação séria (gravidade 0.5))",
+          "Ação pendente 1 (Pede uma ação sua diretamente)",
+          "Novidade 1 (Conteúdo novo)",
+          "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
           "trabalho:7",
+          "tarefas:5",
           "noticias:2",
-          "compras:1",
-          "carreira:0"
+          "compras:1"
         ]
       },
       "parsed": {
         "is_bulk": false,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": false,
         "auth_pass": true,
         "user_in_to": true,
@@ -3930,26 +3726,7 @@
         "received_date": "2026-10-21",
         "body_chars": 288
       },
-      "errors": [
-        {
-          "field": "nível",
-          "exp": "MEDIUM–HIGH",
-          "got": "LOW (score 0.29)",
-          "severity": "abaixo"
-        },
-        {
-          "field": "ação",
-          "exp": "true",
-          "got": "false (action_score 0)",
-          "severity": "erro"
-        },
-        {
-          "field": "prazo",
-          "exp": "2026-10-30",
-          "got": "null",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "trabalho-planilha-compartilhada",
@@ -3966,13 +3743,11 @@
         "notes": "Contexto para outra tarefa; sem pedido explícito."
       },
       "got": {
-        "category": "negocios",
-        "secondary": [
-          "trabalho"
-        ],
-        "confidence": 0.654,
+        "category": "trabalho",
+        "secondary": [],
+        "confidence": 0.842,
         "level": "LOW",
-        "score": 0.2597,
+        "score": 0.287,
         "urgency": 0,
         "action": false,
         "action_score": 0,
@@ -3988,20 +3763,20 @@
         "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: precificacao",
+        "reason": "Termos: drive-shares-dm-noreply@google.com, planilha",
         "signals": [],
         "gate": [],
         "top_components": [
-          "Importância 0.553 (Importância moderada)",
+          "Importância 0.65 (Categoria e conteúdo de alta importância)",
           "Interesse 0.5 (Casa com seus temas de interesse)",
           "Novidade 1 (Conteúdo novo)",
           "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
-          "negocios:9",
           "trabalho:8",
           "noticias:2",
-          "carreira:0"
+          "carreira:0",
+          "networking:0"
         ]
       },
       "parsed": {
@@ -4016,14 +3791,7 @@
         "received_date": "2026-10-21",
         "body_chars": 244
       },
-      "errors": [
-        {
-          "field": "categoria",
-          "exp": "trabalho",
-          "got": "negocios [+trabalho]",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "trabalho-ata-reuniao-em-copia",
@@ -4115,16 +3883,13 @@
       },
       "got": {
         "category": "tarefas",
-        "secondary": [
-          "negocios",
-          "agenda"
-        ],
-        "confidence": 0.51,
+        "secondary": [],
+        "confidence": 0.745,
         "level": "HIGH",
         "score": 0.6824,
         "urgency": 0.5134,
         "action": true,
-        "action_score": 0.734,
+        "action_score": 0.833,
         "deadline": "2026-10-23",
         "deadline_certainty": "EXPLICIT",
         "deadline_kind": "DEADLINE",
@@ -4149,10 +3914,10 @@
           "Interesse 0.5 (Casa com seus temas de interesse)"
         ],
         "top_scores": [
-          "negocios:6",
-          "tarefas:6",
+          "tarefas:7",
           "agenda:3",
-          "trabalho:1"
+          "trabalho:1",
+          "carreira:0"
         ]
       },
       "parsed": {
@@ -4171,7 +3936,7 @@
         {
           "field": "categoria",
           "exp": "trabalho / tarefas / negocios (ideal: trabalho)",
-          "got": "tarefas [+negocios, agenda]",
+          "got": "tarefas",
           "severity": "aceitável"
         }
       ]
@@ -4265,13 +4030,10 @@
       },
       "got": {
         "category": "trabalho",
-        "secondary": [
-          "newsletters",
-          "negocios"
-        ],
-        "confidence": 0.44,
+        "secondary": [],
+        "confidence": 0.615,
         "level": "LOW",
-        "score": 0.244,
+        "score": 0.287,
         "urgency": 0,
         "action": false,
         "action_score": 0,
@@ -4284,13 +4046,11 @@
         "opportunity_mass": null,
         "injection": false,
         "injection_signals": [],
-        "is_newsletter": true,
+        "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
         "reason": "Termos: @slack.com · envio em massa",
-        "signals": [
-          "bulk_list"
-        ],
+        "signals": [],
         "gate": [],
         "top_components": [
           "Importância 0.65 (Categoria e conteúdo de alta importância)",
@@ -4300,9 +4060,9 @@
         ],
         "top_scores": [
           "trabalho:4",
-          "newsletters:4",
-          "negocios:3",
-          "noticias:2"
+          "noticias:2",
+          "carreira:0",
+          "networking:0"
         ]
       },
       "parsed": {
@@ -4335,17 +4095,14 @@
         "notes": "Pedido de ação legítimo vindo de lista automática (dono não está no To)."
       },
       "got": {
-        "category": "negocios",
-        "secondary": [
-          "newsletters",
-          "trabalho"
-        ],
-        "confidence": 0.796,
-        "level": "LOW",
-        "score": 0.2071,
+        "category": "trabalho",
+        "secondary": [],
+        "confidence": 0.745,
+        "level": "MEDIUM",
+        "score": 0.421,
         "urgency": 0,
-        "action": false,
-        "action_score": 0,
+        "action": true,
+        "action_score": 0.5,
         "deadline": null,
         "deadline_certainty": null,
         "deadline_kind": null,
@@ -4355,25 +4112,25 @@
         "opportunity_mass": null,
         "injection": false,
         "injection_signals": [],
-        "is_newsletter": true,
+        "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: pricing · envio em massa",
+        "reason": "Termos: @github.com, pull request · envio em massa · pedido de ação",
         "signals": [
-          "bulk_list"
+          "severity:tarefa_atribuida"
         ],
         "gate": [],
         "top_components": [
-          "Importância 0.553 (Importância moderada)",
+          "Importância 0.8 (Categoria e conteúdo de alta importância · notificação séria (gravidade 0.5))",
+          "Ação pendente 0.6 (Contém pedido ou ação)",
           "Interesse 0.5 (Casa com seus temas de interesse)",
-          "Novidade 0.6 (Envio recorrente)",
-          "Remetente 0.15 (Envio automático ou em massa)"
+          "Novidade 0.6 (Envio recorrente)"
         ],
         "top_scores": [
-          "negocios:12",
           "trabalho:7",
-          "newsletters:4",
-          "noticias:2"
+          "tarefas:3",
+          "noticias:2",
+          "tecnologia:1"
         ]
       },
       "parsed": {
@@ -4388,26 +4145,7 @@
         "received_date": "2026-10-22",
         "body_chars": 327
       },
-      "errors": [
-        {
-          "field": "categoria",
-          "exp": "trabalho / tarefas (ideal: trabalho)",
-          "got": "negocios [+newsletters, trabalho]",
-          "severity": "erro"
-        },
-        {
-          "field": "nível",
-          "exp": "MEDIUM",
-          "got": "LOW (score 0.2071)",
-          "severity": "abaixo"
-        },
-        {
-          "field": "ação",
-          "exp": "true",
-          "got": "false (action_score 0)",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "trabalho-dependabot-vulnerabilidade",
@@ -4426,17 +4164,14 @@
         "notes": "Segurança do repositório, não da conta pessoal."
       },
       "got": {
-        "category": "negocios",
-        "secondary": [
-          "newsletters",
-          "trabalho"
-        ],
-        "confidence": 0.796,
-        "level": "LOW",
-        "score": 0.2207,
+        "category": "trabalho",
+        "secondary": [],
+        "confidence": 0.795,
+        "level": "MEDIUM",
+        "score": 0.35,
         "urgency": 0,
         "action": false,
-        "action_score": 0,
+        "action_score": 0.202,
         "deadline": null,
         "deadline_certainty": null,
         "deadline_kind": null,
@@ -4446,25 +4181,25 @@
         "opportunity_mass": null,
         "injection": false,
         "injection_signals": [],
-        "is_newsletter": true,
+        "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: pricing · envio em massa",
+        "reason": "Termos: @github.com, pull request · envio em massa",
         "signals": [
-          "bulk_list"
+          "severity:vulnerabilidade"
         ],
         "gate": [],
         "top_components": [
-          "Importância 0.553 (Importância moderada)",
+          "Importância 0.8 (Categoria e conteúdo de alta importância · notificação séria (gravidade 0.5))",
           "Interesse 0.5 (Casa com seus temas de interesse)",
           "Novidade 1 (Conteúdo novo)",
-          "Remetente 0.15 (Envio automático ou em massa)"
+          "Piso de prioridade 0.35 (Notificação séria (gravidade 0.5): no mínimo Média)"
         ],
         "top_scores": [
-          "negocios:12",
           "trabalho:7",
-          "newsletters:4",
-          "noticias:2"
+          "noticias:2",
+          "tecnologia:1",
+          "carreira:0"
         ]
       },
       "parsed": {
@@ -4479,20 +4214,7 @@
         "received_date": "2026-10-23",
         "body_chars": 344
       },
-      "errors": [
-        {
-          "field": "categoria",
-          "exp": "trabalho / seguranca_conta / tecnologia (ideal: trabalho)",
-          "got": "negocios [+newsletters, trabalho]",
-          "severity": "erro"
-        },
-        {
-          "field": "nível",
-          "exp": "MEDIUM–HIGH",
-          "got": "LOW (score 0.2207)",
-          "severity": "abaixo"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "trabalho-town-hall-convite-interno",
@@ -4510,14 +4232,12 @@
         "notes": "Evento corporativo de massa."
       },
       "got": {
-        "category": "newsletters",
-        "secondary": [
-          "marketing"
-        ],
-        "confidence": 0.44,
+        "category": "trabalho",
+        "secondary": [],
+        "confidence": 0.883,
         "level": "LOW",
-        "score": 0.0933,
-        "urgency": 0.0043,
+        "score": 0.2249,
+        "urgency": 0.0214,
         "action": false,
         "action_score": 0,
         "deadline": "2026-10-30",
@@ -4529,22 +4249,20 @@
         "opportunity_mass": null,
         "injection": false,
         "injection_signals": [],
-        "is_newsletter": true,
+        "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "envio em massa · prazo 30/10/2026",
-        "signals": [
-          "bulk_list"
-        ],
+        "reason": "Termos: town hall, comunicacao interna · envio em massa · prazo 30/10/2026",
+        "signals": [],
         "gate": [],
         "top_components": [
-          "Importância 0.25 (Baixa importância)",
+          "Importância 0.65 (Categoria e conteúdo de alta importância)",
           "Novidade 0.6 (Envio recorrente)",
           "Remetente 0.15 (Envio automático ou em massa)",
-          "Urgência 0.004 (Prazo inferido em 10 dias (prazo de baixa confiabilidade para a categoria))"
+          "Urgência 0.021 (Prazo inferido em 10 dias)"
         ],
         "top_scores": [
-          "newsletters:4",
+          "trabalho:12",
           "marketing:4",
           "noticias:2",
           "agenda:2"
@@ -4552,7 +4270,7 @@
       },
       "parsed": {
         "is_bulk": true,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": false,
         "auth_pass": true,
         "user_in_to": false,
@@ -4562,14 +4280,7 @@
         "received_date": "2026-10-20",
         "body_chars": 228
       },
-      "errors": [
-        {
-          "field": "categoria",
-          "exp": "trabalho / agenda (ideal: trabalho)",
-          "got": "newsletters [+marketing]",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "trabalho-pesquisa-clima-lembrete",
@@ -4594,10 +4305,10 @@
         ],
         "confidence": 0.645,
         "level": "LOW",
-        "score": 0.2512,
-        "urgency": 0.0139,
+        "score": 0.3055,
+        "urgency": 0.0695,
         "action": false,
-        "action_score": 0.168,
+        "action_score": 0,
         "deadline": "2026-10-30",
         "deadline_certainty": "EXPLICIT",
         "deadline_kind": "DEADLINE",
@@ -4607,7 +4318,7 @@
         "opportunity_mass": null,
         "injection": false,
         "injection_signals": [],
-        "is_newsletter": true,
+        "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
         "reason": "Termos: lembrete, responder · envio em massa · prazo 30/10/2026",
@@ -4619,7 +4330,7 @@
           "Importância 0.85 (Categoria e conteúdo de alta importância)",
           "Novidade 1 (Conteúdo novo)",
           "Remetente 0.15 (Envio automático ou em massa)",
-          "Urgência 0.014 (Prazo explícito em 8 dias (prazo de baixa confiabilidade para a categoria))"
+          "Urgência 0.069 (Prazo explícito em 8 dias)"
         ],
         "top_scores": [
           "tarefas:7",
@@ -4667,16 +4378,13 @@
       },
       "got": {
         "category": "tarefas",
-        "secondary": [
-          "saude",
-          "compras"
-        ],
-        "confidence": 0.755,
+        "secondary": [],
+        "confidence": 0.809,
         "level": "HIGH",
         "score": 0.6724,
         "urgency": 0.5134,
         "action": true,
-        "action_score": 0.721,
+        "action_score": 0.871,
         "deadline": "2026-10-23",
         "deadline_certainty": "EXPLICIT",
         "deadline_kind": "DEADLINE",
@@ -4701,7 +4409,7 @@
           "Remetente 0.8 (Contato com quem você já trocou e-mails)"
         ],
         "top_scores": [
-          "tarefas:8",
+          "tarefas:9",
           "compras:4",
           "saude:4",
           "contas:3"
@@ -4741,12 +4449,12 @@
         "secondary": [
           "trabalho"
         ],
-        "confidence": 0.758,
+        "confidence": 0.775,
         "level": "MEDIUM",
-        "score": 0.484,
+        "score": 0.526,
         "urgency": 0,
         "action": true,
-        "action_score": 0.784,
+        "action_score": 0.967,
         "deadline": null,
         "deadline_certainty": null,
         "deadline_kind": null,
@@ -4760,16 +4468,18 @@
         "is_marketing": false,
         "is_spam": false,
         "reason": "Termos: @docusign.net, por favor, assinar, revisar · pedido de ação",
-        "signals": [],
+        "signals": [
+          "severity:tarefa_atribuida"
+        ],
         "gate": [],
         "top_components": [
-          "Importância 0.8 (Categoria e conteúdo de alta importância)",
+          "Importância 0.95 (Categoria e conteúdo de alta importância · notificação séria (gravidade 0.5))",
           "Ação pendente 1 (Pede uma ação sua diretamente)",
           "Remetente 0.4 (Pessoa (não automático))",
           "Novidade 1 (Conteúdo novo)"
         ],
         "top_scores": [
-          "tarefas:13",
+          "tarefas:14",
           "trabalho:9",
           "newsletters:3",
           "noticias:2"
@@ -4815,7 +4525,7 @@
         "score": 0.5688,
         "urgency": 0.0153,
         "action": true,
-        "action_score": 0.63,
+        "action_score": 0.727,
         "deadline": "2026-10-31",
         "deadline_certainty": "INFERRED",
         "deadline_kind": "DEADLINE",
@@ -4885,14 +4595,14 @@
         "secondary": [
           "tarefas"
         ],
-        "confidence": 0.685,
+        "confidence": 0.627,
         "level": "HIGH",
-        "score": 0.5614,
-        "urgency": 0.4299,
+        "score": 0.655,
+        "urgency": 0.7165,
         "action": true,
-        "action_score": 0.5,
+        "action_score": 0.663,
         "deadline": "2026-10-23",
-        "deadline_certainty": "INFERRED",
+        "deadline_certainty": "EXPLICIT",
         "deadline_kind": "DEADLINE",
         "opportunity": false,
         "opportunity_type": null,
@@ -4905,16 +4615,18 @@
         "is_spam": false,
         "reason": "Termos: segue em anexo, em anexo · pedido de ação · prazo 23/10/2026",
         "signals": [],
-        "gate": [],
+        "gate": [
+          "Ação com prazo próximo"
+        ],
         "top_components": [
-          "Importância 0.8 (Categoria e conteúdo de alta importância)",
+          "Importância 0.95 (Categoria e conteúdo de alta importância)",
           "Ação pendente 1 (Pede uma ação sua diretamente)",
-          "Urgência 0.43 (Prazo inferido amanhã)",
+          "Urgência 0.717 (Prazo explícito amanhã)",
           "Remetente 0.4 (Pessoa (não automático))"
         ],
         "top_scores": [
           "trabalho:6",
-          "tarefas:3",
+          "tarefas:4",
           "carreira:0",
           "networking:0"
         ]
@@ -4956,12 +4668,10 @@
       },
       "got": {
         "category": "carreira",
-        "secondary": [
-          "newsletters"
-        ],
-        "confidence": 0.836,
+        "secondary": [],
+        "confidence": 0.95,
         "level": "MEDIUM",
-        "score": 0.3698,
+        "score": 0.435,
         "urgency": 0,
         "action": false,
         "action_score": 0,
@@ -4974,13 +4684,11 @@
         "opportunity_mass": true,
         "injection": false,
         "injection_signals": [],
-        "is_newsletter": true,
+        "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
         "reason": "Termos: jobalerts-noreply@linkedin.com, vagas, novas vagas, vagas recomendadas · envio em massa",
-        "signals": [
-          "bulk_list"
-        ],
+        "signals": [],
         "gate": [],
         "top_components": [
           "Importância 0.7 (Categoria e conteúdo de alta importância)",
@@ -4990,9 +4698,9 @@
         ],
         "top_scores": [
           "carreira:32",
-          "negocios:15",
-          "newsletters:4",
-          "noticias:2"
+          "noticias:2",
+          "networking:1",
+          "agenda:1"
         ]
       },
       "parsed": {
@@ -5026,7 +4734,7 @@
       "got": {
         "category": "carreira",
         "secondary": [],
-        "confidence": 0.891,
+        "confidence": 0.95,
         "level": "MEDIUM",
         "score": 0.3718,
         "urgency": 0,
@@ -5055,9 +4763,9 @@
         ],
         "top_scores": [
           "carreira:29",
-          "negocios:9",
           "networking:4",
-          "noticias:2"
+          "noticias:2",
+          "economia:0"
         ]
       },
       "parsed": {
@@ -5090,15 +4798,13 @@
       },
       "got": {
         "category": "carreira",
-        "secondary": [
-          "newsletters"
-        ],
-        "confidence": 0.879,
-        "level": "LOW",
-        "score": 0.3078,
-        "urgency": 0.0527,
-        "action": false,
-        "action_score": 0.168,
+        "secondary": [],
+        "confidence": 0.933,
+        "level": "HIGH",
+        "score": 0.592,
+        "urgency": 0.2636,
+        "action": true,
+        "action_score": 0.664,
         "deadline": "2026-10-26",
         "deadline_certainty": "EXPLICIT",
         "deadline_kind": "DEADLINE",
@@ -5108,25 +4814,27 @@
         "opportunity_mass": true,
         "injection": false,
         "injection_signals": [],
-        "is_newsletter": true,
+        "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: @gupy.io, processo seletivo, candidatura, case tecnico · envio em massa · prazo 26/10/2026",
+        "reason": "Termos: @gupy.io, processo seletivo, candidatura, case tecnico · envio em massa · pedido de ação · prazo 26/10/2026",
         "signals": [
-          "bulk_list"
+          "severity:etapa_processo"
         ],
-        "gate": [],
+        "gate": [
+          "Consequência séria com ação e prazo explícito"
+        ],
         "top_components": [
-          "Importância 0.7 (Categoria e conteúdo de alta importância)",
+          "Importância 1 (Categoria e conteúdo de alta importância · notificação séria (gravidade 0.5))",
+          "Ação pendente 0.6 (Contém pedido ou ação)",
           "Oportunidade 0.43 (Oportunidade identificada)",
-          "Interesse 0.5 (Casa com seus temas de interesse)",
-          "Novidade 1 (Conteúdo novo)"
+          "Interesse 0.5 (Casa com seus temas de interesse)"
         ],
         "top_scores": [
           "carreira:26",
-          "negocios:9",
-          "newsletters:4",
-          "noticias:2"
+          "tarefas:5",
+          "noticias:2",
+          "governo_juridico:1"
         ]
       },
       "parsed": {
@@ -5141,20 +4849,7 @@
         "received_date": "2026-10-22",
         "body_chars": 330
       },
-      "errors": [
-        {
-          "field": "nível",
-          "exp": "HIGH–CRITICAL",
-          "got": "LOW (score 0.3078)",
-          "severity": "abaixo"
-        },
-        {
-          "field": "ação",
-          "exp": "true",
-          "got": "false (action_score 0.168)",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "carreira-recrutadora-head-pricing-1a1",
@@ -5172,42 +4867,42 @@
         "notes": "Oportunidade sênior aderente, pede resposta."
       },
       "got": {
-        "category": "negocios",
+        "category": "networking",
         "secondary": [
-          "networking"
+          "carreira"
         ],
-        "confidence": 0.72,
-        "level": "MEDIUM",
-        "score": 0.4829,
-        "urgency": 0,
+        "confidence": 0.755,
+        "level": "HIGH",
+        "score": 0.688,
+        "urgency": 0.3081,
         "action": true,
         "action_score": 0.5,
-        "deadline": null,
-        "deadline_certainty": null,
-        "deadline_kind": null,
-        "opportunity": false,
-        "opportunity_type": null,
-        "opportunity_fit": null,
-        "opportunity_mass": null,
+        "deadline": "2026-10-22",
+        "deadline_certainty": "INFERRED",
+        "deadline_kind": "EVENT",
+        "opportunity": true,
+        "opportunity_type": "job",
+        "opportunity_fit": 0.875,
+        "opportunity_mass": false,
         "injection": false,
         "injection_signals": [],
         "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: pricing, cliente · pedido de ação",
+        "reason": "Termos: recrutadora, talent acquisition, conversa rapida · pedido de ação · prazo 22/10/2026",
         "signals": [],
         "gate": [],
         "top_components": [
+          "Importância 0.745 (Categoria e conteúdo de alta importância)",
           "Ação pendente 1 (Pede uma ação sua diretamente)",
-          "Importância 0.618 (Categoria e conteúdo de alta importância)",
-          "Interesse 0.5 (Casa com seus temas de interesse)",
-          "Remetente 0.4 (Pessoa (não automático))"
+          "Oportunidade 0.95 (Oportunidade aderente ao seu perfil)",
+          "Urgência 0.308 (Prazo inferido em 2 dias)"
         ],
         "top_scores": [
-          "negocios:10",
           "networking:8",
           "carreira:4",
-          "tarefas:3"
+          "tarefas:3",
+          "agenda:2"
         ]
       },
       "parsed": {
@@ -5226,20 +4921,8 @@
         {
           "field": "categoria",
           "exp": "carreira / networking (ideal: carreira)",
-          "got": "negocios [+networking]",
-          "severity": "erro"
-        },
-        {
-          "field": "nível",
-          "exp": "HIGH",
-          "got": "MEDIUM (score 0.4829)",
-          "severity": "abaixo"
-        },
-        {
-          "field": "oportunidade",
-          "exp": "true",
-          "got": "false",
-          "severity": "erro"
+          "got": "networking [+carreira]",
+          "severity": "aceitável"
         }
       ]
     },
@@ -5263,10 +4946,10 @@
         "secondary": [],
         "confidence": 0.95,
         "level": "MEDIUM",
-        "score": 0.5244,
+        "score": 0.3588,
         "urgency": 0,
-        "action": true,
-        "action_score": 0.5,
+        "action": false,
+        "action_score": 0.29,
         "deadline": null,
         "deadline_certainty": null,
         "deadline_kind": null,
@@ -5279,20 +4962,20 @@
         "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: vaga, recrutamento, banco de talentos, salario · pedido de ação",
+        "reason": "Termos: vaga, recrutamento, banco de talentos, salario",
         "signals": [],
         "gate": [],
         "top_components": [
           "Importância 0.85 (Categoria e conteúdo de alta importância)",
-          "Ação pendente 1 (Pede uma ação sua diretamente)",
           "Oportunidade 0.6 (Oportunidade identificada)",
-          "Remetente 0.4 (Pessoa (não automático))"
+          "Remetente 0.4 (Pessoa (não automático))",
+          "Novidade 1 (Conteúdo novo)"
         ],
         "top_scores": [
           "carreira:21",
-          "tarefas:3",
           "agenda:3",
-          "financas:1"
+          "financas:1",
+          "networking:0"
         ]
       },
       "parsed": {
@@ -5329,12 +5012,12 @@
         "secondary": [
           "tarefas"
         ],
-        "confidence": 0.759,
+        "confidence": 0.737,
         "level": "CRITICAL",
         "score": 0.8448,
         "urgency": 0.6,
         "action": true,
-        "action_score": 0.63,
+        "action_score": 0.76,
         "deadline": "2026-10-22",
         "deadline_certainty": "INFERRED",
         "deadline_kind": "DEADLINE",
@@ -5361,7 +5044,7 @@
         ],
         "top_scores": [
           "carreira:16",
-          "tarefas:11",
+          "tarefas:12",
           "agenda:6",
           "networking:3"
         ]
@@ -5398,10 +5081,9 @@
       "got": {
         "category": "carreira",
         "secondary": [
-          "negocios",
           "networking"
         ],
-        "confidence": 0.685,
+        "confidence": 0.72,
         "level": "HIGH",
         "score": 0.648,
         "urgency": 0,
@@ -5430,9 +5112,9 @@
         ],
         "top_scores": [
           "carreira:10",
-          "negocios:9",
           "networking:8",
-          "tarefas:4"
+          "tarefas:4",
+          "noticias:0"
         ]
       },
       "parsed": {
@@ -5466,19 +5148,19 @@
       "got": {
         "category": "carreira",
         "secondary": [],
-        "confidence": 0.902,
-        "level": "MEDIUM",
-        "score": 0.3622,
+        "confidence": 0.95,
+        "level": "LOW",
+        "score": 0.301,
         "urgency": 0,
         "action": false,
         "action_score": 0,
         "deadline": null,
         "deadline_certainty": null,
         "deadline_kind": null,
-        "opportunity": true,
-        "opportunity_type": "job",
-        "opportunity_fit": 0.525,
-        "opportunity_mass": true,
+        "opportunity": false,
+        "opportunity_type": null,
+        "opportunity_fit": null,
+        "opportunity_mass": null,
         "injection": false,
         "injection_signals": [],
         "is_newsletter": false,
@@ -5489,15 +5171,15 @@
         "gate": [],
         "top_components": [
           "Importância 0.7 (Categoria e conteúdo de alta importância)",
-          "Oportunidade 0.51 (Oportunidade identificada)",
           "Interesse 0.5 (Casa com seus temas de interesse)",
-          "Novidade 1 (Conteúdo novo)"
+          "Novidade 1 (Conteúdo novo)",
+          "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
           "carreira:32",
-          "negocios:9",
           "noticias:2",
-          "financas:1"
+          "financas:1",
+          "governo_juridico:1"
         ]
       },
       "parsed": {
@@ -5512,20 +5194,7 @@
         "received_date": "2026-10-20",
         "body_chars": 346
       },
-      "errors": [
-        {
-          "field": "nível",
-          "exp": "LOW",
-          "got": "MEDIUM (score 0.3622)",
-          "severity": "acima"
-        },
-        {
-          "field": "oportunidade",
-          "exp": "false",
-          "got": "true (job, fit 0.525, massa)",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "carreira-carta-proposta-aceite",
@@ -5544,14 +5213,14 @@
       "got": {
         "category": "carreira",
         "secondary": [
-          "negocios"
+          "tarefas"
         ],
-        "confidence": 0.615,
-        "level": "HIGH",
-        "score": 0.7562,
+        "confidence": 0.771,
+        "level": "CRITICAL",
+        "score": 0.7702,
         "urgency": 0.3679,
         "action": true,
-        "action_score": 0.734,
+        "action_score": 0.877,
         "deadline": "2026-10-26",
         "deadline_certainty": "EXPLICIT",
         "deadline_kind": "DEADLINE",
@@ -5565,19 +5234,23 @@
         "is_marketing": false,
         "is_spam": false,
         "reason": "Termos: remuneracao, clt, remoto, senior · pedido de ação · prazo 26/10/2026",
-        "signals": [],
-        "gate": [],
+        "signals": [
+          "severity:etapa_processo"
+        ],
+        "gate": [
+          "Consequência séria com ação e prazo explícito"
+        ],
         "top_components": [
-          "Importância 0.95 (Categoria e conteúdo de alta importância)",
+          "Importância 1 (Categoria e conteúdo de alta importância · notificação séria (gravidade 0.5))",
           "Ação pendente 1 (Pede uma ação sua diretamente)",
           "Oportunidade 0.95 (Oportunidade aderente ao seu perfil)",
           "Urgência 0.368 (Prazo explícito em 3 dias)"
         ],
         "top_scores": [
           "carreira:9",
-          "negocios:9",
-          "tarefas:4",
-          "networking:0"
+          "tarefas:5",
+          "networking:0",
+          "noticias:0"
         ]
       },
       "parsed": {
@@ -5592,14 +5265,7 @@
         "received_date": "2026-10-23",
         "body_chars": 419
       },
-      "errors": [
-        {
-          "field": "nível",
-          "exp": "CRITICAL",
-          "got": "HIGH (score 0.7562)",
-          "severity": "abaixo"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "mkt-curso-garanta-sua-vaga",
@@ -5617,19 +5283,16 @@
       },
       "got": {
         "category": "marketing",
-        "secondary": [
-          "negocios",
-          "tecnologia"
-        ],
-        "confidence": 0.691,
+        "secondary": [],
+        "confidence": 0.938,
         "level": "LOW",
-        "score": 0.0891,
-        "urgency": 0.0036,
+        "score": 0.062,
+        "urgency": 0,
         "action": false,
         "action_score": 0,
-        "deadline": "2026-10-31",
-        "deadline_certainty": "EXPLICIT",
-        "deadline_kind": "DEADLINE",
+        "deadline": null,
+        "deadline_certainty": null,
+        "deadline_kind": null,
         "opportunity": false,
         "opportunity_type": null,
         "opportunity_fit": null,
@@ -5639,22 +5302,19 @@
         "is_newsletter": false,
         "is_marketing": true,
         "is_spam": false,
-        "reason": "Termos: desconto, % off, aproveite, garanta · envio em massa · prazo 31/10/2026",
-        "signals": [
-          "bulk_list"
-        ],
+        "reason": "Termos: desconto, % off, aproveite, garanta · envio em massa",
+        "signals": [],
         "gate": [],
         "top_components": [
           "Interesse 1 (Casa com seus temas de interesse)",
-          "Importância 0.24 (Baixa importância)",
           "Novidade 1 (Conteúdo novo)",
           "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
           "marketing:17",
-          "negocios:15",
-          "tecnologia:12",
-          "newsletters:4"
+          "carreira:3",
+          "networking:0",
+          "noticias:0"
         ]
       },
       "parsed": {
@@ -5669,14 +5329,7 @@
         "received_date": "2026-10-21",
         "body_chars": 271
       },
-      "errors": [
-        {
-          "field": "prazo",
-          "exp": "null",
-          "got": "2026-10-31 (DEADLINE, EXPLICIT)",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "carreira-indeed-alerta-irrelevante",
@@ -5694,43 +5347,38 @@
       },
       "got": {
         "category": "carreira",
-        "secondary": [
-          "newsletters"
-        ],
-        "confidence": 0.944,
+        "secondary": [],
+        "confidence": 0.95,
         "level": "LOW",
-        "score": 0.2439,
+        "score": 0.251,
         "urgency": 0,
         "action": false,
         "action_score": 0,
         "deadline": null,
         "deadline_certainty": null,
         "deadline_kind": null,
-        "opportunity": true,
-        "opportunity_type": "job",
-        "opportunity_fit": 0,
-        "opportunity_mass": true,
+        "opportunity": false,
+        "opportunity_type": null,
+        "opportunity_fit": null,
+        "opportunity_mass": null,
         "injection": false,
         "injection_signals": [],
-        "is_newsletter": true,
+        "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
         "reason": "Termos: @indeed.com, vagas, novas vagas, vagas recomendadas · envio em massa",
-        "signals": [
-          "bulk_list"
-        ],
+        "signals": [],
         "gate": [],
         "top_components": [
           "Importância 0.7 (Categoria e conteúdo de alta importância)",
           "Novidade 1 (Conteúdo novo)",
-          "Oportunidade 0.3 (Oportunidade identificada)",
           "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
           "carreira:25",
-          "newsletters:4",
           "noticias:2",
-          "networking:0"
+          "networking:0",
+          "economia:0"
         ]
       },
       "parsed": {
@@ -5745,14 +5393,7 @@
         "received_date": "2026-10-22",
         "body_chars": 240
       },
-      "errors": [
-        {
-          "field": "oportunidade",
-          "exp": "false",
-          "got": "true (job, fit 0, massa)",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "carreira-fwd-indicacao-amigo-head-rm",
@@ -5772,9 +5413,9 @@
       "got": {
         "category": "carreira",
         "secondary": [],
-        "confidence": 0.876,
+        "confidence": 0.95,
         "level": "HIGH",
-        "score": 0.6069,
+        "score": 0.6209,
         "urgency": 0.0048,
         "action": false,
         "action_score": 0,
@@ -5796,16 +5437,16 @@
           "Oportunidade aderente de contato conhecido"
         ],
         "top_components": [
-          "Importância 0.95 (Categoria e conteúdo de alta importância)",
+          "Importância 1 (Categoria e conteúdo de alta importância)",
           "Oportunidade 1 (Oportunidade aderente ao seu perfil)",
           "Interesse 1 (Casa com seus temas de interesse)",
           "Remetente 0.8 (Contato com quem você já trocou e-mails)"
         ],
         "top_scores": [
           "carreira:17",
-          "negocios:6",
-          "tecnologia:4",
-          "networking:0"
+          "tecnologia:1",
+          "networking:0",
+          "noticias:0"
         ]
       },
       "parsed": {
@@ -5841,14 +5482,14 @@
       "got": {
         "category": "carreira",
         "secondary": [
-          "negocios"
+          "tarefas"
         ],
-        "confidence": 0.51,
-        "level": "MEDIUM",
-        "score": 0.5428,
+        "confidence": 0.627,
+        "level": "CRITICAL",
+        "score": 0.7228,
         "urgency": 0,
-        "action": false,
-        "action_score": 0.27,
+        "action": true,
+        "action_score": 0.578,
         "deadline": null,
         "deadline_certainty": null,
         "deadline_kind": null,
@@ -5861,22 +5502,22 @@
         "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: vaga",
+        "reason": "Termos: vaga · pedido de ação",
         "signals": [],
         "gate": [
           "Oportunidade aderente de contato conhecido"
         ],
         "top_components": [
           "Importância 0.95 (Categoria e conteúdo de alta importância)",
+          "Ação pendente 1 (Pede uma ação sua diretamente)",
           "Oportunidade 0.89 (Oportunidade aderente ao seu perfil)",
-          "Remetente 0.8 (Contato com quem você já trocou e-mails)",
-          "Interesse 0.5 (Casa com seus temas de interesse)"
+          "Remetente 0.8 (Contato com quem você já trocou e-mails)"
         ],
         "top_scores": [
           "carreira:6",
-          "negocios:6",
-          "tarefas:1",
-          "networking:0"
+          "tarefas:4",
+          "networking:0",
+          "noticias:0"
         ]
       },
       "parsed": {
@@ -5895,14 +5536,8 @@
         {
           "field": "nível",
           "exp": "HIGH",
-          "got": "MEDIUM (score 0.5428)",
-          "severity": "abaixo"
-        },
-        {
-          "field": "ação",
-          "exp": "true",
-          "got": "false (action_score 0.27)",
-          "severity": "erro"
+          "got": "CRITICAL (score 0.7228)",
+          "severity": "acima"
         }
       ]
     },
@@ -5928,7 +5563,7 @@
         ],
         "confidence": 0.65,
         "level": "MEDIUM",
-        "score": 0.3562,
+        "score": 0.419,
         "urgency": 0,
         "action": false,
         "action_score": 0,
@@ -5941,7 +5576,7 @@
         "opportunity_mass": true,
         "injection": false,
         "injection_signals": [],
-        "is_newsletter": true,
+        "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
         "reason": "Termos: vagas, remoto, hibrido, senior · envio em massa",
@@ -5958,13 +5593,13 @@
         "top_scores": [
           "carreira:20",
           "newsletters:20",
-          "negocios:9",
-          "tecnologia:6"
+          "noticias:2",
+          "networking:0"
         ]
       },
       "parsed": {
         "is_bulk": true,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": false,
         "auth_pass": true,
         "user_in_to": true,
@@ -5991,16 +5626,16 @@
         "notes": "Golpe clássico disfarçado de vaga."
       },
       "got": {
-        "category": "carreira",
+        "category": "spam",
         "secondary": [
-          "spam"
+          "carreira"
         ],
         "confidence": 0.796,
         "level": "LOW",
-        "score": 0.0181,
+        "score": 0.016,
         "urgency": 0,
         "action": false,
-        "action_score": 0,
+        "action_score": 0.39,
         "deadline": null,
         "deadline_certainty": null,
         "deadline_kind": null,
@@ -6013,11 +5648,14 @@
         "is_newsletter": false,
         "is_marketing": false,
         "is_spam": true,
-        "reason": "Termos: vaga, vagas, estamos contratando, home office",
-        "signals": [],
+        "reason": "Termos: renda extra garantida, ganhe dinheiro rapido, sem risco · remetente não confiável",
+        "signals": [
+          "spam_promoted",
+          "untrusted"
+        ],
         "gate": [],
         "top_components": [
-          "Importância 0.7 (Categoria e conteúdo de alta importância)",
+          "Importância 0.595 (Importância moderada)",
           "Novidade 1 (Conteúdo novo)",
           "Remetente 0.15 (Envio automático ou em massa)"
         ],
@@ -6040,14 +5678,7 @@
         "received_date": "2026-10-20",
         "body_chars": 256
       },
-      "errors": [
-        {
-          "field": "categoria",
-          "exp": "spam",
-          "got": "carreira [+spam]",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "networking-convite-conexao-recrutadora",
@@ -6065,48 +5696,43 @@
       },
       "got": {
         "category": "networking",
-        "secondary": [
-          "newsletters"
-        ],
-        "confidence": 0.942,
+        "secondary": [],
+        "confidence": 0.95,
         "level": "LOW",
-        "score": 0.2083,
+        "score": 0.209,
         "urgency": 0,
         "action": false,
         "action_score": 0,
         "deadline": null,
         "deadline_certainty": null,
         "deadline_kind": null,
-        "opportunity": true,
-        "opportunity_type": "networking",
-        "opportunity_fit": 0,
-        "opportunity_mass": true,
+        "opportunity": false,
+        "opportunity_type": null,
+        "opportunity_fit": null,
+        "opportunity_mass": null,
         "injection": false,
         "injection_signals": [],
-        "is_newsletter": true,
+        "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
         "reason": "Termos: invitations@linkedin.com, recruiter, quer se conectar, conectar · envio em massa",
-        "signals": [
-          "bulk_list"
-        ],
+        "signals": [],
         "gate": [],
         "top_components": [
           "Importância 0.55 (Importância moderada)",
           "Novidade 1 (Conteúdo novo)",
-          "Oportunidade 0.3 (Oportunidade identificada)",
           "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
           "networking:24",
-          "newsletters:4",
           "agenda:3",
-          "tecnologia:1"
+          "tecnologia:1",
+          "carreira:0"
         ]
       },
       "parsed": {
         "is_bulk": true,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": false,
         "auth_pass": true,
         "user_in_to": true,
@@ -6116,14 +5742,7 @@
         "received_date": "2026-10-21",
         "body_chars": 167
       },
-      "errors": [
-        {
-          "field": "oportunidade",
-          "exp": "false",
-          "got": "true (networking, fit 0, massa)",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "networking-ex-colega-cafe-sociedade",
@@ -6144,21 +5763,21 @@
       "got": {
         "category": "tarefas",
         "secondary": [
-          "negocios"
+          "networking"
         ],
-        "confidence": 0.405,
+        "confidence": 0.528,
         "level": "HIGH",
-        "score": 0.616,
+        "score": 0.694,
         "urgency": 0,
         "action": true,
-        "action_score": 0.5,
+        "action_score": 0.727,
         "deadline": null,
         "deadline_certainty": null,
         "deadline_kind": null,
-        "opportunity": false,
-        "opportunity_type": null,
-        "opportunity_fit": null,
-        "opportunity_mass": null,
+        "opportunity": true,
+        "opportunity_type": "business",
+        "opportunity_fit": 0.125,
+        "opportunity_mass": false,
         "injection": false,
         "injection_signals": [],
         "is_newsletter": false,
@@ -6171,13 +5790,13 @@
           "Importância 0.95 (Categoria e conteúdo de alta importância)",
           "Ação pendente 1 (Pede uma ação sua diretamente)",
           "Remetente 0.8 (Contato com quem você já trocou e-mails)",
-          "Interesse 0.5 (Casa com seus temas de interesse)"
+          "Oportunidade 0.65 (Oportunidade identificada)"
         ],
         "top_scores": [
-          "negocios:3",
-          "tarefas:3",
+          "tarefas:4",
+          "networking:3",
           "carreira:0",
-          "networking:0"
+          "noticias:0"
         ]
       },
       "parsed": {
@@ -6196,13 +5815,7 @@
         {
           "field": "categoria",
           "exp": "networking / negocios / carreira (ideal: networking)",
-          "got": "tarefas [+negocios]",
-          "severity": "erro"
-        },
-        {
-          "field": "oportunidade",
-          "exp": "true",
-          "got": "false",
+          "got": "tarefas [+networking]",
           "severity": "erro"
         }
       ]
@@ -6223,14 +5836,14 @@
         "notes": "Pedido pessoal sem urgência."
       },
       "got": {
-        "category": "negocios",
+        "category": "networking",
         "secondary": [
-          "tecnologia",
-          "networking"
+          "tarefas",
+          "agenda"
         ],
-        "confidence": 0.693,
-        "level": "MEDIUM",
-        "score": 0.5329,
+        "confidence": 0.685,
+        "level": "HIGH",
+        "score": 0.5686,
         "urgency": 0,
         "action": true,
         "action_score": 0.5,
@@ -6246,20 +5859,20 @@
         "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: pricing · pedido de ação",
+        "reason": "Termos: mentoria · pedido de ação",
         "signals": [],
         "gate": [],
         "top_components": [
+          "Importância 0.745 (Categoria e conteúdo de alta importância)",
           "Ação pendente 1 (Pede uma ação sua diretamente)",
-          "Importância 0.618 (Categoria e conteúdo de alta importância)",
           "Interesse 1 (Casa com seus temas de interesse)",
           "Remetente 0.4 (Pessoa (não automático))"
         ],
         "top_scores": [
-          "negocios:9",
-          "tecnologia:7",
           "networking:6",
-          "tarefas:3"
+          "tarefas:3",
+          "agenda:3",
+          "compras:2"
         ]
       },
       "parsed": {
@@ -6276,10 +5889,10 @@
       },
       "errors": [
         {
-          "field": "categoria",
-          "exp": "networking / tarefas (ideal: networking)",
-          "got": "negocios [+tecnologia, networking]",
-          "severity": "erro"
+          "field": "nível",
+          "exp": "MEDIUM",
+          "got": "HIGH (score 0.5686)",
+          "severity": "acima"
         }
       ]
     },
@@ -6299,14 +5912,11 @@
         "notes": "Métrica de vaidade."
       },
       "got": {
-        "category": "tecnologia",
-        "secondary": [
-          "newsletters",
-          "networking"
-        ],
-        "confidence": 0.288,
+        "category": "outros",
+        "secondary": [],
+        "confidence": 0.3,
         "level": "LOW",
-        "score": 0.2005,
+        "score": 0.189,
         "urgency": 0,
         "action": false,
         "action_score": 0,
@@ -6319,25 +5929,25 @@
         "opportunity_mass": null,
         "injection": false,
         "injection_signals": [],
-        "is_newsletter": true,
+        "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: analytics · envio em massa",
+        "reason": "envio em massa",
         "signals": [
-          "bulk_list"
+          "social_notifier"
         ],
         "gate": [],
         "top_components": [
-          "Importância 0.468 (Importância moderada)",
+          "Importância 0.3 (Baixa importância)",
           "Interesse 0.5 (Casa com seus temas de interesse)",
           "Novidade 1 (Conteúdo novo)",
           "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
-          "newsletters:4",
           "networking:3",
-          "tecnologia:3",
-          "carreira:0"
+          "carreira:0",
+          "noticias:0",
+          "economia:0"
         ]
       },
       "parsed": {
@@ -6352,14 +5962,7 @@
         "received_date": "2026-10-23",
         "body_chars": 190
       },
-      "errors": [
-        {
-          "field": "categoria",
-          "exp": "outros / networking (ideal: outros)",
-          "got": "tecnologia [+newsletters, networking]",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "networking-linkedin-mensagem-indicacao",
@@ -6379,14 +5982,15 @@
       "got": {
         "category": "networking",
         "secondary": [
-          "carreira"
+          "carreira",
+          "tarefas"
         ],
         "confidence": 0.624,
-        "level": "MEDIUM",
-        "score": 0.3784,
+        "level": "HIGH",
+        "score": 0.5584,
         "urgency": 0,
-        "action": false,
-        "action_score": 0.32,
+        "action": true,
+        "action_score": 0.663,
         "deadline": null,
         "deadline_certainty": null,
         "deadline_kind": null,
@@ -6399,20 +6003,20 @@
         "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: messages-noreply@linkedin.com, linkedin",
+        "reason": "Termos: messages-noreply@linkedin.com, linkedin · pedido de ação",
         "signals": [],
         "gate": [],
         "top_components": [
+          "Ação pendente 1 (Pede uma ação sua diretamente)",
           "Importância 0.595 (Importância moderada)",
           "Oportunidade 0.89 (Oportunidade aderente ao seu perfil)",
-          "Interesse 0.5 (Casa com seus temas de interesse)",
-          "Novidade 1 (Conteúdo novo)"
+          "Interesse 0.5 (Casa com seus temas de interesse)"
         ],
         "top_scores": [
           "networking:8",
           "carreira:7",
-          "negocios:3",
-          "tecnologia:1"
+          "tarefas:5",
+          "noticias:0"
         ]
       },
       "parsed": {
@@ -6427,14 +6031,7 @@
         "received_date": "2026-10-22",
         "body_chars": 261
       },
-      "errors": [
-        {
-          "field": "ação",
-          "exp": "true",
-          "got": "false (action_score 0.32)",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "news-tldr-ai-en",
@@ -6493,7 +6090,7 @@
       },
       "parsed": {
         "is_bulk": true,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": false,
         "auth_pass": true,
         "user_in_to": true,
@@ -6528,13 +6125,13 @@
         ],
         "confidence": 0.862,
         "level": "LOW",
-        "score": 0.1313,
-        "urgency": 0.0194,
+        "score": 0.1284,
+        "urgency": 0,
         "action": false,
         "action_score": 0,
-        "deadline": "2026-10-28",
-        "deadline_certainty": "EXPLICIT",
-        "deadline_kind": "DEADLINE",
+        "deadline": null,
+        "deadline_certainty": null,
+        "deadline_kind": null,
         "opportunity": false,
         "opportunity_type": null,
         "opportunity_fit": null,
@@ -6544,7 +6141,7 @@
         "is_newsletter": true,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: @valor.com.br, selic, copom, inflacao · envio em massa · prazo 28/10/2026",
+        "reason": "Termos: @valor.com.br, selic, copom, inflacao · envio em massa",
         "signals": [
           "bulk_list"
         ],
@@ -6552,8 +6149,7 @@
         "top_components": [
           "Importância 0.4 (Importância moderada)",
           "Novidade 0.6 (Envio recorrente)",
-          "Remetente 0.15 (Envio automático ou em massa)",
-          "Urgência 0.019 (Prazo explícito em 7 dias (prazo de baixa confiabilidade para a categoria))"
+          "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
           "economia:28",
@@ -6574,14 +6170,7 @@
         "received_date": "2026-10-21",
         "body_chars": 299
       },
-      "errors": [
-        {
-          "field": "prazo",
-          "exp": "null",
-          "got": "2026-10-28 (DEADLINE, EXPLICIT)",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "news-substack-pricing-letter",
@@ -6637,13 +6226,13 @@
         "top_scores": [
           "newsletters:9",
           "marketing:9",
-          "negocios:3",
-          "noticias:2"
+          "noticias:2",
+          "carreira:0"
         ]
       },
       "parsed": {
         "is_bulk": true,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": false,
         "auth_pass": true,
         "user_in_to": true,
@@ -6816,14 +6405,14 @@
         "notes": "Leitura opcional."
       },
       "got": {
-        "category": "negocios",
+        "category": "tecnologia",
         "secondary": [
           "newsletters",
-          "tecnologia"
+          "carreira"
         ],
-        "confidence": 0.693,
+        "confidence": 0.44,
         "level": "LOW",
-        "score": 0.227,
+        "score": 0.2734,
         "urgency": 0,
         "action": false,
         "action_score": 0,
@@ -6839,22 +6428,22 @@
         "is_newsletter": true,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: pricing · envio em massa",
+        "reason": "Termos: @medium.com · envio em massa",
         "signals": [
           "bulk_list"
         ],
         "gate": [],
         "top_components": [
-          "Importância 0.4 (Importância moderada)",
+          "Importância 0.595 (Importância moderada)",
           "Interesse 1 (Casa com seus temas de interesse)",
           "Novidade 1 (Conteúdo novo)",
           "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
-          "negocios:9",
-          "tecnologia:7",
+          "tecnologia:4",
           "newsletters:4",
-          "carreira:3"
+          "carreira:3",
+          "noticias:2"
         ]
       },
       "parsed": {
@@ -6869,14 +6458,7 @@
         "received_date": "2026-10-23",
         "body_chars": 229
       },
-      "errors": [
-        {
-          "field": "categoria",
-          "exp": "tecnologia / newsletters (ideal: tecnologia)",
-          "got": "negocios [+newsletters, tecnologia]",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "news-urgente-regra-pix",
@@ -6971,17 +6553,18 @@
       "got": {
         "category": "tecnologia",
         "secondary": [
-          "newsletters"
+          "newsletters",
+          "marketing"
         ],
-        "confidence": 0.825,
+        "confidence": 0.732,
         "level": "LOW",
-        "score": 0.0723,
-        "urgency": 0.043,
+        "score": 0.0692,
+        "urgency": 0,
         "action": false,
         "action_score": 0,
-        "deadline": "2026-10-23",
-        "deadline_certainty": "INFERRED",
-        "deadline_kind": "DEADLINE",
+        "deadline": null,
+        "deadline_certainty": null,
+        "deadline_kind": null,
         "opportunity": false,
         "opportunity_type": null,
         "opportunity_fit": null,
@@ -6991,7 +6574,7 @@
         "is_newsletter": true,
         "is_marketing": true,
         "is_spam": false,
-        "reason": "Termos: ia generativa, machine learning, mlops, engenharia de dados · envio em massa · prazo 23/10/2026",
+        "reason": "Termos: ia generativa, mlops, engenharia de dados · envio em massa",
         "signals": [
           "bulk_list"
         ],
@@ -7003,7 +6586,7 @@
           "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
-          "tecnologia:12",
+          "tecnologia:9",
           "newsletters:6",
           "marketing:5",
           "carreira:3"
@@ -7025,7 +6608,7 @@
         {
           "field": "categoria",
           "exp": "newsletters / marketing / agenda / tecnologia (ideal: newsletters)",
-          "got": "tecnologia [+newsletters]",
+          "got": "tecnologia [+newsletters, marketing]",
           "severity": "aceitável"
         }
       ]
@@ -7088,7 +6671,7 @@
       },
       "parsed": {
         "is_bulk": true,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": false,
         "auth_pass": true,
         "user_in_to": true,
@@ -7127,7 +6710,7 @@
         "secondary": [
           "newsletters"
         ],
-        "confidence": 0.813,
+        "confidence": 0.767,
         "level": "LOW",
         "score": 0.2134,
         "urgency": 0,
@@ -7140,14 +6723,20 @@
         "opportunity_type": null,
         "opportunity_fit": null,
         "opportunity_mass": null,
-        "injection": false,
-        "injection_signals": [],
+        "injection": true,
+        "injection_signals": [
+          "HIDDEN_INSTRUCTION",
+          "IGNORE_PREV",
+          "ROLE_SWITCH",
+          "MANIPULATE"
+        ],
         "is_newsletter": true,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: python, agentes de ia, rag · envio em massa",
+        "reason": "Termos: agentes de ia, rag · envio em massa",
         "signals": [
-          "bulk_list"
+          "bulk_list",
+          "injection"
         ],
         "gate": [],
         "top_components": [
@@ -7157,15 +6746,15 @@
           "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
-          "tecnologia:15",
+          "tecnologia:12",
           "newsletters:8",
-          "negocios:3",
-          "noticias:2"
+          "noticias:2",
+          "marketing:1"
         ]
       },
       "parsed": {
         "is_bulk": true,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": false,
         "auth_pass": true,
         "user_in_to": true,
@@ -7175,14 +6764,7 @@
         "received_date": "2026-10-23",
         "body_chars": 247
       },
-      "errors": [
-        {
-          "field": "injection",
-          "exp": "true",
-          "got": "false",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "news-artigo-sobre-prompt-injection",
@@ -7204,7 +6786,7 @@
         "secondary": [
           "newsletters"
         ],
-        "confidence": 0.44,
+        "confidence": 0.288,
         "level": "LOW",
         "score": 0.142,
         "urgency": 0,
@@ -7217,17 +6799,16 @@
         "opportunity_type": null,
         "opportunity_fit": null,
         "opportunity_mass": null,
-        "injection": true,
+        "injection": false,
         "injection_signals": [
-          "IGNORE_PREV"
+          "QUOTED_EXAMPLE"
         ],
         "is_newsletter": true,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: llm, dados · envio em massa",
+        "reason": "Termos: llm · envio em massa",
         "signals": [
-          "bulk_list",
-          "injection"
+          "bulk_list"
         ],
         "gate": [],
         "top_components": [
@@ -7236,15 +6817,15 @@
           "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
-          "tecnologia:4",
           "newsletters:4",
+          "tecnologia:3",
           "noticias:2",
           "seguranca_conta:1"
         ]
       },
       "parsed": {
         "is_bulk": true,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": false,
         "auth_pass": true,
         "user_in_to": true,
@@ -7254,14 +6835,7 @@
         "received_date": "2026-10-20",
         "body_chars": 375
       },
-      "errors": [
-        {
-          "field": "injection",
-          "exp": "false",
-          "got": "true [IGNORE_PREV]",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "mkt-black-friday-antecipada",
@@ -7282,13 +6856,13 @@
         "secondary": [],
         "confidence": 0.95,
         "level": "LOW",
-        "score": 0.0263,
-        "urgency": 0.06,
+        "score": 0.022,
+        "urgency": 0,
         "action": false,
         "action_score": 0,
-        "deadline": "2026-10-23",
-        "deadline_certainty": "INFERRED",
-        "deadline_kind": "DEADLINE",
+        "deadline": null,
+        "deadline_certainty": null,
+        "deadline_kind": null,
         "opportunity": false,
         "opportunity_type": null,
         "opportunity_fit": null,
@@ -7298,21 +6872,18 @@
         "is_newsletter": false,
         "is_marketing": true,
         "is_spam": false,
-        "reason": "Termos: % off, frete gratis, black friday, so hoje · envio em massa · prazo 23/10/2026",
-        "signals": [
-          "bulk_list"
-        ],
+        "reason": "Termos: % off, frete gratis, black friday, so hoje · envio em massa",
+        "signals": [],
         "gate": [],
         "top_components": [
           "Novidade 1 (Conteúdo novo)",
-          "Remetente 0.15 (Envio automático ou em massa)",
-          "Urgência 0.06 (Prazo inferido hoje (prazo de baixa confiabilidade para a categoria))"
+          "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
           "marketing:34",
-          "newsletters:4",
           "noticias:1",
-          "compras:1"
+          "compras:1",
+          "carreira:0"
         ]
       },
       "parsed": {
@@ -7327,14 +6898,7 @@
         "received_date": "2026-10-23",
         "body_chars": 168
       },
-      "errors": [
-        {
-          "field": "prazo",
-          "exp": "null",
-          "got": "2026-10-23 (DEADLINE, INFERRED)",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "mkt-cupom-delivery",
@@ -7358,13 +6922,13 @@
         ],
         "confidence": 0.777,
         "level": "LOW",
-        "score": 0.0478,
-        "urgency": 0.0513,
+        "score": 0.0441,
+        "urgency": 0,
         "action": false,
-        "action_score": 0.225,
-        "deadline": "2026-10-25",
-        "deadline_certainty": "EXPLICIT",
-        "deadline_kind": "DEADLINE",
+        "action_score": 0.188,
+        "deadline": null,
+        "deadline_certainty": null,
+        "deadline_kind": null,
         "opportunity": false,
         "opportunity_type": null,
         "opportunity_fit": null,
@@ -7374,27 +6938,24 @@
         "is_newsletter": false,
         "is_marketing": true,
         "is_spam": false,
-        "reason": "Termos: cupom, clique aqui · envio em massa · prazo 25/10/2026",
-        "signals": [
-          "bulk_list"
-        ],
+        "reason": "Termos: cupom, clique aqui · envio em massa",
+        "signals": [],
         "gate": [],
         "top_components": [
           "Importância 0.197 (Baixa importância)",
           "Novidade 1 (Conteúdo novo)",
-          "Remetente 0.15 (Envio automático ou em massa)",
-          "Urgência 0.051 (Prazo explícito em 2 dias (prazo de baixa confiabilidade para a categoria))"
+          "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
           "marketing:11",
           "compras:7",
-          "newsletters:4",
-          "carreira:0"
+          "carreira:0",
+          "networking:0"
         ]
       },
       "parsed": {
         "is_bulk": true,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": false,
         "auth_pass": true,
         "user_in_to": true,
@@ -7404,14 +6965,7 @@
         "received_date": "2026-10-23",
         "body_chars": 188
       },
-      "errors": [
-        {
-          "field": "prazo",
-          "exp": "null",
-          "got": "2026-10-25 (DEADLINE, EXPLICIT)",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "mkt-passagens-so-hoje",
@@ -7449,9 +7003,7 @@
         "is_marketing": true,
         "is_spam": false,
         "reason": "Termos: so hoje, garanta ja, garanta · envio em massa",
-        "signals": [
-          "bulk_list"
-        ],
+        "signals": [],
         "gate": [],
         "top_components": [
           "Novidade 1 (Conteúdo novo)",
@@ -7460,8 +7012,8 @@
         "top_scores": [
           "marketing:17",
           "agenda:7",
-          "newsletters:4",
-          "carreira:0"
+          "carreira:0",
+          "networking:0"
         ]
       },
       "parsed": {
@@ -7563,13 +7115,13 @@
         "secondary": [],
         "confidence": 0.85,
         "level": "LOW",
-        "score": 0.0375,
-        "urgency": 0.06,
+        "score": 0.0332,
+        "urgency": 0,
         "action": false,
         "action_score": 0,
-        "deadline": "2026-10-22",
-        "deadline_certainty": "INFERRED",
-        "deadline_kind": "DEADLINE",
+        "deadline": null,
+        "deadline_certainty": null,
+        "deadline_kind": null,
         "opportunity": false,
         "opportunity_type": null,
         "opportunity_fit": null,
@@ -7579,27 +7131,24 @@
         "is_newsletter": false,
         "is_marketing": true,
         "is_spam": false,
-        "reason": "Termos: desconto, aproveite, nao perca, pontos · envio em massa · prazo 22/10/2026",
-        "signals": [
-          "bulk_list"
-        ],
+        "reason": "Termos: desconto, aproveite, nao perca, pontos · envio em massa",
+        "signals": [],
         "gate": [],
         "top_components": [
           "Novidade 1 (Conteúdo novo)",
           "Importância 0.1 (Baixa importância)",
-          "Remetente 0.15 (Envio automático ou em massa)",
-          "Urgência 0.06 (Prazo inferido hoje (prazo de baixa confiabilidade para a categoria))"
+          "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
           "marketing:14",
           "tarefas:6",
-          "newsletters:4",
-          "noticias:2"
+          "noticias:2",
+          "carreira:0"
         ]
       },
       "parsed": {
         "is_bulk": true,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": false,
         "auth_pass": true,
         "user_in_to": true,
@@ -7627,44 +7176,38 @@
         "notes": "Sem consequência real se ignorar."
       },
       "got": {
-        "category": "newsletters",
-        "secondary": [
-          "marketing"
-        ],
-        "confidence": 0.44,
+        "category": "marketing",
+        "secondary": [],
+        "confidence": 0.702,
         "level": "LOW",
-        "score": 0.041,
-        "urgency": 0.0308,
+        "score": 0.022,
+        "urgency": 0,
         "action": false,
-        "action_score": 0,
-        "deadline": "2026-10-23",
-        "deadline_certainty": "INFERRED",
-        "deadline_kind": "DEADLINE",
+        "action_score": 0.195,
+        "deadline": null,
+        "deadline_certainty": null,
+        "deadline_kind": null,
         "opportunity": false,
         "opportunity_type": null,
         "opportunity_fit": null,
         "opportunity_mass": null,
         "injection": false,
         "injection_signals": [],
-        "is_newsletter": true,
+        "is_newsletter": false,
         "is_marketing": true,
         "is_spam": false,
-        "reason": "envio em massa · prazo 23/10/2026",
-        "signals": [
-          "bulk_list"
-        ],
+        "reason": "envio em massa",
+        "signals": [],
         "gate": [],
         "top_components": [
-          "Importância 0.15 (Baixa importância)",
           "Novidade 1 (Conteúdo novo)",
-          "Remetente 0.15 (Envio automático ou em massa)",
-          "Urgência 0.031 (Prazo inferido em 2 dias (prazo de baixa confiabilidade para a categoria))"
+          "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
-          "newsletters:4",
           "marketing:4",
           "compras:1",
-          "contas:1"
+          "contas:1",
+          "carreira:0"
         ]
       },
       "parsed": {
@@ -7679,14 +7222,7 @@
         "received_date": "2026-10-21",
         "body_chars": 289
       },
-      "errors": [
-        {
-          "field": "categoria",
-          "exp": "marketing / compras (ideal: marketing)",
-          "got": "newsletters [+marketing]",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "mkt-pesquisa-satisfacao",
@@ -7706,7 +7242,6 @@
       "got": {
         "category": "compras",
         "secondary": [
-          "newsletters",
           "marketing"
         ],
         "confidence": 0.695,
@@ -7714,7 +7249,7 @@
         "score": 0.05,
         "urgency": 0,
         "action": false,
-        "action_score": 0.278,
+        "action_score": 0.202,
         "deadline": null,
         "deadline_certainty": null,
         "deadline_kind": null,
@@ -7724,13 +7259,11 @@
         "opportunity_mass": null,
         "injection": false,
         "injection_signals": [],
-        "is_newsletter": true,
+        "is_newsletter": false,
         "is_marketing": true,
         "is_spam": false,
         "reason": "Termos: @kabum.com.br, pedido, compra · envio em massa",
-        "signals": [
-          "bulk_list"
-        ],
+        "signals": [],
         "gate": [],
         "top_components": [
           "Importância 0.25 (Baixa importância)",
@@ -7739,14 +7272,14 @@
         ],
         "top_scores": [
           "compras:7",
-          "newsletters:4",
           "marketing:4",
-          "tarefas:1"
+          "tarefas:1",
+          "carreira:0"
         ]
       },
       "parsed": {
         "is_bulk": true,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": false,
         "auth_pass": true,
         "user_in_to": true,
@@ -7760,7 +7293,7 @@
         {
           "field": "categoria",
           "exp": "marketing / compras (ideal: marketing)",
-          "got": "compras [+newsletters, marketing]",
+          "got": "compras [+marketing]",
           "severity": "aceitável"
         }
       ]
@@ -7799,14 +7332,14 @@
         "injection": true,
         "injection_signals": [
           "SYSTEM_PROMPT",
-          "ROLE_LABEL"
+          "ROLE_LABEL",
+          "MANIPULATE"
         ],
         "is_newsletter": false,
         "is_marketing": true,
         "is_spam": false,
         "reason": "Termos: oferta, desconto, imperdivel, compre agora · envio em massa",
         "signals": [
-          "bulk_list",
           "injection"
         ],
         "gate": [],
@@ -7816,9 +7349,9 @@
         ],
         "top_scores": [
           "marketing:30",
-          "newsletters:4",
           "carreira:0",
-          "networking:0"
+          "networking:0",
+          "noticias:0"
         ]
       },
       "parsed": {
@@ -7851,11 +7384,11 @@
         "notes": "Rede social pessoal; não é networking profissional."
       },
       "got": {
-        "category": "newsletters",
+        "category": "outros",
         "secondary": [],
-        "confidence": 0.615,
+        "confidence": 0.3,
         "level": "LOW",
-        "score": 0.1063,
+        "score": 0.139,
         "urgency": 0,
         "action": false,
         "action_score": 0,
@@ -7868,24 +7401,24 @@
         "opportunity_mass": null,
         "injection": false,
         "injection_signals": [],
-        "is_newsletter": true,
+        "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
         "reason": "envio em massa",
         "signals": [
-          "bulk_list"
+          "social_notifier"
         ],
         "gate": [],
         "top_components": [
-          "Importância 0.25 (Baixa importância)",
+          "Importância 0.3 (Baixa importância)",
           "Novidade 1 (Conteúdo novo)",
           "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
-          "newsletters:4",
           "networking:2",
           "carreira:0",
-          "noticias:0"
+          "noticias:0",
+          "economia:0"
         ]
       },
       "parsed": {
@@ -7900,14 +7433,7 @@
         "received_date": "2026-10-20",
         "body_chars": 117
       },
-      "errors": [
-        {
-          "field": "categoria",
-          "exp": "outros / marketing (ideal: outros)",
-          "got": "newsletters",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "social-facebook-aniversarios",
@@ -7924,11 +7450,11 @@
         "notes": "Social genérico."
       },
       "got": {
-        "category": "newsletters",
+        "category": "outros",
         "secondary": [],
-        "confidence": 0.615,
+        "confidence": 0.3,
         "level": "LOW",
-        "score": 0.1063,
+        "score": 0.139,
         "urgency": 0,
         "action": false,
         "action_score": 0,
@@ -7941,24 +7467,24 @@
         "opportunity_mass": null,
         "injection": false,
         "injection_signals": [],
-        "is_newsletter": true,
+        "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
         "reason": "envio em massa",
         "signals": [
-          "bulk_list"
+          "social_notifier"
         ],
         "gate": [],
         "top_components": [
-          "Importância 0.25 (Baixa importância)",
+          "Importância 0.3 (Baixa importância)",
           "Novidade 1 (Conteúdo novo)",
           "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
-          "newsletters:4",
           "networking:2",
           "carreira:0",
-          "noticias:0"
+          "noticias:0",
+          "economia:0"
         ]
       },
       "parsed": {
@@ -7973,14 +7499,7 @@
         "received_date": "2026-10-21",
         "body_chars": 111
       },
-      "errors": [
-        {
-          "field": "categoria",
-          "exp": "outros",
-          "got": "newsletters",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "social-youtube-novo-video",
@@ -7999,15 +7518,13 @@
         "notes": "Notificação de plataforma."
       },
       "got": {
-        "category": "tecnologia",
+        "category": "outros",
         "secondary": [
-          "newsletters",
-          "tarefas",
-          "networking"
+          "tarefas"
         ],
-        "confidence": 0.288,
+        "confidence": 0.3,
         "level": "LOW",
-        "score": 0.2734,
+        "score": 0.3216,
         "urgency": 0,
         "action": false,
         "action_score": 0.18,
@@ -8020,12 +7537,12 @@
         "opportunity_mass": null,
         "injection": false,
         "injection_signals": [],
-        "is_newsletter": true,
+        "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: python · envio em massa",
+        "reason": "envio em massa",
         "signals": [
-          "bulk_list"
+          "social_notifier"
         ],
         "gate": [],
         "top_components": [
@@ -8035,10 +7552,10 @@
           "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
-          "newsletters:4",
           "networking:3",
-          "tecnologia:3",
-          "negocios:3"
+          "tarefas:3",
+          "carreira:1",
+          "noticias:0"
         ]
       },
       "parsed": {
@@ -8053,14 +7570,7 @@
         "received_date": "2026-10-22",
         "body_chars": 209
       },
-      "errors": [
-        {
-          "field": "categoria",
-          "exp": "outros / tecnologia / marketing (ideal: outros)",
-          "got": "tecnologia [+newsletters, tarefas, networking]",
-          "severity": "aceitável"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "phish-banco-bloqueio-dmarc-fail",
@@ -8079,18 +7589,16 @@
       },
       "got": {
         "category": "spam",
-        "secondary": [
-          "seguranca_conta"
-        ],
-        "confidence": 0.767,
+        "secondary": [],
+        "confidence": 0.844,
         "level": "LOW",
-        "score": 0.0172,
+        "score": 0.004,
         "urgency": 0,
         "action": false,
-        "action_score": 0.727,
-        "deadline": "2026-10-21",
-        "deadline_certainty": "INFERRED",
-        "deadline_kind": "DEADLINE",
+        "action_score": 0.897,
+        "deadline": null,
+        "deadline_certainty": null,
+        "deadline_kind": null,
         "opportunity": false,
         "opportunity_type": null,
         "opportunity_fit": null,
@@ -8100,26 +7608,27 @@
         "is_newsletter": false,
         "is_marketing": false,
         "is_spam": true,
-        "reason": "Termos: sua conta sera bloqueada, verifique sua conta imediatamente · prazo 21/10/2026",
+        "reason": "Termos: sua conta sera bloqueada, verifique sua conta imediatamente · remetente não confiável (AUTH_FAIL)",
         "signals": [
-          "auth_fail"
+          "auth_fail",
+          "phishing",
+          "untrusted"
         ],
         "gate": [],
         "top_components": [
-          "Importância 0.568 (Importância moderada)",
-          "Remetente 0.4 (Pessoa (não automático))",
-          "Novidade 1 (Conteúdo novo)"
+          "Novidade 1 (Conteúdo novo)",
+          "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
-          "spam:12",
+          "spam:18",
           "seguranca_conta:8",
-          "contas:5",
-          "financas:4"
+          "tarefas:5",
+          "contas:5"
         ]
       },
       "parsed": {
         "is_bulk": false,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": true,
         "auth_pass": false,
         "user_in_to": true,
@@ -8129,14 +7638,7 @@
         "received_date": "2026-10-21",
         "body_chars": 280
       },
-      "errors": [
-        {
-          "field": "prazo",
-          "exp": "null",
-          "got": "2026-10-21 (DEADLINE, INFERRED)",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "phish-receita-cpf-cancelado",
@@ -8154,19 +7656,19 @@
         "notes": "Golpe; usa vocabulário de governo."
       },
       "got": {
-        "category": "contas",
+        "category": "spam",
         "secondary": [
-          "spam"
+          "contas"
         ],
-        "confidence": 0.825,
+        "confidence": 0.65,
         "level": "LOW",
-        "score": 0.0368,
-        "urgency": 0.3081,
-        "action": true,
-        "action_score": 0.727,
-        "deadline": "2026-10-24",
-        "deadline_certainty": "INFERRED",
-        "deadline_kind": "DEADLINE",
+        "score": 0.0181,
+        "urgency": 0,
+        "action": false,
+        "action_score": 0.35,
+        "deadline": null,
+        "deadline_certainty": null,
+        "deadline_kind": null,
         "opportunity": false,
         "opportunity_type": null,
         "opportunity_fit": null,
@@ -8176,22 +7678,23 @@
         "is_newsletter": false,
         "is_marketing": false,
         "is_spam": true,
-        "reason": "Termos: receita federal, imposto de renda, imposto, cpf · pedido de ação · prazo 24/10/2026",
+        "reason": "Termos: atualizacao cadastral urgente · remetente não confiável (AUTH_FAIL, BRAND_DOMAIN_MISMATCH)",
         "signals": [
-          "auth_fail"
+          "auth_fail",
+          "phishing",
+          "untrusted"
         ],
         "gate": [],
         "top_components": [
-          "Importância 0.7 (Categoria e conteúdo de alta importância)",
-          "Ação pendente 1 (Pede uma ação sua diretamente)",
-          "Urgência 0.308 (Prazo inferido em 2 dias)",
-          "Remetente 0.4 (Pessoa (não automático))"
+          "Importância 0.61 (Categoria e conteúdo de alta importância)",
+          "Remetente 0.4 (Pessoa (não automático))",
+          "Novidade 1 (Conteúdo novo)"
         ],
         "top_scores": [
           "contas:12",
-          "spam:6",
-          "tarefas:4",
-          "governo_juridico:3"
+          "spam:12",
+          "governo_juridico:3",
+          "negocios:2"
         ]
       },
       "parsed": {
@@ -8206,26 +7709,7 @@
         "received_date": "2026-10-22",
         "body_chars": 329
       },
-      "errors": [
-        {
-          "field": "categoria",
-          "exp": "spam / governo_juridico (ideal: spam)",
-          "got": "contas [+spam]",
-          "severity": "erro"
-        },
-        {
-          "field": "ação",
-          "exp": "false",
-          "got": "true (action_score 0.727)",
-          "severity": "erro"
-        },
-        {
-          "field": "prazo",
-          "exp": "null",
-          "got": "2026-10-24 (DEADLINE, INFERRED)",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "phish-correios-taxa-retida",
@@ -8244,16 +7728,19 @@
       },
       "got": {
         "category": "spam",
-        "secondary": [],
-        "confidence": 0.638,
+        "secondary": [
+          "compras",
+          "tarefas"
+        ],
+        "confidence": 0.65,
         "level": "LOW",
-        "score": 0.0082,
+        "score": 0.016,
         "urgency": 0,
         "action": false,
-        "action_score": 0.27,
-        "deadline": "2026-10-20",
-        "deadline_certainty": "INFERRED",
-        "deadline_kind": "DEADLINE",
+        "action_score": 0.721,
+        "deadline": null,
+        "deadline_certainty": null,
+        "deadline_kind": null,
         "opportunity": false,
         "opportunity_type": null,
         "opportunity_fit": null,
@@ -8262,27 +7749,29 @@
         "injection_signals": [],
         "is_newsletter": false,
         "is_marketing": false,
-        "is_spam": false,
-        "reason": "prazo 20/10/2026",
+        "is_spam": true,
+        "reason": "remetente não confiável (AUTH_FAIL, BRAND_DOMAIN_MISMATCH)",
         "signals": [
-          "auth_fail"
+          "auth_fail",
+          "phishing",
+          "untrusted"
         ],
         "gate": [],
         "top_components": [
-          "Remetente 0.4 (Pessoa (não automático))",
+          "Importância 0.595 (Importância moderada)",
           "Novidade 1 (Conteúdo novo)",
-          "Importância 0.1 (Baixa importância)"
+          "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
-          "spam:3",
-          "financas:1",
-          "trabalho:1",
-          "tarefas:1"
+          "compras:10",
+          "spam:9",
+          "tarefas:5",
+          "financas:1"
         ]
       },
       "parsed": {
         "is_bulk": false,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": true,
         "auth_pass": false,
         "user_in_to": true,
@@ -8292,14 +7781,7 @@
         "received_date": "2026-10-20",
         "body_chars": 242
       },
-      "errors": [
-        {
-          "field": "prazo",
-          "exp": "null",
-          "got": "2026-10-20 (DEADLINE, INFERRED)",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "phish-fraude-ceo-pix-gmail",
@@ -8317,14 +7799,16 @@
         "notes": "A gestora real usa o domínio corporativo (contato conhecido); este endereço é novo e o Reply-To diverge."
       },
       "got": {
-        "category": "tarefas",
-        "secondary": [],
-        "confidence": 0.895,
-        "level": "HIGH",
-        "score": 0.552,
-        "urgency": 0.3,
-        "action": true,
-        "action_score": 0.727,
+        "category": "spam",
+        "secondary": [
+          "tarefas"
+        ],
+        "confidence": 0.65,
+        "level": "LOW",
+        "score": 0.0208,
+        "urgency": 0,
+        "action": false,
+        "action_score": 0.928,
         "deadline": null,
         "deadline_certainty": null,
         "deadline_kind": null,
@@ -8336,21 +7820,23 @@
         "injection_signals": [],
         "is_newsletter": false,
         "is_marketing": false,
-        "is_spam": false,
-        "reason": "Termos: preciso que, me confirme · pedido de ação",
-        "signals": [],
+        "is_spam": true,
+        "reason": "remetente não confiável (DISPLAY_NAME_IMPERSONATION, REPLY_TO_MISMATCH, FREEMAIL_EXECUTIVE)",
+        "signals": [
+          "phishing",
+          "untrusted"
+        ],
         "gate": [],
         "top_components": [
-          "Importância 0.85 (Categoria e conteúdo de alta importância)",
-          "Ação pendente 1 (Pede uma ação sua diretamente)",
-          "Urgência 0.3 (Sinais de urgência sem prazo definido)",
-          "Remetente 0.4 (Pessoa (não automático))"
+          "Importância 0.745 (Categoria e conteúdo de alta importância)",
+          "Remetente 0.4 (Pessoa (não automático))",
+          "Novidade 1 (Conteúdo novo)"
         ],
         "top_scores": [
-          "tarefas:10",
+          "tarefas:12",
+          "spam:6",
           "agenda:3",
-          "compras:3",
-          "financas:2"
+          "compras:3"
         ]
       },
       "parsed": {
@@ -8365,26 +7851,7 @@
         "received_date": "2026-10-22",
         "body_chars": 279
       },
-      "errors": [
-        {
-          "field": "categoria",
-          "exp": "spam / tarefas (ideal: spam)",
-          "got": "tarefas",
-          "severity": "aceitável"
-        },
-        {
-          "field": "nível",
-          "exp": "LOW–MEDIUM",
-          "got": "HIGH (score 0.552)",
-          "severity": "acima"
-        },
-        {
-          "field": "ação",
-          "exp": "false",
-          "got": "true (action_score 0.727)",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "spam-premio-sorteio",
@@ -8403,15 +7870,15 @@
       "got": {
         "category": "spam",
         "secondary": [],
-        "confidence": 0.938,
+        "confidence": 0.93,
         "level": "LOW",
         "score": 0.0058,
         "urgency": 0,
         "action": false,
         "action_score": 0,
-        "deadline": "2026-10-20",
-        "deadline_certainty": "INFERRED",
-        "deadline_kind": "DEADLINE",
+        "deadline": null,
+        "deadline_certainty": null,
+        "deadline_kind": null,
         "opportunity": false,
         "opportunity_type": null,
         "opportunity_fit": null,
@@ -8421,15 +7888,17 @@
         "is_newsletter": false,
         "is_marketing": false,
         "is_spam": true,
-        "reason": "Termos: voce ganhou, voce foi selecionado, clique para resgatar, 100% garantido · prazo 20/10/2026",
-        "signals": [],
+        "reason": "Termos: voce ganhou, clique para resgatar, 100% garantido, sem risco · remetente não confiável",
+        "signals": [
+          "untrusted"
+        ],
         "gate": [],
         "top_components": [
           "Remetente 0.4 (Pessoa (não automático))",
           "Novidade 1 (Conteúdo novo)"
         ],
         "top_scores": [
-          "spam:17",
+          "spam:15",
           "financas:3",
           "compras:1",
           "carreira:0"
@@ -8447,14 +7916,7 @@
         "received_date": "2026-10-19",
         "body_chars": 257
       },
-      "errors": [
-        {
-          "field": "prazo",
-          "exp": "null",
-          "got": "2026-10-20 (DEADLINE, INFERRED)",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "phish-microsoft-senha-expira-en",
@@ -8472,20 +7934,19 @@
         "notes": "Golpe com 'Action required'."
       },
       "got": {
-        "category": "tarefas",
+        "category": "spam",
         "secondary": [
-          "seguranca_conta",
-          "spam"
+          "tarefas"
         ],
-        "confidence": 0.627,
+        "confidence": 0.732,
         "level": "LOW",
-        "score": 0.3131,
-        "urgency": 0.6,
+        "score": 0.0198,
+        "urgency": 0,
         "action": false,
         "action_score": 0.35,
-        "deadline": "2026-10-23",
-        "deadline_certainty": "INFERRED",
-        "deadline_kind": "DEADLINE",
+        "deadline": null,
+        "deadline_certainty": null,
+        "deadline_kind": null,
         "opportunity": false,
         "opportunity_type": null,
         "opportunity_fit": null,
@@ -8494,22 +7955,23 @@
         "injection_signals": [],
         "is_newsletter": false,
         "is_marketing": false,
-        "is_spam": false,
-        "reason": "Termos: action required · prazo 23/10/2026",
+        "is_spam": true,
+        "reason": "remetente não confiável (AUTH_FAIL, BRAND_DOMAIN_MISMATCH)",
         "signals": [
-          "auth_fail"
+          "auth_fail",
+          "phishing",
+          "untrusted"
         ],
         "gate": [],
         "top_components": [
-          "Importância 0.8 (Categoria e conteúdo de alta importância)",
-          "Urgência 0.6 (Prazo inferido hoje)",
+          "Importância 0.695 (Categoria e conteúdo de alta importância)",
           "Remetente 0.4 (Pessoa (não automático))",
           "Novidade 1 (Conteúdo novo)"
         ],
         "top_scores": [
+          "spam:9",
           "tarefas:6",
           "seguranca_conta:4",
-          "spam:3",
           "noticias:2"
         ]
       },
@@ -8525,20 +7987,7 @@
         "received_date": "2026-10-23",
         "body_chars": 259
       },
-      "errors": [
-        {
-          "field": "categoria",
-          "exp": "spam / seguranca_conta (ideal: spam)",
-          "got": "tarefas [+seguranca_conta, spam]",
-          "severity": "erro"
-        },
-        {
-          "field": "prazo",
-          "exp": "null",
-          "got": "2026-10-23 (DEADLINE, INFERRED)",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "phish-boleto-protesto-anexo-html",
@@ -8556,17 +8005,19 @@
         "notes": "Cobrança de dívida inexistente; anexo HTML é sinal clássico."
       },
       "got": {
-        "category": "contas",
-        "secondary": [],
-        "confidence": 0.869,
-        "level": "MEDIUM",
-        "score": 0.4054,
-        "urgency": 0.4299,
-        "action": true,
-        "action_score": 0.5,
-        "deadline": "2026-10-22",
-        "deadline_certainty": "INFERRED",
-        "deadline_kind": "DEADLINE",
+        "category": "spam",
+        "secondary": [
+          "contas"
+        ],
+        "confidence": 0.65,
+        "level": "LOW",
+        "score": 0.0142,
+        "urgency": 0,
+        "action": false,
+        "action_score": 0.663,
+        "deadline": null,
+        "deadline_certainty": null,
+        "deadline_kind": null,
         "opportunity": false,
         "opportunity_type": null,
         "opportunity_fit": null,
@@ -8575,28 +8026,29 @@
         "injection_signals": [],
         "is_newsletter": false,
         "is_marketing": false,
-        "is_spam": false,
-        "reason": "Termos: boleto, cobranca, em atraso, cpf · pedido de ação · prazo 22/10/2026",
+        "is_spam": true,
+        "reason": "remetente não confiável (AUTH_FAIL, RISKY_ATTACHMENT)",
         "signals": [
-          "auth_fail"
+          "auth_fail",
+          "phishing",
+          "untrusted"
         ],
         "gate": [],
         "top_components": [
-          "Importância 0.7 (Categoria e conteúdo de alta importância)",
-          "Ação pendente 1 (Pede uma ação sua diretamente)",
-          "Urgência 0.43 (Prazo inferido amanhã)",
-          "Remetente 0.4 (Pessoa (não automático))"
+          "Importância 0.51 (Importância moderada)",
+          "Novidade 1 (Conteúdo novo)",
+          "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
           "contas:24",
+          "spam:9",
           "governo_juridico:9",
-          "trabalho:6",
-          "tarefas:3"
+          "trabalho:6"
         ]
       },
       "parsed": {
         "is_bulk": false,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": true,
         "auth_pass": false,
         "user_in_to": true,
@@ -8606,26 +8058,7 @@
         "received_date": "2026-10-21",
         "body_chars": 249
       },
-      "errors": [
-        {
-          "field": "categoria",
-          "exp": "spam / contas (ideal: spam)",
-          "got": "contas",
-          "severity": "aceitável"
-        },
-        {
-          "field": "ação",
-          "exp": "false",
-          "got": "true (action_score 0.5)",
-          "severity": "erro"
-        },
-        {
-          "field": "prazo",
-          "exp": "null",
-          "got": "2026-10-22 (DEADLINE, INFERRED)",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "inj-recrutador-falso-instrucoes",
@@ -8646,18 +8079,18 @@
         "category": "carreira",
         "secondary": [],
         "confidence": 0.95,
-        "level": "MEDIUM",
-        "score": 0.3614,
+        "level": "LOW",
+        "score": 0.2797,
         "urgency": 0,
         "action": false,
         "action_score": 0,
         "deadline": null,
         "deadline_certainty": null,
         "deadline_kind": null,
-        "opportunity": true,
-        "opportunity_type": "job",
-        "opportunity_fit": 0.35,
-        "opportunity_mass": false,
+        "opportunity": false,
+        "opportunity_type": null,
+        "opportunity_fit": null,
+        "opportunity_mass": null,
         "injection": true,
         "injection_signals": [
           "IGNORE_PREV",
@@ -8674,7 +8107,6 @@
         "gate": [],
         "top_components": [
           "Importância 0.8 (Categoria e conteúdo de alta importância)",
-          "Oportunidade 0.74 (Oportunidade identificada)",
           "Remetente 0.4 (Pessoa (não automático))",
           "Novidade 1 (Conteúdo novo)"
         ],
@@ -8703,12 +8135,6 @@
           "exp": "spam / carreira (ideal: spam)",
           "got": "carreira",
           "severity": "aceitável"
-        },
-        {
-          "field": "oportunidade",
-          "exp": "false",
-          "got": "true (job, fit 0.35)",
-          "severity": "erro"
         }
       ]
     },
@@ -8732,12 +8158,12 @@
         "secondary": [
           "contas"
         ],
-        "confidence": 0.685,
-        "level": "MEDIUM",
-        "score": 0.4453,
+        "confidence": 0.714,
+        "level": "LOW",
+        "score": 0.2797,
         "urgency": 0,
-        "action": true,
-        "action_score": 0.63,
+        "action": false,
+        "action_score": 0.825,
         "deadline": null,
         "deadline_certainty": null,
         "deadline_kind": null,
@@ -8753,19 +8179,18 @@
         "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: pendente · pedido de ação",
+        "reason": "Termos: pendente",
         "signals": [
           "injection"
         ],
         "gate": [],
         "top_components": [
           "Importância 0.8 (Categoria e conteúdo de alta importância)",
-          "Ação pendente 1 (Pede uma ação sua diretamente)",
           "Remetente 0.4 (Pessoa (não automático))",
           "Novidade 1 (Conteúdo novo)"
         ],
         "top_scores": [
-          "tarefas:10",
+          "tarefas:11",
           "contas:9",
           "trabalho:3",
           "compras:3"
@@ -8789,12 +8214,6 @@
           "exp": "spam / tarefas (ideal: spam)",
           "got": "tarefas [+contas]",
           "severity": "aceitável"
-        },
-        {
-          "field": "ação",
-          "exp": "false",
-          "got": "true (action_score 0.63)",
-          "severity": "erro"
         }
       ]
     },
@@ -8815,14 +8234,14 @@
         "notes": "Família, pedido de resposta com prazo relativo (sábado)."
       },
       "got": {
-        "category": "outros",
+        "category": "tarefas",
         "secondary": [],
-        "confidence": 0.3,
-        "level": "LOW",
-        "score": 0.3294,
+        "confidence": 0.685,
+        "level": "HIGH",
+        "score": 0.6214,
         "urgency": 0.3081,
-        "action": false,
-        "action_score": 0.4,
+        "action": true,
+        "action_score": 0.833,
         "deadline": "2026-10-24",
         "deadline_certainty": "INFERRED",
         "deadline_kind": "DEADLINE",
@@ -8835,17 +8254,17 @@
         "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "prazo 24/10/2026",
+        "reason": "pedido de ação · prazo 24/10/2026",
         "signals": [],
         "gate": [],
         "top_components": [
-          "Importância 0.55 (Importância moderada)",
+          "Importância 0.95 (Categoria e conteúdo de alta importância)",
+          "Ação pendente 1 (Pede uma ação sua diretamente)",
           "Remetente 0.8 (Contato com quem você já trocou e-mails)",
-          "Urgência 0.308 (Prazo inferido em 2 dias)",
-          "Novidade 1 (Conteúdo novo)"
+          "Urgência 0.308 (Prazo inferido em 2 dias)"
         ],
         "top_scores": [
-          "tarefas:2",
+          "tarefas:5",
           "agenda:2",
           "carreira:0",
           "networking:0"
@@ -8865,16 +8284,10 @@
       },
       "errors": [
         {
-          "field": "nível",
-          "exp": "MEDIUM–HIGH",
-          "got": "LOW (score 0.3294)",
-          "severity": "abaixo"
-        },
-        {
-          "field": "ação",
-          "exp": "true",
-          "got": "false (action_score 0.4)",
-          "severity": "erro"
+          "field": "categoria",
+          "exp": "outros / agenda / tarefas (ideal: outros)",
+          "got": "tarefas",
+          "severity": "aceitável"
         }
       ]
     },
@@ -8959,19 +8372,19 @@
         "notes": "Familiar, pedido direto, prazo hoje com consequência real."
       },
       "got": {
-        "category": "governo_juridico",
+        "category": "tarefas",
         "secondary": [
-          "tarefas"
+          "governo_juridico"
         ],
-        "confidence": 0.654,
-        "level": "MEDIUM",
-        "score": 0.538,
-        "urgency": 0,
+        "confidence": 0.615,
+        "level": "CRITICAL",
+        "score": 0.72,
+        "urgency": 0.6,
         "action": true,
-        "action_score": 0.812,
-        "deadline": null,
-        "deadline_certainty": null,
-        "deadline_kind": null,
+        "action_score": 1,
+        "deadline": "2026-10-22",
+        "deadline_certainty": "INFERRED",
+        "deadline_kind": "DEADLINE",
         "opportunity": false,
         "opportunity_type": null,
         "opportunity_fit": null,
@@ -8981,18 +8394,21 @@
         "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: cartorio · pedido de ação",
+        "reason": "Termos: preciso que · pedido de ação · prazo 22/10/2026",
         "signals": [],
-        "gate": [],
+        "gate": [
+          "Ação com prazo próximo",
+          "Pedido direto de contato conhecido com prazo hoje"
+        ],
         "top_components": [
-          "Importância 0.85 (Categoria e conteúdo de alta importância)",
+          "Importância 0.95 (Categoria e conteúdo de alta importância)",
           "Ação pendente 1 (Pede uma ação sua diretamente)",
-          "Remetente 0.8 (Contato com quem você já trocou e-mails)",
-          "Novidade 1 (Conteúdo novo)"
+          "Urgência 0.6 (Prazo inferido hoje)",
+          "Remetente 0.8 (Contato com quem você já trocou e-mails)"
         ],
         "top_scores": [
+          "tarefas:9",
           "governo_juridico:9",
-          "tarefas:8",
           "carreira:0",
           "networking:0"
         ]
@@ -9009,26 +8425,7 @@
         "received_date": "2026-10-22",
         "body_chars": 194
       },
-      "errors": [
-        {
-          "field": "categoria",
-          "exp": "tarefas / outros / governo_juridico (ideal: tarefas)",
-          "got": "governo_juridico [+tarefas]",
-          "severity": "aceitável"
-        },
-        {
-          "field": "nível",
-          "exp": "CRITICAL",
-          "got": "MEDIUM (score 0.538)",
-          "severity": "abaixo"
-        },
-        {
-          "field": "prazo",
-          "exp": "2026-10-22",
-          "got": "null",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "pessoal-lista-familia-churrasco",
@@ -9046,12 +8443,12 @@
         "notes": "Grupo familiar; pedido coletivo."
       },
       "got": {
-        "category": "newsletters",
+        "category": "outros",
         "secondary": [],
-        "confidence": 0.79,
+        "confidence": 0.3,
         "level": "LOW",
-        "score": 0.0934,
-        "urgency": 0.0051,
+        "score": 0.1526,
+        "urgency": 0.0256,
         "action": false,
         "action_score": 0,
         "deadline": "2026-10-31",
@@ -9063,25 +8460,25 @@
         "opportunity_mass": null,
         "injection": false,
         "injection_signals": [],
-        "is_newsletter": true,
+        "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "envio em massa · prazo 31/10/2026",
+        "reason": "lista de discussão · prazo 31/10/2026",
         "signals": [
-          "bulk_list"
+          "discussion_list"
         ],
         "gate": [],
         "top_components": [
-          "Importância 0.25 (Baixa importância)",
+          "Importância 0.3 (Baixa importância)",
+          "Remetente 0.4 (Pessoa (não automático))",
           "Novidade 0.6 (Envio recorrente)",
-          "Remetente 0.15 (Envio automático ou em massa)",
-          "Urgência 0.005 (Prazo explícito em 11 dias (prazo de baixa confiabilidade para a categoria))"
+          "Urgência 0.026 (Prazo explícito em 11 dias)"
         ],
         "top_scores": [
-          "newsletters:4",
           "carreira:0",
           "networking:0",
-          "noticias:0"
+          "noticias:0",
+          "economia:0"
         ]
       },
       "parsed": {
@@ -9096,14 +8493,7 @@
         "received_date": "2026-10-20",
         "body_chars": 125
       },
-      "errors": [
-        {
-          "field": "categoria",
-          "exp": "outros / agenda (ideal: outros)",
-          "got": "newsletters",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "pessoal-esposa-fwd-boleto-escola",
@@ -9123,12 +8513,12 @@
       "got": {
         "category": "contas",
         "secondary": [],
-        "confidence": 0.942,
-        "level": "HIGH",
-        "score": 0.709,
+        "confidence": 0.903,
+        "level": "CRITICAL",
+        "score": 0.72,
         "urgency": 0.7165,
         "action": true,
-        "action_score": 0.55,
+        "action_score": 0.833,
         "deadline": "2026-10-23",
         "deadline_certainty": "EXPLICIT",
         "deadline_kind": "DEADLINE",
@@ -9144,7 +8534,8 @@
         "reason": "Termos: boleto, vencimento, linha digitavel · pedido de ação · prazo 23/10/2026",
         "signals": [],
         "gate": [
-          "Ação com prazo próximo"
+          "Ação com prazo próximo",
+          "Pedido direto de contato conhecido com prazo até amanhã"
         ],
         "top_components": [
           "Importância 1 (Categoria e conteúdo de alta importância)",
@@ -9154,9 +8545,9 @@
         ],
         "top_scores": [
           "contas:18",
-          "tarefas:3",
-          "agenda:2",
-          "carreira:0"
+          "tarefas:5",
+          "carreira:0",
+          "networking:0"
         ]
       },
       "parsed": {
@@ -9190,12 +8581,12 @@
         "notes": "Convocação coletiva; data-chave é a assembleia."
       },
       "got": {
-        "category": "newsletters",
+        "category": "outros",
         "secondary": [],
-        "confidence": 0.615,
+        "confidence": 0.3,
         "level": "LOW",
-        "score": 0.0928,
-        "urgency": 0.0011,
+        "score": 0.149,
+        "urgency": 0.0056,
         "action": false,
         "action_score": 0,
         "deadline": "2026-11-05",
@@ -9207,25 +8598,25 @@
         "opportunity_mass": null,
         "injection": false,
         "injection_signals": [],
-        "is_newsletter": true,
+        "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "envio em massa · prazo 05/11/2026",
+        "reason": "lista de discussão · prazo 05/11/2026",
         "signals": [
-          "bulk_list"
+          "discussion_list"
         ],
         "gate": [],
         "top_components": [
-          "Importância 0.25 (Baixa importância)",
+          "Importância 0.3 (Baixa importância)",
+          "Remetente 0.4 (Pessoa (não automático))",
           "Novidade 0.6 (Envio recorrente)",
-          "Remetente 0.15 (Envio automático ou em massa)",
-          "Urgência 0.001 (Prazo inferido em 14 dias (prazo de baixa confiabilidade para a categoria))"
+          "Urgência 0.006 (Prazo inferido em 14 dias)"
         ],
         "top_scores": [
-          "newsletters:4",
           "agenda:2",
           "carreira:0",
-          "networking:0"
+          "networking:0",
+          "noticias:0"
         ]
       },
       "parsed": {
@@ -9240,14 +8631,7 @@
         "received_date": "2026-10-22",
         "body_chars": 310
       },
-      "errors": [
-        {
-          "field": "categoria",
-          "exp": "outros / agenda / contas (ideal: outros)",
-          "got": "newsletters",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "en-invoice-saas-due",
@@ -9265,14 +8649,14 @@
         "notes": "Conta em inglês com prazo de 9 dias."
       },
       "got": {
-        "category": "tecnologia",
+        "category": "contas",
         "secondary": [],
-        "confidence": 0.522,
-        "level": "LOW",
-        "score": 0.2727,
-        "urgency": 0.0149,
-        "action": false,
-        "action_score": 0.35,
+        "confidence": 0.875,
+        "level": "MEDIUM",
+        "score": 0.504,
+        "urgency": 0.0498,
+        "action": true,
+        "action_score": 0.76,
         "deadline": "2026-10-30",
         "deadline_certainty": "EXPLICIT",
         "deadline_kind": "DEADLINE",
@@ -9285,25 +8669,25 @@
         "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: analytics · prazo 30/10/2026",
+        "reason": "Termos: invoice, due date, billing · pedido de ação · prazo 30/10/2026",
         "signals": [],
         "gate": [],
         "top_components": [
-          "Importância 0.5 (Importância moderada)",
+          "Importância 0.75 (Categoria e conteúdo de alta importância)",
+          "Ação pendente 1 (Pede uma ação sua diretamente)",
           "Interesse 0.5 (Casa com seus temas de interesse)",
-          "Remetente 0.4 (Pessoa (não automático))",
           "Novidade 1 (Conteúdo novo)"
         ],
         "top_scores": [
-          "tecnologia:3",
+          "contas:14",
+          "tarefas:5",
           "noticias:2",
-          "carreira:0",
-          "networking:0"
+          "carreira:0"
         ]
       },
       "parsed": {
         "is_bulk": false,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": false,
         "auth_pass": true,
         "user_in_to": true,
@@ -9313,26 +8697,7 @@
         "received_date": "2026-10-21",
         "body_chars": 261
       },
-      "errors": [
-        {
-          "field": "categoria",
-          "exp": "contas / compras (ideal: contas)",
-          "got": "tecnologia",
-          "severity": "erro"
-        },
-        {
-          "field": "nível",
-          "exp": "MEDIUM",
-          "got": "LOW (score 0.2727)",
-          "severity": "abaixo"
-        },
-        {
-          "field": "ação",
-          "exp": "true",
-          "got": "false (action_score 0.35)",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "en-cliente-deck-amanha-eod",
@@ -9350,17 +8715,16 @@
         "notes": "Pedido direto em inglês com prazo amanhã."
       },
       "got": {
-        "category": "negocios",
+        "category": "tarefas",
         "secondary": [
-          "tarefas",
           "agenda"
         ],
-        "confidence": 0.693,
-        "level": "MEDIUM",
-        "score": 0.5496,
-        "urgency": 0.172,
+        "confidence": 0.771,
+        "level": "HIGH",
+        "score": 0.6254,
+        "urgency": 0.4299,
         "action": true,
-        "action_score": 0.727,
+        "action_score": 0.944,
         "deadline": "2026-10-22",
         "deadline_certainty": "INFERRED",
         "deadline_kind": "DEADLINE",
@@ -9373,20 +8737,20 @@
         "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Termos: pricing · pedido de ação · prazo 22/10/2026",
+        "reason": "Termos: could you · pedido de ação · prazo 22/10/2026",
         "signals": [],
         "gate": [],
         "top_components": [
-          "Importância 0.745 (Categoria e conteúdo de alta importância)",
+          "Importância 0.85 (Categoria e conteúdo de alta importância)",
           "Ação pendente 1 (Pede uma ação sua diretamente)",
-          "Interesse 0.5 (Casa com seus temas de interesse)",
-          "Remetente 0.4 (Pessoa (não automático))"
+          "Urgência 0.43 (Prazo inferido amanhã)",
+          "Interesse 0.5 (Casa com seus temas de interesse)"
         ],
         "top_scores": [
-          "negocios:9",
-          "tarefas:7",
+          "tarefas:9",
           "agenda:5",
-          "carreira:0"
+          "carreira:0",
+          "networking:0"
         ]
       },
       "parsed": {
@@ -9405,14 +8769,8 @@
         {
           "field": "categoria",
           "exp": "trabalho / tarefas (ideal: trabalho)",
-          "got": "negocios [+tarefas, agenda]",
-          "severity": "erro"
-        },
-        {
-          "field": "nível",
-          "exp": "HIGH–CRITICAL",
-          "got": "MEDIUM (score 0.5496)",
-          "severity": "abaixo"
+          "got": "tarefas [+agenda]",
+          "severity": "aceitável"
         }
       ]
     },
@@ -9431,11 +8789,11 @@
         "notes": "Informativo."
       },
       "got": {
-        "category": "outros",
+        "category": "financas",
         "secondary": [],
-        "confidence": 0.3,
+        "confidence": 0.795,
         "level": "LOW",
-        "score": 0.139,
+        "score": 0.195,
         "urgency": 0,
         "action": false,
         "action_score": 0,
@@ -9451,19 +8809,19 @@
         "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "Sem sinais fortes de categoria",
+        "reason": "Termos: statement is ready, balances",
         "signals": [],
         "gate": [],
         "top_components": [
-          "Importância 0.3 (Baixa importância)",
+          "Importância 0.5 (Importância moderada)",
           "Novidade 1 (Conteúdo novo)",
           "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
+          "financas:7",
           "noticias:2",
           "carreira:0",
-          "networking:0",
-          "economia:0"
+          "networking:0"
         ]
       },
       "parsed": {
@@ -9478,14 +8836,7 @@
         "received_date": "2026-10-20",
         "body_chars": 124
       },
-      "errors": [
-        {
-          "field": "categoria",
-          "exp": "financas",
-          "got": "outros",
-          "severity": "erro"
-        }
-      ]
+      "errors": []
     },
     {
       "id": "trabalho-reply-chefe-resumo-amanha-cedo",
@@ -9503,14 +8854,14 @@
         "notes": "Pedido curto em resposta; prazo relativo (amanhã)."
       },
       "got": {
-        "category": "outros",
+        "category": "tarefas",
         "secondary": [],
-        "confidence": 0.3,
-        "level": "MEDIUM",
-        "score": 0.3794,
+        "confidence": 0.825,
+        "level": "HIGH",
+        "score": 0.6574,
         "urgency": 0.4299,
-        "action": false,
-        "action_score": 0,
+        "action": true,
+        "action_score": 0.833,
         "deadline": "2026-10-21",
         "deadline_certainty": "INFERRED",
         "deadline_kind": "DEADLINE",
@@ -9523,20 +8874,20 @@
         "is_newsletter": false,
         "is_marketing": false,
         "is_spam": false,
-        "reason": "prazo 21/10/2026",
+        "reason": "pedido de ação · prazo 21/10/2026",
         "signals": [],
         "gate": [],
         "top_components": [
-          "Importância 0.65 (Categoria e conteúdo de alta importância)",
+          "Importância 1 (Categoria e conteúdo de alta importância)",
+          "Ação pendente 1 (Pede uma ação sua diretamente)",
           "Remetente 0.8 (Contato com quem você já trocou e-mails)",
-          "Urgência 0.43 (Prazo inferido amanhã)",
-          "Novidade 1 (Conteúdo novo)"
+          "Urgência 0.43 (Prazo inferido amanhã)"
         ],
         "top_scores": [
+          "tarefas:5",
           "carreira:0",
           "networking:0",
-          "noticias:0",
-          "economia:0"
+          "noticias:0"
         ]
       },
       "parsed": {
@@ -9555,20 +8906,8 @@
         {
           "field": "categoria",
           "exp": "trabalho / tarefas (ideal: trabalho)",
-          "got": "outros",
-          "severity": "erro"
-        },
-        {
-          "field": "nível",
-          "exp": "HIGH–CRITICAL",
-          "got": "MEDIUM (score 0.3794)",
-          "severity": "abaixo"
-        },
-        {
-          "field": "ação",
-          "exp": "true",
-          "got": "false (action_score 0)",
-          "severity": "erro"
+          "got": "tarefas",
+          "severity": "aceitável"
         }
       ]
     },
@@ -9592,10 +8931,10 @@
         "secondary": [],
         "confidence": 0.903,
         "level": "MEDIUM",
-        "score": 0.5013,
+        "score": 0.4483,
         "urgency": 0.0183,
         "action": true,
-        "action_score": 0.4,
+        "action_score": 0.784,
         "deadline": "2026-11-05",
         "deadline_certainty": "EXPLICIT",
         "deadline_kind": "DEADLINE",
@@ -9612,21 +8951,21 @@
         "signals": [],
         "gate": [],
         "top_components": [
-          "Importância 0.85 (Categoria e conteúdo de alta importância)",
+          "Importância 0.75 (Categoria e conteúdo de alta importância)",
           "Ação pendente 1 (Pede uma ação sua diretamente)",
-          "Remetente 0.4 (Pessoa (não automático))",
-          "Novidade 1 (Conteúdo novo)"
+          "Novidade 1 (Conteúdo novo)",
+          "Remetente 0.15 (Envio automático ou em massa)"
         ],
         "top_scores": [
           "contas:18",
           "financas:5",
-          "marketing:3",
-          "noticias:2"
+          "tarefas:5",
+          "marketing:3"
         ]
       },
       "parsed": {
         "is_bulk": false,
-        "is_automated": false,
+        "is_automated": true,
         "auth_fail": false,
         "auth_pass": true,
         "user_in_to": true,

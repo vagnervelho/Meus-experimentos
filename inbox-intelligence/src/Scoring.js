@@ -6,6 +6,19 @@
  * Cada componente Xᵢ ∈ [0, 1] vem com uma justificativa em pt-BR. A IA nunca
  * define o score sozinha: ela contribui com sinais (importância, urgência sem
  * prazo, ação, oportunidade), sempre combinados com regras e limites fixos.
+ *
+ * Depois da soma ponderada vêm pisos e tetos explícitos (cada um vira um
+ * componente com peso 0 e justificativa), sempre mantendo score e nível na
+ * mesma faixa para que a ordenação por score respeite o nível:
+ *  - piso Alta: pedido direto de PESSOA (não automático, você em "Para") com
+ *    ação e prazo concreto (data explícita ou horário) para hoje ou amanhã;
+ *    de contato conhecido/prioritário ou com consequência séria, Crítica;
+ *  - pisos por gravidade (RulesClassifier.severity): séria ⇒ Média; muito
+ *    grave com ação não condicional ⇒ Alta;
+ *  - teto Média (score < limiar de Alta): remetente não confiável (falha de
+ *    autenticação, spam, imitação) ou suspeita de injection;
+ *  - teto Baixa (score < limiar de Média): marcada por você como irrelevante.
+ * Ruído, newsletter e marketing nunca recebem pisos nem viram Crítica.
  */
 var Scoring = (function () {
   var LABELS = {
@@ -18,8 +31,14 @@ var Scoring = (function () {
     interest: 'Interesse',
   };
   var NOISE_CATEGORIES = ['marketing', 'spam'];
-  var TRANSACTIONAL = ['contas', 'agenda', 'tarefas', 'saude', 'governo_juridico', 'trabalho'];
+  var OBLIGATION_CATEGORIES = ['trabalho', 'tarefas', 'contas', 'governo_juridico', 'saude', 'financas'];
+  // Categorias em que pedidos/prazos (inclusive de remetentes automáticos) são tarefas legítimas: boleto,
+  // check-in, retirada, etapa de processo seletivo… Mesma lista de RulesClassifier.TRANSACTIONAL (há teste).
+  var TRANSACTIONAL = ['contas', 'agenda', 'compras', 'tarefas', 'trabalho', 'saude', 'governo_juridico', 'carreira'];
   var URGENT_WORDS = /\b(urgente|urgencia|o quanto antes|imediatamente|asap|urgent|immediately|ultimo dia|hoje ainda)\b/;
+  // Ação condicional ("se não foi você, …", "caso não reconheça, …", "if this wasn't you, …"): só exige algo
+  // se a premissa valer, então não sustenta o piso Alta de notificação grave.
+  var RE_CONDITIONAL_ACTION = /^\W*(?:(?:por favor|please|importante|important|atencao|attention)\W+)?(?:se|caso|if|in case)\s/;
 
   function catOf_(id) {
     return Config.category(id) || Config.category('outros');
@@ -46,8 +65,14 @@ var Scoring = (function () {
     var fromEmail = String(parsed.from_email || '').toLowerCase();
     var fromDomain = String(parsed.from_domain || Util.emailDomain(fromEmail)).toLowerCase();
     var known = !!(ctx && ctx.knownContacts && ctx.knownContacts[fromEmail]);
-    var automated = !!(parsed.is_automated || parsed.is_bulk);
+    // Pessoa numa lista de discussão (grupo da família, condomínio) continua sendo pessoa.
+    var automated = !!(parsed.is_automated || (parsed.is_bulk && !parsed.is_discussion_list));
     var direct = !!parsed.user_in_to && !parsed.is_bulk;
+    // Confiança: autenticação, spam e imitação (merged.untrusted) ou injection limitam o nível a Média.
+    var injection = !!(merged.injection && merged.injection.suspected);
+    var untrusted = !!parsed.auth_fail || !!merged.is_probable_spam || !!parsed.is_spam || !!merged.untrusted || injection;
+    // Gravidade nunca vale para mensagem não confiável (o classificador já zera; aqui é defesa extra).
+    var severity = untrusted ? 0 : Util.clamp(Number(merged.severity) || 0, 0, 1);
 
     // Importância: IA ancorada no prior da categoria (reduz a variância do modelo).
     // Sem IA, sinais gratuitos e confiáveis do Gmail entram como bônus explícitos.
@@ -60,6 +85,7 @@ var Scoring = (function () {
     if (labels.indexOf('STARRED') >= 0 || parsed.is_starred) bonus += b.starred;
     if (parsed.gmail_category === 'PERSONAL' && !automated) bonus += b.personalHuman;
     if (parsed.gmail_category === 'PROMOTIONS') bonus += b.promotions;
+    bonus += sc.severityBonus * severity;
     var importance;
     if (merged.method === 'AI' && merged.importance) {
       importance = sc.aiImportanceBlend * ((Number(merged.importance) - 1) / 4) + (1 - sc.aiImportanceBlend) * prior + Math.min(0, bonus) + Math.max(0, bonus) * 0.5;
@@ -74,11 +100,18 @@ var Scoring = (function () {
     noDeadline = Math.min(sc.noDeadlineUrgencyCap, noDeadline * sc.noDeadlineUrgencyFactor);
 
     var action = 0;
+    var actionConditional = false;
     if (merged.action_required) {
-      var mine = (merged.actions || []).some(function (a) {
+      var acts = merged.actions || [];
+      var mine = acts.some(function (a) {
         return a.owner === 'me';
       });
       action = 0.6 + 0.4 * (direct || mine ? 1 : 0);
+      // Em segurança da conta o classificador só aceita ação sob a condicional "se não foi você" (e a
+      // categoria nunca vai à IA): ali toda ação é condicional, mesmo que a frase extraída não pareça.
+      actionConditional = cat.id === 'seguranca_conta' || (acts.length > 0 && acts.every(function (a) {
+        return RE_CONDITIONAL_ACTION.test(Util.normalizeText(a && a.description));
+      }));
     }
 
     var opportunity = 0;
@@ -102,14 +135,18 @@ var Scoring = (function () {
     var reliability = 0.8;
     if (parsed.auth_fail) reliability = 0.4;
     else if (parsed.auth_pass) reliability = 1;
+    // Imitação de marca/nome ou Reply-To divergente equivalem a autenticação falha.
+    if (merged.untrusted) reliability = Math.min(reliability, 0.4);
     if (merged.is_probable_spam) reliability = Math.min(reliability, 0.3);
 
-    var dl = merged.deadline && merged.deadline.date ? { date: merged.deadline.date, certainty: merged.deadline.certainty || 'INFERRED' } : null;
+    var dl = merged.deadline && merged.deadline.date ? { date: merged.deadline.date, certainty: merged.deadline.certainty || 'INFERRED', time: merged.deadline.time || '' } : null;
 
     // Newsletter e marketing são formatos: ruído e confiança de urgência usam o mínimo entre tema e formato.
+    // Categoria transacional (boleto, etapa de processo, check-in) mantém os próprios valores mesmo em
+    // envio de lista: o formato não torna a cobrança menos real.
     var noise = cat.noise;
     var trust = cat.urgencyTrust;
-    if (merged.is_newsletter) {
+    if (merged.is_newsletter && TRANSACTIONAL.indexOf(cat.id) < 0) {
       noise = Math.min(noise, catOf_('newsletters').noise);
       trust = Math.min(trust, catOf_('newsletters').urgencyTrust);
     }
@@ -122,7 +159,10 @@ var Scoring = (function () {
     return {
       category: cat.id,
       isNoise: NOISE_CATEGORIES.indexOf(cat.id) >= 0 || !!merged.is_probable_spam || !!merged.is_marketing,
-      untrusted: !!parsed.auth_fail || !!merged.is_probable_spam || !!parsed.is_spam,
+      // Formato newsletter (mesma regra do ruído acima): nunca recebe pisos nem vira Crítica.
+      isNewsletter: cat.id === 'newsletters' || (!!merged.is_newsletter && TRANSACTIONAL.indexOf(cat.id) < 0),
+      untrusted: untrusted,
+      injection: injection,
       irrelevant: !!override.irrelevant,
       aiRelevance: aiRelevance,
       confidence: Util.clamp(merged.confidence === undefined ? 0.5 : merged.confidence, 0, 1),
@@ -131,6 +171,10 @@ var Scoring = (function () {
       urgencyNoDeadline: Util.clamp(noDeadline, 0, 1),
       urgencyTrust: trust,
       action: Util.clamp(action, 0, 1),
+      actionConditional: actionConditional,
+      // Pessoa escrevendo diretamente a você (não automático, não massa, você em "Para") e pedindo algo.
+      directRequest: !automated && direct && !!merged.action_required && !untrusted,
+      severity: Util.round(severity, 3),
       opportunity: Util.clamp(opportunity, 0, 1),
       sender: sender,
       senderKind: senderKind,
@@ -148,7 +192,7 @@ var Scoring = (function () {
   /**
    * Aplica o feedback do usuário a features já gravadas (reescore sem reler a
    * mensagem): categoria corrigida troca prior, ruído e confiança de urgência;
-   * "irrelevante" força Baixa; "deveria ser mais alta" soma 0,2 à importância.
+   * "irrelevante" força Baixa (nível e score); "deveria ser mais alta" soma 0,2 à importância.
    * @param {Object} f Features gravadas
    * @param {{category?: string, irrelevant?: boolean, higher?: boolean}} o
    */
@@ -166,6 +210,7 @@ var Scoring = (function () {
       out.noise = cat.noise;
       out.urgencyTrust = cat.urgencyTrust;
       out.isNoise = NOISE_CATEGORIES.indexOf(cat.id) >= 0;
+      out.isNewsletter = cat.id === 'newsletters' || (!!f.isNewsletter && TRANSACTIONAL.indexOf(cat.id) < 0);
     }
     if (ov.higher) out.importance = Util.clamp(out.importance + 0.2, 0, 1);
     out.irrelevant = !!ov.irrelevant;
@@ -205,10 +250,13 @@ var Scoring = (function () {
     var w = sc.weights;
     var today = todayYmd || Util.todayYmd();
 
+    var th = sc.thresholds;
+    var lv = sc.severityLevels;
     var urgency;
     var urgencyWhy;
+    var days = null;
     if (f.deadline && Util.isValidYmd(f.deadline.date)) {
-      var days = Util.daysBetween(today, f.deadline.date);
+      days = Util.daysBetween(today, f.deadline.date);
       var certainty = sc.certaintyFactor[f.deadline.certainty] || sc.certaintyFactor.INFERRED;
       urgency = deadlineFactor(days, sc) * certainty * f.urgencyTrust;
       urgencyWhy = describeDeadline_(days, f.deadline.certainty) + (f.urgencyTrust < 1 ? ' (prazo de baixa confiabilidade para a categoria)' : '');
@@ -217,6 +265,8 @@ var Scoring = (function () {
       urgencyWhy = urgency > 0 ? 'Sinais de urgência sem prazo definido' : 'Sem prazo identificado';
     }
     urgency = Util.clamp(urgency, 0, 1);
+    var severity = Util.clamp(Number(f.severity) || 0, 0, 1);
+    var serious = severity >= lv.medium;
 
     var senderWhy = {
       priority: 'Remetente prioritário',
@@ -225,8 +275,10 @@ var Scoring = (function () {
       automated: 'Envio automático ou em massa',
     }[f.senderKind] || '';
 
+    var importanceWhy = f.importance >= 0.6 ? 'Categoria e conteúdo de alta importância' : f.importance >= 0.35 ? 'Importância moderada' : 'Baixa importância';
+    if (serious) importanceWhy += ' · notificação séria (gravidade ' + Util.round(severity, 2) + ')';
     var parts = [
-      ['importance', f.importance, f.importance >= 0.6 ? 'Categoria e conteúdo de alta importância' : f.importance >= 0.35 ? 'Importância moderada' : 'Baixa importância'],
+      ['importance', f.importance, importanceWhy],
       ['urgency', urgency, urgencyWhy],
       ['action', f.action, f.action > 0 ? (f.action >= 1 ? 'Pede uma ação sua diretamente' : 'Contém pedido ou ação') : 'Nenhuma ação pedida'],
       ['opportunity', f.opportunity, f.opportunity > 0 ? (f.opportunity >= 0.8 ? 'Oportunidade aderente ao seu perfil' : 'Oportunidade identificada') : 'Sem oportunidade'],
@@ -243,26 +295,76 @@ var Scoring = (function () {
     });
     var multiplier = (0.6 + 0.4 * f.reliability) * f.noise;
     var score = Util.clamp(raw * multiplier, 0, 1);
-    if (f.reliability < 0.8) components.push({ key: 'reliability', label: 'Confiabilidade', value: f.reliability, weight: 0, contribution: 0, why: 'Autenticação do remetente falhou ou sinais de spam' });
+    if (f.reliability < 0.8) components.push({ key: 'reliability', label: 'Confiabilidade', value: f.reliability, weight: 0, contribution: 0, why: 'Autenticação do remetente falhou, imitação ou sinais de spam' });
     if (f.noise < 1) components.push({ key: 'noise', label: 'Ruído', value: f.noise, weight: 0, contribution: 0, why: 'Categoria de baixo valor (penalidade ×' + f.noise + ')' });
+
+    // Ruído, newsletter, não confiável e irrelevante nunca recebem piso nem viram Crítica.
+    var eligible = !f.isNoise && !f.isNewsletter && !f.untrusted && !f.irrelevant;
+    // Pedido direto de pessoa com prazo concreto — data explícita, ou horário ("hoje até 15h") — para hoje/amanhã.
+    var concreteDeadline = !!f.deadline && (f.deadline.certainty === 'EXPLICIT' || !!f.deadline.time);
+    var shortRequest = eligible && !!f.directRequest && concreteDeadline && days !== null && days >= 0 && days <= sc.directRequestMaxDays;
+    var trustedContact = f.senderKind === 'priority' || f.senderKind === 'knownContact';
+    var whoWhy = f.senderKind === 'priority' ? 'remetente prioritário' : trustedContact ? 'contato conhecido' : 'pessoa';
+    var whenWhy = days === 0 ? 'hoje' : 'até amanhã';
 
     // Crítica é rara: precisa de score alto E de um gatilho concreto.
     var gate = [];
     if (f.action >= 0.6 && urgency >= 0.5) gate.push('Ação com prazo próximo');
     if (f.opportunity >= 0.8 && f.sender >= 0.8) gate.push('Oportunidade aderente de contato conhecido');
     if (f.isPrioritySender && f.action > 0) gate.push('Pedido de remetente prioritário');
+    if (serious && f.action >= 0.6 && f.deadline && f.deadline.certainty === 'EXPLICIT' && days !== null && days >= 0) gate.push('Consequência séria com ação e prazo explícito');
+    // Pedido direto com prazo até amanhã de contato conhecido/prioritário sobre uma OBRIGAÇÃO (trabalho,
+    // tarefa, conta, governo, saúde, finanças), ou com consequência séria, é o gatilho mais concreto que
+    // existe: dispensa o limiar de score, mas não a confiança mínima nem o teto diário. Convite social
+    // ("confirma até amanhã se você vem?") fica no piso Alta e só vira Crítica pelo score.
+    var obligation = OBLIGATION_CATEGORIES.indexOf(f.category) >= 0;
+    var strongRequest = shortRequest && (serious || (trustedContact && obligation));
+    if (strongRequest) gate.push('Pedido direto de ' + whoWhy + ' com prazo ' + whenWhy);
     // "CRITICAL" aqui significa elegível: o teto diário é aplicado na leitura (dia de exibição).
-    var criticalOk = score >= sc.thresholds.critical && gate.length > 0 && !f.isNoise && !f.untrusted && f.confidence >= sc.criticalMinConfidence;
+    var criticalOk = eligible && f.confidence >= sc.criticalMinConfidence && ((score >= th.critical && gate.length > 0) || strongRequest);
 
-    var level = criticalOk ? 'CRITICAL' : score >= sc.thresholds.high ? 'HIGH' : score >= sc.thresholds.medium ? 'MEDIUM' : 'LOW';
-    if (f.untrusted && (level === 'CRITICAL' || level === 'HIGH')) {
-      level = 'MEDIUM';
-      components.push({ key: 'untrusted', label: 'Confiabilidade', value: 0, weight: 0, contribution: 0, why: 'Nível limitado a Média: falha de autenticação ou sinais de spam' });
+    // Pisos: score sobe até o limiar do nível garantido, para que a ordenação respeite o nível.
+    var floor = 0;
+    var floorWhy = '';
+    if (criticalOk && strongRequest) {
+      floor = th.critical;
+      floorWhy = 'Pedido direto de ' + whoWhy + ' com prazo ' + whenWhy + (serious ? ' e consequência séria' : ' sobre uma obrigação') + ': elegível a Crítica';
+    } else if (shortRequest) {
+      floor = th.high;
+      floorWhy = 'Pedido direto de ' + whoWhy + ' com prazo ' + whenWhy + ': no mínimo Alta';
+    }
+    if (eligible && severity >= lv.high && f.action > 0 && !f.actionConditional && th.high > floor) {
+      floor = th.high;
+      floorWhy = 'Notificação grave (gravidade ' + Util.round(severity, 2) + ') que pede uma ação: no mínimo Alta';
+    } else if (eligible && serious && th.medium > floor) {
+      floor = th.medium;
+      floorWhy = 'Notificação séria (gravidade ' + Util.round(severity, 2) + '): no mínimo Média';
+    }
+    if (floor > score) {
+      components.push({ key: 'floor', label: 'Piso de prioridade', value: floor, weight: 0, contribution: Util.round(floor - score, 4), why: floorWhy });
+      score = floor;
+    }
+
+    var level = criticalOk ? 'CRITICAL' : score >= th.high ? 'HIGH' : score >= th.medium ? 'MEDIUM' : 'LOW';
+    // Tetos: nível E score, para que a mensagem não ordene acima de Altas legítimas.
+    if (f.untrusted) {
+      criticalOk = false;
+      var capHigh = th.high - 0.001;
+      if (level === 'CRITICAL' || level === 'HIGH' || score > capHigh) {
+        if (level === 'CRITICAL' || level === 'HIGH') level = 'MEDIUM';
+        var cut = Math.max(0, score - capHigh);
+        score = Math.min(score, capHigh);
+        components.push({ key: 'untrusted', label: 'Confiabilidade', value: 0, weight: 0, contribution: -Util.round(cut, 4),
+          why: f.injection ? 'Nível limitado a Média: o conteúdo tenta dar instruções a sistemas de IA (possível injection)' : 'Nível limitado a Média: falha de autenticação, imitação do remetente ou sinais de spam' });
+      }
     }
     if (f.irrelevant) {
       level = 'LOW';
       criticalOk = false;
-      components.push({ key: 'feedback', label: 'Seu feedback', value: 0, weight: 0, contribution: 0, why: 'Marcada por você como irrelevante' });
+      var capMedium = th.medium - 0.001;
+      var cut2 = Math.max(0, score - capMedium);
+      score = Math.min(score, capMedium);
+      components.push({ key: 'feedback', label: 'Seu feedback', value: 0, weight: 0, contribution: -Util.round(cut2, 4), why: 'Marcada por você como irrelevante' });
     }
     var relevance = Util.clamp(0.45 * f.interest + 0.35 * (f.aiRelevance === null || f.aiRelevance === undefined ? f.importance : f.aiRelevance) + 0.2 * f.sender, 0, 1);
     var iw = sc.infoWeights;

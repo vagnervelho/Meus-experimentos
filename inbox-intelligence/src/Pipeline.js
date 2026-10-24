@@ -636,7 +636,7 @@ var Pipeline = (function () {
           Monitoring.count(ctx.run, 'minimal_rows');
         } else {
           p = MessageParser.parse(it.message, { ownerEmail: ctx.owner, excerptChars: cfg.storage.excerptChars, maxDecodedBodyChars: cfg.gmail.maxDecodedBodyChars });
-          rules = RulesClassifier.classify(p, { refYmd: p.received_date, taxonomy: ctx.taxonomy, profile: cfg.profile, knownContacts: ctx.knownContacts() });
+          rules = RulesClassifier.classify(p, { refYmd: p.received_date, taxonomy: ctx.taxonomy, profile: cfg.profile, knownContacts: ctx.knownContacts(), ownerEmail: ctx.owner });
         }
         // Só o label SENT prova que foi o dono: um From forjado não ensina o nome dele.
         if (labels.indexOf('SENT') >= 0) AiClient.rememberOwnerName(p.from_name);
@@ -927,6 +927,10 @@ var Pipeline = (function () {
       sensitive: !!row.sensitive,
       ai_eligible: row.ai_eligible !== false,
       injection: { suspected: !!row.injection_suspected, signals: [] },
+      // Não confiável fica gravado nas features: o backlog nunca manda essas mensagens para a IA.
+      untrusted: !!f.untrusted,
+      spoof_signals: [],
+      severity: Number(f.severity || 0),
     };
   }
 
@@ -1026,7 +1030,7 @@ var Pipeline = (function () {
     var all = Repository.query('briefing_input', { start: Repository.date(ctx.today), end: Repository.date(ctx.today) }, { maxRows: 40 }).rows;
     // Conteúdo com suspeita de injection nunca entra no briefing por IA (só na contagem).
     var rows = all.filter(function (r) {
-      return !r.injection_suspected && !r.auth_fail && !r.is_probable_spam;
+      return !r.injection_suspected && !r.auth_fail && !r.is_probable_spam && !r.untrusted;
     });
     if (rows.length < 3) return;
     var high = rows.filter(function (r) {

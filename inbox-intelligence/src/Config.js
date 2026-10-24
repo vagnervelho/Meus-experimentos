@@ -8,8 +8,8 @@
  */
 var Config = (function () {
   var APP_VERSION = '1.0.0';
-  var CLASSIFIER_VERSION = 'rules-2026.10.1';
-  var PARSER_VERSION = 'parser-2026.10.1';
+  var CLASSIFIER_VERSION = 'rules-2026.10.2';
+  var PARSER_VERSION = 'parser-2026.10.2';
   var SCHEMA_VERSION = 1;
   var OVERRIDES_PREFIX = 'CFG_OVR_';
   var OVERRIDES_CHUNK = 8000;
@@ -132,8 +132,9 @@ var Config = (function () {
         strong: ['extrato', 'saldo', 'investimento', 'investimentos', 'aplicacao', 'resgate', 'rendimento', 'tesouro direto', 'cdb', 'lci', 'lca',
           'fundo de investimento', 'fundos imobiliarios', 'fii', 'dividendos', 'corretora', 'previdencia', 'informe de rendimentos',
           'cartao de credito', 'limite do cartao', 'conta corrente', 'emprestimo', 'financiamento', 'renda fixa', 'renda variavel',
-          'transferencia recebida', 'pix recebido', 'pix enviado'],
-        weak: ['banco', 'pix', 'ted', 'credito', 'carteira', 'cripto', 'bitcoin', 'score', 'open finance', 'investidor'],
+          'transferencia recebida', 'pix recebido', 'pix enviado', 'account statement', 'bank statement', 'monthly statement',
+          'statement is ready', 'your statement'],
+        weak: ['banco', 'pix', 'ted', 'credito', 'carteira', 'cripto', 'bitcoin', 'score', 'open finance', 'investidor', 'balance', 'balances'],
       },
       negative: [],
       senderDomains: ['itau.com.br', 'itau-unibanco.com.br', 'bradesco.com.br', 'santander.com.br', 'bb.com.br', 'caixa.gov.br', 'nubank.com.br',
@@ -149,7 +150,8 @@ var Config = (function () {
       keywords: {
         strong: ['projeto', 'entregavel', 'deliverable', 'sprint', 'roadmap', 'cronograma', 'status report', 'kickoff', 'milestone',
           'pull request', 'code review', 'proposta comercial', 'escopo do projeto', 'alinhamento', 'reuniao de alinhamento',
-          'conforme conversado', 'segue em anexo', 'em anexo', 'documento compartilhado', 'compartilhou com voce', 'shared with you'],
+          'conforme conversado', 'segue em anexo', 'em anexo', 'documento compartilhado', 'compartilhou com voce', 'shared with you',
+          'town hall', 'all hands', 'all-hands', 'comunicacao interna', 'comunicado interno'],
         weak: ['relatorio', 'apresentacao', 'revisao', 'aprovacao', 'cliente', 'contrato', 'planilha', 'deploy', 'jira', 'entrega', 'equipe'],
       },
       negative: [],
@@ -195,7 +197,8 @@ var Config = (function () {
         strong: ['seu pedido', 'pedido confirmado', 'compra aprovada', 'pagamento aprovado', 'pagamento confirmado', 'nota fiscal', 'nf-e',
           'saiu para entrega', 'pedido entregue', 'foi entregue', 'codigo de rastreio', 'rastreamento', 'a caminho', 'devolucao', 'reembolso',
           'recibo', 'receipt', 'order confirmation', 'your order', 'shipped', 'delivered', 'assinatura renovada', 'renovacao da assinatura',
-          'your subscription', 'sua assinatura'],
+          'your subscription', 'sua assinatura', 'tentativa de entrega', 'aguardando retirada', 'disponivel para retirada',
+          'devolvido ao remetente', 'encomenda'],
         weak: ['pedido', 'compra', 'entrega', 'frete', 'pagamento', 'plano', 'order', 'subscription'],
       },
       negative: [],
@@ -213,8 +216,9 @@ var Config = (function () {
         strong: ['boleto', 'fatura', 'vencimento', 'vence em', 'vence hoje', 'linha digitavel', 'codigo de barras', 'segunda via', '2a via',
           'conta de luz', 'conta de agua', 'conta de energia', 'conta de telefone', 'condominio', 'aluguel', 'iptu', 'ipva', 'darf',
           'receita federal', 'imposto de renda', 'irpf', 'cobranca', 'pagamento pendente', 'em atraso', 'debito automatico', 'certidao',
-          'comprovante de pagamento', 'holerite', 'contracheque', 'fgts', 'inss', 'detran', 'multa de transito'],
-        weak: ['conta', 'pagamento', 'imposto', 'documento', 'contrato', 'comprovante', 'cpf', 'gov.br', 'declaracao', 'parcela'],
+          'comprovante de pagamento', 'holerite', 'contracheque', 'fgts', 'inss', 'detran', 'multa de transito',
+          'invoice', 'amount due', 'payment due', 'due date', 'past due', 'overdue'],
+        weak: ['conta', 'pagamento', 'imposto', 'documento', 'contrato', 'comprovante', 'cpf', 'gov.br', 'declaracao', 'parcela', 'billing', 'bill'],
       },
       negative: [],
       senderDomains: ['enel.com.br', 'light.com.br', 'cemig.com.br', 'copel.com', 'cpfl.com.br', 'sabesp.com.br', 'comgas.com.br',
@@ -253,10 +257,11 @@ var Config = (function () {
       id: 'spam', label: 'Spam provável e irrelevante', prior: 0, urgencyTrust: 0, noise: 0.1, sensitive: false, aiEligible: false,
       subcategories: [],
       keywords: {
-        strong: ['voce ganhou', 'voce foi selecionado', 'parabens voce', 'premio em dinheiro', 'heranca', 'sorteado', 'renda extra garantida',
+        // "você foi selecionado" é fraco: processos seletivos legítimos usam a mesma frase.
+        strong: ['voce ganhou', 'parabens voce', 'premio em dinheiro', 'heranca', 'sorteado', 'renda extra garantida',
           'ganhe dinheiro rapido', 'clique para resgatar', 'sua conta sera bloqueada', 'verifique sua conta imediatamente', 'you have won',
           'claim your prize', 'lottery', 'crypto giveaway', 'dobre seu bitcoin', 'atualizacao cadastral urgente'],
-        weak: ['urgente!!!', 'gratis!!!', '100% garantido', 'sem risco'],
+        weak: ['urgente!!!', 'gratis!!!', '100% garantido', 'sem risco', 'voce foi selecionado'],
       },
       negative: [],
       senderDomains: [],
@@ -402,6 +407,17 @@ var Config = (function () {
       noDeadlineUrgencyCap: 0.5,
       attentionMinUrgency: 0.4,
       criticalRecencyDays: 7,
+      // Gravidade (RulesClassifier.severity, 0..1) de notificação séria: soma severityBonus × gravidade à
+      // importância (0,5 → +0,15, o mesmo bônus de um prazo explícito em categoria transacional).
+      severityBonus: 0.3,
+      // Pisos por gravidade: ≥ medium (classe "séria" do classificador: atraso, retirada com prazo, tarefa
+      // atribuída, vulnerabilidade, etapa de processo) ⇒ no mínimo Média; ≥ high (conta comprometida,
+      // governo/jurídico) com ação NÃO condicional ⇒ no mínimo Alta. Gravidade ≥ medium também é a
+      // "consequência séria" que abre gatilhos de Crítica.
+      severityLevels: { medium: 0.5, high: 0.7 },
+      // Pedido direto de pessoa com prazo concreto (data explícita ou horário) em até N dias (0 = hoje,
+      // 1 = amanhã): no mínimo Alta; de contato conhecido/prioritário ou com consequência séria, Crítica.
+      directRequestMaxDays: 1,
     },
     tasks: { openDaysWithoutDeadline: 14, overdueAutoResolveDays: 3 },
     privacy: {
@@ -413,6 +429,85 @@ var Config = (function () {
       privateNotifierDomains: ['linkedin.com', 'facebookmail.com', 'instagram.com', 'mail.instagram.com', 'x.com', 'twitter.com', 'whatsapp.com',
         'slack.com', 'discord.com', 'github.com', 'gitlab.com', 'atlassian.net', 'notion.so', 'telegram.org', 'messenger.com', 'gupy.io'],
       discussionListDomains: ['googlegroups.com', 'groups.io', 'freelists.org', 'yahoogroups.com'],
+      // Marca → domínios legítimos (subdomínios incluídos). Um nome de exibição (ou um domínio) que
+      // reivindica a marca fora desses domínios gera BRAND_DOMAIN_MISMATCH. Chaves são nomes como
+      // aparecem no remetente; nomes curtos ou palavras comuns ("Vivo", "Oi", "Inter", "Caixa") ficam de
+      // fora ou aparecem só na forma completa para não confundir com pessoas e frases.
+      brandDomains: {
+        // Bancos, pagamentos e investimentos.
+        'itau': ['itau.com.br', 'itau-unibanco.com.br', 'itau.com', 'itaucard.com.br', 'itaupersonnalite.com.br', 'itaubba.com', 'cartoesitau.com.br'],
+        'bradesco': ['bradesco.com.br', 'bradesco', 'bradescoseguros.com.br', 'bradescocartoes.com.br', 'bradescosaude.com.br', 'bradescard.com.br', 'next.me'],
+        'santander': ['santander.com.br', 'santander.com', 'santandernet.com.br'],
+        'banco do brasil': ['bb.com.br', 'bancobrasil.com.br'],
+        'caixa economica': ['caixa.gov.br'],
+        'nubank': ['nubank.com.br', 'nu.com.br', 'nubank.com'],
+        'banco inter': ['inter.co', 'bancointer.com.br'],
+        'c6 bank': ['c6bank.com.br', 'c6bank.com'],
+        'picpay': ['picpay.com', 'picpay.com.br'],
+        'mercado pago': ['mercadopago.com', 'mercadopago.com.br', 'mercadolivre.com', 'mercadolivre.com.br'],
+        'paypal': ['paypal.com', 'paypal.com.br'],
+        'xp investimentos': ['xpi.com.br', 'xpinc.com', 'xp.com.br'],
+        'btg pactual': ['btgpactual.com', 'btgpactual.com.br'],
+        'sicredi': ['sicredi.com.br'],
+        'sicoob': ['sicoob.com.br'],
+        'serasa': ['serasa.com.br', 'serasaexperian.com.br', 'serasaconsumidor.com.br'],
+        // Governo e Justiça.
+        'receita federal': ['gov.br'],
+        'governo federal': ['gov.br'],
+        'gov br': ['gov.br'],
+        'meu inss': ['gov.br'],
+        'inss': ['gov.br'],
+        'detran': ['gov.br'],
+        'prefeitura': ['gov.br'],
+        'policia federal': ['gov.br'],
+        'banco central': ['gov.br'],
+        'tesouro nacional': ['gov.br'],
+        'justica eleitoral': ['jus.br'],
+        'justica federal': ['jus.br'],
+        'tribunal de justica': ['jus.br'],
+        'poder judiciario': ['jus.br'],
+        // Entregas e varejo.
+        'correios': ['correios.com.br'],
+        'mercado livre': ['mercadolivre.com.br', 'mercadolivre.com', 'mercadopago.com', 'mercadopago.com.br', 'mercadoshops.com.br'],
+        'amazon': ['amazon.com.br', 'amazon.com', 'amazon.co.uk', 'amazonses.com', 'primevideo.com', 'amazonaws.com', 'aws.amazon.com'],
+        'magazine luiza': ['magazineluiza.com.br', 'magalu.com', 'magalu.com.br', 'luizalabs.com'],
+        'magalu': ['magazineluiza.com.br', 'magalu.com', 'magalu.com.br', 'luizalabs.com'],
+        'americanas': ['americanas.com.br', 'americanas.com', 'americanas.io'],
+        'shopee': ['shopee.com.br', 'shopee.com'],
+        'aliexpress': ['aliexpress.com', 'aliexpress.us', 'alibaba.com'],
+        'shein': ['shein.com', 'shein.com.br', 'sheinemail.com'],
+        'casas bahia': ['casasbahia.com.br', 'grupocasasbahia.com.br', 'viavarejo.com.br'],
+        'kabum': ['kabum.com.br'],
+        'ifood': ['ifood.com.br'],
+        'uber': ['uber.com'],
+        'booking com': ['booking.com'],
+        'airbnb': ['airbnb.com', 'airbnb.com.br'],
+        'latam airlines': ['latam.com', 'latamairlines.com', 'latampass.com'],
+        'latam pass': ['latam.com', 'latamairlines.com', 'latampass.com'],
+        // Streaming.
+        'netflix': ['netflix.com'],
+        'spotify': ['spotify.com'],
+        'disney': ['disney.com', 'disneyplus.com', 'disney.com.br', 'disneyplus.com.br'],
+        'globoplay': ['globo.com', 'globoplay.com'],
+        'youtube': ['youtube.com', 'google.com'],
+        // Big techs e plataformas.
+        'google': ['google.com', 'google.com.br', 'youtube.com', 'googlegroups.com', 'googleusercontent.com'],
+        'gmail': ['google.com'],
+        'microsoft': ['microsoft.com', 'microsoftonline.com', 'office.com', 'office365.com', 'microsoft365.com', 'azure.com', 'linkedin.com', 'github.com'],
+        'outlook': ['microsoft.com', 'office.com'],
+        'apple': ['apple.com'],
+        'icloud': ['apple.com'],
+        'facebook': ['facebook.com', 'facebookmail.com', 'meta.com', 'fb.com'],
+        'instagram': ['instagram.com', 'facebookmail.com', 'meta.com'],
+        'whatsapp': ['whatsapp.com', 'facebookmail.com', 'meta.com'],
+        'linkedin': ['linkedin.com'],
+        'github': ['github.com', 'githubusercontent.com'],
+        'docusign': ['docusign.net', 'docusign.com'],
+        'dropbox': ['dropbox.com', 'dropboxmail.com'],
+        'slack': ['slack.com'],
+        'gupy': ['gupy.io', 'gupy.com.br'],
+        'indeed': ['indeed.com', 'indeedemail.com'],
+      },
     },
     profile: {
       interests: ['inteligencia artificial', 'machine learning', 'data science', 'ciencia de dados', 'python', 'pricing', 'precificacao',

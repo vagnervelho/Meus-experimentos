@@ -21,14 +21,12 @@ const { runEval, readBaseline, compareToBaseline, wilson, MAIN_METRICS, DEFAULT_
  * rótulo discutível.
  */
 const KNOWN_EXCEPTIONS = {
-  // Fraude do "CEO": Gmail novo com o nome da gestora (contato conhecido em outro
-  // endereço) e Reply-To divergente; autenticação passa, então nada rebaixa o nível.
-  phishing_max_medium: ['phish-fraude-ceo-pix-gmail'],
+  // Nenhuma violação conhecida desde a rodada de qualidade (rules-2026.10.2). Mantenha a lista
+  // explícita: uma violação nova reprova; para aceitá-la, registre o id aqui com o motivo.
+  phishing_max_medium: [],
   marketing_not_critical: [],
   newsletter_not_critical: [],
-  // Pedidos com prazo "hoje"/"amanhã" sem palavra de prazo explícita ou com
-  // imperativo informal ("me manda", "send me ... by tomorrow EOD") ficam em Média.
-  direct_request_short_deadline_high: ['pessoal-irmao-rg-cartorio-hoje', 'en-cliente-deck-amanha-eod', 'trabalho-reply-chefe-resumo-amanha-cedo'],
+  direct_request_short_deadline_high: [],
 };
 
 // Cobertura mínima de cada invariante: evita que um invariante "passe" por não cobrir nada.
@@ -95,3 +93,20 @@ for (const inv of run.invariants) {
     assert.equal(fresh.length, 0, 'novas violações de "' + inv.label + '": ' + fresh.map((v) => v.id + ' → ' + v.level + ' (' + v.category + ', score ' + v.score + ')').join('; '));
   });
 }
+
+// ------------------------------------------------------------- holdout ----
+// Conjunto de teste escrito sem acesso ao código nem ao dev set. Foi lido uma vez na auditoria
+// de overfitting (não é mais cego): serve de guarda contra regressão, com baseline próprio.
+const path = require('node:path');
+const holdout = runEval({ datasetDir: path.join(__dirname, '..', 'eval', 'holdout') });
+
+test('holdout: invariantes duros e sem regressão além da tolerância', () => {
+  const v = holdout.invariants.flatMap((i) => i.violations.map((x) => i.key + ':' + x.id));
+  assert.deepEqual(v, [], 'violações no holdout');
+  const baseline = readBaseline(path.join(__dirname, '..', 'eval', 'baseline-holdout.json'));
+  assert.ok(baseline, 'eval/baseline-holdout.json ausente: rode `node eval/run-eval.js --holdout --write-baseline`');
+  assert.equal(holdout.meta.datasetHash, baseline.datasetHash, 'o holdout mudou desde o baseline');
+  const cmp = compareToBaseline(holdout.metrics, baseline, DEFAULT_TOLERANCE);
+  assert.equal(cmp.regressions.length, 0, 'Regressões no holdout: ' + cmp.regressions.map((r) => r.key + ' ' + pct(r.baseline) + ' → ' + pct(r.current)).join(', '));
+});
+

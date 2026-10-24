@@ -578,8 +578,11 @@ function main(argv) {
   const args = argv || process.argv.slice(2);
   const write = args.indexOf('--write-baseline') >= 0;
   const quiet = args.indexOf('--quiet') >= 0;
-  const run = runEval();
-  const baseline = readBaseline();
+  // --holdout: conjunto de teste em eval/holdout (relatório e baseline próprios, sufixo -holdout).
+  const holdout = args.indexOf('--holdout') >= 0;
+  const sfx = holdout ? '-holdout' : '';
+  const run = runEval(holdout ? { datasetDir: path.join(EVAL_DIR, 'holdout') } : undefined);
+  const baseline = readBaseline(holdout ? path.join(EVAL_DIR, 'baseline-holdout.json') : undefined);
   let cmp = { available: !!baseline };
   if (baseline) {
     cmp.baselineHash = baseline.datasetHash;
@@ -587,9 +590,9 @@ function main(argv) {
     cmp.cmp = compareToBaseline(run.metrics, baseline);
   }
   if (write) cmp = null; // o relatório do próprio baseline não se compara consigo mesmo
-  fs.writeFileSync(path.join(EVAL_DIR, 'report.md'), buildReport(run, cmp));
-  fs.writeFileSync(path.join(EVAL_DIR, 'last-run.json'), JSON.stringify(compactRun(run), null, 2) + '\n');
-  if (write) fs.writeFileSync(path.join(EVAL_DIR, 'baseline.json'), JSON.stringify(baselineOf(run), null, 2) + '\n');
+  fs.writeFileSync(path.join(EVAL_DIR, 'report' + sfx + '.md'), buildReport(run, cmp));
+  fs.writeFileSync(path.join(EVAL_DIR, 'last-run' + sfx + '.json'), JSON.stringify(compactRun(run), null, 2) + '\n');
+  if (write) fs.writeFileSync(path.join(EVAL_DIR, 'baseline' + sfx + '.json'), JSON.stringify(baselineOf(run), null, 2) + '\n');
   if (!quiet) {
     const rows = ['category_top1', 'category_acceptable', 'macro_f1_lenient', 'level_in_range', 'critical_precision', 'critical_recall', 'high_plus_precision', 'high_plus_recall', 'action_precision', 'action_recall', 'deadline_accuracy', 'injection_recall', 'opportunity_precision', 'opportunity_recall'];
     console.log('Casos: ' + run.meta.n + ' · dataset ' + run.meta.datasetHash);
@@ -600,7 +603,7 @@ function main(argv) {
     const v = run.invariants.reduce((s, i) => s + i.violations.length, 0);
     console.log('Invariantes: ' + (v ? v + ' violação(ões) — ver eval/report.md' : 'ok'));
     if (cmp && cmp.available && !cmp.datasetChanged && cmp.cmp.regressions.length) console.log('Regressões vs baseline: ' + cmp.cmp.regressions.map((x) => x.key).join(', '));
-    console.log('Relatório: eval/report.md' + (write ? ' · baseline gravado em eval/baseline.json' : ''));
+    console.log('Relatório: eval/report' + sfx + '.md' + (write ? ' · baseline gravado em eval/baseline' + sfx + '.json' : ''));
   }
   return run;
 }

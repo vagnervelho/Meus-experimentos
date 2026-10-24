@@ -127,7 +127,9 @@ var Extractors = (function () {
   var RELATIVE = [
     { re: /\bdepois de amanha\b|\bday after tomorrow\b/g, kind: 'offset', n: 2 },
     { re: /\bamanha\b|\btomorrow\b/g, kind: 'offset', n: 1 },
-    { re: /\bhoje\b|\btoday\b|\btonight\b|\beod\b|\bend of (?:the |business )?day\b|\b(?:fim|final) do dia\b/g, kind: 'offset', n: 0 },
+    { re: /\bhoje\b|\btoday\b|\btonight\b/g, kind: 'offset', n: 0 },
+    // "EOD"/"fim do dia" sozinho = hoje; colado a outro dia ("tomorrow EOD") só qualifica aquele dia.
+    { re: /\beod\b|\bend of (?:the |business )?day\b|\b(?:fim|final) do dia\b/g, kind: 'offset', n: 0, eod: true },
     { re: /\b(?:fim|final) de semana\b|\b(?:this |the )?weekend\b/g, kind: 'weekend' },
     { re: /\bsemana que vem\b|\bproxima semana\b|\bnext week\b/g, kind: 'nextWeek' },
     { re: /\b(?:n?esta|n?essa|desta) semana\b|\bthis week\b|\b(?:fim|final) da semana\b|\bend of (?:the |this )?week\b/g, kind: 'thisWeek' },
@@ -139,7 +141,7 @@ var Extractors = (function () {
     { re: /\b(?:nas proximas|em ate|em|dentro de|in the next|within|in|next)\s+(\d{1,3})\s*(?:horas|hours|hrs?|h)\b/g, kind: 'inHours' },
   ];
   // Palavras que tornam aceitável um "dd/mm" sem zero à esquerda (até 15 caracteres antes).
-  var RE_DATE_CUE = /(?:^|[^a-z])(?:ate|dia|em|de|vence|vencem|vencimento|prazo|data|para|entre|a partir de|valido|valida|from|on|until|by|due|starting|reuniao|evento|consulta|voo|entrevista|meeting|segunda|terca|quarta|quinta|sexta|sabado|domingo|feira|monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?![a-z])/;
+  var RE_DATE_CUE = /(?:^|[^a-z])(?:ate|dia|em|de|vence|vencem|vencimento|prazo|data|para|entre|a partir de|valido|valida|from|on|until|by|due|starting|reuniao|evento|consulta|voo|entrevista|meeting|hoje|amanha|ontem|today|tomorrow|yesterday|segunda|terca|quarta|quinta|sexta|sabado|domingo|feira|monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?![a-z])/;
   var RE_SCORE_BEFORE = /(?:^|[^a-z])(?:nota|notas|placar|score|rating|avaliacao|estrelas|pontuacao|resultado|jogo|partida|fracao|razao|proporcao|media)(?![a-z])/;
   var RE_SCORE_AFTER = /^\s*(?:estrelas|pontos|stars|points|votos|gols|acertos|questoes|do total|of total)\b/;
 
@@ -237,6 +239,9 @@ var Extractors = (function () {
     return Util.addDays(ref, d);
   }
 
+  // Períodos sem dia definido ("semana que vem", "fim do mês", "em 5 dias"): servem de prazo, não de agenda.
+  var VAGUE_KINDS = { weekend: true, thisWeek: true, nextWeek: true, endMonth: true, inDays: true, inHours: true };
+
   function relativeDate_(spec, m, ref) {
     var rw = Util.isoWeekday(ref);
     switch (spec.kind) {
@@ -261,6 +266,54 @@ var Extractors = (function () {
         return h > 0 && h <= 240 ? Util.addDays(ref, Math.floor(h / 24)) : '';
     }
     return '';
+  }
+
+  // Entre um relativo e a data absoluta que o explica: pontuação curta e, no máximo, o dia da semana.
+  var RE_GAP_REL_ABS = new RegExp('^[\\s,(\\-–—:]{0,4}(?:(?:' + altOf_(WEEKDAYS) + ')(?:[- ]feira)?[\\s,()\\-–—:]{0,4})?$');
+
+  /**
+   * "amanhã (22/10)", "hoje, 21/10/2026", "amanhã, sexta-feira (23/10)" e "22/10 (amanhã)": a data absoluta
+   * prevalece (absolute = true) e herda o início do relativo, para que a palavra de prazo antes dele valha.
+   * Só funde quando as duas leituras diferem em ≤ 1 dia (listas "hoje, 25/10 e 30/10" continuam separadas).
+   */
+  function mergeRelativeAbsolute_(f, list) {
+    var out = [];
+    for (var i = 0; i < list.length; i++) {
+      var c = list[i];
+      var n = list[i + 1];
+      if (n && !c.absolute && n.absolute && RE_GAP_REL_ABS.test(f.slice(c.end, n.start)) && Math.abs(Util.daysBetween(c.date, n.date)) <= 1) {
+        if (f.slice(c.end, n.start).indexOf('(') >= 0 && f.charAt(n.end) === ')') n.end++;
+        n.start = c.start;
+        continue;
+      }
+      var p = out[out.length - 1];
+      if (p && p.absolute && !c.absolute && /^\s*\(\s*$/.test(f.slice(p.end, c.start)) && f.charAt(c.end) === ')' && Math.abs(Util.daysBetween(p.date, c.date)) <= 1) {
+        p.end = c.end + 1;
+        continue;
+      }
+      out.push(c);
+    }
+    return out;
+  }
+
+  /** "tomorrow EOD", "amanhã até o fim do dia", "EOD tomorrow": o EOD só qualifica o dia ao lado. */
+  function mergeEod_(f, list) {
+    var out = [];
+    for (var i = 0; i < list.length; i++) {
+      var c = list[i];
+      var p = out[out.length - 1];
+      var n = list[i + 1];
+      if (c.eod && p && !p.eod && /^\s+(?:(?:no|ao|at|by|ate o|ate|o|the|in the)\s+)?$/.test(f.slice(p.end, c.start))) {
+        p.end = c.end;
+        continue;
+      }
+      if (c.eod && n && !n.eod && /^\s+(?:(?:de|on|of)\s+)?$/.test(f.slice(c.end, n.start))) {
+        n.start = c.start;
+        continue;
+      }
+      out.push(c);
+    }
+    return out;
   }
 
   /**
@@ -303,8 +356,9 @@ var Extractors = (function () {
       var p = f.charAt(s - 1);
       if (p === '$' || f.charAt(e) === '%' || f.charAt(e) === 'x') return;
       var before = f.slice(Math.max(0, s - 20), s);
-      if (RE_SCORE_BEFORE.test(before) || RE_SCORE_AFTER.test(f.slice(e, e + 15))) return;
       var leadingZero = (m[1].length === 2 && m[1].charAt(0) === '0') || (m[2].length === 2 && m[2].charAt(0) === '0');
+      // Placar/nota ("partida 2/1", "nota 4/5") não usa zero à esquerda: "partida 02/11" é data.
+      if (!leadingZero && (RE_SCORE_BEFORE.test(before) || RE_SCORE_AFTER.test(f.slice(e, e + 15)))) return;
       var cued = leadingZero || RE_DATE_CUE.test(f.slice(Math.max(0, s - 15), s)) || RE_TIME_AFTER.test(f.slice(e, e + 20));
       if (!cued) return;
       add(s, e, inferYear_(mo, d, ref), true);
@@ -357,7 +411,7 @@ var Extractors = (function () {
       });
       RELATIVE.forEach(function (spec) {
         eachMatch_(spec.re, f, function (m) {
-          add(m.index, m.index + m[0].length, relativeDate_(spec, m, ref), false);
+          add(m.index, m.index + m[0].length, relativeDate_(spec, m, ref), false, spec.eod ? { eod: true } : VAGUE_KINDS[spec.kind] ? { vague: true } : null);
         });
       });
     }
@@ -372,6 +426,7 @@ var Extractors = (function () {
       if (prev && prev.absolute && /^[\s,(]{0,4}$/.test(f.slice(prev.end, c.start))) return false;
       return true;
     });
+    list = mergeEod_(f, mergeRelativeAbsolute_(f, list));
     list.forEach(function (c, i) {
       var t = findTime_(f, c.start, c.end, i > 0 ? list[i - 1].rawEnd : 0, i + 1 < list.length ? list[i + 1].start : f.length);
       c.time = t.time;
@@ -392,9 +447,38 @@ var Extractors = (function () {
   }
 
   // ----------------------------------------------------------- prazos ----
-  var RE_DEADLINE_WORD = /(?:^|[^a-z])(?:prazo|ate|vence|vencem|venceu|vencimento|data limite|data-limite|expira|expiram|expiracao|expires?|encerra|encerram|encerramento|inscricoes|deadline|due|by|until|till|no later than|valid until|valido|valida|ultimo dia|last day|termina|terminam|acaba|closes|ends)(?![a-z])/;
-  var RE_EVENT_WORD = /(?:^|[^a-z])(?:reuniao|reunioes|meeting|call|evento|event|consulta|appointment|voo|flight|check-in|checkin|check in|embarque|boarding|webinar|webinario|palestra|talk|workshop|live|entrevista|interview|aula|apresentacao|conferencia|conference|agendad[oa]|agendamento|marcad[oa]|sessao|session|encontro|almoco|jantar|visita|demo|kickoff|kick-off|treinamento|curso|ingresso|show)(?![a-z])/;
+  // Palavras de prazo fortes: valem até 40 caracteres antes da data (ou dentro do núcleo data+hora).
+  var RE_DL_STRONG = /(?:^|[^a-z])(prazo|vence|vencem|venceu|vencimento|data limite|data-limite|deadline|due date|due|ultimo dia|last day|no later than|expira|expiram|expiracao|expires?|encerra|encerram|encerramento|termina|terminam|acaba|acabam|closes|ends|valid until|validos?|validas?|validade|data de entrega)(?![a-z])/g;
+  // Conectivos fracos ("até", "by"): só colados à data (≤ 20 caracteres antes), senão "até logo", "sent by".
+  var RE_DL_NEAR = /(?:^|[^a-z])(ate|by|until|till|inscricoes)(?![a-z])/g;
+  var END_VERBS = { encerra: 1, encerram: 1, encerramento: 1, termina: 1, terminam: 1, acaba: 1, acabam: 1, closes: 1, ends: 1 };
+  var VALID_WORDS = { 'valid until': 1, valido: 1, validos: 1, valida: 1, validas: 1, validade: 1 };
+  // "até 70% OFF", "em até 12x", "até R$ 500": "até" de quantidade, não de prazo.
+  var RE_QTY_ATE = /(^|[^a-z])ate(?=\s+(?:\d+(?:[.,]\d+)?\s*(?:%|x(?![a-z])|vezes|parcelas|meses|anos|pessoas|itens|unidades|reais|mil(?![a-z]))|r\$|us\$|€|\$))/g;
+  var RE_BY_AGENT = /(?:[a-z]+(?:ed|en)|powered|sent|made|run|led|built|brought|shared|written)\s+$/;
+  var RE_EVENT_WORD = /(?:^|[^a-z])(?:reuniao|reunioes|meeting|call|chat|conversa|bate-papo|bate papo|evento|event|consulta|appointment|voo|flight|check-in|checkin|check in|check-out|checkout|embarque|boarding|partida|webinar|webinario|palestra|talk|workshop|live|entrevista|interview|aula|prova|apresentacao|conferencia|conference|agendad[oa]|agendamento|marcad[oa]|sessao|session|encontro|almoco|jantar|cafe|visita|vistoria|demo|kickoff|kick-off|treinamento|curso|ingresso|show|convite|convidad[oa]s?|convidou|invite|invitation|invited|assembleia|convocad[oa]s?|convocacao|meetup|town hall|all hands|all-hands|happy hour|festa|comemoracao|casamento|cerimonia|formatura|churrasco|audiencia|hearing|plantao|culto|missa|cinema|teatro|reserva|hospedagem|nos vemos|te espero|te vejo|see you|quando:|onde:|local:|when:|where:|location:)(?![a-z])/;
   var RE_SENTENCE_END = /[!?\n;]|\.(?=\s|$)/g;
+  // Validade de acesso (link/código/token) — informativa, não é prazo do dono.
+  var RE_ACCESS_VALIDITY = /(?:^|[^a-z])(?:link|links|codigo|codigos|code|token|otp|pin|senha temporaria|senha provisoria|sessao|session|url|botao|button|qr ?code|chave de acesso|convite|invitation|invite)(?![a-z])[^.!?\n]{0,60}(?:expira|expiram|expirara|expires?|expirar|validos?|validas?|validade|valid|deixara de funcionar|sera desativad[oa])(?![a-z])/;
+  // Compromisso do REMETENTE com o dono (SLA, previsão): "será creditado em até 7 dias úteis".
+  var RE_THIRD_PARTY = /(?:^|[^a-z])(?:(?:sera|serao|will be|should be|is expected to be)\s+(?:[a-z]+\s+){0,2}?(?:creditad|estornad|reembolsad|devolvid|entregue|enviad|despachad|postad|processad|analisad|respondid|liberad|disponibilizad|depositad|transferid|efetivad|refunded|credited|delivered|shipped|processed|reviewed|returned|deposited|released)|(?:voce|you)\s+(?:recebera|vai receber|will receive|should receive|ll receive)|retornaremos|responderemos|entraremos em contato|enviaremos|creditaremos|devolveremos|analisaremos|processaremos|entregaremos|we(?: will|'ll) (?:ship|send|deliver|refund|credit|process|review|respond|reply|get back|contact|notify|return)|previsao de (?:entrega|chegada|credito|pagamento|devolucao|reembolso|estorno|conclusao)|(?:entrega|chegada|credito|reembolso|estorno|devolucao) (?:prevista|previsto|estimad[oa])|prazo (?:de|para) (?:o )?(?:estorno|reembolso|analise|resposta|processamento|credito|devolucao|compensacao)|expected (?:delivery|arrival)|estimated (?:delivery|arrival))/;
+  // Entrega ambígua (tarefa × encomenda): só é do remetente com vocabulário de envio por perto.
+  var RE_DELIVERY_AMBIG = /(?:^|[^a-z])(?:(?:data|prazo) de entrega|entrega ate|chega|chegara|arrives?|delivery (?:date|by))(?![a-z])/;
+  var RE_SHIPPING = /(?:^|[^a-z])(?:pedido|encomenda|pacote|frete|rastreio|rastreamento|transportadora|correios|entregador|order|package|shipment|shipping|tracking|courier|parcel)(?![a-z])/;
+  // Linguagem de oferta/escassez: a data é validade da promoção, não obrigação do dono.
+  var RE_OFFER = /(?:^|[^a-z])(?:ofertas?|promocao|promocoes|promocional|promos?|cupom|cupons|descontos?|liquidacao|saldao|queima de estoque|black friday|cyber monday|frete gratis|brindes?|cashback|premios?|sorteios?|resgat(?:e|ar) (?:seus?|suas?|os?|as?) (?:premios?|pontos|cupom|cupons|bonus|brindes?|presentes?|cashback|beneficios?)|condic(?:ao|oes) (?:especia(?:l|is)|validas?)|precos? especia(?:l|is)|aproveite|garanta|corra|nao perca|ultima chance|ultimas (?:vagas|unidades|horas)|vagas limitadas|so hoje|somente hoje|apenas hoje|so ate|somente ate|enquanto durarem|tempo limitado|pre-aprovad[oa]|deals?|discounts?|coupons?|(?:special|exclusive|limited(?:-time)?) offers?|promo codes?|last chance|limited time|only today|today only|early bird)(?![a-z])|\d+\s*% ?(?:off|de desconto)/;
+  // Obrigação do dono colada à data: vence sobre a linguagem de oferta ("pague até 30/10 e ganhe desconto").
+  var RE_OBLIGATION = /(?:^|[^a-z])(?:vence|vencem|venceu|vencimento|pague|pagar|fatura|boleto|mensalidade|due|invoice|pay|sign|submit|reply|respond|prazo para|deve ser|devem ser|envie|enviar|responda|responder|entregue|entregar|assine|assinar|preencha|preencher)(?![a-z])/;
+  // Registro de algo que já aconteceu (transação, alerta, envio): não é compromisso.
+  var RE_RECORD = /(?:^|[^a-z])(?:(?:foi|foram|was|were|has been|have been|had been)\s+(?:[a-z]+\s+)?(?:[a-z]+(?:ad[oa]s?|id[oa]s?|ed|en|eit[oa]s?|ost[oa]s?|ert[oa]s?)|entregues?|pag[oa]s?|feit[oa]s?|vist[oa]s?)|enviou|recebeu|pagou|comprou|realizou|efetuou|fez|acessou|alterou|solicitou|transferiu|emitiu|cancelou|mandei|enviei|falei|recebi|fiz|liguei|encaminhei|conversamos|falamos|identificamos|detectamos|bloqueamos|recebemos|registramos|aprovamos|processamos|realizamos|enviamos|notamos|(?:realizad|efetuad|registrad|emitid|enviad|recebid|aprovad|postad|concluid|processad|detectad|identificad|cancelad|alterad|gerad)[oa]s?|noticed|detected|received|sent|paid|completed|processed|signed in|logged in)(?![a-z])/;
+  var RE_RECORD_WIDE = /(?:^|[^a-z])(?:enviou|recebeu|pix (?:enviado|recebido)|transacao|transferencia|comprovante|extrato|compra (?:aprovada|realizada)|pagamento (?:aprovado|confirmado|realizado|efetuado|recebido)|login|senha|alterad[oa]|detectad[oa]|identificamos|recibo|nota fiscal|nf-?e|estabelecimento|autenticacao)(?![a-z])/;
+  var RE_DATE_LABEL_LINE = /^\s*(?:data|dia|date|horario|hora)\s*:?\s*$/;
+  // Pedido na frase: torna prazo uma data relativa sem palavra de prazo ("me manda hoje", "send it tomorrow").
+  var RE_REQUEST_SENT = /(?:^|[^a-z])(?:preciso que|precisamos que|preciso d[aeo]s?|preciso receber|poderia|poderiam|pode me|podem me|pode nos|voce pode|voces podem|consegue|conseguiria|conseguem|por favor|favor|gentileza|please|could you|can you|would you|need you to|i need|we need|send me|let me know|(?:me|nos) (?:manda|mande|envia|envie|avisa|avise|fala|fale|passa|passe|responde|responda|confirma|confirme|liga|ligue|retorna|retorne|diz|diga|encaminha|encaminhe)|envie|mande|encaminhe|confirme|responda|retorne|revise|aprove|assine|preencha|pague|devolva|providencie|regularize|atualize)(?![a-z])/;
+  var RE_NEGATED_VERB = /(?:^|[^a-z])(?:nao|nunca|never|do not|don't|dont)\s+(?:me\s+|nos\s+|lhe\s+)?[a-z]+/g;
+  var RE_OBLIGATION_VERB = /(?:^|[^a-z])(?:enviar|mandar|encaminhar|responder|confirmar|pagar|entregar|assinar|send|reply|submit|deliver|pay|sign)(?![a-z])/;
+  var RE_BUSINESS_HOURS = /(?:^|[^a-z])(?:atendimento|funciona|funcionamento|aberto|aberta|abrimos|fechamos|expediente|horario de|plantao|open|hours|loja|lojas|das \d{1,2}|de segunda a|seg a sex)(?![a-z])/;
+  var RE_TIME_DEADLINE = new RegExp('(?:^|[^a-z\\d])((?:ate as|ate|by|until|till)\\s*)(?:' + TIME_ALT + ')', 'g');
 
   function windowBefore_(f, start, limitStart, n) {
     var a = Math.max(0, limitStart, start - n);
@@ -413,43 +497,182 @@ var Extractors = (function () {
     return m ? w.slice(0, m.index) : w;
   }
 
+  function blank_(s) {
+    return s.replace(/[^\n]/g, ' ');
+  }
+
+  /** Palavras de prazo antes da data (`before`, já limitado à frase) e no núcleo data+hora. */
+  function deadlineWords_(before, core) {
+    var far = (before + ' ' + core).replace(RE_QTY_ATE, function (m, p) {
+      return p + '   ';
+    });
+    var coreStart = far.length - core.length;
+    var r = { strong: false, near: false, endOnly: true, validOnly: true };
+    eachMatch_(RE_DL_STRONG, far, function (m) {
+      var tok = m[1];
+      var at = m.index + m[0].length;
+      if (tok === 'due' && /^\s+to\b/.test(far.slice(at))) return;
+      r.strong = true;
+      if (!END_VERBS[tok]) r.endOnly = false;
+      if (!VALID_WORDS[tok]) r.validOnly = false;
+    });
+    eachMatch_(RE_DL_NEAR, far, function (m) {
+      var tokStart = m.index + m[0].length - m[1].length;
+      if (tokStart < coreStart - 20) return;
+      if (m[1] === 'by' && RE_BY_AGENT.test(far.slice(Math.max(0, tokStart - 25), tokStart))) return;
+      r.near = true;
+      r.endOnly = false;
+      // "válido até" é uma expressão só: o "até" não transforma validade em obrigação.
+      if (!/(?:validos?|validas?|valid)\s+$/.test(far.slice(Math.max(0, tokStart - 12), tokStart))) r.validOnly = false;
+    });
+    if (!r.strong) {
+      r.endOnly = false;
+      r.validOnly = false;
+    }
+    return r;
+  }
+
+  /** Frase sem verbos negados ("não responda este e-mail" não é pedido). */
+  function requestIn_(s) {
+    return RE_REQUEST_SENT.test(s.replace(RE_NEGATED_VERB, ' '));
+  }
+
   /**
-   * Prazos (DEADLINE) e compromissos (EVENT) com certeza e evidência.
-   * EXPLICIT = palavra de prazo + data absoluta; o resto é INFERRED.
-   * @return {{date: string, time: string, certainty: string, kind: string, evidence: string, index: number}[]}
+   * Classifica uma data: {kind: 'DEADLINE'|'EVENT'|'VALIDITY'|'', scope, viaRequest}.
+   * Ordem: validade de acesso → SLA de terceiro → oferta → palavra de prazo → evento → pedido na frase.
+   */
+  function classifyDate_(scan, i) {
+    var f = scan.f;
+    var list = scan.list;
+    var c = list[i];
+    var prevEnd = i > 0 ? list[i - 1].rawEnd : 0;
+    var nextStart = i + 1 < list.length ? list[i + 1].start : f.length;
+    var before = windowBefore_(f, c.start, prevEnd, 40);
+    var core = f.slice(c.start, c.rawEnd);
+    var after = windowAfter_(f, c.rawEnd, nextStart, 40);
+    var sentB = windowBefore_(f, c.start, 0, 160);
+    var sentA = windowAfter_(f, c.rawEnd, f.length, 160);
+    var sentence = sentB + ' ' + core + ' ' + sentA;
+    var clause = sentB + ' ' + core;
+    var wide = f.slice(Math.max(0, c.start - 150), Math.min(f.length, c.rawEnd + 150));
+    var dw = deadlineWords_(before, core);
+    var hasDl = dw.strong || dw.near;
+    var immediate = (before + ' ' + core).replace(RE_QTY_ATE, function (m, p) {
+      return p + '   ';
+    });
+    var eventHit = RE_EVENT_WORD.test(before + ' ' + core + ' ' + after);
+    var res = { kind: '', scope: '', viaRequest: false };
+    if (RE_ACCESS_VALIDITY.test(clause)) {
+      res.kind = 'VALIDITY';
+      res.scope = 'ACCESS';
+    } else if (!eventHit && (RE_THIRD_PARTY.test(clause) || (RE_DELIVERY_AMBIG.test(clause) && RE_SHIPPING.test(wide)))) {
+      res.kind = 'VALIDITY';
+      res.scope = 'THIRD_PARTY';
+    } else if (RE_OFFER.test(sentence) && !RE_OBLIGATION.test(immediate) && !requestIn_(immediate) && (hasDl || !eventHit)) {
+      res.kind = 'VALIDITY';
+      res.scope = 'OFFER';
+    } else if (hasDl) {
+      if (dw.endOnly && RE_EVENT_WORD.test(before)) res.kind = 'EVENT';
+      else if (dw.validOnly && !RE_OBLIGATION.test(immediate)) {
+        res.kind = 'VALIDITY';
+        res.scope = 'OTHER';
+      } else res.kind = 'DEADLINE';
+    } else if (eventHit) {
+      // Encontro proposto sem dia ("café semana que vem?") ainda não é compromisso.
+      if (!c.vague) res.kind = 'EVENT';
+    } else if (!c.vague && (c.time || RE_DATE_LABEL_LINE.test(before)) && RE_EVENT_WORD.test(wide) && !RE_RECORD_WIDE.test(wide)) {
+      res.kind = 'EVENT';
+    } else if (requestIn_(sentence) && !RE_EVENT_WORD.test(sentence)) {
+      res.kind = 'DEADLINE';
+      res.viaRequest = true;
+    }
+    if (res.kind === 'EVENT' || res.viaRequest) {
+      var days = scan.ref ? Util.daysBetween(scan.ref, c.date) : 0;
+      // Compromisso no passado, ou registro de hoje ("foi alterada hoje às 08:47"), não é agenda.
+      if (days < 0 || (days === 0 && RE_RECORD.test(before) && !/(?:para|for)\s*$/.test(before))) res.kind = '';
+    }
+    return res;
+  }
+
+  /** "Consegue me mandar até as 15h?": hora com "até/by" sem data, em frase de pedido, ancora em refYmd. */
+  function anchoredTimes_(scan) {
+    var f = scan.f;
+    var out = [];
+    if (!scan.ref) return out;
+    eachMatch_(RE_TIME_DEADLINE, f, function (m) {
+      var at = m.index + m[0].search(/[a-z]/);
+      var end = m.index + m[0].length;
+      var covered = scan.list.some(function (c) {
+        return at < c.rawEnd && end > c.start;
+      });
+      if (covered) return;
+      var sentB = windowBefore_(f, at, 0, 160);
+      var sentA = windowAfter_(f, end, f.length, 160);
+      var otherDay = scan.list.some(function (c) {
+        return c.start >= at - sentB.length && c.start <= end + sentA.length && c.date !== scan.ref;
+      });
+      if (otherDay) return;
+      var sentence = sentB + ' ' + f.slice(at, end) + ' ' + sentA;
+      if (RE_BUSINESS_HOURS.test(sentence)) return;
+      if (!requestIn_(sentence) && !RE_OBLIGATION_VERB.test(sentence)) return;
+      var groups = [m[0]].concat(Array.prototype.slice.call(m, 2));
+      var t = timeFromMatch_(groups);
+      if (!t) return;
+      out.push({ date: scan.ref, time: t, certainty: 'INFERRED', kind: 'DEADLINE', scope: '', evidence: snippet_(scan.orig, at, end, 40), index: at });
+    });
+    return out;
+  }
+
+  var KIND_ORDER = { DEADLINE: 0, EVENT: 1, VALIDITY: 2 };
+
+  /**
+   * Prazos do dono, compromissos e validades, com certeza e evidência verificável.
+   *
+   * Contrato de `kind`:
+   *  - 'DEADLINE': algo que o DONO precisa fazer até a data — palavra de prazo ("pague até", "vencimento",
+   *    "prazo", "data de entrega", "due") ou data em frase de pedido ("me manda hoje", "send it tomorrow").
+   *    "até as 15h"/"by 5pm" sem data, em frase de pedido, ancora em refYmd.
+   *  - 'EVENT': compromisso com palavra de evento por perto (reunião, consulta, voo, convite, "Local:"…).
+   *    Data com hora e sem palavra de evento NÃO é evento (é registro: "Data: 19/10 às 09:42").
+   *  - 'VALIDITY': data informativa que não é prazo do dono, com `scope`:
+   *    'OFFER' (validade de oferta/cupom, "só hoje", "inscrições até 31/10 com 30% de desconto"),
+   *    'ACCESS' (link/código/token/convite expira), 'THIRD_PARTY' (compromisso do remetente: "será creditado
+   *    em até 7 dias úteis", previsão de entrega) ou 'OTHER' ("válido até" sem obrigação do dono).
+   *    Consumidores devem tratá-la como fato (key_facts), nunca como prazo nem como ação.
+   * Omitidos (registros): eventos no passado, registros de hoje ("foi alterada hoje às 08:47") e
+   * qualquer data a mais de 30 dias no passado. `scope` é '' fora de VALIDITY.
+   * Relativo + absoluto ("amanhã (22/10)", "hoje, 21/10/2026") vira a data absoluta; "tomorrow EOD" = amanhã.
+   * certainty: EXPLICIT = palavra de prazo + data absoluta; o resto (relativos, pedidos, eventos) é INFERRED.
+   * Ordem: DEADLINE → EVENT → VALIDITY; dentro de cada um, futuras mais próximas antes das vencidas.
+   * @return {{date: string, time: string, certainty: string, kind: string, scope: string, evidence: string, index: number}[]}
    */
   function findDeadlines(text, refYmd) {
     var scan = scanDates_(text, refYmd);
-    var f = scan.f;
     var list = scan.list;
     var out = [];
     list.forEach(function (c, i) {
       if (scan.ref && Util.daysBetween(scan.ref, c.date) < -30) return;
-      var prevEnd = i > 0 ? list[i - 1].rawEnd : 0;
-      var nextStart = i + 1 < list.length ? list[i + 1].start : f.length;
-      var before = windowBefore_(f, c.start, prevEnd, 40);
-      // Núcleo = data + hora anexada ("hoje até às 18h", "tomorrow by 5pm").
-      var core = f.slice(c.start, c.rawEnd);
-      var kind = '';
-      if (RE_DEADLINE_WORD.test(before + ' ' + core)) kind = 'DEADLINE';
-      else if (c.time || RE_EVENT_WORD.test(before + ' ' + core + ' ' + windowAfter_(f, c.rawEnd, nextStart, 40))) kind = 'EVENT';
-      if (!kind) return;
+      var k = classifyDate_(scan, i);
+      if (!k.kind) return;
+      var hasDlWord = k.kind === 'DEADLINE' && !k.viaRequest;
       out.push({
         date: c.date,
         time: c.time,
-        certainty: kind === 'DEADLINE' && c.absolute ? 'EXPLICIT' : 'INFERRED',
-        kind: kind,
+        certainty: hasDlWord && c.absolute ? 'EXPLICIT' : 'INFERRED',
+        kind: k.kind,
+        scope: k.scope,
         evidence: snippet_(scan.orig, c.start, c.rawEnd, 40),
         index: c.start,
       });
     });
+    out = out.concat(anchoredTimes_(scan));
     var byKey = {};
     var uniq = [];
     out.forEach(function (d) {
-      var k = d.kind + '|' + d.date;
-      var prev = byKey[k];
+      var key = d.kind + '|' + d.date;
+      var prev = byKey[key];
       if (!prev) {
-        byKey[k] = d;
+        byKey[key] = d;
         uniq.push(d);
         return;
       }
@@ -458,7 +681,7 @@ var Extractors = (function () {
     });
     var ref = scan.ref;
     uniq.sort(function (a, b) {
-      if (a.kind !== b.kind) return a.kind === 'DEADLINE' ? -1 : 1;
+      if (a.kind !== b.kind) return KIND_ORDER[a.kind] - KIND_ORDER[b.kind];
       var da = ref ? Util.daysBetween(ref, a.date) : 0;
       var db = ref ? Util.daysBetween(ref, b.date) : 0;
       var fa = da >= 0;
@@ -707,7 +930,7 @@ var Extractors = (function () {
   // Ordem importa: rótulos e formatos mais específicos primeiro; cada passo vê o texto já redigido.
   var PII_RULES = [
     // Segredos em parâmetros de URL (links mágicos, redefinição de senha, rastreio autenticado).
-    { key: 'token', re: /([?&](?:access_token|id_token|token|key|apikey|api_key|code|sig|signature|auth|session|sid|password|pwd|otp|hash|ticket)=)[^&\s#"'<>]{6,}/gi, keep: 1, tag: '[TOKEN]' },
+    { key: 'token', re: /([?&](?:[\w-]*(?:token|key|code|reset|auth|session|signature|secret|ticket|otp)[\w-]*|sig|sid|password|pwd|hash)=)[^&\s#"'<>]{6,}/gi, keep: 1, tag: '[TOKEN]' },
     { key: 'rg', re: /(\bRG\s*(?:n[º°o]\.?\s*)?:?\s*)(\d{1,2}\.?\d{3}\.?\d{3}-?[\dxX])\b/gi, keep: 1, tag: '[RG]' },
     { key: 'cnh', re: /(\bCNH\s*(?:n[º°o]\.?\s*)?:?\s*)(\d{9,11})\b/gi, keep: 1, tag: '[CNH]' },
     { key: 'birthdate', re: /(\b(?:data de nascimento|nascid[oa] em|nascimento|date of birth|birth ?date|dob)\s*:?\s*)(\d{1,2}[\/.\-]\d{1,2}[\/.\-]\d{2,4})/gi, keep: 1, tag: '[NASCIMENTO]' },
@@ -735,14 +958,17 @@ var Extractors = (function () {
     },
     {
       key: 'otp',
-      re: /(\b(?:c[oó]digo|codigo|code|token|otp|verifica[cç][aã]o|verification|senha tempor[aá]ria|pin)\b[^\d\n]{0,30}?)(\d{4,8})(?![\d\/:\-]|[.,]\d)/gi,
+      re: /(\b(?:c[oó]digo|codigo|code|token|otp|verifica[cç][aã]o|verification|senha tempor[aá]ria|pin)\b[^\d\n]{0,30}?)(\d{3}[- ]\d{3}(?![\d\-])|\d{4,8})(?![\d\/:\-]|[.,]\d)/gi,
       keep: 1,
       tag: '[CODIGO]',
       test: function (m) {
         return m[1].indexOf('$') < 0;
       },
     },
-    { key: 'password', re: /(\b(?:senha(?:\s+(?:provis[oó]ria|tempor[aá]ria|de acesso|inicial))?|password|passwd|pwd)\s*[:=]\s*)(\S+)/gi, keep: 1, tag: '[SENHA]' },
+    // Código antes da palavra-chave ("482913 é o seu código") e "use 482913 para verificar".
+    { key: 'otp', re: /\b(?:\d{3}[- ]\d{3}|\d{4,8})(?=\s+(?:é|e|is)\s+(?:o\s+|a\s+)?(?:seu|sua|your)\s+(?:novo\s+)?(?:c[oó]digo|code|otp|token|pin|senha)\b)/gi, tag: '[CODIGO]' },
+    { key: 'otp', re: /(\b(?:use|enter|digite|informe|insira|utilize)\s+(?:o\s+c[oó]digo\s+)?)(\d{3}[- ]\d{3}|\d{4,8})\b(?=[^.\n]{0,40}\b(?:verif|confirm|log ?in|sign|entrar|acess|valid))/gi, keep: 1, tag: '[CODIGO]' },
+    { key: 'password', re: /(\b(?:senha(?:\s+(?:provis[oó]ria|tempor[aá]ria|de acesso|inicial))?|password|passwd|pwd|passcode)\s*(?:[:=]|\s(?:é|e|is)\s)\s*)([^\s,.;]+)/gi, keep: 1, tag: '[SENHA]' },
     {
       key: 'boleto',
       re: /\d[\d. \-]{44,70}\d/g,
@@ -835,15 +1061,31 @@ var Extractors = (function () {
     { code: 'RESPOND_ONLY', w: 0.5, re: /\b(?:responda apenas|responda somente|respond only with|reply only with|answer only with|only respond with|only output)\b/ },
     { code: 'OUTPUT_FOLLOWING', w: 0.5, re: /\b(?:output the following|print the following|escreva exatamente|write exactly|say exactly|diga exatamente)\b/ },
     { code: 'JAILBREAK', w: 1, re: /\b(?:jailbreak|do anything now|modo desenvolvedor|developer mode enabled)\b/ },
-    { code: 'MANIPULATE', w: 0.5, re: /\b(?:classifique (?:este|esta|o|a) (?:e-?mail|mensagem) como|marque (?:este|esta|como) (?:\w+ )?(?:importante|urgente|critic[oa])|mark (?:this|it) as (?:important|urgent|critical)|set (?:the )?(?:priority|importance|urgency) to)\b/ },
+    { code: 'MANIPULATE', w: 0.5, re: /\b(?:(?:classifique|classificar|classifica|categorize|categorizar|marque|marcar|marca|trate|tratar)\s+(?:(?:este|esta|esse|essa|o|a)\s+)?(?:e-?mail|mensagem)\s+como|(?:classifique|classificar|marque|marcar|defina|definir|coloque|atribua)\s+(?:como\s+|a\s+|com\s+)?(?:prioridade|nivel|urgencia|importancia)\b|marque (?:este|esta|como) (?:\w+ )?(?:importante|urgente|critic[oa])|(?:mark|classify|flag|treat) (?:this|it)(?: email| message)? as|(?:classify|mark|set|rate) (?:it |this )?(?:as )?(?:priority|importance|urgency)\b|set (?:the )?(?:priority|importance|urgency)(?: to)?\s+(?:high|critical|urgent|max))\b/ },
+    // Texto que se dirige ao assistente/IA ("Note to AI assistants", "Instruções para o assistente de IA").
+    { code: 'ADDRESS_AI', w: 1, re: /\b(?:note|message|instructions?|notice) (?:to|for) (?:the |any |all )?(?:ai|llm|language model|assistant|chatbot)s?\b|\b(?:ai|llm) (?:assistants?|models?|agents?)(?:,|:| reading| processing)|(?:instruc\w*|nota|recado|mensagem|aviso) (?:para|ao|aos) (?:o |a |os )?(?:assistente|ia|modelo|agente|robo|chatbot)s?(?: de (?:ia|inteligencia artificial))?\b|(?:caro|cara|prezado|prezada|dear) (?:assistente|ia|modelo|ai|assistant)\b/ },
   ];
+
+  INJECTION_RULES.forEach(function (r) {
+    r.reG = new RegExp(r.re.source, 'g');
+  });
+  // Trechos citados: "…", “…”, «…» e '…' (aspas simples só com fronteira, para não pegar apóstrofos).
+  var RE_QUOTED_SPAN = /["“«]([^"”»\n]{3,200})["”»]|(?:^|[\s(:])'([^'\n]{3,200})'(?=[\s.,;:!?)]|$)/g;
+  // Vocabulário de quem DISCUTE o fenômeno (artigo, boletim de segurança, curso).
+  var RE_INJECTION_META = /(?:^|[^a-z])(prompt injection|injecao de prompt|injecao de instrucoes|jailbreaks?|ataques?|attacks?|atacantes?|attackers?|exemplos?|examples?|such as|frases? como|tecnicas?|techniques?|seguranca|security|llms?|modelos? de linguagem|language models?|agentes?|agents?|chatbots?|vulnerabilidades?|vulnerabilit(?:y|ies)|defesas?|defenses?|mitigac(?:ao|oes)|mitigations?)(?![a-z])/g;
 
   /**
    * Sinais heurísticos de prompt injection (pt/en). Sinais fortes valem 1, fracos 0,5;
    * `suspected` quando a soma atinge 1.
+   *
+   * Texto que DISCUTE o fenômeno (≥ 2 termos como "prompt injection", "ataques", "LLM", "agentes"
+   * fora das aspas e ≥ 20 palavras fora delas) e só cita o padrão entre aspas ("frases como
+   * \"ignore previous instructions\"") não é suspeito: o padrão citado vira o sinal informativo
+   * QUOTED_EXAMPLE (peso 0). Basta UM padrão fora das aspas para valer tudo de novo.
+   * `opts.hidden = true` (texto oculto do HTML) desliga essa tolerância: ninguém esconde uma citação.
    * @return {{suspected: boolean, signals: string[]}}
    */
-  function detectInjection(text) {
+  function detectInjection(text, opts) {
     var orig = str_(text);
     var f = fold(orig);
     var signals = [];
@@ -853,10 +1095,42 @@ var Extractors = (function () {
       signals.push(code);
       score += w;
     }
+    var spans = [];
+    eachMatch_(RE_QUOTED_SPAN, f, function (m) {
+      var inner = m[1] !== undefined ? m[1] : m[2];
+      var s = m.index + m[0].length - inner.length - 2;
+      spans.push({ s: s, e: s + inner.length + 2 });
+    });
+    function quotedOnly(a, b) {
+      return spans.some(function (q) {
+        return a >= q.s && b <= q.e;
+      });
+    }
+    var discussing = false;
+    if (spans.length && !(opts && opts.hidden)) {
+      var outside = f;
+      spans.slice().reverse().forEach(function (q) {
+        outside = outside.slice(0, q.s) + ' ' + outside.slice(q.e);
+      });
+      var meta = {};
+      eachMatch_(RE_INJECTION_META, outside, function (m) {
+        meta[m[1].replace(/s$/, '')] = true;
+      });
+      discussing = Object.keys(meta).length >= 2 && Util.wordCount(outside) >= 20;
+    }
+    var cited = false;
     INJECTION_RULES.forEach(function (r) {
-      if (r.re.test(f)) hit(r.code, r.w);
+      var found = false;
+      var free = false;
+      eachMatch_(r.reG, f, function (m) {
+        found = true;
+        if (!discussing || !quotedOnly(m.index, m.index + m[0].length)) free = true;
+      });
+      if (free) hit(r.code, r.w);
+      else if (found) cited = true;
     });
     if (/\bDAN\b/.test(orig)) hit('DAN', 0.5);
+    if (cited) hit('QUOTED_EXAMPLE', 0);
     // Texto invisível é comum em newsletters (preheader): só agrava quando já há sinal textual.
     var textual = score;
     if (/[​-‍⁠﻿]{5,}/.test(orig)) hit('ZERO_WIDTH', textual > 0 ? 0.5 : 0);
@@ -873,15 +1147,85 @@ var Extractors = (function () {
     'please confirm', 'please review', 'please reply', 'please respond', 'please send', 'please let me know', 'can you please',
     'could you', 'would you', 'let me know', 'kindly', 'reply by', 'respond by', 'rsvp', 'preencha o formulario', 'preencha',
     'responda', 'assine', 'assinatura pendente', 'documento para assinar', 'pague ate', 'pagar ate', 'efetue o pagamento',
-    'regularize', 'regularizar', 'evite o bloqueio', 'evite a suspensao',
+    'regularize', 'regularizar', 'evite o bloqueio', 'evite a suspensao', 'send me',
   ];
   var ACTION_MEDIUM = [
     'poderia', 'poderiam', 'voce pode', 'voces podem', 'consegue', 'conseguiria', 'por favor', 'favor', 'please', 'gentileza',
-    'pendencia', 'pendente', 'lembrete', 'follow up', 'follow-up', 'confirmar', 'enviar', 'revisar', 'revise', 'aprovar', 'aprove',
+    'pendencia', 'pendencias', 'pendente', 'pendentes', 'lembrete', 'follow up', 'follow-up', 'confirmar', 'enviar', 'revisar', 'revise', 'aprovar', 'aprove',
     'retorne', 'me avise', 'avise', 'can you',
   ];
-  var RE_BILLING = /(?:^|[^a-z])(?:pague|pagar|pagamento|efetue|regularize|regularizar|fatura|boleto|vencimento|vence|em atraso|cobranca|bloqueio|suspensao|assinatura pendente|documento para assinar|assine|assinar|renove|renovacao)(?![a-z])/;
-  var RE_DIRECT_QUESTION = /^(?:voce|voces|vc|pode|poderia|podemos|consegue|conseguiria|qual|quais|quando|como|onde|tem|teria|ha|existe|sera|seria|vamos|could|can|would|will|do|did|are|is|what|when|how|where|which|who|should)\b/;
+  // Verbos de TAREFA no imperativo: [formal (subjuntivo), informal (indicativo 3ª pessoa), peso].
+  // Verbos de venda ("compre", "aproveite", "garanta", "confira", "clique", "acesse", "baixe", "use") ficam fora de propósito.
+  var TASK_VERBS = [
+    ['envie', 'envia', 0.35], ['mande', 'manda', 0.35], ['encaminhe', 'encaminha', 0.35], ['confirme', 'confirma', 0.35],
+    ['responda', 'responde', 0.35], ['retorne', 'retorna', 0.35], ['avise', 'avisa', 0.35], ['revise', 'revisa', 0.35],
+    ['aprove', 'aprova', 0.35], ['assine', 'assina', 0.35], ['preencha', 'preenche', 0.35], ['pague', 'paga', 0.35],
+    ['regularize', 'regulariza', 0.35], ['renove', 'renova', 0.35], ['atualize', 'atualiza', 0.35], ['retire', 'retira', 0.35],
+    ['entregue', 'entrega', 0.35], ['devolva', 'devolve', 0.35], ['providencie', 'providencia', 0.35], ['agende', 'agenda', 0.35],
+    ['remarque', 'remarca', 0.35], ['conclua', 'conclui', 0.35], ['finalize', 'finaliza', 0.35], ['corrija', 'corrige', 0.35],
+    ['informe', 'informa', 0.35], ['indique', 'indica', 0.35], ['aceite', 'aceita', 0.35], ['anexe', 'anexa', 0.35],
+    ['emita', 'emite', 0.35], ['compareca', 'comparece', 0.3], ['faca', 'faz', 0.3], ['passe', 'passa', 0.3], ['fale', 'fala', 0.3],
+    ['diga', 'diz', 0.3], ['ligue', 'liga', 0.3], ['separe', 'separa', 0.3], ['imprima', 'imprime', 0.3], ['decida', 'decide', 0.3],
+    ['defina', 'define', 0.3], ['resolva', 'resolve', 0.3], ['ajude', 'ajuda', 0.3], ['conte', 'conta', 0.3], ['chame', 'chama', 0.2],
+    ['leve', 'leva', 0.2], ['traga', 'traz', 0.2], ['apresente', 'apresenta', 0.2], ['verifique', 'verifica', 0.2],
+    ['consulte', 'consulta', 0.2], ['olhe', 'olha', 0.2],
+  ];
+  // Formas informais sem ambiguidade com substantivo/adjetivo: valem no início da frase ("Manda o arquivo").
+  var INFORMAL_START_OK = { manda: 1, envia: 1, encaminha: 1, avisa: 1, confirma: 1, revisa: 1, responde: 1 };
+  var TASK_VERBS_EN = [
+    ['send', 0.35], ['forward', 0.35], ['confirm', 0.35], ['reply', 0.35], ['respond', 0.35], ['review', 0.35], ['approve', 0.35],
+    ['sign', 0.35], ['complete', 0.35], ['submit', 0.35], ['pay', 0.35], ['provide', 0.35], ['fill out', 0.35], ['fill in', 0.35],
+    ['update', 0.3], ['schedule', 0.3], ['call', 0.3], ['upload', 0.3], ['fix', 0.3], ['finish', 0.3], ['prepare', 0.3],
+    ['share', 0.2], ['check', 0.2], ['verify', 0.2],
+  ];
+  var RE_IMP_FORMAL = new RegExp('(?:^|[^a-z])(' + TASK_VERBS.map(function (v) { return v[0]; }).join('|') + ')(?![a-z])', 'g');
+  var RE_IMP_INFORMAL = new RegExp('(?:^|[^a-z])(' + TASK_VERBS.map(function (v) { return v[1]; }).join('|') + ')(?![a-z])', 'g');
+  var RE_IMP_EN = new RegExp('(?:^|[^a-z])(' + TASK_VERBS_EN.map(function (v) { return v[0]; }).join('|') + ')(?![a-z])', 'g');
+  var IMP_WEIGHT = {};
+  TASK_VERBS.forEach(function (v) {
+    IMP_WEIGHT[v[0]] = v[2];
+    IMP_WEIGHT[v[1]] = v[2];
+  });
+  TASK_VERBS_EN.forEach(function (v) {
+    IMP_WEIGHT[v[0]] = v[1];
+  });
+  // O que pode vir antes de um imperativo de início de frase: marcadores, vocativo ("Rafael,"), cortesia.
+  // Sem alternativas ambíguas (o vocativo aparece no máximo uma vez): nada de retrocesso exponencial.
+  var RE_PRE_CLAUSE_START = /^(?:[\s\-–—•*>]|\d+[.)])*(?:[a-z]{2,20}\s*,\s*)?(?:(?:ok|okay|entao|so|tambem|depois|agora|ai|e|alem disso|ah|por favor|favor|gentileza|please|kindly|just|also|and|then|pls|pf)(?:\s*,\s*|\s+|$))*$/;
+  var RE_PRE_CLITIC = /(?:^|[^a-z])(?:me|nos)\s+$/;
+  var RE_PRE_COORD = /(?:^|[^a-z])(?:e|que (?:voce|vc|voces))\s+(?:me\s+|nos\s+)?$/;
+  var RE_PRE_NEGATION = /(?:^|[^a-z])(?:nao|nunca|never|not|don't|dont|no)\s+(?:me\s+|nos\s+|lhe\s+|o\s+|a\s+)?$/;
+  var RE_PRE_CONDITIONAL = /(?:^|[^a-z])(?:(?:se|caso|if|unless)\s+(?!(?:possivel|puder|der|preferir|possible|you can|you could)(?![a-z]))|qualquer (?:duvida|coisa|problema|questao)|em caso de duvidas?|if you have any questions|any questions)/;
+  var RE_NEXT_DETERMINER = /^\s+(?:o|a|os|as|um|uma|isso|esse|essa|esses|essas|este|esta|aquele|aquela|seu|sua|seus|suas|teu|tua|todos|todas|ai|la|aqui|pra|pro|para|me|por|com|no|na|pelo|pela|ate|hoje|amanha|agora|ja|quando|assim)(?![a-z])/;
+  // Formas que também são substantivo/particípio ("Entregue em 20/10", "Informe de rendimentos", "Aceite enviado")
+  // e instruções fracas: só contam seguidas de artigo/possessivo/complemento ("Informe seus dados").
+  var FORMAL_NEEDS_OBJECT = { entregue: 1, informe: 1, aceite: 1, indique: 1, conte: 1, passe: 1, separe: 1, fale: 1, diga: 1, chame: 1, leve: 1, traga: 1, apresente: 1, verifique: 1, consulte: 1, olhe: 1 };
+  // Tarefa atribuída/revisão pedida: pedido explícito, mesmo vindo de sistema.
+  var RE_TASK_ASSIGNED = /(?:^|[^a-z])(?:atribu(?:iu|ida|ido|idas|idos)(?![a-z])[^.!?\n]{0,60}(?:a|para) voce|assigned (?:to )?you|assigned you|requested your review|review requested|requested changes|solicitou (?:a )?sua (?:revisao|aprovacao|assinatura|resposta)|pediu (?:a )?sua (?:revisao|aprovacao|assinatura|resposta)|aguardando (?:a )?sua (?:aprovacao|assinatura|revisao|resposta|confirmacao|acao)|awaiting your|waiting (?:for|on) your|needs your (?:approval|review|signature|input)|precisa da sua (?:aprovacao|assinatura|revisao|resposta)|enviou (?:um|o|uns|os) documentos? para voce|sent you (?:a|the) document|mencionou voce|mentioned you|sua acao e necessaria|requer sua acao|your action is required)(?![a-z])/g;
+  var RE_TASK_ASSIGNED_1 = new RegExp(RE_TASK_ASSIGNED.source);
+  var RE_TASK_STAGE = /(?:^|[^a-z])(?:proxima etapa|next step|next stage|avancou para|voce avancou|you(?:'ve| have) advanced|moved (?:you )?to the next)(?![a-z])/;
+  var RE_TASK_PENDING = /(?:^|[^a-z])(?:disponivel para retirada|aguardando (?:a )?retirada|ready for pick-?up|check-?in (?:do seu voo |online )?(?:ja )?(?:esta )?(?:aberto|disponivel|liberado)|check-?in is (?:now )?open|nao conseguimos processar|nao foi possivel processar|pagamento (?:recusado|nao aprovado|falhou)|payment (?:failed|declined|was declined)|pendencias?|em aberto|em atraso|overdue|past due)(?![a-z])/g;
+  var RE_TASK_PENDING_1 = new RegExp(RE_TASK_PENDING.source);
+  // Obrigação expressa por modal: "deve ser entregue até", "você precisa", "is required".
+  var RE_OBLIGATION_ACT = /(?:^|[^a-z])(?:devem? ser (?:entregues?|enviad[oa]s?|preenchid[oa]s?|assinad[oa]s?|pag[oa]s?|respondid[oa]s?|concluid[oa]s?|realizad[oa]s?|feit[oa]s?)|voce (?:deve|precisa|tera que|tem que) (?!saber|conhecer|ver|ler|entender|experimentar|conferir|aproveitar|assistir)[a-z]{2,}(?:ar|er|ir)|e (?:necessario|obrigatorio) (?:que|(?!para|pra)[a-z]{2,}(?:ar|er|ir))|precisa ser|prazo (?:para|de) (?:o |a )?(?:indicacao|apresentacao|pagamento|envio|resposta|defesa|recurso|regularizacao|assinatura|inscricao|contestacao|manifestacao|comprovacao|cadastro|matricula|declaracao|confirmacao|retirada|devolucao)|must be|needs to be|you (?:need|must|have) to|is required|are required)(?![a-z])/g;
+  var RE_NO_ACTION = /(?:^|[^a-z])(?:nao (?:e necessario|precisa) fazer nada|nao precisa fazer nada|nenhuma acao (?:e )?necessaria|nao requer (?:nenhuma )?acao|no action (?:is )?(?:needed|required)|you don't need to do anything|nothing (?:else )?to do|pode ignorar)(?![a-z])/;
+  var RE_DUE_CUE = /(?:^|[^a-z])(?:ate|by|until|hoje|amanha|today|tonight|tomorrow|eod|asap|urgente|urgent|o quanto antes|assim que possivel|o mais rapido possivel|esta semana|nesta semana|this week|este mes|neste mes|prazo|deadline|due|segunda(?!\s+(?:via|vez|etapa|opcao|parte))|terca|quarta|quinta|sexta|sabado|domingo|monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?![a-z])|\d{1,2}\/\d{1,2}/;
+  // Prazo concreto colado a um pedido ("confirme até hoje às 18h", "send it by Friday"): pista transacional.
+  var RE_DUE_CONCRETE = /(?:^|[^a-z])(?:ate|by|until|till)\s+(?:(?:o\s+)?(?:dia\s+)?(?:hoje|amanha|today|tomorrow|tonight|eod)|(?:as\s+)?\d{1,2}(?:h|:\d{2})|\d{1,2}\/\d{1,2}|segunda|terca|quarta|quinta|sexta|sabado|domingo|monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?![a-z])/;
+  var RE_EXPLICIT_DUE = new RegExp('(?:^|[^a-z])(?:prazo|vencimento|vence|vencem|data de entrega|data limite|due(?: date)?|deadline|ate|by|until)\\s*(?:[:\\-]\\s*)?(?:(?:o\\s+)?dia\\s+|the\\s+|on\\s+)?(?:\\d{1,2}\\/\\d{1,2}|\\d{1,2}(?:º|o)?\\s+de\\s+(?:' + MONTH_ALT + ')(?![a-z])|(?:' + MONTH_EN_ALT + ')\\s+\\d{1,2}(?!\\d))');
+  var RE_BILLING = /(?:^|[^a-z])(?:pague|pagar|pagamento|efetue|regularize|regularizar|fatura|boleto|vencimento|vence|em atraso|cobranca|bloqueio|suspensao|assinatura pendente|documento para assinar|assine|assinar|renove|renovacao|invoice|payment|overdue|past due|billing)(?![a-z])/;
+  var RE_DIRECT_QUESTION = /^(?:voce|voces|vc|pode|poderia|podemos|consegue|conseguiria|qual|quais|quando|como|onde|tem|teria|ha|existe|sera|seria|vamos|vem|topa|bora|que horas|que dia|da pra|combinado|fechado|could|can|would|will|do|did|are|is|what|when|how|where|which|who|should)\b/;
+  // Perguntas de 1–2 palavras que ainda pedem resposta ("Qual prefere?", "Topa?").
+  var RE_SHORT_QUESTION = /^(?:qual|quais|quando|onde|quanto|quantos|quantas|que horas|que dia|topa|vem|vamos|bora|pode|podemos|consegue|combinado|confirma|fechado|which|when|where|deal|available|free)\b/;
+  var RE_Q_LEAD = /^(?:(?:oi|ola|hi|hey|hello|dear|bom dia|boa tarde|boa noite|fala|e ai|ok|okay|entao|ah)[\s,!]+)?(?:[a-z]{2,20},\s*)?/;
+  var RE_PLEASANTRY_ONLY = /^(?:tudo (?:bem|bom|certo|tranquilo|joia|ok|em ordem)|como (?:vai|vao|esta|estao|voce esta|vai voce|voce vai)|how are you|how(?:'s| is) it going|how have you been|e ai|beleza|td bem)(?:\s+(?:com voce|contigo|por ai|ai|with you|doing|today))?\s*$/;
+  // Mensagem de pessoa retransmitida por plataforma: trecho entre aspas com 1ª/2ª pessoa.
+  var RE_QUOTED_HUMAN = /["“«]([^"”»\n]{25,600})["”»]/g;
+  var RE_PERSON_PRONOUN = /(?:^|[^a-z])(?:eu|voce|vc|te|me|meu|minha|posso|preciso|a gente|i|you|me|my|we)(?![a-z])/;
+  // Pedido modal: "Pode revisar…?", "Você consegue me mandar…?" (início de frase ou pergunta).
+  var RE_MODAL_REQUEST = /(?:^|[^a-z])((?:pode|podem|poderia|poderiam|consegue|conseguiria|conseguem)\s+(?:me\s+|nos\s+)?[a-z]{2,}(?:ar|er|ir))(?![a-z])/g;
+  // Pistas que não são pedido em si (substantivos de lembrete/pendência): não ganham o reforço de prazo.
+  var NOT_A_REQUEST = { lembrete: 1, pendencia: 1, pendencias: 1, pendente: 1, pendentes: 1, 'follow up': 1, 'follow-up': 1, prazo: 1, retorno: 1 };
   var actionMatcherCache_ = null;
 
   /** Lista de frases (fixas + palavras de "tarefas" da taxonomia) compilada na primeira chamada. */
@@ -913,46 +1257,193 @@ var Extractors = (function () {
     return actionMatcherCache_;
   }
 
+  /** Frases (sentenças) do texto: {s, e, term} com o terminador ('?', '.', '\n', ...). */
+  function pieces_(s) {
+    var out = [];
+    var last = 0;
+    var re = /[!?;\n]|\.(?=\s|$)/g;
+    var m;
+    while ((m = re.exec(s)) !== null) {
+      out.push({ s: last, e: m.index, term: m[0] });
+      last = m.index + 1;
+    }
+    out.push({ s: last, e: s.length, term: '' });
+    return out;
+  }
+
   /**
-   * Força do pedido de ação (0..1) a partir de frases de pedido e perguntas diretas.
-   * `ctx = {isAutomated, isBulk, userInTo}` modula: massa ×0,3; automático ×0,5 (exceto cobrança/assinatura); Para +0,15.
+   * Texto da frase antes de `pos`, limitado a 120 caracteres (evita custo quadrático em frases enormes).
+   * Um trecho cortado nunca é "início de frase": recebe um marcador que reprova RE_PRE_CLAUSE_START.
+   */
+  function preOf_(pieces, nu, pos) {
+    var s = pieceAt_(pieces, pos).s;
+    return s < pos - 120 ? '\u0000' + nu.slice(pos - 120, pos) : nu.slice(s, pos);
+  }
+
+  /** Frase que contém `pos` (busca binária: textos longos têm milhares de frases). */
+  function pieceAt_(pieces, pos) {
+    var lo = 0;
+    var hi = pieces.length - 1;
+    while (lo < hi) {
+      var mid = (lo + hi) >> 1;
+      if (pieces[mid].e < pos) lo = mid + 1;
+      else hi = mid;
+    }
+    return pieces[lo];
+  }
+
+  /**
+   * Força do pedido de ação (0..1) a partir de frases de pedido, imperativos de tarefa e perguntas diretas.
+   *
+   * - Frases fixas ("preciso que", "could you", "favor confirmar"), imperativos de TAREFA por forma verbal
+   *   (formal no início da frase ou após "me/nos/e": "envie", "atualize", "faça o check-in"; informal com
+   *   clítico: "me manda", "me avisa"; inglês no início da frase: "send me", "please pay"), tarefas
+   *   atribuídas ("atribuiu … a você", "requested your review") e obrigações ("deve ser entregue até").
+   * - Negados ("não responda este e-mail") não contam; condicionais ("se não foi você, …", "qualquer dúvida,
+   *   me avise") valem 40%. "Não precisa fazer nada" corta o resultado pela metade.
+   * - Perguntas: ≥ 3 palavras, ou curtas e diretas ("Qual prefere?"); saudações ("tudo bem?") não contam.
+   * - Pedido com prazo na mesma frase ("me manda até amanhã") ou tarefa atribuída com data explícita reforça.
+   * `ctx = {isAutomated, isBulk, userInTo}` modula: massa ×0,3 (×0,9 com pista transacional — tarefa
+   * atribuída, etapa de processo, pendência, mensagem de pessoa retransmitida —; ×0,5 só com prazo explícito,
+   * isto é, data escrita ou pedido com prazo concreto: "confirme até hoje às 18h"); automático ×0,5 (exceto
+   * cobrança/assinatura, pista transacional ou prazo explícito); Para +0,15.
    * @return {{score: number, phrases: string[], asksQuestion: boolean}}
    */
   function actionSignals(text, ctx) {
     var c = ctx || {};
     var orig = str_(text);
     var f = fold(orig);
+    // URLs viram espaços (mesmo comprimento): "…/confirmar" num link não é pedido.
+    var nu = f.replace(/https?:\/\/\S+/g, blank_);
+    var pieces = pieces_(nu);
     var matcher = actionMatcher_();
     var cands = [];
-    eachMatch_(matcher.re, f, function (m) {
+    function push(start, end, w) {
+      cands.push({ start: start, end: end, key: nu.slice(start, end), w: w });
+    }
+    eachMatch_(matcher.re, nu, function (m) {
       var start = m.index + m[0].length - m[1].length;
-      cands.push({ start: start, end: start + m[1].length, key: m[1] });
+      push(start, start + m[1].length, matcher.weights[m[1]]);
     });
+    eachMatch_(RE_IMP_FORMAL, nu, function (m) {
+      var start = m.index + m[0].length - m[1].length;
+      var pre = preOf_(pieces, nu, start);
+      if (RE_PRE_CLITIC.test(pre)) return push(start - pre.length + pre.search(/(?:me|nos)\s+$/), start + m[1].length, Math.max(0.35, IMP_WEIGHT[m[1]]));
+      if (RE_PRE_CLAUSE_START.test(pre) || RE_PRE_COORD.test(pre) || /,\s*$/.test(pre)) {
+        var end = start + m[1].length;
+        if (nu.charAt(end) === ':') return; // rótulo de botão ("Responder:")
+        if (FORMAL_NEEDS_OBJECT[m[1]] && !RE_NEXT_DETERMINER.test(nu.slice(end, end + 12))) return;
+        push(start, end, IMP_WEIGHT[m[1]]);
+      }
+    });
+    eachMatch_(RE_IMP_INFORMAL, nu, function (m) {
+      var start = m.index + m[0].length - m[1].length;
+      var end = start + m[1].length;
+      var pre = preOf_(pieces, nu, start);
+      if (RE_PRE_CLITIC.test(pre)) return push(start - pre.length + pre.search(/(?:me|nos)\s+$/), end, 0.35);
+      if (INFORMAL_START_OK[m[1]] && RE_PRE_CLAUSE_START.test(pre) && RE_NEXT_DETERMINER.test(nu.slice(end, end + 12))) push(start, end, IMP_WEIGHT[m[1]]);
+    });
+    eachMatch_(RE_IMP_EN, nu, function (m) {
+      var start = m.index + m[0].length - m[1].length;
+      var end = start + m[1].length;
+      var pre = preOf_(pieces, nu, start);
+      var nx = nu.slice(end, end + 6);
+      if (!RE_PRE_CLAUSE_START.test(pre) || /^\s*[:\-]/.test(nx) || (m[1] === 'check' && /^\s+out\b/.test(nx)) || (m[1] === 'sign' && /^\s+(?:up|in)\b/.test(nx))) return;
+      push(start, end, IMP_WEIGHT[m[1]]);
+    });
+    eachMatch_(RE_MODAL_REQUEST, nu, function (m) {
+      var start = m.index + m[0].length - m[1].length;
+      var piece = pieceAt_(pieces, start);
+      var pre = preOf_(pieces, nu, start);
+      if (RE_PRE_CLAUSE_START.test(pre) || (piece.term === '?' && /(?:^|[^a-z])(?:voce|vc|voces|tu)\s+$/.test(pre))) push(start, start + m[1].length, 0.35);
+    });
+    eachMatch_(RE_TASK_ASSIGNED, nu, function (m) {
+      var start = m.index + m[0].search(/[a-z]/);
+      push(start, m.index + m[0].length, 0.5);
+    });
+    eachMatch_(RE_TASK_PENDING, nu, function (m) {
+      if (/^(?:pendencias?|em aberto|em atraso|overdue|past due)$/.test(m[0].replace(/^[^a-z]+/, ''))) return;
+      var start = m.index + m[0].search(/[a-z]/);
+      push(start, m.index + m[0].length, 0.3);
+    });
+    eachMatch_(RE_OBLIGATION_ACT, nu, function (m) {
+      var start = m.index + m[0].search(/[a-z]/);
+      push(start, m.index + m[0].length, 0.35);
+    });
+    // Mesmo trecho achado por mais de uma regra: fica o maior peso.
+    var bySpan = {};
+    cands = cands.filter(function (cd) {
+      var k = cd.start + ':' + cd.end;
+      var prev = bySpan[k];
+      if (prev) {
+        prev.w = Math.max(prev.w, cd.w);
+        return false;
+      }
+      bySpan[k] = cd;
+      return true;
+    });
+    var quoted = [];
+    eachMatch_(RE_QUOTED_HUMAN, nu, function (m) {
+      if (RE_PERSON_PRONOUN.test(m[1])) quoted.push({ s: m.index, e: m.index + m[0].length });
+    });
+    function inQuote(pos) {
+      return quoted.some(function (q) {
+        return pos >= q.s && pos < q.e;
+      });
+    }
     var seen = {};
     var keep = 1;
     var phrases = [];
+    var relayed = false;
+    var dueBoost = false;
+    var dueConcrete = false;
     resolveOverlaps_(cands).forEach(function (cd) {
       if (seen[cd.key]) return;
+      var piece = pieceAt_(pieces, cd.start);
+      var pre = preOf_(pieces, nu, cd.start);
+      if (RE_PRE_NEGATION.test(pre)) return;
+      // Infinitivo como rótulo/botão ("Enviar para: …", "Responder: https://…") não é pedido.
+      if (/(?:ar|er|ir)$/.test(cd.key) && /^\s*(?:[^\s:]+\s+){0,2}?[^\s:]*:(?!\d)/.test(nu.slice(cd.end, Math.min(piece.e, cd.end + 40)))) return;
       seen[cd.key] = true;
-      keep *= 1 - matcher.weights[cd.key];
+      var w = cd.w;
+      var conditional = RE_PRE_CONDITIONAL.test(pre);
+      if (conditional) w *= 0.4;
+      else if (cd.w >= 0.3 && !NOT_A_REQUEST[cd.key]) {
+        var around = pre + ' ' + nu.slice(cd.end, Math.min(piece.e, cd.end + 120));
+        if (RE_DUE_CUE.test(around)) dueBoost = true;
+        if (RE_DUE_CONCRETE.test(around)) dueConcrete = true;
+      }
+      if (inQuote(cd.start)) relayed = true;
+      keep *= 1 - w;
       phrases.push(orig.slice(cd.start, cd.end));
     });
-    var noUrls = f.replace(/https?:\/\/\S+/g, ' ');
     var asksQuestion = false;
     var direct = false;
-    // Divide por pontuação (linear) em vez de /[^.!?]+\?/, que é quadrático sem "?".
-    var pieces = noUrls.split(/([.!?\n])/);
-    pieces.forEach(function (piece, i) {
-      if (pieces[i + 1] !== '?') return;
-      var t = piece.trim();
-      if (Util.wordCount(t) < 3) return;
+    pieces.forEach(function (p) {
+      if (p.term !== '?') return;
+      var t = nu.slice(p.s, p.e).trim().replace(RE_Q_LEAD, '');
+      if (!t || RE_PLEASANTRY_ONLY.test(t)) return;
+      if (Util.wordCount(t) < 3 && !RE_SHORT_QUESTION.test(t)) return;
       asksQuestion = true;
       if (RE_DIRECT_QUESTION.test(t)) direct = true;
+      if (inQuote(p.s + 1) || inQuote(p.e - 1)) relayed = true;
     });
     if (asksQuestion) keep *= direct ? 0.65 : 0.75;
+    var assigned = RE_TASK_ASSIGNED_1.test(nu);
+    var cue = assigned || RE_TASK_STAGE.test(nu) || RE_TASK_PENDING_1.test(nu) || relayed;
+    var dueExplicit = dueConcrete || pieces.some(function (p) {
+      var s = nu.slice(p.s, p.e);
+      return RE_EXPLICIT_DUE.test(s) && !RE_OFFER.test(s);
+    });
+    if (keep < 1 && (dueBoost || ((assigned || RE_TASK_STAGE.test(nu)) && dueExplicit))) keep *= 0.75;
     var score = 1 - keep;
-    if (c.isBulk) score *= 0.3;
-    if (c.isAutomated && !RE_BILLING.test(f)) score *= 0.5;
+    if (score > 0 && pieces.some(function (p) {
+      var s = nu.slice(p.s, p.e);
+      var at = s.search(RE_NO_ACTION);
+      return at >= 0 && !RE_PRE_CONDITIONAL.test(s.slice(0, at + 1));
+    })) score *= 0.5;
+    if (c.isBulk) score *= assigned ? 1 : cue ? 0.9 : dueExplicit ? 0.5 : 0.3;
+    if (c.isAutomated && !RE_BILLING.test(nu) && !cue && !dueExplicit) score *= 0.5;
     if (c.userInTo && score > 0) score += 0.15;
     return { score: Util.round(Util.clamp(score, 0, 1), 3), phrases: Util.uniq(phrases).slice(0, 5), asksQuestion: asksQuestion };
   }

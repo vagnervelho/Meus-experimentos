@@ -352,19 +352,77 @@ var AiSchema = (function () {
    * Combina regras e IA. A IA prevalece no que interpreta melhor (resumo,
    * categorias, importância, entidades); as regras prevalecem em sinais
    * estruturais (newsletter, envio em massa, sensibilidade, prazo explícito
-   * que a IA não achou) e o OR das suspeitas de injection.
+   * que a IA não achou, confiança do remetente, gravidade) e no OR das
+   * suspeitas de injection.
+   *
+   * Travas contra manipulação do modelo pelo conteúdo:
+   *  - injection (regras OU IA): confiança ≤ 0,5 e importância/urgência/relevância
+   *    da IA descartadas (null → caminho de regras no Scoring);
+   *  - ação da IA só vale fora de envio em massa/newsletter/marketing/spam, ou em
+   *    categoria transacional (nunca em marketing/spam); sem ação → actions = [];
+   *  - a IA não ressuscita a oportunidade que as regras descartaram em marketing/spam;
+   *  - mensagem não confiável (`untrusted` = OR de regras e spam): sem ações, prazo nem
+   *    oportunidade.
+   * @param {Object} rules RulesResult
+   * @param {Object|null} ai AiAnalysis validada (ou null)
+   * @param {Object=} profile perfil (aderência)
+   * @param {string=} text texto da mensagem (aderência por temas); sem ele, vale o
+   *   maior entre a aderência recalculada e a das regras
    */
-  function merge(rules, ai, profile) {
+  function merge(rules, ai, profile, text) {
     var r = rules;
+    var trans = RulesClassifier.TRANSACTIONAL;
     if (!ai) {
-      return Object.assign({}, r, { method: 'RULES', importance: null, urgency: null, relevance: null, whats_new: '', evidence: [] });
+      return Object.assign({}, r, {
+        method: 'RULES', importance: null, urgency: null, relevance: null, whats_new: '', evidence: [],
+        untrusted: !!r.untrusted, spoof_signals: (r.spoof_signals || []).slice(), severity: Number(r.severity || 0),
+      });
     }
+    // A IA não rebaixa uma pessoa (remetente não automático) para spam/marketing sozinha:
+    // o conteúdo pode ter sido escrito para manipular o modelo. Exige concordância das regras.
+    var NOISE = ['spam', 'marketing'];
+    var primary = ai.primary_category;
+    var confidence = ai.confidence;
+    var signals = (r.signals || []).slice();
+    if (NOISE.indexOf(primary) >= 0 && !r.is_automated && !r.is_bulk && NOISE.indexOf(r.primary_category) < 0) {
+      primary = r.primary_category;
+      confidence = Math.min(Number(confidence || 0.5), 0.5);
+      signals.push('ai_demotion_blocked');
+    }
+    var injected = !!(r.injection && r.injection.suspected) || !!ai.injection_suspected;
+    if (injected) {
+      confidence = Math.min(Number(confidence === undefined || confidence === null ? 0.5 : confidence), 0.5);
+      signals.push('ai_scores_ignored_injection');
+    }
+    var aiSecondary = (ai.secondary_categories || []).filter(function (c) {
+      return c !== primary;
+    });
+    var isMarketing = !!r.is_marketing || primary === 'marketing';
+    var isSpam = !!r.is_probable_spam || primary === 'spam';
+    // Newsletter é formato: em categoria transacional (boleto, alerta, etapa de processo) não é newsletter.
+    var isNewsletter = primary === 'newsletters' ||
+      ((!!r.is_newsletter || aiSecondary.indexOf('newsletters') >= 0) && trans.indexOf(primary) < 0);
+    var untrusted = !!r.untrusted || isSpam;
+    var mass = !!r.is_bulk || isNewsletter || isMarketing || isSpam;
+    var aiActionOk = !untrusted && !injected && !isMarketing && !isSpam && (!mass || trans.indexOf(primary) >= 0);
+    var rulesAction = !!r.action_required && Number(r.action_score || 0) >= 0.6;
+    var actionRequired = !untrusted && !injected && ((aiActionOk && !!ai.action_required) || rulesAction);
+    var actions = [];
+    if (actionRequired) actions = aiActionOk && ai.action_required && ai.actions.length ? ai.actions : r.actions || [];
+
+    // Prazo: o explícito das regras vence o inferido da IA; nada de prazo do dono em marketing,
+    // newsletter, spam ou mensagem não confiável.
     var deadline = ai.deadline;
     if (r.deadline && r.deadline.certainty === 'EXPLICIT' && (!deadline || deadline.certainty !== 'EXPLICIT')) {
       deadline = { date: r.deadline.date, certainty: 'EXPLICIT', evidence: r.deadline.evidence || '' };
     }
+    if (untrusted || isMarketing || isNewsletter) deadline = null;
+
     var opportunity = ai.opportunity;
-    if (opportunity || r.opportunity) {
+    // A IA disse "sem oportunidade" em marketing/spam: não ressuscita a das regras. Não confiável ou
+    // com injection: nunca há oportunidade (o golpe do "recrutador" não se promove).
+    if (!opportunity && (NOISE.indexOf(primary) >= 0 || isMarketing || isSpam)) opportunity = null;
+    else if (opportunity || r.opportunity) {
       var base = r.opportunity || {};
       var o = opportunity || {};
       opportunity = {
@@ -384,10 +442,16 @@ var AiSchema = (function () {
         is_mass: !!base.is_mass || !!r.is_bulk,
         evidence: o.evidence || base.evidence || '',
       };
-      var fit = RulesClassifier.opportunityFit(opportunity, profile || Config.get().profile);
+      var fit = RulesClassifier.opportunityFit(opportunity, profile || Config.get().profile, text);
+      if (text === undefined || text === null) {
+        var baseFit = Number(base.fit || 0);
+        if (baseFit > fit.fit) fit = { fit: baseFit, reasons: base.fit_reasons || fit.reasons };
+      }
       opportunity.fit = fit.fit;
       opportunity.fit_reasons = fit.reasons;
     }
+    if (untrusted || injected) opportunity = null;
+
     var facts = ai.key_facts.slice();
     (r.key_facts || []).forEach(function (f) {
       if (facts.length < 6 && !facts.some(function (x) { return Util.normalizeText(x.fact) === Util.normalizeText(f.fact); })) facts.push(f);
@@ -399,35 +463,22 @@ var AiSchema = (function () {
       return false;
     }
     var aiInterest = profile ? Extractors.interestMatch(topics.join(' ') + ' ' + ai.summary, (profile.interests || [])).score : 0;
-    // A IA não rebaixa uma pessoa (remetente não automático) para spam/marketing sozinha:
-    // o conteúdo pode ter sido escrito para manipular o modelo. Exige concordância das regras.
-    var NOISE = ['spam', 'marketing'];
-    var primary = ai.primary_category;
-    var confidence = ai.confidence;
-    var signals = (r.signals || []).slice();
-    if (NOISE.indexOf(primary) >= 0 && !r.is_automated && !r.is_bulk && NOISE.indexOf(r.primary_category) < 0) {
-      primary = r.primary_category;
-      confidence = Math.min(Number(confidence || 0.5), 0.5);
-      signals.push('ai_demotion_blocked');
-    }
     return {
       method: 'AI',
       primary_category: primary,
-      secondary_categories: ai.secondary_categories.filter(function (c) {
-        return c !== primary;
-      }),
+      secondary_categories: aiSecondary,
       category_scores: r.category_scores,
       confidence: confidence,
       reason: ai.reason || r.reason,
       signals: signals,
-      is_newsletter: !!r.is_newsletter || primary === 'newsletters' || ai.secondary_categories.indexOf('newsletters') >= 0,
-      is_marketing: !!r.is_marketing || primary === 'marketing',
-      is_probable_spam: !!r.is_probable_spam || primary === 'spam',
+      is_newsletter: isNewsletter,
+      is_marketing: isMarketing,
+      is_probable_spam: isSpam,
       is_automated: r.is_automated,
       is_bulk: r.is_bulk,
-      action_required: ai.action_required || (!!r.action_required && Number(r.action_score || 0) >= 0.6),
+      action_required: actionRequired,
       action_score: r.action_score,
-      actions: ai.actions.length ? ai.actions : r.actions || [],
+      actions: actions,
       deadline: deadline,
       opportunity: opportunity,
       summary: ai.summary || r.summary,
@@ -436,13 +487,16 @@ var AiSchema = (function () {
       topics: topics,
       interest_score: Math.max(Number(r.interest_score || 0), aiInterest),
       entities: Util.uniq((ai.entities || []).concat(r.entities || [])).slice(0, 12),
-      relevance: ai.relevance,
-      importance: ai.importance,
-      urgency: ai.urgency,
+      relevance: injected ? null : ai.relevance,
+      importance: injected ? null : ai.importance,
+      urgency: injected ? null : ai.urgency,
       evidence: ai.evidence,
       sensitive: !!r.sensitive || sensitiveCat(primary),
       ai_eligible: r.ai_eligible,
-      injection: { suspected: !!(r.injection && r.injection.suspected) || ai.injection_suspected, signals: (r.injection && r.injection.signals) || [] },
+      injection: { suspected: injected, signals: (r.injection && r.injection.signals) || [] },
+      untrusted: untrusted,
+      spoof_signals: (r.spoof_signals || []).slice(),
+      severity: Number(r.severity || 0),
     };
   }
 

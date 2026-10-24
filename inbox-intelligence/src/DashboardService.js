@@ -660,7 +660,7 @@ var DashboardService = (function () {
     var rows = Repository.query('dry_run_rows', {}, { maxRows: 500 }).rows.map(function (r) {
       return {
         msg: r,
-        rules: { primary_category: r.primary_category, sensitive: r.sensitive, ai_eligible: r.ai_eligible, is_probable_spam: r.is_probable_spam, injection: { suspected: !!r.injection_suspected } },
+        rules: { primary_category: r.primary_category, sensitive: r.sensitive, ai_eligible: r.ai_eligible, is_probable_spam: r.is_probable_spam, injection: { suspected: !!r.injection_suspected }, untrusted: !!r.untrusted },
         text: r.body_excerpt || '',
       };
     });

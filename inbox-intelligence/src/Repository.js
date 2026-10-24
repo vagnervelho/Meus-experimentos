@@ -42,6 +42,7 @@ var Repository = (function () {
       '  AND COALESCE(i.ai_attempts, 0) < @max_attempts\n' +
       '  AND COALESCE(i.ai_eligible, TRUE)\n' +
       '  AND NOT COALESCE(i.auth_fail, FALSE)\n' +
+      "  AND NOT COALESCE(SAFE_CAST(JSON_VALUE(i.features_json, '$.untrusted') AS BOOL), FALSE)\n" +
       '  AND i.received_date >= @since\n' +
       '  AND i.body_excerpt IS NOT NULL\n' +
       "  AND (@policy = 'FULL'\n" +
@@ -53,7 +54,8 @@ var Repository = (function () {
 
     thread_context:
       'SELECT thread_id, message_id, summary, method, from_domain, is_automated, is_bulk, has_list_unsubscribe, list_id, gmail_category,\n' +
-      '  sensitive, ai_eligible, is_probable_spam, auth_fail, direction, primary_category\n' +
+      '  sensitive, ai_eligible, is_probable_spam, auth_fail, direction, primary_category,\n' +
+      "  COALESCE(SAFE_CAST(JSON_VALUE(features_json, '$.untrusted') AS BOOL), FALSE) AS untrusted\n" +
       'FROM {{v:inbox}}\n' +
       "WHERE thread_id IN UNNEST(@thread_ids) AND message_id NOT IN UNNEST(@exclude_ids) AND summary IS NOT NULL AND direction = 'INBOUND'\n" +
       'QUALIFY ROW_NUMBER() OVER (PARTITION BY thread_id ORDER BY internal_ts DESC) = 1',
@@ -302,7 +304,8 @@ var Repository = (function () {
     briefing_input:
       'SELECT message_id, thread_id, subject, from_domain, from_name, primary_category, summary, summary_kind, display_level, deadline_date,\n' +
       '  action_required, method, is_automated, is_bulk, has_list_unsubscribe, list_id, gmail_category, sensitive, ai_eligible,\n' +
-      '  is_probable_spam, auth_fail, direction, info_score, score, opportunity_json, injection_suspected\n' +
+      '  is_probable_spam, auth_fail, direction, info_score, score, opportunity_json, injection_suspected,\n' +
+      "  COALESCE(SAFE_CAST(JSON_VALUE(features_json, '$.untrusted') AS BOOL), FALSE) AS untrusted\n" +
       'FROM {{v:inbox}}\n' +
       "WHERE direction = 'INBOUND' AND received_date BETWEEN @start AND @end AND user_status NOT IN ('RESOLVED', 'DISMISSED')\n" +
       'ORDER BY score DESC\n' +
@@ -311,7 +314,8 @@ var Repository = (function () {
     dry_run_rows:
       'SELECT i.message_id, i.subject, i.from_name, i.from_domain, i.received_date, i.direction, i.is_automated, i.is_bulk,\n' +
       '  i.has_list_unsubscribe, i.list_id, i.gmail_category, i.auth_fail, i.user_in_to, i.primary_category, i.sensitive, i.ai_eligible,\n' +
-      '  i.is_probable_spam, i.injection_suspected, i.body_excerpt\n' +
+      '  i.is_probable_spam, i.injection_suspected, i.body_excerpt,\n' +
+      "  COALESCE(SAFE_CAST(JSON_VALUE(i.features_json, '$.untrusted') AS BOOL), FALSE) AS untrusted\n" +
       'FROM {{v:inbox}} i\n' +
       "WHERE i.direction = 'INBOUND' AND i.received_date >= DATE_SUB(CURRENT_DATE(" + TZ + '), INTERVAL 30 DAY)\n' +
       'ORDER BY i.internal_ts DESC\n' +
