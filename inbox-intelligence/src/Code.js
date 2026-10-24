@@ -135,6 +135,7 @@ function diagnose() {
     triggerMinutes24h: Monitoring.triggerMinutesLast24h(),
     bqLifetimeBytes: BigQueryClient.lifetimeBytes(),
     generation: Schema.generation(),
+    live: Triggers.liveChecks(),
   };
   console.log(JSON.stringify(report, null, 2));
   return report;

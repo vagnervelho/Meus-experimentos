@@ -171,3 +171,17 @@ test('PII some do resumo extrativo, das ações e das evidências gravadas', () 
   const blob = JSON.stringify(a);
   assert.ok(!/529\.982\.247-25|12\.345\.678-9|98765-4321/.test(blob), blob.slice(0, 400));
 });
+
+test('diagnose(): checagens reais somente leitura, sem segredos nem conteúdo', () => {
+  const gas = boot();
+  gas.props.script.setProperty('ANTHROPIC_API_KEY', 'sk-ant-segredo-que-nao-pode-vazar-123456');
+  gas.bq.defaultHandler = (req) => (/SELECT 1 AS ok/.test(req.query) ? { rows: [{ ok: 1 }] } : /COUNT\(\*\)/.test(req.query) ? { rows: [{ n: 3 }] } : { rows: [] });
+  for (const t of gas.G.Schema.names()) gas.bq.tableMeta[t + '__g1'] = { creationTime: String(NOW), expirationTime: String(NOW + 50 * DAY), numRows: '1', numBytes: '1' };
+  for (const v of gas.G.Schema.VIEW_ORDER) gas.bq.tableMeta['v_' + v] = { creationTime: String(NOW), expirationTime: String(NOW + 50 * DAY), type: 'VIEW' };
+  const r = gas.G.diagnose();
+  const byName = Object.fromEntries(r.live.checks.map((c) => [c.name, c]));
+  assert.equal(r.live.ok, true, JSON.stringify(r.live.checks));
+  assert.match(byName.ia.detail, /aguardando consentimento/);
+  assert.ok(!JSON.stringify(r).includes('sk-ant-segredo'));
+  assert.ok(gas.gmail.calls.every((c) => ['getProfile', 'messages.list'].includes(c.m)));
+});

@@ -348,8 +348,62 @@ var Triggers = (function () {
     });
   }
 
+  // ------------------------------------------------------ diagnóstico ----
+  /**
+   * Checagens reais e somente leitura para o primeiro deploy: Gmail, BigQuery,
+   * tabelas/views, gatilhos e IA. Sem conteúdo de e-mail nem segredos.
+   * @return {{ok: boolean, checks: Array<{name: string, ok: boolean, detail: string}>}}
+   */
+  function liveChecks() {
+    var checks = [];
+    function check(name, fn) {
+      try {
+        var detail = fn();
+        checks.push({ name: name, ok: true, detail: String(detail || 'ok') });
+      } catch (e) {
+        checks.push({ name: name, ok: false, detail: Monitoring.classify(e, name).code + ': ' + Util.sanitizeError(e) });
+      }
+    }
+    check('gmail_perfil', function () {
+      var p = GmailClient.profile();
+      var owner = String(Config.secret('ownerEmail') || '').toLowerCase();
+      if (owner && p.emailAddress !== owner) throw Util.appError('AUTH', 'A caixa lida não é a do dono configurado.');
+      return 'caixa do dono acessível (somente leitura); historyId ' + (p.historyId ? 'presente' : 'ausente');
+    });
+    check('gmail_listagem', function () {
+      return GmailClient.listPage('newer_than:2d', '', null, null, 5).ids.length + ' mensagem(ns) recente(s) visível(is)';
+    });
+    check('bigquery_consulta', function () {
+      var r = BigQueryClient.query('SELECT 1 AS ok', {}, { name: 'diagnose', maxRows: 1 });
+      if (!r.rows.length) throw Util.appError('QUERY_FAILED', 'Consulta de teste sem resultado.');
+      return 'consulta parametrizada ok (' + Config.bqLocation() + ')';
+    });
+    check('bigquery_objetos', function () {
+      var t = tablesStatus();
+      var missing = t.filter(function (x) { return !x.exists; }).map(function (x) { return x.name; });
+      if (missing.length) throw Util.appError('CONFIG', 'Ausentes: ' + missing.join(', ') + '. Execute setup().');
+      var soon = t.filter(function (x) { return x.expiresInDays !== null && x.expiresInDays < EXPIRY_ALERT_DAYS; }).map(function (x) { return x.name; });
+      return t.length + ' tabelas/views presentes' + (soon.length ? '; expirando em breve: ' + soon.join(', ') : '');
+    });
+    check('bigquery_view_inbox', function () {
+      var r = BigQueryClient.query('SELECT COUNT(*) AS n FROM ' + BigQueryClient.tableRef('v_inbox'), {}, { name: 'diagnose_inbox', maxRows: 1 });
+      return (r.rows[0] ? r.rows[0].n : 0) + ' mensagem(ns) na caixa inteligente';
+    });
+    check('gatilhos', function () {
+      var hs = list().map(function (x) { return x.handler; });
+      if (hs.indexOf(HANDLERS.pipeline) < 0 || hs.indexOf(HANDLERS.maintenance) < 0) throw Util.appError('CONFIG', 'Gatilhos ausentes: execute setupTriggers().');
+      return hs.join(', ');
+    });
+    check('ia', function () {
+      var s = AiClient.status();
+      return s.provider === 'none' ? 'desativada (sem chave): funcionando só com regras' : s.provider + ' · política efetiva ' + s.policy + (s.consent ? '' : ' (aguardando consentimento)');
+    });
+    return { ok: checks.every(function (c) { return c.ok; }), checks: checks };
+  }
+
   return {
     HANDLERS: HANDLERS,
+    liveChecks: liveChecks,
     isSetupDone: isSetupDone,
     missingSetup: missingSetup,
     setup: setup,
