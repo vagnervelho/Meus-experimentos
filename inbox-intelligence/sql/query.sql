@@ -259,7 +259,8 @@ SELECT
      MIN(received_date) AS oldest, MAX(received_date) AS newest
    FROM `meu-projeto.inbox_intelligence.v_inbox` WHERE direction = 'INBOUND') AS pending,
   ARRAY(SELECT AS STRUCT primary_category AS category, COUNT(*) AS n, COUNTIF(user_relevance = 'IRRELEVANT') AS irrelevant,
-      COUNTIF(correct_category IS NOT NULL) AS corrected, COUNTIF(user_relevance = 'SHOULD_BE_HIGHER') AS should_be_higher
+      COUNTIF(correct_category IS NOT NULL) AS corrected, COUNTIF(user_relevance = 'SHOULD_BE_HIGHER') AS should_be_higher,
+      COUNTIF(user_relevance = 'LEVEL_OK') AS level_ok
     FROM `meu-projeto.inbox_intelligence.v_inbox` WHERE direction = 'INBOUND' AND received_date >= DATE_SUB(CURRENT_DATE('America/Sao_Paulo'), INTERVAL 90 DAY)
     GROUP BY category ORDER BY n DESC) AS quality,
   (SELECT AS STRUCT COUNT(*) AS n, COUNTIF(r.primary_category = a.primary_category) AS agree

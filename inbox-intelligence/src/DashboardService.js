@@ -489,7 +489,7 @@ var DashboardService = (function () {
   function systemStatus() {
     var cfg = Config.get();
     var out = {
-      runs: [], health: {}, pending: {}, quality: [], agreement: { n: 0, agree: 0, rate: null }, aiQuality: null,
+      runs: [], health: {}, pending: {}, quality: [], agreement: { n: 0, agree: 0, rate: null }, aiQuality: null, blindReview: null,
       quotas: {
         triggerMinutes24h: Monitoring.triggerMinutesLast24h(), triggerBudgetMin: cfg.pipeline.dailyTriggerBudgetMin,
         bqBytesWrittenLifetime: BigQueryClient.lifetimeBytes(), bqLifetimeLimit: cfg.storage.lifetimeLimitBytes,
@@ -524,8 +524,12 @@ var DashboardService = (function () {
         criticalToday: num_(p.critical_today), highShare7d: Util.round(num_(p.high_share_7d), 3), oldest: p.oldest || '', newest: p.newest || '',
       };
       out.quality = (row.quality || []).map(function (q) {
-        return { category: q.category, label: label_(q.category), n: num_(q.n), irrelevant: num_(q.irrelevant), corrected: num_(q.corrected), shouldBeHigher: num_(q.should_be_higher) };
+        return { category: q.category, label: label_(q.category), n: num_(q.n), irrelevant: num_(q.irrelevant), corrected: num_(q.corrected), shouldBeHigher: num_(q.should_be_higher), levelOk: num_(q.level_ok) };
       });
+      // Amostra cega: dos itens Média/Baixa julgados, quantos deveriam estar mais altos (taxa de falso negativo).
+      var judged = out.quality.reduce(function (s, q) { return s + q.shouldBeHigher + q.levelOk; }, 0);
+      var higher = out.quality.reduce(function (s, q) { return s + q.shouldBeHigher; }, 0);
+      out.blindReview = { judged: judged, shouldBeHigher: higher, rate: judged ? Util.round(higher / judged, 3) : null };
       var a = row.agreement || {};
       out.agreement = { n: num_(a.n), agree: num_(a.agree), rate: num_(a.n) ? Util.round(num_(a.agree) / num_(a.n), 3) : null };
       var aq = row.ai_quality || {};

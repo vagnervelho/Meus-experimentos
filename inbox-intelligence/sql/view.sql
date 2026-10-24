@@ -31,7 +31,7 @@ AS
 WITH f AS (
   SELECT target_type, target_id, message_id, feedback_type, payload_json, version_ts,
     CASE WHEN feedback_type IN ('RESOLVED', 'SAVED', 'DISMISSED', 'REOPEN') THEN 'status'
-         WHEN feedback_type IN ('RELEVANT', 'IRRELEVANT', 'SHOULD_BE_HIGHER') THEN 'relevance'
+         WHEN feedback_type IN ('RELEVANT', 'IRRELEVANT', 'SHOULD_BE_HIGHER', 'LEVEL_OK') THEN 'relevance'
          WHEN feedback_type = 'MISCLASSIFIED' THEN 'category' END AS dim
   FROM `meu-projeto.inbox_intelligence.feedback__g1`
 ), last AS (

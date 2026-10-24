@@ -803,7 +803,20 @@
         if (S.quality[it.id]) return;
         S.quality[it.id] = o[0];
         if (o[0] === 'SHOULD_BE_HIGHER') itemFeedback(it.id, 'SHOULD_BE_HIGHER');
-        else { refreshItem(it.id, 'Q-OK'); toast('Marcada como ok. A prioridade não muda.'); }
+        else {
+          refreshItem(it.id, 'Q-OK');
+          var sendOk = function () {
+            S.quality[it.id] = 'OK';
+            refreshItem(it.id, 'Q-OK');
+            updateQualityProgress();
+            submitFeedback({ targetType: 'MESSAGE', targetId: it.id, type: 'LEVEL_OK', payload: {} }, 'Marcada como ok. A prioridade não muda.', function () {
+              delete S.quality[it.id];
+              refreshItem(it.id, 'Q-OK');
+              updateQualityProgress();
+            }, sendOk);
+          };
+          sendOk();
+        }
         updateQualityProgress();
       } } }, o[1]));
     });
@@ -1582,6 +1595,9 @@
     var qlc = card('Qualidade por categoria', { flush: true, icon: 'ok' });
     qlc._b.appendChild(h('div', { class: 'card-b' }, h('p', { class: 'small' }, 'Concordância regras × IA: ', h('strong', null, pct(ag.rate)),
       isNum(ag.n) ? ' (' + num(ag.agree) + ' de ' + num(ag.n) + ' mensagens analisadas pelos dois). É um indicador indireto, não uma medida de acurácia.' : '')));
+    var br = obj(d.blindReview);
+    if (Number(br.judged) > 0) qlc._b.appendChild(h('div', { class: 'card-b' }, h('p', { class: 'small' }, 'Amostra cega: ', h('strong', null, pct(br.rate)),
+      ' das mensagens de prioridade Média/Baixa avaliadas deveriam estar mais altas (' + num(br.shouldBeHigher) + ' de ' + num(br.judged) + '). Amostra pequena: leia como tendência.')));
     if (qual.length) {
       qlc._b.appendChild(table('Qualidade por categoria a partir do seu feedback', [['Categoria', 'f'], ['Mensagens', 'r'], ['Irrelevantes', 'r'], ['Corrigidas', 'r'], ['Deveriam ser mais altas', 'r']], qual.map(function (x) {
         x = obj(x);

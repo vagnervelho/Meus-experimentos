@@ -301,7 +301,7 @@ var Schema = (function () {
     defs.user_state = 'WITH f AS (\n' +
       '  SELECT target_type, target_id, message_id, feedback_type, payload_json, version_ts,\n' +
       "    CASE WHEN feedback_type IN ('RESOLVED', 'SAVED', 'DISMISSED', 'REOPEN') THEN 'status'\n" +
-      "         WHEN feedback_type IN ('RELEVANT', 'IRRELEVANT', 'SHOULD_BE_HIGHER') THEN 'relevance'\n" +
+      "         WHEN feedback_type IN ('RELEVANT', 'IRRELEVANT', 'SHOULD_BE_HIGHER', 'LEVEL_OK') THEN 'relevance'\n" +
       "         WHEN feedback_type = 'MISCLASSIFIED' THEN 'category' END AS dim\n" +
       '  FROM ' + T('feedback') + '\n' +
       '), last AS (\n' +

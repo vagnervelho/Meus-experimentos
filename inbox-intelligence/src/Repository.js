@@ -278,7 +278,8 @@ var Repository = (function () {
       '     MIN(received_date) AS oldest, MAX(received_date) AS newest\n' +
       "   FROM {{v:inbox}} WHERE direction = 'INBOUND') AS pending,\n" +
       "  ARRAY(SELECT AS STRUCT primary_category AS category, COUNT(*) AS n, COUNTIF(user_relevance = 'IRRELEVANT') AS irrelevant,\n" +
-      "      COUNTIF(correct_category IS NOT NULL) AS corrected, COUNTIF(user_relevance = 'SHOULD_BE_HIGHER') AS should_be_higher\n" +
+      "      COUNTIF(correct_category IS NOT NULL) AS corrected, COUNTIF(user_relevance = 'SHOULD_BE_HIGHER') AS should_be_higher,\n" +
+      "      COUNTIF(user_relevance = 'LEVEL_OK') AS level_ok\n" +
       "    FROM {{v:inbox}} WHERE direction = 'INBOUND' AND received_date >= DATE_SUB(CURRENT_DATE(" + TZ + '), INTERVAL 90 DAY)\n' +
       '    GROUP BY category ORDER BY n DESC) AS quality,\n' +
       '  (SELECT AS STRUCT COUNT(*) AS n, COUNTIF(r.primary_category = a.primary_category) AS agree\n' +
@@ -540,7 +541,8 @@ var Repository = (function () {
   }
 
   // ------------------------------------------------- fila de feedback ----
-  var FEEDBACK_TYPES = ['RELEVANT', 'IRRELEVANT', 'RESOLVED', 'SAVED', 'MISCLASSIFIED', 'REOPEN', 'DISMISSED', 'SHOULD_BE_HIGHER'];
+  // LEVEL_OK: "está ok" na amostra cega (não muda o score; é o denominador dos falsos negativos).
+  var FEEDBACK_TYPES = ['RELEVANT', 'IRRELEVANT', 'RESOLVED', 'SAVED', 'MISCLASSIFIED', 'REOPEN', 'DISMISSED', 'SHOULD_BE_HIGHER', 'LEVEL_OK'];
   var TARGET_TYPES = ['MESSAGE', 'ACTION', 'OPPORTUNITY'];
 
   /** Enfileira um evento (gravação atômica nas Properties; sem lock nem BigQuery). */
