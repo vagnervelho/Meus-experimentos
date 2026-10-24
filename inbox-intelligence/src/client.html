@@ -1221,7 +1221,7 @@
       h('div', { class: 'row-main' },
         h('span', { class: 'row-title' }, str(t.description) || 'Tarefa sem descrição'),
         inDetail ? null : h('span', { class: 'row-sub' }, t.messageId ? navLink(detailHref(t.messageId), str(t.subject) || '(sem assunto)') : str(t.subject), f.name || f.email ? ' · ' + (str(f.name) || str(f.email)) : ''),
-        h('div', { class: 'chips' }, isYmd(t.dueDate) ? dueChip(t.dueDate, t.dueCertainty, 'Vence ') : h('span', { class: 'small muted' }, 'Sem prazo'),
+        h('div', { class: 'chips' }, isYmd(t.dueDate) ? (function () { var c = dueChip(t.dueDate, t.dueCertainty, open ? 'Vence ' : 'Prazo era '); if (!open) c.className = 'due'; return c; })() : h('span', { class: 'small muted' }, 'Sem prazo'),
           !compact && OWNER[t.owner] && t.owner !== 'me' ? h('span', { class: 'chip' }, OWNER[t.owner]) : null),
         !open && why && !compact ? h('span', { class: 'row-sub' }, why + ' Você pode reabrir.') : null,
         acts),
@@ -1481,7 +1481,8 @@
   }
   function countsText(c) {
     c = obj(c);
-    var ks = Object.keys(COUNTS).concat(Object.keys(c)).filter(function (k, i, a) { return a.indexOf(k) === i && isNum(c[k]) && c[k] > 0; });
+    var ks = Object.keys(COUNTS).filter(function (k) { return isNum(c[k]) && c[k] > 0; });
+    if (!ks.length) ks = Object.keys(c).filter(function (k) { return isNum(c[k]) && c[k] > 0 && !/_[A-Z]/.test(k); });
     return ks.length ? ks.slice(0, 6).map(function (k) { return num(c[k]) + ' ' + (COUNTS[k] || k.replace(/_/g, ' ')); }).join(' · ') : '—';
   }
   function errorsText(errs) {
