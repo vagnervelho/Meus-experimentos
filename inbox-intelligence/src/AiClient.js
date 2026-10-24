@@ -379,8 +379,12 @@ var AiClient = (function () {
       // O tipo de cota do Gemini vem em error.details[].violations[].quotaId (ex.: ...PerDay...).
       var detail = msg + ' ' + JSON.stringify(err.details || []);
       if (code === 401 || code === 403 || code === 404) out.error = 'CONFIG';
-      else if (/credit balance|spend limit|usage limit|billing/i.test(msg)) out.error = 'CREDIT';
-      else if (code === 429 || status === 'RESOURCE_EXHAUSTED' || status === 'rate_limit_error') out.error = /per ?day|daily|PerDay|day/i.test(detail) ? 'QUOTA_DAY' : 'RATE';
+      else if (code === 429 || status === 'RESOURCE_EXHAUSTED' || status === 'rate_limit_error') {
+        // Ordem importa: a mensagem de cota do Gemini cita "billing" mesmo sendo cota diária.
+        if (/PerDay|per ?day|daily/i.test(detail)) out.error = 'QUOTA_DAY';
+        else if (/spend limit|usage limit/i.test(msg)) out.error = 'CREDIT';
+        else out.error = 'RATE';
+      } else if (code === 400 && /credit balance/i.test(msg)) out.error = 'CREDIT';
       else if (code === 400) out.error = 'BAD_REQUEST';
       else out.error = 'TRANSIENT';
       return out;
