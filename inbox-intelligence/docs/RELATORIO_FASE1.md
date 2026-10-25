@@ -21,7 +21,7 @@
 | 1 | Ingerir mensagens do Gmail respeitando as permissões | Implementado · **validação real pendente** | Escopo `gmail.readonly`; teste estático proíbe qualquer escrita; `tests/pipeline.test.js` |
 | 2 | Sincronizações incrementais sem duplicar | Implementado · validado com mocks | Histórico página a página, dedup, commit em duas fases, resync em 404 (`pipeline`, `regressions`) |
 | 3 | Classificar e resumir com campos estruturados | Validado offline | 19 categorias, resumo extrativo (IA: abstrativo), fatos, ações, prazos, entidades, oportunidade; métricas na seção 5 |
-| 4 | Persistir no BigQuery | Implementado · **validação real pendente** | Load jobs NDJSON append-only, 7 tabelas + 10 views; SQL validado por sintaxe e colunas |
+| 4 | Persistir no BigQuery | Implementado · **estrutura validada na conta real** (25/10); gravação de mensagens pendente | `setup()` criou o dataset, as 7 tabelas, as 10 views e os 2 gatilhos no Sandbox, e o teste de CTAS passou. Load jobs NDJSON append-only; SQL validado por sintaxe e colunas |
 | 5 | Radar diário com dados reais | Implementado · **validação real pendente** | Sem acesso aos seus dados daqui; o Radar só lê o BigQuery (nenhuma fixture em produção) |
 | 6 | Pesquisa, filtros e acesso à mensagem original | Validado com mocks | Busca com `de:`, `categoria:` e `"frase"`; 8 filtros; links `#all/<id>` e `rfc822msgid:` |
 | 7 | Distinguir relevância, urgência e ação | Validado | Três eixos independentes no score e na interface (`tests/scoring.test.js`) |
@@ -148,7 +148,7 @@ Todos os invariantes duros foram cumpridos nos dois conjuntos:
 - **Riscos do primeiro deploy (pesquisa de 25/10/2026):**
   - há relatos recentes de bloqueio "This app is blocked" na autorização de scripts novos com escopos sensíveis; o contorno é um projeto Cloud próprio com tela de consentimento (README, passo 5);
   - não há confirmação de que o `clasp push` ativa os serviços avançados no projeto padrão; o `setup()` agora detecta serviço ausente ou API desativada e diz o que fazer;
-  - a renovação aos 45 dias usa `CREATE OR REPLACE TABLE … AS SELECT`; a documentação do Sandbox proíbe DML e streaming, mas não fala de CTAS. O `setup()` agora testa isso no primeiro dia com uma tabela descartável (`renewalProbe`). Se uma renovação real falhar, o alerta de expiração ainda dá 10 dias de aviso antes de qualquer perda.
+  - a renovação aos 45 dias usa `CREATE OR REPLACE TABLE … AS SELECT`; a documentação do Sandbox proíbe DML e streaming, mas não fala de CTAS. O `setup()` testa isso no primeiro dia com uma tabela descartável (`renewalProbe`). **Resultado real em 25/10: `ok`** (CTAS funciona no Sandbox deste projeto). Se uma renovação real falhar mesmo assim, o alerta de expiração ainda dá 10 dias de aviso antes de qualquer perda.
 - **Avaliação sintética:** os 220 casos foram escritos por agentes, com rótulos de julgamento humano simulado. O dev set está saturado e o holdout já foi lido uma vez. A medida definitiva virá dos seus feedbacks e da amostra cega na tela Sistema.
 - **Erros conhecidos do ranking (holdout):**
   - recall de ação de 78%: pedidos implícitos ainda escapam;
