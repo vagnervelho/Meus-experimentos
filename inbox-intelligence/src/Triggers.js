@@ -90,6 +90,8 @@ var Triggers = (function () {
       BigQueryClient.ddl(v.sql, 'setup_view');
     });
     props_().setProperty(KEYS.viewsSig, viewsSignature_(statements));
+    // Views com outra definição: as respostas em cache (Repository.cached) deixam de valer.
+    Repository.bumpDataVersion();
   }
 
   function viewsSignature_(statements) {
@@ -214,6 +216,7 @@ var Triggers = (function () {
         renewIfDue_(run, budget);
       });
       safe_(run, 'views', function () {
+        if (viewsOutdated()) recreateViews_(Schema.generation());
         refreshViewsIfNeeded_(run);
       });
       alerts = expiryAlerts_();

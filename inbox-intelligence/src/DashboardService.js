@@ -196,6 +196,13 @@ var DashboardService = (function () {
   // ------------------------------------------------------------- telas ----
   function bootstrap() {
     var missing = Triggers.missingSetup();
+    // Código novo enviado (views com outra definição, como depois de trocar o fuso): agenda uma
+    // execução em ~1 min para recriá-las, em vez de esperar o gatilho de hora em hora.
+    try {
+      if (!missing.length && Triggers.viewsOutdated()) Triggers.scheduleOneShot();
+    } catch (e) {
+      Monitoring.log('warn', 'views_check_failed', { code: Monitoring.classify(e, 'bootstrap').code });
+    }
     var last = Monitoring.lastRun();
     var visit = PropertiesService.getUserProperties().getProperty(USER_KEYS.prevVisit) || '';
     var ui = Config.get().ui;

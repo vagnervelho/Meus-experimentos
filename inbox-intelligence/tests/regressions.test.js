@@ -222,6 +222,59 @@ test('troca de fuso (ou de SQL das views) recria as views na execução seguinte
   assert.ok(['nao_iniciado', 'em_andamento', 'concluido'].includes(ev.backfill));
 });
 
+test('pageToken salvo só vale para a busca que o gerou: troca de fuso recomeça a janela da página 1', () => {
+  const gas = boot();
+  gas.G.runPipeline(); // inicializa o histórico e o estado do backfill
+  const floor = JSON.parse(prop(gas, 'BACKFILL_STATE')).floor;
+  const backfillLists = () => gas.gmail.calls.filter((c) => c.m === 'messages.list' && /after:/.test((c.opts && c.opts.q) || ''));
+  // Estado como o da produção: meio de uma janela, token gerado com a busca no fuso de São Paulo (sem q salvo).
+  gas.props.script.setProperty('BACKFILL_STATE', JSON.stringify({ floor, cursor: '2026-10-24', pageToken: '100', done: false }));
+  gas.session.timeZone = 'America/Porto_Velho';
+  gas.gmail.calls.length = 0;
+  gas.G.runPipeline();
+  const first = backfillLists()[0];
+  assert.ok(first, 'a janela foi listada');
+  assert.ok(!first.opts.pageToken, 'token de outra busca não é reutilizado');
+  assert.match(first.opts.q, new RegExp('before:' + Date.UTC(2026, 9, 24, 4) / 1000 + ' '), 'meia-noite de Porto Velho');
+  // Mesma busca salva junto com o token: o token continua valendo.
+  gas.props.script.setProperty('BACKFILL_STATE', JSON.stringify({ floor, cursor: '2026-10-24', pageToken: '7', q: first.opts.q, done: false }));
+  gas.gmail.calls.length = 0;
+  gas.G.runPipeline();
+  assert.equal(backfillLists()[0].opts.pageToken, '7');
+});
+
+test('falha na checagem das views não derruba a ingestão; o Web App agenda a recriação depois de um envio', () => {
+  const gas = boot();
+  const orig = gas.G.Triggers.viewsOutdated;
+  gas.G.Triggers.viewsOutdated = () => { throw new Error('falha simulada'); };
+  const r = gas.G.Pipeline.run('MANUAL');
+  assert.notEqual(r.status, 'FAILED');
+  gas.G.Triggers.viewsOutdated = orig;
+  // Depois de um envio com views de outra definição, abrir o Web App agenda uma execução avulsa.
+  gas.session.timeZone = 'America/Porto_Velho';
+  gas.G.Util.resetMemo();
+  const before = gas.triggers.length;
+  gas.G.DashboardService.bootstrap();
+  assert.equal(gas.triggers.length, before + 1, 'execução avulsa agendada');
+  gas.G.DashboardService.bootstrap();
+  assert.equal(gas.triggers.length, before + 1, 'sem agendar duas vezes');
+  // A recriação invalida o cache versionado.
+  const v0 = Number(prop(gas, 'DATA_VERSION') || 0);
+  gas.G.Triggers.recreateViews(gas.G.Schema.generation());
+  assert.ok(Number(prop(gas, 'DATA_VERSION') || 0) > v0);
+});
+
+test('fuso: aceita IDs sem barra (UTC) e avisa no registro quando cai no padrão', () => {
+  const gas = boot();
+  gas.session.timeZone = 'UTC';
+  gas.G.Util.resetMemo();
+  assert.equal(gas.G.Util.tz(), 'UTC');
+  gas.session.timeZone = 'America/Porto Velho';
+  gas.G.Util.resetMemo();
+  assert.equal(gas.G.Util.tz(), 'America/Sao_Paulo');
+  assert.ok(gas.logs.some((l) => String(l[1] && l[1][0]).includes('"tz_fallback"')));
+});
+
 test('diagnose(): checagens reais somente leitura, sem segredos nem conteúdo', () => {
   const gas = boot();
   gas.props.script.setProperty('ANTHROPIC_API_KEY', 'sk-ant-segredo-que-nao-pode-vazar-123456');

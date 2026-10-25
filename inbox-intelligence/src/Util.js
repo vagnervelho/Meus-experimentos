@@ -8,7 +8,8 @@
 var Util = (function () {
   // O fuso do app é o timeZone do manifesto (appsscript.json), que também rege os gatilhos.
   var DEFAULT_TZ = 'America/Sao_Paulo';
-  var TZ_RE = /^[A-Za-z]+(?:\/[A-Za-z0-9_+-]+){1,2}$/;
+  // Nomes IANA (America/Porto_Velho, UTC, Etc/GMT+4): sem aspas, barras invertidas nem espaços, seguros no SQL.
+  var TZ_RE = /^[A-Za-z][A-Za-z0-9_+-]*(?:\/[A-Za-z0-9_+-]+){0,2}$/;
   var DAY_MS = 24 * 60 * 60 * 1000;
 
   // ------------------------------------------------------------ tempo ----
@@ -28,7 +29,9 @@ var Util = (function () {
     return memo('tz', function () {
       var z = '';
       try { z = String(Session.getScriptTimeZone() || ''); } catch (e) { z = ''; }
-      return TZ_RE.test(z) ? z : DEFAULT_TZ;
+      if (TZ_RE.test(z)) return z;
+      Monitoring.log('warn', 'tz_fallback', { manifest_tz: z.slice(0, 40), used: DEFAULT_TZ });
+      return DEFAULT_TZ;
     });
   }
   /** Data civil (YYYY-MM-DD) no fuso do app. */

@@ -11,7 +11,7 @@
   var H = 3600e3;
   var D = 86400e3;
   function iso(msAgo) { return new Date(NOW - msAgo).toISOString(); }
-  var YF = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' });
+  var YF = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Porto_Velho', year: 'numeric', month: '2-digit', day: '2-digit' });
   function ymd(days) { return YF.format(new Date(NOW + days * D)); }
   var XSS_IMG = '<img src=x onerror="window.__xss=1;alert(1)">';
   var XSS_SCRIPT = '<script>window.__xss=2;alert(2)</' + 'script>';
@@ -224,7 +224,7 @@
     var news = items.filter(function (it) { return ['tecnologia', 'economia', 'noticias', 'newsletters'].indexOf(it.category) >= 0; }).sort(function (a, b) { return b.priority.axes.relevance - a.priority.axes.relevance; });
     var H_ = {
       apiBootstrap: function () {
-        return { user: { email: 'voce@exemplo.com.br' }, app: { version: '1.0.0', timeZone: 'America/Sao_Paulo' }, ai: state.ai,
+        return { user: { email: 'voce@exemplo.com.br' }, app: { version: '1.0.0', timeZone: 'America/Porto_Velho' }, ai: state.ai,
           setup: variant === 'nosetup' ? { ok: false, missing: ['GCP_PROJECT_ID nas Propriedades do script (ID do projeto do BigQuery Sandbox).', 'Executar a função setup() no editor do Apps Script (cria o banco e os gatilhos).', 'Gatilho de sincronização ausente: execute setupTriggers().', XSS_IMG + 'item com HTML'] } : { ok: true, missing: [] },
           lastSync: empty ? null : { at: sync.lastSuccessAt, status: 'DONE' }, categories: CATS, ui: { pageSize: 10, defaultPeriod: '7d' }, previousVisitAt: empty ? '' : iso(20 * H) };
       },

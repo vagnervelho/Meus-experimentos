@@ -121,13 +121,13 @@ var Pipeline = (function () {
       requireSetup_();
       var stale = Monitoring.recoverStale(true);
       if (stale) Monitoring.count(r, 'recovered_aborted_run');
-      if (props_().getProperty('VIEWS_DIRTY') || Triggers.viewsOutdated()) {
-        step_(r, 'views', function () {
-          Triggers.recreateViews(Schema.generation());
-          props_().deleteProperty('VIEWS_DIRTY');
-          Repository.bumpDataVersion();
-        });
-      }
+      // A checagem fica dentro do passo: uma falha nela não derruba a ingestão desta execução.
+      step_(r, 'views', function () {
+        if (!props_().getProperty('VIEWS_DIRTY') && !Triggers.viewsOutdated()) return;
+        Triggers.recreateViews(Schema.generation());
+        props_().deleteProperty('VIEWS_DIRTY');
+        Repository.bumpDataVersion();
+      });
       var ctx = context_(r, cfg, budget, limiter);
       step_(r, 'feedback', function () {
         flushAndRescore_(ctx);
@@ -469,6 +469,11 @@ var Pipeline = (function () {
           setJson_(KEYS.windows, windows);
           continue;
         }
+        var wq = windowQuery_(ctx, w);
+        if (w.pageToken && w.q !== wq) {
+          w.pageToken = '';
+          Monitoring.count(ctx.run, 'page_token_reset');
+        }
         var r = processWindowPage_(ctx, w);
         if (!r.ok) return;
         if (r.done) {
@@ -476,6 +481,7 @@ var Pipeline = (function () {
           windows[0] = { kind: w.kind, start: w.start, end: w.end, phase: 'RECONCILE', offset: 0 };
         } else {
           windows[0].pageToken = r.nextPageToken;
+          windows[0].q = wq;
         }
         setJson_(KEYS.windows, windows);
         continue;
@@ -493,23 +499,41 @@ var Pipeline = (function () {
       }
       var winStart = Util.addDays(bf.cursor, -cfg.gmail.backfillWindowDays);
       if (winStart < bf.floor) winStart = bf.floor;
-      var res = processWindowPage_(ctx, { kind: 'BACKFILL', start: winStart, end: bf.cursor, pageToken: bf.pageToken || '' });
+      var bw = { kind: 'BACKFILL', start: winStart, end: bf.cursor, pageToken: bf.pageToken || '' };
+      var bq = windowQuery_(ctx, bw);
+      if (bw.pageToken && bf.q !== bq) {
+        bw.pageToken = '';
+        Monitoring.count(ctx.run, 'page_token_reset');
+      }
+      var res = processWindowPage_(ctx, bw);
       if (!res.ok) return;
       if (res.done) {
         bf.cursor = winStart;
         bf.pageToken = '';
+        bf.q = '';
         bf.done = bf.cursor <= bf.floor;
       } else {
         bf.pageToken = res.nextPageToken;
+        bf.q = bq;
       }
       setJson_(KEYS.backfill, bf);
     }
   }
 
-  /** Uma página (até 100 ids) de uma janela de datas [start, end). */
-  function processWindowPage_(ctx, w) {
+  /**
+   * Busca do Gmail de uma janela de datas [start, end), com as meias-noites no fuso do app.
+   * O pageToken salvo vale só para a busca que o gerou: se ela mudar (fuso ou filtros trocados),
+   * a janela recomeça da primeira página, e a deduplicação absorve o que for listado de novo.
+   */
+  function windowQuery_(ctx, w) {
     var q = 'after:' + (Util.ymdStartEpochSec(w.start) - 1) + ' before:' + Util.ymdStartEpochSec(w.end) + (ctx.cfg.gmail.listQueryExtra ? ' ' + ctx.cfg.gmail.listQueryExtra : '');
     if (!ctx.cfg.gmail.includeSent) q += ' -in:sent';
+    return q;
+  }
+
+  /** Uma página (até 100 ids) de uma janela de datas [start, end). */
+  function processWindowPage_(ctx, w) {
+    var q = windowQuery_(ctx, w);
     var page = GmailClient.listPage(q, w.pageToken || '', ctx.limiter, ctx.budget, 100);
     Monitoring.count(ctx.run, w.kind === 'RESYNC' ? 'resync_listed' : 'backfill_listed', page.ids.length);
     if (!page.ids.length) return { ok: true, done: !page.nextPageToken, nextPageToken: page.nextPageToken };
