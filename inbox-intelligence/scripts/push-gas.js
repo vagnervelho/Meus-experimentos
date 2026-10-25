@@ -73,7 +73,8 @@ function ask(question) {
 
 async function main() {
   const major = Number(process.versions.node.split('.')[0]);
-  if (major < 20) fail('O clasp 3 precisa do Node 20 ou mais novo (este é o ' + process.version + ').');
+  // O package.json do clasp aceita Node 20, mas o README dele pede 22 ou mais novo.
+  if (major < 22) fail('O clasp 3 precisa do Node 22 ou mais novo (este é o ' + process.version + ').');
 
   let manifest;
   try { manifest = JSON.parse(fs.readFileSync(MANIFEST, 'utf8')); } catch (e) { fail('Não consegui ler src/appsscript.json: ' + e.message); }

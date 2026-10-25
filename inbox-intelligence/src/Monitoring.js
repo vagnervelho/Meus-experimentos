@@ -22,7 +22,8 @@ var Monitoring = (function () {
     var code = CODES.indexOf(raw) >= 0 ? raw : '';
     if (!code) {
       var msg = String((e && e.message) || e || '');
-      if (http === 401 || http === 403 || /authoriz|permission|insufficient/i.test(msg)) code = 'AUTH';
+      if (Util.apiDisabledHint(e)) code = 'CONFIG';
+      else if (http === 401 || http === 403 || /authoriz|permission|insufficient/i.test(msg)) code = 'AUTH';
       else if (http === 404 || /not found/i.test(msg)) code = 'NOT_FOUND';
       else if (http === 429 || /rate ?limit|too many/i.test(msg)) code = 'RATE';
       else if (/quota|exceeded|limit/i.test(msg)) code = 'QUOTA';

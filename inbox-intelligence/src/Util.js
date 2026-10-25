@@ -299,6 +299,20 @@ var Util = (function () {
     return truncate(msg.replace(/\s+/g, ' ').trim(), 300);
   }
 
+  /**
+   * Orientação para o dono quando uma API do Google está desativada (por exemplo, serviço avançado
+   * que não foi ativado no projeto Cloud padrão do script). Devolve '' se o erro não for desse tipo.
+   */
+  function apiDisabledHint(e) {
+    var msg = String((e && e.message) || e || '');
+    if (!/API has not been used in project|accessNotConfigured|SERVICE_DISABLED/i.test(msg)) return '';
+    var m = msg.match(/\b(Gmail|BigQuery)\b/i);
+    var svc = m ? (m[1].toLowerCase() === 'gmail' ? 'Gmail' : 'BigQuery') : 'Gmail ou BigQuery';
+    return 'A API ' + svc + ' está desativada. No editor do Apps Script, abra Serviços, remova e adicione de novo o serviço ' + svc + ' e salve' +
+      (svc === 'Gmail' ? '' : '; confira também se a BigQuery API está ativada no projeto do Sandbox (APIs e serviços)') +
+      '. Espere alguns minutos e tente de novo.';
+  }
+
   // ------------------------------------------------------------ cache ----
   var CACHE_CHUNK = 90000;
   /**
@@ -387,6 +401,7 @@ var Util = (function () {
     errorCode: errorCode,
     createBudget: createBudget,
     sanitizeError: sanitizeError,
+    apiDisabledHint: apiDisabledHint,
     appError: appError,
     memo: memo,
     forget: forget,

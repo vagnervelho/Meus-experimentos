@@ -43,6 +43,8 @@ var Triggers = (function () {
       if (owner && me && owner !== me) throw Util.appError('AUTH', 'setup() deve ser executado pelo dono configurado.');
       if (!owner && me) Config.setSecret('ownerEmail', me);
       if (!Config.projectId()) throw Util.appError('CONFIG', 'Defina GCP_PROJECT_ID nas Propriedades do script (Configurações do projeto → Propriedades do script) antes do setup().');
+      var absent = [typeof Gmail === 'undefined' ? 'Gmail API v1' : '', typeof BigQuery === 'undefined' ? 'BigQuery API v2' : ''].filter(String);
+      if (absent.length) throw Util.appError('CONFIG', 'Serviços avançados ausentes: ' + absent.join(', ') + '. Envie o código de novo com npm run gas:push ou, no editor, adicione-os em Serviços.');
       if (!props_().getProperty('BQ_LOCATION')) Config.setSecret('bqLocation', Config.bqLocation());
       var ds = BigQueryClient.ensureDataset();
       var gen = Schema.generation();
@@ -51,12 +53,34 @@ var Triggers = (function () {
         BigQueryClient.ddl(Schema.createTableSql(name, gen), 'setup_table');
       });
       recreateViews_(gen);
+      var renewal = probeRenewal_();
       props_().setProperty(KEYS.setup, String(Config.SCHEMA_VERSION));
       var trig = install();
-      Monitoring.log('info', 'setup_done', { generation: gen, dataset_created: ds.created });
-      return { ok: true, datasetCreated: ds.created, generation: gen, triggers: trig };
+      Monitoring.log('info', 'setup_done', { generation: gen, dataset_created: ds.created, renewal_ok: renewal === 'ok' });
+      return { ok: true, datasetCreated: ds.created, generation: gen, renewalProbe: renewal, triggers: trig };
+    } catch (e) {
+      var hint = Util.apiDisabledHint(e);
+      if (hint) throw Util.appError('CONFIG', hint);
+      throw e;
     } finally {
       lock.releaseLock();
+    }
+  }
+
+  /**
+   * A renovação aos 45 dias usa CREATE OR REPLACE TABLE … AS SELECT. A documentação do Sandbox proíbe
+   * DML e streaming, mas não fala de CTAS: o setup testa com uma tabela descartável para não descobrir
+   * só no dia 45. Uma falha aqui não impede o resto do setup.
+   */
+  function probeRenewal_() {
+    var ref = BigQueryClient.tableRef('_probe_renovacao');
+    try {
+      BigQueryClient.ddl('CREATE OR REPLACE TABLE ' + ref + ' AS SELECT 1 AS ok', 'setup_probe');
+      BigQueryClient.ddl('DROP TABLE IF EXISTS ' + ref, 'setup_probe');
+      return 'ok';
+    } catch (e) {
+      Monitoring.log('warn', 'setup_probe_failed', { code: Monitoring.classify(e, 'setup').code });
+      return 'falhou (' + Util.sanitizeError(e) + '): a renovação automática das tabelas aos 45 dias não vai funcionar neste projeto';
     }
   }
 
@@ -361,7 +385,7 @@ var Triggers = (function () {
         var detail = fn();
         checks.push({ name: name, ok: true, detail: String(detail || 'ok') });
       } catch (e) {
-        checks.push({ name: name, ok: false, detail: Monitoring.classify(e, name).code + ': ' + Util.sanitizeError(e) });
+        checks.push({ name: name, ok: false, detail: Monitoring.classify(e, name).code + ': ' + (Util.apiDisabledHint(e) || Util.sanitizeError(e)) });
       }
     }
     check('gmail_perfil', function () {

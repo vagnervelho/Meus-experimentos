@@ -172,6 +172,36 @@ test('PII some do resumo extrativo, das ações e das evidências gravadas', () 
   assert.ok(!/529\.982\.247-25|12\.345\.678-9|98765-4321/.test(blob), blob.slice(0, 400));
 });
 
+test('API desativada ou serviço avançado ausente: setup() e diagnose() dizem o que fazer', () => {
+  const fresh = createGas({ fakeClock: NOW });
+  fresh.props.script.setProperty('GCP_PROJECT_ID', 'meu-projeto');
+  fresh.props.script.setProperty('OWNER_EMAIL', 'dono@gmail.com');
+  fresh.ctx.Gmail = undefined;
+  assert.throws(() => fresh.G.setup(), (e) => e.code === 'CONFIG' && /Gmail API v1/.test(e.message) && /Serviços/.test(e.message));
+  assert.equal(fresh.triggers.length, 0, 'nada é instalado com o serviço ausente');
+
+  const gas = boot();
+  const disabled = new Error('API call to bigquery.jobs.query failed with error: BigQuery API has not been used in project 123456789012 before or it is disabled. Enable it by visiting https://console.developers.google.com/apis/api/bigquery.googleapis.com/overview?project=123456789012 then retry.');
+  assert.equal(gas.G.Monitoring.classify(disabled, 'bq').code, 'CONFIG', 'não é erro de autorização');
+  assert.equal(gas.G.Util.apiDisabledHint(new Error('Request had insufficient authentication scopes.')), '');
+  gas.bq.defaultHandler = () => { throw disabled; };
+  const check = gas.G.diagnose().live.checks.find((c) => c.name === 'bigquery_consulta');
+  assert.equal(check.ok, false);
+  assert.match(check.detail, /^CONFIG: A API BigQuery está desativada\. No editor do Apps Script, abra Serviços/);
+  assert.ok(!/123456789012/.test(check.detail));
+});
+
+test('setup() testa já no primeiro dia o CREATE TABLE … AS SELECT usado na renovação aos 45 dias', () => {
+  const gas = boot();
+  const probes = gas.bq.queries.map((q) => (q.request && q.request.query) || '').filter((sql) => /_probe_renovacao/.test(sql));
+  assert.deepEqual(probes.map((sql) => (sql.match(/^\w+( OR REPLACE)? \w+/) || [''])[0]), ['CREATE OR REPLACE TABLE', 'DROP TABLE']);
+  assert.equal(gas.G.setup().renewalProbe, 'ok');
+  gas.bq.handlers.setup_probe = () => { throw new Error('Access Denied: CREATE TABLE AS SELECT is not allowed in the free tier.'); };
+  const r = gas.G.setup();
+  assert.equal(r.ok, true, 'a falha do teste não impede o resto do setup');
+  assert.match(r.renewalProbe, /^falhou .*renovação automática/);
+});
+
 test('diagnose(): checagens reais somente leitura, sem segredos nem conteúdo', () => {
   const gas = boot();
   gas.props.script.setProperty('ANTHROPIC_API_KEY', 'sk-ant-segredo-que-nao-pode-vazar-123456');

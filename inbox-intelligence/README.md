@@ -52,7 +52,7 @@ Web App (HtmlService) ────┘  consultas parametrizadas + cache versiona
 
 ### 1. Projeto do BigQuery Sandbox (sem cartão)
 
-1. Abra o console do Google Cloud e crie um projeto, por exemplo `inbox-intel-pessoal`. **Não** associe conta de faturamento.
+1. Abra o console do Google Cloud e crie um projeto, por exemplo `inbox-intel-pessoal`. **Não** associe conta de faturamento. Se você administra uma conta de faturamento aberta (por exemplo, de um teste gratuito antigo), o Google pode vincular o projeto novo a ela automaticamente: confira em *Faturamento* que o projeto aparece sem conta vinculada.
 2. Abra o **BigQuery** nesse projeto. O console indica "Sandbox" quando não há faturamento.
 3. Em **APIs e serviços**, confirme que a **BigQuery API** está ativada.
 4. Anote o **ID do projeto**: ele vai em `GCP_PROJECT_ID`.
@@ -60,7 +60,7 @@ Web App (HtmlService) ────┘  consultas parametrizadas + cache versiona
 ### 2. Projeto do Apps Script (vazio)
 
 1. Abra [script.google.com](https://script.google.com), clique em **Novo projeto** e renomeie para `Inbox Intelligence`.
-2. Em *Configurações do projeto* (engrenagem), copie o **ID do script**. Ele é diferente do ID do projeto do Google Cloud do passo 1.
+2. Em *Configurações do projeto* (engrenagem) → *IDs*, copie o **ID do script** (cerca de 57 caracteres). Ele é diferente do ID do projeto do Google Cloud do passo 1.
 
 Mantenha o projeto do Apps Script no **projeto Cloud padrão** (não troque para o projeto do Sandbox). O BigQuery é acessado pelo ID informado nas propriedades.
 
@@ -69,23 +69,24 @@ Mantenha o projeto do Apps Script no **projeto Cloud padrão** (não troque para
 O código vai para o projeto com o [`clasp`](https://github.com/google/clasp), a ferramenta oficial do Google, pelo script `npm run gas:push`. Ele confere o manifesto, mostra a conta logada e pede confirmação antes de enviar.
 
 1. **Uma vez só:** ative a *Google Apps Script API* em [script.google.com/home/usersettings](https://script.google.com/home/usersettings). Sem isso, o envio falha.
-2. Abra um terminal com Node 20 ou mais novo. O mais simples é o **Cloud Shell**: botão *Ativar o Cloud Shell* (ícone `>_`) no topo do console do Google Cloud. Ele roda no navegador e já tem Node e git. No seu computador também funciona, se tiver Node 20+.
+2. Abra um terminal com Node 22 ou mais novo. O mais simples é o **Cloud Shell**: botão *Ativar o Cloud Shell* (ícone `>_`) no topo do console do Google Cloud. É gratuito, roda no navegador e já tem Node, git e o próprio clasp. Não use o modo temporário (*ephemeral*), que apaga a pasta pessoal. No seu computador também funciona, se tiver Node 22+.
 3. Rode:
    ```bash
    git clone --depth 1 --branch claude/inbox-intelligence-ggion7 https://github.com/vagnervelho/Meus-experimentos.git
    cd Meus-experimentos/inbox-intelligence
    npm run gas:push -- COLE_AQUI_O_ID_DO_SCRIPT
    ```
-4. **Login:** o script mostra um link. Abra, escolha a conta cuja caixa será analisada e autorize. No fim, o navegador mostra um erro de conexão em `localhost:8888`: é esperado. Copie a URL inteira da barra de endereço e cole no terminal.
+4. **Login:** o script mostra um link. Abra, escolha a conta cuja caixa será analisada e autorize, marcando **todas** as permissões da lista. No fim, o navegador mostra um erro de conexão em `localhost:8888`: é esperado. Copie a URL inteira da barra de endereço e cole no terminal, nessa mesma execução (uma URL de outra tentativa é recusada).
 5. Confira a conta e o projeto exibidos e responda `s`. O clasp envia os 23 arquivos (19 `.js` viram `.gs`, mais os 3 `.html` e o manifesto) e apaga o `Código.gs` vazio do projeto novo.
+6. Recarregue o editor e abra **Serviços** na barra lateral: devem aparecer **Gmail** e **BigQuery**. Se algum faltar, adicione-o ali (*Gmail API* v1, *BigQuery API* v2).
 
-**Para atualizar depois:** `git pull && npm run gas:push`. O ID fica guardado em `.clasp.json`, fora do git.
+**Para atualizar depois:** `git pull && npm run gas:push`. O ID fica guardado em `.clasp.json`, fora do git. Os gatilhos passam a usar o código novo na hora; o Web App só depois de *Implantar → Gerenciar implantações → editar (lápis) → Versão: Nova versão → Implantar* (a URL `/exec` não muda). O envio substitui todos os arquivos do projeto, então não edite o código direto no editor do navegador.
 
 > Não rode `clasp create`, `clasp clone` nem `clasp pull` nesta pasta. Os três baixam o manifesto padrão do projeto para `src/appsscript.json`, por cima do nosso, e o projeto ficaria sem escopos e sem os serviços Gmail e BigQuery. Se acontecer, `git checkout -- src/appsscript.json` restaura o arquivo. O `gas:push` se recusa a enviar um manifesto nesse estado.
 
 O login do clasp guarda um token em `~/.clasprc.json`. Para removê-lo depois do envio: `npx @google/clasp@3.4.1 logout`.
 
-**Sem terminal (manual):** no editor, em *Configurações do projeto*, marque a opção de mostrar o arquivo de manifesto `appsscript.json` no editor e cole nele o conteúdo de `src/appsscript.json`. Crie um arquivo de script para cada `src/*.js`, com o mesmo nome sem `.js`, e um arquivo HTML para cada `src/*.html` (`index`, `styles`, `client`). Apague o `Código.gs` inicial. São 23 arquivos, e cada atualização exige repetir a cópia, por isso o caminho com `clasp` é o recomendado.
+**Sem terminal (manual):** no editor, em *Configurações do projeto*, marque a opção de mostrar o arquivo de manifesto `appsscript.json` no editor e substitua todo o conteúdo dele pelo de `src/appsscript.json`. Crie um arquivo de script para cada `src/*.js`, com o mesmo nome sem `.js` (o editor acrescenta `.gs`), e um arquivo HTML para cada `src/*.html`, com os nomes em minúsculas (`index`, `styles`, `client`): o código carrega esses nomes. Copie cada arquivo da visualização *Raw* do GitHub e salve (Ctrl+S) antes de passar ao próximo. Apague o `Código.gs` inicial. São 23 arquivos, e cada atualização exige repetir a cópia, por isso o caminho com `clasp` é o recomendado.
 
 ### 4. Propriedades do script
 
@@ -102,7 +103,7 @@ Em *Configurações do projeto → Propriedades do script*:
 
 ### 5. `setup()`
 
-No editor, selecione a função `setup` e clique em **Executar**. Na primeira vez, o Google pede autorização. Como o app é seu e não verificado, use *Avançado → Acessar Inbox Intelligence*. Escopos pedidos:
+No editor, selecione a função `setup` e clique em **Executar**. Na primeira vez, o Google pede autorização. Como o app é seu e não verificado, use *Avançado → Acessar Inbox Intelligence (não seguro)* e marque **todas** as permissões. Escopos pedidos:
 
 - `gmail.readonly`: ler mensagens e rótulos (sem escrita)
 - `bigquery`: gravar e consultar o seu dataset
@@ -111,6 +112,11 @@ No editor, selecione a função `setup` e clique em **Executar**. Na primeira ve
 - `userinfo.email`: identificar o dono
 
 O `setup()` é idempotente: cria o dataset, as 7 tabelas, as 10 views e os 2 gatilhos. Pode ser executado de novo sem efeito colateral.
+
+Se aparecer erro:
+
+- **"Serviços avançados ausentes"** ou **"A API … está desativada"**: siga a orientação da própria mensagem (adicionar de novo o serviço em *Serviços* e salvar). Num projeto Cloud padrão, adicionar o serviço pelo editor ativa a API.
+- **"Este app está bloqueado"** (*This app is blocked*), sem a opção *Avançado*: há relatos recentes desse bloqueio em scripts novos com permissões sensíveis. Tente autorizar numa janela anônima com só essa conta logada. Se continuar, me avise: a alternativa é vincular o script ao seu projeto `GCP_PROJECT_ID` (*Configurações do projeto → Projeto do Google Cloud*) com uma tela de consentimento OAuth própria. Essa troca não tem volta para o projeto padrão.
 
 ### 6. Publicar o Web App
 
@@ -123,7 +129,7 @@ Abra a URL `/exec`. A primeira sincronização roda no próximo gatilho (até 1 
 
 ### 7. Checklist do primeiro deploy
 
-- [ ] `setup()` terminou e o log mostra `"ok":true`
+- [ ] `setup()` terminou e o log mostra `"ok":true` e `"renewalProbe":"ok"`. Esse segundo campo testa, com uma tabela descartável, o `CREATE TABLE … AS SELECT` da renovação aos 45 dias. Se vier `falhou`, me mande a mensagem
 - [ ] Em *Acionadores*, há exatamente `runPipeline` (de hora em hora) e `runMaintenance` (diário)
 - [ ] Depois de uma execução, a tela **Sistema** mostra status `SUCCESS` e o backfill avançando
 - [ ] Um e-mail recebido aparece no Radar em até 1 h, e "Abrir no Gmail" abre a mensagem certa (se você usa várias contas no navegador, ajuste o índice `u/N` em Configurações)

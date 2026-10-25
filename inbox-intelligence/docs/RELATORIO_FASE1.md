@@ -135,7 +135,7 @@ Todos os invariantes duros foram cumpridos nos dois conjuntos:
 ## 6. Configuração e permissões pendentes (você)
 
 1. Criar um projeto no Google Cloud **sem faturamento** (BigQuery Sandbox) e anotar o ID.
-2. Criar um projeto Apps Script vazio, enviar o código com `npm run gas:push -- <ID do script>` (Cloud Shell ou Node 20+; veja o README) e definir `GCP_PROJECT_ID` nas Propriedades do script.
+2. Criar um projeto Apps Script vazio, enviar o código com `npm run gas:push -- <ID do script>` (Cloud Shell ou Node 22+; veja o README) e definir `GCP_PROJECT_ID` nas Propriedades do script.
 3. Executar `setup()` e autorizar os 5 escopos listados no README.
 4. Implantar o Web App com "Executar como: eu" e "Somente eu".
 5. Executar `diagnose()`: faz checagens reais e somente leitura de Gmail, BigQuery, objetos, gatilhos e IA. Me envie o resultado (não tem segredos nem conteúdo).
@@ -145,6 +145,10 @@ Todos os invariantes duros foram cumpridos nos dois conjuntos:
 ## 7. Limitações conhecidas
 
 - **Validação real pendente:** Gmail, BigQuery, gatilhos e IA foram testados contra simulações fiéis das APIs (formatos de parâmetro, erros, limites). Comportamentos só observáveis na conta real ainda podem divergir: expiração de views no Sandbox, quotas efetivas, `getDataAsString('windows-1252')`, `history.list` com volumes grandes.
+- **Riscos do primeiro deploy (pesquisa de 25/10/2026):**
+  - há relatos recentes de bloqueio "This app is blocked" na autorização de scripts novos com escopos sensíveis; o contorno é um projeto Cloud próprio com tela de consentimento (README, passo 5);
+  - não há confirmação de que o `clasp push` ativa os serviços avançados no projeto padrão; o `setup()` agora detecta serviço ausente ou API desativada e diz o que fazer;
+  - a renovação aos 45 dias usa `CREATE OR REPLACE TABLE … AS SELECT`; a documentação do Sandbox proíbe DML e streaming, mas não fala de CTAS. O `setup()` agora testa isso no primeiro dia com uma tabela descartável (`renewalProbe`). Se uma renovação real falhar, o alerta de expiração ainda dá 10 dias de aviso antes de qualquer perda.
 - **Avaliação sintética:** os 220 casos foram escritos por agentes, com rótulos de julgamento humano simulado. O dev set está saturado e o holdout já foi lido uma vez. A medida definitiva virá dos seus feedbacks e da amostra cega na tela Sistema.
 - **Erros conhecidos do ranking (holdout):**
   - recall de ação de 78%: pedidos implícitos ainda escapam;
