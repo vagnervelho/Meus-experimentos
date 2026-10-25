@@ -135,7 +135,7 @@ Todos os invariantes duros foram cumpridos nos dois conjuntos:
 ## 6. Configuração e permissões pendentes (você)
 
 1. Criar um projeto no Google Cloud **sem faturamento** (BigQuery Sandbox) e anotar o ID.
-2. Criar o projeto Apps Script (`clasp push` ou cópia manual) e definir `GCP_PROJECT_ID` nas Propriedades do script.
+2. Criar um projeto Apps Script vazio, enviar o código com `npm run gas:push -- <ID do script>` (Cloud Shell ou Node 20+; veja o README) e definir `GCP_PROJECT_ID` nas Propriedades do script.
 3. Executar `setup()` e autorizar os 5 escopos listados no README.
 4. Implantar o Web App com "Executar como: eu" e "Somente eu".
 5. Executar `diagnose()`: faz checagens reais e somente leitura de Gmail, BigQuery, objetos, gatilhos e IA. Me envie o resultado (não tem segredos nem conteúdo).

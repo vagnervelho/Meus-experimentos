@@ -56,6 +56,24 @@ test('manifesto: escopos mínimos, Web App privado, sem acesso anônimo', () => 
   assert.deepEqual(services, ['bigquery', 'gmail']);
 });
 
+test('gas:push: aceita o manifesto do projeto, recusa o padrão do clasp e lê o ID do script', () => {
+  const { checkManifest, parseScriptId } = require('../scripts/push-gas');
+  assert.deepEqual(checkManifest(manifest), []);
+  // Manifesto que "clasp create"/"clasp pull" gravaria por cima do nosso.
+  const fresh = { timeZone: 'America/New_York', dependencies: {}, exceptionLogging: 'STACKDRIVER', runtimeVersion: 'V8' };
+  assert.ok(checkManifest(fresh).length >= 4);
+  const writable = JSON.parse(JSON.stringify(manifest));
+  writable.oauthScopes.push('https://www.googleapis.com/auth/gmail.modify');
+  assert.ok(checkManifest(writable).some((p) => /escrita/.test(p)));
+  const id = '1AbC_dEf-GhIjKlMnOpQrStUvWxYz0123456789abcdefghijklmnopq';
+  assert.equal(parseScriptId(id), id);
+  assert.equal(parseScriptId('  ' + id + '\n'), id);
+  assert.equal(parseScriptId('https://script.google.com/home/projects/' + id + '/edit'), id);
+  assert.equal(parseScriptId('https://script.google.com/d/' + id + '/edit?usp=sharing'), id);
+  assert.equal(parseScriptId('inbox-intelligence-512713'), null, 'ID do projeto Cloud não é ID do script');
+  assert.equal(parseScriptId('abc"; rm -rf /'), null);
+});
+
 test('hosts externos usados no código ⊆ urlFetchWhitelist', () => {
   const allowed = manifest.urlFetchWhitelist;
   const urls = new Set();

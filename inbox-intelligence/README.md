@@ -57,23 +57,37 @@ Web App (HtmlService) ────┘  consultas parametrizadas + cache versiona
 3. Em **APIs e serviços**, confirme que a **BigQuery API** está ativada.
 4. Anote o **ID do projeto**: ele vai em `GCP_PROJECT_ID`.
 
-### 2. Projeto do Apps Script
+### 2. Projeto do Apps Script (vazio)
 
-Escolha uma das duas opções:
-
-- **Com `clasp`** (recomendado, sincroniza todos os arquivos e o manifesto):
-  ```bash
-  npm install -g @google/clasp
-  clasp login
-  clasp create --type standalone --title "Inbox Intelligence" --rootDir src
-  # ou copie .clasp.json.example para .clasp.json e preencha o scriptId
-  clasp push
-  ```
-- **Manual:** crie um projeto em script.google.com. Em *Configurações do projeto*, marque "Mostrar arquivo de manifesto appsscript.json". Cole o conteúdo de `src/appsscript.json`. Depois crie um arquivo de script para cada `src/*.js`, com o mesmo nome, e um arquivo HTML para cada `src/*.html` (`index`, `styles`, `client`).
+1. Abra [script.google.com](https://script.google.com), clique em **Novo projeto** e renomeie para `Inbox Intelligence`.
+2. Em *Configurações do projeto* (engrenagem), copie o **ID do script**. Ele é diferente do ID do projeto do Google Cloud do passo 1.
 
 Mantenha o projeto do Apps Script no **projeto Cloud padrão** (não troque para o projeto do Sandbox). O BigQuery é acessado pelo ID informado nas propriedades.
 
-### 3. Propriedades do script
+### 3. Enviar o código
+
+O código vai para o projeto com o [`clasp`](https://github.com/google/clasp), a ferramenta oficial do Google, pelo script `npm run gas:push`. Ele confere o manifesto, mostra a conta logada e pede confirmação antes de enviar.
+
+1. **Uma vez só:** ative a *Google Apps Script API* em [script.google.com/home/usersettings](https://script.google.com/home/usersettings). Sem isso, o envio falha.
+2. Abra um terminal com Node 20 ou mais novo. O mais simples é o **Cloud Shell**: botão *Ativar o Cloud Shell* (ícone `>_`) no topo do console do Google Cloud. Ele roda no navegador e já tem Node e git. No seu computador também funciona, se tiver Node 20+.
+3. Rode:
+   ```bash
+   git clone --depth 1 --branch claude/inbox-intelligence-ggion7 https://github.com/vagnervelho/Meus-experimentos.git
+   cd Meus-experimentos/inbox-intelligence
+   npm run gas:push -- COLE_AQUI_O_ID_DO_SCRIPT
+   ```
+4. **Login:** o script mostra um link. Abra, escolha a conta cuja caixa será analisada e autorize. No fim, o navegador mostra um erro de conexão em `localhost:8888`: é esperado. Copie a URL inteira da barra de endereço e cole no terminal.
+5. Confira a conta e o projeto exibidos e responda `s`. O clasp envia os 23 arquivos (19 `.js` viram `.gs`, mais os 3 `.html` e o manifesto) e apaga o `Código.gs` vazio do projeto novo.
+
+**Para atualizar depois:** `git pull && npm run gas:push`. O ID fica guardado em `.clasp.json`, fora do git.
+
+> Não rode `clasp create`, `clasp clone` nem `clasp pull` nesta pasta. Os três baixam o manifesto padrão do projeto para `src/appsscript.json`, por cima do nosso, e o projeto ficaria sem escopos e sem os serviços Gmail e BigQuery. Se acontecer, `git checkout -- src/appsscript.json` restaura o arquivo. O `gas:push` se recusa a enviar um manifesto nesse estado.
+
+O login do clasp guarda um token em `~/.clasprc.json`. Para removê-lo depois do envio: `npx @google/clasp@3.4.1 logout`.
+
+**Sem terminal (manual):** no editor, em *Configurações do projeto*, marque a opção de mostrar o arquivo de manifesto `appsscript.json` no editor e cole nele o conteúdo de `src/appsscript.json`. Crie um arquivo de script para cada `src/*.js`, com o mesmo nome sem `.js`, e um arquivo HTML para cada `src/*.html` (`index`, `styles`, `client`). Apague o `Código.gs` inicial. São 23 arquivos, e cada atualização exige repetir a cópia, por isso o caminho com `clasp` é o recomendado.
+
+### 4. Propriedades do script
 
 Em *Configurações do projeto → Propriedades do script*:
 
@@ -86,7 +100,7 @@ Em *Configurações do projeto → Propriedades do script*:
 
 `OWNER_EMAIL` é preenchida automaticamente pelo `setup()`. Chaves nunca ficam no código e não aparecem na interface: ela só mostra "configurado / não configurado".
 
-### 4. `setup()`
+### 5. `setup()`
 
 No editor, selecione a função `setup` e clique em **Executar**. Na primeira vez, o Google pede autorização. Como o app é seu e não verificado, use *Avançado → Acessar Inbox Intelligence*. Escopos pedidos:
 
@@ -98,7 +112,7 @@ No editor, selecione a função `setup` e clique em **Executar**. Na primeira ve
 
 O `setup()` é idempotente: cria o dataset, as 7 tabelas, as 10 views e os 2 gatilhos. Pode ser executado de novo sem efeito colateral.
 
-### 5. Publicar o Web App
+### 6. Publicar o Web App
 
 *Implantar → Nova implantação → Tipo: App da Web*:
 
@@ -107,7 +121,7 @@ O `setup()` é idempotente: cria o dataset, as 7 tabelas, as 10 views e os 2 gat
 
 Abra a URL `/exec`. A primeira sincronização roda no próximo gatilho (até 1 h). Para não esperar, use **Sincronizar agora**: agenda uma execução em cerca de 1 minuto. O backfill de 90 dias termina em algumas execuções e respeita o orçamento diário de 60 min de gatilhos (o limite do Google é 90 min/dia, somando todos os seus projetos).
 
-### 6. Checklist do primeiro deploy
+### 7. Checklist do primeiro deploy
 
 - [ ] `setup()` terminou e o log mostra `"ok":true`
 - [ ] Em *Acionadores*, há exatamente `runPipeline` (de hora em hora) e `runMaintenance` (diário)

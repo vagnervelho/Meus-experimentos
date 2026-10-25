@@ -11,6 +11,7 @@
     "sql:check": "python3 scripts/validate_sql.py",
     "ui:check": "node scripts/ui-check.js",
     "eval": "node eval/run-eval.js",
+    "gas:push": "node scripts/push-gas.js",
     "check": "npm run build && npm run typecheck && npm test && npm run sql:check"
   },
   "devDependencies": {
