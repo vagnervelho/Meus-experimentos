@@ -18,7 +18,7 @@
 
 | # | Critério | Situação | Evidência |
 |---|---|---|---|
-| 1 | Ingerir mensagens do Gmail respeitando as permissões | Implementado · **validação real pendente** | Escopo `gmail.readonly`; teste estático proíbe qualquer escrita; `tests/pipeline.test.js` |
+| 1 | Ingerir mensagens do Gmail respeitando as permissões | Implementado · **acesso validado na conta real** (25/10); ingestão pendente da primeira execução | `diagnose()` real: perfil da caixa do dono e listagem de mensagens recentes, somente leitura. Escopo `gmail.readonly`; teste estático proíbe qualquer escrita; `tests/pipeline.test.js` |
 | 2 | Sincronizações incrementais sem duplicar | Implementado · validado com mocks | Histórico página a página, dedup, commit em duas fases, resync em 404 (`pipeline`, `regressions`) |
 | 3 | Classificar e resumir com campos estruturados | Validado offline | 19 categorias, resumo extrativo (IA: abstrativo), fatos, ações, prazos, entidades, oportunidade; métricas na seção 5 |
 | 4 | Persistir no BigQuery | Implementado · **estrutura validada na conta real** (25/10); gravação de mensagens pendente | `setup()` criou o dataset, as 7 tabelas, as 10 views e os 2 gatilhos no Sandbox, e o teste de CTAS passou. Load jobs NDJSON append-only; SQL validado por sintaxe e colunas |
@@ -26,7 +26,7 @@
 | 6 | Pesquisa, filtros e acesso à mensagem original | Validado com mocks | Busca com `de:`, `categoria:` e `"frase"`; 8 filtros; links `#all/<id>` e `rfc822msgid:` |
 | 7 | Distinguir relevância, urgência e ação | Validado | Três eixos independentes no score e na interface (`tests/scoring.test.js`) |
 | 8 | Atualizações agendadas e retomada de falhas | Validado com mocks | Gatilhos idempotentes; checkpoints; quarentena em dois níveis; retentativas; PARTIAL ≠ SUCCESS |
-| 9 | Status da última execução | Validado com mocks | Tela Sistema, tabela `runs`, `diagnose()` com checagens reais |
+| 9 | Status da última execução | Validado com mocks · `diagnose()` validado na conta real (25/10: 7 de 7 checagens ok) | Tela Sistema, tabela `runs`, `diagnose()` com checagens reais |
 | 10 | Impedir ações destrutivas e envios | Validado | Somente leitura por escopo e por teste estático; funções de editor exigem o dono |
 | 11 | Documentar instalação, permissões, custos e limitações | Feito | `README.md`, `docs/PLANO_TECNICO.md`, `docs/CONTRATOS.md`, este relatório |
 | 12 | Testes das regras críticas e das consultas essenciais | Feito | 200 testes + validação semântica do SQL + avaliação com IC |
