@@ -66,7 +66,7 @@ Mantenha o projeto do Apps Script no **projeto Cloud padrão** (não troque para
 
 ### 3. Enviar o código
 
-O código vai para o projeto com o [`clasp`](https://github.com/google/clasp), a ferramenta oficial do Google, pelo script `npm run gas:push`. Ele confere o manifesto, mostra a conta logada e pede confirmação antes de enviar.
+O código vai para o projeto com o [`clasp`](https://github.com/google/clasp), a ferramenta oficial do Google, pelo script `npm run gas:push`. Ele confere o manifesto, mostra a conta logada, pede confirmação, envia o código e publica o Web App (passo 6).
 
 1. **Uma vez só:** ative a *Google Apps Script API* em [script.google.com/home/usersettings](https://script.google.com/home/usersettings). Sem isso, o envio falha.
 2. Abra um terminal com Node 22 ou mais novo. O mais simples é o **Cloud Shell**: botão *Ativar o Cloud Shell* (ícone `>_`) no topo do console do Google Cloud. É gratuito, roda no navegador e já tem Node, git e o próprio clasp. Não use o modo temporário (*ephemeral*), que apaga a pasta pessoal. No seu computador também funciona, se tiver Node 22+.
@@ -77,10 +77,10 @@ O código vai para o projeto com o [`clasp`](https://github.com/google/clasp), a
    npm run gas:push -- COLE_AQUI_O_ID_DO_SCRIPT
    ```
 4. **Login:** o script mostra um link. Abra, escolha a conta cuja caixa será analisada e autorize, marcando **todas** as permissões da lista. No fim, o navegador mostra um erro de conexão em `localhost:8888`: é esperado. Copie a URL inteira da barra de endereço e cole no terminal, nessa mesma execução (uma URL de outra tentativa é recusada).
-5. Confira a conta e o projeto exibidos e responda `s`. O clasp envia os 23 arquivos (19 `.js` viram `.gs`, mais os 3 `.html` e o manifesto) e apaga o `Código.gs` vazio do projeto novo.
+5. Confira a conta e o projeto exibidos e responda `s`. O clasp envia os 23 arquivos (19 `.js` viram `.gs`, mais os 3 `.html` e o manifesto), apaga o `Código.gs` vazio do projeto novo e mostra a URL do Web App.
 6. Recarregue o editor e abra **Serviços** na barra lateral: devem aparecer **Gmail** e **BigQuery**. Se algum faltar, adicione-o ali (*Gmail API* v1, *BigQuery API* v2).
 
-**Para atualizar depois:** `git pull && npm run gas:push`. O ID fica guardado em `.clasp.json`, fora do git. Os gatilhos passam a usar o código novo na hora; o Web App só depois de *Implantar → Gerenciar implantações → editar (lápis) → Versão: Nova versão → Implantar* (a URL `/exec` não muda). O envio substitui todos os arquivos do projeto, então não edite o código direto no editor do navegador.
+**Para atualizar depois:** `git pull && npm run gas:push`. O ID fica guardado em `.clasp.json`, fora do git. Os gatilhos passam a usar o código novo na hora, e o Web App é republicado numa versão nova da mesma implantação, então a URL `/exec` não muda. O envio substitui todos os arquivos do projeto, então não edite o código direto no editor do navegador.
 
 > Não rode `clasp create`, `clasp clone` nem `clasp pull` nesta pasta. Os três baixam o manifesto padrão do projeto para `src/appsscript.json`, por cima do nosso, e o projeto ficaria sem escopos e sem os serviços Gmail e BigQuery. Se acontecer, `git checkout -- src/appsscript.json` restaura o arquivo. O `gas:push` se recusa a enviar um manifesto nesse estado.
 
@@ -120,10 +120,12 @@ Se aparecer erro:
 
 ### 6. Publicar o Web App
 
-*Implantar → Nova implantação → Tipo: App da Web*:
+O `npm run gas:push` já publica o Web App e mostra a URL `https://script.google.com/macros/s/…/exec`. As opções vêm do manifesto, e o script se recusa a publicar se elas mudarem:
 
-- **Executar como:** Eu
-- **Quem pode acessar:** **Somente eu** (nunca "Qualquer pessoa")
+- **Executar como:** você (`USER_DEPLOYING`)
+- **Quem pode acessar:** **somente você** (`MYSELF`), nunca "Qualquer pessoa"
+
+Cada publicação cria uma versão nova do projeto. O Apps Script guarda até 200 versões por projeto; versões antigas podem ser apagadas em *Implantar → Gerenciar implantações*. Para enviar o código sem publicar, use `npm run gas:push -- --no-deploy`. Pelo editor, a publicação manual é *Implantar → Nova implantação → App da Web*, com as mesmas duas opções.
 
 Abra a URL `/exec`. A primeira sincronização roda no próximo gatilho (até 1 h). Para não esperar, use **Sincronizar agora**: agenda uma execução em cerca de 1 minuto. O backfill de 90 dias termina em algumas execuções e respeita o orçamento diário de 60 min de gatilhos (o limite do Google é 90 min/dia, somando todos os seus projetos).
 

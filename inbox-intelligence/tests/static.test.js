@@ -74,6 +74,27 @@ test('gas:push: aceita o manifesto do projeto, recusa o padrão do clasp e lê o
   assert.equal(parseScriptId('abc"; rm -rf /'), null);
 });
 
+test('gas:push: publica sempre na mesma implantação do Web App, nunca na @HEAD', () => {
+  const { pickDeployment, shellArgs, webAppUrl, checkManifest } = require('../scripts/push-gas');
+  const head = { deploymentId: 'AKfyHEAD', description: '' };
+  assert.equal(pickDeployment([]), null);
+  assert.equal(pickDeployment([head]), null, '@HEAD não é atualizada: cria a primeira implantação');
+  assert.equal(pickDeployment([head, { deploymentId: 'AKfyManual', versionNumber: 1, description: 'v1' }]), 'AKfyManual', 'adota a única criada à mão');
+  assert.equal(pickDeployment([head, { deploymentId: 'A', versionNumber: 1, description: 'v1' }, { deploymentId: 'B', versionNumber: 2, description: 'teste' }]), null, 'várias de outra origem: não adivinha');
+  assert.equal(pickDeployment([
+    head,
+    { deploymentId: 'Old', versionNumber: 2, description: 'Inbox Intelligence abc123 2026-10-25' },
+    { deploymentId: 'Other', versionNumber: 9, description: 'teste' },
+    { deploymentId: 'New', versionNumber: 5, description: 'Inbox Intelligence def456 2026-10-26' },
+  ]), 'New');
+  assert.equal(webAppUrl('AKfyX'), 'https://script.google.com/macros/s/AKfyX/exec');
+  assert.deepEqual(shellArgs(['--description', 'Inbox Intelligence abc 2026-10-25'], 'linux'), ['--description', 'Inbox Intelligence abc 2026-10-25']);
+  assert.deepEqual(shellArgs(['--description', 'Inbox Intelligence abc 2026-10-25'], 'win32'), ['--description', '"Inbox Intelligence abc 2026-10-25"']);
+  const runAsVisitor = JSON.parse(JSON.stringify(manifest));
+  runAsVisitor.webapp.executeAs = 'USER_ACCESSING';
+  assert.ok(checkManifest(runAsVisitor).some((p) => /executa como você/.test(p)));
+});
+
 test('hosts externos usados no código ⊆ urlFetchWhitelist', () => {
   const allowed = manifest.urlFetchWhitelist;
   const urls = new Set();

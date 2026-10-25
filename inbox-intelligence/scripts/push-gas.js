@@ -1,14 +1,16 @@
 #!/usr/bin/env node
 'use strict';
 /**
- * Envia src/ para o projeto Apps Script com o clasp (versão fixa, via npx; não precisa de npm install).
+ * Envia src/ para o projeto Apps Script com o clasp (versão fixa, via npx; não precisa de npm install)
+ * e publica o Web App numa versão nova, sempre na mesma implantação (a URL /exec não muda).
  *
  * Uso: npm run gas:push -- <ID do script ou URL do editor>   (primeira vez)
  *      npm run gas:push                                       (depois: o ID fica em .clasp.json, fora do git)
- *      --yes pula a confirmação.
+ *      --yes pula a confirmação; --no-deploy só envia o código, sem publicar o Web App.
  *
  * Antes de enviar: confere a versão do Node, confere se src/appsscript.json é o manifesto do projeto
- * (escopos, serviços avançados, Web App só para você) e mostra a conta logada no clasp.
+ * (escopos, serviços avançados, Web App só para você) e mostra a conta logada no clasp. As opções do
+ * Web App (executar como você, acesso só seu) vêm do manifesto, não de parâmetros da implantação.
  * Não usa "clasp create" nem "clasp pull": os dois gravam o manifesto padrão por cima do nosso.
  */
 const fs = require('node:fs');
@@ -41,8 +43,33 @@ function checkManifest(m) {
   const services = ((m && m.dependencies && m.dependencies.enabledAdvancedServices) || []).map((s) => s.serviceId);
   for (const id of ['gmail', 'bigquery']) if (services.indexOf(id) < 0) problems.push('sem o serviço avançado ' + id);
   if (!m || !m.webapp || m.webapp.access !== 'MYSELF') problems.push('Web App não restrito a "Somente eu"');
+  if (!m || !m.webapp || m.webapp.executeAs !== 'USER_DEPLOYING') problems.push('Web App não executa como você');
   if (!m || m.runtimeVersion !== 'V8') problems.push('runtime diferente de V8');
   return problems;
+}
+
+const DEPLOY_DESC = 'Inbox Intelligence';
+
+/**
+ * Implantação a atualizar: a mais recente deste app (descrição "Inbox Intelligence…"); senão, a única
+ * implantação versionada que existir (criada à mão no editor). null = criar uma nova. @HEAD não conta.
+ */
+function pickDeployment(list) {
+  const versioned = (Array.isArray(list) ? list : []).filter((d) => d && d.deploymentId && d.versionNumber);
+  const ours = versioned.filter((d) => String(d.description || '').indexOf(DEPLOY_DESC) === 0);
+  const pool = ours.length ? ours : versioned.length === 1 ? versioned : [];
+  pool.sort((a, b) => Number(b.versionNumber) - Number(a.versionNumber));
+  return pool.length ? pool[0].deploymentId : null;
+}
+
+function webAppUrl(deploymentId) {
+  return 'https://script.google.com/macros/s/' + deploymentId + '/exec';
+}
+
+/** No Windows o npx só roda com shell: argumentos com espaço precisam de aspas. */
+function shellArgs(args, platform) {
+  if (platform !== 'win32') return args;
+  return args.map((a) => (/[\s&|<>^]/.test(a) ? '"' + a.replace(/"/g, '') + '"' : a));
 }
 
 function fail(msg, code) {
@@ -51,7 +78,7 @@ function fail(msg, code) {
 }
 
 function clasp(args, capture) {
-  const r = spawnSync('npx', ['--yes', CLASP].concat(args), {
+  const r = spawnSync('npx', shellArgs(['--yes', CLASP].concat(args), process.platform), {
     cwd: ROOT,
     stdio: capture ? ['ignore', 'pipe', 'inherit'] : 'inherit',
     encoding: 'utf8',
@@ -64,6 +91,27 @@ function clasp(args, capture) {
 function authorizedUser() {
   const r = clasp(['show-authorized-user', '--json'], true);
   try { return JSON.parse(r.stdout); } catch (e) { return { loggedIn: false }; }
+}
+
+function gitShortSha() {
+  const r = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: ROOT, encoding: 'utf8' });
+  return r.status === 0 ? String(r.stdout).trim() : '';
+}
+
+/** Publica o código enviado numa versão nova, atualizando a implantação existente (ou criando a primeira). */
+function deploy() {
+  const listed = clasp(['list-deployments', '--json'], true);
+  let list = null;
+  try { list = JSON.parse(listed.stdout); } catch (e) { list = null; }
+  if (listed.status !== 0 || !Array.isArray(list)) fail('O código foi enviado, mas não consegui listar as implantações. Rode de novo ou publique pelo editor (Implantar → Gerenciar implantações).');
+  const existing = pickDeployment(list);
+  const sha = gitShortSha();
+  const desc = DEPLOY_DESC + (sha ? ' ' + sha : '') + ' ' + new Date().toISOString().slice(0, 10);
+  const r = clasp(['create-deployment', '--json', '--description', desc].concat(existing ? ['--deploymentId', existing] : []), true);
+  let out = null;
+  try { out = JSON.parse(r.stdout); } catch (e) { out = null; }
+  if (r.status !== 0 || !out || !out.deploymentId) fail('O código foi enviado, mas a publicação do Web App falhou. Rode de novo ou publique pelo editor (Implantar → Gerenciar implantações).');
+  return { deploymentId: out.deploymentId, versionNumber: out.versionNumber, created: !existing };
 }
 
 function ask(question) {
@@ -107,8 +155,9 @@ async function main() {
 
   console.log('\nConta:   ' + (who.email || '(desconhecida)'));
   console.log('Projeto: https://script.google.com/d/' + scriptId + '/edit');
+  const publish = process.argv.indexOf('--no-deploy') < 0;
   if (process.stdin.isTTY && process.argv.indexOf('--yes') < 0) {
-    const answer = await ask('Enviar src/ para esse projeto, substituindo todos os arquivos dele? [s/N] ');
+    const answer = await ask('Enviar src/ para esse projeto, substituindo todos os arquivos dele' + (publish ? ', e publicar o Web App (acesso: somente você)' : '') + '? [s/N] ');
     if (!/^s(im)?$/i.test(answer.trim())) fail('Nada foi enviado.', 0);
   }
 
@@ -116,13 +165,19 @@ async function main() {
     fail('O envio falhou. Se a mensagem fala em "Apps Script API", ative a API em https://script.google.com/home/usersettings, espere alguns minutos e rode de novo.');
   }
 
-  console.log('\nPronto. Próximos passos no editor (link acima):');
+  if (!publish) {
+    console.log('\nCódigo enviado (sem publicar o Web App). Os gatilhos já usam o código novo.');
+    return;
+  }
+  const d = deploy();
+  console.log('\nCódigo enviado e Web App publicado (' + (d.created ? 'implantação nova' : 'mesma implantação') + ', versão ' + (d.versionNumber || '?') + ').');
+  console.log('Web App (somente você): ' + webAppUrl(d.deploymentId));
+  console.log('\nSe for a primeira vez, no editor (link acima):');
   console.log('  1. Configurações do projeto → Propriedades do script → GCP_PROJECT_ID = ID do projeto do BigQuery');
-  console.log('  2. Editor → escolha a função setup → Executar → autorize');
-  console.log('  3. Implantar → Nova implantação → App da Web (Executar como: eu · Quem pode acessar: somente eu)');
-  console.log('  4. Execute diagnose() e guarde o resultado');
+  console.log('  2. Code.gs → função setup → Executar → autorize');
+  console.log('  3. Code.gs → função diagnose → Executar e guarde o resultado');
 }
 
 if (require.main === module) main();
 
-module.exports = { parseScriptId, checkManifest };
+module.exports = { parseScriptId, checkManifest, pickDeployment, shellArgs, webAppUrl };
