@@ -133,7 +133,7 @@ Abra a URL `/exec`. A primeira sincronização roda no próximo gatilho (até 1 
 
 - [ ] `setup()` terminou e o log mostra `"ok":true` e `"renewalProbe":"ok"`. Esse segundo campo testa, com uma tabela descartável, o `CREATE TABLE … AS SELECT` da renovação aos 45 dias. Se vier `falhou`, me mande a mensagem
 - [ ] Em *Acionadores*, há exatamente `runPipeline` (de hora em hora) e `runMaintenance` (diário)
-- [ ] Depois de uma execução, a tela **Sistema** mostra status `SUCCESS` e o backfill avançando
+- [ ] Depois de uma execução, a tela **Sistema** mostra status `SUCCESS` e o backfill avançando. No registro do editor, o evento `run_finished` traz `ingested` (mensagens gravadas), `backfill` (`em_andamento` ou `concluido`) e `backfill_cursor` (até que data a carga histórica já chegou)
 - [ ] Um e-mail recebido aparece no Radar em até 1 h, e "Abrir no Gmail" abre a mensagem certa (se você usa várias contas no navegador, ajuste o índice `u/N` em Configurações)
 - [ ] Rode `diagnose()` no editor e guarde o relatório. Ele faz checagens reais e somente leitura (perfil e listagem do Gmail, consulta e objetos do BigQuery, view da caixa, gatilhos, IA) e não contém segredos nem conteúdo
 
@@ -201,4 +201,4 @@ Convenções: um namespace por arquivo, sem dependência em tempo de carga (um t
 - **Corpos grandes:** partes de texto que a Gmail API entrega só como anexo (`attachmentId`) não são baixadas.
 - **Regras:** classificação por regras tem limites. No holdout, o nível fica dentro do esperado em ~90% dos casos e a recuperação de ações em ~78% (números e intervalos em [`docs/RELATORIO_FASE1.md`](docs/RELATORIO_FASE1.md); detalhe por caso em `eval/report.md` e `eval/report-holdout.md`). Assinaturas sem `-- ` e citações intercaladas podem ficar no texto.
 - **Busca:** é por termos normalizados (sem acento), não semântica.
-- **Relógio:** datas relativas ("sexta", "amanhã") são resolvidas a partir da data de recebimento, no fuso de São Paulo.
+- **Relógio:** datas relativas ("sexta", "amanhã") são resolvidas a partir da data de recebimento, no fuso do app. O fuso é o `timeZone` de `src/appsscript.json` (aqui, `America/Porto_Velho`) e vale para datas, consultas, views, interface e gatilhos. Para trocar, mude esse valor e rode `npm run gas:push`: as views se ajustam sozinhas na execução seguinte. Prazos já extraídos de mensagens gravadas antes da troca continuam calculados no fuso antigo, o que só muda algo para mensagens recebidas perto da meia-noite.

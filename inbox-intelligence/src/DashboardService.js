@@ -201,7 +201,7 @@ var DashboardService = (function () {
     var ui = Config.get().ui;
     return {
       user: { email: String(Session.getActiveUser().getEmail() || '') },
-      app: { version: Config.APP_VERSION },
+      app: { version: Config.APP_VERSION, timeZone: Util.tz() },
       ai: aiInfo(),
       setup: { ok: missing.length === 0, missing: missing },
       lastSync: last ? { at: last.finished_at, status: last.status } : null,

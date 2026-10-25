@@ -9,7 +9,7 @@ Qualquer mudança aqui precisa ser refletida nos testes.
 - **Nunca** referenciar outro namespace em tempo de carga (só dentro de funções). Um teste carrega os arquivos em ordem inversa.
 - Funções de topo (fora de namespace) são **somente**: `doGet`, `include`, `api*` (endpoints do cliente), `runPipeline`, `runMaintenance` (triggers), `setup`, `setupTriggers`, `uninstallTriggers`, `runBackfillNow`, `diagnose`. Todas passam por `Auth.assertOwner_()` (exceto triggers, que validam `Session.getEffectiveUser()` vs. dono).
 - Sintaxe permitida: ES2019 (sem `?.`, sem `??`, sem `import/export`, sem classes privadas `#x`).
-- Datas trafegam como **ISO 8601 string** (timestamps) ou **YYYY-MM-DD** (datas civis no fuso `America/Sao_Paulo`). Nunca `Date` em retornos para o cliente.
+- Datas trafegam como **ISO 8601 string** (timestamps) ou **YYYY-MM-DD** (datas civis no fuso do app: o `timeZone` do manifesto, via `Util.tz()`). Nunca `Date` em retornos para o cliente.
 - Textos de interface e justificativas em **pt-BR**.
 - Logs: `Monitoring.log(level, event, fieldsSemPII)`. Nunca registrar assunto, corpo, e-mails ou nomes.
 - Erros para o cliente: `{ok:false, error:{code, message}}` com mensagem sanitizada (`Util.sanitizeError`).
@@ -34,7 +34,7 @@ Ver `src/Util.js` e `src/Config.js` (já implementados). Pontos de uso:
 ParsedMessage = {
   message_id, thread_id, rfc822_message_id, history_id,          // strings
   internal_ts,                    // ISO (de internalDate ms)
-  received_date,                  // YYYY-MM-DD (São Paulo)
+  received_date,                  // YYYY-MM-DD (fuso do app; a view v_messages recalcula de internal_ts)
   direction,                      // 'INBOUND' | 'OUTBOUND' (label SENT ou from == dono)
   from_email, from_name, from_domain, reply_to_email,
   to_emails: [], cc_emails: [],   // e-mails minúsculos

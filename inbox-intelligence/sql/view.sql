@@ -4,7 +4,8 @@
 -- view/v_messages
 CREATE OR REPLACE VIEW `meu-projeto.inbox_intelligence.v_messages`
 AS
-SELECT * FROM `meu-projeto.inbox_intelligence.messages__g1` WHERE TRUE
+SELECT * REPLACE (COALESCE(DATE(internal_ts, 'America/Sao_Paulo'), received_date) AS received_date)
+FROM `meu-projeto.inbox_intelligence.messages__g1` WHERE TRUE
 QUALIFY ROW_NUMBER() OVER (PARTITION BY message_id ORDER BY version_ts DESC) = 1;
 
 -- view/v_state

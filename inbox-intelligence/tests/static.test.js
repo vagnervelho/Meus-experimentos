@@ -51,7 +51,7 @@ test('manifesto: escopos mínimos, Web App privado, sem acesso anônimo', () => 
   assert.equal(manifest.webapp.access, 'MYSELF');
   assert.equal(manifest.webapp.executeAs, 'USER_DEPLOYING');
   assert.equal(manifest.runtimeVersion, 'V8');
-  assert.equal(manifest.timeZone, 'America/Sao_Paulo');
+  assert.match(manifest.timeZone, /^America\/[A-Za-z_]+$/, 'fuso IANA do dono (rege datas, SQL e gatilhos)');
   const services = manifest.dependencies.enabledAdvancedServices.map((s) => s.serviceId).sort();
   assert.deepEqual(services, ['bigquery', 'gmail']);
 });
@@ -93,6 +93,14 @@ test('gas:push: publica sempre na mesma implantação do Web App, nunca na @HEAD
   const runAsVisitor = JSON.parse(JSON.stringify(manifest));
   runAsVisitor.webapp.executeAs = 'USER_ACCESSING';
   assert.ok(checkManifest(runAsVisitor).some((p) => /executa como você/.test(p)));
+});
+
+test('fuso: só o manifesto define (America/Sao_Paulo só como padrão no Util e no cliente)', () => {
+  const html = fs.readdirSync(SRC_DIR).filter((f) => f.endsWith('.html'));
+  const files = jsFiles.concat(html);
+  const withTz = files.filter((f) => fs.readFileSync(path.join(SRC_DIR, f), 'utf8').includes('America/Sao_Paulo'));
+  assert.deepEqual(withTz.sort(), ['Util.js', 'client.html']);
+  assert.equal((src['Util.js'].match(/America\/Sao_Paulo/g) || []).length, 1, 'Util: só o DEFAULT_TZ');
 });
 
 test('hosts externos usados no código ⊆ urlFetchWhitelist', () => {

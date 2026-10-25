@@ -224,7 +224,7 @@
     var news = items.filter(function (it) { return ['tecnologia', 'economia', 'noticias', 'newsletters'].indexOf(it.category) >= 0; }).sort(function (a, b) { return b.priority.axes.relevance - a.priority.axes.relevance; });
     var H_ = {
       apiBootstrap: function () {
-        return { user: { email: 'voce@exemplo.com.br' }, app: { version: '1.0.0' }, ai: state.ai,
+        return { user: { email: 'voce@exemplo.com.br' }, app: { version: '1.0.0', timeZone: 'America/Sao_Paulo' }, ai: state.ai,
           setup: variant === 'nosetup' ? { ok: false, missing: ['GCP_PROJECT_ID nas Propriedades do script (ID do projeto do BigQuery Sandbox).', 'Executar a função setup() no editor do Apps Script (cria o banco e os gatilhos).', 'Gatilho de sincronização ausente: execute setupTriggers().', XSS_IMG + 'item com HTML'] } : { ok: true, missing: [] },
           lastSync: empty ? null : { at: sync.lastSuccessAt, status: 'DONE' }, categories: CATS, ui: { pageSize: 10, defaultPeriod: '7d' }, previousVisitAt: empty ? '' : iso(20 * H) };
       },

@@ -11,7 +11,7 @@
  */
 var Triggers = (function () {
   var HANDLERS = { pipeline: 'runPipeline', maintenance: 'runMaintenance' };
-  var KEYS = { setup: 'SETUP_VERSION', oneShot: 'ONE_SHOT_TRIGGER', dropAt: 'BQ_DROP_AFTER' };
+  var KEYS = { setup: 'SETUP_VERSION', oneShot: 'ONE_SHOT_TRIGGER', dropAt: 'BQ_DROP_AFTER', viewsSig: 'VIEWS_SIG' };
   var EXPIRY_ALERT_DAYS = 10;
   var VIEW_REFRESH_DAYS = 20;
 
@@ -85,9 +85,25 @@ var Triggers = (function () {
   }
 
   function recreateViews_(gen) {
-    Schema.allViewStatements(gen, Schema.viewOptions()).forEach(function (v) {
+    var statements = Schema.allViewStatements(gen, Schema.viewOptions());
+    statements.forEach(function (v) {
       BigQueryClient.ddl(v.sql, 'setup_view');
     });
+    props_().setProperty(KEYS.viewsSig, viewsSignature_(statements));
+  }
+
+  function viewsSignature_(statements) {
+    return Util.sha256Hex(statements.map(function (v) { return v.sql; }).join('\n;\n')).slice(0, 32);
+  }
+
+  /**
+   * As views no BigQuery são de uma definição anterior (código novo enviado, fuso trocado no manifesto)?
+   * Compara a assinatura do SQL atual com a da última recriação.
+   */
+  function viewsOutdated() {
+    if (!isSetupDone()) return false;
+    var current = viewsSignature_(Schema.allViewStatements(Schema.generation(), Schema.viewOptions()));
+    return props_().getProperty(KEYS.viewsSig) !== current;
   }
 
   // ----------------------------------------------------------- gatilhos ----
@@ -439,6 +455,7 @@ var Triggers = (function () {
     assertTriggerOwner: assertTriggerOwner,
     maintenance: maintenance,
     recreateViews: recreateViews_,
+    viewsOutdated: viewsOutdated,
     tablesStatus: tablesStatus,
   };
 })();

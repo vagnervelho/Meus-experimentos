@@ -6,7 +6,9 @@
  * e só referencia outros namespaces dentro de funções (nunca em tempo de carga).
  */
 var Util = (function () {
-  var TZ = 'America/Sao_Paulo';
+  // O fuso do app é o timeZone do manifesto (appsscript.json), que também rege os gatilhos.
+  var DEFAULT_TZ = 'America/Sao_Paulo';
+  var TZ_RE = /^[A-Za-z]+(?:\/[A-Za-z0-9_+-]+){1,2}$/;
   var DAY_MS = 24 * 60 * 60 * 1000;
 
   // ------------------------------------------------------------ tempo ----
@@ -21,9 +23,17 @@ var Util = (function () {
     var d = new Date(typeof ms === 'number' ? ms : Number(ms));
     return isNaN(d.getTime()) ? null : d.toISOString();
   }
-  /** Data civil (YYYY-MM-DD) no fuso de São Paulo. */
+  /** Fuso IANA do app (ex.: America/Porto_Velho), lido do manifesto; inválido ou ausente → DEFAULT_TZ. */
+  function tz() {
+    return memo('tz', function () {
+      var z = '';
+      try { z = String(Session.getScriptTimeZone() || ''); } catch (e) { z = ''; }
+      return TZ_RE.test(z) ? z : DEFAULT_TZ;
+    });
+  }
+  /** Data civil (YYYY-MM-DD) no fuso do app. */
   function ymd(ms) {
-    return Utilities.formatDate(new Date(ms === undefined ? Util.now() : ms), TZ, 'yyyy-MM-dd');
+    return Utilities.formatDate(new Date(ms === undefined ? Util.now() : ms), tz(), 'yyyy-MM-dd');
   }
   function todayYmd() {
     return ymd(Util.now());
@@ -34,10 +44,10 @@ var Util = (function () {
     if (!m) return NaN;
     return Math.floor(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) / DAY_MS);
   }
-  /** Época (segundos) da meia-noite de São Paulo de uma data YYYY-MM-DD (para after:/before: do Gmail). */
+  /** Época (segundos) da meia-noite, no fuso do app, de uma data YYYY-MM-DD (para after:/before: do Gmail). */
   function ymdStartEpochSec(s) {
     var utcMidnight = ymdToDayNumber(s) * DAY_MS;
-    var z = Utilities.formatDate(new Date(utcMidnight + 12 * 3600000), TZ, 'Z');
+    var z = Utilities.formatDate(new Date(utcMidnight + 12 * 3600000), tz(), 'Z');
     var m = /^([+-])(\d{2})(\d{2})$/.exec(String(z));
     var offsetMin = m ? (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3])) : -180;
     return Math.floor((utcMidnight - offsetMin * 60000) / 1000);
@@ -355,7 +365,7 @@ var Util = (function () {
   }
 
   return {
-    TZ: TZ,
+    tz: tz,
     cachePutJson: cachePutJson,
     cacheGetJson: cacheGetJson,
     DAY_MS: DAY_MS,

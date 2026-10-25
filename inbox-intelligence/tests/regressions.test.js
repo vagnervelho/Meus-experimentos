@@ -202,6 +202,26 @@ test('setup() testa já no primeiro dia o CREATE TABLE … AS SELECT usado na re
   assert.match(r.renewalProbe, /^falhou .*renovação automática/);
 });
 
+test('troca de fuso (ou de SQL das views) recria as views na execução seguinte; o registro traz o progresso', () => {
+  const gas = boot();
+  assert.equal(gas.G.Triggers.viewsOutdated(), false, 'setup() grava a assinatura das views');
+  gas.session.timeZone = 'America/Porto_Velho';
+  gas.G.Util.resetMemo();
+  assert.equal(gas.G.Triggers.viewsOutdated(), true);
+  const before = gas.bq.queries.length;
+  gas.G.runPipeline();
+  const recreated = gas.bq.queries.slice(before).map((q) => (q.request && q.request.query) || '').filter((sql) => /^CREATE OR REPLACE VIEW/.test(sql));
+  assert.equal(recreated.length, gas.G.Schema.VIEW_ORDER.length);
+  assert.ok(recreated.every((sql) => !sql.includes('Sao_Paulo')));
+  gas.G.Util.resetMemo();
+  assert.equal(gas.G.Triggers.viewsOutdated(), false);
+  const line = gas.logs.map((l) => String(l[1] && l[1][0])).filter((x) => x.includes('"run_finished"')).pop();
+  const ev = JSON.parse(line);
+  assert.equal(ev.status, 'SUCCESS');
+  for (const k of ['ingested', 'listed', 'backfill', 'backfill_floor', 'windows_pending', 'errors']) assert.ok(k in ev, 'registro sem ' + k);
+  assert.ok(['nao_iniciado', 'em_andamento', 'concluido'].includes(ev.backfill));
+});
+
 test('diagnose(): checagens reais somente leitura, sem segredos nem conteúdo', () => {
   const gas = boot();
   gas.props.script.setProperty('ANTHROPIC_API_KEY', 'sk-ant-segredo-que-nao-pode-vazar-123456');

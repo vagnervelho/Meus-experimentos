@@ -43,7 +43,7 @@
 ## 1. Premissas
 
 - Conta `gmail.com`, ~50 e-mails/dia, histórico inicial de 90 dias (≈ 4.500 mensagens).
-- pt-BR, fuso `America/Sao_Paulo`, formatos brasileiros.
+- pt-BR, formatos brasileiros, fuso do manifesto (`America/Porto_Velho` para o dono; padrão `America/Sao_Paulo`).
 - Mantidos do prompt original: Apps Script + BigQuery, nada de Sheets como banco, incremental, sem IA a cada abertura, sem ações destrutivas, Web App não público.
 
 ## 2. Investigação do ambiente (Fase Zero)

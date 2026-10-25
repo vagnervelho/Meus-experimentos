@@ -99,7 +99,8 @@ var Monitoring = (function () {
     run.counts[key] = (run.counts[key] || 0) + (n === undefined ? 1 : n);
   }
 
-  function finishRun(run, status) {
+  /** @param {Object=} summary campos numéricos/curtos extras para o registro (sem conteúdo) */
+  function finishRun(run, status, summary) {
     run.status = status || (run.errors.length ? 'PARTIAL' : 'SUCCESS');
     run.finished_at = Util.nowIso();
     run.duration_ms = Util.now() - run.startedMs;
@@ -107,7 +108,7 @@ var Monitoring = (function () {
       run_id: run.run_id, kind: run.kind, status: run.status, finished_at: run.finished_at, duration_ms: run.duration_ms,
       counts: run.counts, errors: run.errors.slice(0, 5),
     }));
-    log(run.status === 'FAILED' ? 'error' : 'info', 'run_finished', { run_id: run.run_id, kind: run.kind, status: run.status, duration_ms: run.duration_ms });
+    log(run.status === 'FAILED' ? 'error' : 'info', 'run_finished', Object.assign({}, summary || {}, { run_id: run.run_id, kind: run.kind, status: run.status, duration_ms: run.duration_ms }));
     return run;
   }
 

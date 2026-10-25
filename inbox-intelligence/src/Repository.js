@@ -14,7 +14,8 @@ var Repository = (function () {
   var FB_PREFIX = 'FB_';
   var FB_MIRROR_PREFIX = 'FBM_';
   var DATA_VERSION_KEY = 'DATA_VERSION';
-  var TZ = "'America/Sao_Paulo'";
+  // Fuso do app, trocado por render() (o fuso vem do manifesto, não do código).
+  var TZ = '{{tz}}';
 
   // -------------------------------------------------------------- catálogo ----
   var QUERIES = {
@@ -326,7 +327,7 @@ var Repository = (function () {
   function render(sql, gen) {
     return String(sql).replace(/\{\{([vt]):([a-z_]+)\}\}/g, function (_, kind, name) {
       return kind === 'v' ? BigQueryClient.tableRef('v_' + name) : BigQueryClient.tableRef(Schema.physical(name, gen));
-    });
+    }).replace(/\{\{tz\}\}/g, "'" + Util.tz() + "'");
   }
 
   function run_(name, params, opts) {

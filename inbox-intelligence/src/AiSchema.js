@@ -137,7 +137,7 @@ var AiSchema = (function () {
         '<<<FIM ' + nonce + ' ref=' + m.ref + '>>>',
       ].join('\n');
     });
-    return 'Data de referência: ' + refYmd + ' (fuso America/Sao_Paulo).\nAnalise as ' + inputs.length + ' mensagens abaixo e devolva items na mesma ordem, com o mesmo ref.\n\n' + blocks.join('\n\n');
+    return 'Data de referência: ' + refYmd + ' (fuso ' + Util.tz() + ').\nAnalise as ' + inputs.length + ' mensagens abaixo e devolva items na mesma ordem, com o mesmo ref.\n\n' + blocks.join('\n\n');
   }
 
   // ---------------------------------------------------------- validação ----

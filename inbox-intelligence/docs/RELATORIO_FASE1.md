@@ -25,7 +25,7 @@
 | 5 | Radar diário com dados reais | Implementado · **validação real pendente** | Sem acesso aos seus dados daqui; o Radar só lê o BigQuery (nenhuma fixture em produção) |
 | 6 | Pesquisa, filtros e acesso à mensagem original | Validado com mocks | Busca com `de:`, `categoria:` e `"frase"`; 8 filtros; links `#all/<id>` e `rfc822msgid:` |
 | 7 | Distinguir relevância, urgência e ação | Validado | Três eixos independentes no score e na interface (`tests/scoring.test.js`) |
-| 8 | Atualizações agendadas e retomada de falhas | Validado com mocks | Gatilhos idempotentes; checkpoints; quarentena em dois níveis; retentativas; PARTIAL ≠ SUCCESS |
+| 8 | Atualizações agendadas e retomada de falhas | Validado com mocks · primeira execução real em 25/10: SUCCESS em 199 s | Gatilhos idempotentes; checkpoints; quarentena em dois níveis; retentativas; PARTIAL ≠ SUCCESS |
 | 9 | Status da última execução | Validado com mocks · `diagnose()` validado na conta real (25/10: 7 de 7 checagens ok) | Tela Sistema, tabela `runs`, `diagnose()` com checagens reais |
 | 10 | Impedir ações destrutivas e envios | Validado | Somente leitura por escopo e por teste estático; funções de editor exigem o dono |
 | 11 | Documentar instalação, permissões, custos e limitações | Feito | `README.md`, `docs/PLANO_TECNICO.md`, `docs/CONTRATOS.md`, este relatório |
@@ -43,7 +43,7 @@
 - Commit em duas fases (`messages` é o marcador); a análise de IA é reaproveitada se o commit falhar.
 - Quarentena em dois níveis (só metadados, depois linha mínima), desistência após 3 falhas e heartbeat para execuções mortas.
 - Lock do script; orçamento de tempo de 4,5 min por execução e de 60 min/dia de gatilhos.
-- Status SUCCESS, PARTIAL ou FAILED: execução com trabalho pendente nunca sai como SUCCESS.
+- Status SUCCESS, PARTIAL ou FAILED. PARTIAL quer dizer que algo que devia terminar nesta execução ficou para trás: falha de busca, histórico incompleto ou corte no meio de uma página. A carga histórica de 90 dias é planejada para várias execuções; ela aparece como progresso (registro do editor e tela Sistema) e não rebaixa o status.
 - Métricas de operação: duplicidades evitadas, mensagens sem classificação, latência por etapa, custo por mil mensagens, fidelidade das evidências e consumo de cotas.
 
 **Banco (`Schema`, `Repository`, `BigQueryClient`)**

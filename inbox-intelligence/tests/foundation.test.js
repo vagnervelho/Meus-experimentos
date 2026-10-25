@@ -21,6 +21,28 @@ test('Util: datas civis no fuso de São Paulo', () => {
   assert.equal(G.Util.isValidYmd('2028-02-29'), true);
 });
 
+test('fuso vem do manifesto: Porto Velho (UTC−4) muda datas, SQL, views, prompt e bootstrap', () => {
+  const gas = createGas();
+  gas.session.timeZone = 'America/Porto_Velho';
+  gas.props.script.setProperty('GCP_PROJECT_ID', 'meu-projeto');
+  const { G } = gas;
+  G.Util.resetMemo();
+  assert.equal(G.Util.tz(), 'America/Porto_Velho');
+  // 2026-10-25 03:30 UTC = 24/10 23:30 em Porto Velho, mas já 25/10 00:30 em São Paulo.
+  assert.equal(G.Util.ymd(Date.UTC(2026, 9, 25, 3, 30)), '2026-10-24');
+  assert.equal(G.Util.ymdStartEpochSec('2026-10-25'), Date.UTC(2026, 9, 25, 4) / 1000);
+  const sql = G.Repository.render(G.Repository.QUERIES.system_status);
+  assert.ok(sql.includes("CURRENT_DATE('America/Porto_Velho')") && !sql.includes('Sao_Paulo') && !sql.includes('{{tz}}'));
+  const views = G.Schema.allViewStatements(1, G.Schema.viewOptions()).map((v) => v.sql).join('\n');
+  assert.ok(views.includes("COALESCE(DATE(internal_ts, 'America/Porto_Velho'), received_date) AS received_date"));
+  assert.ok(!views.includes('Sao_Paulo'));
+  assert.equal(G.DashboardService.bootstrap().app.timeZone, 'America/Porto_Velho');
+  // Fuso inválido no manifesto não vira SQL: cai no padrão.
+  gas.session.timeZone = "x'); DROP TABLE t; --";
+  G.Util.resetMemo();
+  assert.equal(G.Util.tz(), 'America/Sao_Paulo');
+});
+
 test('Util: normalização e sanitização', () => {
   const { G } = createGas();
   assert.equal(G.Util.normalizeText('  Inteligência   ARTIFICIAL  '), 'inteligencia artificial');

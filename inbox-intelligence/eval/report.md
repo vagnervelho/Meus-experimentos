@@ -1,6 +1,6 @@
 # Avaliação offline — classificador por regras + ranking
 
-Gerado por `node eval/run-eval.js` em 2026-10-24T23:19:00.107Z. Sem IA (`AiSchema.merge(rules, null)`).
+Gerado por `node eval/run-eval.js` em 2026-10-25T16:06:24.614Z. Sem IA (`AiSchema.merge(rules, null)`).
 
 - Casos: **126** (sintéticos; arquivos: `01-contas-financas.json`, `02-seguranca-compras-viagens.json`, `03-saude-governo-trabalho.json`, `04-carreira-networking.json`, `05-newsletters-marketing-social.json`, `06-spam-pessoal-adversarial.json`)
 - Hash do dataset: `6e95cd74ae2698a4` · classificador `rules-2026.10.2` · parser `parser-2026.10.2` · configVersion `8cee049994`
@@ -38,6 +38,29 @@ Gerado por `node eval/run-eval.js` em 2026-10-24T23:19:00.107Z. Sem IA (`AiSchem
 Taxa de oportunidades esperada pelos rótulos: 10.3%. ↓ = quanto menor, melhor.
 
 Definições: *precisão de Crítica* = das preditas Críticas, quantas tinham `levelMax = CRITICAL`; *recall de Crítica* = dos casos com `levelMin = CRITICAL`, quantos saíram Críticos (idem para "Alta ou crítica"). Ação, injection e prazo só contam casos com rótulo (`null`/`any` = não avaliado).
+
+## Comparação com o baseline
+
+| Métrica | Baseline | Atual | Δ (p.p.) | Tolerância |
+|---|---:|---:|---:|---:|
+| `category_top1` | 79.4% | 79.4% | 0.0 | 3.0 |
+| `category_acceptable` | 96.0% | 96.0% | 0.0 | 3.0 |
+| `macro_f1_strict` | 73.9% | 73.9% | 0.0 | 3.0 |
+| `macro_f1_lenient` | 95.4% | 95.4% | 0.0 | 3.0 |
+| `level_in_range` | 96.0% | 96.0% | 0.0 | 3.0 |
+| `high_plus_precision` | 92.6% | 92.6% | 0.0 | 3.7 |
+| `high_plus_recall` | 95.2% | 95.2% | 0.0 | 4.8 |
+| `critical_precision` | 83.3% | 83.3% | 0.0 | 16.7 |
+| `critical_recall` | 100.0% | 100.0% | 0.0 | 25.0 |
+| `action_precision` | 100.0% | 100.0% | 0.0 | 3.0 |
+| `action_recall` | 100.0% | 100.0% | 0.0 | 3.0 |
+| `deadline_accuracy` | 100.0% | 100.0% | 0.0 | 3.0 |
+| `injection_precision` | 100.0% | 100.0% | 0.0 | 25.0 |
+| `injection_recall` | 100.0% | 100.0% | 0.0 | 25.0 |
+| `opportunity_precision` | 100.0% | 100.0% | 0.0 | 7.7 |
+| `opportunity_recall` | 100.0% | 100.0% | 0.0 | 7.7 |
+
+Nenhuma regressão acima da tolerância.
 
 ## Casos por categoria ideal
 

@@ -121,7 +121,7 @@ var Pipeline = (function () {
       requireSetup_();
       var stale = Monitoring.recoverStale(true);
       if (stale) Monitoring.count(r, 'recovered_aborted_run');
-      if (props_().getProperty('VIEWS_DIRTY')) {
+      if (props_().getProperty('VIEWS_DIRTY') || Triggers.viewsOutdated()) {
         step_(r, 'views', function () {
           Triggers.recreateViews(Schema.generation());
           props_().deleteProperty('VIEWS_DIRTY');
@@ -158,7 +158,7 @@ var Pipeline = (function () {
       r.checkpoint = checkpoint_();
       // Trabalho pendente por falha de busca, histórico parado ou corte por tempo: nunca SUCCESS.
       if (!status && (r.counts.history_not_advanced || r.counts.fetch_errors || r.counts.stopped_early || r.counts.history_incomplete)) status = 'PARTIAL';
-      Monitoring.finishRun(r, status || undefined);
+      Monitoring.finishRun(r, status || undefined, runSummary_(r));
       try {
         if (Triggers.isSetupDone()) Repository.append('runs', [Monitoring.runRow(r)], r.run_id + ':run');
       } catch (e2) {
@@ -178,6 +178,28 @@ var Pipeline = (function () {
     } catch (e) {
       if (Monitoring.classify(e, name).code === 'AUTH') throw e;
     }
+  }
+
+  /**
+   * Resumo numérico da execução para o registro do editor (sem conteúdo). A carga histórica é trabalho
+   * planejado para várias execuções: aparece aqui como progresso e não rebaixa o status.
+   */
+  function runSummary_(r) {
+    var c = r.counts || {};
+    var bf = (r.checkpoint && r.checkpoint.backfill) || null;
+    return {
+      ingested: c.ingested || 0,
+      listed: (c.backfill_listed || 0) + (c.resync_listed || 0),
+      history_events: c.history_events || 0,
+      duplicates_avoided: c.duplicates_avoided || 0,
+      stopped_early: c.stopped_early || 0,
+      fetch_errors: c.fetch_errors || 0,
+      errors: (r.errors || []).length,
+      backfill: !bf ? 'nao_iniciado' : bf.done ? 'concluido' : 'em_andamento',
+      backfill_cursor: bf && !bf.done ? String(bf.cursor || '') : '',
+      backfill_floor: bf ? String(bf.floor || '') : '',
+      windows_pending: (r.checkpoint && r.checkpoint.windows) || 0,
+    };
   }
 
   function checkpoint_() {

@@ -13,7 +13,6 @@
 var Schema = (function () {
   var GEN_KEY = 'BQ_GENERATION';
   var DROP_KEY = 'BQ_DROP_PENDING';
-  var TZ_SQL = "'America/Sao_Paulo'";
 
   var TABLES = [
     {
@@ -211,7 +210,7 @@ var Schema = (function () {
   }
 
   function daysAgo_(days) {
-    return 'DATE_SUB(CURRENT_DATE(' + TZ_SQL + '), INTERVAL ' + Number(days) + ' DAY)';
+    return 'DATE_SUB(CURRENT_DATE(' + tzSql_() + '), INTERVAL ' + Number(days) + ' DAY)';
   }
 
   /**
@@ -224,7 +223,7 @@ var Schema = (function () {
     var t = table(name);
     var src = BigQueryClient.tableRef(physical(name, fromGen));
     var state = BigQueryClient.tableRef(physical('message_state', fromGen));
-    var horizon = 'DATE_SUB(CURRENT_DATE(' + TZ_SQL + '), INTERVAL ' + Number(o.horizonMonths) + ' MONTH)';
+    var horizon = 'DATE_SUB(CURRENT_DATE(' + tzSql_() + '), INTERVAL ' + Number(o.horizonMonths) + ' MONTH)';
     var old = 't.received_date < ' + daysAgo_(o.retentionDays);
     var deleted = 'NOT EXISTS (SELECT 1 FROM ' + state + " d WHERE d.message_id = t.message_id AND d.gmail_state = 'DELETED')";
     var select = 'SELECT *';
@@ -246,7 +245,7 @@ var Schema = (function () {
     } else if (name === 'scores') {
       where = 'WHERE t.received_date >= ' + horizon + '\n  AND ' + deleted;
     } else if (name === 'message_state') {
-      where = 'WHERE DATE(t.version_ts, ' + TZ_SQL + ') >= ' + horizon;
+      where = 'WHERE DATE(t.version_ts, ' + tzSql_() + ') >= ' + horizon;
     } else if (name === 'feedback') {
       partition = 'feedback_id';
     } else if (name === 'runs') {
@@ -275,6 +274,11 @@ var Schema = (function () {
    * Definições das views para a geração `gen`.
    * @param {{retentionDays: number, criticalCap: number, criticalRecencyDays: number, openDaysWithoutDeadline: number, overdueAutoResolveDays: number}} o
    */
+  /** Fuso do app como literal SQL (Util.tz() só aceita nomes IANA, sem aspas). */
+  function tzSql_() {
+    return "'" + Util.tz() + "'";
+  }
+
   function viewDefinitions(gen, o) {
     var g = gen || generation();
     function T(n) {
@@ -283,7 +287,9 @@ var Schema = (function () {
     var oldMsg = 'm.received_date < ' + daysAgo_(o.retentionDays);
     var defs = {};
 
-    defs.messages = 'SELECT * FROM ' + T('messages') + ' WHERE TRUE\n' +
+    // A data civil é recalculada do instante no fuso atual: vale para linhas gravadas com outro fuso.
+    defs.messages = 'SELECT * REPLACE (COALESCE(DATE(internal_ts, ' + tzSql_() + '), received_date) AS received_date)\n' +
+      'FROM ' + T('messages') + ' WHERE TRUE\n' +
       'QUALIFY ROW_NUMBER() OVER (PARTITION BY message_id ORDER BY version_ts DESC) = 1';
 
     defs.state = 'SELECT * FROM ' + T('message_state') + ' WHERE TRUE\n' +
@@ -352,7 +358,7 @@ var Schema = (function () {
       "WHERE COALESCE(s.gmail_state, 'ACTIVE') NOT IN ('DELETED', 'SPAM', 'TRASHED')\n" +
       '), flagged AS (\n' +
       "  SELECT *, COALESCE(level = 'CRITICAL' AND in_inbox AND user_status NOT IN ('RESOLVED', 'DISMISSED') AND user_relevance != 'IRRELEVANT'\n" +
-      '    AND (received_date >= ' + daysAgo_(o.criticalRecencyDays) + ' OR deadline_date >= CURRENT_DATE(' + TZ_SQL + ')), FALSE) AS critical_candidate\n' +
+      '    AND (received_date >= ' + daysAgo_(o.criticalRecencyDays) + ' OR deadline_date >= CURRENT_DATE(' + tzSql_() + ')), FALSE) AS critical_candidate\n' +
       '  FROM base\n' +
       ')\n' +
       'SELECT *,\n' +
