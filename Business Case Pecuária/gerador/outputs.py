@@ -334,6 +334,7 @@ def finish_sens(wb):
     ch.add_data(Reference(ws, min_col=4, max_col=5, min_row=t0, max_row=t0 + n), titles_from_data=True)
     ch.set_categories(Reference(ws, min_col=1, min_row=t0 + 1, max_row=t0 + n))
     ch.overlap = 100
+    ch.x_axis.tickLblPos = "low"
     ws.add_chart(ch, f"H{t0-1}")
     return h, t0
 
@@ -445,7 +446,8 @@ def build_painel(wb, sc_h, torn_t0):
     c1.set_categories(Reference(fc, min_col=C0, max_col=CL, min_row=3))
     c1.x_axis.title = "Mês do modelo"
     c1.x_axis.tickLblSkip = 12
-    ws.add_chart(c1, "D4")
+    c1.x_axis.tickLblPos = "low"
+    ws.add_chart(c1, "D7")
     # 2 EBITDA por unidade
     c2 = BarChart()
     c2.type = "col"
@@ -456,7 +458,8 @@ def build_painel(wb, sc_h, torn_t0):
     for k in ("U_cr", "U_re", "U_en", "U_la", "U_es"):
         c2.series.append(Series(Reference(A, min_col=4, max_col=13, min_row=ar(k)), title=A.cell(ar(k), 1).value))
     c2.set_categories(Reference(A, min_col=4, max_col=13, min_row=4))
-    ws.add_chart(c2, "N4")
+    c2.x_axis.tickLblPos = "low"
+    ws.add_chart(c2, "N7")
     # 3 rebanho
     rb = wb["Rebanho"]
     c3 = LineChart()
@@ -467,7 +470,7 @@ def build_painel(wb, sc_h, torn_t0):
         c3.series.append(Series(Reference(rb, min_col=C0, max_col=CL, min_row=rr), title=t))
     c3.set_categories(Reference(rb, min_col=C0, max_col=CL, min_row=3))
     c3.x_axis.tickLblSkip = 12
-    ws.add_chart(c3, "D22")
+    ws.add_chart(c3, "D25")
     # 4 FCL anual
     c4 = BarChart()
     c4.type = "col"
@@ -476,7 +479,8 @@ def build_painel(wb, sc_h, torn_t0):
     for k in ("FC_fcl", "D_ll"):
         c4.series.append(Series(Reference(A, min_col=4, max_col=13, min_row=ar(k)), title=A.cell(ar(k), 1).value))
     c4.set_categories(Reference(A, min_col=4, max_col=13, min_row=4))
-    ws.add_chart(c4, "N22")
+    c4.x_axis.tickLblPos = "low"
+    ws.add_chart(c4, "N25")
     # 5 cenarios
     cs = wb["Cenarios"]
     c5 = BarChart()
@@ -486,7 +490,8 @@ def build_painel(wb, sc_h, torn_t0):
     c5.series.append(Series(Reference(cs, min_col=3, min_row=sc_h + 1, max_row=sc_h + 9), title="VPL"))
     c5.set_categories(Reference(cs, min_col=1, min_row=sc_h + 1, max_row=sc_h + 9))
     c5.legend = None
-    ws.add_chart(c5, "D40")
+    c5.x_axis.tickLblPos = "low"
+    ws.add_chart(c5, "D43")
     # 6 tornado
     ss = wb["Sensibilidade"]
     n = len(SHOCKS)
@@ -497,5 +502,6 @@ def build_painel(wb, sc_h, torn_t0):
     c6.add_data(Reference(ss, min_col=4, max_col=5, min_row=torn_t0, max_row=torn_t0 + n), titles_from_data=True)
     c6.set_categories(Reference(ss, min_col=1, min_row=torn_t0 + 1, max_row=torn_t0 + n))
     c6.overlap = 100
-    ws.add_chart(c6, "N40")
+    c6.x_axis.tickLblPos = "low"
+    ws.add_chart(c6, "N43")
     return ws
