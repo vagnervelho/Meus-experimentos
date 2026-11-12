@@ -183,12 +183,35 @@ def main():
     wb._sheets = [wb[n] for n in order]
     for nm, tp, _ in DESC:
         wb[nm].sheet_properties.tabColor = TAB[tp]
+    from openpyxl.worksheet.properties import PageSetupProperties
+    for nm in ("Painel", "Capa", "Retorno", "Checks", "Resumo_Anual"):
+        w = wb[nm]
+        w.page_setup.orientation = "landscape"
+        w.page_setup.fitToWidth, w.page_setup.fitToHeight = 1, 1
+        w.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
     wb.active = 0
     wb.calculation.fullCalcOnLoad = True
     for ws in wb.worksheets:
         ws.sheet_view.tabSelected = (ws.title == "Capa")
     wb.save(OUT)
+    no_auto_title(OUT)
     print("salvo:", os.path.abspath(OUT))
+
+
+def no_auto_title(path):
+    """Impede o Excel de criar titulo automatico em graficos de uma serie (o titulo fica nas celulas)."""
+    import zipfile, shutil, re as _re
+    tmp = path + ".tmp"
+    with zipfile.ZipFile(path) as zin, zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+        for it in zin.infolist():
+            data = zin.read(it.filename)
+            if it.filename.startswith("xl/charts/chart") and b"autoTitleDeleted" not in data:
+                x = data.decode("utf-8")
+                x = _re.sub(r"<((?:\w+:)?)plotArea>", lambda m: f'<{m.group(1)}autoTitleDeleted val="1"/><{m.group(1)}plotArea>', x, count=1)
+                x = _re.sub(r'<((?:\w+:)?)numFmt formatCode="([^"]*)"\s*/>', r'<\1numFmt formatCode="\2" sourceLinked="0"/>', x)
+                data = x.encode("utf-8")
+            zout.writestr(it, data)
+    shutil.move(tmp, path)
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ from framework import *
 from inputs import SCEN_ROW0, LEVERS, SHOCKS, SH_ROW0, SCEN_NAMES
 from openpyxl.worksheet.formula import DataTableFormula
 from openpyxl.chart import LineChart, BarChart, Reference, Series
+from charts import *
 from openpyxl.formatting.rule import CellIsRule, FormulaRule
 import os
 # O LibreOffice (usado so na verificacao automatica) nao le Tabelas de Dados com varias colunas.
@@ -253,6 +254,18 @@ def finish_cenarios(wb):
             x.fill = F_TOT
             x.alignment = Alignment(horizontal="right")
     data_table(ws, h + 1, 3, h + 9, 2 + len(SC_OUT), col_input="C4")
+    for c, t in ((14, "Rótulo do gráfico"), (15, "VPL incremental ≥ 0"), (16, "VPL incremental < 0")):
+        x = ws.cell(h - 1, c, t)
+        x.font = font(bold=True, size=9)
+        x.alignment = Alignment(wrap_text=True, horizontal="center", vertical="center")
+    for i in range(9):
+        r = h + 1 + i
+        put(ws, f"N{r}", f"=INDEX($D$9:$L$9,1,B{r})", "gen")
+        put(ws, f"O{r}", f"=MAX(0,D{r})")
+        put(ws, f"P{r}", f"=MIN(0,D{r})")
+    ws.cell(h, 14, "Colunas N a P: apoio do gráfico do Painel.").font = font(GRAY, italic=True, size=9)
+    for c in "NOP":
+        ws.column_dimensions[c].width = 20
     ws.cell(h + 11, 1, "Como ler: o VPL já inclui a renda do pasto arrendado a terceiros. O VPL incremental desconta o que a terra renderia "
                         "100% arrendada: é ele que diz se vale a pena operar. Aporte adicional > 0 = capital insuficiente para o cenário.").font = font(GRAY, italic=True, size=9)
     ws.conditional_formatting.add(f"C{h+1}:C{h+9}", CellIsRule(operator="lessThan", formula=["0"], font=Font(name=FONT, size=10, color="C00000")))
@@ -327,16 +340,37 @@ def finish_sens(wb):
         data_table(ws, r + 2, 3, r + 6, 7, row_input=f"B{rin}", col_input=f"B{cin}")
         ws.conditional_formatting.add(f"C{r+2}:G{r+6}", CellIsRule(operator="lessThan", formula=["0"], font=Font(name=FONT, size=10, color="C00000")))
         r += 9
-    ch = BarChart()
-    ch.type = "bar"
-    ch.title = "Tornado: variação do VPL por variável"
-    ch.height, ch.width = 9, 22
-    ch.add_data(Reference(ws, min_col=4, max_col=5, min_row=t0, max_row=t0 + n), titles_from_data=True)
-    ch.set_categories(Reference(ws, min_col=1, min_row=t0 + 1, max_row=t0 + n))
-    ch.overlap = 100
-    ch.x_axis.tickLblPos = "low"
-    ws.add_chart(ch, f"H{t0-1}")
+    # tabela auxiliar ordenada por amplitude (menor -> maior: no grafico de barras o maior fica no topo)
+    for c, t in zip("HIJKL", ["Chave", "Ordem", "Variável (ordenada)", "Desfavorável", "Favorável"]):
+        ws[f"{c}{t0}"] = t
+        ws[f"{c}{t0}"].font = font(bold=True)
+    for i in range(n):
+        r = t0 + 1 + i
+        put(ws, f"H{r}", f"=F{r}+ROW()/1000000", "num2")
+        put(ws, f"I{r}", i + 1, "idx")
+        m = f"MATCH(SMALL($H${t0+1}:$H${t0+n},I{r}),$H${t0+1}:$H${t0+n},0)"
+        put(ws, f"J{r}", f"=INDEX($A${t0+1}:$A${t0+n},{m})", "gen")
+        put(ws, f"K{r}", f"=MIN(INDEX($D${t0+1}:$D${t0+n},{m}),INDEX($E${t0+1}:$E${t0+n},{m}))")
+        put(ws, f"L{r}", f"=MAX(INDEX($D${t0+1}:$D${t0+n},{m}),INDEX($E${t0+1}:$E${t0+n},{m}))")
+    ws.column_dimensions["J"].width = 52
+    ws.cell(t0 + n + 1, 8, "Colunas H a L: apoio do gráfico (variáveis ordenadas pelo impacto).").font = font(GRAY, italic=True, size=9)
+    PREM["torn_sorted"] = ("Sensibilidade", t0 + 1, 10)
+    ws[f"N{t0-1}"] = f'="Variável de maior impacto no VPL: "&J{t0+n}'
+    ws[f"N{t0-1}"].font = font("1F3864", True, size=11)
+    ws[f"N{t0}"] = "Variação do VPL frente à base para cada choque, R$ mil (laranja = desfavorável, azul = favorável)"
+    ws[f"N{t0}"].font = font(GRAY, italic=True, size=9)
+    ws.add_chart(tornado_chart(ws, t0, n), f"N{t0+1}")
     return h, t0
+
+
+def tornado_chart(ws, t0, n):
+    ch = base(BarChart(), gap=45)
+    ch.type, ch.grouping, ch.overlap = "bar", "clustered", 100
+    ch.series.append(bar_series(Reference(ws, min_col=11, min_row=t0 + 1, max_row=t0 + n), "Desfavorável", ORANGE))
+    ch.series.append(bar_series(Reference(ws, min_col=12, min_row=t0 + 1, max_row=t0 + n), "Favorável", NAVY))
+    ch.set_categories(Reference(ws, min_col=10, min_row=t0 + 1, max_row=t0 + n))
+    ch.x_axis.spPr = GraphicalProperties(ln=LineProperties(solidFill="7F7F7F", w=9525))
+    return ch
 
 
 CHECKS = []
@@ -410,7 +444,7 @@ def build_checks(wb):
 def build_painel(wb, sc_h, torn_t0):
     ws = wb.create_sheet("Painel")
     SHEETS["Pn"] = "Painel"
-    title(ws, "PAINEL — visão executiva do cenário ativo", "Troque o cenário em Cenarios!C4. Tudo aqui é fórmula; nada deve ser digitado.", 20)
+    title(ws, "PAINEL — visão executiva do cenário ativo", "Troque o cenário em Cenarios!C4. Tudo aqui é fórmula; nada deve ser digitado.", 22)
     ws["A4"] = "Cenário ativo"
     ws["A4"].font = font(bold=True)
     put(ws, "B4", f"={paddr('scen_nome')}", "gen", True)
@@ -422,86 +456,81 @@ def build_painel(wb, sc_h, torn_t0):
              ("Lucro líquido em 10 anos (R$)", "k_ll", "brl"), ("Múltiplo do capital", "k_moic", "mult"), ("Rebanho no mês 120 (cab)", "k_cab", "num"),
              ("Lotação média (UA/ha)", "k_lot", "num2"), ("Margem 10 anos — cria (R$)", "k_cr", "brl"), ("Margem 10 anos — recria (R$)", "k_re", "brl"),
              ("Margem 10 anos — engorda (R$)", "k_en", "brl"), ("Margem 10 anos — lavoura (R$)", "k_la", "brl"), ("Resultado 10 anos — estrutura (R$)", "k_es", "brl")]
-    sec(ws, 7, "INDICADORES-CHAVE", 20)
+    sec(ws, 7, "INDICADORES-CHAVE", 2)
+    ws["B4"].alignment = Alignment(wrap_text=True, vertical="top")
+    ws.row_dimensions[4].height = 27
     for i, (lab, k, fmt) in enumerate(cards):
         r = 6 + 2 + i
         ws.cell(r, 1, lab).font = font()
         x = put(ws, f"B{r}", f"={paddr(k)}", fmt, True, fill=F_OUT)
         x.alignment = Alignment(horizontal="right")
     ws.column_dimensions["A"].width = 38
-    ws.column_dimensions["B"].width = 26
+    ws.column_dimensions["B"].width = 44
     ws.column_dimensions["C"].width = 3
+    for c in range(4, 23):
+        ws.column_dimensions[L(c)].width = 9.3
+    ws.column_dimensions["M"].width = 3
     A = wb["Resumo_Anual"]
     ar = lambda k: ROWS[("A", k)]
-    # 1 caixa mensal
-    fc = wb["Fluxo_Caixa"]
-    c1 = LineChart()
-    c1.title = "Saldo de caixa e fluxo livre acumulado (R$, mensal)"
-    c1.height, c1.width = 8.5, 17
-    for key in ("caixa", "cum"):
-        rr = ROWS[("FC", key)]
-        s = Series(Reference(fc, min_col=C0, max_col=CL, min_row=rr), title=fc.cell(rr, 1).value.split(" (")[0].capitalize())
-        s.smooth = False
-        c1.series.append(s)
-    c1.set_categories(Reference(fc, min_col=C0, max_col=CL, min_row=3))
-    c1.x_axis.title = "Mês do modelo"
-    c1.x_axis.tickLblSkip = 12
-    c1.x_axis.tickLblPos = "low"
-    ws.add_chart(c1, "D7")
-    # 2 EBITDA por unidade
-    c2 = BarChart()
-    c2.type = "col"
-    c2.grouping = "stacked"
-    c2.overlap = 100
-    c2.title = "Resultado por unidade de negócio (R$/ano)"
-    c2.height, c2.width = 8.5, 17
-    for k in ("U_cr", "U_re", "U_en", "U_la", "U_es"):
-        c2.series.append(Series(Reference(A, min_col=4, max_col=13, min_row=ar(k)), title=A.cell(ar(k), 1).value))
-    c2.set_categories(Reference(A, min_col=4, max_col=13, min_row=4))
-    c2.x_axis.tickLblPos = "low"
-    ws.add_chart(c2, "N7")
-    # 3 rebanho
-    rb = wb["Rebanho"]
-    c3 = LineChart()
-    c3.title = "Rebanho (cabeças) e UA em pasto"
-    c3.height, c3.width = 8.5, 17
-    for key, t in (("cab_total", "Cabeças"), ("ua_pasto", "UA em pasto")):
-        rr = ROWS[("Reb", key)]
-        c3.series.append(Series(Reference(rb, min_col=C0, max_col=CL, min_row=rr), title=t))
-    c3.set_categories(Reference(rb, min_col=C0, max_col=CL, min_row=3))
-    c3.x_axis.tickLblSkip = 12
-    ws.add_chart(c3, "D25")
-    # 4 FCL anual
-    c4 = BarChart()
-    c4.type = "col"
-    c4.title = "Fluxo de caixa livre e lucro líquido (R$/ano)"
-    c4.height, c4.width = 8.5, 17
-    for k in ("FC_fcl", "D_ll"):
-        c4.series.append(Series(Reference(A, min_col=4, max_col=13, min_row=ar(k)), title=A.cell(ar(k), 1).value))
-    c4.set_categories(Reference(A, min_col=4, max_col=13, min_row=4))
-    c4.x_axis.tickLblPos = "low"
-    ws.add_chart(c4, "N25")
-    # 5 cenarios
-    cs = wb["Cenarios"]
-    c5 = BarChart()
-    c5.type = "bar"
-    c5.title = "VPL por cenário (R$)"
-    c5.height, c5.width = 9.5, 17
-    c5.series.append(Series(Reference(cs, min_col=3, min_row=sc_h + 1, max_row=sc_h + 9), title="VPL"))
-    c5.set_categories(Reference(cs, min_col=1, min_row=sc_h + 1, max_row=sc_h + 9))
-    c5.legend = None
-    c5.x_axis.tickLblPos = "low"
-    ws.add_chart(c5, "D43")
-    # 6 tornado
-    ss = wb["Sensibilidade"]
+    fc, rb, cs, ss = wb["Fluxo_Caixa"], wb["Rebanho"], wb["Cenarios"], wb["Sensibilidade"]
     n = len(SHOCKS)
-    c6 = BarChart()
-    c6.type = "bar"
-    c6.title = "Tornado: variação do VPL (R$)"
-    c6.height, c6.width = 9.5, 17
-    c6.add_data(Reference(ss, min_col=4, max_col=5, min_row=torn_t0, max_row=torn_t0 + n), titles_from_data=True)
-    c6.set_categories(Reference(ss, min_col=1, min_row=torn_t0 + 1, max_row=torn_t0 + n))
-    c6.overlap = 100
-    c6.x_axis.tickLblPos = "low"
-    ws.add_chart(c6, "N43")
+    kk = lambda k: paddr(k)
+    um = f"{kk('k_cr')}:{kk('k_es')}"
+    inc = f"Cenarios!$D${sc_h+1}:$D${sc_h+9}"
+    ts = PREM["torn_sorted"][1]
+
+    def block(anchor_col, row, headline, sub, chart):
+        c0 = anchor_col
+        h = ws.cell(row, c0, headline)
+        h.font = font("1F3864", True, size=11)
+        for c in range(c0, c0 + 9):
+            ws.cell(row, c).border = Border(bottom=Side(style="medium", color="1F3864"))
+        ws.cell(row + 1, c0, sub).font = font(GRAY, italic=True, size=9)
+        ws.add_chart(chart, f"{L(c0)}{row+2}")
+
+    # 1 caixa
+    c1 = base(LineChart())
+    c1.series.append(line_series(fc, ROWS[("FC", "caixa")], C0, CL, "Saldo de caixa", NAVY, 2.25))
+    c1.series.append(line_series(fc, ROWS[("FC", "cum")], C0, CL, "Fluxo de caixa livre acumulado", GREY, 1.75))
+    c1.set_categories(Reference(fc, min_col=C0, max_col=CL, min_row=3))
+    monthly_axis(c1)
+    block(4, 4, f'="O projeto consome até R$ "&ROUND({kk("k_expo")}/1000,0)&" mil de caixa e "&IF(ISNUMBER({kk("k_pb")}),"recupera o investimento no mês "&{kk("k_pb")},"não recupera o investimento em 10 anos")',
+          "Saldo de caixa e fluxo de caixa livre acumulado, R$ mil, por mês do modelo", c1)
+    # 2 unidades
+    c2 = base(BarChart(), gap=55)
+    c2.type, c2.grouping, c2.overlap = "col", "stacked", 100
+    for k, col, nm in (("U_cr", NAVY, "Cria"), ("U_re", ORANGE, "Recria"), ("U_en", TEAL, "Engorda"), ("U_la", VIOLET, "Lavoura e grãos"), ("U_es", GREY, "Estrutura (terra e custos fixos)")):
+        c2.series.append(bar_series(Reference(A, min_col=4, max_col=13, min_row=ar(k)), nm, col))
+    c2.set_categories(Reference(A, min_col=4, max_col=13, min_row=4))
+    block(14, 4, f'="Maior resultado em 10 anos: "&CHOOSE(MATCH(MAX({um}),{um},0),"cria","recria","engorda","lavoura e grãos","estrutura (renda da terra)")&" (R$ "&ROUND(MAX({um})/1000,0)&" mil)"',
+          "Resultado por unidade de negócio, com preços de transferência e arrendamento imputado, R$ mil por ano do modelo", c2)
+    # 3 rebanho
+    c3 = base(LineChart(), yfmt='#,##0')
+    c3.series.append(line_series(rb, ROWS[("Reb", "cab_total")], C0, CL, "Cabeças", NAVY, 2.25))
+    c3.series.append(line_series(rb, ROWS[("Reb", "ua_pasto")], C0, CL, "Unidades animais em pasto", TEAL, 1.75))
+    c3.set_categories(Reference(rb, min_col=C0, max_col=CL, min_row=3))
+    monthly_axis(c3)
+    block(4, 23, f'="Rebanho de "&ROUND({kk("k_cab")},0)&" cabeças no mês 120; lotação média de "&ROUND({kk("k_lot")},2)&" UA/ha"',
+          "Cabeças e unidades animais (UA = 450 kg) em pasto, por mês do modelo", c3)
+    # 4 fluxo e lucro
+    c4 = base(BarChart(), gap=70)
+    c4.type, c4.grouping, c4.overlap = "col", "clustered", -10
+    c4.series.append(bar_series(Reference(A, min_col=4, max_col=13, min_row=ar("FC_fcl")), "Fluxo de caixa livre", NAVY))
+    c4.series.append(bar_series(Reference(A, min_col=4, max_col=13, min_row=ar("D_ll")), "Lucro líquido", GREY))
+    c4.set_categories(Reference(A, min_col=4, max_col=13, min_row=4))
+    block(14, 23, f'="EBITDA médio de R$ "&ROUND({kk("k_ebitda")}/1000,0)&" mil/ano; lucro acumulado de R$ "&ROUND({kk("k_ll")}/1000,0)&" mil em 10 anos"',
+          "Fluxo de caixa livre e lucro líquido, R$ mil por ano do modelo", c4)
+    # 5 cenarios
+    c5 = base(BarChart(), gap=45)
+    c5.type, c5.grouping, c5.overlap = "bar", "stacked", 100
+    c5.x_axis.scaling.orientation = "maxMin"     # cenário 1 no topo
+    c5.y_axis.crosses = "max"
+    c5.series.append(bar_series(Reference(cs, min_col=15, min_row=sc_h + 1, max_row=sc_h + 9), "Cria valor frente a arrendar tudo", NAVY, labels=True))
+    c5.series.append(bar_series(Reference(cs, min_col=16, min_row=sc_h + 1, max_row=sc_h + 9), "Destrói valor frente a arrendar tudo", RED, labels=True))
+    c5.set_categories(Reference(cs, min_col=14, min_row=sc_h + 1, max_row=sc_h + 9))
+    block(4, 42, f'=IF(MAX({inc})>0,"Cenário "&MATCH(MAX({inc}),{inc},0)&" supera arrendar toda a área em R$ "&ROUND(MAX({inc})/1000,0)&" mil","Nenhum cenário supera arrendar toda a área; o mais próximo é o nº "&MATCH(MAX({inc}),{inc},0))',
+          "VPL incremental de cada cenário frente à alternativa de arrendar 100% da área útil, R$ mil", c5)
+    # 6 tornado
+    block(14, 42, f'="Variável de maior impacto no VPL: "&Sensibilidade!$J${ts+n-1}',
+          "Variação do VPL frente à base para cada choque, R$ mil (laranja = desfavorável, azul = favorável)", tornado_chart(ss, ts - 1, n))
     return ws

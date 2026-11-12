@@ -16,6 +16,7 @@ SCEN_NAMES = [
     "8. Misto: cria + recria/engorda em semiconfinamento + milho próprio",
     "9. Personalizado (exemplo: recria a pasto ampliada com crédito rural)",
 ]
+SCEN_SHORT = ["1 Cria", "2 Recria", "3 Recria+eng.", "4 Semiconf.", "5 Confin.", "6 Conf.+lav.", "7 Ciclo compl.", "8 Misto", "9 Personal."]
 # (nome, rotulo, unidade, formato, valores dos 9 cenarios, nota)
 LEVERS = [
     ("matr_ini", "Matrizes compradas no início", "cab", "int", [20, 0, 0, 0, 0, 0, 14, 6, 0],
@@ -111,6 +112,12 @@ def build_cenarios(wb):
         y.fill = F_IN
         y.alignment = Alignment(wrap_text=True, vertical="top")
     ws["A8"] = "Nome do cenário"
+    ws["A9"] = "Nome curto (rótulo dos gráficos)"
+    for i, nm in enumerate(SCEN_SHORT):
+        z = ws.cell(9, 4 + i, nm)
+        z.font = font(BLUE, size=9)
+        z.fill = F_IN
+        z.alignment = Alignment(horizontal="center")
     ws["M7"] = "Notas"
     ws["M7"].font = font(bold=True)
     ws.row_dimensions[8].height = 66
@@ -136,7 +143,7 @@ def build_cenarios(wb):
     for c in range(4, 13):
         ws.column_dimensions[L(c)].width = 17
     ws.column_dimensions["M"].width = 95
-    ws.freeze_panes = "D9"
+    ws.freeze_panes = "D10"
     return ws
 
 
