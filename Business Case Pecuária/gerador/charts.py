@@ -2,7 +2,7 @@
 """Estilo dos graficos (padrao de apresentacao executiva).
 
 Regras: sem titulo dentro do grafico (a mensagem fica numa celula acima, calculada por formula),
-sem borda, grade horizontal discreta, eixos em R$ mil, poucas cores com papel fixo.
+sem borda, sem linhas de grade, fundo branco, eixos em R$ mil, poucas cores com papel fixo.
 Paleta categorica validada para daltonismo (separacao e contraste):
   cria/serie principal  #24528F   recria/desfavoravel  #C8641E
   engorda               #1C9AA0   lavoura              #8A63B8
@@ -32,8 +32,8 @@ def base(ch, yfmt=K, legend=True, gap=None):
     ch.style = None
     ch.roundedCorners = False
     ch.width, ch.height = W, H
-    ch.graphical_properties = GraphicalProperties(noFill=True, ln=LineProperties(noFill=True))
-    ch.plot_area.spPr = GraphicalProperties(noFill=True, ln=LineProperties(noFill=True))
+    ch.graphical_properties = GraphicalProperties(solidFill="FFFFFF", ln=LineProperties(noFill=True))
+    ch.plot_area.spPr = GraphicalProperties(solidFill="FFFFFF", ln=LineProperties(noFill=True))
     for ax in (ch.x_axis, ch.y_axis):
         ax.delete = False
         ax.title = None
@@ -44,7 +44,7 @@ def base(ch, yfmt=K, legend=True, gap=None):
     ch.x_axis.spPr = GraphicalProperties(ln=LineProperties(solidFill="BFBFBF", w=9525))
     ch.x_axis.majorGridlines = None
     ch.y_axis.spPr = GraphicalProperties(ln=LineProperties(noFill=True))
-    ch.y_axis.majorGridlines.spPr = GraphicalProperties(ln=LineProperties(solidFill=GRID, w=6350))
+    ch.y_axis.majorGridlines = None          # sem linhas de grade: fundo totalmente branco
     ch.y_axis.number_format = yfmt
     if legend:
         ch.legend.position = "t"
