@@ -1,0 +1,189 @@
+{
+  "generatedAt": "2026-10-24T23:19:01.227Z",
+  "datasetHash": "0394934af1c1df50",
+  "n": 94,
+  "classifierVersion": "rules-2026.10.2",
+  "configVersion": "8cee049994",
+  "tolerance": 0.03,
+  "mainMetrics": [
+    "category_top1",
+    "category_acceptable",
+    "macro_f1_strict",
+    "macro_f1_lenient",
+    "level_in_range",
+    "high_plus_precision",
+    "high_plus_recall",
+    "critical_precision",
+    "critical_recall",
+    "action_precision",
+    "action_recall",
+    "deadline_accuracy",
+    "injection_precision",
+    "injection_recall",
+    "opportunity_precision",
+    "opportunity_recall"
+  ],
+  "metrics": {
+    "category_top1": {
+      "value": 0.6063829787234043,
+      "k": 57,
+      "n": 94,
+      "ci_low": 0.5053093955361283,
+      "ci_high": 0.6991026337029684
+    },
+    "category_acceptable": {
+      "value": 0.8617021276595744,
+      "k": 81,
+      "n": 94,
+      "ci_low": 0.7776378977292479,
+      "ci_high": 0.9173630016836808
+    },
+    "macro_f1_strict": {
+      "value": 0.5562387935241121,
+      "k": null,
+      "n": 94,
+      "ci_low": 0.41669635690533524,
+      "ci_high": 0.6357208151325798
+    },
+    "macro_f1_lenient": {
+      "value": 0.8224518786845657,
+      "k": null,
+      "n": 94,
+      "ci_low": 0.6999149424980629,
+      "ci_high": 0.9003390073978309
+    },
+    "level_exact": {
+      "value": 0.9583333333333334,
+      "k": 23,
+      "n": 24,
+      "ci_low": 0.7975777375115778,
+      "ci_high": 0.992606734645195
+    },
+    "level_in_range": {
+      "value": 0.9042553191489362,
+      "k": 85,
+      "n": 94,
+      "ci_low": 0.8279570919390105,
+      "ci_high": 0.9488086191695568
+    },
+    "level_over": {
+      "value": 0.02127659574468085,
+      "k": 2,
+      "n": 94,
+      "ci_low": 0.005854213528540098,
+      "ci_high": 0.07429165489552492
+    },
+    "level_under": {
+      "value": 0.07446808510638298,
+      "k": 7,
+      "n": 94,
+      "ci_low": 0.03653811601751902,
+      "ci_high": 0.14581376702609433
+    },
+    "critical_precision": {
+      "value": null,
+      "k": 0,
+      "n": 0,
+      "ci_low": null,
+      "ci_high": null
+    },
+    "critical_recall": {
+      "value": null,
+      "k": 0,
+      "n": 0,
+      "ci_low": null,
+      "ci_high": null
+    },
+    "high_plus_precision": {
+      "value": 0.9333333333333333,
+      "k": 14,
+      "n": 15,
+      "ci_low": 0.7018292244757601,
+      "ci_high": 0.9881334113938051
+    },
+    "high_plus_recall": {
+      "value": 0.7142857142857143,
+      "k": 5,
+      "n": 7,
+      "ci_low": 0.35892909014821267,
+      "ci_high": 0.9177828342909844
+    },
+    "action_precision": {
+      "value": 1,
+      "k": 29,
+      "n": 29,
+      "ci_low": 0.8830264055344442,
+      "ci_high": 1
+    },
+    "action_recall": {
+      "value": 0.7837837837837838,
+      "k": 29,
+      "n": 37,
+      "ci_low": 0.628045387261231,
+      "ci_high": 0.8861362314804442
+    },
+    "action_accuracy": {
+      "value": 0.9036144578313253,
+      "k": 75,
+      "n": 83,
+      "ci_low": 0.8211717868492707,
+      "ci_high": 0.9503478535074248
+    },
+    "deadline_accuracy": {
+      "value": 0.9021739130434783,
+      "k": 83,
+      "n": 92,
+      "ci_low": 0.8244304748274598,
+      "ci_high": 0.9476768355680261
+    },
+    "deadline_date_recall": {
+      "value": 0.8571428571428571,
+      "k": 24,
+      "n": 28,
+      "ci_low": 0.6850982695512267,
+      "ci_high": 0.9430108706929821
+    },
+    "deadline_spurious": {
+      "value": 0.078125,
+      "k": 5,
+      "n": 64,
+      "ci_low": 0.03383067809543547,
+      "ci_high": 0.1701975287864777
+    },
+    "injection_precision": {
+      "value": 1,
+      "k": 3,
+      "n": 3,
+      "ci_low": 0.43849391955098227,
+      "ci_high": 1
+    },
+    "injection_recall": {
+      "value": 1,
+      "k": 3,
+      "n": 3,
+      "ci_low": 0.43849391955098227,
+      "ci_high": 1
+    },
+    "opportunity_rate": {
+      "value": 0.07446808510638298,
+      "k": 7,
+      "n": 94,
+      "ci_low": 0.03653811601751902,
+      "ci_high": 0.14581376702609433
+    },
+    "opportunity_precision": {
+      "value": 0.7142857142857143,
+      "k": 5,
+      "n": 7,
+      "ci_low": 0.35892909014821267,
+      "ci_high": 0.9177828342909844
+    },
+    "opportunity_recall": {
+      "value": 0.5555555555555556,
+      "k": 5,
+      "n": 9,
+      "ci_low": 0.2666473457440297,
+      "ci_high": 0.811224570528086
+    }
+  }
+}

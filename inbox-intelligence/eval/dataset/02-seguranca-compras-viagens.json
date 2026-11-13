@@ -1,0 +1,327 @@
+[
+  {
+    "id": "seguranca-codigo-acesso-banco",
+    "description": "Código de acesso de uso único (efêmero)",
+    "refToday": "2026-10-20",
+    "message": {
+      "from": "Banco Inter <no-reply@inter.co>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Seu código de acesso",
+      "date": "2026-10-20T13:31:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@inter.co; spf=pass smtp.mailfrom=inter.co; dmarc=pass header.from=inter.co" },
+      "text": "Use o código 551203 para acessar sua conta no Internet Banking.\n\nEle expira em 10 minutos. Se você não solicitou, ignore este e-mail e não compartilhe o código com ninguém."
+    },
+    "expected": { "categories": ["seguranca_conta"], "levelMin": "LOW", "levelMax": "MEDIUM", "action": null, "deadline": null, "opportunity": false, "injection": false, "notes": "Útil só no momento em que foi pedido." }
+  },
+  {
+    "id": "seguranca-novo-login-google",
+    "description": "Alerta de novo login na conta Google",
+    "refToday": "2026-10-20",
+    "message": {
+      "from": "Google <no-reply@accounts.google.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Alerta de segurança: novo login no Windows",
+      "date": "2026-10-20T17:23:00Z",
+      "labelIds": ["INBOX", "UNREAD", "IMPORTANT", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@accounts.google.com; spf=pass smtp.mailfrom=accounts.google.com; dmarc=pass header.from=accounts.google.com" },
+      "text": "Um novo login foi detectado na sua Conta do Google rafael.moura.dados@gmail.com\n\nWindows · Chrome · São Paulo, Brasil\n20 de outubro de 2026, 14:22\n\nSe foi você, não é necessário fazer nada. Se não foi, ajudaremos você a proteger sua conta.\n\nVerificar atividade: https://myaccount.google.com/notifications"
+    },
+    "expected": { "categories": ["seguranca_conta"], "levelMin": "MEDIUM", "levelMax": "HIGH", "action": null, "deadline": null, "opportunity": false, "injection": false, "notes": "Precisa de um olhar rápido para confirmar que foi o dono." }
+  },
+  {
+    "id": "seguranca-senha-alterada-marketplace",
+    "description": "Aviso de senha alterada em conta de marketplace",
+    "refToday": "2026-10-21",
+    "message": {
+      "from": "Mercado Livre <seguranca@mercadolivre.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Sua senha foi alterada",
+      "date": "2026-10-21T11:48:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@mercadolivre.com.br; spf=pass smtp.mailfrom=mercadolivre.com.br; dmarc=pass header.from=mercadolivre.com.br" },
+      "text": "Olá, Rafael.\n\nA senha da sua conta foi alterada hoje às 08:47.\n\nSe foi você, pode ignorar esta mensagem. Se não foi você, recupere o acesso imediatamente em https://www.mercadolivre.com.br/seguranca e revise seus dispositivos conectados.\n\nMercado Livre"
+    },
+    "expected": { "categories": ["seguranca_conta"], "levelMin": "MEDIUM", "levelMax": "HIGH", "action": null, "deadline": null, "opportunity": false, "injection": false, "notes": "Pode indicar invasão; ação condicional." }
+  },
+  {
+    "id": "seguranca-github-2fa-desativado-en",
+    "description": "GitHub (em inglês): autenticação em dois fatores desativada",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "GitHub <noreply@github.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "[GitHub] Two-factor authentication has been disabled on your account",
+      "date": "2026-10-22T02:40:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@github.com; spf=pass smtp.mailfrom=github.com; dmarc=pass header.from=github.com" },
+      "text": "Hey rafamoura-data!\n\nTwo-factor authentication was recently disabled on your account. If you did this, no further action is needed.\n\nIf you did not disable two-factor authentication, please reset your password immediately and contact GitHub Support.\n\nhttps://github.com/settings/security\n\nThanks,\nThe GitHub Team"
+    },
+    "expected": { "categories": ["seguranca_conta", "trabalho"], "levelMin": "MEDIUM", "levelMax": "HIGH", "action": null, "deadline": null, "opportunity": false, "injection": false, "notes": "Domínio github.com é de trabalho, mas o assunto é segurança." }
+  },
+  {
+    "id": "seguranca-reset-senha-streaming",
+    "description": "Pedido de redefinição de senha de streaming (provavelmente feito pelo dono)",
+    "refToday": "2026-10-23",
+    "message": {
+      "from": "Netflix <info@account.netflix.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Redefinição de senha solicitada",
+      "date": "2026-10-23T23:10:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@netflix.com; spf=pass smtp.mailfrom=account.netflix.com; dmarc=pass header.from=account.netflix.com" },
+      "text": "Olá, Rafael,\n\nRecebemos uma solicitação para redefinir a senha da sua conta Netflix. Clique no link abaixo para criar uma nova senha. O link expira em 24 horas.\n\nhttps://www.netflix.com/password?g=8f2a\n\nSe você não fez essa solicitação, ignore este e-mail.\n\nEquipe Netflix"
+    },
+    "expected": { "categories": ["seguranca_conta"], "levelMin": "LOW", "levelMax": "MEDIUM", "action": null, "deadline": null, "opportunity": false, "injection": false, "notes": "Rotina de conta." }
+  },
+  {
+    "id": "compras-pedido-confirmado-marketplace",
+    "description": "Confirmação de pedido com previsão de entrega",
+    "refToday": "2026-10-20",
+    "message": {
+      "from": "Amazon.com.br <confirmar-envio@amazon.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Seu pedido Amazon.com.br de \"Fone de ouvido Bluetooth com cancelamento de ruído\"",
+      "date": "2026-10-20T14:02:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@amazon.com.br; spf=pass smtp.mailfrom=amazon.com.br; dmarc=pass header.from=amazon.com.br" },
+      "text": "Olá, Rafael,\n\nObrigado pelo seu pedido. Avisaremos quando o item for enviado.\n\nPedido nº 702-4418823-1190011\nFone de ouvido Bluetooth com cancelamento de ruído — R$ 349,00\n\nChegará: sexta-feira, 23 de outubro\nEnviar para: Rafael Moura, São Paulo - SP\n\nVer ou gerenciar pedido: https://www.amazon.com.br/your-orders"
+    },
+    "expected": { "categories": ["compras"], "levelMin": "LOW", "levelMax": "LOW", "action": false, "deadline": "any", "opportunity": false, "injection": false, "notes": "Previsão de entrega não é prazo do dono." }
+  },
+  {
+    "id": "compras-pacote-chega-hoje",
+    "description": "Aviso de entrega no dia",
+    "refToday": "2026-10-23",
+    "message": {
+      "from": "Mercado Livre <noreply@mercadolivre.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Seu pacote chega hoje!",
+      "date": "2026-10-23T11:20:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@mercadolivre.com.br; spf=pass smtp.mailfrom=mercadolivre.com.br; dmarc=pass header.from=mercadolivre.com.br" },
+      "text": "Rafael, seu pacote saiu para entrega e chega hoje!\n\nProduto: Suporte articulado para notebook\nRastreamento: ML998812233BR\n\nSe não houver ninguém para receber, o entregador tentará novamente no próximo dia útil."
+    },
+    "expected": { "categories": ["compras"], "levelMin": "LOW", "levelMax": "MEDIUM", "action": false, "deadline": "any", "opportunity": false, "injection": false, "notes": "Informativo de entrega." }
+  },
+  {
+    "id": "compras-nfe-emitida",
+    "description": "Nota fiscal eletrônica com anexos XML/PDF",
+    "refToday": "2026-10-20",
+    "message": {
+      "from": "KaBuM! <nfe@kabum.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Nota fiscal eletrônica do pedido 88123441",
+      "date": "2026-10-20T16:00:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@kabum.com.br; spf=pass smtp.mailfrom=kabum.com.br; dmarc=pass header.from=kabum.com.br" },
+      "text": "Olá, Rafael!\n\nA NF-e referente ao pedido 88123441 foi emitida e segue em anexo (XML e DANFE).\n\nValor total: R$ 1.299,90\n\nGuarde este documento: ele é necessário para garantia e eventuais trocas.\n\nKaBuM!",
+      "attachments": [
+        { "filename": "NFe-35261012345678000199550010000123451000123456.xml", "mimeType": "application/xml", "size": 12000 },
+        { "filename": "DANFE-88123441.pdf", "mimeType": "application/pdf", "size": 64000 }
+      ]
+    },
+    "expected": { "categories": ["compras"], "levelMin": "LOW", "levelMax": "LOW", "action": false, "deadline": null, "opportunity": false, "injection": false, "notes": "Documento para arquivar." }
+  },
+  {
+    "id": "compras-reembolso-aprovado",
+    "description": "Reembolso de compra aprovado",
+    "refToday": "2026-10-21",
+    "message": {
+      "from": "Shopee <info@mail.shopee.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Seu reembolso foi aprovado",
+      "date": "2026-10-21T18:30:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@shopee.com.br; spf=pass smtp.mailfrom=mail.shopee.com.br; dmarc=pass header.from=mail.shopee.com.br" },
+      "text": "Olá, rafamoura!\n\nSeu pedido de reembolso do pedido 241019ABCD foi aprovado. O valor de R$ 79,90 será creditado na forma de pagamento original em até 7 dias úteis.\n\nEquipe Shopee"
+    },
+    "expected": { "categories": ["compras"], "levelMin": "LOW", "levelMax": "LOW", "action": false, "deadline": null, "opportunity": false, "injection": false, "notes": "Informativo." }
+  },
+  {
+    "id": "compras-recibo-assinatura-musica",
+    "description": "Recibo mensal de assinatura de música",
+    "refToday": "2026-10-19",
+    "message": {
+      "from": "Spotify <no-reply@spotify.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Seu recibo do Spotify",
+      "date": "2026-10-19T09:00:00Z",
+      "labelIds": ["INBOX", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@spotify.com; spf=pass smtp.mailfrom=spotify.com; dmarc=pass header.from=spotify.com" },
+      "text": "Obrigado por assinar o Spotify Premium.\n\nPlano: Premium Individual\nValor: R$ 21,90\nData do pagamento: 19/10/2026\nPróxima cobrança: 19/11/2026\n\nGerencie sua assinatura em spotify.com/account."
+    },
+    "expected": { "categories": ["compras"], "levelMin": "LOW", "levelMax": "LOW", "action": false, "deadline": null, "opportunity": false, "injection": false, "notes": "Cobrança recorrente já paga." }
+  },
+  {
+    "id": "compras-correios-retirada-agencia",
+    "description": "Objeto aguardando retirada na agência com prazo de devolução",
+    "refToday": "2026-10-21",
+    "message": {
+      "from": "Correios <naoresponda@correios.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Objeto aguardando retirada — AB123456789BR",
+      "date": "2026-10-21T12:15:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@correios.com.br; spf=pass smtp.mailfrom=correios.com.br; dmarc=pass header.from=correios.com.br" },
+      "text": "Olá, RAFAEL MOURA.\n\nApós tentativa de entrega sem sucesso, o objeto AB123456789BR está disponível para retirada na Agência Pinheiros (Rua dos Pinheiros, 500) até 28/10/2026.\n\nApós esse prazo, ele será devolvido ao remetente. Leve documento oficial com foto.\n\nCorreios"
+    },
+    "expected": { "categories": ["compras"], "levelMin": "MEDIUM", "levelMax": "HIGH", "action": true, "deadline": "2026-10-28", "opportunity": false, "injection": false, "notes": "Exige ir à agência antes do prazo." }
+  },
+  {
+    "id": "compras-delivery-entregue-com-cupom",
+    "description": "Pedido de delivery entregue, com convite para avaliar e cupom (List-Unsubscribe)",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "iFood <naoresponda@ifood.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Seu pedido foi entregue! Que tal avaliar?",
+      "date": "2026-10-22T23:40:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": {
+        "List-Unsubscribe": "<https://ifood.com.br/unsubscribe?t=91aa>",
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@ifood.com.br; spf=pass smtp.mailfrom=ifood.com.br; dmarc=pass header.from=ifood.com.br"
+      },
+      "text": "Seu pedido do Restaurante Sabor Caseiro foi entregue.\n\nTotal: R$ 62,40\n\nConte pra gente como foi! Avalie o restaurante e ganhe um cupom de R$ 5 para o próximo pedido.\n\nAvaliar agora"
+    },
+    "expected": { "categories": ["compras", "marketing"], "levelMin": "LOW", "levelMax": "LOW", "action": false, "deadline": null, "opportunity": false, "injection": false, "notes": "Avaliação opcional." }
+  },
+  {
+    "id": "compras-pagamento-assinatura-falhou",
+    "description": "Pagamento de assinatura recusado; atualizar forma de pagamento em 3 dias",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Netflix <info@account.netflix.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Atualize sua forma de pagamento",
+      "date": "2026-10-22T12:00:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@netflix.com; spf=pass smtp.mailfrom=account.netflix.com; dmarc=pass header.from=account.netflix.com" },
+      "text": "Olá, Rafael,\n\nNão conseguimos processar o pagamento da sua assinatura com o cartão final 4821.\n\nAtualize sua forma de pagamento até 25/10/2026 para continuar assistindo sem interrupções.\n\nAtualizar pagamento: https://www.netflix.com/youraccount\n\nEquipe Netflix"
+    },
+    "expected": { "categories": ["compras", "contas"], "levelMin": "MEDIUM", "levelMax": "MEDIUM", "action": true, "deadline": "2026-10-25", "opportunity": false, "injection": false, "notes": "Ação real, consequência pequena (perde o streaming)." }
+  },
+  {
+    "id": "compras-recibo-viagem-app",
+    "description": "Recibo de viagem por aplicativo",
+    "refToday": "2026-10-21",
+    "message": {
+      "from": "Uber Receipts <noreply@uber.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Sua viagem de terça-feira à noite com a Uber",
+      "date": "2026-10-21T01:35:00Z",
+      "labelIds": ["INBOX", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@uber.com; spf=pass smtp.mailfrom=uber.com; dmarc=pass header.from=uber.com" },
+      "text": "Obrigado por viajar com a Uber, Rafael.\n\nTotal: R$ 38,72\nUberX · 12,4 km · 28 min\nDe: Av. Faria Lima, 3000\nPara: Rua das Acácias, 120\n\nRecibo disponível no app."
+    },
+    "expected": { "categories": ["compras"], "levelMin": "LOW", "levelMax": "LOW", "action": false, "deadline": null, "opportunity": false, "injection": false, "notes": "Recibo." }
+  },
+  {
+    "id": "agenda-voo-checkin-amanha",
+    "description": "Check-in aberto para voo de amanhã cedo",
+    "refToday": "2026-10-21",
+    "message": {
+      "from": "LATAM Airlines <latam@info.latam.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Faça seu check-in: voo LA3456 amanhã",
+      "date": "2026-10-21T10:40:00Z",
+      "labelIds": ["INBOX", "UNREAD", "IMPORTANT", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@info.latam.com; spf=pass smtp.mailfrom=info.latam.com; dmarc=pass header.from=info.latam.com" },
+      "text": "Olá, Rafael!\n\nO check-in do seu voo já está aberto.\n\nVoo LA3456 · São Paulo (GRU) → Recife (REC)\nData: 22/10/2026 · Partida: 07:40 · Embarque: 06:55\nLocalizador: XKQ7PL\n\nFaça o check-in pelo app ou site até 1 hora antes do voo e evite filas no aeroporto.\n\nBoa viagem!\nLATAM Airlines"
+    },
+    "expected": { "categories": ["agenda"], "levelMin": "HIGH", "levelMax": "HIGH", "action": true, "deadline": "2026-10-22", "opportunity": false, "injection": false, "notes": "Voo amanhã: check-in é ação concreta e urgente." }
+  },
+  {
+    "id": "agenda-reserva-hospedagem-confirmada",
+    "description": "Reserva de hospedagem confirmada para daqui a 25 dias",
+    "refToday": "2026-10-20",
+    "message": {
+      "from": "Booking.com <noreply@booking.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Reserva confirmada: Pousada Mar Azul, Porto de Galinhas",
+      "date": "2026-10-20T22:05:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@booking.com; spf=pass smtp.mailfrom=booking.com; dmarc=pass header.from=booking.com" },
+      "text": "Obrigado, Rafael! Sua reserva está confirmada.\n\nPousada Mar Azul — Porto de Galinhas\nCheck-in: sábado, 14/11/2026 (a partir das 14h)\nCheck-out: terça-feira, 17/11/2026 (até 12h)\nNúmero da reserva: 4182.993.120\n\nPagamento na propriedade. Cancelamento gratuito até 10/11/2026."
+    },
+    "expected": { "categories": ["agenda"], "levelMin": "LOW", "levelMax": "MEDIUM", "action": false, "deadline": "any", "opportunity": false, "injection": false, "notes": "Data-chave = check-in; prazo de cancelamento é opcional." }
+  },
+  {
+    "id": "agenda-anfitria-pergunta-horario",
+    "description": "Mensagem da anfitriã do aluguel por temporada pedindo horário de chegada",
+    "refToday": "2026-10-20",
+    "message": {
+      "from": "Airbnb <automated@airbnb.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Nova mensagem de Helena, sua anfitriã",
+      "date": "2026-10-20T20:12:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@airbnb.com; spf=pass smtp.mailfrom=airbnb.com; dmarc=pass header.from=airbnb.com" },
+      "text": "Helena enviou uma mensagem sobre a reserva em Olinda:\n\n\"Oi Rafael! Tudo certo para sexta? Que horas você pretende chegar? Preciso deixar a chave com o porteiro se for depois das 20h.\"\n\nResponder: https://www.airbnb.com.br/messaging/thread/889911"
+    },
+    "expected": { "categories": ["agenda", "tarefas"], "levelMin": "MEDIUM", "levelMax": "HIGH", "action": true, "deadline": "any", "opportunity": false, "injection": false, "notes": "Pessoa real via notificador automático; pede resposta antes de sexta." }
+  },
+  {
+    "id": "agenda-convite-reuniao-calendar",
+    "description": "Convite do Google Agenda para reunião de trabalho em 2 dias",
+    "refToday": "2026-10-20",
+    "message": {
+      "from": "Juliana Prado (Google Agenda) <calendar-notification@google.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Convite: Alinhamento pricing Q4 @ qui 22 de out de 2026 15:00 - 16:00 (BRT) (rafael.moura.dados@gmail.com)",
+      "date": "2026-10-20T15:30:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@google.com; spf=pass smtp.mailfrom=calendar-server.bounces.google.com; dmarc=pass header.from=google.com" },
+      "text": "Juliana Prado convidou você para este evento.\n\nAlinhamento pricing Q4\nQuando: quinta-feira, 22 de outubro de 2026 · 15:00 – 16:00 (Horário de Brasília)\nParticipar com Google Meet: https://meet.google.com/abc-defg-hij\n\nConvidados: Juliana Prado (organizadora), Rafael Moura, Bruno Tavares\n\nVai participar? Sim · Talvez · Não"
+    },
+    "expected": { "categories": ["agenda", "trabalho"], "levelMin": "MEDIUM", "levelMax": "HIGH", "action": null, "deadline": "2026-10-22", "opportunity": false, "injection": false, "notes": "RSVP é desejável, mas o essencial é a data." }
+  },
+  {
+    "id": "agenda-meetup-inscricao-confirmada",
+    "description": "Inscrição confirmada em meetup de pricing e analytics",
+    "refToday": "2026-10-20",
+    "message": {
+      "from": "Sympla <noreply@sympla.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Inscrição confirmada: Meetup Pricing & Analytics SP",
+      "date": "2026-10-20T19:44:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@sympla.com.br; spf=pass smtp.mailfrom=sympla.com.br; dmarc=pass header.from=sympla.com.br" },
+      "text": "Sua inscrição está confirmada!\n\nMeetup Pricing & Analytics SP — edição 12\nData: 29/10/2026 às 19h\nLocal: Espaço Comunidade, Av. Paulista, 2000 — São Paulo\n\nApresente o QR Code do ingresso na entrada.\n\nSympla"
+    },
+    "expected": { "categories": ["agenda"], "levelMin": "LOW", "levelMax": "MEDIUM", "action": false, "deadline": "2026-10-29", "opportunity": false, "injection": false, "notes": "Compromisso de interesse profissional." }
+  },
+  {
+    "id": "agenda-webinar-comeca-hoje",
+    "description": "Lembrete em massa de webinar em que o dono se inscreveu, hoje à noite",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Comunidade Dados BR <eventos@comunidadedadosbr.org>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Começa hoje às 19h: Precificação dinâmica com machine learning",
+      "date": "2026-10-22T15:00:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": {
+        "List-Unsubscribe": "<https://comunidadedadosbr.org/unsub?e=rm>",
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@comunidadedadosbr.org; spf=pass smtp.mailfrom=comunidadedadosbr.org; dmarc=pass header.from=comunidadedadosbr.org"
+      },
+      "text": "Olá, Rafael!\n\nO webinar \"Precificação dinâmica com machine learning\" começa hoje às 19h.\n\nLink de acesso: https://zoom.us/j/99887766\n\nAté logo!\nComunidade Dados BR"
+    },
+    "expected": { "categories": ["agenda", "tecnologia"], "levelMin": "LOW", "levelMax": "MEDIUM", "action": false, "deadline": "2026-10-22", "opportunity": false, "injection": false, "notes": "Evento opcional de interesse." }
+  },
+  {
+    "id": "agenda-save-the-date-casamento",
+    "description": "Save the date de casamento de amigos (data distante)",
+    "refToday": "2026-10-21",
+    "message": {
+      "from": "Ana e Pedro <anaepedro2027@gmail.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Save the date: casamento Ana & Pedro 💍",
+      "date": "2026-10-21T21:00:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_PERSONAL"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@gmail.com; spf=pass smtp.mailfrom=gmail.com; dmarc=pass header.from=gmail.com" },
+      "text": "Querido Rafael,\n\nCom muita alegria, contamos que vamos nos casar! Reserve a data: 12/06/2027, em Campos do Jordão.\n\nO convite oficial, com todos os detalhes, chega em breve.\n\nCom carinho,\nAna e Pedro"
+    },
+    "expected": { "categories": ["agenda", "outros"], "levelMin": "LOW", "levelMax": "MEDIUM", "action": false, "deadline": "any", "opportunity": false, "injection": false, "notes": "Pessoal, sem ação agora." }
+  }
+]

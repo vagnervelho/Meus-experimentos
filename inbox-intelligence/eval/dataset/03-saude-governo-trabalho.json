@@ -1,0 +1,425 @@
+[
+  {
+    "id": "saude-resultado-exame-disponivel",
+    "description": "Resultados de exames laboratoriais disponíveis",
+    "refToday": "2026-10-21",
+    "message": {
+      "from": "Fleury Medicina e Saúde <resultados@fleury.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Seus resultados de exames estão disponíveis",
+      "date": "2026-10-21T13:10:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@fleury.com.br; spf=pass smtp.mailfrom=fleury.com.br; dmarc=pass header.from=fleury.com.br" },
+      "text": "Olá, Rafael Moura.\n\nOs resultados dos exames realizados em 17/10/2026 (hemograma completo, perfil lipídico e TSH) já estão disponíveis.\n\nAcesse com seu CPF e senha em https://www.fleury.com.br/resultados ou pelo app.\n\nEm caso de dúvidas sobre os resultados, consulte seu médico.\n\nFleury Medicina e Saúde"
+    },
+    "expected": { "categories": ["saude"], "levelMin": "MEDIUM", "levelMax": "HIGH", "action": null, "deadline": null, "opportunity": false, "injection": false, "notes": "Saúde pessoal; data citada é da coleta (passado)." }
+  },
+  {
+    "id": "saude-consulta-amanha-confirmar-hoje",
+    "description": "Clínica lembra consulta amanhã e pede confirmação até hoje às 18h",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Clínica Vida Plena <agendamento@clinicavidaplena.com.br>",
+      "to": "Rafael Moura <rafael.moura.dados@gmail.com>",
+      "subject": "Lembrete: consulta amanhã, 23/10 às 9h — confirme sua presença",
+      "date": "2026-10-22T11:30:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_PERSONAL"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@clinicavidaplena.com.br; spf=pass smtp.mailfrom=clinicavidaplena.com.br; dmarc=pass header.from=clinicavidaplena.com.br" },
+      "text": "Olá, Rafael Moura.\n\nLembramos da sua consulta:\nDra. Helena Duarte — Cardiologia\nData: 23/10/2026 (sexta-feira) às 09:00\nLocal: Av. Paulista, 1500 — conj. 82\n\nPor favor, confirme sua presença respondendo SIM a este e-mail até hoje às 18h. Caso não confirme, o horário poderá ser liberado para outro paciente.\n\nTraga documento com foto e a carteirinha do plano de saúde.\n\nClínica Vida Plena"
+    },
+    "expected": { "categories": ["saude", "agenda"], "levelMin": "HIGH", "levelMax": "CRITICAL", "action": true, "deadline": "2026-10-22", "opportunity": false, "injection": false, "notes": "Prazo da ação (confirmar) é hoje; consulta é amanhã." }
+  },
+  {
+    "id": "saude-reajuste-plano",
+    "description": "Comunicado de reajuste anual do plano de saúde",
+    "refToday": "2026-10-20",
+    "message": {
+      "from": "SulAmérica Saúde <comunicados@sulamerica.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Comunicado: reajuste anual do seu plano de saúde",
+      "date": "2026-10-20T14:00:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@sulamerica.com.br; spf=pass smtp.mailfrom=sulamerica.com.br; dmarc=pass header.from=sulamerica.com.br" },
+      "text": "Prezado(a) beneficiário(a),\n\nInformamos que, conforme contrato e regras da ANS, será aplicado a partir da mensalidade de novembro/2026 o reajuste anual de 11,2% no seu plano de saúde Executivo 200.\n\nA nova mensalidade será de R$ 1.214,30. Os detalhes do cálculo estão disponíveis na área do cliente.\n\nSulAmérica Saúde"
+    },
+    "expected": { "categories": ["saude", "contas"], "levelMin": "LOW", "levelMax": "MEDIUM", "action": false, "deadline": null, "opportunity": false, "injection": false, "notes": "Informativo; impacto financeiro moderado." }
+  },
+  {
+    "id": "saude-newsletter-bem-estar",
+    "description": "Newsletter de bem-estar de operadora de saúde (massa)",
+    "refToday": "2026-10-21",
+    "tags": ["newsletter"],
+    "message": {
+      "from": "Unimed Bem-Estar <bemestar@unimed.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "5 hábitos para dormir melhor 😴",
+      "date": "2026-10-21T20:00:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_PROMOTIONS"],
+      "headers": {
+        "List-Unsubscribe": "<https://news.unimed.com.br/unsub?id=553>",
+        "List-Id": "Bem-Estar Unimed <bemestar.unimed.com.br>",
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@unimed.com.br; spf=pass smtp.mailfrom=unimed.com.br; dmarc=pass header.from=unimed.com.br"
+      },
+      "text": "Newsletter Bem-Estar · edição de outubro\n\nDormir bem é saúde! Confira 5 hábitos simples para melhorar a qualidade do seu sono: evite telas uma hora antes de deitar, mantenha horários regulares, reduza a cafeína à tarde, pratique atividade física e cuide do ambiente do quarto.\n\nLeia a matéria completa no nosso blog.\n\nVocê está recebendo este e-mail porque é beneficiário Unimed. Cancelar inscrição."
+    },
+    "expected": { "categories": ["newsletters", "saude", "marketing"], "levelMin": "LOW", "levelMax": "LOW", "action": false, "deadline": null, "opportunity": false, "injection": false, "notes": "Conteúdo genérico de massa, domínio de saúde." }
+  },
+  {
+    "id": "saude-dentista-orcamento-pessoa",
+    "description": "Dentista (pessoa) envia orçamento e receita, pede para agendar",
+    "refToday": "2026-10-20",
+    "message": {
+      "from": "Dr. Marcos Lima <marcos.lima.odonto@gmail.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Orçamento do tratamento + receita",
+      "date": "2026-10-20T21:15:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_PERSONAL"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@gmail.com; spf=pass smtp.mailfrom=gmail.com; dmarc=pass header.from=gmail.com" },
+      "text": "Rafael, boa noite.\n\nConforme conversamos, segue em anexo o orçamento do tratamento de canal (R$ 1.900,00, podendo parcelar em 3x) e a receita do anti-inflamatório.\n\nMe avise se quer agendar a próxima sessão ainda este mês, pois minha agenda de novembro está bem cheia.\n\nAbraço,\nDr. Marcos Lima — CRO-SP 98765",
+      "attachments": [
+        { "filename": "orcamento-tratamento.pdf", "mimeType": "application/pdf", "size": 52000 },
+        { "filename": "receita.pdf", "mimeType": "application/pdf", "size": 31000 }
+      ]
+    },
+    "expected": { "categories": ["saude"], "levelMin": "MEDIUM", "levelMax": "HIGH", "action": true, "deadline": null, "opportunity": false, "injection": false, "notes": "Pessoa, pedido de retorno sem data explícita." }
+  },
+  {
+    "id": "gov-malha-fina-pendencia",
+    "description": "Receita Federal: declaração retida em malha fiscal",
+    "refToday": "2026-10-20",
+    "message": {
+      "from": "Receita Federal <naoresponda@receita.fazenda.gov.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Sua declaração IRPF 2026 possui pendências",
+      "date": "2026-10-20T13:00:00Z",
+      "labelIds": ["INBOX", "UNREAD", "IMPORTANT", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@receita.fazenda.gov.br; spf=pass smtp.mailfrom=receita.fazenda.gov.br; dmarc=pass header.from=receita.fazenda.gov.br" },
+      "text": "Prezado(a) contribuinte,\n\nForam identificadas inconsistências na sua Declaração de Ajuste Anual do IRPF 2026, que se encontra retida em malha fiscal.\n\nConsulte o extrato da declaração no e-CAC para verificar as pendências e, se for o caso, envie uma declaração retificadora. A autorregularização antes de qualquer intimação evita a multa de ofício de 75%.\n\nEsta mensagem é automática. A Receita Federal não envia links para download de arquivos."
+    },
+    "expected": { "categories": ["governo_juridico", "contas"], "levelMin": "HIGH", "levelMax": "HIGH", "action": true, "deadline": null, "opportunity": false, "injection": false, "notes": "Risco financeiro alto, sem data explícita." }
+  },
+  {
+    "id": "juridico-advogada-audiencia-documentos",
+    "description": "Advogada informa audiência e pede documentos até terça (4 dias)",
+    "refToday": "2026-10-23",
+    "tags": ["pedido_direto_prazo"],
+    "message": {
+      "from": "Patrícia Nogueira <patricia@nogueiraadvocacia.com.br>",
+      "to": "Rafael Moura <rafael.moura.dados@gmail.com>",
+      "subject": "Processo contra a construtora — audiência e documentos",
+      "date": "2026-10-23T14:20:00Z",
+      "labelIds": ["INBOX", "UNREAD", "IMPORTANT", "CATEGORY_PERSONAL"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@nogueiraadvocacia.com.br; spf=pass smtp.mailfrom=nogueiraadvocacia.com.br; dmarc=pass header.from=nogueiraadvocacia.com.br" },
+      "text": "Prezado Rafael,\n\nFomos intimados da audiência de conciliação no processo nº 1023456-78.2026.8.26.0100 (ação contra a construtora), designada para 05/11/2026 às 14h, por videoconferência.\n\nPreciso que você me envie até terça-feira (27/10) os comprovantes de pagamento das parcelas e as fotos dos defeitos no imóvel, para eu montar a proposta de acordo.\n\nQualquer dúvida, estou à disposição.\n\nAtenciosamente,\nPatrícia Nogueira\nOAB/SP 123.456"
+    },
+    "context": { "knownContacts": ["patricia@nogueiraadvocacia.com.br"] },
+    "expected": { "categories": ["governo_juridico", "tarefas"], "levelMin": "HIGH", "levelMax": "CRITICAL", "action": true, "deadline": "2026-10-27", "opportunity": false, "injection": false, "notes": "Pedido direto com prazo de 4 dias e processo judicial." }
+  },
+  {
+    "id": "gov-detran-autuacao-indicacao-condutor",
+    "description": "Notificação de autuação de trânsito com prazo para indicar condutor",
+    "refToday": "2026-10-21",
+    "message": {
+      "from": "DETRAN-SP <naoresponda@detran.sp.gov.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Notificação de autuação — veículo ABC1D23",
+      "date": "2026-10-21T12:45:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@detran.sp.gov.br; spf=pass smtp.mailfrom=detran.sp.gov.br; dmarc=pass header.from=detran.sp.gov.br" },
+      "text": "Prezado(a) proprietário(a),\n\nFoi registrada infração de trânsito (velocidade superior à máxima permitida em até 20%) para o veículo placa ABC1D23 em 02/10/2026, na Av. dos Bandeirantes.\n\nPrazo para indicação do condutor infrator ou apresentação de defesa prévia: até 10/11/2026.\n\nConsulte a notificação completa em https://www.detran.sp.gov.br/infracoes\n\nDETRAN-SP"
+    },
+    "expected": { "categories": ["governo_juridico", "contas"], "levelMin": "MEDIUM", "levelMax": "HIGH", "action": true, "deadline": "2026-11-10", "opportunity": false, "injection": false, "notes": "Prazo legal confortável (20 dias)." }
+  },
+  {
+    "id": "gov-justica-eleitoral-informativo",
+    "description": "Boletim informativo da Justiça Eleitoral (massa)",
+    "refToday": "2026-10-19",
+    "tags": ["newsletter"],
+    "message": {
+      "from": "Justiça Eleitoral <comunicacao@tse.jus.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Biometria: saiba como atualizar seu cadastro eleitoral",
+      "date": "2026-10-19T15:00:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": {
+        "List-Unsubscribe": "<mailto:descadastro@tse.jus.br>",
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@tse.jus.br; spf=pass smtp.mailfrom=tse.jus.br; dmarc=pass header.from=tse.jus.br"
+      },
+      "text": "Boletim da Justiça Eleitoral\n\nA coleta biométrica continua aberta nos cartórios eleitorais de todo o país. Veja como agendar o atendimento pelo site e quais documentos levar.\n\nSaiba mais em www.tse.jus.br\n\nVocê está recebendo este boletim porque se cadastrou no portal. Cancelar inscrição."
+    },
+    "expected": { "categories": ["governo_juridico", "noticias", "newsletters"], "levelMin": "LOW", "levelMax": "LOW", "action": false, "deadline": null, "opportunity": false, "injection": false, "notes": "Informativo genérico de órgão público." }
+  },
+  {
+    "id": "trabalho-chefe-revisao-amanha-12h",
+    "description": "Chefe pede revisão de planilha até amanhã às 12h para comitê",
+    "refToday": "2026-10-21",
+    "tags": ["pedido_direto_prazo"],
+    "message": {
+      "from": "Juliana Prado <juliana.prado@varejohorizonte.com.br>",
+      "to": "Rafael Moura <rafael.moura.dados@gmail.com>",
+      "subject": "Revisão da planilha de elasticidade — preciso até amanhã 12h",
+      "date": "2026-10-21T17:05:00Z",
+      "labelIds": ["INBOX", "UNREAD", "IMPORTANT", "CATEGORY_PERSONAL"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@varejohorizonte.com.br; spf=pass smtp.mailfrom=varejohorizonte.com.br; dmarc=pass header.from=varejohorizonte.com.br" },
+      "text": "Rafael,\n\npreciso que você revise a planilha de elasticidade das categorias de mercearia e me envie até amanhã (22/10) às 12h. Vou levar os números para o comitê de preços às 14h.\n\nPontos principais: conferir os outliers de arroz e café e validar o cenário de +3% no preço médio.\n\nObrigada!\nJuliana"
+    },
+    "context": { "knownContacts": ["juliana.prado@varejohorizonte.com.br"] },
+    "expected": { "categories": ["trabalho", "tarefas"], "levelMin": "CRITICAL", "levelMax": "CRITICAL", "action": true, "deadline": "2026-10-22", "opportunity": false, "injection": false, "notes": "Caso canônico de Crítica: gestora, pedido direto, prazo amanhã." }
+  },
+  {
+    "id": "trabalho-colega-duvida-query",
+    "description": "Colega pergunta sobre regra de cálculo, sem prazo",
+    "refToday": "2026-10-20",
+    "message": {
+      "from": "Bruno Tavares <bruno.tavares@varejohorizonte.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Dúvida na query de margem",
+      "date": "2026-10-20T18:40:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_PERSONAL"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@varejohorizonte.com.br; spf=pass smtp.mailfrom=varejohorizonte.com.br; dmarc=pass header.from=varejohorizonte.com.br" },
+      "text": "Rafa, rodei a query de margem por SKU e o total não bate com o DRE (diferença de uns 2%).\n\nVocê lembra se a gente exclui as devoluções antes ou depois do rateio de frete? Quando puder me dá um toque.\n\nValeu,\nBruno"
+    },
+    "context": { "knownContacts": ["bruno.tavares@varejohorizonte.com.br"] },
+    "expected": { "categories": ["trabalho", "tarefas"], "levelMin": "MEDIUM", "levelMax": "HIGH", "action": true, "deadline": null, "opportunity": false, "injection": false, "notes": "Pergunta direta de colega, sem urgência." }
+  },
+  {
+    "id": "trabalho-jira-tarefa-atribuida",
+    "description": "Notificação do Jira: tarefa atribuída com data de entrega",
+    "refToday": "2026-10-21",
+    "message": {
+      "from": "Bruno Tavares (Jira) <jira@varejohorizonte.atlassian.net>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "[JIRA] (PRC-412) Ajustar regra de arredondamento de preços",
+      "date": "2026-10-21T13:55:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@varejohorizonte.atlassian.net; spf=pass smtp.mailfrom=atlassian.net; dmarc=pass header.from=varejohorizonte.atlassian.net" },
+      "text": "Bruno Tavares atribuiu PRC-412 a você.\n\nAjustar regra de arredondamento de preços\nPrioridade: Média\nData de entrega: 30/10/2026\nDescrição: preços terminados em ,99 estão virando ,00 nas lojas do Nordeste após a última carga.\n\nVer item: https://varejohorizonte.atlassian.net/browse/PRC-412"
+    },
+    "expected": { "categories": ["trabalho", "tarefas"], "levelMin": "MEDIUM", "levelMax": "HIGH", "action": true, "deadline": "2026-10-30", "opportunity": false, "injection": false, "notes": "Tarefa atribuída via ferramenta; 'data de entrega' é prazo." }
+  },
+  {
+    "id": "trabalho-planilha-compartilhada",
+    "description": "Notificação de planilha compartilhada pela gestora",
+    "refToday": "2026-10-21",
+    "message": {
+      "from": "Juliana Prado (via Planilhas Google) <drive-shares-dm-noreply@google.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Planilha compartilhada com você: \"Modelo de precificação Q4\"",
+      "date": "2026-10-21T14:10:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@google.com; spf=pass smtp.mailfrom=google.com; dmarc=pass header.from=google.com" },
+      "text": "Juliana Prado (juliana.prado@varejohorizonte.com.br) compartilhou uma planilha com você.\n\nModelo de precificação Q4\n\nAbrir: https://docs.google.com/spreadsheets/d/1AbCdEf/edit\n\nGoogle LLC, 1600 Amphitheatre Parkway, Mountain View, CA 94043, USA"
+    },
+    "expected": { "categories": ["trabalho"], "levelMin": "LOW", "levelMax": "MEDIUM", "action": false, "deadline": null, "opportunity": false, "injection": false, "notes": "Contexto para outra tarefa; sem pedido explícito." }
+  },
+  {
+    "id": "trabalho-ata-reuniao-em-copia",
+    "description": "Ata de reunião em que o dono está só em cópia",
+    "refToday": "2026-10-20",
+    "message": {
+      "from": "Carla Souza <carla.souza@varejohorizonte.com.br>",
+      "to": "Equipe Comercial <comercial@varejohorizonte.com.br>",
+      "cc": "Rafael Moura <rafael.moura.dados@gmail.com>",
+      "subject": "Ata — reunião de sortimento 20/10",
+      "date": "2026-10-20T21:30:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_PERSONAL"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@varejohorizonte.com.br; spf=pass smtp.mailfrom=varejohorizonte.com.br; dmarc=pass header.from=varejohorizonte.com.br" },
+      "text": "Pessoal, segue a ata da reunião de hoje.\n\nPrincipais decisões:\n1. Manter o mix atual de marcas próprias.\n2. Revisar preços de hortifrúti semanalmente.\n3. Próxima reunião em 03/11/2026 às 10h.\n\nQualquer ajuste, me avisem.\n\nCarla"
+    },
+    "expected": { "categories": ["trabalho"], "levelMin": "LOW", "levelMax": "MEDIUM", "action": false, "deadline": "any", "opportunity": false, "injection": false, "notes": "Em cópia; informativo." }
+  },
+  {
+    "id": "trabalho-cliente-proposta-sexta",
+    "description": "Cliente de consultoria pede proposta revisada até sexta (2 dias)",
+    "refToday": "2026-10-21",
+    "tags": ["pedido_direto_prazo"],
+    "message": {
+      "from": "Fernando Alves <fernando.alves@distribuidoranorte.com.br>",
+      "to": "Rafael Moura <rafael.moura.dados@gmail.com>",
+      "subject": "Proposta revisada — consultoria de pricing",
+      "date": "2026-10-21T12:25:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_PERSONAL"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@distribuidoranorte.com.br; spf=pass smtp.mailfrom=distribuidoranorte.com.br; dmarc=pass header.from=distribuidoranorte.com.br" },
+      "text": "Olá, Rafael,\n\nobrigado pela reunião de ontem. Poderia nos enviar a proposta revisada, com o escopo reduzido para as duas regionais, até sexta-feira (23/10)? Precisamos levar para aprovação da diretoria na segunda.\n\nAbraço,\nFernando Alves\nDiretor Comercial — Distribuidora Norte"
+    },
+    "expected": { "categories": ["trabalho", "tarefas", "negocios"], "levelMin": "HIGH", "levelMax": "CRITICAL", "action": true, "deadline": "2026-10-23", "opportunity": false, "injection": false, "notes": "Pedido direto de cliente, prazo em 2 dias." }
+  },
+  {
+    "id": "trabalho-reply-agradecimento-com-citacao",
+    "description": "Resposta curta de agradecimento; a citação contém um pedido antigo do próprio dono",
+    "refToday": "2026-10-21",
+    "message": {
+      "from": "Bruno Tavares <bruno.tavares@varejohorizonte.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Re: Ajuste no dashboard de margem",
+      "date": "2026-10-21T16:02:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_PERSONAL"],
+      "headers": {
+        "In-Reply-To": "<CAM1x9@mail.gmail.com>",
+        "References": "<CAM1x9@mail.gmail.com>",
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@varejohorizonte.com.br; spf=pass smtp.mailfrom=varejohorizonte.com.br; dmarc=pass header.from=varejohorizonte.com.br"
+      },
+      "text": "Perfeito, obrigado! Já está aparecendo certinho aqui.\n\nEm qua., 21 de out. de 2026 às 10:12, Rafael Moura <rafael.moura.dados@gmail.com> escreveu:\n> Bruno, ajustei a medida de margem no dashboard.\n> Preciso que você confirme se o filtro de loja está certo até amanhã.\n> Abs, Rafael\n"
+    },
+    "context": { "knownContacts": ["bruno.tavares@varejohorizonte.com.br"] },
+    "expected": { "categories": ["trabalho", "outros"], "levelMin": "LOW", "levelMax": "MEDIUM", "action": false, "deadline": null, "opportunity": false, "injection": false, "notes": "Fecha o assunto; pedido citado é do próprio dono e já foi atendido." }
+  },
+  {
+    "id": "trabalho-slack-mensagens-nao-lidas",
+    "description": "Resumo automático do Slack com mensagens não lidas",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Slack <notification@slack.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Você tem 5 mensagens não lidas no workspace Varejo Horizonte",
+      "date": "2026-10-22T22:00:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": {
+        "List-Unsubscribe": "<https://slack.com/account/notifications>",
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@slack.com; spf=pass smtp.mailfrom=slack.com; dmarc=pass header.from=slack.com"
+      },
+      "text": "Olá, Rafael. Você tem 5 mensagens não lidas.\n\n#pricing-ops — Bruno Tavares: subi a nova base de concorrentes\n#comite-precos — Juliana Prado: pauta de amanhã atualizada\n\nAbrir o Slack: https://varejohorizonte.slack.com"
+    },
+    "expected": { "categories": ["trabalho", "outros"], "levelMin": "LOW", "levelMax": "MEDIUM", "action": false, "deadline": null, "opportunity": false, "injection": false, "notes": "Resumo; o conteúdo está no Slack." }
+  },
+  {
+    "id": "trabalho-github-review-solicitado-en",
+    "description": "GitHub (inglês): revisão de pull request solicitada ao dono",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Bruno Tavares <notifications@github.com>",
+      "to": "varejohorizonte/pricing-engine <pricing-engine@noreply.github.com>",
+      "cc": "Review requested <review_requested@noreply.github.com>",
+      "subject": "[varejohorizonte/pricing-engine] Add rounding rules for promo prices (PR #231)",
+      "date": "2026-10-22T14:30:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": {
+        "List-Id": "varejohorizonte/pricing-engine <pricing-engine.varejohorizonte.github.com>",
+        "List-Unsubscribe": "<https://github.com/notifications/unsubscribe/AB12>",
+        "Precedence": "list",
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@github.com; spf=pass smtp.mailfrom=github.com; dmarc=pass header.from=github.com"
+      },
+      "text": "@btavares requested your review on: varejohorizonte/pricing-engine#231 Add rounding rules for promo prices.\n\nThis PR adds the .99 rounding rule for promotional prices and fixes the regional override.\n\nYou can view, comment on, or merge this pull request online at:\n\n  https://github.com/varejohorizonte/pricing-engine/pull/231\n\n—\nReply to this email directly, view it on GitHub, or unsubscribe.\nYou are receiving this because your review was requested."
+    },
+    "expected": { "categories": ["trabalho", "tarefas"], "levelMin": "MEDIUM", "levelMax": "MEDIUM", "action": true, "deadline": null, "opportunity": false, "injection": false, "notes": "Pedido de ação legítimo vindo de lista automática (dono não está no To)." }
+  },
+  {
+    "id": "trabalho-dependabot-vulnerabilidade",
+    "description": "Alerta do Dependabot com severidade crítica em repositório de trabalho",
+    "refToday": "2026-10-23",
+    "message": {
+      "from": "GitHub <noreply@github.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "[varejohorizonte/pricing-engine] Dependabot alert: critical severity vulnerability in lodash",
+      "date": "2026-10-23T09:10:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": {
+        "List-Unsubscribe": "<https://github.com/notifications/unsubscribe/CD34>",
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@github.com; spf=pass smtp.mailfrom=github.com; dmarc=pass header.from=github.com"
+      },
+      "text": "A critical severity vulnerability (CVE-2026-1234, prototype pollution) was found in lodash < 4.17.22 used by varejohorizonte/pricing-engine.\n\nRemediation: upgrade lodash to 4.17.22 or later. Dependabot can open a pull request to fix this automatically.\n\nReview the alert: https://github.com/varejohorizonte/pricing-engine/security/dependabot/17"
+    },
+    "expected": { "categories": ["trabalho", "seguranca_conta", "tecnologia"], "levelMin": "MEDIUM", "levelMax": "HIGH", "action": null, "deadline": null, "opportunity": false, "injection": false, "notes": "Segurança do repositório, não da conta pessoal." }
+  },
+  {
+    "id": "trabalho-town-hall-convite-interno",
+    "description": "Convite em massa da comunicação interna para town hall",
+    "refToday": "2026-10-20",
+    "message": {
+      "from": "Comunicação Interna <comunicacao@varejohorizonte.com.br>",
+      "to": "Todos <todos@varejohorizonte.com.br>",
+      "subject": "Town hall do 4º trimestre — 30/10 às 16h",
+      "date": "2026-10-20T12:00:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": {
+        "List-Id": "todos.varejohorizonte.com.br",
+        "Precedence": "bulk",
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@varejohorizonte.com.br; spf=pass smtp.mailfrom=varejohorizonte.com.br; dmarc=pass header.from=varejohorizonte.com.br"
+      },
+      "text": "Olá, time!\n\nNosso town hall do 4º trimestre será no dia 30/10 às 16h, no auditório da sede e com transmissão ao vivo.\n\nPauta: resultados do trimestre, plano de Black Friday e novidades de benefícios.\n\nAté lá!\nComunicação Interna"
+    },
+    "expected": { "categories": ["trabalho", "agenda"], "levelMin": "LOW", "levelMax": "MEDIUM", "action": false, "deadline": "2026-10-30", "opportunity": false, "injection": false, "notes": "Evento corporativo de massa." }
+  },
+  {
+    "id": "trabalho-pesquisa-clima-lembrete",
+    "description": "Lembrete automático para responder pesquisa de clima",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Pesquisa de Clima <noreply@pesquisaclima-rh.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Lembrete: responda à pesquisa de clima até 30/10",
+      "date": "2026-10-22T12:00:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": {
+        "List-Unsubscribe": "<https://pesquisaclima-rh.com.br/optout>",
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@pesquisaclima-rh.com.br; spf=pass smtp.mailfrom=pesquisaclima-rh.com.br; dmarc=pass header.from=pesquisaclima-rh.com.br"
+      },
+      "text": "Olá!\n\nA pesquisa de clima organizacional da Varejo Horizonte fica aberta até 30/10/2026. Leva cerca de 10 minutos e as respostas são anônimas.\n\nResponder agora: https://pesquisaclima-rh.com.br/r/vh2026\n\nObrigado pela participação!"
+    },
+    "expected": { "categories": ["trabalho", "tarefas"], "levelMin": "LOW", "levelMax": "MEDIUM", "action": null, "deadline": "2026-10-30", "opportunity": false, "injection": false, "notes": "Pedido coletivo e opcional." }
+  },
+  {
+    "id": "tarefas-contador-informes-ate-sexta",
+    "description": "Contador pede documentos até sexta (2 dias) para a declaração",
+    "refToday": "2026-10-21",
+    "tags": ["pedido_direto_prazo"],
+    "message": {
+      "from": "Sérgio Ramos <sergio@ramoscontabil.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Documentos para a declaração — preciso até sexta",
+      "date": "2026-10-21T13:40:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_PERSONAL"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@ramoscontabil.com.br; spf=pass smtp.mailfrom=ramoscontabil.com.br; dmarc=pass header.from=ramoscontabil.com.br" },
+      "text": "Oi Rafael, tudo bem?\n\nPara eu finalizar a retificação da sua declaração, preciso que você me envie até sexta-feira, 23/10, os informes de rendimentos do Banco Inter e da XP e o recibo do plano de saúde.\n\nSem esses documentos não consigo transmitir dentro do prazo.\n\nAbraço,\nSérgio\nRamos Contabilidade"
+    },
+    "context": { "knownContacts": ["sergio@ramoscontabil.com.br"] },
+    "expected": { "categories": ["tarefas", "contas", "governo_juridico"], "levelMin": "HIGH", "levelMax": "CRITICAL", "action": true, "deadline": "2026-10-23", "opportunity": false, "injection": false, "notes": "Pedido direto de profissional, prazo em 2 dias." }
+  },
+  {
+    "id": "tarefas-assinatura-docusign-nda",
+    "description": "Documento para assinar via DocuSign enviado pela gestora",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Juliana Prado via DocuSign <dse_na2@docusign.net>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Assine: Termo de confidencialidade — projeto Aurora",
+      "date": "2026-10-22T13:00:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@docusign.net; spf=pass smtp.mailfrom=docusign.net; dmarc=pass header.from=docusign.net" },
+      "text": "Juliana Prado enviou um documento para você revisar e assinar.\n\nREVISAR DOCUMENTO\n\nOlá Rafael, por favor assine o NDA para iniciarmos o projeto Aurora com o novo fornecedor de dados.\n\nNão compartilhe este e-mail: ele contém um link seguro para o DocuSign."
+    },
+    "expected": { "categories": ["tarefas", "trabalho"], "levelMin": "MEDIUM", "levelMax": "HIGH", "action": true, "deadline": null, "opportunity": false, "injection": false, "notes": "Pedido de assinatura sem data." }
+  },
+  {
+    "id": "tarefas-amigo-recomendacao-linkedin",
+    "description": "Amigo pede recomendação no LinkedIn, sem pressa",
+    "refToday": "2026-10-20",
+    "message": {
+      "from": "Thiago Martins <thiago.martins.ux@gmail.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Favorzão: recomendação no LinkedIn",
+      "date": "2026-10-20T23:20:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_PERSONAL"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@gmail.com; spf=pass smtp.mailfrom=gmail.com; dmarc=pass header.from=gmail.com" },
+      "text": "Fala, Rafa! Tudo certo?\n\nTô participando de um processo para Product Designer sênior e eles pediram referências. Você poderia escrever uma recomendação rápida no meu LinkedIn? Sem pressa, mas se der até o fim do mês seria ótimo.\n\nValeu demais!\nThiago"
+    },
+    "context": { "knownContacts": ["thiago.martins.ux@gmail.com"] },
+    "expected": { "categories": ["tarefas", "networking", "outros"], "levelMin": "MEDIUM", "levelMax": "MEDIUM", "action": true, "deadline": "any", "opportunity": false, "injection": false, "notes": "Favor pessoal com prazo suave." }
+  },
+  {
+    "id": "tarefas-escola-autorizacao-amanha",
+    "description": "Coordenação da escola pede autorização assinada até amanhã",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Coordenação Colégio Ipê Amarelo <coordenacao@colegioipeamarelo.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Autorização para o passeio ao Museu Catavento — entregar até amanhã",
+      "date": "2026-10-22T14:30:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_PERSONAL"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@colegioipeamarelo.com.br; spf=pass smtp.mailfrom=colegioipeamarelo.com.br; dmarc=pass header.from=colegioipeamarelo.com.br" },
+      "text": "Prezados responsáveis pelo aluno Lucas Moura,\n\nPedimos que a autorização do passeio ao Museu Catavento seja assinada e devolvida até amanhã, sexta-feira (23/10). Sem a autorização assinada, o aluno não poderá participar.\n\nO formulário segue em anexo.\n\nAtenciosamente,\nAna Beatriz — Coordenação Pedagógica",
+      "attachments": [{ "filename": "autorizacao-passeio.pdf", "mimeType": "application/pdf", "size": 41000 }]
+    },
+    "expected": { "categories": ["tarefas", "outros"], "levelMin": "HIGH", "levelMax": "CRITICAL", "action": true, "deadline": "2026-10-23", "opportunity": false, "injection": false, "notes": "Prazo amanhã com consequência para o filho." }
+  }
+]

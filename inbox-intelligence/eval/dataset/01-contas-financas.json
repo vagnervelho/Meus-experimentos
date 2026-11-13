@@ -1,0 +1,266 @@
+[
+  {
+    "id": "contas-energia-vence-3d",
+    "description": "Conta de energia digital com vencimento em 3 dias e linha digitável (sem débito automático)",
+    "refToday": "2026-10-20",
+    "message": {
+      "from": "Enel Distribuição São Paulo <contadigital@enel.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Sua conta de energia de outubro chegou",
+      "date": "2026-10-20T12:10:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@enel.com.br; spf=pass smtp.mailfrom=enel.com.br; dmarc=pass (p=REJECT) header.from=enel.com.br" },
+      "text": "Olá, RAFAEL MOURA\n\nSua conta de energia referente a outubro/2026 já está disponível.\n\nInstalação: 0045128833\nValor: R$ 287,45\nVencimento: 23/10/2026\n\nLinha digitável: 83660000002 8 87450048100 5 00045128833 1 02026102300 9\n\nPague pelo app, internet banking ou Pix até a data de vencimento para evitar multa e juros.\n\nEnel Distribuição São Paulo\nEste é um e-mail automático, não responda."
+    },
+    "expected": { "categories": ["contas"], "levelMin": "MEDIUM", "levelMax": "HIGH", "action": true, "deadline": "2026-10-23", "opportunity": false, "injection": false, "notes": "Conta a pagar em 3 dias, sem débito automático." }
+  },
+  {
+    "id": "contas-fatura-cartao-debito-automatico",
+    "description": "Fatura do cartão fechada, com débito automático já cadastrado (não exige ação)",
+    "refToday": "2026-10-21",
+    "message": {
+      "from": "Nubank <todomundo@nubank.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Sua fatura de outubro fechou",
+      "date": "2026-10-21T10:30:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@nubank.com.br; spf=pass smtp.mailfrom=nubank.com.br; dmarc=pass header.from=nubank.com.br" },
+      "text": "Oi, Rafael!\n\nA fatura do seu cartão de crédito fechou.\n\nValor total: R$ 1.487,32\nVencimento: 28/10/2026\n\nVocê tem o débito automático ativado: o valor será debitado da sua conta Nubank na data de vencimento. Não precisa fazer nada.\n\nConfira os detalhes da fatura no app.\n\nNubank"
+    },
+    "expected": { "categories": ["contas", "financas"], "levelMin": "LOW", "levelMax": "MEDIUM", "action": false, "deadline": "2026-10-28", "opportunity": false, "injection": false, "notes": "Débito automático: há vencimento, mas nenhuma ação do dono." }
+  },
+  {
+    "id": "contas-condominio-vence-hoje",
+    "description": "Boleto do condomínio vencendo hoje, com multa após o vencimento",
+    "refToday": "2026-10-21",
+    "message": {
+      "from": "Administradora Lar Paulista <boletos@larpaulista-adm.com.br>",
+      "to": "Rafael Moura <rafael.moura.dados@gmail.com>",
+      "subject": "Boleto do condomínio — vencimento HOJE (21/10)",
+      "date": "2026-10-21T11:00:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@larpaulista-adm.com.br; spf=pass smtp.mailfrom=larpaulista-adm.com.br; dmarc=pass header.from=larpaulista-adm.com.br" },
+      "text": "Prezado(a) condômino(a) RAFAEL MOURA,\n\nLembramos que o boleto da taxa condominial de outubro, unidade 54-B, vence hoje, 21/10/2026.\n\nValor: R$ 1.180,00\nApós o vencimento: multa de 2% + juros de 1% a.m.\n\nO boleto segue em anexo e também está disponível no portal do condômino.\n\nAtenciosamente,\nAdministradora Lar Paulista",
+      "attachments": [{ "filename": "boleto-condominio-outubro.pdf", "mimeType": "application/pdf", "size": 48211 }]
+    },
+    "expected": { "categories": ["contas"], "levelMin": "HIGH", "levelMax": "CRITICAL", "action": true, "deadline": "2026-10-21", "opportunity": false, "injection": false, "notes": "Pagamento vencendo no dia." }
+  },
+  {
+    "id": "contas-iptu-atraso-segunda-via",
+    "description": "IPTU com parcela vencida; prazo para pagar a 2ª via antes da dívida ativa",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Prefeitura de São Paulo — IPTU <naoresponda@prefeitura.sp.gov.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "IPTU 2026: parcela 9 em aberto",
+      "date": "2026-10-22T13:20:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@prefeitura.sp.gov.br; spf=pass smtp.mailfrom=prefeitura.sp.gov.br; dmarc=pass header.from=prefeitura.sp.gov.br" },
+      "text": "Contribuinte,\n\nConsta em aberto a parcela 9/10 do IPTU 2026 do imóvel SQL 012.034.0056-7, vencida em 09/10/2026.\n\nEmita a 2ª via atualizada e pague até 31/10/2026 para evitar a inscrição do débito em Dívida Ativa e a cobrança de encargos adicionais.\n\nAcesse: https://iptu.prefeitura.sp.gov.br/segunda-via\n\nSecretaria Municipal da Fazenda"
+    },
+    "expected": { "categories": ["contas", "governo_juridico"], "levelMin": "HIGH", "levelMax": "HIGH", "action": true, "deadline": "2026-10-31", "opportunity": false, "injection": false, "notes": "Imposto em atraso com risco de dívida ativa; o prazo relevante é o da 2ª via." }
+  },
+  {
+    "id": "financas-comprovante-pix-enviado",
+    "description": "Comprovante de Pix que o próprio dono enviou",
+    "refToday": "2026-10-19",
+    "message": {
+      "from": "Itaú <comprovante@itau.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Comprovante de Pix enviado",
+      "date": "2026-10-19T12:43:00Z",
+      "labelIds": ["INBOX", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@itau.com.br; spf=pass smtp.mailfrom=itau.com.br; dmarc=pass header.from=itau.com.br" },
+      "text": "Você enviou um Pix\n\nValor: R$ 250,00\nPara: MARIA DE FATIMA MOURA\nInstituição: Banco Exemplo S.A.\nData: 19/10/2026 às 09:42\nID da transação: E60701190202610191242abc\n\nSe você não reconhece esta transação, entre em contato pelo app."
+    },
+    "expected": { "categories": ["financas", "contas", "compras"], "levelMin": "LOW", "levelMax": "MEDIUM", "action": false, "deadline": null, "opportunity": false, "injection": false, "notes": "Registro de transação própria." }
+  },
+  {
+    "id": "contas-telefonia-fatura-9d",
+    "description": "Fatura de telefonia com vencimento em 9 dias",
+    "refToday": "2026-10-21",
+    "message": {
+      "from": "Claro <faturadigital@claro.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Sua fatura Claro chegou — vencimento 30/10",
+      "date": "2026-10-21T15:05:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@claro.com.br; spf=pass smtp.mailfrom=claro.com.br; dmarc=pass header.from=claro.com.br" },
+      "text": "Olá, Rafael.\n\nSua fatura digital do Claro Pós 25GB está disponível.\n\nValor: R$ 129,90\nVencimento: 30/10/2026\n\nPague com Pix ou com o código de barras do boleto em anexo. Se já pagou, desconsidere.\n\nClaro",
+      "attachments": [{ "filename": "fatura-claro-102026.pdf", "mimeType": "application/pdf", "size": 90311 }]
+    },
+    "expected": { "categories": ["contas"], "levelMin": "MEDIUM", "levelMax": "MEDIUM", "action": true, "deadline": "2026-10-30", "opportunity": false, "injection": false, "notes": "Conta comum com prazo confortável." }
+  },
+  {
+    "id": "mkt-serasa-quitar-dividas",
+    "description": "Oferta de renegociação de dívidas em massa (marketing com vocabulário de cobrança)",
+    "refToday": "2026-10-20",
+    "tags": ["promo"],
+    "message": {
+      "from": "Serasa Limpa Nome <ofertas@serasa.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Rafael, quite suas dívidas com até 90% de desconto 💸",
+      "date": "2026-10-20T19:00:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_PROMOTIONS"],
+      "headers": {
+        "List-Unsubscribe": "<https://email.serasa.com.br/unsub?u=ab12>",
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@serasa.com.br; spf=pass smtp.mailfrom=serasa.com.br; dmarc=pass header.from=serasa.com.br"
+      },
+      "text": "Oferta exclusiva para você!\n\nNo Feirão Limpa Nome você negocia dívidas com até 90% de desconto e parcela em até 24x. Condições válidas até 31/10/2026.\n\nAproveite e saia do vermelho. Negociar agora: https://www.serasa.com.br/limpa-nome\n\nVocê está recebendo este e-mail porque se cadastrou no Serasa. Para não receber mais, descadastre-se."
+    },
+    "expected": { "categories": ["marketing", "contas"], "levelMin": "LOW", "levelMax": "LOW", "action": false, "deadline": null, "opportunity": false, "injection": false, "notes": "Promoção genérica; o dono não tem dívida citada." }
+  },
+  {
+    "id": "contas-aluguel-boleto-novembro",
+    "description": "Boleto do aluguel com vencimento em 8 dias",
+    "refToday": "2026-10-24",
+    "message": {
+      "from": "QuintoAndar <nao-responda@quintoandar.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Boleto do aluguel de novembro disponível",
+      "date": "2026-10-24T13:00:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@quintoandar.com.br; spf=pass smtp.mailfrom=quintoandar.com.br; dmarc=pass header.from=quintoandar.com.br" },
+      "text": "Oi, Rafael!\n\nO boleto do aluguel do imóvel na Rua das Acácias, 120 — apto 54 já está disponível.\n\nValor total: R$ 3.450,00 (aluguel + condomínio + IPTU)\nVencimento: 01/11/2026\n\nVocê pode pagar pelo app com Pix ou boleto. Lembre-se: pagamentos após o vencimento têm multa de 10%.\n\nEquipe QuintoAndar"
+    },
+    "expected": { "categories": ["contas"], "levelMin": "MEDIUM", "levelMax": "HIGH", "action": true, "deadline": "2026-11-01", "opportunity": false, "injection": false, "notes": "Valor alto e multa relevante; prazo de 8 dias." }
+  },
+  {
+    "id": "contas-holerite-disponivel",
+    "description": "Aviso automático de holerite disponível no portal do RH",
+    "refToday": "2026-10-23",
+    "message": {
+      "from": "Portal do Colaborador <nao-responda@portalrh-varejohorizonte.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Seu holerite de outubro/2026 está disponível",
+      "date": "2026-10-23T14:00:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "text": "Olá, Rafael Moura.\n\nO demonstrativo de pagamento (holerite) da competência 10/2026 já pode ser consultado no Portal do Colaborador.\n\nCrédito previsto: 30/10/2026.\n\nEste é um e-mail automático."
+    },
+    "expected": { "categories": ["contas", "trabalho", "financas"], "levelMin": "LOW", "levelMax": "MEDIUM", "action": false, "deadline": null, "opportunity": false, "injection": false, "notes": "Informativo; data de crédito não é prazo." }
+  },
+  {
+    "id": "gov-restituicao-irpf-lote",
+    "description": "Restituição do IR incluída em lote (boa notícia, sem ação)",
+    "refToday": "2026-10-23",
+    "message": {
+      "from": "Receita Federal <naoresponda@receita.fazenda.gov.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Restituição do IRPF 2026 — 5º lote",
+      "date": "2026-10-23T12:00:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@receita.fazenda.gov.br; spf=pass smtp.mailfrom=receita.fazenda.gov.br; dmarc=pass header.from=receita.fazenda.gov.br" },
+      "text": "Prezado(a) contribuinte,\n\nInformamos que a sua restituição do Imposto de Renda Pessoa Física 2026 foi incluída no 5º lote, com crédito em 30/10/2026 na conta bancária informada na declaração.\n\nValor: R$ 1.842,17\n\nConsulte detalhes no e-CAC ou no app Meu Imposto de Renda.\n\nEsta mensagem é automática."
+    },
+    "expected": { "categories": ["governo_juridico", "contas", "financas"], "levelMin": "LOW", "levelMax": "MEDIUM", "action": false, "deadline": null, "opportunity": false, "injection": false, "notes": "Informativo oficial; nada a fazer." }
+  },
+  {
+    "id": "financas-compra-aprovada-cartao",
+    "description": "Alerta de compra aprovada no cartão (rotina)",
+    "refToday": "2026-10-19",
+    "message": {
+      "from": "C6 Bank <notificacoes@c6bank.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Compra aprovada no cartão final 4821",
+      "date": "2026-10-19T23:15:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@c6bank.com.br; spf=pass smtp.mailfrom=c6bank.com.br; dmarc=pass header.from=c6bank.com.br" },
+      "text": "Compra aprovada\n\nCartão: final 4821\nValor: R$ 89,90\nEstabelecimento: RESTAURANTE SABOR CASEIRO\nData: 19/10 às 20:14\n\nNão reconhece? Bloqueie o cartão pelo app C6."
+    },
+    "expected": { "categories": ["financas", "compras"], "levelMin": "LOW", "levelMax": "LOW", "action": false, "deadline": null, "opportunity": false, "injection": false, "notes": "Notificação transacional rotineira." }
+  },
+  {
+    "id": "financas-extrato-investimentos",
+    "description": "Extrato mensal consolidado de investimentos",
+    "refToday": "2026-10-20",
+    "message": {
+      "from": "XP Investimentos <extrato@xpi.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Seu extrato mensal de investimentos — setembro/2026",
+      "date": "2026-10-20T11:00:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@xpi.com.br; spf=pass smtp.mailfrom=xpi.com.br; dmarc=pass header.from=xpi.com.br" },
+      "text": "Olá, Rafael.\n\nSeu extrato consolidado de setembro já está disponível na área logada.\n\nPatrimônio total: R$ 184.322,10\nRentabilidade no mês: 0,98% (102% do CDI)\n\nAcesse sua conta para ver a composição da carteira por produto.\n\nXP Investimentos"
+    },
+    "expected": { "categories": ["financas"], "levelMin": "LOW", "levelMax": "MEDIUM", "action": false, "deadline": null, "opportunity": false, "injection": false, "notes": "Informativo pessoal de finanças." }
+  },
+  {
+    "id": "financas-cdb-vencimento-automatico",
+    "description": "CDB vencendo com crédito automático (palavra 'vence' sem ação do dono)",
+    "refToday": "2026-10-21",
+    "message": {
+      "from": "Banco Inter <no-reply@inter.co>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Seu CDB está perto do vencimento",
+      "date": "2026-10-21T12:30:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@inter.co; spf=pass smtp.mailfrom=inter.co; dmarc=pass header.from=inter.co" },
+      "text": "Olá, Rafael!\n\nSeu CDB Inter Liquidez 110% do CDI vence em 28/10/2026.\n\nValor bruto estimado: R$ 10.734,55. O valor será creditado automaticamente na sua conta corrente na data do vencimento.\n\nQuer reinvestir? Confira as opções de renda fixa no app.\n\nBanco Inter"
+    },
+    "expected": { "categories": ["financas"], "levelMin": "LOW", "levelMax": "MEDIUM", "action": false, "deadline": "any", "opportunity": false, "injection": false, "notes": "Vencimento de aplicação não é prazo do dono; data aceitável como fato-chave." }
+  },
+  {
+    "id": "financas-pix-recebido-freela",
+    "description": "Pix recebido de cliente de consultoria",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Nubank <todomundo@nubank.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Você recebeu um Pix de R$ 4.500,00",
+      "date": "2026-10-22T17:12:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@nubank.com.br; spf=pass smtp.mailfrom=nubank.com.br; dmarc=pass header.from=nubank.com.br" },
+      "text": "Pix recebido!\n\nVocê recebeu R$ 4.500,00 de CONSULTORIA ALFA LTDA.\nData: 22/10/2026 às 14:11\n\nO valor já está disponível na sua conta.\n\nNubank"
+    },
+    "expected": { "categories": ["financas"], "levelMin": "LOW", "levelMax": "MEDIUM", "action": false, "deadline": null, "opportunity": false, "injection": false, "notes": "Entrada de dinheiro esperada." }
+  },
+  {
+    "id": "seguranca-transacao-suspeita-banco",
+    "description": "Banco legítimo (autenticado) bloqueou compra suspeita e pede confirmação no app",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Itaú <seguranca@itau.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Você reconhece esta compra?",
+      "date": "2026-10-22T16:05:00Z",
+      "labelIds": ["INBOX", "UNREAD", "IMPORTANT", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@itau.com.br; spf=pass smtp.mailfrom=itau.com.br; dmarc=pass header.from=itau.com.br" },
+      "text": "Rafael, identificamos uma tentativa de compra de R$ 2.349,00 em LOJA ONLINE ELETRO no seu cartão final 7710 hoje às 13:02 e bloqueamos a transação preventivamente.\n\nSe foi você, confirme no app Itaú em Cartões > Transações pendentes. Se não reconhece, nenhuma ação é necessária: o cartão será cancelado e substituído.\n\nNunca pedimos senhas ou códigos por e-mail."
+    },
+    "expected": { "categories": ["seguranca_conta", "financas"], "levelMin": "MEDIUM", "levelMax": "HIGH", "action": null, "deadline": null, "opportunity": false, "injection": false, "notes": "Alerta real de fraude; ação condicional." }
+  },
+  {
+    "id": "mkt-banco-credito-pre-aprovado",
+    "description": "Oferta de crédito pré-aprovado do banco (marketing de domínio financeiro)",
+    "refToday": "2026-10-20",
+    "tags": ["promo"],
+    "message": {
+      "from": "Banco Inter <ofertas@inter.co>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Rafael, você tem R$ 50.000 de crédito pré-aprovado",
+      "date": "2026-10-20T21:00:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_PROMOTIONS"],
+      "headers": {
+        "List-Unsubscribe": "<mailto:unsubscribe@inter.co?subject=unsub>",
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@inter.co; spf=pass smtp.mailfrom=inter.co; dmarc=pass header.from=inter.co"
+      },
+      "text": "Rafael, seu crédito está pronto!\n\nVocê tem R$ 50.000 de empréstimo pré-aprovado com taxa a partir de 1,49% a.m. e até 60 meses para pagar.\n\nContrate em poucos cliques pelo app. Oferta válida até 30/10.\n\nAproveite!\n\nPara deixar de receber nossas ofertas, clique aqui."
+    },
+    "expected": { "categories": ["marketing", "financas"], "levelMin": "LOW", "levelMax": "LOW", "action": false, "deadline": null, "opportunity": false, "injection": false, "notes": "Oferta comercial; validade da oferta não é prazo do dono." }
+  },
+  {
+    "id": "contas-fatura-cartao-html-pesado",
+    "description": "Fatura de cartão só em HTML com tabelas, vencimento em 5 dias",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Itaú Cartões <faturadigital@itau.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Fatura do seu cartão Itaú Personnalité Visa — outubro",
+      "date": "2026-10-22T10:40:00Z",
+      "labelIds": ["INBOX", "UNREAD", "CATEGORY_UPDATES"],
+      "headers": { "Authentication-Results": "mx.google.com; dkim=pass header.i=@itau.com.br; spf=pass smtp.mailfrom=itau.com.br; dmarc=pass header.from=itau.com.br" },
+      "html": "<!DOCTYPE html><html><head><meta charset='utf-8'><style>td{font-family:Arial;font-size:14px}.btn{background:#ec7000;color:#fff}</style></head><body style='margin:0;background:#f2f2f2'><div style='display:none;max-height:0;overflow:hidden'>Sua fatura de outubro está disponível</div><table width='100%' cellpadding='0' cellspacing='0'><tr><td align='center'><table width='600' style='background:#ffffff'><tr><td style='padding:24px'><img src='https://cdn.itau.com.br/logo.png' alt='Itaú' width='80'></td></tr><tr><td style='padding:0 24px'><h1 style='font-size:20px'>Olá, Rafael</h1><p>A fatura do seu cartão final 7710 está disponível.</p></td></tr><tr><td style='padding:0 24px'><table width='100%' style='border:1px solid #ddd'><tr><td>Total da fatura</td><td align='right'><b>R$ 3.214,77</b></td></tr><tr><td>Pagamento mínimo</td><td align='right'>R$ 482,21</td></tr><tr><td>Vencimento</td><td align='right'><b>27/10/2026</b></td></tr><tr><td>Melhor dia de compra</td><td align='right'>20/11/2026</td></tr></table></td></tr><tr><td style='padding:24px'><p>Pague até o vencimento para evitar juros rotativos e encargos.</p><a class='btn' href='https://www.itau.com.br/cartoes/fatura?id=7710'>Ver fatura completa</a></td></tr><tr><td style='padding:24px;font-size:11px;color:#888'>Itaú Unibanco S.A. Este é um e-mail automático, não responda. Todos os direitos reservados.</td></tr></table></td></tr></table></body></html>"
+    },
+    "expected": { "categories": ["contas", "financas"], "levelMin": "MEDIUM", "levelMax": "HIGH", "action": true, "deadline": "2026-10-27", "opportunity": false, "injection": false, "notes": "Fatura sem débito automático; HTML com tabelas e preheader." }
+  }
+]

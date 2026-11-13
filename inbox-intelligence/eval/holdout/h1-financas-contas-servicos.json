@@ -1,0 +1,931 @@
+[
+  {
+    "id": "h-enel-fatura-debito-automatico",
+    "description": "Fatura de energia disponível, paga por débito automático (nenhuma ação).",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Enel Distribuição São Paulo <faturadigital@enel.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Sua fatura de energia de outubro/2026 já está disponível",
+      "date": "2026-10-21T14:22:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@enel.com header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@enel.com designates 203.0.113.11 as permitted sender) smtp.mailfrom=bounces@enel.com; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=enel.com"
+      },
+      "text": "Olá, RAFAEL MOURA\n\nSua fatura de energia referente a outubro/2026 já está disponível.\n\nInstalação: 0012345678\nValor: R$ 287,45\nVencimento: 05/11/2026\nForma de pagamento: DÉBITO AUTOMÁTICO (Banco Itaú, ag. ****)\n\nNão é necessário fazer nada: o valor será debitado automaticamente na data de vencimento.\n\nConsumo do mês: 312 kWh (média dos últimos 12 meses: 298 kWh)\nBandeira tarifária: amarela\n\nPara ver a fatura completa, acesse a Agência Virtual.\n\nEnel Distribuição São Paulo\nEste é um e-mail automático, por favor não responda.",
+      "html": "<!DOCTYPE html><html lang=\"pt-BR\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\"><title>Fatura Enel</title></head><body style=\"margin:0;padding:0;background:#f4f4f4;font-family:Arial,Helvetica,sans-serif;color:#222\"><table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr><td align=\"center\"><table role=\"presentation\" width=\"600\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#ffffff;margin:16px 0\"><tr><td style=\"padding:24px\"><h2 style=\"color:#e4002b;margin:0 0 12px\">Sua fatura chegou</h2><p>Olá, <b>RAFAEL MOURA</b></p><p>Sua fatura de energia referente a <b>outubro/2026</b> já está disponível.</p><table cellpadding=\"6\" style=\"border-collapse:collapse;font-size:14px\"><tr><td>Instalação</td><td><b>0012345678</b></td></tr><tr><td>Valor</td><td><b>R$ 287,45</b></td></tr><tr><td>Vencimento</td><td>05/11/2026</td></tr><tr><td>Pagamento</td><td>DÉBITO AUTOMÁTICO (Banco Itaú)</td></tr></table><p style=\"background:#eef7ee;padding:10px\">Não é necessário fazer nada: o valor será debitado automaticamente na data de vencimento.</p><p style=\"font-size:12px;color:#777\">Consumo do mês: 312 kWh · Bandeira amarela<br>Enel Distribuição São Paulo · e-mail automático, não responda.</p></td></tr></table></td></tr></table></body></html>"
+    },
+    "expected": {
+      "categories": [
+        "contas"
+      ],
+      "levelMin": "LOW",
+      "levelMax": "MEDIUM",
+      "action": false,
+      "deadline": null,
+      "opportunity": false,
+      "injection": false,
+      "notes": "Fatura em débito automático, explicitamente sem ação; 05/11 é o vencimento debitado automaticamente, não prazo dele."
+    }
+  },
+  {
+    "id": "h-sabesp-conta-agua-vencimento",
+    "description": "Conta de água com código de barras e vencimento em 27/10.",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Sabesp <contadigital@sabesp.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Conta de água - vencimento 27/10/2026",
+      "date": "2026-10-20T11:40:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@sabesp.com.br header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@sabesp.com.br designates 203.0.113.12 as permitted sender) smtp.mailfrom=bounces@sabesp.com.br; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=sabesp.com.br"
+      },
+      "text": "Prezado(a) cliente,\n\nSua conta digital Sabesp está disponível.\n\nRGI: 0123456789-0\nEndereço: R. dos Jacarandás, 410 - Apto 72 - Pinheiros\nReferência: 10/2026\nValor: R$ 164,32\nVencimento: 27/10/2026\n\nCódigo de barras para pagamento:\n82680000001-6 64320097001-2 23456789010-3 20261027000-1\n\nVocê também pode pagar via Pix pelo QR Code na conta anexa.\nEvite multa e juros: pague até a data de vencimento.\n\nCadastre o débito automático e não se preocupe mais com prazos.\n\nSabesp - Companhia de Saneamento Básico do Estado de São Paulo"
+    },
+    "expected": {
+      "categories": [
+        "contas"
+      ],
+      "levelMin": "MEDIUM",
+      "levelMax": "HIGH",
+      "action": true,
+      "deadline": "2026-10-27",
+      "opportunity": false,
+      "injection": false,
+      "notes": "Conta a pagar (não está em débito automático), vencimento em 5 dias."
+    }
+  },
+  {
+    "id": "h-condominio-boleto-novembro",
+    "description": "Boleto da taxa condominial de novembro enviado pela administradora.",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Lexa Administradora de Condomínios <boletos@lexa-condominios.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Cond. Edifício Jacarandá - Boleto 11/2026 - Unid. 72",
+      "date": "2026-10-22T10:15:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@lexa-condominios.com.br header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@lexa-condominios.com.br designates 203.0.113.13 as permitted sender) smtp.mailfrom=bounces@lexa-condominios.com.br; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=lexa-condominios.com.br"
+      },
+      "text": "Prezado condômino RAFAEL MOURA,\n\nSegue o boleto da taxa condominial da unidade 72, competência 11/2026.\n\nValor: R$ 1.180,00 (inclui fundo de reserva e rateio de obra 3/6)\nVencimento: 10/11/2026\nApós o vencimento: multa de 2% + juros de 1% a.m.\n\nLinha digitável: 34191.79001 01043.510047 91020.150008 8 12340000118000\n\nO boleto em PDF segue anexo. Pagamentos via Pix: utilize o QR code impresso no boleto.\n\nAtenciosamente,\nLexa Administradora - Departamento de Cobrança\n(11) 3000-0000"
+    },
+    "expected": {
+      "categories": [
+        "contas"
+      ],
+      "levelMin": "MEDIUM",
+      "levelMax": "HIGH",
+      "action": true,
+      "deadline": "2026-11-10",
+      "opportunity": false,
+      "injection": false,
+      "notes": "Boleto a pagar com vencimento absoluto; distante (19 dias), por isso MEDIUM é o esperado."
+    }
+  },
+  {
+    "id": "h-nubank-fatura-fechada",
+    "description": "Fatura do cartão fechou, com valor e vencimento.",
+    "refToday": "2026-10-24",
+    "message": {
+      "from": "Nubank <todomundo@nubank.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Sua fatura fechou: R$ 4.312,90",
+      "date": "2026-10-24T12:30:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@nubank.com.br header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@nubank.com.br designates 203.0.113.14 as permitted sender) smtp.mailfrom=bounces@nubank.com.br; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=nubank.com.br"
+      },
+      "text": "Oi, Rafael\n\nA fatura do seu cartão fechou hoje.\n\nValor total: R$ 4.312,90\nVencimento: 03/11/2026\nPagamento mínimo: R$ 646,94\n\nVocê pode pagar pelo app com Pix, boleto ou débito em conta. Se preferir, também dá para parcelar a fatura.\n\nPrincipais gastos do mês: Supermercado (R$ 1.204,30), Restaurantes (R$ 880,15), Transporte (R$ 412,00).\n\nAbraços,\nNubank",
+      "html": "<!DOCTYPE html><html lang=\"pt-BR\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\"><title>Fatura Nubank</title></head><body style=\"margin:0;padding:0;background:#f4f4f4;font-family:Arial,Helvetica,sans-serif;color:#222\"><table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr><td align=\"center\"><table role=\"presentation\" width=\"600\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#ffffff;margin:16px 0\"><tr><td style=\"padding:24px\"><div style=\"background:#820ad1;color:#fff;padding:16px;font-size:20px\">Sua fatura fechou</div><p>Oi, Rafael</p><p>A fatura do seu cartão fechou hoje.</p><p style=\"font-size:28px;margin:8px 0\"><b>R$ 4.312,90</b></p><p>Vencimento: <b>03/11/2026</b><br>Pagamento mínimo: R$ 646,94</p><p>Você pode pagar pelo app com Pix, boleto ou débito em conta.</p><p style=\"font-size:12px;color:#777\">Principais gastos: Supermercado R$ 1.204,30 · Restaurantes R$ 880,15 · Transporte R$ 412,00</p></td></tr></table></td></tr></table></body></html>"
+    },
+    "expected": {
+      "categories": [
+        "contas",
+        "financas"
+      ],
+      "levelMin": "MEDIUM",
+      "levelMax": "HIGH",
+      "action": true,
+      "deadline": "2026-11-03",
+      "opportunity": false,
+      "injection": false,
+      "notes": "Fatura de cartão a pagar; o vencimento é o prazo dele."
+    }
+  },
+  {
+    "id": "h-itau-pix-recebido",
+    "description": "Notificação de Pix recebido de um amigo.",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Itaú Unibanco <naoresponda@itau.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Pix recebido: R$ 350,00",
+      "date": "2026-10-22T19:45:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@itau.com.br header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@itau.com.br designates 203.0.113.15 as permitted sender) smtp.mailfrom=bounces@itau.com.br; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=itau.com.br"
+      },
+      "text": "Rafael, você recebeu um Pix.\n\nValor: R$ 350,00\nDe: THIAGO LINS DE ALBUQUERQUE\nInstituição: Banco Inter\nData/hora: 22/10/2026 às 16:44\nMensagem: \"racha do churrasco + cerveja\"\nID da transação: E00000000202610221944abcdef12345\n\nO valor já está disponível na sua conta corrente.\n\nItaú Unibanco S.A."
+    },
+    "expected": {
+      "categories": [
+        "financas",
+        "compras",
+        "contas"
+      ],
+      "levelMin": "LOW",
+      "levelMax": "MEDIUM",
+      "action": false,
+      "deadline": null,
+      "opportunity": false,
+      "injection": false,
+      "notes": "Transação bancária informativa, nada a fazer."
+    }
+  },
+  {
+    "id": "h-itau-comprovante-pix-enviado",
+    "description": "Comprovante de Pix enviado para o condomínio (mês anterior).",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Itaú Unibanco <comprovantes@itau.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Comprovante de Pix - R$ 1.180,00",
+      "date": "2026-10-21T13:02:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@itau.com.br header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@itau.com.br designates 203.0.113.16 as permitted sender) smtp.mailfrom=bounces@itau.com.br; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=itau.com.br"
+      },
+      "text": "Comprovante de transferência Pix\n\nValor: R$ 1.180,00\nPara: CONDOMINIO EDIFICIO JACARANDA\nCNPJ: 00.000.000/0001-00\nInstituição: Banco Bradesco\nData: 21/10/2026 10:01\nDescrição: Condomínio 10/2026 unid 72\nAutenticação: 9F3A-77C1-0B2D-4E88\n\nEste comprovante foi gerado a pedido do cliente pelo app Itaú.\n\nItaú Unibanco S.A."
+    },
+    "expected": {
+      "categories": [
+        "financas",
+        "contas",
+        "compras"
+      ],
+      "levelMin": "LOW",
+      "levelMax": "LOW",
+      "action": false,
+      "deadline": null,
+      "opportunity": false,
+      "injection": false,
+      "notes": "Comprovante de pagamento já realizado por ele: puramente documental."
+    }
+  },
+  {
+    "id": "h-nubank-compra-alto-valor",
+    "description": "Alerta legítimo de compra online de valor alto em estabelecimento genérico.",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Nubank <todomundo@nubank.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Compra de R$ 2.399,00 aprovada",
+      "date": "2026-10-22T10:47:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@nubank.com.br header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@nubank.com.br designates 203.0.113.17 as permitted sender) smtp.mailfrom=bounces@nubank.com.br; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=nubank.com.br"
+      },
+      "text": "Compra aprovada no seu cartão final 4821.\n\nValor: R$ 2.399,00 em 1x\nEstabelecimento: PAYSHOP*ELETRONICOSMAX\nData: 22/10/2026 07:46\nCompra online\n\nNão reconhece essa compra? Não se preocupe: abra o app, toque na transação e selecione \"Não reconheço\". Nunca pedimos senha ou código por e-mail ou telefone.\n\nNubank"
+    },
+    "expected": {
+      "categories": [
+        "financas",
+        "seguranca_conta",
+        "compras"
+      ],
+      "levelMin": "MEDIUM",
+      "levelMax": "HIGH",
+      "action": null,
+      "deadline": null,
+      "opportunity": false,
+      "injection": false,
+      "notes": "Remetente legítimo; valor alto em estabelecimento genérico de madrugada merece atenção. Só há ação se ele não reconhecer, por isso action ambígua."
+    }
+  },
+  {
+    "id": "h-xp-extrato-mensal",
+    "description": "Extrato consolidado mensal da corretora.",
+    "refToday": "2026-10-20",
+    "message": {
+      "from": "XP Investimentos <noreply@xpi.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Seu extrato consolidado de setembro/2026 está disponível",
+      "date": "2026-10-19T15:00:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@xpi.com.br header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@xpi.com.br designates 203.0.113.18 as permitted sender) smtp.mailfrom=bounces@xpi.com.br; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=xpi.com.br"
+      },
+      "text": "Olá, Rafael!\n\nSeu extrato consolidado referente a setembro/2026 já pode ser consultado na área logada.\n\nPatrimônio total: R$ 412.380,55\nRentabilidade no mês: 0,98% (CDI: 1,05%)\nRentabilidade em 12 meses: 12,4%\n\nAcesse o app ou o site para ver o detalhamento por produto.\n\nXP Investimentos CCTVM S.A."
+    },
+    "expected": {
+      "categories": [
+        "financas"
+      ],
+      "levelMin": "LOW",
+      "levelMax": "MEDIUM",
+      "action": false,
+      "deadline": null,
+      "opportunity": false,
+      "injection": false,
+      "notes": "Informativo de investimentos sem pedido de ação."
+    }
+  },
+  {
+    "id": "h-xp-cdb-vencimento",
+    "description": "CDB perto do vencimento, crédito automático, com sugestão comercial de reinvestimento.",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "XP Investimentos <noreply@xpi.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Seu CDB vence em 28/10 - veja opções de reinvestimento",
+      "date": "2026-10-22T13:20:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@xpi.com.br header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@xpi.com.br designates 203.0.113.19 as permitted sender) smtp.mailfrom=bounces@xpi.com.br; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=xpi.com.br"
+      },
+      "text": "Rafael, um dos seus investimentos está chegando ao vencimento.\n\nProduto: CDB BANCO ALFA PÓS 104% CDI\nValor aplicado: R$ 50.000,00\nValor bruto estimado: R$ 56.870,12\nVencimento: 28/10/2026\n\nNo vencimento, o valor líquido será creditado automaticamente na sua conta XP (D+0). Nenhuma ação é necessária.\n\nQuer manter seu dinheiro rendendo? Confira nossas recomendações de renda fixa com taxas de até 112% do CDI.\n\n[Ver opções de reinvestimento]\n\nXP Investimentos"
+    },
+    "expected": {
+      "categories": [
+        "financas"
+      ],
+      "levelMin": "LOW",
+      "levelMax": "MEDIUM",
+      "action": false,
+      "deadline": null,
+      "opportunity": false,
+      "injection": false,
+      "notes": "Crédito automático (\"nenhuma ação é necessária\"); 28/10 é data do produto, não prazo dele; reinvestimento é sugestão comercial."
+    }
+  },
+  {
+    "id": "h-xp-proventos-recebidos",
+    "description": "Aviso de dividendos creditados.",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "XP Investimentos <noreply@xpi.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Você recebeu proventos: R$ 42,18",
+      "date": "2026-10-21T21:05:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@xpi.com.br header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@xpi.com.br designates 203.0.113.20 as permitted sender) smtp.mailfrom=bounces@xpi.com.br; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=xpi.com.br"
+      },
+      "text": "Olá, Rafael\n\nCreditamos proventos na sua conta:\n\nITSA4 - Dividendos - R$ 31,40\nTAEE11 - JCP (líquido de IR) - R$ 10,78\nTotal: R$ 42,18\nData do crédito: 21/10/2026\n\nO saldo já está disponível para novos investimentos.\n\nXP Investimentos"
+    },
+    "expected": {
+      "categories": [
+        "financas"
+      ],
+      "levelMin": "LOW",
+      "levelMax": "LOW",
+      "action": false,
+      "deadline": null,
+      "opportunity": false,
+      "injection": false,
+      "notes": "Informativo de baixo impacto."
+    }
+  },
+  {
+    "id": "h-microsoft-codigo-seguranca",
+    "description": "Código de verificação de conta (solicitado pelo usuário).",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Microsoft account team <account-security-noreply@accountprotection.microsoft.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Código de segurança da conta da Microsoft",
+      "date": "2026-10-22T18:31:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@accountprotection.microsoft.com header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@accountprotection.microsoft.com designates 203.0.113.21 as permitted sender) smtp.mailfrom=bounces@accountprotection.microsoft.com; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=accountprotection.microsoft.com"
+      },
+      "text": "Conta da Microsoft\n\nCódigo de segurança\n\nUse o seguinte código de segurança para a conta da Microsoft ra*****@gmail.com.\n\nCódigo de segurança: 482913\n\nSe você não reconhece a conta da Microsoft ra*****@gmail.com, clique aqui para remover seu email dessa conta.\n\nObrigado,\nEquipe de contas da Microsoft"
+    },
+    "expected": {
+      "categories": [
+        "seguranca_conta"
+      ],
+      "levelMin": "LOW",
+      "levelMax": "MEDIUM",
+      "action": false,
+      "deadline": null,
+      "opportunity": false,
+      "injection": false,
+      "notes": "Código de uso imediato, tipicamente pedido por ele mesmo; não exige ação adicional."
+    }
+  },
+  {
+    "id": "h-google-alerta-novo-login",
+    "description": "Alerta legítimo do Google de novo login em Windows em Recife (dono mora em SP).",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Google <no-reply@accounts.google.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Alerta de segurança",
+      "date": "2026-10-22T09:58:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "IMPORTANT",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@accounts.google.com header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@scoutcamp.bounces.google.com designates 203.0.113.22 as permitted sender) smtp.mailfrom=bounces@scoutcamp.bounces.google.com; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=accounts.google.com"
+      },
+      "text": "Novo login no Windows\nrafael.moura.dados@gmail.com\n\nPercebemos um novo login na sua Conta do Google em um dispositivo Windows. Se foi você, não é necessário fazer nada. Caso contrário, ajudaremos você a proteger sua conta.\n\nQuando: quinta-feira, 22 de outubro de 2026 06:57 (horário de Brasília)\nOnde: Recife, PE, Brasil (local aproximado)\nNavegador: Chrome\n\nVerificar atividade\n\nVocê também pode ver a atividade de segurança em\nhttps://myaccount.google.com/notifications\n\nEnviamos este e-mail para informar você sobre mudanças importantes na sua Conta do Google e nos serviços.\n© 2026 Google LLC, 1600 Amphitheatre Parkway, Mountain View, CA 94043, USA",
+      "html": "<!DOCTYPE html><html lang=\"pt-BR\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\"><title>Alerta de segurança</title></head><body style=\"margin:0;padding:0;background:#f4f4f4;font-family:Arial,Helvetica,sans-serif;color:#222\"><table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr><td align=\"center\"><table role=\"presentation\" width=\"600\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#ffffff;margin:16px 0\"><tr><td style=\"padding:24px\"><div style=\"text-align:center\"><div style=\"font-size:22px\">Novo login no Windows</div><div style=\"color:#555\">rafael.moura.dados@gmail.com</div></div><hr style=\"border:0;border-top:1px solid #ddd\"><p>Percebemos um novo login na sua Conta do Google em um dispositivo Windows. Se foi você, não é necessário fazer nada. Caso contrário, ajudaremos você a proteger sua conta.</p><p><b>Quando:</b> quinta-feira, 22 de outubro de 2026 06:57 (horário de Brasília)<br><b>Onde:</b> Recife, PE, Brasil (local aproximado)<br><b>Navegador:</b> Chrome</p><p style=\"text-align:center\"><a href=\"https://accounts.google.com/AccountChooser?Email=rafael.moura.dados@gmail.com&continue=https://myaccount.google.com/alert/nt/1729580220000\" style=\"background:#1a73e8;color:#fff;padding:10px 20px;text-decoration:none;border-radius:4px\">Verificar atividade</a></p><p style=\"font-size:12px;color:#777\">Você também pode ver a atividade de segurança em https://myaccount.google.com/notifications</p></td></tr></table></td></tr></table></body></html>"
+    },
+    "expected": {
+      "categories": [
+        "seguranca_conta"
+      ],
+      "levelMin": "HIGH",
+      "levelMax": "CRITICAL",
+      "action": null,
+      "deadline": null,
+      "opportunity": false,
+      "injection": false,
+      "notes": "Legítimo (auth ok, domínio do Google). Cidade e dispositivo incompatíveis com o dono (SP); uma pessoa razoável verificaria imediatamente. A ação é condicional (\"caso contrário\"), por isso action=null; o nível deve ser alto mesmo assim."
+    }
+  },
+  {
+    "id": "h-ifood-senha-alterada",
+    "description": "Aviso de senha alterada em serviço de delivery.",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "iFood <naoresponda@ifood.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Sua senha foi alterada",
+      "date": "2026-10-21T23:10:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@ifood.com.br header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@ifood.com.br designates 203.0.113.23 as permitted sender) smtp.mailfrom=bounces@ifood.com.br; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=ifood.com.br"
+      },
+      "text": "Olá, Rafael\n\nA senha da sua conta iFood foi alterada em 21/10/2026 às 20:09.\n\nSe foi você, pode ignorar este e-mail.\n\nSe você não reconhece essa alteração, acesse a Central de Ajuda imediatamente para recuperar sua conta.\n\nEquipe iFood"
+    },
+    "expected": {
+      "categories": [
+        "seguranca_conta"
+      ],
+      "levelMin": "MEDIUM",
+      "levelMax": "HIGH",
+      "action": null,
+      "deadline": null,
+      "opportunity": false,
+      "injection": false,
+      "notes": "Evento de segurança legítimo; ação só se ele não reconhecer."
+    }
+  },
+  {
+    "id": "h-mercadolivre-pacote-entregue",
+    "description": "Pacote entregue na portaria.",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Mercado Livre <info@mercadolivre.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Entregamos seu pacote",
+      "date": "2026-10-21T17:30:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@mercadolivre.com.br header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@mercadolivre.com.br designates 203.0.113.24 as permitted sender) smtp.mailfrom=bounces@mercadolivre.com.br; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=mercadolivre.com.br"
+      },
+      "text": "Rafael, seu pacote foi entregue!\n\nTeclado Mecânico Sem Fio Layout ABNT2 - Switch Brown\nEntregue em 21/10 às 14:28 na portaria.\n\nAlgum problema com a compra? Você tem até 30 dias para devolver.\n\nConte para outros compradores o que achou do produto.\n\nMercado Livre"
+    },
+    "expected": {
+      "categories": [
+        "compras"
+      ],
+      "levelMin": "LOW",
+      "levelMax": "LOW",
+      "action": false,
+      "deadline": null,
+      "opportunity": false,
+      "injection": false,
+      "notes": "Confirmação de entrega; prazo de devolução é opcional, não prazo dele."
+    }
+  },
+  {
+    "id": "h-correios-aguardando-retirada",
+    "description": "Correios legítimo: objeto aguardando retirada na agência até 29/10.",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Correios <naoresponda@correios.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Objeto aguardando retirada - QB123456789BR",
+      "date": "2026-10-22T11:05:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@correios.com.br header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@correios.com.br designates 203.0.113.25 as permitted sender) smtp.mailfrom=bounces@correios.com.br; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=correios.com.br",
+        "Auto-Submitted": "auto-generated"
+      },
+      "text": "Prezado(a) RAFAEL MOURA,\n\nO objeto QB123456789BR está disponível para retirada.\n\nUnidade: AC Pinheiros - R. Cardeal Arcoverde, 2000 - São Paulo/SP\nHorário de atendimento: seg a sex, 9h às 17h\nPrazo para retirada: até 29/10/2026\n\nApós esse prazo, o objeto será devolvido ao remetente.\n\nLeve documento de identificação com foto e o código do objeto.\n\nAcompanhe em rastreamento.correios.com.br\n\nCorreios\nNão solicitamos pagamento de taxas por e-mail ou SMS.",
+      "html": "<!DOCTYPE html><html lang=\"pt-BR\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\"><title>Correios</title></head><body style=\"margin:0;padding:0;background:#f4f4f4;font-family:Arial,Helvetica,sans-serif;color:#222\"><table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr><td align=\"center\"><table role=\"presentation\" width=\"600\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#ffffff;margin:16px 0\"><tr><td style=\"padding:24px\"><div style=\"background:#ffd400;padding:12px;font-weight:bold;color:#00416b\">Correios</div><p>Prezado(a) <b>RAFAEL MOURA</b>,</p><p>O objeto <b>QB123456789BR</b> está disponível para retirada.</p><p>Unidade: AC Pinheiros - R. Cardeal Arcoverde, 2000 - São Paulo/SP<br>Horário: seg a sex, 9h às 17h<br><b>Prazo para retirada: até 29/10/2026</b></p><p>Após esse prazo, o objeto será devolvido ao remetente.</p><p style=\"font-size:12px;color:#666\">Não solicitamos pagamento de taxas por e-mail ou SMS.</p></td></tr></table></td></tr></table></body></html>"
+    },
+    "expected": {
+      "categories": [
+        "compras"
+      ],
+      "levelMin": "MEDIUM",
+      "levelMax": "HIGH",
+      "action": true,
+      "deadline": "2026-10-29",
+      "opportunity": false,
+      "injection": false,
+      "notes": "Domínio legítimo e auth ok, sem pedido de pagamento: não é phishing. Retirada presencial com prazo absoluto."
+    }
+  },
+  {
+    "id": "h-amazon-pedido-enviado",
+    "description": "Pedido enviado com previsão de entrega.",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Amazon.com.br <confirmar-envio@amazon.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Seu pedido de \"Hands-On Machine Learning with Scikit-Learn and PyTorch\" foi enviado",
+      "date": "2026-10-21T12:00:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@amazon.com.br header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@amazon.com.br designates 203.0.113.26 as permitted sender) smtp.mailfrom=bounces@amazon.com.br; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=amazon.com.br"
+      },
+      "text": "Olá Rafael,\n\nSeu pacote está a caminho!\n\nPedido nº 702-1234567-8901234\nItem: Hands-On Machine Learning with Scikit-Learn and PyTorch (Inglês) - Capa comum\nPrevisão de entrega: sexta-feira, 23 de outubro\n\nRastrear pacote\n\nObrigado por comprar conosco.\nAmazon.com.br"
+    },
+    "expected": {
+      "categories": [
+        "compras"
+      ],
+      "levelMin": "LOW",
+      "levelMax": "LOW",
+      "action": false,
+      "deadline": null,
+      "opportunity": false,
+      "injection": false,
+      "notes": "Previsão de entrega é SLA de terceiro, não prazo dele. Tema de ML não torna o e-mail de tecnologia."
+    }
+  },
+  {
+    "id": "h-latam-checkin-disponivel",
+    "description": "Check-in aberto para voo de sábado cedo.",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "LATAM Airlines <noreply@latam.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Rafael, seu check-in já está disponível - LA3412 GRU > POA",
+      "date": "2026-10-22T10:20:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@latam.com header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@latam.com designates 203.0.113.27 as permitted sender) smtp.mailfrom=bounces@latam.com; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=latam.com"
+      },
+      "text": "Olá, RAFAEL MOURA\n\nO check-in do seu voo já está aberto.\n\nCódigo de reserva: XPTRQZ\nVoo LA3412 - São Paulo/Guarulhos (GRU) > Porto Alegre (POA)\nSábado, 24 de outubro de 2026 - partida 07:15, chegada 08:50\n\nFaça seu check-in pelo app ou site até 1 hora antes da partida e evite filas no aeroporto. Para voos nacionais, o embarque encerra 20 minutos antes da decolagem.\n\n[Fazer check-in]\n\nBoa viagem!\nLATAM Airlines Brasil",
+      "html": "<!DOCTYPE html><html lang=\"pt-BR\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\"><title>Check-in LATAM</title></head><body style=\"margin:0;padding:0;background:#f4f4f4;font-family:Arial,Helvetica,sans-serif;color:#222\"><table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr><td align=\"center\"><table role=\"presentation\" width=\"600\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#ffffff;margin:16px 0\"><tr><td style=\"padding:24px\"><div style=\"background:#1b0088;color:#fff;padding:14px;font-size:18px\">Seu check-in está disponível</div><p>Olá, <b>RAFAEL MOURA</b></p><table cellpadding=\"6\" style=\"font-size:14px\"><tr><td>Reserva</td><td><b>XPTRQZ</b></td></tr><tr><td>Voo</td><td>LA3412 · GRU → POA</td></tr><tr><td>Data</td><td>Sábado, 24/10/2026 · 07:15</td></tr></table><p>Faça seu check-in até 1 hora antes da partida.</p><p><a href=\"https://www.latam.com/pt_br/checkin\" style=\"background:#e8114b;color:#fff;padding:10px 18px;text-decoration:none\">Fazer check-in</a></p></td></tr></table></td></tr></table></body></html>"
+    },
+    "expected": {
+      "categories": [
+        "agenda",
+        "compras"
+      ],
+      "levelMin": "MEDIUM",
+      "levelMax": "HIGH",
+      "action": true,
+      "deadline": "2026-10-24",
+      "opportunity": false,
+      "injection": false,
+      "notes": "Viagem própria com check-in a fazer antes do voo de 24/10."
+    }
+  },
+  {
+    "id": "h-booking-reserva-confirmada",
+    "description": "Confirmação de hotel com prazo de cancelamento grátis.",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Booking.com <noreply@booking.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Sua reserva no Hotel Moinhos Plaza está confirmada",
+      "date": "2026-10-20T22:00:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@booking.com header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@mailer.booking.com designates 203.0.113.28 as permitted sender) smtp.mailfrom=bounces@mailer.booking.com; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=booking.com"
+      },
+      "text": "Rafael, sua reserva está confirmada!\n\nHotel Moinhos Plaza - Porto Alegre\nCheck-in: sáb, 24 out 2026 (a partir das 14:00)\nCheck-out: seg, 26 out 2026 (até 12:00)\n1 quarto, 2 adultos, 2 noites\nPreço total: R$ 1.046,00 (pagamento no hotel)\n\nCancelamento gratuito até 23 de outubro de 2026, 23:59. Depois disso, será cobrado o valor da primeira noite.\n\nNúmero da confirmação: 4821.937.115\nPIN: 7731\n\nGerenciar reserva\nBooking.com"
+    },
+    "expected": {
+      "categories": [
+        "agenda",
+        "compras"
+      ],
+      "levelMin": "LOW",
+      "levelMax": "MEDIUM",
+      "action": false,
+      "deadline": null,
+      "opportunity": false,
+      "injection": false,
+      "notes": "Confirmação de reserva; o prazo de cancelamento grátis é opção, não obrigação dele."
+    }
+  },
+  {
+    "id": "h-clinica-confirmar-consulta",
+    "description": "Clínica pede confirmação de consulta até sábado.",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Clínica CardioVida Pinheiros <agendamento@cardiovida-pinheiros.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Confirme sua consulta - Dr. Henrique Sato - 26/10 às 14h",
+      "date": "2026-10-22T13:00:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_PERSONAL"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@cardiovida-pinheiros.com.br header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@cardiovida-pinheiros.com.br designates 203.0.113.29 as permitted sender) smtp.mailfrom=bounces@cardiovida-pinheiros.com.br; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=cardiovida-pinheiros.com.br"
+      },
+      "text": "Olá, Rafael Moura!\n\nVocê tem uma consulta agendada:\n\nEspecialidade: Cardiologia (retorno - avaliação do teste ergométrico)\nMédico: Dr. Henrique Sato - CRM-SP 000000\nData: segunda-feira, 26/10/2026, às 14h00\nLocal: R. Teodoro Sampaio, 1500, cj. 41 - Pinheiros\n\nPor favor, CONFIRME sua presença respondendo SIM a este e-mail ou pelo WhatsApp (11) 90000-0000 até sábado, 24/10. Consultas não confirmadas serão liberadas para a lista de espera.\n\nTraga seu cartão do convênio e os exames anteriores.\n\nAtenciosamente,\nCentral de Agendamento CardioVida"
+    },
+    "expected": {
+      "categories": [
+        "saude",
+        "agenda"
+      ],
+      "levelMin": "MEDIUM",
+      "levelMax": "HIGH",
+      "action": true,
+      "deadline": "2026-10-24",
+      "opportunity": false,
+      "injection": false,
+      "notes": "Prazo dele é confirmar até 24/10 (a consulta em 26/10 é o evento)."
+    }
+  },
+  {
+    "id": "h-laboratorio-resultado-disponivel",
+    "description": "Resultados de exames disponíveis no portal.",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Laboratório Delta Diagnósticos <resultados@deltadiagnosticos-lab.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Seus resultados estão disponíveis",
+      "date": "2026-10-21T18:40:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@deltadiagnosticos-lab.com.br header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@deltadiagnosticos-lab.com.br designates 203.0.113.30 as permitted sender) smtp.mailfrom=bounces@deltadiagnosticos-lab.com.br; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=deltadiagnosticos-lab.com.br"
+      },
+      "text": "Olá, Rafael.\n\nOs resultados dos exames realizados em 17/10/2026 (Hemograma completo, Perfil lipídico, Glicemia de jejum, TSH) já estão disponíveis.\n\nPara visualizar, acesse o Portal do Paciente com seu CPF e a senha do protocolo 2026-88123.\n\nPor segurança, não enviamos laudos por e-mail. Em caso de dúvida, ligue (11) 3000-0001.\n\nDelta Diagnósticos"
+    },
+    "expected": {
+      "categories": [
+        "saude"
+      ],
+      "levelMin": "LOW",
+      "levelMax": "MEDIUM",
+      "action": null,
+      "deadline": null,
+      "opportunity": false,
+      "injection": false,
+      "notes": "Informativo de saúde; consultar é desejável mas não é um pedido."
+    }
+  },
+  {
+    "id": "h-plano-saude-reembolso-pendente",
+    "description": "Plano de saúde pede nota fiscal corrigida para reembolso em 5 dias úteis (até 29/10).",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Vivace Saúde <reembolso@vivacesaude.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Pendência no pedido de reembolso nº 88213",
+      "date": "2026-10-22T14:30:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@vivacesaude.com.br header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@vivacesaude.com.br designates 203.0.113.31 as permitted sender) smtp.mailfrom=bounces@vivacesaude.com.br; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=vivacesaude.com.br"
+      },
+      "text": "Prezado beneficiário RAFAEL MOURA (carteirinha 0012 3456 7890 0001),\n\nSeu pedido de reembolso nº 88213, referente a consulta de psicologia em 02/10/2026 no valor de R$ 380,00, está PENDENTE.\n\nMotivo: nota fiscal ilegível / sem CPF do beneficiário.\n\nPara dar continuidade, envie a nota fiscal corrigida pelo app Vivace ou pelo portal em até 5 dias úteis, ou seja, até 29/10/2026. Após esse prazo, o pedido será encerrado e será necessário abrir uma nova solicitação.\n\nAtenciosamente,\nCentral de Reembolso - Vivace Saúde"
+    },
+    "expected": {
+      "categories": [
+        "saude",
+        "contas"
+      ],
+      "levelMin": "MEDIUM",
+      "levelMax": "HIGH",
+      "action": true,
+      "deadline": "2026-10-29",
+      "opportunity": false,
+      "injection": false,
+      "notes": "Pendência que exige envio de documento por ele; a data da consulta (02/10) é passada e não é prazo."
+    }
+  },
+  {
+    "id": "h-detran-licenciamento-2026",
+    "description": "Detran-SP lembra prazo do licenciamento anual.",
+    "refToday": "2026-10-20",
+    "message": {
+      "from": "Detran-SP <naoresponda@detran.sp.gov.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Licenciamento 2026 - veículo final de placa 9",
+      "date": "2026-10-19T12:00:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@detran.sp.gov.br header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@detran.sp.gov.br designates 203.0.113.32 as permitted sender) smtp.mailfrom=bounces@detran.sp.gov.br; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=detran.sp.gov.br",
+        "Auto-Submitted": "auto-generated"
+      },
+      "text": "Prezado(a) proprietário(a),\n\nInformamos que o licenciamento anual 2026 do veículo de placa ***-*D29 (final 9) deve ser pago até 30/11/2026, conforme calendário oficial.\n\nO pagamento da taxa pode ser feito na rede bancária credenciada ou pelo app/portal Detran-SP, com o RENAVAM. O documento digital (CRLV-e) fica disponível na Carteira Digital de Trânsito após a compensação.\n\nCircular com o veículo não licenciado é infração gravíssima.\n\nDetran-SP\nEste é um e-mail automático. O Detran-SP não envia links de pagamento por e-mail."
+    },
+    "expected": {
+      "categories": [
+        "governo_juridico",
+        "contas"
+      ],
+      "levelMin": "MEDIUM",
+      "levelMax": "HIGH",
+      "action": true,
+      "deadline": "2026-11-30",
+      "opportunity": false,
+      "injection": false,
+      "notes": "Obrigação legal com prazo absoluto distante; órgão oficial legítimo (.gov.br)."
+    }
+  },
+  {
+    "id": "h-phishing-receita-cpf-cancelado",
+    "description": "Phishing imitando a Receita Federal com domínio falso, SPF/DMARC falhando e DARF via Pix.",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Receita Federal do Brasil <notificacao@receitafederal-regularize.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "URGENTE: Seu CPF será CANCELADO em 24 horas - Pendência na Declaração",
+      "date": "2026-10-22T11:31:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=none (message not signed); spf=fail (google.com: domain of bounce@mail-srv88.xyz does not designate 203.0.113.33 as permitted sender) smtp.mailfrom=bounce@mail-srv88.xyz; dmarc=fail (p=NONE sp=NONE dis=NONE) header.from=receitafederal-regularize.com",
+        "Reply-To": "atendimento.rfb2026@protonmail.com"
+      },
+      "text": "MINISTÉRIO DA FAZENDA - RECEITA FEDERAL\n\nPrezado(a) contribuinte RAFAEL MOURA,\n\nIdentificamos divergências na sua Declaração de Imposto de Renda 2026. Seu CPF encontra-se em situação PENDENTE DE REGULARIZAÇÃO e será CANCELADO em até 24 horas, impossibilitando movimentações bancárias.\n\nPara evitar o bloqueio, emita agora a DARF de regularização no valor de R$ 487,90 e efetue o pagamento via Pix:\n\nhttp://receitafederal-regularize.com/darf?cpf=***\n\nProtocolo: RFB-2026-99812\n\nAtenciosamente,\nSecretaria Especial da Receita Federal",
+      "html": "<!DOCTYPE html><html lang=\"pt-BR\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\"><title>Receita Federal</title></head><body style=\"margin:0;padding:0;background:#f4f4f4;font-family:Arial,Helvetica,sans-serif;color:#222\"><table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr><td align=\"center\"><table role=\"presentation\" width=\"600\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#ffffff;margin:16px 0\"><tr><td style=\"padding:24px\"><div style=\"background:#1351b4;color:#fff;padding:12px\"><b>gov.br</b> | Receita Federal</div><p>Prezado(a) contribuinte <b>RAFAEL MOURA</b>,</p><p>Identificamos divergências na sua Declaração de Imposto de Renda 2026. Seu CPF encontra-se em situação <b style=\"color:#c00\">PENDENTE DE REGULARIZAÇÃO</b> e será <b>CANCELADO em até 24 horas</b>.</p><p><a href=\"http://receitafederal-regularize.com/darf?cpf=***\" style=\"background:#168821;color:#fff;padding:10px 18px;text-decoration:none\">https://www.gov.br/receitafederal/regularizar</a></p><p style=\"font-size:12px\">Protocolo: RFB-2026-99812</p></td></tr></table></td></tr></table></body></html>"
+    },
+    "expected": {
+      "categories": [
+        "spam",
+        "seguranca_conta",
+        "governo_juridico"
+      ],
+      "levelMin": "LOW",
+      "levelMax": "MEDIUM",
+      "action": false,
+      "deadline": null,
+      "opportunity": false,
+      "injection": false,
+      "notes": "Golpe: domínio não-oficial, SPF/DMARC falham, Reply-To divergente, link exibido como gov.br aponta para outro domínio, ameaça de 24h e pagamento via Pix. O \"prazo\" é do golpista."
+    }
+  },
+  {
+    "id": "h-tjsp-juizado-intimacao",
+    "description": "Intimação de Juizado Especial Cível com prazo de 5 dias úteis (até 29/10).",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Tribunal de Justiça de São Paulo <naoresponda@tjsp.jus.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Juizado Especial Cível - Processo 1000000-00.2026.8.26.0002 - Intimação",
+      "date": "2026-10-22T16:00:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@tjsp.jus.br header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@tjsp.jus.br designates 203.0.113.34 as permitted sender) smtp.mailfrom=bounces@tjsp.jus.br; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=tjsp.jus.br",
+        "Auto-Submitted": "auto-generated"
+      },
+      "text": "PODER JUDICIÁRIO - TRIBUNAL DE JUSTIÇA DO ESTADO DE SÃO PAULO\nJuizado Especial Cível - Foro Regional II - Santo Amaro\n\nProcesso nº 1000000-00.2026.8.26.0002\nRequerente: RAFAEL MOURA\nRequerido: VIAJE BEM TURISMO LTDA\n\nINTIMAÇÃO\n\nFica a parte requerente intimada a manifestar-se, no prazo de 5 (cinco) dias úteis, até 29/10/2026, sobre a contestação e os documentos juntados pela requerida, bem como informar se tem interesse na realização de audiência de instrução por videoconferência. O silêncio será interpretado como desinteresse.\n\nA manifestação deve ser protocolada pelo e-SAJ ou por meio do Balcão Virtual.\n\nEsta é uma mensagem automática; não responda."
+    },
+    "expected": {
+      "categories": [
+        "governo_juridico"
+      ],
+      "levelMin": "HIGH",
+      "levelMax": "CRITICAL",
+      "action": true,
+      "deadline": "2026-10-29",
+      "opportunity": false,
+      "injection": false,
+      "notes": "Prazo processual dele em ação que ele move; consequência jurídica se perder o prazo. Auto-Submitted não deve rebaixar."
+    }
+  },
+  {
+    "id": "h-contador-carne-leao-comprovantes",
+    "description": "Contador pede comprovantes de aluguel até o dia 30 para o carnê-leão.",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Marcos Teixeira <marcos@teixeiracontabil-sp.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Carnê-leão outubro - preciso dos comprovantes",
+      "date": "2026-10-21T15:12:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_PERSONAL"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@teixeiracontabil-sp.com.br header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@teixeiracontabil-sp.com.br designates 203.0.113.35 as permitted sender) smtp.mailfrom=bounces@teixeiracontabil-sp.com.br; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=teixeiracontabil-sp.com.br"
+      },
+      "text": "Oi Rafael, tudo bem?\n\nPra eu fechar o carnê-leão de outubro do aluguel do apê da Vila Mariana, preciso que você me mande até o dia 30 (sexta que vem):\n\n- comprovante do aluguel recebido em outubro\n- recibo do IPTU pago pelo inquilino, se houver\n- boleto da administradora com a taxa descontada\n\nO DARF vence dia 30/11, mas preciso de um tempo pra conferir.\n\nAbraço,\nMarcos Teixeira\nTeixeira Contabilidade"
+    },
+    "expected": {
+      "categories": [
+        "tarefas",
+        "governo_juridico",
+        "contas",
+        "financas"
+      ],
+      "levelMin": "MEDIUM",
+      "levelMax": "HIGH",
+      "action": true,
+      "deadline": "2026-10-30",
+      "opportunity": false,
+      "injection": false,
+      "notes": "O prazo dele é 30/10 (envio dos documentos); 30/11 é o vencimento do DARF, tratado pelo contador."
+    }
+  },
+  {
+    "id": "h-seguro-auto-renovacao",
+    "description": "Seguradora avisa vencimento da apólice e pede aprovação da renovação.",
+    "refToday": "2026-10-21",
+    "message": {
+      "from": "Porto Azul Seguros <renovacao@portoazulseguros.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Seu seguro auto vence em 15/11 - renove sem perder o bônus",
+      "date": "2026-10-20T13:00:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@portoazulseguros.com.br header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@portoazulseguros.com.br designates 203.0.113.36 as permitted sender) smtp.mailfrom=bounces@portoazulseguros.com.br; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=portoazulseguros.com.br"
+      },
+      "text": "Olá, Rafael!\n\nA apólice do seu seguro auto (Apólice 0531.2025.778812 - Honda HR-V 2022) vence em 15/11/2026.\n\nPara manter a cobertura e sua classe de bônus 6, aprove a proposta de renovação até a data de vencimento. Sem renovação, o veículo ficará sem cobertura a partir de 16/11.\n\nProposta de renovação: R$ 3.412,00 em até 10x sem juros (franquia R$ 4.800).\n\nFale com sua corretora ou aprove pelo link abaixo.\n\n[Revisar e aprovar renovação]\n\nPorto Azul Seguros"
+    },
+    "expected": {
+      "categories": [
+        "contas",
+        "financas",
+        "compras"
+      ],
+      "levelMin": "MEDIUM",
+      "levelMax": "HIGH",
+      "action": true,
+      "deadline": "2026-11-15",
+      "opportunity": false,
+      "injection": false,
+      "notes": "Renovação necessária para não ficar descoberto; o vencimento da apólice é efetivamente o prazo dele."
+    }
+  },
+  {
+    "id": "h-netflix-pagamento-recusado-legitimo",
+    "description": "Netflix legítima informa pagamento recusado e pede atualização do cartão.",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Netflix <info@account.netflix.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Atualize suas informações de pagamento",
+      "date": "2026-10-22T12:45:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@account.netflix.com header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@bounces.netflix.com designates 203.0.113.37 as permitted sender) smtp.mailfrom=bounces@bounces.netflix.com; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=account.netflix.com"
+      },
+      "text": "Olá, Rafael,\n\nNão conseguimos processar o pagamento da sua próxima cobrança mensal. O cartão final 4821 foi recusado pelo emissor.\n\nPara continuar assistindo sem interrupções, atualize sua forma de pagamento. Tentaremos cobrar novamente nos próximos dias.\n\n[Atualizar pagamento]\n\nOu acesse netflix.com/YourAccount\n\nPrecisa de ajuda? Visite help.netflix.com.\n\nEquipe Netflix"
+    },
+    "expected": {
+      "categories": [
+        "compras",
+        "contas"
+      ],
+      "levelMin": "LOW",
+      "levelMax": "MEDIUM",
+      "action": true,
+      "deadline": null,
+      "opportunity": false,
+      "injection": false,
+      "notes": "Legítimo (domínio e auth corretos): par com o phishing de Netflix do h3. Ação real mas sem data definida."
+    }
+  },
+  {
+    "id": "h-itau-fatura-cartao-vencida",
+    "description": "Fatura do cartão venceu ontem sem pagamento identificado; pagar hoje para evitar encargos.",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Itaú Unibanco <naoresponda@itau.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Fatura do cartão Itaú Personnalité venceu - evite encargos",
+      "date": "2026-10-22T12:10:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "IMPORTANT",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@itau.com.br header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@itau.com.br designates 203.0.113.38 as permitted sender) smtp.mailfrom=bounces@itau.com.br; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=itau.com.br"
+      },
+      "text": "Rafael, não identificamos o pagamento da fatura do seu cartão Itaú Personnalité Mastercard Black final 7702.\n\nVencimento: 21/10/2026 (ontem)\nValor total: R$ 6.980,44\n\nSe o pagamento já foi feito, desconsidere esta mensagem: pode levar até 2 dias úteis para ser compensado.\n\nPague hoje pelo app Itaú para evitar juros rotativos, multa e IOF. Atrasos superiores a 5 dias podem resultar no bloqueio do cartão.\n\nItaú Unibanco"
+    },
+    "expected": {
+      "categories": [
+        "contas",
+        "financas"
+      ],
+      "levelMin": "HIGH",
+      "levelMax": "CRITICAL",
+      "action": true,
+      "deadline": "2026-10-22",
+      "opportunity": false,
+      "injection": false,
+      "notes": "Conta vencida com encargos e risco de bloqueio: ação hoje. A data de vencimento passada (21/10) não é o prazo; o prazo é hoje."
+    }
+  }
+]

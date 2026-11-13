@@ -1,0 +1,1052 @@
+[
+  {
+    "id": "h-chefe-elasticidade-ate-15h",
+    "description": "Chefe pede análise para hoje até as 15h (reunião antecipada com o CFO).",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Patrícia Valadares <patricia.valadares@grupoaurora-varejo.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "URGENTE: elasticidade bebidas pra reunião com o CFO",
+      "date": "2026-10-22T12:05:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "IMPORTANT",
+        "CATEGORY_PERSONAL"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@grupoaurora-varejo.com.br header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@grupoaurora-varejo.com.br designates 203.0.113.39 as permitted sender) smtp.mailfrom=bounces@grupoaurora-varejo.com.br; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=grupoaurora-varejo.com.br"
+      },
+      "text": "Rafa, bom dia\n\nMandando no seu gmail porque o Outlook de vocês caiu de novo.\n\nO Roberto antecipou a reunião de margem pra hoje às 16h e ele quer ver a análise de elasticidade da categoria bebidas (refrigerantes + cervejas) com o cenário de repasse de 4% e 7%. Consegue me mandar até as 15h de hoje? Pode ser um resumo em 3-4 slides, não precisa estar lindo.\n\nSe tiver qualquer bloqueio me liga.\n\nObrigada!\nPatrícia Valadares\nHead de Pricing - Grupo Aurora Varejo"
+    },
+    "expected": {
+      "categories": [
+        "trabalho",
+        "tarefas"
+      ],
+      "levelMin": "HIGH",
+      "levelMax": "CRITICAL",
+      "action": true,
+      "deadline": "2026-10-22",
+      "opportunity": false,
+      "injection": false,
+      "notes": "Pedido direto da chefe com prazo no mesmo dia (\"até as 15h de hoje\")."
+    }
+  },
+  {
+    "id": "h-colega-revisao-notebook-amanha",
+    "description": "Colega pede revisão de notebook \"até amanhã\" (mensagem do dia anterior).",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Diego Ramos <diego.ramos@grupoaurora-varejo.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "revisão do notebook de markdown",
+      "date": "2026-10-21T20:40:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_PERSONAL"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@grupoaurora-varejo.com.br header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@grupoaurora-varejo.com.br designates 203.0.113.40 as permitted sender) smtp.mailfrom=bounces@grupoaurora-varejo.com.br; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=grupoaurora-varejo.com.br"
+      },
+      "text": "Fala Rafa,\n\nsubi no Drive o notebook novo do modelo de markdown (pasta Pricing > 2026 > Q4). Consegue dar uma revisada até amanhã? Queria apresentar pra Patrícia na sexta e to meio inseguro com a parte de regularização do XGBoost e com o backtest.\n\nlink: https://drive.google.com/drive/folders/1AbCdEfGhIjKlMnOpQrStUv\n\nvaleu!!\nDiego"
+    },
+    "expected": {
+      "categories": [
+        "trabalho",
+        "tarefas"
+      ],
+      "levelMin": "MEDIUM",
+      "levelMax": "HIGH",
+      "action": true,
+      "deadline": "2026-10-22",
+      "opportunity": false,
+      "injection": false,
+      "notes": "\"Amanhã\" relativo à data do envio (21/10) = 22/10. A apresentação de sexta é do colega."
+    }
+  },
+  {
+    "id": "h-cliente-ingles-eod-friday",
+    "description": "Cliente externo em inglês pede premissas revisadas \"by EOD Friday\".",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Mark Delaney <mark.delaney@northwind-analytics.io>",
+      "to": "rafael.moura.dados@gmail.com",
+      "cc": "Patrícia Valadares <patricia.valadares@grupoaurora-varejo.com.br>",
+      "subject": "Revised pricing model assumptions - steering committee",
+      "date": "2026-10-21T14:30:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "IMPORTANT",
+        "CATEGORY_PERSONAL"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@northwind-analytics.io header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@northwind-analytics.io designates 203.0.113.41 as permitted sender) smtp.mailfrom=bounces@northwind-analytics.io; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=northwind-analytics.io"
+      },
+      "text": "Hi Rafael,\n\nThanks again for the walkthrough on Tuesday - the team found the price ladder analysis really helpful.\n\nCould you send over the revised model assumptions (elasticity priors, competitor index weights and the promo cannibalization factor) by EOD Friday? We need them to finalize the deck for the steering committee on Monday morning.\n\nIf anything is still pending on your side, a partial version with open items flagged is fine.\n\nBest,\nMark\n\nMark Delaney | Partner, Northwind Analytics"
+    },
+    "expected": {
+      "categories": [
+        "trabalho",
+        "tarefas"
+      ],
+      "levelMin": "MEDIUM",
+      "levelMax": "HIGH",
+      "action": true,
+      "deadline": "2026-10-23",
+      "opportunity": false,
+      "injection": false,
+      "notes": "EOD Friday a partir de quarta 21/10 = 23/10. O comitê de segunda é do cliente; a reunião de terça é passada."
+    }
+  },
+  {
+    "id": "h-jira-issue-atribuida",
+    "description": "Notificação automática do Jira atribuindo tarefa com due date.",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Diego Ramos (Jira) <jira@grupoaurora.atlassian.net>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "[JIRA] Diego Ramos assigned PRC-482 to you",
+      "date": "2026-10-22T17:15:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@grupoaurora.atlassian.net header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@atlassian.net designates 203.0.113.42 as permitted sender) smtp.mailfrom=bounces@atlassian.net; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=grupoaurora.atlassian.net",
+        "Auto-Submitted": "auto-generated",
+        "List-Unsubscribe": "<https://grupoaurora.atlassian.net/jira/settings/personal/notifications>",
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        "Precedence": "bulk"
+      },
+      "text": "Diego Ramos assigned this issue to you\n\nPRC-482: Ajustar regra de markdown para SKUs sazonais (Natal)\n\nType: Task   Priority: High   Status: To Do\nSprint: Pricing Sprint 43\nDue date: 30/Oct/26\n\nDescription:\nA regra atual aplica markdown linear a partir de 45 dias do fim da sazonalidade. Precisamos parametrizar por subcategoria e limitar o desconto máximo a 35% para panetones e chocotones.\n\nView issue: https://grupoaurora.atlassian.net/browse/PRC-482\n\nGet Jira notifications on your phone! Download the Jira Cloud app for Android or iOS.\nThis message was sent by Atlassian Jira."
+    },
+    "expected": {
+      "categories": [
+        "trabalho",
+        "tarefas"
+      ],
+      "levelMin": "MEDIUM",
+      "levelMax": "HIGH",
+      "action": true,
+      "deadline": "2026-10-30",
+      "opportunity": false,
+      "injection": false,
+      "notes": "Apesar de Precedence: bulk e Auto-Submitted, é uma tarefa atribuída a ele com due date 30/Oct/26."
+    }
+  },
+  {
+    "id": "h-jira-comentario-fyi",
+    "description": "Comentário de agradecimento em issue já concluída (ele é watcher).",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Camila Ferraz (Jira) <jira@grupoaurora.atlassian.net>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "[JIRA] (PRC-455) Atualizar dashboard de margem por loja",
+      "date": "2026-10-22T18:02:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@grupoaurora.atlassian.net header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@atlassian.net designates 203.0.113.43 as permitted sender) smtp.mailfrom=bounces@atlassian.net; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=grupoaurora.atlassian.net",
+        "Auto-Submitted": "auto-generated",
+        "List-Unsubscribe": "<https://grupoaurora.atlassian.net/jira/settings/personal/notifications>",
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        "Precedence": "bulk"
+      },
+      "text": "Camila Ferraz commented on PRC-455\n\nRe: Atualizar dashboard de margem por loja\nStatus: Done\n\n\"Deploy feito em produção, já está refletindo os dados de ontem. Obrigada pela ajuda com a query, Rafa!\"\n\nView issue: https://grupoaurora.atlassian.net/browse/PRC-455\n\nYou're receiving this because you're a watcher of this issue."
+    },
+    "expected": {
+      "categories": [
+        "trabalho"
+      ],
+      "levelMin": "LOW",
+      "levelMax": "MEDIUM",
+      "action": false,
+      "deadline": null,
+      "opportunity": false,
+      "injection": false,
+      "notes": "FYI em issue concluída, nada a fazer."
+    }
+  },
+  {
+    "id": "h-github-review-requested",
+    "description": "GitHub: pedido de review de PR do repositório de pricing.",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Carlos Mendes <notifications@github.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "[grupoaurora/pricing-engine] feat: cache de elasticidades por cluster de loja (PR #214)",
+      "date": "2026-10-22T15:40:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@github.com header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@github.com designates 203.0.113.44 as permitted sender) smtp.mailfrom=bounces@github.com; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=github.com",
+        "X-GitHub-Reason": "review_requested",
+        "Reply-To": "grupoaurora/pricing-engine <reply+AABBCCDD2140@reply.github.com>",
+        "List-Unsubscribe": "<https://github.com/notifications/unsubscribe/AABBCCDD2140>",
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        "Precedence": "list",
+        "List-Id": "grupoaurora/pricing-engine <pricing-engine.grupoaurora.github.com>"
+      },
+      "text": "@carlosmendes-aurora requested your review on: grupoaurora/pricing-engine#214 feat: cache de elasticidades por cluster de loja.\n\nAdiciona cache em Redis para os coeficientes de elasticidade por cluster, reduzindo o tempo do job de precificação de ~40min para ~6min. Precisa de review de alguém de pricing para validar se a invalidação do cache na troca de cluster está correta.\n\nYou can view, comment on, or merge this pull request online at:\n\n  https://github.com/grupoaurora/pricing-engine/pull/214\n\nCommit Summary\n\n  * a1f3c9e cache de elasticidades\n  * 7be21d0 testes de invalidação\n\nFile Changes (4 files)\n\n--\nReply to this email directly, view it on GitHub, or unsubscribe.\nYou are receiving this because your review was requested."
+    },
+    "expected": {
+      "categories": [
+        "trabalho",
+        "tecnologia",
+        "tarefas"
+      ],
+      "levelMin": "MEDIUM",
+      "levelMax": "HIGH",
+      "action": true,
+      "deadline": null,
+      "opportunity": false,
+      "injection": false,
+      "notes": "Pedido de review direcionado a ele (review_requested); sem data. Reply-To divergente é normal no GitHub."
+    }
+  },
+  {
+    "id": "h-github-actions-run-failed",
+    "description": "Falha no job noturno de elasticidade; publicação de preços pulada (ele é watcher).",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "GitHub <notifications@github.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "[grupoaurora/pricing-engine] Run failed: nightly-elasticity - main (7be21d0)",
+      "date": "2026-10-22T09:12:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@github.com header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@github.com designates 203.0.113.45 as permitted sender) smtp.mailfrom=bounces@github.com; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=github.com",
+        "X-GitHub-Reason": "ci_activity",
+        "List-Unsubscribe": "<https://github.com/notifications/unsubscribe/EEFF0011>",
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        "Precedence": "list",
+        "List-Id": "grupoaurora/pricing-engine <pricing-engine.grupoaurora.github.com>"
+      },
+      "text": "Run failed for main (7be21d0)\n\nRepository: grupoaurora/pricing-engine\nWorkflow: nightly-elasticity\nDuration: 3m 12s\nFinished: Thu, 22 Oct 2026 06:11:48 -03:00\n\nJobs:\n  X fit-models - Process completed with exit code 1.\n  - publish-prices (skipped)\n\nView workflow run: https://github.com/grupoaurora/pricing-engine/actions/runs/123456789\n\nYou are receiving this because you are watching this repository."
+    },
+    "expected": {
+      "categories": [
+        "trabalho",
+        "tecnologia"
+      ],
+      "levelMin": "MEDIUM",
+      "levelMax": "HIGH",
+      "action": null,
+      "deadline": null,
+      "opportunity": false,
+      "injection": false,
+      "notes": "Notificação automática, mas o impacto é real (preços do dia não publicados no sistema que ele cuida). Não está claro se cabe a ele corrigir."
+    }
+  },
+  {
+    "id": "h-slack-mencao-antes-call-amanha",
+    "description": "E-mail de menção do Slack: chefe pede confirmação antes da call de amanhã cedo.",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Slack <notification@slack.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "[Slack] Patrícia Valadares mencionou você em #pricing-squad",
+      "date": "2026-10-22T19:20:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@slack.com header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@slack.com designates 203.0.113.46 as permitted sender) smtp.mailfrom=bounces@slack.com; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=slack.com",
+        "List-Unsubscribe": "<https://grupoaurora.slack.com/account/notifications>",
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        "Precedence": "bulk"
+      },
+      "text": "Olá, Rafael,\n\nVocê tem novas menções no workspace Grupo Aurora (grupoaurora.slack.com).\n\n#pricing-squad\nPatrícia Valadares  16:18\n@Rafael consegue confirmar se o reajuste do SKU 7781 (refrigerante 2L) entrou ontem nas lojas do interior? O comercial está dizendo que não. Preciso dessa resposta antes da call com a regional amanhã cedo.\n\nAbrir no Slack\n\nVocê está recebendo este e-mail porque não está ativo no Slack. Gerenciar preferências de notificação."
+    },
+    "expected": {
+      "categories": [
+        "trabalho",
+        "tarefas"
+      ],
+      "levelMin": "MEDIUM",
+      "levelMax": "HIGH",
+      "action": true,
+      "deadline": "2026-10-23",
+      "opportunity": false,
+      "injection": false,
+      "notes": "Pedido real da chefe via notificação de ferramenta; prazo \"antes da call amanhã cedo\" = 23/10."
+    }
+  },
+  {
+    "id": "h-gdocs-comentario-mencao-sexta",
+    "description": "Google Docs: CFO menciona o dono em comentário pedindo validação até sexta (23/10).",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Roberto Kanashiro (via Documentos Google) <comments-noreply@docs.google.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Budget 2027 - Premissas de Pricing",
+      "date": "2026-10-21T21:30:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@docs.google.com header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@doclist.bounces.google.com designates 203.0.113.47 as permitted sender) smtp.mailfrom=bounces@doclist.bounces.google.com; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=docs.google.com",
+        "Reply-To": "Roberto Kanashiro <d+AORGpRf1x9qLkZ@docs.google.com>"
+      },
+      "text": "Roberto Kanashiro mencionou você em um comentário no documento a seguir\n\nBudget 2027 - Premissas de Pricing\n\nTrecho: \"Inflação de custos (CMV) projetada: 4,8% a.a.\"\n\nRoberto Kanashiro\n@rafael.moura.dados@gmail.com preciso que você valide essas premissas de inflação e o repasse por categoria até sexta (23/10), porque o board recebe a versão final na segunda.\n\nResponder   Abrir\n\nGoogle LLC, 1600 Amphitheatre Parkway, Mountain View, CA 94043, USA\nVocê recebeu este e-mail porque foi mencionado neste comentário."
+    },
+    "expected": {
+      "categories": [
+        "trabalho",
+        "tarefas"
+      ],
+      "levelMin": "MEDIUM",
+      "levelMax": "HIGH",
+      "action": true,
+      "deadline": "2026-10-23",
+      "opportunity": false,
+      "injection": false,
+      "notes": "Pedido direto do CFO dentro de notificação do Docs; Reply-To divergente legítimo. A reunião do board (segunda) é de terceiros."
+    }
+  },
+  {
+    "id": "h-calendar-convite-comite-pricing",
+    "description": "Convite do Google Agenda para comitê de segunda (RSVP).",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Patrícia Valadares <calendar-notification@google.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Convite: Comitê de Pricing Q4 @ seg 26 de out de 2026 10:00 - 11:00 (BRT) (rafael.moura.dados@gmail.com)",
+      "date": "2026-10-22T16:30:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@google.com header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@calendar-server.bounces.google.com designates 203.0.113.48 as permitted sender) smtp.mailfrom=bounces@calendar-server.bounces.google.com; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=google.com",
+        "Reply-To": "Patrícia Valadares <patricia.valadares@grupoaurora-varejo.com.br>"
+      },
+      "text": "Patrícia Valadares convidou você para um evento\n\nComitê de Pricing Q4\nQuando: segunda-feira, 26 de outubro de 2026 10:00 - 11:00 (Horário de Brasília)\nOnde: Sala Ipê (3º andar) / Google Meet: meet.google.com/abc-defg-hij\nParticipantes: Patrícia Valadares (organizadora), Roberto Kanashiro, Diego Ramos, Camila Ferraz, Rafael Moura\n\nPauta: revisão de margem por categoria, plano de Black Friday, ajustes de regra de markdown.\n\nVai participar? Sim - Talvez - Não   mais opções\n\nConvite do Google Agenda\nVocê está recebendo este e-mail porque é um convidado do evento.",
+      "html": "<!DOCTYPE html><html lang=\"pt-BR\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\"><title>Convite</title></head><body style=\"margin:0;padding:0;background:#f4f4f4;font-family:Arial,Helvetica,sans-serif;color:#222\"><table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr><td align=\"center\"><table role=\"presentation\" width=\"600\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#ffffff;margin:16px 0\"><tr><td style=\"padding:24px\"><p style=\"font-size:13px;color:#555\">Patrícia Valadares convidou você para um evento</p><h2 style=\"margin:4px 0\">Comitê de Pricing Q4</h2><table cellpadding=\"4\" style=\"font-size:14px\"><tr><td style=\"color:#777\">Quando</td><td>segunda-feira, 26 de outubro de 2026 10:00 – 11:00 (Horário de Brasília)</td></tr><tr><td style=\"color:#777\">Onde</td><td>Sala Ipê (3º andar) / meet.google.com/abc-defg-hij</td></tr><tr><td style=\"color:#777\">Participantes</td><td>Patrícia Valadares (organizadora), Roberto Kanashiro, Diego Ramos, Camila Ferraz, Rafael Moura</td></tr></table><p>Pauta: revisão de margem por categoria, plano de Black Friday, ajustes de regra de markdown.</p><p><b>Vai participar?</b> <a href=\"https://calendar.google.com/calendar/event?action=RESPOND&rst=1\">Sim</a> · <a href=\"https://calendar.google.com/calendar/event?action=RESPOND&rst=3\">Talvez</a> · <a href=\"https://calendar.google.com/calendar/event?action=RESPOND&rst=2\">Não</a></p></td></tr></table></td></tr></table></body></html>"
+    },
+    "expected": {
+      "categories": [
+        "agenda",
+        "trabalho"
+      ],
+      "levelMin": "MEDIUM",
+      "levelMax": "HIGH",
+      "action": true,
+      "deadline": "any",
+      "opportunity": false,
+      "injection": false,
+      "notes": "Convite pede RSVP; o limite implícito é antes da reunião de 26/10, sem data explícita para responder (deadline \"any\")."
+    }
+  },
+  {
+    "id": "h-colega-remarcar-1a1-fim-do-dia",
+    "description": "Colega pede para remarcar 1:1 e quer confirmação até o fim do dia.",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Camila Ferraz <camila.ferraz@grupoaurora-varejo.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "mudar nossa 1:1?",
+      "date": "2026-10-22T13:50:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_PERSONAL"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@grupoaurora-varejo.com.br header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@grupoaurora-varejo.com.br designates 203.0.113.49 as permitted sender) smtp.mailfrom=bounces@grupoaurora-varejo.com.br; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=grupoaurora-varejo.com.br"
+      },
+      "text": "Oi Rafa! Surgiu um treinamento obrigatório amanhã de manhã e vou ter que mexer na nossa 1:1. Consegue amanhã mesmo (sexta, 23/10) às 16h em vez das 10h? Se não der, podemos jogar pra segunda. Me confirma até hoje no fim do dia pra eu ajustar a agenda? bjs\nCamila"
+    },
+    "expected": {
+      "categories": [
+        "agenda",
+        "trabalho"
+      ],
+      "levelMin": "MEDIUM",
+      "levelMax": "HIGH",
+      "action": true,
+      "deadline": "2026-10-22",
+      "opportunity": false,
+      "injection": false,
+      "notes": "O prazo dele é confirmar hoje; 23/10 é a data da reunião."
+    }
+  },
+  {
+    "id": "h-thread-aprovacao-chefe-citacao",
+    "description": "Resposta em thread: chefe aprova proposta; o texto citado (dele) contém um prazo.",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Patrícia Valadares <patricia.valadares@grupoaurora-varejo.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Re: Proposta de reajuste - lojas Campinas",
+      "date": "2026-10-22T20:10:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_PERSONAL"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@grupoaurora-varejo.com.br header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@grupoaurora-varejo.com.br designates 203.0.113.50 as permitted sender) smtp.mailfrom=bounces@grupoaurora-varejo.com.br; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=grupoaurora-varejo.com.br",
+        "In-Reply-To": "<CAF8xR2m-campinas-01@mail.gmail.com>",
+        "References": "<CAF8xR2m-campinas-01@mail.gmail.com>"
+      },
+      "text": "Perfeito, Rafa. Aprovado do meu lado, pode seguir com o reajuste a partir de segunda. Bom trabalho!\n\nPatrícia\n\nEm qua., 21 de out. de 2026 às 18:02, Rafael Moura <rafael.moura.dados@gmail.com> escreveu:\n> Oi Patrícia,\n>\n> Segue a proposta de reajuste para as 6 lojas de Campinas: +3,2% em mercearia seca e manutenção em perecíveis. O impacto estimado em margem é +0,4 p.p. com perda de volume de 0,8%.\n>\n> Preciso da sua aprovação até quinta (22/10) para conseguir subir na janela de segunda.\n>\n> Abs,\n> Rafael"
+    },
+    "expected": {
+      "categories": [
+        "trabalho"
+      ],
+      "levelMin": "LOW",
+      "levelMax": "MEDIUM",
+      "action": null,
+      "deadline": null,
+      "opportunity": false,
+      "injection": false,
+      "notes": "O prazo \"até quinta (22/10)\" está no texto citado e foi pedido por ele à chefe; a resposta é uma aprovação. Seguir com o reajuste é a continuidade do trabalho dele (action ambígua), sem prazo novo."
+    }
+  },
+  {
+    "id": "h-encaminhada-chefe-fornecedor",
+    "description": "Chefe encaminha e-mail de fornecedor e pede resposta até segunda; o fornecedor citou outro prazo.",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Patrícia Valadares <patricia.valadares@grupoaurora-varejo.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Fwd: Nova tabela de preços - Bebidas Serra Azul - posicionamento",
+      "date": "2026-10-22T14:40:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "IMPORTANT",
+        "CATEGORY_PERSONAL"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@grupoaurora-varejo.com.br header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@grupoaurora-varejo.com.br designates 203.0.113.51 as permitted sender) smtp.mailfrom=bounces@grupoaurora-varejo.com.br; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=grupoaurora-varejo.com.br"
+      },
+      "text": "Rafa, consegue analisar e responder o fornecedor até segunda (26/10)? Quero que a gente segure o repasse pelo menos até a Black Friday. Me copia na resposta.\n\n---------- Forwarded message ---------\nDe: Luciana Prado <luciana.prado@bebidasserraazul.com.br>\nDate: qua., 21 de out. de 2026 às 11:20\nSubject: Nova tabela de preços - Bebidas Serra Azul - posicionamento\nTo: Patrícia Valadares <patricia.valadares@grupoaurora-varejo.com.br>\n\nPrezada Patrícia,\n\nConforme alinhado, segue em anexo a nova tabela de preços com reajuste médio de 6,5% a partir de 01/12/2026. Solicitamos o posicionamento do Grupo Aurora até 30/10/2026 para programação do faturamento.\n\nAtenciosamente,\nLuciana Prado\nKey Account Manager - Bebidas Serra Azul"
+    },
+    "expected": {
+      "categories": [
+        "trabalho",
+        "tarefas"
+      ],
+      "levelMin": "MEDIUM",
+      "levelMax": "HIGH",
+      "action": true,
+      "deadline": "2026-10-26",
+      "opportunity": false,
+      "injection": false,
+      "notes": "O prazo dele é o da chefe (26/10); 30/10 é o prazo do fornecedor para a empresa e 01/12 é vigência da tabela."
+    }
+  },
+  {
+    "id": "h-rh-ponto-pendente",
+    "description": "Sistema de RH pede regularização do ponto até domingo 25/10.",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "RH Aurora <rh-sistemas@grupoaurora-varejo.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Pendências no espelho de ponto - regularize até 25/10",
+      "date": "2026-10-21T11:00:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@grupoaurora-varejo.com.br header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@grupoaurora-varejo.com.br designates 203.0.113.52 as permitted sender) smtp.mailfrom=bounces@grupoaurora-varejo.com.br; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=grupoaurora-varejo.com.br",
+        "Auto-Submitted": "auto-generated"
+      },
+      "text": "Olá, RAFAEL MOURA (matrícula 004512),\n\nIdentificamos 2 marcações pendentes no seu espelho de ponto do período 21/09 a 20/10:\n\n- 07/10/2026: saída não registrada\n- 15/10/2026: justificativa de ausência parcial sem anexo\n\nRegularize no portal Ponto Fácil até domingo, 25/10/2026. Pendências não tratadas até o fechamento da folha poderão gerar desconto em folha.\n\nAtenciosamente,\nDepartamento Pessoal - Grupo Aurora Varejo\nMensagem automática, não responda."
+    },
+    "expected": {
+      "categories": [
+        "trabalho",
+        "tarefas"
+      ],
+      "levelMin": "MEDIUM",
+      "levelMax": "HIGH",
+      "action": true,
+      "deadline": "2026-10-25",
+      "opportunity": false,
+      "injection": false,
+      "notes": "Mensagem automática interna, mas exige ação dele com prazo; datas 07/10 e 15/10 são passadas."
+    }
+  },
+  {
+    "id": "h-comunicado-interno-feriado",
+    "description": "Comunicado geral para todos os funcionários sobre o feriado.",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Comunicação Interna Aurora <comunicacao@grupoaurora-varejo.com.br>",
+      "to": "todos-sp@grupoaurora-varejo.com.br",
+      "subject": "Funcionamento do escritório no feriado de Finados",
+      "date": "2026-10-21T19:00:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@grupoaurora-varejo.com.br header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@grupoaurora-varejo.com.br designates 203.0.113.53 as permitted sender) smtp.mailfrom=bounces@grupoaurora-varejo.com.br; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=grupoaurora-varejo.com.br",
+        "List-Id": "<todos-sp.grupoaurora-varejo.com.br>",
+        "Precedence": "list"
+      },
+      "text": "Olá, time!\n\nLembramos que na segunda-feira, 02/11 (Finados), o escritório da Faria Lima estará fechado. As lojas funcionarão em horário especial, conforme comunicado da Operação.\n\nO suporte de TI estará disponível em regime de plantão pelo ramal 4000.\n\nBom descanso!\nComunicação Interna - Grupo Aurora Varejo"
+    },
+    "expected": {
+      "categories": [
+        "trabalho",
+        "outros",
+        "agenda"
+      ],
+      "levelMin": "LOW",
+      "levelMax": "LOW",
+      "action": false,
+      "deadline": null,
+      "opportunity": false,
+      "injection": false,
+      "notes": "Comunicado em massa sem ação; 02/11 é data de feriado, não prazo."
+    }
+  },
+  {
+    "id": "h-headhunter-head-pricing",
+    "description": "Headhunter 1:1 com vaga de Head de Pricing aderente e remuneração.",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Fernanda Siqueira <fernanda.siqueira@huntertalentos-exec.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Head de Pricing - varejo de moda (confidencial)",
+      "date": "2026-10-21T16:25:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "IMPORTANT",
+        "CATEGORY_PERSONAL"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@huntertalentos-exec.com.br header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@huntertalentos-exec.com.br designates 203.0.113.54 as permitted sender) smtp.mailfrom=bounces@huntertalentos-exec.com.br; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=huntertalentos-exec.com.br"
+      },
+      "text": "Olá, Rafael, tudo bem?\n\nSou sócia da Hunter Talentos Executivos e estou conduzindo, de forma confidencial, uma posição de Head de Pricing & Revenue Management para uma varejista de moda com cerca de 400 lojas (sede em São Paulo, modelo híbrido).\n\nA posição reporta ao CFO, lidera um time de 9 pessoas (cientistas de dados e analistas) e tem como desafio estruturar precificação dinâmica e markdown otimizado. Remuneração na faixa de R$ 38-42 mil + bônus de até 6 salários + ILP.\n\nVi sua trajetória em pricing no varejo alimentar e acredito que há bastante aderência. Teria disponibilidade para uma conversa de 30 minutos nesta semana ou na próxima? Pode me sugerir um horário ou, se preferir, me passar um telefone.\n\nUm abraço,\nFernanda Siqueira\nSócia | Hunter Talentos Executivos\n(11) 99000-0000"
+    },
+    "expected": {
+      "categories": [
+        "networking",
+        "carreira"
+      ],
+      "levelMin": "HIGH",
+      "levelMax": "HIGH",
+      "action": true,
+      "deadline": null,
+      "opportunity": true,
+      "injection": false,
+      "notes": "Contato 1:1 de recrutadora, vaga sênior totalmente aderente ao perfil de quem está buscando oportunidade. \"Nesta semana ou na próxima\" é janela de agenda, não prazo."
+    }
+  },
+  {
+    "id": "h-linkedin-inmail-ingles-revenue",
+    "description": "InMail do LinkedIn (em inglês) com vaga sênior remota de revenue management.",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Sarah Kim via LinkedIn <inmail-hit-reply@linkedin.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Sarah Kim: Senior Data Scientist, Revenue Management (Remote, USD)",
+      "date": "2026-10-22T17:40:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_SOCIAL"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@linkedin.com header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@bounce.linkedin.com designates 203.0.113.55 as permitted sender) smtp.mailfrom=bounces@bounce.linkedin.com; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=linkedin.com",
+        "List-Unsubscribe": "<https://www.linkedin.com/comm/psettings/email-unsubscribe?lipi=abc>",
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        "Precedence": "bulk"
+      },
+      "text": "Sarah Kim\nTalent Partner at Brightwave Travel\n\nHi Rafael,\n\nI came across your profile and was impressed by your work on pricing optimization and demand forecasting in retail. We're hiring a Senior Data Scientist, Revenue Management to work on dynamic pricing for our hotel marketplace across LATAM. The role is fully remote, paid in USD (range USD 85-110k), and reports to our Director of Pricing Science.\n\nWould you be open to a 20-minute intro call next week? Happy to share the full JD.\n\nBest,\nSarah\n\nReply   View profile\n\nThis is an InMail from a LinkedIn member. You are receiving InMail notification emails.\nUnsubscribe   Help\n(c) 2026 LinkedIn Corporation, 1000 West Maude Avenue, Sunnyvale, CA 94085."
+    },
+    "expected": {
+      "categories": [
+        "networking",
+        "carreira"
+      ],
+      "levelMin": "MEDIUM",
+      "levelMax": "HIGH",
+      "action": true,
+      "deadline": null,
+      "opportunity": true,
+      "injection": false,
+      "notes": "Mensagem 1:1 de recrutadora via plataforma (cabeçalhos de bulk e CATEGORY_SOCIAL não a tornam massa). Vaga aderente."
+    }
+  },
+  {
+    "id": "h-recrutadora-vaga-nao-aderente",
+    "description": "Consultoria de RH oferece vaga operacional júnior sem relação com o perfil.",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Bruna - RH Conecta Vagas <bruna.rh@conectavagas-rh.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Oportunidade: Assistente Financeiro (Contas a Pagar) - Guarulhos",
+      "date": "2026-10-21T13:00:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_PERSONAL"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@conectavagas-rh.com.br header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@conectavagas-rh.com.br designates 203.0.113.56 as permitted sender) smtp.mailfrom=bounces@conectavagas-rh.com.br; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=conectavagas-rh.com.br"
+      },
+      "text": "Olá Rafael,\n\nEncontramos seu currículo em nossa base e gostaríamos de te convidar para o processo seletivo de Assistente Financeiro (Contas a Pagar) para uma indústria em Guarulhos.\n\n- Regime CLT, presencial (seg a sex, 8h às 17h48)\n- Salário: R$ 3.200 + VR + VT\n- Requisitos: ensino médio completo, Excel intermediário\n\nSe tiver interesse, responda este e-mail com seu currículo atualizado e pretensão salarial.\n\nAtt,\nBruna\nConecta Vagas RH"
+    },
+    "expected": {
+      "categories": [
+        "carreira",
+        "networking",
+        "spam"
+      ],
+      "levelMin": "LOW",
+      "levelMax": "LOW",
+      "action": null,
+      "deadline": null,
+      "opportunity": false,
+      "injection": false,
+      "notes": "Vaga operacional júnior, incompatível com perfil sênior: não é oportunidade relevante. Resposta é condicional ao interesse."
+    }
+  },
+  {
+    "id": "h-gupy-reprovacao",
+    "description": "Gupy: reprovação em processo seletivo.",
+    "refToday": "2026-10-21",
+    "message": {
+      "from": "Mercantil Prisma via Gupy <noreply@gupy.io>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Atualização sobre sua candidatura - Gerente de Revenue Management",
+      "date": "2026-10-20T14:00:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@gupy.io header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@gupy.io designates 203.0.113.57 as permitted sender) smtp.mailfrom=bounces@gupy.io; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=gupy.io",
+        "Auto-Submitted": "auto-generated"
+      },
+      "text": "Olá, Rafael!\n\nAgradecemos muito seu interesse e o tempo dedicado ao processo seletivo para a vaga de Gerente de Revenue Management na Mercantil Prisma.\n\nApós análise cuidadosa, optamos por seguir com outros candidatos cujo perfil está mais alinhado ao momento da empresa. Seu currículo continuará em nosso banco de talentos para futuras oportunidades.\n\nDesejamos sucesso em sua jornada!\n\nEquipe de Talent Acquisition - Mercantil Prisma\nEnviado via Gupy"
+    },
+    "expected": {
+      "categories": [
+        "carreira"
+      ],
+      "levelMin": "LOW",
+      "levelMax": "MEDIUM",
+      "action": false,
+      "deadline": null,
+      "opportunity": false,
+      "injection": false,
+      "notes": "Encerramento de processo: informativo, não é oportunidade."
+    }
+  },
+  {
+    "id": "h-gupy-case-tecnico-prazo",
+    "description": "Gupy: avançou para case técnico com entrega até domingo 25/10 23h59.",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Cobalto Pay via Gupy <noreply@gupy.io>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Você avançou! Próxima etapa: Case técnico - Senior Pricing Analyst",
+      "date": "2026-10-22T13:30:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@gupy.io header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@gupy.io designates 203.0.113.58 as permitted sender) smtp.mailfrom=bounces@gupy.io; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=gupy.io",
+        "Auto-Submitted": "auto-generated"
+      },
+      "text": "Olá, Rafael!\n\nParabéns! Você avançou para a próxima etapa do processo seletivo para Senior Pricing Analyst na Cobalto Pay.\n\nEtapa: Case técnico (modelagem de precificação de tarifas de adquirência)\nFormato: notebook Python ou SQL + apresentação de até 5 slides\nPrazo de entrega: domingo, 25/10/2026, às 23h59 (pela plataforma)\n\nAcesse a sua área do candidato para baixar o enunciado e a base de dados. Entregas após o prazo não serão consideradas.\n\nBoa sorte!\nTime de Pessoas - Cobalto Pay\nEnviado via Gupy",
+      "html": "<!DOCTYPE html><html lang=\"pt-BR\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width\"><title>Gupy</title></head><body style=\"margin:0;padding:0;background:#f4f4f4;font-family:Arial,Helvetica,sans-serif;color:#222\"><table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\"><tr><td align=\"center\"><table role=\"presentation\" width=\"600\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#ffffff;margin:16px 0\"><tr><td style=\"padding:24px\"><p style=\"color:#2d5bff;font-weight:bold\">Cobalto Pay</p><h2>Parabéns, Rafael! Você avançou 🎉</h2><p>Próxima etapa do processo para <b>Senior Pricing Analyst</b>:</p><ul><li>Etapa: Case técnico (modelagem de precificação de tarifas de adquirência)</li><li>Formato: notebook Python ou SQL + até 5 slides</li><li><b>Prazo de entrega: domingo, 25/10/2026, às 23h59</b></li></ul><p><a href=\"https://cobaltopay.gupy.io/candidates/applications\" style=\"background:#2d5bff;color:#fff;padding:10px 18px;text-decoration:none\">Acessar área do candidato</a></p><p style=\"font-size:12px;color:#888\">Enviado via Gupy</p></td></tr></table></td></tr></table></body></html>"
+    },
+    "expected": {
+      "categories": [
+        "carreira",
+        "networking"
+      ],
+      "levelMin": "HIGH",
+      "levelMax": "CRITICAL",
+      "action": true,
+      "deadline": "2026-10-25",
+      "opportunity": true,
+      "injection": false,
+      "notes": "Etapa ativa de processo aderente com entrega em 3 dias; mensagem automática de plataforma, mas com ação e prazo dele."
+    }
+  },
+  {
+    "id": "h-linkedin-alerta-vagas-aderente",
+    "description": "Alerta de vagas do LinkedIn para \"gerente de pricing\" (aderente ao perfil).",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "LinkedIn Job Alerts <jobalerts-noreply@linkedin.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "\"gerente de pricing\": 5 novas vagas em São Paulo e região",
+      "date": "2026-10-22T11:15:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@linkedin.com header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@bounce.linkedin.com designates 203.0.113.59 as permitted sender) smtp.mailfrom=bounces@bounce.linkedin.com; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=linkedin.com",
+        "List-Unsubscribe": "<https://www.linkedin.com/comm/jobs/alerts/unsubscribe?id=99>",
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        "Precedence": "bulk"
+      },
+      "text": "Suas vagas recomendadas\n\nGerente de Pricing\nRede Supermercados Horizonte - São Paulo, SP (Híbrido)\nRecrutando ativamente - Candidatura simplificada\n\nPricing Lead\nFintech Monetra - São Paulo, SP (Remoto)\n\nSenior Revenue Manager\nAzulmar Hotéis - São Paulo, SP\n\nCoordenador de Inteligência de Preços\nFarmaBem - Barueri, SP\n\nData Science Manager - Pricing\nMarketplace Vitrine - São Paulo, SP (Híbrido)\n\nVer todas as vagas\n\nVocê está recebendo alertas de vaga para \"gerente de pricing\". Cancelar inscrição\n(c) 2026 LinkedIn"
+    },
+    "expected": {
+      "categories": [
+        "carreira",
+        "newsletters"
+      ],
+      "levelMin": "LOW",
+      "levelMax": "MEDIUM",
+      "action": false,
+      "deadline": null,
+      "opportunity": true,
+      "injection": false,
+      "notes": "Alerta em massa, mas aderente (pricing/revenue sênior em SP): conta como oportunidade; prioridade baixa-média."
+    }
+  },
+  {
+    "id": "h-alerta-vagas-nao-aderente",
+    "description": "Alerta de vagas operacionais de site de empregos (não aderente).",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "VagasJá Alertas <alertas@vagasja-empregos.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "12 vagas perto de você: Motorista, Auxiliar de Logística e mais",
+      "date": "2026-10-21T10:00:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_PROMOTIONS"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@vagasja-empregos.com.br header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@vagasja-empregos.com.br designates 203.0.113.60 as permitted sender) smtp.mailfrom=bounces@vagasja-empregos.com.br; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=vagasja-empregos.com.br",
+        "List-Unsubscribe": "<https://vagasja-empregos.com.br/descadastrar?u=8812>",
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        "Precedence": "bulk",
+        "List-Id": "<alertas.vagasja-empregos.com.br>"
+      },
+      "text": "Olá, Rafael!\n\nConfira as vagas que combinam com você:\n\n- Motorista Entregador (CNH B) - Osasco - R$ 2.400\n- Auxiliar de Logística - Barueri - R$ 1.900\n- Operador de Caixa - São Paulo - R$ 1.750\n- Repositor de Mercadorias - Guarulhos - R$ 1.680\n\nCandidate-se com 1 clique!\n\nPara deixar de receber, clique aqui."
+    },
+    "expected": {
+      "categories": [
+        "carreira",
+        "spam",
+        "marketing",
+        "newsletters"
+      ],
+      "levelMin": "LOW",
+      "levelMax": "LOW",
+      "action": false,
+      "deadline": null,
+      "opportunity": false,
+      "injection": false,
+      "notes": "Alerta em massa não aderente: ruído."
+    }
+  },
+  {
+    "id": "h-convite-palestra-meetup",
+    "description": "Convite para palestrar em meetup de dados e pricing, confirmar até 30/10.",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Lucas Andrade <lucas@dadosepricing-meetup.org>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Convite para palestrar no Data & Pricing Meetup SP - 18/11",
+      "date": "2026-10-21T22:00:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_PERSONAL"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@dadosepricing-meetup.org header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@dadosepricing-meetup.org designates 203.0.113.61 as permitted sender) smtp.mailfrom=bounces@dadosepricing-meetup.org; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=dadosepricing-meetup.org"
+      },
+      "text": "Oi Rafael, tudo certo?\n\nSou um dos organizadores do Data & Pricing Meetup SP. A gente assistiu sua fala sobre elasticidade-preço com modelos bayesianos no PyData e adoraria ter você como palestrante na nossa edição de 18/11 (quarta), às 19h, no auditório da Faria Lima.\n\nO formato é uma palestra de 30 min + 15 min de perguntas, público de ~150 pessoas (cientistas de dados, analistas de pricing e gestores). A gente cuida da gravação e da divulgação.\n\nVocê consegue me confirmar até 30/10 se topa? Assim fechamos a divulgação.\n\nAbraço,\nLucas Andrade\nData & Pricing Meetup SP"
+    },
+    "expected": {
+      "categories": [
+        "networking",
+        "agenda",
+        "carreira"
+      ],
+      "levelMin": "MEDIUM",
+      "levelMax": "HIGH",
+      "action": true,
+      "deadline": "2026-10-30",
+      "opportunity": true,
+      "injection": false,
+      "notes": "Convite profissional 1:1 relevante (visibilidade para quem busca vaga); o prazo dele é 30/10, o evento é 18/11."
+    }
+  },
+  {
+    "id": "h-proposta-consultoria-farmacias",
+    "description": "Proposta de projeto de consultoria PJ em pricing por indicação.",
+    "refToday": "2026-10-21",
+    "message": {
+      "from": "Renata Okumura <renata@okumura-consultoria.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Proposta: projeto de pricing para rede de farmácias (3 meses)",
+      "date": "2026-10-20T18:30:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_PERSONAL"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@okumura-consultoria.com.br header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@okumura-consultoria.com.br designates 203.0.113.62 as permitted sender) smtp.mailfrom=bounces@okumura-consultoria.com.br; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=okumura-consultoria.com.br"
+      },
+      "text": "Rafael, boa tarde.\n\nO Henrique Bastos me passou seu contato. Tenho uma consultoria boutique de varejo e fechamos um projeto com uma rede regional de farmácias (120 lojas, interior de SP) para reestruturar a política de preços e promoções.\n\nProcuro um especialista sênior em pricing para liderar a frente analítica: 3 meses, ~20h/semana, remoto com 2 visitas presenciais. A remuneração que temos em mente é de R$ 25 mil/mês como PJ.\n\nFaz sentido para você? Se sim, podemos marcar uma call na próxima semana para eu detalhar o escopo.\n\nAtenciosamente,\nRenata Okumura\nSócia-diretora - Okumura Consultoria de Varejo"
+    },
+    "expected": {
+      "categories": [
+        "negocios",
+        "networking",
+        "carreira"
+      ],
+      "levelMin": "MEDIUM",
+      "levelMax": "HIGH",
+      "action": true,
+      "deadline": null,
+      "opportunity": true,
+      "injection": false,
+      "notes": "Proposta de negócio 1:1 relevante, com indicação e valores; sem prazo."
+    }
+  },
+  {
+    "id": "h-convite-advisor-startup-ia",
+    "description": "Fundador de startup de IA convida para advisory board com equity.",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Gabriel Torres <gabriel@margemviva.ai>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Advisor de pricing para startup de IA (equity)",
+      "date": "2026-10-22T21:15:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_PERSONAL"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@margemviva.ai header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@margemviva.ai designates 203.0.113.63 as permitted sender) smtp.mailfrom=bounces@margemviva.ai; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=margemviva.ai"
+      },
+      "text": "Oi Rafael!\n\nSou cofundador da MargemViva, startup de IA que faz recomendação de preços para pequenos e médios varejistas (seed de US$ 2M fechada em agosto). Estamos montando um advisory board e seu nome surgiu em várias conversas com o pessoal do PyData.\n\nA proposta é ~2h por mês, com 0,25%-0,5% de equity e vesting de 2 anos. Topa uma call de 30 min pra eu te contar mais?\n\nAbraço,\nGabriel Torres\nCEO & cofundador - MargemViva"
+    },
+    "expected": {
+      "categories": [
+        "negocios",
+        "networking"
+      ],
+      "levelMin": "MEDIUM",
+      "levelMax": "HIGH",
+      "action": true,
+      "deadline": null,
+      "opportunity": true,
+      "injection": false,
+      "notes": "Convite de parceria/negócio 1:1 alinhado a IA + pricing."
+    }
+  },
+  {
+    "id": "h-ex-colega-cafe-informal",
+    "description": "Ex-colega, informal e com erros de digitação, chama para café e sugere oportunidade.",
+    "refToday": "2026-10-23",
+    "message": {
+      "from": "Leo Barreto <leo.barreto.dados@gmail.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "café semana q vem?",
+      "date": "2026-10-22T23:20:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_PERSONAL"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@gmail.com header.s=20230601 header.b=Zk3Rt9Wq; spf=pass (google.com: domain of leo.barreto.dados@gmail.com designates 209.85.220.43 as permitted sender) smtp.mailfrom=leo.barreto.dados@gmail.com; dmarc=pass (p=NONE sp=QUARANTINE dis=NONE) header.from=gmail.com"
+      },
+      "text": "Rafa!! quanto tempo cara\n\nto na Ventura Digital desde agosto, to montando o time de dados e pricing do zero e lembrei de vc na hora. queria muito trocar uma ideia, tem coisa interesante vindo ai. bora tomar um café semana que vem? terça ou quarta perto da faria lima funciona pra mim\n\nabs\nLeo"
+    },
+    "expected": {
+      "categories": [
+        "networking",
+        "carreira"
+      ],
+      "levelMin": "MEDIUM",
+      "levelMax": "HIGH",
+      "action": true,
+      "deadline": null,
+      "opportunity": true,
+      "injection": false,
+      "notes": "Networking com sinal claro de oportunidade (montando time). Datas sugeridas para o café não são prazo."
+    }
+  },
+  {
+    "id": "h-amigo-pede-indicacao-vaga",
+    "description": "Amigo pede indicação interna para vaga na empresa do dono.",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Thiago Lins <thiago.lins.albuquerque@gmail.com>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "indicação pra vaga aí na Aurora",
+      "date": "2026-10-21T12:30:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_PERSONAL"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@gmail.com header.s=20230601 header.b=Zk3Rt9Wq; spf=pass (google.com: domain of thiago.lins.albuquerque@gmail.com designates 209.85.220.44 as permitted sender) smtp.mailfrom=thiago.lins.albuquerque@gmail.com; dmarc=pass (p=NONE sp=QUARANTINE dis=NONE) header.from=gmail.com"
+      },
+      "text": "E aí Rafa, blz? Vi que abriu vaga de Analista de Pricing Pleno aí na Aurora (tá no LinkedIn). Será que vc consegue me indicar pelo programa de indicação interno? Te mando meu CV atualizado em anexo.\n\nSei que a vaga fecha dia 28 então se puder ver isso essa semana seria top. Valeu demais, te devo uma cerveja (além da do churras rs)\n\nThiago"
+    },
+    "expected": {
+      "categories": [
+        "tarefas",
+        "networking",
+        "carreira"
+      ],
+      "levelMin": "MEDIUM",
+      "levelMax": "HIGH",
+      "action": true,
+      "deadline": "any",
+      "opportunity": false,
+      "injection": false,
+      "notes": "Pedido de favor: a oportunidade é do amigo, não dele. Prazo ambíguo (\"essa semana\", antes do fechamento em 28/10)."
+    }
+  },
+  {
+    "id": "h-certificado-curso-concluido",
+    "description": "Certificado de curso concluído, com upsell.",
+    "refToday": "2026-10-20",
+    "message": {
+      "from": "Academia Dados+ <certificados@academiadadosmais.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Parabéns! Seu certificado de \"MLOps na prática\" está pronto",
+      "date": "2026-10-19T20:00:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_UPDATES"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@academiadadosmais.com.br header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@academiadadosmais.com.br designates 203.0.113.66 as permitted sender) smtp.mailfrom=bounces@academiadadosmais.com.br; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=academiadadosmais.com.br",
+        "List-Unsubscribe": "<https://academiadadosmais.com.br/email/unsubscribe?u=55>",
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        "Precedence": "bulk"
+      },
+      "text": "Olá, Rafael!\n\nVocê concluiu o curso MLOps na prática: do notebook à produção (24h) com aproveitamento de 92%.\n\nSeu certificado já pode ser baixado na área do aluno e compartilhado no LinkedIn.\n\nQue tal continuar aprendendo? Alunos que concluíram este curso também fizeram \"LLMs para dados tabulares\", com 20% de desconto para ex-alunos.\n\nEquipe Academia Dados+"
+    },
+    "expected": {
+      "categories": [
+        "tecnologia",
+        "carreira",
+        "outros",
+        "marketing"
+      ],
+      "levelMin": "LOW",
+      "levelMax": "LOW",
+      "action": false,
+      "deadline": null,
+      "opportunity": false,
+      "injection": false,
+      "notes": "Informativo de curso já concluído + upsell."
+    }
+  },
+  {
+    "id": "h-entrevista-confirmada-teams",
+    "description": "Entrevista já confirmada para 29/10; não precisa confirmar de novo.",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Mariana Couto <mariana.couto@superhorizonte-rh.com.br>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Entrevista confirmada - Gerente de Pricing - Supermercados Horizonte",
+      "date": "2026-10-22T18:45:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "IMPORTANT",
+        "CATEGORY_PERSONAL"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@superhorizonte-rh.com.br header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@superhorizonte-rh.com.br designates 203.0.113.67 as permitted sender) smtp.mailfrom=bounces@superhorizonte-rh.com.br; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=superhorizonte-rh.com.br"
+      },
+      "text": "Olá, Rafael!\n\nConforme combinamos por telefone, sua entrevista com o Diretor Comercial, Sr. Paulo Henrique Vidal, está confirmada:\n\nData: quinta-feira, 29/10/2026\nHorário: 10h00 às 11h00\nFormato: Microsoft Teams (link abaixo)\n\nhttps://teams.microsoft.com/l/meetup-join/19%3ameeting_EXEMPLO%40thread.v2/0\n\nNão é necessário confirmar novamente. Caso precise remarcar, me avise com 24h de antecedência.\n\nAbraços,\nMariana Couto\nTalent Acquisition - Supermercados Horizonte"
+    },
+    "expected": {
+      "categories": [
+        "carreira",
+        "agenda",
+        "networking"
+      ],
+      "levelMin": "MEDIUM",
+      "levelMax": "HIGH",
+      "action": false,
+      "deadline": null,
+      "opportunity": true,
+      "injection": false,
+      "notes": "Compromisso importante já confirmado (\"não é necessário confirmar\"); 29/10 é o evento, não prazo de ação."
+    }
+  },
+  {
+    "id": "h-cliente-ingles-review-by-tuesday",
+    "description": "Contato externo em inglês pede revisão de apêndice \"by Tuesday\".",
+    "refToday": "2026-10-22",
+    "message": {
+      "from": "Daniel Weber <daniel.weber@northwind-analytics.io>",
+      "to": "rafael.moura.dados@gmail.com",
+      "subject": "Quick review - elasticity appendix",
+      "date": "2026-10-22T15:05:00Z",
+      "labelIds": [
+        "INBOX",
+        "UNREAD",
+        "CATEGORY_PERSONAL"
+      ],
+      "headers": {
+        "Authentication-Results": "mx.google.com; dkim=pass header.i=@northwind-analytics.io header.s=s1 header.b=Qx7pLm2a; spf=pass (google.com: domain of bounces@northwind-analytics.io designates 203.0.113.68 as permitted sender) smtp.mailfrom=bounces@northwind-analytics.io; dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=northwind-analytics.io"
+      },
+      "text": "Hi Rafael,\n\nQuick one: could you review the attached elasticity appendix by Tuesday? Comments directly in the doc are fine, no need for a call. Mark mentioned you're the right person to sanity-check the cross-elasticity matrix.\n\nThanks a lot,\nDaniel\n\nDaniel Weber | Senior Consultant, Northwind Analytics"
+    },
+    "expected": {
+      "categories": [
+        "trabalho",
+        "tarefas"
+      ],
+      "levelMin": "MEDIUM",
+      "levelMax": "HIGH",
+      "action": true,
+      "deadline": "2026-10-27",
+      "opportunity": false,
+      "injection": false,
+      "notes": "Prazo relativo em inglês: \"by Tuesday\" enviado na quinta 22/10 = terça 27/10."
+    }
+  }
+]
