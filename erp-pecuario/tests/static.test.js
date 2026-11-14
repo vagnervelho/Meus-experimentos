@@ -360,3 +360,87 @@ test('ui:check: recusa recurso externo e página acima do orçamento', () => {
   assert.match(conferirPaginas({ 'A.html': 'x'.repeat(ORCAMENTO_BYTES), 'B.html': 'y' }).join('|'), /a página soma \d+ KB; o orçamento é de 450 KB/);
   assert.deepEqual(conferirPaginas({}), []);
 });
+
+// ------------------------------------------------------------------ superfície pública e rotas (E1.5) ----
+const DOCS = path.join(RAIZ, 'docs', 'fase-0');
+/** Funções de topo de Code.js: [{nome, corpo (primeira linha não vazia do corpo)}]. */
+function funcoesDeTopo(codigo) {
+  const linhas = limpar(codigo, false).split('\n');
+  const out = [];
+  linhas.forEach((l, i) => {
+    const m = /^function\s+([A-Za-z_$][\w$]*)\s*\(/.exec(l);
+    if (!m) return;
+    let j = i + 1;
+    while (j < linhas.length && linhas[j].trim() === '') j++;
+    out.push({ nome: m[1], primeira: (linhas[j] || '').trim() });
+  });
+  return out;
+}
+
+test('Code.js: superfície pública EXATA (as oito do desenho), cada uma começando pela guarda de dono; o resto termina em _', () => {
+  const funcoes = funcoesDeTopo(fontes['Code.js']);
+  const publicas = funcoes.filter((f) => !/_$/.test(f.nome));
+  assert.deepEqual(publicas.map((f) => f.nome).sort(), PUBLICAS.slice().sort());
+  for (const f of publicas) assert.match(f.primeira, /^var guarda = assertOwner_\(/, f.nome + ' começa pela guarda de dono');
+  assert.deepEqual(funcoes.filter((f) => /_$/.test(f.nome)).map((f) => f.nome).sort(), ['assertOwner_', 'include_']);
+  // Autoteste do leitor: pega função a mais e guarda fora do começo.
+  const ruim = funcoesDeTopo('function api(p) {\n  return Api.tratar(p);\n}\nfunction extra(e) {\n  var guarda = assertOwner_(e);\n}\n');
+  assert.deepEqual(ruim.map((f) => [f.nome, /^var guarda = assertOwner_\(/.test(f.primeira)]), [['api', false], ['extra', true]]);
+  // Na carga, o contexto só ganha essas funções globais (e as auxiliares com _).
+  const gas = createGas();
+  const globais = Object.keys(gas.G).filter((k) => typeof gas.G[k] === 'function' && fontes['Code.js'].indexOf('function ' + k + '(') >= 0);
+  assert.deepEqual(globais.filter((k) => !/_$/.test(k)).sort(), PUBLICAS.slice().sort());
+});
+
+test('rotas: a lista canônica (desenho-base, 15.3) é a do código; toda rota tem tratador ou NOT_FOUND explícito de fase futura', () => {
+  const base = fs.readFileSync(path.join(DOCS, '00-desenho-base.md'), 'utf8');
+  const inicio = base.indexOf('\n', base.indexOf('### 15.3'));
+  const secao = base.slice(inicio, base.indexOf('Lançamento financeiro avulso', inicio));
+  const doDesenho = [...secao.matchAll(/`([a-z]+\.[A-Za-z]+)`/g)].map((m) => m[1]);
+  assert.equal(doDesenho.length, 51);
+  const gas = createGas();
+  const Api = gas.G.Api;
+  assert.deepEqual(JSON.parse(JSON.stringify(Api.ROTAS_CANONICAS)), doDesenho, 'mesma lista e mesma ordem');
+  const rotas = JSON.parse(JSON.stringify(Api.rotas()));
+  for (const r of doDesenho) {
+    assert.ok(rotas[r], 'rota sem definição: ' + r);
+    assert.ok(['CONSULTA', 'COMANDO', 'MANUTENCAO', 'FUTURA'].includes(rotas[r].tipo), r);
+    if (rotas[r].tipo === 'FUTURA') assert.ok(rotas[r].fase >= 2 && rotas[r].modulo, r + ': rota de fase futura diz a fase e o módulo');
+  }
+  // Fase de cada rota na tabela de 01-arquitetura.md, 3.6: "(1)" não pode ser NOT_FOUND; a futura tem a fase da tabela.
+  const arq = fs.readFileSync(path.join(DOCS, '01-arquitetura.md'), 'utf8');
+  const tabela = arq.slice(arq.indexOf('### 3.6'), arq.indexOf('## 4.'));
+  const fases = Object.fromEntries([...tabela.matchAll(/`([a-z]+\.[A-Za-z]+)` \((\d)/g)].map((m) => [m[1], Number(m[2])]));
+  assert.ok(Object.keys(fases).length >= 40);
+  for (const [r, f] of Object.entries(fases)) {
+    if (f === 1) assert.notEqual(rotas[r].tipo, 'FUTURA', r + ' é da Fase 1');
+    if (rotas[r].tipo === 'FUTURA') assert.equal(rotas[r].fase, f, r + ': fase da tabela');
+  }
+  // Extras do código (consultas do assistente de importação, estado do sistema, rascunho) são documentados.
+  const contratos = fs.readFileSync(path.join(RAIZ, 'docs', 'CONTRATOS.md'), 'utf8');
+  for (const r of Object.keys(rotas).filter((x) => !doDesenho.includes(x))) assert.ok(contratos.includes('`' + r + '`'), 'rota extra sem contrato: ' + r);
+  // Sem exclusão física (P7): nenhuma rota de apagar.
+  assert.deepEqual(Object.keys(rotas).filter((r) => /\.(apagar|excluir|deletar|delete|remove)$/i.test(r)), []);
+  // Comando de gravação exige chave, salvo os de chave derivada do import_id; consultas não.
+  assert.deepEqual(Object.keys(rotas).filter((r) => rotas[r].tipo === 'COMANDO' && !rotas[r].exigeChave).sort(), ['importacao.concluir', 'importacao.desfazer', 'importacao.importarBloco']);
+  assert.deepEqual(Object.keys(rotas).filter((r) => rotas[r].tipo === 'CONSULTA' && rotas[r].exigeChave), []);
+});
+
+test('Api: versão = package.json; includes da lista branca = telas do desenho (01, 6.2), sem o Index; todo .html de src/ é da lista', () => {
+  const gas = createGas();
+  const Api = gas.G.Api;
+  const pkg = JSON.parse(fs.readFileSync(path.join(RAIZ, 'package.json'), 'utf8'));
+  assert.equal(Api.APP_VERSION, pkg.version);
+  const arq = fs.readFileSync(path.join(DOCS, '01-arquitetura.md'), 'utf8');
+  const secao = arq.slice(arq.indexOf('### 6.2'), arq.indexOf('### 6.3'));
+  const telas = [...new Set([...secao.matchAll(/^\| (`[A-Za-z]+`(?:, `[A-Za-z]+`)*) \|/gm)].flatMap((m) => m[1].match(/[A-Za-z]+/g)))].filter((n) => n !== 'Index');
+  assert.equal(telas.length, 14);
+  assert.deepEqual(JSON.parse(JSON.stringify(Api.INCLUDES)).sort(), telas.sort());
+  const htmls = fs.readdirSync(SRC_DIR).filter((f) => f.endsWith('.html')).map((f) => f.replace(/\.html$/, ''));
+  for (const h of htmls) assert.ok(h === 'Index' || Api.INCLUDES.indexOf(h) >= 0, h + '.html fora da lista branca');
+});
+
+test('manifesto do Web App: só executeAs e access; exceções no log do Google', () => {
+  assert.deepEqual(Object.keys(manifest.webapp).sort(), ['access', 'executeAs']);
+  assert.equal(manifest.exceptionLogging, 'STACKDRIVER');
+});

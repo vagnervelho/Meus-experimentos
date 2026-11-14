@@ -8,7 +8,8 @@ Estado: etapas BASE (E1.1 e parte da E1.2) — `Schema`, `Utils`, `Validation`, 
 (E1.3 e E1.4) — `Database`, `Repository`, `UnitOfWork` e `AuditService` (parte 1) — e MOTOR DE EVENTOS (E1.6) —
 `EventCatalog`, `Timeline` e `EventService` — e SERVIÇOS DE CADASTRO E CONSULTA (E1.7 e E1.8) — `Config`, `AnimalService`,
 `PastureService` e `InventoryService` (seção 15) — e OPERAÇÃO DO SISTEMA (E1.10 e E1.11, backend) — `FileService`,
-`Maintenance`, `AuditService` (parte 2) e `ImportService` (seções 11, 16 a 18).
+`Maintenance`, `AuditService` (parte 2) e `ImportService` (seções 11, 16 a 18) — e API E PONTOS DE ENTRADA (E1.5 e parte
+da E1.12) — `Api`, `Code` e `TestRunner` (seções 19 a 21).
 
 ## 1. Regras que valem para todo arquivo de `src/`
 
@@ -174,9 +175,9 @@ monta o contexto com `Database.contexto(opcoes)`; nos testes, o mesmo objeto é 
 | `hash` | `sha256Hex(texto) → 64 caracteres hexadecimais minúsculos` (UTF-8) | `Utilities.computeDigest(SHA_256, texto, UTF_8)` + `Utils.bytesParaHex` |
 | `props` | `ler() → {chave: texto}` (UM `getProperties()` por chamada: o retrato de um ponto de leitura); `gravar(chave, valor)`; `remover(chave)` | `PropertiesService.getScriptProperties()` |
 | `files` | `FileStore` (Drive: pastas, banco, backups, anexos, exportações; seção 16) | `FileService.porta()` |
-| `session` | Sessão do pedido (dono, e-mail ativo) | `Api` (etapa posterior); `null` até lá |
-| `usuario` | E-mail de quem executa; obrigatório em `UnitOfWork.run` (vai para `OPERACOES.usuario`, `created_by`, `AUDITORIA.usuario`) | `Api` |
-| `fuso` | Fuso IANA de "hoje" | `CONFIGURACOES.fuso` (Api); padrão `Session.getScriptTimeZone()` |
+| `session` | Sessão do pedido: `{usuario, ambiente, base_de_teste}` | `Api.contexto`; `null` fora da Api (gatilho, setup) |
+| `usuario` | E-mail de quem executa; obrigatório em `UnitOfWork.run` (vai para `OPERACOES.usuario`, `created_by`, `AUDITORIA.usuario`) | `Api` (o dono, também com `ALLOW_EMPTY_ACTIVE_USER`) |
+| `fuso` | Fuso IANA de "hoje" | `Api.contexto`: o fuso da planilha-banco (`io.fuso()`), que o setup e o `config.salvar` mantêm igual a `CONFIGURACOES.fuso` (a integridade confere); padrão `Session.getScriptTimeZone()` |
 | `projecoes` | Porta do projetor: `{reads: [abas], reconstruir(tx, escopo)}` (seção 10.4); `null` = a fase C só refaz `EVENTOS.status` e a auditoria | `Timeline.porta()` (seção 13) — a `Api` deve sempre passá-la |
 | `errosPendentes` | Fila de registros de ERROS_LOG da execução (`UnitOfWork.anotarErro`) | — |
 
@@ -452,6 +453,12 @@ resultado. Também: `conferirCorpus`, `corpusDefinicao(aba)`, `corpusRegistros()
 
 **Portas reais:** `lock()`, `clock()`, `idGen()`, `hash()`, `props()` (seção 5) e `contexto({banco, primitiva,
 usuario, fuso, files, session, projecoes})`.
+
+**Diagnóstico** (só `runDiagnostics`, sempre numa planilha TEMPORÁRIA, nunca no banco): `diagnosticoCoercao(banco,
+entradas?) → {locale, casos: [{entrada, geral: {tipo, valor}}]}` (setValues em células Geral, pt_BR; `tipo` ∈ formula,
+texto, numero, data, hora, booleano — o formato de `tests/fixtures/coercao.json`); `diagnosticoAtomicidade(banco) →
+{atomico, recusou, lido, erro}` (um `batchUpdate` com uma escrita válida e um pedido inválido); `diagnosticoFuso(instante,
+fuso) → {utilities, utils}`.
 
 ## 9. `Repository` (puro)
 
@@ -782,16 +789,19 @@ EVENTOS, IMPORTACOES.
 
 ## 17. `Maintenance` (plataforma: setup, backup, restauração, rotinas agendadas)
 
-Script Properties: `SPREADSHEET_ID`, `OWNER_EMAIL`, `DRIVE_FOLDERS`, `IO_PRIMITIVE` (forma de gravação escolhida),
-`IO_PRIMITIVE_RELATORIO` (resumo do corpus), `DATA_VERSION:<id>`, `PENDING_OP:<id>`, `INTEGRIDADE:<id>` (resumo da
-última verificação semanal `{gerado_em, ok, erros, alertas}`). Backup = arquivo na pasta Backups com appProperties
+Script Properties: `SPREADSHEET_ID`, `TEST_SPREADSHEET_ID`, `DEMO_SPREADSHEET_ID` (bancos por ambiente: `AMBIENTES =
+{PRODUCAO, TESTE, DEMO}`), `OWNER_EMAIL`, `DRIVE_FOLDERS`, `IO_PRIMITIVE` (forma de gravação da produção),
+`IO_PRIMITIVE:<id>` (a de um banco de teste ou de demonstração; nunca mexe na de produção), `IO_PRIMITIVE_RELATORIO`
+(resumo do corpus da produção), `DATA_VERSION:<id>`, `PENDING_OP:<id>`, `INTEGRIDADE:<id>` (resumo da última verificação
+semanal `{gerado_em, ok, erros, alertas}`). Backup = arquivo na pasta Backups com appProperties
 `erp_tipo = BACKUP`, `erp_banco`, `erp_data` (yyyy-MM-dd no fuso), `erp_motivo`, `erp_instante`. A guarda
 `assertOwner_` das funções públicas é do Code.js; os handlers dos gatilhos montam o contexto com `contexto()`.
 
 | Função | Contrato |
 |---|---|
-| `contexto({banco, usuario, fuso}?)` | Contexto de produção: banco de `SPREADSHEET_ID`, primitiva de `IO_PRIMITIVE`, `FileService.porta()`, `Timeline.porta()`. Sem banco → `CONFIG` |
-| `setup({usuario, fuso, tabelas})` | 06, seção 4, idempotente: dono (`OWNER_EMAIL` na primeira vez; outro → `DENIED`) → lock (`LOCKED`) → pastas e sonda do Drive (`CONFIG` com a contingência) → backup cru do banco existente (SETUP; banco registrado sumido → `CONFIG`, nunca cria outro) → corpus numa planilha temporária na pasta Testes, que vai para a lixeira (nenhuma passa → `CONFIG`, banco intocado) → banco pelo Drive → abas na dimensão exata (a aba padrão vazia do banco novo sai) → colunas ao final → sementes por chave natural num comando (`anexaSemPai`, AUDITORIA `MANUTENCAO`) → fuso de `CONFIGURACOES.fuso` e locale `pt_BR` → SCHEMA_META (colunas do sistema na ordem real; `versao` sobe quando cresce) → contadores → gatilhos → proteção "somente aviso" → integridade. `tabelas` = definições que substituem as do Schema (migração; teste do esquema da fase seguinte). Devolve `{banco, banco_criado, pastas, drive, backup, primitiva: {primitiva, resultados: [{primitiva, ok, divergencias, erro}]}, abas: {criadas, colunas_acrescentadas, removidas}, sementes: {CONFIGURACOES, LISTAS, PLANO_CONTAS, CATEGORIAS}, fuso, schema_meta: {criadas, atualizadas}, contadores: {proximo_event_seq, proximo_codigo_interno}, gatilhos, protecoes, integridade}` |
+| `contexto({banco, ambiente, usuario, fuso, props}?)` | Contexto com portas reais: banco do `ambiente` (padrão PRODUCAO = `SPREADSHEET_ID`; TESTE/DEMO = `TEST_`/`DEMO_SPREADSHEET_ID`) ou `banco`; forma de gravação por `primitivaDoBanco`; `FileService.porta()`, `Timeline.porta()`; `props` = retrato já lido. Sem banco → `CONFIG` (para TESTE/DEMO, com a instrução de rodar `runAcceptanceTests`); ambiente desconhecido → `VALIDATION` |
+| `chaveDoAmbiente(ambiente)`, `primitivaDoBanco(props, banco)` | Chave de Script Properties do banco do ambiente; forma de gravação: `IO_PRIMITIVE:<banco>` → `IO_PRIMITIVE` → `Database.PRIMITIVAS[0]` |
+| `setup({usuario, fuso, tabelas, ambiente})` | `ambiente` TESTE/DEMO: o banco nasce na pasta Testes ("ERP Pecuário — BASE DE TESTE", `erp_ambiente`), vai para `TEST_`/`DEMO_SPREADSHEET_ID` e a forma de gravação para `IO_PRIMITIVE:<banco>`; `IO_PRIMITIVE` e `IO_PRIMITIVE_RELATORIO` de produção não mudam. 06, seção 4, idempotente: dono (`OWNER_EMAIL` na primeira vez; outro → `DENIED`) → lock (`LOCKED`) → pastas e sonda do Drive (`CONFIG` com a contingência) → backup cru do banco existente (SETUP; banco registrado sumido → `CONFIG`, nunca cria outro) → corpus numa planilha temporária na pasta Testes, que vai para a lixeira (nenhuma passa → `CONFIG`, banco intocado) → banco pelo Drive → abas na dimensão exata (a aba padrão vazia do banco novo sai) → colunas ao final → sementes por chave natural num comando (`anexaSemPai`, AUDITORIA `MANUTENCAO`) → fuso de `CONFIGURACOES.fuso` e locale `pt_BR` → SCHEMA_META (colunas do sistema na ordem real; `versao` sobe quando cresce) → contadores → gatilhos → proteção "somente aviso" → integridade. `tabelas` = definições que substituem as do Schema (migração; teste do esquema da fase seguinte). Devolve `{banco, banco_criado, pastas, drive, backup, primitiva: {primitiva, resultados: [{primitiva, ok, divergencias, erro}]}, abas: {criadas, colunas_acrescentadas, removidas}, sementes: {CONFIGURACOES, LISTAS, PLANO_CONTAS, CATEGORIAS}, fuso, schema_meta: {criadas, atualizadas}, contadores: {proximo_event_seq, proximo_codigo_interno}, gatilhos, protecoes, integridade}` |
 | `backup(ctx, {motivo})` | `MOTIVOS_BACKUP`: DIARIO, SOB_DEMANDA (padrão), SETUP, IMPORTACAO, RESTAURACAO. `UnitOfWork.exclusivo` (lock, recuperação, flush) e cópia pelo Drive; o DIARIO aplica a retenção. `{backup: {id, nome, data, instante, motivo}, retencao}`. Falha da cópia → `CONFIG` com instrução |
 | `listarBackups(ctx, {todos}?)` | Deste banco (ou todos), do mais novo: `[{id, nome, data, instante, motivo, banco}]` |
 | `aplicarRetencao(ctx) → {mantidos, removidos: [nome]}` | Os `backup_retencao_diarios` DIARIO mais recentes; dos mais antigos, o último de cada mês nos `backup_retencao_mensais` meses mais recentes; os demais motivos ficam o mesmo número de dias; o resto vai para a lixeira |
@@ -800,6 +810,7 @@ Script Properties: `SPREADSHEET_ID`, `OWNER_EMAIL`, `DRIVE_FOLDERS`, `IO_PRIMITI
 | `limparAnexos(ctx) → {temporarios, orfaos, arquivos_removidos}` | TEMPORARIO com mais de 24 h → REMOVIDO (comando auditado) e lixeira; arquivo deste banco na pasta Anexos sem linha em ANEXOS e com mais de 24 h → lixeira; arquivo de anexo REMOVIDO ainda fora da lixeira → lixeira |
 | `manutencaoDiaria(ctx)` | Corpo de `trgManutencaoDiaria`: backup DIARIO com retenção → exportações → anexos. Etapa que falha não impede as seguintes; vai para ERROS_LOG (`MANUTENCAO_<ETAPA>`) e no fim lança `INTERNAL` com `erro.relatorio`. Sem falha: `{backup, retencao, exportacoes, anexos, falhas: []}` |
 | `integridadeSemanal(ctx)` | Corpo de `trgIntegridadeSemanal`: o relatório; resumo em `INTEGRIDADE:<banco>`; com erro, ERROS_LOG `INTEGRIDADE_COM_ERRO` |
+| `listarGatilhos() → [{funcao, id}]` | Gatilhos do projeto que são deste sistema (diagnóstico SP-09, aceitação CT-11) |
 | `garantirGatilhos(fuso) → {criados, removidos, total}` | Por nome da função: `trgManutencaoDiaria` diário às 3 h e `trgIntegridadeSemanal` aos domingos às 5 h, no fuso; cria o que falta, apaga duplicata |
 | `estado(ctx)` | Tela de sistema: `{banco, primitiva, data_version, backups, ultimo_backup, integridade, gatilhos, alertas_estado}`; `alertas_estado` = `{backup: {ultimo_em}, integridade: {verificado_em, erros} \| null}`, o parâmetro de `InventoryService.consultaAlertas` |
 
