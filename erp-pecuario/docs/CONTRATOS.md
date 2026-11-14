@@ -805,7 +805,7 @@ semanal `{gerado_em, ok, erros, alertas}`). Backup = arquivo na pasta Backups co
 | `backup(ctx, {motivo})` | `MOTIVOS_BACKUP`: DIARIO, SOB_DEMANDA (padrão), SETUP, IMPORTACAO, RESTAURACAO. `UnitOfWork.exclusivo` (lock, recuperação, flush) e cópia pelo Drive; o DIARIO aplica a retenção. `{backup: {id, nome, data, instante, motivo}, retencao}`. Falha da cópia → `CONFIG` com instrução |
 | `listarBackups(ctx, {todos}?)` | Deste banco (ou todos), do mais novo: `[{id, nome, data, instante, motivo, banco}]` |
 | `aplicarRetencao(ctx) → {mantidos, removidos: [nome]}` | Os `backup_retencao_diarios` DIARIO mais recentes; dos mais antigos, o último de cada mês nos `backup_retencao_mensais` meses mais recentes; os demais motivos ficam o mesmo número de dias; o resto vai para a lixeira |
-| `restaurar(ctx, {dados: {backup_id, justificativa}})` | 06, seção 10: cópia do backup pelo Drive (pasta raiz, `erp_tipo = BANCO`); `DATA_VERSION` do novo = maior das duas + 1; marcador do novo ANTES de trocar a propriedade do banco em uso (`SPREADSHEET_ID`, ou `TEST_`/`DEMO_` quando é a do contexto); `recoverAll`; AUDITORIA `MANUTENCAO` no novo; integridade. O anterior fica no Drive. `{banco_anterior, banco, backup, recuperacao, dataVersion, integridade}`. Erros: `NOT_FOUND` (não é backup), `LOCKED`, `CONFIG` |
+| `restaurar(ctx, {dados: {backup_id, justificativa}})` | 06, seção 10: cópia do backup pelo Drive (pasta raiz, `erp_tipo = BANCO`); `DATA_VERSION` do novo = maior das duas + 1; marcador do novo ANTES de trocar a propriedade do banco em uso (`SPREADSHEET_ID`, ou `TEST_`/`DEMO_` quando é a do contexto; a `IO_PRIMITIVE:<id>` do banco de teste passa para o novo); `recoverAll`; AUDITORIA `MANUTENCAO` no novo; integridade. O anterior fica no Drive. `{banco_anterior, banco, backup, recuperacao, dataVersion, integridade}`. Erros: `NOT_FOUND` (não é backup), `LOCKED`, `CONFIG` |
 | `limparExportacoes(ctx) → {removidas}` | Exportações com mais de `EXPORTACAO_VALIDADE_DIAS` (7) |
 | `limparAnexos(ctx) → {temporarios, orfaos, arquivos_removidos}` | TEMPORARIO com mais de 24 h → REMOVIDO (comando auditado) e lixeira; arquivo deste banco na pasta Anexos sem linha em ANEXOS e com mais de 24 h → lixeira; arquivo de anexo REMOVIDO ainda fora da lixeira → lixeira |
 | `manutencaoDiaria(ctx)` | Corpo de `trgManutencaoDiaria`: backup DIARIO com retenção → exportações → anexos. Etapa que falha não impede as seguintes; vai para ERROS_LOG (`MANUTENCAO_<ETAPA>`) e no fim lança `INTERNAL` com `erro.relatorio`. Sem falha: `{backup, retencao, exportacoes, anexos, falhas: []}` |
@@ -862,3 +862,73 @@ cria a propriedade `PROP`, os pastos `PASTOS.A` e `PASTOS.B` (identificação `P
 2026-01-01`, `propriedade_padrao_id` e o que vier em `config`. Helpers: `ctx()` (portas reais, com `files`), `exec(fn)`,
 `tentar(fn)`, `read(q)`, `tabela(aba, banco?)`, `evento(acao, dados, chave)`, `integridade()`, `conferirProjecoes()`,
 `editar(aba, id, coluna, valorCru)` e `apagarLinha(aba, id)` (edição à mão no fake); `situacoes(relatorio)`.
+
+## 19. `Api` (plataforma: guarda de dono, roteador, contexto, envelope, rascunho, páginas)
+
+**Pedido** (`google.script.run.api(pedido)`): `{rota, dados (objeto; padrão {}), idempotencyKey (texto ≤ 200; obrigatória
+em comando), avisosAceitos ([código] ou [{codigo, animal_id, justificativa}]; vira a lista de códigos), dataVersionEsperada
+(inteiro), ambiente (PRODUCAO padrão | TESTE | DEMO)}`. O banco vem SEMPRE do ambiente (Script Properties), nunca de um ID
+enviado pelo cliente. Pedido malformado → `VALIDATION` com `details[0].campo` (rota, dados, idempotencyKey, avisosAceitos,
+dataVersionEsperada, ambiente).
+
+**Envelope** (sempre; `api()` nunca lança): `{ok: true, data, meta}` ou `{ok: false, error: {code, message, details}, meta}`,
+copiado por JSON (nenhum `Date`, função ou `undefined` sai). `meta = {dataVersion (versão do banco do ambiente, ou null sem
+banco/DENIED/rascunho), appVersion (= package.json), serverTime (ISO UTC)}`; em comando também `duplicado` (booleano),
+`opId`, e `semAlteracao`/`recuperada` quando a UnitOfWork os devolve. `data` = o `dados` do serviço. Exceção que não é
+`AppError` (ou `INTERNAL`): mensagem genérica de `Validation`; o detalhe vai para o log de execuções e para ERROS_LOG
+(`codigo = API_<code>`, `contexto = api:<rota>`).
+
+| Membro | Contrato |
+|---|---|
+| `tratar(pedido, guarda?)` | O roteador. `guarda = {usuario}` (já conferido por Code.js) ou `{erro}` (vira envelope DENIED); sem guarda, confere aqui |
+| `assertOwner({props, evento}?) → e-mail` | 01, seção 4.2: e-mail ativo = dono (`OWNER_EMAIL`, senão o usuário efetivo; sem diferença de maiúsculas); vazio → `DENIED` com a instrução, salvo `ALLOW_EMPTY_ACTIVE_USER = true` (o usuário passa a ser o dono); `evento.triggerUid` de gatilho instalado (`getProjectTriggers().getUniqueId()`) → o dono; uid estranho → `DENIED` |
+| `contexto({ambiente, usuario, props}) → ctx` | `Maintenance.contexto` + `fuso = io.fuso()` + `session = {usuario, ambiente, base_de_teste}`. Planilha inacessível → `CONFIG` (causa em `erro.causa` e no log) |
+| `rotas() → {rota: {tipo, fase, modulo, exigeChave}}` | `tipo` ∈ CONSULTA, COMANDO, MANUTENCAO, RASCUNHO, FUTURA. `ROTAS_CANONICAS` = as 51 da seção 15.3, na ordem |
+| `pagina(e)`, `paginaNegada(erro)` | doGet: `Index` (template; `appVersion` disponível no template) com título "ERP Pecuário" e viewport; sem `Index.html` no projeto, página de aviso; `?pagina=concorrencia` → `TestRunner.paginaConcorrencia()` |
+| `incluir(nome)` | Conteúdo de `src/<nome>.html` da lista branca `INCLUDES` (Styles, JavaScript, Components, Dashboard, Animals, Pastures, Events, Weights, Health, Reproduction, Financial, Reports, Settings, Import); outro nome → `VALIDATION`. Templates chamam `<?!= include_('Styles') ?>` |
+| `rascunho(acao, dados, info)` | Ver rotas `rascunho.*` |
+| `executarNoEditor(nome, fn)` | Corpo das funções do editor e dos gatilhos: resultado em JSON simples + resumo no log; erro registrado e relançado |
+| `diagnosticoSessao()` | SP-04 sem dado sensível: `{email_ativo_preenchido, email_ativo_e_do_dono, email_efetivo_preenchido, dono_registrado, contingencia_email_vazio}` |
+| `APP_VERSION`, `TITULO`, `FAIXA_TESTE` (`'BASE DE TESTE'`), `RASCUNHO` (`{prefixo, maxBytes: 8000, max: 40, validadeDias: 30}`) | Constantes |
+
+**Rotas.** As 51 canônicas; as de fase futura respondem `NOT_FOUND` "Esta função faz parte do módulo X, que chega na fase N"
+(`inventario.elegiveis` 2; `produto.salvar`, `protocolo.salvar`, `estacao.salvar`, `sanidade.agenda`,
+`reproducao.indicadores`, `peso.desempenho` 3; `conta.salvar`, `preco.salvar`, `parcela.*`, `financeiro.*` 4;
+`relatorio.*` 5); rota desconhecida → `NOT_FOUND`. Cada uma chama o serviço da seção correspondente com
+`pedido = {idempotencyKey, dados, avisosAceitos, dataVersionEsperada}` (comando) ou `dados` (consulta). Particularidades:
+
+| Rota | O que faz |
+|---|---|
+| `sistema.bootstrap` | `dados.dataVersion` = versão em cache: igual à atual e sem marcador → `{atual: true, dataVersion, appVersion, ambiente}` (só Script Properties). Senão, numa leitura validada: `{atual: false, configuracoes, listas, categorias, cobertura, parceiros (Config.cadastros), propriedades, pastos (cartões de hoje, inclusive inativos), animais (ATIVOS + EXTERNOS em colunas), alertas, catalogo (EventCatalog.serializar), modulos, dataVersion, appVersion, ambiente: {codigo, base_de_teste, faixa: 'BASE DE TESTE' \| null}, usuario, sistema: {primitiva, ultimo_backup, integridade, gatilhos}}` |
+| `sistema.estado` | `Maintenance.estado` (backups, forma de gravação, integridade, gatilhos) — tela de sistema e lista para restaurar |
+| `sistema.backup` / `sistema.restaurarBackup` / `sistema.integridade` | Manutenção (sem chave): backup SOB_DEMANDA; `restaurar` com `{backup_id, justificativa}`; integridade (`{reparar: true, justificativa}` → `repararIntegridade`) |
+| `operacao.status` | `{chave}` → `UnitOfWork.status` |
+| `evento.simular` | `{acao: registrar \| corrigir \| estornar, dados}` → `EventService.simular`; outra ação → `VALIDATION` |
+| `config.salvar` | `Config.salvar`; mudando `fuso`, a planilha-banco recebe o fuso novo (e `pt_BR`) logo depois do commit |
+| `importacao.importarBloco`, `importacao.concluir`, `importacao.desfazer` | Comandos SEM chave do cliente (a chave é `ImportService.chaveBloco`) |
+| `importacao.obter`, `importacao.previa`, `importacao.linhas`, `importacao.relatorio`, `importacao.listar` | Consultas do assistente (`ImportService.obter`, `previaArquivo`, `consultaLinhas`, `consultaRelatorio`, `consultaListar`) — rotas extras, não canônicas |
+| `rascunho.salvar` / `rascunho.obter` / `rascunho.remover` | Seção 17, SP-06: `{chave (A-Z a-z 0-9 . _ : -, até 100), conteudo}` nas propriedades do USUÁRIO, chave `RASCUNHO:<ambiente>:<chave>`; fora da planilha, sem versão, funciona sem banco. `salvar → {chave, salvo_em, bytes}` (acima de 8 KB, ou com 40 guardados, `VALIDATION`; vencidos há 30 dias saem na gravação); `obter → {chave, existe, conteudo, salvo_em}`; `remover → {chave, removido}` |
+
+## 20. `Code` (funções públicas)
+
+Só estas funções globais sem `_` (o teste estático exige a lista exata e a guarda na primeira linha de cada uma):
+`doGet(e)` (página ou "acesso negado"), `api(pedido)` (envelope), `setup()` (`Maintenance.setup` com o fuso do script),
+`runAcceptanceTests()`, `runDiagnostics()`, `verifyIntegrity()` (relatório de integridade da produção),
+`trgManutencaoDiaria(e)`, `trgIntegridadeSemanal(e)` (contexto de produção por `Api.contexto`). Auxiliares: `assertOwner_(evento,
+semLancar) → {usuario, erro}` e `include_(nome)` (templates). As do editor devolvem JSON simples e registram um resumo no log;
+falha → exceção (a execução aparece com erro).
+
+## 21. `TestRunner` (aceitação de nível 2, base de demonstração, diagnóstico)
+
+| Função | Contrato |
+|---|---|
+| `runAcceptanceTests({usuario, plano?, limiteMs?, reiniciar?, injetar?})` | `plano` = `ACEITACAO` (padrão, ou `TEST_PLAN`) ou `DEMO`. ACEITACAO: base de teste NOVA (a anterior vai para a lixeira) por `Maintenance.setup({ambiente: 'TESTE'})` e os cenários `CENARIOS` (PREPARO, CT-09, CT-10, CT-12, CT-18, RESTAURACAO, CT-20, CT-11, ISOLAMENTO), todos pela `Api` com `ambiente: 'TESTE'`. Relatório `{plano, completo: true, ok, resumo: {cenarios: {PASSOU, FALHOU}, passos: {PASSOU, FALHOU, NAO_SE_APLICA, PENDENTE_NA_CONTA_DO_DONO}}, cenarios: [{id, titulo, situacao, falha, ms, passos: [{passo, titulo, situacao, detalhe}]}], corpus, limpeza, arquivo: {nome, id}}`, gravado em JSON na pasta Testes. Pausa perto de `limiteMs` (padrão 4 min) → `{completo: false, proximo, mensagem}`; a chamada seguinte continua (cursor `TEST_CURSOR`, resultados `TEST_RESULTADO:<i>`, apagados no fim). Falha de cenário vai para o relatório (e para o log) e os demais seguem; falha no PREPARO encerra. No fim: backups e bancos antigos da rodada para a lixeira; a base de teste final fica (página de concorrência) |
+| `injetar` (só no Node) | `{ocuparLock(), liberarLock()}`: outra execução segura o lock (CT-10, passo 5). Sem ele, o passo é NAO_SE_APLICA |
+| DEMO | Base de demonstração em `DEMO_SPREADSHEET_ID` (criada pelo setup se não existe): propriedade, 6 pastos (1 arrendado), D0 = hoje − 1095 (ou o marco zero já gravado), 6 ENTRADA_INICIAL de 40 animais (110 vacas, 4 touros, 30 novilhas, 48 bezerros ao pé com a mãe, 48 garrotes), 8 OUTRA_ENTRADA de 8, 1 entrada estornada, 3 correções de localização → 304 ativos conferidos pelo inventário. Sorteio com semente fixa (`geracaoDemo(d0)`), chaves `seed:<n>`: reexecutar não grava de novo. Comando recusado para o seed: `{completo: false, ok: false, proximo, falha}` (cursor fica no passo) |
+| `runDiagnostics({usuario, linhas?})` | Itens SP-01 a SP-10 e RUNTIME `{id, titulo, situacao: OK \| FALHOU \| ALERTA \| NAO_SE_APLICA, medidas, observacao}`: corpus nas três formas + coerção Geral (formato do fixture) + atomicidade; sonda do Drive + abertura pelo SpreadsheetApp; lock; e-mail ativo; tempos com `linhas` (padrão 10.000) em EVENTO_ANIMAIS + custo de ler as propriedades; gatilhos; fuso do V8. Planilhas temporárias na pasta Testes (lixeira no fim); sem e-mail nem ID de arquivo no relatório; JSON também na pasta Testes |
+| `paginaConcorrencia()` | HTML autocontido (CT-10, passo 6): 5 gravações com chaves diferentes + 2 com a mesma chave, em paralelo, na base de TESTE; confere 7 respostas boas, 1 duplicada e 6 eventos com `event_seq` distintos |
+| `CENARIOS`, `SITUACAO`, `LIMITE_MS`, `geracaoDemo(d0)` | Constantes e o gerador determinístico |
+
+Testes: `tests/api.test.js` (envelope, guarda, roteador, avisos, duplicado, LOCKED, carga condicional, ambiente TESTE,
+rascunho, fuso, páginas) e `tests/acceptance.test.js` (os mesmos cenários no fake, retomada, falha reportada, DEMO,
+diagnóstico).
