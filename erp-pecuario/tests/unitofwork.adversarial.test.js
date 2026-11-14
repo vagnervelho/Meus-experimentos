@@ -449,11 +449,16 @@ test('intercalação: o lock livre antes de o comando obtê-lo e depois de solt�
           const chave2 = mesma ? 'chave-evento-1' : 'w2';
           const msg = primitiva + ' ' + momento + (mesma ? ' mesma chave' : ' outra chave') + ' W2 ' + (k2 ? 'morto antes de ' + k2 : 'completo');
           let r2 = null;
-          amb.gas.ganchos.em(momento, () => { r2 = rodarInstrumentado(amb, cmdEvento({ chave: chave2 }), k2 ? { antes: k2 } : {}).r; });
+          let valeuW2 = null;
+          amb.gas.ganchos.em(momento, () => {
+            r2 = rodarInstrumentado(amb, cmdEvento({ chave: chave2 }), k2 ? { antes: k2 } : {}).r;
+            valeuW2 = estado(amb).OPERACOES.some((o) => o.idempotency_key === chave2 && o.status === 'CONFIRMADA');
+          });
           const r1 = amb.tentarRun(cmdEvento({}));
           assert.ok(r2, msg + ': o outro rodou');
           assert.equal(r1.ok, true, msg + ': W1 termina bem (' + (r1.erro && r1.erro.message) + ')');
-          if (mesma && momento === 'lock.tentar') assert.equal(r1.valor.duplicado, !!(r2.ok || estado(amb).OPERACOES.some((o) => o.op_id !== r1.valor.opId && o.status === 'CONFIRMADA')), msg + ': W1 é duplicado exatamente quando W2 valeu');
+          if (mesma && momento === 'lock.tentar') assert.equal(r1.valor.duplicado, valeuW2, msg + ': W1 é duplicado exatamente quando W2 valeu');
+          if (mesma && momento === 'lock.liberado' && r2.ok) assert.deepEqual([js(r2.valor).duplicado, js(r2.valor).dados], [true, r1.valor.dados], msg + ': o toque duplo depois é duplicado, com a mesma resposta');
           amb.read(consultaVigentes());
           const e = conferirInvariantes(amb, msg);
           const seqs = e.EVENTOS.map((x) => x.event_seq);
@@ -491,7 +496,7 @@ test('dois bancos no mesmo projeto: queda em cada passo de A não contamina B; B
           durante.comandoB = erroDe(b.gas.tentar(() => b.G.UnitOfWork.run(b.ctx(), cmdEvento({ chave: 'b-durante' }))));
         },
       });
-      assert.deepEqual([durante.leituraB, durante.esperouLeitura, durante.comandoB], [true, 0, k === 1 && false ? null : 'LOCKED'], msg + ': durante a gravação de A');
+      assert.deepEqual([durante.leituraB, durante.esperouLeitura, durante.comandoB], [true, 0, 'LOCKED'], msg + ': durante a gravação de A');
       const duravelA = () => ABAS.map((aba) => JSON.stringify(a.gas.planilhas.matrizDuravel(a.banco, aba)));
       const fotoA = duravelA();
       const marcadorA = a.marcador();
@@ -509,5 +514,311 @@ test('dois bancos no mesmo projeto: queda em cada passo de A não contamina B; B
       conferirInvariantes(b, msg + ' [B]');
       assert.equal(b.versao(), 2, msg + ': a versão de B só andou com B');
     }
+  }
+});
+
+// ------------------------------------------------------------------ exceção tratável ----
+/** Envolve io.anexar/io.atualizar: na k-ésima chamada a escrita é FEITA e a resposta se perde (lança depois). */
+function respostaPerdidaNa(amb, ctx, k) {
+  let n = 0;
+  const io = ctx.io;
+  const envolver = (nome) => function () {
+    const r = io[nome].apply(null, arguments);
+    if (++n === k) throw amb.gas.run('new Error("Sheets API: a resposta se perdeu (" + ' + JSON.stringify(nome) + ' + ")")');
+    return r;
+  };
+  ctx.io = Object.assign({}, io, { anexar: envolver('anexar'), atualizar: envolver('atualizar') });
+}
+function conferirExcecao(amb, cen, prep, r, msg) {
+  const confirmado = estado(amb).OPERACOES.some((o) => o.idempotency_key === cen.chave && o.status === 'CONFIRMADA');
+  if (r.ok) {
+    assert.equal(confirmado, true, msg + ': sucesso só com a operação confirmada');
+    assert.equal(js(r.valor).recuperada, true, msg + ': sucesso depois de exceção vem marcado como recuperado');
+  } else {
+    assert.equal(erroDe(r), 'INTERNAL', msg + ': ' + r.erro.message);
+    if (amb.marcador() === null) {
+      assert.equal(confirmado, false, msg + ': INTERNAL com a recuperação feita só quando nada valeu');
+      assert.match(r.erro.message, /nada foi alterado/, msg);
+    } else {
+      // A recuperação também falhou: "nada foi alterado" só é verdade se o commit não pode ter chegado.
+      if (confirmado) {
+        assert.doesNotMatch(r.erro.message, /nada foi alterado/, msg + ': a operação já vale; não pode dizer que nada mudou');
+        assert.match(r.erro.message, /confira/i, msg + ': manda conferir antes de lançar de novo');
+      }
+      assert.ok(r.erro.recuperacao, msg + ': o erro da recuperação acompanha');
+      amb.read(consultaVigentes()); // a chamada seguinte recupera
+    }
+  }
+  return conferirQueda(amb, cen, prep, 'leitura', msg);
+}
+
+for (const primitiva of PRIMITIVAS) {
+  test('exceção tratável (' + primitiva + ') em cada escrita do comando, também na recuperação que ela dispara, e resposta perdida em cada gravação', () => {
+    for (const nome of Object.keys(CENARIOS)) {
+      const cen = CENARIOS[nome];
+      const n = escritasDoComando(primitiva, cen);
+      for (let w = 1; w <= n; w++) {
+        for (let m = 0; m <= 6; m++) { // m = 0: só a escrita w falha; m > 0: a m-ésima escrita depois dela também (dentro da recuperação)
+          const amb = ambiente({ primitiva });
+          const prep = cen.preparar(amb);
+          amb.gas.falhas.falharNaEscrita(w, { mensagem: 'Service Spreadsheets timed out while accessing document' });
+          if (m) amb.gas.falhas.falharNaEscrita(w + m, { mensagem: 'Service Spreadsheets failed again' });
+          const r = amb.tentarRun(cen.comando(amb, prep));
+          amb.gas.falhas.limpar();
+          assert.equal(r.morta, false);
+          conferirExcecao(amb, cen, prep, r, primitiva + ' ' + nome + ' falha na escrita ' + w + '/' + n + (m ? ' e na ' + (w + m) : ''));
+        }
+      }
+      const ref = ambiente({ primitiva });
+      let gravacoes = 0;
+      ref.gas.exec(() => {
+        const ctx = ref.ctx();
+        const io = ctx.io;
+        ctx.io = Object.assign({}, io, { anexar: (x) => { gravacoes++; return io.anexar(x); }, atualizar: (x) => { gravacoes++; return io.atualizar(x); } });
+        return ref.G.UnitOfWork.run(ctx, cen.comando(ref, cen.preparar(ref)));
+      });
+      for (let k = 1; k <= gravacoes; k++) {
+        const amb = ambiente({ primitiva });
+        const prep = cen.preparar(amb);
+        const r = amb.gas.tentar(() => {
+          const ctx = amb.ctx();
+          respostaPerdidaNa(amb, ctx, k);
+          return js(amb.G.UnitOfWork.run(ctx, cen.comando(amb, prep)));
+        });
+        conferirExcecao(amb, cen, prep, r, primitiva + ' ' + nome + ' resposta perdida na gravação ' + k + '/' + gravacoes);
+      }
+    }
+  });
+}
+
+// ------------------------------------------------------------------ estado da operação ----
+test('estado da operação com a original VIVA em cada passo: nunca FALHOU, CONFIRMADA só com tudo aplicado, e a consulta não mexe em nada', () => {
+  for (const primitiva of PRIMITIVAS) {
+    const ref = ambiente({ primitiva });
+    const passos = rodarInstrumentado(ref, cmdEvento({}), {}).chamadas;
+    for (let k = 1; k <= passos.length; k++) {
+      const amb = ambiente({ primitiva });
+      const msg = primitiva + ' passo ' + k + ' (' + passos[k - 1] + ')';
+      let visto = null;
+      let completa = null;
+      const { r } = rodarInstrumentado(amb, cmdEvento({}), {
+        antesDe: (i) => {
+          if (i !== k) return;
+          completa = estado(amb).OPERACOES.some((o) => o.status === 'CONFIRMADA' && o.aplicada_em);
+          visto = js(amb.gas.tentar(() => amb.G.UnitOfWork.status(amb.ctx(), 'chave-evento-1')).valor).situacao;
+        },
+      });
+      assert.equal(r.ok, true, msg + ': a original termina bem');
+      assert.ok(['INEXISTENTE', 'EM_ANDAMENTO', 'CONFIRMADA'].includes(visto), msg + ': ' + visto);
+      assert.equal(visto === 'CONFIRMADA', completa, msg + ': CONFIRMADA exatamente quando a operação já está aplicada');
+      if (k >= 2 && !completa) assert.equal(visto, 'EM_ANDAMENTO', msg + ': com o marcador e o lock tomado, em andamento');
+      conferirInvariantes(amb, msg);
+      assert.equal(amb.status('chave-evento-1').situacao, 'CONFIRMADA', msg);
+    }
+  }
+});
+
+test('estado da operação que recupera grava a mesma trilha em ERROS_LOG que a leitura que recupera (AUDITORIA_SEM_ALVO não se perde)', () => {
+  const trilhas = {};
+  for (const via of ['leitura', 'status', 'recoverAll']) {
+    const amb = ambiente();
+    const p = amb.run(cmdPasto(amb.G, { chave: 'cria', dados: { campos: { nome: 'Rio' } } }));
+    rodarInstrumentado(amb, cmdPasto(amb.G, { chave: 'k', dados: { pasture_id: p.dados.pasture_id, campos: { nome: 'Novo' } } }), { antes: 6 });
+    const m = amb.gas.planilhas.matriz(amb.banco, 'PASTOS');
+    amb.gas.planilhas.gravar(amb.banco, 'PASTOS', 2, 1, [m[1].map(() => '')]); // o dono apaga a linha do pasto à mão
+    recuperarPor(amb, via, 'k');
+    trilhas[via] = amb.tabela('ERROS_LOG').map((e) => e.codigo).sort();
+    assert.equal(amb.marcador(), null, via);
+  }
+  assert.deepEqual(trilhas.leitura, ['AUDITORIA_SEM_ALVO', 'FASE_C_REFEITA']);
+  assert.deepEqual(trilhas.status, trilhas.leitura, 'pelo estado da operação');
+  assert.deepEqual(trilhas.recoverAll, trilhas.leitura, 'pelo recoverAll');
+});
+
+// ------------------------------------------------------------------ corpus hostil ----
+function profundo(n) {
+  let v = { fim: '=1+1' };
+  for (let i = 0; i < n; i++) v = { nivel: i, filho: v, lista: [i, String(i), null] };
+  return v;
+}
+const HOSTIS = {
+  TEXTO: [
+    '=SOMA(1;2)', '=HYPERLINK("http://x";"y")', "'=1+1", '==', '=', '+', '-', '@', "'", "''", ' ', '\t', 'linha 1\nlinha 2', 'a\r\nb',
+    ' ', 'zero​largura', '﻿0012', 'Ração São João — "Baixada"', '🐄🐂 Nelore', '#N/A', '#REF!', '#DIV/0!', 'R$ 1.234,56',
+    '1/2', '3-4', '1e400', '-0', '+0', '0x1F', 'E5', '1E-5', 'Infinity', 'NaN', 'null', 'undefined', 'true', 'VERDADEIRO', 'FALSO',
+    '00:00', '24:00', '2026-02-30', '30/02/2026', '1.0', '.5', '5.', ' 12 ', '١٢٣', '\\', '<script>alert(1)</script>', '{"a":1}', '[1,2]',
+    '50 %', '$1', 'x'.repeat(40000),
+  ],
+  ID: ['0012', '1E5', '=1', 'TRUE', '2026-11-13', '00000000-0000-4000-8000-000000000001', '-1', '+1', "'x", ' id '],
+  DATA: ['1899-12-30', '1899-12-31', '1900-01-01', '1900-02-28', '1900-03-01', '0001-01-01', '9999-12-31', '2024-02-29', '1970-01-01', '2026-11-13'],
+  TS: ['1970-01-01T00:00:00.000Z', '1899-12-30T00:00:00.000Z', '2026-11-14T03:59:59.999Z', '9999-12-31T23:59:59.999Z', '0001-01-01T00:00:00.000Z', '2026-03-08T07:00:00.001Z'],
+  INT: [0, -1, 1, 2147483648, -2147483649, 9007199254740991, -9007199254740991, 1e15, 12, 100000],
+  DEC1: [0.1, -0.1, 387.5, 1e21, 0, 99999999999.9],
+  DEC4: [0.0001, 37.4501, 123456789.1234, 0.1 + 0.2, -0.0001, 1e21, 5e-324],
+  DINHEIRO: [1, -1, 0, 5, 105, 1005, 10005, 123456789, 99999999999, 900719925474099, -900719925474099, 999999999999999, -999999999999999],
+  BOOL: [true, false],
+  ENUM: ['N', 'S', 'TRUE', '0', '=X', 'ATIVO', ' A '],
+  JSON: [{}, [], [[]], { a: { b: { c: [1, 2, { d: '=1+1' }] } } }, { 'chave com espaço': ' v ' }, { ' ': ' ' }, { n: 1e21, f: 0.1, z: -1e-7 },
+    { s: 'x'.repeat(39000) }, [null], [true, false], { emoji: '🐄' }, profundo(40), { '': '' }, { '=': '+' }, ['=1+1', '0012', '2026-11-13']],
+};
+const DEF_HOSTIL = {
+  nome: 'HOSTIL', pk: 'id',
+  colunas: [{ nome: 'id', tipo: 'TEXTO' }, { nome: 'texto', tipo: 'TEXTO' }, { nome: 'ident', tipo: 'ID' }, { nome: 'data', tipo: 'DATA' },
+    { nome: 'instante', tipo: 'TS' }, { nome: 'inteiro', tipo: 'INT' }, { nome: 'dec1', tipo: 'DEC1' }, { nome: 'dec4', tipo: 'DEC4' },
+    { nome: 'dinheiro', tipo: 'DINHEIRO' }, { nome: 'sim_nao', tipo: 'BOOL' }, { nome: 'enumerado', tipo: 'ENUM' }, { nome: 'json', tipo: 'JSON' }],
+};
+function registrosHostis(desloca) {
+  const n = Math.max(...Object.values(HOSTIS).map((l) => l.length));
+  const regs = [];
+  for (let i = 0; i < n; i++) {
+    const r = { id: 'hostil-' + String(i).padStart(3, '0') };
+    DEF_HOSTIL.colunas.slice(1).forEach((c) => { const l = HOSTIS[c.tipo]; r[c.nome] = l[(i + desloca) % l.length]; });
+    regs.push(r);
+  }
+  regs.push({ id: 'hostil-vazio', texto: '', ident: null, data: '', instante: null, inteiro: null, dec1: null, dec4: null, dinheiro: null, sim_nao: null, enumerado: '', json: null });
+  return regs;
+}
+
+for (const primitiva of PRIMITIVAS) {
+  test('corpus hostil (' + primitiva + '): cada valor volta idêntico ao anexar e ao reescrever, e a memória da unidade espelha a planilha', () => {
+    const amb = ambiente({ primitiva });
+    const { G, gas, banco } = amb;
+    const abrir = () => G.Database.abrir(banco, { primitiva, tabelas: { HOSTIL: DEF_HOSTIL } });
+    const originais = registrosHostis(0);
+    const reescritos = registrosHostis(1);
+    const espelho = js(gas.exec(() => {
+      const io = abrir();
+      io.criarTabelas(['HOSTIL']);
+      const ultima = io.ler(['HOSTIL']).HOSTIL.ultimaLinha;
+      const onde = io.anexar({ HOSTIL: originais });
+      const primeira = onde.HOSTIL === null || onde.HOSTIL === undefined ? ultima + 1 : onde.HOSTIL;
+      io.flush();
+      assert.equal(io.conferirPosicoes([{ tabela: 'HOSTIL', linha: primeira, id: originais[0].id }]), true, 'a posição anexada confere');
+      io.atualizar(reescritos.map((r, i) => {
+        const campos = Object.assign({}, r);
+        delete campos.id;
+        return { tabela: 'HOSTIL', linha: primeira + i, campos };
+      }));
+      io.flush();
+      return reescritos.map((r) => io.normalizar('HOSTIL', r));
+    }));
+    const lido = js(gas.exec(() => abrir().ler(['HOSTIL']).HOSTIL));
+    assert.deepEqual(lido.alertas, [], primitiva + ': nenhuma célula coercida');
+    assert.equal(lido.registros.length, reescritos.length);
+    lido.registros.forEach((reg, i) => {
+      for (const c of DEF_HOSTIL.colunas) {
+        const esperado = js(reescritos[i][c.nome]);
+        assert.deepEqual(reg[c.nome], esperado === '' ? null : esperado, primitiva + ' ' + reg.id + '.' + c.nome + ' = ' + JSON.stringify(reescritos[i][c.nome]).slice(0, 60));
+      }
+    });
+    assert.deepEqual(lido.registros, espelho, primitiva + ': normalizar (o espelho da memória) = o que a planilha devolve');
+  });
+}
+
+test('codec: limites do que ida e volta preserva — dinheiro além de 15 dígitos é recusado antes de gravar; texto de AUDITORIA de número grande volta exato', () => {
+  const amb = ambiente();
+  const D = amb.G.Database;
+  const col = (tipo) => ({ nome: 'x', tipo });
+  const codigo = (fn) => { try { fn(); return null; } catch (e) { return e.code || 'EXCECAO'; } };
+  for (const c of [1e15, -1e15, 4503599627370495, 9007199254740991]) {
+    assert.equal(codigo(() => D.codificar(col('DINHEIRO'), c)), 'INTERNAL', 'centavos ' + c + ' não voltariam exatos');
+    assert.ok(amb.G.Validation.validarValor(amb.G.Schema.coluna('FINANCEIRO', 'valor_total'), c), 'a validação recusa antes: ' + c);
+  }
+  assert.equal(D.codificar(col('DINHEIRO'), 999999999999999), 9999999999999.99);
+  for (const [tipo, v] of [['DEC4', 1e21], ['DEC1', -1e21], ['DEC4', 123456789.1234], ['INT', 9007199254740991], ['DINHEIRO', -999999999999999]]) {
+    const texto = D.paraTexto(col(tipo), v);
+    assert.equal(D.deTexto(col(tipo), texto), v, tipo + ' ' + v + ' → "' + texto + '" → volta');
+  }
+});
+
+test('células hostis digitadas pelo dono: a leitura nunca lança, e conversão impossível é erro de integridade, nunca "coercida sem perda"', () => {
+  const celulas = {
+    data: [{ data: 1e10 }, 1e10, -1e10, 2958466, true, 'abc', { data: 46339 }],
+    instante: [{ data: 1e10 }, 1e10, -1e10, 2958466.5, false, '2026-11-13', { data: 46339.5 }],
+    dinheiro: [1e300, -1e300, 1e13, 'R$ 10,00', true],
+    inteiro: [2.5, 1e300, '12', 'doze', -0.5],
+    dec4: ['1e5', 'x', true],
+    sim_nao: ['s', 'SIM', 1, true],
+    json: ['{', '"texto"', '12', 'null', '[1]'],
+    ident: [12, true, { data: 46339 }],
+  };
+  for (const primitiva of PRIMITIVAS) {
+    const amb = ambiente({ primitiva });
+    const { G, gas, banco } = amb;
+    const abrir = () => G.Database.abrir(banco, { primitiva, tabelas: { HOSTIL: DEF_HOSTIL } });
+    gas.exec(() => abrir().criarTabelas(['HOSTIL']));
+    const cols = DEF_HOSTIL.colunas.map((c) => c.nome);
+    let linha = 3;
+    const casos = [];
+    for (const [coluna, lista] of Object.entries(celulas)) {
+      for (const valor of lista) {
+        gas.planilhas.gravar(banco, 'HOSTIL', linha, 1, [['dono-' + linha]]);
+        gas.planilhas.gravar(banco, 'HOSTIL', linha, cols.indexOf(coluna) + 1, [[valor]]);
+        casos.push({ linha, coluna, valor });
+        linha++;
+      }
+    }
+    const r = gas.tentar(() => js(abrir().ler(['HOSTIL']).HOSTIL));
+    assert.equal(r.ok, true, primitiva + ': a leitura de célula hostil não pode derrubar a aba inteira: ' + (r.erro && r.erro.message));
+    const lido = r.valor;
+    for (const caso of casos) {
+      const reg = lido.registros.find((x) => x.id === 'dono-' + caso.linha);
+      const alerta = lido.alertas.find((a) => a.linha === caso.linha && a.coluna === caso.coluna);
+      const v = reg[caso.coluna];
+      const tipo = DEF_HOSTIL.colunas.find((c) => c.nome === caso.coluna).tipo;
+      const msg = primitiva + ' ' + caso.coluna + ' ← ' + JSON.stringify(caso.valor) + ' lido ' + JSON.stringify(v) + ' ' + (alerta ? alerta.nivel + ' ' + alerta.codigo : 'sem alerta');
+      const valido = v === null || (tipo === 'DATA' ? G.Utils.dataValida(v) : tipo === 'TS' ? G.Utils.instanteValido(v)
+        : tipo === 'INT' || tipo === 'DINHEIRO' ? Number.isSafeInteger(v) : tipo === 'DEC4' ? Number.isFinite(v)
+          : tipo === 'BOOL' ? typeof v === 'boolean' : tipo === 'JSON' ? typeof v === 'object' : typeof v === 'string');
+      if (!alerta) assert.ok(valido, msg + ': sem alerta, o valor tem de ser do tipo');
+      else if (alerta.nivel === 'COERCIDA') assert.ok(valido && v !== null, msg + ': "coercida" promete conversão sem perda');
+      else assert.equal(alerta.nivel, 'ERRO', msg);
+    }
+  }
+});
+
+test('valores hostis pelo caminho inteiro: cadastro criado e editado com eles volta exato, AUDITORIA refaz, o reenvio é duplicado e o banco segue usável', () => {
+  for (const primitiva of PRIMITIVAS) {
+    const amb = ambiente({ primitiva });
+    const G = amb.G;
+    const textos = ['=SOMA(1;2)', "'0012", 'linha 1\nlinha 2', ' ', '#N/A', '🐄 Ração São João', 'null', '-10 kg', 'x'.repeat(30000)];
+    const areas = [1e21, 0.0001, 123456789.1234, 0.1 + 0.2 > 0.3 ? 0.3 : 0.3, 99999999999.9999];
+    const criado = amb.run(cmdPasto(G, { chave: 'h-cria', dados: { campos: { nome: textos[0], area_hectares: areas[0], observacoes: textos[1] } } }));
+    const id = criado.dados.pasture_id;
+    for (let i = 1; i < Math.max(textos.length, areas.length); i++) {
+      const campos = { nome: textos[i % textos.length], area_hectares: areas[i % areas.length], observacoes: textos[(i + 3) % textos.length] };
+      const msg = primitiva + ' edição ' + i;
+      const r = amb.tentarRun(cmdPasto(G, { chave: 'h-' + i, dados: { pasture_id: id, campos } }));
+      assert.equal(r.ok, true, msg + ': ' + (r.erro && (r.erro.causa || r.erro.message)));
+      const p = amb.tabela('PASTOS').find((x) => x.pasture_id === id);
+      assert.deepEqual([p.nome, p.area_hectares, p.observacoes], [campos.nome, campos.area_hectares, campos.observacoes], msg + ': volta exato');
+      assert.equal(amb.run(cmdPasto(G, { chave: 'h-' + i, dados: { pasture_id: id, campos } })).duplicado, true, msg + ': reenvio');
+    }
+    // A fase C refeita pela recuperação lê de volta o texto da AUDITORIA de cada tipo.
+    rodarInstrumentado(amb, cmdPasto(G, { chave: 'h-rec', dados: { pasture_id: id, campos: { nome: '=1+1', area_hectares: 1e21, observacoes: '\t' } } }), { antes: 6 });
+    amb.recoverAll();
+    conferirInvariantes(amb, primitiva + ' fase C refeita com valores hostis');
+    assert.equal(amb.run(cmdEvento({ chave: 'depois' })).duplicado, false, primitiva + ': o banco segue usável');
+  }
+});
+
+test('chaves de idempotência hostis: cada uma é uma operação só, o reenvio é duplicado e chaves parecidas não se confundem', () => {
+  const chaves = ['0012', '12', "'0012", '1E5', '100000', '=1+1', 'TRUE', 'true', ' k ', 'k', 'k\nk', '🐄', '2026-11-13', '13/11/2026', 'x'.repeat(2000)];
+  for (const primitiva of PRIMITIVAS) {
+    const amb = ambiente({ primitiva });
+    const ids = {};
+    for (const chave of chaves) {
+      const r = amb.run(cmdEvento({ chave, animais: 1 }));
+      assert.equal(r.duplicado, false, primitiva + ' ' + JSON.stringify(chave).slice(0, 20) + ': primeira vez');
+      ids[chave] = r.dados.event_id;
+    }
+    for (const chave of chaves) {
+      const r = amb.run(cmdEvento({ chave, animais: 1 }));
+      assert.deepEqual([r.duplicado, r.dados.event_id], [true, ids[chave]], primitiva + ' ' + JSON.stringify(chave).slice(0, 20) + ': reenvio');
+      assert.equal(amb.status(chave).situacao, 'CONFIRMADA');
+    }
+    const e = conferirInvariantes(amb, primitiva);
+    assert.deepEqual(e.OPERACOES.map((o) => o.idempotency_key), chaves, primitiva + ': as chaves voltam exatas');
+    assert.equal(amb.status(' 0012').situacao, 'INEXISTENTE', primitiva + ': sem aparar nem converter');
   }
 });

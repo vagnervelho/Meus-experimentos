@@ -18,6 +18,7 @@ var UnitOfWork = (function () {
   var TENTATIVAS_LEITURA = 3;
   var MSG_OCUPADO = 'O sistema está ocupado gravando outra operação. Aguarde alguns segundos e tente de novo.';
   var MSG_FALHA = 'Não foi possível concluir a gravação e nada foi alterado. Tente de novo.';
+  var MSG_INCERTA = 'A gravação foi interrompida depois da confirmação e pode já valer. Atualize a tela e confira antes de lançar de novo; reenviar este mesmo formulário não duplica.';
   var MSG_ORFA = 'Execução interrompida antes da confirmação.';
   var MSG_IMPORTANDO = 'Há uma importação de planilha em andamento. Conclua ou desfaça a importação antes de fazer outros lançamentos.';
   var RESERVADAS = Object.freeze({ OPERACOES: true, AUDITORIA: true, ERROS_LOG: true });
@@ -389,9 +390,14 @@ var UnitOfWork = (function () {
     est.repo.carregar(est.cmd.reads);
     return est.cmd.reconstruir(novoTx_(est, false), publica);
   }
-  function falha_(erro, erroDaRecuperacao) {
+  /**
+   * Erro devolvido quando a gravação não terminou bem. `incerta` = a recuperação falhou depois de o commit poder
+   * ter chegado (fase B ou C): aí não se pode dizer ao usuário que nada foi alterado — ele lançaria de novo, com
+   * outra chave, e duplicaria o lançamento.
+   */
+  function falha_(erro, erroDaRecuperacao, incerta) {
     if (Validation.ehAppError(erro)) return erro;
-    var e = Validation.erro('INTERNAL', MSG_FALHA);
+    var e = Validation.erro('INTERNAL', incerta ? MSG_INCERTA : MSG_FALHA);
     e.causa = String(erro && erro.message ? erro.message : erro);
     if (erroDaRecuperacao) e.recuperacao = String(erroDaRecuperacao.message || erroDaRecuperacao);
     return e;
@@ -488,7 +494,7 @@ var UnitOfWork = (function () {
     try {
       recuperar_(est, { motivo: motivo, erro: erro });
     } catch (e2) {
-      throw falha_(erro, e2);
+      throw falha_(erro, e2, est.fase !== 'A'); // na fase A o commit ainda não foi pedido: nada vale, com ou sem recuperação
     }
     var op = est.repo.cruPorId('OPERACOES', est.opId);
     if (!op || op.status !== 'CONFIRMADA' || vazio_(op.aplicada_em)) throw falha_(erro);
@@ -626,6 +632,7 @@ var UnitOfWork = (function () {
       try {
         recuperar_(est, {});
         ops = est.repo.cruPor('OPERACOES', 'idempotency_key', String(chave));
+        descarregarErros(ctx); // com o lock ainda na mão: a trilha anotada pela recuperação (ex.: AUDITORIA_SEM_ALVO) não se perde
       } finally {
         ctx.lock.soltar();
       }
