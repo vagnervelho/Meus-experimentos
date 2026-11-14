@@ -85,7 +85,7 @@ p { margin: 0 0 12px; }
 }
 .topo-marca { font-weight: 700; font-size: 1.0625rem; margin-right: auto; display: flex; align-items: center; gap: 8px; min-width: 0; }
 .topo-marca span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.topo-voltar { display: none; }
+.topo .topo-voltar { display: none; }
 .topo-acoes { display: none; align-items: center; gap: var(--respiro); }
 .busca-topo { display: flex; gap: var(--respiro); align-items: center; }
 .busca-topo input { width: 220px; }
@@ -143,7 +143,7 @@ body.tela-cheia .barra-inferior { display: none; }
   .so-celular { display: none !important; }
 }
 @media (max-width: 899.98px) {
-  body.tela-cheia .topo-voltar { display: inline-flex; }
+  body.tela-cheia .topo .topo-voltar { display: inline-flex; }
   .so-desktop { display: none !important; }
 }
 
@@ -168,7 +168,7 @@ body.tela-cheia .barra-inferior { display: none; }
 .botao {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: var(--alvo); min-width: var(--alvo);
   padding: 10px 18px; border-radius: var(--raio); border: 2px solid transparent; font: inherit; font-weight: 700;
-  line-height: 1.2; text-decoration: none; cursor: pointer; text-align: center;
+  line-height: 1.2; text-decoration: none; cursor: pointer; text-align: center; overflow-wrap: normal; word-break: normal;
 }
 .botao-primario { background: var(--acao); color: var(--acao-texto); }
 .botao-primario:hover { background: var(--acao-escura); }
@@ -190,6 +190,7 @@ body.tela-cheia .barra-inferior { display: none; }
 .campo-erro { color: var(--erro); font-weight: 600; display: flex; gap: 6px; align-items: flex-start; }
 .campo-linha { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .campo-linha > input, .campo-linha > select { flex: 1 1 auto; min-width: 0; }
+.campo-linha > .botao { flex: 0 0 auto; }
 .campo-unidade { color: var(--texto-suave); font-weight: 600; }
 input, select, textarea {
   font: inherit; font-size: 16px; color: var(--texto); background: var(--superficie);
@@ -212,6 +213,7 @@ input[readonly] { background: var(--superficie-2); }
 .opcoes[aria-invalid="true"] .opcao { border-color: var(--erro); }
 .marca { display: inline-flex; align-items: center; gap: 10px; min-height: var(--alvo); min-width: var(--alvo); padding: 8px 10px; cursor: pointer; border-radius: 8px; }
 .marca input { width: 24px; height: 24px; min-height: 0; margin: 0; accent-color: var(--acao); flex: 0 0 auto; }
+.bloco-campos { display: flex; flex-direction: column; gap: 16px; }
 .grade-campos { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
 @media (min-width: 640px) { .grade-campos { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .escolhido { display: flex; flex-wrap: wrap; align-items: center; gap: var(--respiro); padding: 8px 12px; border: 2px solid var(--acao); border-radius: 8px; background: var(--acao-fundo); }
@@ -231,6 +233,7 @@ input[readonly] { background: var(--superficie-2); }
 .mais-dados > summary::-webkit-details-marker, details.detalhe > summary::-webkit-details-marker { display: none; }
 .mais-dados > summary::before, details.detalhe > summary::before { content: "\25B8"; }
 .mais-dados[open] > summary::before, details.detalhe[open] > summary::before { content: "\25BE"; }
+.mais-dados { margin-top: 0; }
 .mais-dados[open] > .grade-campos { margin-top: 12px; }
 .problema-animal { display: flex; gap: 8px; align-items: flex-start; color: var(--erro); background: var(--erro-fundo); padding: 10px 12px; border-radius: 8px; font-weight: 600; }
 .faixa-problemas { position: sticky; top: 60px; z-index: 5; border-radius: var(--raio); }
@@ -322,7 +325,7 @@ body.tela-cheia .avisos { bottom: 16px; }
 /* --------------------------------------------------------------- gráficos ---- */
 .grafico { margin: 0 0 16px; background: var(--superficie); border: 1px solid var(--borda-suave); border-radius: var(--raio); padding: 12px; }
 .grafico figcaption { font-weight: 700; margin-bottom: 8px; }
-.grafico svg { display: block; width: 100%; height: auto; }
+.grafico svg { display: block; width: 100%; max-width: 720px; height: auto; }
 .grafico-eixo { stroke: var(--borda); stroke-width: 1; }
 .grafico-grade { stroke: var(--borda-suave); stroke-width: 1; }
 .grafico-rotulo { fill: var(--texto-suave); font-size: 12px; font-family: inherit; }

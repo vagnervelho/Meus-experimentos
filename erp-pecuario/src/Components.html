@@ -292,7 +292,7 @@ var UI = (function () {
     var fig = h('figure', { class: 'grafico', dataset: { grafico: o.tipo } });
     fig.appendChild(h('figcaption', { text: o.titulo }));
     var notas = [];
-    var W = 600, H = o.tipo === 'barras' && series.length === 1 ? Math.max(120, xs.length * 34 + 30) : 260;
+    var W = 600, H = o.tipo === 'barras' && series.length === 1 ? xs.length * 34 + 16 : 260;
     var svg = s('svg', { viewBox: '0 0 ' + W + ' ' + H, role: 'img', 'aria-label': o.titulo + '. Os valores estão na tabela abaixo.' });
     if (!valores.length) {
       notas.push('Sem dados para desenhar.');
