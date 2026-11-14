@@ -1,0 +1,1021 @@
+<script>
+'use strict';
+/*
+ * ERP Pecuário — componentes (08-ux-ui.md, seções 4, 7, 8 e 15).
+ * UI: kit (ícones, botões, faixas, folha sobreposta e modal acessíveis, aviso temporário em aria-live, carregando,
+ * vazio, erro, tabela ordenável e paginada com cartões abaixo de 900 px, gráfico SVG de linha e de barras com tabela
+ * equivalente). Campos: um componente por tipo do EventCatalog. Formulario: renderizador a partir do catálogo
+ * (visivel_se, obrigatorio_se, default, escopo POR_ANIMAL, grupos repetíveis). Seletor: seletor de animais.
+ * Registro: o fluxo "Registrar evento" (seletor de tipo → formulário com rascunho → revisão local ou pelo servidor →
+ * resultado), com avisos com aceite e erros por animal. Telas registradas aqui: inicio e evento/novo.
+ */
+
+var UI = (function () {
+  var h = Util.h, s = Util.s;
+  var ICONES = {
+    inicio: 'M3 11l9-8 9 8M5 10v10h5v-6h4v6h5V10', rebanho: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
+    pasto: 'M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3zM9 3v15M15 6v15', eventos: 'M4 5h16v16H4zM4 10h16M8 3v4M16 3v4',
+    peso: 'M6 20h12M12 4v16M5 8h14M5 8l-3 7h6zM19 8l-3 7h6z', sanidade: 'M10 3h4v7h7v4h-7v7h-4v-7H3v-4h7z',
+    reproducao: 'M12 21s-8-5-8-11a4.5 4.5 0 0 1 8-3 4.5 4.5 0 0 1 8 3c0 6-8 11-8 11z',
+    financeiro: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM15 9h-4a2 2 0 0 0 0 4h2a2 2 0 0 1 0 4H9M12 6v2M12 16v2',
+    relatorios: 'M4 20V10M10 20V4M16 20v-7M22 20H2', config: 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9L7 7M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1',
+    mais: 'M5 12h.01M12 12h.01M19 12h.01', registrar: 'M12 5v14M5 12h14', busca: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM21 21l-5-5',
+    fechar: 'M6 6l12 12M18 6L6 18', voltar: 'M15 5l-7 7 7 7', ok: 'M5 12l5 5 9-10', aviso: 'M12 3l10 18H2zM12 10v5M12 18h.01',
+    erro: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM9 9l6 6M15 9l-6 6', info: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 11v6M12 7h.01',
+    remover: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13', editar: 'M4 20h4L19 9l-4-4L4 16z', teste: 'M9 3h6M10 3v6l-5 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3',
+  };
+  var ICONE_DO_TIPO = { info: 'info', aviso: 'aviso', erro: 'erro', ok: 'ok', teste: 'teste' };
+  function icone(nome, classe) {
+    return s('svg', { class: 'icone' + (classe ? ' ' + classe : ''), viewBox: '0 0 24 24', 'aria-hidden': 'true', focusable: 'false' }, s('path', { d: ICONES[nome] || ICONES.info }));
+  }
+
+  /** Botão. o: {tipo: primario|secundario|perigo|texto, icone, aoClicar, rotulo (aria-label), bloco, desabilitado, atributos}. */
+  function botao(texto, o) {
+    o = o || {};
+    var b = h('button', Object.assign({ type: 'button', class: 'botao botao-' + (o.tipo || 'secundario') + (o.bloco ? ' botao-bloco' : '') + (!texto ? ' botao-icone' : ''), 'aria-label': o.rotulo || null, disabled: !!o.desabilitado }, o.atributos || {}),
+      o.icone ? icone(o.icone) : null, texto ? h('span', { class: 'botao-texto-rotulo', text: texto }) : null);
+    if (o.aoClicar) b.addEventListener('click', o.aoClicar);
+    return b;
+  }
+  function definirTexto(b, texto) { var t = b.querySelector('.botao-texto-rotulo'); if (t) t.textContent = texto; else b.textContent = texto; }
+  /** Trava o botão durante um envio ("Enviando…"): impede o duplo clique (§15). Devolve a função que destrava. */
+  function travar(b, texto) {
+    var antes = (b.querySelector('.botao-texto-rotulo') || b).textContent;
+    b.disabled = true;
+    b.setAttribute('aria-busy', 'true');
+    definirTexto(b, texto || 'Enviando…');
+    return function (novo) { b.disabled = false; b.removeAttribute('aria-busy'); definirTexto(b, novo || antes); };
+  }
+  function acaoParaBotao_(a, tipo) {
+    if (a.href) return h('a', { class: 'botao botao-' + (a.tipo || tipo || 'secundario'), href: a.href, target: a.alvo || null, rel: a.alvo === '_blank' ? 'noopener' : null }, a.texto);
+    return botao(a.texto, { tipo: a.tipo || tipo || 'secundario', aoClicar: a.aoClicar, icone: a.icone });
+  }
+  /** Faixa: {tipo: info|aviso|erro|ok|teste, texto, acoes: [{texto, aoClicar | href, alvo}]}. Ícone e texto, nunca só cor. */
+  function faixa(def) {
+    var t = def.tipo || 'info';
+    return h('div', { class: 'faixa faixa-' + t, role: t === 'erro' ? 'alert' : 'status' },
+      h('div', { class: 'faixa-texto' }, icone(ICONE_DO_TIPO[t] || 'info'), h('span', { text: def.texto })),
+      (def.acoes && def.acoes.length) ? h('div', { class: 'faixa-acoes' }, def.acoes.map(function (a) { return acaoParaBotao_(a); })) : null);
+  }
+  function nota(texto, tipo, extra) {
+    return h('div', { class: 'nota' + (tipo ? ' nota-' + tipo : '') }, icone(tipo === 'erro' ? 'erro' : tipo === 'aviso' ? 'aviso' : tipo === 'ok' ? 'ok' : 'info'), h('div', null, h('span', { text: texto }), extra || null));
+  }
+  /** Aviso passageiro na região aria-live (o leitor de tela anuncia). o: {tipo: ok|erro|info, duracaoMs}. */
+  function aviso(texto, o) {
+    o = o || {};
+    var regiao = App.regiaoAvisos();
+    var el = h('div', { class: 'aviso-temporario ' + (o.tipo || 'info') }, icone(o.tipo === 'erro' ? 'erro' : o.tipo === 'ok' ? 'ok' : 'info'), h('span', { text: texto }));
+    regiao.appendChild(el);
+    setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, o.duracaoMs || 6000);
+    return el;
+  }
+  function carregando(texto) {
+    return h('div', { class: 'esqueleto', role: 'status', 'aria-live': 'polite' }, h('span', { class: 'oculto-visual', text: texto || 'Carregando…' }),
+      h('p', { class: 'suave', 'aria-hidden': 'true', text: texto || 'Carregando…' }), h('div', { class: 'esqueleto-linha' }), h('div', { class: 'esqueleto-linha' }), h('div', { class: 'esqueleto-linha curta' }));
+  }
+  /** Estado vazio com ação: {texto, acao: {texto, aoClicar}}. */
+  function vazio(o) {
+    return h('div', { class: 'estado estado-vazio' }, h('div', { class: 'estado-titulo' }, icone('info'), h('span', { text: o.texto })), o.acao ? acaoParaBotao_(o.acao, 'primario') : null);
+  }
+  var TITULOS_ERRO = {
+    VALIDATION: 'Confira os dados', NEEDS_CONFIRMATION: 'Confira os avisos', CONFLICT: 'Os dados mudaram', IDEMPOTENCY_MISMATCH: 'Este formulário já foi gravado',
+    LOCKED: 'Sistema ocupado', DENIED: 'Acesso não confirmado', NOT_FOUND: 'Não encontrado', CONFIG: 'O sistema precisa de um ajuste',
+    INTERNAL: 'Algo deu errado', TRANSPORTE: 'Sem conexão', SEM_RESPOSTA: 'Sem resposta do servidor',
+  };
+  /** Estado de erro: título pelo código, a mensagem do servidor, ação e o detalhe técnico expansível. */
+  function estadoErro(e, o) {
+    o = o || {};
+    var code = (e && e.code) || 'INTERNAL';
+    var titulo = TITULOS_ERRO[code] || TITULOS_ERRO.INTERNAL;
+    var tecnico = 'Código: ' + code + (e && e.causa ? '\nCausa: ' + e.causa : '') + (o.detalhe ? '\n' + o.detalhe : '');
+    return h('div', { class: 'estado estado-erro', role: 'alert', dataset: { erro: code } },
+      h('div', { class: 'estado-titulo' }, icone('erro'), h('span', { text: titulo })),
+      h('p', { text: (e && e.message) || 'Tente de novo em instantes.' }),
+      o.acao ? acaoParaBotao_(o.acao, 'primario') : null,
+      h('details', { class: 'detalhe' }, h('summary', { text: 'Detalhes técnicos' }), h('pre', { text: tecnico })));
+  }
+
+  // ------------------------------------------------------- folha e modal ----
+  var pilha = [];
+  /**
+   * Folha sobreposta (celular: de baixo; desktop: painel à direita) ou modal (o.modal). Acessível: role=dialog,
+   * aria-modal, título ligado, foco preso dentro, Esc fecha, fundo inerte, foco volta para quem abriu.
+   * o: {titulo, conteudo (nó), acoes: [nós], origem, aoFechar (devolve false para impedir), modal, rotuloFechar}.
+   * Devolve {el, corpo, fechar(), definirAcoes(nós), definirConteudo(nó)}.
+   */
+  function folha(o) {
+    var id = 'folha-' + Util.uuid().slice(0, 8);
+    var origem = o.origem || document.activeElement;
+    var corpo = h('div', { class: 'folha-corpo' });
+    var acoes = h('div', { class: 'folha-acoes' });
+    var fecharB = botao('', { tipo: 'texto', icone: 'fechar', rotulo: o.rotuloFechar || 'Fechar', aoClicar: function () { fechar(); } });
+    var caixa = h('div', { class: 'folha', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': id + '-t' },
+      h('div', { class: 'folha-cabecalho' }, h('h2', { id: id + '-t', text: o.titulo }), fecharB), corpo, acoes);
+    var fundo = h('div', { class: 'folha-fundo' + (o.modal ? ' modal' : ''), dataset: { folha: id } }, caixa);
+    var api = { el: caixa, corpo: corpo, fechar: fechar, aberta: true };
+    api.definirConteudo = function (n) { Util.limpar(corpo); if (n) corpo.appendChild(n); };
+    api.definirAcoes = function (ns) { Util.limpar(acoes); (ns || []).forEach(function (n) { acoes.appendChild(n); }); acoes.hidden = !(ns && ns.length); };
+    api.definirConteudo(o.conteudo);
+    api.definirAcoes(o.acoes);
+    fundo.addEventListener('mousedown', function (ev) { if (ev.target === fundo && o.fecharPorFora !== false) fechar(); });
+    fundo.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Escape') { ev.preventDefault(); fechar(); return; }
+      if (ev.key !== 'Tab') return;
+      var f = Util.focaveis(caixa);
+      if (!f.length) return;
+      if (ev.shiftKey && document.activeElement === f[0]) { ev.preventDefault(); f[f.length - 1].focus(); }
+      else if (!ev.shiftKey && document.activeElement === f[f.length - 1]) { ev.preventDefault(); f[0].focus(); }
+    });
+    var anterior = pilha[pilha.length - 1];
+    if (anterior) anterior.fundo.setAttribute('inert', '');
+    else { var app = App.raiz(); app.setAttribute('inert', ''); app.setAttribute('aria-hidden', 'true'); }
+    pilha.push({ api: api, fundo: fundo });
+    App.camada().appendChild(fundo);
+    var primeiro = Util.focaveis(corpo)[0] || fecharB;
+    primeiro.focus();
+    function fechar(opcoes) {
+      if (!api.aberta) return true;
+      if (!(opcoes && opcoes.forcar) && o.aoFechar && o.aoFechar() === false) return false;
+      api.aberta = false;
+      pilha = pilha.filter(function (p) { return p.api !== api; });
+      if (fundo.parentNode) fundo.parentNode.removeChild(fundo);
+      var topo = pilha[pilha.length - 1];
+      if (topo) topo.fundo.removeAttribute('inert');
+      else { var a = App.raiz(); a.removeAttribute('inert'); a.removeAttribute('aria-hidden'); }
+      if (origem && origem.isConnected && typeof origem.focus === 'function') origem.focus();
+      return true;
+    }
+    return api;
+  }
+  function fecharTudo() { pilha.slice().reverse().forEach(function (p) { p.api.fechar({ forcar: true }); }); }
+  /** Confirmação que descreve a consequência; o botão repete o verbo (§15). Resolve true/false. */
+  function confirmar(o) {
+    return new Promise(function (resolve) {
+      var feito = false;
+      function fim(v) { if (feito) return; feito = true; resolve(v); }
+      var f = folha({ titulo: o.titulo, modal: true, conteudo: h('p', { text: o.texto }), aoFechar: function () { fim(false); }, acoes: [] });
+      f.definirAcoes([
+        botao(o.cancelar || 'Voltar', { aoClicar: function () { f.fechar(); } }),
+        botao(o.verbo, { tipo: o.perigo ? 'perigo' : 'primario', aoClicar: function () { fim(true); f.fechar({ forcar: true }); } }),
+      ]);
+    });
+  }
+
+  // ------------------------------------------------- busca de brinco no topo ----
+  function buscaBrinco() {
+    var entrada = h('input', { type: 'search', id: 'busca-topo', 'aria-label': 'Buscar animal por brinco', placeholder: 'Brinco', autocomplete: 'off', inputmode: Store.param('brinco_somente_numerico') === true ? 'numeric' : null });
+    var form = h('form', { class: 'busca-topo', role: 'search' }, entrada, botao('', { icone: 'busca', rotulo: 'Buscar', atributos: { type: 'submit' } }));
+    form.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      var r = Store.buscar(entrada.value);
+      if (r.candidatos.length === 1) { Roteador.ir('animal/' + r.candidatos[0].animal_id + '/resumo'); entrada.value = ''; return; }
+      if (!r.candidatos.length) { aviso('Nenhum animal com "' + entrada.value + '".', { tipo: 'erro' }); return; }
+      var lista = h('ul', { class: 'candidatos' });
+      var f = folha({ titulo: r.candidatos.length + ' animais com "' + entrada.value + '"', conteudo: lista, origem: entrada });
+      r.candidatos.forEach(function (a) {
+        lista.appendChild(h('li', { class: 'candidato' }, h('div', { class: 'candidato-texto' }, h('div', { class: 'candidato-titulo', text: Store.rotuloAnimal(a) }), h('div', { class: 'suave', text: Store.descricaoAnimal(a) })),
+          botao('Abrir', { aoClicar: function () { f.fechar({ forcar: true }); Roteador.ir('animal/' + a.animal_id + '/resumo'); } })));
+      });
+    });
+    return form;
+  }
+
+  // ------------------------------------------------------------- tabela ----
+  function comparar_(a, b) {
+    if (a === b) return 0;
+    if (a === null || a === undefined || a === '') return 1;
+    if (b === null || b === undefined || b === '') return -1;
+    var na = typeof a === 'number' ? a : /^-?\d+([.,]\d+)?$/.test(String(a)) ? Number(String(a).replace(',', '.')) : NaN;
+    var nb = typeof b === 'number' ? b : /^-?\d+([.,]\d+)?$/.test(String(b)) ? Number(String(b).replace(',', '.')) : NaN;
+    if (!isNaN(na) && !isNaN(nb)) return na - nb;
+    return String(a).localeCompare(String(b), 'pt-BR', { numeric: true, sensitivity: 'base' });
+  }
+  var LARGO = '(min-width: 900px)';
+  /**
+   * Tabela ordenável e paginada; abaixo de 900 px vira cartões com ordenação por seletor (08, seção 10).
+   * o: {rotulo, colunas: [{id, rotulo, valor(l) (chave de ordem), formatar(l) (texto ou nó), num, ordenavel}], linhas,
+   * chave(l), porPagina (padrão itens_por_pagina), cartao(l) → nó, ordem: {coluna, direcao: 1|-1}, selecao: {aoMudar(ids)},
+   * vazio: {texto, acao}, aoAbrir(l)}. Devolve {el, atualizar(linhas), selecionados(), pagina()}.
+   */
+  function tabela(o) {
+    var raiz = h('div', { class: 'tabela-componente' });
+    var porPagina = o.porPagina || Store.param('itens_por_pagina') || 50;
+    var linhas = o.linhas || [];
+    var ordem = o.ordem || null;
+    var pagina = 1;
+    var sel = {};
+    var mq = window.matchMedia ? window.matchMedia(LARGO) : null;
+    function valor(c, l) { return c.valor ? c.valor(l) : l[c.id]; }
+    function ordenadas() {
+      if (!ordem) return linhas.slice();
+      var c = o.colunas.filter(function (x) { return x.id === ordem.coluna; })[0];
+      if (!c) return linhas.slice();
+      return linhas.slice().sort(function (a, b) { return comparar_(valor(c, a), valor(c, b)) * ordem.direcao; });
+    }
+    function chave(l) { return o.chave ? o.chave(l) : l.id; }
+    function caixaSel(l) {
+      var k = chave(l);
+      var c = h('input', { type: 'checkbox', checked: !!sel[k], 'aria-label': 'Selecionar ' + (o.rotuloLinha ? o.rotuloLinha(l) : k) });
+      c.addEventListener('change', function () { if (c.checked) sel[k] = true; else delete sel[k]; mudouSel(); });
+      return h('label', { class: 'marca' }, c, h('span', { class: 'oculto-visual', text: 'Selecionar' }));
+    }
+    function mudouSel() { if (o.selecao && o.selecao.aoMudar) o.selecao.aoMudar(Object.keys(sel)); desenhar(); }
+    function celula(c, l) { var v = c.formatar ? c.formatar(l) : valor(c, l); return v && v.nodeType ? v : (v === null || v === undefined || v === '' ? '—' : String(v)); }
+    function desenhar() {
+      Util.limpar(raiz);
+      var todas = ordenadas();
+      if (!todas.length) { raiz.appendChild(vazio(o.vazio || { texto: 'Nada para mostrar.' })); return; }
+      var paginas = Math.max(1, Math.ceil(todas.length / porPagina));
+      if (pagina > paginas) pagina = paginas;
+      var vis = todas.slice((pagina - 1) * porPagina, pagina * porPagina);
+      var largo = mq ? mq.matches : true;
+      if (o.selecao) {
+        var n = Object.keys(sel).length;
+        raiz.appendChild(h('div', { class: 'acoes' }, h('span', { class: 'dado', text: n + (n === 1 ? ' selecionado' : ' selecionados') }),
+          botao('Selecionar os ' + todas.length + ' filtrados', { aoClicar: function () { todas.forEach(function (l) { sel[chave(l)] = true; }); mudouSel(); } }),
+          n ? botao('Limpar seleção', { tipo: 'texto', aoClicar: function () { sel = {}; mudouSel(); } }) : null));
+      }
+      if (largo) {
+        var trh = h('tr', null, o.selecao ? h('th', { scope: 'col' }, h('span', { class: 'oculto-visual', text: 'Seleção' })) : null, o.colunas.map(function (c) {
+          var ativa = ordem && ordem.coluna === c.id;
+          var th = h('th', { scope: 'col', class: c.num ? 'num' : null, 'aria-sort': ativa ? (ordem.direcao > 0 ? 'ascending' : 'descending') : (c.ordenavel === false ? null : 'none') });
+          if (c.ordenavel === false) th.textContent = c.rotulo;
+          else th.appendChild(h('button', { type: 'button', class: 'ordenar', on: { click: function () { ordem = { coluna: c.id, direcao: ativa && ordem.direcao > 0 ? -1 : 1 }; pagina = 1; desenhar(); } } }, c.rotulo, h('span', { class: 'ordenar-seta', 'aria-hidden': 'true', text: ativa ? (ordem.direcao > 0 ? ' ▲' : ' ▼') : ' ↕' })));
+          return th;
+        }));
+        var tb = h('tbody');
+        vis.forEach(function (l) {
+          tb.appendChild(h('tr', { dataset: { chave: chave(l) } }, o.selecao ? h('td', null, caixaSel(l)) : null, o.colunas.map(function (c) { return h('td', { class: c.num ? 'num' : null }, celula(c, l)); })));
+        });
+        raiz.appendChild(h('div', { class: 'tabela-rolagem' }, h('table', { class: 'tabela' }, o.rotulo ? h('caption', { class: 'oculto-visual', text: o.rotulo }) : null, h('thead', null, trh), tb)));
+      } else {
+        var sOrd = h('select', { id: 'ord-' + (o.id || 'tab'), 'aria-label': 'Ordenar por' }, h('option', { value: '', text: 'Ordem original' }), o.colunas.filter(function (c) { return c.ordenavel !== false; }).map(function (c) {
+          return [h('option', { value: c.id + ':1', text: c.rotulo + ' (crescente)', selected: !!(ordem && ordem.coluna === c.id && ordem.direcao > 0) }), h('option', { value: c.id + ':-1', text: c.rotulo + ' (decrescente)', selected: !!(ordem && ordem.coluna === c.id && ordem.direcao < 0) })];
+        }));
+        sOrd.addEventListener('change', function () { var p = sOrd.value.split(':'); ordem = p[0] ? { coluna: p[0], direcao: Number(p[1]) } : null; pagina = 1; desenhar(); });
+        raiz.appendChild(h('div', { class: 'ordenacao-celular' }, h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo', for: sOrd.id, text: 'Ordenar por' }), sOrd)));
+        var ul = h('ul', { class: 'lista-cartoes', 'aria-label': o.rotulo || null });
+        vis.forEach(function (l) {
+          var corpo = o.cartao ? o.cartao(l) : h('div', null, h('div', { class: 'cartao-linha-titulo' }, celula(o.colunas[0], l)), o.colunas.slice(1).map(function (c) { return h('div', null, h('span', { class: 'suave', text: c.rotulo + ': ' }), celula(c, l)); }));
+          ul.appendChild(h('li', { class: 'cartao-linha', dataset: { chave: chave(l) } }, o.selecao ? h('div', { class: 'cartao-linha-topo' }, caixaSel(l)) : null, corpo));
+        });
+        raiz.appendChild(ul);
+      }
+      if (paginas > 1 || todas.length > 0) {
+        raiz.appendChild(h('div', { class: 'paginacao' }, h('span', { class: 'suave', text: 'Página ' + pagina + ' de ' + paginas + ' · ' + todas.length + (todas.length === 1 ? ' item' : ' itens') }),
+          h('div', { class: 'acoes', style: 'margin-top:0' }, botao('Anterior', { desabilitado: pagina <= 1, aoClicar: function () { pagina -= 1; desenhar(); } }), botao('Próxima', { desabilitado: pagina >= paginas, aoClicar: function () { pagina += 1; desenhar(); } }))));
+      }
+    }
+    if (mq) { var ouvir = function () { desenhar(); }; if (mq.addEventListener) mq.addEventListener('change', ouvir); else mq.addListener(ouvir); }
+    desenhar();
+    return {
+      el: raiz,
+      atualizar: function (novas) { linhas = novas || []; pagina = 1; desenhar(); },
+      selecionados: function () { return Object.keys(sel); },
+      pagina: function () { return pagina; },
+    };
+  }
+
+  // ----------------------------------------------------------- gráficos ----
+  /**
+   * Gráfico SVG próprio (SP-08), sempre com a tabela equivalente ("Ver tabela"). o: {tipo: linha|barras, titulo,
+   * series: [{nome, pontos: [{x, y}]}] (y null = sem dado), formatar(y) → texto, rotuloX}. Linha com menos de
+   * 2 pontos não é desenhada: "dados insuficientes". Barras: horizontais com uma série; verticais agrupadas com várias.
+   */
+  function grafico(o) {
+    var formatar = o.formatar || function (v) { return Fmt.numero(v, 0); };
+    var series = (o.series || []).map(function (sr) { return { nome: sr.nome, pontos: sr.pontos || [] }; });
+    var xs = [];
+    series.forEach(function (sr) { sr.pontos.forEach(function (p) { if (xs.indexOf(p.x) < 0) xs.push(p.x); }); });
+    var valores = [];
+    series.forEach(function (sr) { sr.pontos.forEach(function (p) { if (p.y !== null && p.y !== undefined && isFinite(p.y)) valores.push(Number(p.y)); }); });
+    var fig = h('figure', { class: 'grafico', dataset: { grafico: o.tipo } });
+    fig.appendChild(h('figcaption', { text: o.titulo }));
+    var notas = [];
+    var W = 600, H = o.tipo === 'barras' && series.length === 1 ? Math.max(120, xs.length * 34 + 30) : 260;
+    var svg = s('svg', { viewBox: '0 0 ' + W + ' ' + H, role: 'img', 'aria-label': o.titulo + '. Os valores estão na tabela abaixo.' });
+    if (!valores.length) {
+      notas.push('Sem dados para desenhar.');
+    } else if (o.tipo === 'barras' && series.length === 1) {
+      var max = Math.max.apply(null, valores.concat([0]));
+      var esq = 150, dir = 70;
+      xs.forEach(function (x, i) {
+        var p = series[0].pontos.filter(function (q) { return q.x === x; })[0];
+        var y = p && p.y !== null && p.y !== undefined ? Number(p.y) : null;
+        var yy = 10 + i * 34;
+        svg.appendChild(s('text', { x: esq - 8, y: yy + 17, 'text-anchor': 'end', class: 'grafico-rotulo' }, String(x).length > 22 ? String(x).slice(0, 21) + '…' : String(x)));
+        if (y !== null) {
+          var w = max > 0 ? Math.max(2, (W - esq - dir) * (y / max)) : 2;
+          svg.appendChild(s('rect', { x: esq, y: yy, width: w, height: 24, rx: 3, class: 'grafico-serie-0' }));
+          svg.appendChild(s('text', { x: esq + w + 6, y: yy + 17, class: 'grafico-valor' }, formatar(y)));
+        } else {
+          svg.appendChild(s('text', { x: esq + 4, y: yy + 17, class: 'grafico-rotulo' }, '— sem dado'));
+        }
+      });
+    } else {
+      var mn = Math.min.apply(null, valores), mx = Math.max.apply(null, valores);
+      if (o.tipo === 'barras') mn = Math.min(0, mn);
+      if (mn === mx) { mx = mx + (mx === 0 ? 1 : Math.abs(mx) * 0.1); mn = o.tipo === 'barras' ? Math.min(0, mn) : mn - (mn === 0 ? 1 : Math.abs(mn) * 0.1); }
+      var L = 64, R = 16, T = 12, B = 40;
+      var pw = W - L - R, ph = H - T - B;
+      var ys = function (v) { return T + ph - (v - mn) / (mx - mn) * ph; };
+      for (var g = 0; g <= 4; g++) {
+        var gv = mn + (mx - mn) * g / 4;
+        svg.appendChild(s('line', { x1: L, x2: W - R, y1: ys(gv), y2: ys(gv), class: 'grafico-grade' }));
+        svg.appendChild(s('text', { x: L - 6, y: ys(gv) + 4, 'text-anchor': 'end', class: 'grafico-rotulo' }, formatar(gv)));
+      }
+      svg.appendChild(s('line', { x1: L, x2: W - R, y1: T + ph, y2: T + ph, class: 'grafico-eixo' }));
+      var passo = xs.length > 1 ? pw / (o.tipo === 'barras' ? xs.length : xs.length - 1) : pw;
+      var cx = function (i) { return o.tipo === 'barras' ? L + passo * i + passo / 2 : (xs.length > 1 ? L + passo * i : L + pw / 2); };
+      var saltoRotulo = Math.max(1, Math.ceil(xs.length / 8));
+      xs.forEach(function (x, i) { if (i % saltoRotulo === 0) svg.appendChild(s('text', { x: cx(i), y: H - 14, 'text-anchor': 'middle', class: 'grafico-rotulo' }, String(x))); });
+      series.forEach(function (sr, k) {
+        var cls = 'grafico-serie-' + (k % 4);
+        if (o.tipo === 'barras') {
+          var bw = Math.max(4, passo * 0.8 / series.length);
+          sr.pontos.forEach(function (p) {
+            if (p.y === null || p.y === undefined) return;
+            var i = xs.indexOf(p.x);
+            var x0 = cx(i) - passo * 0.4 + k * bw;
+            var y0 = ys(Math.max(0, p.y)), y1 = ys(Math.min(0, p.y));
+            svg.appendChild(s('rect', { x: x0, y: y0, width: bw - 2, height: Math.max(1, y1 - y0), class: cls }));
+          });
+          return;
+        }
+        var validos = sr.pontos.filter(function (p) { return p.y !== null && p.y !== undefined; });
+        if (validos.length < 2) notas.push('Dados insuficientes para desenhar a linha de ' + sr.nome + (validos.length === 1 ? ' (só um ponto, em ' + validos[0].x + ')' : '') + '.');
+        var trecho = [];
+        var desenharTrecho = function () { if (trecho.length >= 2) svg.appendChild(s('polyline', { points: trecho.join(' '), class: 'grafico-linha ' + cls })); trecho = []; };
+        xs.forEach(function (x, i) {
+          var p = sr.pontos.filter(function (q) { return q.x === x; })[0];
+          if (!p || p.y === null || p.y === undefined) { desenharTrecho(); return; }
+          trecho.push(cx(i) + ',' + ys(p.y));
+          svg.appendChild(s('circle', { cx: cx(i), cy: ys(p.y), r: 4, class: cls }));
+        });
+        desenharTrecho();
+      });
+    }
+    fig.appendChild(svg);
+    if (series.length > 1) {
+      fig.appendChild(h('ul', { class: 'grafico-legenda' }, series.map(function (sr, k) { return h('li', null, h('span', { class: 'amostra grafico-serie-' + (k % 4), style: 'background:currentColor', 'aria-hidden': 'true' }), sr.nome); })));
+    }
+    notas.forEach(function (n) { fig.appendChild(nota(n, 'info')); });
+    var thead = h('tr', null, h('th', { scope: 'col', text: o.rotuloX || 'Item' }), series.map(function (sr) { return h('th', { scope: 'col', class: 'num', text: sr.nome }); }));
+    var tbody = h('tbody', null, xs.map(function (x) {
+      return h('tr', null, h('th', { scope: 'row', text: String(x) }), series.map(function (sr) {
+        var p = sr.pontos.filter(function (q) { return q.x === x; })[0];
+        return h('td', { class: 'num', text: p && p.y !== null && p.y !== undefined ? formatar(p.y) : '—' });
+      }));
+    }));
+    fig.appendChild(h('details', { class: 'detalhe grafico-tabela' }, h('summary', { text: 'Ver tabela' }), h('div', { class: 'tabela-rolagem' }, h('table', { class: 'tabela' }, h('caption', { class: 'oculto-visual', text: o.titulo }), h('thead', null, thead), tbody))));
+    return fig;
+  }
+
+  return {
+    icone: icone, botao: botao, travar: travar, definirTexto: definirTexto, faixa: faixa, nota: nota, aviso: aviso, carregando: carregando, vazio: vazio,
+    estadoErro: estadoErro, folha: folha, fecharTudo: fecharTudo, confirmar: confirmar, buscaBrinco: buscaBrinco, tabela: tabela, grafico: grafico,
+    comparar: comparar_, TITULOS_ERRO: TITULOS_ERRO,
+  };
+})();
+
+var Campos = (function () {
+  var h = Util.h;
+  var TEXTO_LONGO = ['notes', 'observacoes', 'justificativa', 'description'];
+  var MAX_ANEXO_BYTES = 5 * 1024 * 1024;
+  /** Campo de valor composto por animal: o catálogo o declara texto, mas o servidor espera a lista {tipo, codigo}. */
+  var COMPOSTOS = { outras_identificacoes: { tipos: ['BRINCO_ORIGEM', 'RFID', 'SISBOV', 'TATUAGEM', 'OUTRO'] } };
+  /** Cadastros com "+ Novo" no próprio formulário (08, seção 4.3): rota e campos do miniformulário. */
+  var NOVOS = {
+    PASTOS: { titulo: 'Novo pasto', rota: 'pasto.salvar', pk: 'pasture_id', campos: [
+      { id: 'nome', rotulo: 'Nome do pasto', tipo: 'texto', obrigatorio: true },
+      { id: 'property_id', rotulo: 'Propriedade', tipo: 'ref:PROPRIEDADES', obrigatorio: true, default: { de: 'CONFIGURACOES.propriedade_padrao_id' } },
+      { id: 'area_hectares', rotulo: 'Área', tipo: 'decimal', unidade: 'ha', casas: 2, min: 0.01 },
+    ], fixos: { posse: 'PROPRIO' } },
+    PARCEIROS: { titulo: 'Novo parceiro', rota: 'parceiro.salvar', pk: 'partner_id', campos: [
+      { id: 'nome', rotulo: 'Nome', tipo: 'texto', obrigatorio: true },
+      { id: 'telefone', rotulo: 'Telefone', tipo: 'texto' },
+      { id: 'documento', rotulo: 'CPF ou CNPJ', tipo: 'texto' },
+    ], fixos: {} },
+  };
+
+  function rotuloDe(def) { return def.rotulo || Fmt.rotulo('', def.id); }
+  function vazio(v) { return v === null || v === undefined || v === '' || (Array.isArray(v) && !v.length); }
+  /** Condição de visivel_se/obrigatorio_se: {campo, valores} ou {campo, preenchido}. */
+  function condicao(c, valores) {
+    if (!c) return true;
+    var v = valores[c.campo];
+    if (c.preenchido) return !vazio(v);
+    if (c.valores) return c.valores.some(function (x) { return x === v || String(x) === String(v); });
+    return true;
+  }
+  function visivel(def, valores) { return !def.visivel_se || condicao(def.visivel_se, valores); }
+  function obrigatorio(def, valores) { return !!def.obrigatorio || (!!def.obrigatorio_se && condicao(def.obrigatorio_se, valores)); }
+  /** Valor padrão: literal, HOJE (no fuso da fazenda) ou {de: 'CONFIGURACOES.chave'}. */
+  function padrao(def) {
+    var d = def.default;
+    if (d === undefined || d === null) return undefined;
+    if (d === 'HOJE') return Fmt.hoje();
+    if (typeof d === 'object' && d.de) {
+      var m = /^CONFIGURACOES\.(\w+)$/.exec(d.de);
+      return m ? (Store.param(m[1]) === null ? undefined : Store.param(m[1])) : undefined;
+    }
+    if (def.tipo === 'dinheiro' && typeof d === 'number') return Fmt.centavosParaTexto(d);
+    if (def.tipo === 'decimal' && typeof d === 'number') return Fmt.numero(d, def.casas === undefined ? 1 : def.casas).replace(/\./g, '');
+    return d;
+  }
+  function opcoesDe(def) {
+    if (def.opcoes) return def.opcoes.map(function (c) { return { valor: c, rotulo: Fmt.rotuloOpcao(def.id, c) }; });
+    if (def.lista) return Store.lista(def.lista).map(function (l) { return { valor: l.codigo, rotulo: l.rotulo }; });
+    return [];
+  }
+  function opcoesRef(tabela, atual) {
+    var itens = [];
+    if (tabela === 'PASTOS') {
+      var varias = Store.propriedades().length > 1;
+      itens = Store.pastos({ todos: true }).filter(function (p) { return p.status !== 'INATIVO' || p.pasture_id === atual; }).map(function (p) { return { valor: p.pasture_id, rotulo: p.nome + (varias && p.propriedade_nome ? ' (' + p.propriedade_nome + ')' : '') + (p.status === 'INATIVO' ? ' — inativo' : '') }; });
+    } else if (tabela === 'PROPRIEDADES') {
+      itens = Store.propriedades({ todas: true }).filter(function (p) { return p.status !== 'INATIVO' || p.property_id === atual; }).map(function (p) { return { valor: p.property_id, rotulo: p.nome }; });
+    } else if (tabela === 'PARCEIROS') {
+      itens = Store.parceiros().map(function (p) { return { valor: p.partner_id, rotulo: p.nome }; });
+    } else if (tabela === 'CATEGORIAS') {
+      itens = Store.categorias().filter(function (c) { return c.ativo !== false; }).map(function (c) { return { valor: c.category_id, rotulo: c.nome }; });
+    }
+    return itens.sort(function (a, b) { return UI.comparar(a.rotulo, b.rotulo); });
+  }
+
+  /**
+   * Converte o valor bruto (como digitado) no valor do contrato do servidor e confere o FORMATO (o servidor é a
+   * autoridade): {valor} ou {erro}. dinheiro → centavos (min/max em reais); decimal com `casas`; data yyyy-MM-dd.
+   */
+  function converter(def, bruto) {
+    var t = def.tipo;
+    if (COMPOSTOS[def.id]) {
+      var itens = (Array.isArray(bruto) ? bruto : []).filter(function (x) { return x && (!vazio(x.tipo) || !vazio(x.codigo)); });
+      for (var i = 0; i < itens.length; i++) if (vazio(itens[i].tipo) || vazio(itens[i].codigo)) return { erro: 'Informe o tipo e o código da identificação ' + (i + 1) + '.' };
+      return { valor: itens.length ? itens.map(function (x) { return { tipo: x.tipo, codigo: String(x.codigo).trim() }; }) : null };
+    }
+    if (vazio(bruto)) return { valor: null };
+    var r;
+    if (t === 'texto') return { valor: String(bruto).trim() || null };
+    if (t === 'inteiro') r = Fmt.lerInteiro(bruto);
+    else if (t === 'decimal') r = Fmt.lerDecimal(bruto, def.casas === undefined ? null : def.casas);
+    else if (t === 'dinheiro') r = Fmt.lerDinheiro(bruto);
+    else if (t === 'data') return Fmt.ehData(bruto) ? { valor: bruto } : { erro: 'Data inválida. Use o calendário ou dd/mm/aaaa.' };
+    else if (t === 'bool') return { valor: bruto === true || bruto === 'S' || bruto === 'true' };
+    else if (t === 'lista') {
+      var ops = opcoesDe(def).map(function (x) { return x.valor; });
+      return ops.indexOf(bruto) >= 0 || (!def.opcoes && !def.lista) ? { valor: bruto } : { erro: 'Escolha uma das opções da lista.' };
+    } else if (t === 'anexo') return { valor: bruto };
+    else return { valor: String(bruto) };
+    if (r.erro) return r;
+    var escala = t === 'dinheiro' ? 100 : 1;
+    if (def.min !== undefined && def.min !== null && r.valor < def.min * escala) return { erro: 'O mínimo é ' + (t === 'dinheiro' ? Fmt.dinheiro(def.min * 100) : Fmt.numero(def.min, t === 'inteiro' ? 0 : (def.casas || 1)) + (def.unidade ? ' ' + def.unidade : '')) + '.' };
+    if (def.max !== undefined && def.max !== null && r.valor > def.max * escala) return { erro: 'O máximo é ' + (t === 'dinheiro' ? Fmt.dinheiro(def.max * 100) : Fmt.numero(def.max, t === 'inteiro' ? 0 : (def.casas || 1)) + (def.unidade ? ' ' + def.unidade : '')) + '.' };
+    return r;
+  }
+
+  var seq = 0;
+  /**
+   * Um campo do catálogo. o: {valor (bruto), aoMudar(bruto), idBase, rotulos: {id: texto} (ref:EVENTOS), aoNovo}.
+   * Devolve {el, def, ler(), escrever(v), erro(msg|null), focar(), mostrar(bool), marcarObrigatorio(bool)}.
+   */
+  function criar(def, o) {
+    o = o || {};
+    seq += 1;
+    var id = (o.idBase || 'c') + '-' + def.id + '-' + seq;
+    var atual = o.valor;
+    var el = h('div', { class: 'campo', dataset: { campo: def.id, tipo: def.tipo } });
+    var rotulo = h('span', { class: 'campo-rotulo', id: id + '-r', text: rotuloDe(def) });
+    var ajuda = def.ajuda ? h('div', { class: 'campo-ajuda', id: id + '-a', text: def.ajuda }) : null;
+    var erroEl = h('div', { class: 'campo-erro', id: id + '-e', hidden: true });
+    var controle = null, focavel = null;
+    var describedby = [ajuda ? id + '-a' : null, id + '-e'].filter(Boolean).join(' ');
+    function mudou(v) { atual = v; if (o.aoMudar) o.aoMudar(v); }
+    var t = def.tipo;
+    var ref = /^ref:(\w+)$/.exec(t);
+    if (COMPOSTOS[def.id]) {
+      controle = compostoIdent_(def, id, atual, mudou);
+      focavel = function () { return controle.querySelector('select, input, button'); };
+      el.appendChild(h('div', { class: 'campo-rotulo', id: id + '-r', text: rotuloDe(def) }));
+    } else if (t === 'bool' || (t === 'lista' && opcoesDe(def).length > 0 && opcoesDe(def).length <= 3)) {
+      var ops = t === 'bool' ? [{ valor: true, rotulo: 'Sim' }, { valor: false, rotulo: 'Não' }] : opcoesDe(def);
+      var grupo = h('div', { class: 'opcoes-lista' });
+      controle = h('fieldset', { class: 'opcoes', 'aria-describedby': describedby }, h('legend', { class: 'campo-rotulo', text: rotuloDe(def) }), grupo);
+      ops.forEach(function (op, k) {
+        var r = h('input', { type: 'radio', name: id, id: id + '-' + k, value: String(op.valor), checked: atual === op.valor || (atual !== null && atual !== undefined && String(atual) === String(op.valor)) });
+        r.addEventListener('change', function () { if (r.checked) mudou(op.valor); });
+        grupo.appendChild(h('label', { class: 'opcao', for: id + '-' + k }, r, h('span', { text: op.rotulo })));
+      });
+      focavel = function () { return controle.querySelector('input:checked') || controle.querySelector('input'); };
+    } else if (t === 'lista' || (ref && ref[1] !== 'ANIMAIS' && ref[1] !== 'EVENTOS')) {
+      var sel = h('select', { id: id, 'aria-describedby': describedby });
+      var preencher = function () {
+        Util.limpar(sel);
+        sel.appendChild(h('option', { value: '', text: 'Escolha…' }));
+        var itens = t === 'lista' ? opcoesDe(def) : opcoesRef(ref[1], atual);
+        itens.forEach(function (op) { sel.appendChild(h('option', { value: op.valor, text: op.rotulo, selected: op.valor === atual })); });
+        if (!vazio(atual) && !itens.some(function (op) { return op.valor === atual; })) sel.appendChild(h('option', { value: atual, text: 'Valor anterior (' + atual + ')', selected: true }));
+      };
+      preencher();
+      sel.addEventListener('change', function () { mudou(sel.value === '' ? null : sel.value); });
+      var linha = h('div', { class: 'campo-linha' }, sel);
+      if (ref && NOVOS[ref[1]] && o.aoNovo !== false) {
+        linha.appendChild(UI.botao('+ Novo', { aoClicar: function (ev) { abrirNovo_(ref[1], ev.currentTarget, function (novoId) { atual = novoId; preencher(); sel.value = novoId; mudou(novoId); sel.focus(); }); } }));
+      }
+      controle = linha;
+      focavel = function () { return sel; };
+      el._recarregar = preencher;
+    } else if (ref && ref[1] === 'ANIMAIS') {
+      controle = campoAnimal_(def, id, atual, mudou, describedby);
+      focavel = function () { return controle.querySelector('input, button'); };
+    } else if (ref && ref[1] === 'EVENTOS') {
+      var rot = o.rotulos && atual ? o.rotulos[atual] : null;
+      controle = atual ? h('div', { class: 'escolhido', id: id }, h('span', { class: 'escolhido-texto', text: rot || 'Evento escolhido no histórico' })) : UI.nota('Abra o evento no histórico de eventos e use "Estornar" ou "Desfazer".', 'info');
+      focavel = function () { return null; };
+    } else if (t === 'anexo') {
+      var arq = h('input', { type: 'file', id: id, 'aria-describedby': describedby, accept: 'image/*,application/pdf' });
+      var info = h('div', { class: 'campo-ajuda', text: atual && atual.nome_arquivo ? 'Arquivo: ' + atual.nome_arquivo : '' });
+      arq.addEventListener('change', function () {
+        var f = arq.files && arq.files[0];
+        if (!f) { mudou(null); info.textContent = ''; return; }
+        info.textContent = 'Preparando ' + f.name + '…';
+        lerArquivo(f).then(function (v) { info.textContent = 'Arquivo: ' + v.nome_arquivo + ' (' + Fmt.numero(Math.ceil(v.tamanho_bytes / 1024)) + ' KB)'; mudou(v); }, function (e) { info.textContent = ''; arq.value = ''; mudou(null); erro(e.message); });
+      });
+      controle = h('div', null, arq, info);
+      focavel = function () { return arq; };
+    } else {
+      var longo = t === 'texto' && TEXTO_LONGO.indexOf(def.id) >= 0;
+      var modo = t === 'inteiro' ? 'numeric' : (t === 'decimal' || t === 'dinheiro') ? 'decimal' : (def.id === 'brinco' && Store.param('brinco_somente_numerico') === true) ? 'numeric' : null;
+      var inp = h(longo ? 'textarea' : 'input', { id: id, type: longo ? null : (t === 'data' ? 'date' : 'text'), inputmode: modo, autocomplete: 'off', 'aria-describedby': describedby, value: vazio(atual) ? '' : String(atual), spellcheck: longo ? null : 'false' });
+      inp.addEventListener('input', function () { mudou(inp.value); });
+      inp.addEventListener('change', function () { mudou(inp.value); });
+      var prefixo = t === 'dinheiro' ? h('span', { class: 'campo-unidade', 'aria-hidden': 'true', text: 'R$' }) : null;
+      var sufixo = def.unidade ? h('span', { class: 'campo-unidade', text: def.unidade }) : null;
+      controle = prefixo || sufixo ? h('div', { class: 'campo-linha' }, prefixo, inp, sufixo) : inp;
+      focavel = function () { return inp; };
+    }
+    if (!controle.matches || !controle.matches('fieldset') && !COMPOSTOS[def.id]) {
+      el.appendChild(h('label', { class: 'campo-rotulo', id: id + '-r', for: (focavel() && focavel().id) || null, text: rotuloDe(def) }));
+    }
+    el.appendChild(controle);
+    if (ajuda) el.appendChild(ajuda);
+    el.appendChild(erroEl);
+    var lab = el.querySelector('.campo-rotulo');
+    function erro(msg) {
+      var f = focavel();
+      if (msg) {
+        Util.limpar(erroEl);
+        erroEl.appendChild(UI.icone('erro', 'icone-pequeno'));
+        erroEl.appendChild(h('span', { text: msg }));
+        erroEl.hidden = false;
+        if (f) f.setAttribute('aria-invalid', 'true');
+        if (controle.matches && controle.matches('fieldset')) controle.setAttribute('aria-invalid', 'true');
+      } else {
+        erroEl.hidden = true;
+        Util.limpar(erroEl);
+        if (f) f.removeAttribute('aria-invalid');
+        if (controle.matches && controle.matches('fieldset')) controle.removeAttribute('aria-invalid');
+      }
+    }
+    return {
+      el: el, def: def,
+      ler: function () { return atual; },
+      erro: erro,
+      focar: function () { var f = focavel(); if (f) f.focus(); else el.scrollIntoView({ block: 'center' }); },
+      mostrar: function (v) { el.hidden = !v; },
+      marcarObrigatorio: function (v) { lab.classList.toggle('campo-obrigatorio', !!v); var f = focavel(); if (f && f.tagName !== 'BUTTON') { if (v) f.setAttribute('aria-required', 'true'); else f.removeAttribute('aria-required'); } },
+      recarregar: function () { if (el._recarregar) el._recarregar(); },
+    };
+  }
+
+  function compostoIdent_(def, id, atual, mudou) {
+    var itens = Array.isArray(atual) ? atual.map(function (x) { return { tipo: x.tipo, codigo: x.codigo }; }) : [];
+    var caixa = h('div', { class: 'subgrupo', id: id });
+    function desenhar() {
+      Util.limpar(caixa);
+      itens.forEach(function (it, k) {
+        var sel = h('select', { id: id + '-t' + k, 'aria-label': 'Tipo da identificação ' + (k + 1) }, h('option', { value: '', text: 'Tipo…' }), COMPOSTOS[def.id].tipos.map(function (tp) { return h('option', { value: tp, text: Fmt.rotulo('IDENTIFICACAO', tp), selected: it.tipo === tp }); }));
+        var cod = h('input', { type: 'text', id: id + '-c' + k, 'aria-label': 'Código da identificação ' + (k + 1), value: it.codigo || '', autocomplete: 'off' });
+        sel.addEventListener('change', function () { it.tipo = sel.value || null; mudou(itens.slice()); });
+        cod.addEventListener('input', function () { it.codigo = cod.value; mudou(itens.slice()); });
+        caixa.appendChild(h('div', { class: 'campo-linha' }, sel, cod, UI.botao('', { tipo: 'texto', icone: 'remover', rotulo: 'Tirar a identificação ' + (k + 1), aoClicar: function () { itens.splice(k, 1); mudou(itens.slice()); desenhar(); } })));
+      });
+      caixa.appendChild(UI.botao('+ Identificação', { aoClicar: function () { itens.push({ tipo: null, codigo: '' }); mudou(itens.slice()); desenhar(); var u = caixa.querySelectorAll('select'); if (u.length) u[u.length - 1].focus(); } }));
+    }
+    desenhar();
+    return caixa;
+  }
+
+  /** ref:ANIMAIS: digita o brinco (ou código) e o Enter resolve no store; um candidato → escolhido; vários → lista. */
+  function campoAnimal_(def, id, atual, mudou, describedby) {
+    var caixa = h('div', { class: 'campo-animal' });
+    function desenhar(valor, candidatos, msg) {
+      Util.limpar(caixa);
+      if (valor) {
+        var a = Store.animal(valor);
+        caixa.appendChild(h('div', { class: 'escolhido', id: id }, h('span', { class: 'escolhido-texto', text: a ? Store.rotuloAnimal(a) + ' · ' + Store.descricaoAnimal(a) : 'Animal escolhido' }),
+          UI.botao('Trocar', { aoClicar: function () { mudou(null); desenhar(null); var i = caixa.querySelector('input'); if (i) i.focus(); } })));
+        return;
+      }
+      var inp = h('input', { type: 'text', id: id, 'aria-describedby': describedby, autocomplete: 'off', placeholder: 'Brinco ou código', inputmode: Store.param('brinco_somente_numerico') === true ? 'numeric' : null, dataset: { enterProprio: '1' } });
+      var achar = function () {
+        var r = Store.buscar(inp.value);
+        if (r.candidatos.length === 1) { mudou(r.candidatos[0].animal_id); desenhar(r.candidatos[0].animal_id); var b = caixa.querySelector('button'); if (b) b.focus(); return; }
+        desenhar(null, r.candidatos, r.candidatos.length ? null : 'Nenhum animal com "' + inp.value + '".');
+        var i2 = caixa.querySelector('input'); if (i2) { i2.value = inp.value; i2.focus(); }
+      };
+      inp.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); ev.stopPropagation(); achar(); } });
+      caixa.appendChild(h('div', { class: 'campo-linha' }, inp, UI.botao('Achar', { aoClicar: achar })));
+      if (msg) caixa.appendChild(h('div', { class: 'campo-ajuda', role: 'status', text: msg }));
+      if (candidatos && candidatos.length) {
+        caixa.appendChild(h('ul', { class: 'candidatos', 'aria-label': 'Escolha o animal' }, candidatos.slice(0, 20).map(function (a) {
+          return h('li', { class: 'candidato' }, h('div', { class: 'candidato-texto' }, h('div', { class: 'candidato-titulo', text: Store.rotuloAnimal(a) }), h('div', { class: 'suave', text: Store.descricaoAnimal(a) })),
+            UI.botao('Escolher', { aoClicar: function () { mudou(a.animal_id); desenhar(a.animal_id); } }));
+        })));
+      }
+    }
+    desenhar(atual || null);
+    return caixa;
+  }
+
+  function abrirNovo_(tabela, origem, aoCriar) {
+    var def = NOVOS[tabela];
+    var chave = Util.uuid();
+    var bloco = Formulario.bloco(def.campos, {}, { idBase: 'novo-' + tabela.toLowerCase(), aoNovo: false });
+    var status = h('div', { role: 'status' });
+    var f = UI.folha({ titulo: def.titulo, conteudo: h('div', { class: 'formulario' }, bloco.el, status), origem: origem });
+    var salvarB = UI.botao('Salvar', { tipo: 'primario', aoClicar: salvar });
+    f.definirAcoes([UI.botao('Cancelar', { aoClicar: function () { f.fechar(); } }), salvarB]);
+    async function salvar() {
+      var c = bloco.converter();
+      if (c.erros.length) { bloco.focarPrimeiroErro(); return; }
+      var destravar = UI.travar(salvarB, 'Salvando…');
+      Util.limpar(status);
+      try {
+        var campos = Object.assign({}, def.fixos, c.valores);
+        var r = await Cliente.comando(def.rota, { campos: campos }, { chave: chave });
+        await Store.aplicarResultado(def.rota, r.data, r.meta);
+        f.fechar({ forcar: true });
+        UI.aviso(def.titulo.replace(/^Novo /, '') + ' "' + (r.data.nome || '') + '" cadastrado.', { tipo: 'ok' });
+        aoCriar(r.data[def.pk]);
+      } catch (e) {
+        destravar();
+        if (e.code === 'VALIDATION') bloco.mostrarErros(e.details);
+        status.appendChild(UI.estadoErro(e));
+      }
+    }
+  }
+
+  /** Lê um arquivo para anexo: imagens são reduzidas no aparelho (~300 KB e miniatura ~15 KB); outros, até 5 MB. */
+  function lerArquivo(arquivo) {
+    if (/^image\//.test(arquivo.type)) {
+      return Promise.all([reduzirImagem_(arquivo, 1600, 300 * 1024), reduzirImagem_(arquivo, 240, 15 * 1024)]).then(function (r) {
+        return { nome_arquivo: arquivo.name.replace(/\.[^.]+$/, '') + '.jpg', mime_type: 'image/jpeg', tamanho_bytes: Math.floor(r[0].length * 3 / 4), conteudo_base64: r[0], miniatura_base64: r[1] };
+      });
+    }
+    if (arquivo.size > MAX_ANEXO_BYTES) return Promise.reject(new Error('Arquivo grande demais (' + Fmt.numero(arquivo.size / 1048576, 1) + ' MB). O limite é 5 MB.'));
+    return new Promise(function (resolve, reject) {
+      var fr = new FileReader();
+      fr.onload = function () { resolve({ nome_arquivo: arquivo.name, mime_type: arquivo.type || 'application/octet-stream', tamanho_bytes: arquivo.size, conteudo_base64: String(fr.result).split(',')[1] || '', miniatura_base64: null }); };
+      fr.onerror = function () { reject(new Error('Não foi possível ler o arquivo. Escolha de novo.')); };
+      fr.readAsDataURL(arquivo);
+    });
+  }
+  function reduzirImagem_(arquivo, ladoMax, alvoBytes) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(arquivo);
+      var img = new Image();
+      img.onload = function () {
+        URL.revokeObjectURL(url);
+        var esc = Math.min(1, ladoMax / Math.max(img.naturalWidth, img.naturalHeight));
+        var c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(img.naturalWidth * esc));
+        c.height = Math.max(1, Math.round(img.naturalHeight * esc));
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        var q = 0.85, b64 = '';
+        do { b64 = c.toDataURL('image/jpeg', q).split(',')[1]; q -= 0.15; } while (b64.length * 3 / 4 > alvoBytes && q > 0.2);
+        resolve(b64);
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('A imagem não pôde ser aberta. Escolha outro arquivo.')); };
+      img.src = url;
+    });
+  }
+  return { criar: criar, converter: converter, visivel: visivel, obrigatorio: obrigatorio, padrao: padrao, opcoesDe: opcoesDe, rotuloDe: rotuloDe, vazio: vazio, lerArquivo: lerArquivo, COMPOSTOS: COMPOSTOS, NOVOS: NOVOS };
+})();
+
+var Formulario = (function () {
+  var h = Util.h;
+  /**
+   * Bloco de campos com as condicionais do catálogo (mesmo escopo). defs: definições; valores: brutos (o bloco
+   * escreve neles); o: {idBase, aoMudar(id), extras (valores de outro escopo para condições), rotulos, aoNovo,
+   * principais (ids que ficam fora de "Mais dados"), tituloExtras}. Devolve {el, valores, converter() →
+   * {valores (só visíveis), erros: [{campo, mensagem}]}, mostrarErros(details), focarPrimeiroErro(), campo(id)}.
+   */
+  function bloco(defs, valores, o) {
+    o = o || {};
+    var ctrls = {};
+    var el = h('div', { class: 'bloco-campos' });
+    var grade = h('div', { class: 'grade-campos' });
+    el.appendChild(grade);
+    var extras = null, gradeExtras = null;
+    if (o.principais) {
+      gradeExtras = h('div', { class: 'grade-campos' });
+      extras = h('details', { class: 'mais-dados' }, h('summary', { text: o.tituloExtras || 'Mais dados (opcional)' }), gradeExtras);
+    }
+    defs.forEach(function (d) {
+      if (valores[d.id] === undefined) { var p = Campos.padrao(d); if (p !== undefined) valores[d.id] = p; }
+    });
+    var principal = function (d) {
+      if (!o.principais) return true;
+      if (o.principais.indexOf(d.id) >= 0 || d.obrigatorio) return true;
+      var dep = (d.visivel_se && d.visivel_se.campo) || (d.obrigatorio_se && d.obrigatorio_se.campo);
+      if (dep) { var pai = defs.filter(function (x) { return x.id === dep; })[0]; return pai ? principal(pai) : true; }
+      return false;
+    };
+    defs.forEach(function (d) {
+      var c = Campos.criar(d, { valor: valores[d.id], idBase: o.idBase, rotulos: o.rotulos, aoNovo: o.aoNovo, aoMudar: function (v) { valores[d.id] = v; c.erro(null); atualizar(); if (o.aoMudar) o.aoMudar(d.id); } });
+      ctrls[d.id] = c;
+      (principal(d) ? grade : gradeExtras).appendChild(c.el);
+    });
+    if (extras && gradeExtras.childNodes.length) el.appendChild(extras);
+    function contexto() { return Object.assign({}, o.extras ? o.extras() : {}, valores); }
+    function atualizar() {
+      var v = contexto();
+      defs.forEach(function (d) { ctrls[d.id].mostrar(Campos.visivel(d, v)); ctrls[d.id].marcarObrigatorio(Campos.obrigatorio(d, v)); });
+    }
+    atualizar();
+    function converter() {
+      var v = contexto(), out = {}, erros = [];
+      defs.forEach(function (d) {
+        if (!Campos.visivel(d, v)) return;
+        var r = Campos.converter(d, valores[d.id]);
+        if (r.erro) { erros.push({ campo: d.id, mensagem: r.erro }); return; }
+        if (r.valor === null && Campos.obrigatorio(d, v)) { erros.push({ campo: d.id, mensagem: d.tipo === 'lista' || d.tipo === 'bool' || /^ref:/.test(d.tipo) ? 'Escolha uma opção.' : 'Preencha este campo.' }); return; }
+        out[d.id] = r.valor;
+      });
+      erros.forEach(function (e) { ctrls[e.campo].erro(e.mensagem); });
+      return { valores: out, erros: erros };
+    }
+    function mostrarErros(details) {
+      var n = 0;
+      (details || []).forEach(function (d) { if (d.campo && ctrls[d.campo]) { ctrls[d.campo].erro(d.mensagem); n += 1; } });
+      return n;
+    }
+    function focarPrimeiroErro() {
+      for (var i = 0; i < defs.length; i++) {
+        var c = ctrls[defs[i].id];
+        if (!c.el.hidden && c.el.querySelector('.campo-erro:not([hidden])')) {
+          if (extras && extras.contains(c.el)) extras.open = true;
+          c.focar();
+          return true;
+        }
+      }
+      return false;
+    }
+    return { el: el, valores: valores, converter: converter, mostrarErros: mostrarErros, focarPrimeiroErro: focarPrimeiroErro, campo: function (id) { return ctrls[id] || null; }, atualizar: atualizar, abrirExtras: function () { if (extras) extras.open = true; } };
+  }
+
+  /**
+   * Enter percorre os campos (08, seção 14): no campo de texto, Enter leva ao próximo campo (ou ao botão principal),
+   * sem enviar. Campos com Enter próprio (busca de brinco) marcam data-enter-proprio.
+   */
+  function enterPercorre(raiz, principal) {
+    raiz.addEventListener('keydown', function (ev) {
+      if (ev.key !== 'Enter' || ev.defaultPrevented) return;
+      var t = ev.target;
+      if (!t || t.tagName === 'TEXTAREA' || t.tagName === 'BUTTON' || t.tagName === 'A' || t.tagName === 'SUMMARY' || t.getAttribute('data-enter-proprio')) return;
+      if (t.tagName !== 'INPUT' && t.tagName !== 'SELECT') return;
+      ev.preventDefault();
+      var campos = Util.focaveis(raiz).filter(function (x) { return (x.tagName === 'INPUT' && x.type !== 'radio' && x.type !== 'checkbox' && x.type !== 'file') || x.tagName === 'SELECT' || x.tagName === 'TEXTAREA' || (x.type === 'radio' && (x.checked || !raiz.querySelector('input[type=radio][name="' + x.name + '"]:checked'))); });
+      var dedup = [];
+      campos.forEach(function (x) { if (x.type === 'radio' && dedup.some(function (y) { return y.type === 'radio' && y.name === x.name; })) return; dedup.push(x); });
+      var i = dedup.indexOf(t);
+      if (t.type === 'radio') i = dedup.findIndex(function (y) { return y.type === 'radio' && y.name === t.name; });
+      var prox = dedup[i + 1];
+      if (prox) prox.focus();
+      else if (principal()) principal().focus();
+    });
+  }
+  return { bloco: bloco, enterPercorre: enterPercorre };
+})();
+
+var Seletor = (function () {
+  var h = Util.h;
+  /** Elegibilidade pelo filtro_elegiveis do catálogo: null = elegível; senão o motivo (pré-marcação; o servidor decide). */
+  function motivoInelegivel(a, filtro, valorCampo) {
+    if (!filtro) return null;
+    var sit = filtro.situacao;
+    if (sit === 'NAO_ANULADO') { if (a.situacao_cadastral === 'ANULADO' || a.situacao_cadastral === 'PENDENTE') return Fmt.rotulo('SITUACAO_CADASTRAL', a.situacao_cadastral).toLowerCase(); }
+    else if (Array.isArray(sit)) { if (sit.indexOf(a.situacao_cadastral) < 0) return Fmt.rotulo('SITUACAO_CADASTRAL', a.situacao_cadastral).toLowerCase(); }
+    else if (sit && a.situacao_cadastral !== sit) return Fmt.rotulo('SITUACAO_CADASTRAL', a.situacao_cadastral).toLowerCase();
+    if (filtro.pasto && typeof filtro.pasto === 'string' && filtro.pasto.charAt(0) === '$' && valorCampo) {
+      var p = valorCampo(filtro.pasto.slice(1));
+      if (p && a.pasto_atual_id !== p) return 'fora do pasto de origem';
+    }
+    return null;
+  }
+  function precisaBaixados(filtro) {
+    var sit = filtro && filtro.situacao;
+    var fora = ['VENDIDO', 'MORTO', 'DESCARTADO', 'BAIXADO_AJUSTE', 'HISTORICO'];
+    return Array.isArray(sit) ? sit.some(function (x) { return fora.indexOf(x) >= 0; }) : fora.indexOf(sit) >= 0;
+  }
+
+  /**
+   * Seletor de animais (08, seção 7). o: {modo: UM|VARIOS, filtro (filtro_elegiveis), tipo, selecionados: [ids],
+   * aoMudar(ids), dataEvento() → yyyy-MM-dd, valorCampo(id), titulo}. Modos: busca (brinco com a resolução do
+   * curral, nome, código, crias da mãe), filtros, todos do pasto, colar lista. Devolve {el, selecionados(), definir(ids)}.
+   */
+  function criar(o) {
+    var ids = (o.selecionados || []).slice();
+    var varios = o.modo !== 'UM';
+    var baixados = precisaBaixados(o.filtro);
+    var el = h('div', { class: 'seletor' });
+    var painel = h('div', { class: 'seletor-painel' });
+    var lista = h('ul', { class: 'selecionados', 'aria-label': 'Animais escolhidos' });
+    var contador = h('p', { class: 'dado', role: 'status' });
+    var modoAtual = 'busca';
+    var botoesModo = {};
+    function elegivel(a) { return motivoInelegivel(a, o.filtro, o.valorCampo); }
+    function candidatos() {
+      var base = baixados ? [] : Store.animais();
+      if (baixados) base = (Store.animais().concat(Store.carregarBaixados.cache || [])).filter(function (a) { return !elegivel(a); });
+      return base;
+    }
+    function mudou() { if (o.aoMudar) o.aoMudar(ids.slice()); desenharSelecionados(); }
+    function adicionar(novos) {
+      var antes = ids.length;
+      novos.forEach(function (id) { if (ids.indexOf(id) < 0) { if (!varios) ids = []; ids.push(id); } });
+      if (ids.length !== antes || !varios) mudou();
+      return ids.length - antes;
+    }
+    function rotuloCand(a) { return h('div', { class: 'candidato-texto' }, h('div', { class: 'candidato-titulo brinco', text: Store.rotuloAnimal(a) }), h('div', { class: 'suave', text: Store.descricaoAnimal(a) }), elegivel(a) ? h('div', { class: 'marca-inelegivel' }, UI.icone('aviso', 'icone-pequeno'), 'Não elegível: ' + elegivel(a)) : null); }
+    function desenharSelecionados() {
+      Util.limpar(lista);
+      ids.forEach(function (id) {
+        var a = Store.animal(id);
+        lista.appendChild(h('li', { class: 'candidato', dataset: { animal: id } }, a ? rotuloCand(a) : h('div', { class: 'candidato-texto', text: 'Animal ' + id }),
+          UI.botao('Tirar', { tipo: 'texto', icone: 'remover', aoClicar: function () { ids = ids.filter(function (x) { return x !== id; }); mudou(); } })));
+      });
+      contador.textContent = ids.length ? ids.length + (ids.length === 1 ? ' animal escolhido' : ' animais escolhidos') : 'Nenhum animal escolhido ainda.';
+    }
+    function trocarModo(m) {
+      modoAtual = m;
+      Object.keys(botoesModo).forEach(function (k) { botoesModo[k].setAttribute('aria-pressed', k === m ? 'true' : 'false'); });
+      Util.limpar(painel);
+      ({ busca: painelBusca, filtros: painelFiltros, pasto: painelPasto, colar: painelColar })[m]();
+    }
+    function listaCandidatos(cands, rotuloAcao) {
+      return h('ul', { class: 'candidatos' }, cands.slice(0, 30).map(function (a) {
+        var ja = ids.indexOf(a.animal_id) >= 0;
+        return h('li', { class: 'candidato' }, rotuloCand(a), UI.botao(ja ? 'Já escolhido' : (rotuloAcao || (varios ? 'Incluir' : 'Escolher')), { desabilitado: ja, aoClicar: function (ev) { adicionar([a.animal_id]); ev.currentTarget.disabled = true; UI.definirTexto(ev.currentTarget, 'Já escolhido'); } }));
+      }), cands.length > 30 ? h('li', { class: 'suave', text: 'e mais ' + (cands.length - 30) + '. Refine a busca.' }) : null);
+    }
+    async function garantirBaixados(alvo) {
+      if (!baixados || Store.carregarBaixados.cache) return true;
+      var c = UI.carregando('Buscando os animais que saíram do rebanho…');
+      alvo.appendChild(c);
+      try {
+        Store.carregarBaixados.cache = await Store.carregarBaixados();
+        if (c.parentNode) c.parentNode.removeChild(c);
+        return true;
+      } catch (e) {
+        if (c.parentNode) c.parentNode.removeChild(c);
+        alvo.appendChild(UI.estadoErro(e, { acao: { texto: 'Tentar de novo', aoClicar: function () { trocarModo(modoAtual); } } }));
+        return false;
+      }
+    }
+    function painelBusca() {
+      var idc = 'sel-busca-' + Util.uuid().slice(0, 6);
+      var inp = h('input', { type: 'search', id: idc, autocomplete: 'off', inputmode: Store.param('brinco_somente_numerico') === true ? 'numeric' : null, dataset: { enterProprio: '1' } });
+      var saida = h('div', { class: 'conferencia', role: 'status', 'aria-live': 'polite' });
+      function buscar() {
+        Util.limpar(saida);
+        var t = inp.value.trim();
+        if (!t) return;
+        var filtro = baixados ? function (a) { return !elegivel(a); } : null;
+        var r = Store.buscar(t, filtro);
+        if (!r.candidatos.length) { saida.appendChild(UI.nota('Nenhum animal com "' + t + '"' + (baixados ? ' entre os que saíram do rebanho.' : '.'), 'aviso')); return; }
+        if ((r.modo === 'EXATO' || r.modo === 'SEM_ZEROS') && r.candidatos.length === 1) {
+          var a = r.candidatos[0];
+          var n = adicionar([a.animal_id]);
+          saida.appendChild(UI.nota((n || !varios ? 'Incluído: ' : 'Já estava na lista: ') + Store.rotuloAnimal(a) + (r.modo === 'SEM_ZEROS' ? ' (achado sem os zeros à esquerda)' : ''), n || !varios ? 'ok' : 'info'));
+          inp.value = '';
+          inp.focus();
+          return;
+        }
+        saida.appendChild(h('p', { class: 'suave', text: r.modo === 'CRIAS' ? 'Crias da ' + Store.rotuloAnimal(r.mae) + ':' : r.candidatos.length + ' animais encontrados. Escolha:' }));
+        saida.appendChild(listaCandidatos(r.candidatos));
+      }
+      inp.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); ev.stopPropagation(); buscar(); } });
+      painel.appendChild(h('div', { class: 'busca-linha' }, h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo', for: idc, text: 'Brinco, nome ou código' }), inp), UI.botao('Buscar', { icone: 'busca', aoClicar: buscar })));
+      painel.appendChild(h('p', { class: 'campo-ajuda', text: 'Sem brinco? Digite o código (A-000123) ou o brinco da mãe para ver as crias.' }));
+      painel.appendChild(saida);
+      garantirBaixados(painel);
+    }
+    function selectDe(rotulo, opcoes, id) {
+      var sel = h('select', { id: id }, h('option', { value: '', text: 'Todos' }), opcoes.map(function (op) { return h('option', { value: op.valor, text: op.rotulo }); }));
+      return { sel: sel, el: h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo', for: id, text: rotulo }), sel) };
+    }
+    function painelFiltros() {
+      var base = 'sel-f-' + Util.uuid().slice(0, 6);
+      var fp = selectDe('Pasto', Store.pastos().map(function (p) { return { valor: p.pasture_id, rotulo: p.nome }; }), base + 'p');
+      var fs = selectDe('Sexo', [{ valor: 'M', rotulo: 'Macho' }, { valor: 'F', rotulo: 'Fêmea' }], base + 's');
+      var fc = selectDe('Categoria', Store.categorias().filter(function (c) { return c.ativo !== false; }).map(function (c) { return { valor: c.category_id, rotulo: c.nome }; }), base + 'c');
+      var semBrinco = h('input', { type: 'checkbox', id: base + 'b' });
+      var saida = h('div', { class: 'conferencia', role: 'status', 'aria-live': 'polite' });
+      function filtrar() {
+        var r = candidatos().filter(function (a) {
+          return !elegivel(a) && (!fp.sel.value || a.pasto_atual_id === fp.sel.value) && (!fs.sel.value || a.sexo === fs.sel.value) && (!fc.sel.value || a.categoria_id === fc.sel.value) && (!semBrinco.checked || !a.brinco);
+        });
+        Util.limpar(saida);
+        saida.appendChild(h('p', { class: 'dado', text: r.length + (r.length === 1 ? ' animal elegível com esses filtros' : ' animais elegíveis com esses filtros') }));
+        if (r.length && varios) saida.appendChild(UI.botao('Incluir os ' + r.length + ' filtrados', { tipo: 'primario', aoClicar: function () { var n = adicionar(r.map(function (a) { return a.animal_id; })); UI.aviso(n + ' incluídos.', { tipo: 'ok' }); } }));
+        saida.appendChild(listaCandidatos(r));
+      }
+      [fp.sel, fs.sel, fc.sel, semBrinco].forEach(function (x) { x.addEventListener('change', filtrar); });
+      painel.appendChild(h('div', { class: 'grade-campos' }, fp.el, fs.el, fc.el, h('label', { class: 'marca', for: base + 'b' }, semBrinco, h('span', { text: 'Só os sem brinco' }))));
+      painel.appendChild(saida);
+      garantirBaixados(painel).then(function (ok) { if (ok) filtrar(); });
+    }
+    function painelPasto() {
+      var base = 'sel-p-' + Util.uuid().slice(0, 6);
+      var fp = selectDe('Pasto', Store.pastos().map(function (p) { return { valor: p.pasture_id, rotulo: p.nome + ' (' + (p.cabecas || 0) + ' cab.)' }; }), base);
+      fp.sel.firstChild.textContent = 'Escolha o pasto…';
+      var saida = h('div', { class: 'conferencia', role: 'status', 'aria-live': 'polite' });
+      async function todos() {
+        Util.limpar(saida);
+        var p = fp.sel.value;
+        if (!p) { saida.appendChild(UI.nota('Escolha o pasto.', 'aviso')); return; }
+        var data = o.dataEvento ? o.dataEvento() : Fmt.hoje();
+        var rotuloPos = null, achados;
+        if (data && data !== Fmt.hoje()) {
+          try {
+            var r = await Cliente.consulta('inventario.elegiveis', { tipo: o.tipo, data: data, pasto: p });
+            var lst = r.data.animais || r.data.itens || [];
+            achados = lst.map(function (x) { return typeof x === 'string' ? x : x.animal_id; });
+            rotuloPos = 'Posição em ' + Fmt.data(data) + ', conferida pelo servidor.';
+          } catch (e) {
+            if (e.code !== 'NOT_FOUND') { saida.appendChild(UI.estadoErro(e)); return; }
+            rotuloPos = 'Lista com a posição de hoje: a consulta da posição em ' + Fmt.data(data) + ' ainda não está disponível. Ao gravar, o servidor confere cada animal na data.';
+          }
+        }
+        if (!achados) achados = Store.animais().filter(function (a) { return a.pasto_atual_id === p && !elegivel(a); }).map(function (a) { return a.animal_id; });
+        var n = adicionar(achados);
+        saida.appendChild(UI.nota(n + ' de ' + achados.length + ' animais do pasto incluídos. Tire da lista as exceções.', 'ok'));
+        if (rotuloPos) saida.appendChild(UI.nota(rotuloPos, 'info'));
+      }
+      painel.appendChild(h('div', { class: 'busca-linha' }, fp.el, UI.botao('Incluir todos', { tipo: 'primario', aoClicar: todos })));
+      painel.appendChild(saida);
+    }
+    function painelColar() {
+      var idc = 'sel-colar-' + Util.uuid().slice(0, 6);
+      var ta = h('textarea', { id: idc, rows: 5, placeholder: '0457\n0391; 0388' });
+      var saida = h('div', { class: 'conferencia', role: 'status', 'aria-live': 'polite' });
+      function conferir() {
+        Util.limpar(saida);
+        var itens = ta.value.split(/[\n,;\t]+/).map(function (x) { return x.trim(); }).filter(Boolean);
+        var achados = [], nao = [], repetidos = [], varios_ = [], vistos = {};
+        var filtro = function (a) { return !elegivel(a); };
+        itens.forEach(function (t) {
+          var r = Store.resolverBrinco(t, filtro);
+          if (r.modo === 'NENHUM') { nao.push(t); return; }
+          if (r.modo === 'VARIOS') { varios_.push({ texto: t, candidatos: r.candidatos }); return; }
+          var id = r.candidatos[0].animal_id;
+          if (vistos[id] || ids.indexOf(id) >= 0) { repetidos.push(t); return; }
+          vistos[id] = true;
+          achados.push(id);
+        });
+        saida.appendChild(h('p', { class: 'dado', text: achados.length + ' achados · ' + nao.length + ' não encontrados · ' + repetidos.length + ' repetidos' }));
+        if (nao.length) saida.appendChild(UI.nota('Não encontrados: ' + nao.join(', '), 'aviso'));
+        if (repetidos.length) saida.appendChild(UI.nota('Repetidos ou já na lista: ' + repetidos.join(', '), 'info'));
+        varios_.forEach(function (v) { saida.appendChild(h('p', { text: '"' + v.texto + '" serve para mais de um animal. Escolha:' })); saida.appendChild(listaCandidatos(v.candidatos)); });
+        if (achados.length) saida.appendChild(UI.botao('Incluir os ' + achados.length + ' achados', { tipo: 'primario', aoClicar: function (ev) { adicionar(achados); ev.currentTarget.disabled = true; UI.aviso(achados.length + ' incluídos.', { tipo: 'ok' }); } }));
+      }
+      painel.appendChild(h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo', for: idc, text: 'Cole os brincos (um por linha, ou separados por vírgula ou ponto e vírgula)' }), ta));
+      painel.appendChild(UI.botao('Conferir a lista', { aoClicar: conferir }));
+      painel.appendChild(saida);
+      garantirBaixados(painel);
+    }
+    var modos = [['busca', 'Buscar']].concat(varios ? [['filtros', 'Filtros'], ['pasto', 'Todos do pasto'], ['colar', 'Colar lista']] : []);
+    if (baixados) modos = modos.filter(function (m) { return m[0] !== 'pasto'; });
+    var barraModos = h('div', { class: 'seletor-modos', role: 'group', 'aria-label': 'Como escolher os animais' }, modos.map(function (m) {
+      var b = UI.botao(m[1], { aoClicar: function () { trocarModo(m[0]); } });
+      b.setAttribute('aria-pressed', 'false');
+      botoesModo[m[0]] = b;
+      return b;
+    }));
+    el.appendChild(h('h3', { text: o.titulo || (varios ? 'Animais' : 'Animal') }));
+    if (modos.length > 1) el.appendChild(barraModos);
+    el.appendChild(painel);
+    el.appendChild(contador);
+    el.appendChild(lista);
+    trocarModo('busca');
+    desenharSelecionados();
+    return {
+      el: el,
+      selecionados: function () { return ids.slice(); },
+      definir: function (novos) { ids = novos.slice(); desenharSelecionados(); },
+    };
+  }
+  return { criar: criar, motivoInelegivel: motivoInelegivel, precisaBaixados: precisaBaixados };
+})();
