@@ -198,7 +198,7 @@ test('duas fachadas, um estado: o que uma grava a outra lê; a API não enxerga 
     aba().getRange(5, 1).setValue('pendente');
     G.Sheets.Spreadsheets.batchUpdate({ requests: [{ appendCells: { sheetId, rows: [{ values: [{ userEnteredValue: { stringValue: 'e-2' } }, { userEnteredValue: { numberValue: 2 } }] }], fields: 'userEnteredValue' } }] }, id);
   });
-  assert.deepEqual(gas.planilhas.matriz(id, 'T'), [['event_id', 'event_seq'], ['e-1', 1], ['e-2', 2], [], ['pendente']].map((l) => (l.length === 1 ? [l[0], ''] : l.length ? l : ['', ''])));
+  assert.deepEqual(gas.planilhas.matriz(id, 'T'), [['event_id', 'event_seq'], ['e-1', 1], ['e-2', 2], ['', ''], ['pendente', '']]);
   const meta = gas.exec(() => G.Sheets.Spreadsheets.get(id));
   assert.deepEqual(plano(meta.properties), { title: 'Banco de teste', locale: 'pt_BR', timeZone: 'America/Porto_Velho' });
   assert.deepEqual(plano(meta.sheets.map((s) => [s.properties.title, s.properties.gridProperties.rowCount, s.properties.gridProperties.columnCount])), [['Página1', 1000, 26], ['T', 20, 6]]);

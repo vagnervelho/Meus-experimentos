@@ -9,12 +9,12 @@
 var Validation = (function () {
   'use strict';
 
-  var CODIGOS = ['VALIDATION', 'CONFLICT', 'NEEDS_CONFIRMATION', 'IDEMPOTENCY_MISMATCH', 'LOCKED', 'DENIED', 'NOT_FOUND', 'CONFIG', 'INTERNAL'];
+  var CODIGOS = Object.freeze(['VALIDATION', 'CONFLICT', 'NEEDS_CONFIRMATION', 'IDEMPOTENCY_MISMATCH', 'LOCKED', 'DENIED', 'NOT_FOUND', 'CONFIG', 'INTERNAL']);
   var TETO_CELULA = 40000;
   var RE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
   var MENSAGEM_INTERNA = 'Não foi possível concluir. Tente de novo; se o problema continuar, veja a tela Sistema.';
   /** Códigos estáveis de `details[].codigo` gerados pela validação de formato. */
-  var DETALHE = {
+  var DETALHE = Object.freeze({
     CAMPO_OBRIGATORIO: 'CAMPO_OBRIGATORIO',
     CAMPO_DESCONHECIDO: 'CAMPO_DESCONHECIDO',
     TIPO_INVALIDO: 'TIPO_INVALIDO',
@@ -22,7 +22,7 @@ var Validation = (function () {
     VALOR_FORA_DA_LISTA: 'VALOR_FORA_DA_LISTA',
     VALOR_FORA_DA_FAIXA: 'VALOR_FORA_DA_FAIXA',
     TEXTO_LONGO_DEMAIS: 'TEXTO_LONGO_DEMAIS',
-  };
+  });
 
   // ------------------------------------------------------------------ AppError ----
   function texto_(v) {
