@@ -58,3 +58,28 @@ repositório; "a verificar na conta do dono" significa que só o roteiro de diag
 - Verificado em Node: exemplos (i) a (v) de 04, seção 5.2; CT-09, CT-10 e CT-18 da Fase 1; projeção = reconstrução
   depois de cada comando de todos os testes; o comando real entrou na varredura de quedas (três primitivas), que
   achou e fez corrigir dois defeitos do projetor (linha órfã da fase A virando EXTERNO; linha filha sem o evento).
+
+## 14/11/2026 — Fase 1, operação do sistema (E1.10 e E1.11, backend)
+
+- `FileService`: porta de arquivos sobre o Drive v3 (pastas `ERP Pecuário`, `Backups`, `Exportações`, `Anexos` e
+  `Testes` reencontradas ou recriadas; planilha nova, cópia, lixeira, listagem filtrada e paginada; bytes por
+  `alt=media`; texto em UTF-8/Latin-1/Windows-1252; sonda do escopo `drive.file`) e os comandos `anexo.adicionar`,
+  `anexo.remover`, `anexo.obter` (data URL) e a promoção de anexo temporário.
+- `Maintenance`: `setup()` idempotente com os 11 passos de 06, seção 4 (backup cru antes; forma de gravação escolhida
+  pelo corpus numa planilha temporária; sementes por chave natural; SCHEMA_META; gatilhos; proteção de aviso;
+  integridade); backup sob demanda e diário (banco parado: lock e recuperação antes da cópia); retenção 30 diários +
+  12 mensais; restauração por comando com `recoverAll`; rotina diária (backup → exportações → anexos temporários e
+  órfãos) e verificação semanal.
+- `AuditService` (parte 2): verificação de integridade com 20 checagens, severidade e reparo oferecido (reconstruir,
+  auditado); `auditoria.listar` paginado.
+- `ImportService`: importação de ANIMAIS (criar com o original guardado e o hash; CSV e linhas coladas; mapeamento com
+  confiança e padrões explícitos; validação em blocos com duplicidades no arquivo e na base e genealogia em duas
+  passadas; pré-visualização; confirmação TOTAL ou PARCIAL_APROVADO registrada; lotes de chave determinística com
+  ENTRADA_INICIAL pelas regras do formulário; conclusão com backup antes; desfazer; relatório final).
+- `EventService`: `planejarEntradaImportada` (o mesmo planejamento da ENTRADA_INICIAL dentro do lote de importação,
+  aceitando como mãe ou pai os animais ainda pendentes de lotes anteriores).
+- Verificado em Node: CT-11 (setup repetido, desativação preservada, esquema da fase seguinte), escolha da primitiva
+  com falha simulada, CT-12 nas partes da Fase 1 (erros, duplicatas, TOTAL recusado, PARCIAL aprovado, queda após o
+  lote 1, recusa de outros lançamentos, retomar, concluir, desfazer), queda em cada fronteira do lote e da conclusão,
+  ensaio completo de restauração, cada checagem de integridade disparada por adulteração à mão. A verificar na conta do
+  dono: sonda real do Drive (SP-02), corpus real (SP-01), gatilhos reais (SP-09).
