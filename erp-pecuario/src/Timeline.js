@@ -214,7 +214,10 @@ var Timeline = (function () {
     }
     function statusEvento(id) {
       if (excl[id]) return 'ESTORNADO';
-      if (cru) return cru.avaliar(id).status;
+      if (cru) {
+        var a = cru.avaliar(id);
+        return a ? a.status : 'FALHOU'; // linha filha cujo evento não chegou à planilha (queda na fase A)
+      }
       return repo.eventoVigente(id) ? 'CONFIRMADO' : null;
     }
     function ordemSeq(id) {
@@ -523,7 +526,7 @@ var Timeline = (function () {
   function projetarLancamento_(tx, r) {
     if (!tx.cru) return null;
     var a = tx.cru.avaliar(r.event_id);
-    if (a.status !== 'CONFIRMADO' && a.status !== 'ESTORNADO' && a.status !== 'CANCELADO') return null;
+    if (!a || (a.status !== 'CONFIRMADO' && a.status !== 'ESTORNADO' && a.status !== 'CANCELADO')) return null;
     var ativo = a.status === 'CONFIRMADO';
     var anulador = a.anulador_id ? tx.cru.cruPorId('EVENTOS', a.anulador_id) : null;
     var parcelas = tx.cru.cruPor('PARCELAS', 'financial_id', r.financial_id).filter(function (p) { return p.status !== 'CANCELADA'; });

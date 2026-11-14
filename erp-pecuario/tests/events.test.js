@@ -146,8 +146,8 @@ test('CT-09: mãe inválida (macho, nascida depois do filho, inexistente, a si m
   const [v0102, touro, nova] = idsDe(base);
   const mae = (mae_id, extra) => bicho(Object.assign({ data_nascimento: '2024-09-12', data_nascimento_confianca: 'CONFIRMADA', mae_id, mae_confianca: 'CONFIRMADA' }, extra || {}));
   const e1 = falha(m, 'registrar', outraEntrada('2026-02-01', [mae(touro, { brinco: '1' }), mae(nova, { brinco: '2' }), mae(E.id(0xbeef), { brinco: '3' }), bicho({ brinco: '4', pai_id: v0102, pai_confianca: 'ESTIMADA' }), mae(v0102, { brinco: '5', mae_confianca: '' })]));
-  assert.deepEqual(codigos(e1), ['SEXO_DO_PROGENITOR', 'NASCIMENTO_DO_PROGENITOR', 'NAO_ENCONTRADO', 'SEXO_DO_PROGENITOR', 'CAMPO_OBRIGATORIO'].sort().length ? codigos(e1) : [], 'todos os erros juntos');
-  assert.deepEqual(codigos(e1).sort(), ['CAMPO_OBRIGATORIO', 'NAO_ENCONTRADO', 'NASCIMENTO_DO_PROGENITOR', 'SEXO_DO_PROGENITOR', 'SEXO_DO_PROGENITOR'].sort());
+  assert.deepEqual(codigos(e1).sort(), ['CAMPO_OBRIGATORIO', 'NAO_ENCONTRADO', 'NASCIMENTO_DO_PROGENITOR', 'SEXO_DO_PROGENITOR', 'SEXO_DO_PROGENITOR'], 'todos os erros juntos, um por animal');
+  assert.deepEqual(e1.details.map((d) => d.brinco), ['1', '2', '3', '4', '5']);
   assert.ok(e1.details.some((d) => /^Brinco 2: a mãe 900 nasceu em 20\/08\/2025, não antes do animal \(12\/09\/2024\)/.test(d.mensagem)));
   // Ciclo: 0102 é mãe de 0310, que é mãe de 0457; propor 0457 como mãe de 0102 é recusado com o caminho.
   const f1 = m.run('registrar', outraEntrada('2026-02-01', [mae(v0102, { brinco: '0310', data_nascimento: '2018-01-01' })]));
@@ -449,4 +449,22 @@ test('categorias: classificação pura (manual, idade, condição) e cobertura t
     { perfil: 'FEMEA_NAO_PARIDA', rotulo: 'fêmea não parida', idade_de: 24, idade_ate: 36 },
     { perfil: 'FEMEA_NAO_PARIDA', rotulo: 'fêmea não parida', idade_de: 36, idade_ate: null },
   ]);
+});
+
+test('outra entrada de animal já cadastrado: só volta quem está fora; estorno pela simulação lista o bloqueio; estornar o brinco corrigido devolve o anterior', () => {
+  const m = E.ambienteEventos();
+  const r = m.run('registrar', entradaInicial([bicho({ brinco: '0412' }), bicho({ brinco: '15' })]));
+  const [x, y] = idsDe(r);
+  assert.deepEqual(codigos(falha(m, 'registrar', outraEntrada('2026-03-01', [{ animal_id: x, pasto_destino_id: PASTOS.B }]))), ['JA_NO_REBANHO']);
+  assert.deepEqual(codigos(falha(m, 'registrar', outraEntrada('2026-03-01', [{ animal_id: x, pasto_destino_id: PASTOS.B, sexo: 'M' }]))).sort(), ['CAMPO_NAO_SE_APLICA', 'JA_NO_REBANHO']);
+  assert.deepEqual(codigos(falha(m, 'registrar', outraEntrada('2026-03-01', [{ animal_id: E.id(0x777), pasto_destino_id: PASTOS.B }]))), ['NAO_ENCONTRADO']);
+  assert.deepEqual(codigos(falha(m, 'registrar', entradaInicial([{ animal_id: x, pasto_destino_id: PASTOS.B }]))), ['SO_ANIMAIS_NOVOS']);
+  assert.deepEqual(codigos(falha(m, 'registrar', { tipo: 'ESTORNO', campos: {}, animais: [] })), ['TIPO_INVALIDO']);
+  const loc = m.run('registrar', ajuste('CORRECAO_LOCALIZACAO', '2026-04-01', [{ animal_id: y, pasto_destino_id: PASTOS.B }]));
+  const sim = m.simular('estornar', { event_id: r.dados.event_id, justificativa: 'x' });
+  assert.deepEqual([sim.ok, sim.erro.code, sim.erro.details.map((d) => d.conflito.event_id)], [false, 'CONFLICT', [loc.dados.event_id]]);
+  const corr = m.run('registrar', ajuste('IDENTIFICACAO_INCORRETA', '2026-05-01', [{ animal_id: x, brinco: '0421' }]));
+  assert.deepEqual(codigos(falha(m, 'registrar', ajuste('IDENTIFICACAO_INCORRETA', '2026-05-01', [{ animal_id: x, brinco: '421' }]))), ['VALOR_IGUAL']);
+  m.run('estornar', { event_id: corr.dados.event_id, justificativa: 'O brinco estava certo' });
+  assert.deepEqual([m.animal(x).brinco, m.tabela('IDENTIFICACOES').filter((i) => i.animal_id === x && i.codigo === '0412')[0].data_fim], ['0412', null]);
 });

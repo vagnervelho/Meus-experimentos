@@ -141,7 +141,7 @@ function desfechoMotor(amb, e, confirmado, msg, pasto) {
   const evs = e.EVENTOS.filter((x) => x.idempotency_key === 'k-motor').map((x) => x.event_id);
   const animaisDe = (ids) => e.EVENTO_ANIMAIS.filter((l) => ids.includes(l.event_id)).map((l) => e.ANIMAIS.find((a) => a.animal_id === l.animal_id));
   if (!confirmado) {
-    assert.ok(animaisDe(evs).every((a) => a && a.situacao_cadastral === 'ANULADO'), msg + ': (1) animal da operação falhada fica ANULADO');
+    assert.ok(animaisDe(evs).filter(Boolean).every((a) => a.situacao_cadastral === 'ANULADO'), msg + ': (1) animal da operação falhada fica ANULADO');
     return null;
   }
   const evId = op.resumo_json.event_id;
