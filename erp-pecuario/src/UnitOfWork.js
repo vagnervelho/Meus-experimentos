@@ -19,6 +19,7 @@ var UnitOfWork = (function () {
   var MSG_OCUPADO = 'O sistema está ocupado gravando outra operação. Aguarde alguns segundos e tente de novo.';
   var MSG_FALHA = 'Não foi possível concluir a gravação e nada foi alterado. Tente de novo.';
   var MSG_ORFA = 'Execução interrompida antes da confirmação.';
+  var MSG_IMPORTANDO = 'Há uma importação de planilha em andamento. Conclua ou desfaça a importação antes de fazer outros lançamentos.';
   var RESERVADAS = Object.freeze({ OPERACOES: true, AUDITORIA: true, ERROS_LOG: true });
 
   function vazio_(v) {
@@ -317,6 +318,7 @@ var UnitOfWork = (function () {
       reconstruir: typeof o.reconstruir === 'function' ? o.reconstruir : null,
       acessoCru: !!o.acessoCru,
       anexaSemPai: o.anexaSemPai || [],
+      permiteDuranteImportacao: !!o.permiteDuranteImportacao,
     };
   }
   function conferirValidacoes_(res, aceitos) {
@@ -389,7 +391,7 @@ var UnitOfWork = (function () {
     var cmd = est.cmd;
     var io = ctx.io;
     var hash = Utils.payloadHash(cmd.rota, cmd.dados, ctx.hash);
-    abrirSobLock_(est, cmd.reads);
+    abrirSobLock_(est, cmd.permiteDuranteImportacao ? cmd.reads : cmd.reads.concat(['IMPORTACOES']));
 
     // Idempotência: a autoridade é OPERACOES (no máximo uma CONFIRMADA por chave).
     var confirmada = est.repo.cruPor('OPERACOES', 'idempotency_key', cmd.chave).filter(function (op) { return op.status === 'CONFIRMADA'; })[0];
@@ -398,6 +400,10 @@ var UnitOfWork = (function () {
         throw Validation.erro('IDEMPOTENCY_MISMATCH', 'Este formulário já foi gravado com outro conteúdo. Atualize a tela e comece um lançamento novo.');
       }
       return { dados: reconstruir_(est, confirmada), duplicado: true, opId: confirmada.op_id, dataVersion: est.versao };
+    }
+    // Importação em curso (desenho-base, 16.8): recusam-se os comandos de negócio; importacao.* e manutenção passam.
+    if (!cmd.permiteDuranteImportacao && est.repo.cru('IMPORTACOES').some(function (i) { return i.status === 'IMPORTANDO'; })) {
+      throw Validation.erro('CONFLICT', MSG_IMPORTANDO);
     }
     if (cmd.dataVersionEsperada !== null && cmd.dataVersionEsperada !== est.versao) {
       throw Validation.erro('CONFLICT', 'Os dados mudaram desde que você abriu a revisão. Confira de novo antes de confirmar.');
