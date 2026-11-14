@@ -14,7 +14,7 @@ const { js, ambiente, cmdEvento, cmdPasto, consultaVigentes, rodarInstrumentado,
 const PRIMITIVAS = ['SHEETS_TYPED', 'SHEETS_RAW', 'SPREADSHEET_APP'];
 const SEQUENCIA_EVENTO = [
   'props.gravar:PENDING_OP', 'anexar:OPERACOES,EVENTOS,ANIMAIS,EVENTO_ANIMAIS', 'flush', 'atualizar:OPERACOES.status', 'flush',
-  'atualizar:EVENTOS.status,EVENTOS.confirmed_at,ANIMAIS.situacao_cadastral', 'flush', 'atualizar:OPERACOES.aplicada_em,OPERACOES.finished_at',
+  'atualizar:EVENTOS.status,EVENTOS.confirmed_at,ANIMAIS.situacao_cadastral,OPERACOES.finished_at', 'flush', 'atualizar:OPERACOES.aplicada_em',
   'flush', 'props.gravar:DATA_VERSION', 'props.remover:PENDING_OP', 'soltar',
 ];
 const CASO_DA_TABELA = { 1: 'antes do marcador', 2: 'caso 1', 3: 'casos 2 e 3', 4: 'caso 4', 5: 'caso 5', 6: 'caso 6', 7: 'caso 6', 8: 'caso 6', 9: 'caso 6', 10: 'caso 7', 11: 'caso 8', 12: 'caso 9' };

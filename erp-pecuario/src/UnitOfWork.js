@@ -189,7 +189,8 @@ var UnitOfWork = (function () {
    * Derivados de operações CONFIRMADAS — repetível: (1) refaz a auditoria de cada operação (aplica valor_novo;
    * cria o cadastro que ainda não existe); (2) cache de status dos eventos; (3) projeções pela porta
    * ctx.projecoes (`tudo` na recuperação, `escopo` do tratador no caminho normal). Só grava o que difere.
-   * o: {operacoes: [{op, linhas}], escopo, tudo, agora}.
+   * o: {operacoes: [{op, linhas}], escopo, tudo, agora, fecho}. `fecho` (ex.: OPERACOES.finished_at) vai na mesma
+   * gravação dos derivados: fica durável no flush que precede aplicada_em, nunca depois dela.
    */
   function derivar_(est, o) {
     var ctx = est.ctx;
@@ -207,7 +208,7 @@ var UnitOfWork = (function () {
       ctx.projecoes.reconstruir(tx, o.tudo ? { tudo: true } : o.escopo);
       derivados = derivados.concat(tx.plano.atualizacoes());
     }
-    gravar_(est, derivados);
+    gravar_(est, derivados.concat(o.fecho || []));
   }
 
   // ------------------------------------------------------------------ recuperação ----
@@ -236,18 +237,24 @@ var UnitOfWork = (function () {
     est.repo.carregar(['EVENTOS', 'IMPORTACOES', 'AUDITORIA'].concat(leiturasDasProjecoes_(ctx)));
 
     var registros = [];
-    var falhas = [];
+    var motivos = [];
     orfas.forEach(function (op) {
       if (op.status !== 'INICIADA') return;
       var propria = op.op_id === est.opId && !vazio_(o.motivo);
       resumo.falharam.push(op.op_id);
-      falhas.push({ tabela: 'OPERACOES', id: op.op_id, campos: { status: 'FALHOU', erro: propria ? o.motivo : MSG_ORFA, finished_at: agora } });
+      motivos.push({ tabela: 'OPERACOES', id: op.op_id, campos: { erro: propria ? o.motivo : MSG_ORFA, finished_at: agora } });
       registros.push({
         contexto: 'recuperacao', codigo: 'OPERACAO_INTERROMPIDA', op_id: op.op_id, erro: propria ? o.erro : null,
         mensagem: 'Operação ' + op.comando + ' interrompida antes da confirmação: marcada como FALHOU; nada foi alterado.' + (propria ? ' Motivo: ' + o.motivo : ''),
       });
     });
-    gravar_(est, falhas);
+    // Motivo e fim ficam duráveis ANTES do status: uma linha FALHOU nunca fica sem OPERACOES.erro e finished_at
+    // (células vizinhas não chegam juntas; FALHOU não é órfã, logo nenhuma recuperação voltaria a completá-la).
+    if (motivos.length) {
+      gravar_(est, motivos);
+      io.flush();
+      gravar_(est, motivos.map(function (m) { return { tabela: 'OPERACOES', id: m.id, campos: { status: 'FALHOU' } }; }));
+    }
 
     var refazer = [];
     var entidades = [];
@@ -261,7 +268,10 @@ var UnitOfWork = (function () {
     });
     if (entidades.indexOf('IMPORTACOES') >= 0 && entidades.indexOf('EVENTOS') < 0) entidades.push('EVENTOS');
     est.repo.carregar(entidades);
-    derivar_(est, { operacoes: refazer, tudo: true, agora: agora });
+    derivar_(est, {
+      operacoes: refazer, tudo: true, agora: agora,
+      fecho: resumo.refeitas.map(function (id) { return { tabela: 'OPERACOES', id: id, campos: { finished_at: agora } }; }),
+    });
     io.flush();
 
     if (!registros.length && p.marcador) {
@@ -276,7 +286,7 @@ var UnitOfWork = (function () {
     });
     anexar_(est, lote, false);
     io.flush();
-    gravar_(est, resumo.refeitas.map(function (id) { return { tabela: 'OPERACOES', id: id, campos: { aplicada_em: agora, finished_at: agora } }; }));
+    gravar_(est, resumo.refeitas.map(function (id) { return { tabela: 'OPERACOES', id: id, campos: { aplicada_em: agora } }; }));
     io.flush();
     est.versao += 1;
     ctx.props.gravar(chaveVersao(ctx.banco), String(est.versao));
@@ -447,15 +457,16 @@ var UnitOfWork = (function () {
     gravar_(est, [{ tabela: 'OPERACOES', id: est.opId, campos: { status: 'CONFIRMADA' } }]);
     io.flush();
 
-    // Fase C — derivados (repetível), em dois passos: derivados → flush → aplicada_em → flush.
+    // Fase C — derivados (repetível), em dois passos: derivados e finished_at → flush → aplicada_em → flush.
     est.fase = 'C';
+    var fim = ctx.clock.agora();
     derivar_(est, {
       operacoes: plano.auditoria.length ? [{ op: op, linhas: plano.auditoria }] : [],
-      escopo: res.derivados, agora: ctx.clock.agora(),
+      escopo: res.derivados, agora: fim,
+      fecho: [{ tabela: 'OPERACOES', id: est.opId, campos: { finished_at: fim } }],
     });
     io.flush();
-    var fim = ctx.clock.agora();
-    gravar_(est, [{ tabela: 'OPERACOES', id: est.opId, campos: { aplicada_em: fim, finished_at: fim } }]);
+    gravar_(est, [{ tabela: 'OPERACOES', id: est.opId, campos: { aplicada_em: fim } }]);
     io.flush();
     est.versao += 1;
     ctx.props.gravar(chaveVersao(ctx.banco), String(est.versao));

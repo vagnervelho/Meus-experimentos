@@ -271,3 +271,243 @@ for (const primitiva of PRIMITIVAS) {
     }
   });
 }
+
+// ------------------------------------------------------------------ (7) recuperação morta e repetida ----
+for (const primitiva of PRIMITIVAS) {
+  test('(7) recuperação reentrante (' + primitiva + '): morta DEPOIS de cada passo, em cada queda do comando, chega ao mesmo estado', () => {
+    for (const nome of ['evento', 'criacao']) {
+      const cen = CENARIOS[nome];
+      const ref0 = ambiente({ primitiva });
+      const passosCmd = rodarInstrumentado(ref0, cen.comando(ref0, cen.preparar(ref0)), {}).chamadas.length;
+      for (let k = 1; k < passosCmd; k++) {
+        const montar = () => {
+          const amb = ambiente({ primitiva });
+          const prep = cen.preparar(amb);
+          rodarInstrumentado(amb, cen.comando(amb, prep), { depois: k, chegam: 'nenhuma' });
+          return { amb, prep };
+        };
+        const ref = montar();
+        const passos = recuperarInstrumentado(ref.amb, {}).chamadas;
+        const esperado = essencia(conferirInvariantes(ref.amb, 'referência k=' + k));
+        for (let j = 1; j < passos.length; j++) {
+          const chegadas = primitiva === 'SPREADSHEET_APP' ? ['nenhuma', 'todas', (p) => p.map((_, i) => (i * 7 + j) % 3 !== 0)] : ['nenhuma'];
+          for (const chegam of chegadas) {
+            const { amb } = montar();
+            const msg = primitiva + ' ' + nome + ' comando morto depois de ' + k + ', recuperação morta depois de ' + j + ' (' + passos[j - 1] + ')';
+            const morta = recuperarInstrumentado(amb, { depois: j, chegam });
+            assert.equal(morta.r.morta, true, msg);
+            if (j < passos.length - 2) assert.notEqual(amb.marcador(), null, msg + ': o marcador fica até a recuperação terminar');
+            const segunda = recuperarInstrumentado(amb, { depois: j, chegam }); // pode morrer de novo no mesmo ponto
+            if (segunda.r.morta) amb.read(consultaVigentes());
+            assert.deepEqual(essencia(conferirInvariantes(amb, msg)), esperado, msg + ': (7) mesmo estado da recuperação sem queda');
+          }
+        }
+      }
+    }
+  });
+}
+
+// ------------------------------------------------------------------ intercalações ----
+/**
+ * Numera as chamadas de LEITURA e de lock de um contexto e roda `antesDe(k, rótulo)` antes de cada uma. `io.ler`
+ * é partido em uma chamada por aba (o pior caso: o SpreadsheetApp lê aba por aba; a Sheets API lê tudo numa
+ * requisição) — cada aba lida é um ponto de troca.
+ */
+function instrumentarLeitura(ctx, antesDe) {
+  const vistos = [];
+  const marcar = (rotulo) => { vistos.push(rotulo); antesDe(vistos.length, rotulo); };
+  const io = ctx.io;
+  const props = ctx.props;
+  const lock = ctx.lock;
+  ctx.io = Object.assign({}, io, {
+    esquecer: () => { marcar('esquecer'); return io.esquecer(); },
+    ler: (abas) => {
+      const out = {};
+      abas.forEach((a) => { marcar('ler:' + a); Object.assign(out, io.ler([a])); });
+      return out;
+    },
+  });
+  ctx.props = Object.assign({}, props, { ler: () => { marcar('props.ler'); return props.ler(); } });
+  ctx.lock = Object.assign({}, lock, {
+    tentar: (ms) => { marcar('lock.tentar'); return lock.tentar(ms); },
+    soltar: () => { marcar('lock.soltar'); return lock.soltar(); },
+  });
+  return vistos;
+}
+const LEITORES = {
+  leitura: (amb, ctx) => {
+    const r = amb.G.UnitOfWork.read(ctx, consultaVigentes());
+    return { versao: r.dataVersion, eventos: js(r.dados.eventos).length, animais: js(r.dados.animais).length, linhas: r.dados.linhas };
+  },
+  simulacao: (amb, ctx) => {
+    const visto = {};
+    const r = amb.G.UnitOfWork.run(ctx, cmdEvento({ chave: 'sim', modo: 'SIMULAR', antes: (tx) => {
+      visto.eventos = tx.repo.vigentes('EVENTOS').length;
+      visto.animais = tx.repo.vigentes('ANIMAIS').length;
+      visto.linhas = tx.repo.vigentes('EVENTO_ANIMAIS').length;
+      visto.versao = tx.dataVersion;
+    } }));
+    assert.equal(r.dataVersion, visto.versao, 'a prévia diz a versão que leu');
+    return visto;
+  },
+  status: (amb, ctx) => ({ situacao: js(amb.G.UnitOfWork.status(ctx, 'w')).situacao }),
+};
+const W_VARIANTES = [null, 3, 5, 7, 11]; // completa; morta antes do flush da fase A, do flush do commit, do flush da fase C, de remover o marcador
+
+for (const primitiva of PRIMITIVAS) {
+  test('intercalação (' + primitiva + '): um comando inteiro, ou morto, em cada ponto de troca de leitura, prévia e estado da operação; o leitor nunca vê estado parcial', () => {
+    const leitores = primitiva === 'SHEETS_RAW' ? ['leitura'] : Object.keys(LEITORES);
+    for (const leitor of leitores) {
+      const seco = ambiente({ primitiva });
+      seco.run(cmdEvento({ chave: 'antes' }));
+      let pontos = [];
+      seco.gas.exec(() => { const ctx = seco.ctx(); pontos = instrumentarLeitura(ctx, () => {}); return LEITORES[leitor](seco, ctx); });
+      assert.ok(pontos.length >= 3, leitor + ': pontos de troca ' + pontos.join(' | '));
+      for (let j = 1; j <= pontos.length; j++) {
+        for (const kW of W_VARIANTES) {
+          const amb = ambiente({ primitiva });
+          amb.run(cmdEvento({ chave: 'antes' })); // S0: um evento, dois animais, versão 1
+          const msg = primitiva + ' ' + leitor + ': W ' + (kW ? 'morto antes de ' + kW : 'completo') + ' no ponto ' + j + ' (' + pontos[j - 1] + ')';
+          let rodou = false;
+          const r = amb.gas.tentar(() => {
+            const ctx = amb.ctx();
+            instrumentarLeitura(ctx, (k) => {
+              if (k !== j || rodou) return;
+              rodou = true;
+              rodarInstrumentado(amb, cmdEvento({ chave: 'w' }), kW ? { antes: kW } : {});
+            });
+            return LEITORES[leitor](amb, ctx);
+          });
+          assert.equal(r.ok, true, msg + ': ' + (r.erro && r.erro.message));
+          assert.ok(rodou, msg + ': o ponto de troca existiu');
+          const v = r.valor;
+          const final = amb.vigentes(); // recupera o que tiver ficado pendente
+          const e = conferirInvariantes(amb, msg);
+          const valeu = e.OPERACOES.some((o) => o.idempotency_key === 'w' && o.status === 'CONFIRMADA');
+          assert.equal(final.eventos.length, valeu ? 2 : 1, msg);
+          if (leitor === 'status') {
+            assert.notEqual(v.situacao, 'EM_ANDAMENTO', msg + ': a original já terminou ou morreu; o lock estava livre');
+            if (v.situacao === 'CONFIRMADA') assert.equal(valeu, true, msg + ': CONFIRMADA só se valeu');
+            if (v.situacao === 'FALHOU') assert.equal(valeu, false, msg + ': FALHOU só se não valeu');
+            continue;
+          }
+          // Versão 1 = o estado de antes; versão maior = o estado final. Nunca um meio-termo.
+          const esperado = v.versao === 1 ? { eventos: 1, animais: 2, linhas: 2 } : { eventos: final.eventos.length, animais: final.animais.length, linhas: final.linhas };
+          assert.deepEqual({ eventos: v.eventos, animais: v.animais, linhas: v.linhas }, esperado, msg + ': versão ' + v.versao + ' servida com o estado dela');
+          assert.ok(v.versao >= 1 && v.versao <= amb.versao(), msg);
+        }
+      }
+    }
+  });
+}
+
+test('intercalação: com a gravação em curso, em cada passo dela, outro comando, recoverAll e gatilho esperam e recebem LOCKED sem deixar rastro; a leitura só serve antes do marcador ou depois de removido', () => {
+  for (const primitiva of PRIMITIVAS) {
+    const ref = ambiente({ primitiva });
+    const passos = rodarInstrumentado(ref, cmdEvento({}), {}).chamadas;
+    for (let k = 1; k <= passos.length; k++) {
+      const amb = ambiente({ primitiva });
+      amb.run(cmdEvento({ chave: 'antes' }));
+      const msg = primitiva + ' passo ' + k + ' (' + passos[k - 1] + ')';
+      const vistos = {};
+      const { r } = rodarInstrumentado(amb, cmdEvento({}), {
+        antesDe: (i) => {
+          if (i !== k) return;
+          const marcadorAntes = amb.gas.props.script._data.get(amb.chaveMarcador) || null;
+          const t0 = amb.gas.clock.now;
+          vistos.mesmaChave = erroDe(amb.gas.tentar(() => amb.G.UnitOfWork.run(amb.ctx(), cmdEvento({}))));
+          vistos.outraChave = erroDe(amb.gas.tentar(() => amb.G.UnitOfWork.run(amb.ctx(), cmdEvento({ chave: 'outra' }))));
+          vistos.recoverAll = erroDe(amb.gas.tentar(() => amb.G.UnitOfWork.recoverAll(amb.ctx())));
+          vistos.gatilho = erroDe(amb.gas.tentar(() => amb.G.UnitOfWork.exclusivo(amb.ctx(), { rota: 'trgIntegridadeSemanal', tratador: () => 'ok' })));
+          vistos.esperou = amb.gas.clock.now - t0 >= 3 * 25000;
+          const leitura = amb.gas.tentar(() => js(amb.G.UnitOfWork.read(amb.ctx(), consultaVigentes())));
+          vistos.leitura = leitura.ok ? leitura.valor.dados.eventos.length + '@' + leitura.valor.dataVersion : erroDe(leitura);
+          vistos.marcadorIntacto = (amb.gas.props.script._data.get(amb.chaveMarcador) || null) === marcadorAntes;
+        },
+      });
+      assert.equal(r.ok, true, msg + ': a gravação em curso termina bem');
+      assert.deepEqual([vistos.mesmaChave, vistos.outraChave, vistos.recoverAll, vistos.gatilho], ['LOCKED', 'LOCKED', 'LOCKED', 'LOCKED'], msg);
+      assert.equal(vistos.esperou, true, msg + ': cada um esperou os 25 s');
+      assert.equal(vistos.marcadorIntacto, true, msg + ': ninguém mexeu no marcador da gravação em curso');
+      const esperadoLeitura = k === 1 ? '1@1' : k === passos.length ? '2@2' : 'LOCKED';
+      assert.equal(vistos.leitura, esperadoLeitura, msg + ': leitura');
+      const e = conferirInvariantes(amb, msg);
+      assert.deepEqual(e.OPERACOES.map((o) => [o.idempotency_key, o.status]), [['antes', 'CONFIRMADA'], ['chave-evento-1', 'CONFIRMADA']], msg + ': as recusadas não deixaram operação');
+      assert.equal(amb.run(cmdEvento({})).duplicado, true, msg + ': o reenvio de depois é duplicado');
+    }
+  }
+});
+
+test('intercalação: o lock livre antes de o comando obtê-lo e depois de soltá-lo — o outro entra inteiro (ou morre em cada passo) e os dois terminam coerentes', () => {
+  for (const primitiva of PRIMITIVAS) {
+    const ref = ambiente({ primitiva });
+    const passos = rodarInstrumentado(ref, cmdEvento({ chave: 'w2' }), {}).chamadas.length;
+    for (const momento of ['lock.tentar', 'lock.liberado']) {
+      for (const mesma of [false, true]) {
+        for (let k2 = 0; k2 <= passos; k2++) {
+          const amb = ambiente({ primitiva });
+          const chave2 = mesma ? 'chave-evento-1' : 'w2';
+          const msg = primitiva + ' ' + momento + (mesma ? ' mesma chave' : ' outra chave') + ' W2 ' + (k2 ? 'morto antes de ' + k2 : 'completo');
+          let r2 = null;
+          amb.gas.ganchos.em(momento, () => { r2 = rodarInstrumentado(amb, cmdEvento({ chave: chave2 }), k2 ? { antes: k2 } : {}).r; });
+          const r1 = amb.tentarRun(cmdEvento({}));
+          assert.ok(r2, msg + ': o outro rodou');
+          assert.equal(r1.ok, true, msg + ': W1 termina bem (' + (r1.erro && r1.erro.message) + ')');
+          if (mesma && momento === 'lock.tentar') assert.equal(r1.valor.duplicado, !!(r2.ok || estado(amb).OPERACOES.some((o) => o.op_id !== r1.valor.opId && o.status === 'CONFIRMADA')), msg + ': W1 é duplicado exatamente quando W2 valeu');
+          amb.read(consultaVigentes());
+          const e = conferirInvariantes(amb, msg);
+          const seqs = e.EVENTOS.map((x) => x.event_seq);
+          assert.equal(new Set(seqs).size, seqs.length, msg + ': event_seq nunca se repete');
+          const codigos = e.ANIMAIS.map((a) => a.codigo_interno);
+          assert.equal(new Set(codigos).size, codigos.length, msg + ': codigo_interno nunca se repete');
+          if (!mesma) {
+            const valeu2 = e.OPERACOES.some((o) => o.idempotency_key === 'w2' && o.status === 'CONFIRMADA');
+            assert.equal(js(amb.vigentes()).eventos.length, 1 + (valeu2 ? 1 : 0), msg);
+          }
+        }
+      }
+    }
+  }
+});
+
+// ------------------------------------------------------------------ dois bancos ----
+test('dois bancos no mesmo projeto: queda em cada passo de A não contamina B; B nunca recupera, versiona nem grava em A; o lock é um só', () => {
+  for (const primitiva of ['SHEETS_TYPED', 'SPREADSHEET_APP']) {
+    const ref = ambiente({ primitiva, nome: 'Ref' });
+    const passos = rodarInstrumentado(ref, cmdEvento({}), {}).chamadas;
+    for (let k = 1; k <= passos.length; k++) {
+      const a = ambiente({ primitiva, nome: 'Banco A' });
+      const b = ambiente({ primitiva, gas: a.gas, nome: 'Banco B' });
+      const msg = primitiva + ' A morto antes de ' + k + ' (' + passos[k - 1] + ')';
+      // Durante a gravação de A, um leitor de B não espera o lock (B não tem marcador); um comando em B espera (lock único).
+      const durante = {};
+      rodarInstrumentado(a, cmdEvento({}), {
+        antes: k,
+        antesDe: (i) => {
+          if (i !== k) return;
+          const t0 = a.gas.clock.now;
+          durante.leituraB = b.gas.tentar(() => js(b.G.UnitOfWork.read(b.ctx(), consultaVigentes()))).ok;
+          durante.esperouLeitura = a.gas.clock.now - t0;
+          durante.comandoB = erroDe(b.gas.tentar(() => b.G.UnitOfWork.run(b.ctx(), cmdEvento({ chave: 'b-durante' }))));
+        },
+      });
+      assert.deepEqual([durante.leituraB, durante.esperouLeitura, durante.comandoB], [true, 0, k === 1 && false ? null : 'LOCKED'], msg + ': durante a gravação de A');
+      const duravelA = () => ABAS.map((aba) => JSON.stringify(a.gas.planilhas.matrizDuravel(a.banco, aba)));
+      const fotoA = duravelA();
+      const marcadorA = a.marcador();
+      const versaoA = a.versao();
+      const rb = b.run(cmdEvento({})); // mesma chave, outro banco: outra operação
+      assert.deepEqual([rb.duplicado, rb.dataVersion], [false, 1], msg);
+      assert.equal(b.read(consultaVigentes()).dados.eventos.length, 1, msg);
+      assert.equal(b.status('chave-evento-1').situacao, 'CONFIRMADA', msg);
+      const tb = b.recoverAll();
+      assert.deepEqual([tb.falharam, tb.refeitas], [[], []], msg + ': B não enxerga as órfãs de A');
+      assert.deepEqual(duravelA(), fotoA, msg + ': nada de B foi gravado em A');
+      assert.deepEqual([a.marcador(), a.versao()], [marcadorA, versaoA], msg + ': marcador e versão de A intactos');
+      a.read(consultaVigentes()); // A recupera o que é seu
+      conferirInvariantes(a, msg + ' [A]');
+      conferirInvariantes(b, msg + ' [B]');
+      assert.equal(b.versao(), 2, msg + ': a versão de B só andou com B');
+    }
+  }
+});
