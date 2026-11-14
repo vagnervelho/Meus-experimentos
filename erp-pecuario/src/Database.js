@@ -908,6 +908,70 @@ var Database = (function () {
     };
   }
 
+  // ------------------------------------------------------------------ diagnóstico (runDiagnostics) ----
+  /** Classifica o que uma célula de formato Geral devolveu, na forma de tests/fixtures/coercao.json. */
+  function classificarCelula_(valor, formula, fuso) {
+    var v = valor;
+    if (ehData_(v)) {
+      var dia = Utilities.formatDate(v, fuso, 'yyyy-MM-dd');
+      if (dia === '1899-12-30') return { tipo: formula ? 'formula' : 'hora', valor: Utilities.formatDate(v, fuso, 'HH:mm:ss') };
+      return { tipo: formula ? 'formula' : 'data', valor: dia };
+    }
+    if (!vazio_(formula)) return { tipo: 'formula', valor: v };
+    if (typeof v === 'number') return { tipo: 'numero', valor: v };
+    if (typeof v === 'boolean') return { tipo: 'booleano', valor: v };
+    return { tipo: 'texto', valor: v === null || v === undefined ? '' : String(v) };
+  }
+  /**
+   * SP-01 (parte "Geral"): grava o corpus por setValues em células de formato Geral de uma aba nova da planilha
+   * `banco` (temporária), em pt_BR, e relê. Devolve {locale, casos: [{entrada, geral: {tipo, valor}}]} — o formato de
+   * tests/fixtures/coercao.json, para comparar a hipótese do fake com a conta real. Nunca use no banco de dados.
+   */
+  function diagnosticoCoercao(banco, entradas) {
+    var lista = entradas || CORPUS;
+    var ss = SpreadsheetApp.openById(banco);
+    ss.setSpreadsheetLocale('pt_BR');
+    var aba = ss.insertSheet('DIAG_GERAL');
+    var faixa = aba.getRange(1, 1, lista.length, 1);
+    faixa.setValues(lista.map(function (e) { return [e]; }));
+    SpreadsheetApp.flush();
+    var valores = faixa.getValues();
+    var formulas = faixa.getFormulas();
+    var fuso = ss.getSpreadsheetTimeZone();
+    return {
+      locale: ss.getSpreadsheetLocale(),
+      casos: lista.map(function (e, i) { return { entrada: e, geral: classificarCelula_(valores[i][0], formulas[i][0], fuso) }; }),
+    };
+  }
+  /**
+   * SP-01 (atomicidade): numa aba nova da planilha temporária `banco`, grava A1 = "inicial"; depois manda UM
+   * Spreadsheets.batchUpdate com uma escrita válida (A1 = "alterado") e um pedido inválido (aba inexistente). Atômico =
+   * a requisição falhou e A1 continua "inicial". Devolve {atomico, recusou, lido, erro}.
+   */
+  function diagnosticoAtomicidade(banco) {
+    var r = Sheets.Spreadsheets.batchUpdate({ requests: [{ addSheet: { properties: { title: 'DIAG_ATOMICO', gridProperties: { rowCount: 2, columnCount: 2 } } } }] }, banco);
+    var sheetId = r.replies[0].addSheet.properties.sheetId;
+    var escrever = function (id, texto) {
+      return { updateCells: { start: { sheetId: id, rowIndex: 0, columnIndex: 0 }, rows: [{ values: [{ userEnteredValue: { stringValue: texto } }] }], fields: 'userEnteredValue' } };
+    };
+    Sheets.Spreadsheets.batchUpdate({ requests: [escrever(sheetId, 'inicial')] }, banco);
+    var recusou = false;
+    var erro = null;
+    try {
+      Sheets.Spreadsheets.batchUpdate({ requests: [escrever(sheetId, 'alterado'), escrever(sheetId + 7919, 'invalido')] }, banco);
+    } catch (e) {
+      recusou = true;
+      erro = String(e && e.message ? e.message : e).slice(0, 200);
+    }
+    var lido = Sheets.Spreadsheets.Values.get(banco, 'DIAG_ATOMICO!A1', { valueRenderOption: 'UNFORMATTED_VALUE' });
+    var valor = lido.values && lido.values[0] ? lido.values[0][0] : '';
+    return { atomico: recusou && valor === 'inicial', recusou: recusou, lido: valor, erro: erro };
+  }
+  /** Runtime V8: `Intl` com fuso (usado por Utils.hoje) × Utilities.formatDate, no mesmo instante. */
+  function diagnosticoFuso(instante, fuso) {
+    return { utilities: Utilities.formatDate(new Date(Date.parse(instante)), fuso, 'yyyy-MM-dd'), utils: Utils.hoje(instante, fuso) };
+  }
+
   return {
     PRIMITIVAS: PRIMITIVAS,
     CORPUS: CORPUS,
@@ -927,5 +991,8 @@ var Database = (function () {
     hash: hash,
     props: props,
     contexto: contexto,
+    diagnosticoCoercao: diagnosticoCoercao,
+    diagnosticoAtomicidade: diagnosticoAtomicidade,
+    diagnosticoFuso: diagnosticoFuso,
   };
 })();

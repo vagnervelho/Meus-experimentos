@@ -15,7 +15,13 @@ var Maintenance = (function () {
   var PROP_PRIMITIVA = 'IO_PRIMITIVE';
   var PROP_PRIMITIVA_RELATORIO = 'IO_PRIMITIVE_RELATORIO';
   var CHAVES_BANCO = Object.freeze(['SPREADSHEET_ID', 'TEST_SPREADSHEET_ID', 'DEMO_SPREADSHEET_ID']);
+  /**
+   * Bancos por ambiente (desenho-base 16.3): produção, teste de aceitação e demonstração. Os de teste nascem na pasta
+   * Testes e guardam a forma de gravação na própria chave (`IO_PRIMITIVE:<banco>`), para nunca mexer na de produção.
+   */
+  var AMBIENTES = Object.freeze({ PRODUCAO: 'SPREADSHEET_ID', TESTE: 'TEST_SPREADSHEET_ID', DEMO: 'DEMO_SPREADSHEET_ID' });
   var NOME_BANCO = 'ERP Pecuário — Banco de dados';
+  var NOMES_BANCO_TESTE = Object.freeze({ TESTE: 'ERP Pecuário — BASE DE TESTE', DEMO: 'ERP Pecuário — BASE DE TESTE (demonstração)' });
   var FUSO_PADRAO = 'America/Porto_Velho';
   var ESPERA_LOCK_MS = 25000;
   var GATILHOS = Object.freeze([
@@ -42,19 +48,35 @@ var Maintenance = (function () {
   function chaveVersao_(banco) {
     return UnitOfWork.chaveVersao(banco);
   }
+  /** Chave de Script Properties do banco do ambiente (PRODUCAO, TESTE ou DEMO). Outro valor → VALIDATION. */
+  function chaveDoAmbiente(ambiente) {
+    var a = vazio_(ambiente) ? 'PRODUCAO' : String(ambiente);
+    if (!Object.prototype.hasOwnProperty.call(AMBIENTES, a)) throw Validation.erro('VALIDATION', 'Ambiente desconhecido: "' + a + '". Use PRODUCAO, TESTE ou DEMO.');
+    return AMBIENTES[a];
+  }
+  /** Forma de gravação do banco: a própria (`IO_PRIMITIVE:<banco>`, bancos de teste), a geral ou a preferida. */
+  function primitivaDoBanco(props, banco) {
+    var p = props || {};
+    return p['IO_PRIMITIVE:' + banco] || p[PROP_PRIMITIVA] || Database.PRIMITIVAS[0];
+  }
 
   // ------------------------------------------------------------------ contexto ----
   /**
-   * Contexto de produção (gatilhos e rotas de sistema): banco de SPREADSHEET_ID (ou `banco`), forma de gravação de
-   * IO_PRIMITIVE, porta de arquivos, projetor real. o: {banco, usuario, fuso}.
+   * Contexto de produção (gatilhos e rotas de sistema): banco do ambiente (SPREADSHEET_ID, ou TEST_/DEMO_ com
+   * `ambiente`; ou `banco`), forma de gravação do banco, porta de arquivos, projetor real.
+   * o: {banco, ambiente, usuario, fuso, props (retrato já lido das Script Properties)}.
    */
   function contexto(opcoes) {
     var o = opcoes || {};
-    var p = PropertiesService.getScriptProperties().getProperties();
-    var banco = o.banco || p[PROP_BANCO];
-    if (vazio_(banco)) throw Validation.erro('CONFIG', 'O sistema ainda não tem planilha configurada. Execute a configuração inicial (setup).');
+    var p = o.props || PropertiesService.getScriptProperties().getProperties();
+    var chave = chaveDoAmbiente(o.ambiente);
+    var banco = o.banco || p[chave];
+    if (vazio_(banco)) {
+      if (chave !== PROP_BANCO) throw Validation.erro('CONFIG', 'A base de teste (' + o.ambiente + ') ainda não existe. Rode runAcceptanceTests no editor do Apps Script para criá-la.');
+      throw Validation.erro('CONFIG', 'O sistema ainda não tem planilha configurada. Execute a configuração inicial (setup).');
+    }
     return Database.contexto({
-      banco: banco, primitiva: p[PROP_PRIMITIVA] || Database.PRIMITIVAS[0], usuario: o.usuario || Session.getEffectiveUser().getEmail() || 'sistema',
+      banco: banco, primitiva: primitivaDoBanco(p, banco), usuario: o.usuario || Session.getEffectiveUser().getEmail() || 'sistema',
       fuso: o.fuso || Session.getScriptTimeZone(), files: FileService.porta(), projecoes: Timeline.porta(),
     });
   }
@@ -188,6 +210,7 @@ var Maintenance = (function () {
       var versaoCopia = parseInt(props[chaveVersao_(novo)], 10) || 0;
       ctx.props.gravar(chaveVersao_(novo), String(Math.max(versaoAnterior, versaoCopia) + 1));
       ctx.props.gravar(UnitOfWork.chaveMarcador(novo), JSON.stringify({ restauracao: true, backup: b.id, desde: agora }));
+      if (!vazio_(props['IO_PRIMITIVE:' + ctx.banco])) ctx.props.gravar('IO_PRIMITIVE:' + novo, props['IO_PRIMITIVE:' + ctx.banco]);
       ctx.props.gravar(chave, novo);
       rec = UnitOfWork.recoverAll(contextoDoBanco_(ctx, novo));
     } finally {
@@ -327,6 +350,13 @@ var Maintenance = (function () {
     return { criados: criados, removidos: removidos, total: total };
   }
 
+  /** Gatilhos do projeto que são deste sistema: [{funcao, id}] (diagnóstico SP-09 e tela de sistema). */
+  function listarGatilhos() {
+    return ScriptApp.getProjectTriggers().filter(function (t) {
+      return GATILHOS.some(function (g) { return g.funcao === t.getHandlerFunction(); });
+    }).map(function (t) { return { funcao: t.getHandlerFunction(), id: t.getUniqueId() }; });
+  }
+
   // ------------------------------------------------------------------ setup ----
   /** Corpus de tipos numa planilha temporária (pasta Testes), que vai para a lixeira no fim. */
   function escolherPrimitiva_(files) {
@@ -443,6 +473,8 @@ var Maintenance = (function () {
   function setup(opcoes) {
     var o = opcoes || {};
     if (vazio_(o.usuario)) throw interno_('A configuração inicial precisa do e-mail de quem a executa.');
+    var chaveBanco = chaveDoAmbiente(o.ambiente);
+    var producao = chaveBanco === PROP_BANCO;
     var store = PropertiesService.getScriptProperties();
     var props = store.getProperties();
     if (!vazio_(props[PROP_DONO]) && String(props[PROP_DONO]).toLowerCase() !== String(o.usuario).toLowerCase()) {
@@ -462,7 +494,7 @@ var Maintenance = (function () {
         var falhou = rel.drive.passos.filter(function (p) { return !p.ok; }).map(function (p) { return p.passo + ': ' + p.erro; }).join('; ');
         throw Validation.erro('CONFIG', 'O Google Drive recusou uma operação de que o sistema precisa (' + falhou + '). Autorize o acesso completo ao Drive (escopo "drive") conforme o guia de implantação e rode a configuração de novo.');
       }
-      var banco = props[PROP_BANCO] || null;
+      var banco = props[chaveBanco] || null;
       if (banco) {
         var arq = files.obter(banco);
         if (!arq || arq.trashed === true) {
@@ -474,12 +506,15 @@ var Maintenance = (function () {
       rel.primitiva = escolha;
       store.setProperty(PROP_PRIMITIVA_RELATORIO, JSON.stringify(escolha).slice(0, 8000));
       if (!escolha.primitiva) throw Validation.erro('CONFIG', 'Nenhuma forma de gravação preservou os tipos dos dados nesta conta (veja o relatório do teste de gravação). A configuração foi interrompida sem mexer na planilha-banco.');
-      store.setProperty(PROP_PRIMITIVA, escolha.primitiva);
       if (!banco) {
-        banco = files.criarPlanilha(NOME_BANCO, 'raiz', { erp_tipo: 'BANCO' });
-        store.setProperty(PROP_BANCO, banco);
+        banco = producao
+          ? files.criarPlanilha(NOME_BANCO, 'raiz', { erp_tipo: 'BANCO' })
+          : files.criarPlanilha(NOMES_BANCO_TESTE[o.ambiente], 'testes', { erp_tipo: 'BANCO', erp_ambiente: o.ambiente });
+        store.setProperty(chaveBanco, banco);
         rel.banco_criado = true;
       }
+      // A forma de gravação de produção fica em IO_PRIMITIVE; a de um banco de teste, só nele.
+      store.setProperty(producao ? PROP_PRIMITIVA : 'IO_PRIMITIVE:' + banco, escolha.primitiva);
       rel.banco = banco;
       if (vazio_(props[PROP_DONO])) store.setProperty(PROP_DONO, o.usuario);
       var io = Database.abrir(banco, { primitiva: escolha.primitiva, tabelas: o.tabelas });
@@ -533,7 +568,7 @@ var Maintenance = (function () {
     }
     var backups = listarBackups(ctx);
     return {
-      banco: ctx.banco, primitiva: p[PROP_PRIMITIVA] || null, data_version: UnitOfWork.versao(ctx), backups: backups,
+      banco: ctx.banco, primitiva: p['IO_PRIMITIVE:' + ctx.banco] || p[PROP_PRIMITIVA] || null, data_version: UnitOfWork.versao(ctx), backups: backups,
       ultimo_backup: backups[0] || null, integridade: integridade,
       gatilhos: ScriptApp.getProjectTriggers().map(function (t) { return t.getHandlerFunction(); }),
       // O estado que InventoryService.consultaAlertas espera (BACKUP_ATRASADO, INTEGRIDADE_COM_ERRO).
@@ -549,6 +584,9 @@ var Maintenance = (function () {
     MOTIVOS_BACKUP: MOTIVOS_BACKUP,
     EXPORTACAO_VALIDADE_DIAS: EXPORTACAO_VALIDADE_DIAS,
     ANEXO_TEMPORARIO_HORAS: ANEXO_TEMPORARIO_HORAS,
+    AMBIENTES: AMBIENTES,
+    chaveDoAmbiente: chaveDoAmbiente,
+    primitivaDoBanco: primitivaDoBanco,
     contexto: contexto,
     setup: setup,
     backup: backup,
@@ -560,6 +598,7 @@ var Maintenance = (function () {
     manutencaoDiaria: manutencaoDiaria,
     integridadeSemanal: integridadeSemanal,
     garantirGatilhos: garantirGatilhos,
+    listarGatilhos: listarGatilhos,
     estado: estado,
   };
 })();
