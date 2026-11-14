@@ -98,7 +98,7 @@ As rotas de tela são por hash (coluna "Rota" da seção 3) e levam só tela e I
 
 ## 3. Inventário de telas
 
-"Store" = dado já no cliente desde o bootstrap, sem ida ao servidor. Fase = quando a tela nasce. ¹ = uso de rota definido por decisão local (seção 16).
+"Store" = dado já no cliente desde o bootstrap, sem ida ao servidor. Fase = quando a tela nasce. ¹ = uso de rota explicado na seção 16.
 
 | Tela | Rota | O que mostra | Ações | Consultas e comandos | Fase |
 |---|---|---|---|---|---|
@@ -506,22 +506,15 @@ Gráficos: Chart.js em versão fixa, com verificação de integridade, carregado
 
 ---
 
-## 16. Decisões locais e itens do spike
+## 16. Notas de rota (¹) e itens do spike
 
-Decisões tomadas aqui onde o desenho-base é omisso, para conferência do arquiteto.
+A lista canônica de rotas não tem leitura própria para algumas telas. Para não criar rota fora dela, as telas marcadas com ¹ na seção 3 usam o que já existe:
 
-| # | Lacuna | Decisão |
+| Tela | Uso previsto | Porquê |
 |---|---|---|
-| 1 | Rotas de tela (hash) não estão nos nomes canônicos | As da coluna "Rota" da seção 3; o contexto de abertura vai no rascunho, não na URL |
-| 2 | Sem rota de leitura para lista de lançamentos, parcelas, custos por pasto e patrimônio | Reaproveitar `financeiro.resultado` (detalhe por lançamento), `financeiro.fluxoCaixa` (parcelas liquidadas e abertas), `financeiro.custosAnimal` (agregado por pasto) e `inventario.posicao` (com valor e cobertura). Rota própria, se criada, só troca a coluna de consultas |
-| 3 | O bootstrap não cita os cadastros de apoio | Parceiros, produtos, protocolos, estações, plano de contas e preços entram no bootstrap na fase que os entrega: são pequenos e alimentam campos de referência |
-| 4 | `animal.editar` × evento de ajuste | A tela envia um comando só; o servidor separa o que é auditoria do que é ajuste |
-| 5 | Lista de backups para restaurar | `sistema.restaurarBackup` em modo SIMULAR devolve os backups disponíveis e o que será substituído; confirmar exige digitar RESTAURAR |
-| 6 | `revisao` de tipos não classificados | LOCAL: entrada inicial, outra entrada, marcação, entrada de estoque. SERVIDOR: ajuste de inventário, rateio |
-| 7 | `grupo_ui` e rótulo de cada tipo | Tabela da seção 4.2; subtipo como primeiro campo do formulário |
-| 8 | Rascunhos simultâneos | Um por tipo de evento |
-| 9 | Coluna "ID" da §5 | `codigo_interno`; UUID não exibido |
-| 10 | Tela para filtro não aplicável | Tabela da seção 11 |
-| 11 | Marca de variação no modo curral | Faixa de GMD plausível aplicada a (peso − último peso) ÷ dias, só como aviso |
+| Financeiro: lançamentos, parcelas, custos por pasto, patrimônio | `financeiro.resultado` (detalhe por lançamento), `financeiro.fluxoCaixa` (parcelas abertas e liquidadas), `financeiro.custosAnimal` (agregado por pasto), `inventario.posicao` (com valor e cobertura) | Os dados já saem dessas consultas; rota própria, se criada, só troca a coluna de consultas |
+| Produtos, protocolos, estações, parceiros, plano de contas, preços | Chegam no bootstrap, na fase que entrega cada cadastro | São pequenos e alimentam os campos de referência dos formulários |
+| Edição do animal | `animal.editar` recebe um comando só; o servidor separa o que é auditoria do que vira evento de ajuste (DV-07) | O usuário não precisa conhecer a diferença |
+| Restaurar backup | `sistema.restaurarBackup` com `modo: 'SIMULAR'` devolve os backups disponíveis e o que será substituído; confirmar exige digitar RESTAURAR | Operação destrutiva: a prévia vem do servidor e o aceite é explícito |
 
 Itens do spike que condicionam este documento: SP-04 (conta e sessão no celular) · SP-05 (abertura a frio em 3G) · SP-06 (`localStorage` no iframe; histórico e URL; comportamento do `google.script.run` em queda de rede; tamanho de fotos e blocos) · SP-07 (abrir exportação no celular; XLSX e PDF) · SP-08 (Chart.js × SVG próprio).
