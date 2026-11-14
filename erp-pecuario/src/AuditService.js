@@ -431,12 +431,12 @@ var AuditService = (function () {
     cru.cru('ANIMAIS').forEach(function (a) {
       var id = a.animal_id;
       var linhas = f.linhas(id);
-      if (!linhas.length) return;
-      var calc = Timeline.projetarAnimal(f, id).campos;
-      var problemas = Timeline.validar(linhas, { nascimento: calc.data_nascimento, dataEntrada: calc.data_entrada }).problemas;
-      problemas.forEach(function (p) {
-        col.achado('LINHA_DO_TEMPO', { tabela: 'ANIMAIS', id: id, mensagem: rotuloAnimal_(a, id) + ': ' + Timeline.descrever(p, nomePasto) + ' (evento de ' + br_(p.event_date) + ').' });
-      });
+      if (linhas.length) {
+        var calc = Timeline.projetarAnimal(f, id).campos;
+        Timeline.validar(linhas, { nascimento: calc.data_nascimento, dataEntrada: calc.data_entrada }).problemas.forEach(function (p) {
+          col.achado('LINHA_DO_TEMPO', { tabela: 'ANIMAIS', id: id, mensagem: rotuloAnimal_(a, id) + ': ' + Timeline.descrever(p, nomePasto) + ' (evento de ' + br_(p.event_date) + ').' });
+        });
+      }
       if (a.situacao_cadastral === 'ATIVO') {
         var soma = linhas.filter(function (l) { return !l.pre_marco_zero; }).reduce(function (s, l) { return s + (l.efeito || 0); }, 0);
         if (soma !== 1) col.achado('ENTRADA_ABERTA', { tabela: 'ANIMAIS', id: id, mensagem: rotuloAnimal_(a, id) + ' está ativo, mas os eventos somam ' + soma + ' entrada(s) em aberto.' });

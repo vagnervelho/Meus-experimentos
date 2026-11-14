@@ -222,7 +222,7 @@ var Maintenance = (function () {
   /**
    * Anexos: TEMPORARIO com mais de 24 h → REMOVIDO (comando auditado) e arquivo na lixeira; arquivo deste banco na
    * pasta Anexos sem linha em ANEXOS (comando que não confirmou) e com mais de 24 h → lixeira; arquivo de anexo
-   * REMOVIDO que ainda não foi para a lixeira → lixeira. Devolve {temporarios, orfaos, removidos}.
+   * REMOVIDO que ainda não foi para a lixeira → lixeira. Devolve {temporarios (linhas), orfaos, arquivos_removidos}.
    */
   function limparAnexos(ctx) {
     var agoraMs = ctx.clock.agoraMs();
@@ -253,10 +253,10 @@ var Maintenance = (function () {
       });
     });
     var vivos = ctx.files.listar('anexos', { appProperties: { erp_banco: ctx.banco } });
-    var n = { temporarios: vencidos.length, orfaos: 0, removidos: 0 };
+    var n = { temporarios: vencidos.length, orfaos: 0, arquivos_removidos: 0 };
     vivos.forEach(function (f) {
       if (usados[f.id]) return;
-      if (removidos[f.id]) { ctx.files.lixeira(f.id); n.removidos += 1; return; }
+      if (removidos[f.id]) { ctx.files.lixeira(f.id); n.arquivos_removidos += 1; return; }
       if (f.createdTime < limite) { ctx.files.lixeira(f.id); n.orfaos += 1; }
     });
     return n;
