@@ -722,8 +722,9 @@ test('codec: limites do que ida e volta preserva — dinheiro além de 15 dígit
   const codigo = (fn) => { try { fn(); return null; } catch (e) { return e.code || 'EXCECAO'; } };
   for (const c of [1e15, -1e15, 4503599627370495, 9007199254740991]) {
     assert.equal(codigo(() => D.codificar(col('DINHEIRO'), c)), 'INTERNAL', 'centavos ' + c + ' não voltariam exatos');
-    assert.ok(amb.G.Validation.validarValor(amb.G.Schema.coluna('FINANCEIRO', 'valor_total'), c), 'a validação recusa antes: ' + c);
+    if (c > 0) assert.equal(js(amb.G.Validation.validarValor(amb.G.Schema.coluna('EVENTOS', 'total_value'), c)).codigo, 'VALOR_FORA_DA_FAIXA', 'a validação recusa antes: ' + c);
   }
+  assert.equal(amb.G.Validation.validarValor(amb.G.Schema.coluna('EVENTOS', 'total_value'), 999999999999999), null, 'o limite ainda vale');
   assert.equal(D.codificar(col('DINHEIRO'), 999999999999999), 9999999999999.99);
   for (const [tipo, v] of [['DEC4', 1e21], ['DEC1', -1e21], ['DEC4', 123456789.1234], ['INT', 9007199254740991], ['DINHEIRO', -999999999999999]]) {
     const texto = D.paraTexto(col(tipo), v);
@@ -733,8 +734,9 @@ test('codec: limites do que ida e volta preserva — dinheiro além de 15 dígit
 
 test('células hostis digitadas pelo dono: a leitura nunca lança, e conversão impossível é erro de integridade, nunca "coercida sem perda"', () => {
   const celulas = {
-    data: [{ data: 1e10 }, 1e10, -1e10, 2958466, true, 'abc', { data: 46339 }],
-    instante: [{ data: 1e10 }, 1e10, -1e10, 2958466.5, false, '2026-11-13', { data: 46339.5 }],
+    // {data: 2958466} é 01/01/10000: Date válido que não cabe em yyyy-MM-dd (o fake não representa serial além do Date).
+    data: [{ data: 2958466 }, 1e10, -1e10, 2958466, true, 'abc', { data: 46339 }],
+    instante: [{ data: 2958466.5 }, 1e10, -1e10, 2958466.5, false, '2026-11-13', { data: 46339.5 }],
     dinheiro: [1e300, -1e300, 1e13, 'R$ 10,00', true],
     inteiro: [2.5, 1e300, '12', 'doze', -0.5],
     dec4: ['1e5', 'x', true],

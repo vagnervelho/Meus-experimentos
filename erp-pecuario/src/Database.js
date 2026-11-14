@@ -60,6 +60,23 @@ var Database = (function () {
     ms = parede - deslocamentoMs_(ms, fuso); // segunda passada: acerta a virada de horário de verão
     return new Date(ms).toISOString();
   }
+  /**
+   * Data nativa (objeto Date do SpreadsheetApp ou serial da Sheets API) → 'yyyy-MM-dd', ou null se a célula não
+   * representa uma data do contrato (serial fora do calendário, Date inválido): aí é erro de integridade, não coerção.
+   */
+  function nativaParaData_(celula, fuso) {
+    var s = null;
+    if (ehData_(celula)) s = isNaN(celula.getTime()) ? null : Utilities.formatDate(celula, fuso(), 'yyyy-MM-dd');
+    else if (isFinite(celula) && Math.abs(celula) < 3e6) s = serialParaData_(celula);
+    return s !== null && Utils.dataValida(s) ? s : null;
+  }
+  /** Idem para instante: ISO-8601 UTC, ou null. */
+  function nativaParaInstante_(celula, fuso) {
+    var s = null;
+    if (ehData_(celula)) s = isNaN(celula.getTime()) ? null : celula.toISOString();
+    else if (isFinite(celula) && Math.abs(celula) < 3e6) s = serialParaInstante_(celula, fuso());
+    return s !== null && Utils.instanteValido(s) ? s : null;
+  }
   function jsonInvalido_(v) {
     if (v === null || typeof v === 'string' || typeof v === 'boolean') return false;
     if (typeof v === 'number') return !isFinite(v);
@@ -79,6 +96,7 @@ var Database = (function () {
         if (typeof valor !== 'number' || !isFinite(valor)) throw interno_('A coluna ' + col.nome + ' (' + col.tipo + ') só aceita número.');
         return valor;
       case 'DINHEIRO':
+        if (typeof valor === 'number' && Math.abs(valor) > Utils.CENTAVOS_MAX) throw interno_('A coluna ' + col.nome + ' (DINHEIRO) passa do limite de 15 dígitos: o valor não voltaria exato da planilha.');
         return Utils.centavosParaReais(valor);
       case 'BOOL':
         if (typeof valor !== 'boolean') throw interno_('A coluna ' + col.nome + ' (BOOL) só aceita verdadeiro ou falso.');
@@ -111,20 +129,30 @@ var Database = (function () {
         if (t === 'string') return { valor: celula, alerta: null };
         if (t === 'number') return { valor: String(celula), alerta: alerta_('ERRO', 'TEXTO_VIROU_NUMERO', 'Número onde se esperava texto: zeros à esquerda podem ter se perdido.') };
         if (t === 'boolean') return { valor: celula ? 'TRUE' : 'FALSE', alerta: alerta_('ERRO', 'TEXTO_VIROU_BOOLEANO', 'Valor lógico onde se esperava texto.') };
-        return { valor: Utilities.formatDate(celula, fuso(), 'yyyy-MM-dd'), alerta: alerta_('ERRO', 'TEXTO_VIROU_DATA', 'Data onde se esperava texto.') };
+        n = nativaParaData_(celula, fuso);
+        return { valor: n, alerta: alerta_('ERRO', 'TEXTO_VIROU_DATA', 'Data onde se esperava texto.') };
       case 'DATA':
         if (t === 'string') return { valor: celula, alerta: Utils.dataValida(celula) ? null : alerta_('ERRO', 'DATA_INVALIDA', 'Data fora do formato aaaa-mm-dd.') };
-        if (t === 'data') return { valor: Utilities.formatDate(celula, fuso(), 'yyyy-MM-dd'), alerta: alerta_('COERCIDA', 'DATA_NATIVA', 'Data gravada como data da planilha, e não como texto.') };
-        if (t === 'number') return { valor: serialParaData_(celula), alerta: alerta_('COERCIDA', 'DATA_NATIVA', 'Data gravada como data da planilha, e não como texto.') };
+        if (t === 'data' || t === 'number') {
+          n = nativaParaData_(celula, fuso);
+          if (n === null) return { valor: null, alerta: alerta_('ERRO', 'DATA_INVALIDA', 'Número ou data da planilha que não corresponde a uma data válida.') };
+          return { valor: n, alerta: alerta_('COERCIDA', 'DATA_NATIVA', 'Data gravada como data da planilha, e não como texto.') };
+        }
         return { valor: null, alerta: alerta_('ERRO', 'DATA_INVALIDA', 'Valor lógico onde se esperava data.') };
       case 'TS':
         if (t === 'string') return { valor: celula, alerta: Utils.instanteValido(celula) ? null : alerta_('ERRO', 'INSTANTE_INVALIDO', 'Data e hora fora do formato ISO-8601 em UTC.') };
-        if (t === 'data') return { valor: celula.toISOString(), alerta: alerta_('COERCIDA', 'INSTANTE_NATIVO', 'Data e hora gravadas como data da planilha, e não como texto.') };
-        if (t === 'number') return { valor: serialParaInstante_(celula, fuso()), alerta: alerta_('COERCIDA', 'INSTANTE_NATIVO', 'Data e hora gravadas como data da planilha, e não como texto.') };
+        if (t === 'data' || t === 'number') {
+          n = nativaParaInstante_(celula, fuso);
+          if (n === null) return { valor: null, alerta: alerta_('ERRO', 'INSTANTE_INVALIDO', 'Número ou data da planilha que não corresponde a uma data e hora válidas.') };
+          return { valor: n, alerta: alerta_('COERCIDA', 'INSTANTE_NATIVO', 'Data e hora gravadas como data da planilha, e não como texto.') };
+        }
         return { valor: null, alerta: alerta_('ERRO', 'INSTANTE_INVALIDO', 'Valor lógico onde se esperava data e hora.') };
       case 'INT': case 'DEC1': case 'DEC4': case 'DINHEIRO':
         n = t === 'number' ? celula : t === 'string' ? numeroDeTexto_(celula) : null;
         if (n === null || !isFinite(n)) return { valor: null, alerta: alerta_('ERRO', 'NUMERO_INVALIDO', 'Texto, data ou valor lógico onde se esperava número.') };
+        // Fora do que o tipo representa: erro de integridade (a leitura da aba não pode lançar por causa de uma célula).
+        if (col.tipo === 'DINHEIRO' && Math.abs(n) * 100 > Utils.CENTAVOS_MAX + 0.5) return { valor: null, alerta: alerta_('ERRO', 'NUMERO_INVALIDO', 'Valor em reais grande demais para o sistema.') };
+        if (col.tipo === 'INT' && !(Math.floor(n) === n && Math.abs(n) <= 9007199254740991)) return { valor: n, alerta: alerta_('ERRO', 'NUMERO_INVALIDO', 'Número com casas decimais, ou grande demais, onde se esperava número inteiro.') };
         return {
           valor: col.tipo === 'DINHEIRO' ? Utils.reaisParaCentavos(n) : n,
           alerta: t === 'number' ? null : alerta_('COERCIDA', 'NUMERO_COMO_TEXTO', 'Número gravado como texto.'),
@@ -158,7 +186,7 @@ var Database = (function () {
     if (typeof texto !== 'string') throw interno_('deTexto espera texto (' + col.nome + ').');
     var cel = texto;
     if (TIPOS_NUMERO[col.tipo]) {
-      cel = /^-?\d+(?:\.\d+)?$/.test(texto) ? Number(texto) : null;
+      cel = /^-?\d+(?:\.\d+)?(?:e[+-]?\d+)?$/.test(texto) ? Number(texto) : null; // String(n) usa expoente a partir de 1e21
       if (cel === null) throw interno_('O texto "' + texto + '" não é um número (' + col.nome + ').');
     }
     var d = decodificar(col, cel, function () { throw interno_('deTexto não converte data nativa.'); });

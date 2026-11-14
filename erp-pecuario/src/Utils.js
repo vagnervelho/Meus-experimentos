@@ -178,6 +178,11 @@ var Utils = (function () {
     if (Math.abs(c) > 9007199254740991) throw falha_('VALIDATION', 'Valor em reais grande demais para o sistema.');
     return c;
   }
+  /**
+   * Maior valor em centavos (em módulo) que vai à planilha e volta exato: 15 dígitos, a precisão de número da
+   * planilha. Acima disso, reais com 2 casas em ponto flutuante perdem o último centavo na volta.
+   */
+  var CENTAVOS_MAX = 999999999999999;
   /** Centavos inteiros → reais com 2 casas (valor de célula). Vazio → null. */
   function centavosParaReais(centavos) {
     if (vazio(centavos)) return null;
@@ -424,6 +429,7 @@ var Utils = (function () {
   }
 
   return {
+    CENTAVOS_MAX: CENTAVOS_MAX,
     vazio: vazio,
     dataValida: dataValida,
     diffDias: diffDias,

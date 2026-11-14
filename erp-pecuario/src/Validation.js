@@ -169,6 +169,7 @@ var Validation = (function () {
       case 'DINHEIRO':
         if (typeof valor !== 'number' || !isFinite(valor)) return problema_(DETALHE.TIPO_INVALIDO, 'Informe um valor em reais.');
         if (!ehInteiroSeguro_(valor)) return problema_(DETALHE.FORMATO_INVALIDO, 'Valor em reais com mais de duas casas decimais.');
+        if (Math.abs(valor) > Utils.CENTAVOS_MAX) return problema_(DETALHE.VALOR_FORA_DA_FAIXA, 'Valor em reais grande demais: o limite é R$ 9.999.999.999.999,99.');
         p = faixa_(col, valor / 100);
         return p ? problema_(p.codigo, p.mensagem.replace('Informe um valor ', 'Informe um valor em reais ')) : null;
       case 'BOOL':
