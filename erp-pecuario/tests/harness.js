@@ -498,11 +498,13 @@ function createGas(opts) {
    * Fim normal: descarrega as escritas pendentes e solta o lock. Exceção não tratada: por padrão as pendentes
    * chegam todas (hipótese); `seLancar` escolhe outro subconjunto. Morte: chega o subconjunto pedido em matar().
    * Pode ser chamada de dentro de um gancho: é outra execução, que não enxerga as pendentes da que foi suspensa.
+   * Chamada pelo teste, fora de outra execução, encerra antes a execução "ambiente" (o que o teste fez direto).
    */
   function tentar(fn, opcoes) {
     const op = opcoes || {};
-    const pai = atual;
-    if (pai.ambiente) mundo.descarregar(pai); else mundo.suspender(pai);
+    let pai = atual;
+    // Código do teste fora de exec é uma execução que TERMINA quando a próxima começa (descarrega e solta o lock).
+    if (pai.ambiente) { encerrar(pai, 'todas'); pai = novaExecucao(true); } else mundo.suspender(pai);
     const exec = novaExecucao(false);
     atual = exec;
     let ok = true;

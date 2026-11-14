@@ -534,9 +534,15 @@ test('lock: cai ao fim da execução — fim normal, exceção ou morte', () => 
   const e = gas.lock.estatisticas();
   assert.equal(e.aquisicoes, 3);
   assert.equal(e.liberacoes, 3);
+  // Código do teste fora de exec também é uma execução: o lock que ele pegar cai quando a próxima começa.
+  assert.equal(G.LockService.getScriptLock().tryLock(1000), true);
+  assert.equal(typeof gas.lock.dono(), 'number');
+  assert.equal(gas.exec(() => G.LockService.getScriptLock().tryLock(1000)), true, 'a execução seguinte não fica trancada para fora');
+  assert.equal(gas.lock.dono(), null);
+  assert.equal(gas.lock.estatisticas().liberacoes, 5);
   // releaseLock explícito conta uma vez só; soltar sem ter não faz nada.
   gas.exec(() => { const l = G.LockService.getScriptLock(); l.waitLock(1000); l.releaseLock(); l.releaseLock(); assert.equal(l.hasLock(), false); });
-  assert.equal(gas.lock.estatisticas().liberacoes, 4);
+  assert.equal(gas.lock.estatisticas().liberacoes, 6);
   assert.throws(() => gas.exec(() => G.LockService.getScriptLock().tryLock()), /don't match the method signature/);
 });
 
