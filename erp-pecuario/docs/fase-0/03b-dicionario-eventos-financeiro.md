@@ -6,7 +6,7 @@
 - `EVENTOS` guarda o cabeçalho. Dado por animal vai para `EVENTO_ANIMAIS` ou para a tabela de detalhe. `payload_json` tem lista fechada de chaves por tipo (seção 2.6) e nunca guarda coleção por animal.
 - Em compra e venda o valor informado prevalece e quantidade × preço é só conferência. Peso vivo e peso de carcaça têm colunas separadas. `valor_individual` é sempre preenchido e soma exatamente o valor principal do evento.
 - O dinheiro tem três níveis ligados por invariantes em centavos: lançamento (`FINANCEIRO`), título (`PARCELAS`) e distribuição por animal (`RATEIOS` + `ALOCACOES_FINANCEIRAS`). A seção 15 traz dois exemplos completos, linha a linha, com as somas fechando.
-- Todo campo de §4.4 a §4.9 e de §6.1 a §6.12 tem destino na seção 16. As lacunas do desenho-base fechadas aqui estão na seção 17, para conferência do arquiteto.
+- Todo campo de §4.4 a §4.9 e de §6.1 a §6.12 tem destino na seção 16.
 
 **Documentos relacionados:** `02-modelo-de-dados.md` (DER, vigência, fonte × cópia) · `03a-dicionario-cadastros-suporte.md` (tipos de coluna, enums, LISTAS, cadastros e suporte) · `04-motor-de-eventos.md` (catálogo, pipeline, estorno) · `05-regras-de-negocio.md` (validações) · `06-persistencia-e-integridade.md` (fases A/B/C, verificação) · `07-financeiro-e-indicadores.md` (fórmulas das três visões) · `09-plano-de-testes.md` (CT-01 a CT-20).
 
@@ -69,7 +69,7 @@ As colunas aparecem na ordem do desenho-base, que é a ordem física da aba.
 
 Os mesmos eventos também gravam em abas descritas em `03a`: ANIMAIS (entradas que criam animal), IDENTIFICACOES (entradas com brinco, o evento IDENTIFICACAO e o ajuste de identificação incorreta), MOVIMENTOS_ESTOQUE (SANIDADE e ESTOQUE) e ANEXOS (documentos do evento).
 
-A coluna REPRODUCAO das três entradas (ENTRADA_INICIAL, OUTRA_ENTRADA, COMPRA) refere-se à fêmea declarada prenha: o evento de entrada grava para ela uma linha de diagnóstico de gestação informado (seção 7). O catálogo do desenho-base só cita essa linha na ENTRADA_INICIAL; a extensão às outras duas entradas segue `03a` e está na seção 17.
+A coluna REPRODUCAO das três entradas (ENTRADA_INICIAL, OUTRA_ENTRADA, COMPRA) refere-se à fêmea declarada prenha: o evento de entrada grava para ela uma linha de diagnóstico de gestação informado (seção 7). O catálogo do desenho-base só cita essa linha na ENTRADA_INICIAL; aqui ela vale também para COMPRA e OUTRA_ENTRADA, porque a situação reprodutiva pode ser declarada em qualquer entrada (`03a`, seção 4.3) e, sem a linha, a vaca comprada prenha ficaria fora da previsão de parto.
 
 Nenhuma fase preenche retroativamente um evento confirmado (P11): COMPRA e VENDA gravam FINANCEIRO, PARCELAS, RATEIOS e ALOCACOES_FINANCEIRAS desde a Fase 2, embora as telas do módulo financeiro só cheguem na Fase 4.
 
@@ -126,7 +126,7 @@ Os treze campos de §4.4 foram mantidos com o mesmo nome. Os doze acréscimos es
 
 Exemplo: transferência de 05/03 registrada em 20/03 recebe `event_seq` 520; uma pesagem de 10/03, registrada no próprio dia, tem 498. No replay a transferência vem antes, porque a data manda. O 520 só desempataria contra outro movimento de 05/03.
 
-Consequência a conhecer: o evento substituto ("corrigir") recebe `event_seq` novo, maior que o do original. Se o animal tiver dois movimentos no mesmo dia, o substituto do primeiro passa a ser lido depois do segundo. Quando isso quebra a cadeia de pastos, a validação do conjunto final devolve CONFLICT com os eventos envolvidos e o operador corrige também o segundo. O ponto está em aberto para o arquiteto (seção 17).
+Consequência a conhecer: o evento substituto ("corrigir") recebe `event_seq` novo, maior que o do original. Se o animal tiver dois movimentos no mesmo dia, o substituto do primeiro passa a ser lido depois do segundo. Quando isso quebra a cadeia de pastos, a validação do conjunto final devolve CONFLICT com os eventos envolvidos e o operador corrige também o segundo. Decisão adotada: o substituto não herda o `event_seq` do original. O contador é monotônico por definição, e renumerar exigiria regravar linhas já confirmadas.
 
 ### 2.4 `event_subtype` e a coluna de tipo do detalhe
 
@@ -724,7 +724,7 @@ Campos aceitos por `tipo_ajuste` (lista fechada):
 | `tipo_ajuste` | `campo` aceito | Efeito além da linha de AJUSTES |
 |---|---|---|
 | CORRECAO_CADASTRO | `sexo`, `data_nascimento`, `data_nascimento_confianca`, `mae_id`, `mae_confianca`, `pai_id`, `pai_confianca`, `castrado`, `reprodutor`, `partos_previos`, `origem`, `data_entrada`, `data_entrada_confianca` | Revalida genealogia e linha do tempo com o valor novo |
-| IDENTIFICACAO_INCORRETA | `brinco` | `valor_anterior` = código lançado errado; `valor_novo` = código correto. O mesmo evento grava uma linha nova em IDENTIFICACOES com o código correto (`03a`, seção 4.4); a linha errada não é alterada e é fechada pela projeção `data_fim*`. Revalida a unicidade do brinco. O efeito do código errado sobre a regra de reuso de brinco está em aberto (seção 17) |
+| IDENTIFICACAO_INCORRETA | `brinco` | `valor_anterior` = código lançado errado; `valor_novo` = código correto. O mesmo evento grava uma linha nova em IDENTIFICACOES com o código correto (`03a`, seção 4.4); a linha errada não é alterada e é fechada pela projeção `data_fim*`. Revalida a unicidade do brinco. O código errado não conta para o bloqueio de reuso de brinco: o teste de reuso ignora o código que é `valor_anterior` de um ajuste IDENTIFICACAO_INCORRETA vigente do mesmo animal, porque ele nunca identificou esse animal de fato. Sem isso, o brinco digitado por engano ficaria vedado ao animal que realmente o usa |
 | RECLASSIFICACAO | `categoria_manual_id` | Valor preenchido → `categoria_modo*` = MANUAL. Valor vazio → volta a AUTO |
 | CORRECAO_LOCALIZACAO | `pasto_atual_id` | Linha de EVENTO_ANIMAIS com origem (pasto registrado) e destino (pasto real), que entra na linha do tempo como movimento |
 
@@ -1170,7 +1170,7 @@ O mesmo comando grava ainda, em abas descritas em `03a`: 1 linha em OPERACOES (o
 | Σ `base_valor` = `base_total` | 212,5 + 198,0 + 206,5 = 617,0 | 8 |
 | Σ `custo_aquisicao*` = `valor_total` | 3.237,12 + 3.016,23 + 3.145,70 = 9.399,05 | 18 |
 
-Leituras calculadas na consulta, não gravadas: preço médio = 9.039,05 ÷ 3 = R$ 3.013,02 por cabeça; custo posto na fazenda = 9.399,05 ÷ 617,0 kg = R$ 15,22 por kg vivo, contra R$ 14,65 negociados.
+Leituras calculadas na consulta, não gravadas: preço médio = 9.039,05 ÷ 3 = R$ 3.013,02 por cabeça; custo posto na fazenda = 9.399,05 ÷ 617,0 kg = R$ 15,23 por kg vivo, contra R$ 14,65 negociados.
 
 Efeito nas três visões, supondo cada parcela paga no vencimento:
 
