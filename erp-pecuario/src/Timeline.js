@@ -479,12 +479,11 @@ var Timeline = (function () {
       var a = f.animal(id);
       [a && a.mae_id, proj[id].campos.mae_id].forEach(function (m) { if (!vazio_(m)) fazer(m); });
     });
-    var maeDe = Object.create(null);
     var filhos = Object.create(null);
     todos.forEach(function (a) {
-      var c = proj[a.animal_id] ? proj[a.animal_id].campos : a;
-      if (!vazio_(c.mae_id)) (filhos[c.mae_id] = filhos[c.mae_id] || []).push(a.animal_id);
-      maeDe[a.animal_id] = c.mae_id;
+      var pj = proj[a.animal_id];
+      var mae = pj && pj.meta.situacao !== 'EXTERNO' ? pj.campos.mae_id : a.mae_id;
+      if (!vazio_(mae)) (filhos[mae] = filhos[mae] || []).push(a.animal_id);
     });
     var desmama = f.parametros.idade_desmama_padrao_meses;
     Object.keys(proj).forEach(function (id) {
