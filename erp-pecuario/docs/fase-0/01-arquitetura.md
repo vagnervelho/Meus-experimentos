@@ -25,20 +25,20 @@ flowchart TB
     STORE --> CLI[apiClient]
     RASC --> CLI
   end
-  CLI -->|"google.script.run.api"| API
   subgraph GAS["Apps Script"]
     API["Api: guarda de dono, roteador, envelope"]
     API --> CMD[Commands]
     API --> QRY[Queries]
-    CMD --> DOM["Dominio: JS puro"]
+    CMD --> DOM["Domínio: JS puro"]
     QRY --> DOM
-    CMD -->|"run: lock e tres fases"| UOW[UnitOfWork]
+    CMD -->|"run: lock e três fases"| UOW[UnitOfWork]
     QRY -->|"read: sem lock"| UOW
-    UOW --> REPO["Repository: vigentes e indices"]
+    UOW --> REPO["Repository: vigentes e índices"]
     REPO --> SA[SheetsAdapter]
     CMD --> FS[FileStore]
     QRY --> FS
   end
+  CLI -->|"google.script.run.api"| API
   TRG["Gatilhos de tempo"] --> UOW
   SA --> SH[("Google Sheets: 1 aba = 1 tabela")]
   FS --> DR[("Google Drive")]
@@ -53,7 +53,7 @@ flowchart TB
 | UnitOfWork + Repository | Lock, idempotência, journal `OPERACOES`, três fases, recuperação; `repo.vigentes(tabela)` e índices em memória. | Conhecer pecuária. |
 | Adaptadores | `SheetsAdapter` (E/S em lote, codec por tipo de coluna) e `FileStore` (API do Drive). | Filtrar vigência; validar negócio. |
 
-Cada camada só chama a de baixo; o domínio não chama ninguém. Os mecanismos da §2.4 (lock, validação prévia, identificador de operação, registro de processamento, duplicidade, compensação, reconciliação) ficam na `UnitOfWork`. "Compensação" foi lida como refazer (redo idempotente), não desfazer: a primeira fase só anexa linhas inertes, então não há o que reverter.
+As dependências só descem; o domínio não chama ninguém. Os mecanismos da §2.4 (lock, validação prévia, identificador de operação, registro de processamento, duplicidade, compensação, reconciliação) ficam na `UnitOfWork`. "Compensação" foi lida como refazer (redo idempotente), não desfazer: a primeira fase só anexa linhas inertes, então não há o que reverter.
 
 ### 1.1 Comando × consulta
 
@@ -128,7 +128,7 @@ Nos quatro primeiros, nada novo foi gravado.
 
 ### 3.3 Estrutura de `error.details[]`
 
-Cada item: `{codigo, animal_id, brinco, campo, mensagem, conflito: {event_id, tipo, data}}`; o que não se aplica vem `null`. Exemplo: vacinação datada de 10/11 para 80 animais, um deles nascido em 11/11. O servidor rejeita tudo (§2.4) com um item `brinco: "0612"`, `campo: "event_date"`, `mensagem: "0612 nasceu em 11/11 — não pode ser vacinado em 10/11"`, `conflito: {tipo: "NASCIMENTO", data: "2026-11-11"}`. A tela mostra "1 de 80 com problema"; gravar os 79 restantes é novo envio explícito, nunca parcial em silêncio. Os valores de `codigo` são definidos em `05-regras-de-negocio.md`.
+Cada item: `{codigo, animal_id, brinco, campo, mensagem, conflito: {event_id, tipo, data}}`; o que não se aplica vem `null`. Exemplo: vacinação datada de 10/11 para 80 animais, um deles nascido em 11/11. O servidor rejeita tudo (§2.4) com um item `brinco: "0612"`, `campo: "event_date"`, `conflito: {tipo: "NASCIMENTO", data: "2026-11-11"}`. A tela mostra "1 de 80 com problema"; gravar os outros 79 é novo envio explícito, nunca parcial em silêncio. Os valores de `codigo` são definidos em `05-regras-de-negocio.md`.
 
 ### 3.4 Avisos com aceite (`NEEDS_CONFIRMATION`)
 
@@ -140,7 +140,7 @@ sequenceDiagram
   participant S as Servidor
   C->>S: evento.registrar com chave K
   S-->>C: NEEDS_CONFIRMATION e lista de avisos, nada gravado
-  Note over C: Usuario le os avisos na folha de revisao
+  Note over C: Usuário lê os avisos na folha de revisão
   C->>S: evento.registrar com chave K e avisosAceitos
   S-->>C: ok, evento gravado, nova dataVersion
 ```
@@ -181,7 +181,7 @@ Entre parênteses, a fase em que a rota nasce.
 | Anexo | `anexo.obter` (1) | `anexo.adicionar` (1), `anexo.remover` (1) |
 | Auditoria | `auditoria.listar` (2) | — |
 
-¹ Manutenção: entram pela `UnitOfWork` sob lock, recuperam órfãs antes de trabalhar e não criam evento.
+¹ Os três comandos de sistema são manutenção: entram pela `UnitOfWork` sob lock, recuperam órfãs antes de trabalhar e não criam evento.
 ² Gera XLSX/PDF em `ERP Pecuário/Exportações`, sem tocar a planilha-banco. O CSV é montado no cliente, sem rota.
 
 Os 21 tipos de evento não são rotas: todos passam por `evento.registrar` (inclusive lançamento financeiro avulso, rateio e entrada de estoque), e a fase de cada um está no campo `fase` do `EventCatalog`. O bootstrap entrega a lista de módulos ativos; menu e seletor só mostram o que existe (§20 regra 3).
@@ -206,7 +206,7 @@ Função global sem `_` final é chamável do navegador por `google.script.run`.
 
 ### 4.2 Guarda de dono e a indisponibilidade do e-mail ativo
 
-A §17 proíbe presumir `Session.getActiveUser().getEmail()` disponível, e seu comportamento em `USER_DEPLOYING` + `MYSELF` com conta gmail não tem fonte verificada (a confirmar no spike, SP-04). A guarda cobre os dois desfechos, como no projeto irmão `inbox-intelligence`:
+A §17 proíbe presumir `Session.getActiveUser().getEmail()` disponível, e seu comportamento em `USER_DEPLOYING` + `MYSELF` com conta gmail não tem fonte verificada (a confirmar no spike, SP-04). A guarda trata e-mail preenchido e e-mail vazio, como no projeto irmão `inbox-intelligence`:
 
 | E-mail do usuário ativo | Flag `ALLOW_EMPTY_ACTIVE_USER` | Resultado |
 |---|---|---|
@@ -215,7 +215,7 @@ A §17 proíbe presumir `Session.getActiveUser().getEmail()` disponível, e seu 
 | Vazio | ausente (padrão) | `DENIED`, com instrução para o guia. |
 | Vazio | `true` | Passa; `created_by` e `usuario` recebem o e-mail do dono. |
 
-- Dono = Script Property `OWNER_EMAIL`, gravada pelo `setup()`; na falta, o e-mail do usuário efetivo (SP-04).
+- Dono = Script Property `OWNER_EMAIL`, gravada pelo `setup()`; na falta, o e-mail de `Session.getEffectiveUser()`, que é quem implantou.
 - A flag é ligada à mão, só se o spike mostrar e-mail vazio. Ela não abre o app: com `MYSELF` o Google barra outras contas antes de o código rodar; a guarda é a segunda camada.
 - Gatilho de tempo não tem usuário ativo: o handler reconhece a chamada por `e.triggerUid` e confere se o identificador pertence a um gatilho instalado (`ScriptApp.getProjectTriggers()`, `getUniqueId()`).
 
@@ -252,28 +252,28 @@ A §17 proíbe presumir `Session.getActiveUser().getEmail()` disponível, e seu 
 
 O caminho recomendado repete o do projeto irmão (`scripts/push-gas.js`, via `npm run gas:push`), com a conferência de manifesto adaptada:
 
-0. Uma vez só: criar o projeto vazio no Apps Script, ativar a Google Apps Script API nas configurações do usuário e abrir um terminal com Node 22 ou mais novo (o Cloud Shell serve).
-1. Primeira vez: `npm run gas:push -- <ID do script ou URL do editor>`; depois, sem argumento (o ID fica em `.clasp.json`, fora do git, com `rootDir: "src"`). O script usa o clasp em versão fixa via `npx`, sem `npm install`.
-2. Recusa enviar se `src/appsscript.json` não for o manifesto do projeto: escopos esperados, serviços avançados, `MYSELF`, `USER_DEPLOYING`, runtime V8.
-3. Se não houver sessão, faz o login do clasp; mostra a conta e o projeto, pede confirmação e executa `clasp push --force`, que substitui todos os arquivos — por isso não se edita código no navegador.
-4. Sem `--no-deploy`, lista as implantações, reaproveita a deste app (reconhecida pela descrição) e cria nela uma versão nova: a URL `/exec` não muda. Não usa `clasp create`, `clone` nem `pull`, que gravariam o manifesto padrão por cima do nosso.
-5. Depois do primeiro envio, o dono executa `setup` no editor e autoriza os escopos.
+1. Uma vez: criar o projeto vazio no Apps Script, ativar a Google Apps Script API nas configurações do usuário e ter um terminal com Node 22 ou mais novo (o Cloud Shell serve).
+2. `npm run gas:push -- <ID do script ou URL do editor>` na primeira vez; depois, sem argumento (o ID fica em `.clasp.json`, fora do git, com `rootDir: "src"`). O clasp roda em versão fixa, via `npx`.
+3. O script recusa enviar se `src/appsscript.json` não for o manifesto do projeto (escopos, serviços avançados, `MYSELF`, `USER_DEPLOYING`, V8); faz o login do clasp se preciso; mostra conta e projeto e pede confirmação.
+4. `clasp push --force` substitui todos os arquivos do projeto — por isso não se edita código no navegador.
+5. Sem `--no-deploy`, reaproveita a implantação deste app (reconhecida pela descrição) e cria nela uma versão nova: a URL `/exec` não muda. Nunca usa `clasp create`, `clone` ou `pull`, que gravariam o manifesto padrão por cima do nosso.
+6. Após o primeiro envio, o dono executa `setup` no editor e autoriza os escopos.
 
 **Cópia manual** (sem terminal): colar o manifesto no editor e criar um arquivo para cada `src/*.js` e `src/*.html`, com nomes idênticos (os includes são carregados pelo nome). São 41 arquivos (25 + 15 + manifesto) a cada atualização; por isso o clasp é o recomendado (PR-16).
 
 ```mermaid
 flowchart LR
-  REPO["Repositorio: src"] -->|"envio sem publicar"| HEAD["Projeto Apps Script: codigo enviado"]
+  REPO["Repositório: src"] -->|"envio sem publicar"| HEAD["Projeto Apps Script: código enviado"]
   HEAD --> DEV["URL /dev: testes do dono"]
-  HEAD --> TRG["Gatilhos e funcoes do editor"]
-  HEAD -->|"envio com publicacao, em marco testado"| VER["Versao publicada N"]
-  VER --> EXEC["URL /exec: uso diario"]
+  HEAD --> TRG["Gatilhos e funções do editor"]
+  HEAD -->|"envio com publicação, em marco testado"| VER["Versão publicada N"]
+  VER --> EXEC["URL /exec: uso diário"]
 ```
 
 - `/dev` executa o último código enviado; `/exec`, a versão publicada. Desenvolve-se em `/dev` com `gas:push -- --no-deploy` e publica-se só em marco testado.
 - Gatilhos e funções do editor usam o código enviado mesmo sem publicação (documentado no projeto irmão). Por isso a migração de esquema é só aditiva: a versão publicada anterior continua funcionando sobre o banco já migrado.
 - **Versões:** limite de 200 por script (NV); a API não exclui versão, a limpeza é manual no editor. Publicar a cada envio estouraria o limite: num ritmo ilustrativo de 3 envios por dia × 5 dias × 14 semanas = 210. Política: 5 fases × (1 marco + até 5 correções) = 30 versões; o script avisará a partir de 150.
-- **Gatilhos:** 2 dos 20 permitidos. Pior caso de tempo: 6 min (manutenção) + 6 min (integridade, no dia em que coincide) = 12 min, contra 90 min/dia somados entre os projetos da conta. O projeto irmão reserva até 60: 60 + 12 = 72, sobram 18. O tempo real será medido no spike (SP-05).
+- **Gatilhos:** 2 dos 20 permitidos. Pior caso de 6 + 6 = 12 min num dia, contra a cota de 90 min/dia, que é somada entre os projetos da conta: o projeto irmão reserva até 60, e 60 + 12 = 72.
 
 ---
 
@@ -314,11 +314,11 @@ Se um incremento de `DATA_VERSION` se perder, o pior caso é uma tela desatualiz
 | `Api` ● | Api | Guarda de dono, roteador, envelope, exceção → código, montagem das portas da execução. | novo: tira roteador e guarda de `Code` ("não concentrar toda a lógica em Code.gs"). |
 | `Config` ● | Infraestrutura | Script Properties (seção 5); leitura tipada de `CONFIGURACOES` e `LISTAS`; `config.salvar` e `lista.salvar`. | `Config.gs` |
 | `Schema` | Domínio (declarativo) | As 34 tabelas, o tipo de cada coluna, enums fechados, FKs e sementes: fonte única do `setup()`, do codec e do dicionário de dados. | `Schema.gs` |
-| `Database` ● | Adaptador | `SheetsAdapter`: E/S em lote, codec por tipo de coluna, criação e migração aditiva das abas; implementações de `Lock` e `IdGen`. | `Database.gs` |
+| `Database` ● | Adaptador | `SheetsAdapter`: E/S em lote, codec por tipo de coluna, criação e migração aditiva das abas; implementações das portas `Lock`, `Clock` e `IdGen`. | `Database.gs` |
 | `Repository` | Persistência | `repo.vigentes(tabela)`, índices em memória, memoização por execução; acesso cru só para `UnitOfWork`, recuperação e integridade. | novo: é a separação pedida na §3.3. |
 | `UnitOfWork` | Persistência | Lock, idempotência, journal, fases A/B/C, recuperação, leitura validada. | novo: os mecanismos da §2.4 num só lugar. |
 | `Validation` | Domínio | Validação de formato a partir do catálogo, tetos de célula, coletor `{erros, avisos}`, política de avisos. | `Validation.gs` |
-| `Utils` | Domínio | `Money` (centavos inteiros), `Dates` e `Clock`, normalização de texto e de brinco, hash. | `Utils.gs` |
+| `Utils` | Domínio | `Money` (centavos inteiros), `Dates` (aritmética sobre `yyyy-MM-dd`), normalização de texto e de brinco, hash do payload. | `Utils.gs` |
 | `EventCatalog` | Domínio (declarativo) | Os 21 tipos de evento: campos, seleção de animais, revisão, `reads[]`, fase. | novo: uma definição alimenta formulário e validação (P5; §20 regra 8). |
 | `EventService` | Aplicação | Pipeline único do evento: simular, registrar, corrigir, estornar; plano de escrita. | `EventService.gs` |
 | `Timeline` | Domínio | `TimelineValidator`, `Projector`, inventário e pasto em data. | novo: replay e projeção numa rotina só (§2.3). |
