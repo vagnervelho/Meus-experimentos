@@ -31,7 +31,7 @@ test('CT-11 (1): setup em banco vazio cria pastas, banco pelo Drive, 34 abas exa
   assert.ok(gas.drive.chamadas.some((c) => c.metodo === 'create' && c.id === banco), 'o banco nasce por Drive.Files.create (drive.file)');
   assert.equal(setup.drive.ok, true, 'sonda do Drive (SP-02): criar, copiar, ler, listar e lixeira');
   // Abas: as 34 do Schema, cabeçalho exato, dimensão exata; a aba padrão da planilha nova saiu.
-  assert.deepEqual(gas.planilhas.abas(banco), G.Schema.nomesTabelas());
+  assert.deepEqual(js(gas.planilhas.abas(banco)), js(G.Schema.nomesTabelas()));
   assert.deepEqual(setup.abas.removidas, ['Página1']);
   for (const t of G.Schema.nomesTabelas()) {
     assert.deepEqual(gas.planilhas.matriz(banco, t)[0], js(G.Schema.colunas(t)), 'cabeçalho de ' + t);
@@ -95,7 +95,6 @@ test('CT-11 (2)–(3): setup de novo não duplica, não sobrescreve o dono, não
   assert.deepEqual(rel.abas, { criadas: [], colunas_acrescentadas: {}, removidas: [] });
   assert.deepEqual(rel.schema_meta, { criadas: 0, atualizadas: 0 });
   const depois = contagens(s);
-  depois.AUDITORIA -= 0; // o setup repetido não grava trilha quando nada muda
   assert.deepEqual(depois, antes, 'mesmas contagens de linhas em todas as abas');
   assert.equal(s.tabela('CONFIGURACOES').find((c) => c.chave === 'ua_peso_kg').valor, '400', 'valor do dono preservado');
   const cats = s.tabela('CATEGORIAS').filter((c) => c.codigo === 'GARROTE');
