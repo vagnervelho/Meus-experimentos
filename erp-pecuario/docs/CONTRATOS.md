@@ -100,6 +100,7 @@ dado vem do usuário, `CONFIG` no fuso. `Utils` só cita `Validation` para lanç
 | `arredondar(valor, casas)` | Meio para cima sobre o decimal informado (387,45 → 387,5) |
 | `casasDecimais(valor)` | Casas realmente usadas, ignorando ruído binário |
 | `reaisParaCentavos(reais)`, `centavosParaReais(centavos)` | Conversão do codec; vazio → `null` |
+| `CENTAVOS_MAX` | `999999999999999`: maior valor em centavos (em módulo) que vai à planilha e volta exato (15 dígitos). Acima disso a `Validation` recusa DINHEIRO (`VALOR_FORA_DA_FAIXA`) e o codec também |
 | `formatarReais(centavos)` | `'R$ 1.234,56'` para mensagens |
 | `ratear(totalCentavos, itens)` | Ver abaixo |
 | `aparar(texto)` | Sem espaços nas pontas; vazio → `''` |
@@ -358,6 +359,16 @@ modo, ...})` e `cmdPasto(G, {chave, dados})`; `projetorDeTeste()` cumpre a porta
 vigente → ATIVO; sem → ANULADO). `rodarInstrumentado(amb, cmd, {antes: k | depois: k, chegam, antesDe(k, rotulo)})`
 numera as chamadas de escrita do contexto (`io.anexar`, `io.atualizar`, `io.flush`, `props.gravar`, `props.remover`,
 `lock.soltar`) e mata a execução na k-ésima — é assim que os testes percorrem todas as fronteiras de 06, seção 5.
+`cmdPasto` devolve no duplicado a mesma forma da resposta original (edição `{pasture_id, campos}`; criação
+`{pasture_id, existe}`).
+
+`tests/unitofwork.adversarial.test.js` é o ataque ao protocolo: varre a morte DEPOIS de cada escrita de serviço
+(`gas.falhas.matarNaEscrita(n, {incluiAtual: true, chegam})`) e de cada chamada de porta, com nenhuma, todas, cada
+prefixo e subconjuntos aleatórios das pendentes; e confere, sobre o estado DURÁVEL, `conferirInvariantes` (marcador
+removido, nenhuma órfã, operação terminada com `finished_at` e, se FALHOU, `erro`; uma confirmada por chave; chaves
+primárias únicas; `EVENTOS.status` = predicado; projeção de ANIMAIS = reconstrução; nenhuma filha vigente órfã;
+cadastro só de operação confirmada, com o último valor auditado). Comando novo que a etapa seguinte criar (e um
+projetor real) deve entrar em `CENARIOS` desse arquivo.
 
 
 ## 7. Scripts e estrutura
@@ -409,7 +420,11 @@ Erros da porta: `CONFIG` para aba ou coluna ausente ("execute a configuração i
 
 **Codec** (`codificar(coluna, valor) → célula`; `decodificar(coluna, célula, fusoFn) → {valor, alerta}`): forma de
 célula de `03a` / `06`, seção 3 (texto para ID, TEXTO, ENUM, DATA, TS, BOOL `S`/`N` e JSON; número para INT, DEC1,
-DEC4 e DINHEIRO em reais). `codificar` recusa com `INTERNAL` objeto `Date`, tipo errado e centavos não inteiros.
+DEC4 e DINHEIRO em reais). `codificar` recusa com `INTERNAL` objeto `Date`, tipo errado, centavos não inteiros e
+centavos acima de `Utils.CENTAVOS_MAX` (não voltariam exatos). `decodificar` **nunca lança** por causa de uma célula:
+dinheiro grande demais, inteiro com casas decimais e data/data e hora nativa que não cabe no calendário
+(`0001-01-01` a `9999-12-31`) são `ERRO`; `COERCIDA` só com valor válido do tipo. `deTexto` aceita a notação
+científica que `paraTexto` produz para números a partir de 1e21.
 `alerta = {nivel, codigo, mensagem}`, com `nivel` `COERCIDA` (convertida sem perda: vira ERROS_LOG) ou `ERRO`
 (integridade; o valor devolvido é o melhor possível ou `null`). Códigos: `TEXTO_VIROU_NUMERO`,
 `TEXTO_VIROU_BOOLEANO`, `TEXTO_VIROU_DATA`, `DATA_INVALIDA`, `DATA_NATIVA`, `INSTANTE_INVALIDO`, `INSTANTE_NATIVO`,
@@ -480,7 +495,7 @@ resposta de `reconstruir`; hash diferente → `IDEMPOTENCY_MISMATCH`) → import
 (`NEEDS_CONFIRMATION`, nada gravado, chave não consumida) → plano validado contra o esquema → **fase A**
 (`props` marcador, `anexar` OPERACOES INICIADA + EVENTOS + filhas + AUDITORIA, `flush`) → **fase B**
 (`OPERACOES.status = CONFIRMADA`, `flush`) → **fase C** (refaz a auditoria, `EVENTOS.status`/`confirmed_at`/
-`reversed_by_event_id`, projeções; `flush`; `aplicada_em`/`finished_at`; `flush`) → `DATA_VERSION++` → remove o
+`reversed_by_event_id`, projeções e `finished_at` na mesma gravação; `flush`; `aplicada_em`; `flush`) → `DATA_VERSION++` → remove o
 marcador → grava ERROS_LOG pendente → solta o lock.
 
 Carimbos da UnitOfWork: EVENTOS `op_id`, `status = PENDENTE`, `idempotency_key`, `reversed_by_event_id`,
@@ -497,14 +512,17 @@ plano, por leitura validada, sem lock de escrita e sem gravar; erro de validaç�
 **Exceção tratada depois do início da fase A:** a UnitOfWork, ainda com o lock, aplica a recuperação à própria
 operação relendo a planilha: CONFIRMADA → fase C refeita e sucesso (`recuperada`); INICIADA ou ausente → FALHOU
 (motivo em `OPERACOES.erro`) e `INTERNAL` "nada foi alterado" (retentável com a mesma chave; `erro.causa` e,
-se a recuperação também falhou, `erro.recuperacao`; aí o marcador fica e a chamada seguinte recupera).
+se a recuperação também falhou, `erro.recuperacao`; aí o marcador fica e a chamada seguinte recupera). Se a
+recuperação falhou depois de o commit poder ter chegado (exceção na fase B ou C), a mensagem NÃO diz que nada
+mudou: diz que a gravação pode já valer e manda conferir antes de lançar de novo (reenviar o mesmo formulário é
+seguro). A tela não deve oferecer "lançar de novo" com chave nova nesse caso: consulta `operacao.status`.
 
 ### 10.2 Consultas, estado da operação e manutenção
 
 | Função | Contrato |
 |---|---|
-| `read(ctx, {rota, reads, tratador(tx), acessoCru?}) → {dados, dataVersion}` | Leitura otimista validada: marcador e versão → abas → marcador e versão; mudou → repete (até 3; depois `LOCKED`). Com marcador: `tentar(5 s)` → recupera e segue, ou `LOCKED`. Nunca serve dados com marcador presente. Não grava dado de negócio |
-| `status(ctx, chave) → {situacao, op_id, comando, resumo, erro, started_at, finished_at}` | `situacao` ∈ CONFIRMADA, EM_ANDAMENTO, FALHOU, INEXISTENTE. Com marcador ou operação pendente, tenta o lock sem esperar: ocupado → EM_ANDAMENTO (ou CONFIRMADA, se a da chave já está completa); livre → recupera e responde o estado final. Chave vazia → `VALIDATION` |
+| `read(ctx, {rota, reads, tratador(tx), acessoCru?}) → {dados, dataVersion}` | Leitura otimista validada: marcador e versão → abas → marcador e versão; mudou → repete (até 3; depois `LOCKED`). Com marcador: `tentar(5 s)` → recupera e segue, ou `LOCKED`. Nunca serve dados com marcador presente, nem com operação órfã visível em OPERACOES sem marcador (backup restaurado, Script Properties apagadas): trata como marcador. A restauração deve, ainda assim, gravar o marcador do banco novo antes de trocá-lo e rodar `recoverAll`. Não grava dado de negócio |
+| `status(ctx, chave) → {situacao, op_id, comando, resumo, erro, started_at, finished_at}` | `situacao` ∈ CONFIRMADA, EM_ANDAMENTO, FALHOU, INEXISTENTE. Com marcador ou operação pendente, tenta o lock sem esperar: ocupado → EM_ANDAMENTO (ou CONFIRMADA, se a da chave já está completa); livre → recupera (gravando em ERROS_LOG a trilha que a recuperação anotou) e responde o estado final. Nunca FALHOU enquanto a original está viva. Chave vazia → `VALIDATION` |
 | `recoverAll(ctx) → {recuperou, marcador, falharam: [op_id], refeitas: [op_id], dataVersion}` | Recuperação sobre OPERACOES inteira, com reconstrução de TODAS as projeções, mesmo sem marcador (restauração de backup, verificação semanal). `LOCKED` |
 | `exclusivo(ctx, {rota, reads, acessoCru, tratador}) → {dados, dataVersion}` | Gatilhos e manutenção: espera o lock (25 s), recupera e roda o tratador com o banco parado; não é recusado com importação em curso. O que precisar gravar em dado de negócio vai por `run` |
 | `versao(ctx)`, `chaveVersao(banco)`, `chaveMarcador(banco)` | `DATA_VERSION:<banco>` e `PENDING_OP:<banco>` |
@@ -512,7 +530,9 @@ se a recuperação também falhou, `erro.recuperacao`; aí o marcador fica e a c
 
 ### 10.3 Recuperação (`06`, seção 6)
 
-Com o lock e relendo tudo: INICIADA → FALHOU; CONFIRMADA sem `aplicada_em` → fase C refeita; com marcador (ou
+Com o lock e relendo tudo: INICIADA → FALHOU (`erro` e `finished_at` gravados e descarregados ANTES do status: uma
+linha FALHOU nunca fica sem motivo); CONFIRMADA sem `aplicada_em` → fase C refeita (`finished_at` junto dos
+derivados, antes de `aplicada_em`: operação aplicada sempre tem `finished_at`); com marcador (ou
 `recoverAll`) reconstrói o cache de `EVENTOS.status` e TODAS as projeções (animal PENDENTE de operação que falhou
 vira ANULADO pelo projetor); grava a trilha (ERROS_LOG sempre; AUDITORIA `RECUPERACAO` com o `op_id` quando refez a
 fase C) antes de `aplicada_em`; `flush`; versão; remove o marcador. Sem marcador mas com órfã, põe um marcador

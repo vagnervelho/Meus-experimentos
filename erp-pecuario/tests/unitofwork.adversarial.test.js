@@ -824,3 +824,52 @@ test('chaves de idempotência hostis: cada uma é uma operação só, o reenvio 
     assert.equal(amb.status(' 0012').situacao, 'INEXISTENTE', primitiva + ': sem aparar nem converter');
   }
 });
+
+// ------------------------------------------------------------------ órfã sem marcador ----
+test('backup restaurado no meio de uma operação (sem as Script Properties): leitura, prévia e comando no banco novo nunca servem estado parcial', () => {
+  for (const primitiva of PRIMITIVAS) {
+    const ref = ambiente({ primitiva });
+    const passos = rodarInstrumentado(ref, cmdEvento({}), {}).chamadas;
+    for (let k = 2; k <= passos.length; k++) {
+      for (const via of ['leitura', 'simulacao', 'comando']) {
+        const amb = ambiente({ primitiva });
+        amb.run(cmdEvento({ chave: 'antes' }));
+        rodarInstrumentado(amb, cmdEvento({}), { antes: k, chegam: 'todas' });
+        const copia = js(amb.gas.exec(() => amb.G.Drive.Files.copy({ name: 'Banco restaurado' }, amb.banco))).id;
+        // O banco restaurado, visto pela mesma API do ambiente (outro banco, sem marcador nem versão).
+        const rest = Object.assign({}, amb, {
+          banco: copia,
+          ctx: () => amb.G.Database.contexto({ banco: copia, primitiva, usuario: A.USUARIO, fuso: A.FUSO, projecoes: amb.projecoes }),
+          marcador: () => amb.gas.props.script._data.get('PENDING_OP:' + copia) || null,
+          versao: () => Number(amb.gas.props.script._data.get('DATA_VERSION:' + copia) || 0),
+          lido: (abas) => js(amb.gas.exec(() => amb.G.Database.abrir(copia, { primitiva }).ler(abas))),
+        });
+        rest.read = (q) => js(amb.gas.exec(() => amb.G.UnitOfWork.read(rest.ctx(), q)));
+        rest.run = (cmd) => js(amb.gas.exec(() => amb.G.UnitOfWork.run(rest.ctx(), cmd)));
+        rest.status = (chave) => js(amb.gas.exec(() => amb.G.UnitOfWork.status(rest.ctx(), chave)));
+        rest.recoverAll = () => js(amb.gas.exec(() => amb.G.UnitOfWork.recoverAll(rest.ctx())));
+        rest.vigentes = () => rest.read(consultaVigentes()).dados;
+        assert.equal(rest.marcador(), null);
+        const msg = primitiva + ' cópia feita com a operação morta antes de ' + k + ' (' + passos[k - 1] + '), primeira chamada: ' + via;
+        let visto;
+        if (via === 'leitura') visto = rest.read(consultaVigentes()).dados;
+        else if (via === 'simulacao') {
+          const v = {};
+          rest.run(cmdEvento({ chave: 'sim', modo: 'SIMULAR', antes: (tx) => { v.eventos = tx.repo.vigentes('EVENTOS').map((e) => e.event_id); v.animais = tx.repo.vigentes('ANIMAIS').map((a) => a.animal_id); v.linhas = tx.repo.vigentes('EVENTO_ANIMAIS').length; } }));
+          visto = v;
+        } else {
+          rest.run(cmdEvento({ chave: 'depois-da-restauracao' }));
+          visto = null;
+        }
+        const e = conferirInvariantes(rest, msg);
+        const final = rest.vigentes();
+        if (visto) {
+          assert.deepEqual([js(visto.eventos), js(visto.animais), visto.linhas], [final.eventos, final.animais, final.linhas], msg + ': serviu o estado recuperado, não o parcial');
+        }
+        const valeu = e.OPERACOES.some((o) => o.idempotency_key === 'chave-evento-1' && o.status === 'CONFIRMADA');
+        assert.equal(rest.run(cmdEvento({})).duplicado, valeu, msg + ': reenvio no banco restaurado');
+        conferirInvariantes(rest, msg + ' [depois do reenvio]');
+      }
+    }
+  }
+});

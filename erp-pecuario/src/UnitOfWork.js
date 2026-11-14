@@ -584,6 +584,18 @@ var UnitOfWork = (function () {
       est.repo.carregar(tabelas);
       var depois = estadoProps_(ctx);
       if (depois.marcador || depois.versao !== antes.versao) continue;
+      // A verdade está na planilha; o marcador é só um atalho (06, seção 6). Órfã sem marcador (backup restaurado,
+      // Script Properties apagadas) não é gravação em curso: sem marcador nos dois retratos e com a mesma versão,
+      // nenhuma gravação começou nem terminou no meio desta leitura. Recupera antes de servir.
+      if (est.repo.carregada('OPERACOES') && est.repo.operacoesOrfas().length) {
+        if (!ctx.lock.tentar(ESPERA_LEITURA_MS)) throw Validation.erro('LOCKED', MSG_OCUPADO);
+        try {
+          recuperar_(est, {});
+        } finally {
+          ctx.lock.soltar();
+        }
+        continue;
+      }
       var dados = fn(est);
       anotarCoercoes_(est, cmd.rota);
       return { dados: dados, dataVersion: antes.versao };

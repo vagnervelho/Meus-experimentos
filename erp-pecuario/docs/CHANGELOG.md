@@ -31,3 +31,15 @@ repositório; "a verificar na conta do dono" significa que só o roteiro de diag
 - Verificado em Node: todas as quedas de 06, seções 5.1 e 5.2 (morte antes de cada escrita, nas três primitivas, com
   subconjuntos de escritas pendentes), reentrância da recuperação, intercalações de 06, seção 7, e a tabela de
   idempotência de 06, seção 8. A verificar na conta do dono: corpus, atomicidade e lock reais (SP-01, SP-03).
+
+## 14/11/2026 — Fase 1, ataque à persistência
+
+- `tests/unitofwork.adversarial.test.js`: morte depois de cada escrita (de serviço e de porta) com todas as combinações
+  relevantes de escritas pendentes, recuperação morta e repetida, intercalações em cada ponto de troca, dois bancos,
+  exceção tratável e resposta perdida em cada escrita, estado da operação com a original viva ou morta, banco
+  restaurado no meio de uma operação, corpus e células hostis nas três primitivas.
+- Defeitos corrigidos: operação terminada sem `finished_at` ou FALHOU sem `erro` (ordem das escritas); mensagem
+  "nada foi alterado" com a operação já confirmada; estado da operação que perdia a trilha de ERROS_LOG; leitura que
+  servia estado parcial com órfã sem marcador; texto de AUDITORIA de número ≥ 1e21 que travava a recuperação para
+  sempre; leitura de célula hostil (dinheiro enorme, data fora do calendário) que derrubava a aba inteira ou passava
+  como "coercida"; dinheiro acima de 15 dígitos aceito sem voltar exato.
