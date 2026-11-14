@@ -150,19 +150,22 @@ var PastureService = (function () {
   /**
    * Lotação de um pasto a partir da composição (07, seção 8.2): UA/ha = UA ÷ área (null sem área: SEM_VALOR_DE_
    * REFERENCIA); ocupação % = UA/ha ÷ capacidade em UA/ha; sem ela (ou sem UA/ha), cabeças ÷ capacidade em cabeças;
-   * sem capacidade informada → null (SEM_VALOR_DE_REFERENCIA).
+   * sem capacidade informada → null (SEM_VALOR_DE_REFERENCIA). Contas sobre o peso total, arredondando só no fim.
+   * comp: {cabecas, peso_vivo_total: {valor}, ua: {valor, motivo, n, estimado, ua_peso_kg}} (InventoryService.compor).
    */
   function lotacao(pasto, comp) {
     var area = typeof pasto.area_hectares === 'number' && pasto.area_hectares > 0 ? pasto.area_hectares : null;
     var ua = comp.ua.valor;
-    var uaHa = ua === null ? null : area === null ? null : arred_(ua / area, 2);
+    var uaBruta = ua === null || typeof comp.ua.ua_peso_kg !== 'number' ? ua : comp.peso_vivo_total.valor / comp.ua.ua_peso_kg;
+    var uaHaBruta = ua === null || area === null ? null : uaBruta / area;
+    var uaHa = arred_(uaHaBruta, 2);
     var motivoUaHa = ua === null ? comp.ua.motivo : area === null ? 'SEM_VALOR_DE_REFERENCIA' : null;
     var capUa = typeof pasto.capacidade_estimada_ua_ha === 'number' ? pasto.capacidade_estimada_ua_ha : null;
     var capCab = typeof pasto.capacidade_estimada_cabecas === 'number' ? pasto.capacidade_estimada_cabecas : null;
     var ocup = null;
     var base = null;
     var motivoOcup = null;
-    if (capUa !== null && uaHa !== null) { ocup = arred_(uaHa / capUa * 100, 1); base = 'UA_HA'; }
+    if (capUa !== null && uaHa !== null) { ocup = arred_(uaHaBruta / capUa * 100, 1); base = 'UA_HA'; }
     else if (capCab !== null) { ocup = arred_(comp.cabecas / capCab * 100, 1); base = 'CABECAS'; }
     else motivoOcup = capUa === null ? 'SEM_VALOR_DE_REFERENCIA' : motivoUaHa;
     return {
