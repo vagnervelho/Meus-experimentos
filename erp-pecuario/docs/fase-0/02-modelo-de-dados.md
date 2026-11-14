@@ -658,7 +658,7 @@ flowchart LR
 
 Consequências para quem lê o modelo:
 
-- Linha de fato não tem coluna "ativo" nem é atualizada: deixa de valer porque o pai deixou de valer. Linha filha sem pai em EVENTOS é inerte e é erro de integridade.
+- Linha de fato não tem coluna "ativo" nem é atualizada: deixa de valer porque o pai deixou de valer. Linha filha sem pai em EVENTOS é inerte e aparece como alerta na verificação de integridade: é o resíduo esperado de uma fase A interrompida (`06-persistencia-e-integridade.md`, 5.1, caso 3), não um dado corrompido.
 - Unicidade (brinco) e FKs são avaliadas só sobre linhas vigentes; animal PENDENTE ou ANULADO não ocupa brinco.
 - A visão "como foi registrado" (inclusive o que foi anulado) usa acesso cru a EVENTOS + AUDITORIA; a visão "como vale hoje" usa `repo.vigentes()`.
 
@@ -668,7 +668,7 @@ Consequências para quem lê o modelo:
 
 | Condição | `status*` |
 |---|---|
-| Operação FALHOU | FALHOU |
+| Operação FALHOU, ou linha de OPERACOES inexistente (evento anexado numa fase A interrompida, cuja linha de operação não chegou a ser gravada) | FALHOU |
 | Operação INICIADA | PENDENTE |
 | Importação do evento CANCELADO | CANCELADO |
 | Importação do evento ainda não IMPORTADO | PENDENTE |

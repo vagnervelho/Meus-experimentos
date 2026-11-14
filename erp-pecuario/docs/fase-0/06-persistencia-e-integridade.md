@@ -50,7 +50,7 @@ Um único codec no adaptador converte entre o valor de domínio e a célula. Os 
 | Tipo | Na planilha | Na leitura, se a célula vier diferente |
 |---|---|---|
 | ID, TEXTO, ENUM | Texto | Número onde se esperava texto é **erro de integridade** (zeros à esquerda já se perderam) |
-| DATA | Texto `yyyy-MM-dd` | Chegou como data: reformata no fuso da planilha e registra "célula coercida" |
+| DATA | Texto `yyyy-MM-dd` | Chegou como data: converte para `yyyy-MM-dd` e registra "célula coercida". A forma depende da primitiva: objeto `Date` pelo `SpreadsheetApp` (reformatado no fuso da planilha); número serial pela Sheets API com `UNFORMATTED_VALUE` (dias desde 30/12/1899) |
 | TS | Texto ISO-8601 em UTC | Idem |
 | INT, DEC1, DEC4 | Número | Texto numérico: converte e registra alerta |
 | DINHEIRO | Número com 2 casas (reais) | A lógica trabalha em centavos inteiros; a conversão é feita só no codec |
@@ -95,7 +95,8 @@ sequenceDiagram
   Note over U,P: Fase B - commit
   U->>P: OPERACOES.status = CONFIRMADA e flush
   Note over U,P: Fase C - derivados, repetivel
-  U->>P: status dos eventos, projecoes, aplicada_em e flush
+  U->>P: status dos eventos, projecoes e flush
+  U->>P: aplicada_em e flush
   U->>U: DATA_VERSION, remove marcador, solta o lock
   U-->>C: resultado e nova versao
 ```
@@ -120,6 +121,8 @@ Regra que sustenta tudo: **toda alteração em linha existente é função deter
 
 Dois pontos merecem atenção. Primeiro, o **caso 5** é a única fronteira em que o desenho depende de um comportamento da plataforma: a gravação de uma célula ser tudo ou nada. Segundo, em nenhum caso a recuperação restaura valor anterior; por isso ela é reentrante e pode morrer no meio sem piorar o estado.
 
+**Exceção tratada em qualquer fase** (erro de serviço, cota da API, resposta perdida de uma requisição de escrita). Não há caminho próprio de limpeza. A UnitOfWork captura a exceção e, ainda com o lock, aplica à própria operação a recuperação da seção 6, relendo a planilha: o que está em memória não serve, porque a escrita que falhou pode ter chegado inteira ou em parte. O desfecho é um dos da tabela: operação `INICIADA` → `FALHOU`, com o motivo em `OPERACOES.erro`, e resposta `INTERNAL`, que o cliente retenta com a mesma chave; operação `CONFIRMADA` → fase C refeita e resposta de sucesso. Se a própria recuperação falhar, o marcador fica e a chamada seguinte recupera.
+
 ### 5.2 Análise de queda: comando sem evento
 
 Vale para edição de cadastro, baixa de parcela, configuração e cadastro de animal externo. A fase A anexa a operação e as linhas de AUDITORIA, que servem de registro de refazer: entidade, registro, campo, valor anterior e valor novo. A fase C aplica o valor novo nas células.
@@ -129,7 +132,7 @@ Vale para edição de cadastro, baixa de parcela, configuração e cadastro de a
 | Antes do commit | Operação → FALHOU. As linhas de AUDITORIA ficam inertes (a consulta de auditoria só mostra operações confirmadas) | Nada mudou |
 | Depois do commit, antes ou durante a fase C | Reaplica cada valor novo registrado na AUDITORIA da operação | A alteração vale por inteiro |
 
-Aplicar duas vezes o mesmo valor novo dá o mesmo resultado, por isso a fase C pode ser repetida.
+Aplicar duas vezes o mesmo valor novo dá o mesmo resultado, por isso a fase C pode ser repetida. Na criação de registro (`acao` = CRIAR: pasto, parceiro, produto, animal externo), a chave primária nasce no plano de escrita e fica em `AUDITORIA.entity_id`; a linha do cadastro só é anexada na fase C, e apenas se essa chave ainda não existir (se já existir, os campos são regravados). Anexá-la na fase A não serve: cadastro não tem evento pai que o deixe inerte, e uma operação que falhasse deixaria o registro valendo.
 
 ### 5.3 Análise de queda: importação
 
@@ -154,11 +157,14 @@ Algoritmo, usado na abertura de todo comando, em toda leitura que encontra o mar
 2. Não conseguiu: há escrita em curso. A leitura espera alguns segundos e, se persistir, devolve "sistema ocupado", que o cliente retenta sozinho.
 3. Conseguiu: **reler** o marcador e a cauda de OPERACOES, descartando tudo o que já estava em memória. A operação pode ter terminado bem entre a primeira leitura e a obtenção do lock.
 4. Para cada órfã, decidir só pelo que foi relido: `INICIADA` → `FALHOU`; `CONFIRMADA` sem `aplicada_em` → refazer a fase C.
-5. Incrementar a versão dos dados, remover o marcador, registrar em AUDITORIA e ERROS_LOG, soltar o lock.
+5. Reconstruir projeções e caches sempre que o marcador estava presente, qualquer que tenha sido o caso (inclusive marcador sem operação e linhas sem operação, casos 1 e 3 da seção 5.1): os eventos de operação `FALHOU` ou inexistente ficam com `EVENTOS.status = FALHOU`, e os animais anexados por ela passam de PENDENTE a ANULADO. A reconstrução é função das linhas vigentes e pode ser repetida.
+6. Registrar a recuperação (ERROS_LOG sempre; AUDITORIA quando a fase C foi refeita), `flush()`, incrementar a versão dos dados e só então remover o marcador: enquanto ele existir, uma queda no meio da recuperação leva a execução seguinte a refazê-la. O lock é solto aqui apenas quando foi a própria recuperação que o adquiriu (leitura ou `recoverAll()`); na abertura de um comando ele continua com o comando.
 
 Por que "marcador presente e lock livre" não basta como teste: entre ler o marcador e obter o lock, a operação original pode ter concluído; decidir com a leitura antiga marcaria como falha uma operação boa. Por isso a decisão é tomada só depois da releitura, com o lock na mão. Só a UnitOfWork externa adquire e solta o lock; nenhum subcomando faz isso.
 
 `recoverAll()` faz o mesmo sobre a tabela OPERACOES inteira e reconstrói todas as projeções. É usado depois de restaurar um backup e pela verificação semanal.
+
+**Como ERROS_LOG e a trilha da recuperação são gravados.** ERROS_LOG fica fora do journal: cada registro é uma linha anexada, completa em si mesma, sem linha em OPERACOES, sem commit e sem mudar a versão dos dados. Nenhuma linha aponta para ela, e perdê-la numa queda é aceitável. É a única escrita que uma consulta pode causar (a regra "consulta nunca escreve na planilha" vale para dados de negócio): os registros da execução (célula coercida, erro INTERNAL, CONFIG ou DENIED, quando o banco está acessível) são acumulados em memória e anexados no fim, com o lock obtido por `tryLock` de espera curta; sem lock, o registro é descartado e a consulta segue. A recuperação, que já tem o lock, grava a sua linha antes de remover o marcador. Em AUDITORIA, a linha `RECUPERACAO` leva o `op_id` da operação recuperada e, como toda linha de AUDITORIA, só aparece se essa operação está CONFIRMADA: a recuperação que refaz a fase C fica em AUDITORIA e em ERROS_LOG; a que termina em `FALHOU`, só em ERROS_LOG.
 
 ## 7. Concorrência
 
@@ -169,12 +175,15 @@ Há um usuário, mas várias origens de execução: duas abas, celular e computa
 | Dois comandos ao mesmo tempo | O segundo espera o lock (até 25 s). Se não conseguir, recebe "sistema ocupado"; o cliente retenta em 2, 5 e 10 s com a mesma chave |
 | Leitura durante uma gravação | Leitura otimista validada: lê marcador e versão, lê as abas, relê marcador e versão. Se mudaram, repete (até 3 vezes). Nunca serve dados com marcador presente |
 | Gatilho de backup ou integridade durante uma gravação | O gatilho entra pela UnitOfWork: espera o lock e recupera antes de trabalhar. O backup copia um estado sem operação pela metade |
+| Gatilho de backup ou de integridade, ou `sistema.backup`, com uma importação em `IMPORTANDO` | Não são recusados. A recusa durante `IMPORTANDO` vale para comandos que alteram dados de negócio (eventos, cadastros, parcelas, configuração); a manutenção e as rotas `importacao.*` continuam. O backup copia o banco com a importação incompleta, que segue inerte se for restaurado. Sem essa exceção, uma importação esquecida suspenderia o backup diário |
 | Reenvio com a mesma chave enquanto a primeira tentativa ainda roda | O reenvio espera o lock; ao obtê-lo, encontra a operação confirmada com o mesmo conteúdo e devolve o resultado dela, marcado como duplicado |
-| Consulta de estado da operação durante a gravação | Responde "em andamento" sem tomar lock; o cliente pergunta de novo |
+| Consulta de estado da operação (`operacao.status`) | Lê a linha de OPERACOES pela chave. Se ela está `INICIADA`, ou `CONFIRMADA` sem `aplicada_em`, tenta o lock sem esperar: não obteve, há gravação em curso e a resposta é "em andamento" (o cliente pergunta de novo); obteve, a execução original morreu, e a consulta recupera (seção 6) e responde o estado final, CONFIRMADA ou FALHOU |
 
 ## 8. Idempotência e duplicidade
 
 A autoridade é OPERACOES: `idempotency_key` mais `payload_hash` (resumo de rota e dados; não inclui os avisos aceitos nem a versão esperada, para que o reenvio com aceite seja a mesma operação). `EVENTOS.idempotency_key` é cópia para rastreio. Há no máximo uma operação confirmada por chave.
+
+**Cálculo do `payload_hash`.** SHA-256, em hexadecimal, do JSON canônico de `{rota, dados}`: chaves em ordem alfabética em todos os níveis; sem espaços; listas na ordem recebida; campo vazio (`''`, `null` ou ausente) omitido; números na serialização padrão do JavaScript. A forma canônica faz parte da regra: sem ela, o mesmo formulário reenviado a partir do rascunho com as chaves em outra ordem, ou com um campo vazio a mais, daria `IDEMPOTENCY_MISMATCH`. Nos lotes de importação, `dados` são as linhas do lote, na ordem do arquivo.
 
 | Caso | Resposta |
 |---|---|

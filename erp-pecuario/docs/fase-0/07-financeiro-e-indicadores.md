@@ -42,7 +42,7 @@ flowchart LR
 - "Pago", "recebido" e "atrasado" não são gravados (P1): atrasado = parcela ABERTA com `data_vencimento` anterior a hoje. Baixa parcial = desdobrar a parcela em duas, ligadas por `parcela_origem_id`.
 - **Por que separar**: a §4.9 põe pagamento no lançamento e a §11.3 exige vencimento e pagamento por título. Com uma linha por parcela, a compra parcelada quebraria a soma das alocações e a competência se espalharia pelos vencimentos.
 - Vínculos pedidos na §11: animal (alocações), pasto (`pasture_id`, no máximo um por lançamento), categoria (`categoria_animal_id`), evento (`event_id` criou a linha; `ref_event_id` é o evento de negócio), propriedade (`property_id`) e período (`competencia_inicio`, `competencia_fim`).
-- **Competência por período**: lançamento com `competencia_inicio` e `competencia_fim` entra no resultado de cada mês por valor × dias de interseção ÷ dias totais, calculado na leitura e fechado pelo maior resto; nenhuma linha extra é gravada. Arrendamento anual de R$ 24.000,00 (01/01 a 31/12/2027): março = 24.000,00 × 31 ÷ 365 = R$ 2.038,36. Arredondar mês a mês somaria R$ 24.000,02; o maior resto fecha o ano em R$ 24.000,00.
+- **Competência por período**: lançamento com `competencia_inicio` e `competencia_fim` entra no resultado de cada mês por valor × dias de interseção ÷ dias totais, calculado na leitura e fechado pelo maior resto (em empate de resto, o mês mais antigo recebe o centavo); nenhuma linha extra é gravada. Arrendamento anual de R$ 24.000,00 (01/01 a 31/12/2027): março = 24.000,00 × 31 ÷ 365 = R$ 2.038,36. Arredondar mês a mês somaria R$ 24.000,02; o maior resto fecha o ano em R$ 24.000,00.
 
 ### 1.2 O que cada natureza faz em cada visão
 
@@ -81,7 +81,7 @@ O código sugerido é texto com prefixo do grupo: um código como "1.10" viraria
 | `APORTES` Aportes · `EMPRESTIMOS` Empréstimos | NAO_OPERACIONAL | NAO_OPERACIONAL | RECEITA | NAO_SE_APLICA |
 | `RETIRADAS` Retiradas | NAO_OPERACIONAL | NAO_OPERACIONAL | DESPESA | NAO_SE_APLICA |
 
-- O catálogo fixa a natureza dos lançamentos de evento: COMPRA só aceita contas AQUISICAO_ANIMAIS; deduções de VENDA, só DESPESA_VENDA.
+- O catálogo fixa a natureza dos lançamentos de evento: COMPRA só aceita contas AQUISICAO_ANIMAIS; deduções de VENDA, só DESPESA_VENDA. LANCAMENTO_FINANCEIRO avulso em conta AQUISICAO_ANIMAIS (frete de compra cobrado depois, com `ref_event_id`) exige rateio de 100%, como na COMPRA: a parte não alocada ficaria fora do resultado e do custo do rebanho ativo, e a conciliação da 2.1 não fecharia.
 - Consumo de insumo usa a conta pela `PRODUTOS.categoria`: VACINA → `VACINAS`; VERMIFUGO e MEDICAMENTO → `MEDICAMENTOS`; SUPLEMENTO → `ALIMENTACAO`; OUTRO → `TRATAMENTOS`. A receita simples do DESCARTE vai para `OUTRAS_RECEITAS_OPERACIONAIS`.
 - Pasto é o alimento do sistema a pasto: manutenção e arrendamento levam classe ALIMENTACAO. Despesas de venda não compõem o custo acumulado (NAO_SE_APLICA): aparecem em coluna própria no resultado do animal.
 - `tipo` é da conta e é copiado para o lançamento. "Empréstimos" é a entrada do principal (RECEITA); a amortização pede outra conta NAO_OPERACIONAL, de tipo DESPESA, criada em `conta.salvar`.
@@ -105,7 +105,7 @@ Resultado(P) = RV + OR − DV − CA − CT − J + DB
 - RV = Σ lançamentos RECEITA_VENDA_ANIMAIS com competência em P. Valor = bruto − desconto comercial; competência = `event_date` da venda.
 - OR = Σ lançamentos OUTRA_RECEITA com competência em P.
 - DV = Σ lançamentos DESPESA_VENDA com competência em P.
-- CA = Σ `custo_aquisicao*` dos animais com `data_saida*` em P, em três linhas: vendidos e descartados; mortes; baixas por ajuste.
+- CA = Σ das alocações vigentes AQUISICAO_ANIMAIS do período de permanência encerrado por cada saída com `event_date` em P, em três linhas: vendidos e descartados; mortes; baixas por ajuste. Sem reentrada, é igual a Σ `custo_aquisicao*` dos animais com `data_saida*` em P; com reentrada, as projeções guardam só o último período (`03a`, DL-08) e não servem a períodos passados.
 - CT = Σ lançamentos CUSTEIO na competência P (pro rata da 1.1), alocados ou não.
 - J, DB = Σ `juros_multa` e Σ `desconto` das parcelas de despesa liquidadas em P. Nas parcelas de receita o sinal inverte: juros recebidos somam, desconto concedido subtrai.
 
@@ -128,7 +128,7 @@ Resultado acumulado até D = caixa líquido acumulado até D + a receber em D �
 
 - A receber e a pagar: nominal das parcelas ainda não liquidadas em D, de todas as naturezas.
 - Insumos em estoque: saldo contábil = Σ lançamentos ESTOQUE_INSUMOS − Σ lançamentos de consumo.
-- Despesa antecipada: parte dos lançamentos CUSTEIO com competência posterior a D. O termo não está na identidade resumida do desenho-base; é exigido pela competência por período. No arrendamento anual da 1.1, pago em 05/01, em 31/03: resultado −5.917,81 = caixa −24.000,00 + despesa antecipada 18.082,19.
+- Despesa antecipada, líquida de receita antecipada: parte dos lançamentos CUSTEIO com competência posterior a D, menos a parte dos lançamentos OUTRA_RECEITA com competência posterior a D (receita com período, pela regra da 1.1, recebida antes de vencer a competência). O termo não está na identidade resumida do desenho-base; é exigido pela competência por período. No arrendamento anual da 1.1, pago em 05/01, em 31/03: resultado −5.917,81 = caixa −24.000,00 + despesa antecipada 18.082,19.
 - Entradas líquidas não operacionais: Σ lançamentos NAO_OPERACIONAL de tipo RECEITA − Σ de tipo DESPESA.
 
 ### 2.2 Caso numérico: uma compra, uma morte, uma venda
@@ -142,7 +142,7 @@ Três garrotes, A1, A2 e A3 (códigos internos A-000101 a A-000103).
 | 05/04 | SANIDADE (VACINACAO) | uma dose em cada um dos 3 |
 | 24/05 | baixa de parcela | 2ª parcela da compra paga com R$ 45,00 de juros |
 | 01/06 e 11/06 | TRANSFERENCIA | A1 e A3 entram no Pasto 2 (arrendado) em 01/06; A2 entra em 11/06 |
-| 05/06 | LANCAMENTO_FINANCEIRO + RATEIO | arrendamento do Pasto 2: R$ 600,00, competência 01/06 a 30/06, rateio por DIAS_PERMANENCIA |
+| 05/06 e 01/07 | LANCAMENTO_FINANCEIRO; RATEIO | arrendamento do Pasto 2: R$ 600,00 pagos em 05/06, com `pasture_id` e competência 01/06 a 30/06; o RATEIO por DIAS_PERMANENCIA (escopo PASTO, período 01/06 a 30/06) é registrado em 01/07, com o mês encerrado: em 05/06 a entrada de A2 e a morte de A3 ainda não existiam, a base seria A1 30 e A3 30 dias e o rateio ficaria sujeito ao alerta "rateio desatualizado" |
 | 16/06 | MORTE | A3 |
 | 30/06 | LANCAMENTO_FINANCEIRO | contabilidade, R$ 200,00, sem rateio |
 | 20/11 | VENDA para abate | A1 e A2 a R$ 320,00 por arroba de carcaça; romaneio de 285,0 kg e 270,0 kg = 555,0 kg ÷ 15 = 37,00 @; bruto de R$ 11.840,00; taxas de R$ 177,60 retidas pelo comprador (valor informado); recebimento em 20/12 |
@@ -251,7 +251,7 @@ Exemplo, o F5 do caso (arrendamento do Pasto 2, R$ 600,00, 01/06 a 30/06/2027): 
 
 | `modalidade` | `base_peso` | Informado | Derivado | Rateio padrão |
 |---|---|---|---|---|
-| CABECA | — | valor por animal, ou preço × quantidade | total | VALOR_INDIVIDUAL |
+| CABECA | — | valor por animal, ou preço × quantidade | total | VALOR_INDIVIDUAL com valor por animal; CABECAS com preço único |
 | KG_VIVO | VIVO | peso vivo e R$/kg | valor | PESO_VIVO |
 | ARROBA | CARCACA | carcaça do romaneio e R$/@ | arrobas = carcaça ÷ 15; rendimento = carcaça ÷ vivo (APURADO) | PESO_CARCACA |
 | ARROBA | VIVO | peso vivo, rendimento e R$/@ | arrobas = vivo × rendimento ÷ 15 (NEGOCIADO ou ESTIMADO) | PESO_VIVO |
@@ -287,7 +287,7 @@ A receita é o lançamento RECEITA_VENDA_ANIMAIS e a base do rateio. Cada deduç
 
 O insumo entra no resultado quando é aplicado, não quando é comprado (PR-11). Sem a regra, a compra do frasco e a despesa da aplicação contariam o mesmo dinheiro duas vezes.
 
-1. **Compra de produto com `controla_estoque` = S**: o evento ESTOQUE (ENTRADA) grava um lançamento ESTOQUE_INSUMOS (com `product_id`, `quantidade` e parcela) e o movimento de ENTRADA. Caixa no pagamento; nada no resultado nem no animal.
+1. **Compra de produto do cadastro, com ou sem `controla_estoque`**: o evento ESTOQUE (ENTRADA) grava um lançamento ESTOQUE_INSUMOS (com `product_id`, `quantidade` e parcela) e, quando `controla_estoque` = S, o movimento de ENTRADA que alimenta o saldo. Produto do cadastro com `custo_unitario` nunca é comprado em conta CUSTEIO: a aplicação gera o consumo mesmo com `controla_estoque` = N. Caixa no pagamento; nada no resultado nem no animal.
 2. **Aplicação de produto em estoque**: SANIDADE grava o movimento de SAIDA e um lançamento de consumo CUSTEIO, sem parcela, = quantidade consumida × custo unitário congelado. Nada no caixa; custeio na data da aplicação; alocação igual por cabeça ou proporcional à dose.
 3. **Produto ou serviço pago no ato**: lançamento CUSTEIO com parcela, no próprio evento. Caixa no pagamento; custeio na competência; alocação aos animais do evento.
 
@@ -303,6 +303,8 @@ Colunas do relatório 14, lidas das alocações vigentes pela `classe_custo_anim
 - receita, despesas de venda e resultado realizado (visão 3), só com saída; margem por arroba = resultado ÷ arrobas do animal na venda (`null` sem peso de venda).
 
 No caso da 2.2, A1 (255 dias): custo diário de R$ 1,10 e margem de R$ 140,82 por @ de carcaça.
+
+Custo diário e margem por arroba não são pedidos na §11.2: são divisões de colunas já exibidas, sem dado, tabela nem tela próprios. As "análises de rentabilidade" da §22 (comparações, rankings, projeções) continuam fora do MVP.
 
 - **Nascidos**: custo de aquisição de R$ 0,00 por definição (`custo_aquisicao_origem` = NAO_SE_APLICA), exibido como "nascido na fazenda".
 - **Rebanho de abertura**: valor de abertura opcional na ENTRADA_INICIAL, por animal (ABERTURA_INFORMADA) ou em massa pela TABELA_PRECOS de D0 (ABERTURA_ESTIMADA). Gera lançamento AQUISICAO_ANIMAIS na conta `SALDO_ABERTURA_REBANHO`, sem parcela, com alocação por animal.
@@ -334,14 +336,14 @@ Contrato único (P9): `{valor, motivo, n}`. Sem outro motivo indicado, o `null` 
 
 ### 8.1 Peso e desempenho (§8)
 
-Fonte: PESAGENS (`peso_kg`, `data_pesagem`, `metodo`, `tipo`); o GMD por pasto usa também EVENTO_ANIMAIS.
+Fonte: PESAGENS (`peso_kg`, `data_pesagem`, `metodo`, `tipo`); o GMD por pasto usa também EVENTO_ANIMAIS. Filtros de `peso.desempenho` e da tela de desempenho, os cinco da §8: período, pasto, sexo, categoria e raça (`ANIMAIS.raca`); os relatórios 8, 9 e 10 da seção 10 aceitam o filtro de raça além dos listados na tabela. Filtros do módulo (§8): período, pasto, sexo, categoria e raça (`ANIMAIS.raca`).
 
 | Indicador | Fórmula | `null` quando |
 |---|---|---|
 | Peso atual, ao nascer, à desmama | última pesagem; pesagem de `tipo` NASCIMENTO; de `tipo` DESMAMA | não pesado |
 | Ganho absoluto, dias, variação % | P2 − P1; D2 − D1; (P2 ÷ P1 − 1) × 100; ganho acumulado = última − primeira | menos de 2 pesagens individuais |
 | GMD individual (kg/dia) | (P2 − P1) ÷ (D2 − D1), só `metodo` BALANCA (FITA se `gmd_aceita_fita`) | intervalo menor que `gmd_intervalo_min_dias` (28) |
-| GMD de lote | (média 2 − média 1) ÷ dias, só com os animais presentes nas duas pesagens | n abaixo de `indicador_n_minimo` (5) |
+| GMD de lote | (média 2 − média 1) ÷ dias, só com os animais presentes nas duas pesagens | n abaixo de `indicador_n_minimo` (5); intervalo entre as duas pesagens menor que `gmd_intervalo_min_dias` (28) |
 | GMD por pasto | Σ ganho atribuído ao pasto ÷ Σ dias no pasto; o ganho de cada intervalo é dividido na proporção dos dias em cada pasto | n abaixo de 5 |
 | Peso médio por categoria ou pasto | Σ peso vigente ÷ cabeças com peso, com "x% estimado" | nenhuma cabeça com peso |
 | Projeção de peso | último peso + GMD de referência × dias; GMD de referência = da primeira à última pesagem válida dos últimos `gmd_referencia_janela_dias` (120) | sem GMD de referência; data além de `projecao_peso_horizonte_dias` (90) |
@@ -349,6 +351,8 @@ Fonte: PESAGENS (`peso_kg`, `data_pesagem`, `metodo`, `tipo`); o GMD por pasto u
 Exemplos: 300,0 kg em 01/03 e 345,0 kg em 30/04/2027 dão 60 dias, ganho de 45,0 kg, GMD de 0,750 kg/dia e variação de 15,0%. Lote de 20 cabeças com 6.840 kg em 03/05 e 7.600 kg em 02/07: (380,0 − 342,0) ÷ 60 = 0,633 kg/dia.
 
 Limites: GMD fora de −1,0 a 2,0 kg/dia (`gmd_plausivel_*`) gera o aviso PESO_IMPLAUSIVEL, sem bloquear. Linhas MEDIA_LOTE e ESTIMATIVA_VISUAL servem a UA e peso vivo total, nunca ao GMD individual. A projeção é linear, de horizonte curto, não distingue águas de seca, nunca vira pesagem e sai rotulada no gráfico.
+
+Peso ao nascer sem pesagem: o indicador devolve `null`. Com `peso_nascer_padrao_kg_macho` ou `peso_nascer_padrao_kg_femea` preenchido, a curva do animal parte desse valor como ponto estimado e rotulado, que não entra em PESAGENS, no GMD nem nas médias (P10).
 
 ### 8.2 Lotação (§7)
 
@@ -368,11 +372,11 @@ Por estação de monta E; fontes: REPRODUCAO, ESTACOES_MONTA, ANIMAIS, BAIXAS. E
 |---|---|---|---|
 | Matrizes ativas | fêmeas ATIVAS aptas (idade ≥ `idade_min_reprodutiva_meses` ou partos ≥ 1) sem marca de descarte | contagem em D | — |
 | Matrizes prenhas | matrizes ativas com `situacao_reprodutiva*` PRENHA | contagem em D | "N sem informação" |
-| Taxa de prenhez | prenhas no último DG de E | expostas em E | cobertura do DG abaixo de `prenhez_cobertura_dg_min_pct` (90): "prenhez entre diagnosticadas" |
+| Taxa de prenhez | expostas em E com resultado positivo no último DG | expostas em E; ao lado, cobertura do DG = diagnosticadas ÷ expostas | cobertura abaixo de `prenhez_cobertura_dg_min_pct` (90): o denominador passa a ser as diagnosticadas e o rótulo, "prenhez entre diagnosticadas"; a razão sobre expostas não é exibida como taxa |
 | Taxa de parição | expostas que pariram | expostas em E | "parcial" com prenha sem desfecho |
 | Taxa de natalidade | nascidos vivos desses partos | expostas em E | idem; sem estação: "natalidade anual" = nascidos vivos no ano ÷ matrizes ativas no início do ano |
-| Perda gestacional | prenhas no DG − paridas | prenhas no DG de E | idem |
-| Taxa de desmama | desmamados | expostas em E | "parcial" com cria ao pé |
+| Perda gestacional | prenhas no DG de E com ABORTO registrado ou com a janela de parto encerrada sem parto atribuído a E | prenhas no DG de E | "parcial" enquanto houver prenha com a janela de parto aberta; prenha sem desfecho nunca conta como perda |
+| Taxa de desmama | crias dos partos atribuídos a E com DESMAMA registrada | expostas em E | "parcial" com cria ao pé |
 | Bezerros por matriz (ficha) | crias nascidas vivas e desmamadas | contagem na vida da matriz | — |
 | IEP (dias) | Σ intervalos entre partos consecutivos encerrados em P | nº de intervalos em P | — |
 | Mortalidade de bezerros | mortos + baixados por divergência antes da desmama (sem DESMAMA, corte em `idade_desmama_padrao_meses`) | nascidos vivos da safra | "parcial" com bezerro em risco; vendidos ao pé à parte |
@@ -391,7 +395,7 @@ Exemplo: 80 expostas, 76 diagnosticadas (cobertura de 95,0%), 64 prenhas, 60 par
 `dashboard.obter(filtros)` devolve todos os itens e `geradoEm` (data de atualização). Filtros: Di e Df (datas), Pr (propriedade), Pa (pasto), S (sexo), C (categoria). Tipo: P = POSICAO (estado ao fim de Df), F = FLUXO (soma de Di a Df), m = série mensal. Pasto e categoria do animal são os da data: Df na posição; a data do evento no fluxo (pasto de destino na entrada, de origem na saída). Filtro não aplicável, entre parênteses na tabela:
 
 - **E**: o filtro é ignorado e o item mostra uma etiqueta ("posição em Df", "todos os pastos");
-- **A**: o valor passa a ser só a parte alocada a animais do filtro, pelos atributos na data de competência, com "não atribuída: R$ X" ao lado; o filtro Pa soma também os lançamentos com `pasture_id`;
+- **A**: o valor passa a ser só a parte alocada a animais do filtro, pelos atributos na data de competência, com "não atribuída: R$ X" ao lado; no filtro Pa, o lançamento com `pasture_id` conta inteiro para o seu pasto e fica fora da soma por alocações (o arrendamento tem `pasture_id` e rateio; somar os dois caminhos o contaria duas vezes);
 - **N**: `null` com FILTRO_NAO_APLICAVEL.
 
 Df anterior a D0 devolve `null` em todos; período que começa antes de D0 conta os fluxos de D0 em diante, com etiqueta. A fonte passa a existir na Fase 1 (itens 1 a 3, 15, 16, G2 a G4), 2 (4 a 10, 12, G1, G6, G7), 3 (G5) ou 4 (11, 13, 14, G8, G9); o dashboard completo é da Fase 5.

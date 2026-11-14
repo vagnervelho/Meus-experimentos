@@ -154,7 +154,7 @@ Esforço se a premissa for falsa: **C** = muda configuração; **A** = mudança 
 | 21 | §6.3, §11.1 | "Valor por kg ou arroba" sem dizer se é peso vivo ou carcaça, e "não confundir" os dois | Base de peso e tipo de rendimento explícitos | `07` |
 | 22 | §2.4 | "Compensação/estorno para falhas" pressupõe desfazer gravação | A primeira fase só anexa linhas inertes: não há o que desfazer | `06` |
 | 23 | §4.5 | EVENTO_ANIMAIS não distingue mãe e cria no mesmo evento | Coluna de papel | DV-03 |
-| 24 | §14 × §2.4 | Importação parcial "quando aprovada" × tudo ou nada | Total por padrão; parcial só com aprovação registrada | `06` |
+| 24 | §14 × §2.4 | Importação parcial "quando aprovada" × tudo ou nada | Total por padrão; parcial só com aprovação registrada | `05` (RN-089), `08` (seção 12) |
 | 25 | §13 | PDF "quando tecnicamente viável" | Viável pela exportação do Drive, a confirmar no spike | SP-07 |
 | 26 | §17 | "Executar como proprietário" × "usuário que acessa" a avaliar | Comparação e escolha justificadas | `01` |
 | 27 | §9 | Taxas pedidas sem definir denominadores | Dicionário de indicadores com numerador, denominador e janela | `07` |

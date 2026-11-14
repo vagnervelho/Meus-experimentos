@@ -113,7 +113,7 @@ As rotas de tela são por hash (coluna "Rota" da seção 3) e levam só tela e I
 | Eventos: histórico | `#/eventos` | Tipo, data, nº de animais, valor, status; filtros; operações não concluídas | Abrir | `evento.listar` | 1 |
 | Evento: detalhe, estornar, corrigir | `#/evento/<id>` | Animais e valores, lançamentos e parcelas, anexos, avisos aceitos, estorno ou substituto | Estornar; Corrigir | `evento.obter`, `evento.simular`, `evento.estornar`, `evento.corrigir` | 1 |
 | Pesagens | `#/pesagens` | Filtros da §8; peso médio e GMD por categoria e pasto; curvas de 2 a 5 animais; projeção "estimativa" | Nova pesagem; colar pesagens | `peso.desempenho` | 3 |
-| Sanidade: agenda | `#/sanidade/agenda` | Vencidos, próximos, pendentes, carência ativa, custos | Registrar aplicação nos pendentes | `sanidade.agenda` | 3 |
+| Sanidade: agenda | `#/sanidade/agenda` | Procedimentos vencidos, próximos do vencimento, animais pendentes, protocolos executados no período (por protocolo: aplicações, animais atendidos e a cobertura definida em `07-financeiro-e-indicadores.md`, seção 8.4), custos por período; carência ativa | Registrar aplicação nos pendentes | `sanidade.agenda` | 3 |
 | Sanidade: produtos | `#/sanidade/produtos` | Dose padrão, carência, estoque × mínimo, validade | Editar; entrada de estoque | store¹; `produto.salvar`; `evento.registrar` | 3 |
 | Sanidade: protocolos | `#/sanidade/protocolos` | Regras de recorrência (nenhuma ativa de fábrica) | Editar; ativar | store¹; `protocolo.salvar` | 3 |
 | Reprodução: matrizes | `#/reproducao/matrizes` | Situação reprodutiva; partos previstos; matrizes sem histórico | Registrar exposição, IA, diagnóstico, parto | store; `reproducao.indicadores` | 3 |
@@ -138,7 +138,7 @@ As rotas de tela são por hash (coluna "Rota" da seção 3) e levam só tela e I
 | B Genealogia | Genealogia | Árvore e lista de crias ("todos os bezerros de uma matriz"). Sem pai nem mãe conhecidos, a aba diz "sem genealogia registrada" (§5.2: "quando houver informações suficientes") |
 | D Pastos | Pastos | Períodos de permanência |
 | E Peso | Peso | Curva em SVG e tabela com ganho, dias, GMD e variação %; projeção tracejada, rotulada "estimativa" |
-| F Sanidade · G Reprodução | Sanidade · Reprodução | Aplicações, carência, próximas doses; partos, coberturas, diagnósticos, intervalo entre partos |
+| F Sanidade · G Reprodução | Sanidade · Reprodução | Todos os registros sanitários do animal (vacinas, vermífugos, medicamentos, tratamentos, exames e doenças), carência, próximas doses; ficha reprodutiva da matriz (§9): situação reprodutiva e cria ao pé, histórico de partos, quantidade de bezerros (nascidos vivos, natimortos e desmamados), exposições e datas de cobertura, inseminações, diagnósticos, perdas gestacionais (abortos e natimortos), intervalo entre partos |
 | H Financeiro | Financeiro | Aquisição, custeio alocado, receita, resultado; critério de rateio de cada valor |
 | I Eventos | Linha do tempo | Todos os eventos em ordem cronológica; estornados riscados |
 | J Fotos e documentos | Anexos | Miniaturas (~15 KB); original sob toque |
@@ -426,9 +426,9 @@ Uma consulta, `dashboard.obter(filtros)`, devolve todos os cartões e séries; c
 
 | Caso | O que aparece |
 |---|---|
-| Filtro de sexo ativo | "Machos", "Fêmeas" e o gráfico por sexo viram "—" com motivo FILTRO_NAO_APLICAVEL (seriam zero ou 100% por construção) |
+| Filtro de sexo ativo | "Machos", "Fêmeas" e o gráfico por sexo ignoram o filtro e ganham a etiqueta "todos os sexos" (tratamento E da matriz de `07-financeiro-e-indicadores.md`, seção 9; filtrados, seriam zero ou 100% por construção) |
 | Pasto, sexo ou categoria nos indicadores financeiros | Valor pelas alocações, mais a linha "não atribuído: R$ …"; sem ela, o custo pareceria baixo e o resultado, inflado |
-| Caixa líquido com filtro de animal | Valor com a etiqueta "não filtrado por pasto, sexo ou categoria": parcela não tem animal |
+| Caixa líquido com filtro de animal | "—" com motivo FILTRO_NAO_APLICAVEL (tratamento N da matriz de `07-financeiro-e-indicadores.md`, seção 9): parcela não tem animal |
 
 **Dado ausente** (§12): "—" e, ao toque, o motivo: DADOS_INSUFICIENTES ("n = 3; mínimo 5"), ANTERIOR_AO_MARCO_ZERO, SEM_VALOR_DE_REFERENCIA ("definir em Configurações › Preços"). Série com menos de 2 pontos não desenha linha: "dados insuficientes desde dd/mm". Histórico e projeção nunca na mesma série. Valor com cobertura parcial mostra a cobertura: "412 de 430 cabeças valoradas".
 

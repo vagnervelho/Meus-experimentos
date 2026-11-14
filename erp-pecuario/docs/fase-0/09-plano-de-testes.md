@@ -5,7 +5,7 @@
 - **Três níveis**: 1 em Node contra fakes fiéis, a cada commit; 2 no Apps Script, pelo dono, em planilha temporária; 3 de interface, com Playwright.
 - **20 cenários com valores fechados**: CT-01 a CT-10 são os da §18, marcador por marcador; CT-11 a CT-20 cobrem o que ela não alcança.
 - **Protocolo de gravação testado por queda injetada** em cada ponto da análise de `06-persistencia-e-integridade.md` e por intercalação de execuções.
-- **Nenhuma das 20 regras da §16 fica sem teste** (seção 6); RN marcada "novo" em `05-regras-de-negocio.md` ganha caso próprio (seção 4.1).
+- **Nenhuma das 20 regras da §16 fica sem teste** (seção 6); RN marcada "novo" em `05-regras-de-negocio.md` ganha caso próprio (seção 4.1) ou é coberta por cenário, teste de queda, intercalação ou lint (RN-001, 031, 037, 105 e 110; seção 6.1).
 - **Honestidade (§20, regra 10)**: o relatório separa "executado aqui" de "a executar na conta do dono".
 
 **Documentos relacionados:** `04-motor-de-eventos.md`, `05-regras-de-negocio.md`, `06-persistencia-e-integridade.md`, `07-financeiro-e-indicadores.md`, `08-ux-ui.md`, `10-plano-de-implementacao.md`, `12-fatos-de-plataforma.md`.
@@ -195,6 +195,7 @@
 |7|0907 como mãe de 0905 (ciclo; a resposta traz o caminho)|010|
 |8|Extensão: pasto de destino inexistente ou inativo|019|
 |9|Extensão: evento datado de 14/11/2026|021|
+|10|Extensão: COMPRA de 0901 (vendido em 02/10/2026) datada de 01/10/2026, anterior à saída; a mesma compra datada de 13/11/2026 é aceita como reentrada, com o mesmo `animal_id`|016|
 
 **Verificações:** `ok: false` com `error.details[]` por animal e campo; todas as abas idênticas antes e depois; chave de idempotência não consumida.
 
@@ -245,7 +246,7 @@
 |e|MANUAL somando 99,99 de 100,00|VALIDATION|
 |f|Re-rateio de (a)|Novo evento RATEIO; linhas antigas intactas|
 
-**Verificações:** Σ alocado = valor; RATEIOS com critério, `base_total` (3; 7.600; 57) e `total_alocado`; entrada embaralhada dá a mesma saída; 1.000 sorteios com semente fixa mantêm Σ exata.
+**Verificações:** Σ alocado = valor; RATEIOS com critério, `base_total` (3; 760,0; 57) e `total_alocado`; entrada embaralhada dá a mesma saída; 1.000 sorteios com semente fixa mantêm Σ exata.
 
 ### CT-14: Venda por arroba
 
@@ -253,7 +254,7 @@
 
 **Passos:** (a) carcaça apurada: romaneio de 285,0 e 270,0 kg, R$ 320,00 por arroba, taxas de R$ 177,60 retidas pelo comprador; (b) rendimento estimado: pesos vivos de 540,0 e 510,0 kg, 52%, R$ 310,00 por arroba; (c) ARROBA sem `base_peso`.
 
-**Verificações:** (a) 555,0 ÷ 15 = 37,00 @; bruto R$ 11.840,00, alocado por PESO_CARCACA (6.080,00 e 5.760,00); depósito esperado R$ 11.662,40; `rendimento_tipo` APURADO; nenhuma linha em PESAGENS; (b) 1.050,0 × 0,52 ÷ 15 = 36,40 @; bruto R$ 11.284,00 (5.803,20 e 5.480,80); `rendimento_tipo` ESTIMADO; 2 PESAGENS (VENDA); (c) VALIDATION. Todo R$/@ exibido traz a base.
+**Verificações:** (a) 555,0 ÷ 15 = 37,00 @; bruto R$ 11.840,00, alocado por PESO_CARCACA (6.080,00 e 5.760,00); depósito esperado R$ 11.662,40; `rendimento_carcaca_pct` 52,4 e `rendimento_tipo` APURADO (555,0 ÷ 1.060,0); 2 PESAGENS (VENDA) com os pesos vivos de 540,0 e 520,0 kg e nenhuma com peso de carcaça; (b) 1.050,0 × 0,52 ÷ 15 = 36,40 @; bruto R$ 11.284,00 (5.803,20 e 5.480,80); `rendimento_tipo` ESTIMADO; 2 PESAGENS (VENDA); (c) VALIDATION. Todo R$/@ exibido traz a base.
 
 ### CT-15: Estorno × parcela liquidada
 
@@ -399,7 +400,7 @@ Regra 18: como toda entrada exige pasto, "ativo sem pasto" só nasce de edição
 
 ## 8. Testes por fase
 
-O nível 1 inteiro roda a cada commit; a fase N exige verde tudo das fases 1 a N.
+O nível 1 inteiro roda a cada commit; a fase N exige verde tudo das fases 1 a N. Um cenário alocado a uma fase roda só com eventos já entregues nela. Na Fase 1, o CT-10 usa AJUSTE_INVENTARIO/CORRECAO_CADASTRO no lugar da PESAGEM (que é da Fase 3, quando o cenário volta a rodar como escrito, inclusive o passo 3), e os comandos-modelo das quedas e intercalações (seção 5) são ENTRADA_INICIAL, estorno de entrada e `animal.editar`; a venda, o estorno de transferência e a correção de compra entram como modelos na Fase 2, e `parcela.baixar`, na Fase 4. Na Fase 2, o fato independente do CT-17 (b) e da massa do CT-18 é uma IDENTIFICACAO; a pesagem entra na Fase 3.
 
 |Fase|Nível 1|Nível 2 (dono)|Nível 3|Também para fechar|
 |---|---|---|---|---|
@@ -409,18 +410,20 @@ O nível 1 inteiro roda a cada commit; a fase N exige verde tudo das fases 1 a N
 |4|CT-13 completo, CT-15, CT-19|CT-15|Baixa de parcela, rateio|Conciliação sobre a base do seed|
 |5|CT-16; indicadores `null` com motivo|XLSX e PDF|Dashboard, relatórios, acessibilidade|Exportação × tela nos 17 relatórios|
 
+**Cenário que usa peça de fase posterior.** Na fase indicada, o cenário roda só com o que ela entrega; a parte restante é conferida na fase que entrega a peça, e até lá o relatório a marca `NÃO SE APLICA`. CT-10 na Fase 1: os passos 1, 2, 4, 5 e 6 usam OUTRA_ENTRADA de animal novo no lugar de PESAGEM (Fase 3); o passo 3 entra na Fase 3. CT-12 na Fase 1: sem a verificação de reconciliação, que nasce com os importadores de eventos (Fase 2). CT-18 na Fase 1: substituição de ENTRADA_INICIAL com uma CORRECAO_LOCALIZACAO posterior; na Fase 2, a compra com a transferência; a pesagem de 12/02 entra na Fase 3. CT-17 (b) na Fase 2: o fato independente no dia da saída é uma IDENTIFICACAO; a pesagem entra na Fase 3. CT-03 na Fase 2: confere lançamentos, parcelas e alocações; o resultado gerencial de fevereiro é conferido na Fase 4.
+
 **Ensaio de restauração (Fase 1).** Na base de teste: `sistema.backup`; registrar 3 eventos; `sistema.restaurarBackup`. Esperado: banco trocado; os 3 eventos ausentes; inventário igual ao do backup; integridade sem erro; versão de dados acima da última servida; banco anterior ainda no Drive.
 
 ## 9. Testes estáticos (lint)
 
 Regex sobre `src/`, cada regra com autoteste de detecção:
 
-- **Arquivos**: proibidos `DriveApp` e `SpreadsheetApp.create`.
+- **Arquivos**: proibidos `DriveApp`, `SpreadsheetApp.create` e `Spreadsheet.copy` (todo `.copy(` que não seja `Drive.Files.copy`).
 - **Recursos externos**: `<script src>` só o do Chart.js (versão fixa, com `integrity`); página até cerca de 450 KB.
-- **`Date`**: `new Date` só em `Utils` (relógio); o harness percorre toda resposta de `api()` e falha ao achar `Date`.
+- **`Date`**: `new Date()` sem argumento (leitura do relógio) só em `Database`, na implementação da porta `Clock` (`01-arquitetura.md`, 6.1); `Utils` pode construir datas a partir de valores, para a aritmética, mas não lê o relógio; o harness percorre toda resposta de `api()` e falha ao achar `Date`.
 - **Carga nas duas ordens**: alfabética e inversa, com a mesma superfície pública.
 - **Superfície pública**: sem `_` no fim, só `doGet`, `api`, `setup`, `runAcceptanceTests`, `verifyIntegrity` e os dois gatilhos, cada uma começando por `assertOwner_()`.
-- **Camadas**: serviços do Apps Script fora dos arquivos de domínio; escrita na planilha só em `Database`; `LockService` só em `UnitOfWork`.
+- **Camadas**: serviços do Apps Script fora dos arquivos de domínio; escrita na planilha só em `Database`; `LockService` só em `Database`, que implementa a porta `Lock` usada pela `UnitOfWork` (`01-arquitetura.md`, 6.1).
 - **Sem exclusão**: o roteador não tem rota de apagar.
 
 ## 10. Modelo do relatório de testes por fase

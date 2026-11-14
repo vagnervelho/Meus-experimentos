@@ -88,7 +88,8 @@ As 30 ambiguidades e contradições encontradas na especificação, com a leitur
 - **Revisão adversarial do desenho, antes da redação.** Sete revisores independentes atacaram o desenho-base: 110 achados (5 bloqueantes, 39 altos). Todos foram decididos um a um; os cinco bloqueantes mudaram o desenho. Detalhe em `13-revisao-adversarial.md`.
 - **Diagramas.** Os 23 diagramas Mermaid dos 14 documentos foram renderizados em navegador, sem erro. Tabelas e blocos de código foram conferidos por script.
 - **Consistência de nomes.** Um script confere, contra o desenho-base, as colunas das 34 abas no dicionário, toda referência `TABELA.coluna`, as rotas da API, os identificadores (regras, cenários, riscos, premissas, itens do spike) e os arquivos citados.
-- **Exemplos numéricos.** Os exemplos financeiros foram conferidos por script pelos autores de cada documento.
+- **Exemplos numéricos.** Conferidos por script pelos autores e refeitos por um revisor independente, com script próprio: 291 conferências, nenhuma divergência.
+- **Revisão independente dos documentos.** Três revisores (finanças e domínio, protocolo e plataforma, cobertura da especificação) devolveram 54 achados, 5 de severidade alta; todos foram aplicados. Os de severidade alta eram de regra, não de conta: dupla contagem do arrendamento num filtro do dashboard, compra de insumo sem caminho definido e três furos na análise de queda do protocolo de gravação. Detalhe em `13-revisao-adversarial.md`, seção 8.
 - **Fatos de plataforma.** Cada afirmação sobre Apps Script, Sheets e Drive tem fonte e grau de verificação em `12-fatos-de-plataforma.md`. A existência dos métodos foi conferida nos tipos oficiais; nenhuma API citada é inventada.
 
 **Não verificado, por não ser possível nesta fase:**

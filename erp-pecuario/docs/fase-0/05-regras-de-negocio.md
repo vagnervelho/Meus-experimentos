@@ -174,7 +174,7 @@ flowchart TD
 |RN-077|Σ alocações vigentes de um lançamento ≤ valor; a diferença aparece como "não alocado".|§11.2|INVARIANTE|Integridade|—|CT-13|
 |RN-078|Rateio fecha em centavos pelo maior resto: Σ alocado = valor rateado.|§11.2|INVARIANTE|FinancialService|—|CT-13|
 |RN-079|Toda alocação pertence a um rateio com critério, escopo, base e data ou período gravados.|§11.2|INVARIANTE|FinancialService; Integridade|—|CT-13|
-|RN-080|Custo compartilhado só chega ao animal por evento RATEIO; re-rateio é evento novo e não altera linhas antigas.|§11.2|INVARIANTE|FinancialService|—|CT-13|
+|RN-080|Custo compartilhado só chega ao animal por rateio gravado, com critério e base: no próprio evento que cria o lançamento ou em evento RATEIO posterior; re-rateio é sempre evento RATEIO novo e não altera linhas antigas.|§11.2|INVARIANTE|FinancialService|—|CT-13|
 |RN-081|Baixa exige parcela ABERTA, data não futura e `valor_pago` = valor + juros − desconto.|§11.3|ERRO|FinancialService|VALIDATION|CT-15|
 |RN-082|Criar ou cancelar lançamento, ou mexer em baixa, até `fin_bloqueio_ate` exige aceite com justificativa.|§11.3|AVISO|FinancialService|PERIODO_BLOQUEADO|novo|
 |RN-083|O resultado usa `natureza`: aquisição de animais, compra de insumos e não operacional ficam fora do custeio.|§11.3|INVARIANTE|FinancialService|—|CT-19|

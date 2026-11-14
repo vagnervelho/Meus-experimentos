@@ -280,7 +280,7 @@ flowchart LR
 
 ## 5. Estado do sistema fora da planilha
 
-Tudo o que não mora na planilha-banco fica em Script Properties, lidas com um único `getProperties()` por execução (custo por chamada sem fonte: a confirmar no spike, SP-05). Limites: 9 KB por valor, 500 KB no total.
+Tudo o que não mora na planilha-banco fica em Script Properties, lidas em bloco, com um `getProperties()` por ponto de leitura e nunca chave a chave (custo por chamada sem fonte: a confirmar no spike, SP-05). O resultado não é guardado de um ponto de leitura para o outro: a leitura validada relê marcador e versão depois das abas, e a recuperação relê o marcador com o lock na mão (`06-persistencia-e-integridade.md`, seções 6 e 7). Limites: 9 KB por valor, 500 KB no total.
 
 | Chave | Conteúdo | Quem grava | Se faltar ou estiver errada |
 |---|---|---|---|

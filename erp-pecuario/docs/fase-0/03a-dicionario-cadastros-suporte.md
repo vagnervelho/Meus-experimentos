@@ -567,7 +567,7 @@ PESAGEM aparece no desenho-base como "individual, coletiva ou por lote", em min�
 |---|---|
 | ABERTA | A pagar ou a receber. "Atrasada" é rótulo derivado (vencimento anterior a hoje), não valor gravado |
 | LIQUIDADA | Paga ou recebida |
-| CANCELADA | Parcela desdobrada por baixa parcial, ou de lançamento cancelado |
+| CANCELADA | Parcela desdobrada por baixa parcial. Parcela de lançamento cancelado não é regravada: sai do caixa pelo predicado de vigência (`03b`, seção 11) |
 
 **CRITERIO_RATEIO** — Onde: `RATEIOS.criterio`, `COMPRAS.criterio_rateio`, `VENDAS.criterio_rateio` (§6.3, §11.2).
 
@@ -1323,8 +1323,8 @@ Combinações aceitas na criação de conta:
 Leituras adotadas nas sementes:
 
 - **Por que `classe_custo_animal` existe.** O `grupo` separa Vacinas (custo direto) de Serviços veterinários (custo operacional), mas a §11.2 quer os dois na linha "custos sanitários" do animal. A classe resolve isso sem mexer na apresentação A–D.
-- **Contas `sistema = S`** (12): as que o motor lança sem o usuário escolher. COMPRA usa COMPRA_ANIMAIS e FRETE_DESPESAS_COMPRA; ENTRADA_INICIAL usa SALDO_ABERTURA_REBANHO; VENDA usa VENDA_ANIMAIS, FRETE_VENDA, COMISSAO_VENDA e TAXAS_RETENCOES_VENDA; a entrada de estoque usa COMPRA_INSUMOS; o consumo de produto usa a conta da categoria do produto: VACINA → VACINAS; VERMIFUGO e MEDICAMENTO → MEDICAMENTOS; SUPLEMENTO → ALIMENTACAO; OUTRO → TRATAMENTOS (proposta deste documento, DL-12; o mapeamento definitivo é do `EventCatalog`, descrito em `07-financeiro-e-indicadores.md`).
-- **Empréstimos.** Como `tipo` é atributo da conta, uma conta só não comporta a entrada do dinheiro e a devolução. A semente EMPRESTIMOS é DESPESA (pagamento de principal e encargos); o ingresso do empréstimo é lançado em APORTES, ou em conta de receita não operacional que o dono criar. Nenhuma das duas entra no resultado gerencial.
+- **Contas `sistema = S`** (13): as que o motor lança sem o usuário escolher. DESCARTE com receita simples usa OUTRAS_RECEITAS_OPERACIONAIS; COMPRA usa COMPRA_ANIMAIS e FRETE_DESPESAS_COMPRA; ENTRADA_INICIAL usa SALDO_ABERTURA_REBANHO; VENDA usa VENDA_ANIMAIS, FRETE_VENDA, COMISSAO_VENDA e TAXAS_RETENCOES_VENDA; a entrada de estoque usa COMPRA_INSUMOS; o consumo de produto usa a conta da categoria do produto: VACINA → VACINAS; VERMIFUGO e MEDICAMENTO → MEDICAMENTOS; SUPLEMENTO → ALIMENTACAO; OUTRO → TRATAMENTOS (proposta deste documento, DL-12; o mapeamento definitivo é do `EventCatalog`, descrito em `07-financeiro-e-indicadores.md`).
+- **Empréstimos.** Como `tipo` é atributo da conta, uma conta só não comporta a entrada do dinheiro e a devolução. A semente EMPRESTIMOS é RECEITA (entrada do principal), como na tabela acima e em DL-11; o pagamento de principal e encargos é lançado em outra conta NAO_OPERACIONAL, de tipo DESPESA, que o dono cria em `conta.salvar`. Nenhuma das duas entra no resultado gerencial.
 - **Compra de animais em custo direto.** A conta aparece no grupo B, como a §11 pede, mas a natureza AQUISICAO_ANIMAIS a tira do custeio do período, como a §11.3 exige. Exemplo: compra de 20 garrotes por R$ 60.000,00 com frete de R$ 1.500,00 → dois lançamentos de natureza AQUISICAO_ANIMAIS; custo de aquisição por animal = (60.000,00 + 1.500,00) ÷ 20 = R$ 3.075,00; efeito no resultado do mês da compra = zero; o custo entra no resultado no mês em que cada animal sair.
 
 ### 4.14 TABELA_PRECOS

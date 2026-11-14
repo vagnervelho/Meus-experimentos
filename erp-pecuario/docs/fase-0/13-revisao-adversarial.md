@@ -205,6 +205,31 @@ Decisão: **A** = adotado como proposto; **AA** = adotado com ajuste (a diferen�
 | Biblioteca de gráficos por CDN dentro do iframe | Precisa de teste | SP-08 |
 | Manejo reprodutivo, forma de venda, controle de estoque e demais premissas de negócio (a de gado de terceiros já foi respondida) | Só o dono sabe | PR-01 a PR-16 |
 
-## 8. Segunda revisão
+## 8. Segunda revisão: os documentos depois de escritos
 
-Os documentos da Fase 0, depois de redigidos, passam por uma segunda revisão (consistência entre documentos, exatidão do protocolo e conferência numérica dos exemplos financeiros). O resultado dessa segunda passada está registrado no `README.md` da pasta, na seção sobre o que foi e o que não foi verificado.
+Com os 14 documentos redigidos, houve uma segunda passada, em três camadas.
+
+**Verificações automáticas** (repetidas a cada alteração):
+
+- os 23 diagramas Mermaid foram renderizados em navegador; tabelas e blocos de código, conferidos por script;
+- um script compara os documentos com o desenho-base: colunas das 34 abas no dicionário, toda referência `TABELA.coluna`, rotas da API, identificadores (regras, cenários, riscos, premissas, itens do spike) e arquivos citados.
+
+**Dúvidas dos redatores.** Cada redator devolveu as decisões que tomou além do desenho-base e as dúvidas que ficaram. O arquiteto decidiu uma a uma; as que mudavam mais de um documento foram harmonizadas (códigos do plano de contas, posição do evento substituto no replay, exceção de reuso de brinco, ambiente de teste no contrato da API, contingências do spike).
+
+**Revisão independente por três lentes**, somente leitura, com correção exata por achado:
+
+| Lente | O que conferiu | Alta | Média | Baixa | Total |
+|---|---|---:|---:|---:|---:|
+| Finanças e domínio | Refez, com script próprio, 291 conferências numéricas dos exemplos de `07`, `03b`, `05`, `04` e `09`; fórmulas; plano de contas; indicadores | 2 | 10 | 8 | 20 |
+| Protocolo e plataforma | Protocolo de três fases entre `01`, `04`, `06` e `09`; análise de queda refeita; existência das APIs; cotas; cenários × §18 | 3 | 10 | 7 | 20 |
+| Cobertura da especificação | Cada requisito das §1 a §23 contra os documentos | 0 | 5 | 9 | 14 |
+| **Total** | | **5** | **25** | **24** | **54** |
+
+Resultado:
+
+- **Aritmética:** nenhuma das 291 conferências divergiu.
+- **Os 54 achados foram aplicados.** Nenhum foi rejeitado.
+- **Os cinco de severidade alta eram de regra, não de conta:** (1) o filtro de pasto do dashboard somava o arrendamento duas vezes, pelo lançamento e pelas alocações; (2) a compra de insumo sem controle de estoque ficava sem caminho e seria contada na compra e no consumo; (3) na fase C, a marca de "aplicada" ia no mesmo lote das projeções e podia chegar sem elas; (4) a consulta de estado da operação respondia "em andamento" para sempre se a execução original tivesse morrido; (5) um trecho da arquitetura contradizia a releitura obrigatória na recuperação.
+- **Cobertura:** nenhuma lacuna de severidade alta; as omissões eram pontuais (por exemplo, "protocolos executados" na agenda sanitária, itens da ficha reprodutiva, o mapeamento das 12 regras da §20).
+
+Limite desta segunda revisão: ela conferiu coerência interna, aritmética e cobertura. Não substitui o spike nem os testes no ambiente real: nada foi executado no Google.

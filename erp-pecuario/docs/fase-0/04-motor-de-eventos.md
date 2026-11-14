@@ -51,7 +51,7 @@ Pontos que definem o comportamento:
 
 1. **Tudo ou nada na validação.** A ordem é: esquema dos campos → regras do tipo → linha do tempo de cada animal → regras financeiras → tetos de tamanho. Um erro em um animal rejeita o evento inteiro, com a lista de erros por animal e por campo. Nunca se grava "os 77 que passaram": o usuário tira os 3 da lista e reenvia, de forma explícita.
 2. **Avisos com aceite.** Regras que admitem exceção (carência ativa, possível duplicidade, lotação acima da capacidade, peso implausível, período bloqueado) voltam como `NEEDS_CONFIRMATION`. Nada é gravado e a chave não é consumida. O cliente mostra os avisos e reenvia com os aceites. A política por código (bloqueia, avisa, ignora) fica em `avisos_politica`.
-3. **Simulação é a mesma função.** `evento.simular` executa os passos de leitura, validação e plano sem gravar. Prévia e gravação não podem divergir, porque não há duas implementações.
+3. **Simulação é a mesma função.** `evento.simular` executa os passos de leitura, validação e plano sem gravar. É consulta: não toma o lock de escrita nem passa pela checagem de idempotência; lê pela leitura otimista validada (`06-persistencia-e-integridade.md`). No diagrama, o desvio "modo SIMULAR" aproveita só os passos de leitura, validação e plano. Prévia e gravação não podem divergir, porque não há duas implementações.
 4. **Revisão antes de confirmar (§6).** Eventos de `revisao = LOCAL` montam a folha de confirmação no próprio navegador e fazem uma ida ao servidor. Eventos de `revisao = SERVIDOR` chamam a simulação, mostram impactos e rateio calculados, e o commit envia a versão dos dados que o usuário viu; se ela mudou, a resposta é CONFLICT.
 5. **As três fases** estão detalhadas, com a análise de queda, em `06-persistencia-e-integridade.md`.
 
@@ -117,7 +117,7 @@ stateDiagram-v2
   [*] --> ABERTA
   ABERTA --> LIQUIDADA: baixa
   LIQUIDADA --> ABERTA: desfazer baixa
-  ABERTA --> CANCELADA: evento anulado
+  ABERTA --> CANCELADA: desdobramento por baixa parcial
   state "Importacao" as IMP {
     [*] --> RASCUNHO
     RASCUNHO --> VALIDADO: validacao
@@ -233,7 +233,7 @@ Animal a mais na contagem entra por OUTRA_ENTRADA ou ENTRADA_INICIAL, não por a
 
 ### 4.7 Financeiro e estoque
 
-**LANCAMENTO_FINANCEIRO** — receita ou despesa avulsa: conta, competência (data ou período), valor, parceiro, vínculos (pasto, propriedade, categoria, evento de referência), parcelas. Exemplo: aluguel de pasto arrendado.
+**LANCAMENTO_FINANCEIRO** — receita ou despesa avulsa: conta, competência (data ou período), valor, quantidade (opcional), parceiro, vínculos (pasto, propriedade, categoria, evento de referência), parcelas e rateio opcional no próprio evento (critério, escopo e período). Exemplo: aluguel de pasto arrendado, na conta "Arrendamento de pasto", com o pasto, o arrendador, o período de competência e, se o preço for por cabeça/mês, a quantidade (cabeças × meses); rateio por dias de permanência com escopo no pasto, no próprio evento ou depois, por evento RATEIO.
 
 **RATEIO** — distribui um lançamento entre animais por cabeças, peso vivo, dias de permanência ou percentual manual. Re-ratear é um novo evento; o anterior deixa de valer sem ser alterado.
 

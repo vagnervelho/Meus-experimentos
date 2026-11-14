@@ -4,7 +4,7 @@
 
 - São cinco fases, na ordem da §19. Cada uma termina com software utilizável, testado e versionado, e só avança com os testes da fase passando.
 - A Fase 1 começa por um **spike técnico de 10 itens** (SP-01 a SP-10): antes de construir, confirmar no ambiente real o que a documentação não permitiu verificar. O primeiro item decide a forma de gravar na planilha.
-- O plano muda a distribuição da §19 em seis pontos, todos pelo mesmo motivo: a base recebe dados reais já na Fase 1, então correção, auditoria, backup e integridade não podem esperar a Fase 2; e um evento precisa gravar todos os seus fatos na fase em que nasce.
+- O plano muda a distribuição da §19 em doze pontos (seção 2), a maioria por dois motivos: a base recebe dados reais já na Fase 1, então correção, auditoria, backup e integridade não podem esperar a Fase 2; e um evento precisa gravar todos os seus fatos na fase em que nasce.
 - Não há estimativa em dias: falta base para isso. As entregas estão ordenadas por dependência e têm tamanho relativo (P, M, G).
 
 **Documentos relacionados:** `01-arquitetura.md` (arquivos de `src/`), `04-motor-de-eventos.md` (catálogo), `09-plano-de-testes.md` (cenários CT-nn), `11-riscos-e-premissas.md` (premissas PR-nn), `12-fatos-de-plataforma.md` (o que o spike precisa fechar).
@@ -187,7 +187,7 @@ O caminho crítico é spike → persistência → UnitOfWork → motor → anima
 | §4 modelo de dados completo | 1 |
 | §5 listagem, filtros, ordenação, paginação, cadastro, edição, exportação | 1 |
 | §5.1 ficha: A geral, B genealogia, C localização, I eventos, J fotos e documentos | 1 |
-| §5.1 ficha: D histórico de pastos | 2 |
+| §5.1 ficha: D histórico de pastos | 1 (entrada e correção de localização); transferências na 2 |
 | §5.1 ficha: E peso, F sanitário, G reprodutivo | 3 (parto na 2) |
 | §5.1 ficha: H financeiro | 2 (compra e venda), 4 (custos) |
 | §5.2 genealogia e árvore | 1 |
@@ -226,6 +226,23 @@ O caminho crítico é spike → persistência → UnitOfWork → motor → anima
 - **O que nunca será dito sem evidência.** Que algo foi implantado, ou que passou em teste na conta do dono. O relatório de testes de cada fase separa o que rodou aqui (Node) do que só o dono pode rodar.
 - **Mudança de desenho durante a implementação.** Se o spike ou o uso real contrariar uma decisão desta fase, a mudança é registrada no CHANGELOG com o motivo, e o documento da Fase 0 afetado é atualizado no mesmo commit.
 - **Premissas e limitações.** Ficam em `11-riscos-e-premissas.md`, atualizado a cada fase.
+
+**As 12 regras da §20, uma a uma.**
+
+| §20 | Regra | Como o plano a cumpre |
+|---|---|---|
+| 1 | Sem código superficial | Entrega só fecha com os cenários CT da fase passando (seção 1, regra 1) |
+| 2 | Sem dado estático no lugar da persistência | Toda tela lê de `api()`; a "Visão geral" já nasce com números reais; resposta simulada só existe em `tests/ui/` |
+| 3 | Sem botão sem função | Menu e seletor mostram só módulos entregues (seção 1, regra 3) |
+| 4 | Nada essencial como TODO | Item só é marcado no CHECKLIST quando completo; o que fica fora do MVP está em `11-riscos-e-premissas.md`, seção 3, não em comentário de código |
+| 5 | Sem API inventada | Assinaturas conferidas nos tipos e registradas em `12-fatos-de-plataforma.md`; o que não tem fonte vai ao spike (seção 3) |
+| 6 | Sem omitir arquivo | Arquivos completos; o guia de implantação lista todos os arquivos de `src/`; a compatibilidade entre arquivos é conferida pelo teste de carga nas duas ordens |
+| 7 | Sem simplificar regra sem justificar | Divergências DV-01 a DV-20 (`02-modelo-de-dados.md`, seção 9) e limitações (`11-riscos-e-premissas.md`, seção 3); mudança durante a implementação vai ao CHANGELOG com o motivo |
+| 8 | Sem lógica duplicada entre frontend e backend | Formulário e validação saem do mesmo `EventCatalog`; o cliente só valida formato |
+| 9 | Sem esconder erro | Envelope com código de erro; exceção inesperada vai para ERROS_LOG; a verificação de integridade só relata; o relatório de testes lista as falhas conhecidas |
+| 10 | Não dizer "testado" sem executar | Relatório por fase separa "executado aqui" de "a executar na conta do dono" |
+| 11 | Documentar premissas e limitações | `11-riscos-e-premissas.md`, atualizado a cada fase |
+| 12 | Código legível, modular e sustentável | Camadas e um arquivo por domínio (`01-arquitetura.md`, seção 6), com testes estáticos de camada e de superfície pública |
 
 ## 8. Checklist mestre
 
