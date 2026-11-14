@@ -850,6 +850,13 @@ function criarMundoPlanilhas(amb) {
         if (!Array.isArray(reqs) || !reqs.length) throw erroApi('Must specify at least one request.');
         let respostas = [];
         const abas = [];
+        reqs.forEach((req) => {
+          const tipo = Object.keys(req || {})[0];
+          const r = (tipo && req[tipo]) || {};
+          const id = r.sheetId !== undefined ? r.sheetId : r.start ? r.start.sheetId : r.range ? r.range.sheetId : r.properties ? r.properties.sheetId : undefined;
+          const nome = tipo === 'addSheet' ? (r.properties || {}).title : (ss.abas.find((a) => a.sheetId === (id === undefined ? 0 : id)) || {}).nome;
+          if (nome !== undefined && abas.indexOf(nome) < 0) abas.push(nome);
+        });
         escreverDireto({ ss: ss.id, aba: null, abas, tipo: 'api', metodo: 'spreadsheets.batchUpdate', pedidos: reqs.length }, [() => {
           // Traduz e aplica pedido a pedido; qualquer erro desfaz o lote inteiro (atomicidade documentada da API).
           const desfazer = [];
@@ -889,6 +896,7 @@ function criarMundoPlanilhas(amb) {
           if (!Array.isArray(r.data)) throw erroApi('Invalid data: must be a list');
           const respostas = [];
           const abas = [];
+          r.data.forEach((item) => { const p = parseA1(ss, item && item.range); if (abas.indexOf(p.aba.nome) < 0) abas.push(p.aba.nome); });
           const info = { ss: ss.id, aba: null, abas, tipo: 'api', metodo: 'spreadsheets.values.batchUpdate', pedidos: r.data.length };
           amb.antesDeEscrever(info);
           // SEM atomicidade entre intervalos (hipótese pessimista do desenho, 06 seção 2): o que veio antes do erro fica.
