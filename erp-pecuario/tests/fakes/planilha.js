@@ -22,9 +22,10 @@ const MS_DIA = 86400000;
 function tzOffsetMinutes(date, timeZone) {
   const fmt = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'longOffset' });
   const name = fmt.formatToParts(date).find((p) => p.type === 'timeZoneName').value; // GMT-04:00
-  const m = /GMT([+-])(\d{2}):?(\d{2})?/.exec(name);
+  const m = /GMT([+-])(\d{2}):?(\d{2})?(?::(\d{2}))?/.exec(name);
   if (!m) return 0;
-  const v = parseInt(m[2], 10) * 60 + parseInt(m[3] || '0', 10);
+  // Fusos antigos têm segundos (hora local média, antes de 1914): contam, para a hora pura (30/12/1899) ir e voltar.
+  const v = parseInt(m[2], 10) * 60 + parseInt(m[3] || '0', 10) + parseInt(m[4] || '0', 10) / 60;
   return m[1] === '-' ? -v : v;
 }
 function ehData(v) {
@@ -867,13 +868,13 @@ function criarMundoPlanilhas(amb) {
               const t = traduzirRequest(ss, req, i, abasNovas);
               t.ops.forEach((op) => desfazer.push(op()));
               t.abas.forEach((n) => { if (abas.indexOf(n) < 0) abas.push(n); });
-              pendResp.push(t.resposta);
+              pendResp.push(t.resposta()); // a resposta retrata a planilha logo depois DESTE pedido
             });
           } catch (e) {
             for (let i = desfazer.length - 1; i >= 0; i--) desfazer[i]();
             throw e;
           }
-          respostas = pendResp.map((f) => f());
+          respostas = pendResp;
           return () => { for (let i = desfazer.length - 1; i >= 0; i--) desfazer[i](); };
         }]);
         return amb.paraContexto({ spreadsheetId: ss.id, replies: respostas });
