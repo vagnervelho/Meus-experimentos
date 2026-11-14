@@ -431,10 +431,9 @@ var EventService = (function () {
     if (!e) { erroItem_(m, it, 'animal_id', 'NAO_ENCONTRADO', 'animal não encontrado.'); return; }
     it.codigo_interno = e.codigo_interno;
     it.estado = e;
-    if (vazio_(it.dados.brinco) || ctxEv.subtipo !== 'IDENTIFICACAO_INCORRETA') it.quem = nomeAnimal_(e);
-    it.brincoTexto = e.brinco || it.brincoTexto;
+    it.quem = nomeAnimal_(e);
+    it.brincoTexto = nulo_(e.brinco);
     if (e.situacao_cadastral === 'EXTERNO') { erroItem_(m, it, 'animal_id', 'ANIMAL_EXTERNO', 'animal de fora do rebanho é corrigido pela edição do cadastro de referência.'); return; }
-    if (vazio_(ctxEv.ev.justificativa)) return;
     if (ctxEv.subtipo === 'CORRECAO_CADASTRO') return correcaoCadastro_(m, ctxEv, it, e);
     if (ctxEv.subtipo === 'IDENTIFICACAO_INCORRETA') return identificacaoIncorreta_(m, ctxEv, it, e);
     return correcaoLocalizacao_(m, ctxEv, it, e);
@@ -515,15 +514,14 @@ var EventService = (function () {
       if (fim.sexo === 'M' && g.campos.partos_previos !== undefined) erroItem_(m, it, 'campo', 'NAO_SE_APLICA', 'partos anteriores só se aplicam a fêmeas.');
       if (fim.sexo === 'M' && fim.castrado === true && fim.reprodutor === true && (g.campos.castrado !== undefined || g.campos.reprodutor !== undefined)) erroItem_(m, it, 'campo', 'CASTRADO_REPRODUTOR', 'animal castrado não pode ser reprodutor.');
       // Apagar a mãe, o pai ou uma data apaga também a confiança (que deixaria de ter a que se referir).
-      [['mae_id', 'mae_confianca'], ['pai_id', 'pai_confianca'], ['data_nascimento', 'data_nascimento_confianca'], ['data_entrada', 'data_entrada_confianca']].forEach(function (par) {
-        if (g.campos[par[0]] === null && g.campos[par[1]] === undefined && !vazio_(e[par[1]]) && par[0] !== 'data_entrada') {
+      [['mae_id', 'mae_confianca'], ['pai_id', 'pai_confianca'], ['data_nascimento', 'data_nascimento_confianca']].forEach(function (par) {
+        if (g.campos[par[0]] === null && g.campos[par[1]] === undefined && !vazio_(e[par[1]])) {
           ajusteRow_(m, ctxEv, it, par[1], textoCampo_(par[1], e[par[1]]), null);
           fim[par[1]] = null;
         }
-        if (!vazio_(fim[par[0]]) && vazio_(fim[par[1]]) && par[0] !== 'data_entrada') erroItem_(m, it, par[1], 'CAMPO_OBRIGATORIO', 'informe também "' + par[1] + '".');
-        if (vazio_(fim[par[0]]) && !vazio_(g.campos[par[1]]) && par[0] !== 'data_entrada') erroItem_(m, it, par[1], 'CAMPO_SEM_VINCULO', '"' + par[1] + '" precisa de "' + par[0] + '" preenchido.');
+        if (!vazio_(fim[par[0]]) && vazio_(fim[par[1]])) erroItem_(m, it, par[1], 'CAMPO_OBRIGATORIO', 'informe também "' + par[1] + '".');
+        if (vazio_(fim[par[0]]) && !vazio_(g.campos[par[1]])) erroItem_(m, it, par[1], 'CAMPO_SEM_VINCULO', '"' + par[1] + '" precisa de "' + par[0] + '" preenchido.');
       });
-      if (g.campos.mae_confianca === 'DESCONHECIDA' || g.campos.pai_confianca === 'DESCONHECIDA') erroItem_(m, it, 'valor_novo', 'VALOR_FORA_DA_LISTA', 'vínculo de mãe ou pai preenchido é confirmado ou estimado.');
       if (g.campos.data_entrada !== undefined || g.campos.data_entrada_confianca !== undefined) {
         var entrada = Timeline.ordenar(m.f.linhas(id).filter(function (l) { return l.efeito === 1 && !l.pre_marco_zero; })).pop();
         if (!entrada || entrada.event_type !== 'ENTRADA_INICIAL') erroItem_(m, it, 'campo', 'NAO_SE_APLICA', 'a data de chegada só se corrige em animal do rebanho inicial; nos demais ela é a data do lançamento de entrada.');
@@ -536,7 +534,6 @@ var EventService = (function () {
     var novo = it.dados.brinco;
     if (vazio_(novo)) return;
     var codigo = Utils.aparar(novo);
-    it.quem = nomeAnimal_(e);
     if (vazio_(e.brinco)) { erroItem_(m, it, 'brinco', 'SEM_BRINCO', 'o animal não tem brinco para corrigir; o primeiro brinco é colocado pelo lançamento de identificação.'); return; }
     if (Utils.normalizarBrinco(codigo) === e.brinco_norm) { erroItem_(m, it, 'brinco', 'VALOR_IGUAL', 'o brinco informado é o mesmo que já está no cadastro.'); return; }
     var aberta = m.f.identificacoes(it.animal_id).filter(function (r) { return r.tipo === 'BRINCO' && r.codigo_norm === e.brinco_norm; });
@@ -645,7 +642,7 @@ var EventService = (function () {
    */
   function conferirGenealogia_(m, ctxEv) {
     var porRef = {};
-    var itens = ctxEv.itens.filter(function (it) { return it.animal_id; });
+    var itens = ctxEv.itens.filter(function (it) { return it.animal_id && !it.ignorarNaLinhaDoTempo; });
     itens.forEach(function (it) {
       var ref = it.dados.ref;
       if (vazio_(ref) || !it.novo && !it.reusado) return;
@@ -653,7 +650,7 @@ var EventService = (function () {
       else porRef[ref] = it;
     });
     var final = {};
-    itens.forEach(function (it) { final[it.animal_id] = it; });
+    itens.forEach(function (it) { if (!it.ignorarNaLinhaDoTempo && !final[it.animal_id]) final[it.animal_id] = it; });
     function sexoDe(id) { return final[id] && final[id].final.sexo !== undefined ? final[id].final.sexo : (estado_(m, id) || {}).sexo; }
     function nascDe(id) { return final[id] && final[id].final.data_nascimento !== undefined ? final[id].final.data_nascimento : (estado_(m, id) || {}).data_nascimento; }
     function nomeDe(id) { return final[id] ? final[id].quem.replace(/^Brinco /, '') : nomeAnimal_(estado_(m, id)); }
@@ -862,8 +859,7 @@ var EventService = (function () {
     var comCapacidade = Object.keys(destinos).filter(function (id) { var p = m.f.pasto(id); return p && typeof p.capacidade_estimada_cabecas === 'number'; });
     if (!comCapacidade.length || !Utils.dataValida(ctxEv.ev.event_date)) return;
     var novas = [];
-    var tocados = {};
-    ctxEv.itens.forEach(function (it) { if (it.linhas.length) { novas = novas.concat(it.linhas); tocados[it.animal_id] = true; } });
+    ctxEv.itens.forEach(function (it) { novas = novas.concat(it.linhas); });
     var linhas = m.f.todasAsLinhas().concat(novas);
     var inv = Timeline.inventario(linhas, ctxEv.ev.event_date, m.D0);
     comCapacidade.forEach(function (id) {
@@ -941,13 +937,13 @@ var EventService = (function () {
   }
   /** Valida as linhas montadas contra o esquema (tipos, listas, tetos) com o "quem" de cada animal. */
   function validarLinhas_(m, plano, itensPorAnimal) {
-    var listas = { RACA: m.listas.RACA || [], MOTIVO_IDENTIFICACAO: m.listas.MOTIVO_IDENTIFICACAO || [] };
+    var listas = m.listas;
     Object.keys(plano).forEach(function (t) {
       plano[t].forEach(function (r) {
         var it = r.animal_id ? itensPorAnimal[r.animal_id] : null;
         var row = {};
         Object.keys(r).forEach(function (k) { if (Schema.temColuna(t, k)) row[k] = r[k]; });
-        Validation.validarRegistro(t, row, { parcial: true, semProjecoes: true, tetoCelula: m.teto, listas: t === 'ANIMAIS' || t === 'IDENTIFICACOES' ? listas : undefined }).forEach(function (d) {
+        Validation.validarRegistro(t, row, { parcial: true, semProjecoes: true, tetoCelula: m.teto, listas: listas }).forEach(function (d) {
           m.col.erro({ codigo: d.codigo, animal_id: it && it.publico ? it.animal_id : null, brinco: it ? it.brincoTexto : null, campo: d.campo, mensagem: (it ? it.quem + ': ' : '') + d.mensagem });
         });
       });
@@ -963,7 +959,7 @@ var EventService = (function () {
     var linhaEv = {};
     Object.keys(ev).forEach(function (k) { if (Schema.temColuna('EVENTOS', k)) linhaEv[k] = ev[k]; });
     ctxEv.plano.EVENTOS.push(linhaEv);
-    validarLinhas_(m, ctxEv.plano, itensPorAnimal);
+    if (!m.col.temErros()) validarLinhas_(m, ctxEv.plano, itensPorAnimal);
     if (m.col.temErros()) return { erros: m.col.erros };
     if (m.conflitos.length) throw Validation.erro('CONFLICT', m.conflitos.length === 1 ? m.conflitos[0].mensagem : m.conflitos.length + ' registros já gravados impedem este lançamento.', m.conflitos);
     Object.keys(ctxEv.plano).forEach(function (t) { ctxEv.plano[t].forEach(function (r) { m.tx.plano.anexar(t, r); }); });
@@ -991,7 +987,9 @@ var EventService = (function () {
     EventCatalog.validarCampos(EventCatalog.camposEvento('ESTORNO'), { event_id: d.event_id, justificativa: d.justificativa }).forEach(function (x) { erroGeral_(m, x.campo, x.codigo, x.mensagem); });
     var alvo = vazio_(d.event_id) ? null : alvo_(m, d.event_id, 'estornar');
     if (!alvo) return { erros: m.col.erros };
+    var anteriores = m.col.erros;
     m = motor_(tx, [alvo.event_id]);
+    anteriores.forEach(function (x) { m.col.erro(x); });
     var linhas = m.f.linhasDoEvento(alvo.event_id);
     var animais = Utils.unicos(linhas.map(function (l) { return l.animal_id; }));
     var criados = {};
@@ -1051,7 +1049,6 @@ var EventService = (function () {
       animais: ids.map(function (id) { return animalPublico_(tx.cru ? tx.cru.cruPorId('ANIMAIS', id) : tx.repo.porId('ANIMAIS', id)); }).filter(Boolean),
     };
   }
-  var LEITURAS_CONSULTA = Utils === undefined ? [] : null;
   function leiturasConsulta_() {
     return Timeline.LEITURAS.concat(['PROPRIEDADES']);
   }

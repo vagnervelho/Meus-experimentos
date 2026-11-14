@@ -40,7 +40,7 @@ function projetorDeTeste() {
 
 /**
  * Ambiente de teste: harness + planilha-banco com todas as abas. opcoes: {primitiva, order, projecoes (false
- * desliga), gas (reaproveita um harness: dois bancos no mesmo projeto)}.
+ * desliga; função (G) → porta, ex.: G.Timeline.porta), gas (reaproveita um harness: dois bancos no mesmo projeto)}.
  */
 function ambiente(opcoes) {
   const o = opcoes || {};
@@ -49,7 +49,7 @@ function ambiente(opcoes) {
   const primitiva = o.primitiva || 'SHEETS_TYPED';
   const banco = gas.planilhas.criar(o.nome || 'Banco');
   gas.exec(() => G.Database.abrir(banco, { primitiva }).criarTabelas(G.Schema.nomesTabelas()));
-  const projecoes = o.projecoes === false ? null : o.projecoes || projetorDeTeste();
+  const projecoes = o.projecoes === false ? null : typeof o.projecoes === 'function' ? o.projecoes(G) : o.projecoes || projetorDeTeste();
   const amb = {
     gas, G, banco, primitiva, projecoes,
     chaveMarcador: 'PENDING_OP:' + banco,
