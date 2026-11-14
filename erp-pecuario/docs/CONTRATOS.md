@@ -4,7 +4,8 @@ Interfaces que cada etapa entrega para as seguintes. Uma seção curta por módu
 retorno e erros. Quem acrescenta um módulo acrescenta a seção dele aqui. O desenho está em `docs/fase-0/`; este
 arquivo descreve o que **existe no código**.
 
-Estado: etapa BASE (E1.1 e parte da E1.2) — `Schema`, `Utils`, `Validation`, harness de testes e estrutura do projeto.
+Estado: etapas BASE (E1.1 e parte da E1.2) — `Schema`, `Utils`, `Validation`, harness e estrutura — e PERSISTÊNCIA
+(E1.3 e E1.4) — `Database`, `Repository`, `UnitOfWork` e `AuditService` (parte 1).
 
 ## 1. Regras que valem para todo arquivo de `src/`
 
@@ -153,17 +154,90 @@ O que NÃO confere (é regra do evento ou do serviço): obrigatoriedade `COND`, 
 do tempo. Códigos de detalhe (`Validation.DETALHE`): `CAMPO_OBRIGATORIO`, `CAMPO_DESCONHECIDO`, `TIPO_INVALIDO`,
 `FORMATO_INVALIDO`, `VALOR_FORA_DA_LISTA`, `VALOR_FORA_DA_FAIXA`, `TEXTO_LONGO_DEMAIS`.
 
-## 5. Portas do contexto de execução
+## 5. Portas e contexto de execução
 
-O domínio puro recebe portas; nunca chama o Apps Script. As três abaixo já são consumidas ou oferecidas pelo
-harness (`gas.portas()`); a implementação real é do `Database`/`Api`. Portas novas (repositório, lock, arquivos)
-são documentadas aqui por quem as criar.
+O domínio puro nunca chama o Apps Script: recebe um **contexto** por execução, com portas. Em produção, a `Api`
+monta o contexto com `Database.contexto(opcoes)`; nos testes, o mesmo objeto é montado sobre os fakes do harness
+(`tests/apoio-persistencia.js`). Um contexto vale para UMA execução do Apps Script (não se guarda entre execuções).
 
-| Porta | Contrato | Implementação real prevista |
+| Campo | Contrato | Implementação real |
 |---|---|---|
-| `hash` | `sha256Hex(texto) → 64 caracteres hexadecimais minúsculos` (UTF-8) | `Utils.bytesParaHex(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, texto, Utilities.Charset.UTF_8))` |
+| `banco` | Id da planilha-banco. Sufixo das chaves `DATA_VERSION:<banco>` e `PENDING_OP:<banco>` | `SPREADSHEET_ID`, ou `TEST_`/`DEMO_SPREADSHEET_ID` com `ambiente` (Api) |
+| `io` | Porta de E/S da planilha (seção 8) | `Database.abrir(banco, {primitiva})` |
+| `lock` | `tentar(ms) → booleano` (espera até `ms`); `soltar()`; `tem() → booleano` | `LockService.getScriptLock()`: `tryLock`, `releaseLock`, `hasLock` |
 | `clock` | `agoraMs() → number`; `agora() → instante ISO-8601 UTC`. "Hoje" = `Utils.hoje(clock.agora(), fuso)` | Único lugar com `new Date()` sem argumento |
 | `idGen` | `uuid() → UUID minúsculo de 36 caracteres` | `Utilities.getUuid()` |
+| `hash` | `sha256Hex(texto) → 64 caracteres hexadecimais minúsculos` (UTF-8) | `Utilities.computeDigest(SHA_256, texto, UTF_8)` + `Utils.bytesParaHex` |
+| `props` | `ler() → {chave: texto}` (UM `getProperties()` por chamada: o retrato de um ponto de leitura); `gravar(chave, valor)`; `remover(chave)` | `PropertiesService.getScriptProperties()` |
+| `files` | `FileStore` (Drive: backups, anexos, exportações) | `FileService` (etapa posterior); `null` até lá |
+| `session` | Sessão do pedido (dono, e-mail ativo) | `Api` (etapa posterior); `null` até lá |
+| `usuario` | E-mail de quem executa; obrigatório em `UnitOfWork.run` (vai para `OPERACOES.usuario`, `created_by`, `AUDITORIA.usuario`) | `Api` |
+| `fuso` | Fuso IANA de "hoje" | `CONFIGURACOES.fuso` (Api); padrão `Session.getScriptTimeZone()` |
+| `projecoes` | Porta do projetor: `{reads: [abas], reconstruir(tx, escopo)}` (seção 10.4); `null` = a fase C só refaz `EVENTOS.status` e a auditoria | `Timeline` (etapa seguinte) |
+| `errosPendentes` | Fila de registros de ERROS_LOG da execução (`UnitOfWork.anotarErro`) | — |
+
+O tratador de comando ou consulta recebe da `UnitOfWork` o objeto **`tx`**:
+
+| Campo | Conteúdo |
+|---|---|
+| `repo` | Fachada pública do `Repository`: só linhas VIGENTES das abas declaradas em `reads` (seção 9) |
+| `cru` | Fachada de leitura crua (inclui linhas inertes) — só com `acessoCru: true` (recuperação, integridade) e na porta de projeções; senão `null` |
+| `plano` | Plano de escrita (`Repository.plano()`): `anexar(tabela, registro)`, `auditar(mudanca)` |
+| `rota`, `dados`, `avisosAceitos` | Do pedido |
+| `usuario`, `agora`, `hoje` | Quem, o instante da unidade (ISO) e a data de hoje no fuso |
+| `opId` | Id da operação que será aberta (comando) |
+| `novoId()` | UUID novo (chave de registro criado no plano) |
+| `simulacao` | `true` no modo `SIMULAR` |
+| `dataVersion` | Versão dos dados lida pela unidade |
+| `ctx` | O contexto (para `ctx.io.normalizarValor` e afins) |
+
+### 5.1 Como um serviço de domínio escreve um comando e uma consulta
+
+```js
+// Comando SEM evento (cadastro [cad]): o tratador só valida e põe mudanças no plano; quem grava é a UnitOfWork.
+function salvarPasto_(ctx, pedido) {
+  return UnitOfWork.run(ctx, {
+    rota: 'pasto.salvar', idempotencyKey: pedido.idempotencyKey, dados: pedido.dados,
+    avisosAceitos: pedido.avisosAceitos, reads: ['PASTOS', 'PROPRIEDADES'],
+    tratador: function (tx) {
+      var d = tx.dados;
+      var erros = Validation.validarRegistro('PASTOS', d.campos, { parcial: true });
+      if (d.campos.property_id && !tx.repo.porId('PROPRIEDADES', d.campos.property_id)) erros.push(Validation.detalhe({ codigo: 'NAO_ENCONTRADO', campo: 'property_id', mensagem: 'Propriedade não encontrada.' }));
+      if (erros.length) return { erros: erros };                       // VALIDATION, nada gravado
+      var id = d.pasture_id || tx.novoId();
+      if (d.pasture_id) AuditService.alteracao(tx, 'PASTOS', id, d.campos, d.justificativa); // ALTERAR/CONTROLE
+      else AuditService.criacao(tx, 'PASTOS', id, d.campos);                                 // CRIAR (linha nasce na fase C)
+      return {
+        resumo: { pasture_id: id },                                    // OPERACOES.resumo_json (só cabeçalho)
+        resposta: function (t) { return Utils.clonar(t.repo.porId('PASTOS', id)); },       // lida DEPOIS da fase C
+      };
+    },
+    reconstruir: function (tx, op) { return Utils.clonar(tx.repo.porId('PASTOS', op.resumo.pasture_id)); }, // duplicado
+  });
+}
+
+// Comando de EVENTO: linhas inertes na fase A (EVENTOS + filhas); a fase C projeta pelo escopo `derivados`.
+tratador: function (tx) {
+  var eventId = tx.novoId();
+  tx.plano.anexar('EVENTOS', { event_id: eventId, event_seq: tx.repo.contador('EVENTOS', 'event_seq'),
+    event_type: 'OUTRA_ENTRADA', event_date: d.data, registration_date: tx.hoje, property_id: d.property_id,
+    source: 'APP', pre_marco_zero: false });                          // op_id, status, chave, created_* são carimbados
+  tx.plano.anexar('EVENTO_ANIMAIS', { event_animal_id: tx.novoId(), event_id: eventId, animal_id: animalId,
+    papel: 'SUJEITO', efeito_inventario: 1 });
+  return { avisos: avisos, resumo: { event_id: eventId, event_type: 'OUTRA_ENTRADA', animais: 1 },
+           derivados: { animais: [animalId] }, resposta: function (t) { return { event_id: eventId }; } };
+}
+
+// Consulta: sem lock, leitura otimista validada; só vigentes.
+UnitOfWork.read(ctx, { rota: 'pasto.listar', reads: ['PASTOS'], tratador: function (tx) {
+  return tx.repo.vigentes('PASTOS').map(Utils.clonar);
+} });
+```
+
+Regras do tratador: lê só as abas de `reads` (outra aba → `INTERNAL`); não altera registro do `repo` (clone antes
+de devolver); não grava nada direto; não abre outra unidade (`run`, `read`, `status`, `recoverAll`, `exclusivo`
+dentro de tratador → `INTERNAL`); não lê relógio nem gera id fora de `tx.agora`/`tx.novoId()`. O mesmo tratador
+serve ao modo `SIMULAR` (prévia = gravação).
 
 ## 6. Harness de testes (`tests/harness.js`)
 
@@ -275,6 +349,17 @@ Nada disto foi conferido na conta real; o `runDiagnostics` precisa medir e, onde
 | `Drive.Files.copy` leva as `appProperties` do original; planilha criada pelo Drive nasce com locale e fuso que não são os do app | SP-02 |
 | `Intl.DateTimeFormat` com `timeZone` existe no runtime V8 (usado por `Utils.hoje`) | Diagnóstico: comparar `Utils.hoje` com `Utilities.formatDate` |
 
+### 6.6 Apoio aos testes de persistência (`tests/apoio-persistencia.js`)
+
+`ambiente({primitiva, order, projecoes, gas, nome})` cria a planilha-banco com as 34 abas pela própria porta de
+E/S e devolve `{gas, G, banco, ctx(), run(cmd), tentarRun(cmd), read(q), status(chave), recoverAll(), marcador(),
+versao(), tabela(aba), lido(abas), vigentes()}`. Comandos de exemplo: `cmdEvento({chave, animais, avisos, erros,
+modo, ...})` e `cmdPasto(G, {chave, dados})`; `projetorDeTeste()` cumpre a porta de projeções (animal com entrada
+vigente → ATIVO; sem → ANULADO). `rodarInstrumentado(amb, cmd, {antes: k | depois: k, chegam, antesDe(k, rotulo)})`
+numera as chamadas de escrita do contexto (`io.anexar`, `io.atualizar`, `io.flush`, `props.gravar`, `props.remover`,
+`lock.soltar`) e mata a execução na k-ésima — é assim que os testes percorrem todas as fronteiras de 06, seção 5.
+
+
 ## 7. Scripts e estrutura
 
 | Comando | O que faz |
@@ -289,3 +374,166 @@ Nada disto foi conferido na conta real; o `runDiagnostics` precisa medir e, onde
 `Sheets` v4 e `Drive` v3, `urlFetchWhitelist` só com `https://www.googleapis.com/`. Mudar o manifesto exige mudar
 `tests/static.test.js` e `scripts/push-gas.js` juntos (a contingência do escopo `drive` completo já é aceita pelo
 `gas:push`, no lugar de `drive.file`).
+
+## 8. `Database` (adaptador `SheetsAdapter`, codec e portas reais)
+
+Únicos pontos com serviço do Google na persistência. Três primitivas atrás da mesma porta, nunca misturadas no mesmo
+comando (`Database.PRIMITIVAS`, em ordem de preferência): `SHEETS_TYPED` (Sheets API: `Values.batchGet` +
+`Spreadsheets.batchUpdate` com `appendCells`/`updateCells` tipados — uma requisição por `anexar`/`atualizar`),
+`SHEETS_RAW` (Sheets API: `appendDimension` + `Values.batchUpdate` `RAW` — duas requisições, sem atomicidade) e
+`SPREADSHEET_APP` (`insertRowsAfter` → `setNumberFormats` no bloco exato → `setValues`, por aba; buffer até
+`flush`). Nenhuma presume atomicidade: o protocolo de três fases vale para as três.
+
+**`Database.abrir(banco, {primitiva, tabelas}?) → io`** (`primitiva` padrão `SHEETS_TYPED`; `tabelas` = definições
+extras na forma do Schema `{nome, pk, colunas: [{nome, tipo}]}`, para corpus e diagnóstico). `CONFIG` se o banco é
+vazio ou a primitiva é desconhecida. Nada é lido na abertura.
+
+| Membro de `io` | Contrato |
+|---|---|
+| `banco`, `primitiva`, `definicao(aba)` | Identificação; definição da aba (Schema ou extra) |
+| `ler(abas) → {ABA: {cabecalho, registros, linhas, ultimaLinha, alertas}}` | Várias abas numa requisição (Sheets API). `registros` na forma da lógica, uma propriedade por coluna da definição (falta = `null`); `linhas[i]` = número da linha de `registros[i]`; linha em branco é pulada; linha sem chave é ignorada com alerta. Mapeamento por NOME de cabeçalho (coluna do dono é preservada e ignorada) |
+| `anexar({ABA: [registro]}) → {ABA: primeira linha gravada}` | Linhas novas ao fim. `null` quando a posição não é conhecida (aba não lida antes por esta porta, em `SHEETS_TYPED`); quem precisa da posição confere com `conferirPosicoes` |
+| `atualizar([{tabela, linha, campos}]) → nº de células` | Por índice de linha (≥ 2); células vizinhas viram blocos retangulares |
+| `conferirPosicoes([{tabela, linha, id}]) → booleano` | Uma leitura: a chave de cada linha é o `id` esperado. `false` ⇒ reler as abas |
+| `criarTabelas(abas) → [criadas]` | Cria só as que faltam, na dimensão exata (cabeçalho congelado + 1 linha livre; colunas exatas) |
+| `acrescentarColunas(abas) → {ABA: [acrescentadas]}` | Colunas da definição que faltam, AO FINAL do cabeçalho real; nunca remove, renomeia ou reordena |
+| `lerCabecalhos(abas) → {ABA: [nomes] ou null}` | `null` = aba inexistente (setup e integridade) |
+| `meta()`, `fuso()`, `definirPropriedades({fuso, locale})` | Abas e grade; fuso da planilha; fixa fuso e locale |
+| `flush()` | Descarrega o buffer (`SpreadsheetApp.flush`; nada a fazer na Sheets API) |
+| `esquecer()` | Descarta cabeçalhos e posições memorizados (obrigatório depois de escrita que falhou ou de outra execução) |
+| `normalizar(aba, registro)`, `normalizarValor(aba, coluna, valor)` | O valor como voltaria da planilha (`decodificar(codificar(v))`) |
+| `paraTexto(aba, coluna, valor)`, `deTexto(aba, coluna, texto)` | Texto de AUDITORIA no formato de célula do tipo (dinheiro `'20300.00'`, BOOL `'S'`) e volta exata |
+
+Erros da porta: `CONFIG` para aba ou coluna ausente ("execute a configuração inicial") e banco não configurado;
+`INTERNAL` para valor de tipo errado, coluna fora da definição e linha inválida. Erro de serviço sobe como veio.
+
+**Codec** (`codificar(coluna, valor) → célula`; `decodificar(coluna, célula, fusoFn) → {valor, alerta}`): forma de
+célula de `03a` / `06`, seção 3 (texto para ID, TEXTO, ENUM, DATA, TS, BOOL `S`/`N` e JSON; número para INT, DEC1,
+DEC4 e DINHEIRO em reais). `codificar` recusa com `INTERNAL` objeto `Date`, tipo errado e centavos não inteiros.
+`alerta = {nivel, codigo, mensagem}`, com `nivel` `COERCIDA` (convertida sem perda: vira ERROS_LOG) ou `ERRO`
+(integridade; o valor devolvido é o melhor possível ou `null`). Códigos: `TEXTO_VIROU_NUMERO`,
+`TEXTO_VIROU_BOOLEANO`, `TEXTO_VIROU_DATA`, `DATA_INVALIDA`, `DATA_NATIVA`, `INSTANTE_INVALIDO`, `INSTANTE_NATIVO`,
+`NUMERO_INVALIDO`, `NUMERO_COMO_TEXTO`, `BOOLEANO_NATIVO`, `BOOLEANO_INVALIDO`, `JSON_INVALIDO`; na leitura de aba,
+também `LINHA_SEM_PK` e `COLUNA_AUSENTE`, com `{tabela, linha, coluna}`. Data nativa é lida no fuso da planilha
+(objeto `Date` pelo SpreadsheetApp; número serial pela Sheets API).
+
+**Corpus** (`06`, seção 2): `Database.CORPUS` (os 14 valores do desenho + formatos que o sistema grava);
+`corpus(banco, primitiva, {aba}?)` grava (anexa e reescreve uma coluna), descarrega e relê com uma porta nova:
+`{primitiva, aba, ok, casos, divergencias: [{id, coluna, esperado, lido, tipoLido}], alertas}`;
+`escolherPrimitiva(banco) → {primitiva | null, resultados}` roda na ordem de preferência e para na primeira com
+`ok` (falha de serviço vira `{primitiva, ok: false, erro}`). O `setup` roda numa planilha temporária e grava o
+resultado. Também: `conferirCorpus`, `corpusDefinicao(aba)`, `corpusRegistros()`.
+
+**Portas reais:** `lock()`, `clock()`, `idGen()`, `hash()`, `props()` (seção 5) e `contexto({banco, primitiva,
+usuario, fuso, files, session, projecoes})`.
+
+## 9. `Repository` (puro)
+
+`Repository.abrir(ctx) → repositório INTERNO` de uma unidade (só a `UnitOfWork` o abre). Leitura memoizada:
+`carregar(abas)` lê, numa chamada a `io.ler`, as abas pedidas e as de que a vigência delas depende
+(`Repository.dependencias(abas)`, ex.: `ALOCACOES_FINANCEIRAS` → `RATEIOS`, `FINANCEIRO`, `EVENTOS`, `OPERACOES`,
+`IMPORTACOES`); aba já lida não volta. Registros na forma da lógica: **não os altere**.
+
+**Vigência (P3), numa função só:** `Repository.avaliarEvento(evento, fontes) → {status, vigente, anulador_id}`, com
+`status` na ordem de `02`, seção 5.3 (FALHOU, PENDENTE, CANCELADO, PENDENTE de importação, ESTORNADO, CONFIRMADO) e
+`vigente = status CONFIRMADO e event_type ≠ ESTORNO`. Regra por aba (`Repository.regra(aba)`):
+
+| Regra | Abas | Linha vale se |
+|---|---|---|
+| `EVENTO` | EVENTOS | o predicado |
+| `FILHA` | toda aba com `event_id` (EVENTO_ANIMAIS, detalhes, IDENTIFICACOES, MOVIMENTOS_ESTOQUE, ANEXOS, FINANCEIRO) | `event_id` vazio, ou o evento é vigente |
+| `PARCELA` | PARCELAS | o lançamento vale e `status ≠ CANCELADA` |
+| `RATEIO` | RATEIOS | o lançamento vale, o evento é vigente e é o de maior `event_seq` do `financial_id` |
+| `ALOCACAO` | ALOCACOES_FINANCEIRAS | o rateio vale |
+| `OPERACAO` | AUDITORIA | `OPERACOES.status = CONFIRMADA` |
+| `ANIMAL` | ANIMAIS | `situacao_cadastral` não é PENDENTE nem ANULADO (projeção) |
+| `SEMPRE` | cadastros, LISTAS, CONFIGURACOES, OPERACOES, IMPORTACOES, ERROS_LOG... | sempre |
+
+| Fachada | Métodos |
+|---|---|
+| Pública (`tx.repo`) | `vigentes(aba)`; `porId(aba, id)`; `por(aba, campos, valor)` (índice múltiplo; `campos` nome ou lista, `valor` valor ou lista; devolve cópia da lista); `unico(aba, campos, valor)`; `agrupados(aba, campos)` (mapa inteiro; chave composta unida por `'\u0000'`); `eventoVigente(id)`; `contador(aba, campo, extrair?)` (máximo + 1 sobre TODAS as linhas, inclusive inertes; cada chamada reserva um número); `carregada(aba)` |
+| Crua (`tx.cru`) | a pública + `cru(aba)`, `cruPorId`, `cruPor`, `linhaDe(aba, id)`, `avaliar(eventId)`, `operacoesOrfas()`, `celulaCoercida(aba, linha, coluna)`, `alertas()`, `cabecalho(aba)` — nenhum método que altere a memória |
+| Interna (UnitOfWork) | a crua + `carregar`, `carregadas`, `resolver(atualizacoes)` (por chave → por linha, só o que muda; célula coercida é regravada), `incluir(aba, registros, primeiraLinha)`, `alterar(aba, id, campos)`, `publico()`, `leituraCrua()` |
+
+Índices (`02`, seção 8) são montados sob demanda, uma vez por unidade, com uma passada sobre as linhas vigentes (ou
+cruas, no acesso cru); chave vazia não indexa. Aba não declarada → `INTERNAL`.
+
+**Plano de escrita** `Repository.plano()`: `anexar(aba, registro)` (fase A), `auditar(mudanca)` (vira AUDITORIA na
+fase A e é aplicada na C), `atualizar(aba, id, campos)` (só a porta de projeções, na fase C); `linhas()`,
+`mudancas()`, `atualizacoes()`, `contagem()`, `vazio()`. Aba inexistente → `Error`; registro inválido → `INTERNAL`.
+
+## 10. `UnitOfWork` (puro, só portas)
+
+### 10.1 `UnitOfWork.run(ctx, comando)`
+
+`comando = {rota, idempotencyKey, dados, avisosAceitos?, dataVersionEsperada?, modo?: 'EXECUTAR' | 'SIMULAR',
+reads, tratador(tx) → resultado, reconstruir?(tx, operacao) → dados, acessoCru?, anexaSemPai?: [abas],
+permiteDuranteImportacao?}`. `resultado = {erros?, avisos?, resumo?, derivados?, resposta?, impactos?}`:
+`erros`/`avisos` são detalhes (`Validation.detalhe`); `resumo` vai para `OPERACOES.resumo_json` (só cabeçalho);
+`derivados` é o escopo entregue a `ctx.projecoes.reconstruir` na fase C (`null`/ausente = nenhuma projeção);
+`resposta` é valor ou `função(tx)` avaliada DEPOIS da fase C; `impactos` é a prévia do `SIMULAR`.
+
+Sequência (`06`, seção 5; desenho-base 4.2 e 16.4): `lock.tentar(25 s)` (senão `LOCKED`) → recuperação
+preventiva → idempotência por `OPERACOES` (mesma chave CONFIRMADA: mesmo `payload_hash` → `duplicado: true` com a
+resposta de `reconstruir`; hash diferente → `IDEMPOTENCY_MISMATCH`) → importação em curso (`CONFLICT`, salvo
+`permiteDuranteImportacao`) → `dataVersionEsperada` (`CONFLICT`) → tratador → avisos não aceitos
+(`NEEDS_CONFIRMATION`, nada gravado, chave não consumida) → plano validado contra o esquema → **fase A**
+(`props` marcador, `anexar` OPERACOES INICIADA + EVENTOS + filhas + AUDITORIA, `flush`) → **fase B**
+(`OPERACOES.status = CONFIRMADA`, `flush`) → **fase C** (refaz a auditoria, `EVENTOS.status`/`confirmed_at`/
+`reversed_by_event_id`, projeções; `flush`; `aplicada_em`/`finished_at`; `flush`) → `DATA_VERSION++` → remove o
+marcador → grava ERROS_LOG pendente → solta o lock.
+
+Carimbos da UnitOfWork: EVENTOS `op_id`, `status = PENDENTE`, `idempotency_key`, `reversed_by_event_id`,
+`confirmed_at` vazios, `created_by` = usuário se vazio; ANIMAIS `situacao_cadastral = PENDENTE`; `created_at` e
+`updated_at` = `tx.agora` se vazios. Recusas de programação (`INTERNAL`): tratador que anexa em OPERACOES,
+AUDITORIA ou ERROS_LOG; que anexa aba `SEMPRE` (cadastro nasce por `AuditService.criacao`) sem `anexaSemPai`; que
+usa `plano.atualizar`; contexto sem porta ou sem usuário; unidade aninhada. Comando sem chave → `VALIDATION`.
+
+Devolve `{dados, duplicado, opId, dataVersion}` (+ `semAlteracao: true` com plano vazio: nada gravado, sem
+operação; + `recuperada: true` quando uma exceção depois do commit foi resolvida pela recuperação). `SIMULAR`
+devolve `{dados: {simulacao: true, impactos, avisos, linhas: {ABA: n}}, dataVersion}`: mesmo tratador e mesmo
+plano, por leitura validada, sem lock de escrita e sem gravar; erro de validação é lançado como no comando.
+
+**Exceção tratada depois do início da fase A:** a UnitOfWork, ainda com o lock, aplica a recuperação à própria
+operação relendo a planilha: CONFIRMADA → fase C refeita e sucesso (`recuperada`); INICIADA ou ausente → FALHOU
+(motivo em `OPERACOES.erro`) e `INTERNAL` "nada foi alterado" (retentável com a mesma chave; `erro.causa` e,
+se a recuperação também falhou, `erro.recuperacao`; aí o marcador fica e a chamada seguinte recupera).
+
+### 10.2 Consultas, estado da operação e manutenção
+
+| Função | Contrato |
+|---|---|
+| `read(ctx, {rota, reads, tratador(tx), acessoCru?}) → {dados, dataVersion}` | Leitura otimista validada: marcador e versão → abas → marcador e versão; mudou → repete (até 3; depois `LOCKED`). Com marcador: `tentar(5 s)` → recupera e segue, ou `LOCKED`. Nunca serve dados com marcador presente. Não grava dado de negócio |
+| `status(ctx, chave) → {situacao, op_id, comando, resumo, erro, started_at, finished_at}` | `situacao` ∈ CONFIRMADA, EM_ANDAMENTO, FALHOU, INEXISTENTE. Com marcador ou operação pendente, tenta o lock sem esperar: ocupado → EM_ANDAMENTO (ou CONFIRMADA, se a da chave já está completa); livre → recupera e responde o estado final. Chave vazia → `VALIDATION` |
+| `recoverAll(ctx) → {recuperou, marcador, falharam: [op_id], refeitas: [op_id], dataVersion}` | Recuperação sobre OPERACOES inteira, com reconstrução de TODAS as projeções, mesmo sem marcador (restauração de backup, verificação semanal). `LOCKED` |
+| `exclusivo(ctx, {rota, reads, acessoCru, tratador}) → {dados, dataVersion}` | Gatilhos e manutenção: espera o lock (25 s), recupera e roda o tratador com o banco parado; não é recusado com importação em curso. O que precisar gravar em dado de negócio vai por `run` |
+| `versao(ctx)`, `chaveVersao(banco)`, `chaveMarcador(banco)` | `DATA_VERSION:<banco>` e `PENDING_OP:<banco>` |
+| `anotarErro(ctx, {contexto, codigo, mensagem, erro?, op_id?})`, `descarregarErros(ctx) → {gravados, descartados, motivo}` | ERROS_LOG fora do journal: linhas completas, sem operação, sem versão. `run` (no fim), `read` e `SIMULAR` descarregam sozinhos; com o lock de outra execução, descarta (motivo `LOCKED`) |
+
+### 10.3 Recuperação (`06`, seção 6)
+
+Com o lock e relendo tudo: INICIADA → FALHOU; CONFIRMADA sem `aplicada_em` → fase C refeita; com marcador (ou
+`recoverAll`) reconstrói o cache de `EVENTOS.status` e TODAS as projeções (animal PENDENTE de operação que falhou
+vira ANULADO pelo projetor); grava a trilha (ERROS_LOG sempre; AUDITORIA `RECUPERACAO` com o `op_id` quando refez a
+fase C) antes de `aplicada_em`; `flush`; versão; remove o marcador. Sem marcador mas com órfã, põe um marcador
+antes de trabalhar. Reentrante: morrer em qualquer ponto e recuperar de novo dá o mesmo estado. Códigos em
+ERROS_LOG: `OPERACAO_INTERROMPIDA`, `FASE_C_REFEITA`, `MARCADOR_SEM_OPERACAO`, `AUDITORIA_SEM_ALVO`, e
+`CELULA_COERCIDA` (leitura).
+
+### 10.4 Porta de projeções (`ctx.projecoes`)
+
+`{reads: [abas que o projetor lê], reconstruir(tx, escopo)}`. `escopo` = `derivados` do tratador (caminho normal)
+ou `{tudo: true}` (recuperação). O projetor lê por `tx.repo` (vigentes) e `tx.cru` (inclusive PENDENTE) e põe
+`tx.plano.atualizar(aba, id, campos)` para cada projeção; a UnitOfWork grava só o que difere do que está na
+planilha. Tem de ser função determinística das linhas vigentes (pode rodar quantas vezes for preciso).
+
+## 11. `AuditService` (parte 1, puro)
+
+| Função | Contrato |
+|---|---|
+| `linhas(ctx, {op_id, usuario, timestamp}, mudancas) → [linha de AUDITORIA]` | `mudanca = {entidade, entity_id, acao, campo, valor_anterior, valor_novo, justificativa}` com valores na forma da LÓGICA; viram texto no formato de célula do tipo. `ALTERAR` só em coluna `[cad]`, `CONTROLE` só em `[ctl]`, `CRIAR` em qualquer uma; a chave nunca muda; `RECUPERACAO`/`MANUTENCAO` sem campo (`valor_novo` = descrição; entidade `SISTEMA` sem registro). Fora disso → `INTERNAL` |
+| `alteracao(tx, aba, id, campos, justificativa?) → n` | Compara com o registro vigente e põe no plano uma mudança por campo que REALMENTE muda (marca `[ctl]` → CONTROLE; senão ALTERAR). Registro inexistente → `NOT_FOUND` |
+| `criacao(tx, aba, id, campos, justificativa?) → n` | CRIAR, uma mudança por campo preenchido; a chave nasce no plano e fica em `entity_id`; a linha do cadastro é anexada só na fase C, se a chave ainda não existir |
+| `refazer(repo, io, op, linhasDaOperacao) → {atualizar, criar, semAlvo}` | O que a fase C aplica (idempotente; `updated_at`/`created_at` = `op.started_at`). Usado pela UnitOfWork |
+| `listar(tx, {entidade, entity_id, op_id, acao, de, ate}?) → [linhas]` | Trilha só de operações CONFIRMADAS, da mais recente para a mais antiga (cópias). A consulta declara `AuditService.LEITURAS` |
+| `linhaErro(ctx, {contexto, codigo, mensagem, erro, op_id}) → linha de ERROS_LOG` | Mensagem até 2.000 caracteres; pilha resumida (6 linhas) quando há `erro` |
