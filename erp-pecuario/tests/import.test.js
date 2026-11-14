@@ -120,6 +120,8 @@ test('CT-12 (1)–(5): validar, TOTAL recusado, PARCIAL com queda no lote 1, out
   assert.deepEqual(vigentes(s), ['0231'], 'nenhum dos 5 animais do lote 1 vale antes de concluir');
   assert.ok(s.tabela('ANIMAIS').filter((a) => a.situacao_cadastral === 'PENDENTE').length === 5);
   assert.equal(s.read(G.Timeline.consultaInventario({ data: '2026-11-13' })).total, 1);
+  s.conferirProjecoes('importação em curso: animais pendentes com os atributos declarados');
+  assert.equal(s.integridade().ok, true, 'a integridade não acusa a importação em curso');
 
   // (4) Outro lançamento é recusado enquanto a importação está em curso; consultas e manutenção seguem.
   const outro = s.tentar((ctx) => G.EventService.registrar(ctx, { idempotencyKey: 'outra-1', dados: { tipo: 'OUTRA_ENTRADA', campos: { event_date: '2026-03-01', description: 'Doação' }, animais: [S.bicho({ brinco: '900' })] } }));
@@ -339,4 +341,58 @@ test('leitor de CSV e interpretação do arquivo: aspas, CRLF, BOM, linhas em br
     { linha_num: 5, valores: { Brinco: '11', Sexo: 'M', '#coluna_extra_3': 'extra' } },
   ], 'a numeração segue a planilha do dono (cabeçalho = 1, linhas em branco contam)');
   assert.deepEqual(js(I.sugerirMapeamento(['Nº', 'Data de Nascimento', 'Brinco da Mãe', 'Piquete', 'Qualquer'])), { 'Data de Nascimento': 'data_nascimento', 'Brinco da Mãe': 'mae', Piquete: 'pasto' });
+});
+
+test('queda em cada fronteira do lote e da conclusão: a recuperação decide pela célula de commit; reenviar com a mesma chave completa', () => {
+  const CSV = 'Brinco;Sexo;Nasc.;Mãe;Pasto\n40;F;01/01/2019;;Pasto A\n41;F;01/01/2023;40;Pasto B\n42;M;01/01/2024;40;Pasto A';
+  function montar() {
+    const s = preparar();
+    const c = criar(s, CSV);
+    validarTudo(s, c.import_id);
+    return { s, id: c.import_id };
+  }
+  function passos(fn) {
+    const { s, id } = montar();
+    let inst = null;
+    s.gas.exec(() => { const ctx = s.ctx(); inst = instrumentar(s.gas, ctx, {}); return fn(s, ctx, id); });
+    return inst.chamadas;
+  }
+  const lote = (s, ctx, id) => s.G.ImportService.importarBloco(ctx, { dados: { import_id: id, bloco: 1, modo: 'TOTAL' } });
+  const fim = (s, ctx, id) => s.G.ImportService.concluir(ctx, { dados: { import_id: id } });
+  const nLote = passos(lote);
+  assert.ok(nLote.length >= 8, 'o lote passa por várias fronteiras: ' + nLote.join(' | '));
+  for (let k = 1; k <= nLote.length; k++) {
+    const { s, id } = montar();
+    const r = s.gas.tentar(() => { const ctx = s.ctx(); instrumentar(s.gas, ctx, { depois: k }); return lote(s, ctx, id); });
+    assert.equal(r.morta, true);
+    const msg = 'lote, queda depois de ' + k + ' (' + nLote[k - 1] + ')';
+    const commit = s.tabela('OPERACOES').some((o) => o.idempotency_key === s.G.ImportService.chaveBloco(id, 1) && o.status === 'CONFIRMADA');
+    const e = s.read(s.G.ImportService.consultaObter({ import_id: id })); // a leitura recupera
+    assert.equal(e.importacao.status, commit ? 'IMPORTANDO' : 'VALIDADO', msg);
+    assert.equal(e.contadores.importadas, commit ? 3 : 0, msg);
+    assert.ok(s.tabela('OPERACOES').every((o) => o.status === 'FALHOU' || (o.status === 'CONFIRMADA' && o.aplicada_em)), msg + ': nenhuma órfã');
+    assert.deepEqual(vigentes(s), ['0231'], msg + ': nada vale antes de concluir');
+    s.conferirProjecoes(msg);
+    const de2 = importar(s, id, 1, { modo: 'TOTAL' });
+    assert.equal(de2.valor.duplicado, commit, msg + ': o reenvio é duplicado exatamente quando o commit chegou');
+    s.exec((ctx) => s.G.ImportService.concluir(ctx, { dados: { import_id: id } }));
+    assert.deepEqual(vigentes(s), ['0231', '40', '41', '42'], msg + ': concluída, sem duplicar animal');
+  }
+  const nFim = passos((s, ctx, id) => { lote(s, ctx, id); return null; }).length;
+  const comFim = passos((s, ctx, id) => { lote(s, ctx, id); return fim(s, ctx, id); });
+  for (let k = nFim + 1; k <= comFim.length; k++) {
+    const { s, id } = montar();
+    const r = s.gas.tentar(() => { const ctx = s.ctx(); instrumentar(s.gas, ctx, { depois: k }); lote(s, ctx, id); return fim(s, ctx, id); });
+    assert.equal(r.morta, true);
+    const msg = 'conclusão, queda depois de ' + k + ' (' + comFim[k - 1] + ')';
+    const commit = s.tabela('OPERACOES').some((o) => o.idempotency_key === s.G.ImportService.chaveBloco(id, 'concluir') && o.status === 'CONFIRMADA');
+    const e = s.read(s.G.ImportService.consultaObter({ import_id: id }));
+    assert.equal(e.importacao.status, commit ? 'IMPORTADO' : 'IMPORTANDO', msg);
+    assert.deepEqual(vigentes(s), commit ? ['0231', '40', '41', '42'] : ['0231'], msg);
+    s.conferirProjecoes(msg);
+    const de2 = s.exec((ctx) => s.G.ImportService.concluir(ctx, { dados: { import_id: id } }));
+    assert.equal(de2.duplicado, commit, msg + ': reenvio da conclusão');
+    assert.deepEqual(vigentes(s), ['0231', '40', '41', '42'], msg + ': concluída');
+    assert.equal(s.tabela('ANIMAIS').find((a) => a.brinco === '41').mae_id, s.tabela('ANIMAIS').find((a) => a.brinco === '40').animal_id);
+  }
 });

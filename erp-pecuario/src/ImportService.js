@@ -878,6 +878,8 @@ var ImportService = (function () {
     AuditService.alteracao(tx, 'IMPORTACOES', imp.import_id, { linhas_importadas: jaImportadas + doBloco.length });
     return {
       avisos: r.avisos, resumo: { import_id: imp.import_id, bloco: bloco, event_id: eventId, linhas: doBloco.length },
+      // Projeção dos animais do lote: ficam PENDENTE (com os atributos declarados, inertes) até a conclusão.
+      derivados: r.derivados,
       resposta: function (t) { return estado_(t, imp.import_id); },
     };
   }
