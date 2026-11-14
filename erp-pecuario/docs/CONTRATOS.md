@@ -4,8 +4,9 @@ Interfaces que cada etapa entrega para as seguintes. Uma seção curta por módu
 retorno e erros. Quem acrescenta um módulo acrescenta a seção dele aqui. O desenho está em `docs/fase-0/`; este
 arquivo descreve o que **existe no código**.
 
-Estado: etapas BASE (E1.1 e parte da E1.2) — `Schema`, `Utils`, `Validation`, harness e estrutura — e PERSISTÊNCIA
-(E1.3 e E1.4) — `Database`, `Repository`, `UnitOfWork` e `AuditService` (parte 1).
+Estado: etapas BASE (E1.1 e parte da E1.2) — `Schema`, `Utils`, `Validation`, harness e estrutura —, PERSISTÊNCIA
+(E1.3 e E1.4) — `Database`, `Repository`, `UnitOfWork` e `AuditService` (parte 1) — e MOTOR DE EVENTOS (E1.6) —
+`EventCatalog`, `Timeline` e `EventService`.
 
 ## 1. Regras que valem para todo arquivo de `src/`
 
@@ -174,7 +175,7 @@ monta o contexto com `Database.contexto(opcoes)`; nos testes, o mesmo objeto é 
 | `session` | Sessão do pedido (dono, e-mail ativo) | `Api` (etapa posterior); `null` até lá |
 | `usuario` | E-mail de quem executa; obrigatório em `UnitOfWork.run` (vai para `OPERACOES.usuario`, `created_by`, `AUDITORIA.usuario`) | `Api` |
 | `fuso` | Fuso IANA de "hoje" | `CONFIGURACOES.fuso` (Api); padrão `Session.getScriptTimeZone()` |
-| `projecoes` | Porta do projetor: `{reads: [abas], reconstruir(tx, escopo)}` (seção 10.4); `null` = a fase C só refaz `EVENTOS.status` e a auditoria | `Timeline` (etapa seguinte) |
+| `projecoes` | Porta do projetor: `{reads: [abas], reconstruir(tx, escopo)}` (seção 10.4); `null` = a fase C só refaz `EVENTOS.status` e a auditoria | `Timeline.porta()` (seção 13) — a `Api` deve sempre passá-la |
 | `errosPendentes` | Fila de registros de ERROS_LOG da execução (`UnitOfWork.anotarErro`) | — |
 
 O tratador de comando ou consulta recebe da `UnitOfWork` o objeto **`tx`**:
@@ -352,7 +353,7 @@ Nada disto foi conferido na conta real; o `runDiagnostics` precisa medir e, onde
 
 ### 6.6 Apoio aos testes de persistência (`tests/apoio-persistencia.js`)
 
-`ambiente({primitiva, order, projecoes, gas, nome})` cria a planilha-banco com as 34 abas pela própria porta de
+`ambiente({primitiva, order, projecoes, gas, nome})` (`projecoes` aceita também `(G) => porta`, ex.: `G.Timeline.porta`) cria a planilha-banco com as 34 abas pela própria porta de
 E/S e devolve `{gas, G, banco, ctx(), run(cmd), tentarRun(cmd), read(q), status(chave), recoverAll(), marcador(),
 versao(), tabela(aba), lido(abas), vigentes()}`. Comandos de exemplo: `cmdEvento({chave, animais, avisos, erros,
 modo, ...})` e `cmdPasto(G, {chave, dados})`; `projetorDeTeste()` cumpre a porta de projeções (animal com entrada
@@ -368,7 +369,15 @@ prefixo e subconjuntos aleatórios das pendentes; e confere, sobre o estado DUR�
 removido, nenhuma órfã, operação terminada com `finished_at` e, se FALHOU, `erro`; uma confirmada por chave; chaves
 primárias únicas; `EVENTOS.status` = predicado; projeção de ANIMAIS = reconstrução; nenhuma filha vigente órfã;
 cadastro só de operação confirmada, com o último valor auditado). Comando novo que a etapa seguinte criar (e um
-projetor real) deve entrar em `CENARIOS` desse arquivo.
+projetor real) deve entrar em `CENARIOS` desse arquivo — o cenário `motor` (OUTRA_ENTRADA real pelo `EventService`, com
+`Timeline.porta()` e `Timeline.conferir` no desfecho) é o modelo; `cen.ambiente` dá as opções do `ambiente`.
+
+`tests/apoio-eventos.js`: `ambienteEventos({primitiva, order, marcoZero, config, categorias})` = banco semeado
+(propriedade, 5 pastos `PASTOS.A/B/C/INATIVO/PEQUENO` — o último com capacidade de 2 cabeças —, CONFIGURACOES com
+`data_marco_zero = 2026-01-01`, LISTAS, PLANO_CONTAS, CATEGORIAS) e o projetor real. `m.run(acao, dados, {chave, avisos})`,
+`m.tentar(...)` e `m.simular(...)` conferem, depois de CADA comando, que a projeção gravada = `Timeline.conferir` vazio.
+Construtores: `bicho(extra)`, `entradaInicial(animais, campos)`, `outraEntrada(data, animais, campos)`,
+`ajuste(subtipo, data, animais, campos)`; `sementes(G, opcoes)` dá as linhas de semente.
 
 
 ## 7. Scripts e estrutura
@@ -557,3 +566,95 @@ planilha. Tem de ser função determinística das linhas vigentes (pode rodar qu
 | `refazer(repo, io, op, linhasDaOperacao) → {atualizar, criar, semAlvo}` | O que a fase C aplica (idempotente; `updated_at`/`created_at` = `op.started_at`). Usado pela UnitOfWork |
 | `listar(tx, {entidade, entity_id, op_id, acao, de, ate}?) → [linhas]` | Trilha só de operações CONFIRMADAS, da mais recente para a mais antiga (cópias). A consulta declara `AuditService.LEITURAS` |
 | `linhaErro(ctx, {contexto, codigo, mensagem, erro, op_id}) → linha de ERROS_LOG` | Mensagem até 2.000 caracteres; pilha resumida (6 linhas) quando há `erro` |
+
+## 12. `EventCatalog` (puro, só dados)
+
+Definição declarativa dos eventos (04, seção 7). Os 21 tipos estão no catálogo com `fase`; só os da fase corrente
+(`FASE_ATUAL = 1`) têm campos e passam pelo motor: ENTRADA_INICIAL, OUTRA_ENTRADA, AJUSTE_INVENTARIO (subtipos
+CORRECAO_CADASTRO, IDENTIFICACAO_INCORRETA, CORRECAO_LOCALIZACAO; RECLASSIFICACAO e DIVERGENCIA_CONTAGEM são da fase 2)
+e ESTORNO. Vocabulário fechado de 04 mais três atributos de campo: `opcoes` (enum fechado), `lista` (lista aberta de
+LISTAS) e `casas` (decimais). No tipo, os campos de cabeçalho ficam em `campos` e os por animal em `campos_animal`
+(ou em `subtipos[S].campos_animal`).
+
+| Função | Contrato |
+|---|---|
+| `nomes()`, `existe(tipo)` | Os 21 tipos |
+| `tipo(nome)` | Resumo + definição (`rotulo, grupo_ui, ordem, fase, frequente, selecao_animais, filtro_elegiveis, modo_entrada, revisao, critico, reads, campos, campos_animal, componentes, grupos_repetiveis, subtipos`). Tipo inexistente → `INTERNAL` |
+| `ativo(tipo, subtipo?, fase?)` | Entregue na fase (padrão: a corrente) e com campos; tipo com subtipos exige subtipo ativo |
+| `tiposAtivos(fase?)`, `modulosAtivos(fase?)` | Listas por fase. Módulos: os 10 itens do menu (§15) + IMPORTACAO (`menu: false`), cada um com `fase` |
+| `camposEvento(tipo)`, `camposAnimal(tipo, subtipo?)`, `leituras(tipo)` | Definições e abas que o comando lê |
+| `serializar(fase?)` | `{fase, modulos, tipos}` só dados (vai ao cliente no bootstrap), só tipos e subtipos ativos |
+| `validarCampos(definicoes, valores, {listas}?)` | Formato, obrigatório, `obrigatorio_se`, `visivel_se` (preenchido e não visível → `CAMPO_NAO_SE_APLICA`; `false` passa), lista, faixa (`dinheiro` em centavos, `min`/`max` em reais) e chave desconhecida não vazia (`CAMPO_DESCONHECIDO`). Devolve `[{codigo, campo, mensagem}]` |
+| `CAMPOS_CORRIGIVEIS`, `PESO_MAX_KG` (2000), `TIPOS_CAMPO` | Constantes |
+
+## 13. `Timeline` (puro: linha do tempo, projetor, inventário)
+
+Linha = linha vigente de EVENTO_ANIMAIS + cabeçalho do evento:
+`{event_id, animal_id, papel, efeito, pasto_origem_id, pasto_destino_id, atributos, valor_individual, event_type,
+event_subtype, event_date, event_seq, ordem_seq, pre_marco_zero, property_id, confiabilidade, payload}`
+(`Timeline.linha(registroEA, evento, ordemSeq)`). `ordem_seq` = `event_seq` do primeiro evento da cadeia de
+substituição (desenho-base 16.1).
+
+| Função | Contrato |
+|---|---|
+| `LEITURAS` | Abas do projetor (= `porta().reads`) |
+| `parametros(repo)` | CONFIGURACOES tipadas (NUMERO → número, BOOL → booleano, JSON → objeto, data validada); chave ausente = semente; célula vazia = `null`; inválido → `CONFIG` |
+| `ordenar(linhas)`, `classe(l)`, `papelNaLinha(l)` | Ordem `(event_date, classe 0/1/2, ordem_seq, event_seq)`; papel ENTRADA, SAIDA, MOVIMENTO (efeito 0 com destino), FATO (exige presença, limites inclusivos) ou NEUTRO (CORRECAO_CADASTRO e IDENTIFICACAO_INCORRETA: valem para todo o histórico) |
+| `validar(linhas, {nascimento, dataEntrada})` | Linha do tempo de UM animal já com a mudança: `{problemas, periodos, pasto, dentro, morte}`. Códigos: `ENTRADA_JA_DENTRO`, `FORA_DO_REBANHO`, `ORIGEM_DIVERGENTE` (com `pasto_esperado`/`pasto_informado`), `FORA_DA_PERMANENCIA`, `APOS_MORTE`, `ANTES_DO_NASCIMENTO`, `ANTES_DA_ENTRADA`. Linhas `pre_marco_zero` ficam fora do replay e só são conferidas contra nascimento e chegada declarada |
+| `problemasNovos(antes, depois)` | O que a mudança quebrou (por `codigo` + `event_id`). Regra do serviço: problema em linha do comando → VALIDATION; em evento gravado → CONFLICT |
+| `descrever(problema, nomePasto?)` | Frase para o pecuarista, sem o "quem" |
+| `fonte(tx, {excluir, parametros})` | Acesso indexado às linhas da unidade (usa `tx.cru` quando há); `excluir` = eventos tratados como anulados (validação de estorno e de substituição) |
+| `projetarAnimal(fonte, id)` → `{campos, meta}`; `projetar(fonte, ids \| null)` | A ÚNICA rotina que calcula as projeções de ANIMAIS (03a, 4.3.3 e 4.3.4); `projetar` inclui as mães alcançadas e `cria_ao_pe` |
+| `porta()` / `reconstruir(tx, escopo)` | Porta `ctx.projecoes`. Escopo `{animais, eventos}` (o `derivados` do EventService) ou `{tudo: true}`. Grava ANIMAIS (+ `updated_at` quando algo muda), `IDENTIFICACOES.data_fim` e FINANCEIRO (`status`, `cancelado_em` = `created_at` do anulador, `cancelado_por_event_id`, `status_pagamento`, `data_pagamento`, `animal_id` da alocação DIRETA) |
+| `conferir(tx)` | Projeção gravada × reconstrução total (precisa de `tx.cru`): `[{tabela, id, campo, gravado, calculado}]`, vazio = coincidem. Base da integridade (E1.11) |
+| `inventario(linhas, D, marcoZero)` | `{data, total, porPasto: {pasture_id: n}, semPasto, motivo}`; D < marco zero → nulos com `ANTERIOR_AO_MARCO_ZERO`; sem marco zero → `DADOS_INSUFICIENTES` |
+| `pastoEm(linhasDoAnimal, D, marcoZero)` | `{presente, pasture_id, motivo}` ao fim do dia D |
+| `consultaInventario({data, animal_id?})` | Consulta pronta para `UnitOfWork.read` (rota `inventario.posicao`) |
+
+Regras do projetor que valem como contrato: atributo = criação (`atributos_iniciais_json`, booleanos `S`/`N`) + correção
+CORRECAO_CADASTRO vigente de maior `event_seq`; ANULADO/PENDENTE conservam os atributos declarados na linha de criação
+mais recente (inertes) e zeram o resto; ANIMAIS sem nenhuma linha em EVENTO_ANIMAIS é EXTERNO, salvo se a linha gravada
+está PENDENTE ou ANULADO (queda na fase A) — então ANULADO; estoque (`PRODUTOS.estoque_atual`) ainda não é projetado
+(só a Fase 3 grava MOVIMENTOS_ESTOQUE).
+
+## 14. `EventService` (puro: comandos e consultas do motor)
+
+Pedido de comando: `{idempotencyKey, dados, avisosAceitos: [códigos], dataVersionEsperada?}`. Dinheiro em centavos
+inteiros; datas `yyyy-MM-dd`. Erros: VALIDATION (detalhes por animal e campo), CONFLICT (detalhe com
+`conflito: {event_id, tipo, data}`), NEEDS_CONFIRMATION (avisos sem aceite; nada gravado; chave livre), NOT_FOUND,
+CONFIG (sem marco zero; conta SALDO_ABERTURA_REBANHO ausente), além dos da UnitOfWork.
+
+| Função | Contrato |
+|---|---|
+| `comando(acao, pedido)` | Comando para `UnitOfWork.run` (`acessoCru: true`: o motor lê eventos anulados para a posição do substituto e para o histórico). `acao` ∈ `registrar` (rota `evento.registrar`), `corrigir` (`evento.corrigir`), `estornar` (`evento.estornar`) |
+| `registrar/corrigir/estornar(ctx, pedido)` | `UnitOfWork.run(ctx, comando(...))` → `{dados: resposta, duplicado, opId, dataVersion}` |
+| `simular(ctx, {acao, dados, avisosAceitos})` | Mesmo tratador em modo SIMULAR → `{dados: {simulacao, impactos, avisos, linhas}}`; erro de validação e bloqueio (CONFLICT) são lançados como no commit |
+| `consultaListar(filtros)` / `listar(ctx, filtros)` | `{total, pagina, por_pagina, itens: [evento]}`; filtros `{tipo, de, ate, animal_id, vigentes, pagina, por_pagina}`; inclui anulados e estornos; não inclui operações que falharam |
+| `consultaObter({event_id})` / `obter(ctx, dados)` | `{evento, linhas (com codigo_interno e brinco), detalhes: {IDENTIFICACOES, PESAGENS, REPRODUCAO, AJUSTES, FINANCEIRO, RATEIOS, ALOCACOES_FINANCEIRAS}, anula}`; NOT_FOUND |
+| `classificarCategoria(perfil, data, categorias)` | Perfil `{sexo, data_nascimento, castrado, reprodutor, parida, categoria_modo, categoria_manual_id}` (valores em D) → `{category_id, codigo, nome, manual}` ou `null` |
+| `coberturaCategorias(categorias)` | `{completa, testes, lacunas: [{perfil, rotulo, idade_de, idade_ate}]}` (05, seção 4.9); base do aviso CATEGORIAS_SEM_COBERTURA em `categoria.salvar` |
+
+`dados` de registrar/corrigir: `{tipo, subtipo?, campos: {event_date, property_id, description, responsible, notes,
+justificativa (AJUSTE)}, animais: [item], event_id (corrigir), justificativa (corrigir), justificativa_aviso (com
+PERIODO_BLOQUEADO)}`. Item por tipo:
+- ENTRADA_INICIAL / OUTRA_ENTRADA (novo): campos de `EventCatalog.camposAnimal`: `brinco, nome, sexo, raca,
+  data_nascimento | idade_meses, data_nascimento_confianca, mae_id | mae_ref, mae_confianca, pai_id | pai_ref,
+  pai_confianca, ref, origem, castrado, reprodutor (macho), partos_previos, situacao_reprodutiva, data_prevista_parto
+  (fêmea), pasto_destino_id, outras_identificacoes [{tipo, codigo}], observacoes`; só na ENTRADA_INICIAL: `data_entrada,
+  data_entrada_confianca, peso, metodo_pesagem, valor_abertura` (centavos). `ref`/`mae_ref`/`pai_ref` ligam animais do
+  mesmo lançamento. Na correção de evento criador, o item leva o `animal_id` criado pelo original (reaproveitado);
+  animal do original que fica fora do substituto é anulado (com as regras do estorno).
+- OUTRA_ENTRADA de animal existente (volta ao rebanho): `{animal_id, brinco?, pasto_destino_id, observacoes?}`; só
+  VENDIDO, DESCARTADO, BAIXADO_AJUSTE ou HISTORICO.
+- AJUSTE_INVENTARIO: CORRECAO_CADASTRO `{animal_id, campo, valor_novo}` (um item por campo; texto canônico, `''` =
+  desconhecido; apagar mãe, pai ou nascimento apaga a confiança); IDENTIFICACAO_INCORRETA `{animal_id, brinco}`;
+  CORRECAO_LOCALIZACAO `{animal_id, pasto_destino_id, pasto_origem_id?}` (a origem é a da linha do tempo na data).
+- ESTORNO (`estornar`): `{event_id, justificativa}`.
+
+Resposta (e reenvio duplicado): `{acao, event_id, event_type, event_subtype, event_date, status, total_value,
+substitui, estorna, animais: [{animal_id, codigo_interno, brinco, sexo, situacao_cadastral, pasto_atual_id}]}`
+(no estorno, os animais do evento estornado). `derivados` = `{animais, eventos}`. `payload_json`: `justificativa`
+(corrigir/estornar), `valor_abertura_origem` (`INFORMADO`), `avisos_aceitos: [{codigo, n, justificativa?}]`.
+Códigos de aviso emitidos: POSSIVEL_DUPLICIDADE, BRINCO_PARECIDO, IDADE_REPRODUTIVA, LOTACAO_ACIMA_DA_CAPACIDADE (em
+cabeças), PERIODO_BLOQUEADO; política por código em `avisos_politica` (ausente = AVISA).
+

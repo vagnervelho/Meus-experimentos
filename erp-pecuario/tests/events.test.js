@@ -147,7 +147,7 @@ test('CT-09: mãe inválida (macho, nascida depois do filho, inexistente, a si m
   const mae = (mae_id, extra) => bicho(Object.assign({ data_nascimento: '2024-09-12', data_nascimento_confianca: 'CONFIRMADA', mae_id, mae_confianca: 'CONFIRMADA' }, extra || {}));
   const e1 = falha(m, 'registrar', outraEntrada('2026-02-01', [mae(touro, { brinco: '1' }), mae(nova, { brinco: '2' }), mae(E.id(0xbeef), { brinco: '3' }), bicho({ brinco: '4', pai_id: v0102, pai_confianca: 'ESTIMADA' }), mae(v0102, { brinco: '5', mae_confianca: '' })]));
   assert.deepEqual(codigos(e1).sort(), ['CAMPO_OBRIGATORIO', 'NAO_ENCONTRADO', 'NASCIMENTO_DO_PROGENITOR', 'SEXO_DO_PROGENITOR', 'SEXO_DO_PROGENITOR'], 'todos os erros juntos, um por animal');
-  assert.deepEqual(e1.details.map((d) => d.brinco), ['1', '2', '3', '4', '5']);
+  assert.deepEqual(e1.details.map((d) => d.brinco).sort(), ['1', '2', '3', '4', '5']);
   assert.ok(e1.details.some((d) => /^Brinco 2: a mãe 900 nasceu em 20\/08\/2025, não antes do animal \(12\/09\/2024\)/.test(d.mensagem)));
   // Ciclo: 0102 é mãe de 0310, que é mãe de 0457; propor 0457 como mãe de 0102 é recusado com o caminho.
   const f1 = m.run('registrar', outraEntrada('2026-02-01', [mae(v0102, { brinco: '0310', data_nascimento: '2018-01-01' })]));

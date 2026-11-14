@@ -43,3 +43,18 @@ repositório; "a verificar na conta do dono" significa que só o roteiro de diag
   servia estado parcial com órfã sem marcador; texto de AUDITORIA de número ≥ 1e21 que travava a recuperação para
   sempre; leitura de célula hostil (dinheiro enorme, data fora do calendário) que derrubava a aba inteira ou passava
   como "coercida"; dinheiro acima de 15 dígitos aceito sem voltar exato.
+
+## 14/11/2026 — Fase 1, motor de eventos (E1.6)
+
+- `EventCatalog`: os 21 tipos com fase; definições completas de ENTRADA_INICIAL, OUTRA_ENTRADA, AJUSTE_INVENTARIO
+  (correção de cadastro, identificação incorreta, correção de localização) e ESTORNO; módulos por fase; serialização
+  para o cliente; validação de campos pelo catálogo.
+- `Timeline`: ordem canônica com o substituto na posição do original; validador único (evento novo, retroativo,
+  estorno, substituição, integridade); fatos independentes; marco zero; projetor de ANIMAIS, IDENTIFICACOES.data_fim e
+  FINANCEIRO (porta `ctx.projecoes`); `conferir` (projeção × reconstrução); inventário e pasto em data.
+- `EventService`: registrar, corrigir (mesmos `animal_id`), estornar, simular, listar, obter; unicidade de brinco com
+  normalização e a exceção do brinco corrigido; genealogia (sexo, datas, ciclo, RN-012); avisos com aceite e política;
+  guarda de duplicidade; valor de abertura sem parcela com rateio e alocações; classificação e cobertura de categorias.
+- Verificado em Node: exemplos (i) a (v) de 04, seção 5.2; CT-09, CT-10 e CT-18 da Fase 1; projeção = reconstrução
+  depois de cada comando de todos os testes; o comando real entrou na varredura de quedas (três primitivas), que
+  achou e fez corrigir dois defeitos do projetor (linha órfã da fase A virando EXTERNO; linha filha sem o evento).
