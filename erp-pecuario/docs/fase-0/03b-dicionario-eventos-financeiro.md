@@ -18,7 +18,7 @@ Tipos de coluna, codec de leitura e gravação, enums compartilhados e sementes 
 
 | Campo da tabela | Como ler |
 |---|---|
-| tipo | Um dos dez tipos do `Schema`: ID, TEXTO, DATA, TS, INT, DEC1, DINHEIRO, BOOL, ENUM, JSON |
+| tipo | Um dos tipos do `Schema` descritos em `03a`, seção 1.2: os dez do desenho-base (ID, TEXTO, DATA, TS, INT, DEC1, DINHEIRO, BOOL, ENUM, JSON) e o `DEC4` acrescentado lá (até 4 casas; usado aqui em dose, quantidade e base de rateio) |
 | obrig. | **S** = sempre preenchida. **N** = opcional. **S: caso** = obrigatória só no caso indicado. "auto" = preenchida pelo servidor, nunca enviada pelo cliente |
 | marca | **imutável** = gravada uma única vez, na fase A. `*` = projeção ou cache, gravada na fase C e na recuperação. `[ctl]` = controle mutável por comando próprio, com AUDITORIA |
 | domínio / FK | Valores do enum fechado; `LISTAS.X` = código da lista aberta X; `→ TABELA.coluna` = alvo da FK |
@@ -46,9 +46,9 @@ As colunas aparecem na ordem do desenho-base, que é a ordem física da aba.
 | Tipo de evento | EVENTOS | EVENTO_ANIMAIS | COMPRAS | VENDAS | PESAGENS | SANIDADE | REPRODUCAO | BAIXAS | AJUSTES | FINANCEIRO | PARCELAS | RATEIOS | ALOCACOES |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | ENTRADA_INICIAL | ● | ● | | | ○ | | ○ | | | ○ | | ○ | ○ |
-| OUTRA_ENTRADA | ● | ● | | | | | | | | | | | |
+| OUTRA_ENTRADA | ● | ● | | | | | ○ | | | | | | |
 | NASCIMENTO | ● | ● | | | ○ | | ● | | | | | | |
-| COMPRA | ● | ● | ● | | ○ | | | | | ● | ● | ● | ● |
+| COMPRA | ● | ● | ● | | ○ | | ○ | | | ● | ● | ● | ● |
 | VENDA | ● | ● | | ● | ○ | | | | | ● | ● | ● | ● |
 | TRANSFERENCIA | ● | ● | | | | | | | | | | | |
 | MORTE | ● | ● | | | | | | ● | | ○ | ○ | ○ | ○ |
@@ -67,7 +67,9 @@ As colunas aparecem na ordem do desenho-base, que é a ordem física da aba.
 | ESTOQUE | ● | | | | | | | | | ○ | ○ | | |
 | ESTORNO | ● | | | | | | | | | | | | |
 
-Os mesmos eventos também gravam em abas descritas em `03a`: ANIMAIS (entradas que criam animal), IDENTIFICACOES (entradas com brinco e o evento IDENTIFICACAO), MOVIMENTOS_ESTOQUE (SANIDADE e ESTOQUE) e ANEXOS (documentos do evento).
+Os mesmos eventos também gravam em abas descritas em `03a`: ANIMAIS (entradas que criam animal), IDENTIFICACOES (entradas com brinco, o evento IDENTIFICACAO e o ajuste de identificação incorreta), MOVIMENTOS_ESTOQUE (SANIDADE e ESTOQUE) e ANEXOS (documentos do evento).
+
+A coluna REPRODUCAO das três entradas (ENTRADA_INICIAL, OUTRA_ENTRADA, COMPRA) refere-se à fêmea declarada prenha: o evento de entrada grava para ela uma linha de diagnóstico de gestação informado (seção 7). O catálogo do desenho-base só cita essa linha na ENTRADA_INICIAL; a extensão às outras duas entradas segue `03a` e está na seção 17.
 
 Nenhuma fase preenche retroativamente um evento confirmado (P11): COMPRA e VENDA gravam FINANCEIRO, PARCELAS, RATEIOS e ALOCACOES_FINANCEIRAS desde a Fase 2, embora as telas do módulo financeiro só cheguem na Fase 4.
 
@@ -96,7 +98,7 @@ Nenhuma fase preenche retroativamente um evento confirmado (P11): COMPRA e VENDA
 | `registration_date` | DATA | S (auto) | imutável | — | Data em que o comando foi executado, no fuso da planilha. Com `event_date`, separa ocorrência de registro (§2.5) |
 | `property_id` | ID | S | imutável | → PROPRIEDADES.property_id | Propriedade onde o fato ocorreu. Padrão: `propriedade_padrao_id`. No ESTORNO, cópia da propriedade do evento anulado |
 | `description` | TEXTO | S: OUTRA_ENTRADA, OCORRENCIA | imutável | — | Frase curta do operador que identifica o evento. Em OUTRA_ENTRADA diz como o animal entrou (doação, permuta, achado, reentrada); em OCORRENCIA, o que ocorreu. Vazia nos demais casos: a interface monta o resumo na leitura, sem gravá-lo |
-| `status` | ENUM | S (auto) | `*` | PENDENTE · CONFIRMADO · ESTORNADO · FALHOU · CANCELADO | Cache do predicado de vigência. Nasce PENDENTE na fase A; a fase C e a recuperação gravam o valor final. Não decide nada: leitores usam o predicado |
+| `status` | ENUM | S (auto) | `*` | PENDENTE · CONFIRMADO · ESTORNADO · FALHOU · CANCELADO | Cache do predicado de vigência. Nasce PENDENTE na fase A; a fase C e a recuperação gravam o valor final. Não decide nada: leitores usam o predicado. Significado de cada valor em `03a`, seção 2.3; ordem de avaliação em `02-modelo-de-dados.md`, seção 5.3. O evento ESTORNO fica CONFIRMADO, embora nunca seja vigente |
 | `total_value` | DINHEIRO | N | imutável | > 0 ou vazio | Valor informativo do evento, definido por tipo (seção 2.5). Nenhum relatório financeiro o lê |
 | `responsible` | TEXTO | N | imutável | — | Quem executou o manejo em campo (campo "Responsável" de §6.4, §6.6 e §6.8). Texto livre |
 | `created_by` | TEXTO | S (auto) | imutável | — | Usuário do sistema que registrou, resolvido pela guarda de dono. É o e-mail quando a plataforma o fornece; a contingência está em `01-arquitetura.md` |
@@ -146,7 +148,7 @@ O subtipo e a coluna de tipo da tabela de detalhe têm correspondência fixa, co
 | COMPRA · VENDA · ENTRADA_INICIAL | vazio | `PESAGENS.tipo` = COMPRA · VENDA · ENTRADA |
 | Demais tipos | vazio | — |
 
-Leitura adotada: "individual, coletiva, por lote" (PESAGEM) e "receita, despesa" (LANCAMENTO_FINANCEIRO) aparecem em minúsculas no catálogo e não são subtipos. Pesagem individual ou coletiva difere só pelo número de linhas; pesagem por lote é reconhecida pelo payload; receita ou despesa está em `FINANCEIRO.tipo`.
+Leitura adotada: "individual, coletiva, por lote" (PESAGEM) e "receita, despesa" (LANCAMENTO_FINANCEIRO) aparecem em minúsculas no catálogo e não são subtipos. Pesagem individual ou coletiva difere só pelo número de linhas; pesagem por lote é reconhecida pelo método MEDIA_LOTE das linhas e pelas duas chaves do payload; receita ou despesa está em `FINANCEIRO.tipo`.
 
 ### 2.5 `total_value` por tipo
 
@@ -183,7 +185,8 @@ Chaves próprias por tipo:
 | `event_type` | Chave | Tipo | Obrig. | Conteúdo |
 |---|---|---|---|---|
 | ENTRADA_INICIAL | `valor_abertura_origem` | ENUM: INFORMADO · TABELA_PRECOS | S: há valor de abertura | Como o valor de abertura foi obtido. Alimenta `ANIMAIS.custo_aquisicao_origem*`: INFORMADO → ABERTURA_INFORMADA; TABELA_PRECOS → ABERTURA_ESTIMADA. Um evento usa um modo só |
-| VENDA | `deducoes` | lista de objetos | S: há dedução | Um objeto por dedução: `financial_id` (lançamento DESPESA_VENDA gerado) e `tipo` (código de `LISTAS.TIPO_DEDUCAO_VENDA`). Valor, parceiro e retenção ficam no lançamento; aqui vai só o tipo, que não tem coluna em FINANCEIRO |
+| VENDA | `deducoes` | lista de objetos | S: há dedução | Um objeto por dedução: `financial_id` (lançamento DESPESA_VENDA gerado) e `tipo` (código de `LISTAS.TIPO_DEDUCAO_VENDA`). Valor, parceiro e retenção ficam no lançamento; aqui vai só o tipo, que não tem coluna em FINANCEIRO. É lista por dedução (três ou quatro itens), não por animal |
+| TRANSFERENCIA | `gta_numero` | TEXTO | N | Número da GTA quando o destino fica em outra propriedade (pasto arrendado em outra fazenda, DV-20). Opcional: a exigência de trânsito é assunto a validar com o órgão de defesa, nunca regra fixa. O arquivo digitalizado vai para ANEXOS. TRANSFERENCIA não tem tabela de detalhe, por isso o número fica aqui |
 | PESAGEM | `peso_total_lote_kg` | número (kg, 1 casa) | S: pesagem por lote | Peso total lido na balança para o grupo. É o fato; as linhas MEDIA_LOTE de PESAGENS são derivadas dele |
 | PESAGEM | `qtd_cabecas_lote` | inteiro | S: pesagem por lote | Cabeças que estavam na balança |
 | SANIDADE | `modo_dose` | ENUM: POR_CABECA · POR_PESO · TOTAL | S: há produto | Como a dose foi definida. TOTAL = só o consumo total é conhecido |
@@ -195,7 +198,7 @@ Chaves próprias por tipo:
 | OCORRENCIA | `tipo_ocorrencia` | código `LISTAS.TIPO_OCORRENCIA` | S | Classificação da ocorrência |
 | ESTOQUE | `qtd_apresentacao` | número | N | Só em ENTRADA: quantidade comprada na apresentação comercial (ex.: 2 frascos) |
 | ESTOQUE | `fator_conversao` | número | S: há `qtd_apresentacao` | Cópia congelada de `PRODUTOS.fator_conversao` no dia da entrada. Torna auditável a conta 2 frascos × 50 doses = 100 doses |
-| Demais tipos | — | — | — | Só as chaves comuns |
+| OUTRA_ENTRADA · NASCIMENTO · COMPRA · MORTE · DESCARTE · REPRODUCAO · DESMAMA · IDENTIFICACAO · AJUSTE_INVENTARIO · LANCAMENTO_FINANCEIRO · RATEIO · ESTORNO | — | — | — | Nenhuma chave própria: todos os campos têm coluna em EVENTOS ou na tabela de detalhe. Só as chaves comuns |
 
 Exemplos de célula:
 
@@ -208,7 +211,7 @@ Exemplos de célula:
  "avisos_aceitos":[{"codigo":"CARENCIA_ATIVA","n":2,"justificativa":"Carência vence antes do abate"}]}
 ```
 
-Os códigos FRETE e FUNRURAL são ilustrativos; os códigos reais de `LISTAS.TIPO_DEDUCAO_VENDA` estão em `03a`.
+FRETE e FUNRURAL são sementes de `LISTAS.TIPO_DEDUCAO_VENDA` (`03a`, seção 3). FRETE e COMISSAO são códigos reservados: têm conta própria e total próprio em VENDAS; qualquer outro tipo cai na conta "Taxas e retenções sobre venda" e em `VENDAS.outras_deducoes`.
 
 O que **não** vai no payload, e onde fica:
 
@@ -293,11 +296,11 @@ Os oito campos de §4.5 foram mantidos; os seis acréscimos estão em DV-03.
 | SUJEITO | Animal sobre o qual o evento atua | Todos os tipos com animal; é o único papel na maioria deles |
 | CRIA | Animal que nasce no evento | NASCIMENTO: uma linha por nascido vivo, com efeito +1. Parto gemelar = duas linhas CRIA no mesmo evento |
 | MATRIZ | Mãe envolvida como acompanhante, sem mudança própria de inventário ou de pasto | NASCIMENTO (a parida) e DESMAMA (a mãe do bezerro desmamado) |
-| TOURO | Reprodutor do rebanho posto com as matrizes | REPRODUCAO/EXPOSICAO: uma linha por touro |
+| TOURO | Reprodutor do rebanho posto com as matrizes | REPRODUCAO/EXPOSICAO: uma linha por touro. REPRODUCAO/COBERTURA: uma linha, quando o touro é do rebanho |
 
 Por que o papel existe: sem ele, a linha da mãe em um NASCIMENTO seria indistinguível da linha do bezerro, e o inventário contaria +2 em vez de +1.
 
-Leitura adotada para o touro: linha TOURO só em EXPOSICAO, onde pode haver vários touros e `REPRODUCAO.touro_id` guarda no máximo um. Em COBERTURA e INSEMINACAO o touro fica só em `REPRODUCAO.touro_id`. Touro EXTERNO (sêmen, animal de fora) nunca tem linha aqui, porque está fora do inventário e não tem linha do tempo.
+Leitura adotada para o touro: há linha TOURO quando um touro do rebanho participa fisicamente do evento. Na EXPOSICAO pode haver vários, e `REPRODUCAO.touro_id` guarda no máximo um; na COBERTURA há um só, que aparece nos dois lugares. A linha serve para validar que o touro estava no rebanho naquela data e para o evento aparecer na ficha dele. Na INSEMINACAO não há linha: o touro do sêmen é referência genética em `REPRODUCAO.touro_id`. Touro EXTERNO (sêmen, animal de fora) nunca tem linha aqui, porque está fora do inventário e não tem linha do tempo.
 
 Papéis com efeito 0 também são validados contra a linha do tempo: a MATRIZ e o TOURO precisam estar no rebanho na data do evento.
 
@@ -319,7 +322,7 @@ Papéis com efeito 0 também são validados contra a linha do tempo: a MATRIZ e 
 | PESAGEM | SUJEITO | 0 | — | — | S | — | — | — | — | — |
 | SANIDADE | SUJEITO | 0 | — | — | — | — | — | — | — | — |
 | REPRODUCAO, matriz | SUJEITO | 0 | — | — | — | — | — | — | — | — |
-| REPRODUCAO/EXPOSICAO, touro | TOURO | 0 | — | — | — | — | — | — | — | — |
+| REPRODUCAO/EXPOSICAO e COBERTURA, touro do rebanho | TOURO | 0 | — | — | — | — | — | — | — | — |
 | DESMAMA, bezerro | SUJEITO | 0 | N (³) | N (³) | N | — | — | — | — | — |
 | DESMAMA, mãe | MATRIZ | 0 | — | — | — | — | — | — | — | — |
 | CASTRACAO · IDENTIFICACAO · MARCACAO · OCORRENCIA | SUJEITO | 0 | — | — | — | — | — | — | — | — |
@@ -349,36 +352,35 @@ Só a linha que cria o animal carrega o JSON. Um substituto de evento criador gr
 | `pai_id` | ID → ANIMAIS | N | N | N | N | `pai_id*` |
 | `pai_confianca` | ENUM de confiança | S: há pai | S: há pai | S: há pai | S: há pai | `pai_confianca*` |
 | `raca` | código `LISTAS.RACA` | N | N | N | N | `raca` (valor inicial; depois é `[cad]`) |
-| `castrado` | BOOL | S | S | fixo N | S | `castrado*` (junto com CASTRACAO vigente) |
-| `reprodutor` | BOOL | S | S | fixo N | S | `reprodutor*` |
+| `castrado` | BOOL | S: macho | S: macho | fixo N, em macho | S: macho | `castrado*` (junto com CASTRACAO vigente) |
+| `reprodutor` | BOOL | S: macho | S: macho | fixo N, em macho | S: macho | `reprodutor*` |
 | `partos_previos` | INT ≥ 0 | N | N | ausente | N | `partos_previos*`; ausente = desconhecido |
-| `situacao_reprodutiva_inicial` | ENUM de `situacao_reprodutiva` | N | N | ausente | N | Estado inicial de `situacao_reprodutiva*` |
-| `data_prevista_parto` | DATA | N | N | ausente | N | Previsão de parto informada; só com situação inicial PRENHA |
+| `situacao_reprodutiva` | ENUM: VAZIA · EXPOSTA · INSEMINADA · PRENHA | N | N | ausente | N | Estado inicial de `situacao_reprodutiva*`. Sem a chave, a projeção parte de NAO_APTA (nascida no sistema) ou de SEM_INFORMACAO (demais) |
+| `data_prevista_parto` | DATA | N | N | ausente | N | Nenhuma coluna de ANIMAIS. Só com situação PRENHA; é copiada para a linha de REPRODUCAO que o evento de entrada grava (⁶) |
 | `origem` | ENUM: NASCIDO · COMPRADO · DESCONHECIDA | S | S | fixo NASCIDO | fixo COMPRADO | `origem*` |
-| `data_entrada` | DATA | N (⁵) | fixo = `event_date` | fixo = `event_date` | fixo = `event_date` | `data_entrada*` |
-| `data_entrada_confianca` | ENUM de confiança | S | fixo CONFIRMADA | fixo CONFIRMADA | fixo CONFIRMADA | `data_entrada_confianca*` |
+| `data_entrada` | DATA | N (⁵) | ausente | ausente | ausente | `data_entrada*`. Nos três tipos em que a chave é ausente, a projeção usa `event_date` |
+| `data_entrada_confianca` | ENUM de confiança | S: há data | ausente | ausente | ausente | `data_entrada_confianca*`. Sem a chave: DESCONHECIDA na ENTRADA_INICIAL; nos demais, a `confiabilidade` do evento |
 
 (⁴) §6.2 pede "idade ou nascimento". Se o operador informar a idade em meses, o servidor grava `data_nascimento` = `event_date` − idade, em meses de calendário, com confiança ESTIMADA. A idade em si não é gravada. Exemplo: compra em 10/03/2027 de animal com 14 meses → `2026-01-10`, ESTIMADA.
-(⁵) Na ENTRADA_INICIAL o evento é sempre datado do marco zero. A data real ou estimada em que o animal chegou à fazenda fica aqui e pode ser anterior ao marco zero. Ausente = desconhecida, com confiança DESCONHECIDA.
+(⁵) Na ENTRADA_INICIAL o evento é sempre datado do marco zero. A data real ou estimada em que o animal chegou à fazenda fica aqui e pode ser anterior ao marco zero. Ausente = desconhecida.
+(⁶) Fêmea declarada PRENHA na entrada: o mesmo evento grava uma linha em REPRODUCAO com `tipo_evento` DIAGNOSTICO_GESTACAO, `resultado` POSITIVO, `metodo` INFORMADO e a `data_prevista_parto` do JSON, se houver. O JSON é a declaração de criação (fonte); a linha de REPRODUCAO é a cópia que a ficha reprodutiva, a previsão de parto e os indicadores leem. A integridade confere uma contra a outra.
 
-Em fêmeas, `castrado` e `reprodutor` são gravados como N. As chaves `partos_previos`, `situacao_reprodutiva_inicial` e `data_prevista_parto` só são aceitas em fêmeas.
+As chaves `castrado` e `reprodutor` só existem em machos; `partos_previos`, `situacao_reprodutiva` e `data_prevista_parto`, só em fêmeas. No outro sexo a chave é omitida e a coluna de ANIMAIS fica vazia ("não se aplica", `03a`, seção 1.3).
 
 Exemplos de célula (cerca de 300 caracteres por animal, longe do teto de 40.000):
 
 ```json
 {"sexo":"M","data_nascimento":"2027-01-15","data_nascimento_confianca":"CONFIRMADA",
  "mae_id":"<uuid da matriz>","mae_confianca":"CONFIRMADA","pai_id":"<uuid do touro>","pai_confianca":"ESTIMADA",
- "raca":"NELORE","castrado":"N","reprodutor":"N","origem":"NASCIDO",
- "data_entrada":"2027-01-15","data_entrada_confianca":"CONFIRMADA"}
+ "raca":"NELORE","castrado":"N","reprodutor":"N","origem":"NASCIDO"}
 ```
 
 ```json
 {"sexo":"F","data_nascimento":"2023-09-01","data_nascimento_confianca":"ESTIMADA","raca":"NELORE",
- "castrado":"N","reprodutor":"N","partos_previos":2,"situacao_reprodutiva_inicial":"PRENHA",
- "data_prevista_parto":"2027-02-20","origem":"DESCONHECIDA","data_entrada_confianca":"DESCONHECIDA"}
+ "partos_previos":2,"situacao_reprodutiva":"PRENHA","data_prevista_parto":"2027-02-20","origem":"DESCONHECIDA"}
 ```
 
-O primeiro é um bezerro nascido na fazenda. O segundo é uma vaca do rebanho inicial, prenha no marco zero, de origem e data de chegada desconhecidas. O código NELORE é ilustrativo.
+O primeiro é um bezerro nascido na fazenda: `data_entrada` não aparece porque é a própria data do evento. O segundo é uma vaca do rebanho inicial, prenha no marco zero, de origem e data de chegada desconhecidas. NELORE é semente de `LISTAS.RACA`.
 
 ## 4. COMPRAS e VENDAS
 
@@ -397,7 +399,7 @@ Uma linha por evento, com o cabeçalho comercial da negociação. Os animais est
 |---|---|---|---|---|---|
 | `purchase_id` | ID | S (auto) | imutável | PK | UUID |
 | `event_id` | ID | S (auto) | imutável | → EVENTOS.event_id | Evento COMPRA |
-| `finalidade` | TEXTO | N | imutável | `LISTAS.FINALIDADE_NEGOCIO` | Para que os animais foram comprados (recria, reprodução). Lista aberta, sem lógica associada |
+| `finalidade` | TEXTO | N | imutável | `LISTAS.FINALIDADE_NEGOCIO` | Para que os animais foram comprados (recria e engorda, reprodução). Na compra é só classificação, sem lógica associada |
 | `modalidade` | ENUM | S | imutável | CABECA · KG_VIVO · ARROBA · LOTE | Como o preço foi formado: por cabeça, por kg vivo, por arroba ou valor fechado do lote |
 | `base_peso` | ENUM | S: KG_VIVO, ARROBA | imutável | VIVO · CARCACA | Peso sobre o qual o preço incide. KG_VIVO é sempre VIVO. Vazia em CABECA e LOTE |
 | `rendimento_carcaca_pct` | DEC1 | conforme a seção 4.3 | imutável | 0 < x < 100 | Rendimento de carcaça em %. Informado em arroba de base VIVO; derivado em base CARCACA quando há peso vivo |
@@ -428,7 +430,7 @@ Uma linha por evento, com o cabeçalho comercial da negociação. Os animais est
 |---|---|---|---|---|---|
 | `sale_id` | ID | S (auto) | imutável | PK | UUID |
 | `event_id` | ID | S (auto) | imutável | → EVENTOS.event_id | Evento VENDA |
-| `finalidade` | ENUM | S | imutável | ABATE · RECRIA_ENGORDA · REPRODUCAO · OUTRA | Destino dos animais. Enum fechado porque tem lógica: carência sanitária ativa bloqueia venda para ABATE e só avisa nas demais |
+| `finalidade` | TEXTO | S | imutável | `LISTAS.FINALIDADE_NEGOCIO` (sementes: ABATE · RECRIA_ENGORDA · REPRODUCAO · OUTRA) | Destino dos animais. A lista é aberta, mas o código ABATE é reservado (`03a`, seção 3): carência sanitária ativa bloqueia venda para ABATE e só avisa nas demais |
 | `modalidade` | ENUM | S | imutável | CABECA · KG_VIVO · ARROBA · LOTE | As quatro formas de negociação de §6.3 |
 | `base_peso` | ENUM | S: KG_VIVO, ARROBA | imutável | VIVO · CARCACA | Peso sobre o qual o preço incide. Frigorífico paga por carcaça; reposição paga por peso vivo |
 | `rendimento_carcaca_pct` | DEC1 | conforme a seção 4.3 | imutável | 0 < x < 100 | Como em COMPRAS |
@@ -573,7 +575,7 @@ Em relação a §4.6, a única coluna acrescentada é `tipo`.
 | `fabricante` | TEXTO | N | imutável | — | Fabricante. Proposto pelo cadastro, editável na aplicação |
 | `lote` | TEXTO | N | imutável | — | Lote efetivamente aplicado. Vale sobre o "último lote" do cadastro (DV-19) |
 | `validade` | DATA | N | imutável | — | Validade do lote aplicado (§6.6). Validade anterior à data de aplicação gera aviso |
-| `dose` | DEC1 | S: `modo_dose` POR_CABECA ou POR_PESO | imutável | > 0 | Dose deste animal, na unidade de `unidade_dose`. Vazia em modo TOTAL, quando só o consumo total é conhecido |
+| `dose` | DEC4 | S: `modo_dose` POR_CABECA ou POR_PESO | imutável | > 0 | Dose deste animal, na unidade de `unidade_dose`. Em POR_PESO, o formulário propõe `dose_referencia` × último peso do animal (ex.: 0,02 mL/kg × 400,0 kg = 8 mL) e o operador confirma. Vazia em modo TOTAL, quando só o consumo total é conhecido |
 | `unidade_dose` | TEXTO | S: há dose | imutável | = `PRODUTOS.unidade` quando há `produto_id` | Unidade da dose (mL, dose, g). Com produto cadastrado, precisa ser a unidade de controle do produto, para dose, estoque e custo falarem a mesma língua |
 | `via_aplicacao` | TEXTO | N | imutável | `LISTAS.VIA_APLICACAO` | Via de aplicação |
 | `motivo` | TEXTO | S: TRATAMENTO | imutável | — | Por que o animal foi tratado ou medicado (§6.7). Texto livre |
@@ -602,7 +604,7 @@ Três pontos em que a aba conversa com outras:
 | Propósito | Uma linha por matriz e fato reprodutivo. Fonte da ficha reprodutiva, da projeção `situacao_reprodutiva*`, da previsão de parto e dos indicadores por estação (§4.8, §6.10, §9) |
 | Chave | PK `reproduction_id`. Único por (`event_id`, `animal_id`) |
 | Crescimento | 0,6 a 1 mil linhas por ano |
-| Quem grava | REPRODUCAO (EXPOSICAO, COBERTURA, INSEMINACAO, DIAGNOSTICO_GESTACAO, ABORTO); NASCIMENTO (PARTO); DESMAMA (DESMAMA, na linha da mãe, quando ela é conhecida e está no rebanho); ENTRADA_INICIAL (DIAGNOSTICO_GESTACAO informado, para fêmea declarada prenha no marco zero) |
+| Quem grava | REPRODUCAO (EXPOSICAO, COBERTURA, INSEMINACAO, DIAGNOSTICO_GESTACAO, ABORTO); NASCIMENTO (PARTO); DESMAMA (DESMAMA, na linha da mãe, quando ela é conhecida e está no rebanho); ENTRADA_INICIAL, COMPRA e OUTRA_ENTRADA (DIAGNOSTICO_GESTACAO informado, para fêmea declarada prenha na entrada; seção 3.5) |
 | Regra do parto | Um parto = um evento NASCIMENTO = uma linha PARTO, mesmo gemelar e mesmo com zero nascidos vivos. Natimorto não cria animal, mas o parto conta para o intervalo entre partos e para "parida" (DV-15) |
 
 ### 7.1 Colunas
@@ -647,7 +649,7 @@ Em relação a §4.8, foram acrescentadas `data_fim`, `estacao_id`, `semen_ident
 Leituras adotadas:
 
 - **"Monta natural" × "cobertura" (§6.10).** A especificação lista as duas. Monta a campo, em que não se sabe o dia em que cada vaca foi coberta, é EXPOSICAO: fato coletivo com início, fim, estação e touros. Cobertura observada ou controlada, com data e touro conhecidos, é COBERTURA.
-- **`metodo` = INFORMADO** marca o diagnóstico declarado sem exame registrado no sistema: fêmea que entra prenha no marco zero. É o que permite tratar a previsão como estimativa.
+- **`metodo` = INFORMADO** marca o diagnóstico declarado sem exame registrado no sistema: fêmea que entra prenha no rebanho inicial, por compra ou por outra entrada. É o que permite tratar a previsão como estimativa.
 - **DESMAMA** grava uma linha na mãe só para a projeção "cria ao pé = não" e para a taxa de desmama. O bezerro desmamado é a linha SUJEITO do mesmo evento em EVENTO_ANIMAIS; o peso à desmama está em PESAGENS.
 - **Vínculo parto × cobertura** não é gravado: é derivado na leitura (última cobertura ou inseminação dentro da janela de gestação).
 
@@ -722,7 +724,7 @@ Campos aceitos por `tipo_ajuste` (lista fechada):
 | `tipo_ajuste` | `campo` aceito | Efeito além da linha de AJUSTES |
 |---|---|---|
 | CORRECAO_CADASTRO | `sexo`, `data_nascimento`, `data_nascimento_confianca`, `mae_id`, `mae_confianca`, `pai_id`, `pai_confianca`, `castrado`, `reprodutor`, `partos_previos`, `origem`, `data_entrada`, `data_entrada_confianca` | Revalida genealogia e linha do tempo com o valor novo |
-| IDENTIFICACAO_INCORRETA | `brinco` | O `Projector` aplica o código corrigido sobre a identificação vigente; a linha errada de IDENTIFICACOES não é alterada. Revalida a unicidade do brinco |
+| IDENTIFICACAO_INCORRETA | `brinco` | `valor_anterior` = código lançado errado; `valor_novo` = código correto. O mesmo evento grava uma linha nova em IDENTIFICACOES com o código correto (`03a`, seção 4.4); a linha errada não é alterada e é fechada pela projeção `data_fim*`. Revalida a unicidade do brinco. O efeito do código errado sobre a regra de reuso de brinco está em aberto (seção 17) |
 | RECLASSIFICACAO | `categoria_manual_id` | Valor preenchido → `categoria_modo*` = MANUAL. Valor vazio → volta a AUTO |
 | CORRECAO_LOCALIZACAO | `pasto_atual_id` | Linha de EVENTO_ANIMAIS com origem (pasto registrado) e destino (pasto real), que entra na linha do tempo como movimento |
 
@@ -756,10 +758,10 @@ Colocar ou repor brinco não é ajuste: é o evento de rotina IDENTIFICACAO (DV-
 | `competencia_inicio` | DATA | N | imutável | ≤ `competencia_fim` | Início do período a que a despesa se refere (ex.: arrendamento de janeiro a dezembro). Atende ao vínculo "período" de §11. Vazio = só `data_competencia` |
 | `competencia_fim` | DATA | S: há início | imutável | ≥ `competencia_inicio` | Fim do período. Com período, o resultado de cada mês recebe valor × dias de interseção ÷ dias totais, calculado na leitura; nenhuma linha extra é gerada |
 | `valor` | DINHEIRO | S | imutável | > 0 | Valor total do lançamento, sempre positivo. Juros, multa e desconto de pagamento não entram aqui |
-| `quantidade` | DEC1 | N | imutável | > 0 | Quantidade a que o valor se refere: unidades do produto quando há `product_id`; cabeças nos lançamentos principais de COMPRA, VENDA e abertura. Vazia nos demais |
+| `quantidade` | DEC4 | N | imutável | > 0 | Quantidade a que o valor se refere: unidades de dose do produto quando há `product_id`; cabeças nos lançamentos principais de COMPRA, VENDA e abertura; cabeças × meses no arrendamento de pasto cobrado por cabeça/mês (DV-20). Vazia nos demais. Só informa o preço unitário (valor ÷ quantidade); nenhum rateio a usa |
 | `product_id` | ID | S: consumo de SANIDADE, ESTOQUE/ENTRADA | imutável | → PRODUTOS.product_id | Insumo comprado ou consumido |
 | `animal_id` | ID | N (auto) | `*` | → ANIMAIS.animal_id | Preenchida pela fase C só quando o rateio vigente do lançamento é DIRETO (uma única alocação, de 100%). Atalho de leitura da aba; nenhum relatório de custo a lê |
-| `pasture_id` | ID | N | imutável | → PASTOS.pasture_id | Vínculo a um pasto (ex.: reforma de cerca). No máximo um por lançamento; despesa de dois pastos é digitada em dois lançamentos |
+| `pasture_id` | ID | N | imutável | → PASTOS.pasture_id | Vínculo a um pasto (ex.: reforma de cerca, aluguel de pasto arrendado). No máximo um por lançamento; despesa de dois pastos é digitada em dois lançamentos |
 | `property_id` | ID | N | imutável | → PROPRIEDADES.property_id | Vínculo a uma propriedade. Preenchida por padrão com a propriedade do evento |
 | `categoria_animal_id` | ID | N | imutável | → CATEGORIAS.category_id | Vínculo a uma categoria de animais (ex.: sal para bezerros). Atende ao vínculo "categoria" de §11; o nome evita confusão com `categoria` |
 | `partner_id` | ID | N | imutável | → PARCEIROS.partner_id | Contraparte deste lançamento. Pode diferir de `EVENTOS.partner_id`: o frete é do transportador, não do vendedor |
@@ -773,7 +775,7 @@ Colocar ou repor brinco não é ajuste: é o evento de rotina IDENTIFICACAO (DV-
 | `data_pagamento` | DATA | N (auto) | `*` | — | Maior `PARCELAS.data_pagamento`, preenchida só quando `status_pagamento` = LIQUIDADO. É o destino de "data_pagamento" de §4.9 |
 | `created_at` | TS | S (auto) | imutável | — | Instante da gravação |
 
-Dos quinze campos de §4.9, doze foram mantidos com o mesmo nome (`data_pagamento` e `status_pagamento` como projeção, `animal_id` como projeção) e `forma_pagamento` foi para PARCELAS. As colunas novas estão em DV-02.
+Dos quinze campos de §4.9, doze foram mantidos com o mesmo nome (três deles como projeção: `data_pagamento`, `status_pagamento` e `animal_id`), dois perderam o acento (`descricao`, `observacoes`; DV-01) e `forma_pagamento` foi para PARCELAS. As catorze colunas novas (28 − 14): as oito de DV-02, mais `product_id`, `documento`, `status*`, `cancelado_em*`, `cancelado_por_event_id*` e `created_at`.
 
 ### 10.3 Lançamentos que cada evento gera
 
@@ -792,6 +794,7 @@ Nomes de conta são as sementes do plano de contas; os códigos estão em `03a`.
 | DESCARTE | Receita simples (opcional) | Outras receitas operacionais [OUTRA_RECEITA] | Informado | 1 ou mais | CABECAS |
 | REPRODUCAO · CASTRACAO · OCORRENCIA | Despesa (opcional) | Conta de custeio escolhida [CUSTEIO] | Informado | 1 ou mais | CABECAS, se o evento tem animais; sem animais, nenhum |
 | LANCAMENTO_FINANCEIRO | Receita ou despesa avulsa | Conta escolhida | Informado | 1 ou mais | Opcional, com qualquer critério e escopo |
+| LANCAMENTO_FINANCEIRO | Aluguel de pasto arrendado (DV-20) | Arrendamento de pasto [CUSTEIO, classe ALIMENTACAO] | Informado; `pasture_id`, parceiro e `competencia_inicio`/`competencia_fim` preenchidos; `quantidade` opcional | 1 ou mais | DIAS_PERMANENCIA com escopo PASTO, no próprio evento ou depois, por evento RATEIO |
 | ESTOQUE/ENTRADA | Compra de insumo | Compra de insumos [ESTOQUE_INSUMOS] | Informado | 1 ou mais | Não se aplica |
 
 Em toda a tabela, rateio com um único animal é gravado como DIRETO.
@@ -802,13 +805,15 @@ Por que o consumo de SANIDADE não tem parcela: o insumo vira custo quando é ap
 
 `status*` responde "o lançamento vale?"; `status_pagamento*` responde "como está o caixa dele?". São perguntas diferentes: misturá-las em uma coluna só era um dos defeitos apontados na revisão do desenho.
 
-| `status_pagamento*` | Condição, avaliada nesta ordem |
+| `status_pagamento*` | Condição, avaliada nesta ordem (a mesma de `02-modelo-de-dados.md`, seção 6.2) |
 |---|---|
+| SEM_CAIXA | Lançamento sem parcela, vigente ou não |
 | CANCELADO | `status*` = CANCELADO |
-| SEM_CAIXA | Lançamento sem parcela |
-| LIQUIDADO | Todas as parcelas não canceladas estão LIQUIDADAS |
+| LIQUIDADO | Todas as parcelas não canceladas estão LIQUIDADAS. `data_pagamento*` recebe a maior data de pagamento |
 | ABERTO | Nenhuma parcela LIQUIDADA |
 | PARCIAL | Os demais casos |
+
+Exemplo: lançamento de R$ 9.039,05 em duas parcelas. Nenhuma paga → ABERTO. Paga a primeira → PARCIAL. Paga a segunda em 10/05/2027 → LIQUIDADO, com `data_pagamento*` = 2027-05-10.
 
 "Pago", "recebido" e "atrasado" não são valores gravados: são rótulos que a interface deriva de `tipo`, do status e do vencimento das parcelas.
 
@@ -874,13 +879,13 @@ Regras do título:
 | `periodo_inicio` | DATA | S: DIAS_PERMANENCIA | imutável | ≤ `periodo_fim` | Início do período medido. Padrão: `competencia_inicio` do lançamento |
 | `periodo_fim` | DATA | S: DIAS_PERMANENCIA | imutável | ≥ `periodo_inicio` | Fim do período, inclusivo |
 | `data_base` | DATA | S: CABECAS e PESO_VIVO fora do escopo EVENTO | imutável | — | Data em que o inventário e o peso são tomados. No escopo EVENTO, cópia de `event_date` |
-| `base_total` | DINHEIRO (¹) | S | imutável | ≥ 0 | Soma das bases dos animais, na unidade do critério. Zero quando ninguém se qualificou (pasto vazio no período) |
+| `base_total` | DEC4 (¹) | S | imutável | ≥ 0 | Soma das bases dos animais, na unidade do critério. Zero quando ninguém se qualificou (pasto vazio no período) |
 | `total_alocado` | DINHEIRO | S | imutável | 0 ≤ x ≤ `FINANCEIRO.valor` | Valor distribuído, em R$. Igual à soma das alocações do rateio. Menor que o lançamento só em MANUAL parcial ou com base zero |
 | `justificativa` | TEXTO | S: MANUAL, re-rateio, base zero | imutável | — | Por que este critério, ou por que nada foi alocado |
 | `created_by` | TEXTO | S (auto) | imutável | — | Usuário que registrou |
 | `created_at` | TS | S (auto) | imutável | — | Instante da gravação |
 
-(¹) `base_total` e `ALOCACOES_FINANCEIRAS.base_valor` usam o codec numérico de 2 casas do tipo DINHEIRO, mas a unidade é a do critério (R$, kg, cabeças, dias), não necessariamente reais. O `Schema` do desenho-base não tem tipo decimal genérico (seção 17).
+(¹) `base_total` e `ALOCACOES_FINANCEIRAS.base_valor` não são dinheiro: a unidade é a do critério (R$, kg, cabeças, dias ou peso relativo). Por isso usam `DEC4`, o decimal genérico acrescentado em `03a`, e não DINHEIRO.
 
 ### 12.3 Critério, base e unidade
 
@@ -891,7 +896,7 @@ Regras do título:
 | CABECAS | 1 | cabeça | `data_base` | Frete por cabeça, vacinação, custo geral do rebanho |
 | PESO_VIVO | Peso vivo: o do evento, ou a última pesagem até `data_base` | kg | `data_base` | Compra e venda por kg; suplemento |
 | PESO_CARCACA | Peso de carcaça do animal no evento | kg | — | Venda por arroba de carcaça. Só no escopo EVENTO |
-| DIAS_PERMANENCIA | Dias do animal no escopo dentro do período | dia | `periodo_inicio`, `periodo_fim` | Custo de pasto, sal, mão de obra |
+| DIAS_PERMANENCIA | Dias do animal no escopo dentro do período | dia | `periodo_inicio`, `periodo_fim` | Aluguel de pasto arrendado (escopo PASTO), sal, mão de obra |
 | MANUAL | Peso relativo informado no comando: percentual, valor ou dose | livre | `justificativa` | "Percentual manual" de §11.2; consumo proporcional à dose |
 
 Regras de base:
@@ -931,7 +936,7 @@ Os 2 centavos de sobra vão para os dois maiores restos (50 e 35). A linha de RA
 | `rateio_id` | ID | S (auto) | imutável | → RATEIOS.rateio_id | Rateio que gerou a alocação. Toda alocação tem rateio, inclusive a direta |
 | `financial_id` | ID | S (auto) | imutável | → FINANCEIRO.financial_id | Cópia de `RATEIOS.financial_id`, para somar por lançamento sem passar por RATEIOS |
 | `animal_id` | ID | S | imutável | → ANIMAIS.animal_id | Animal que recebe o valor. Alocação vigente impede o estorno puro da entrada do animal |
-| `base_valor` | DINHEIRO (¹) | S | imutável | > 0 | Base do animal no critério do rateio, na unidade da seção 12.3. É o que torna a conta refazível por qualquer pessoa |
+| `base_valor` | DEC4 (¹) | S | imutável | > 0 | Base do animal no critério do rateio, na unidade da seção 12.3. É o que torna a conta refazível por qualquer pessoa |
 | `valor_alocado` | DINHEIRO | S | imutável | ≥ 0 | Valor atribuído ao animal, em R$, já com o ajuste de centavos |
 
 (¹) Mesma observação de `RATEIOS.base_total`.
@@ -950,7 +955,7 @@ O que se lê daqui (fórmulas completas em `07-financeiro-e-indicadores.md`):
 Toda a conta é feita em inteiros, para a simulação e o commit darem sempre o mesmo centavo ao mesmo animal.
 
 1. T = valor a distribuir, em centavos. É o valor do lançamento, salvo MANUAL parcial.
-2. bᵢ = base do animal i convertida em inteiro (base × 100). B = Σ bᵢ.
+2. bᵢ = base do animal i na menor unidade inteira do critério: centavos para base em R$; décimos de kg para peso; a própria unidade para cabeças e dias; décimos de milésimo (base × 10.000) em MANUAL. B = Σ bᵢ. A escala é a mesma para todos os animais do rateio e não altera o resultado.
 3. Quociente: qᵢ = parte inteira de (T × bᵢ ÷ B). Resto: rᵢ = (T × bᵢ) mod B.
 4. Sobra = T − Σ qᵢ. É sempre menor que o número de animais.
 5. Os animais são ordenados por maior resto; em empate, maior base; persistindo, `codigo_interno` crescente. Os primeiros recebem 1 centavo cada, até acabar a sobra.
@@ -959,6 +964,8 @@ Toda a conta é feita em inteiros, para a simulação e o commit darem sempre o 
 Exemplo mínimo (CT-13): R$ 100,00 por CABECAS entre 3 animais. T = 10.000; cada qᵢ = 3.333; sobra = 1; restos e bases empatam, e o centavo vai para o menor `codigo_interno`. Resultado: 33,34 + 33,33 + 33,33 = 100,00.
 
 Percentual é só exibição: nenhuma conta usa percentual arredondado. Com B = 0 não há distribuição: grava-se a linha de RATEIOS com `total_alocado` = 0,00 e a `justificativa`, sem alocações.
+
+Limite numérico: o produto T × bᵢ precisa ser inteiro exato, e o número do JavaScript só garante inteiros até 2⁵³ − 1 (cerca de 9,007 × 10¹⁵). Um lançamento de R$ 1.000.000,00 (T = 10⁸ centavos) admite base individual de até 9,007 × 10⁷ unidades: R$ 900.719,92 por animal em VALOR_INDIVIDUAL, ou 9.007 toneladas em peso. Fica muito acima de qualquer negócio de 500 cabeças, mas o plano de escrita confere o limite e recusa o comando com VALIDATION se ele for excedido; nunca arredonda em silêncio.
 
 ## 14. Invariantes entre FINANCEIRO, PARCELAS, RATEIOS e ALOCACOES_FINANCEIRAS
 
@@ -981,7 +988,7 @@ Setas cheias são FKs; setas tracejadas são projeções. Todas as igualdades ab
 | 1 | `FINANCEIRO.valor` > 0; o sinal vem de `tipo` | Validação do comando | Valor negativo usado como estorno informal |
 | 2 | `natureza`, `tipo` e `categoria` do lançamento = natureza, tipo e grupo da conta | Fase A; integridade (cópia × fonte) | Lançamento que muda de visão porque a conta foi editada |
 | 3 | Σ `PARCELAS.valor` das parcelas não canceladas = `FINANCEIRO.valor`, em todo lançamento que tem parcela | Validação; integridade | Título que não soma o fato econômico |
-| 4 | Lançamento sem parcela ⇔ `status_pagamento*` = SEM_CAIXA | Fase C | Consumo de insumo ou saldo de abertura aparecendo no fluxo de caixa |
+| 4 | Lançamento sem parcela ⇔ `status_pagamento*` = SEM_CAIXA. Os lançamentos de consumo de produto e de saldo de abertura nunca têm parcela | Fase A (plano de escrita); fase C | Consumo de insumo ou saldo de abertura aparecendo no fluxo de caixa |
 | 5 | Parcela LIQUIDADA: `valor_pago` = `valor` + `juros_multa` − `desconto`, com `data_pagamento` preenchida. Parcela ABERTA: as quatro colunas vazias | Comando de baixa; integridade | Caixa realizado diferente do que foi pago |
 | 6 | `status_pagamento*` e `data_pagamento*` = função das parcelas (seção 10.4) | Fase C da baixa; integridade | Lançamento "liquidado" com parcela aberta |
 | 7 | Um rateio vigente por lançamento: o do evento vigente de maior `event_seq` | `Repository`; integridade | Somar o rateio antigo e o novo |
@@ -995,10 +1002,298 @@ Setas cheias são FKs; setas tracejadas são projeções. Todas as igualdades ab
 | 15 | Σ `EVENTO_ANIMAIS.valor_individual` do evento = `COMPRAS.valor_animais`, ou `VENDAS.valor_bruto` − `desconto_comercial`, = Σ alocações do lançamento principal | Fase A; integridade | Base de rateio que não fecha com o cabeçalho |
 | 16 | `COMPRAS.valor_total` = Σ `FINANCEIRO.valor` do evento; `VENDAS.frete` + `comissao` + `outras_deducoes` = Σ lançamentos DESPESA_VENDA do evento | Fase A; integridade | Cabeçalho comercial divergente do financeiro |
 | 17 | Σ `SANIDADE.custo` do evento = Σ alocações do rateio que o próprio evento gravou | Fase A; integridade | Cópia de custo divergente da fonte |
-| 18 | `ANIMAIS.custo_aquisicao*` = Σ alocações vigentes de natureza AQUISICAO_ANIMAIS | Fase C (`Projector`); integridade (projeção × replay) | Ficha do animal com custo diferente do relatório |
+| 18 | `ANIMAIS.custo_aquisicao*` = Σ alocações vigentes de natureza AQUISICAO_ANIMAIS do animal (em reentrada, só as do período de permanência mais recente; regra em `03a`, seção 4.3.3) | Fase C (`Projector`); integridade (projeção × replay) | Ficha do animal com custo diferente do relatório |
 | 19 | Evento com parcela LIQUIDADA não pode ser estornado | Validação do estorno | Dinheiro já movimentado sumindo do caixa |
 | 20 | Lançamento CANCELADO não tem parcela, rateio nem alocação vigente | Predicado de vigência | Resíduo de evento anulado nos relatórios |
 
 O que não é invariante, de propósito: a soma das alocações **não** precisa igualar o valor do lançamento fora de COMPRA e VENDA. Uma despesa de contabilidade de R$ 500,00 sem rateio é válida e aparece como "custeio não alocado". Exigir 100% forçaria rateios artificiais (§11.2 "não atribuir automaticamente custos... sem apresentar o método").
+
+## 15. Exemplos completos, linha a linha
+
+Como ler os dois exemplos:
+
+- Os IDs estão encurtados (`ev-1`, `fin-1`, `parc-1`, `rat-1`) no lugar dos UUIDs. Os animais são citados pelo `codigo_interno`, mas a coluna guarda o `animal_id`; a conta aparece pelo `codigo`, mas a coluna guarda o `conta_id`.
+- Os valores estão em formato brasileiro, como a tela mostra. Na célula o número é gravado com ponto.
+- "—" é célula vazia. Colunas vazias em todas as linhas do exemplo são citadas abaixo da tabela, não desenhadas.
+- Os números foram conferidos por script, com a aritmética da seção 13.3 (centavos inteiros, maior resto).
+- São exemplos de desenho: mostram o que o plano de escrita deverá gravar. Nada disto foi executado.
+
+### 15.1 Compra de 3 animais por kg vivo, com frete rateado e 2 parcelas
+
+**Cenário.** Em 10/03/2027 a fazenda compra 3 garrotes do fornecedor `forn-1`, pesados na chegada: 212,5 kg, 198,0 kg e 206,5 kg, total de 617,0 kg. O preço é de R$ 14,65 por kg vivo. A nota traz R$ 9.039,05, igual à conferência (617,0 kg × R$ 14,65/kg = R$ 9.039,05; desvio de 0%). Os animais são pagos em 2 parcelas por boleto, a 30 e a 60 dias. O frete, de R$ 360,00, é do transportador `transp-1` e vence em 15/03/2027, por Pix. Destino: `pasto-2`. Os animais recebem os brincos 0431, 0432 e 0433.
+
+```mermaid
+flowchart TD
+    EV["EVENTOS ev-1: COMPRA"] --> CO["COMPRAS cmp-1"]
+    EV --> EA["EVENTO_ANIMAIS: 3 linhas"]
+    EV --> F1["FINANCEIRO fin-1: animais 9.039,05"]
+    EV --> F2["FINANCEIRO fin-2: frete 360,00"]
+    F1 --> P1["PARCELAS parc-1 e parc-2"]
+    F2 --> P3["PARCELAS parc-3"]
+    F1 --> R1["RATEIOS rat-1: PESO_VIVO"]
+    F2 --> R2["RATEIOS rat-2: PESO_VIVO"]
+    R1 --> A1["ALOCACOES_FINANCEIRAS: 3 linhas"]
+    R2 --> A2["ALOCACOES_FINANCEIRAS: 3 linhas"]
+```
+
+**Passo 1: a conta do rateio.** A modalidade KG_VIVO fixa o critério PESO_VIVO. As bases entram em décimos de kg: 2.125, 1.980 e 2.065, com B = 6.170. O valor dos animais e o frete são distribuídos em contas separadas, pelas mesmas bases.
+
+| Lançamento | Animal | bᵢ | T × bᵢ | qᵢ | rᵢ | Sobra | `valor_alocado` (R$) |
+|---|---|---|---|---|---|---|---|
+| fin-1: T = 903.905 | A-000431 | 2.125 | 1.920.798.125 | 311.312 | 3.085 | +1 | 3.113,13 |
+| | A-000432 | 1.980 | 1.789.731.900 | 290.070 | 0 | | 2.900,70 |
+| | A-000433 | 2.065 | 1.866.563.825 | 302.522 | 3.085 | | 3.025,22 |
+| | Soma | 6.170 | | 903.904 | | 1 centavo | 9.039,05 |
+| fin-2: T = 36.000 | A-000431 | 2.125 | 76.500.000 | 12.398 | 4.340 | +1 | 123,99 |
+| | A-000432 | 1.980 | 71.280.000 | 11.552 | 4.160 | +1 | 115,53 |
+| | A-000433 | 2.065 | 74.340.000 | 12.048 | 3.840 | | 120,48 |
+| | Soma | 6.170 | | 35.998 | | 2 centavos | 360,00 |
+
+Em fin-1, A-000431 e A-000433 empatam no resto (3.085). O centavo vai para a maior base: 212,5 kg contra 206,5 kg. É o desempate determinístico em ação. A conta ingênua "peso × preço" daria meio centavo aos dois (212,5 × 14,65 = 3.113,125 e 206,5 × 14,65 = 3.025,225); arredondar ambos para cima somaria R$ 9.039,06, um centavo a mais que a nota.
+
+**Passo 2: linhas gravadas na fase A.**
+
+EVENTOS, 1 linha:
+
+| Coluna | Valor |
+|---|---|
+| `event_id` · `op_id` · `event_seq` | ev-1 · op-1 · 612 |
+| `event_type` · `event_subtype` | COMPRA · — |
+| `event_date` · `registration_date` | 2027-03-10 · 2027-03-10 |
+| `property_id` · `partner_id` | prop-1 · forn-1 |
+| `status*` | PENDENTE na fase A; CONFIRMADO na fase C |
+| `total_value` | 9.399,05 (cópia de `COMPRAS.valor_total`) |
+| `created_by` · `source` · `confiabilidade` · `pre_marco_zero` | e-mail do dono · APP · CONFIRMADA · N |
+| `idempotency_key` | chave gerada na abertura do formulário |
+| `created_at` · `confirmed_at*` | 2027-03-10T18:42:07.000Z · preenchido na fase C |
+| Vazias | `description`, `responsible`, `notes`, `payload_json` (não houve aviso aceito), `reversal_of_event_id`, `reversed_by_event_id*`, `import_id` |
+
+COMPRAS, 1 linha:
+
+| Coluna | Valor |
+|---|---|
+| `purchase_id` · `event_id` | cmp-1 · ev-1 |
+| `finalidade` | RECRIA_ENGORDA |
+| `modalidade` · `base_peso` | KG_VIVO · VIVO |
+| `qtd_animais` · `peso_total_kg` | 3 · 617,0 |
+| `preco_unitario` · `unidade_preco` | 14,65 · KG_VIVO |
+| `valor_animais` | 9.039,05 |
+| `frete` · `outros_custos` | 360,00 · 0,00 |
+| `valor_total` | 9.399,05 |
+| `criterio_rateio` | PESO_VIVO |
+| `gta_numero` · `nota_fiscal` | 0012345 · 000789 |
+| Vazias | `rendimento_carcaca_pct`, `rendimento_tipo`, `observacoes` |
+
+EVENTO_ANIMAIS, 3 linhas:
+
+| `event_animal_id` | `event_id` | `animal_id` | `papel` | `efeito_inventario` | `pasto_destino_id` | `peso` | `valor_individual` | `atributos_iniciais_json` |
+|---|---|---|---|---|---|---|---|---|
+| ea-1 | ev-1 | A-000431 | SUJEITO | 1 | pasto-2 | 212,5 | 3.113,13 | preenchido |
+| ea-2 | ev-1 | A-000432 | SUJEITO | 1 | pasto-2 | 198,0 | 2.900,70 | preenchido |
+| ea-3 | ev-1 | A-000433 | SUJEITO | 1 | pasto-2 | 206,5 | 3.025,22 | preenchido |
+
+Vazias: `pasto_origem_id`, `peso_carcaca_kg`, `preco_unitario` (o preço é único e está no cabeçalho), `motivo_saida`, `observacoes`. O operador informou idade de 14 meses, e o JSON de cada linha fica assim:
+
+```json
+{"sexo":"M","data_nascimento":"2026-01-10","data_nascimento_confianca":"ESTIMADA",
+ "raca":"NELORE","castrado":"N","reprodutor":"N","origem":"COMPRADO"}
+```
+
+PESAGENS, 3 linhas:
+
+| `weight_id` | `animal_id` | `event_id` | `data_pesagem` | `peso_kg` | `metodo` | `tipo` |
+|---|---|---|---|---|---|---|
+| pes-1 | A-000431 | ev-1 | 2027-03-10 | 212,5 | BALANCA | COMPRA |
+| pes-2 | A-000432 | ev-1 | 2027-03-10 | 198,0 | BALANCA | COMPRA |
+| pes-3 | A-000433 | ev-1 | 2027-03-10 | 206,5 | BALANCA | COMPRA |
+
+FINANCEIRO, 2 linhas:
+
+| `financial_id` | `conta_id` | `natureza` | `tipo` | `categoria` | `descricao` | `data_competencia` | `valor` | `quantidade` | `partner_id` | `documento` | `status*` | `status_pagamento*` |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| fin-1 | COMPRA_ANIMAIS | AQUISICAO_ANIMAIS | DESPESA | CUSTO_DIRETO | Compra de 3 animais | 2027-03-10 | 9.039,05 | 3 | forn-1 | 000789 | ATIVO | ABERTO |
+| fin-2 | FRETE_DESPESAS_COMPRA | AQUISICAO_ANIMAIS | DESPESA | CUSTO_DIRETO | Frete da compra de 10/03/2027 | 2027-03-10 | 360,00 | — | transp-1 | — | ATIVO | ABERTO |
+
+Iguais nas duas: `event_id` = ev-1, `property_id` = prop-1, `retida_pelo_comprador` = N. Vazias: `ref_event_id`, `competencia_inicio`, `competencia_fim`, `product_id`, `animal_id*` (cada lançamento tem três alocações, não uma direta), `pasture_id`, `categoria_animal_id`, `observacoes`, `cancelado_em*`, `cancelado_por_event_id*`, `data_pagamento*`. As duas colunas de status são gravadas na fase C.
+
+PARCELAS, 3 linhas:
+
+| `parcela_id` | `financial_id` | `parcela_num` | `data_vencimento` | `valor` | `forma_pagamento` | `status` |
+|---|---|---|---|---|---|---|
+| parc-1 | fin-1 | 1 | 2027-04-09 | 4.519,53 | BOLETO | ABERTA |
+| parc-2 | fin-1 | 2 | 2027-05-09 | 4.519,52 | BOLETO | ABERTA |
+| parc-3 | fin-2 | 1 | 2027-03-15 | 360,00 | PIX | ABERTA |
+
+Vazias: `data_pagamento`, `valor_pago`, `juros_multa`, `desconto`, `parcela_origem_id`, `documento`. Divisão em duas: 903.905 centavos ÷ 2 = 451.952, com 1 centavo de sobra, que vai para a primeira parcela.
+
+RATEIOS, 2 linhas:
+
+| `rateio_id` | `event_id` | `financial_id` | `criterio` | `escopo_tipo` | `escopo_ref` | `data_base` | `base_total` | `total_alocado` |
+|---|---|---|---|---|---|---|---|---|
+| rat-1 | ev-1 | fin-1 | PESO_VIVO | EVENTO | ev-1 | 2027-03-10 | 617,0 | 9.039,05 |
+| rat-2 | ev-1 | fin-2 | PESO_VIVO | EVENTO | ev-1 | 2027-03-10 | 617,0 | 360,00 |
+
+Vazias: `periodo_inicio`, `periodo_fim`, `justificativa`.
+
+ALOCACOES_FINANCEIRAS, 6 linhas:
+
+| `alloc_id` | `rateio_id` | `financial_id` | `animal_id` | `base_valor` | `valor_alocado` |
+|---|---|---|---|---|---|
+| alo-1 | rat-1 | fin-1 | A-000431 | 212,5 | 3.113,13 |
+| alo-2 | rat-1 | fin-1 | A-000432 | 198,0 | 2.900,70 |
+| alo-3 | rat-1 | fin-1 | A-000433 | 206,5 | 3.025,22 |
+| alo-4 | rat-2 | fin-2 | A-000431 | 212,5 | 123,99 |
+| alo-5 | rat-2 | fin-2 | A-000432 | 198,0 | 115,53 |
+| alo-6 | rat-2 | fin-2 | A-000433 | 206,5 | 120,48 |
+
+O mesmo comando grava ainda, em abas descritas em `03a`: 1 linha em OPERACOES (op-1), 3 em ANIMAIS (situação PENDENTE) e 3 em IDENTIFICACOES (tipo BRINCO). No total são 28 linhas em 11 abas, que passam a valer juntas quando `OPERACOES.status` de op-1 vira CONFIRMADA.
+
+**Passo 3: o que a fase C projeta.** `EVENTOS.status*` passa a CONFIRMADO. Os três animais passam a ATIVO, em `pasto-2`, com `peso_atual*` igual ao peso da compra. O custo de aquisição sai das alocações:
+
+| Animal | Alocação de fin-1 | Alocação de fin-2 | `custo_aquisicao*` | `custo_aquisicao_origem*` |
+|---|---|---|---|---|
+| A-000431 | 3.113,13 | 123,99 | 3.237,12 | NEGOCIADO |
+| A-000432 | 2.900,70 | 115,53 | 3.016,23 | NEGOCIADO |
+| A-000433 | 3.025,22 | 120,48 | 3.145,70 | NEGOCIADO |
+| Soma | 9.039,05 | 360,00 | 9.399,05 | |
+
+**Passo 4: as somas fecham.**
+
+| Conferência | Conta | Invariante (seção 14) |
+|---|---|---|
+| Σ `valor_individual` = `valor_animais` = valor de fin-1 | 3.113,13 + 2.900,70 + 3.025,22 = 9.039,05 | 15 |
+| `valor_total` = Σ lançamentos do evento = `total_value` | 9.039,05 + 360,00 = 9.399,05 | 16 |
+| Σ parcelas de fin-1 = valor de fin-1 | 4.519,53 + 4.519,52 = 9.039,05 | 3 |
+| Σ parcelas de fin-2 = valor de fin-2 | 360,00 | 3 |
+| Σ alocações de rat-1 = `total_alocado` = 100% de fin-1 | 9.039,05 | 8 e 10 |
+| Σ alocações de rat-2 = `total_alocado` = 100% de fin-2 | 123,99 + 115,53 + 120,48 = 360,00 | 8 e 10 |
+| Σ `base_valor` = `base_total` | 212,5 + 198,0 + 206,5 = 617,0 | 8 |
+| Σ `custo_aquisicao*` = `valor_total` | 3.237,12 + 3.016,23 + 3.145,70 = 9.399,05 | 18 |
+
+Leituras calculadas na consulta, não gravadas: preço médio = 9.039,05 ÷ 3 = R$ 3.013,02 por cabeça; custo posto na fazenda = 9.399,05 ÷ 617,0 kg = R$ 15,22 por kg vivo, contra R$ 14,65 negociados.
+
+Efeito nas três visões, supondo cada parcela paga no vencimento:
+
+| Visão | Março/2027 | Abril/2027 | Maio/2027 |
+|---|---|---|---|
+| Caixa realizado (R$) | −360,00 | −4.519,53 | −4.519,52 |
+| Resultado gerencial (R$) | 0,00 | 0,00 | 0,00 |
+| Custo de aquisição do rebanho ativo (R$) | +9.399,05 | sem mudança | sem mudança |
+
+O resultado fica em zero porque a natureza é AQUISICAO_ANIMAIS: o custo de cada animal só entra no resultado do mês em que ele sair (§11.3).
+
+**Passo 5: baixa de uma parcela com juros.** Em 14/04/2027 o boleto da primeira parcela é pago com R$ 45,20 de juros. O comando `parcela.baixar` não gera evento: altera as colunas `[ctl]` de parc-1 e deixa uma linha em AUDITORIA por coluna alterada.
+
+| Coluna de parc-1 | Antes | Depois |
+|---|---|---|
+| `status` | ABERTA | LIQUIDADA |
+| `data_pagamento` | — | 2027-04-14 |
+| `juros_multa` | — | 45,20 |
+| `valor_pago` | — | 4.564,73 (= 4.519,53 + 45,20) |
+| `valor` | 4.519,53 | 4.519,53 (nunca muda) |
+
+`status_pagamento*` de fin-1 passa a PARCIAL. O caixa de abril registra −4.564,73, os R$ 45,20 de juros entram no resultado de abril, e o custo de aquisição dos três animais continua 9.399,05.
+
+### 15.2 Vacinação coletiva de 4 animais, com consumo de insumo e sem parcela
+
+**Cenário.** Em 10/05/2027 são vacinados 4 bezerros, A-000101 a A-000104, com o produto `prod-7` do cadastro: categoria VACINA, unidade `dose`, `custo_unitario` de 1,85, `carencia_padrao_dias` de 21 e `controla_estoque` = S. O modo é POR_CABECA, com 1 dose por animal. Uma dose se perdeu na seringa, e saíram 5 doses do frasco. Nada é pago no dia: o frasco já estava no estoque. Lote L2291, validade 28/02/2028, via subcutânea, próxima aplicação informada para 10/11/2027. Carência e intervalo são valores de exemplo, não recomendação.
+
+**Passo 1: valor e rateio.** Valor do consumo = quantidade consumida × custo unitário congelado = 5 doses × R$ 1,85 por dose = R$ 9,25. O rateio é por CABECAS: T = 925 centavos, base 1 para cada animal, B = 4. Cada quociente é 231 (soma 924) e cada resto é 1; sobra 1 centavo. Resto e base empatam nos quatro, e o centavo vai para o menor `codigo_interno`, A-000101. Resultado: 2,32 + 2,31 + 2,31 + 2,31 = 9,25.
+
+**Passo 2: linhas gravadas na fase A.**
+
+EVENTOS, 1 linha:
+
+| Coluna | Valor |
+|---|---|
+| `event_id` · `op_id` · `event_seq` | ev-2 · op-2 · 655 |
+| `event_type` · `event_subtype` | SANIDADE · VACINACAO |
+| `event_date` · `registration_date` | 2027-05-10 · 2027-05-10 |
+| `property_id` | prop-1 |
+| `total_value` | 9,25 |
+| `responsible` | José (vaqueiro) |
+| `payload_json` | `{"modo_dose":"POR_CABECA","dose_referencia":1,"quantidade_consumida_total":5}` |
+| `created_by` · `source` · `confiabilidade` · `pre_marco_zero` | e-mail do dono · APP · CONFIRMADA · N |
+| Vazias | `description`, `partner_id`, `notes`, `reversal_of_event_id`, `reversed_by_event_id*`, `import_id` |
+
+EVENTO_ANIMAIS, 4 linhas (ea-4 a ea-7), uma por bezerro: `event_id` = ev-2, `papel` = SUJEITO, `efeito_inventario` = 0. Todas as outras colunas ficam vazias: vacinar não move nem pesa o animal.
+
+SANIDADE, 4 linhas:
+
+| `health_id` | `animal_id` | `dose` | `unidade_dose` | `periodo_carencia_dias` | `data_fim_carencia` | `custo` |
+|---|---|---|---|---|---|---|
+| san-1 | A-000101 | 1 | dose | 21 | 2027-05-31 | 2,32 |
+| san-2 | A-000102 | 1 | dose | 21 | 2027-05-31 | 2,31 |
+| san-3 | A-000103 | 1 | dose | 21 | 2027-05-31 | 2,31 |
+| san-4 | A-000104 | 1 | dose | 21 | 2027-05-31 | 2,31 |
+
+Iguais nas quatro: `event_id` = ev-2; `tipo_procedimento` = VACINA; `produto_id` = prod-7; `nome_produto` e `fabricante` copiados do cadastro; `lote` = L2291; `validade` = 2028-02-28; `via_aplicacao` = SUBCUTANEA; `data_aplicacao` = 2027-05-10; `data_proxima_aplicacao` = 2027-11-10. Vazias: `protocol_id`, `motivo`, `diagnostico`, `resultado_exame`, `veterinario`, `observacoes`.
+
+MOVIMENTOS_ESTOQUE (aba descrita em `03a`), 1 linha:
+
+| `mov_id` | `product_id` | `event_id` | `data` | `tipo` | `quantidade` | `custo_unitario` | `lote` | `validade` |
+|---|---|---|---|---|---|---|---|---|
+| mov-1 | prod-7 | ev-2 | 2027-05-10 | SAIDA | 5 | 1,85 | L2291 | 2028-02-28 |
+
+FINANCEIRO, 1 linha:
+
+| Coluna | Valor |
+|---|---|
+| `financial_id` · `event_id` | fin-3 · ev-2 |
+| `conta_id` | VACINAS (conta da categoria do produto) |
+| `natureza` · `tipo` · `categoria` | CUSTEIO · DESPESA · CUSTO_DIRETO |
+| `descricao` | Consumo de vacina: 5 doses |
+| `data_competencia` | 2027-05-10 |
+| `valor` · `quantidade` · `product_id` | 9,25 · 5 · prod-7 |
+| `property_id` · `retida_pelo_comprador` | prop-1 · N |
+| `status*` · `status_pagamento*` | ATIVO · SEM_CAIXA |
+| Vazias | `ref_event_id`, `competencia_inicio`, `competencia_fim`, `animal_id*` (quatro alocações), `pasture_id`, `categoria_animal_id`, `partner_id`, `documento`, `observacoes`, `cancelado_em*`, `cancelado_por_event_id*`, `data_pagamento*` |
+
+PARCELAS: nenhuma linha. É o que faz o lançamento ser SEM_CAIXA.
+
+RATEIOS, 1 linha:
+
+| `rateio_id` | `event_id` | `financial_id` | `criterio` | `escopo_tipo` | `escopo_ref` | `data_base` | `base_total` | `total_alocado` |
+|---|---|---|---|---|---|---|---|---|
+| rat-3 | ev-2 | fin-3 | CABECAS | EVENTO | ev-2 | 2027-05-10 | 4 | 9,25 |
+
+ALOCACOES_FINANCEIRAS, 4 linhas:
+
+| `alloc_id` | `rateio_id` | `financial_id` | `animal_id` | `base_valor` | `valor_alocado` |
+|---|---|---|---|---|---|
+| alo-7 | rat-3 | fin-3 | A-000101 | 1 | 2,32 |
+| alo-8 | rat-3 | fin-3 | A-000102 | 1 | 2,31 |
+| alo-9 | rat-3 | fin-3 | A-000103 | 1 | 2,31 |
+| alo-10 | rat-3 | fin-3 | A-000104 | 1 | 2,31 |
+
+Com a linha de OPERACOES (op-2), são 17 linhas em 8 abas.
+
+**Passo 3: as somas fecham.**
+
+| Conferência | Conta | Invariante (seção 14) |
+|---|---|---|
+| Σ alocações = `total_alocado` = valor de fin-3 | 2,32 + 2,31 + 2,31 + 2,31 = 9,25 | 8 e 9 |
+| Σ `SANIDADE.custo` = Σ alocações do rateio do evento | 9,25 | 17 |
+| Movimento de estoque × lançamento | 5 × 1,85 = 9,25 | 2 (cópia × fonte) |
+| Lançamento sem parcela ⇔ SEM_CAIXA | 0 linhas em PARCELAS | 4 |
+| `total_value` = Σ lançamentos do evento | 9,25 | seção 2.5 |
+| `data_fim_carencia` = `data_aplicacao` + carência | 10/05/2027 + 21 dias = 31/05/2027 | seção 6 |
+
+Efeito nas três visões:
+
+| Visão | Efeito em maio/2027 |
+|---|---|
+| Caixa realizado | Nenhum. O desembolso ocorreu quando o frasco foi comprado (evento ESTOQUE/ENTRADA, natureza ESTOQUE_INSUMOS) |
+| Resultado gerencial | −R$ 9,25 de custeio, na conta Vacinas, classe de custo SANITARIO |
+| Custo acumulado por animal | +R$ 2,32 em A-000101 e +R$ 2,31 em cada um dos outros três |
+| Estoque | `PRODUTOS.estoque_atual*` cai 5 doses na fase C |
+
+Três observações sobre o exemplo:
+
+- **A dose perdida é custo dos animais vacinados.** O fato é o consumo (5 doses), não a soma das doses aplicadas (4). Os R$ 1,85 da dose perdida estão dentro dos R$ 9,25 rateados.
+- **Serviço pago no ato vira um segundo lançamento.** Se um veterinário cobrasse R$ 80,00 pelo serviço, o evento gravaria também fin-4, na conta "Serviços veterinários" [CUSTEIO], com uma parcela, e um segundo rateio por CABECAS de R$ 20,00 por animal. `SANIDADE.custo` passaria a 22,32, 22,31, 22,31 e 22,31, e `total_value` a 89,25.
+- **Estornar não grava linha inversa.** Um ESTORNO de ev-2 tira do replay as 4 aplicações, a saída de estoque e o lançamento: fin-3 fica com `status*` = CANCELADO, o saldo do produto volta a subir 5 doses por recálculo e o custo acumulado dos bezerros perde os R$ 9,25.
+
+O cenário CT-06 (vacinação de 30 animais) grava a mesma estrutura: 30 linhas em EVENTO_ANIMAIS, SANIDADE e ALOCACOES_FINANCEIRAS e 1 linha em cada uma das demais abas.
 
 <!-- CONTINUA -->
