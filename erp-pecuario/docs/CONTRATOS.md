@@ -9,7 +9,8 @@ Estado: etapas BASE (E1.1 e parte da E1.2) — `Schema`, `Utils`, `Validation`, 
 `EventCatalog`, `Timeline` e `EventService` — e SERVIÇOS DE CADASTRO E CONSULTA (E1.7 e E1.8) — `Config`, `AnimalService`,
 `PastureService` e `InventoryService` (seção 15) — e OPERAÇÃO DO SISTEMA (E1.10 e E1.11, backend) — `FileService`,
 `Maintenance`, `AuditService` (parte 2) e `ImportService` (seções 11, 16 a 18) — e API E PONTOS DE ENTRADA (E1.5 e parte
-da E1.12) — `Api`, `Code` e `TestRunner` (seções 19 a 21).
+da E1.12) — `Api`, `Code` e `TestRunner` (seções 19 a 21) — e INTERFACE, NÚCLEO E COMPONENTES (E1.9, parte 1) — `Index`,
+`Styles`, `JavaScript`, `Components` e `Dashboard` (seção 22).
 
 ## 1. Regras que valem para todo arquivo de `src/`
 
@@ -884,7 +885,7 @@ banco/DENIED/rascunho), appVersion (= package.json), serverTime (ISO UTC)}`; em 
 | `assertOwner({props, evento}?) → e-mail` | 01, seção 4.2: e-mail ativo = dono (`OWNER_EMAIL`, senão o usuário efetivo; sem diferença de maiúsculas); vazio → `DENIED` com a instrução, salvo `ALLOW_EMPTY_ACTIVE_USER = true` (o usuário passa a ser o dono); `evento.triggerUid` de gatilho instalado (`getProjectTriggers().getUniqueId()`) → o dono; uid estranho → `DENIED` |
 | `contexto({ambiente, usuario, props}) → ctx` | `Maintenance.contexto` + `fuso = io.fuso()` + `session = {usuario, ambiente, base_de_teste}`. Planilha inacessível → `CONFIG` (causa em `erro.causa` e no log) |
 | `rotas() → {rota: {tipo, fase, modulo, exigeChave}}` | `tipo` ∈ CONSULTA, COMANDO, MANUTENCAO, RASCUNHO, FUTURA. `ROTAS_CANONICAS` = as 51 da seção 15.3, na ordem |
-| `pagina(e)`, `paginaNegada(erro)` | doGet: `Index` (template; `appVersion` disponível no template) com título "ERP Pecuário" e viewport; sem `Index.html` no projeto, página de aviso; `?pagina=concorrencia` → `TestRunner.paginaConcorrencia()` |
+| `pagina(e)`, `paginaNegada(erro)` | doGet: `Index` (template com `appVersion`, `ambiente` e `urlApp`) com título "ERP Pecuário" e viewport; `?ambiente=TESTE\|DEMO` abre a SPA sobre essa base (outro valor → página de aviso "Endereço do app inválido"); `urlApp` = `ScriptApp.getService().getUrl()` (+ `?ambiente=` fora da produção; falha → `''` e causa no log); sem `Index.html` no projeto, página de aviso; `?pagina=concorrencia` → `TestRunner.paginaConcorrencia()` |
 | `incluir(nome)` | Conteúdo de `src/<nome>.html` da lista branca `INCLUDES` (Styles, JavaScript, Components, Dashboard, Animals, Pastures, Events, Weights, Health, Reproduction, Financial, Reports, Settings, Import); outro nome → `VALIDATION`. Templates chamam `<?!= include_('Styles') ?>` |
 | `rascunho(acao, dados, info)` | Ver rotas `rascunho.*` |
 | `executarNoEditor(nome, fn)` | Corpo das funções do editor e dos gatilhos: resultado em JSON simples + resumo no log; erro registrado e relançado |
@@ -932,3 +933,64 @@ falha → exceção (a execução aparece com erro).
 Testes: `tests/api.test.js` (envelope, guarda, roteador, avisos, duplicado, LOCKED, carga condicional, ambiente TESTE,
 rascunho, fuso, páginas) e `tests/acceptance.test.js` (os mesmos cenários no fake, retomada, falha reportada, DEMO,
 diagnóstico).
+
+## 22. Interface: núcleo e componentes (E1.9, parte 1) — `Index`, `Styles`, `JavaScript`, `Components`, `Dashboard`
+
+SPA no HtmlService, sem biblioteca externa nem CDN (seção 17 do desenho-base). Tudo é montado por nós DOM (`Util.h`), nunca
+por `innerHTML`; nenhuma tela chama `google.script.run` (só o `Cliente`); `localStorage` só pelo `Util.armazem` — regras
+conferidas por `tests/interface.test.js`. Nada roda na carga: `App.iniciar()` é chamado no fim do `Index`.
+
+**Página.** `Index.html` inclui, em ordem, `Styles`, `JavaScript`, `Components`, `Dashboard` e o boot. **As telas da parte 2
+entram como novos includes entre `Dashboard` e o `<script>` do boot** (o arquivo precisa estar em `Api.INCLUDES`) e
+registram suas rotas na carga com `Telas.registrar` (o `JavaScript` já foi carregado). `#app` traz `data-app-version`,
+`data-ambiente` e `data-url-app`. Estrutura: `#topo`, `#faixas`, `#menu` (lateral, ≥ 900 px), `#conteudo` (a tela),
+`#barra` (inferior, < 900 px), `#camada` (folhas e modais), `#avisos` (`aria-live=polite`).
+
+**Telas e rotas** (`JavaScript.html`):
+
+| Membro | Contrato |
+|---|---|
+| `Telas.registrar(padrao, def)` | `padrao` com parâmetros (`'animal/:id/:aba?'`); `def = {titulo, modulo (id do servidor: a tela só abre com o módulo ativo), telaCheia (celular sem barra inferior), montar(el, params) → função de limpeza opcional}`. Registrar de novo o mesmo padrão substitui. A tela deve ter um `h1` (o foco vai para ele na troca de rota) |
+| `Roteador.ir(rota, {substituir, forcar})`, `voltar(padrao)`, `atual()`, `href(rota)`, `modo()` | Rota = `tela/ID opaco`, nunca dado (§17). Modo `GAS` (`google.script.history`/`url`, NV), `HASH` ou `MEMORIA`. Links internos: `<a href="#/x" data-rota="x">` (o clique é tratado pelo App) |
+| `App.MENU` | Os 10 itens da §15 com rota: `inicio`, `rebanho`, `pastos`, `eventos`, `pesagens`, `sanidade/agenda`, `reproducao/matrizes`, `financeiro/lancamentos`, `relatorios`, `config/parametros`. Item aparece só com módulo ativo no bootstrap **e** tela registrada. Barra inferior: Início · Rebanho · Registrar · Pastos · Mais (itens 4 a 10). A busca por brinco do topo aparece quando existir a rota `animal/:id/:aba?` (ela abre `animal/<id>/resumo`) |
+| `App.faixa(id, {tipo: info\|aviso\|erro\|ok\|teste, texto, acoes: [{texto, aoClicar \| href, alvo}]})`, `removerFaixa(id)` | Faixas fixas. Ids usados: `base-teste`, `nova-versao`, `importacao`, `sem-conexao`, `rascunho-<TIPO>`, `envio-<TIPO>`, `rascunho-falhou` |
+| `App.acaoRecarregar(texto)`, `App.recasca()`, `App.rotaInicial()`, `App.podeRegistrar()` | Recarregar = link `target=_top` para `urlApp` (senão recarrega o quadro); `recasca` redesenha menu, barra e faixas do sistema |
+
+**Dados** (`JavaScript.html`):
+
+| Membro | Contrato |
+|---|---|
+| `Cliente.consulta(rota, dados, {aoEstado, semPrazo})` | Promise `{data, meta}`. `LOCKED` → novas tentativas em 2, 5 e 10 s (`aoEstado({estado: 'OCUPADO', tentativa, de})`); 45 s sem resposta → `ErroApi SEM_RESPOSTA`; falha de transporte → `ErroApi TRANSPORTE` (`repetida` depois de 3 seguidas: tratar como sessão expirada, "Entrar de novo") |
+| `Cliente.comando(rota, dados, {chave, avisosAceitos, dataVersionEsperada, aoEstado})` | Promise `{data, meta, duplicado, verificado}`. Chave obrigatória (o formulário a guarda até o sucesso). `LOCKED` como acima, com a MESMA chave; esgotado → `ErroApi LOCKED` com `esgotado`. 45 s sem resposta → `Cliente.verificar` (`operacao.status`) → `CONFIRMADA`/`FALHOU`/`INEXISTENTE` reenviam com a mesma chave (`verificado: true`); `EM_ANDAMENTO` consulta de novo a cada 5 s. Demais: `ErroApi {code, message, details, meta}` com os códigos do servidor (`NEEDS_CONFIRMATION` traz os avisos em `details`) |
+| `Cliente.ErroApi`, `Cliente.MSG` | Códigos só do cliente: `TRANSPORTE`, `SEM_RESPOSTA`. `meta.appVersion` diferente da página → faixa "Nova versão disponível"; `meta.serverTime` acerta o relógio do "hoje" |
+| `Store.carregar({forcar})` | Carga condicional: envia a `dataVersion` da carga guardada (memória ou `localStorage`, por ambiente e versão do app); `{atual: true}` → usa a guardada. `{fonte: SERVIDOR \| GUARDADA}` |
+| `Store.aplicarResultado(rota, data, meta)` | Depois de TODO comando: versão igual → nada; local + 1 e rota com delta (`animal.editar` sem evento, `animal.cadastrarExterno`, `pasto.salvar`, `propriedade.salvar` com padrão já definido, `lista.salvar`, `parceiro.salvar`) → delta; senão nova carga. `{aplicado: NADA \| DELTA \| CARGA}` |
+| Leitura | `param(chave)`, `lista(nome)` (ativos, por ordem), `rotuloLista`, `pastos({todos})`, `pasto(id)`, `propriedades({todas})`, `propriedade`, `parceiros`, `categorias`, `categoria`, `animais()` (ATIVOS + EXTERNOS, linhas leves de `AnimalService.COLUNAS_LEVE`), `animal(id)`, `filhosDe`, `modulos`, `modulo(id)`, `catalogo()`, `tipoEvento(tipo)`, `alertas()`, `ambiente()`, `atualizadoEm()`, `assinar(fn)` |
+| Busca | `resolverBrinco(texto, filtro)` → `{modo: EXATO \| SEM_ZEROS \| VARIOS \| NENHUM, candidatos}` (exato → sem zeros à esquerda conforme `brinco_ignora_zeros_esquerda` → lista); `buscar(texto, filtro)` também por código interno (`A-000123` ou `123`), nome e "crias da <brinco da mãe>" (`modo: CRIAS`); `carregarBaixados()` (`animal.listar`, guardado até a próxima carga), `baixados()`; `rotuloAnimal(a)` ("A-000123 · cria da 0231 · 12/09/2026" sem brinco), `descricaoAnimal(a)`, `normalizarBrinco(t, manterZeros)` (= `Utils.normalizarBrinco`) |
+| `Rascunhos.iniciar/listar/obter/salvar(id, r, {imediato})/remover/modo()` | `localStorage` (`erp:<ambiente>:rascunho:<id>` + índice) quando responde; senão o servidor (`rascunho.salvar/obter/remover`, chaves `r.<id>` e `indice`, agrupado em 1 s e descarregado ao sair da página). Formulário de evento usa `id = evento.<TIPO>` |
+| `Fmt` | `hoje()` (yyyy-MM-dd no fuso da fazenda = `CONFIGURACOES.fuso`, relógio corrigido pelo servidor), `data`, `dataCurta`, `instante(ISO)`, `numero(n, casas)`, `peso(kg)` (respeita `unidade_peso_exibicao`), `dinheiro(centavos)`, `idade(meses, estimada)`, `rotulo(dominio, codigo)`, `rotuloOpcao(campo, codigo)`, `lerDecimal(t, casas)`, `lerDinheiro(t)` → centavos, `lerInteiro(t)`, `ehData`, `diasEntre` |
+
+**Componentes** (`Components.html`):
+
+| Membro | Contrato |
+|---|---|
+| `UI.botao(texto, {tipo: primario\|secundario\|perigo\|texto, icone, aoClicar, rotulo, bloco})`, `UI.travar(b, texto)` | 48 px mínimos; `travar` impede o duplo clique e devolve a função que destrava |
+| `UI.folha({titulo, conteudo, acoes, origem, aoFechar, modal})` | Folha (celular: de baixo; desktop: à direita) ou modal: `role=dialog`, `aria-modal`, foco preso, Esc fecha, fundo `inert`, foco volta a `origem`. `aoFechar` devolvendo `false` impede. `{el, corpo, fechar({forcar}), definirAcoes, definirConteudo}` |
+| `UI.confirmar({titulo, texto, verbo, cancelar, perigo})` | Promise booleana; o botão repete o verbo (operação crítica) |
+| `UI.aviso(texto, {tipo})`, `UI.faixa`, `UI.nota(texto, tipo)`, `UI.carregando(texto)`, `UI.vazio({texto, acao})`, `UI.estadoErro(erro, {acao, detalhe})` | Estados de 08 (seção 8): sempre ícone e texto; erro com título pelo código e detalhe técnico expansível |
+| `UI.tabela({rotulo, colunas: [{id, rotulo, valor(l), formatar(l), num, ordenavel}], linhas, chave(l), porPagina, cartao(l), ordem, selecao: {aoMudar(ids)}, vazio})` | Ordenável (cabeçalho com `aria-sort`), paginada (`itens_por_pagina`), cartões abaixo de 900 px com ordenação por seletor; seleção com "Selecionar os N filtrados". `{el, atualizar(linhas), selecionados()}` |
+| `UI.grafico({tipo: linha\|barras, titulo, series: [{nome, pontos: [{x, y}]}], formatar, rotuloX})` | SVG próprio + tabela equivalente ("Ver tabela"); `y = null` é buraco; linha com < 2 pontos não é desenhada ("dados insuficientes") |
+| `Campos.criar(def, {valor, aoMudar, idBase, rotulos, aoNovo})` | Um campo do catálogo (todos os `TIPOS_CAMPO` + `ref:TABELA`): rótulo sempre visível, ajuda, unidade, erro sob o campo; `lista`/`bool` com até 3 opções viram botões; `ref:PASTOS`/`ref:PARCEIROS` com "+ Novo" (miniformulário que grava e seleciona); `ref:ANIMAIS` com a resolução de brinco; `anexo` lê o arquivo (imagem reduzida a ~300 KB + miniatura ~15 KB) em `{nome_arquivo, mime_type, tamanho_bytes, conteudo_base64, miniatura_base64}` |
+| `Campos.converter(def, bruto)` | Bruto → valor do contrato ou `{erro}`: dinheiro em centavos (min/max em reais), decimal com `casas`, data yyyy-MM-dd, `outras_identificacoes` → `[{tipo, codigo}]` |
+| `Formulario.bloco(defs, valores, o)` / `Formulario.converterValores(defs, valores, contexto)` | Campos com `visivel_se`, `obrigatorio_se` e `default` (`HOJE`, literal, `{de: 'CONFIGURACOES.chave'}`); oculto não vai ao servidor; vazio visível vai `null` |
+| `Seletor.criar({modo: UM\|VARIOS, filtro (filtro_elegiveis), tipo, selecionados, aoMudar, dataEvento, valorCampo})` | Busca, filtros, todos do pasto (data ≠ hoje → `inventario.elegiveis`; `NOT_FOUND` na Fase 1 → posição de hoje com o rótulo), colar lista (achados, não encontrados, repetidos). Inelegíveis só pré-marcados |
+| `Registro.abrir(tipo, {subtipo, campos, linhas: [{animal_id, valores}], rotulos: {event_id: texto}, origem})` | Atalho com pré-preenchimento (ficha, pasto, listagem, "Desfazer"); pergunta antes de apagar um rascunho do mesmo tipo |
+| Rotas `evento/novo` e `evento/novo/:tipo/:etapa?` (`revisao`, `resultado`) | Seletor de tipo (grupos de `grupo_ui`, sem ESTORNO) → formulário (data → animais → campos → grupos → observações; Enter percorre) → revisão LOCAL ou SERVIDOR (`evento.simular`; o commit leva `dataVersionEsperada`) → resultado (coletivo ou crítico) ou aviso + volta à origem. Pedido: o de `EventService` (seção 14); grupos repetíveis vão em `dados.<grupo>`. Erros por animal ligados à linha por `animal_id`, brinco ou "Animal N da lista" |
+| `Registro.conferirPendentes()` | Na abertura: rascunho `ENVIANDO` → `operacao.status` antes de tudo (CONFIRMADA → resultado; senão volta a editar com faixa "não foi gravado"); `EDITANDO` → faixa "… — registro não concluído (N animais) · Continuar · Descartar" |
+| Tela `inicio` (`Dashboard.html`, `TelaInicio`) | Fase 1: cabeças, sexo, pastos, pendências (alertas do bootstrap), rascunhos e gráficos por pasto e categoria, tudo do store |
+
+Testes: `tests/interface.test.js` (Node: página do doGet, sintaxe, contraste, CSS, regras estáticas, contratos com o
+catálogo e com as mensagens do servidor) e `tests/ui/interface.test.js` (Playwright, por `npm run ui:check`; apoio em
+`tests/ui/apoio.js` — `sistema`, `semear`, `abrir(s, {largura, historico, semLocalStorage, params, telasDeTeste, relogio,
+fuso, hash})`, `esperarTela`, `ir`, `semRolagemHorizontal`, `alvosDeToque`, `focoVisivel` — e mock em `tests/ui/mock-gas.js`,
+com `window.__gas = {atrasoMs, perder, falharTransporte, pedidos, violacoes}`).

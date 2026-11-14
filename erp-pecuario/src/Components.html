@@ -1106,6 +1106,7 @@ var Registro = (function () {
     if (s && s.salvarAdiado.pendente()) s.salvarAdiado.agora();
     await Rascunhos.remover(idRascunho(tipo));
     delete sessoes[tipo];
+    App.removerFaixa('rascunho-' + tipo);
   }
   /**
    * Abre o formulário de um tipo já preenchido (atalhos da ficha, do pasto, da listagem e o "Desfazer").
@@ -1725,6 +1726,7 @@ var Registro = (function () {
   async function concluir(s, r) {
     await Rascunhos.remover(idRascunho(s.tipo)).catch(function (e) { Util.registrarFalha('remover rascunho', e); });
     delete sessoes[s.tipo];
+    App.removerFaixa('rascunho-' + s.tipo);
     var resultado = { tipo: s.tipo, def: s.def, data: r.data, meta: r.meta, duplicado: r.duplicado, verificado: r.verificado, n: (r.data && r.data.animais ? r.data.animais.length : 0), origem: s.origem };
     var nova = novaSessao(s.tipo, s.def);
     nova.alterado = false;
@@ -1906,7 +1908,10 @@ var Registro = (function () {
       if (etapa === 'revisao') {
         if (s.dados) mostrarRevisao(s);
         else Roteador.ir(rotaDoForm(tipo), { substituir: true });
+        return;
       }
+      var titulo = s.view.el.querySelector('h1');
+      if (titulo && (!document.activeElement || document.activeElement === document.body || !document.activeElement.isConnected)) { titulo.setAttribute('tabindex', '-1'); titulo.focus(); }
     }, function (e) {
       if (!vivo) return;
       Util.limpar(el);
