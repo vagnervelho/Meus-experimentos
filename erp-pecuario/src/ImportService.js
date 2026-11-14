@@ -558,20 +558,6 @@ var ImportService = (function () {
       .map(function (l) { return porNum[l.linha_num]; }).filter(Boolean);
     return ordenarParaImportar_(lista);
   }
-  function estadoBlocos_(imp, gravadas, frescos) {
-    var rel = relatorio_(imp);
-    var lote = rel.lote_linhas || null;
-    if (!lote || imp.status === 'RASCUNHO' || imp.status === 'VALIDADO') return { tamanho: lote, total: null, importados: 0, proximo: null };
-    var conj = conjuntoImportavel_(gravadas, frescos);
-    var total = Math.ceil(conj.length / lote);
-    var importados = 0;
-    for (var b = 1; b <= total; b++) {
-      var linhas = conj.slice((b - 1) * lote, b * lote);
-      if (linhas.every(function (r) { return gravadas[r.linha_num].status === 'IMPORTADA'; })) importados = b; else break;
-    }
-    return { tamanho: lote, total: total, importados: importados, proximo: imp.status === 'IMPORTANDO' && importados < total ? importados + 1 : null };
-  }
-
   // ------------------------------------------------------------------ criar ----
   /** Leva à lixeira o arquivo enviado quando o comando com certeza não vale; falha vira ERROS_LOG. */
   function descartarArquivo_(ctx, chave, fileId, rota) {
@@ -710,7 +696,7 @@ var ImportService = (function () {
         var blocos = Math.ceil(total / tam);
         if (bloco > blocos) throw recusar_('O arquivo tem só ' + blocos + ' bloco(s) de validação.', [det_('bloco', 'VALOR_FORA_DA_FAIXA', 'Bloco inexistente.')]);
         var rel = relatorio_(imp);
-        var mesmoMapa = JSON.stringify(Utils.jsonCanonico(imp.mapeamento_json || null)) === JSON.stringify(Utils.jsonCanonico(map));
+        var mesmoMapa = !!imp.mapeamento_json && Utils.jsonCanonico(imp.mapeamento_json) === Utils.jsonCanonico(map);
         if (bloco > 1 && !mesmoMapa) throw Validation.erro('CONFLICT', 'O mapeamento das colunas mudou: valide de novo a partir do primeiro bloco.');
         if (bloco > 1 && rel.conferidas < (bloco - 1) * tam) throw Validation.erro('CONFLICT', 'Valide os blocos em ordem: falta o bloco ' + (Math.floor(rel.conferidas / tam) + 1) + '.');
         var res = validarLinhas(arq.linhas, map, formato, cv);
@@ -771,8 +757,6 @@ var ImportService = (function () {
   }
   function confirmar_(tx, imp, gravadas, frescos, cv) {
     var d = tx.dados;
-    var porNum = {};
-    frescos.forEach(function (r) { porNum[r.linha_num] = r; });
     // O dono aprovou o que viu: a revalidação de agora tem de dar o mesmo resultado.
     var divergentes = frescos.filter(function (r) {
       var g = gravadas[r.linha_num];
@@ -813,7 +797,7 @@ var ImportService = (function () {
       ? 'Importação parcial aprovada por ' + tx.usuario + ': importar ' + validas + ' linha(s) válidas e deixar de fora ' + (reprovadas + ignorar.length) + '.'
       : 'Importação total confirmada por ' + tx.usuario + ': ' + validas + ' linha(s).';
     AuditService.alteracao(tx, 'IMPORTACOES', imp.import_id, { modo: d.modo, status: 'IMPORTANDO', relatorio_json: rel, linhas_validas: validas, linhas_erro: reprovadas }, justificativa);
-    return { lote: lote, imp: Object.assign({}, imp, { relatorio_json: rel }), ignorar: ignorar };
+    return { lote: lote, ignorar: ignorar };
   }
   function planejarBloco_(tx, bloco) {
     var d = tx.dados;
@@ -872,8 +856,15 @@ var ImportService = (function () {
       });
       return it;
     });
+    // Propriedade: a escolhida na confirmação (bloco 1); os blocos seguintes repetem a do primeiro evento gravado.
+    var propriedade = bloco === 1 ? d.property_id || null : null;
+    if (bloco > 1) {
+      var primeira = anteriores[0] && gravadas[anteriores[0].linha_num];
+      var ev1 = primeira && tx.cru.cruPorId('EVENTOS', primeira.event_id_gerado);
+      propriedade = ev1 ? ev1.property_id : null;
+    }
     var r = EventService.planejarEntradaImportada(tx, {
-      campos: { property_id: d.property_id || (imp.relatorio_json && imp.relatorio_json.property_id) || null, description: 'Importação de planilha: ' + imp.arquivo_nome + ' (bloco ' + bloco + ')' },
+      campos: { property_id: propriedade, notes: 'Importação de planilha: ' + imp.arquivo_nome + ' (bloco ' + bloco + ')' },
       animais: itens,
     }, { importacao: { import_id: imp.import_id }, conhecidos: conhecidos, rotulos: doBloco.map(function (x) { return 'Linha ' + x.linha_num; }) });
     if (r.erros) return { erros: r.erros };
@@ -901,7 +892,7 @@ var ImportService = (function () {
     var d = (pedido && pedido.dados) || {};
     var chave = chaveBloco(d.import_id, 'concluir');
     var comando = {
-      rota: 'importacao.concluir', idempotencyKey: chave, dados: { import_id: d.import_id }, reads: leiturasImportacao_(), acessoCru: true, permiteDuranteImportacao: true,
+      rota: 'importacao.concluir', idempotencyKey: chave, dados: { import_id: d.import_id }, reads: leiturasImportacao_().concat(['AUDITORIA']), acessoCru: true, permiteDuranteImportacao: true,
       reconstruir: function (tx) { return relatorioFinal_(tx, d.import_id); },
       tratador: function (tx) {
         var imp = exigirImportacao_(tx, d.import_id);
@@ -964,7 +955,7 @@ var ImportService = (function () {
     var d = (pedido && pedido.dados) || {};
     return UnitOfWork.run(ctx, {
       rota: 'importacao.desfazer', idempotencyKey: chaveBloco(d.import_id, 'desfazer'), dados: { import_id: d.import_id, justificativa: d.justificativa || null },
-      reads: leiturasImportacao_(), acessoCru: true, permiteDuranteImportacao: true,
+      reads: leiturasImportacao_().concat(['AUDITORIA']), acessoCru: true, permiteDuranteImportacao: true,
       reconstruir: function (tx) { return relatorioFinal_(tx, d.import_id); },
       tratador: function (tx) {
         var imp = exigirImportacao_(tx, d.import_id);
@@ -992,14 +983,16 @@ var ImportService = (function () {
     var lista = Object.keys(gravadas).map(function (k) { return gravadas[k]; });
     var conta = function (s) { return lista.filter(function (l) { return l.status === s; }).length; };
     var rel = relatorio_(imp);
-    var blocos = { tamanho: rel.lote_linhas || null, total: rel.blocos || null, importados: 0, proximo: null };
-    if (imp.status === 'IMPORTANDO' || imp.status === 'IMPORTADO' || (imp.status === 'CANCELADO' && rel.lote_linhas)) {
+    var blocos = { tamanho: rel.lote_linhas || null, total: null, importados: 0, proximo: null };
+    if (rel.lote_linhas && imp.status !== 'RASCUNHO' && imp.status !== 'VALIDADO') {
+      // Os blocos são fatias da ordem de importação, gravadas estritamente em ordem: o número de linhas
+      // importadas diz quantos blocos já foram.
       var importaveis = lista.filter(function (l) { return l.status === 'VALIDA' || l.status === 'IMPORTADA'; }).length;
+      var feitas = conta('IMPORTADA');
       blocos.total = Math.ceil(importaveis / rel.lote_linhas);
-      blocos.importados = Math.floor(conta('IMPORTADA') / rel.lote_linhas) + (conta('IMPORTADA') === importaveis && importaveis % rel.lote_linhas ? 1 : 0);
+      blocos.importados = feitas === importaveis ? blocos.total : Math.floor(feitas / rel.lote_linhas);
       blocos.proximo = imp.status === 'IMPORTANDO' && blocos.importados < blocos.total ? blocos.importados + 1 : null;
     }
-    var tam = rel.lote_linhas || null;
     return {
       importacao: importacaoPublica_(imp),
       contadores: {
@@ -1007,7 +1000,7 @@ var ImportService = (function () {
         ignoradas: conta('IGNORADA'), importadas: conta('IMPORTADA'), por_codigo: rel.por_codigo,
       },
       blocos: blocos,
-      validacao: { tamanho: tam, conferidas: rel.conferidas, completa: rel.conferidas >= imp.total_linhas },
+      validacao: { conferidas: rel.conferidas, completa: rel.conferidas >= imp.total_linhas },
       pode: {
         validar: !!ESTADOS_VALIDAVEIS[imp.status], importar: imp.status === 'VALIDADO' || blocos.proximo !== null,
         concluir: imp.status === 'IMPORTANDO' && blocos.proximo === null, desfazer: imp.status !== 'CANCELADO',

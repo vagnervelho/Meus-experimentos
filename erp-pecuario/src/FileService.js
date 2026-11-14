@@ -1,7 +1,7 @@
 /**
  * FileService — porta de arquivos (FileStore) sobre o serviço avançado Drive v3 e os comandos de anexo.
  *
- * Regra do escopo drive.file (01, seção 4.4): TODO arquivo nasce pelo Drive v3 (Drive.Files.create / copy / update);
+ * Regra do escopo drive.file (01, seção 4.4): todo arquivo nasce pelo Drive v3 (Drive.Files.create / copy / update);
  * o app só enxerga o que ele mesmo criou. Os bytes de um arquivo são lidos pela rota REST `alt=media` (UrlFetchApp
  * com o token do script), nunca por DriveApp. Pastas: `ERP Pecuário` e, dentro dela, `Backups`, `Exportações`,
  * `Anexos` e `Testes`; os IDs ficam em Script Properties (`DRIVE_FOLDERS`) e são reencontrados ou recriados.

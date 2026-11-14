@@ -6,7 +6,8 @@ arquivo descreve o que **existe no código**.
 
 Estado: etapas BASE (E1.1 e parte da E1.2) — `Schema`, `Utils`, `Validation`, harness e estrutura —, PERSISTÊNCIA
 (E1.3 e E1.4) — `Database`, `Repository`, `UnitOfWork` e `AuditService` (parte 1) — e MOTOR DE EVENTOS (E1.6) —
-`EventCatalog`, `Timeline` e `EventService`.
+`EventCatalog`, `Timeline` e `EventService` — e SERVIÇOS DE CADASTRO E CONSULTA (E1.7 e E1.8) — `Config`, `AnimalService`,
+`PastureService` e `InventoryService` (seção 15).
 
 ## 1. Regras que valem para todo arquivo de `src/`
 
@@ -561,7 +562,7 @@ planilha. Tem de ser função determinística das linhas vigentes (pode rodar qu
 | Função | Contrato |
 |---|---|
 | `linhas(ctx, {op_id, usuario, timestamp}, mudancas) → [linha de AUDITORIA]` | `mudanca = {entidade, entity_id, acao, campo, valor_anterior, valor_novo, justificativa}` com valores na forma da LÓGICA; viram texto no formato de célula do tipo. `ALTERAR` só em coluna `[cad]`, `CONTROLE` só em `[ctl]`, `CRIAR` em qualquer uma; a chave nunca muda; `RECUPERACAO`/`MANUTENCAO` sem campo (`valor_novo` = descrição; entidade `SISTEMA` sem registro). Fora disso → `INTERNAL` |
-| `alteracao(tx, aba, id, campos, justificativa?) → n` | Compara com o registro vigente e põe no plano uma mudança por campo que REALMENTE muda (marca `[ctl]` → CONTROLE; senão ALTERAR). Registro inexistente → `NOT_FOUND` |
+| `alteracao(tx, aba, id, campos, justificativa?) → n` | Compara com o registro vigente e põe no plano uma mudança por campo que REALMENTE muda (marca `[ctl]` → CONTROLE; senão ALTERAR). Registro inexistente → `NOT_FOUND`. 6º argumento `{externo: true}`: sexo e nascimento do cadastro de referência de um animal EXTERNO (`ATRIBUTOS_EXTERNO`), aceitos só se o registro está EXTERNO (senão `INTERNAL`) |
 | `criacao(tx, aba, id, campos, justificativa?) → n` | CRIAR, uma mudança por campo preenchido; a chave nasce no plano e fica em `entity_id`; a linha do cadastro é anexada só na fase C, se a chave ainda não existir |
 | `refazer(repo, io, op, linhasDaOperacao) → {atualizar, criar, semAlvo}` | O que a fase C aplica (idempotente; `updated_at`/`created_at` = `op.started_at`). Usado pela UnitOfWork |
 | `listar(tx, {entidade, entity_id, op_id, acao, de, ate}?) → [linhas]` | Trilha só de operações CONFIRMADAS, da mais recente para a mais antiga (cópias). A consulta declara `AuditService.LEITURAS` |
@@ -598,7 +599,7 @@ substituição (desenho-base 16.1).
 | Função | Contrato |
 |---|---|
 | `LEITURAS` | Abas do projetor (= `porta().reads`) |
-| `parametros(repo)` | CONFIGURACOES tipadas (NUMERO → número, BOOL → booleano, JSON → objeto, data validada); chave ausente = semente; célula vazia = `null`; inválido → `CONFIG` |
+| `parametros(repo)` | = `Config.parametros(repo)` (seção 15.1): CONFIGURACOES tipadas; chave ausente = semente; célula vazia = `null`; inválido → `CONFIG` |
 | `ordenar(linhas)`, `classe(l)`, `papelNaLinha(l)` | Ordem `(event_date, classe 0/1/2, ordem_seq, event_seq)`; papel ENTRADA, SAIDA, MOVIMENTO (efeito 0 com destino), FATO (exige presença, limites inclusivos) ou NEUTRO (CORRECAO_CADASTRO e IDENTIFICACAO_INCORRETA: valem para todo o histórico) |
 | `validar(linhas, {nascimento, dataEntrada})` | Linha do tempo de UM animal já com a mudança: `{problemas, periodos, pasto, dentro, morte}`. Códigos: `ENTRADA_JA_DENTRO`, `FORA_DO_REBANHO`, `ORIGEM_DIVERGENTE` (com `pasto_esperado`/`pasto_informado`), `FORA_DA_PERMANENCIA`, `APOS_MORTE`, `ANTES_DO_NASCIMENTO`, `ANTES_DA_ENTRADA`. Linhas `pre_marco_zero` ficam fora do replay e só são conferidas contra nascimento e chegada declarada |
 | `problemasNovos(antes, depois)` | O que a mudança quebrou (por `codigo` + `event_id`). Regra do serviço: problema em linha do comando → VALIDATION; em evento gravado → CONFLICT |
@@ -658,3 +659,65 @@ substitui, estorna, animais: [{animal_id, codigo_interno, brinco, sexo, situacao
 Códigos de aviso emitidos: POSSIVEL_DUPLICIDADE, BRINCO_PARECIDO, IDADE_REPRODUTIVA, LOTACAO_ACIMA_DA_CAPACIDADE (em
 cabeças), PERIODO_BLOQUEADO; política por código em `avisos_politica` (ausente = AVISA).
 
+## 15. Serviços de cadastro e consulta (E1.7 e E1.8): `Config`, `AnimalService`, `PastureService`, `InventoryService`
+
+Puros (só portas). Padrão comum: cada comando tem `comandoX(pedido)` (objeto para `UnitOfWork.run`) e `x(ctx, pedido)`
+(= `UnitOfWork.run`); cada consulta tem `consultaX(dados)` (para `UnitOfWork.read`) e `x(ctx, dados)`. `pedido =
+{idempotencyKey, dados, avisosAceitos, dataVersionEsperada}`. A resposta do comando fica em `dados` do resultado da
+UnitOfWork; o reenvio com a mesma chave devolve a mesma forma (`reconstruir`). Erros: `VALIDATION` (detalhes por campo,
+com os códigos citados abaixo), `NEEDS_CONFIRMATION` (avisos sem aceite), `NOT_FOUND` (registro que não existe mais),
+`CONFLICT`, `CONFIG`, além dos da UnitOfWork. Indicador numérico (P9): `{valor, motivo, n, ...}`, com `motivo` ∈
+`MOTIVO_INDICADOR_NULO` quando `valor` é `null`; zero só quando é zero de verdade (pasto vazio).
+Testes: `tests/apoio-cadastros.js` — `ambienteCadastros(opcoes de apoio-eventos)` com `run/tentar('Modulo.comandoX',
+dados, {chave, avisos})` (confere a projeção depois de cada comando), `ler(consulta)`, `lerCom(reads, tratador)`, `auditoria(filtro)`.
+
+### 15.1 `Config` (parâmetros e cadastros de configuração)
+
+| Membro | Contrato |
+|---|---|
+| `parametros(repo)` | `{chave: valor}` tipado das 45 chaves (NUMERO → número, BOOL → booleano, JSON → objeto, data validada). Chave ausente na aba (ou `repo` nulo/sem a aba) = padrão do código (Schema); célula vazia = `null`; célula inválida → `CONFIG`. `Timeline.parametros` delega aqui |
+| `valor(repo, chave)` | Um parâmetro tipado; chave desconhecida → `INTERNAL` |
+| `listar(repo)` | Tela de configurações, sem lançar: `{itens: [{chave, grupo, tipo, formato, descricao, padrao, texto, valor, origem: PLANILHA\|PADRAO, erro, faixa}], desconhecidas: [chave]}` |
+| `normalizar(chave, bruto)` | `{texto (célula), valor (tipado)}` ou `{erro: {codigo, mensagem}}`: tipo, faixa (`FAIXAS`), datas, `faixas_etarias_meses` (inteiros crescentes), `avisos_politica` (códigos de `CODIGOS_AVISO` → BLOQUEIA/AVISA/IGNORA). Vazio só em chave sem padrão |
+| `planejarParametro(tx, chave, valor, justificativa?)` | Para outro comando: normaliza e põe no plano (altera a linha ou cria a que falta). `CONFIGURACOES` nas `reads`. Inválido → `VALIDATION` |
+| `aplicarPolitica(params, avisos, coletor)` | `avisos_politica`: BLOQUEIA vira erro no coletor; IGNORA some; devolve os que ficam (AVISA) |
+| `cadastros(repo)` / `LEITURAS_CADASTROS` | Para `sistema.bootstrap`: `{configuracoes (= listar), listas, categorias (por prioridade), cobertura, parceiros}` |
+| `comandoSalvar` — `config.salvar` | `dados: {valores: {chave: valor}, justificativa?}` (várias chaves, uma operação). Códigos: `CHAVE_DESCONHECIDA`, `TIPO_INVALIDO`, `FORMATO_INVALIDO` (inclusive fuso IANA), `VALOR_FORA_DA_FAIXA`, `VALOR_FORA_DA_LISTA`, `CAMPO_OBRIGATORIO`, `NAO_ENCONTRADO`/`PROPRIEDADE_INATIVA` (propriedade padrão), `DATA_FUTURA` (marco zero), `FAIXA_INVALIDA` (GMD mín ≥ máx). Marco zero com entrada/saída vigente → `CONFLICT` `MARCO_ZERO_EM_USO` (RN-101). Mudar `idade_desmama_padrao_meses` ou `data_marco_zero` reconstrói todas as projeções na fase C. Resposta `{chaves, itens}` |
+| `comandoSalvarLista` — `lista.salvar` | `dados: {lista_id?, lista, codigo?, rotulo, ordem?, ativo?, justificativa?}`. Código MAIÚSCULAS ASCII (derivado do rótulo se vazio), único na lista; ordem padrão = última + 10. Edição só de rótulo, ordem, ativo. Códigos: `CODIGO_REPETIDO`, `CAMPO_IMUTAVEL`, `CODIGO_RESERVADO`, `FORMATO_INVALIDO`. Resposta: o item |
+| `comandoSalvarCategoria` — `categoria.salvar` | `dados: {categorias: [{category_id?, campos}]}` ou `{category_id?, campos}`. Aviso `CATEGORIAS_SEM_COBERTURA` (lacunas na mensagem; política por código). Erros: `CAMPO_IMUTAVEL` (código), `CODIGO_REPETIDO`, `FAIXA_INVALIDA`, `CONDICAO_INCOMPATIVEL`, `PRIORIDADE_REPETIDA` (entre ativas), `CATEGORIA_EM_USO` (reclassificação manual vigente), `CAMPO_OBRIGATORIO`, `CAMPO_DESCONHECIDO`. Resposta `{categorias, cobertura}` |
+| `comandoSalvarParceiro` — `parceiro.salvar` | `dados: {partner_id?, campos: {nome, tipos (lista ou "A,B"), documento, telefone, endereco, observacoes, ativo}}`. Documento repetido → aviso `POSSIVEL_DUPLICIDADE`. Resposta: o parceiro |
+
+### 15.2 `AnimalService` (lista, ficha, edição, externo; idade, categoria e peso na leitura)
+
+| Membro | Contrato |
+|---|---|
+| `leituras()`, `leitor(tx)` | Abas do leitor e o leitor da consulta: `L = {tx, repo, f (Timeline.fonte), params, marcoZero, hoje, categorias, categoriaPorId, animais (vigentes), filhosMae, filhosPai}` |
+| `idadeEm(a, data)` | Meses completos; `null` sem nascimento ou antes dele |
+| `perfilEm(L, a, data)` / `categoriaEm(L, a, data)` | Perfil em D (castração posterior não conta; parida = partos prévios, PARTO até D ou cria nascida até D; reclassificação vigente em D) → `EventService.classificarCategoria` → `{category_id, codigo, nome, manual}` ou `null` |
+| `pesoVigente(L, a, data, categoria)` | `{kg, situacao: PESADO\|PESAGEM_VENCIDA\|SEM_PESAGEM\|SEM_PESO, estimado, data_pesagem, metodo, referencia_kg}` (desenho-base, seção 6) |
+| `linhaLeve(L, a)`, `COLUNAS_LEVE` | Linha do store. Idade/categoria na data de referência (hoje; baixado: data da saída); `categoria_id` null no EXTERNO; `peso_vencido` só em ATIVO |
+| `consultaCargaInicial()` / `cargaInicial(ctx)` | ATIVOS + EXTERNOS em colunas: `{data, n, colunas, valores: {coluna: [..]}}` (ordem de `codigo_interno`) |
+| `consultaListar({situacoes?})` — `animal.listar` | Mesmo formato; padrão = baixados (VENDIDO, MORTO, DESCARTADO, BAIXADO_AJUSTE, HISTORICO); PENDENTE/ANULADO → `VALIDATION` |
+| `consultaFicha({animal_id, geracoes?})` — `animal.ficha` | `{animal_id, data, geral (A), genealogia (B), localizacao (C), pastos (D: períodos [início, fim) com dias), peso (E), sanitario (F), reprodutivo (G), financeiro (H), eventos (I: linha do tempo com status, vigente, anulado_por, ajustes), anexos (J: ANEXOS ativos do animal)}`; todo bloco traz `entregue`; E, F, G e H voltam `{entregue: false, modulo, fase, mensagem, itens: []}`. Genealogia: `{sem_genealogia, mae, pai, arvore (nós {..., confianca, confirmado, geracao, disponivel, tem_ancestrais, mae, pai}), filhos [{..., papel MAE\|PAI, confianca}]}`; `geracoes` 1–6 (padrão 3). `NOT_FOUND`; `VALIDATION` |
+| `comandoEditar` — `animal.editar` | Um formulário só. `dados: {animal_id, campos, justificativa?, justificativa_aviso?}`; só o que muda é gravado. `nome, raca, observacoes, foto_anexo_id` → AUDITORIA; campos de `EventCatalog.CAMPOS_CORRIGIVEIS` → evento AJUSTE_INVENTARIO/CORRECAO_CADASTRO datado de hoje, com todas as regras do motor (justificativa obrigatória: `CAMPO_OBRIGATORIO`), NA MESMA operação da auditoria. EXTERNO: sexo e nascimento por AUDITORIA (`AuditService.alteracao(..., {externo: true})`), demais sensíveis `CAMPO_NAO_SE_APLICA`. `brinco`, pasto, situação, colunas calculadas → `CAMPO_NAO_EDITAVEL` (mensagem com o caminho certo); `ANEXO_INVALIDO`; `CAMPO_DESCONHECIDO`. Resposta `{animal_id, event_id, correcoes, cadastro, animal (linha leve)}`; nada muda → `semAlteracao` |
+| `comandoCadastrarExterno` — `animal.cadastrarExterno` | `dados: {campos: {nome*, sexo*, raca, data_nascimento, data_nascimento_confianca, observacoes}}`; nome repetido entre externos → aviso `POSSIVEL_DUPLICIDADE`; linha de ANIMAIS nasce na fase C (AUDITORIA CRIAR), situação EXTERNO. Resposta `{animal_id, animal}` |
+
+### 15.3 `PastureService` (propriedades, pastos, painel)
+
+| Membro | Contrato |
+|---|---|
+| `comandoSalvarPropriedade` — `propriedade.salvar` | `dados: {property_id?, campos: {nome, descricao, localizacao, area_total_ha, status}}`. `NOME_REPETIDO`; INATIVO → `PROPRIEDADE_COM_PASTOS` / `PROPRIEDADE_PADRAO`. A primeira vira `propriedade_padrao_id` se ele estiver vazio. Resposta: a propriedade |
+| `comandoSalvarPasto` — `pasto.salvar` | `dados: {pasture_id?, campos: {property_id (criação), nome, identificacao, area_hectares, tipo_capim, capacidade_estimada_ua_ha, capacidade_estimada_cabecas, posse (PROPRIO), arrendador_id, observacoes, status}}`. `ARRENDADOR_SEM_ARRENDAMENTO`, `NAO_ENCONTRADO`, `PROPRIEDADE_INATIVA`, `NOME_REPETIDO` (ativos da propriedade), `CAMPO_IMUTAVEL` (propriedade), `PASTO_COM_ANIMAIS`. Resposta: o pasto |
+| `consultaPainel({pasture_id, data?})` — `pasto.painel` | Cabeçalho do pasto + `{data, motivo, cabecas, machos, femeas, por_categoria, sem_categoria, peso_vivo_total, ua: {valor, motivo, n, estimado, ua_peso_kg, partes: {pesada, pesagem_vencida, sem_pesagem: {cabecas, peso_kg, ua}}, sem_peso, rotulo}, ua_ha, capacidade, ocupacao_pct: {valor, motivo, n, base: UA_HA\|CABECAS, estimado}, animais, parametros}`. Data = fim do dia D (≥ marco zero; antes → nulos com `ANTERIOR_AO_MARCO_ZERO`); futura → `VALIDATION`; `NOT_FOUND` |
+| `consultaListar({property_id?, incluir_inativos?})` — `pasto.listar` | Cartões de hoje (o painel sem `animais`), por nome |
+| `lotacao(pasto, composicao)` | Pura: UA/ha (`SEM_VALOR_DE_REFERENCIA` sem área), ocupação por UA/ha ou por cabeças; sem capacidade → `null` |
+
+### 15.4 `InventoryService` (posição, visão geral, alertas)
+
+| Membro | Contrato |
+|---|---|
+| `presentes(L, data)` | `{motivo, itens: [{animal, pasture_id}]}` pelo replay até o fim de D; sem marco zero `DADOS_INSUFICIENTES`, antes dele `ANTERIOR_AO_MARCO_ZERO` (itens `null`) |
+| `compor(L, itens, data, {animais}?)` | `{cabecas, machos, femeas, por_categoria (por prioridade), sem_categoria, peso_vivo_total, ua, animais?}` |
+| `consultaPosicao({data?, animal_id?})` — `inventario.posicao` | `{data, marco_zero, motivo, cabecas, por_sexo: {M, F}, por_pasto: [{pasture_id, nome, cabecas}], sem_pasto, por_categoria, sem_categoria, peso_vivo_total, ua}`; com `animal_id`: `{data, animal_id, presente, pasture_id, motivo}`. Futura/inválida → `VALIDATION`; animal inexistente → `NOT_FOUND` |
+| `consultaVisaoGeral()` — `dashboard.obter` (Fase 1) | Posição de hoje + `geradoEm` + `pendencias: {sem_pasto, sem_brinco, sem_categoria}` |
+| `consultaAlertas(estado)` — `alerta.listar` | `estado = {backup: {ultimo_em: ISO\|null}, integridade: {verificado_em, erros}\|null}` vem de quem chama (Maintenance/Api; fora da planilha). Devolve `{data, geradoEm, alertas: [{codigo, nivel AVISO\|ERRO, mensagem, n, ids, entidade}], nao_avaliados: [{codigo, motivo, mensagem}]}`; códigos `ALERTAS`: ATIVO_SEM_PASTO, SEM_BRINCO, SEM_CATEGORIA, BACKUP_ATRASADO (`alerta_backup_atrasado_dias`; nenhum backup = alerta), INTEGRIDADE_COM_ERRO, IMPORTACAO_INCOMPLETA (IMPORTACOES `IMPORTANDO`). Parte do `estado` ausente vai para `nao_avaliados` |

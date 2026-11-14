@@ -253,5 +253,20 @@ test('editar externo: sexo e nascimento pelo cadastro de referência (AUDITORIA)
   assert.deepEqual(codigos(erros.erro).sort(), ['CAMPO_NAO_SE_APLICA', 'NASCIMENTO_DO_PROGENITOR', 'SEXO_DO_PROGENITOR']);
   c.run('AnimalService.comandoEditar', { animal_id: ext, campos: { data_nascimento: null } });
   assert.deepEqual([c.m.animal(ext).data_nascimento, c.m.animal(ext).data_nascimento_confianca], [null, null], 'apagar o nascimento apaga a confiança');
-  assert.ok(bezerra);
+  // A exceção do EXTERNO não abre a porta para editar atributo de projeção de animal do rebanho.
+  const direto = (opcoes) => c.amb.tentarRun({ rota: 'teste.direto', idempotencyKey: 'k-direto-' + (opcoes ? 'x' : 'y'), dados: {}, reads: ['ANIMAIS'],
+    tratador: (tx) => { c.G.AuditService.alteracao(tx, 'ANIMAIS', bezerra.animal_id, { sexo: 'M' }, null, opcoes); return {}; } });
+  assert.equal(direto({ externo: true }).erro.code, 'INTERNAL', 'bezerra do rebanho não é EXTERNO');
+  assert.equal(direto(undefined).erro.code, 'INTERNAL', 'sem a marca, sexo não se altera por AUDITORIA');
+  assert.equal(c.m.animal(bezerra.animal_id).sexo, 'F');
+});
+
+test('ordem de carga inversa e primitiva SPREADSHEET_APP: carga inicial, ficha, edição e painel funcionam igual', () => {
+  const { c, bezerra } = rebanho({ order: 'reverse', primitiva: 'SPREADSHEET_APP' });
+  assert.equal(c.ler(c.G.AnimalService.consultaCargaInicial()).n, 8);
+  assert.equal(c.ler(c.G.AnimalService.consultaFicha({ animal_id: bezerra.animal_id })).genealogia.mae.brinco, '0310');
+  c.run('AnimalService.comandoEditar', { animal_id: bezerra.animal_id, campos: { nome: 'Pintada', sexo: 'F' } });
+  assert.equal(c.m.animal(bezerra.animal_id).nome, 'Pintada');
+  assert.equal(c.ler(c.G.PastureService.consultaPainel({ pasture_id: PASTOS.A })).cabecas, 6);
+  assert.equal(c.ler(c.G.InventoryService.consultaPosicao({})).cabecas, 7);
 });
