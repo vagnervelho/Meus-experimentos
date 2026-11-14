@@ -40,12 +40,12 @@ Cada item tem critério de aprovação e contingência. "Quem": **N** = roda em 
 
 | ID | O que testar | Critério de aprovação | Se reprovar | Quem |
 |---|---|---|---|---|
-| SP-01 | Primitiva de gravação: corpus de tipos pela Sheets API com valores tipados × `setValues` com formato de texto; atomicidade do `batchUpdate` com um pedido inválido no meio; tempo de uma venda de 5 animais | Todo valor do corpus volta idêntico; nada é aplicado quando um pedido falha | Usar `SpreadsheetApp` com a primitiva única de append; manter o protocolo de três fases completo | D |
+| SP-01 | Primitiva de gravação: corpus de tipos pela Sheets API com valores tipados × `setValues` com formato de texto; atomicidade do `batchUpdate` com um pedido inválido no meio; tempo de uma venda de 5 animais | Todo valor do corpus volta idêntico; nada é aplicado quando um pedido falha | Tentar a Sheets API com `Values.batchUpdate` e entrada `RAW`; se também reprovar, `SpreadsheetApp` com a primitiva única de append. Em qualquer caso, protocolo de três fases completo | D |
 | SP-02 | Escopo `drive.file`: criar planilha e pasta, copiar, exportar, ler bytes, listar e mandar para a lixeira pela Drive API; abrir com `SpreadsheetApp.openById` a planilha criada assim | Todas as operações funcionam só com `drive.file` | Escopo `drive` completo, com nova autorização | D |
 | SP-03 | Lock: o que acontece com o lock e com escritas não descarregadas quando a execução morre por tempo | O lock é liberado; o estado encontrado é um dos previstos na análise de queda | Ajustar a recuperação ao comportamento observado; `flush()` mais frequente | D |
 | SP-04 | E-mail do usuário ativo no modo "executar como eu, acesso só meu" em conta pessoal; abertura com várias contas logadas | O e-mail vem preenchido para o dono | Ligar a contingência da guarda de dono; orientar perfil único no celular | D |
-| SP-05 | Tempo de leitura e gravação com 10 mil, 50 mil, 100 mil e 300 mil linhas; custo de ler as propriedades | Comando p95 ≤ 5 s com 10 mil linhas em EVENTO_ANIMAIS e ≤ 15 s com 100 mil | Leituras parciais por bloco de colunas; arquivamento antecipado | D (massa gerada por N) |
-| SP-06 | Tamanho de payload de `google.script.run`; `localStorage` dentro do iframe no celular do dono | Rascunho sobrevive a recarga e a fechamento do navegador | Rascunho guardado no servidor | D |
+| SP-05 | Tempo de leitura e gravação com 10 mil, 50 mil, 100 mil e 300 mil linhas; custo de ler as propriedades; abertura a frio em rede 3G no celular | Comando p95 ≤ 5 s com 10 mil linhas em EVENTO_ANIMAIS e ≤ 15 s com 100 mil | Leituras parciais por bloco de colunas; arquivamento antecipado | D (massa gerada por N) |
+| SP-06 | Tamanho de payload de `google.script.run`; `localStorage` dentro do iframe no celular do dono; histórico e URL do navegador (`google.script.history`, `google.script.url`); aviso de falha quando a rede cai | Rascunho sobrevive a recarga e a fechamento do navegador | Rascunho guardado no servidor | D |
 | SP-07 | Exportar XLSX e PDF pela Drive API e abrir o arquivo no celular | Arquivo abre a partir do link | CSV sempre; PDF por conversão de HTML | D |
 | SP-08 | Biblioteca de gráficos por CDN, com verificação de integridade, dentro do iframe | Carrega e desenha no celular e no desktop | Gráficos SVG próprios | D |
 | SP-09 | Gatilho diário chamando a função de manutenção; criação idempotente de gatilhos | Dispara uma vez; rodar o `setup()` de novo não duplica | Ajustar o registro de gatilhos | D |
@@ -71,7 +71,7 @@ Saída do spike: um relatório curto em `docs/` com o resultado de cada item, a 
 | E1.7 | Cadastros: propriedades, pastos próprios e arrendados com painel básico, categorias, listas, parâmetros | `PastureService`, `AnimalService`, `Config` | M |
 | E1.8 | Animais: listagem com os filtros da §5, ficha, genealogia com árvore, edição com auditoria, foto e documento, exportação CSV | `AnimalService`, `FileService`, `Animals.html` | G |
 | E1.9 | Interface base: estrutura, estilos, cliente da API, store, roteador, rascunhos, componentes, registrar evento, "Visão geral", configurações | `Index`, `Styles`, `JavaScript`, `Components`, `Events`, `Dashboard`, `Settings`, `Pastures` | G |
-| E1.10 | Importação de animais: assistente com os 10 passos da §14, preparação, validação, duplicidades, parcial aprovada, desfazer, relatório | `ImportService`, `Import.html` | G |
+| E1.10 | Importação de animais: assistente com os 10 passos da §14, preparação, validação, duplicidades, parcial aprovada, desfazer, relatório; valor de abertura informado por animal | `ImportService`, `Import.html` | G |
 | E1.11 | Backup diário e sob demanda, restauração por comando, verificação básica de integridade, tela de sistema | `Maintenance`, `AuditService`, `FileService` | M |
 | E1.12 | Testes de aceitação, base de demonstração, guia de implantação, relatório de testes da fase | `TestRunner`, `docs/` | M |
 
@@ -133,7 +133,7 @@ Saída do spike: um relatório curto em `docs/` com o resultado de cada item, a 
 | E4.3 | RATEIO de custos compartilhados: cabeças, peso vivo, dias de permanência, manual; re-rateio; alerta de rateio desatualizado; aluguel de pasto arrendado rateado por dias de permanência | G |
 | E4.4 | Custos por animal e por pasto; resultado por animal | M |
 | E4.5 | Resultado gerencial por competência; teste de conciliação com o caixa | M |
-| E4.6 | TABELA_PRECOS e patrimônio: valoração, cobertura, série histórica | M |
+| E4.6 | TABELA_PRECOS e patrimônio: valoração, cobertura, série histórica; aplicação em massa do valor de abertura pelo preço do marco zero | M |
 | E4.7 | Bloqueio de período; alertas financeiros | P |
 
 - **Arquivos:** `FinancialService`, `InventoryService`; `Financial.html`.

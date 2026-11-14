@@ -97,7 +97,8 @@ google.script.run.api({
   dados: { /* JSON simples */ },
   idempotencyKey: '<uuid>',     // obrigatória em todo comando
   avisosAceitos: [],            // opcional (3.4)
-  dataVersionEsperada: 812      // obrigatória no commit de tipos com revisão no servidor
+  dataVersionEsperada: 812,     // obrigatória no commit de tipos com revisão no servidor
+  ambiente: 'TESTE'             // opcional; só as páginas de teste e de demonstração enviam (09-plano-de-testes.md)
 });
 ```
 
@@ -289,6 +290,8 @@ Tudo o que não mora na planilha-banco fica em Script Properties, lidas com um �
 | `DRIVE_FOLDERS` | JSON com os IDs das pastas `ERP Pecuário`, `Backups`, `Exportações` e `Anexos`. | `setup()`. | `setup()` reencontra ou recria. |
 | `DATA_VERSION:<spreadsheetId>` | Contador que invalida o cache do cliente. | Fim da fase C e recuperação. | O cliente recarrega; nenhum dado se perde. |
 | `PENDING_OP:<spreadsheetId>` | Marcador "há operação em curso ou órfã". | Fase A põe; fim da fase C tira. | A recuperação relê `OPERACOES`. |
+| `TEST_SPREADSHEET_ID`, `DEMO_SPREADSHEET_ID` | Bancos do teste de aceitação e da demonstração, em `ERP Pecuário/Testes`. Usados só quando o pedido traz `ambiente`. | `runAcceptanceTests()`. | O teste recria a planilha. |
+| `TEST_PLAN` | Roteiro do teste: `ACEITACAO` (padrão) ou `DEMO`. | O dono, à mão. | Vale o padrão. |
 
 **Por que as duas últimas levam o ID da planilha.** Script Properties pertencem ao projeto de script, não ao arquivo. O teste de aceitação (planilha temporária) e um banco restaurado rodam no mesmo projeto: sem o sufixo, o marcador de um banco travaria o outro e a versão de um validaria o cache do outro. Na restauração, a versão do banco novo nasce acima da última servida, para o cliente nunca ver um número repetido.
 

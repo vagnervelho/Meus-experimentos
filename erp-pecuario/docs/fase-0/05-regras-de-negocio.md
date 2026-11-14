@@ -49,7 +49,7 @@ flowchart TD
 |RN-002|Dois animais não anulados, ativos ou baixados, não têm o mesmo `brinco_norm` preenchido.|§2.1, §16.1|ERRO|Validation|VALIDATION|CT-09|
 |RN-003|Com `brinco_ignora_zeros_esquerda` = N, brincos que só diferem por zeros à esquerda convivem, com aviso.|DV-05|AVISO|Validation|BRINCO_PARECIDO|novo|
 |RN-004|Brinco de período já encerrado em outro animal só é aceito com `brinco_permite_reuso` = S.|§2.1|ERRO|Validation|VALIDATION|novo|
-|RN-005|Animal ATIVO sem brinco vigente aparece na pendência "sem brinco"; brinco é opcional.|§16.19|ALERTA|AnimalService|—|novo|
+|RN-005|Animal ATIVO sem brinco vigente aparece na pendência "sem brinco"; brinco é opcional.|§16.19|ALERTA|AnimalService|—|CT-01|
 |RN-006|Animal EXTERNO fica fora do inventário e só aceita papel de progenitor ou TOURO.|DV-06|ERRO|Timeline|VALIDATION|novo|
 
 ### 2.2 Genealogia
@@ -73,21 +73,21 @@ flowchart TD
 |RN-016|VENDIDO, DESCARTADO ou BAIXADO_AJUSTE só aceita reentrada (COMPRA, OUTRA_ENTRADA) com data posterior à saída.|§6.3|ERRO|Timeline|VALIDATION|CT-09|
 |RN-017|Pesagem, sanidade, reprodução, parto (matriz), desmama e identificação exigem data dentro de um período de permanência, limites inclusivos.|§6.3|ERRO|Timeline|VALIDATION|CT-17|
 |RN-018|Na TRANSFERENCIA, cada animal está no pasto de origem informado na data do evento.|§6.4, §16.6|ERRO|Timeline|VALIDATION|CT-02|
-|RN-019|Pasto de destino, como toda referência de evento, existe e está ativo; destino difere da origem.|§16.5|ERRO|Validation|VALIDATION|novo|
+|RN-019|Pasto de destino, como toda referência de evento, existe e está ativo; destino difere da origem.|§16.5|ERRO|Validation|VALIDATION|CT-09|
 |RN-020|Evento retroativo que invalida eventos posteriores do animal é recusado, listando-os.|§2.3|ERRO|Timeline|CONFLICT|CT-17|
-|RN-021|`event_date` não é futura nem anterior ao nascimento do animal; em pares início/fim, início ≤ fim.|§16.10|ERRO|Validation|VALIDATION|novo|
+|RN-021|`event_date` não é futura nem anterior ao nascimento do animal; em pares início/fim, início ≤ fim.|§16.10|ERRO|Validation|VALIDATION|CT-09|
 |RN-022|ENTRADA_INICIAL é datada do marco zero; evento anterior a ele entra só como informativo, com efeito 0.|§14|ERRO|Timeline|VALIDATION|CT-12|
 |RN-023|Eventos do mesmo animal no mesmo dia valem na ordem entrada, demais, saída; depois `event_seq`.|§2.3|INVARIANTE|Timeline|—|CT-17|
 |RN-024|Σ `efeito_inventario` dos eventos vigentes = número de animais ATIVOS.|§16.20|INVARIANTE|Integridade|—|CT-08|
 |RN-025|Projeções de ANIMAIS e `EVENTOS.status` coincidem com o replay dos eventos vigentes.|§2.3, §16.20|INVARIANTE|Timeline; Integridade|—|CT-08|
-|RN-026|Animal ATIVO sem `pasto_atual_id` aparece na pendência "sem pasto".|§16.18|ALERTA|InventoryService|—|novo|
+|RN-026|Animal ATIVO sem `pasto_atual_id` aparece na pendência "sem pasto".|§16.18|ALERTA|InventoryService|—|CT-20|
 |RN-027|Entrada ou transferência que leva o pasto acima da capacidade informada gera aviso.|§7|AVISO|PastureService|LOTACAO_ACIMA_DA_CAPACIDADE|novo|
 
 ### 2.4 Eventos coletivos e atomicidade
 
 |RN|Regra|Origem|Tipo|Onde|Código|CT|
 |---|---|---|---|---|---|---|
-|RN-028|Erro em um animal rejeita o evento coletivo inteiro, com a lista por animal e campo.|§2.4, §16.14|ERRO|EventService|VALIDATION|novo|
+|RN-028|Erro em um animal rejeita o evento coletivo inteiro, com a lista por animal e campo.|§2.4, §16.14|ERRO|EventService|VALIDATION|CT-02|
 |RN-029|Cada animal aparece uma vez por papel; há ao menos um animal; totais do cabeçalho = contagem das linhas.|§16.14|ERRO|Validation|VALIDATION|CT-03|
 |RN-030|Só linhas de operação CONFIRMADA são visíveis em consulta.|§2.4|INVARIANTE|Repository|—|CT-10|
 |RN-031|Operação órfã é resolvida antes do próximo comando: INICIADA vira FALHOU; CONFIRMADA sem `aplicada_em` reaplica a fase C.|§2.4|INVARIANTE|UnitOfWork|—|novo|
@@ -109,22 +109,22 @@ flowchart TD
 |RN|Regra|Origem|Tipo|Onde|Código|CT|
 |---|---|---|---|---|---|---|
 |RN-039|ESTORNO anula o original sem apagá-lo: ele fica ESTORNADO e sai do replay.|§2.3, §16.15|INVARIANTE|EventService|—|CT-07|
-|RN-040|Estorno que deixa inválida a linha do tempo restante é recusado, listando os dependentes.|§2.3|ERRO|Timeline|CONFLICT|novo|
-|RN-041|Estorno de evento criador exige animal sem outro evento vigente e sem referência (mãe, pai, touro, rateio); o animal fica ANULADO.|§2.3|ERRO|EventService|CONFLICT|novo|
+|RN-040|Estorno que deixa inválida a linha do tempo restante é recusado, listando os dependentes.|§2.3|ERRO|Timeline|CONFLICT|CT-07|
+|RN-041|Estorno de evento criador exige animal sem outro evento vigente e sem referência (mãe, pai, touro, rateio); o animal fica ANULADO.|§2.3|ERRO|EventService|CONFLICT|CT-07|
 |RN-042|Estorno de evento com parcela LIQUIDADA exige desfazer a baixa antes.|§11.3|ERRO|FinancialService|CONFLICT|CT-15|
-|RN-043|ESTORNO não é estornável; evento estornado não é estornado de novo.|§16.15|ERRO|EventService|VALIDATION|novo|
+|RN-043|ESTORNO não é estornável; evento estornado não é estornado de novo.|§16.15|ERRO|EventService|VALIDATION|CT-07|
 |RN-044|Substituto tem o tipo do original, anula-o no mesmo commit e reaproveita os `animal_id` criados.|§2.1, §2.3|ERRO|EventService|VALIDATION|CT-18|
 |RN-045|Substituição é validada uma vez sobre o conjunto final; mudança só de valores, parceiro, parcelas ou observações nunca é bloqueada por dependentes.|§2.3|ERRO|Timeline|CONFLICT|CT-18|
 |RN-046|Substituição transporta a baixa da parcela com valor e vencimento inalterados; se mudaram, exige desfazer a baixa.|§11.3|ERRO|FinancialService|CONFLICT|CT-15|
-|RN-047|Todo AJUSTE_INVENTARIO exige justificativa e grava valor anterior e novo.|§6.12, §16.15|ERRO|Validation|VALIDATION|novo|
-|RN-048|Sexo, nascimento, mãe, pai, brinco e castrado só mudam por evento; o valor de criação é preservado.|§16.17|INVARIANTE|AnimalService|—|novo|
+|RN-047|Todo AJUSTE_INVENTARIO exige justificativa e grava valor anterior e novo.|§6.12, §16.15|ERRO|Validation|VALIDATION|CT-01|
+|RN-048|Sexo, nascimento, mãe, pai, brinco e castrado só mudam por evento; o valor de criação é preservado.|§16.17|INVARIANTE|AnimalService|—|CT-01|
 
 ### 2.7 Pesagem
 
 |RN|Regra|Origem|Tipo|Onde|Código|CT|
 |---|---|---|---|---|---|---|
-|RN-049|Peso vivo é maior que zero, com uma casa decimal, até o teto do campo no EventCatalog.|§16.11|ERRO|Schema|VALIDATION|CT-05|
-|RN-050|Variação diária contra a pesagem anterior fora da faixa `gmd_plausivel_*` gera aviso.|§16.11|AVISO|WeightService|PESO_IMPLAUSIVEL|novo|
+|RN-049|Peso vivo é maior que zero, com uma casa decimal, e de no máximo 2.000 kg (limite de digitação).|§16.11|ERRO|Schema|VALIDATION|CT-05|
+|RN-050|Variação diária contra a pesagem anterior fora da faixa `gmd_plausivel_*` gera aviso.|§16.11|AVISO|WeightService|PESO_IMPLAUSIVEL|CT-05|
 |RN-051|Nova pesagem nunca altera nem substitui linha anterior.|§6.5|INVARIANTE|Repository|—|CT-05|
 |RN-052|GMD exige intervalo ≥ `gmd_intervalo_min_dias` e método individual; senão devolve `null` (DADOS_INSUFICIENTES).|§8|INVARIANTE|WeightService|—|CT-05|
 |RN-053|Projeção, média calculada e peso de carcaça nunca entram em PESAGENS.|§6.3, §8|INVARIANTE|WeightService|—|CT-14|
@@ -160,7 +160,7 @@ flowchart TD
 |RN-068|Valor informado prevalece; diferença para quantidade × preço acima de `fin_tolerancia_conferencia_pct` gera aviso.|§11.1|AVISO|FinancialService|VALOR_DIVERGENTE|novo|
 |RN-069|Receita da venda = bruto − desconto comercial; cada dedução é lançamento DESPESA_VENDA próprio.|§6.3|INVARIANTE|FinancialService|—|CT-04|
 |RN-070|Lançamentos de COMPRA e VENDA são 100% alocados aos animais pelo critério do evento.|§6.3|INVARIANTE|FinancialService; Integridade|—|CT-13|
-|RN-071|Rateio MANUAL soma exatamente o valor do lançamento.|§6.3|ERRO|FinancialService|VALIDATION|novo|
+|RN-071|Rateio MANUAL soma exatamente o valor do lançamento.|§6.3|ERRO|FinancialService|VALIDATION|CT-13|
 |RN-072|Venda de animal em carência: bloqueada por padrão se a finalidade é ABATE; nas demais, aviso.|§10|AVISO|HealthService|CARENCIA_ATIVA|novo|
 |RN-073|Rateio por peso sem peso individual usa a última pesagem escalada ou cai para CABECAS, com aviso.|§6.3|AVISO|FinancialService|RATEIO_SEM_PESO|novo|
 |RN-074|DESCARTE é saída sem negociação: grava BAIXAS, nunca VENDAS.|§6.9|INVARIANTE|EventService|—|novo|
@@ -174,7 +174,7 @@ flowchart TD
 |RN-077|Σ alocações vigentes de um lançamento ≤ valor; a diferença aparece como "não alocado".|§11.2|INVARIANTE|Integridade|—|CT-13|
 |RN-078|Rateio fecha em centavos pelo maior resto: Σ alocado = valor rateado.|§11.2|INVARIANTE|FinancialService|—|CT-13|
 |RN-079|Toda alocação pertence a um rateio com critério, escopo, base e data ou período gravados.|§11.2|INVARIANTE|FinancialService; Integridade|—|CT-13|
-|RN-080|Custo compartilhado só chega ao animal por evento RATEIO; re-rateio é evento novo e não altera linhas antigas.|§11.2|INVARIANTE|FinancialService|—|novo|
+|RN-080|Custo compartilhado só chega ao animal por evento RATEIO; re-rateio é evento novo e não altera linhas antigas.|§11.2|INVARIANTE|FinancialService|—|CT-13|
 |RN-081|Baixa exige parcela ABERTA, data não futura e `valor_pago` = valor + juros − desconto.|§11.3|ERRO|FinancialService|VALIDATION|CT-15|
 |RN-082|Criar ou cancelar lançamento, ou mexer em baixa, até `fin_bloqueio_ate` exige aceite com justificativa.|§11.3|AVISO|FinancialService|PERIODO_BLOQUEADO|novo|
 |RN-083|O resultado usa `natureza`: aquisição de animais, compra de insumos e não operacional ficam fora do custeio.|§11.3|INVARIANTE|FinancialService|—|CT-19|
@@ -198,7 +198,7 @@ flowchart TD
 |RN-091|Linha repetida no arquivo ou já existente na base fica DUPLICADA e não entra.|§14|ERRO|ImportService|VALIDATION|CT-12|
 |RN-092|Eventos importados só valem com a importação IMPORTADO; interrompida, nada vale até Retomar ou Desfazer.|§14|INVARIANTE|Repository|—|CT-12|
 |RN-093|O texto original de cada linha é preservado; vazio = desconhecido, sem valor padrão.|§14|INVARIANTE|ImportService|—|CT-12|
-|RN-094|Progenitor não encontrado mantém a linha em erro até a decisão: desconhecido, criar EXTERNO ou corrigir.|§14|ERRO|ImportService|VALIDATION|novo|
+|RN-094|Progenitor não encontrado mantém a linha em erro até a decisão: desconhecido, criar EXTERNO ou corrigir.|§14|ERRO|ImportService|VALIDATION|CT-12|
 |RN-095|A reconciliação lista divergências entre a fotografia do marco zero e o histórico, sem bloquear.|§14|ALERTA|ImportService|—|CT-12|
 
 ### 2.14 Configuração e categorias
@@ -228,7 +228,7 @@ flowchart TD
 |RN|Regra|Origem|Tipo|Onde|Código|CT|
 |---|---|---|---|---|---|---|
 |RN-108|Evento confirmado e suas linhas filhas são imutáveis; não há rota de edição nem de exclusão.|§2.2, §16.16|INVARIANTE|Api; Repository|—|CT-07|
-|RN-109|Edição de campo `[cad]` grava AUDITORIA (anterior, novo, usuário, hora) no mesmo commit.|§16.17|INVARIANTE|UnitOfWork|—|novo|
+|RN-109|Edição de campo `[cad]` grava AUDITORIA (anterior, novo, usuário, hora) no mesmo commit.|§16.17|INVARIANTE|UnitOfWork|—|CT-01|
 |RN-110|Não há exclusão de cadastro: pasto, parceiro, produto, categoria e conta só são desativados.|§16.16|INVARIANTE|Api|—|novo|
 |RN-111|Todo evento grava data de ocorrência, data de registro, usuário, origem e status.|§2.5|INVARIANTE|EventService|—|CT-07|
 |RN-112|A verificação de integridade detecta edição manual da planilha e só relata; nunca corrige em silêncio.|§17|INVARIANTE|Integridade|—|CT-20|

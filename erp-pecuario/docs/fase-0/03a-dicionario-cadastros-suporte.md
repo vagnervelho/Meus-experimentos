@@ -6,7 +6,7 @@
 - Os dez tipos do desenho-base não comportam área, dose nem custo por dose. Este documento acrescenta um tipo, `DEC4`, e fecha outras lacunas de detalhe; todas estão listadas na seção 7 para conferência do arquiteto.
 - ANIMAIS tem 39 colunas: 3 imutáveis, 4 de cadastro editável, 1 carimbo e **31 projeções**, cada uma com regra de derivação escrita (seção 4.3). Atributo de criação é fato imutável guardado no evento; projeção é o valor que vale hoje.
 - Enum fechado (tem lógica) vive no `Schema` e está catalogado na seção 2, inclusive os das tabelas de eventos e do financeiro. Lista aberta vive em LISTAS (11 listas, seção 3); tabela de fato grava o `codigo`, nunca o rótulo.
-- Sementes do `setup()`, sempre por "insere se ausente": 45 chaves de CONFIGURACOES, 9 CATEGORIAS, 28 contas de PLANO_CONTAS e 69 itens de LISTAS.
+- Sementes do `setup()`, sempre por "insere se ausente": 45 chaves de CONFIGURACOES, 9 CATEGORIAS, 29 contas de PLANO_CONTAS e 69 itens de LISTAS.
 - Todos os campos de §4.1, §4.2, §4.3 e §4.10 a §4.14 têm destino no modelo (seção 6). Só `categoria_atual` e `valor_estimado` deixam de ser coluna (são calculados na leitura), e `foto_url` vira `foto_anexo_id`.
 
 **Documentos relacionados:** `README.md` · `01-arquitetura.md` · `02-modelo-de-dados.md` (DER, relacionamentos, vigência) · `03b-dicionario-eventos-financeiro.md` (as 13 abas de eventos e financeiro, coluna a coluna) · `04-motor-de-eventos.md` · `05-regras-de-negocio.md` · `06-persistencia-e-integridade.md` · `07-financeiro-e-indicadores.md` · `11-riscos-e-premissas.md` · `12-fatos-de-plataforma.md`.
@@ -984,7 +984,7 @@ Calculado na leitura, nunca gravado: ganho = 185,0 − 32,0 = 153,0 kg em 243 di
 | `motivo` | TEXTO | não | imutável | lista MOTIVO_IDENTIFICACAO | Motivo da substituição ou remoção; vazio na primeira identificação |
 | `created_at` | TS | sim | imutável | — | Criação da linha |
 
-Reuso de brinco: com `brinco_permite_reuso = N` (padrão), um `codigo_norm` que já aparece em qualquer linha vigente de tipo BRINCO, aberta ou fechada, de outro animal, é recusado. Com `S`, só bloqueia o código que está em uso (linha com `data_fim` vazia), inclusive em animal vendido ou morto, até que uma remoção seja registrada.
+Reuso de brinco: com `brinco_permite_reuso = N` (padrão), um `codigo_norm` que já aparece em qualquer linha vigente de tipo BRINCO, aberta ou fechada, de outro animal, é recusado. Com `S`, só bloqueia o código que está em uso (linha com `data_fim` vazia), inclusive em animal vendido ou morto, até que uma remoção seja registrada. Exceção nos dois casos: o código lançado por engano e corrigido por AJUSTE_INVENTARIO/IDENTIFICACAO_INCORRETA não conta para o bloqueio (o teste ignora o código que é `valor_anterior` de um ajuste vigente do mesmo animal).
 
 ### 4.5 CATEGORIAS
 
@@ -1256,7 +1256,7 @@ Exemplos conferidos:
 ### 4.13 PLANO_CONTAS
 
 - **Propósito**: contas do financeiro, com dois eixos: `grupo` organiza a apresentação na estrutura A–D da §11; `natureza` decide todo cálculo (DV-12). O motor de eventos referencia contas por `codigo`, nunca por nome.
-- **Chave**: `conta_id`; `codigo` é a chave natural estável. **Crescimento**: 28 sementes, mais as contas que o dono criar.
+- **Chave**: `conta_id`; `codigo` é a chave natural estável. **Crescimento**: 29 sementes, mais as contas que o dono criar.
 - Editada por `conta.salvar`. O dono pode renomear, reordenar, desativar (exceto `sistema = S`) e criar contas.
 
 | Coluna | Tipo | Obrig. | Marca | Domínio / FK | Descrição |
@@ -1286,12 +1286,12 @@ Combinações aceitas na criação de conta:
 | ESTOQUE_INSUMOS | DESPESA | CUSTO_DIRETO | NAO_SE_APLICA |
 | NAO_OPERACIONAL | RECEITA ou DESPESA | NAO_OPERACIONAL | NAO_SE_APLICA |
 
-**Sementes** (as 28 contas da seção 7 do desenho-base; `codigo`, `tipo`, `classe_custo_animal`, `sistema` e `ordem` definidos aqui, DL-11):
+**Sementes** (as 29 contas da seção 7 do desenho-base; `codigo`, `tipo`, `classe_custo_animal`, `sistema` e `ordem` definidos aqui, DL-11):
 
 | `ordem` | `codigo` | `nome` | `grupo` | `natureza` | `tipo` | `classe_custo_animal` | `sistema` |
 |---|---|---|---|---|---|---|---|
 | 110 | VENDA_ANIMAIS | Venda de animais | RECEITA | RECEITA_VENDA_ANIMAIS | RECEITA | NAO_SE_APLICA | S |
-| 120 | OUTRAS_RECEITAS_OPERACIONAIS | Outras receitas operacionais | RECEITA | OUTRA_RECEITA | RECEITA | NAO_SE_APLICA | N |
+| 120 | OUTRAS_RECEITAS_OPERACIONAIS | Outras receitas operacionais | RECEITA | OUTRA_RECEITA | RECEITA | NAO_SE_APLICA | S |
 | 130 | RECEITAS_EXTRAORDINARIAS | Receitas extraordinárias | RECEITA | OUTRA_RECEITA | RECEITA | NAO_SE_APLICA | N |
 | 210 | COMPRA_ANIMAIS | Compra de animais | CUSTO_DIRETO | AQUISICAO_ANIMAIS | DESPESA | AQUISICAO | S |
 | 220 | FRETE_DESPESAS_COMPRA | Frete e despesas de compra | CUSTO_DIRETO | AQUISICAO_ANIMAIS | DESPESA | AQUISICAO | S |
@@ -1306,7 +1306,7 @@ Combinações aceitas na criação de conta:
 | 310 | COMISSAO_VENDA | Comissão de venda | CUSTO_DIRETO | DESPESA_VENDA | DESPESA | NAO_SE_APLICA | S |
 | 320 | TAXAS_RETENCOES_VENDA | Taxas e retenções sobre venda | CUSTO_DIRETO | DESPESA_VENDA | DESPESA | NAO_SE_APLICA | S |
 | 330 | COMPRA_INSUMOS | Compra de insumos | CUSTO_DIRETO | ESTOQUE_INSUMOS | DESPESA | NAO_SE_APLICA | S |
-| 410 | MANUTENCAO_PASTOS | Manutenção de pastos | CUSTO_OPERACIONAL | CUSTEIO | DESPESA | OUTROS | N |
+| 410 | MANUTENCAO_PASTOS | Manutenção de pastos | CUSTO_OPERACIONAL | CUSTEIO | DESPESA | ALIMENTACAO | N |
 | 415 | ARRENDAMENTO_PASTO | Arrendamento de pasto | CUSTO_OPERACIONAL | CUSTEIO | DESPESA | ALIMENTACAO | N |
 | 420 | MAO_DE_OBRA | Mão de obra | CUSTO_OPERACIONAL | CUSTEIO | DESPESA | OUTROS | N |
 | 430 | EQUIPAMENTOS | Equipamentos | CUSTO_OPERACIONAL | CUSTEIO | DESPESA | OUTROS | N |
@@ -1318,7 +1318,7 @@ Combinações aceitas na criação de conta:
 | 530 | OUTROS_GASTOS | Outros gastos | DESPESA_ADMINISTRATIVA | CUSTEIO | DESPESA | OUTROS | N |
 | 610 | APORTES | Aportes | NAO_OPERACIONAL | NAO_OPERACIONAL | RECEITA | NAO_SE_APLICA | N |
 | 620 | RETIRADAS | Retiradas | NAO_OPERACIONAL | NAO_OPERACIONAL | DESPESA | NAO_SE_APLICA | N |
-| 630 | EMPRESTIMOS | Empréstimos | NAO_OPERACIONAL | NAO_OPERACIONAL | DESPESA | NAO_SE_APLICA | N |
+| 630 | EMPRESTIMOS | Empréstimos | NAO_OPERACIONAL | NAO_OPERACIONAL | RECEITA | NAO_SE_APLICA | N |
 
 Leituras adotadas nas sementes:
 
@@ -1720,7 +1720,7 @@ Lacunas e ambiguidades do desenho-base fechadas aqui com a menor decisão coeren
 | DL-08 | Em reentrada, `custo_aquisicao*` soma só as alocações do período de permanência mais recente | A soma literal contaria duas vezes a compra de um animal vendido e recomprado | 4.3.3 |
 | DL-09 | Registros anteriores ao marco zero contam como fatos independentes para peso e reprodução, não para inventário nem localização | "Fora do replay" no desenho-base refere-se à linha do tempo de inventário | 4.3.3 |
 | DL-10 | CATEGORIAS: 9 sementes com `codigo` e `prioridade`; duas regras de novilha; `peso_referencia_kg` vazio; atributo vazio conta como "não" na condição; idade desconhecida só casa com regra sem limite de idade | O desenho-base lista nomes e faixas, não códigos nem pesos | 4.5 |
-| DL-11 | PLANO_CONTAS: `codigo`, `tipo`, `classe_custo_animal`, `sistema` e `ordem` das 28 sementes; EMPRESTIMOS como DESPESA; trava pós-lançamento estendida a `tipo` e `classe_custo_animal`; tabela de combinações válidas | O desenho-base lista nome, grupo e natureza | 4.13 |
+| DL-11 | PLANO_CONTAS: `codigo`, `tipo`, `classe_custo_animal`, `sistema` e `ordem` das 29 sementes; EMPRESTIMOS como RECEITA (entrada do principal; a amortização pede conta de tipo DESPESA criada pelo dono); trava pós-lançamento estendida a `tipo` e `classe_custo_animal`; tabela de combinações válidas | O desenho-base lista nome, grupo e natureza | 4.13 |
 | DL-12 | Conta do consumo de produto definida por `PRODUTOS.categoria` | O lançamento de consumo é automático e PRODUTOS não tem coluna de conta | 4.13 |
 | DL-13 | 69 sementes de LISTAS; três códigos reservados (ABATE, FRETE, COMISSAO) que não podem ser desativados | O desenho-base põe FINALIDADE_NEGOCIO e TIPO_DEDUCAO_VENDA em lista aberta, mas dá lógica a esses códigos | 3 |
 | DL-14 | `AUDITORIA.acao` com cinco valores; uma linha por campo, inclusive na criação; `entidade = SISTEMA` para ação sem registro-alvo | O desenho-base não enumera as ações | 2.5, 5.2 |

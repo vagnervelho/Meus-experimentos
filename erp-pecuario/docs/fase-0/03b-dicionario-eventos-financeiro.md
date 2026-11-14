@@ -126,7 +126,7 @@ Os treze campos de §4.4 foram mantidos com o mesmo nome. Os doze acréscimos es
 
 Exemplo: transferência de 05/03 registrada em 20/03 recebe `event_seq` 520; uma pesagem de 10/03, registrada no próprio dia, tem 498. No replay a transferência vem antes, porque a data manda. O 520 só desempataria contra outro movimento de 05/03.
 
-Consequência a conhecer: o evento substituto ("corrigir") recebe `event_seq` novo, maior que o do original. Se o animal tiver dois movimentos no mesmo dia, o substituto do primeiro passa a ser lido depois do segundo. Quando isso quebra a cadeia de pastos, a validação do conjunto final devolve CONFLICT com os eventos envolvidos e o operador corrige também o segundo. Decisão adotada: o substituto não herda o `event_seq` do original. O contador é monotônico por definição, e renumerar exigiria regravar linhas já confirmadas.
+Consequência a conhecer: o evento substituto ("corrigir") recebe `event_seq` novo, maior que o do original, porque o contador é monotônico e linhas confirmadas não são regravadas. Para que corrigir um valor não mude a ordem dos movimentos do dia, a ordem canônica do replay usa, para o substituto, o `event_seq` do primeiro evento da cadeia de substituição (a posição do original). Só quando a correção muda a data ou os pastos a posição muda, e aí vale a validação do conjunto final, que devolve CONFLICT se a cadeia de pastos quebrar.
 
 ### 2.4 `event_subtype` e a coluna de tipo do detalhe
 

@@ -40,7 +40,7 @@ Volumes em ordem de grandeza para 500 animais ativos. Os de EVENTO_ANIMAIS, ALOC
 | ESTACOES_MONTA | Período de exposição que define o denominador dos indicadores reprodutivos (§9) | 1 a 2/ano |
 | LISTAS | Listas abertas (raça, causa de morte, forma de pagamento...) por `lista` + `codigo` | ~100 |
 | CONFIGURACOES | Parâmetros por `chave` (§4.14, §21) | 45 chaves |
-| PLANO_CONTAS | Contas com `grupo` (apresentação) e `natureza` (cálculo) (§11) | 28 sementes |
+| PLANO_CONTAS | Contas com `grupo` (apresentação) e `natureza` (cálculo) (§11) | 29 sementes |
 | TABELA_PRECOS | Valores de referência do patrimônio, com vigência (§11.4) | 10 a 50/ano |
 
 ### 2.2 Eventos e detalhes (9)

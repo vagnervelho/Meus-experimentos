@@ -63,26 +63,26 @@ flowchart LR
 
 O código sugerido é texto com prefixo do grupo: um código como "1.10" viraria 1,1 numa célula coercida. Contas de mesmo tratamento dividem a linha. Código em negrito = `sistema` S: conta citada pelo `EventCatalog` pelo `codigo`; pode ser renomeada, não desativada.
 
-| Contas (código sugerido e nome) | Grupo | Natureza | Tipo | Classe de custo |
+| Contas (`codigo` do dicionário e nome) | Grupo | Natureza | Tipo | Classe de custo |
 |---|---|---|---|---|
-| **REC-01** Venda de animais | RECEITA | RECEITA_VENDA_ANIMAIS | RECEITA | NAO_SE_APLICA |
-| **REC-02** Outras receitas operacionais · REC-03 Receitas extraordinárias | RECEITA | OUTRA_RECEITA | RECEITA | NAO_SE_APLICA |
-| **DIR-01** Compra de animais · **DIR-02** Frete e despesas de compra · **DIR-03** Saldo de abertura do rebanho | CUSTO_DIRETO | AQUISICAO_ANIMAIS | DESPESA | AQUISICAO |
-| **DIR-04** Alimentação | CUSTO_DIRETO | CUSTEIO | DESPESA | ALIMENTACAO |
-| **DIR-05** Vacinas · **DIR-06** Medicamentos · **DIR-07** Tratamentos | CUSTO_DIRETO | CUSTEIO | DESPESA | SANITARIO |
-| DIR-08 Transporte interno | CUSTO_DIRETO | CUSTEIO | DESPESA | OUTROS |
-| DIR-09 Reprodução | CUSTO_DIRETO | CUSTEIO | DESPESA | REPRODUCAO |
-| **DIR-10** Frete de venda · **DIR-11** Comissão de venda · **DIR-12** Taxas e retenções sobre venda | CUSTO_DIRETO | DESPESA_VENDA | DESPESA | NAO_SE_APLICA |
-| **DIR-13** Compra de insumos | CUSTO_DIRETO | ESTOQUE_INSUMOS | DESPESA | NAO_SE_APLICA |
-| OPE-01 Manutenção de pastos · OPE-02 Arrendamento de pasto | CUSTO_OPERACIONAL | CUSTEIO | DESPESA | ALIMENTACAO |
-| OPE-03 Mão de obra · OPE-04 Equipamentos · OPE-05 Combustível · OPE-06 Energia | CUSTO_OPERACIONAL | CUSTEIO | DESPESA | OUTROS |
-| OPE-07 Serviços veterinários | CUSTO_OPERACIONAL | CUSTEIO | DESPESA | SANITARIO |
-| ADM-01 Contabilidade · ADM-02 Despesas gerais · ADM-03 Outros gastos | DESPESA_ADMINISTRATIVA | CUSTEIO | DESPESA | OUTROS |
-| NOP-01 Aportes · NOP-03 Empréstimos | NAO_OPERACIONAL | NAO_OPERACIONAL | RECEITA | NAO_SE_APLICA |
-| NOP-02 Retiradas | NAO_OPERACIONAL | NAO_OPERACIONAL | DESPESA | NAO_SE_APLICA |
+| **`VENDA_ANIMAIS`** Venda de animais | RECEITA | RECEITA_VENDA_ANIMAIS | RECEITA | NAO_SE_APLICA |
+| **`OUTRAS_RECEITAS_OPERACIONAIS`** Outras receitas operacionais · `RECEITAS_EXTRAORDINARIAS` Receitas extraordinárias | RECEITA | OUTRA_RECEITA | RECEITA | NAO_SE_APLICA |
+| **`COMPRA_ANIMAIS`** Compra de animais · **`FRETE_DESPESAS_COMPRA`** Frete e despesas de compra · **`SALDO_ABERTURA_REBANHO`** Saldo de abertura do rebanho | CUSTO_DIRETO | AQUISICAO_ANIMAIS | DESPESA | AQUISICAO |
+| **`ALIMENTACAO`** Alimentação | CUSTO_DIRETO | CUSTEIO | DESPESA | ALIMENTACAO |
+| **`VACINAS`** Vacinas · **`MEDICAMENTOS`** Medicamentos · **`TRATAMENTOS`** Tratamentos | CUSTO_DIRETO | CUSTEIO | DESPESA | SANITARIO |
+| `TRANSPORTE_INTERNO` Transporte interno | CUSTO_DIRETO | CUSTEIO | DESPESA | OUTROS |
+| `REPRODUCAO` Reprodução | CUSTO_DIRETO | CUSTEIO | DESPESA | REPRODUCAO |
+| **`FRETE_VENDA`** Frete de venda · **`COMISSAO_VENDA`** Comissão de venda · **`TAXAS_RETENCOES_VENDA`** Taxas e retenções sobre venda | CUSTO_DIRETO | DESPESA_VENDA | DESPESA | NAO_SE_APLICA |
+| **`COMPRA_INSUMOS`** Compra de insumos | CUSTO_DIRETO | ESTOQUE_INSUMOS | DESPESA | NAO_SE_APLICA |
+| `MANUTENCAO_PASTOS` Manutenção de pastos · `ARRENDAMENTO_PASTO` Arrendamento de pasto | CUSTO_OPERACIONAL | CUSTEIO | DESPESA | ALIMENTACAO |
+| `MAO_DE_OBRA` Mão de obra · `EQUIPAMENTOS` Equipamentos · `COMBUSTIVEL` Combustível · `ENERGIA` Energia | CUSTO_OPERACIONAL | CUSTEIO | DESPESA | OUTROS |
+| `SERVICOS_VETERINARIOS` Serviços veterinários | CUSTO_OPERACIONAL | CUSTEIO | DESPESA | SANITARIO |
+| `CONTABILIDADE` Contabilidade · `DESPESAS_GERAIS` Despesas gerais · `OUTROS_GASTOS` Outros gastos | DESPESA_ADMINISTRATIVA | CUSTEIO | DESPESA | OUTROS |
+| `APORTES` Aportes · `EMPRESTIMOS` Empréstimos | NAO_OPERACIONAL | NAO_OPERACIONAL | RECEITA | NAO_SE_APLICA |
+| `RETIRADAS` Retiradas | NAO_OPERACIONAL | NAO_OPERACIONAL | DESPESA | NAO_SE_APLICA |
 
 - O catálogo fixa a natureza dos lançamentos de evento: COMPRA só aceita contas AQUISICAO_ANIMAIS; deduções de VENDA, só DESPESA_VENDA.
-- Consumo de insumo usa a conta pela `PRODUTOS.categoria`: VACINA → DIR-05; VERMIFUGO e MEDICAMENTO → DIR-06; SUPLEMENTO → DIR-04; OUTRO → DIR-07. A receita simples do DESCARTE vai para REC-02.
+- Consumo de insumo usa a conta pela `PRODUTOS.categoria`: VACINA → `VACINAS`; VERMIFUGO e MEDICAMENTO → `MEDICAMENTOS`; SUPLEMENTO → `ALIMENTACAO`; OUTRO → `TRATAMENTOS`. A receita simples do DESCARTE vai para `OUTRAS_RECEITAS_OPERACIONAIS`.
 - Pasto é o alimento do sistema a pasto: manutenção e arrendamento levam classe ALIMENTACAO. Despesas de venda não compõem o custo acumulado (NAO_SE_APLICA): aparecem em coluna própria no resultado do animal.
 - `tipo` é da conta e é copiado para o lançamento. "Empréstimos" é a entrada do principal (RECEITA); a amortização pede outra conta NAO_OPERACIONAL, de tipo DESPESA, criada em `conta.salvar`.
 
@@ -305,7 +305,7 @@ Colunas do relatório 14, lidas das alocações vigentes pela `classe_custo_anim
 No caso da 2.2, A1 (255 dias): custo diário de R$ 1,10 e margem de R$ 140,82 por @ de carcaça.
 
 - **Nascidos**: custo de aquisição de R$ 0,00 por definição (`custo_aquisicao_origem` = NAO_SE_APLICA), exibido como "nascido na fazenda".
-- **Rebanho de abertura**: valor de abertura opcional na ENTRADA_INICIAL, por animal (ABERTURA_INFORMADA) ou em massa pela TABELA_PRECOS de D0 (ABERTURA_ESTIMADA). Gera lançamento AQUISICAO_ANIMAIS na conta DIR-03, sem parcela, com alocação por animal.
+- **Rebanho de abertura**: valor de abertura opcional na ENTRADA_INICIAL, por animal (ABERTURA_INFORMADA) ou em massa pela TABELA_PRECOS de D0 (ABERTURA_ESTIMADA). Gera lançamento AQUISICAO_ANIMAIS na conta `SALDO_ABERTURA_REBANHO`, sem parcela, com alocação por animal.
 - **Sem valor de abertura**: custo nulo (DESCONHECIDO), nunca zero; o resultado sai rotulado "parcial: N cabeças baixadas sem custo de aquisição". Exemplo: venda de 40 bois de abertura por R$ 192.000,00 e custeio do mês de R$ 12.000,00. Sem abertura: R$ 180.000,00, parcial. Com abertura de R$ 3.800,00 por cabeça (R$ 152.000,00): R$ 28.000,00.
 
 ## 7. Patrimônio (§11.4)

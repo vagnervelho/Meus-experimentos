@@ -244,6 +244,7 @@ Animal a mais na contagem entra por OUTRA_ENTRADA ou ENTRADA_INICIAL, não por a
 ### 5.1 Regras
 
 - **Ordem canônica:** `(event_date, classe, event_seq)`. Classe 0 = entradas; 1 = movimentos e demais; 2 = saídas. Não há hora; "na data D" significa o estado ao fim do dia D.
+- **Substituto mantém a posição:** o evento substituto recebe `event_seq` novo, mas no desempate ocupa a posição do evento que substitui (vale o `event_seq` do primeiro evento da cadeia). Corrigir um valor não muda a ordem dos movimentos do dia.
 - **Permanência:** pares de entrada e saída. MORTO é terminal; os demais admitem reentrada.
 - **Continuidade de local:** o pasto de origem de cada movimento é o pasto de destino do movimento anterior.
 - **Fato independente** (pesagem, sanidade, reprodução, desmama, identificação): válido se a data cai dentro de um período de permanência, com os dois limites incluídos. O dia da saída conta.

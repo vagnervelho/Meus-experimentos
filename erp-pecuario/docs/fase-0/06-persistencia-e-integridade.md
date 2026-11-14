@@ -33,7 +33,7 @@ A escolha é entre duas formas de falar com a planilha. Não se misturam as duas
 | Escopo | `spreadsheets` (o mesmo) | `spreadsheets` |
 | Risco | Cota de requisições da API; serviço avançado a habilitar no manifesto | Três comportamentos sem fonte (coerção, herança de formato, append em abas aparadas) |
 
-**Decisão:** preferência pela Sheets API, a fechar no SP-01 com três critérios: (1) todo valor do corpus volta idêntico; (2) um `batchUpdate` com um pedido inválido no meio não aplica nada; (3) uma venda de 5 animais grava em tempo aceitável. Se reprovar, usa-se `SpreadsheetApp` com a primitiva única de append e o protocolo de três fases completo.
+**Decisão:** preferência pela Sheets API, a fechar no SP-01 com três critérios: (1) todo valor do corpus volta idêntico; (2) um `batchUpdate` com um pedido inválido no meio não aplica nada; (3) uma venda de 5 animais grava em tempo aceitável. Se reprovar, tenta-se a própria Sheets API com `Values.batchUpdate` e entrada `RAW` (sem interpretação de tipo, mas sem atomicidade entre abas); se também reprovar, `SpreadsheetApp` com a primitiva única de append. Nos dois casos vale o protocolo de três fases completo.
 
 **Se a atomicidade do `batchUpdate` for confirmada**, um comando simples vira uma única requisição que anexa todas as linhas, já com a operação confirmada, e atualiza as projeções. As fases A, B e C continuam existindo como desenho, mas ocorrem juntas. O caminho de recuperação fica para dois casos: operações de várias requisições (importação) e resposta perdida, que a idempotência resolve.
 
