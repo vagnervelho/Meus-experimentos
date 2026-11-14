@@ -1,0 +1,1136 @@
+<script>
+'use strict';
+/*
+ * ERP Pecuário — núcleo do cliente (01-arquitetura.md, seção 7; 08-ux-ui.md, seções 2, 8 e 9).
+ * Namespaces: Util (ids, armazém local, DOM), Fmt (formatação pt-BR e "hoje" no fuso da fazenda), Cliente (única
+ * parte que conhece google.script.run: Promise, 45 s, LOCKED, NEEDS_CONFIRMATION, consulta ao estado da operação),
+ * Store (carga inicial condicional por dataVersion e delta), Rascunhos (localStorage com alternativa no servidor),
+ * Roteador (hash com google.script.history/url e alternativa), Telas (registro das telas) e App (casca).
+ * Nada roda na carga: App.iniciar() é chamado no fim do Index, depois de todos os includes.
+ */
+
+var Util = (function () {
+  function registrarFalha(contexto, erro) {
+    if (window.console && console.error) console.error('[ERP] ' + contexto + ':', erro && erro.message ? erro.message : erro);
+  }
+  function uuid() {
+    var c = window.crypto;
+    if (c && typeof c.randomUUID === 'function') return c.randomUUID();
+    if (c && typeof c.getRandomValues === 'function') {
+      var b = new Uint8Array(16);
+      c.getRandomValues(b);
+      b[6] = (b[6] & 0x0f) | 0x40;
+      b[8] = (b[8] & 0x3f) | 0x80;
+      var hx = Array.prototype.map.call(b, function (x) { return (x + 0x100).toString(16).slice(1); }).join('');
+      return hx.slice(0, 8) + '-' + hx.slice(8, 12) + '-' + hx.slice(12, 16) + '-' + hx.slice(16, 20) + '-' + hx.slice(20);
+    }
+    throw new Error('Este navegador não gera identificadores seguros. Atualize o navegador para usar o app.');
+  }
+  function clonar(v) { return v === undefined ? undefined : JSON.parse(JSON.stringify(v)); }
+  function vazio(v) { return v === null || v === undefined || (typeof v === 'string' && v.trim() === ''); }
+  function esperar(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  /** Função adiada: chama fn ms depois da última chamada; `.agora()` executa já o que estiver pendente. */
+  function adiar(fn, ms) {
+    var t = null, args = null;
+    function f() { args = arguments; if (t) clearTimeout(t); t = setTimeout(executar, ms); }
+    function executar() { t = null; var a = args; args = null; if (a) fn.apply(null, a); }
+    f.agora = function () { if (t) { clearTimeout(t); executar(); } };
+    f.pendente = function () { return t !== null; };
+    return f;
+  }
+
+  /**
+   * localStorage com tratamento de falha (SP-06): no iframe do HtmlService ele pode faltar, estar cheio ou bloqueado.
+   * Toda leitura e gravação passam por aqui; quem chama recebe null/false e decide a alternativa.
+   */
+  var armazem = {
+    disponivel: function () {
+      try {
+        var k = '__erp_teste__';
+        window.localStorage.setItem(k, '1');
+        var ok = window.localStorage.getItem(k) === '1';
+        window.localStorage.removeItem(k);
+        return ok;
+      } catch (e) {
+        registrarFalha('armazenamento local indisponível', e);
+        return false;
+      }
+    },
+    ler: function (k) {
+      try {
+        var t = window.localStorage.getItem(k);
+        return t === null ? null : JSON.parse(t);
+      } catch (e) {
+        registrarFalha('leitura local de ' + k, e);
+        return null;
+      }
+    },
+    gravar: function (k, v) {
+      try {
+        window.localStorage.setItem(k, JSON.stringify(v));
+        return true;
+      } catch (e) {
+        registrarFalha('gravação local de ' + k, e);
+        return false;
+      }
+    },
+    remover: function (k) {
+      try {
+        window.localStorage.removeItem(k);
+        return true;
+      } catch (e) {
+        registrarFalha('remoção local de ' + k, e);
+        return false;
+      }
+    },
+  };
+
+  var SVG = 'http://www.w3.org/2000/svg';
+  /**
+   * h(tag, atributos, ...filhos): cria elemento sem innerHTML (texto vira nó de texto). Atributos: class, text,
+   * on: {evento: fn}, dataset, e qualquer outro (aria-*, type...). `false`/`null` omite; `true` vira atributo vazio.
+   */
+  function h(tag, atributos) {
+    var el = document.createElement(tag);
+    aplicar_(el, atributos);
+    for (var i = 2; i < arguments.length; i++) anexar_(el, arguments[i]);
+    return el;
+  }
+  function s(tag, atributos) {
+    var el = document.createElementNS(SVG, tag);
+    aplicar_(el, atributos);
+    for (var i = 2; i < arguments.length; i++) anexar_(el, arguments[i]);
+    return el;
+  }
+  function aplicar_(el, a) {
+    if (!a) return;
+    Object.keys(a).forEach(function (k) {
+      var v = a[k];
+      if (v === null || v === undefined || v === false) return;
+      if (k === 'on') { Object.keys(v).forEach(function (ev) { el.addEventListener(ev, v[ev]); }); return; }
+      if (k === 'text') { el.textContent = String(v); return; }
+      if (k === 'dataset') { Object.keys(v).forEach(function (d) { if (v[d] !== null && v[d] !== undefined) el.dataset[d] = String(v[d]); }); return; }
+      if (k === 'value' && 'value' in el && el.namespaceURI !== SVG) { el.value = v; return; }
+      if (k === 'checked' || k === 'selected' || k === 'disabled' || k === 'readOnly' || k === 'multiple') { el[k] = !!v; return; }
+      el.setAttribute(k === 'className' ? 'class' : k, v === true ? '' : String(v));
+    });
+  }
+  function anexar_(el, filho) {
+    if (filho === null || filho === undefined || filho === false) return;
+    if (Array.isArray(filho)) { filho.forEach(function (f) { anexar_(el, f); }); return; }
+    el.appendChild(typeof filho === 'object' && filho.nodeType ? filho : document.createTextNode(String(filho)));
+  }
+  function limpar(el) { while (el.firstChild) el.removeChild(el.firstChild); return el; }
+  function focaveis(raiz) {
+    return Array.prototype.filter.call(raiz.querySelectorAll('a[href], button, input, select, textarea, summary, [tabindex]:not([tabindex="-1"])'), function (el) {
+      return !el.disabled && el.getAttribute('aria-hidden') !== 'true' && (el.offsetWidth > 0 || el.offsetHeight > 0 || el === document.activeElement);
+    });
+  }
+  return { registrarFalha: registrarFalha, uuid: uuid, clonar: clonar, vazio: vazio, esperar: esperar, adiar: adiar, armazem: armazem, h: h, s: s, limpar: limpar, focaveis: focaveis };
+})();
+
+var Fmt = (function () {
+  var cfg = { fuso: 'America/Porto_Velho', unidadePeso: 'KG', arrobaKg: 15, desvioMs: 0, hojeServidor: null };
+  var cache = {};
+  var ROTULOS = {
+    SEXO: { M: 'Macho', F: 'Fêmea' },
+    CONFIANCA: { CONFIRMADA: 'Confirmada', ESTIMADA: 'Estimada', DESCONHECIDA: 'Não se sabe' },
+    ORIGEM: { NASCIDO: 'Nasceu na fazenda', COMPRADO: 'Comprado', DESCONHECIDA: 'Não se sabe' },
+    SITUACAO_REPRODUTIVA: { NAO_APTA: 'Não apta', SEM_INFORMACAO: 'Sem informação', VAZIA: 'Vazia', EXPOSTA: 'Exposta (com touro)', INSEMINADA: 'Inseminada', PRENHA: 'Prenha' },
+    METODO_PESAGEM: { BALANCA: 'Balança', FITA: 'Fita', ESTIMATIVA_VISUAL: 'Estimativa visual', MEDIA_LOTE: 'Média do lote' },
+    SITUACAO_CADASTRAL: { PENDENTE: 'Pendente', ATIVO: 'Ativo', VENDIDO: 'Vendido', MORTO: 'Morto', DESCARTADO: 'Descartado', BAIXADO_AJUSTE: 'Baixado por ajuste', HISTORICO: 'Histórico', EXTERNO: 'De fora do rebanho', ANULADO: 'Anulado' },
+    IDENTIFICACAO: { BRINCO_ORIGEM: 'Brinco de origem', RFID: 'RFID (chip)', SISBOV: 'SISBOV', TATUAGEM: 'Tatuagem', OUTRO: 'Outra' },
+    CAMPO_CORRIGIVEL: {
+      sexo: 'Sexo', data_nascimento: 'Data de nascimento', data_nascimento_confianca: 'Certeza do nascimento', mae_id: 'Mãe', mae_confianca: 'Certeza da mãe',
+      pai_id: 'Pai', pai_confianca: 'Certeza do pai', castrado: 'Castrado', reprodutor: 'Reprodutor (touro)', partos_previos: 'Partos anteriores',
+      origem: 'Origem', data_entrada: 'Chegada na fazenda', data_entrada_confianca: 'Certeza da chegada',
+    },
+  };
+  var DOMINIO_DO_CAMPO = {
+    sexo: 'SEXO', data_nascimento_confianca: 'CONFIANCA', mae_confianca: 'CONFIANCA', pai_confianca: 'CONFIANCA', data_entrada_confianca: 'CONFIANCA',
+    origem: 'ORIGEM', situacao_reprodutiva: 'SITUACAO_REPRODUTIVA', metodo_pesagem: 'METODO_PESAGEM', campo: 'CAMPO_CORRIGIVEL', situacao_cadastral: 'SITUACAO_CADASTRAL',
+  };
+
+  function configurar(o) { Object.keys(o || {}).forEach(function (k) { if (o[k] !== undefined && o[k] !== null) cfg[k] = o[k]; }); cache = {}; }
+  function ajustarRelogio(serverTime) {
+    var t = Date.parse(serverTime);
+    if (isFinite(t)) cfg.desvioMs = t - Date.now();
+  }
+  /** Agora (ms) corrigido pelo relógio do servidor: o "hoje" não depende do relógio do aparelho. */
+  function agoraMs() { return Date.now() + cfg.desvioMs; }
+  function partes_(ms, fuso) {
+    var f = cache[fuso] || (cache[fuso] = new Intl.DateTimeFormat('en-CA', { timeZone: fuso, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }));
+    var p = {};
+    f.formatToParts(new Date(ms)).forEach(function (x) { p[x.type] = x.value; });
+    return p;
+  }
+  /** Data de hoje (yyyy-MM-dd) no fuso da fazenda — nunca pelo relógio UTC nem pelo fuso do aparelho (08, 4.3). */
+  function hoje() {
+    try {
+      var p = partes_(agoraMs(), cfg.fuso);
+      return p.year + '-' + p.month + '-' + p.day;
+    } catch (e) {
+      Util.registrarFalha('fuso ' + cfg.fuso + ' não reconhecido pelo navegador; usando a data do servidor', e);
+      return cfg.hojeServidor;
+    }
+  }
+  function ehData(v) { return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !isNaN(Date.parse(v + 'T00:00:00Z')) && new Date(v + 'T00:00:00Z').toISOString().slice(0, 10) === v; }
+  function data(v) { return ehData(v) ? v.slice(8, 10) + '/' + v.slice(5, 7) + '/' + v.slice(0, 4) : '—'; }
+  function dataCurta(v) { return ehData(v) ? v.slice(8, 10) + '/' + v.slice(5, 7) : '—'; }
+  function instante(ts) {
+    var t = Date.parse(ts);
+    if (!isFinite(t)) return '—';
+    try {
+      var p = partes_(t, cfg.fuso);
+      return p.day + '/' + p.month + '/' + p.year + ' ' + p.hour + ':' + p.minute;
+    } catch (e) {
+      Util.registrarFalha('formatação de instante', e);
+      return new Date(t).toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+    }
+  }
+  function diasEntre(a, b) { return Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000); }
+  function numero(n, casas) {
+    if (n === null || n === undefined || n === '' || !isFinite(Number(n))) return '—';
+    var c = casas === undefined ? 0 : casas;
+    var k = 'n' + c;
+    var f = cache[k] || (cache[k] = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: c, maximumFractionDigits: c }));
+    return f.format(Number(n));
+  }
+  function peso(kg) {
+    if (kg === null || kg === undefined || kg === '') return '—';
+    if (cfg.unidadePeso === 'ARROBA') return numero(Number(kg) / cfg.arrobaKg, 2) + ' @';
+    return numero(kg, 1) + ' kg';
+  }
+  function dinheiro(centavos) {
+    if (centavos === null || centavos === undefined || centavos === '' || !isFinite(Number(centavos))) return '—';
+    var f = cache.brl || (cache.brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }));
+    return f.format(Number(centavos) / 100);
+  }
+  function idade(meses, estimada) {
+    if (meses === null || meses === undefined || meses === '') return '—';
+    var m = Number(meses);
+    var t = m < 12 ? m + 'm' : Math.floor(m / 12) + 'a' + (m % 12 ? ' ' + (m % 12) + 'm' : '');
+    return (estimada ? '≈ ' : '') + t;
+  }
+  function rotulo(dominio, codigo) {
+    if (codigo === null || codigo === undefined || codigo === '') return '—';
+    var d = ROTULOS[dominio];
+    if (d && d[codigo]) return d[codigo];
+    var t = String(codigo).replace(/_/g, ' ').toLowerCase();
+    return t.charAt(0).toUpperCase() + t.slice(1);
+  }
+  function rotuloOpcao(campoId, codigo) { return rotulo(DOMINIO_DO_CAMPO[campoId] || '', codigo); }
+
+  /** Decimal digitado (vírgula decimal; ponto como milhar em "1.500"). {valor} | {erro}. Vazio → {valor: null}. */
+  function lerDecimal(texto, casas) {
+    var s = String(texto === null || texto === undefined ? '' : texto).trim().replace(/\s+/g, '');
+    if (s === '') return { valor: null };
+    if (s.indexOf(',') >= 0) s = s.replace(/\./g, '').replace(',', '.');
+    else if (/^-?\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, '');
+    if (!/^-?\d+(\.\d+)?$/.test(s)) return { erro: 'Use só números, com vírgula para os decimais (ex.: 412,5).' };
+    var dec = (s.split('.')[1] || '').length;
+    if (casas !== undefined && casas !== null && dec > casas) return { erro: casas === 0 ? 'Use um número inteiro.' : 'Use no máximo ' + casas + (casas === 1 ? ' casa decimal.' : ' casas decimais.') };
+    return { valor: Number(s) };
+  }
+  /** Dinheiro digitado ("1.234,56", "R$ 10") → centavos inteiros, sem conta em ponto flutuante. */
+  function lerDinheiro(texto) {
+    var s = String(texto === null || texto === undefined ? '' : texto).replace(/R\$/i, '').trim();
+    if (s === '') return { valor: null };
+    var r = lerDecimal(s, 2);
+    if (r.erro) return { erro: r.erro.indexOf('casa') >= 0 ? 'Use no máximo 2 casas para os centavos.' : 'Use só números, com vírgula para os centavos (ex.: 1.234,56).' };
+    var neg = r.valor < 0;
+    var partes = Math.abs(r.valor).toFixed(2).split('.');
+    var c = Number(partes[0]) * 100 + Number(partes[1]);
+    return { valor: neg ? -c : c };
+  }
+  function lerInteiro(texto) {
+    var s = String(texto === null || texto === undefined ? '' : texto).trim();
+    if (s === '') return { valor: null };
+    if (!/^-?\d+$/.test(s)) return { erro: 'Use um número inteiro, sem vírgula.' };
+    return { valor: Number(s) };
+  }
+  /** Centavos → texto editável ("1234,56"). */
+  function centavosParaTexto(c) {
+    if (c === null || c === undefined || c === '') return '';
+    var n = Number(c);
+    var a = Math.abs(n);
+    return (n < 0 ? '-' : '') + Math.floor(a / 100) + ',' + String(a % 100).padStart(2, '0');
+  }
+  return {
+    configurar: configurar, ajustarRelogio: ajustarRelogio, agoraMs: agoraMs, hoje: hoje, ehData: ehData, data: data, dataCurta: dataCurta,
+    instante: instante, diasEntre: diasEntre, numero: numero, peso: peso, dinheiro: dinheiro, idade: idade, rotulo: rotulo, rotuloOpcao: rotuloOpcao,
+    lerDecimal: lerDecimal, lerDinheiro: lerDinheiro, lerInteiro: lerInteiro, centavosParaTexto: centavosParaTexto, ROTULOS: ROTULOS,
+    config: function () { return Util.clonar(cfg); },
+  };
+})();
+
+var Cliente = (function () {
+  var TEMPO_LIMITE_MS = 45000;
+  var ESPERAS_OCUPADO = [2000, 5000, 10000];
+  var ESPERA_VERIFICACAO_MS = 5000;
+  var MAX_VERIFICACOES = 6;
+  var MAX_PRAZOS = 2;
+  var cfg = { ambiente: 'PRODUCAO', appVersion: null, aoMeta: null, aoNovaVersao: null };
+  var falhasSeguidas = 0;
+
+  function ErroApi(code, message, details, extra) {
+    this.name = 'ErroApi';
+    this.code = code;
+    this.message = message;
+    this.details = details || [];
+    var e = extra || {};
+    Object.keys(e).forEach(function (k) { this[k] = e[k]; }, this);
+  }
+  ErroApi.prototype = Object.create(Error.prototype);
+  ErroApi.prototype.constructor = ErroApi;
+
+  var MSG = {
+    TRANSPORTE: 'Sem conexão. O que você digitou está guardado neste aparelho.',
+    TRANSPORTE_CONSULTA: 'Sem conexão com o servidor. Confira o sinal e tente de novo.',
+    ACESSO: 'Não foi possível confirmar seu acesso. Entre de novo; o que você digitou fica guardado.',
+    SEM_RESPOSTA: 'O servidor não respondeu a tempo e ainda não sabemos se gravou. A verificação se repete quando você abrir este formulário de novo.',
+    SEM_RESPOSTA_CONSULTA: 'O servidor demorou demais para responder. Confira o sinal e tente de novo.',
+    RESPOSTA_ESTRANHA: 'O servidor respondeu de um jeito inesperado. Recarregue a página e tente de novo.',
+  };
+
+  function configurar(o) { Object.keys(o || {}).forEach(function (k) { cfg[k] = o[k]; }); }
+  function run_() {
+    var g = window.google;
+    return g && g.script && g.script.run ? g.script.run : null;
+  }
+  /** Uma ida ao servidor. Resolve {tipo: 'resposta', env} | {tipo: 'prazo'} | {tipo: 'transporte', erro}; nunca rejeita. */
+  function enviar_(pedido, prazoMs) {
+    return new Promise(function (resolve) {
+      var feito = false;
+      var t = null;
+      function fim(r) { if (feito) return; feito = true; if (t) clearTimeout(t); resolve(r); }
+      if (prazoMs) t = setTimeout(function () { fim({ tipo: 'prazo' }); }, prazoMs);
+      var run = run_();
+      if (!run) { fim({ tipo: 'transporte', erro: new Error('google.script.run indisponível: a página não está dentro do Apps Script.') }); return; }
+      try {
+        run.withSuccessHandler(function (env) { fim({ tipo: 'resposta', env: env }); })
+          .withFailureHandler(function (e) { fim({ tipo: 'transporte', erro: e }); })
+          .api(pedido);
+      } catch (e) {
+        fim({ tipo: 'transporte', erro: e });
+      }
+    });
+  }
+  function pedido_(rota, dados, o) {
+    var p = { rota: rota, dados: dados || {} };
+    if (o.chave) p.idempotencyKey = o.chave;
+    if (o.avisosAceitos && o.avisosAceitos.length) p.avisosAceitos = o.avisosAceitos.slice();
+    if (o.dataVersionEsperada !== undefined && o.dataVersionEsperada !== null) p.dataVersionEsperada = o.dataVersionEsperada;
+    if (cfg.ambiente && cfg.ambiente !== 'PRODUCAO') p.ambiente = cfg.ambiente;
+    return p;
+  }
+  function meta_(meta) {
+    if (!meta) return;
+    if (meta.serverTime) Fmt.ajustarRelogio(meta.serverTime);
+    if (meta.appVersion && cfg.appVersion && meta.appVersion !== cfg.appVersion && cfg.aoNovaVersao) cfg.aoNovaVersao(meta.appVersion);
+    if (cfg.aoMeta) cfg.aoMeta(meta);
+  }
+  function valido_(env) { return env && typeof env === 'object' && typeof env.ok === 'boolean' && (env.ok || (env.error && typeof env.error.code === 'string')); }
+  function erroDoEnvelope_(env) {
+    var e = env.error;
+    return new ErroApi(e.code, e.message || 'Algo deu errado no servidor.', e.details || [], { meta: env.meta || null });
+  }
+  function erroTransporte_(r, consulta) {
+    falhasSeguidas += 1;
+    var repetida = falhasSeguidas >= 3;
+    return new ErroApi('TRANSPORTE', repetida ? MSG.ACESSO : consulta ? MSG.TRANSPORTE_CONSULTA : MSG.TRANSPORTE, [], { repetida: repetida, causa: String(r.erro && r.erro.message ? r.erro.message : r.erro) });
+  }
+  function avisar_(o, estado) { if (o && typeof o.aoEstado === 'function') o.aoEstado(estado); }
+
+  /** Consulta (ou manutenção sem chave): LOCKED retentado em 2, 5 e 10 s; sem resposta em 45 s → SEM_RESPOSTA. */
+  async function consulta(rota, dados, o) {
+    o = o || {};
+    var pedido = pedido_(rota, dados, {});
+    for (var tentativa = 0; ; tentativa++) {
+      var r = await enviar_(pedido, o.semPrazo ? 0 : TEMPO_LIMITE_MS);
+      if (r.tipo === 'prazo') throw new ErroApi('SEM_RESPOSTA', MSG.SEM_RESPOSTA_CONSULTA);
+      if (r.tipo === 'transporte') throw erroTransporte_(r, true);
+      falhasSeguidas = 0;
+      if (!valido_(r.env)) throw new ErroApi('INTERNAL', MSG.RESPOSTA_ESTRANHA);
+      meta_(r.env.meta);
+      if (r.env.ok) return { data: r.env.data, meta: r.env.meta };
+      if (r.env.error.code === 'LOCKED' && tentativa < ESPERAS_OCUPADO.length) {
+        avisar_(o, { estado: 'OCUPADO', tentativa: tentativa + 1, de: ESPERAS_OCUPADO.length, esperaMs: ESPERAS_OCUPADO[tentativa] });
+        await Util.esperar(ESPERAS_OCUPADO[tentativa]);
+        continue;
+      }
+      throw erroDoEnvelope_(r.env);
+    }
+  }
+
+  /**
+   * "Verificando se gravou" (08, seção 9): operacao.status até sair de EM_ANDAMENTO. Devolve a situação
+   * (CONFIRMADA | FALHOU | INEXISTENTE) ou lança SEM_RESPOSTA (a verificação se repete na próxima abertura).
+   */
+  async function verificar(chave, o) {
+    for (var i = 0; i < MAX_VERIFICACOES; i++) {
+      avisar_(o, { estado: 'VERIFICANDO', tentativa: i + 1 });
+      var s;
+      try {
+        s = await consulta('operacao.status', { chave: chave });
+      } catch (e) {
+        if (e.code === 'SEM_RESPOSTA' || e.code === 'TRANSPORTE') throw new ErroApi('SEM_RESPOSTA', MSG.SEM_RESPOSTA, [], { causa: e.message });
+        throw e;
+      }
+      if (s.data.situacao !== 'EM_ANDAMENTO') return s.data;
+      await Util.esperar(ESPERA_VERIFICACAO_MS);
+    }
+    throw new ErroApi('SEM_RESPOSTA', MSG.SEM_RESPOSTA);
+  }
+
+  /**
+   * Comando com chave de idempotência (01, seção 3.5). o: {chave (obrigatória), avisosAceitos, dataVersionEsperada,
+   * aoEstado({estado: ENVIANDO | OCUPADO | VERIFICANDO, tentativa, de})}. Resolve {data, meta, duplicado, verificado}.
+   * LOCKED: nova tentativa sozinha em 2, 5 e 10 s com a mesma chave; esgotadas → ErroApi LOCKED com `esgotado`.
+   * Sem resposta em 45 s: operacao.status; CONFIRMADA → reenvio com a mesma chave (o servidor devolve o resultado
+   * gravado, `duplicado`); FALHOU/INEXISTENTE → reenvio; EM_ANDAMENTO → consulta de novo. Demais erros: ErroApi.
+   */
+  async function comando(rota, dados, o) {
+    o = o || {};
+    if (!o.chave) throw new ErroApi('INTERNAL', 'Formulário sem chave de envio.');
+    var pedido = pedido_(rota, dados, o);
+    var ocupado = 0, prazos = 0, verificado = false;
+    for (;;) {
+      avisar_(o, { estado: 'ENVIANDO' });
+      var r = await enviar_(pedido, TEMPO_LIMITE_MS);
+      if (r.tipo === 'prazo') {
+        prazos += 1;
+        if (prazos > MAX_PRAZOS) throw new ErroApi('SEM_RESPOSTA', MSG.SEM_RESPOSTA);
+        await verificar(o.chave, o);
+        verificado = true;
+        continue;
+      }
+      if (r.tipo === 'transporte') throw erroTransporte_(r, false);
+      falhasSeguidas = 0;
+      if (!valido_(r.env)) throw new ErroApi('INTERNAL', MSG.RESPOSTA_ESTRANHA);
+      meta_(r.env.meta);
+      if (r.env.ok) return { data: r.env.data, meta: r.env.meta, duplicado: !!(r.env.meta && r.env.meta.duplicado), verificado: verificado };
+      var code = r.env.error.code;
+      if (code === 'LOCKED' && ocupado < ESPERAS_OCUPADO.length) {
+        avisar_(o, { estado: 'OCUPADO', tentativa: ocupado + 1, de: ESPERAS_OCUPADO.length, esperaMs: ESPERAS_OCUPADO[ocupado] });
+        await Util.esperar(ESPERAS_OCUPADO[ocupado]);
+        ocupado += 1;
+        continue;
+      }
+      var erro = erroDoEnvelope_(r.env);
+      if (code === 'LOCKED') erro.esgotado = true;
+      throw erro;
+    }
+  }
+  return {
+    configurar: configurar, consulta: consulta, comando: comando, verificar: verificar, ErroApi: ErroApi, MSG: MSG,
+    TEMPO_LIMITE_MS: TEMPO_LIMITE_MS, ESPERAS_OCUPADO: ESPERAS_OCUPADO,
+    ambiente: function () { return cfg.ambiente; },
+  };
+})();
+
+var Store = (function () {
+  var FORMATO_CACHE = 1;
+  var est = { dados: null, params: {}, listas: {}, animais: null, porId: null, porBrinco: null, porBrincoSemZeros: null, filhos: null, baixados: null, atualizadoEm: null };
+  var ouvintes = [];
+  var cfg = { ambiente: 'PRODUCAO', appVersion: null };
+
+  function configurar(o) { Object.keys(o || {}).forEach(function (k) { cfg[k] = o[k]; }); }
+  function chaveCache_() { return 'erp:' + cfg.ambiente + ':carga'; }
+  function lerCache_() {
+    var c = Util.armazem.ler(chaveCache_());
+    if (!c || c.formato !== FORMATO_CACHE || c.appVersion !== cfg.appVersion || !c.dados || typeof c.dados.dataVersion !== 'number') return null;
+    return c.dados;
+  }
+  function gravarCache_() {
+    if (!est.dados) return;
+    Util.armazem.gravar(chaveCache_(), { formato: FORMATO_CACHE, appVersion: cfg.appVersion, salvo_em: new Date(Fmt.agoraMs()).toISOString(), dados: est.dados });
+  }
+  function avisar_(motivo) { ouvintes.slice().forEach(function (f) { f(motivo); }); }
+  function assinar(fn) { ouvintes.push(fn); return function () { ouvintes = ouvintes.filter(function (x) { return x !== fn; }); }; }
+
+  function normalizarBrinco(texto, manterZeros) {
+    var v = String(texto === null || texto === undefined ? '' : texto).trim().toUpperCase().replace(/\s+/g, '');
+    if (!manterZeros && /^\d+$/.test(v)) v = v.replace(/^0+(?=\d)/, '');
+    return v;
+  }
+  function indexar_() {
+    est.animais = null; est.porId = null; est.porBrinco = null; est.porBrincoSemZeros = null; est.filhos = null;
+  }
+  function materializar_(col) {
+    if (!col || !col.colunas) return [];
+    var out = [];
+    for (var i = 0; i < col.n; i++) {
+      var o = {};
+      for (var j = 0; j < col.colunas.length; j++) o[col.colunas[j]] = col.valores[col.colunas[j]][i];
+      out.push(o);
+    }
+    return out;
+  }
+  function garantirIndices_() {
+    if (est.animais) return;
+    est.animais = materializar_(est.dados && est.dados.animais);
+    reindexar_();
+  }
+  function reindexar_() {
+    est.porId = {}; est.porBrinco = {}; est.porBrincoSemZeros = {}; est.filhos = {};
+    todosConhecidos_().forEach(function (a) {
+      est.porId[a.animal_id] = a;
+      if (a.brinco) {
+        var k = normalizarBrinco(a.brinco, true), z = normalizarBrinco(a.brinco, false);
+        (est.porBrinco[k] = est.porBrinco[k] || []).push(a);
+        (est.porBrincoSemZeros[z] = est.porBrincoSemZeros[z] || []).push(a);
+      }
+      if (a.mae_id) (est.filhos[a.mae_id] = est.filhos[a.mae_id] || []).push(a);
+    });
+  }
+  function todosConhecidos_() { return (est.animais || []).concat(est.baixados || []); }
+
+  function aplicar_(dados) {
+    est.dados = dados;
+    est.params = {};
+    ((dados.configuracoes && dados.configuracoes.itens) || []).forEach(function (i) { est.params[i.chave] = i.valor; });
+    est.listas = {};
+    (dados.listas || []).forEach(function (l) { (est.listas[l.lista] = est.listas[l.lista] || []).push(l); });
+    Object.keys(est.listas).forEach(function (k) { est.listas[k].sort(function (a, b) { return (a.ordem || 0) - (b.ordem || 0); }); });
+    est.baixados = null;
+    indexar_();
+    est.atualizadoEm = Fmt.agoraMs();
+    Fmt.configurar({ fuso: est.params.fuso || undefined, unidadePeso: est.params.unidade_peso_exibicao || undefined, arrobaKg: est.params.arroba_kg || undefined, hojeServidor: dados.animais ? dados.animais.data : null });
+  }
+
+  /**
+   * Carga inicial condicional (08, seção 9): envia a dataVersion da carga guardada; {atual: true} → usa a guardada.
+   * o.forcar: pede a carga inteira. Resolve {fonte: SERVIDOR | GUARDADA, dataVersion}. Erros: os do Cliente.
+   */
+  async function carregar(o) {
+    o = o || {};
+    var guardada = o.forcar ? null : (est.dados || lerCache_());
+    var r = await Cliente.consulta('sistema.bootstrap', guardada ? { dataVersion: guardada.dataVersion } : {}, { aoEstado: o.aoEstado });
+    if (r.data.atual) {
+      if (!guardada) return carregar({ forcar: true, aoEstado: o.aoEstado });
+      if (guardada !== est.dados) aplicar_(guardada);
+      est.dados.ambiente = r.data.ambiente || est.dados.ambiente;
+      est.atualizadoEm = Fmt.agoraMs();
+      avisar_('carga');
+      return { fonte: 'GUARDADA', dataVersion: est.dados.dataVersion };
+    }
+    aplicar_(r.data);
+    gravarCache_();
+    avisar_('carga');
+    return { fonte: 'SERVIDOR', dataVersion: est.dados.dataVersion };
+  }
+
+  // Deltas: só rotas cuja resposta traz a linha completa do store. Qualquer outra muda a carga por inteiro.
+  var DELTAS = {
+    'animal.cadastrarExterno': function (d) { return d && d.animal ? substituirAnimal_(d.animal) : false; },
+    'animal.editar': function (d) { return d && d.animal && !d.event_id ? substituirAnimal_(d.animal) : false; },
+    'pasto.salvar': function (d) { return d && d.pasture_id ? mesclarEm_('pastos', 'pasture_id', d) : false; },
+    'propriedade.salvar': function (d) { return d && d.property_id && !Util.vazio(est.params.propriedade_padrao_id) ? mesclarEm_('propriedades', 'property_id', d) : false; },
+    'lista.salvar': function (d) { return d && d.lista_id ? mesclarEm_('listas', 'lista_id', d) && (aplicarListas_(), true) : false; },
+    'parceiro.salvar': function (d) { return d && d.partner_id ? mesclarEm_('parceiros', 'partner_id', d) : false; },
+  };
+  function aplicarListas_() {
+    est.listas = {};
+    (est.dados.listas || []).forEach(function (l) { (est.listas[l.lista] = est.listas[l.lista] || []).push(l); });
+    Object.keys(est.listas).forEach(function (k) { est.listas[k].sort(function (a, b) { return (a.ordem || 0) - (b.ordem || 0); }); });
+  }
+  function mesclarEm_(colecao, pk, item) {
+    var lista = est.dados[colecao] = est.dados[colecao] || [];
+    var i = lista.findIndex(function (x) { return x[pk] === item[pk]; });
+    if (i >= 0) lista[i] = Object.assign({}, lista[i], item);
+    else lista.push(Object.assign({}, item));
+    return true;
+  }
+  function substituirAnimal_(linha) {
+    var col = est.dados.animais;
+    if (!col || !col.colunas) return false;
+    var ids = col.valores.animal_id;
+    var i = ids.indexOf(linha.animal_id);
+    if (i < 0) { i = col.n; col.n += 1; }
+    col.colunas.forEach(function (c) { col.valores[c][i] = linha[c] === undefined ? null : linha[c]; });
+    indexar_();
+    return true;
+  }
+  /**
+   * Depois de um comando: versão igual → nada; versão = local + 1 e rota com delta → aplica; senão → nova carga
+   * (condicional). Resolve {aplicado: NADA | DELTA | CARGA}.
+   */
+  async function aplicarResultado(rota, data, meta) {
+    var nova = meta && typeof meta.dataVersion === 'number' ? meta.dataVersion : null;
+    if (!est.dados || nova === null || nova === est.dados.dataVersion) return { aplicado: 'NADA' };
+    var delta = DELTAS[rota];
+    if (nova === est.dados.dataVersion + 1 && delta && delta(data)) {
+      est.dados.dataVersion = nova;
+      gravarCache_();
+      avisar_('delta');
+      return { aplicado: 'DELTA' };
+    }
+    await carregar();
+    return { aplicado: 'CARGA' };
+  }
+
+  function carregado() { return !!est.dados; }
+  function versao() { return est.dados ? est.dados.dataVersion : null; }
+  function param(chave) { return est.params[chave] === undefined ? null : est.params[chave]; }
+  function lista(nome) { return (est.listas[nome] || []).filter(function (l) { return l.ativo !== false; }); }
+  function rotuloLista(nome, codigo) {
+    var l = (est.listas[nome] || []).filter(function (x) { return x.codigo === codigo; })[0];
+    return l ? l.rotulo : Fmt.rotulo('', codigo);
+  }
+  function pastos(o) { var t = (est.dados && est.dados.pastos) || []; return o && o.todos ? t : t.filter(function (p) { return p.status !== 'INATIVO'; }); }
+  function pasto(id) { return ((est.dados && est.dados.pastos) || []).filter(function (p) { return p.pasture_id === id; })[0] || null; }
+  function propriedades(o) { var t = (est.dados && est.dados.propriedades) || []; return o && o.todas ? t : t.filter(function (p) { return p.status !== 'INATIVO'; }); }
+  function propriedade(id) { return ((est.dados && est.dados.propriedades) || []).filter(function (p) { return p.property_id === id; })[0] || null; }
+  function parceiros() { return ((est.dados && est.dados.parceiros) || []).filter(function (p) { return p.ativo !== false; }); }
+  function categorias() { return (est.dados && est.dados.categorias) || []; }
+  function categoria(id) { return categorias().filter(function (c) { return c.category_id === id; })[0] || null; }
+  function animais() { garantirIndices_(); return est.animais; }
+  function animal(id) { garantirIndices_(); return est.porId[id] || null; }
+  function filhosDe(id) { garantirIndices_(); return est.filhos[id] || []; }
+  function modulos() { return (est.dados && est.dados.modulos) || []; }
+  function modulo(id) { return modulos().filter(function (m) { return m.id === id; })[0] || null; }
+  function catalogo() { return (est.dados && est.dados.catalogo) || { tipos: [] }; }
+  function tipoEvento(nome) { return (catalogo().tipos || []).filter(function (t) { return t.tipo === nome; })[0] || null; }
+
+  /** Nome curto do animal: brinco; sem brinco, "A-000123 · cria da 0231 · 12/09/2026" (08, seção 7). */
+  function rotuloAnimal(a) {
+    if (!a) return '—';
+    if (a.brinco) return a.brinco;
+    var p = [a.codigo_interno || 'sem código'];
+    var mae = a.mae_id ? animal(a.mae_id) : null;
+    if (mae) p.push('cria da ' + (mae.brinco || mae.codigo_interno));
+    if (a.data_nascimento) p.push(Fmt.data(a.data_nascimento));
+    return p.join(' · ');
+  }
+  function descricaoAnimal(a) {
+    if (!a) return '';
+    var p = [];
+    var c = a.categoria_id ? categoria(a.categoria_id) : null;
+    p.push(c ? c.nome : Fmt.rotulo('SEXO', a.sexo));
+    var ps = a.pasto_atual_id ? pasto(a.pasto_atual_id) : null;
+    if (a.situacao_cadastral === 'ATIVO') p.push(ps ? ps.nome : 'sem pasto');
+    else p.push(Fmt.rotulo('SITUACAO_CADASTRAL', a.situacao_cadastral));
+    if (a.peso_atual) p.push(Fmt.peso(a.peso_atual) + (a.data_ultima_pesagem ? ' em ' + Fmt.dataCurta(a.data_ultima_pesagem) : ''));
+    if (a.brinco && a.codigo_interno) p.push(a.codigo_interno);
+    return p.join(' · ');
+  }
+  /**
+   * Resolução do brinco no store (08, seção 5): (1) igual exato; (2) sem zeros à esquerda, se o parâmetro
+   * brinco_ignora_zeros_esquerda permitir; (3) mais de um → lista para escolher. Inclui os baixados já trazidos.
+   * Devolve {modo: EXATO | SEM_ZEROS | VARIOS | NENHUM, candidatos}.
+   */
+  function resolverBrinco(texto, filtro) {
+    garantirIndices_();
+    var f = typeof filtro === 'function' ? filtro : function () { return true; };
+    var exatos = (est.porBrinco[normalizarBrinco(texto, true)] || []).filter(f);
+    if (exatos.length === 1) return { modo: 'EXATO', candidatos: exatos };
+    if (exatos.length > 1) return { modo: 'VARIOS', candidatos: exatos };
+    if (param('brinco_ignora_zeros_esquerda') !== false) {
+      var z = (est.porBrincoSemZeros[normalizarBrinco(texto, false)] || []).filter(f);
+      if (z.length === 1) return { modo: 'SEM_ZEROS', candidatos: z };
+      if (z.length > 1) return { modo: 'VARIOS', candidatos: z };
+    }
+    return { modo: 'NENHUM', candidatos: [] };
+  }
+  /**
+   * Busca do seletor: brinco (com a resolução acima), código interno (A-000123 ou só o número), nome, ou
+   * "crias da <brinco da mãe>" quando o texto é o brinco de uma matriz. Devolve {modo, candidatos, mae}.
+   */
+  function buscar(texto, filtro) {
+    garantirIndices_();
+    var t = String(texto || '').trim();
+    if (!t) return { modo: 'NENHUM', candidatos: [] };
+    var f = typeof filtro === 'function' ? filtro : function () { return true; };
+    var r = resolverBrinco(t, f);
+    if (r.modo !== 'NENHUM') {
+      var crias = r.candidatos.length === 1 ? filhosDe(r.candidatos[0].animal_id).filter(function (x) { return !x.brinco && f(x); }) : [];
+      return { modo: r.modo, candidatos: r.candidatos.concat(crias), mae: crias.length ? r.candidatos[0] : null };
+    }
+    var cod = /^(?:A-?)?0*(\d{1,9})$/i.exec(t);
+    var alvo = cod ? 'A-' + String(cod[1]).padStart(6, '0') : null;
+    var tn = t.toLowerCase();
+    var achados = todosConhecidos_().filter(function (a) {
+      if (!f(a)) return false;
+      if (alvo && a.codigo_interno === alvo) return true;
+      return !!(a.nome && a.nome.toLowerCase().indexOf(tn) >= 0);
+    });
+    var mae = resolverBrinco(t);
+    if (!achados.length && mae.modo !== 'NENHUM' && mae.candidatos.length === 1) {
+      return { modo: 'CRIAS', candidatos: filhosDe(mae.candidatos[0].animal_id).filter(f), mae: mae.candidatos[0] };
+    }
+    return { modo: achados.length === 1 ? 'EXATO' : achados.length ? 'VARIOS' : 'NENHUM', candidatos: achados };
+  }
+  /** Animais que saíram do rebanho (animal.listar), trazidos sob demanda e guardados até a próxima carga. */
+  async function carregarBaixados() {
+    if (est.baixados) return est.baixados;
+    var r = await Cliente.consulta('animal.listar', {});
+    est.baixados = materializar_(r.data);
+    garantirIndices_();
+    reindexar_();
+    return est.baixados;
+  }
+  return {
+    configurar: configurar, carregar: carregar, aplicarResultado: aplicarResultado, assinar: assinar, carregado: carregado, versao: versao,
+    param: param, lista: lista, rotuloLista: rotuloLista, pastos: pastos, pasto: pasto, propriedades: propriedades, propriedade: propriedade,
+    parceiros: parceiros, categorias: categorias, categoria: categoria, animais: animais, animal: animal, filhosDe: filhosDe,
+    modulos: modulos, modulo: modulo, catalogo: catalogo, tipoEvento: tipoEvento, rotuloAnimal: rotuloAnimal, descricaoAnimal: descricaoAnimal,
+    resolverBrinco: resolverBrinco, buscar: buscar, carregarBaixados: carregarBaixados, normalizarBrinco: normalizarBrinco,
+    dados: function () { return est.dados; },
+    ambiente: function () { return (est.dados && est.dados.ambiente) || { codigo: cfg.ambiente, base_de_teste: cfg.ambiente !== 'PRODUCAO', faixa: null }; },
+    alertas: function () { return (est.dados && est.dados.alertas) || { alertas: [] }; },
+    atualizadoEm: function () { return est.atualizadoEm; },
+  };
+})();
+
+var Rascunhos = (function () {
+  var modo = null;
+  var cfg = { ambiente: 'PRODUCAO' };
+  var pendentesServidor = {};
+  var gravarServidorAdiado = null;
+
+  function prefixo_() { return 'erp:' + cfg.ambiente + ':rascunho:'; }
+  function indiceLocal_() { return 'erp:' + cfg.ambiente + ':rascunhos'; }
+  /** Escolhe onde guardar: localStorage se ele responde; senão as propriedades do usuário no servidor (SP-06). */
+  function iniciar(o) {
+    Object.keys(o || {}).forEach(function (k) { cfg[k] = o[k]; });
+    modo = Util.armazem.disponivel() ? 'LOCAL' : 'SERVIDOR';
+    gravarServidorAdiado = Util.adiar(descarregarServidor_, 1500);
+    return modo;
+  }
+  function resumo_(id, r) {
+    return { id: id, tipo: r.tipo, rotulo: r.rotulo, estado: r.estado, data: r.data || null, n: r.n || 0, salvo_em: r.salvo_em };
+  }
+  async function listar() {
+    if (modo === 'LOCAL') {
+      var ids = Util.armazem.ler(indiceLocal_()) || [];
+      return ids.map(function (id) { var r = Util.armazem.ler(prefixo_() + id); return r ? resumo_(id, r) : null; }).filter(Boolean);
+    }
+    var r = await Cliente.consulta('rascunho.obter', { chave: 'indice' });
+    return r.data.existe && Array.isArray(r.data.conteudo) ? r.data.conteudo : [];
+  }
+  async function obter(id) {
+    if (modo === 'LOCAL') return Util.armazem.ler(prefixo_() + id);
+    if (pendentesServidor[id] !== undefined) return pendentesServidor[id];
+    var r = await Cliente.consulta('rascunho.obter', { chave: 'r.' + id });
+    return r.data.existe ? r.data.conteudo : null;
+  }
+  /**
+   * Guarda o rascunho (objeto JSON simples). Local: na hora; servidor: agrupado (1,5 s) para poupar idas.
+   * `imediato` descarrega já (antes de enviar). Resolve {onde: LOCAL | SERVIDOR}. Falha local vira guarda no servidor.
+   */
+  async function salvar(id, r, o) {
+    r.salvo_em = new Date(Fmt.agoraMs()).toISOString();
+    if (modo === 'LOCAL') {
+      var ok = Util.armazem.gravar(prefixo_() + id, r);
+      if (ok) {
+        var ids = Util.armazem.ler(indiceLocal_()) || [];
+        if (ids.indexOf(id) < 0) { ids.push(id); ok = Util.armazem.gravar(indiceLocal_(), ids); }
+      }
+      if (ok) return { onde: 'LOCAL' };
+      modo = 'SERVIDOR';
+    }
+    pendentesServidor[id] = r;
+    if (o && o.imediato) { await descarregarServidor_(); return { onde: 'SERVIDOR' }; }
+    gravarServidorAdiado();
+    return { onde: 'SERVIDOR' };
+  }
+  async function descarregarServidor_() {
+    var ids = Object.keys(pendentesServidor);
+    if (!ids.length) return;
+    var lote = pendentesServidor;
+    pendentesServidor = {};
+    var indice = await listar();
+    for (var i = 0; i < ids.length; i++) {
+      var id = ids[i], r = lote[id];
+      try {
+        if (r === null) await Cliente.consulta('rascunho.remover', { chave: 'r.' + id });
+        else await Cliente.consulta('rascunho.salvar', { chave: 'r.' + id, conteudo: r });
+      } catch (e) {
+        if (pendentesServidor[id] === undefined) pendentesServidor[id] = r;
+        Util.registrarFalha('rascunho no servidor', e);
+        throw e;
+      }
+      indice = indice.filter(function (x) { return x.id !== id; });
+      if (r !== null) indice.push(resumo_(id, r));
+    }
+    await Cliente.consulta('rascunho.salvar', { chave: 'indice', conteudo: indice });
+  }
+  async function remover(id) {
+    if (modo === 'LOCAL') {
+      Util.armazem.remover(prefixo_() + id);
+      var ids = (Util.armazem.ler(indiceLocal_()) || []).filter(function (x) { return x !== id; });
+      Util.armazem.gravar(indiceLocal_(), ids);
+      return;
+    }
+    pendentesServidor[id] = null;
+    await descarregarServidor_();
+  }
+  return {
+    iniciar: iniciar, listar: listar, obter: obter, salvar: salvar, remover: remover,
+    descarregar: function () { return descarregarServidor_(); },
+    modo: function () { return modo; },
+  };
+})();
+
+var Roteador = (function () {
+  var modo = null, atual = '', ouvinte = null, pilha = [], ouvindoHash = false;
+  function gas_(parte) {
+    var g = window.google;
+    return g && g.script && g.script[parte] ? g.script[parte] : null;
+  }
+  function normalizar(h) { return String(h || '').replace(/^#/, '').replace(/^\/+/, '').replace(/\/+$/, '').split('?')[0]; }
+  function mudar_(rota, origem) {
+    if (pilha.length >= 2 && pilha[pilha.length - 2] === rota && origem === 'voltar') pilha.pop();
+    else if (origem === 'voltar') pilha = [rota];
+    atual = rota;
+    if (ouvinte) ouvinte(rota);
+  }
+  function ouvirHash_() {
+    if (ouvindoHash) return;
+    ouvindoHash = true;
+    window.addEventListener('hashchange', function () {
+      var r = normalizar(location.hash);
+      if (r !== atual) mudar_(r, 'voltar');
+    });
+  }
+  /**
+   * Escolhe o modo: GAS (google.script.history + google.script.url — espelha a rota na URL da janela de cima),
+   * HASH (location.hash do próprio quadro) ou MEMORIA. Resolve a rota inicial.
+   */
+  function iniciar(fn) {
+    ouvinte = fn;
+    var hist = gas_('history');
+    if (hist && typeof hist.push === 'function' && typeof hist.replace === 'function' && typeof hist.setChangeHandler === 'function') {
+      try {
+        hist.setChangeHandler(function (e) { mudar_(normalizar(e && e.location ? e.location.hash : ''), 'voltar'); });
+        modo = 'GAS';
+      } catch (e) {
+        Util.registrarFalha('google.script.history indisponível; usando o endereço do quadro', e);
+      }
+    }
+    if (!modo) {
+      try {
+        ouvirHash_();
+        modo = 'HASH';
+      } catch (e) {
+        Util.registrarFalha('navegação por endereço indisponível; navegação só em memória', e);
+        modo = 'MEMORIA';
+      }
+    }
+    return inicial_().then(function (r) { atual = r; pilha = [r]; return r; });
+  }
+  function inicial_() {
+    var url = gas_('url');
+    if (modo === 'GAS' && url && typeof url.getLocation === 'function') {
+      return new Promise(function (res) {
+        var feito = false;
+        var t = setTimeout(function () { if (!feito) { feito = true; res(normalizar(location.hash)); } }, 3000);
+        try {
+          url.getLocation(function (loc) { if (feito) return; feito = true; clearTimeout(t); res(normalizar(loc && loc.hash)); });
+        } catch (e) {
+          Util.registrarFalha('google.script.url.getLocation', e);
+          feito = true;
+          clearTimeout(t);
+          res(normalizar(location.hash));
+        }
+      });
+    }
+    return Promise.resolve(modo === 'HASH' ? normalizar(location.hash) : '');
+  }
+  /** Navega para a rota ("rebanho", "evento/novo/PESAGEM"). o: {substituir}. A rota leva só tela e ID opaco (§17). */
+  function ir(rota, o) {
+    var r = normalizar(rota);
+    o = o || {};
+    if (r === atual && !o.forcar) return;
+    if (o.substituir) pilha[pilha.length - 1] = r;
+    else pilha.push(r);
+    if (modo === 'GAS') {
+      try {
+        gas_('history')[o.substituir ? 'replace' : 'push'](null, null, '/' + r);
+      } catch (e) {
+        Util.registrarFalha('google.script.history.push', e);
+        modo = 'MEMORIA';
+      }
+    } else if (modo === 'HASH') {
+      try {
+        if (o.substituir) history.replaceState(history.state, '', '#/' + r);
+        else history.pushState(history.state, '', '#/' + r);
+      } catch (e) {
+        Util.registrarFalha('history.pushState', e);
+        modo = 'MEMORIA';
+      }
+    }
+    atual = r;
+    if (ouvinte) ouvinte(r);
+  }
+  /** Volta uma etapa: usa o histórico do navegador quando a etapa anterior foi aberta nesta sessão; senão vai a `padrao`. */
+  function voltar(padrao) {
+    if (pilha.length >= 2 && modo !== 'MEMORIA') { history.back(); return; }
+    if (pilha.length >= 2) { pilha.pop(); var r = pilha[pilha.length - 1]; atual = r; if (ouvinte) ouvinte(r); return; }
+    ir(padrao || 'inicio', { substituir: true });
+  }
+  return {
+    iniciar: iniciar, ir: ir, voltar: voltar, normalizar: normalizar,
+    atual: function () { return atual; },
+    modo: function () { return modo; },
+    href: function (rota) { return '#/' + normalizar(rota); },
+    anterior: function () { return pilha.length >= 2 ? pilha[pilha.length - 2] : null; },
+  };
+})();
+
+var Telas = (function () {
+  var defs = [];
+  /**
+   * Registra uma tela: padrao "rebanho", "animal/:id/:aba?". def: {titulo, modulo, telaCheia, montar(el, params) →
+   * função de limpeza opcional}. Registrar o mesmo padrão de novo substitui a tela.
+   */
+  function registrar(padrao, def) {
+    var nomes = [];
+    var re = '^' + padrao.split('/').map(function (p, i) {
+      var opcional = /\?$/.test(p);
+      if (p.charAt(0) === ':') { nomes.push(p.replace(/^:|\?$/g, '')); return (i ? (opcional ? '(?:/([^/]+))?' : '/([^/]+)') : '([^/]+)'); }
+      return (i ? '/' : '') + p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }).join('') + '$';
+    defs = defs.filter(function (d) { return d.padrao !== padrao; });
+    defs.push({ padrao: padrao, re: new RegExp(re), nomes: nomes, def: def });
+  }
+  function resolver(rota) {
+    for (var i = 0; i < defs.length; i++) {
+      var m = defs[i].re.exec(rota);
+      if (m) {
+        var params = {};
+        defs[i].nomes.forEach(function (n, k) { params[n] = m[k + 1] === undefined ? null : decodeURIComponent(m[k + 1]); });
+        return { padrao: defs[i].padrao, def: defs[i].def, params: params };
+      }
+    }
+    return null;
+  }
+  return { registrar: registrar, resolver: resolver, existe: function (rota) { return !!resolver(rota); } };
+})();
+
+var App = (function () {
+  /** Os 10 itens da §15, na ordem dela; cada um aparece só se o módulo está ativo no servidor e a tela existe. */
+  var MENU = [
+    { modulo: 'DASHBOARD', rota: 'inicio', icone: 'inicio', curto: 'Início' },
+    { modulo: 'REBANHO', rota: 'rebanho', icone: 'rebanho', curto: 'Rebanho' },
+    { modulo: 'PASTOS', rota: 'pastos', icone: 'pasto', curto: 'Pastos' },
+    { modulo: 'EVENTOS', rota: 'eventos', icone: 'eventos', curto: 'Eventos' },
+    { modulo: 'PESAGENS', rota: 'pesagens', icone: 'peso', curto: 'Pesagens' },
+    { modulo: 'SANIDADE', rota: 'sanidade/agenda', icone: 'sanidade', curto: 'Sanidade' },
+    { modulo: 'REPRODUCAO', rota: 'reproducao/matrizes', icone: 'reproducao', curto: 'Reprodução' },
+    { modulo: 'FINANCEIRO', rota: 'financeiro/lancamentos', icone: 'financeiro', curto: 'Financeiro' },
+    { modulo: 'RELATORIOS', rota: 'relatorios', icone: 'relatorios', curto: 'Relatórios' },
+    { modulo: 'CONFIGURACOES', rota: 'config/parametros', icone: 'config', curto: 'Configurações' },
+  ];
+  var ROTA_REGISTRAR = 'evento/novo';
+  var cfg = { appVersion: null, ambiente: 'PRODUCAO', urlApp: '' };
+  var montada = null, limpeza = null, iniciado = false, ultimaConferencia = 0;
+  var el = {};
+
+  function lerPagina_() {
+    var raiz = document.getElementById('app');
+    cfg.appVersion = raiz.getAttribute('data-app-version') || null;
+    cfg.ambiente = raiz.getAttribute('data-ambiente') || 'PRODUCAO';
+    cfg.urlApp = raiz.getAttribute('data-url-app') || '';
+    ['topo', 'faixas', 'menu', 'conteudo', 'barra', 'camada', 'avisos'].forEach(function (id) { el[id] = document.getElementById(id); });
+  }
+  function itensMenu() {
+    return MENU.map(function (m, i) {
+      var mod = Store.modulo(m.modulo);
+      if (!mod || mod.menu === false || !Telas.existe(m.rota)) return null;
+      return { modulo: m.modulo, rota: m.rota, icone: m.icone, rotulo: mod.rotulo || m.curto, curto: m.curto, ordem: i + 1 };
+    }).filter(Boolean);
+  }
+  function podeRegistrar() { return Telas.existe(ROTA_REGISTRAR) && (Store.catalogo().tipos || []).some(function (t) { return t.tipo !== 'ESTORNO'; }); }
+  function rotaInicial_() { var m = itensMenu(); return m.length ? m[0].rota : ROTA_REGISTRAR; }
+
+  function renderizarCasca_() {
+    var h = Util.h;
+    Util.limpar(el.topo);
+    el.topo.appendChild(h('button', { type: 'button', class: 'botao botao-texto botao-icone topo-voltar', 'aria-label': 'Voltar', on: { click: function () { Roteador.voltar(rotaInicial_()); } } }, UI.icone('voltar')));
+    el.topo.appendChild(h('div', { class: 'topo-marca' }, UI.icone('rebanho'), h('span', { text: 'ERP Pecuário' })));
+    var acoes = h('div', { class: 'topo-acoes' });
+    if (Telas.existe('animal/x/resumo')) acoes.appendChild(UI.buscaBrinco());
+    if (podeRegistrar()) acoes.appendChild(h('a', { class: 'botao botao-primario', href: Roteador.href(ROTA_REGISTRAR), dataset: { rota: ROTA_REGISTRAR } }, UI.icone('registrar'), 'REGISTRAR EVENTO'));
+    el.topo.appendChild(acoes);
+
+    Util.limpar(el.menu);
+    var ul = h('ul', { class: 'menu-lista' });
+    itensMenu().forEach(function (m) {
+      ul.appendChild(h('li', null, h('a', { class: 'menu-item', href: Roteador.href(m.rota), dataset: { rota: m.rota, modulo: m.modulo } }, UI.icone(m.icone), m.rotulo)));
+    });
+    el.menu.appendChild(ul);
+
+    Util.limpar(el.barra);
+    var itens = itensMenu();
+    var porModulo = {};
+    itens.forEach(function (m) { porModulo[m.modulo] = m; });
+    var barra = [];
+    if (porModulo.DASHBOARD) barra.push(itemBarra_(porModulo.DASHBOARD));
+    if (porModulo.REBANHO) barra.push(itemBarra_(porModulo.REBANHO));
+    if (podeRegistrar()) barra.push(h('a', { class: 'barra-item barra-registrar', href: Roteador.href(ROTA_REGISTRAR), dataset: { rota: ROTA_REGISTRAR } }, UI.icone('registrar'), 'Registrar'));
+    if (porModulo.PASTOS) barra.push(itemBarra_(porModulo.PASTOS));
+    var mais = itens.filter(function (m) { return m.ordem >= 4; });
+    if (mais.length) barra.push(h('button', { type: 'button', class: 'barra-item', 'aria-haspopup': 'dialog', dataset: { mais: '1' }, on: { click: function (ev) { abrirMais_(mais, ev.currentTarget); } } }, UI.icone('mais'), 'Mais'));
+    barra.forEach(function (b) { el.barra.appendChild(b); });
+    el.barra.hidden = barra.length === 0;
+    marcarAtual_();
+  }
+  function itemBarra_(m) {
+    return Util.h('a', { class: 'barra-item', href: Roteador.href(m.rota), dataset: { rota: m.rota, modulo: m.modulo } }, UI.icone(m.icone), m.curto);
+  }
+  function abrirMais_(itens, origem) {
+    var h = Util.h;
+    var lista = h('ul', { class: 'menu-lista' });
+    var folha;
+    itens.forEach(function (m) {
+      lista.appendChild(h('li', null, h('a', { class: 'menu-item', href: Roteador.href(m.rota), dataset: { rota: m.rota }, on: { click: function () { folha.fechar(); } } }, UI.icone(m.icone), m.rotulo)));
+    });
+    folha = UI.folha({ titulo: 'Mais', conteudo: lista, origem: origem });
+  }
+  function marcarAtual_() {
+    var r = Roteador.atual();
+    var raiz = r.split('/')[0];
+    [el.menu, el.barra, el.topo].forEach(function (c) {
+      if (!c) return;
+      Array.prototype.forEach.call(c.querySelectorAll('[data-rota]'), function (a) {
+        var alvo = a.getAttribute('data-rota');
+        var ativo = alvo === r || (alvo.split('/')[0] === raiz && raiz !== 'evento') || (alvo === ROTA_REGISTRAR && r.indexOf(ROTA_REGISTRAR) === 0);
+        if (ativo) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+      });
+    });
+  }
+  function aoClicar_(ev) {
+    if (ev.defaultPrevented || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+    var a = ev.target.closest ? ev.target.closest('a[data-rota]') : null;
+    if (!a) return;
+    ev.preventDefault();
+    Roteador.ir(a.getAttribute('data-rota'));
+  }
+
+  function renderizarRota_(rota) {
+    if (!rota) { Roteador.ir(rotaInicial_(), { substituir: true }); return; }
+    var alvo = Telas.resolver(rota);
+    if (typeof limpeza === 'function') {
+      try { limpeza(); } catch (e) { Util.registrarFalha('ao sair da tela ' + montada, e); }
+    }
+    limpeza = null;
+    UI.fecharTudo();
+    Util.limpar(el.conteudo);
+    document.body.classList.toggle('tela-cheia', !!(alvo && alvo.def.telaCheia));
+    marcarAtual_();
+    if (!alvo) {
+      montada = null;
+      el.conteudo.appendChild(UI.estadoErro({ code: 'NOT_FOUND', message: 'Esta tela não existe nesta versão do app.' }, { acao: { texto: 'Ir para o início', aoClicar: function () { Roteador.ir(rotaInicial_()); } } }));
+      return;
+    }
+    if (alvo.def.modulo && !Store.modulo(alvo.def.modulo)) {
+      montada = null;
+      el.conteudo.appendChild(UI.estadoErro({ code: 'NOT_FOUND', message: 'Esta parte do sistema ainda não foi entregue.' }, { acao: { texto: 'Ir para o início', aoClicar: function () { Roteador.ir(rotaInicial_()); } } }));
+      return;
+    }
+    montada = alvo.padrao;
+    var caixa = Util.h('div', { class: 'tela', dataset: { tela: alvo.padrao } });
+    el.conteudo.appendChild(caixa);
+    try {
+      limpeza = alvo.def.montar(caixa, alvo.params) || null;
+    } catch (e) {
+      Util.registrarFalha('ao abrir a tela ' + alvo.padrao, e);
+      Util.limpar(caixa);
+      caixa.appendChild(UI.estadoErro({ code: 'INTERNAL', message: 'A tela não pôde ser aberta. Recarregue a página; se continuar, avise o suporte.' }, { detalhe: String(e && e.message) }));
+    }
+    var titulo = caixa.querySelector('h1');
+    if (titulo && iniciado) { titulo.setAttribute('tabindex', '-1'); titulo.classList.add('tela-titulo'); titulo.focus({ preventScroll: false }); }
+    window.scrollTo(0, 0);
+  }
+
+  // ------------------------------------------------------------------ faixas ----
+  /** Faixa persistente no alto (id único; repetir o id substitui). def: {tipo: info|aviso|erro|ok|teste, texto, acoes: [{texto, aoClicar, href}]}. */
+  function faixa(id, def) {
+    removerFaixa(id);
+    var f = UI.faixa(def);
+    f.setAttribute('data-faixa', id);
+    if (def.tipo === 'teste') el.faixas.insertBefore(f, el.faixas.firstChild);
+    else el.faixas.appendChild(f);
+    return f;
+  }
+  function removerFaixa(id) {
+    var f = el.faixas && el.faixas.querySelector('[data-faixa="' + id + '"]');
+    if (f) f.parentNode.removeChild(f);
+  }
+  function temFaixa(id) { return !!(el.faixas && el.faixas.querySelector('[data-faixa="' + id + '"]')); }
+  /** Recarregar a janela inteira: link para o app (target=_top) quando o endereço é conhecido; senão o próprio quadro. */
+  function acaoRecarregar(texto) {
+    if (cfg.urlApp) return { texto: texto, href: cfg.urlApp, alvo: '_top' };
+    return { texto: texto, aoClicar: function () { location.reload(); } };
+  }
+  function faixasDoSistema_() {
+    var amb = Store.ambiente();
+    if (amb.base_de_teste) faixa('base-teste', { tipo: 'teste', texto: (amb.faixa || 'BASE DE TESTE') + ' — estes dados não são os da fazenda' });
+    else removerFaixa('base-teste');
+    var imp = (Store.alertas().alertas || []).filter(function (a) { return a.codigo === 'IMPORTACAO_INCOMPLETA'; })[0];
+    if (imp) faixa('importacao', { tipo: 'erro', texto: imp.mensagem + ' Os registros ficam bloqueados até terminar ou desfazer.', acoes: Telas.existe('importar/x') ? [{ texto: 'Ver importação', aoClicar: function () { Roteador.ir('importar/' + (imp.ids && imp.ids[0] ? imp.ids[0] : '')); } }] : [] });
+    else removerFaixa('importacao');
+  }
+  function novaVersao_() {
+    if (temFaixa('nova-versao')) return;
+    faixa('nova-versao', { tipo: 'info', texto: 'Nova versão disponível. O que você digitou fica guardado.', acoes: [acaoRecarregar('Recarregar')] });
+  }
+  async function conferirVersao_() {
+    if (document.visibilityState !== 'visible' || !Store.carregado()) return;
+    if (Fmt.agoraMs() - ultimaConferencia < 60000) return;
+    ultimaConferencia = Fmt.agoraMs();
+    try {
+      var r = await Store.carregar();
+      removerFaixa('sem-conexao');
+      if (r.fonte === 'SERVIDOR') { renderizarCasca_(); faixasDoSistema_(); }
+    } catch (e) {
+      faixa('sem-conexao', { tipo: 'aviso', texto: 'Sem conexão com o servidor. Os dados na tela são de ' + Fmt.instante(new Date(Store.atualizadoEm()).toISOString()) + '.', acoes: [{ texto: 'Tentar de novo', aoClicar: function () { ultimaConferencia = 0; conferirVersao_(); } }] });
+    }
+  }
+
+  async function carregarInicial_() {
+    Util.limpar(el.conteudo);
+    el.conteudo.appendChild(UI.carregando('Carregando o rebanho…'));
+    try {
+      await Store.carregar({ aoEstado: function (s) { if (s.estado === 'OCUPADO') { Util.limpar(el.conteudo); el.conteudo.appendChild(UI.carregando('Sistema ocupado, tentando de novo (' + s.tentativa + ' de ' + s.de + ')…')); } } });
+      return true;
+    } catch (e) {
+      Util.limpar(el.conteudo);
+      var acao = e.code === 'DENIED' || e.repetida ? acaoRecarregar('Entrar de novo') : { texto: 'Tentar de novo', aoClicar: function () { carregarInicial_().then(function (ok) { if (ok) continuar_(); }); } };
+      el.conteudo.appendChild(UI.estadoErro(e, { acao: acao }));
+      return false;
+    }
+  }
+  function continuar_() {
+    renderizarCasca_();
+    faixasDoSistema_();
+    return Roteador.iniciar(renderizarRota_).then(function (rota) {
+      renderizarRota_(rota);
+      iniciado = true;
+      if (typeof Registro !== 'undefined' && Registro.conferirPendentes) Registro.conferirPendentes();
+    });
+  }
+  /** Ponto de entrada (fim do Index): configura, carrega o store, monta a casca e a rota. */
+  async function iniciar() {
+    lerPagina_();
+    Fmt.configurar({});
+    Cliente.configurar({ ambiente: cfg.ambiente, appVersion: cfg.appVersion, aoNovaVersao: novaVersao_ });
+    Store.configurar({ ambiente: cfg.ambiente, appVersion: cfg.appVersion });
+    Rascunhos.iniciar({ ambiente: cfg.ambiente });
+    document.addEventListener('click', aoClicar_);
+    document.addEventListener('visibilitychange', conferirVersao_);
+    var pular = document.getElementById('pular');
+    if (pular) pular.addEventListener('click', function () { var t = el.conteudo.querySelector('h1') || el.conteudo; t.setAttribute('tabindex', '-1'); t.focus(); });
+    ultimaConferencia = Fmt.agoraMs();
+    if (await carregarInicial_()) await continuar_();
+  }
+  return {
+    iniciar: iniciar, faixa: faixa, removerFaixa: removerFaixa, temFaixa: temFaixa, itensMenu: itensMenu, podeRegistrar: podeRegistrar,
+    acaoRecarregar: acaoRecarregar, recasca: function () { renderizarCasca_(); faixasDoSistema_(); },
+    rotaInicial: rotaInicial_, MENU: MENU, ROTA_REGISTRAR: ROTA_REGISTRAR,
+    camada: function () { return el.camada; }, regiaoAvisos: function () { return el.avisos; }, raiz: function () { return document.getElementById('app'); },
+  };
+})();
+</script>

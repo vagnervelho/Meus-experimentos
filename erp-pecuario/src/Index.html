@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>ERP Pecuário</title>
+<?!= include_('Styles') ?>
+</head>
+<body>
+<button type="button" id="pular" class="pular">Pular para o conteúdo</button>
+<div id="app" data-app-version="<?= appVersion ?>" data-ambiente="<?= ambiente ?>" data-url-app="<?= urlApp ?>">
+  <header id="topo" class="topo">
+    <div class="topo-marca"><span>ERP Pecuário</span></div>
+  </header>
+  <div id="faixas" role="region" aria-label="Avisos do sistema"></div>
+  <nav id="menu" aria-label="Menu principal"></nav>
+  <main id="conteudo" tabindex="-1" aria-live="off"></main>
+  <nav id="barra" class="barra-inferior" aria-label="Navegação rápida" hidden></nav>
+</div>
+<div id="camada"></div>
+<div id="avisos" class="avisos" role="status" aria-live="polite" aria-atomic="false"></div>
+<noscript><p>O ERP Pecuário precisa de JavaScript ligado no navegador.</p></noscript>
+<?!= include_('JavaScript') ?>
+<?!= include_('Components') ?>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  App.iniciar().catch(function (e) {
+    if (window.console) console.error('[ERP] falha ao iniciar:', e);
+    var c = document.getElementById('conteudo');
+    while (c.firstChild) c.removeChild(c.firstChild);
+    var p = document.createElement('p');
+    p.textContent = 'O app não conseguiu abrir. Recarregue a página; se continuar, avise o suporte.';
+    c.appendChild(p);
+  });
+});
+</script>
+</body>
+</html>
