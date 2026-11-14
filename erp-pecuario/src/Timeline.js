@@ -29,9 +29,6 @@ var Timeline = (function () {
   function nulo_(v) {
     return vazio_(v) ? null : v;
   }
-  function config_(mensagem) {
-    return Validation.erro('CONFIG', mensagem);
-  }
   function dataBr(d) {
     return vazio_(d) ? '' : String(d).slice(8, 10) + '/' + String(d).slice(5, 7) + '/' + String(d).slice(0, 4);
   }
@@ -45,38 +42,9 @@ var Timeline = (function () {
   }
 
   // ------------------------------------------------------------------ parâmetros ----
-  /** CONFIGURACOES tipadas, com a semente quando a chave não existe (célula vazia = não informado). */
+  /** CONFIGURACOES tipadas, com a semente quando a chave não existe (célula vazia = não informado): ver Config.parametros. */
   function parametros(repo) {
-    var out = {};
-    var carregada = !!repo && repo.carregada('CONFIGURACOES');
-    Schema.SEMENTES.CONFIGURACOES.forEach(function (s) {
-      var linha = carregada ? repo.porId('CONFIGURACOES', s.chave) : null;
-      var texto = linha ? linha.valor : s.padrao;
-      out[s.chave] = converterParametro_(s, texto);
-    });
-    return out;
-  }
-  function converterParametro_(s, texto) {
-    if (vazio_(texto)) return null;
-    var t = String(texto).trim();
-    if (s.tipo === 'NUMERO') {
-      var n = Number(t);
-      if (!isFinite(n)) throw config_('O parâmetro "' + s.chave + '" precisa ser um número (está "' + t + '").');
-      return n;
-    }
-    if (s.tipo === 'BOOL') {
-      if (t !== 'S' && t !== 'N') throw config_('O parâmetro "' + s.chave + '" precisa ser S ou N (está "' + t + '").');
-      return t === 'S';
-    }
-    if (s.tipo === 'JSON') {
-      try {
-        return JSON.parse(t);
-      } catch (e) {
-        throw config_('O parâmetro "' + s.chave + '" não é um JSON válido.');
-      }
-    }
-    if (s.formato === 'DATA' && !Utils.dataValida(t)) throw config_('O parâmetro "' + s.chave + '" precisa ser uma data (aaaa-mm-dd).');
-    return t;
+    return Config.parametros(repo);
   }
 
   // ------------------------------------------------------------------ linhas e ordem ----

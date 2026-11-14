@@ -10,6 +10,12 @@ var AuditService = (function () {
   /** Tabelas que `listar` precisa nas leituras (reads) da consulta. */
   var LEITURAS = Object.freeze(['AUDITORIA']);
   var ACOES_DE_CAMPO = Object.freeze({ CRIAR: true, ALTERAR: true, CONTROLE: true });
+  /**
+   * Exceção do animal EXTERNO (03a, seção 4.3.2): sem evento de criação, estes atributos de projeção são do
+   * cadastro de referência, alterados por `animal.editar` com AUDITORIA, e o projetor os preserva. Só valem com a
+   * marca `externo: true` na mudança, que `alteracao` põe depois de conferir que o animal é EXTERNO.
+   */
+  var ATRIBUTOS_EXTERNO = Object.freeze({ ANIMAIS: Object.freeze(['sexo', 'data_nascimento', 'data_nascimento_confianca']) });
   var TETO_MENSAGEM = 2000;
 
   function vazio_(v) {
@@ -47,7 +53,8 @@ var AuditService = (function () {
       if (!Schema.temColuna(m.entidade, m.campo)) throw interno_('A coluna ' + m.campo + ' não existe em ' + m.entidade + '.');
       var col = Schema.coluna(m.entidade, m.campo);
       if (acao !== 'CRIAR' && col.pk) throw interno_('A chave de ' + m.entidade + ' não pode ser alterada.');
-      if (acao === 'ALTERAR' && col.marca !== 'CAD') throw interno_('A coluna ' + m.entidade + '.' + m.campo + ' não é de cadastro: não pode ser editada por comando direto.');
+      var deExterno = m.externo === true && (ATRIBUTOS_EXTERNO[m.entidade] || []).indexOf(m.campo) >= 0;
+      if (acao === 'ALTERAR' && col.marca !== 'CAD' && !deExterno) throw interno_('A coluna ' + m.entidade + '.' + m.campo + ' não é de cadastro: não pode ser editada por comando direto.');
       if (acao === 'CONTROLE' && col.marca !== 'CTL') throw interno_('A coluna ' + m.entidade + '.' + m.campo + ' não é de controle.');
       linha.campo = m.campo;
       var anterior = ctx.io.paraTexto(m.entidade, m.campo, m.valor_anterior);
@@ -62,20 +69,26 @@ var AuditService = (function () {
    * Edição de registro existente: compara `campos` com a linha atual e põe no plano (tx.plano.auditar) uma
    * mudança por campo que REALMENTE muda. A ação sai da marca da coluna ([cad] → ALTERAR, [ctl] → CONTROLE).
    * Devolve quantas mudanças entraram no plano. Registro inexistente → NOT_FOUND.
+   * opcoes: {externo: true} — atributos do cadastro de referência de um animal EXTERNO (ATRIBUTOS_EXTERNO);
+   * o registro precisa estar EXTERNO, senão INTERNAL.
    */
-  function alteracao(tx, tabela, id, campos, justificativa) {
+  function alteracao(tx, tabela, id, campos, justificativa, opcoes) {
     var atual = tx.repo.porId(tabela, id);
     if (!atual) throw Validation.erro('NOT_FOUND', 'O registro que você tentou alterar não existe mais. Atualize a tela e tente de novo.');
+    var externo = !!(opcoes && opcoes.externo);
+    if (externo && (tabela !== 'ANIMAIS' || atual.situacao_cadastral !== 'EXTERNO')) throw interno_('Só o cadastro de referência de um animal EXTERNO aceita a alteração direta de atributos.');
     var n = 0;
     Object.keys(campos || {}).forEach(function (campo) {
       var col = Schema.coluna(tabela, campo);
       var novo = tx.ctx.io.normalizarValor(tabela, campo, campos[campo]);
       var igual = col.tipo === 'JSON' ? JSON.stringify(atual[campo]) === JSON.stringify(novo) : atual[campo] === novo;
       if (igual) return;
-      tx.plano.auditar({
+      var mudanca = {
         entidade: tabela, entity_id: id, acao: col.marca === 'CTL' ? 'CONTROLE' : 'ALTERAR', campo: campo,
         valor_anterior: atual[campo], valor_novo: novo, justificativa: justificativa,
-      });
+      };
+      if (externo) mudanca.externo = true;
+      tx.plano.auditar(mudanca);
       n += 1;
     });
     return n;

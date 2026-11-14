@@ -83,6 +83,26 @@ var EventService = (function () {
   function registrar(ctx, pedido) {
     return UnitOfWork.run(ctx, comando('registrar', pedido));
   }
+  /**
+   * Planeja, dentro do tratador de OUTRO comando (a importação de planilha), uma ENTRADA_INICIAL com as MESMAS regras
+   * do formulário (RN-090), sem abrir unidade própria. O tx precisa ter lido `leiturasEntrada()` e ter acesso cru.
+   * dados: {campos, animais} como em registrar. opcoes: {importacao: {import_id}} (o evento nasce com import_id e
+   * source IMPORTACAO: só vale quando a importação chega a IMPORTADO); conhecidos: {animal_id: {sexo,
+   * data_nascimento, mae_id, pai_id, nome}} — animais criados por lotes anteriores da mesma importação, ainda
+   * pendentes, aceitos como mãe ou pai; rotulos: [texto por item] (ex.: 'Linha 12') para as mensagens.
+   * Devolve o resultado do tratador ({erros} ou {avisos, resumo, impactos, derivados, resposta}); com erros, nada
+   * entra no plano. CONFLICT e CONFIG são lançados como no registrar.
+   */
+  function planejarEntradaImportada(tx, dados, opcoes) {
+    var o = opcoes || {};
+    if (!o.importacao || vazio_(o.importacao.import_id)) throw interno_('planejarEntradaImportada precisa do import_id.');
+    var d = { tipo: 'ENTRADA_INICIAL', campos: (dados && dados.campos) || {}, animais: (dados && dados.animais) || [] };
+    return planejarEvento_(tx, 'registrar', { dados: d, importacao: o.importacao, conhecidos: o.conhecidos || {}, rotulos: o.rotulos || null });
+  }
+  /** Abas que o tratador precisa ler para planejar uma entrada (reads do comando que chama planejarEntradaImportada). */
+  function leiturasEntrada() {
+    return Utils.unicos(EventCatalog.leituras('ENTRADA_INICIAL').concat(Timeline.LEITURAS));
+  }
   function corrigir(ctx, pedido) {
     return UnitOfWork.run(ctx, comando('corrigir', pedido));
   }
@@ -106,7 +126,7 @@ var EventService = (function () {
     });
     return out;
   }
-  function motor_(tx, excluir) {
+  function motor_(tx, excluir, opcoes) {
     if (vazio_(tx.hoje)) throw interno_('Contexto sem fuso: não há como saber a data de hoje.');
     var params = Timeline.parametros(tx.repo);
     var f = Timeline.fonte(tx, { excluir: excluir, parametros: params });
@@ -115,6 +135,7 @@ var EventService = (function () {
       real: excluir && excluir.length ? Timeline.fonte(tx, { parametros: params }) : f,
       col: Validation.coletor(), conflitos: [], avisos: [], listas: listasAtivas_(tx.repo), afetados: {}, cache: {},
       teto: params.json_celula_max_caracteres || Validation.TETO_CELULA,
+      opcoes: opcoes || {}, conhecidos: (opcoes && opcoes.conhecidos) || {},
     };
     (excluir || []).forEach(function (id) { f.linhasDoEvento(id).forEach(function (l) { m.afetados[l.animal_id] = true; }); });
     return m;
@@ -186,8 +207,8 @@ var EventService = (function () {
     if (st !== 'CONFIRMADO') { erroGeral_(m, 'event_id', 'JA_ANULADO', 'Este evento já foi estornado ou corrigido e não vale mais.'); return null; }
     return ev;
   }
-  function planejarEvento_(tx, acao) {
-    var d = tx.dados || {};
+  function planejarEvento_(tx, acao, opcoes) {
+    var d = (opcoes && opcoes.dados) || tx.dados || {};
     var original = null;
     var m;
     if (acao === 'corrigir') {
@@ -197,7 +218,7 @@ var EventService = (function () {
       if (!original) return { erros: pre.col.erros };
       m = motor_(tx, [original.event_id]);
       if (vazio_(d.justificativa)) erroGeral_(m, 'justificativa', 'CAMPO_OBRIGATORIO', 'Diga por que o evento está sendo corrigido.');
-    } else m = motor_(tx, []);
+    } else m = motor_(tx, [], opcoes);
     exigirMarcoZero_(m);
     var tipo = vazio_(d.tipo) && original ? original.event_type : d.tipo;
     var subtipo = vazio_(d.subtipo) ? (original ? nulo_(original.event_subtype) : null) : d.subtipo;
@@ -259,19 +280,21 @@ var EventService = (function () {
       else if (p.status !== 'ATIVO') erroGeral_(m, 'property_id', 'PROPRIEDADE_INATIVA', 'A propriedade ' + p.nome + ' está desativada.');
     }
     var seq = m.repo.contador('EVENTOS', 'event_seq');
+    var imp = m.opcoes.importacao || null;
     return {
       event_id: m.tx.novoId(), event_seq: seq, ordem_seq: original ? m.f.ordemSeq(original.event_id) : seq,
       event_type: tipo, event_subtype: subtipo, event_date: data, registration_date: m.hoje, property_id: prop,
       description: nulo_(campos.description), total_value: null, responsible: nulo_(campos.responsible),
-      created_by: m.tx.usuario, source: 'APP', confiabilidade: 'CONFIRMADA', pre_marco_zero: false, partner_id: null,
-      notes: nulo_(campos.notes), payload_json: null, reversal_of_event_id: original ? original.event_id : null, import_id: null,
+      created_by: m.tx.usuario, source: imp ? 'IMPORTACAO' : 'APP', confiabilidade: 'CONFIRMADA', pre_marco_zero: false, partner_id: null,
+      notes: nulo_(campos.notes), payload_json: null, reversal_of_event_id: original ? original.event_id : null, import_id: imp ? imp.import_id : null,
       justificativa: nulo_(campos.justificativa),
     };
   }
   function novoItem_(m, item, i) {
     var codigo = typeof item.brinco === 'string' ? Utils.aparar(item.brinco) : null;
     var existente = typeof item.animal_id === 'string' ? m.f.animal(item.animal_id) : null;
-    var quem = !vazio_(codigo) ? 'Brinco ' + codigo : existente ? nomeAnimal_(existente) : 'Animal ' + (i + 1) + ' da lista';
+    var rotulo = m.opcoes.rotulos ? m.opcoes.rotulos[i] : null;
+    var quem = !vazio_(rotulo) ? rotulo : !vazio_(codigo) ? 'Brinco ' + codigo : existente ? nomeAnimal_(existente) : 'Animal ' + (i + 1) + ' da lista';
     return { indice: i, dados: item, animal_id: null, publico: false, quem: quem, brincoTexto: vazio_(codigo) ? null : codigo, linhas: [], novo: false, final: {} };
   }
   /** Linha de EVENTO_ANIMAIS no plano e na forma da linha do tempo. */
@@ -652,9 +675,11 @@ var EventService = (function () {
     });
     var final = {};
     itens.forEach(function (it) { if (!it.ignorarNaLinhaDoTempo && !final[it.animal_id]) final[it.animal_id] = it; });
-    function sexoDe(id) { return final[id] && final[id].final.sexo !== undefined ? final[id].final.sexo : (estado_(m, id) || {}).sexo; }
-    function nascDe(id) { return final[id] && final[id].final.data_nascimento !== undefined ? final[id].final.data_nascimento : (estado_(m, id) || {}).data_nascimento; }
-    function nomeDe(id) { return final[id] ? final[id].quem.replace(/^Brinco /, '') : nomeAnimal_(estado_(m, id)); }
+    var conhecidos = m.conhecidos;
+    function base(id) { return conhecidos[id] || estado_(m, id) || {}; }
+    function sexoDe(id) { return final[id] && final[id].final.sexo !== undefined ? final[id].final.sexo : base(id).sexo; }
+    function nascDe(id) { return final[id] && final[id].final.data_nascimento !== undefined ? final[id].final.data_nascimento : base(id).data_nascimento; }
+    function nomeDe(id) { return final[id] ? final[id].quem.replace(/^Brinco /, '') : conhecidos[id] ? conhecidos[id].nome : nomeAnimal_(estado_(m, id)); }
     function resolver(it, campoId, campoRef) {
       var p = it.parentesco || {};
       if (!vazio_(p[campoRef])) {
@@ -674,8 +699,8 @@ var EventService = (function () {
         if (it.atributos && it.genealogia.pai_id) it.atributos.pai_id = it.genealogia.pai_id;
       }
     });
-    function maeDe(id) { return final[id] && final[id].genealogia ? final[id].genealogia.mae_id : (estado_(m, id) || {}).mae_id; }
-    function paiDe(id) { return final[id] && final[id].genealogia ? final[id].genealogia.pai_id : (estado_(m, id) || {}).pai_id; }
+    function maeDe(id) { return final[id] && final[id].genealogia ? final[id].genealogia.mae_id : base(id).mae_id; }
+    function paiDe(id) { return final[id] && final[id].genealogia ? final[id].genealogia.pai_id : base(id).pai_id; }
     function caminho(de, ate) {
       var fila = [[de]];
       var vistos = {};
@@ -697,7 +722,7 @@ var EventService = (function () {
         var mudou = novo || (it.parentesco && it.parentesco[cfg[0] === 'mae_id' ? 'mudouMae' : 'mudouPai']);
         if (vazio_(pid) || !mudou) return;
         if (pid === it.animal_id) { erroItem_(m, it, cfg[0], 'PROPRIO_PROGENITOR', 'o animal não pode ser ' + cfg[2] + ' de si mesmo.'); return; }
-        var p = final[pid] ? { situacao_cadastral: 'ATIVO' } : existente_(m, pid);
+        var p = final[pid] || conhecidos[pid] ? { situacao_cadastral: 'ATIVO' } : existente_(m, pid);
         if (!p) { erroItem_(m, it, cfg[0], 'NAO_ENCONTRADO', 'a ' + cfg[2] + ' informada não foi encontrada.'); return; }
         if (sexoDe(pid) !== cfg[1]) { erroItem_(m, it, cfg[0], 'SEXO_DO_PROGENITOR', nomeDe(pid) + ' não pode ser ' + cfg[2] + ': precisa ser ' + cfg[3] + '.'); return; }
         var nf = nascDe(it.animal_id);
@@ -1193,6 +1218,8 @@ var EventService = (function () {
     ROTAS: ROTAS,
     comando: comando,
     registrar: registrar,
+    planejarEntradaImportada: planejarEntradaImportada,
+    leiturasEntrada: leiturasEntrada,
     corrigir: corrigir,
     estornar: estornar,
     simular: simular,
