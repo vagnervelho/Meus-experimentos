@@ -459,6 +459,10 @@ var Api = (function () {
     if (params.pagina === 'concorrencia') {
       return HtmlService.createHtmlOutput(TestRunner.paginaConcorrencia()).setTitle(TITULO + ' — teste de concorrência').addMetaTag('viewport', VIEWPORT);
     }
+    var ambiente = vazio_(params.ambiente) ? 'PRODUCAO' : String(params.ambiente).toUpperCase();
+    if (AMBIENTES.indexOf(ambiente) < 0) {
+      return paginaAviso_('Endereço do app inválido', 'O ambiente "' + String(params.ambiente) + '" não existe. Abra o endereço do app sem parâmetros, ou com ?ambiente=DEMO para a base de demonstração.');
+    }
     var t;
     try {
       t = HtmlService.createTemplateFromFile(PAGINA);
@@ -467,7 +471,24 @@ var Api = (function () {
       return paginaAviso_('A interface ainda não foi instalada', 'Os arquivos de tela (.html) não estão no projeto do Apps Script. Envie o projeto de novo (npm run gas:push) e recarregue esta página.');
     }
     t.appVersion = APP_VERSION;
+    t.ambiente = ambiente;
+    t.urlApp = urlDoApp_(ambiente);
     return t.evaluate().setTitle(TITULO).addMetaTag('viewport', VIEWPORT);
+  }
+  /**
+   * Endereço do app para o "Recarregar" e o "Entrar de novo" da página (link com target=_top: o iframe do HtmlService
+   * não recarrega a janela de cima por script). Sem implantação publicada, `getUrl` falha ou vem vazio: a página usa
+   * então o recarregamento do próprio quadro, e a causa fica no log.
+   */
+  function urlDoApp_(ambiente) {
+    var url = '';
+    try {
+      url = ScriptApp.getService().getUrl() || '';
+    } catch (e) {
+      console.error('doGet: endereço do app indisponível: ' + texto_(e));
+      return '';
+    }
+    return url && ambiente !== 'PRODUCAO' ? url + '?ambiente=' + ambiente : url;
   }
   function paginaNegada(erro) {
     return paginaAviso_('Acesso negado', erro && erro.code === 'DENIED' ? erro.message : 'Não foi possível conferir o acesso. Tente de novo.');
