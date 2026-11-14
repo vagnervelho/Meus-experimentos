@@ -49,7 +49,11 @@ test('createGas carrega src/*.js nas duas ordens, com relógio, IDs e sessão de
   assert.deepEqual(a.files, fontes);
   assert.deepEqual(b.files, fontes.slice().reverse());
   for (const gas of [a, b]) {
-    fontes.forEach((f) => assert.equal(typeof gas.G[f.replace(/\.js$/, '')], 'object', f + ' declara o namespace'));
+    // Code.js é a exceção da regra: declara as funções públicas (01, seção 4.1) em vez de um namespace.
+    fontes.forEach((f) => {
+      if (f === 'Code.js') ['doGet', 'api', 'setup', 'runAcceptanceTests', 'runDiagnostics', 'verifyIntegrity', 'trgManutencaoDiaria', 'trgIntegridadeSemanal'].forEach((fn) => assert.equal(typeof gas.G[fn], 'function', 'Code.js declara ' + fn));
+      else assert.equal(typeof gas.G[f.replace(/\.js$/, '')], 'object', f + ' declara o namespace');
+    });
     assert.equal(gas.run('new Date().toISOString()'), '2026-11-13T14:00:00.000Z');
     assert.equal(gas.run('Date.now()'), RELOGIO_PADRAO);
     assert.equal(gas.run('new Date(2026, 0, 2).getDate()'), 2, 'Date com argumentos continua real');
