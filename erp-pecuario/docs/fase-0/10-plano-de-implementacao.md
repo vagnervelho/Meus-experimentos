@@ -263,7 +263,7 @@ O caminho crítico é spike → persistência → UnitOfWork → motor → anima
 - [x] Plano de implementação (`10`)
 - [x] Riscos, premissas e inconsistências da especificação (`11`)
 - [x] Fatos de plataforma (`12`)
-- [ ] Aprovação do dono
+- [x] Aprovação do dono (14/11/2026, com autonomia total para as fases seguintes)
 
 ### Fase 1 — Fundação
 

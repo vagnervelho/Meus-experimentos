@@ -1,6 +1,6 @@
 # ERP Pecuário — Fase 0: desenho técnico
 
-**Status:** desenho técnico para aprovação. Nenhum código de aplicação foi escrito e nada foi implantado. A Fase 1 só começa com a aprovação do dono.
+**Status:** aprovada pelo dono em 14/11/2026, com autorização para executar as fases seguintes com autonomia total. Este conjunto é o desenho; o andamento da implementação está em [`../CHANGELOG.md`](../CHANGELOG.md).
 
 ## Resumo executivo
 
@@ -152,6 +152,7 @@ Ao aprovar, a Fase 1 começa pelo spike técnico, que depende de o dono criar o 
 
 | Documento | Conteúdo |
 |---|---|
+| [`00-desenho-base.md`](00-desenho-base.md) | Resumo canônico das decisões, com as decisões posteriores e as de execução autônoma |
 | [`01-arquitetura.md`](01-arquitetura.md) | Camadas, princípios, contrato da API, publicação e acesso, estrutura de arquivos, evolução |
 | [`02-modelo-de-dados.md`](02-modelo-de-dados.md) | Diagramas de entidades, relacionamentos, regra de vigência, divergências da especificação |
 | [`03a-dicionario-cadastros-suporte.md`](03a-dicionario-cadastros-suporte.md) | Tipos, enums, cadastros, suporte, parâmetros e sementes |
