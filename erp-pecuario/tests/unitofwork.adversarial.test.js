@@ -19,6 +19,7 @@ const assert = require('node:assert/strict');
 const A = require('./apoio-persistencia');
 
 const { js, ambiente, cmdEvento, cmdPasto, consultaVigentes, rodarInstrumentado, recuperarInstrumentado } = A;
+const { sementes } = require('./apoio-eventos');
 const PRIMITIVAS = ['SHEETS_TYPED', 'SHEETS_RAW', 'SPREADSHEET_APP'];
 const ABAS = ['OPERACOES', 'EVENTOS', 'EVENTO_ANIMAIS', 'ANIMAIS', 'PASTOS', 'AUDITORIA', 'ERROS_LOG', 'IMPORTACOES'];
 
@@ -129,6 +130,29 @@ function desfechoEvento(amb, e, chave, confirmado, msg) {
 
 // ------------------------------------------------------------------ cenários ----
 const NOVOS = { nome: 'Rio de Baixo', area_hectares: 40, observacoes: 'Beira do córrego\nsem cerca' };
+const DATA_MOTOR = '2026-11-10';
+/** Desfecho do comando REAL do motor (OUTRA_ENTRADA de 2 animais pelo EventService, projetor real na fase C). */
+function desfechoMotor(amb, e, confirmado, msg, pasto) {
+  const G = amb.G;
+  const dif = amb.read({ rota: 'teste.projecoes', reads: G.Timeline.LEITURAS, acessoCru: true, tratador: (tx) => G.Timeline.conferir(tx) }).dados;
+  assert.deepEqual(dif, [], msg + ': (2) projeção do motor = reconstrução pelos eventos vigentes');
+  const op = e.OPERACOES.find((o) => o.idempotency_key === 'k-motor' && o.status === 'CONFIRMADA');
+  assert.equal(!!op, confirmado, msg + ': (1) a operação vale exatamente quando o commit chegou');
+  const evs = e.EVENTOS.filter((x) => x.idempotency_key === 'k-motor').map((x) => x.event_id);
+  const animaisDe = (ids) => e.EVENTO_ANIMAIS.filter((l) => ids.includes(l.event_id)).map((l) => e.ANIMAIS.find((a) => a.animal_id === l.animal_id));
+  if (!confirmado) {
+    assert.ok(animaisDe(evs).every((a) => a && a.situacao_cadastral === 'ANULADO'), msg + ': (1) animal da operação falhada fica ANULADO');
+    return null;
+  }
+  const evId = op.resumo_json.event_id;
+  const animais = animaisDe([evId]);
+  assert.deepEqual(animais.map((a) => [a.situacao_cadastral, a.pasto_atual_id, a.data_entrada]), [['ATIVO', pasto, DATA_MOTOR], ['ATIVO', pasto, DATA_MOTOR]], msg + ': (1) os dois animais ATIVOS no pasto');
+  return {
+    acao: 'registrar', event_id: evId, event_type: 'OUTRA_ENTRADA', event_subtype: null, event_date: DATA_MOTOR, status: 'CONFIRMADO',
+    total_value: null, substitui: null, estorna: null,
+    animais: animais.map((a) => ({ animal_id: a.animal_id, codigo_interno: a.codigo_interno, brinco: a.brinco || null, sexo: a.sexo, situacao_cadastral: a.situacao_cadastral, pasto_atual_id: a.pasto_atual_id })),
+  };
+}
 const CENARIOS = {
   evento: {
     chave: 'chave-evento-1',
@@ -163,7 +187,30 @@ const CENARIOS = {
       return confirmado ? { pasture_id: id, campos: 3 } : null;
     },
   },
+  motor: {
+    chave: 'k-motor',
+    ambiente: { projecoes: (G) => G.Timeline.porta() },
+    preparar: (amb) => {
+      const s = sementes(amb.G);
+      amb.gas.exec(() => amb.G.Database.abrir(amb.banco, { primitiva: amb.primitiva }).anexar({ CONFIGURACOES: s.CONFIGURACOES, PROPRIEDADES: s.PROPRIEDADES }));
+      const p = amb.run(cmdPasto(amb.G, { chave: 'cria-retiro', dados: { campos: { nome: 'Retiro' } } }));
+      amb.gas.clock.now += 60000;
+      return p.dados.pasture_id;
+    },
+    comando: (amb, pasto) => amb.G.EventService.comando('registrar', {
+      idempotencyKey: 'k-motor',
+      dados: {
+        tipo: 'OUTRA_ENTRADA', campos: { event_date: DATA_MOTOR, description: 'Doação do vizinho' },
+        animais: [{ brinco: '0457', sexo: 'F', origem: 'DESCONHECIDA', pasto_destino_id: pasto }, { sexo: 'M', castrado: false, reprodutor: false, origem: 'NASCIDO', pasto_destino_id: pasto }],
+      },
+    }),
+    desfecho: desfechoMotor,
+  },
 };
+/** Ambiente do cenário: o do motor usa o projetor real (Timeline) e o banco semeado. */
+function ambienteDo(primitiva, cen) {
+  return Object.assign({ primitiva }, cen.ambiente || {});
+}
 const MODOS = ['recoverAll', 'leitura', 'status', 'comando', 'simulacao'];
 function recuperarPor(amb, modo, chave) {
   if (modo === 'recoverAll') return amb.recoverAll();
@@ -216,7 +263,7 @@ function conferirQueda(amb, cen, prep, modo, msg) {
 }
 
 function escritasDoComando(primitiva, cen) {
-  const amb = ambiente({ primitiva });
+  const amb = ambiente(ambienteDo(primitiva, cen));
   const prep = cen.preparar(amb);
   const antes = amb.gas.falhas.escritas();
   amb.run(cen.comando(amb, prep));
@@ -234,7 +281,7 @@ for (const primitiva of PRIMITIVAS) {
       for (let w = 1; w <= n; w++) {
         let combos = null;
         for (let c = 0; combos === null || c < combos.length; c++) {
-          const amb = ambiente({ primitiva });
+          const amb = ambiente(ambienteDo(primitiva, cen));
           const prep = cen.preparar(amb);
           const chegam = combos ? combos[c].chegam : 'nenhuma';
           amb.gas.falhas.matarNaEscrita(w, { incluiAtual: true, chegam });
@@ -254,13 +301,13 @@ for (const primitiva of PRIMITIVAS) {
   test('varredura (' + primitiva + '): morte DEPOIS de cada chamada de porta (marcador, anexar, flush, commit, versão, lock)', () => {
     for (const nome of Object.keys(CENARIOS)) {
       const cen = CENARIOS[nome];
-      const ref = ambiente({ primitiva });
+      const ref = ambiente(ambienteDo(primitiva, cen));
       const passos = rodarInstrumentado(ref, cen.comando(ref, cen.preparar(ref)), {}).chamadas;
       let i = 0;
       for (let k = 1; k <= passos.length; k++) {
         let combos = null;
         for (let c = 0; combos === null || c < combos.length; c++) {
-          const amb = ambiente({ primitiva });
+          const amb = ambiente(ambienteDo(primitiva, cen));
           const prep = cen.preparar(amb);
           const { r } = rodarInstrumentado(amb, cen.comando(amb, prep), { depois: k, chegam: combos ? combos[c].chegam : 'nenhuma' });
           assert.equal(r.morta, true);
@@ -559,7 +606,7 @@ for (const primitiva of PRIMITIVAS) {
       const n = escritasDoComando(primitiva, cen);
       for (let w = 1; w <= n; w++) {
         for (let m = 0; m <= 6; m++) { // m = 0: só a escrita w falha; m > 0: a m-ésima escrita depois dela também (dentro da recuperação)
-          const amb = ambiente({ primitiva });
+          const amb = ambiente(ambienteDo(primitiva, cen));
           const prep = cen.preparar(amb);
           amb.gas.falhas.falharNaEscrita(w, { mensagem: 'Service Spreadsheets timed out while accessing document' });
           if (m) amb.gas.falhas.falharNaEscrita(w + m, { mensagem: 'Service Spreadsheets failed again' });
@@ -569,7 +616,7 @@ for (const primitiva of PRIMITIVAS) {
           conferirExcecao(amb, cen, prep, r, primitiva + ' ' + nome + ' falha na escrita ' + w + '/' + n + (m ? ' e na ' + (w + m) : ''));
         }
       }
-      const ref = ambiente({ primitiva });
+      const ref = ambiente(ambienteDo(primitiva, cen));
       let gravacoes = 0;
       ref.gas.exec(() => {
         const ctx = ref.ctx();
@@ -578,7 +625,7 @@ for (const primitiva of PRIMITIVAS) {
         return ref.G.UnitOfWork.run(ctx, cen.comando(ref, cen.preparar(ref)));
       });
       for (let k = 1; k <= gravacoes; k++) {
-        const amb = ambiente({ primitiva });
+        const amb = ambiente(ambienteDo(primitiva, cen));
         const prep = cen.preparar(amb);
         const r = amb.gas.tentar(() => {
           const ctx = amb.ctx();

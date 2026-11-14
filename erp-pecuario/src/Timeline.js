@@ -309,7 +309,10 @@ var Timeline = (function () {
     var p = f.parametros;
     var vig = f.linhas(id);
     var cruas = f.linhasCru(id);
-    if (!cruas.length && !vig.length) {
+    // Sem linha nenhuma: cadastro de referência (EXTERNO), salvo a linha anexada na fase A de uma operação que caiu
+    // antes de as linhas de EVENTO_ANIMAIS chegarem (nasce PENDENTE e fica ANULADO; nunca vira EXTERNO).
+    var gravada = animal ? animal.situacao_cadastral : null;
+    if (!cruas.length && !vig.length && gravada !== 'PENDENTE' && gravada !== 'ANULADO') {
       return { campos: { situacao_cadastral: 'EXTERNO', pasto_atual_id: null, propriedade_atual_id: null, evento_origem_id: null }, meta: { situacao: 'EXTERNO' } };
     }
     var replay = ordenar(vig.filter(function (l) { return !l.pre_marco_zero; }));
