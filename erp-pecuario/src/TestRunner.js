@@ -203,7 +203,7 @@ var TestRunner = (function () {
         var p = props_().ler();
         t.passo('1', 'Retrato da base real (para conferir no fim que nada mudou)', function () {
           var prod = p.SPREADSHEET_ID || null;
-          t.estado.producao = { banco: prod, versao: prod ? p[UnitOfWork.chaveVersao(prod)] || null : null, marcador: prod ? !vazio_(p[UnitOfWork.chaveMarcador(prod)]) : false, primitiva: p.IO_PRIMITIVE || null };
+          t.estado.producao = { banco: prod, versao: prod ? p[UnitOfWork.chaveVersao(prod)] || null : null, marcador: prod ? !vazio_(p[UnitOfWork.chaveMarcador(prod)]) : false, primitiva: p.IO_PRIMITIVE || null, relatorio: p.IO_PRIMITIVE_RELATORIO ? p.IO_PRIMITIVE_RELATORIO.length : 0 };
           return prod ? 'base real registrada' : 'ainda não há base real (setup não rodou)';
         });
         t.passo('2', 'Base de teste anterior para a lixeira; propriedades dela apagadas', function () {
@@ -600,6 +600,7 @@ var TestRunner = (function () {
             igual_(!vazio_(p[UnitOfWork.chaveMarcador(prod.banco)]), prod.marcador, 'marcador da base real');
           }
           igual_(p.IO_PRIMITIVE || null, prod.primitiva, 'IO_PRIMITIVE de produção');
+          igual_(p.IO_PRIMITIVE_RELATORIO ? p.IO_PRIMITIVE_RELATORIO.length : 0, prod.relatorio, 'relatório da forma de gravação de produção');
           verificar_(p.TEST_SPREADSHEET_ID && p.TEST_SPREADSHEET_ID !== prod.banco, 'a base de teste é outra planilha');
         });
       },
@@ -635,7 +636,9 @@ var TestRunner = (function () {
       var ref = 'v' + i;
       lotes[k].push({ brinco: brinco(), sexo: 'F', raca: raca(), data_nascimento: nasc(d0, 1100, 3600), data_nascimento_confianca: 'ESTIMADA', partos_previos: entre(1, 5), ref: ref, pasto: pasto, peso: entre(380, 520), metodo_pesagem: 'BALANCA', valor_abertura: entre(4500, 6500) * 100 });
       var macho = rnd() < 0.5;
-      lotes[k].push({ brinco: brinco(), sexo: macho ? 'M' : 'F', raca: raca(), data_nascimento: nasc(d0, 60, 210), data_nascimento_confianca: 'CONFIRMADA', mae_ref: ref, mae_confianca: 'CONFIRMADA', pasto: pasto, peso: entre(80, 200), metodo_pesagem: 'BALANCA', valor_abertura: entre(1500, 2500) * 100 });
+      var cria = { brinco: brinco(), sexo: macho ? 'M' : 'F', raca: raca(), data_nascimento: nasc(d0, 60, 210), data_nascimento_confianca: 'CONFIRMADA', mae_ref: ref, mae_confianca: 'CONFIRMADA', pasto: pasto, peso: entre(80, 200), metodo_pesagem: 'BALANCA', valor_abertura: entre(1500, 2500) * 100 };
+      if (macho) { cria.castrado = false; cria.reprodutor = false; }
+      lotes[k].push(cria);
     }
     var outros = [];
     for (var v = 0; v < 62; v++) outros.push({ brinco: brinco(), sexo: 'F', raca: raca(), data_nascimento: nasc(d0, 1100, 3600), data_nascimento_confianca: 'ESTIMADA', partos_previos: entre(1, 6), pasto: v % 3, peso: entre(380, 520), metodo_pesagem: 'BALANCA', valor_abertura: entre(4500, 6500) * 100 });
@@ -673,8 +676,9 @@ var TestRunner = (function () {
     var chave = function (n) { return 'seed:' + n; };
     for (var l = 0; l < 6; l++) {
       (function (k) {
+        var n = passos.length;
         passos.push({ nome: 'lote-' + (k + 1), executar: function (t, gen) {
-          t.ok(t.api('evento.registrar', { tipo: 'ENTRADA_INICIAL', campos: { description: 'Rebanho inicial (demonstração), lote ' + (k + 1) }, animais: gen.lotes[k].map(function (a) { return itemDemo_(t, a); }) }, { chave: chave(passos.length) }), 'lote ' + (k + 1));
+          t.ok(t.api('evento.registrar', { tipo: 'ENTRADA_INICIAL', campos: {}, animais: gen.lotes[k].map(function (a) { return itemDemo_(t, a); }) }, { chave: chave(n) }), 'lote ' + (k + 1));
         } });
       })(l);
     }
@@ -750,7 +754,11 @@ var TestRunner = (function () {
     Maintenance.listarBackups(ctx, { todos: true }).forEach(function (b) {
       if (bancos.indexOf(b.banco) >= 0 && files.lixeira(b.id)) removidos.backups += 1;
     });
-    bancos.forEach(function (b) { if (b !== atual && files.lixeira(b)) removidos.bancos += 1; });
+    bancos.forEach(function (b) {
+      if (b === atual) return;
+      if (files.lixeira(b)) removidos.bancos += 1;
+      [UnitOfWork.chaveVersao(b), UnitOfWork.chaveMarcador(b), 'IO_PRIMITIVE:' + b, 'INTEGRIDADE:' + b].forEach(function (k) { props_().remover(k); });
+    });
     return removidos;
   }
   function executarPlano_(opcoes, plano) {
@@ -782,7 +790,13 @@ var TestRunner = (function () {
         if (feitos > 0 && clock.agoraMs() - inicio > limite) {
           return { plano: plano, completo: false, proximo: passos[run.proximo - 1].nome, mensagem: 'Pausado perto do limite de tempo. Rode runAcceptanceTests de novo para continuar a base de demonstração.' };
         }
-        passos[run.proximo - 1].executar(td, gen);
+        try {
+          passos[run.proximo - 1].executar(td, gen);
+        } catch (e) {
+          // Comando rejeitado derruba o seed (09, seção 7): o cursor fica no passo, para corrigir e rodar de novo.
+          console.error('demonstração ' + passos[run.proximo - 1].nome + ': ' + texto_(e));
+          return { plano: plano, completo: false, ok: false, proximo: passos[run.proximo - 1].nome, falha: curto_(texto_(e), 400), mensagem: 'A base de demonstração parou num comando recusado. Veja a falha; rode runAcceptanceTests de novo para retomar deste passo.' };
+        }
         run.proximo += 1;
         feitos += 1;
         gravarCursor_(run);
@@ -900,7 +914,7 @@ var TestRunner = (function () {
     });
     item('SP-02', 'Escopo drive.file: criar, copiar, ler, listar, lixeira; planilha criada pelo Drive abre no SpreadsheetApp', function () {
       var sonda = files.sondar();
-      var abre = temporaria('abertura', function (id) { return Database.abrir(id, { primitiva: 'SPREADSHEET_APP' }).meta().abas.length >= 1; });
+      var abre = temporaria('abertura', function (id) { return Object.keys(Database.abrir(id, { primitiva: 'SPREADSHEET_APP' }).meta().abas).length >= 1; });
       return { situacao: sonda.ok && abre ? 'OK' : 'FALHOU', medidas: { passos: sonda.passos, abre_no_spreadsheetapp: abre }, observacao: sonda.ok ? null : 'Contingência: escopo drive completo (guia de implantação).' };
     });
     item('SP-03', 'Lock: obter, conferir e soltar', function () {

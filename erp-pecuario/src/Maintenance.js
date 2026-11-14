@@ -504,7 +504,7 @@ var Maintenance = (function () {
       }
       var escolha = escolherPrimitiva_(files);
       rel.primitiva = escolha;
-      store.setProperty(PROP_PRIMITIVA_RELATORIO, JSON.stringify(escolha).slice(0, 8000));
+      if (producao) store.setProperty(PROP_PRIMITIVA_RELATORIO, JSON.stringify(escolha).slice(0, 8000));
       if (!escolha.primitiva) throw Validation.erro('CONFIG', 'Nenhuma forma de gravação preservou os tipos dos dados nesta conta (veja o relatório do teste de gravação). A configuração foi interrompida sem mexer na planilha-banco.');
       if (!banco) {
         banco = producao
