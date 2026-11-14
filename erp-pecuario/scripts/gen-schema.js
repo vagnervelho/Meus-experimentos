@@ -529,10 +529,16 @@ function parsePlanoContas(textoA, enums) {
 }
 
 // ------------------------------------------------------------------ montagem e conferência ----
-function montar() {
-  const base = ler(ARQ_BASE);
-  const textoA = ler(ARQ_A);
-  const textoB = ler(ARQ_B);
+/** Textos dos três documentos-fonte: {base, a, b}. */
+function lerFontes() {
+  return { base: ler(ARQ_BASE), a: ler(ARQ_A), b: ler(ARQ_B) };
+}
+/** Monta o modelo do Schema a partir dos textos (padrão: os documentos do repositório). */
+function montar(fontes) {
+  const f = fontes || lerFontes();
+  const base = f.base;
+  const textoA = f.a;
+  const textoB = f.b;
 
   const desenho = parseDesenhoBase(base);
   if (desenho.ordem.length !== TOTAL_ABAS) falha(ARQ_BASE + ': a seção 3 lista ' + desenho.ordem.length + ' abas; esperava ' + TOTAL_ABAS);
@@ -769,9 +775,9 @@ const RODAPE = [
   '})();',
 ].join('\n');
 
-/** Texto de src/Schema.js gerado a partir dos documentos atuais (não grava). */
-function gerar() {
-  return emitir(montar());
+/** Texto de src/Schema.js gerado a partir dos documentos (padrão: os do repositório). Não grava. */
+function gerar(fontes) {
+  return emitir(montar(fontes));
 }
 
 function main() {
@@ -801,4 +807,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { gerar, montar, SAIDA, parseDesenhoBase, parseColunas, parseEnums, celulas, removerParenteses, TOTAL_ABAS };
+module.exports = { gerar, montar, lerFontes, SAIDA, parseDesenhoBase, TOTAL_ABAS, VERSAO };
