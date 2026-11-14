@@ -43,20 +43,25 @@ var Util = (function () {
    * localStorage com tratamento de falha (SP-06): no iframe do HtmlService ele pode faltar, estar cheio ou bloqueado.
    * Toda leitura e gravação passam por aqui; quem chama recebe null/false e decide a alternativa.
    */
+  var armazemOk = null;
   var armazem = {
+    /** Sonda uma vez (com registro da causa); depois disso, sem armazenamento, ler/gravar só devolvem null/false. */
     disponivel: function () {
+      if (armazemOk !== null) return armazemOk;
       try {
         var k = '__erp_teste__';
         window.localStorage.setItem(k, '1');
         var ok = window.localStorage.getItem(k) === '1';
         window.localStorage.removeItem(k);
-        return ok;
+        armazemOk = ok;
       } catch (e) {
         registrarFalha('armazenamento local indisponível', e);
-        return false;
+        armazemOk = false;
       }
+      return armazemOk;
     },
     ler: function (k) {
+      if (!armazem.disponivel()) return null;
       try {
         var t = window.localStorage.getItem(k);
         return t === null ? null : JSON.parse(t);
@@ -66,6 +71,7 @@ var Util = (function () {
       }
     },
     gravar: function (k, v) {
+      if (!armazem.disponivel()) return false;
       try {
         window.localStorage.setItem(k, JSON.stringify(v));
         return true;
@@ -75,6 +81,7 @@ var Util = (function () {
       }
     },
     remover: function (k) {
+      if (!armazem.disponivel()) return false;
       try {
         window.localStorage.removeItem(k);
         return true;
@@ -696,7 +703,14 @@ var Rascunhos = (function () {
   function iniciar(o) {
     Object.keys(o || {}).forEach(function (k) { cfg[k] = o[k]; });
     modo = Util.armazem.disponivel() ? 'LOCAL' : 'SERVIDOR';
-    gravarServidorAdiado = Util.adiar(descarregarServidor_, 1500);
+    gravarServidorAdiado = Util.adiar(descarregarServidor_, 1000);
+    // Ao sair da página (recarga, aba em segundo plano), o que estiver pendente vai ao servidor na hora.
+    var sair = function () {
+      if (!Object.keys(pendentesServidor).length) return;
+      descarregarServidor_().catch(function (e) { Util.registrarFalha('rascunho no servidor ao sair', e); });
+    };
+    window.addEventListener('pagehide', sair);
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') sair(); });
     return modo;
   }
   function resumo_(id, r) {
@@ -717,7 +731,7 @@ var Rascunhos = (function () {
     return r.data.existe ? r.data.conteudo : null;
   }
   /**
-   * Guarda o rascunho (objeto JSON simples). Local: na hora; servidor: agrupado (1,5 s) para poupar idas.
+   * Guarda o rascunho (objeto JSON simples). Local: na hora; servidor: agrupado (1 s) para poupar idas.
    * `imediato` descarrega já (antes de enviar). Resolve {onde: LOCAL | SERVIDOR}. Falha local vira guarda no servidor.
    */
   async function salvar(id, r, o) {
@@ -1021,14 +1035,10 @@ var App = (function () {
     Util.limpar(el.conteudo);
     document.body.classList.toggle('tela-cheia', !!(alvo && alvo.def.telaCheia));
     marcarAtual_();
-    if (!alvo) {
+    if (!alvo || (alvo.def.modulo && !Store.modulo(alvo.def.modulo))) {
       montada = null;
-      el.conteudo.appendChild(UI.estadoErro({ code: 'NOT_FOUND', message: 'Esta tela não existe nesta versão do app.' }, { acao: { texto: 'Ir para o início', aoClicar: function () { Roteador.ir(rotaInicial_()); } } }));
-      return;
-    }
-    if (alvo.def.modulo && !Store.modulo(alvo.def.modulo)) {
-      montada = null;
-      el.conteudo.appendChild(UI.estadoErro({ code: 'NOT_FOUND', message: 'Esta parte do sistema ainda não foi entregue.' }, { acao: { texto: 'Ir para o início', aoClicar: function () { Roteador.ir(rotaInicial_()); } } }));
+      el.conteudo.appendChild(Util.h('h1', { class: 'tela-titulo', text: alvo ? 'Ainda não disponível' : 'Tela não encontrada' }));
+      el.conteudo.appendChild(UI.estadoErro({ code: 'NOT_FOUND', message: alvo ? 'Esta parte do sistema ainda não foi entregue.' : 'Esta tela não existe nesta versão do app.' }, { acao: { texto: 'Ir para o início', aoClicar: function () { Roteador.ir(rotaInicial_()); } } }));
       return;
     }
     montada = alvo.padrao;

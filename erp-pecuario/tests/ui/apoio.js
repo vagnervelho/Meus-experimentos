@@ -135,6 +135,7 @@ async function alvosDeToque(page, escopo) {
       if (alvo.classList.contains('pular') && document.activeElement !== alvo) return;
       alvos.push(alvo);
     });
+    const preso = (el) => { for (let e = el; e && e !== document.body; e = e.parentElement) { const p = getComputedStyle(e).position; if (p === 'fixed' || p === 'sticky') return e; } return null; };
     const desc = (el) => (el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + (el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\s+/).join('.') : '') + ' "' + (el.textContent || el.getAttribute('aria-label') || '').trim().slice(0, 30) + '"');
     const problemas = [];
     const rects = alvos.map((el) => el.getBoundingClientRect());
@@ -142,6 +143,8 @@ async function alvosDeToque(page, escopo) {
     for (let i = 0; i < alvos.length; i++) {
       for (let j = i + 1; j < alvos.length; j++) {
         if (alvos[i].contains(alvos[j]) || alvos[j].contains(alvos[i])) continue;
+        // Barra fixa (topo, barra inferior) sobre conteúdo que rola por baixo não é colisão de alvos.
+        if (preso(alvos[i]) !== preso(alvos[j])) continue;
         const a = rects[i], b = rects[j];
         const sobV = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
         const sobH = Math.min(a.right, b.right) - Math.max(a.left, b.left);

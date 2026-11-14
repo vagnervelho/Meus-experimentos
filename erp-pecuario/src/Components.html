@@ -424,7 +424,7 @@ var Campos = (function () {
     return d;
   }
   function opcoesDe(def) {
-    if (def.opcoes) return def.opcoes.map(function (c) { return { valor: c, rotulo: Fmt.rotuloOpcao(def.id, c) }; });
+    if (def.opcoes) return def.opcoes.map(function (c) { return { valor: c, rotulo: Fmt.rotuloOpcao(def.rotulos_de || def.id, c) }; });
     if (def.lista) return Store.lista(def.lista).map(function (l) { return { valor: l.codigo, rotulo: l.rotulo }; });
     return [];
   }
@@ -1088,7 +1088,9 @@ var Registro = (function () {
     App.faixa('rascunho-falhou', { tipo: 'aviso', texto: 'Não foi possível guardar o rascunho (' + e.message + '). Não feche esta tela antes de gravar.' });
   }
   function tocar(s) {
+    var antes = s.alterado;
     s.alterado = true;
+    if (!antes && s.view && s.view.acoes) desenharAcoes(s);
     App.removerFaixa('rascunho-falhou');
     s.salvarAdiado();
   }
@@ -1138,7 +1140,7 @@ var Registro = (function () {
         if (d.id === 'campo') return Object.assign({}, d, { tipo: 'lista' });
         if (d.id !== 'valor_novo') return d;
         var c = corr[linha.valores.campo];
-        return c ? Object.assign({}, d, { tipo: c.tipo, opcoes: c.opcoes, min: c.min, max: c.max, ajuda: c.tipo === 'lista' || c.tipo === 'bool' ? null : d.ajuda }) : Object.assign({}, d, { visivel_se: { campo: 'campo', preenchido: true } });
+        return c ? Object.assign({}, d, { tipo: c.tipo, opcoes: c.opcoes, min: c.min, max: c.max, rotulos_de: linha.valores.campo, ajuda: c.tipo === 'lista' || c.tipo === 'bool' ? null : d.ajuda }) : Object.assign({}, d, { visivel_se: { campo: 'campo', preenchido: true } });
       });
     }
     return base;
@@ -1488,7 +1490,7 @@ var Registro = (function () {
       linhas.push(['Animais', plural(d.animais.length, 'animal', 'animais') + (novos.length && novos.length < d.animais.length ? ' (' + novos.length + ' novos)' : '')]);
       var sexos = { M: 0, F: 0 };
       novos.forEach(function (a) { if (sexos[a.sexo] !== undefined) sexos[a.sexo] += 1; });
-      if (novos.length) linhas.push(['Sexo', sexos.M + ' machos · ' + sexos.F + ' fêmeas']);
+      if (novos.length) linhas.push(['Sexo', plural(sexos.M, 'macho', 'machos') + ' · ' + plural(sexos.F, 'fêmea', 'fêmeas')]);
       var porPasto = {};
       d.animais.forEach(function (a) { if (a.pasto_destino_id) porPasto[a.pasto_destino_id] = (porPasto[a.pasto_destino_id] || 0) + 1; });
       var pp = Object.keys(porPasto).map(function (p) { var x = Store.pasto(p); return (x ? x.nome : 'Pasto') + ': ' + porPasto[p]; });

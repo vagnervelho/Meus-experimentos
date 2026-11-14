@@ -185,7 +185,7 @@ test('formulário do catálogo: todos os campos com rótulo, padrões, visivel_s
   await preencherCartao(page, 0, { brinco: '0700', origem: 'Comprado' });
   await page.click('button:has-text("+ Outro animal")');
   assert.equal(await page.locator(cartoes).count(), 2);
-  assert.equal(await page.inputValue(page.locator(cartoes).nth(1).locator('[data-campo="pasto_destino_id"] select')), novo.pasture_id, 'o novo animal herda o pasto do anterior');
+  assert.equal(await page.locator(cartoes).nth(1).locator('[data-campo="pasto_destino_id"] select').inputValue(), novo.pasture_id, 'o novo animal herda o pasto do anterior');
   // Enter percorre os campos sem enviar.
   await page.focus(cartoes + ' >> nth=1 >> [data-campo="brinco"] input');
   await page.keyboard.press('Enter');
@@ -334,7 +334,8 @@ for (const modo of ['aparelho', 'servidor']) {
     const chave = await page.evaluate(() => window.Registro.sessao('OUTRA_ENTRADA').chave);
     if (modo === 'servidor') await page.waitForFunction(() => window.__gas.pedidos.some((p) => p.rota === 'rascunho.salvar' && p.dados.chave === 'indice'), null, { timeout: 8000 });
     else await page.waitForTimeout(700);
-    await page.goto(A.ORIGEM + '/app#/inicio');
+    await A.ir(page, 'inicio', 'Início');
+    await page.reload();
     await A.esperarTela(page, 'Início');
     const faixa = page.locator('[data-faixa="rascunho-OUTRA_ENTRADA"]');
     await faixa.waitFor();
@@ -400,8 +401,10 @@ test('sem resposta em 45 s: "Verificando se gravou…", operacao.status CONFIRMA
   assert.match(await page.textContent('[data-resultado]'), /o servidor confirmou a gravação/);
   assert.ok(a.pedidos('operacao.status').length >= 1);
   const regs = a.pedidos('evento.registrar');
-  assert.equal(regs.length, 3, 'falha de transporte, envio sem resposta, reenvio depois de CONFIRMADA');
-  assert.equal(new Set(regs.map((r) => r.idempotencyKey)).size, 1);
+  assert.equal(regs.length, 2, 'no servidor: o envio sem resposta e o reenvio depois de CONFIRMADA');
+  const daPagina = (await page.evaluate(() => window.__gas.pedidos)).filter((p) => p.rota === 'evento.registrar');
+  assert.equal(daPagina.length, 3, 'na página: + o envio que falhou no transporte');
+  assert.equal(new Set(daPagina.map((r) => r.idempotencyKey)).size, 1);
   assert.equal(eventosCom(s, regs[0].idempotencyKey).length, 1, 'nada duplicado');
   await a.fechar();
 });
@@ -531,7 +534,7 @@ test('componentes: tabela ordenável e paginada vira cartões abaixo de 900 px; 
   const graficos = page.locator(t + ' figure.grafico');
   assert.equal(await graficos.count(), 2);
   const linha = graficos.nth(0);
-  assert.equal(await linha.locator('svg').getAttribute('role'), 'img');
+  assert.equal(await linha.locator('svg[role=img]').count(), 1);
   assert.equal(await linha.locator('polyline').count(), 0, 'com o buraco de outubro, nenhum trecho de 2 pontos seguidos');
   assert.match(await linha.textContent(), /Dados insuficientes para desenhar a linha de Lote 2/);
   assert.equal(await linha.locator('.grafico-tabela tbody tr').count(), 3, 'tabela equivalente: uma linha por mês');
