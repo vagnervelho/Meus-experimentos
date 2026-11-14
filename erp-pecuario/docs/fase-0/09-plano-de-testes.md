@@ -2,7 +2,7 @@
 
 ## Em resumo
 
-- **Três níveis**: 1 em Node contra fakes fiéis, a cada commit; 2 no Apps Script, pelo dono, em planilha temporária; 3 de interface, com Playwright. Cada um declara o que prova e o que não prova.
+- **Três níveis**: 1 em Node contra fakes fiéis, a cada commit; 2 no Apps Script, pelo dono, em planilha temporária; 3 de interface, com Playwright.
 - **20 cenários com valores fechados**: CT-01 a CT-10 são os da §18, marcador por marcador; CT-11 a CT-20 cobrem o que ela não alcança.
 - **Protocolo de gravação testado por queda injetada** em cada ponto da análise de `06-persistencia-e-integridade.md` e por intercalação de execuções.
 - **Nenhuma das 20 regras da §16 fica sem teste** (seção 6); RN marcada "novo" em `05-regras-de-negocio.md` ganha caso próprio (seção 4.1).
@@ -101,7 +101,7 @@
 **Verificações:**
 - Inventário: Pasto 1 com 5 em 19/08 e 0 em 20/08; ANIMAIS VENDIDO, `data_saida` 20/08, pasto vazio.
 - Tabelas: VENDAS 1; EVENTO_ANIMAIS 5 linhas −1; PESAGENS 5 (VENDA); `partner_id` = C1.
-- Receita: RECEITA_VENDA_ANIMAIS de R$ 22.760,00, parcela aberta para 19/09, alocada em 4.500,00, 4.620,00, 4.380,00, 4.710,00 e 4.550,00; DESPESA_VENDA de 455,20 (90,00 a 94,20 por animal). Resultado da negociação: 22.304,80.
+- Receita: RECEITA_VENDA_ANIMAIS de R$ 22.760,00, parcela aberta para 19/09, alocada em 4.500,00, 4.620,00, 4.380,00, 4.710,00 e 4.550,00; DESPESA_VENDA de 455,20 (87,60 a 94,20 por animal). Resultado da negociação: 22.304,80.
 - Histórico: a ficha de 0401 mantém entrada e registros anteriores.
 
 ### CT-05: Pesagem
@@ -132,7 +132,7 @@
 
 **Passos:**
 1. Aplicação com dose 0.
-2. SANIDADE/VACINACAO em 05/04/2026: 30 animais, POR_CABECA, 1 dose, `quantidade_consumida_total` 30.
+2. SANIDADE/VACINACAO em 05/04/2026: 30 animais, POR_CABECA, 1 dose, `quantidade_consumida_total` 30, vinculada ao protocolo.
 3. `sanidade.agenda` com o relógio em 20/09 e em 13/11/2026.
 
 **Verificações:**
@@ -175,7 +175,7 @@
 |15/02/2026|102|52|50|transferência não muda o total|
 |31/03/2026|96|51|45|100+2−5−1|
 
-- Estornada a venda, 31/03 passa a 101 (51 e 50): o passado é recalculado com os eventos vigentes.
+- Estornada a venda, 31/03 passa a 101 (51 e 50).
 - A reconstrução total das projeções produz ANIMAIS idêntico ao gravado.
 
 ### CT-09: Integridade
@@ -207,7 +207,7 @@
 **Passos e verificações:**
 1. PESAGEM de 1001 (410,0 kg) duas vezes com a chave K1: a segunda devolve `duplicado: true` e o mesmo `event_id`; 1 linha em EVENTOS e em PESAGENS.
 2. K1 com 415,0 kg: IDEMPOTENCY_MISMATCH.
-3. Mesma pesagem com chave nova: aviso POSSIVEL_DUPLICIDADE (100% ≥ 80%); com `avisosAceitos`, grava.
+3. Mesma pesagem com chave nova: aviso POSSIVEL_DUPLICIDADE; com `avisosAceitos`, grava.
 4. Resposta perdida depois do commit: `operacao.status` devolve CONFIRMADA; o cliente não reenvia.
 5. Lock tomado: LOCKED após 25 s; nova tentativa com a mesma chave grava uma vez.
 6. Real: a página de concorrência dispara 5 comandos paralelos com chaves diferentes e 2 com a mesma chave. Esperado: 6 eventos com `event_seq` distintos, 1 resposta `duplicado: true`, nenhuma linha intercalada.
@@ -261,7 +261,7 @@
 
 **Massa:** compra de 0801–0803 por R$ 9.000,00 em 2 parcelas de 4.500,00; frete lançado como R$ 30,00.
 
-**Passos e verificações:** (1) baixar a parcela 2 com juros de 45,00 e `valor_pago` 4.500,00: VALIDATION (exige 4.545,00); (2) `parcela.baixar` da parcela 1: LIQUIDADA; (3) `evento.estornar`: CONFLICT "desfaça a baixa antes"; (4) `evento.corrigir` com frete de 300,00: aceito, a baixa é transportada e o custo de aquisição vai de 3.010,00 a 3.100,00 por animal; (5) `evento.corrigir` com a parcela 1 em 5.000,00: CONFLICT; (6) `parcela.desfazerBaixa` e estorno: aceito.
+**Passos e verificações:** (1) baixar a parcela 2 com juros de 45,00 e `valor_pago` 4.500,00: VALIDATION (exige 4.545,00); (2) `parcela.baixar` da parcela 1: LIQUIDADA; (3) `evento.estornar`: CONFLICT; (4) `evento.corrigir` com frete de 300,00: aceito, a baixa é transportada e o custo de aquisição vai de 3.010,00 a 3.100,00 por animal; (5) `evento.corrigir` com a parcela 1 em 5.000,00: CONFLICT; (6) `parcela.desfazerBaixa` e estorno: aceito.
 
 ### CT-16: Exportação
 
@@ -426,7 +426,7 @@ Regex sobre `src/`, cada regra com autoteste de detecção:
 ## 10. Modelo do relatório de testes por fase
 
 ```text
-RELATÓRIO DE TESTES — FASE n — commit <hash> — <data>
+RELATÓRIO DE TESTES, FASE n, commit <hash>, <data>
 
 1. EXECUTADO AQUI (Node)
    comando: npm test      resultado: <passaram>/<total>
