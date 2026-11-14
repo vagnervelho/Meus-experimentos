@@ -386,10 +386,9 @@ test('Code.js: superfície pública EXATA (as oito do desenho), cada uma começa
   // Autoteste do leitor: pega função a mais e guarda fora do começo.
   const ruim = funcoesDeTopo('function api(p) {\n  return Api.tratar(p);\n}\nfunction extra(e) {\n  var guarda = assertOwner_(e);\n}\n');
   assert.deepEqual(ruim.map((f) => [f.nome, /^var guarda = assertOwner_\(/.test(f.primeira)]), [['api', false], ['extra', true]]);
-  // Na carga, o contexto só ganha essas funções globais (e as auxiliares com _).
-  const gas = createGas();
-  const globais = Object.keys(gas.G).filter((k) => typeof gas.G[k] === 'function' && fontes['Code.js'].indexOf('function ' + k + '(') >= 0);
-  assert.deepEqual(globais.filter((k) => !/_$/.test(k)).sort(), PUBLICAS.slice().sort());
+  // Carregadas, as oito existem como funções globais (as demais globais são namespaces ou terminam em _: teste de carga).
+  const gas = createGas({ order: 'reverse' });
+  PUBLICAS.forEach((f) => assert.equal(typeof gas.G[f], 'function', f));
 });
 
 test('rotas: a lista canônica (desenho-base, 15.3) é a do código; toda rota tem tratador ou NOT_FOUND explícito de fase futura', () => {

@@ -305,6 +305,12 @@ test('manutenção pela api: backup, estado do sistema, integridade com reparo; 
   const rep = chamar(s, { rota: 'sistema.integridade', dados: { reparar: true, justificativa: 'conferência' } }).data;
   assert.equal(rep.integridade.ok, true);
   assert.equal(chamar(s, { rota: 'sistema.restaurarBackup', dados: { backup_id: 'nao-existe' } }).error.code, 'NOT_FOUND');
+  // Planilha-banco inacessível (apagada, sem permissão): CONFIG com instrução, a causa só no log.
+  s.gas.planilhas.tornarInacessivel(s.banco());
+  const r = chamar(s, { rota: 'evento.listar', dados: {} });
+  assert.equal(r.error.code, 'CONFIG');
+  assert.match(r.error.message, /restaure um backup/);
+  assert.ok(s.gas.logs.some((l) => l[0] === 'error' && /planilha-banco inacessível/.test(String(l[1][0]))));
 });
 
 test('páginas: doGet sem a interface instalada mostra o aviso com título e viewport; ?pagina=concorrencia só fala com a base de TESTE; include por lista branca', () => {
