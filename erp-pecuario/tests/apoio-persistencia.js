@@ -151,7 +151,10 @@ function cmdPasto(G, opcoes) {
       G.AuditService.criacao(tx, 'PASTOS', id, Object.assign({ property_id: PROPRIEDADE, posse: 'PROPRIO', status: 'ATIVO' }, d.campos));
       return { resumo: { pasture_id: id }, resposta: (t) => ({ pasture_id: id, existe: !!t.repo.porId('PASTOS', id) }) };
     },
-    reconstruir: (tx, op) => ({ pasture_id: op.resumo.pasture_id, existe: !!tx.repo.porId('PASTOS', op.resumo.pasture_id) }),
+    // Duplicado devolve a MESMA forma da resposta original: edição → {pasture_id, campos}; criação → {pasture_id, existe}.
+    reconstruir: (tx, op) => (op.resumo.campos !== undefined
+      ? { pasture_id: op.resumo.pasture_id, campos: op.resumo.campos }
+      : { pasture_id: op.resumo.pasture_id, existe: !!tx.repo.porId('PASTOS', op.resumo.pasture_id) }),
   };
 }
 
