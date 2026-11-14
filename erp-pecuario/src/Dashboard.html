@@ -1,0 +1,79 @@
+<script>
+'use strict';
+/*
+ * ERP Pecuário — tela Início (08-ux-ui.md, seção 3, "Visão geral" da Fase 1): cabeças, sexo, pastos e categorias
+ * do rebanho de hoje, pendências (alertas do servidor) e registros não concluídos (rascunhos). Tudo vem do store
+ * (carga inicial), sem ida ao servidor. A versão completa do dashboard (filtros, 16 indicadores, 9 gráficos,
+ * dashboard.obter) cresce a partir desta tela.
+ */
+var TelaInicio = (function () {
+  var h = Util.h;
+  function contarPor(itens, chave) {
+    var m = {};
+    itens.forEach(function (a) { var k = chave(a); m[k] = (m[k] || 0) + 1; });
+    return m;
+  }
+  function indicador(rotulo, valor, nota) {
+    return h('div', { class: 'indicador' }, h('div', { class: 'indicador-rotulo', text: rotulo }), h('div', { class: 'indicador-valor', text: valor }), nota ? h('div', { class: 'indicador-nota', text: nota }) : null);
+  }
+  function montar(el) {
+    var ativos = Store.animais().filter(function (a) { return a.situacao_cadastral === 'ATIVO'; });
+    var hoje = Fmt.hoje();
+    var porSexo = contarPor(ativos, function (a) { return a.sexo || '?'; });
+    el.appendChild(h('div', { class: 'tela-cabecalho' }, h('h1', { text: 'Início' }),
+      h('span', { class: 'suave', text: 'Dados de ' + Fmt.instante(new Date(Store.atualizadoEm()).toISOString()) })));
+    if (!Store.param('data_marco_zero') || !Store.propriedades().length) {
+      el.appendChild(UI.nota('Para começar: cadastre a propriedade e os pastos nas configurações e registre o rebanho inicial (ou importe a planilha dos animais).', 'info'));
+    }
+    var cartoes = h('div', { class: 'grade-cartoes', role: 'list', 'aria-label': 'Rebanho em ' + Fmt.data(hoje) },
+      indicador('Cabeças', Fmt.numero(ativos.length), 'em ' + Fmt.dataCurta(hoje)),
+      indicador('Machos', Fmt.numero(porSexo.M || 0), 'em ' + Fmt.dataCurta(hoje)),
+      indicador('Fêmeas', Fmt.numero(porSexo.F || 0), 'em ' + Fmt.dataCurta(hoje)),
+      indicador('Pastos ativos', Fmt.numero(Store.pastos().length), Store.pastos().filter(function (p) { return p.posse === 'ARRENDADO'; }).length + ' arrendados'));
+    Array.prototype.forEach.call(cartoes.children, function (c) { c.setAttribute('role', 'listitem'); });
+    el.appendChild(cartoes);
+
+    var pend = h('section', { class: 'cartao', 'aria-labelledby': 'inicio-pend' }, h('h2', { id: 'inicio-pend', text: 'Pendências' }));
+    var lista = h('ul', { class: 'lista-simples' });
+    pend.appendChild(lista);
+    el.appendChild(pend);
+    var alertas = (Store.alertas().alertas || []);
+    alertas.forEach(function (a) {
+      lista.appendChild(h('li', { class: 'linha-acao', dataset: { alerta: a.codigo } }, h('span', { class: 'campo-linha' }, UI.icone(a.nivel === 'ERRO' ? 'erro' : 'aviso'), h('span', { text: a.mensagem }))));
+    });
+    Rascunhos.listar().then(function (rs) {
+      if (!el.isConnected) return;
+      rs.filter(function (r) { return Store.tipoEvento(r.tipo); }).forEach(function (r) {
+        lista.appendChild(h('li', { class: 'linha-acao', dataset: { rascunho: r.tipo } }, h('span', { class: 'campo-linha' }, UI.icone('editar'), h('span', { text: Registro.descricaoRascunho(r) })),
+          h('div', { class: 'acoes', style: 'margin-top:0' },
+            h('a', { class: 'botao botao-secundario', href: Roteador.href('evento/novo/' + r.tipo), dataset: { rota: 'evento/novo/' + r.tipo } }, 'Continuar'),
+            UI.botao('Descartar', { tipo: 'texto', aoClicar: async function () {
+              var ok = await UI.confirmar({ titulo: 'Descartar o rascunho?', texto: Registro.descricaoRascunho(r) + '. O que foi digitado será apagado.', verbo: 'Descartar o rascunho', cancelar: 'Manter', perigo: true });
+              if (!ok) return;
+              await Registro.descartar(r.tipo);
+              App.removerFaixa('rascunho-' + r.tipo);
+              Roteador.ir('inicio', { forcar: true, substituir: true });
+            } }))));
+      });
+      if (!lista.children.length) lista.appendChild(h('li', { class: 'suave', text: 'Nenhuma pendência.' }));
+    }, function (e) {
+      lista.appendChild(h('li', null, UI.nota('Não foi possível ler os rascunhos: ' + e.message, 'aviso')));
+    });
+
+    var pastos = Store.pastos();
+    if (pastos.length) {
+      el.appendChild(UI.grafico({ tipo: 'barras', titulo: 'Cabeças por pasto em ' + Fmt.data(hoje), rotuloX: 'Pasto', series: [{ nome: 'Cabeças', pontos: pastos.map(function (p) { return { x: p.nome, y: p.cabecas === null || p.cabecas === undefined ? null : p.cabecas }; }) }] }));
+    }
+    if (ativos.length) {
+      var porCat = contarPor(ativos, function (a) { return a.categoria_id || ''; });
+      var pontos = Store.categorias().filter(function (c) { return porCat[c.category_id]; }).map(function (c) { return { x: c.nome, y: porCat[c.category_id] }; });
+      if (porCat['']) pontos.push({ x: 'Sem categoria', y: porCat[''] });
+      el.appendChild(UI.grafico({ tipo: 'barras', titulo: 'Cabeças por categoria em ' + Fmt.data(hoje), rotuloX: 'Categoria', series: [{ nome: 'Cabeças', pontos: pontos }] }));
+    } else {
+      el.appendChild(UI.vazio({ texto: 'Nenhum animal no rebanho ainda.', acao: App.podeRegistrar() ? { texto: 'Registrar o rebanho', aoClicar: function () { Roteador.ir('evento/novo'); } } : null }));
+    }
+  }
+  Telas.registrar('inicio', { titulo: 'Início', modulo: 'DASHBOARD', montar: montar });
+  return { montar: montar };
+})();
+</script>

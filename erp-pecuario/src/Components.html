@@ -485,7 +485,6 @@ var Campos = (function () {
     var id = (o.idBase || 'c') + '-' + def.id + '-' + seq;
     var atual = o.valor;
     var el = h('div', { class: 'campo', dataset: { campo: def.id, tipo: def.tipo } });
-    var rotulo = h('span', { class: 'campo-rotulo', id: id + '-r', text: rotuloDe(def) });
     var ajuda = def.ajuda ? h('div', { class: 'campo-ajuda', id: id + '-a', text: def.ajuda }) : null;
     var erroEl = h('div', { class: 'campo-erro', id: id + '-e', hidden: true });
     var controle = null, focavel = null;
@@ -554,7 +553,7 @@ var Campos = (function () {
       controle = prefixo || sufixo ? h('div', { class: 'campo-linha' }, prefixo, inp, sufixo) : inp;
       focavel = function () { return inp; };
     }
-    if (!controle.matches || !controle.matches('fieldset') && !COMPOSTOS[def.id]) {
+    if (!controle.matches('fieldset') && !COMPOSTOS[def.id]) {
       el.appendChild(h('label', { class: 'campo-rotulo', id: id + '-r', for: (focavel() && focavel().id) || null, text: rotuloDe(def) }));
     }
     el.appendChild(controle);
@@ -745,16 +744,9 @@ var Formulario = (function () {
     }
     atualizar();
     function converter() {
-      var v = contexto(), out = {}, erros = [];
-      defs.forEach(function (d) {
-        if (!Campos.visivel(d, v)) return;
-        var r = Campos.converter(d, valores[d.id]);
-        if (r.erro) { erros.push({ campo: d.id, mensagem: r.erro }); return; }
-        if (r.valor === null && Campos.obrigatorio(d, v)) { erros.push({ campo: d.id, mensagem: d.tipo === 'lista' || d.tipo === 'bool' || /^ref:/.test(d.tipo) ? 'Escolha uma opção.' : 'Preencha este campo.' }); return; }
-        out[d.id] = r.valor;
-      });
-      erros.forEach(function (e) { ctrls[e.campo].erro(e.mensagem); });
-      return { valores: out, erros: erros };
+      var r = converterValores(defs, valores, contexto());
+      r.erros.forEach(function (e) { ctrls[e.campo].erro(e.mensagem); });
+      return r;
     }
     function mostrarErros(details) {
       var n = 0;
@@ -776,6 +768,24 @@ var Formulario = (function () {
   }
 
   /**
+   * Conversão sem tela (mesma regra do bloco): só os campos visíveis entram; vazio vira null; obrigatório vazio e
+   * formato inválido viram erro {campo, mensagem}. `contexto` = valores para as condicionais (padrão: `valores`).
+   */
+  function converterValores(defs, valores, contexto) {
+    var v = contexto || valores, out = {}, erros = [];
+    defs.forEach(function (d) {
+      if (valores[d.id] === undefined) { var p = Campos.padrao(d); if (p !== undefined) valores[d.id] = p; }
+    });
+    defs.forEach(function (d) {
+      if (!Campos.visivel(d, v)) return;
+      var r = Campos.converter(d, valores[d.id]);
+      if (r.erro) { erros.push({ campo: d.id, mensagem: r.erro }); return; }
+      if (r.valor === null && Campos.obrigatorio(d, v)) { erros.push({ campo: d.id, mensagem: d.tipo === 'lista' || d.tipo === 'bool' || /^ref:/.test(d.tipo) ? 'Escolha uma opção.' : 'Preencha este campo.' }); return; }
+      out[d.id] = r.valor;
+    });
+    return { valores: out, erros: erros };
+  }
+  /**
    * Enter percorre os campos (08, seção 14): no campo de texto, Enter leva ao próximo campo (ou ao botão principal),
    * sem enviar. Campos com Enter próprio (busca de brinco) marcam data-enter-proprio.
    */
@@ -796,7 +806,7 @@ var Formulario = (function () {
       else if (principal()) principal().focus();
     });
   }
-  return { bloco: bloco, enterPercorre: enterPercorre };
+  return { bloco: bloco, converterValores: converterValores, enterPercorre: enterPercorre };
 })();
 
 var Seletor = (function () {
@@ -836,11 +846,7 @@ var Seletor = (function () {
     var modoAtual = 'busca';
     var botoesModo = {};
     function elegivel(a) { return motivoInelegivel(a, o.filtro, o.valorCampo); }
-    function candidatos() {
-      var base = baixados ? [] : Store.animais();
-      if (baixados) base = (Store.animais().concat(Store.carregarBaixados.cache || [])).filter(function (a) { return !elegivel(a); });
-      return base;
-    }
+    function candidatos() { return baixados ? Store.animais().concat(Store.baixados() || []) : Store.animais(); }
     function mudou() { if (o.aoMudar) o.aoMudar(ids.slice()); desenharSelecionados(); }
     function adicionar(novos) {
       var antes = ids.length;
@@ -871,11 +877,11 @@ var Seletor = (function () {
       }), cands.length > 30 ? h('li', { class: 'suave', text: 'e mais ' + (cands.length - 30) + '. Refine a busca.' }) : null);
     }
     async function garantirBaixados(alvo) {
-      if (!baixados || Store.carregarBaixados.cache) return true;
+      if (!baixados || Store.baixados()) return true;
       var c = UI.carregando('Buscando os animais que saíram do rebanho…');
       alvo.appendChild(c);
       try {
-        Store.carregarBaixados.cache = await Store.carregarBaixados();
+        await Store.carregarBaixados();
         if (c.parentNode) c.parentNode.removeChild(c);
         return true;
       } catch (e) {
@@ -1019,3 +1025,906 @@ var Seletor = (function () {
   }
   return { criar: criar, motivoInelegivel: motivoInelegivel, precisaBaixados: precisaBaixados };
 })();
+
+var Registro = (function () {
+  var h = Util.h;
+  var GRUPOS = ['Movimentação', 'Manejo', 'Reprodução', 'Financeiro', 'Correções'];
+  /** Campos do animal novo que ficam à vista; os demais vão para "Mais dados deste animal" (os obrigatórios sempre à vista). */
+  var PRINCIPAIS_ANIMAL = ['brinco', 'nome', 'sexo', 'data_nascimento', 'idade_meses', 'pasto_destino_id', 'origem'];
+  /** Animal que volta ao rebanho (OUTRA_ENTRADA de animal existente): só estes campos (contrato do EventService). */
+  var CAMPOS_VOLTA = ['brinco', 'pasto_destino_id', 'observacoes'];
+  var VERBOS = { ENTRADA_INICIAL: 'Gravar o rebanho inicial', OUTRA_ENTRADA: 'Gravar a entrada', AJUSTE_INVENTARIO: 'Gravar a correção', ESTORNO: 'Estornar' };
+  var ROTAS = { ESTORNO: 'evento.estornar' };
+  var sessoes = {};
+  var uidSeq = 0;
+  function uid() { uidSeq += 1; return 'l' + uidSeq + '-' + Util.uuid().slice(0, 4); }
+  function idRascunho(tipo) { return 'evento.' + tipo; }
+  function rotaDoForm(tipo) { return 'evento/novo/' + tipo; }
+  function rotaComando(tipo) { return ROTAS[tipo] || 'evento.registrar'; }
+  function verbo(s) { return VERBOS[s.tipo] || ('Gravar ' + s.def.rotulo.toLowerCase()); }
+  function plural(n, um, varios) { return n + ' ' + (n === 1 ? um : varios); }
+
+  // ------------------------------------------------------------------ sessão e rascunho ----
+  function novaSessao(tipo, def, previa) {
+    var p = previa || {};
+    var s = {
+      tipo: tipo, def: def, chave: Util.uuid(), subtipo: p.subtipo || null, campos: Util.clonar(p.campos || {}), linhas: [], grupos: {},
+      rotulos: Util.clonar(p.rotulos || {}), origem: p.origem || null, estado: 'EDITANDO', alterado: !!previa, restaurado: null,
+      erros: [], avisos: [], aceites: {}, justificativaAviso: '', simulacao: null, dvEsperada: null, resultado: null, envio: null, view: null, removidosComProblema: 0,
+    };
+    (p.linhas || []).forEach(function (l) { s.linhas.push({ uid: uid(), animal_id: l.animal_id || null, valores: Util.clonar(l.valores || {}), erros: [] }); });
+    if (def.selecao_animais === 'NOVOS' && !s.linhas.length) s.linhas.push(linhaNova_(s));
+    Object.keys(def.grupos_repetiveis || {}).forEach(function (g) { s.grupos[g] = []; });
+    s.salvarAdiado = Util.adiar(function () { salvarRascunho(s).catch(function (e) { avisarFalhaRascunho_(e); }); }, 400);
+    return s;
+  }
+  function linhaNova_(s, anterior) {
+    var v = {};
+    if (anterior) ['pasto_destino_id', 'origem', 'raca'].forEach(function (k) { if (!Util.vazio(anterior.valores[k])) v[k] = anterior.valores[k]; });
+    return { uid: uid(), animal_id: null, valores: v, erros: [] };
+  }
+  function paraRascunho(s) {
+    return {
+      versao: 1, tipo: s.tipo, rotulo: s.def.rotulo, chave: s.chave, estado: s.estado, subtipo: s.subtipo, campos: s.campos, rotulos: s.rotulos, origem: s.origem,
+      linhas: s.linhas.map(function (l) { return { animal_id: l.animal_id, valores: l.valores }; }), grupos: s.grupos,
+      data: s.campos.event_date || null, n: s.linhas.length, envio: s.envio,
+    };
+  }
+  function deRascunho(def, r) {
+    var s = novaSessao(r.tipo, def, { subtipo: r.subtipo, campos: r.campos, rotulos: r.rotulos, origem: r.origem, linhas: r.linhas });
+    s.chave = r.chave;
+    s.estado = r.estado || 'EDITANDO';
+    s.grupos = r.grupos || s.grupos;
+    s.envio = r.envio || null;
+    s.restaurado = r.salvo_em || null;
+    s.alterado = true;
+    return s;
+  }
+  async function salvarRascunho(s, o) {
+    if (!s.alterado && s.estado === 'EDITANDO') return null;
+    return Rascunhos.salvar(idRascunho(s.tipo), paraRascunho(s), o);
+  }
+  function avisarFalhaRascunho_(e) {
+    App.faixa('rascunho-falhou', { tipo: 'aviso', texto: 'Não foi possível guardar o rascunho (' + e.message + '). Não feche esta tela antes de gravar.' });
+  }
+  function tocar(s) {
+    s.alterado = true;
+    App.removerFaixa('rascunho-falhou');
+    s.salvarAdiado();
+  }
+  /** Sessão do tipo: a da memória, ou a do rascunho guardado, ou uma nova (chave nova). */
+  async function sessao(tipo, def) {
+    if (sessoes[tipo]) return sessoes[tipo];
+    var r = await Rascunhos.obter(idRascunho(tipo));
+    sessoes[tipo] = r && r.tipo === tipo ? deRascunho(def, r) : novaSessao(tipo, def);
+    return sessoes[tipo];
+  }
+  async function descartar(tipo) {
+    var s = sessoes[tipo];
+    if (s && s.salvarAdiado.pendente()) s.salvarAdiado.agora();
+    await Rascunhos.remover(idRascunho(tipo));
+    delete sessoes[tipo];
+  }
+  /**
+   * Abre o formulário de um tipo já preenchido (atalhos da ficha, do pasto, da listagem e o "Desfazer").
+   * previa: {subtipo, campos (brutos), linhas: [{animal_id, valores}], rotulos: {event_id: texto}, origem (rota de volta)}.
+   * Se já houver rascunho desse tipo, pergunta antes de substituí-lo.
+   */
+  async function abrir(tipo, previa) {
+    var def = Store.tipoEvento(tipo);
+    if (!def) { UI.aviso('Este registro não está disponível nesta fase.', { tipo: 'erro' }); return false; }
+    var existente = sessoes[tipo] || await Rascunhos.obter(idRascunho(tipo));
+    if (existente && (existente.alterado !== false)) {
+      var ok = await UI.confirmar({ titulo: 'Há um rascunho de ' + def.rotulo.toLowerCase(), texto: 'Começar este registro apaga o rascunho anterior deste tipo, que ainda não foi gravado.', verbo: 'Apagar o rascunho e começar', cancelar: 'Manter o rascunho', perigo: true });
+      if (!ok) { Roteador.ir(rotaDoForm(tipo)); return false; }
+      await descartar(tipo);
+    }
+    sessoes[tipo] = novaSessao(tipo, def, previa || {});
+    tocar(sessoes[tipo]);
+    Roteador.ir(rotaDoForm(tipo), { forcar: true });
+    return true;
+  }
+
+  // ------------------------------------------------------------------ montagem do pedido ----
+  function defsLinha(s, linha) {
+    var def = s.def;
+    var sub = s.subtipo && def.subtipos ? def.subtipos[s.subtipo] : null;
+    var base = (sub && sub.campos_animal) || def.campos_animal || [];
+    base = base.filter(function (d) { return d.id !== 'animal_id'; });
+    if (linha.animal_id && def.selecao_animais === 'NOVOS') base = base.filter(function (d) { return CAMPOS_VOLTA.indexOf(d.id) >= 0; });
+    var corr = sub && sub.campos_corrigiveis;
+    if (corr) {
+      base = base.map(function (d) {
+        if (d.id === 'campo') return Object.assign({}, d, { tipo: 'lista' });
+        if (d.id !== 'valor_novo') return d;
+        var c = corr[linha.valores.campo];
+        return c ? Object.assign({}, d, { tipo: c.tipo, opcoes: c.opcoes, min: c.min, max: c.max, ajuda: c.tipo === 'lista' || c.tipo === 'bool' ? null : d.ajuda }) : Object.assign({}, d, { visivel_se: { campo: 'campo', preenchido: true } });
+      });
+    }
+    return base;
+  }
+  function camposEvento(s) { return s.def.campos || []; }
+  function temCamposPorAnimal(s) { return s.linhas.some(function (l) { return defsLinha(s, l).length > 0; }) || (s.def.campos_animal || []).length > 0; }
+  /** Pedido do contrato (CONTRATOS, 14): {tipo, subtipo, campos, animais[, grupos]}; no estorno, {event_id, justificativa}. */
+  function montarDados(s) {
+    var erros = [];
+    var cEv = Formulario.converterValores(camposEvento(s), s.campos);
+    cEv.erros.forEach(function (e) { erros.push({ campo: e.campo, mensagem: e.mensagem, nivel: 'EVENTO' }); });
+    if (s.tipo === 'ESTORNO') return { dados: cEv.valores, erros: erros };
+    if (s.def.subtipos && !s.subtipo) erros.push({ campo: '__subtipo', mensagem: 'Escolha o que corrigir.', nivel: 'EVENTO' });
+    var sub = s.subtipo && s.def.subtipos ? s.def.subtipos[s.subtipo] : null;
+    var animais = [];
+    s.linhas.forEach(function (l, i) {
+      var c = Formulario.converterValores(defsLinha(s, l), l.valores, Object.assign({}, s.campos, l.valores));
+      c.erros.forEach(function (e) { erros.push({ campo: e.campo, mensagem: e.mensagem, nivel: 'ANIMAL', linha: l.uid }); });
+      var item = c.valores;
+      if (l.animal_id) item = Object.assign({ animal_id: l.animal_id }, item);
+      if (sub && sub.campos_corrigiveis && Object.prototype.hasOwnProperty.call(item, 'valor_novo')) {
+        var t = (sub.campos_corrigiveis[item.campo] || {}).tipo;
+        var v = item.valor_novo;
+        item.valor_novo = v === null || v === undefined ? '' : t === 'bool' ? (v ? 'S' : 'N') : String(v);
+      } else if (sub && sub.campos_corrigiveis && item.campo) item.valor_novo = '';
+      animais.push(item);
+    });
+    if (s.def.selecao_animais !== 'NENHUM' && !animais.length) erros.push({ campo: '__animais', mensagem: s.def.selecao_animais === 'NOVOS' ? 'Inclua pelo menos um animal.' : 'Escolha pelo menos um animal.', nivel: 'EVENTO' });
+    var dados = { tipo: s.tipo, campos: cEv.valores, animais: animais };
+    if (s.subtipo) dados.subtipo = s.subtipo;
+    Object.keys(s.def.grupos_repetiveis || {}).forEach(function (g) {
+      dados[g] = (s.grupos[g] || []).map(function (row, k) {
+        var c = Formulario.converterValores(s.def.grupos_repetiveis[g], row.valores);
+        c.erros.forEach(function (e) { erros.push({ campo: e.campo, mensagem: e.mensagem, nivel: 'GRUPO', grupo: g, linha: row.uid }); });
+        return c.valores;
+      });
+    });
+    if (s.justificativaAviso) dados.justificativa_aviso = s.justificativaAviso;
+    return { dados: dados, erros: erros };
+  }
+  /** Liga cada detalhe do servidor à linha do animal: animal_id → brinco → "Animal N da lista". O resto é do evento. */
+  function mapearErros(s, details) {
+    s.linhas.forEach(function (l) { l.erros = []; });
+    var gerais = [];
+    (details || []).forEach(function (d) {
+      var alvo = null;
+      if (d.animal_id) alvo = s.linhas.filter(function (l) { return l.animal_id === d.animal_id; })[0] || null;
+      if (!alvo && d.brinco) {
+        var b = Store.normalizarBrinco(d.brinco, true);
+        alvo = s.linhas.filter(function (l) {
+          var br = l.animal_id ? ((Store.animal(l.animal_id) || {}).brinco || l.valores.brinco) : l.valores.brinco;
+          return br && Store.normalizarBrinco(br, true) === b;
+        })[0] || null;
+      }
+      if (!alvo) {
+        var m = /^Animal (\d+) da lista:/.exec(d.mensagem || '');
+        if (m && s.linhas[Number(m[1]) - 1]) alvo = s.linhas[Number(m[1]) - 1];
+      }
+      if (alvo) alvo.erros.push(d);
+      else gerais.push(d);
+    });
+    s.erros = gerais;
+    s.removidosComProblema = 0;
+  }
+  function linhasComProblema(s) { return s.linhas.filter(function (l) { return l.erros && l.erros.length; }); }
+
+  // ------------------------------------------------------------------ tela do formulário ----
+  function montarFormulario(s) {
+    var def = s.def;
+    var v = s.view = { blocos: {}, cartoes: {} };
+    var raiz = h('div', { class: 'form-evento', dataset: { tipoEvento: s.tipo } });
+    raiz.appendChild(h('div', { class: 'tela-cabecalho' }, h('h1', { text: def.rotulo }), h('span', { class: 'selo', text: def.grupo_ui })));
+    v.rascunho = h('div');
+    raiz.appendChild(v.rascunho);
+    v.problemas = h('div', { class: 'problemas', dataset: { problemas: '1' } });
+    raiz.appendChild(v.problemas);
+    var form = h('form', { class: 'formulario', novalidate: true });
+    form.addEventListener('submit', function (ev) { ev.preventDefault(); revisar(s); });
+    raiz.appendChild(form);
+    if (def.subtipos) {
+      var ids = Object.keys(def.subtipos);
+      var opRot = {};
+      ids.forEach(function (k) { opRot[k] = def.subtipos[k].rotulo; });
+      var grupo = h('div', { class: 'opcoes-lista' });
+      var fs = h('fieldset', { class: 'opcoes', dataset: { campo: '__subtipo' } }, h('legend', { class: 'campo-rotulo campo-obrigatorio', text: 'O que corrigir' }), grupo);
+      ids.forEach(function (k, i) {
+        var r = h('input', { type: 'radio', name: 'subtipo-' + s.chave, id: 'sub-' + i, value: k, checked: s.subtipo === k });
+        r.addEventListener('change', function () {
+          if (!r.checked) return;
+          s.subtipo = k;
+          s.linhas.forEach(function (l) { l.valores = {}; l.erros = []; });
+          tocar(s);
+          desenharAnimais(s);
+        });
+        grupo.appendChild(h('label', { class: 'opcao', for: 'sub-' + i }, r, h('span', { text: opRot[k] })));
+      });
+      v.subtipoErro = h('div', { class: 'campo-erro', hidden: true });
+      form.appendChild(h('div', { class: 'campo' }, fs, v.subtipoErro));
+    }
+    var cEv = camposEvento(s);
+    var primeiro = cEv.filter(function (d) { return d.id === 'event_date'; });
+    var ultimo = cEv.filter(function (d) { return d.id === 'notes'; });
+    var meio = cEv.filter(function (d) { return d.id !== 'event_date' && d.id !== 'notes'; });
+    var opEv = { idBase: 'ev', rotulos: s.rotulos, aoMudar: function (id) { tocar(s); if (id === 'event_date') desenharAvisoData(s); } };
+    if (primeiro.length) { v.blocos.primeiro = Formulario.bloco(primeiro, s.campos, opEv); form.appendChild(v.blocos.primeiro.el); }
+    v.avisoData = h('div');
+    form.appendChild(v.avisoData);
+    v.animais = h('section', { class: 'bloco-animais', 'aria-label': 'Animais' });
+    if (def.selecao_animais !== 'NENHUM') form.appendChild(v.animais);
+    if (meio.length) { v.blocos.meio = Formulario.bloco(meio, s.campos, opEv); form.appendChild(v.blocos.meio.el); }
+    v.grupos = h('div');
+    form.appendChild(v.grupos);
+    if (ultimo.length) { v.blocos.ultimo = Formulario.bloco(ultimo, s.campos, opEv); form.appendChild(v.blocos.ultimo.el); }
+    v.acoes = h('div', { class: 'acao-final' });
+    form.appendChild(v.acoes);
+    Formulario.enterPercorre(form, function () { return v.revisar; });
+    v.el = raiz;
+    desenharRascunho(s);
+    desenharAvisoData(s);
+    desenharAnimais(s);
+    desenharGrupos(s);
+    desenharAcoes(s);
+    desenharProblemas(s);
+    return raiz;
+  }
+  function desenharRascunho(s) {
+    var v = s.view;
+    Util.limpar(v.rascunho);
+    if (!s.restaurado) return;
+    v.rascunho.appendChild(UI.nota('Continuando o rascunho guardado em ' + Fmt.instante(s.restaurado) + '.', 'info',
+      h('div', { class: 'acoes', style: 'margin-top:8px' }, UI.botao('Descartar o rascunho', { tipo: 'texto', aoClicar: function () { pedirDescarte(s); } }))));
+  }
+  async function pedirDescarte(s) {
+    var ok = await UI.confirmar({ titulo: 'Descartar o rascunho?', texto: 'O que foi digitado neste formulário será apagado e não poderá ser recuperado.', verbo: 'Descartar o rascunho', cancelar: 'Continuar editando', perigo: true });
+    if (!ok) return;
+    await descartar(s.tipo);
+    UI.aviso('Rascunho descartado.', { tipo: 'info' });
+    Roteador.ir(rotaDoForm(s.tipo), { substituir: true, forcar: true });
+  }
+  function desenharAvisoData(s) {
+    var v = s.view;
+    Util.limpar(v.avisoData);
+    var d = s.campos.event_date, d0 = Store.param('data_marco_zero');
+    if (d && d0 && d < d0 && s.tipo !== 'ENTRADA_INICIAL') v.avisoData.appendChild(UI.nota('Data anterior ao marco zero (' + Fmt.data(d0) + '): entra como histórico informativo, sem efeito no inventário.', 'aviso'));
+  }
+  function desenharAnimais(s) {
+    var v = s.view, def = s.def;
+    Util.limpar(v.animais);
+    v.cartoes = {};
+    if (def.selecao_animais === 'NENHUM') return;
+    if (def.subtipos && !s.subtipo) { v.animais.appendChild(UI.nota('Escolha acima o que corrigir para ver os campos de cada animal.', 'info')); return; }
+    if (def.selecao_animais === 'NOVOS') {
+      v.animais.appendChild(h('h2', { text: 'Animais' }));
+      var lista = h('div', { class: 'bloco-animais' });
+      s.linhas.forEach(function (l, i) { lista.appendChild(cartao(s, l, i)); });
+      v.animais.appendChild(lista);
+      var acoes = h('div', { class: 'acoes', style: 'margin-top:0' }, UI.botao('+ Outro animal', { icone: null, aoClicar: function () {
+        var nova = linhaNova_(s, s.linhas.filter(function (x) { return !x.animal_id; }).slice(-1)[0]);
+        s.linhas.push(nova);
+        tocar(s);
+        desenharAnimais(s);
+        desenharAcoes(s);
+        var c = v.cartoes[nova.uid];
+        if (c) { var f = c.el.querySelector('input, select'); if (f) f.focus(); }
+      } }));
+      if ((def.componentes || []).indexOf('seletor_animais') >= 0) acoes.appendChild(UI.botao('Incluir animal que volta ao rebanho', { aoClicar: function (ev) { escolherExistentes(s, ev.currentTarget); } }));
+      v.animais.appendChild(acoes);
+      return;
+    }
+    var sel = Seletor.criar({
+      modo: def.selecao_animais, filtro: def.filtro_elegiveis, tipo: s.tipo, titulo: def.selecao_animais === 'UM' ? 'Animal' : 'Animais',
+      selecionados: Util.clonar(s.linhas.map(function (l) { return l.animal_id; }).filter(function (x, i, a) { return a.indexOf(x) === i; })),
+      dataEvento: function () { return s.campos.event_date || Fmt.hoje(); }, valorCampo: function (id) { return s.campos[id]; },
+      aoMudar: function (ids) {
+        var porId = {};
+        s.linhas.forEach(function (l) { (porId[l.animal_id] = porId[l.animal_id] || []).push(l); });
+        s.linhas = [];
+        ids.forEach(function (id) { (porId[id] || [{ uid: uid(), animal_id: id, valores: {}, erros: [] }]).forEach(function (l) { s.linhas.push(l); }); });
+        tocar(s);
+        desenharCartoesExistentes(s);
+        desenharAcoes(s);
+      },
+    });
+    v.seletor = sel;
+    v.animais.appendChild(sel.el);
+    v.cartoesExistentes = h('div', { class: 'bloco-animais' });
+    v.animais.appendChild(v.cartoesExistentes);
+    desenharCartoesExistentes(s);
+  }
+  function desenharCartoesExistentes(s) {
+    var v = s.view;
+    if (!v.cartoesExistentes) return;
+    Util.limpar(v.cartoesExistentes);
+    v.cartoes = {};
+    s.linhas.forEach(function (l, i) { if (defsLinha(s, l).length || (l.erros && l.erros.length)) v.cartoesExistentes.appendChild(cartao(s, l, i)); });
+  }
+  async function escolherExistentes(s, origem) {
+    var corpo = h('div');
+    var escolhidos = [];
+    var f = UI.folha({ titulo: 'Animal que volta ao rebanho', conteudo: corpo, origem: origem });
+    var sel = Seletor.criar({ modo: 'VARIOS', filtro: s.def.filtro_elegiveis, tipo: s.tipo, titulo: 'Animais que saíram do rebanho', aoMudar: function (ids) { escolhidos = ids; } });
+    corpo.appendChild(sel.el);
+    f.definirAcoes([UI.botao('Cancelar', { aoClicar: function () { f.fechar(); } }), UI.botao('Incluir no lançamento', { tipo: 'primario', aoClicar: function () {
+      escolhidos.forEach(function (id) { if (!s.linhas.some(function (l) { return l.animal_id === id; })) s.linhas.push({ uid: uid(), animal_id: id, valores: {}, erros: [] }); });
+      s.linhas = s.linhas.filter(function (l) { return l.animal_id || Object.keys(l.valores).some(function (k) { return !Util.vazio(l.valores[k]); }) || s.linhas.length === 1; });
+      f.fechar({ forcar: true });
+      tocar(s);
+      desenharAnimais(s);
+      desenharAcoes(s);
+    } })]);
+  }
+  function cartao(s, l, i) {
+    var a = l.animal_id ? Store.animal(l.animal_id) : null;
+    var tituloTxt = function () { return a ? Store.rotuloAnimal(a) : 'Animal ' + (i + 1) + (Util.vazio(l.valores.brinco) ? '' : ' · brinco ' + l.valores.brinco); };
+    var titulo = h('h3', { class: 'cartao-animal-titulo', id: 'tit-' + l.uid, text: tituloTxt() });
+    var el = h('section', { class: 'cartao-animal', 'aria-labelledby': 'tit-' + l.uid, dataset: { linha: l.uid, problema: l.erros && l.erros.length ? 'true' : null } });
+    var tirar = UI.botao('Tirar da lista', { tipo: 'texto', icone: 'remover', aoClicar: function () { tirarLinha(s, l); } });
+    var cab = h('div', { class: 'cartao-animal-cabecalho' }, h('div', null, titulo, a ? h('div', { class: 'suave', text: Store.descricaoAnimal(a) }) : null), tirar);
+    el.appendChild(cab);
+    if (l.erros && l.erros.length) {
+      el.appendChild(h('div', { class: 'problema-animal', role: 'alert' }, UI.icone('erro'), h('div', null, l.erros.map(function (d) { return h('div', { text: d.mensagem }); }),
+        h('div', { class: 'acoes', style: 'margin-top:8px' }, UI.botao('Corrigir', { aoClicar: function () { if (!bloco.focarPrimeiroErro()) { var f = el.querySelector('input, select'); if (f) f.focus(); } } }), UI.botao('Tirar da lista', { aoClicar: function () { tirarLinha(s, l); } })))));
+    }
+    var corr = s.subtipo && s.def.subtipos && s.def.subtipos[s.subtipo].campos_corrigiveis;
+    var defs = defsLinha(s, l);
+    if (corr) defs = defs.map(function (d) { return d.id === 'campo' ? Object.assign({}, d, { opcoes: d.opcoes || Object.keys(corr) }) : d; });
+    var bloco = Formulario.bloco(defs, l.valores, {
+      idBase: l.uid, principais: l.animal_id ? null : PRINCIPAIS_ANIMAL, tituloExtras: 'Mais dados deste animal (opcional)', extras: function () { return s.campos; },
+      aoMudar: function (id) {
+        tocar(s);
+        if (id === 'brinco') titulo.textContent = tituloTxt();
+        if (id === 'campo' && corr) { l.valores.valor_novo = null; var novo = cartao(s, l, i); el.parentNode.replaceChild(novo, el); var c = novo.querySelector('[data-campo="valor_novo"] input, [data-campo="valor_novo"] select'); if (c) c.focus(); }
+      },
+    });
+    if (l.erros && l.erros.length && bloco.mostrarErros(l.erros)) bloco.abrirExtras();
+    el.appendChild(bloco.el);
+    if (corr) el.appendChild(h('div', { class: 'acoes', style: 'margin-top:0' }, UI.botao('+ Corrigir outro dado deste animal', { aoClicar: function () {
+      var k = s.linhas.indexOf(l);
+      s.linhas.splice(k + 1, 0, { uid: uid(), animal_id: l.animal_id, valores: {}, erros: [] });
+      tocar(s);
+      desenharCartoesExistentes(s);
+    } })));
+    s.view.cartoes[l.uid] = { el: el, bloco: bloco };
+    return el;
+  }
+  function tirarLinha(s, l) {
+    if (l.erros && l.erros.length) s.removidosComProblema += 1;
+    s.linhas = s.linhas.filter(function (x) { return x !== l; });
+    if (s.def.selecao_animais === 'NOVOS' && !s.linhas.length) s.linhas.push(linhaNova_(s));
+    if (s.view.seletor) s.view.seletor.definir(s.linhas.map(function (x) { return x.animal_id; }).filter(function (x, i, a) { return a.indexOf(x) === i; }));
+    tocar(s);
+    if (s.def.selecao_animais === 'NOVOS') desenharAnimais(s); else desenharCartoesExistentes(s);
+    desenharProblemas(s);
+    desenharAcoes(s);
+    UI.aviso('Animal tirado da lista.', { tipo: 'info' });
+  }
+  function desenharGrupos(s) {
+    var v = s.view;
+    Util.limpar(v.grupos);
+    Object.keys(s.def.grupos_repetiveis || {}).forEach(function (g) {
+      var defs = s.def.grupos_repetiveis[g];
+      var sec = h('section', { class: 'subgrupo', 'aria-label': Fmt.rotulo('', g) }, h('h2', { text: Fmt.rotulo('', g) }));
+      (s.grupos[g] || []).forEach(function (row, k) {
+        var b = Formulario.bloco(defs, row.valores, { idBase: g + row.uid, aoMudar: function () { tocar(s); } });
+        sec.appendChild(h('div', { class: 'cartao-animal' }, h('div', { class: 'cartao-animal-cabecalho' }, h('span', { class: 'cartao-animal-titulo', text: Fmt.rotulo('', g) + ' ' + (k + 1) }),
+          UI.botao('Tirar', { tipo: 'texto', icone: 'remover', aoClicar: function () { s.grupos[g].splice(k, 1); tocar(s); desenharGrupos(s); } })), b.el));
+      });
+      sec.appendChild(UI.botao('+ Adicionar', { aoClicar: function () { (s.grupos[g] = s.grupos[g] || []).push({ uid: uid(), valores: {} }); tocar(s); desenharGrupos(s); } }));
+      v.grupos.appendChild(sec);
+    });
+  }
+  function desenharAcoes(s) {
+    var v = s.view;
+    Util.limpar(v.acoes);
+    var n = s.linhas.length;
+    var texto = s.removidosComProblema > 0 && !linhasComProblema(s).length ? 'Gravar ' + (n === 1 ? 'o animal restante' : 'os ' + n + ' restantes') : 'Revisar';
+    v.revisar = UI.botao(texto, { tipo: 'primario', atributos: { type: 'submit' } });
+    v.acoes.appendChild(v.revisar);
+    if (s.alterado) v.acoes.appendChild(UI.botao('Descartar o rascunho', { tipo: 'texto', aoClicar: function () { pedirDescarte(s); } }));
+  }
+  function desenharProblemas(s) {
+    var v = s.view;
+    Util.limpar(v.problemas);
+    var com = linhasComProblema(s);
+    var total = s.linhas.length;
+    if (com.length) {
+      var so = !!v.soProblemas;
+      var faixa = UI.faixa({ tipo: 'erro', texto: com.length + ' de ' + total + ' com problema. Nada foi gravado: corrija ou tire da lista e envie de novo.', acoes: [{ texto: so ? 'Mostrar todos' : 'Só com problema', aoClicar: function () { v.soProblemas = !so; desenharProblemas(s); } }] });
+      faixa.classList.add('faixa-problemas');
+      faixa.setAttribute('data-faixa-problemas', String(com.length));
+      v.problemas.appendChild(faixa);
+      Object.keys(v.cartoes).forEach(function (k) { var l = s.linhas.filter(function (x) { return x.uid === k; })[0]; v.cartoes[k].el.hidden = !!(so && l && !(l.erros && l.erros.length)); });
+    } else if (v.soProblemas) {
+      v.soProblemas = false;
+      Object.keys(v.cartoes).forEach(function (k) { v.cartoes[k].el.hidden = false; });
+    }
+    if (s.erros.length) {
+      v.problemas.appendChild(h('div', { class: 'estado estado-erro', role: 'alert' }, h('div', { class: 'estado-titulo' }, UI.icone('erro'), h('span', { text: s.erros.length === 1 ? 'Há um problema a corrigir' : 'Há ' + s.erros.length + ' problemas a corrigir' })),
+        h('ul', null, s.erros.map(function (d) { return h('li', { text: d.mensagem }); }))));
+      var blocos = Object.keys(v.blocos).map(function (k) { return v.blocos[k]; });
+      blocos.forEach(function (b) { b.mostrarErros(s.erros); });
+    }
+  }
+  function mostrarErrosLocais(s, erros) {
+    var v = s.view;
+    var nEv = 0, porLinha = {};
+    erros.forEach(function (e) {
+      if (e.nivel === 'EVENTO') {
+        if (e.campo === '__subtipo' && v.subtipoErro) { Util.limpar(v.subtipoErro); v.subtipoErro.appendChild(h('span', { text: e.mensagem })); v.subtipoErro.hidden = false; }
+        else if (e.campo === '__animais') v.animais.appendChild(UI.nota(e.mensagem, 'erro'));
+        else Object.keys(v.blocos).forEach(function (k) { if (v.blocos[k].mostrarErros([e])) nEv += 1; });
+      } else if (e.nivel === 'ANIMAL') {
+        (porLinha[e.linha] = porLinha[e.linha] || []).push(e);
+      }
+    });
+    Object.keys(porLinha).forEach(function (u) { var c = v.cartoes[u]; if (c && c.bloco.mostrarErros(porLinha[u])) c.bloco.abrirExtras(); });
+    var n = erros.length;
+    UI.aviso(n === 1 ? '1 campo para corrigir.' : n + ' campos para corrigir.', { tipo: 'erro' });
+    var alvo = v.el.querySelector('[aria-invalid="true"]') || v.el.querySelector('.campo-erro:not([hidden])');
+    if (alvo) {
+      var det = alvo.closest('details');
+      if (det) det.open = true;
+      if (alvo.focus && alvo.matches('input, select, textarea, fieldset')) alvo.focus(); else alvo.scrollIntoView({ block: 'center' });
+      var f = alvo.matches('fieldset') ? alvo.querySelector('input') : null;
+      if (f) f.focus();
+    }
+  }
+
+  // ------------------------------------------------------------------ revisão e envio ----
+  function revisar(s) {
+    var r = montarDados(s);
+    if (r.erros.length) { mostrarErrosLocais(s, r.erros); return; }
+    s.dados = r.dados;
+    s.simulacao = null;
+    s.avisos = [];
+    s.aceites = {};
+    Roteador.ir(rotaDoForm(s.tipo) + '/revisao');
+  }
+  function resumoLocal(s) {
+    var d = s.dados, def = s.def;
+    var linhas = [['Registro', def.rotulo + (s.subtipo && def.subtipos ? ' · ' + def.subtipos[s.subtipo].rotulo : '')]];
+    var data = d.campos ? d.campos.event_date : null;
+    if (s.tipo === 'ENTRADA_INICIAL') data = data || Store.param('data_marco_zero');
+    if (data) linhas.push(['Data', Fmt.data(data)]);
+    if (d.animais) {
+      var novos = d.animais.filter(function (a) { return !a.animal_id; });
+      linhas.push(['Animais', plural(d.animais.length, 'animal', 'animais') + (novos.length && novos.length < d.animais.length ? ' (' + novos.length + ' novos)' : '')]);
+      var sexos = { M: 0, F: 0 };
+      novos.forEach(function (a) { if (sexos[a.sexo] !== undefined) sexos[a.sexo] += 1; });
+      if (novos.length) linhas.push(['Sexo', sexos.M + ' machos · ' + sexos.F + ' fêmeas']);
+      var porPasto = {};
+      d.animais.forEach(function (a) { if (a.pasto_destino_id) porPasto[a.pasto_destino_id] = (porPasto[a.pasto_destino_id] || 0) + 1; });
+      var pp = Object.keys(porPasto).map(function (p) { var x = Store.pasto(p); return (x ? x.nome : 'Pasto') + ': ' + porPasto[p]; });
+      if (pp.length) linhas.push(['Pasto', pp.join(' · ')]);
+    }
+    (def.campos || []).forEach(function (c) {
+      if (c.id === 'event_date' || !d.campos || Util.vazio(d.campos[c.id])) return;
+      var val = d.campos[c.id];
+      if (c.tipo === 'ref:PROPRIEDADES') { var p = Store.propriedade(val); val = p ? p.nome : val; }
+      if (c.tipo === 'ref:EVENTOS') val = s.rotulos[val] || 'evento escolhido';
+      linhas.push([Campos.rotuloDe(c), String(val)]);
+    });
+    return linhas;
+  }
+  function listaAnimaisRevisao(s) {
+    var itens = (s.dados.animais || []).slice(0, 50).map(function (a, i) {
+      var x = a.animal_id ? Store.animal(a.animal_id) : null;
+      var nome = x ? Store.rotuloAnimal(x) : (a.brinco ? 'Brinco ' + a.brinco : 'Animal ' + (i + 1) + ' (sem brinco)');
+      var extra = [];
+      if (a.sexo) extra.push(Fmt.rotulo('SEXO', a.sexo));
+      if (a.pasto_destino_id) { var p = Store.pasto(a.pasto_destino_id); extra.push(p ? p.nome : ''); }
+      if (a.campo) extra.push(Fmt.rotuloOpcao('campo', a.campo) + ' → ' + (a.valor_novo === '' ? 'desconhecido' : a.valor_novo));
+      return h('li', null, h('span', { class: 'dado', text: nome }), extra.length ? ' · ' + extra.filter(Boolean).join(' · ') : '');
+    });
+    var resto = (s.dados.animais || []).length - 50;
+    return h('ul', { class: 'lista-simples' }, itens, resto > 0 ? h('li', { class: 'suave', text: 'e mais ' + resto + '.' }) : null);
+  }
+  function blocoAvisos(s, aoMudar) {
+    if (!s.avisos.length) return null;
+    var precisaJust = s.avisos.some(function (a) { return a.codigo === 'PERIODO_BLOQUEADO'; });
+    var ul = h('ul', { class: 'lista-avisos', 'aria-label': 'Avisos a confirmar' });
+    s.avisos.forEach(function (a, i) {
+      var k = a.codigo + '|' + (a.animal_id || '') + '|' + i;
+      var cx = h('input', { type: 'checkbox', id: 'aceite-' + i, checked: !!s.aceites[k] });
+      cx.addEventListener('change', function () { if (cx.checked) s.aceites[k] = a; else delete s.aceites[k]; aoMudar(); });
+      ul.appendChild(h('li', { dataset: { aviso: a.codigo } }, h('div', { class: 'campo-linha' }, UI.icone('aviso'), h('span', { text: a.mensagem })), h('label', { class: 'marca', for: 'aceite-' + i }, cx, h('span', { text: 'Vi e confirmo' }))));
+    });
+    var caixa = h('div', { class: 'formulario' }, h('h3', { text: s.avisos.length === 1 ? 'Confira o aviso antes de gravar' : 'Confira os ' + s.avisos.length + ' avisos antes de gravar' }), ul);
+    if (precisaJust) {
+      var ta = h('textarea', { id: 'just-aviso', value: s.justificativaAviso || '' });
+      ta.addEventListener('input', function () { s.justificativaAviso = ta.value.trim(); aoMudar(); });
+      caixa.appendChild(h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo campo-obrigatorio', for: 'just-aviso', text: 'Justificativa (período bloqueado)' }), ta));
+    }
+    return caixa;
+  }
+  function avisosResolvidos(s) {
+    if (!s.avisos.length) return true;
+    var todos = s.avisos.every(function (a, i) { return !!s.aceites[a.codigo + '|' + (a.animal_id || '') + '|' + i]; });
+    var just = !s.avisos.some(function (a) { return a.codigo === 'PERIODO_BLOQUEADO'; }) || !!s.justificativaAviso;
+    return todos && just;
+  }
+  function aceitos(s) {
+    var cods = [];
+    Object.keys(s.aceites).forEach(function (k) { var c = s.aceites[k].codigo; if (cods.indexOf(c) < 0) cods.push(c); });
+    return cods;
+  }
+  function impactosServidor(s) {
+    var im = (s.simulacao && s.simulacao.impactos) || {};
+    var l = [];
+    if (im.acao === 'estornar') {
+      l.push(['Será desfeito', (Store.tipoEvento(im.event_type) ? Store.tipoEvento(im.event_type).rotulo : Fmt.rotulo('', im.event_type)) + ' de ' + Fmt.data(im.event_date)]);
+      if (im.animais !== undefined) l.push(['Animais do evento', String(im.animais)]);
+      if (im.anulados) l.push(['Animais que deixam de existir', String(im.anulados)]);
+      return l;
+    }
+    if (im.animais !== undefined) l.push(['Animais', String(im.animais)]);
+    if (im.novos !== undefined) l.push(['Animais novos no cadastro', String(im.novos)]);
+    if (im.anulados) l.push(['Animais anulados', String(im.anulados)]);
+    if (im.substitui) l.push(['Substitui o evento', im.substitui]);
+    if (im.abertura && im.abertura.total !== undefined) l.push(['Valor de abertura', Fmt.dinheiro(im.abertura.total) + ' em ' + plural(im.abertura.animais, 'animal', 'animais')]);
+    return l;
+  }
+  function textoVerbo(s) {
+    if (s.tipo === 'ESTORNO') {
+      var im = (s.simulacao && s.simulacao.impactos) || {};
+      var t = Store.tipoEvento(im.event_type);
+      return 'Estornar ' + (t ? t.rotulo.toLowerCase() : 'o evento') + (im.animais ? ' de ' + plural(im.animais, 'animal', 'animais') : '');
+    }
+    var n = s.dados && s.dados.animais ? s.dados.animais.length : 0;
+    return verbo(s) + (n ? ' de ' + plural(n, 'animal', 'animais') : '');
+  }
+  /** Folha de revisão (08, 4.4): LOCAL monta o resumo aqui; SERVIDOR mostra a simulação (mesma função que grava). */
+  async function mostrarRevisao(s) {
+    var corpo = h('div', { class: 'formulario' });
+    var status = h('div', { role: 'status', 'aria-live': 'polite', dataset: { statusEnvio: '1' } });
+    var folha = UI.folha({ titulo: 'Confira antes de gravar', conteudo: corpo, aoFechar: function () { if (!s.enviando) sairDaRevisao(s, status); return false; }, rotuloFechar: 'Voltar e corrigir' });
+    s.folha = folha;
+    var principal = UI.botao(textoVerbo(s), { tipo: s.def.critico ? 'perigo' : 'primario', aoClicar: function () { enviar(s, principal, status); } });
+    principal.setAttribute('data-acao-principal', '1');
+    var voltarB = UI.botao('Voltar e corrigir', { aoClicar: function () { folha.fechar(); } });
+    function redesenhar() {
+      Util.limpar(corpo);
+      if (s.def.revisao === 'SERVIDOR' && s.simulacao) corpo.appendChild(UI.nota('Calculado pelo servidor com os dados de agora. Ao confirmar, ele confere de novo.', 'info'));
+      var dl = h('dl', { class: 'resumo-revisao' });
+      resumoLocal(s).concat(s.def.revisao === 'SERVIDOR' ? impactosServidor(s) : []).forEach(function (p) { dl.appendChild(h('dt', { text: p[0] })); dl.appendChild(h('dd', { text: p[1] })); });
+      corpo.appendChild(dl);
+      if (s.dados.animais && s.dados.animais.length) corpo.appendChild(h('details', { class: 'detalhe', open: s.dados.animais.length <= 5 }, h('summary', { text: 'Ver os animais' }), listaAnimaisRevisao(s)));
+      var av = blocoAvisos(s, function () { atualizarPrincipal(); });
+      if (av) corpo.appendChild(av);
+      corpo.appendChild(status);
+      atualizarPrincipal();
+    }
+    function atualizarPrincipal() {
+      var ok = avisosResolvidos(s);
+      principal.disabled = !ok || !!s.enviando;
+      UI.definirTexto(principal, s.avisos.length ? 'Confirmar mesmo assim' : textoVerbo(s));
+    }
+    s.redesenharRevisao = redesenhar;
+    folha.definirAcoes([voltarB, principal]);
+    if (s.def.revisao === 'SERVIDOR' && !s.simulacao) {
+      corpo.appendChild(UI.carregando('Calculando o que vai acontecer…'));
+      principal.disabled = true;
+      try {
+        var acao = s.tipo === 'ESTORNO' ? 'estornar' : 'registrar';
+        var r = await Cliente.consulta('evento.simular', { acao: acao, dados: s.dados }, { aoEstado: function (e) { if (e.estado === 'OCUPADO') { Util.limpar(corpo); corpo.appendChild(UI.carregando('Sistema ocupado, tentando de novo (' + e.tentativa + ' de ' + e.de + ')…')); } } });
+        if (!folha.aberta) return;
+        s.simulacao = r.data;
+        s.dvEsperada = r.meta.dataVersion;
+        s.avisos = r.data.avisos || [];
+        s.aceites = {};
+      } catch (e) {
+        if (!folha.aberta) return;
+        if (e.code === 'VALIDATION' || (e.code === 'CONFLICT' && e.details && e.details.length)) { voltarComErros(s, e); return; }
+        Util.limpar(corpo);
+        corpo.appendChild(UI.estadoErro(e, { acao: { texto: 'Tentar de novo', aoClicar: function () { s.simulacao = null; folha.fechar({ forcar: true }); mostrarRevisao(s); } } }));
+        return;
+      }
+    }
+    redesenhar();
+  }
+  /**
+   * Sair da revisão. Se o último envio ficou sem resposta ou sem conexão (estado ENVIANDO), pergunta ao servidor antes
+   * de liberar a edição: editar e reenviar com a mesma chave um conteúdo diferente do que talvez tenha sido gravado
+   * daria IDEMPOTENCY_MISMATCH ou perderia a edição.
+   */
+  async function sairDaRevisao(s, status) {
+    if (s.estado !== 'ENVIANDO') { Roteador.voltar(rotaDoForm(s.tipo)); return; }
+    s.enviando = true;
+    status_(status, 'Verificando se o envio anterior foi gravado…', 'info');
+    try {
+      var sit = await retomarEnvio(s);
+      s.enviando = false;
+      if (sit !== 'CONFIRMADA') Roteador.voltar(rotaDoForm(s.tipo));
+    } catch (e) {
+      s.enviando = false;
+      Util.limpar(status);
+      status.appendChild(UI.estadoErro(e, { acao: { texto: 'Verificar de novo', aoClicar: function () { sairDaRevisao(s, status); } } }));
+    }
+  }
+  function voltarComErros(s, e) {
+    mapearErros(s, e.details);
+    if (!e.details || !e.details.length) s.erros = [{ codigo: e.code, mensagem: e.message }];
+    s.estado = 'EDITANDO';
+    s.envio = null;
+    salvarRascunho(s).catch(avisarFalhaRascunho_);
+    Roteador.ir(rotaDoForm(s.tipo), { substituir: true });
+    redesenharTudo(s);
+  }
+  function redesenharTudo(s) {
+    if (!s.view) return;
+    desenharAnimais(s);
+    desenharProblemas(s);
+    desenharAcoes(s);
+    var alvo = s.view.problemas.querySelector('[role="alert"]');
+    if (alvo) { alvo.setAttribute('tabindex', '-1'); alvo.focus(); }
+  }
+  function status_(el, texto, tipo) { Util.limpar(el); if (texto) el.appendChild(UI.nota(texto, tipo || 'info')); }
+  async function enviar(s, botao, status) {
+    if (s.enviando) return;
+    s.enviando = true;
+    var destravar = UI.travar(botao, 'Enviando…');
+    var rota = rotaComando(s.tipo);
+    var o = { chave: s.chave, avisosAceitos: aceitos(s), dataVersionEsperada: s.def.revisao === 'SERVIDOR' ? s.dvEsperada : null };
+    if (s.justificativaAviso) s.dados.justificativa_aviso = s.justificativaAviso;
+    s.estado = 'ENVIANDO';
+    s.envio = { rota: rota, dados: s.dados, avisosAceitos: o.avisosAceitos, dataVersionEsperada: o.dataVersionEsperada };
+    try {
+      await salvarRascunho(s, { imediato: true });
+    } catch (e) {
+      Util.registrarFalha('rascunho antes do envio', e);
+    }
+    o.aoEstado = function (e) {
+      if (e.estado === 'ENVIANDO') { UI.definirTexto(botao, 'Enviando…'); status_(status, ''); }
+      else if (e.estado === 'OCUPADO') { UI.definirTexto(botao, 'Aguardando…'); status_(status, 'Sistema ocupado, tentando de novo (' + e.tentativa + ' de ' + e.de + ')…', 'aviso'); }
+      else if (e.estado === 'VERIFICANDO') { UI.definirTexto(botao, 'Verificando…'); status_(status, 'Verificando se gravou…', 'info'); }
+    };
+    try {
+      var r = await Cliente.comando(rota, s.dados, o);
+      s.enviando = false;
+      await concluir(s, r);
+    } catch (e) {
+      s.enviando = false;
+      destravar(s.avisos.length ? 'Confirmar mesmo assim' : textoVerbo(s));
+      tratarErroEnvio(s, e, botao, status);
+    }
+  }
+  function tratarErroEnvio(s, e, botao, status) {
+    var editar = function () { s.estado = 'EDITANDO'; s.envio = null; salvarRascunho(s).catch(avisarFalhaRascunho_); };
+    if (e.code === 'NEEDS_CONFIRMATION') {
+      editar();
+      s.avisos = e.details || [];
+      s.aceites = {};
+      if (s.redesenharRevisao) s.redesenharRevisao();
+      var primeiro = s.folha && s.folha.el.querySelector('.lista-avisos input');
+      if (primeiro) primeiro.focus();
+      return;
+    }
+    if (e.code === 'VALIDATION' || (e.code === 'CONFLICT' && e.details && e.details.length)) { voltarComErros(s, e); return; }
+    Util.limpar(status);
+    if (e.code === 'CONFLICT') {
+      editar();
+      status.appendChild(UI.estadoErro(e, { acao: { texto: 'Revisar de novo', aoClicar: function () { s.simulacao = null; s.avisos = []; s.folha.fechar({ forcar: true }); mostrarRevisao(s); } } }));
+    } else if (e.code === 'IDEMPOTENCY_MISMATCH') {
+      status.appendChild(UI.estadoErro({ code: e.code, message: 'Este formulário já foi gravado com outro conteúdo. Para mudar o que foi gravado, abra o evento e use "Corrigir".' }, { acao: { texto: 'Começar um formulário novo', aoClicar: async function () { await descartar(s.tipo); Roteador.ir(rotaDoForm(s.tipo), { substituir: true, forcar: true }); } } }));
+      botao.disabled = true;
+    } else if (e.code === 'LOCKED') {
+      editar();
+      status.appendChild(UI.estadoErro({ code: 'LOCKED', message: 'O sistema continua ocupado com outra gravação. Nada foi gravado; tente de novo em instantes.' }, { acao: { texto: 'Tentar de novo', aoClicar: function () { enviar(s, botao, status); } } }));
+    } else if (e.code === 'TRANSPORTE' || e.code === 'SEM_RESPOSTA') {
+      var acao = e.repetida ? App.acaoRecarregar('Entrar de novo') : { texto: e.code === 'SEM_RESPOSTA' ? 'Verificar agora' : 'Enviar de novo', aoClicar: function () { enviar(s, botao, status); } };
+      status.appendChild(UI.estadoErro(e, { acao: acao }));
+    } else if (e.code === 'DENIED') {
+      editar();
+      status.appendChild(UI.estadoErro(e, { acao: App.acaoRecarregar('Entrar de novo') }));
+    } else {
+      editar();
+      status.appendChild(UI.estadoErro(e, { acao: { texto: 'Tentar de novo', aoClicar: function () { enviar(s, botao, status); } } }));
+    }
+    var alerta = status.querySelector('[role="alert"]');
+    if (alerta) { alerta.setAttribute('tabindex', '-1'); alerta.focus(); }
+  }
+  async function concluir(s, r) {
+    await Rascunhos.remover(idRascunho(s.tipo)).catch(function (e) { Util.registrarFalha('remover rascunho', e); });
+    delete sessoes[s.tipo];
+    var resultado = { tipo: s.tipo, def: s.def, data: r.data, meta: r.meta, duplicado: r.duplicado, verificado: r.verificado, n: (r.data && r.data.animais ? r.data.animais.length : 0), origem: s.origem };
+    var nova = novaSessao(s.tipo, s.def);
+    nova.alterado = false;
+    nova.resultado = resultado;
+    sessoes[s.tipo] = nova;
+    try {
+      await Store.aplicarResultado(rotaComando(s.tipo), r.data, r.meta);
+      App.recasca();
+    } catch (e) {
+      resultado.falhaAtualizar = e.message;
+    }
+    var coletivo = resultado.n > 1 || s.def.critico;
+    if (!coletivo) {
+      nova.resultado = null;
+      UI.aviso(resumoResultado(resultado) + (r.duplicado && !r.verificado ? ' Já estava gravado; nada foi duplicado.' : ''), { tipo: 'ok' });
+      Roteador.ir(s.origem || App.rotaInicial(), { substituir: true });
+      return;
+    }
+    Roteador.ir(rotaDoForm(s.tipo) + '/resultado', { substituir: true });
+  }
+  function resumoResultado(res) {
+    var n = res.n;
+    if (res.tipo === 'ESTORNO') return 'Evento estornado.';
+    if (res.tipo === 'ENTRADA_INICIAL' || res.tipo === 'OUTRA_ENTRADA') return n === 1 ? '1 animal entrou no rebanho.' : n + ' animais entraram no rebanho.';
+    if (res.tipo === 'AJUSTE_INVENTARIO') return n === 1 ? 'Correção gravada em 1 animal.' : 'Correção gravada em ' + n + ' animais.';
+    return res.def.rotulo + ' gravado' + (n ? ' com ' + plural(n, 'animal', 'animais') : '') + '.';
+  }
+  /** Tela de resultado persistente (08, 4.6): o que foi gravado, com Ver evento · Registrar outro · Desfazer. */
+  function montarResultado(el, s) {
+    var res = s.resultado;
+    var d = res.data || {};
+    var caixa = h('div', { class: 'estado estado-ok', dataset: { resultado: res.tipo } },
+      h('div', { class: 'estado-titulo' }, UI.icone('ok'), h('h1', { style: 'margin:0', text: res.tipo === 'ESTORNO' ? 'Estornado' : 'Gravado' })),
+      h('p', { class: 'resultado-numero', text: resumoResultado(res) }));
+    if (res.duplicado && !res.verificado) caixa.appendChild(UI.nota('Já estava gravado; nada foi duplicado.', 'info'));
+    if (res.verificado) caixa.appendChild(UI.nota('A resposta demorou, mas o servidor confirmou a gravação.', 'ok'));
+    if (res.falhaAtualizar) caixa.appendChild(UI.nota('Gravado. A lista do rebanho deste aparelho não pôde ser atualizada agora (' + res.falhaAtualizar + '); ela se atualiza na próxima abertura.', 'aviso'));
+    if (d.event_date) caixa.appendChild(h('p', { text: 'Data: ' + Fmt.data(d.event_date) }));
+    if (d.animais && d.animais.length) {
+      caixa.appendChild(h('ul', { class: 'lista-simples' }, d.animais.slice(0, 20).map(function (a) {
+        var p = a.pasto_atual_id ? Store.pasto(a.pasto_atual_id) : null;
+        return h('li', null, h('span', { class: 'dado', text: a.brinco || a.codigo_interno }), ' · ' + (a.codigo_interno || '') + (p ? ' · ' + p.nome : '') + ' · ' + Fmt.rotulo('SITUACAO_CADASTRAL', a.situacao_cadastral));
+      }), d.animais.length > 20 ? h('li', { class: 'suave', text: 'e mais ' + (d.animais.length - 20) + '.' }) : null));
+    }
+    var acoes = h('div', { class: 'acoes' });
+    if (d.event_id && Telas.existe('evento/' + d.event_id)) acoes.appendChild(UI.botao('Ver evento', { aoClicar: function () { Roteador.ir('evento/' + d.event_id); } }));
+    if (res.tipo !== 'ESTORNO') acoes.appendChild(UI.botao('Registrar outro', { tipo: 'primario', aoClicar: function () { s.resultado = null; Roteador.ir(rotaDoForm(res.tipo), { substituir: true, forcar: true }); } }));
+    if (res.tipo !== 'ESTORNO' && d.event_id && Store.tipoEvento('ESTORNO')) acoes.appendChild(UI.botao('Desfazer', { aoClicar: function () {
+      var rot = {};
+      rot[d.event_id] = res.def.rotulo + ' de ' + Fmt.data(d.event_date) + (res.n ? ' (' + plural(res.n, 'animal', 'animais') + ')' : '');
+      abrir('ESTORNO', { campos: { event_id: d.event_id }, rotulos: rot, origem: 'evento/novo' });
+    } }));
+    acoes.appendChild(UI.botao('Ir para o início', { tipo: 'texto', aoClicar: function () { s.resultado = null; Roteador.ir(App.rotaInicial()); } }));
+    caixa.appendChild(acoes);
+    el.appendChild(caixa);
+  }
+
+  // ------------------------------------------------------------------ envio pendente ----
+  /** Rascunho que ficou ENVIANDO (sem resposta, aba fechada): pergunta ao servidor antes de qualquer outra coisa. */
+  async function retomarEnvio(s) {
+    var sit = await Cliente.verificar(s.chave);
+    if (sit.situacao === 'CONFIRMADA' && s.envio) {
+      var r = await Cliente.comando(s.envio.rota, s.envio.dados, { chave: s.chave, avisosAceitos: s.envio.avisosAceitos, dataVersionEsperada: s.envio.dataVersionEsperada });
+      r.verificado = true;
+      await concluir(s, r);
+      return 'CONFIRMADA';
+    }
+    s.estado = 'EDITANDO';
+    s.envio = null;
+    await salvarRascunho(s);
+    return sit.situacao;
+  }
+  function descricaoRascunho(r) {
+    var p = [r.rotulo || r.tipo];
+    if (r.data) p.push('de ' + Fmt.dataCurta(r.data));
+    var t = p.join(' ') + ' — registro não concluído';
+    if (r.n) t += ' (' + plural(r.n, 'animal', 'animais') + ')';
+    return t;
+  }
+  /** Na abertura do app: confere os envios pendentes e anuncia os rascunhos (08, seção 9). */
+  async function conferirPendentes() {
+    var lista;
+    try {
+      lista = await Rascunhos.listar();
+    } catch (e) {
+      App.faixa('rascunhos', { tipo: 'aviso', texto: 'Não foi possível ler os rascunhos guardados: ' + e.message });
+      return;
+    }
+    for (var i = 0; i < lista.length; i++) {
+      var r = lista[i];
+      var def = Store.tipoEvento(r.tipo);
+      if (!def || r.estado !== 'ENVIANDO') continue;
+      var idF = 'envio-' + r.tipo;
+      App.faixa(idF, { tipo: 'info', texto: (r.rotulo || r.tipo) + ': verificando se gravou…' });
+      try {
+        var s = await sessao(r.tipo, def);
+        var sit = await retomarEnvio(s);
+        if (sit === 'CONFIRMADA') App.faixa(idF, { tipo: 'ok', texto: (r.rotulo || r.tipo) + ' de ' + Fmt.instante(r.salvo_em) + ': o servidor confirmou que foi gravado.', acoes: [{ texto: 'Ver resultado', aoClicar: function (tipo) { return function () { App.removerFaixa('envio-' + tipo); Roteador.ir(rotaDoForm(tipo) + '/resultado'); }; }(r.tipo) }] });
+        else App.faixa(idF, { tipo: 'erro', texto: (r.rotulo || r.tipo) + ' de ' + Fmt.instante(r.salvo_em) + ' não foi gravado.', acoes: [{ texto: 'Enviar de novo', aoClicar: function (tipo) { return function () { App.removerFaixa('envio-' + tipo); Roteador.ir(rotaDoForm(tipo)); }; }(r.tipo) }] });
+      } catch (e) {
+        App.faixa(idF, { tipo: 'aviso', texto: (r.rotulo || r.tipo) + ': ainda não sabemos se gravou (' + e.message + ').', acoes: [{ texto: 'Verificar de novo', aoClicar: function () { conferirPendentes(); } }] });
+      }
+    }
+    var abertos = lista.filter(function (x) { return x.estado !== 'ENVIANDO' && Store.tipoEvento(x.tipo); });
+    try {
+      abertos = (await Rascunhos.listar()).filter(function (x) { return x.estado !== 'ENVIANDO' && Store.tipoEvento(x.tipo); });
+    } catch (e) {
+      Util.registrarFalha('releitura dos rascunhos', e);
+    }
+    abertos.forEach(function (r) {
+      App.faixa('rascunho-' + r.tipo, { tipo: 'aviso', texto: descricaoRascunho(r), acoes: [
+        { texto: 'Continuar', aoClicar: function () { App.removerFaixa('rascunho-' + r.tipo); Roteador.ir(rotaDoForm(r.tipo)); } },
+        { texto: 'Descartar', aoClicar: async function () {
+          var ok = await UI.confirmar({ titulo: 'Descartar o rascunho?', texto: descricaoRascunho(r) + '. O que foi digitado será apagado.', verbo: 'Descartar o rascunho', cancelar: 'Manter', perigo: true });
+          if (!ok) return;
+          await descartar(r.tipo);
+          App.removerFaixa('rascunho-' + r.tipo);
+          UI.aviso('Rascunho descartado.', { tipo: 'info' });
+        } },
+      ] });
+    });
+  }
+
+  // ------------------------------------------------------------------ telas ----
+  function montarSeletorTipo(el) {
+    el.appendChild(h('div', { class: 'tela-cabecalho' }, h('h1', { text: 'Registrar evento' })));
+    var pend = h('div');
+    el.appendChild(pend);
+    Rascunhos.listar().then(function (lista) {
+      var abertos = lista.filter(function (r) { return Store.tipoEvento(r.tipo); });
+      if (!abertos.length || !el.isConnected) return;
+      pend.appendChild(h('section', { class: 'cartao', 'aria-label': 'Registros não concluídos' }, h('h2', { text: 'Não concluídos' }), h('ul', { class: 'lista-simples' }, abertos.map(function (r) {
+        return h('li', { class: 'linha-acao' }, h('span', { text: descricaoRascunho(r) + (r.estado === 'ENVIANDO' ? ' · verificando se gravou' : '') }), h('a', { class: 'botao botao-secundario', href: Roteador.href(rotaDoForm(r.tipo)), dataset: { rota: rotaDoForm(r.tipo) } }, 'Continuar'));
+      }))));
+    }, function (e) { pend.appendChild(UI.nota('Não foi possível ler os rascunhos: ' + e.message, 'aviso')); });
+    var tipos = (Store.catalogo().tipos || []).filter(function (t) { return t.tipo !== 'ESTORNO'; });
+    if (!tipos.length) { el.appendChild(UI.vazio({ texto: 'Nenhum tipo de registro disponível nesta fase.' })); return; }
+    var link = function (t) { return h('li', null, h('a', { class: 'botao botao-secundario botao-bloco', href: Roteador.href(rotaDoForm(t.tipo)), dataset: { rota: rotaDoForm(t.tipo), tipoEvento: t.tipo } }, t.rotulo)); };
+    var freq = tipos.filter(function (t) { return t.frequente; }).sort(function (a, b) { return a.ordem - b.ordem; });
+    if (freq.length) el.appendChild(h('section', { class: 'cartao' }, h('h2', { text: 'Mais usados' }), h('ul', { class: 'lista-simples' }, freq.map(link))));
+    GRUPOS.forEach(function (g) {
+      var doGrupo = tipos.filter(function (t) { return t.grupo_ui === g; }).sort(function (a, b) { return a.ordem - b.ordem; });
+      if (doGrupo.length) el.appendChild(h('section', { class: 'cartao', dataset: { grupo: g } }, h('h2', { text: g }), h('ul', { class: 'lista-simples' }, doGrupo.map(link))));
+    });
+  }
+  function montarTipo(el, p) {
+    var tipo = p.tipo, etapa = p.etapa;
+    var def = Store.tipoEvento(tipo);
+    if (!def) {
+      el.appendChild(UI.estadoErro({ code: 'NOT_FOUND', message: 'Este tipo de registro não está disponível nesta fase do sistema.' }, { acao: { texto: 'Escolher outro registro', aoClicar: function () { Roteador.ir('evento/novo'); } } }));
+      return null;
+    }
+    var vivo = true;
+    el.appendChild(UI.carregando('Abrindo o formulário…'));
+    sessao(tipo, def).then(async function (s) {
+      if (!vivo) return;
+      if (s.estado === 'ENVIANDO' && etapa !== 'resultado') {
+        Util.limpar(el);
+        el.appendChild(UI.carregando('Verificando se o último envio deste formulário foi gravado…'));
+        try {
+          var sit = await retomarEnvio(s);
+          if (sit === 'CONFIRMADA') return;
+        } catch (e) {
+          if (!vivo) return;
+          Util.limpar(el);
+          el.appendChild(UI.estadoErro(e, { acao: { texto: 'Verificar de novo', aoClicar: function () { Roteador.ir(rotaDoForm(tipo), { forcar: true, substituir: true }); } } }));
+          return;
+        }
+        if (!vivo) return;
+      }
+      Util.limpar(el);
+      if (etapa === 'resultado') {
+        if (sessoes[tipo] && sessoes[tipo].resultado) montarResultado(el, sessoes[tipo]);
+        else Roteador.ir(rotaDoForm(tipo), { substituir: true });
+        return;
+      }
+      if (!s.view || !s.view.el) montarFormulario(s);
+      el.appendChild(s.view.el);
+      if (etapa === 'revisao') {
+        if (s.dados) mostrarRevisao(s);
+        else Roteador.ir(rotaDoForm(tipo), { substituir: true });
+      }
+    }, function (e) {
+      if (!vivo) return;
+      Util.limpar(el);
+      el.appendChild(UI.estadoErro(e, { acao: { texto: 'Tentar de novo', aoClicar: function () { Roteador.ir(rotaDoForm(tipo), { forcar: true, substituir: true }); } } }));
+    });
+    return function () {
+      vivo = false;
+      var s = sessoes[tipo];
+      if (!s) return;
+      if (s.salvarAdiado.pendente()) s.salvarAdiado.agora();
+      if (Roteador.atual().indexOf(rotaDoForm(tipo)) !== 0 && s.alterado && !s.resultado) UI.aviso(Rascunhos.modo() === 'SERVIDOR' ? 'Rascunho guardado no servidor. Continue depois pelo Registrar.' : 'Rascunho guardado neste aparelho. Continue depois pelo Registrar.', { tipo: 'info' });
+    };
+  }
+  Telas.registrar('evento/novo', { titulo: 'Registrar evento', telaCheia: true, montar: montarSeletorTipo });
+  Telas.registrar('evento/novo/:tipo/:etapa?', { titulo: 'Registrar evento', telaCheia: true, montar: montarTipo });
+
+  return {
+    abrir: abrir, conferirPendentes: conferirPendentes, descartar: descartar, montarDados: montarDados, mapearErros: mapearErros,
+    sessao: function (tipo) { return sessoes[tipo] || null; }, descricaoRascunho: descricaoRascunho,
+    PRINCIPAIS_ANIMAL: PRINCIPAIS_ANIMAL, CAMPOS_VOLTA: CAMPOS_VOLTA,
+  };
+})();
+</script>

@@ -676,6 +676,7 @@ var Store = (function () {
     parceiros: parceiros, categorias: categorias, categoria: categoria, animais: animais, animal: animal, filhosDe: filhosDe,
     modulos: modulos, modulo: modulo, catalogo: catalogo, tipoEvento: tipoEvento, rotuloAnimal: rotuloAnimal, descricaoAnimal: descricaoAnimal,
     resolverBrinco: resolverBrinco, buscar: buscar, carregarBaixados: carregarBaixados, normalizarBrinco: normalizarBrinco,
+    baixados: function () { return est.baixados; },
     dados: function () { return est.dados; },
     ambiente: function () { return (est.dados && est.dados.ambiente) || { codigo: cfg.ambiente, base_de_teste: cfg.ambiente !== 'PRODUCAO', faixa: null }; },
     alertas: function () { return (est.dados && est.dados.alertas) || { alertas: [] }; },
