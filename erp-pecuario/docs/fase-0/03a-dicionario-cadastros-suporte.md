@@ -266,7 +266,15 @@ Enum fechado é o que tem lógica associada no código: acrescentar um valor exi
 | COMPRADOR | Compra animais da fazenda |
 | VETERINARIO | Presta serviço veterinário |
 | TRANSPORTADOR | Faz frete |
+| ARRENDADOR | Cede pasto em arrendamento (`PASTOS.arrendador_id`) |
 | OUTRO | Demais contrapartes (contador, prestador) |
+
+**POSSE_PASTO** — Onde: `PASTOS.posse`.
+
+| Valor | Significado |
+|---|---|
+| PROPRIO | Pasto da fazenda |
+| ARRENDADO | Pasto alugado de terceiro. O aluguel é lançado na conta "Arrendamento de pasto" e vai para os animais por rateio de dias de permanência |
 
 **RECORRENCIA_PROTOCOLO** — Onde: `PROTOCOLOS_SANITARIOS.recorrencia_tipo`.
 
@@ -738,6 +746,8 @@ Não são listas, por terem lógica: tipo de procedimento sanitário, método de
 | `tipo_capim` | TEXTO | não | `[cad]` | — | Forrageira predominante; texto livre |
 | `capacidade_estimada_ua_ha` | DEC4 | não | `[cad]` | > 0 | Capacidade de suporte informada, em UA por hectare. Nunca deduzida da área (§7.1) |
 | `capacidade_estimada_cabecas` | INT | não | `[cad]` | > 0 | Capacidade informada em cabeças; alternativa quando não se trabalha com UA |
+| `posse` | ENUM | sim | `[cad]` | POSSE_PASTO; padrão PROPRIO | Se o pasto é da fazenda ou arrendado (DV-20). Não muda regra de inventário nem de lotação; separa pastos próprios de arrendados no relatório de custos por pasto |
+| `arrendador_id` | ID | não | `[cad]` | → `PARCEIROS.partner_id` | Quem cede o pasto. Só é aceito com `posse = ARRENDADO` e é opcional mesmo nesse caso |
 | `observacoes` | TEXTO | não | `[cad]` | — | Texto livre |
 | `status` | ENUM | sim | `[cad]` | STATUS_CADASTRO | INATIVO só é aceito sem animal ativo no pasto |
 | `created_at` | TS | sim | imutável | — | Criação da linha |
@@ -1297,6 +1307,7 @@ Combinações aceitas na criação de conta:
 | 320 | TAXAS_RETENCOES_VENDA | Taxas e retenções sobre venda | CUSTO_DIRETO | DESPESA_VENDA | DESPESA | NAO_SE_APLICA | S |
 | 330 | COMPRA_INSUMOS | Compra de insumos | CUSTO_DIRETO | ESTOQUE_INSUMOS | DESPESA | NAO_SE_APLICA | S |
 | 410 | MANUTENCAO_PASTOS | Manutenção de pastos | CUSTO_OPERACIONAL | CUSTEIO | DESPESA | OUTROS | N |
+| 415 | ARRENDAMENTO_PASTO | Arrendamento de pasto | CUSTO_OPERACIONAL | CUSTEIO | DESPESA | ALIMENTACAO | N |
 | 420 | MAO_DE_OBRA | Mão de obra | CUSTO_OPERACIONAL | CUSTEIO | DESPESA | OUTROS | N |
 | 430 | EQUIPAMENTOS | Equipamentos | CUSTO_OPERACIONAL | CUSTEIO | DESPESA | OUTROS | N |
 | 440 | COMBUSTIVEL | Combustível | CUSTO_OPERACIONAL | CUSTEIO | DESPESA | OUTROS | N |
@@ -1578,6 +1589,7 @@ Uma linha por campo listado na especificação. "Coluna" sem nome de aba refere-
 | tipo_capim | `tipo_capim` | Texto livre |
 | capacidade_estimada_ua_ha | `capacidade_estimada_ua_ha` | Informada, nunca deduzida da área (§7.1) |
 | capacidade_estimada_cabecas | `capacidade_estimada_cabecas` | — |
+| (não previsto na §4.2) | `posse`, `arrendador_id` | DV-20: o dono informou, em 14/11/2026, que às vezes o gado fica em pasto arrendado |
 | observações | `observacoes` | DV-01 |
 | status | `status` | Valores ATIVO e INATIVO (DL-03) |
 | created_at | `created_at` | — |

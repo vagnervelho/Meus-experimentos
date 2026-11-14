@@ -68,7 +68,7 @@ Saída do spike: um relatório curto em `docs/` com o resultado de cada item, a 
 | E1.4 | UnitOfWork: três fases, journal, idempotência, recuperação, leitura otimista, auditoria | `UnitOfWork`, `AuditService` | G |
 | E1.5 | API: roteador, guarda de dono, envelope, avisos com aceite, estado da operação, carga inicial | `Api`, `Code` | M |
 | E1.6 | Motor: catálogo, pipeline, validador de linha do tempo, projetor; eventos ENTRADA_INICIAL, OUTRA_ENTRADA, AJUSTE_INVENTARIO (correção de cadastro, identificação incorreta, correção de localização); estorno e substituição de entradas | `EventCatalog`, `EventService`, `Timeline` | G |
-| E1.7 | Cadastros: propriedades, pastos com painel básico, categorias, listas, parâmetros | `PastureService`, `AnimalService`, `Config` | M |
+| E1.7 | Cadastros: propriedades, pastos próprios e arrendados com painel básico, categorias, listas, parâmetros | `PastureService`, `AnimalService`, `Config` | M |
 | E1.8 | Animais: listagem com os filtros da §5, ficha, genealogia com árvore, edição com auditoria, foto e documento, exportação CSV | `AnimalService`, `FileService`, `Animals.html` | G |
 | E1.9 | Interface base: estrutura, estilos, cliente da API, store, roteador, rascunhos, componentes, registrar evento, "Visão geral", configurações | `Index`, `Styles`, `JavaScript`, `Components`, `Events`, `Dashboard`, `Settings`, `Pastures` | G |
 | E1.10 | Importação de animais: assistente com os 10 passos da §14, preparação, validação, duplicidades, parcial aprovada, desfazer, relatório | `ImportService`, `Import.html` | G |
@@ -77,7 +77,7 @@ Saída do spike: um relatório curto em `docs/` com o resultado de cada item, a 
 
 - **Eventos que nascem:** ENTRADA_INICIAL, OUTRA_ENTRADA, AJUSTE_INVENTARIO (três subtipos), ESTORNO.
 - **Testes para fechar:** CT-09 (brinco duplicado, mãe inválida), CT-10, CT-11, CT-12, CT-18 (entradas), CT-20; testes de queda do protocolo; ensaio de restauração de backup.
-- **O dono faz:** responder PR-12; criar o projeto Apps Script e enviar o código; rodar o spike e mandar o resultado; rodar `setup()` e os testes de aceitação; informar a data do marco zero e importar o rebanho.
+- **O dono faz:** criar o projeto Apps Script e enviar o código; rodar o spike e mandar o resultado; rodar `setup()` e os testes de aceitação; informar a data do marco zero e importar o rebanho.
 - **Riscos da fase:** R-01, R-04, R-09, R-10, R-23, R-25, R-27.
 
 ### Fase 2 — Motor de eventos
@@ -130,7 +130,7 @@ Saída do spike: um relatório curto em `docs/` com o resultado de cada item, a 
 |---|---|---|
 | E4.1 | LANCAMENTO_FINANCEIRO avulso; edição do plano de contas | M |
 | E4.2 | Parcelas: baixa, desfazer baixa, desdobramento, encontro de contas; fluxo de caixa previsto e realizado | G |
-| E4.3 | RATEIO de custos compartilhados: cabeças, peso vivo, dias de permanência, manual; re-rateio; alerta de rateio desatualizado | G |
+| E4.3 | RATEIO de custos compartilhados: cabeças, peso vivo, dias de permanência, manual; re-rateio; alerta de rateio desatualizado; aluguel de pasto arrendado rateado por dias de permanência | G |
 | E4.4 | Custos por animal e por pasto; resultado por animal | M |
 | E4.5 | Resultado gerencial por competência; teste de conciliação com o caixa | M |
 | E4.6 | TABELA_PRECOS e patrimônio: valoração, cobertura, série histórica | M |
@@ -276,7 +276,7 @@ O caminho crítico é spike → persistência → UnitOfWork → motor → anima
 | Item | Necessário para começar? | Observação |
 |---|---|---|
 | Aprovar a Fase 0 | Sim | É o único pré-requisito |
-| PR-12 — gado de terceiros, parceria ou pasto alugado | Não, mas convém | Afeta patrimônio e financeiro; sem resposta vale o padrão |
+| PR-12 — gado de terceiros, parceria ou pasto alugado | Já respondida (14/11/2026) | Sem gado de terceiros nem parceria; o pasto arrendado entrou no modelo (DV-20) |
 | PR-16 — forma de implantação | Não | Necessário só na primeira implantação |
 | PR-03 — data do marco zero | Não | Necessário na importação inicial (E1.10) |
 | Demais premissas | Não | Cada uma tem a fase-limite em `11-riscos-e-premissas.md` |

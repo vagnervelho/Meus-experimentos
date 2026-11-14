@@ -4,7 +4,7 @@
 
 - Antes de redigir os documentos da Fase 0, o desenho-base (v1) foi atacado por sete revisores independentes, cada um com uma lente. Eles devolveram **110 achados: 5 bloqueantes, 39 altos, 56 médios e 10 baixos**.
 - Nenhuma API inventada foi encontrada. Os cinco bloqueantes eram defeitos reais de desenho e mudaram a arquitetura: estorno, financeiro, importação histórica e reprodução.
-- Dos 110 achados, 94 foram adotados como propostos, 14 foram adotados com ajuste, 1 foi registrado como premissa a validar e 1 não foi adotado (a alternativa escolhida está explicada).
+- Dos 110 achados, 94 foram adotados como propostos, 14 foram adotados com ajuste, 1 virou pergunta ao dono, já respondida, e 1 não foi adotado (a alternativa escolhida está explicada).
 - O que a revisão não pôde fechar — comportamentos de plataforma sem fonte legível nesta sessão — virou item do spike técnico da Fase 1 (SP-01 a SP-10).
 
 **Documentos relacionados:** `11-riscos-e-premissas.md` (riscos e premissas que saíram daqui), `12-fatos-de-plataforma.md` (fatos e fontes), `10-plano-de-implementacao.md` (spike).
@@ -131,7 +131,7 @@ Decisão: **A** = adotado como proposto; **AA** = adotado com ajuste (a diferen�
 | PEC-11 | Sanidade coletiva: dose e consumo | A |
 | PEC-12 | Descarte, consumo próprio, não localizado | A (evento de contagem fica para depois) |
 | PEC-13 | Manejos no mesmo dia | A |
-| PEC-14 | Gado de terceiros e pasto alugado | Premissa PR-12; coluna não criada agora |
+| PEC-14 | Gado de terceiros e pasto alugado | Virou a premissa PR-12, respondida em 14/11/2026: sem gado de terceiros; pasto arrendado incorporado (DV-20) |
 | FIN-09 | Arroba e fórmulas de preço | A |
 | FIN-10 | Descontos, retenções, recebimento | A |
 | FIN-11 | Vínculo a período e a evento | A |
@@ -178,7 +178,7 @@ Decisão: **A** = adotado como proposto; **AA** = adotado com ajuste (a diferen�
 | Correção financeira (FIN-07) | Evento próprio de retificação financeira | Evento substituto do mesmo tipo, transportando as baixas | Um caminho de correção em vez de dois; nessa escala, regravar as linhas de uma compra de 20 animais é barato |
 | Estoque de insumos (MD-05, INT-11) | Eliminar o razão de estoque | Estoque opcional por produto, desligado por padrão, com evento de entrada e ajuste | A §4.10 lista estoque atual e mínimo e o cenário 6 da §18 pede consumo; a regra de custo no consumo já exige o movimento de saída |
 | Reentrada de animal (COB-07) | Declarar recompra fora do MVP | Máquina de estados admite reentrada | A §6.2 pede "cadastrar ou associar"; o validador já trata pares de entrada e saída, e a permanência por períodos é necessária para o rateio por dias |
-| Gado de terceiros (PEC-14) | Criar `proprietario_id` agora | Premissa PR-12, sem coluna | A coluna é aditiva; o que custa é a lógica de filtro em patrimônio e financeiro, que só se justifica se a premissa for falsa |
+| Gado de terceiros (PEC-14) | Criar `proprietario_id` agora | Perguntar ao dono (PR-12) antes de criar a coluna | Resposta: não há gado de terceiros nem parceria, então a coluna não existe. Há pasto arrendado, que entrou no modelo por `PASTOS.posse`, `PASTOS.arrendador_id` e uma conta de arrendamento |
 | Entidade LOTES (desenho v1) | Manter com regras de continuidade | Retirada do MVP | Dois revisores (MD-13, COB-27) mostraram que criava uma segunda cadeia na linha do tempo sem requisito que a pagasse; a §22 trata comparação entre lotes como futuro |
 
 ## 6. O que a revisão confirmou como sólido
@@ -203,7 +203,7 @@ Decisão: **A** = adotado como proposto; **AA** = adotado com ajuste (a diferen�
 | `localStorage` dentro do iframe no celular; tamanho de payload | Depende do navegador | SP-06 |
 | Abrir arquivo exportado no celular | Sem evidência | SP-07 |
 | Biblioteca de gráficos por CDN dentro do iframe | Precisa de teste | SP-08 |
-| Gado de terceiros, manejo reprodutivo, forma de venda, controle de estoque e demais premissas de negócio | Só o dono sabe | PR-01 a PR-16 |
+| Manejo reprodutivo, forma de venda, controle de estoque e demais premissas de negócio (a de gado de terceiros já foi respondida) | Só o dono sabe | PR-01 a PR-16 |
 
 ## 8. Segunda revisão
 

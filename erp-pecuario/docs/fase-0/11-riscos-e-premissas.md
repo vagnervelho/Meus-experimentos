@@ -2,7 +2,7 @@
 
 ## Em resumo
 
-- **Não há decisão bloqueante para iniciar a Fase 1.** Todas as premissas têm valor padrão configurável. Uma delas (PR-12, gado de terceiros) convém ser respondida antes do congelamento do esquema.
+- **Não há decisão bloqueante para iniciar a Fase 1.** Todas as premissas têm valor padrão configurável. A única que convinha responder antes do congelamento do esquema (PR-12) já foi respondida pelo dono e está incorporada ao desenho.
 - São 30 riscos mapeados. Os cinco que mais importam: a planilha alterar tipos na gravação (R-01), edição manual da planilha (R-10), perda de formulário no celular (R-23), dupla contagem financeira (R-13) e diferença entre o que se testa aqui e o ambiente real do Google (R-27).
 - A especificação tem 30 pontos ambíguos ou contraditórios. Cada um recebeu uma leitura e uma solução; nenhum exigiu descartar um requisito.
 - O que não pôde ser verificado nesta sessão vira item do spike da Fase 1 (SP-01 a SP-10), com critério de aprovação e plano B.
@@ -93,7 +93,7 @@ Probabilidade e impacto: alta, média ou baixa, sempre considerando o desenho **
 - Eventos têm data, não hora. A ordem dentro do dia segue a classe do evento e a ordem de registro.
 - Cada ação que grava leva alguns segundos (limite da plataforma, não do desenho).
 - "Lote" não é entidade: é o grupo de animais de um evento ou um recorte por pasto e categoria.
-- Presume que todos os animais são do dono e todos os pastos, da propriedade (PR-12).
+- Todos os animais são do dono (confirmado na PR-12): não há controle de gado de terceiros nem de parceria. Pasto arrendado é suportado.
 - Estoque de insumos é opcional por produto, sem saldo por lote e sem custo médio.
 - Financeiro sem contas bancárias, sem conciliação, sem depreciação, sem baixa parcial automática (a parcela é desdobrada) e sem transferir custo da matriz ao bezerro.
 - Patrimônio só tem valor onde há preço de referência vigente; o histórico anterior ao marco zero é informativo.
@@ -119,13 +119,13 @@ Esforço se a premissa for falsa: **C** = muda configuração; **A** = mudança 
 | PR-09 | Vendas para frigorífico (peso de carcaça) e de reposição (cabeça ou kg vivo) | São as duas formas usuais | C: rendimento padrão e modalidades | Fase 2 |
 | PR-10 | Controle de estoque de insumos opcional por produto, desligado por padrão | A §22 trata estoque como futuro; a §10 pede consumo e custo | C por produto | Fase 3 |
 | PR-11 | Insumo vira custo quando é aplicado, não quando é comprado | Evita contar duas vezes; é o regime de competência | D leve: se o dono preferir custo na compra, a aplicação deixa de gerar lançamento | Fase 3 |
-| PR-12 | Todos os animais são do dono; todos os pastos são da propriedade | Não há menção a parceria na especificação | A no esquema (`proprietario_id`; pasto alugado como outra propriedade), mas com efeito em patrimônio, financeiro e lotação | **Congelamento do esquema (Fase 1)** |
+| PR-12 | **Respondida em 14/11/2026:** não há gado de terceiros nem parceria; às vezes o gado fica em pasto arrendado | Resposta do dono | Já incorporada: `PASTOS.posse` e `PASTOS.arrendador_id`, conta "Arrendamento de pasto" e rateio por dias de permanência (DV-20). Se um dia houver gado de terceiros: A (`proprietario_id`), com revisão de patrimônio e financeiro | — |
 | PR-13 | "Lote" sem entidade própria | A especificação não a define e a §22 a deixa para depois | A: tabela e coluna de lote | Fase 3 |
 | PR-14 | Categorias-semente e faixas etárias de 12, 24 e 36 meses | Nomenclatura e faixas usuais em guias e declarações | C: tabela de categorias e parâmetro de faixas | Fase 1 |
 | PR-15 | Parâmetros zootécnicos: UA de 450 kg; gestação de 290 dias; pesagem válida por 180 dias; GMD com intervalo mínimo de 28 dias; idade reprodutiva mínima de 24 meses | Pontos de partida comuns; nenhum é recomendação técnica | C | Uso de cada indicador |
 | PR-16 | Implantação por clasp no Cloud Shell, como no projeto irmão | O dono já fez esse fluxo | C: cópia manual dos arquivos | Primeira implantação |
 
-**Nenhuma premissa bloqueia o início da Fase 1.** A PR-12 é a única cuja resposta muda regras de patrimônio e de financeiro; por isso convém tê-la antes de congelar o esquema. Se ficar sem resposta, vale o padrão, e a mudança posterior é aditiva.
+**Nenhuma premissa bloqueia o início da Fase 1.** A PR-12, a única cuja resposta mudava regras de patrimônio e de financeiro, foi respondida pelo dono e incorporada ao esquema.
 
 ## 5. Inconsistências e ambiguidades da especificação
 
@@ -168,7 +168,7 @@ Não há. O que existe são decisões recomendadas antes de marcos específicos:
 
 | Decisão | Antes de | Impacto de adiar |
 |---|---|---|
-| PR-12 — há gado de terceiros, parceria ou pasto alugado? | Congelar o esquema, no início da Fase 1 | Vale o padrão. Mudar depois é aditivo no esquema, mas obriga a rever filtros de patrimônio e financeiro já entregues |
+| PR-12 — há gado de terceiros, parceria ou pasto alugado? | Respondida em 14/11/2026 | Sem pendência: não há gado de terceiros nem parceria; o pasto arrendado está no modelo |
 | PR-03 — data do marco zero | Importação inicial | Sem a data não há fotografia do rebanho; o cadastro manual continua possível |
 | PR-04 — formato dos dados históricos | Construir os importadores | Importador genérico por mapeamento de colunas cobre a maior parte; o resto vira digitação |
 | PR-16 — forma de implantação | Primeira implantação | Nenhum: os dois caminhos são suportados |

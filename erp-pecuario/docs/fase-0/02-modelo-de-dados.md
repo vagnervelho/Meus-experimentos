@@ -6,7 +6,7 @@
 - **O modelo é um razão de eventos.** `EVENTOS` + `EVENTO_ANIMAIS` são a fonte; `ANIMAIS` guarda projeções (`*`) reconstruíveis por replay (§2.3). Uma linha só vale se o evento pai for **vigente**, predicado único apoiado em três células de controle: `OPERACOES.status`, `EVENTOS.reversal_of_event_id` e `IMPORTACOES.status`.
 - **Dinheiro por animal tem uma única fonte de leitura**, `ALOCACOES_FINANCEIRAS`. Lançamento (`FINANCEIRO`) e título (`PARCELAS`) são níveis separados. Toda coluna redundante tem fonte declarada e conferência na verificação de integridade.
 - **Derivado não é persistido**: GMD, categoria automática, valor estimado, agenda sanitária e série patrimonial saem de consulta sobre linhas vigentes.
-- **Fora do MVP, com entrada aditiva**: LOTES, `proprietario_id`, USUARIOS e lotes de estoque. Só `proprietario_id` (PR-12) convém decidir antes de congelar o esquema.
+- **Fora do MVP, com entrada aditiva**: LOTES, USUARIOS e lotes de estoque. A premissa PR-12 foi respondida pelo dono em 14/11/2026: não há gado de terceiros nem parceria, então `proprietario_id` não existe; às vezes o gado fica em pasto arrendado, modelado por `PASTOS.posse` e `PASTOS.arrendador_id` (DV-20).
 
 **Documentos relacionados:** `README.md` · `01-arquitetura.md` · `03a-dicionario-cadastros-suporte.md` e `03b-dicionario-eventos-financeiro.md` (coluna a coluna) · `04-motor-de-eventos.md` · `05-regras-de-negocio.md` · `06-persistencia-e-integridade.md` · `07-financeiro-e-indicadores.md` · `11-riscos-e-premissas.md` · `12-fatos-de-plataforma.md`.
 
@@ -112,6 +112,8 @@ erDiagram
         string property_id FK
         string nome
         decimal area_hectares
+        string posse
+        string arrendador_id FK
         string status
     }
     CATEGORIAS {
@@ -529,6 +531,7 @@ Cardinalidade lida como origem : destino.
 | Origem → Destino | Coluna FK | Card. | Obrigatória | Regra de integridade |
 |---|---|---|---|---|
 | PASTOS → PROPRIEDADES | `property_id` | N : 1 | sim | `escrita` |
+| PASTOS → PARCEIROS | `arrendador_id` | N : 0..1 | não (só com `posse = ARRENDADO`) | `escrita` |
 | ANIMAIS → ANIMAIS | `mae_id*`, `pai_id*` | N : 0..1 | não (vazio = desconhecido) | `projeção` (atributo inicial + ajustes vigentes); `bloqueia`; `erro`. Mãe fêmea, pai macho, sem ciclo, filho nascido depois da mãe (§5.2). O alvo pode ser EXTERNO, HISTORICO, VENDIDO ou MORTO |
 | ANIMAIS → EVENTOS | `evento_origem_id*` | N : 0..1 | sim, exceto EXTERNO | `projeção`: evento vigente cuja linha criou o animal (a que carrega `atributos_iniciais_json`). Sem entrada vigente o animal fica ANULADO, ou HISTORICO se só tem registros anteriores ao marco zero |
 | ANIMAIS → PROPRIEDADES, PASTOS | `propriedade_atual_id*`, `pasto_atual_id*` | N : 0..1 | não (vazias fora do rebanho) | `projeção`: destino do último movimento vigente. ATIVO sem pasto é alerta (§16, regra 18) |
@@ -793,6 +796,7 @@ Os contadores `event_seq` e `codigo_interno` saem do mesmo passe: máximo + 1, s
 | DV-17 | §4.14 "unidade de peso" | Armazenamento sempre em kg; `unidade_peso_exibicao` (KG ou ARROBA) afeta só a exibição | Converter o valor gravado quebraria o histórico |
 | DV-18 | §19 põe auditoria na Fase 2 e não dá fase ao backup | AUDITORIA, OPERACOES, ERROS_LOG e SCHEMA_META existem desde o primeiro `setup()`; backup e integridade básica vão para a Fase 1 | A base recebe dados reais na importação inicial |
 | DV-19 | §4.10 PRODUTOS com `unidade`, `lote`, `validade` | `unidade` = unidade de dose e de controle; `lote` e `validade` do cadastro são "último lote" | Compra-se em frasco e aplica-se em mL ou dose; valem os dados gravados na aplicação |
+| DV-20 | §4.2 PASTOS não distingue pasto próprio de alugado | `PASTOS.posse` (PROPRIO, ARRENDADO) e `PASTOS.arrendador_id` → PARCEIROS; conta "Arrendamento de pasto" no plano de contas | O dono informou, em 14/11/2026, que às vezes paga para deixar o gado em pasto alugado. O aluguel vira custo por animal pelo rateio de dias de permanência |
 
 A numeração 4.4 a 4.12 dentro da seção 6 da especificação é lida como 6.4 a 6.12.
 
@@ -803,7 +807,7 @@ Regra de evolução: `setup()` acrescenta abas e colunas ao final, nunca remove 
 | Item | Por que ficou fora | Como entra, de forma aditiva |
 |---|---|---|
 | Entidade LOTES | DV-13. Criaria uma segunda cadeia de continuidade na linha do tempo, sem requisito que a pague | Aba LOTES; `ANIMAIS.lote_atual_id*`; `lote_origem_id` e `lote_destino_id` em EVENTO_ANIMAIS; evento de mudança de lote; valor LOTE em `RATEIOS.escopo_tipo`. Linhas antigas ficam vazias, isto é, sem lote |
-| `proprietario_id` (gado de terceiros) | PR-12: presume-se que todo animal é do dono | `ANIMAIS.proprietario_id` → PARCEIROS (vazio = próprio). Lotação conta todos; patrimônio e financeiro, só os próprios. É aditivo no esquema, mas muda filtros de patrimônio e resultado: convém decidir antes do congelamento |
+| `proprietario_id` (gado de terceiros) | PR-12 respondida em 14/11/2026: não há gado de terceiros nem parceria; todo animal é do dono | Só se a resposta mudar: `ANIMAIS.proprietario_id` → PARCEIROS (vazio = próprio), com revisão dos filtros de patrimônio e de resultado. O pasto arrendado já está no modelo (DV-20) |
 | USUARIOS e papéis | Um usuário (§1, §21) | Aba USUARIOS (e-mail, papel, ativo). `created_by` e `usuario` já gravam a identidade em EVENTOS, OPERACOES, AUDITORIA, RATEIOS, ANEXOS e IMPORTACOES: o histórico não precisa de migração |
 | Lotes de estoque, custo médio ou PEPS | Estoque é opcional por produto (PR-10) e a §22 o trata como futuro | `MOVIMENTOS_ESTOQUE.lote`, `validade` e `custo_unitario` já são gravados por movimento; saldo por lote e custo médio passam a ser calculáveis sem regravar. Aba própria de lotes só se for preciso bloquear lote vencido |
 
