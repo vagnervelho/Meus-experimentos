@@ -1196,7 +1196,7 @@ var Registro = (function () {
         })[0] || null;
       }
       if (!alvo) {
-        var m = /^Animal (\d+) da lista:/.exec(d.mensagem || '');
+        var m = /^Animal (\d+) da lista\b/.exec(d.mensagem || '');
         if (m && s.linhas[Number(m[1]) - 1]) alvo = s.linhas[Number(m[1]) - 1];
       }
       if (alvo) alvo.erros.push(d);

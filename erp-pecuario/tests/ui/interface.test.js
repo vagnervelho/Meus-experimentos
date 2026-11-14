@@ -280,24 +280,31 @@ test('NEEDS_CONFIRMATION: aviso com "Vi e confirmo"; reenvio com avisosAceitos e
   await a.fechar();
 });
 
-test('erro por animal: "1 de 3 com problema", motivo na linha, Tirar da lista → "Gravar os 2 restantes" → nova revisão e gravação', async () => {
+test('erro por animal: "2 de 4 com problema" (por brinco e por "Animal N da lista"), motivo na linha, Tirar da lista → "Gravar os 2 restantes" → nova revisão e gravação; Desfazer', async () => {
   const s = A.sistema();
   A.semear(s);
   const a = await A.abrir(s, { largura: 1280, hash: 'evento/novo/OUTRA_ENTRADA' });
   const { page } = a;
-  await formOutraEntrada(page, [{ brinco: '77', sexo: 'Fêmea', origem: 'Comprado', pasto: 'Pasto A' }, { brinco: '457', sexo: 'Fêmea' }, { brinco: '78', sexo: 'Fêmea' }]);
+  await formOutraEntrada(page, [{ brinco: '77', sexo: 'Fêmea', origem: 'Comprado', pasto: 'Pasto A' }, { brinco: '457', sexo: 'Fêmea' }, { brinco: '78', sexo: 'Fêmea' }, { brinco: '', sexo: 'Fêmea' }]);
+  const quarto = page.locator(cartoes).nth(3);
+  await quarto.locator('[data-campo="data_nascimento"] input').fill('2026-11-14');
+  await quarto.locator('[data-campo="data_nascimento_confianca"] label.opcao', { hasText: 'Confirmada' }).click();
   await revisarEGravar(page);
   await page.waitForSelector('[data-faixa-problemas]');
   assert.equal(await page.$('[role=dialog]'), null, 'volta ao formulário');
-  assert.match(await page.textContent('[data-faixa-problemas]'), /1 de 3 com problema/);
-  const ruim = page.locator(cartoes + '[data-problema="true"]');
-  assert.equal(await ruim.count(), 1);
-  assert.match(await ruim.textContent(), /Brinco 457: o brinco 457 já é do animal A-000001/);
-  assert.match(await ruim.locator('[data-campo="brinco"] .campo-erro').textContent(), /já é do animal/);
+  assert.match(await page.textContent('[data-faixa-problemas]'), /2 de 4 com problema/);
+  const ruins = page.locator(cartoes + '[data-problema="true"]');
+  assert.equal(await ruins.count(), 2);
+  assert.match(await ruins.nth(0).textContent(), /Brinco 457: o brinco 457 já é do animal A-000001/);
+  assert.match(await ruins.nth(0).locator('[data-campo="brinco"] .campo-erro').textContent(), /já é do animal/);
+  assert.match(await ruins.nth(1).textContent(), /Animal 4 da lista/, 'sem brinco: ligado à linha pela posição');
+  assert.match(await ruins.nth(1).locator('.cartao-animal-titulo').textContent(), /^Animal 4$/);
   assert.equal(s.tabela('EVENTOS').filter((e) => e.event_type === 'OUTRA_ENTRADA').length, 0);
   await page.click('[data-faixa-problemas] button:has-text("Só com problema")');
-  assert.equal(await page.locator(cartoes + ':visible').count(), 1);
-  await ruim.locator('.problema-animal button:has-text("Tirar da lista")').click();
+  assert.equal(await page.locator(cartoes + ':visible').count(), 2);
+  await ruins.nth(1).locator('.problema-animal button:has-text("Tirar da lista")').click();
+  assert.match(await page.textContent('[data-faixa-problemas]'), /1 de 3 com problema/);
+  await page.locator(cartoes + '[data-problema="true"]').locator('.problema-animal button:has-text("Tirar da lista")').click();
   assert.equal(await page.$('[data-faixa-problemas]'), null);
   assert.equal(await page.textContent('.form-evento button[type=submit]'), 'Gravar os 2 restantes');
   await revisarEGravar(page);
