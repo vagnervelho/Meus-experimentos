@@ -320,13 +320,17 @@ function parseColunas(texto, arquivo, nomes) {
   const reNomes = nomes.map((n) => ({ nome: n, re: new RegExp('(^|[^A-Z_])' + n + '($|[^A-Z_])') }));
   const out = {};
   let aba = null;
+  let nivelAba = 0;
   let lendo = null;
   linhas.forEach((l, i) => {
-    if (/^#{1,4} /.test(l)) {
+    const titulo = /^(#{1,4}) /.exec(l);
+    if (titulo) {
       lendo = null;
+      const nivel = titulo[1].length;
       const achadas = reNomes.filter((x) => x.re.test(l));
-      if (achadas.length === 1) aba = achadas[0].nome;
-      else if (achadas.length > 1) aba = null;
+      // O título com o nome de UMA aba abre a seção dela; subtítulos ("Colunas") ficam dentro; qualquer outro
+      // título do mesmo nível ou acima encerra a seção.
+      if (achadas.length === 1) { aba = achadas[0].nome; nivelAba = nivel; } else if (achadas.length > 1 || nivel <= nivelAba) aba = null;
       return;
     }
     const c = celulas(l);
@@ -378,6 +382,7 @@ function resolverDominios(tabs, cat, subtipos, metodos) {
       const inline = / · /.test(dom) ? dom.split(' · ').map((t) => semCrases(t).replace(/−/g, '-')) : null;
       const nomeado = /^([A-Z][A-Z0-9_]*)(?=$|[,;])/.exec(dom);
       let nomeEnum = onde[ref] || null;
+      if (col.tipo === 'ENUM' && nomeado && !enums[nomeado[1]]) falha(ref + ': o domínio cita o enum ' + nomeado[1] + ', que não está no catálogo (03a, seção 2)');
       if (nomeado && enums[nomeado[1]]) {
         if (nomeEnum && nomeEnum !== nomeado[1]) falha(ref + ': o domínio cita ' + nomeado[1] + ', mas o catálogo de enums aponta ' + nomeEnum);
         nomeEnum = nomeado[1];

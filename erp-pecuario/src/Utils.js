@@ -156,10 +156,18 @@ var Utils = (function () {
     var r = Math.round(Number(abs.toFixed(6))) / f;
     return valor < 0 && r !== 0 ? -r : r;
   }
-  /** Quantas casas decimais o número realmente usa, até o máximo de 8 (387.5 → 1; 0.02 → 2). */
+  /**
+   * Quantas casas decimais o número realmente usa (387.5 → 1; 0.02 → 2), lido com 15 algarismos significativos
+   * para o ruído binário não contar (0.1 + 0.2 → 1).
+   */
   function casasDecimais(valor) {
     if (typeof valor !== 'number' || !isFinite(valor)) throw falha_('INTERNAL', 'casasDecimais espera um número.');
-    var s = Math.abs(valor).toFixed(8).replace(/0+$/, '');
+    var abs = Math.abs(valor);
+    if (abs >= 1e15 || Math.floor(abs) === abs) return 0;
+    var s = abs.toPrecision(15);
+    var exp = /^(\d)(?:\.(\d+))?e-(\d+)$/.exec(s);
+    if (exp) return Number(exp[3]) + (exp[2] || '').replace(/0+$/, '').length;
+    s = s.replace(/0+$/, '');
     return s.length - s.indexOf('.') - 1;
   }
   /** Reais (número com até 2 casas, como na planilha) → centavos inteiros. Vazio → null. */
