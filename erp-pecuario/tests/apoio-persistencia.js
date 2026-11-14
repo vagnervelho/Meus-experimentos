@@ -159,7 +159,8 @@ function cmdPasto(G, opcoes) {
  * Instrumenta as portas de escrita do contexto (io.anexar, io.atualizar, io.flush, props.gravar, props.remover,
  * lock.soltar): cada chamada recebe um número e um rótulo. `alvo` = {antes: k} mata a execução ANTES da k-ésima
  * chamada; {depois: k} faz a chamada e mata em seguida. `chegam` escolhe as escritas pendentes que chegam
- * (só tem efeito na primitiva SPREADSHEET_APP). Devolve {chamadas} com os rótulos vistos.
+ * (só tem efeito na primitiva SPREADSHEET_APP); `antesDe(k, rotulo)` roda antes de cada chamada (intercalações).
+ * Devolve {chamadas} com os rótulos vistos.
  */
 function instrumentar(gas, ctx, alvo) {
   const a = alvo || {};
@@ -180,6 +181,7 @@ function instrumentar(gas, ctx, alvo) {
       const args = Array.prototype.slice.call(arguments);
       chamadas.push(rotulo(nome, args));
       const k = chamadas.length;
+      if (a.antesDe) a.antesDe(k, chamadas[k - 1]);
       if (a.antes === k) gas.matar({ chegam: a.chegam });
       const r = original.apply(this, args);
       if (a.depois === k) gas.matar({ chegam: a.chegam });
