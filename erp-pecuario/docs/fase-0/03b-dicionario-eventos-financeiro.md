@@ -1296,4 +1296,285 @@ Três observações sobre o exemplo:
 
 O cenário CT-06 (vacinação de 30 animais) grava a mesma estrutura: 30 linhas em EVENTO_ANIMAIS, SANIDADE e ALOCACOES_FINANCEIRAS e 1 linha em cada uma das demais abas.
 
-<!-- CONTINUA -->
+## 16. Mapeamento especificação → modelo
+
+Uma linha por campo pedido. Coluna sem nome de aba pertence à aba do título; "—" = mesmo nome e mesmo significado. As divergências DV-nn estão justificadas em `02-modelo-de-dados.md`, seção 9. Os itens que a especificação numera 4.4 a 4.12 dentro da seção 6 são citados como §6.4 a §6.12.
+
+### 16.1 §4.4 EVENTOS
+
+| Campo na §4.4 | Destino no modelo | Divergência ou observação |
+|---|---|---|
+| event_id | `event_id` | — |
+| event_type | `event_type` | 21 tipos, oito acrescentados (DV-15); o subtipo fica em `event_subtype` |
+| event_date | `event_date` | — |
+| registration_date | `registration_date` | — |
+| property_id | `property_id` | — |
+| description | `description` | Obrigatória só em OUTRA_ENTRADA e OCORRENCIA |
+| status | `status*` | Cache do predicado de vigência (DV-14) |
+| total_value | `total_value` | Informativo, definido por tipo (seção 2.5) |
+| responsible | `responsible` | Quem executou em campo; o usuário do sistema fica em `created_by` (DV-04) |
+| notes | `notes` | — |
+| idempotency_key | `idempotency_key` | Cópia; a autoridade é `OPERACOES.idempotency_key` |
+| reversal_of_event_id | `reversal_of_event_id` | Usada pelo ESTORNO e pelo substituto (seção 2.7) |
+| created_at | `created_at` | — |
+| (não previsto) | `op_id`, `event_seq`, `event_subtype`, `created_by`, `source`, `confiabilidade`, `pre_marco_zero`, `partner_id`, `payload_json`, `reversed_by_event_id*`, `import_id`, `confirmed_at*` | DV-04 |
+
+### 16.2 §4.5 EVENTO_ANIMAIS
+
+| Campo na §4.5 | Destino no modelo | Divergência ou observação |
+|---|---|---|
+| event_animal_id | `event_animal_id` | — |
+| event_id | `event_id` | — |
+| animal_id | `animal_id` | — |
+| peso | `peso` | Só peso vivo; carcaça em `peso_carcaca_kg` (DV-03) |
+| valor_individual | `valor_individual` | Valor negociado e base de rateio; custo e receita saem de ALOCACOES_FINANCEIRAS |
+| pasto_origem_id | `pasto_origem_id` | — |
+| pasto_destino_id | `pasto_destino_id` | — |
+| observações | `observacoes` | DV-01 |
+| "campos adicionais específicos por tipo" | `papel`, `efeito_inventario`, `peso_carcaca_kg`, `preco_unitario`, `motivo_saida`, `atributos_iniciais_json`; tabelas de detalhe das seções 4 a 9 | DV-03 |
+
+### 16.3 §4.6 PESAGENS
+
+| Campo na §4.6 | Destino no modelo | Divergência ou observação |
+|---|---|---|
+| weight_id | `weight_id` | — |
+| animal_id | `animal_id` | — |
+| event_id | `event_id` | — |
+| data_pesagem | `data_pesagem` | Cópia de `EVENTOS.event_date` |
+| peso_kg | `peso_kg` | Só peso vivo |
+| método | `metodo` | DV-01; enum fechado de quatro valores |
+| observações | `observacoes` | DV-01 |
+| (não previsto) | `tipo` | Momento da pesagem. Ganho, GMD, dias e variação não são gravados (DV-08) |
+
+### 16.4 §4.7 SANIDADE
+
+| Campo na §4.7 | Destino no modelo | Divergência ou observação |
+|---|---|---|
+| health_id | `health_id` | — |
+| animal_id | `animal_id` | — |
+| event_id | `event_id` | — |
+| tipo_procedimento | `tipo_procedimento` | Fixado pelo subtipo do evento |
+| produto_id | `produto_id` | Opcional: produto pode ser texto livre |
+| nome_produto | `nome_produto` | Cópia congelada do cadastro, ou texto livre |
+| fabricante | `fabricante` | — |
+| lote | `lote` | Lote aplicado; o do cadastro é só o último (DV-19) |
+| dose | `dose` | Por animal; o consumo total do evento fica no payload |
+| unidade_dose | `unidade_dose` | Igual à unidade de controle do produto |
+| via_aplicacao | `via_aplicacao` | Código de `LISTAS.VIA_APLICACAO` |
+| data_aplicacao | `data_aplicacao` | Cópia de `EVENTOS.event_date` |
+| data_proxima_aplicacao | `data_proxima_aplicacao` | — |
+| período_carencia | `periodo_carencia_dias` | DV-01; unidade no nome |
+| data_fim_carencia | `data_fim_carencia` | Derivada e gravada; a integridade confere |
+| custo | `custo` | Cópia da alocação do animal; a fonte é ALOCACOES_FINANCEIRAS |
+| veterinário | `veterinario` | DV-01 |
+| observações | `observacoes` | DV-01 |
+| (não previsto) | `protocol_id`, `validade`, `motivo`, `diagnostico`, `resultado_exame` | Pedidos por §6.6, §6.7 e §10 |
+
+### 16.5 §4.8 REPRODUÇÃO
+
+A aba chama-se `REPRODUCAO` (DV-01).
+
+| Campo na §4.8 | Destino no modelo | Divergência ou observação |
+|---|---|---|
+| reproduction_id | `reproduction_id` | — |
+| animal_id | `animal_id` | Sempre a matriz |
+| event_id | `event_id` | — |
+| tipo_evento | `tipo_evento` | Sete valores (seção 7.2) |
+| data | `data` | Cópia de `EVENTOS.event_date` |
+| touro_id | `touro_id` | Quando único; vários touros ficam em EVENTO_ANIMAIS, papel TOURO |
+| método | `metodo` | DV-01; valores por tipo |
+| resultado | `resultado` | Só no diagnóstico de gestação |
+| data_prevista_parto | `data_prevista_parto` | Só previsão informada; a calculada não é gravada (seção 7.3) |
+| data_parto | `data_parto` | Só em PARTO; cópia de `data` |
+| observações | `observacoes` | DV-01 |
+| (não previsto) | `data_fim`, `estacao_id`, `semen_identificacao`, `idade_gestacional_dias`, `qtd_nascidos_vivos`, `qtd_natimortos`, `tipo_parto` | Pedidos por §6.1, §6.10 e §9 |
+
+### 16.6 §4.9 FINANCEIRO
+
+| Campo na §4.9 | Destino no modelo | Divergência ou observação |
+|---|---|---|
+| financial_id | `financial_id` | — |
+| event_id | `event_id` | Evento criador; o evento referido vai em `ref_event_id` (DV-02) |
+| data_competencia | `data_competencia` | — |
+| data_pagamento | `PARCELAS.data_pagamento` (fato) e `data_pagamento*` (projeção) | DV-02 |
+| tipo | `tipo` | Cópia do tipo da conta |
+| categoria | `categoria` | Cópia do grupo da conta; o cálculo usa `natureza` (DV-12) |
+| descrição | `descricao` | DV-01 |
+| valor | `valor` | Sempre positivo |
+| quantidade | `quantidade` | — |
+| animal_id | `animal_id*` | Projeção: só com uma alocação direta. O vínculo real é ALOCACOES_FINANCEIRAS |
+| pasture_id | `pasture_id` | — |
+| partner_id | `partner_id` | — |
+| status_pagamento | `status_pagamento*` | Agregado das parcelas (DV-02) |
+| forma_pagamento | `PARCELAS.forma_pagamento` | DV-02 |
+| observações | `observacoes` | DV-01 |
+| (não previsto) | `ref_event_id`, `conta_id`, `natureza`, `competencia_inicio`, `competencia_fim`, `property_id`, `categoria_animal_id`, `retida_pelo_comprador` | DV-02 |
+| (não previsto) | `product_id`, `documento`, `status*`, `cancelado_em*`, `cancelado_por_event_id*`, `created_at` | Sem número; justificadas na seção 10.2 |
+
+Vencimento, pagamento, recebimento e status por título (§11.3) estão em PARCELAS; critério de rateio exibido (§11.2), em RATEIOS.
+
+### 16.7 Comum a todo evento (§2.5 e abertura da §6)
+
+| Item pedido | Destino no modelo | Divergência ou observação |
+|---|---|---|
+| ID, tipo, data de ocorrência, data de registro, status | `EVENTOS.event_id`, `event_type` e `event_subtype`, `event_date`, `registration_date`, `status*` | — |
+| Usuário responsável | `EVENTOS.created_by` (quem registrou) e `responsible` (quem executou) | DV-04 |
+| Animais envolvidos | EVENTO_ANIMAIS, uma linha por animal | — |
+| Origem e destino | `EVENTO_ANIMAIS.pasto_origem_id` e `pasto_destino_id` | — |
+| Campos específicos | Tabela de detalhe do tipo; o que não tem coluna vai em `payload_json` (seção 2.6) | — |
+| Observações | `EVENTOS.notes`; por animal, `EVENTO_ANIMAIS.observacoes` | — |
+| Anexos e referências a documentos | ANEXOS com o `event_id` (`03a`, seção 5.1); números em `gta_numero`, `nota_fiscal` e `documento` | — |
+| Impactos operacionais | `efeito_inventario` e pastos em EVENTO_ANIMAIS; projeções `*` de ANIMAIS | — |
+| Impactos financeiros | FINANCEIRO, PARCELAS, RATEIOS e ALOCACOES_FINANCEIRAS (seção 10.3) | — |
+| Validações; confirmação antes da gravação | Não são dado gravado: `05-regras-de-negocio.md` e `04-motor-de-eventos.md` | — |
+
+### 16.8 §6.1 NASCIMENTO
+
+| Campo na §6.1 | Destino no modelo | Divergência ou observação |
+|---|---|---|
+| Data do nascimento | `EVENTOS.event_date` | Copiada para `data_nascimento` do JSON de criação e para `REPRODUCAO.data` e `data_parto` |
+| Identificação do bezerro | IDENTIFICACOES (`tipo` BRINCO), no mesmo evento; `ANIMAIS.codigo_interno`, sempre | Brinco opcional: pode vir depois, por evento IDENTIFICACAO (DV-05) |
+| Sexo | `atributos_iniciais_json.sexo` → `ANIMAIS.sexo*` | DV-07 |
+| Raça | `atributos_iniciais_json.raca` → `ANIMAIS.raca` | Código de `LISTAS.RACA` |
+| Mãe | Linha MATRIZ em EVENTO_ANIMAIS; `mae_id` no JSON da cria; `REPRODUCAO.animal_id` | Confiança fixa CONFIRMADA |
+| Pai, quando conhecido | `pai_id` e `pai_confianca` no JSON da cria; `REPRODUCAO.touro_id` | Ausente = desconhecido |
+| Peso ao nascer | `EVENTO_ANIMAIS.peso` e PESAGENS (`tipo` NASCIMENTO) | Opcional; sem peso, nenhuma pesagem é gravada |
+| Pasto | `EVENTO_ANIMAIS.pasto_destino_id` da cria | — |
+| Observações | `EVENTOS.notes`; por cria, `EVENTO_ANIMAIS.observacoes` | — |
+| Situação do nascimento | `REPRODUCAO.tipo_parto` (`LISTAS.TIPO_PARTO`), `qtd_nascidos_vivos` e `qtd_natimortos` | Leitura adotada: como foi o parto e quantos nasceram vivos ou mortos. Natimorto não é evento próprio (DV-15) |
+| Parto gemelar | Duas linhas CRIA no mesmo evento; uma só linha PARTO | — |
+
+### 16.9 §6.2 COMPRA
+
+| Campo na §6.2 | Destino no modelo | Divergência ou observação |
+|---|---|---|
+| Fornecedor | `EVENTOS.partner_id` | DV-04. Frete e outros custos têm parceiro próprio em `FINANCEIRO.partner_id` |
+| Data | `EVENTOS.event_date` | — |
+| Animais | EVENTO_ANIMAIS (SUJEITO, +1) e ANIMAIS | Animal novo, ou existente fora do rebanho (DV-06) |
+| Brincos | IDENTIFICACOES: BRINCO (o da fazenda) e BRINCO_ORIGEM (o do vendedor) | DV-05 |
+| Sexo | `atributos_iniciais_json.sexo` | DV-07 |
+| Raça | `atributos_iniciais_json.raca` | — |
+| Idade ou nascimento | `atributos_iniciais_json.data_nascimento` e `data_nascimento_confianca` | Idade vira data ESTIMADA; a idade não é gravada (seção 3.5) |
+| Peso | `EVENTO_ANIMAIS.peso` e PESAGENS (`tipo` COMPRA); só o lote: `COMPRAS.peso_total_kg` | Peso vivo. Carcaça: `EVENTO_ANIMAIS.peso_carcaca_kg` (DV-03) |
+| Valor individual | `EVENTO_ANIMAIS.valor_individual` | Informado ou derivado (seção 4.5) |
+| Valor total | `COMPRAS.valor_animais` | Leitura adotada: "valor total" = valor dos animais. O total com frete e outros é `COMPRAS.valor_total`, copiado em `EVENTOS.total_value` |
+| Frete | `COMPRAS.frete` (total) e um lançamento em FINANCEIRO | Natureza AQUISICAO_ANIMAIS, rateado entre os animais |
+| Outros custos | `COMPRAS.outros_custos` (total) e um lançamento por item | Idem |
+| Pasto de destino | `EVENTO_ANIMAIS.pasto_destino_id` | — |
+| Forma e condição de pagamento | Forma: `PARCELAS.forma_pagamento`. Condição: as linhas de PARCELAS (`parcela_num`, `data_vencimento`, `valor`) | DV-02. Condições em texto livre: `COMPRAS.observacoes` |
+| Documentos | Números: `COMPRAS.gta_numero`, `COMPRAS.nota_fiscal`, `FINANCEIRO.documento`, `PARCELAS.documento`. Arquivos: ANEXOS (`tipo` GTA, NOTA_FISCAL ou DOCUMENTO) com o `event_id` | — |
+| Compra por lote e negociação individual | `COMPRAS.modalidade` e `criterio_rateio` | Lote fechado = LOTE; valores por animal = VALOR_INDIVIDUAL. Lote não é entidade (DV-13) |
+
+### 16.10 §6.3 VENDA
+
+| Campo na §6.3 | Destino no modelo | Divergência ou observação |
+|---|---|---|
+| Comprador | `EVENTOS.partner_id` | DV-04 |
+| Data | `EVENTOS.event_date` | — |
+| Animais vendidos | EVENTO_ANIMAIS (SUJEITO, −1) | Animal de descarte: `motivo_saida` |
+| Peso individual ou peso total do lote | Individual: `EVENTO_ANIMAIS.peso` e PESAGENS (`tipo` VENDA), ou `peso_carcaca_kg`. Total: `VENDAS.peso_vivo_total_kg` e `peso_carcaca_total_kg` | Vivo e carcaça nunca na mesma coluna (DV-03) |
+| Valor por kg ou arroba | `VENDAS.preco_unitario`, `unidade_preco` e `base_peso`; por animal, `EVENTO_ANIMAIS.preco_unitario` | Todo R$/@ é exibido com a base |
+| Preço total | `VENDAS.valor_bruto` | Copiado em `EVENTOS.total_value` |
+| Descontos | `VENDAS.desconto_comercial`; retenções em `VENDAS.outras_deducoes` e em lançamentos DESPESA_VENDA | Leitura adotada na seção 4.2 |
+| Frete | `VENDAS.frete` e lançamento na conta "Frete de venda" | `retida_pelo_comprador` diz quem pagou |
+| Comissão | `VENDAS.comissao` e lançamento na conta "Comissão de venda" | Idem |
+| Condição de pagamento | Linhas de PARCELAS da receita, com `forma_pagamento` | DV-02 |
+| Data prevista de recebimento | `PARCELAS.data_vencimento` da primeira parcela aberta da receita | DV-16 |
+| Observações | `EVENTOS.notes`; condições comerciais em `VENDAS.observacoes` | — |
+| Negociação por cabeça, quilograma, arroba ou lote fechado | `VENDAS.modalidade` | Seção 4.3 |
+| Rateio por peso, valor individual ou critério manual | `VENDAS.criterio_rateio`; RATEIOS e ALOCACOES_FINANCEIRAS | Base e centavos de cada animal ficam gravados |
+
+### 16.11 §6.4 TRANSFERÊNCIA e §6.5 PESAGEM
+
+| § | Campo pedido | Destino no modelo | Divergência ou observação |
+|---|---|---|---|
+| 6.4 | Data | `EVENTOS.event_date` | — |
+| 6.4 | Pasto de origem | `EVENTO_ANIMAIS.pasto_origem_id` | Por animal, conferido contra a linha do tempo |
+| 6.4 | Pasto de destino | `EVENTO_ANIMAIS.pasto_destino_id` | — |
+| 6.4 | Animais | EVENTO_ANIMAIS (SUJEITO, 0) | — |
+| 6.4 | Responsável | `EVENTOS.responsible` | — |
+| 6.4 | Observações | `EVENTOS.notes` | — |
+| 6.4 | (não previsto) | `payload_json.gta_numero` | Destino em outra propriedade (DV-20) |
+| 6.5 | Animal | `PESAGENS.animal_id` e EVENTO_ANIMAIS | — |
+| 6.5 | Data | `EVENTOS.event_date` → `PESAGENS.data_pesagem` | — |
+| 6.5 | Peso | `PESAGENS.peso_kg`, copiado em `EVENTO_ANIMAIS.peso` | — |
+| 6.5 | Método | `PESAGENS.metodo` | DV-01 |
+| 6.5 | Observações | `PESAGENS.observacoes`; do evento, `EVENTOS.notes` | — |
+| 6.5 | Pesagem individual e coletiva | Uma ou N linhas de PESAGENS no mesmo evento | — |
+| 6.5 | Pesagem por lote | `payload_json.peso_total_lote_kg` e `qtd_cabecas_lote`; linhas com `metodo` MEDIA_LOTE | DV-13 |
+| 6.5 | Importação de pesagens | Evento PESAGEM com `source` IMPORTACAO e `import_id` | — |
+| 6.5 | Ganho absoluto, GMD, variação percentual, dias | Não gravados: calculados na leitura | DV-08 |
+
+### 16.12 §6.6 VACINAÇÃO e §6.7 VERMIFUGAÇÃO E TRATAMENTOS
+
+Os dois itens são o mesmo evento SANIDADE, com subtipos diferentes.
+
+| § | Campo pedido | Destino no modelo | Divergência ou observação |
+|---|---|---|---|
+| 6.6, 6.7 | Data | `EVENTOS.event_date` → `SANIDADE.data_aplicacao` | — |
+| 6.6, 6.7 | Produto | `SANIDADE.produto_id` e `nome_produto` | Sem cadastro, só o nome |
+| 6.6 | Fabricante | `SANIDADE.fabricante` | — |
+| 6.6 | Lote | `SANIDADE.lote`; `MOVIMENTOS_ESTOQUE.lote` | DV-19 |
+| 6.6 | Validade | `SANIDADE.validade`; `MOVIMENTOS_ESTOQUE.validade` | Coluna que §4.7 não lista (DV-19) |
+| 6.6, 6.7 | Dose | `SANIDADE.dose` e `unidade_dose`; `payload_json.modo_dose` e `dose_referencia` | Consumo total: `payload_json.quantidade_consumida_total` |
+| 6.6, 6.7 | Via de aplicação | `SANIDADE.via_aplicacao` | — |
+| 6.6, 6.7 | Animais | EVENTO_ANIMAIS (SUJEITO, 0) e uma linha de SANIDADE por animal | Aplicação coletiva = N linhas |
+| 6.6 | Responsável | `EVENTOS.responsible`; `SANIDADE.veterinario` | — |
+| 6.7 | Motivo | `SANIDADE.motivo` | Coluna que §4.7 não lista; obrigatória em TRATAMENTO |
+| 6.6, 6.7 | Custo | Lançamentos CUSTEIO em FINANCEIRO, alocados por animal; cópia em `SANIDADE.custo` | Consumo sem parcela; serviço com parcela (seção 10.3) |
+| 6.7 | Período de carência | `SANIDADE.periodo_carencia_dias` e `data_fim_carencia` | DV-01 |
+| 6.6, 6.7 | Próxima aplicação | `SANIDADE.data_proxima_aplicacao` | Proposta pelo protocolo, nunca prescrita |
+| 6.6 | Observações | `EVENTOS.notes`; por animal, `SANIDADE.observacoes` | — |
+| 6.6 | Protocolos configuráveis | `SANIDADE.protocol_id` → PROTOCOLOS_SANITARIOS | Nenhum protocolo vem ativo de fábrica |
+
+### 16.13 §6.8 MORTE e §6.9 DESCARTE
+
+| § | Campo pedido | Destino no modelo | Divergência ou observação |
+|---|---|---|---|
+| 6.8 | Animal | EVENTO_ANIMAIS (SUJEITO, −1) e `BAIXAS.animal_id` | — |
+| 6.8 | Data | `EVENTOS.event_date` | — |
+| 6.8 | Causa | `BAIXAS.causa` | Código de `LISTAS.CAUSA_MORTE` |
+| 6.8 | Diagnóstico | `BAIXAS.diagnostico` | — |
+| 6.8 | Responsável | `EVENTOS.responsible`, copiado em `BAIXAS.responsavel` | — |
+| 6.8 | Custos associados | Lançamento CUSTEIO opcional em FINANCEIRO, com PARCELAS e rateio entre os animais do evento | Sem coluna em BAIXAS; total em `EVENTOS.total_value` |
+| 6.8 | Observações | `EVENTOS.notes`; por animal, `BAIXAS.observacoes` | — |
+| 6.9 | Animais descartados | EVENTO_ANIMAIS (SUJEITO, −1) e BAIXAS (`tipo` DESCARTE, `motivo`, `destino`) | Saída sem negociação |
+| 6.9 | Receita correspondente | Lançamento OUTRA_RECEITA opcional, com PARCELAS e rateio | Havendo negociação, o evento é VENDA com `motivo_saida` |
+
+### 16.14 §6.10 REPRODUÇÃO e §6.11 DESMAMA
+
+| § | Campo pedido | Destino no modelo | Divergência ou observação |
+|---|---|---|---|
+| 6.10 | Cobertura | REPRODUCAO, `tipo_evento` COBERTURA: `touro_id`, `metodo` | — |
+| 6.10 | Monta natural | `tipo_evento` EXPOSICAO: `data`, `data_fim`, `estacao_id`; touros em EVENTO_ANIMAIS (papel TOURO) | Leitura adotada na seção 7.2 |
+| 6.10 | Inseminação artificial | `tipo_evento` INSEMINACAO: `touro_id`, `semen_identificacao`, `metodo` | O touro do sêmen pode ser EXTERNO |
+| 6.10 | Diagnóstico de gestação | `tipo_evento` DIAGNOSTICO_GESTACAO: `metodo`, `idade_gestacional_dias` | — |
+| 6.10 | Resultado | `REPRODUCAO.resultado` | POSITIVO · NEGATIVO · INCONCLUSIVO |
+| 6.10 | Previsão de parto | `REPRODUCAO.data_prevista_parto`, quando informada | Sem informação, é calculada na leitura (seção 7.3) |
+| 6.10 | Parto | Evento NASCIMENTO → `tipo_evento` PARTO, `data_parto` | Um parto = uma linha |
+| 6.10 | Aborto | `tipo_evento` ABORTO: `idade_gestacional_dias` | — |
+| 6.10 | Natimorto | `REPRODUCAO.qtd_natimortos` da linha PARTO | Não é evento nem cria animal (DV-15) |
+| 6.10 | Desmama | Evento DESMAMA → `tipo_evento` DESMAMA, na linha da mãe | — |
+| 6.11 | Animal | EVENTO_ANIMAIS (SUJEITO, 0) | — |
+| 6.11 | Data | `EVENTOS.event_date` | — |
+| 6.11 | Peso | `EVENTO_ANIMAIS.peso` e PESAGENS (`tipo` DESMAMA) | Opcional |
+| 6.11 | Matriz | EVENTO_ANIMAIS (papel MATRIZ) e `REPRODUCAO.animal_id` | Só quando a mãe é conhecida e está no rebanho |
+| 6.11 | Pasto de destino | `EVENTO_ANIMAIS.pasto_origem_id` e `pasto_destino_id` do bezerro | Opcional; preenchido, vale como movimento |
+| 6.11 | Observações | `EVENTOS.notes`; por animal, `EVENTO_ANIMAIS.observacoes` | — |
+
+### 16.15 §6.12 AJUSTE DE INVENTÁRIO
+
+Todos os casos são o evento AJUSTE_INVENTARIO; o caso é o subtipo.
+
+| Campo na §6.12 | Destino no modelo | Divergência ou observação |
+|---|---|---|
+| Erro de cadastro | Subtipo CORRECAO_CADASTRO → AJUSTES (`campo`, `valor_novo`) | Atributo sensível é projeção (DV-07) |
+| Identificação incorreta | Subtipo IDENTIFICACAO_INCORRETA → AJUSTES e linha nova em IDENTIFICACOES | Pôr ou repor brinco é evento IDENTIFICACAO (DV-05) |
+| Divergência de contagem | Subtipo DIVERGENCIA_CONTAGEM → BAIXAS (`tipo` DIVERGENCIA_CONTAGEM) e EVENTO_ANIMAIS (−1) | Não grava em AJUSTES |
+| Reclassificação | Subtipo RECLASSIFICACAO → AJUSTES (`campo` = `categoria_manual_id`) | A categoria automática não é gravada (DV-09) |
+| Correção de localização | Subtipo CORRECAO_LOCALIZACAO → AJUSTES e EVENTO_ANIMAIS (origem e destino) | — |
+| Justificativa | `AJUSTES.justificativa`; na divergência, `BAIXAS.observacoes` | Obrigatória nos cinco casos |
+| Evento próprio | EVENTOS com `event_type` AJUSTE_INVENTARIO | — |
+| Valor anterior registrado | `AJUSTES.valor_anterior`; na correção de localização, também `EVENTO_ANIMAIS.pasto_origem_id` | Registro para leitura, nunca fonte de restauração. Na divergência, o estado anterior é a própria linha do tempo |
+
+Cobertura: os 72 campos de §4.4 a §4.9 e todos os campos de §6.1 a §6.12 têm linha acima. Três pedidos não viram coluna, de propósito: os derivados de pesagem (DV-08), a previsão de parto calculada (seção 7.3) e a data prevista de recebimento (DV-16).
