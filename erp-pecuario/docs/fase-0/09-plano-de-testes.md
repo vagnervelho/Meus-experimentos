@@ -18,23 +18,22 @@
 |2|Apps Script, conta do dono: `runAcceptanceTests()` e página de concorrência|Os cenários com serviços reais: coerção, lock entre execuções paralelas, Drive com `drive.file`, tempos|Queda no meio do protocolo (não há como matar a execução no ponto exato: nível 1 e SP-03); telas|
 |3|Playwright sobre `src/*.html`, com `google.script.run` simulado: respostas fixas para estados de tela, ou ponte para o `api()` do harness do nível 1|Telas a 360 px e desktop: registrar evento, modo curral, rascunho e reenvio, avisos, erro coletivo, acessibilidade|Regra de negócio (decide o backend, P5); iframe real, `localStorage` e download no celular (SP-06, SP-07)|
 
-**Regra de honestidade.** Cada item do relatório tem um de quatro estados: `EXECUTADO AQUI` (comando e contagens copiados da saída), `EXECUTADO PELO DONO` (com o arquivo de resultado gerado na conta dele), `PENDENTE NA CONTA DO DONO` ou `NÃO SE APLICA`. O nível 3 só é "executado aqui" se o navegador rodar neste ambiente. Fase não fecha com item pendente.
+**Regra de honestidade.** Cada item do relatório tem um de quatro estados: `EXECUTADO AQUI` (comando e contagens copiados da saída), `EXECUTADO PELO DONO` (com o arquivo de resultado), `PENDENTE NA CONTA DO DONO` ou `NÃO SE APLICA`. O nível 3 só é "executado aqui" se o navegador rodar neste ambiente. Fase não fecha com item pendente.
 
 **Nível 2.** `runAcceptanceTests()` cria pela Drive API a planilha "ERP Pecuário — BASE DE TESTE" em `ERP Pecuário/Testes`, guarda o ID em `TEST_SPREADSHEET_ID` e roda `setup()` e os cenários com esse banco como parâmetro do contexto de execução; `SPREADSHEET_ID` nunca é trocado, e versão e marcador já são por planilha. É retomável (limite de 6 min): para perto de 4 min, grava o cursor e continua na chamada seguinte. O resultado sai em arquivo JSON na mesma pasta.
 
 ## 2. Harness e fakes
 
-**Reaproveitado de `inbox-intelligence/tests/`:** `createGas()` (contexto `vm`, carga de `src/*.js` nas duas ordens, relógio falso), `makePropertyStore` (9 KB por valor, 500 KB no total), `makeUtilities`, `makeScriptApp`, `makeHtmlService`, `makeUrlFetch`; de `tests/ui/`, `mock-gas.js` (respostas clonadas; acusa `Date` em argumento) e `static-rules.js` (regex com autoteste). Novos:
+**Reaproveitado de `inbox-intelligence/tests/`:** `createGas()` (contexto `vm`, carga de `src/*.js` nas duas ordens, relógio falso), `makePropertyStore` (9 KB por valor, 500 KB no total), `makeUtilities`, `makeScriptApp`, `makeHtmlService`, `makeUrlFetch` e a sessão com e-mail ajustável (dono, terceiro ou vazio); de `tests/ui/`, `mock-gas.js` (respostas clonadas; acusa `Date` em argumento) e `static-rules.js`. Novos:
 
 |Fake|Comportamento exigido|Por quê|
 |---|---|---|
-|FakeSheets: um estado, duas fachadas (`SpreadsheetApp` e serviço avançado `Sheets`)|Célula = valor + formato. Em `SpreadsheetApp`, célula "Geral" coage (`0012` vira 12; `=1+1`, 2; `2026-11-13`, data; `TRUE`, booleano; `50%`, 0,5) e `getValues` devolve `Date`, número ou booleano. Em `Sheets`, `stringValue` nunca é interpretado e `batchUpdate` com pedido inválido não aplica nada|O teste falha quando o adaptador esquece o tipo (P6)|
+|FakeSheets: um estado, duas fachadas (`SpreadsheetApp` e serviço avançado `Sheets`)|Célula = valor + formato. Em `SpreadsheetApp`, célula "Geral" coage (`0012` vira 12; `=1+1`, 2; `2026-11-13`, data) e `getValues` devolve `Date`, número ou booleano. Em `Sheets`, `stringValue` nunca é interpretado e `batchUpdate` com pedido inválido não aplica nada|O teste falha quando o adaptador esquece o tipo (P6)|
 |Buffer de escrita e falha injetável|Pendentes até `flush()`; `crashAt(n, subconjunto)` mata a execução na n-ésima escrita e descarta qualquer subconjunto das pendentes; `failOn(aba, n)` lança erro tratável|Premissa pessimista da análise de queda; exceção tratada × morte|
 |FakeLock com agendador|Lock compartilhado por N execuções simuladas, com pontos de troca (entre "ler marcador" e "obter lock", entre fases); conta aquisições e liberações|Intercalações; subcomando que solta o lock|
 |FakeDrive (serviço avançado `Drive`)|`Files.create`, `copy`, `update`, listagem por pasta; só enxerga arquivo criado por ele|Emula `drive.file`|
-|FakeSession|E-mail ativo do dono, de terceiro ou vazio|Guarda de dono|
 
-**Como a fidelidade é conferida.** Fake complacente dá verde falso nos três riscos maiores (tipos, gravação parcial, concorrência). A coerção do fake é um arquivo de dados (`tests/fixtures/coercao.json`: valor escrito e formato, valor e tipo lidos). O SP-01 grava o mesmo corpus na planilha real, pelas duas primitivas, e devolve um JSON igual; um teste compara os dois, e divergência corrige o fake. Até lá a coerção é hipótese (a confirmar no spike, SP-01), como o destino do buffer e a liberação do lock (SP-03).
+**Como a fidelidade é conferida.** Fake complacente dá verde falso nos três riscos maiores (tipos, gravação parcial, concorrência). A coerção do fake é um arquivo de dados (`tests/fixtures/coercao.json`). O SP-01 grava o mesmo corpus na planilha real, pelas duas primitivas, e devolve um JSON igual; um teste compara os dois, e divergência corrige o fake. Até lá a coerção é hipótese (a confirmar no spike, SP-01), como o destino do buffer e a liberação do lock (SP-03).
 
 **Convenções.** Relógio falso em 13/11/2026, fuso `America/Porto_Velho`; IDs determinísticos; marco zero (D0) em 01/01/2026; Pasto 1, Pasto 2 e Baixada; parceiros F1 (fornecedor), C1 (comprador), T1 (transportador). Verificações comuns a todas as fichas: `sistema.integridade` sem erro; Σ `efeito_inventario` = animais ATIVOS; linha preexistente de tabela imutável não muda (célula a célula); resposta sem `Date`; comando rejeitado não grava linha nem muda `DATA_VERSION`.
 
@@ -73,7 +72,7 @@
 - Passo 1: VALIDATION com um detalhe (0211 estava no Pasto 2); nada gravado, nem em OPERACOES (§16.6, §16.14).
 - Quantidades hoje: Pasto 1 = 0, Pasto 2 = 11. Inventário anterior (28/02): 10 e 1.
 - EVENTO_ANIMAIS: 10 linhas, efeito 0, origem Pasto 1, destino Pasto 2.
-- Histórico de 0201: entrada (01/01) e transferência (01/03); 59 dias no Pasto 1 (o dia da saída não conta); a linha da entrada não mudou.
+- Histórico de 0201: entrada (01/01) e transferência (01/03); 59 dias no Pasto 1 (o dia da saída não conta).
 
 ### CT-03: Compra
 
@@ -92,20 +91,18 @@
 
 ### CT-04: Venda
 
-**Objetivo:** baixa, receita rateada e histórico preservado. **Nível:** 1, 2, 3. **RN:** 014, 017, 069, 070, 108.
+**Objetivo:** baixa, receita rateada e histórico preservado. **Nível:** 1, 2, 3. **RN:** 014, 069, 070, 108.
 
 **Massa:** 0401–0405 em D0 no Pasto 1, sem valor de abertura.
 
 **Passos:**
 1. VENDA em 20/08/2026, comprador C1, RECRIA_ENGORDA, KG_VIVO a R$ 10,00: 450,0, 462,0, 438,0, 471,0 e 455,0 kg (2.276,0 kg); comissão de R$ 455,20; recebimento em 19/09; rateio por PESO_VIVO.
-2. PESAGEM de 0401 em 25/08/2026.
 
 **Verificações:**
 - Inventário: Pasto 1 com 5 em 19/08 e 0 em 20/08; ANIMAIS VENDIDO, `data_saida` 20/08, pasto vazio.
 - Tabelas: VENDAS 1; EVENTO_ANIMAIS 5 linhas −1; PESAGENS 5 (VENDA); `partner_id` = C1.
 - Receita: RECEITA_VENDA_ANIMAIS de R$ 22.760,00, parcela aberta para 19/09, alocada em 4.500,00, 4.620,00, 4.380,00, 4.710,00 e 4.550,00; DESPESA_VENDA de 455,20 (90,00 a 94,20 por animal). Resultado da negociação: 22.304,80.
-- Histórico: a ficha de 0401 mantém entrada e registros anteriores; resultado por animal sai "parcial: sem custo de aquisição".
-- Passo 2: VALIDATION (fora da permanência).
+- Histórico: a ficha de 0401 mantém entrada e registros anteriores.
 
 ### CT-05: Pesagem
 
@@ -120,7 +117,7 @@
 4. Tentar peso 0 e, em 29/06, 450,0 kg.
 
 **Verificações:**
-- Dias entre 10/03 e 09/06: 91 (21 + 30 + 31 + 9).
+- Dias entre 10/03 e 09/06: 91 (21+30+31+9).
 - Ganho = 372,8 − 300,0 = 72,8 kg; GMD = 72,8 ÷ 91 = 0,800 kg/dia; variação = (372,8 ÷ 300,0 − 1) × 100 = 24,27%.
 - Intervalo de 10 dias (< 28): GMD `null` com DADOS_INSUFICIENTES, nunca zero.
 - PESAGENS: 3 linhas, as anteriores intactas; nenhuma coluna de GMD; `peso_atual` 380,0.
@@ -143,7 +140,7 @@
 - SANIDADE: 30 linhas, mesmo `event_id`, `custo` 3,00 cada.
 - Consumo: 1 MOVIMENTOS_ESTOQUE (SAIDA, 30); `estoque_atual` de 100 para 70.
 - Custo: 1 lançamento CUSTEIO de R$ 90,00, sem parcela; 30 alocações de 3,00; caixa inalterado.
-- Próxima aplicação: 05/04 + 180 dias = 02/10/2026 nas 30 linhas; em 20/09 as pendências aparecem como próximas (antecedência de 15 dias); em 13/11, vencidas. Sem protocolo nem data, não há pendência.
+- Próxima aplicação: 05/04 + 180 dias = 02/10/2026 nas 30 linhas; em 20/09 as pendências aparecem como próximas (antecedência de 15 dias); em 13/11, vencidas.
 
 ### CT-07: Estorno
 
@@ -165,7 +162,7 @@
 
 ### CT-08: Histórico
 
-**Objetivo:** inventário em qualquer data, pelo replay. **Nível:** 1, 2. **RN:** 013, 023, 024, 025.
+**Objetivo:** inventário em qualquer data, pelo replay. **Nível:** 1, 2. **RN:** 013, 024, 025.
 
 **Massa e passos:** D0 com 100 animais (60 no Pasto 1, 40 no Pasto 2); 15/01/2026, 2 nascimentos no Pasto 1; 01/02, 10 do Pasto 1 para o Pasto 2; 20/02, venda de 5 do Pasto 2; 10/03, 1 morte no Pasto 1.
 
@@ -203,7 +200,7 @@
 
 ### CT-10: Concorrência e duplicidade
 
-**Objetivo:** reenvio não duplica; gravações não se intercalam. **Nível:** 1 (passos 1–6), 2 (passo 7), 3 (duplo clique). **RN:** 030, 033–038.
+**Objetivo:** reenvio não duplica; gravações não se intercalam. **Nível:** 1 (passos 1–5), 2 (passo 6), 3 (duplo clique). **RN:** 030, 033–038.
 
 **Massa:** 1001 em D0 no Pasto 1.
 
@@ -213,8 +210,7 @@
 3. Mesma pesagem com chave nova: aviso POSSIVEL_DUPLICIDADE (100% ≥ 80%); com `avisosAceitos`, grava.
 4. Resposta perdida depois do commit: `operacao.status` devolve CONFIRMADA; o cliente não reenvia.
 5. Lock tomado: LOCKED após 25 s; nova tentativa com a mesma chave grava uma vez.
-6. Segunda execução iniciada entre as fases A e B da primeira: espera; `event_seq` distintos; linhas contíguas.
-7. Real: a página de concorrência dispara 5 comandos paralelos com chaves diferentes e 2 com a mesma chave. Esperado: 6 eventos, 1 resposta `duplicado: true`, nenhuma linha intercalada.
+6. Real: a página de concorrência dispara 5 comandos paralelos com chaves diferentes e 2 com a mesma chave. Esperado: 6 eventos com `event_seq` distintos, 1 resposta `duplicado: true`, nenhuma linha intercalada.
 
 ## 4. Cenários adicionais
 
@@ -279,7 +275,7 @@
 
 **Objetivo:** data passada não quebra a cadeia gravada. **Nível:** 1. **RN:** 017, 020, 023.
 
-**Passos e verificações:** (a) 0457 foi do Pasto 1 para a Baixada em 10/03/2026; lançar Pasto 1 para Pasto 2 com data 01/03: CONFLICT citando a de 10/03; (b) lote vendido em 20/06: pesagem datada de 20/06 é aceita (limite inclusivo), de 21/06 dá VALIDATION, transferência de 20/06 dá CONFLICT; (c) pesagem retroativa de 325,0 kg em 10/04 entre as do CT-05: GMD de 0,806 (25,0 ÷ 31) e 0,797 (47,8 ÷ 60), sem regravar linha.
+**Passos e verificações:** (a) 0457 foi do Pasto 1 para a Baixada em 10/03/2026; lançar Pasto 1 para Pasto 2 com data 01/03: CONFLICT citando a de 10/03; (b) lote vendido em 20/06: pesagem datada de 20/06 é aceita (limite inclusivo), de 21/06 dá VALIDATION, transferência de 20/06 dá CONFLICT.
 
 ### CT-18: Substituição de evento que cria animais
 
@@ -287,9 +283,9 @@
 
 **Massa:** a compra do CT-15, com pesagem dos 3 em 12/02 e transferência em 01/03.
 
-**Passos:** (1) `evento.corrigir` trocando o brinco 0802 por 0812; (2) corrigir retirando 0803; (3) queda entre as fases A e B da correção.
+**Passos:** (1) `evento.corrigir` trocando o brinco 0802 por 0812; (2) corrigir retirando 0803.
 
-**Verificações:** (1) um só commit; original ESTORNADO; ANIMAIS com as mesmas 3 linhas, `animal_id` e `codigo_interno`; `evento_origem_id` aponta para o substituto; pesagem e transferência seguem válidas; lançamentos antigos CANCELADO; unicidade de brinco conferida no estado final; (2) CONFLICT; (3) o original segue vigente.
+**Verificações:** (1) um só commit; original ESTORNADO; ANIMAIS com as mesmas 3 linhas, `animal_id` e `codigo_interno`; `evento_origem_id` aponta para o substituto; pesagem e transferência seguem válidas; lançamentos antigos CANCELADO; unicidade de brinco conferida no estado final; (2) CONFLICT.
 
 ### CT-19: Conciliação caixa × resultado
 
@@ -297,13 +293,7 @@
 
 **Massa:** o caso de `07-financeiro-e-indicadores.md`, seção 2.2 (compra, vacina, arrendamento, morte de A3, venda de A1 e A2).
 
-**Verificações:** resultado de março 0,00 (compra não é custeio), junho −3.733,33, novembro +5.495,73; por animal: 2.675,54; 2.352,65; −3.074,79. A identidade fecha ao centavo, inclusive depois de estornar a venda:
-
-|Data|Caixa acumulado|A receber|A pagar|Rebanho ativo (custo)|Insumos|Resultado acumulado|
-|---|---:|---:|---:|---:|---:|---:|
-|30/06|−9.975,00|0,00|0,00|6.166,67|21,00|−3.787,33|
-|30/11|−9.975,00|11.840,00|177,60|0,00|21,00|1.708,40|
-|31/12|1.687,40|0,00|0,00|0,00|21,00|1.708,40|
+**Verificações:** resultado de março 0,00 (compra não é custeio), junho −3.733,33, novembro +5.495,73; por animal: 2.675,54; 2.352,65; −3.074,79. A identidade da conciliação fecha ao centavo nas três datas da tabela daquele documento (resultado acumulado de −3.787,33 em 30/06 e de 1.708,40 em 30/11 e 31/12), inclusive depois de estornar a venda.
 
 ### CT-20: Corpus de tipos e edição manual
 
@@ -322,10 +312,10 @@
 |056, 057|Lote vencido em 31/10/2026 aplicado em 13/11 (PRODUTO_VENCIDO); consumo de 30 com saldo de 20 (ESTOQUE_INSUFICIENTE)|
 |058, 059, 072|Agenda e carência pelos exemplos de `05-regras-de-negocio.md` (4.7 e 4.8), antes, dentro e depois do prazo|
 |060, 061, 064|Macho como sujeito de diagnóstico; parto de fêmea de 20 meses (IDADE_REPRODUTIVA); segundo parto 200 dias após o primeiro (INTERVALO_PARTO_CURTO)|
-|066|Estação com 40 expostas, 38 diagnosticadas, 32 prenhas, 30 paridas, 31 nascidos vivos: prenhez 80,0%; parição 75,0%; natalidade 77,5%; perda gestacional 6,25%. Com 4 expostas: `null`|
+|066|Estação com 40 expostas, 38 diagnosticadas, 32 prenhas, 30 paridas, 31 nascidos vivos: prenhez 80,0%; parição 75,0%; natalidade 77,5%. Com 4 expostas: `null`|
 |068, 073, 074, 082|Valor 2% acima de quantidade × preço (VALOR_DIVERGENTE); rateio por peso sem peso individual (RATEIO_SEM_PESO); DESCARTE grava BAIXAS, nunca VENDAS; baixa em 15/06 com `fin_bloqueio_ate` em 30/06/2026 (PERIODO_BLOQUEADO)|
-|085–087|Valor manual com mais de 180 dias cai para o preço da categoria; sem referência, `null` (SEM_VALOR_DE_REFERENCIA)|
-|096–098, 100–102|As 20 combinações de cobertura das categorias-semente; chave de configuração desconhecida; mudar `data_marco_zero` com evento vigente|
+|085–087|Valor manual com mais de 180 dias cai para o preço da categoria; sem referência, `null` (SEM_VALOR_DE_REFERENCIA); peso vencido marcado estimado; total com cobertura|
+|096–098, 100–102|As 20 combinações de cobertura das categorias-semente; chave de configuração desconhecida; mudar `data_marco_zero` com evento vigente; alterar `codigo` de conta|
 |103, 104, 107|E-mail de terceiro: DENIED com zero leituras no FakeSheets; e-mail vazio só passa com `ALLOW_EMPTY_ACTIVE_USER`; backup de 3 dias atrás gera alerta|
 
 ## 5. Falhas do protocolo e concorrência
@@ -351,10 +341,9 @@ O caso 9 (lock depois da morte da execução) fica no SP-03.
 |Dois comandos criando o mesmo brinco|O segundo relê sob lock e recebe VALIDATION|
 |Reenvio da chave com a primeira tentativa em curso|`duplicado: true`|
 |Gatilho de backup durante uma gravação|Espera e copia um estado sem operação pela metade|
-|`operacao.status` durante a gravação|EM_ANDAMENTO, sem tomar lock|
 |Commit com `dataVersionEsperada` antiga|CONFLICT|
 
-**Teste real (nível 2).** Uma execução não disputa lock consigo mesma; por isso o passo 7 do CT-10 usa uma página servida por `doGet` em modo de teste. Ela envia `ambiente: 'TESTE'` em cada pedido, e o servidor resolve o banco por `TEST_SPREADSHEET_ID`, nunca por ID vindo do cliente.
+**Teste real (nível 2).** Uma execução não disputa lock consigo mesma; por isso o passo 6 do CT-10 usa uma página servida por `doGet` em modo de teste, que envia `ambiente: 'TESTE'` em cada pedido; o servidor resolve o banco por `TEST_SPREADSHEET_ID`, nunca por ID vindo do cliente.
 
 ## 6. Rastreabilidade
 
@@ -403,7 +392,7 @@ Regra 18: como toda entrada exige pasto, "ativo sem pasto" só nasce de edição
 `seedDemoData_()` é chamada por `runAcceptanceTests()` quando a propriedade `TEST_PLAN` vale `DEMO` (padrão: `ACEITACAO`).
 
 - **Composição em D0** (hoje menos 1.095 dias): 240 cabeças, sendo 110 vacas, 4 touros, 30 novilhas, 48 bezerros ao pé e 48 garrotes, em 6 pastos, um arrendado.
-- **Três anos de eventos**, só pelos comandos: 255 nascimentos, 70 compras, 240 vendas (cabeça, kg vivo e arroba), 15 mortes, 5 descartes e 1 divergência de contagem, fechando em 304 ativos (240+255+70−240−15−5−1); pesagens e campanhas sanitárias coletivas; 3 estações de monta; lançamentos mensais com rateio; parcelas pagas, abertas e vencidas; estornos e correções.
+- **Três anos de eventos**, só pelos comandos: 255 nascimentos, 70 compras, 240 vendas (cabeça, kg vivo e arroba), 15 mortes, 5 descartes e 1 divergência de contagem, fechando em 304 ativos (240+255+70−240−15−5−1); manejos coletivos, 3 estações de monta, lançamentos com rateio, parcelas em todos os estados, estornos e correções.
 - **Determinismo**: sorteio com semente fixa; totais conferidos; comando rejeitado derruba o seed, que assim também testa o motor. Retomável (chaves `seed:<n>`).
 - **Separação da base real** (§18): planilha própria em `ERP Pecuário/Testes`, com ID em `DEMO_SPREADSHEET_ID`, nunca em `SPREADSHEET_ID`; versão e marcador por planilha; faixa "BASE DE TESTE" em todas as telas quando o banco não é o de produção. Um teste confere que a base real não muda durante o seed nem a aceitação.
 - **Desempenho (SP-05)**: o mesmo gerador, com fator de escala, produz de 10 mil a 300 mil linhas.
@@ -420,7 +409,7 @@ O nível 1 inteiro roda a cada commit; a fase N exige verde tudo das fases 1 a N
 |4|CT-13 completo, CT-15, CT-19|CT-15|Baixa de parcela, rateio|Conciliação sobre a base do seed|
 |5|CT-16; indicadores `null` com motivo|XLSX e PDF|Dashboard, relatórios, acessibilidade|Exportação × tela nos 17 relatórios|
 
-**Ensaio de restauração (Fase 1).** Na base de teste: `sistema.backup`; registrar 3 eventos; `sistema.restaurarBackup`. Esperado: banco trocado; os 3 eventos ausentes; inventário igual ao do backup; integridade sem erro; versão de dados acima da última servida; banco anterior ainda no Drive. No nível 1, variante com operação INICIADA no backup: `recoverAll()` a marca FALHOU.
+**Ensaio de restauração (Fase 1).** Na base de teste: `sistema.backup`; registrar 3 eventos; `sistema.restaurarBackup`. Esperado: banco trocado; os 3 eventos ausentes; inventário igual ao do backup; integridade sem erro; versão de dados acima da última servida; banco anterior ainda no Drive.
 
 ## 9. Testes estáticos (lint)
 
@@ -433,7 +422,6 @@ Regex sobre `src/`, cada regra com autoteste de detecção:
 - **Superfície pública**: sem `_` no fim, só `doGet`, `api`, `setup`, `runAcceptanceTests`, `verifyIntegrity` e os dois gatilhos, cada uma começando por `assertOwner_()`.
 - **Camadas**: serviços do Apps Script fora dos arquivos de domínio; escrita na planilha só em `Database`; `LockService` só em `UnitOfWork`.
 - **Sem exclusão**: o roteador não tem rota de apagar.
-- **Manifesto**: os 5 escopos, `USER_DEPLOYING` e `MYSELF`.
 
 ## 10. Modelo do relatório de testes por fase
 
@@ -448,12 +436,10 @@ RELATÓRIO DE TESTES — FASE n — commit <hash> — <data>
 2. A EXECUTAR NA CONTA DO DONO (nível 2)
    item                    estado                        evidência
    runAcceptanceTests()    PENDENTE | EXECUTADO dd/mm    <arquivo JSON>
-   CT-10 passo 7           ...
+   CT-10 passo 6           ...
    spike SP-nn             ...
 
 3. HIPÓTESES NÃO CONFERIDAS NA PLATAFORMA
 4. FALHAS CONHECIDAS E DECISÃO
 5. VEREDITO: a fase fecha? sim | não
 ```
-
-Um relatório por fase, em `docs/`; "pendente" só vira "ok" com a evidência anexada.
