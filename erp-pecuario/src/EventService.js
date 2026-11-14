@@ -214,7 +214,8 @@ var EventService = (function () {
     var ev = cabecalho_(m, tipo, subtipo, campos, original);
     if (!Array.isArray(animais) || !animais.length) erroGeral_(m, 'animais', 'SEM_ANIMAIS', 'Inclua ao menos um animal.');
     else if (animais.length > MAX_ANIMAIS) erroGeral_(m, 'animais', 'ANIMAIS_DEMAIS', 'Um lançamento aceita até ' + MAX_ANIMAIS + ' animais; divida em partes.');
-    if (m.col.temErros() || !Array.isArray(animais) || animais.length > MAX_ANIMAIS) return { erros: m.col.erros };
+    // Sem data válida ou sem lista de animais não há linha do tempo a conferir; os demais erros do cabeçalho seguem juntos com os dos animais.
+    if (!Utils.dataValida(ev.event_date) || !Array.isArray(animais) || !animais.length || animais.length > MAX_ANIMAIS) return { erros: m.col.erros };
 
     var plano = { EVENTOS: [], ANIMAIS: [], EVENTO_ANIMAIS: [], IDENTIFICACOES: [], PESAGENS: [], REPRODUCAO: [], AJUSTES: [], FINANCEIRO: [], RATEIOS: [], ALOCACOES_FINANCEIRAS: [] };
     var ctxEv = { tipo: tipo, subtipo: subtipo, ev: ev, original: original, plano: plano, itens: [], criadosOriginal: {}, auditorias: [] };
@@ -269,7 +270,7 @@ var EventService = (function () {
   }
   function novoItem_(m, item, i) {
     var codigo = typeof item.brinco === 'string' ? Utils.aparar(item.brinco) : null;
-    var existente = typeof item.animal_id === 'string' ? estado_(m, item.animal_id) : null;
+    var existente = typeof item.animal_id === 'string' ? m.f.animal(item.animal_id) : null;
     var quem = !vazio_(codigo) ? 'Brinco ' + codigo : existente ? nomeAnimal_(existente) : 'Animal ' + (i + 1) + ' da lista';
     return { indice: i, dados: item, animal_id: null, publico: false, quem: quem, brincoTexto: vazio_(codigo) ? null : codigo, linhas: [], novo: false, final: {} };
   }
@@ -750,6 +751,8 @@ var EventService = (function () {
       var opcAntes = { nascimento: e && e.data_nascimento, dataEntrada: e && e.data_entrada };
       var novos = Timeline.problemasNovos(Timeline.validar(antes, opcAntes).problemas, Timeline.validar(depois, opc).problemas);
       novos.forEach(function (p) {
+        // Nascimento × a própria entrada já foi conferido nos atributos (mensagem mais clara).
+        if (p.codigo === 'ANTES_DO_NASCIMENTO' && it.atributos && p.event_id === ctxEv.ev.event_id) return;
         var texto = Timeline.descrever(p, function (id) { return nomePasto_(m, id); });
         if (p.event_id === ctxEv.ev.event_id) erroItem_(m, it, null, p.codigo, texto);
         else conflito_(m, it, p, texto + ' Estorne ou corrija esse registro antes, ou mude este lançamento.');
@@ -758,7 +761,7 @@ var EventService = (function () {
   }
   /** Animal que deixa de ter a entrada (estorno, ou correção que o tira da lista): sem outro evento nem referência (RN-041). */
   function conferirAnulacao_(m, animalId, eventoId, anulados) {
-    var e = estado_(m, animalId) || {};
+    var e = m.f.animal(animalId) || {};
     var it = { animal_id: animalId, brincoTexto: e.brinco || null, quem: nomeAnimal_(e) };
     var outros = {};
     m.real.linhas(animalId).forEach(function (l) {
@@ -795,7 +798,7 @@ var EventService = (function () {
     // Animais não criados pelo original que ficaram fora do substituto: a linha do tempo deles sem o original.
     m.f.linhasDoEvento(ctxEv.original.event_id).forEach(function (l) {
       if (presentes[l.animal_id] || ctxEv.criadosOriginal[l.animal_id]) return;
-      var e = estado_(m, l.animal_id) || {};
+      var e = m.f.animal(l.animal_id) || {};
       var it = { animal_id: l.animal_id, brincoTexto: e.brinco || null, quem: nomeAnimal_(e) };
       var novos = Timeline.problemasNovos(Timeline.validar(m.real.linhas(l.animal_id), { nascimento: e.data_nascimento }).problemas, Timeline.validar(m.f.linhas(l.animal_id), { nascimento: e.data_nascimento }).problemas);
       novos.forEach(function (p) { conflito_(m, it, p, Timeline.descrever(p, function (x) { return nomePasto_(m, x); })); });
@@ -996,7 +999,7 @@ var EventService = (function () {
     linhas.forEach(function (l) { if (l.atributos_iniciais_json) criados[l.animal_id] = true; });
     animais.forEach(function (id) {
       if (criados[id]) return conferirAnulacao_(m, id, alvo.event_id, criados);
-      var e = estado_(m, id) || {};
+      var e = m.f.animal(id) || {};
       var it = { animal_id: id, brincoTexto: e.brinco || null, quem: nomeAnimal_(e) };
       var novos = Timeline.problemasNovos(Timeline.validar(m.real.linhas(id), { nascimento: e.data_nascimento }).problemas, Timeline.validar(m.f.linhas(id), { nascimento: e.data_nascimento }).problemas);
       novos.forEach(function (p) { conflito_(m, it, p, Timeline.descrever(p, function (x) { return nomePasto_(m, x); }) + ' Estorne esse registro antes.'); });

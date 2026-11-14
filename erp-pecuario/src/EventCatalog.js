@@ -303,7 +303,7 @@ var EventCatalog = (function () {
     var porId = {};
     definicoes.forEach(function (d) { porId[d.id] = d; });
     Object.keys(v).forEach(function (k) {
-      if (!porId[k]) out.push(det_('CAMPO_DESCONHECIDO', k, 'O campo "' + k + '" não existe neste lançamento.'));
+      if (!porId[k] && !vazio_(v[k])) out.push(det_('CAMPO_DESCONHECIDO', k, 'O campo "' + k + '" não existe neste lançamento.'));
     });
     definicoes.forEach(function (d) {
       var x = v[d.id];
