@@ -536,6 +536,11 @@ var Maintenance = (function () {
       banco: ctx.banco, primitiva: p[PROP_PRIMITIVA] || null, data_version: UnitOfWork.versao(ctx), backups: backups,
       ultimo_backup: backups[0] || null, integridade: integridade,
       gatilhos: ScriptApp.getProjectTriggers().map(function (t) { return t.getHandlerFunction(); }),
+      // O estado que InventoryService.consultaAlertas espera (BACKUP_ATRASADO, INTEGRIDADE_COM_ERRO).
+      alertas_estado: {
+        backup: { ultimo_em: backups[0] ? backups[0].instante : null },
+        integridade: integridade && !integridade.erro ? { verificado_em: integridade.gerado_em, erros: integridade.erros } : null,
+      },
     };
   }
 

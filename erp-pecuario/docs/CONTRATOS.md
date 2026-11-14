@@ -7,7 +7,8 @@ arquivo descreve o que **existe no código**.
 Estado: etapas BASE (E1.1 e parte da E1.2) — `Schema`, `Utils`, `Validation`, harness e estrutura —, PERSISTÊNCIA
 (E1.3 e E1.4) — `Database`, `Repository`, `UnitOfWork` e `AuditService` (parte 1) — e MOTOR DE EVENTOS (E1.6) —
 `EventCatalog`, `Timeline` e `EventService` — e SERVIÇOS DE CADASTRO E CONSULTA (E1.7 e E1.8) — `Config`, `AnimalService`,
-`PastureService` e `InventoryService` (seção 15).
+`PastureService` e `InventoryService` (seção 15) — e OPERAÇÃO DO SISTEMA (E1.10 e E1.11, backend) — `FileService`,
+`Maintenance`, `AuditService` (parte 2) e `ImportService` (seções 11, 16 a 18).
 
 ## 1. Regras que valem para todo arquivo de `src/`
 
@@ -172,7 +173,7 @@ monta o contexto com `Database.contexto(opcoes)`; nos testes, o mesmo objeto é 
 | `idGen` | `uuid() → UUID minúsculo de 36 caracteres` | `Utilities.getUuid()` |
 | `hash` | `sha256Hex(texto) → 64 caracteres hexadecimais minúsculos` (UTF-8) | `Utilities.computeDigest(SHA_256, texto, UTF_8)` + `Utils.bytesParaHex` |
 | `props` | `ler() → {chave: texto}` (UM `getProperties()` por chamada: o retrato de um ponto de leitura); `gravar(chave, valor)`; `remover(chave)` | `PropertiesService.getScriptProperties()` |
-| `files` | `FileStore` (Drive: backups, anexos, exportações) | `FileService` (etapa posterior); `null` até lá |
+| `files` | `FileStore` (Drive: pastas, banco, backups, anexos, exportações; seção 16) | `FileService.porta()` |
 | `session` | Sessão do pedido (dono, e-mail ativo) | `Api` (etapa posterior); `null` até lá |
 | `usuario` | E-mail de quem executa; obrigatório em `UnitOfWork.run` (vai para `OPERACOES.usuario`, `created_by`, `AUDITORIA.usuario`) | `Api` |
 | `fuso` | Fuso IANA de "hoje" | `CONFIGURACOES.fuso` (Api); padrão `Session.getScriptTimeZone()` |
@@ -567,6 +568,26 @@ planilha. Tem de ser função determinística das linhas vigentes (pode rodar qu
 | `refazer(repo, io, op, linhasDaOperacao) → {atualizar, criar, semAlvo}` | O que a fase C aplica (idempotente; `updated_at`/`created_at` = `op.started_at`). Usado pela UnitOfWork |
 | `listar(tx, {entidade, entity_id, op_id, acao, de, ate}?) → [linhas]` | Trilha só de operações CONFIRMADAS, da mais recente para a mais antiga (cópias). A consulta declara `AuditService.LEITURAS` |
 | `linhaErro(ctx, {contexto, codigo, mensagem, erro, op_id}) → linha de ERROS_LOG` | Mensagem até 2.000 caracteres; pilha resumida (6 linhas) quando há `erro` |
+| `consultaListar(filtros)` / `listarAuditoria(ctx, filtros)` | Rota `auditoria.listar`: os filtros de `listar` + `pagina`, `por_pagina` (padrão 50, teto 500) → `{total, pagina, por_pagina, itens}` |
+
+**Parte 2 — verificação de integridade (06, seção 9).** `verificarIntegridade(ctx) → {dados: relatório, dataVersion}`
+(rota `sistema.integridade`; fim do setup; gatilho semanal): lê os cabeçalhos e a localidade pela porta e entra por
+`UnitOfWork.exclusivo` (lock e recuperação ANTES de conferir) com acesso cru a todas as abas existentes. Com aba
+ausente, só a estrutura é conferida (as demais checagens ficam `NAO_EXECUTADA`). Relatório: `{gerado_em, banco,
+data_version, ok (nenhum ERRO), erros, alertas, reparavel, abas_ausentes, checagens: [{codigo, rotulo, severidade,
+situacao (OK|ERRO|ALERTA|NAO_EXECUTADA), achados, correcao, reparo}], achados: [{checagem, severidade, tabela, id,
+linha, campo, mensagem, reparo}] (até 300), truncado}`. Checagens (`AuditService.CHECAGENS`): `PK`, `BRINCO`, `FK`
+(linhas vigentes; alvo inexistente ou animal ANULADO; ANEXOS pela entidade; ERROS_LOG só alerta), `ENTRADA_ABERTA`
+(ATIVO ⇔ soma dos efeitos = 1), `LINHA_DO_TEMPO`, `PROJECAO` e `STATUS_EVENTOS` (reparo `RECONSTRUIR`), `INVENTARIO`
+(total e por pasto, hoje), `ALOCACOES` (soma = total do rateio, ≤ lançamento, 100% em COMPRA, VENDA e ENTRADA_INICIAL),
+`PARCELAS`, `ALOCACAO_DIRETA` (reparo), `BASE_RATEIO` (alerta; VALOR_INDIVIDUAL e DIRETO de escopo EVENTO), `COPIAS`
+(data de PESAGENS, REPRODUCAO e IDENTIFICACOES = data do evento), `CELULAS` (COERCIDA = alerta; ERRO = erro),
+`OPERACOES_ORFAS`, `FILHAS_SEM_PAI` (alerta: linha cujo evento, operação, importação, rateio ou lançamento não existe),
+`CABECALHOS` (aba ou coluna ausente e coluna de SCHEMA_META sumida = erro; coluna do dono = alerta), `FUSO_LOCALE`,
+`CONTADORES` (`event_seq` e `codigo_interno` repetidos), `PENDENCIAS` (alerta: ativo sem pasto, sem brinco ou sem
+categoria). `repararIntegridade(ctx, justificativa?) → {recuperacao, integridade}`: o reparo oferecido —
+`UnitOfWork.recoverAll` (status dos eventos e todas as projeções), AUDITORIA `MANUTENCAO` e nova verificação. Erros:
+LOCKED, CONFIG.
 
 ## 12. `EventCatalog` (puro, só dados)
 
@@ -632,6 +653,8 @@ CONFIG (sem marco zero; conta SALDO_ABERTURA_REBANHO ausente), além dos da Unit
 | `simular(ctx, {acao, dados, avisosAceitos})` | Mesmo tratador em modo SIMULAR → `{dados: {simulacao, impactos, avisos, linhas}}`; erro de validação e bloqueio (CONFLICT) são lançados como no commit |
 | `consultaListar(filtros)` / `listar(ctx, filtros)` | `{total, pagina, por_pagina, itens: [evento]}`; filtros `{tipo, de, ate, animal_id, vigentes, pagina, por_pagina}`; inclui anulados e estornos; não inclui operações que falharam |
 | `consultaObter({event_id})` / `obter(ctx, dados)` | `{evento, linhas (com codigo_interno e brinco), detalhes: {IDENTIFICACOES, PESAGENS, REPRODUCAO, AJUSTES, FINANCEIRO, RATEIOS, ALOCACOES_FINANCEIRAS}, anula}`; NOT_FOUND |
+| `planejarEntradaImportada(tx, {campos, animais}, {importacao: {import_id}, conhecidos, rotulos})` | O MESMO planejamento da ENTRADA_INICIAL (todas as regras do formulário) dentro do tratador de outro comando: o evento nasce com `import_id` e `source = IMPORTACAO`; `conhecidos` = `{animal_id: {sexo, data_nascimento, mae_id, pai_id, nome}}` de animais ainda pendentes da mesma importação, aceitos como mãe ou pai; `rotulos[i]` substitui o "quem" das mensagens (ex.: `Linha 12`). Devolve o resultado do tratador (`{erros}` ou `{avisos, resumo, derivados, ...}`); exige `leiturasEntrada()` e acesso cru |
+| `leiturasEntrada()` | Abas que esse planejamento lê |
 | `classificarCategoria(perfil, data, categorias)` | Perfil `{sexo, data_nascimento, castrado, reprodutor, parida, categoria_modo, categoria_manual_id}` (valores em D) → `{category_id, codigo, nome, manual}` ou `null` |
 | `coberturaCategorias(categorias)` | `{completa, testes, lacunas: [{perfil, rotulo, idade_de, idade_ate}]}` (05, seção 4.9); base do aviso CATEGORIAS_SEM_COBERTURA em `categoria.salvar` |
 
@@ -721,3 +744,110 @@ dados, {chave, avisos})` (confere a projeção depois de cada comando), `ler(con
 | `consultaPosicao({data?, animal_id?})` — `inventario.posicao` | `{data, marco_zero, motivo, cabecas, por_sexo: {M, F}, por_pasto: [{pasture_id, nome, cabecas}], sem_pasto, por_categoria, sem_categoria, peso_vivo_total, ua}`; com `animal_id`: `{data, animal_id, presente, pasture_id, motivo}`. Futura/inválida → `VALIDATION`; animal inexistente → `NOT_FOUND` |
 | `consultaVisaoGeral()` — `dashboard.obter` (Fase 1) | Posição de hoje + `geradoEm` + `pendencias: {sem_pasto, sem_brinco, sem_categoria}` |
 | `consultaAlertas(estado)` — `alerta.listar` | `estado = {backup: {ultimo_em: ISO\|null}, integridade: {verificado_em, erros}\|null}` vem de quem chama (Maintenance/Api; fora da planilha). Devolve `{data, geradoEm, alertas: [{codigo, nivel AVISO\|ERRO, mensagem, n, ids, entidade}], nao_avaliados: [{codigo, motivo, mensagem}]}`; códigos `ALERTAS`: ATIVO_SEM_PASTO, SEM_BRINCO, SEM_CATEGORIA, BACKUP_ATRASADO (`alerta_backup_atrasado_dias`; nenhum backup = alerta), INTEGRIDADE_COM_ERRO, IMPORTACAO_INCOMPLETA (IMPORTACOES `IMPORTANDO`). Parte do `estado` ausente vai para `nao_avaliados` |
+
+## 16. `FileService` (plataforma: Drive v3 e UrlFetchApp)
+
+**Porta `FileService.porta() → files`** (a `ctx.files`). Todo arquivo nasce pelo Drive v3 (`Drive.Files.create`,
+`copy`, `update`); bytes só pela rota REST `alt=media` (UrlFetchApp com `ScriptApp.getOAuthToken()`). `pasta` ∈ `raiz`
+(ERP Pecuário), `backups`, `exportacoes`, `anexos`, `testes`.
+
+| Membro | Contrato |
+|---|---|
+| `garantirPastas() → {raiz, backups, exportacoes, anexos, testes, criadas: [nomes]}` | Reencontra pelo ID de `DRIVE_FOLDERS`, depois pelo nome na pasta-mãe; senão cria. Regrava `DRIVE_FOLDERS` só se mudou. Falha do Drive → `CONFIG` com a instrução do escopo `drive` |
+| `pastas()` | Os IDs (garante na primeira chamada da execução) |
+| `obter(id) → File \| null` | Metadados (`id, name, mimeType, createdTime, modifiedTime, appProperties, size, trashed, parents`); 404 → `null` |
+| `criarPlanilha(nome, pasta, appProperties) → id` | Planilha nova pelo Drive (nunca `SpreadsheetApp.create`) |
+| `copiar(id, {nome, pasta, appProperties, descricao}) → {id, name, createdTime, appProperties}` | Cópia pelo Drive |
+| `lixeira(id) → booleano` | `trashed = true`; inexistente → `false` |
+| `listar(pasta, {appProperties: {k: v}, criadoAntesDe, mimeType}?)` | Fora da lixeira, todas as páginas, por `createdTime`: `[{id, name, mimeType, createdTime, modifiedTime, appProperties, size}]` |
+| `guardarArquivo({nome, mimeType, base64 \| texto, pasta, appProperties}) → {id, tamanho}` | Base64 vazio ou ilegível → `VALIDATION` |
+| `guardarAnexo({nome, mimeType, base64, miniaturaBase64, appProperties}) → {drive_file_id, thumb_drive_file_id, tamanho_bytes}` | Na pasta Anexos; acima de `TAMANHO_MAX_ANEXO` (5 MB) o arquivo vai para a lixeira e `VALIDATION` |
+| `lerBytes(id) → {base64, mimeType, tamanho}` | 404 (inclusive arquivo que o app não criou) → `NOT_FOUND`; outro código → `INTERNAL` com `causa` |
+| `textoDeBase64(base64, codificacao) → texto` | UTF-8, ISO-8859-1 (LATIN1), WINDOWS-1252, US-ASCII; tira o BOM; outra → `VALIDATION` |
+| `sondar() → {ok, passos: [{passo, ok, erro}]}` | SP-02: criar, copiar, ler, listar e lixeira na pasta Testes |
+
+**Anexos (rotas `anexo.*`; ANEXOS: TEMPORARIO → ATIVO → REMOVIDO).** O arquivo vai ao Drive ANTES do comando; a linha
+nasce na fase C (`AuditService.criacao`). Arquivo cujo comando não vale vai para a lixeira (só quando
+`UnitOfWork.status` diz FALHOU ou INEXISTENTE; na dúvida, a limpeza diária decide pela planilha). appProperties dos
+arquivos: `erp_tipo = ANEXO`, `erp_banco`, `erp_entidade`, `erp_entity_id`. `LEITURAS_ANEXO` = ANEXOS, ANIMAIS,
+EVENTOS, IMPORTACOES.
+
+| Função | Contrato |
+|---|---|
+| `adicionarAnexo(ctx, {idempotencyKey, dados: {entidade (ANIMAIS\|EVENTOS\|IMPORTACOES), entity_id, tipo, descricao, nome_arquivo, mime_type, conteudo_base64, miniatura_base64, temporario, definir_como_foto}})` | `{dados: anexo, duplicado, opId, dataVersion}`. Envio malformado → `VALIDATION` antes de subir; dono inexistente ou anulado → `NOT_FOUND`; reenvio de chave confirmada não sobe de novo. `definir_como_foto` (só FOTO de animal) grava `ANIMAIS.foto_anexo_id` (auditado) |
+| `promover(tx, [anexo_id]) → n` | Dentro do tratador do comando dono (ANEXOS nas `reads`): TEMPORARIO → ATIVO. Inexistente ou REMOVIDO → `VALIDATION` |
+| `removerAnexo(ctx, {idempotencyKey, dados: {anexo_id, justificativa}})` | REMOVIDO (a linha fica); tira a foto da ficha se era ela; arquivo e miniatura vão para a lixeira depois do commit. Já removido → `VALIDATION` `JA_REMOVIDO` |
+| `obterAnexo(ctx, {anexo_id, miniatura})` | `{dados: {anexo, miniatura, data_url}, dataVersion}`; removido ou inexistente → `NOT_FOUND` |
+| `anexoPublico(linha)` | `{anexo_id, entidade, entity_id, event_id, nome_arquivo, mime_type, tamanho_bytes, tipo, descricao, status, tem_miniatura, created_by, created_at}` |
+
+## 17. `Maintenance` (plataforma: setup, backup, restauração, rotinas agendadas)
+
+Script Properties: `SPREADSHEET_ID`, `OWNER_EMAIL`, `DRIVE_FOLDERS`, `IO_PRIMITIVE` (forma de gravação escolhida),
+`IO_PRIMITIVE_RELATORIO` (resumo do corpus), `DATA_VERSION:<id>`, `PENDING_OP:<id>`, `INTEGRIDADE:<id>` (resumo da
+última verificação semanal `{gerado_em, ok, erros, alertas}`). Backup = arquivo na pasta Backups com appProperties
+`erp_tipo = BACKUP`, `erp_banco`, `erp_data` (yyyy-MM-dd no fuso), `erp_motivo`, `erp_instante`. A guarda
+`assertOwner_` das funções públicas é do Code.js; os handlers dos gatilhos montam o contexto com `contexto()`.
+
+| Função | Contrato |
+|---|---|
+| `contexto({banco, usuario, fuso}?)` | Contexto de produção: banco de `SPREADSHEET_ID`, primitiva de `IO_PRIMITIVE`, `FileService.porta()`, `Timeline.porta()`. Sem banco → `CONFIG` |
+| `setup({usuario, fuso, tabelas})` | 06, seção 4, idempotente: dono (`OWNER_EMAIL` na primeira vez; outro → `DENIED`) → lock (`LOCKED`) → pastas e sonda do Drive (`CONFIG` com a contingência) → backup cru do banco existente (SETUP; banco registrado sumido → `CONFIG`, nunca cria outro) → corpus numa planilha temporária na pasta Testes, que vai para a lixeira (nenhuma passa → `CONFIG`, banco intocado) → banco pelo Drive → abas na dimensão exata (a aba padrão vazia do banco novo sai) → colunas ao final → sementes por chave natural num comando (`anexaSemPai`, AUDITORIA `MANUTENCAO`) → fuso de `CONFIGURACOES.fuso` e locale `pt_BR` → SCHEMA_META (colunas do sistema na ordem real; `versao` sobe quando cresce) → contadores → gatilhos → proteção "somente aviso" → integridade. `tabelas` = definições que substituem as do Schema (migração; teste do esquema da fase seguinte). Devolve `{banco, banco_criado, pastas, drive, backup, primitiva: {primitiva, resultados: [{primitiva, ok, divergencias, erro}]}, abas: {criadas, colunas_acrescentadas, removidas}, sementes: {CONFIGURACOES, LISTAS, PLANO_CONTAS, CATEGORIAS}, fuso, schema_meta: {criadas, atualizadas}, contadores: {proximo_event_seq, proximo_codigo_interno}, gatilhos, protecoes, integridade}` |
+| `backup(ctx, {motivo})` | `MOTIVOS_BACKUP`: DIARIO, SOB_DEMANDA (padrão), SETUP, IMPORTACAO, RESTAURACAO. `UnitOfWork.exclusivo` (lock, recuperação, flush) e cópia pelo Drive; o DIARIO aplica a retenção. `{backup: {id, nome, data, instante, motivo}, retencao}`. Falha da cópia → `CONFIG` com instrução |
+| `listarBackups(ctx, {todos}?)` | Deste banco (ou todos), do mais novo: `[{id, nome, data, instante, motivo, banco}]` |
+| `aplicarRetencao(ctx) → {mantidos, removidos: [nome]}` | Os `backup_retencao_diarios` DIARIO mais recentes; dos mais antigos, o último de cada mês nos `backup_retencao_mensais` meses mais recentes; os demais motivos ficam o mesmo número de dias; o resto vai para a lixeira |
+| `restaurar(ctx, {dados: {backup_id, justificativa}})` | 06, seção 10: cópia do backup pelo Drive (pasta raiz, `erp_tipo = BANCO`); `DATA_VERSION` do novo = maior das duas + 1; marcador do novo ANTES de trocar a propriedade do banco em uso (`SPREADSHEET_ID`, ou `TEST_`/`DEMO_` quando é a do contexto); `recoverAll`; AUDITORIA `MANUTENCAO` no novo; integridade. O anterior fica no Drive. `{banco_anterior, banco, backup, recuperacao, dataVersion, integridade}`. Erros: `NOT_FOUND` (não é backup), `LOCKED`, `CONFIG` |
+| `limparExportacoes(ctx) → {removidas}` | Exportações com mais de `EXPORTACAO_VALIDADE_DIAS` (7) |
+| `limparAnexos(ctx) → {temporarios, orfaos, arquivos_removidos}` | TEMPORARIO com mais de 24 h → REMOVIDO (comando auditado) e lixeira; arquivo deste banco na pasta Anexos sem linha em ANEXOS e com mais de 24 h → lixeira; arquivo de anexo REMOVIDO ainda fora da lixeira → lixeira |
+| `manutencaoDiaria(ctx)` | Corpo de `trgManutencaoDiaria`: backup DIARIO com retenção → exportações → anexos. Etapa que falha não impede as seguintes; vai para ERROS_LOG (`MANUTENCAO_<ETAPA>`) e no fim lança `INTERNAL` com `erro.relatorio`. Sem falha: `{backup, retencao, exportacoes, anexos, falhas: []}` |
+| `integridadeSemanal(ctx)` | Corpo de `trgIntegridadeSemanal`: o relatório; resumo em `INTEGRIDADE:<banco>`; com erro, ERROS_LOG `INTEGRIDADE_COM_ERRO` |
+| `garantirGatilhos(fuso) → {criados, removidos, total}` | Por nome da função: `trgManutencaoDiaria` diário às 3 h e `trgIntegridadeSemanal` aos domingos às 5 h, no fuso; cria o que falta, apaga duplicata |
+| `estado(ctx)` | Tela de sistema: `{banco, primitiva, data_version, backups, ultimo_backup, integridade, gatilhos, alertas_estado}`; `alertas_estado` = `{backup: {ultimo_em}, integridade: {verificado_em, erros} \| null}`, o parâmetro de `InventoryService.consultaAlertas` |
+
+## 18. `ImportService` (puro: importação de ANIMAIS)
+
+Rotas `importacao.*` (com `permiteDuranteImportacao`, salvo `criar`); enquanto uma importação está IMPORTANDO, a
+UnitOfWork recusa os demais comandos de negócio (`CONFLICT`). Cada lote é UMA operação de chave
+`chaveBloco(import_id, n)` = `imp:<import_id>:<n>` (conclusão `:concluir`, desfazer `:desfazer`), com UMA ENTRADA_INICIAL
+planejada por `EventService.planejarEntradaImportada`: os eventos só valem com IMPORTADO; até lá os animais ficam
+PENDENTE (com os atributos declarados). Tamanho do bloco de validação e de importação = `importacao_lote_linhas`
+(1 a 1000), fixado na confirmação em `relatorio_json.lote_linhas`.
+
+`mapeamento` (gravado em `mapeamento_json`): `{colunas: {cabeçalho: campo}, confiancas: {data_nascimento, data_entrada,
+mae, pai}, padroes: {castrado, reprodutor, origem, pasto (pasture_id), metodo_pesagem}}` — o padrão é escolha explícita
+do dono; sem ele, vazio = desconhecido. Campos (`CAMPOS`): `brinco, nome, sexo, raca, data_nascimento, idade_meses,
+data_nascimento_confianca, mae, mae_confianca, pai, pai_confianca, origem, castrado, reprodutor, partos_previos,
+situacao_reprodutiva, data_prevista_parto, pasto, data_entrada, data_entrada_confianca, peso, metodo_pesagem,
+valor_abertura, brinco_origem, rfid, sisbov, tatuagem, observacoes` (`mae`/`pai` = brinco do progenitor no arquivo ou no
+rebanho; `pasto` = nome ou identificação; raça por código ou rótulo de LISTAS). Obrigatório mapear `sexo` e `pasto` (ou
+o padrão) e dar a confiança de nascimento, chegada, mãe e pai quando mapeados sem coluna de confiança. `formato`:
+`{delimitador (',' ';' TAB '|'), codificacao, formato_data (dd/MM/yyyy, yyyy-MM-dd, MM/dd/yyyy, dd-MM-yyyy, dd.MM.yyyy;
+ISO sempre aceito), decimal (',' ou '.')}`.
+
+| Função | Contrato |
+|---|---|
+| `criar(ctx, {idempotencyKey, avisosAceitos, dados: {tipo: 'ANIMAIS', arquivo_nome, conteudo_base64 \| texto, formato}})` | Lê o arquivo (`VALIDATION`: vazio, só cabeçalho, coluna repetida, aspas abertas, mais de 20.000 linhas, formato), guarda o original no Drive e em ANEXOS (DOCUMENTO, ATIVO) e cria IMPORTACOES RASCUNHO com `arquivo_hash` (SHA-256 do texto). Mesmo arquivo já enviado → aviso `POSSIVEL_DUPLICIDADE`. Outro tipo → `VALIDATION` `TIPO_INDISPONIVEL`. `{dados: {import_id, status, cabecalho, amostra, total_linhas, sugestao}}` |
+| `previaArquivo(ctx, {import_id})` | O mesmo, relido do Drive (retomar o assistente), + `mapeamento` gravado |
+| `validarBloco(ctx, {idempotencyKey, dados: {import_id, bloco, mapeamento}})` | Relê e valida o arquivo INTEIRO (duplicidade no arquivo e na base, mãe e pai em duas passadas, ciclos, confiança, regras do catálogo e do marco zero) e grava só as linhas do bloco (anexa ou atualiza por `linha_num`). O bloco 1 recomeça e grava o mapeamento; os seguintes exigem o mesmo mapeamento e o anterior validado (`CONFLICT`). Linha: VALIDA, ERRO ou DUPLICADA com `erros_json` `[{codigo, campo, mensagem}]`. Última linha → VALIDADO. Sem marco zero → `CONFIG`. Devolve o estado (`obter`) |
+| `importarBloco(ctx, {avisosAceitos, dados: {import_id, bloco, modo, aprovacao: {importar, ignorar}, ignorar_linhas, property_id, justificativa_aviso}})` | Bloco 1 = confirmação: revalida (resultado diferente do gravado → `CONFLICT` "valide de novo"); `TOTAL` só sem linha reprovada (`IMPORTACAO_TOTAL_RECUSADA`); `PARCIAL_APROVADO` exige `aprovacao` igual aos números de agora (`APROVACAO_DIVERGENTE`) e fica em AUDITORIA (justificativa com quem aprovou); `ignorar_linhas` → IGNORADA (não pode ser progenitor de linha que entra: `PROGENITOR_IGNORADO`). Ordem de importação: progenitor do arquivo antes do filho, depois a linha. Blocos em ordem (`CONFLICT`); bloco já gravado por outra chave → sem alteração. Linhas → IMPORTADA com `entity_id_gerado`/`event_id_gerado`. Avisos do motor (ex.: `IDADE_REPRODUTIVA`) → `NEEDS_CONFIRMATION` |
+| `concluir(ctx, {dados: {import_id}})` | Exige todos os lotes (`CONFLICT`); backup IMPORTACAO ANTES; IMPORTADO (commit do arquivo inteiro), `finished_at`, reconstrução total das projeções. Devolve o relatório final |
+| `desfazer(ctx, {dados: {import_id, justificativa}})` | Qualquer estado menos CANCELADO → CANCELADO (nada se apaga; reconstrução total se havia eventos). IMPORTADO com lançamento, filho ou anexo posterior sobre os animais → `CONFLICT` com os detalhes (`conflito.event_id`) |
+| `consultaObter({import_id})` / `obter(ctx, dados)` | `{importacao, contadores: {total, conferidas, validas, erro, duplicadas, ignoradas, importadas, por_codigo}, blocos: {tamanho, total, importados, proximo}, validacao: {conferidas, completa}, pode: {validar, importar, concluir, desfazer}}` |
+| `consultaLinhas({import_id, status, pagina, por_pagina})` | Pré-visualização: `{total, pagina, por_pagina, itens: [{linha_num, status, erros, dados_originais, interpretado, entity_id_gerado, event_id_gerado}]}` |
+| `consultaRelatorio({import_id})` | Relatório final: o estado + `aprovacao {modo, por, em, texto}`, `criados {animais, eventos, ativos}`, `reprovadas [{linha_num, status, erros, dados_originais}]`, `ignoradas`, `pendencias {sem_brinco, sem_nascimento}` |
+| `consultaListar()` | `{itens, em_curso}` (a importação IMPORTANDO, para a faixa "importação incompleta") |
+| Puras: `lerCsv(texto, delim)`, `interpretarArquivo(texto, delim) → {cabecalho, linhas: [{linha_num, valores}]}`, `sugerirMapeamento(cabecalho)`, `conferirMapeamento(m, cabecalho, pastosPorId)`, `validarLinhas(linhas, map, formato, contexto)` | `linha_num` conta o cabeçalho como 1 e as linhas em branco (é a linha da planilha do dono); célula além do cabeçalho fica em `#coluna_extra_N` e reprova a linha |
+
+Códigos de linha — DUPLICADA: `BRINCO_JA_CADASTRADO`, `BRINCO_REPETIDO_NO_ARQUIVO`; ERRO: `MAE_NAO_ENCONTRADA`,
+`PAI_NAO_ENCONTRADO`, `MAE_COM_ERRO`, `PAI_COM_ERRO`, `SEXO_DO_PROGENITOR`, `NASCIMENTO_DO_PROGENITOR`,
+`PROPRIO_PROGENITOR`, `CICLO_GENEALOGICO`, `DATA_INVALIDA`, `FORMATO_INVALIDO`, `TIPO_INVALIDO`, `VALOR_FORA_DA_LISTA`,
+`PASTO_NAO_ENCONTRADO`, `PASTO_INATIVO`, `COLUNAS_A_MAIS`, `CONFLITO_DE_CAMPOS`, `NASCIMENTO_DEPOIS_DA_ENTRADA`,
+`ENTRADA_DEPOIS_DO_MARCO_ZERO`, `ENTRADA_ANTES_DO_NASCIMENTO`, `PREVISAO_PASSADA`, `CASTRADO_REPRODUTOR`,
+`BRINCO_NAO_NUMERICO` e os do catálogo (`CAMPO_OBRIGATORIO`, `CAMPO_NAO_SE_APLICA`, ...).
+
+### 18.1 Apoio aos testes de sistema (`tests/apoio-sistema.js`)
+
+`sistema({order, semCadastro, config})`: o banco nasce pelo `Maintenance.setup`; sem `semCadastro`, um comando auditado
+cria a propriedade `PROP`, os pastos `PASTOS.A` e `PASTOS.B` (identificação `P-B`) e grava `data_marco_zero =
+2026-01-01`, `propriedade_padrao_id` e o que vier em `config`. Helpers: `ctx()` (portas reais, com `files`), `exec(fn)`,
+`tentar(fn)`, `read(q)`, `tabela(aba, banco?)`, `evento(acao, dados, chave)`, `integridade()`, `conferirProjecoes()`,
+`editar(aba, id, coluna, valorCru)` e `apagarLinha(aba, id)` (edição à mão no fake); `situacoes(relatorio)`.

@@ -168,6 +168,10 @@ test('rotina diária: backup e retenção → exportações velhas → anexos te
   const est = s.exec((ctx) => G.Maintenance.estado(ctx));
   assert.equal(est.ultimo_backup.motivo, 'DIARIO');
   assert.deepEqual(est.gatilhos.sort(), ['trgIntegridadeSemanal', 'trgManutencaoDiaria']);
+  assert.deepEqual(est.alertas_estado, { backup: { ultimo_em: rel.backup.instante }, integridade: { verificado_em: sem.gerado_em, erros: 0 } });
+  const alertas = s.read(G.InventoryService.consultaAlertas(est.alertas_estado));
+  assert.deepEqual(alertas.nao_avaliados, [], 'o estado da manutenção alimenta os alertas de backup e integridade');
+  assert.ok(!alertas.alertas.some((a) => a.codigo === 'BACKUP_ATRASADO' || a.codigo === 'INTEGRIDADE_COM_ERRO'));
 });
 
 test('rotina diária: etapa que falha não impede as seguintes; vai para ERROS_LOG e a rotina termina com erro e relatório', () => {
