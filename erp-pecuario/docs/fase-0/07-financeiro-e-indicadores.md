@@ -7,7 +7,7 @@
 - **Valor por animal tem uma única fonte**, ALOCACOES_FINANCEIRAS, calculada em centavos inteiros pelo maior resto com desempate determinístico. O que não foi rateado aparece como "não alocado"; nunca é distribuído em silêncio (§11.2).
 - **Peso vivo e carcaça não se confundem** (§6.3, §11.1): todo R$/@ exibido traz a base de peso e o tipo de rendimento (apurado, negociado ou estimado).
 - **Sem dado, sem indicador** (P9): cada indicador declara fórmula, fonte, tipo (POSICAO ou FLUXO), filtros aplicáveis e o motivo com que devolve `null`. Peso estimado, projeção e valor de referência são sempre rotulados.
-- Os exemplos foram conferidos por script, em centavos inteiros: é conferência da aritmética do documento, não teste do sistema.
+- Os exemplos foram conferidos por script: é conferência da aritmética, não teste do sistema.
 
 **Documentos relacionados:** `02-modelo-de-dados.md` · `03a-dicionario-cadastros-suporte.md` · `03b-dicionario-eventos-financeiro.md` · `04-motor-de-eventos.md` · `05-regras-de-negocio.md` · `06-persistencia-e-integridade.md` · `08-ux-ui.md` · `09-plano-de-testes.md` (CT-13, CT-14, CT-19) · `10-plano-de-implementacao.md`.
 
@@ -35,7 +35,7 @@ flowchart LR
 | Representa | fato econômico: qual conta, qual competência, quanto | compromisso de caixa: quando vence, quando e por quanto foi pago |
 | Responde a | resultado gerencial e custo por animal | fluxo de caixa realizado e previsto |
 | É alvo de | RATEIOS e ALOCACOES_FINANCEIRAS | baixa (`parcela.baixar`, `parcela.desfazerBaixa`) |
-| Mutabilidade | conteúdo imutável; corrige-se por evento substituto | controle: `data_pagamento`, `valor_pago`, `juros_multa`, `desconto`, `forma_pagamento`, `status` |
+| Mutabilidade | imutável; corrige-se por evento substituto | colunas de controle mudam na baixa |
 
 - Σ `PARCELAS.valor` = `FINANCEIRO.valor`, com as parcelas divididas pelo maior resto. O nominal não muda na baixa: `valor_pago` = `valor` + `juros_multa` − `desconto`. Juros são caixa e resultado do mês do pagamento, nunca custo do animal.
 - Lançamento sem parcela é fato sem efeito de caixa (consumo de insumo, saldo de abertura do rebanho): `status_pagamento*` = SEM_CAIXA.
@@ -59,41 +59,27 @@ flowchart LR
 
 ### 1.3 Plano de contas-semente (29 contas)
 
-`grupo` reproduz os blocos A a D da §11 (mais NAO_OPERACIONAL) e só organiza a apresentação. `natureza` decide o cálculo. `classe_custo_animal` separa as colunas da §11.2 (aquisição, sanitário, alimentação, adicionais) sem depender do nome da conta (P8). Grupo e natureza ficam imutáveis depois do primeiro lançamento; para mudar, cria-se outra conta. O "Transporte" da §11-B vira três contas porque o frete tem três papéis: custo de aquisição na compra, despesa de venda e custeio no transporte interno. Com uma conta só, o frete de compra entraria no custeio do mês e de novo no custo do animal.
+`grupo` reproduz os blocos A a D da §11 (mais NAO_OPERACIONAL) e só organiza a apresentação. `natureza` decide o cálculo. `classe_custo_animal` separa as colunas da §11.2 sem depender do nome da conta (P8). Grupo e natureza ficam imutáveis depois do primeiro lançamento; para mudar, cria-se outra conta. O "Transporte" da §11-B vira três contas porque o frete tem três papéis: custo de aquisição na compra, despesa de venda e custeio no transporte interno. Com uma conta só, o frete de compra entraria no custeio do mês e de novo no custo do animal.
 
-O código sugerido é texto com prefixo do grupo: um código como "1.10" viraria 1,1 numa célula coercida. Código em negrito = `sistema` S: conta citada pelo `EventCatalog` pelo `codigo`; pode ser renomeada, não desativada.
+O código sugerido é texto com prefixo do grupo: um código como "1.10" viraria 1,1 numa célula coercida. Contas de mesmo tratamento dividem a linha. Código em negrito = `sistema` S: conta citada pelo `EventCatalog` pelo `codigo`; pode ser renomeada, não desativada.
 
-| Código | Conta | Grupo | Natureza | Tipo | Classe de custo |
-|---|---|---|---|---|---|
-| **REC-01** | Venda de animais | RECEITA | RECEITA_VENDA_ANIMAIS | RECEITA | NAO_SE_APLICA |
-| **REC-02** | Outras receitas operacionais | RECEITA | OUTRA_RECEITA | RECEITA | NAO_SE_APLICA |
-| REC-03 | Receitas extraordinárias | RECEITA | OUTRA_RECEITA | RECEITA | NAO_SE_APLICA |
-| **DIR-01** | Compra de animais | CUSTO_DIRETO | AQUISICAO_ANIMAIS | DESPESA | AQUISICAO |
-| **DIR-02** | Frete e despesas de compra | CUSTO_DIRETO | AQUISICAO_ANIMAIS | DESPESA | AQUISICAO |
-| **DIR-03** | Saldo de abertura do rebanho | CUSTO_DIRETO | AQUISICAO_ANIMAIS | DESPESA | AQUISICAO |
-| **DIR-04** | Alimentação | CUSTO_DIRETO | CUSTEIO | DESPESA | ALIMENTACAO |
-| **DIR-05** | Vacinas | CUSTO_DIRETO | CUSTEIO | DESPESA | SANITARIO |
-| **DIR-06** | Medicamentos | CUSTO_DIRETO | CUSTEIO | DESPESA | SANITARIO |
-| **DIR-07** | Tratamentos | CUSTO_DIRETO | CUSTEIO | DESPESA | SANITARIO |
-| DIR-08 | Transporte interno | CUSTO_DIRETO | CUSTEIO | DESPESA | OUTROS |
-| DIR-09 | Reprodução | CUSTO_DIRETO | CUSTEIO | DESPESA | REPRODUCAO |
-| **DIR-10** | Frete de venda | CUSTO_DIRETO | DESPESA_VENDA | DESPESA | NAO_SE_APLICA |
-| **DIR-11** | Comissão de venda | CUSTO_DIRETO | DESPESA_VENDA | DESPESA | NAO_SE_APLICA |
-| **DIR-12** | Taxas e retenções sobre venda | CUSTO_DIRETO | DESPESA_VENDA | DESPESA | NAO_SE_APLICA |
-| **DIR-13** | Compra de insumos | CUSTO_DIRETO | ESTOQUE_INSUMOS | DESPESA | NAO_SE_APLICA |
-| OPE-01 | Manutenção de pastos | CUSTO_OPERACIONAL | CUSTEIO | DESPESA | ALIMENTACAO |
-| OPE-02 | Arrendamento de pasto | CUSTO_OPERACIONAL | CUSTEIO | DESPESA | ALIMENTACAO |
-| OPE-03 | Mão de obra | CUSTO_OPERACIONAL | CUSTEIO | DESPESA | OUTROS |
-| OPE-04 | Equipamentos | CUSTO_OPERACIONAL | CUSTEIO | DESPESA | OUTROS |
-| OPE-05 | Combustível | CUSTO_OPERACIONAL | CUSTEIO | DESPESA | OUTROS |
-| OPE-06 | Energia | CUSTO_OPERACIONAL | CUSTEIO | DESPESA | OUTROS |
-| OPE-07 | Serviços veterinários | CUSTO_OPERACIONAL | CUSTEIO | DESPESA | SANITARIO |
-| ADM-01 | Contabilidade | DESPESA_ADMINISTRATIVA | CUSTEIO | DESPESA | OUTROS |
-| ADM-02 | Despesas gerais | DESPESA_ADMINISTRATIVA | CUSTEIO | DESPESA | OUTROS |
-| ADM-03 | Outros gastos | DESPESA_ADMINISTRATIVA | CUSTEIO | DESPESA | OUTROS |
-| NOP-01 | Aportes | NAO_OPERACIONAL | NAO_OPERACIONAL | RECEITA | NAO_SE_APLICA |
-| NOP-02 | Retiradas | NAO_OPERACIONAL | NAO_OPERACIONAL | DESPESA | NAO_SE_APLICA |
-| NOP-03 | Empréstimos | NAO_OPERACIONAL | NAO_OPERACIONAL | RECEITA | NAO_SE_APLICA |
+| Contas (código sugerido e nome) | Grupo | Natureza | Tipo | Classe de custo |
+|---|---|---|---|---|
+| **REC-01** Venda de animais | RECEITA | RECEITA_VENDA_ANIMAIS | RECEITA | NAO_SE_APLICA |
+| **REC-02** Outras receitas operacionais · REC-03 Receitas extraordinárias | RECEITA | OUTRA_RECEITA | RECEITA | NAO_SE_APLICA |
+| **DIR-01** Compra de animais · **DIR-02** Frete e despesas de compra · **DIR-03** Saldo de abertura do rebanho | CUSTO_DIRETO | AQUISICAO_ANIMAIS | DESPESA | AQUISICAO |
+| **DIR-04** Alimentação | CUSTO_DIRETO | CUSTEIO | DESPESA | ALIMENTACAO |
+| **DIR-05** Vacinas · **DIR-06** Medicamentos · **DIR-07** Tratamentos | CUSTO_DIRETO | CUSTEIO | DESPESA | SANITARIO |
+| DIR-08 Transporte interno | CUSTO_DIRETO | CUSTEIO | DESPESA | OUTROS |
+| DIR-09 Reprodução | CUSTO_DIRETO | CUSTEIO | DESPESA | REPRODUCAO |
+| **DIR-10** Frete de venda · **DIR-11** Comissão de venda · **DIR-12** Taxas e retenções sobre venda | CUSTO_DIRETO | DESPESA_VENDA | DESPESA | NAO_SE_APLICA |
+| **DIR-13** Compra de insumos | CUSTO_DIRETO | ESTOQUE_INSUMOS | DESPESA | NAO_SE_APLICA |
+| OPE-01 Manutenção de pastos · OPE-02 Arrendamento de pasto | CUSTO_OPERACIONAL | CUSTEIO | DESPESA | ALIMENTACAO |
+| OPE-03 Mão de obra · OPE-04 Equipamentos · OPE-05 Combustível · OPE-06 Energia | CUSTO_OPERACIONAL | CUSTEIO | DESPESA | OUTROS |
+| OPE-07 Serviços veterinários | CUSTO_OPERACIONAL | CUSTEIO | DESPESA | SANITARIO |
+| ADM-01 Contabilidade · ADM-02 Despesas gerais · ADM-03 Outros gastos | DESPESA_ADMINISTRATIVA | CUSTEIO | DESPESA | OUTROS |
+| NOP-01 Aportes · NOP-03 Empréstimos | NAO_OPERACIONAL | NAO_OPERACIONAL | RECEITA | NAO_SE_APLICA |
+| NOP-02 Retiradas | NAO_OPERACIONAL | NAO_OPERACIONAL | DESPESA | NAO_SE_APLICA |
 
 - O catálogo fixa a natureza dos lançamentos de evento: COMPRA só aceita contas AQUISICAO_ANIMAIS; deduções de VENDA, só DESPESA_VENDA.
 - Consumo de insumo usa a conta pela `PRODUTOS.categoria`: VACINA → DIR-05; VERMIFUGO e MEDICAMENTO → DIR-06; SUPLEMENTO → DIR-04; OUTRO → DIR-07. A receita simples do DESCARTE vai para REC-02.
@@ -174,7 +160,7 @@ Três garrotes, A1, A2 e A3 (códigos internos A-000101 a A-000103).
 | F7 | Venda de animais [RECEITA_VENDA_ANIMAIS] | 11.840,00 | 11.840,00 recebido em 20/12 | PESO_CARCACA | 6.080,00 | 5.760,00 | — | 0,00 |
 | F8 | Taxas e retenções sobre venda [DESPESA_VENDA], retida | 177,60 | 177,60 liquidada em 20/12 junto com F7 | PESO_CARCACA | 91,20 | 86,40 | — | 0,00 |
 
-Conferências: F2 e F5 estão abertos nas seções 3.2 e 3.3. Em F7, A1 = 285,0 ÷ 15 = 19 @ × 320,00. Depósito esperado em 20/12 = 11.840,00 − 177,60 = R$ 11.662,40.
+Conferências: F2 e F5 estão abertos nas seções 3.2 e 3.3. Em F7, A1 = 285,0 ÷ 15 = 19 @ × 320,00.
 
 **Visão 3: resultado por animal**
 
@@ -192,7 +178,7 @@ Conferências: F2 e F5 estão abertos nas seções 3.2 e 3.3. Em F7, A1 = 285,0 
 | Mês | Caixa | Resultado | O que explica a diferença |
 |---|---|---|---|
 | mar | −100,00 | 0,00 | o frete pago é custo de aquisição, não resultado |
-| abr | −4.530,00 | −9,00 | caixa: 1ª parcela e frasco de vacina; resultado: só as 3 doses consumidas |
+| abr | −4.530,00 | −9,00 | caixa: 1ª parcela e frasco; resultado: 3 doses consumidas |
 | mai | −4.545,00 | −45,00 | caixa: 2ª parcela com juros; resultado: só os juros |
 | jun | −800,00 | −3.733,33 | resultado: custeio de 800,00 + custo de aquisição de A3 (2.933,33) |
 | nov | 0,00 | +5.495,73 | 11.840,00 − 177,60 − 6.166,67 (aquisição de A1 e A2); nada recebido ainda |
@@ -240,7 +226,7 @@ Rateio é o único caminho de um lançamento até o animal. RATEIOS guarda o mé
 2. Quota qᵢ = piso(V × bᵢ ÷ B); resto rᵢ = (V × bᵢ) mod B.
 3. Sobram S = V − Σ qᵢ centavos. Os S primeiros recebem 1 centavo cada, na ordem: maior resto → maior base → menor `codigo_interno`.
 
-Percentual é só exibição. A ordem é total: simulação e commit dão o centavo ao mesmo animal.
+A ordem é total: simulação e commit dão o centavo ao mesmo animal.
 
 Exemplo (CT-13): R$ 100,00 entre 3 cabeças. V = 10.000, B = 3: quotas de 3.333, restos de 1/3, S = 1. Restos e bases empatam e decide o código: A-000101 recebe R$ 33,34; os outros, R$ 33,33.
 
@@ -250,14 +236,14 @@ Exemplo (CT-13): R$ 100,00 entre 3 cabeças. V = 10.000, B = 3: quotas de 3.333,
 - Convenção [entrada, saída): o dia da entrada conta, o da saída não. Nenhum dia cai em dois pastos, e Σ dias nos pastos = dias no rebanho.
 - Base = dias dentro de [`periodo_inicio`, `periodo_fim`], inclusivos. Animal já baixado recebe o custo dos dias em que esteve presente.
 
-Exemplo, o F5 do caso (arrendamento do Pasto 2, R$ 600,00, 01/06 a 30/06/2027): A1 ficou o mês inteiro (30 dias); A2 entrou em 11/06 (20 dias); A3 morreu em 16/06 (15 dias). Base de 65 dias; quotas exatas de 27.692,31, 18.461,54 e 13.846,15 centavos. Os pisos somam 59.999 e o centavo restante vai para A2, o maior resto (35/65): R$ 276,92, 184,62 e 138,46. Custo por animal-dia: 600,00 ÷ 65 = R$ 9,23. Aluguel por cabeça/mês: `quantidade` guarda cabeças × meses; o rateio segue por dias.
+Exemplo, o F5 do caso (arrendamento do Pasto 2, R$ 600,00, 01/06 a 30/06/2027): A1 ficou o mês inteiro (30 dias); A2 entrou em 11/06 (20 dias); A3 morreu em 16/06 (15 dias). Base de 65 dias; quotas exatas de 27.692,31, 18.461,54 e 13.846,15 centavos. Os pisos somam 59.999 e o centavo restante vai para A2, o maior resto (35/65): R$ 276,92, 184,62 e 138,46. Custo por animal-dia: 600,00 ÷ 65 = R$ 9,23.
 
 ### 3.4 `data_base`, base zero e re-rateio
 
 - `data_base` (CABECAS e PESO_VIVO) fixa o dia em que se conta quem está no escopo e qual peso vale; sem ela, o rateio mudaria depois de uma transferência.
 - Base zero (pasto vazio): rateio gravado com `total_alocado` = 0 e o motivo na `justificativa`; o valor aparece inteiro como "não alocado".
 - Re-rateio = novo evento RATEIO para o mesmo `financial_id`; as linhas antigas não mudam e vale o rateio do último evento vigente. COMPRA e VENDA são re-rateadas sem estorno.
-- Base desatualizada: a verificação de integridade recalcula a base dos rateios vigentes e, se diferir, levanta o alerta "rateio desatualizado"; nunca recalcula em silêncio. No caso, a entrada retroativa de A2 em 05/06 mudaria a base de 65 para 71 dias.
+- Base desatualizada: a verificação de integridade recalcula a base dos rateios vigentes e, se diferir, levanta o alerta "rateio desatualizado"; nunca recalcula em silêncio.
 
 ## 4. Compra e venda
 
@@ -295,7 +281,7 @@ A receita é o lançamento RECEITA_VENDA_ANIMAIS e a base do rateio. Cada deduç
 
 **(b) Reposição por kg vivo.** 10 bezerros, 2.150,0 kg, R$ 12,50/kg: bruto de R$ 26.875,00, R$ 2.687,50 por cabeça. Comissão de R$ 500,00 paga à parte (não retida): resultado da negociação de R$ 26.375,00; depósito esperado de R$ 26.875,00. Em arroba, só como equivalente rotulado: 71,67 "@ estimadas a 50%", a R$ 375,00.
 
-**(c) Compra por arroba com rendimento negociado.** 20 garrotes, 4.800,0 kg vivos, R$ 300,00/@ a 50% (`base_peso` VIVO, `rendimento_tipo` NEGOCIADO): 4.800,0 × 50% ÷ 15 = 160,00 @ e `valor_animais` de R$ 48.000,00. Dividir o peso vivo por 15 daria 320 @ e R$ 96.000,00: é o erro que a base explícita impede. Com frete de R$ 1.500,00, custo total de R$ 49.500,00. Nota de R$ 48.150,00: vale a nota (diferença de 0,31%, dentro da tolerância).
+**(c) Compra por arroba com rendimento negociado.** 20 garrotes, 4.800,0 kg vivos, R$ 300,00/@ a 50% (`base_peso` VIVO, `rendimento_tipo` NEGOCIADO): 4.800,0 × 50% ÷ 15 = 160,00 @ e `valor_animais` de R$ 48.000,00. Dividir o peso vivo por 15 daria 320 @ e R$ 96.000,00: é o erro que a base explícita impede. Nota de R$ 48.150,00: vale a nota (diferença de 0,31%, dentro da tolerância).
 
 ## 5. Insumos: custo no consumo
 
@@ -316,7 +302,7 @@ Colunas do relatório 14, lidas das alocações vigentes pela `classe_custo_anim
 - custo acumulado = soma das quatro; custo diário = custeio alocado ÷ dias no rebanho;
 - receita, despesas de venda e resultado realizado (visão 3), só com saída; margem por arroba = resultado ÷ arrobas do animal na venda (`null` sem peso de venda).
 
-No caso da 2.2, A1 ficou 255 dias: custo diário de R$ 1,10 e margem de R$ 140,82 por @ de carcaça.
+No caso da 2.2, A1 (255 dias): custo diário de R$ 1,10 e margem de R$ 140,82 por @ de carcaça.
 
 - **Nascidos**: custo de aquisição de R$ 0,00 por definição (`custo_aquisicao_origem` = NAO_SE_APLICA), exibido como "nascido na fazenda".
 - **Rebanho de abertura**: valor de abertura opcional na ENTRADA_INICIAL, por animal (ABERTURA_INFORMADA) ou em massa pela TABELA_PRECOS de D0 (ABERTURA_ESTIMADA). Gera lançamento AQUISICAO_ANIMAIS na conta DIR-03, sem parcela, com alocação por animal.
@@ -331,13 +317,13 @@ Valor do animal em D, pelo primeiro que existir:
 3. linha geral (escopo GERAL);
 4. sem referência: fica fora da soma e é contado (SEM_VALOR_DE_REFERENCIA).
 
-**Peso vigente em D**, o mesmo de UA e peso médio: última pesagem até D com no máximo `peso_validade_dias` (180). Vencida: o maior entre o último peso e o `peso_referencia_kg` da categoria, rotulado como estimado. Sem ambos: sem peso. Peso projetado por GMD não entra (P10).
+**Peso vigente em D**, o mesmo de UA e peso médio: última pesagem até D com no máximo `peso_validade_dias` (180). Vencida: o maior entre o último peso e o `peso_referencia_kg` da categoria, rotulado como estimado. Sem ambos: sem peso.
 
 - CABECA: valor.
 - KG_VIVO: peso vigente × R$/kg. Novilho com 210,0 kg em 10/01/2027: em 31/10 (294 dias, vencida) vale a referência de 330,0 kg, estimada, × R$ 11,00 = R$ 3.630,00; pelo peso vencido seriam R$ 2.310,00.
 - ARROBA: peso vigente × `rendimento_carcaca_pct` ÷ 15 × R$/@. Boi de 540,0 kg a 52%: 18,72 @ × R$ 320,00 = R$ 5.990,40.
 
-- **Cobertura ao lado do total**: "412 de 430 cabeças valoradas (95,8%): 35 por valor manual, 377 pela tabela; 61 com peso estimado; 18 sem valor de referência". Nenhuma média é extrapolada para as 18.
+- **Cobertura ao lado do total**: "412 de 430 cabeças valoradas (95,8%): 35 por valor manual, 377 pela tabela; 61 com peso estimado; 18 sem valor de referência".
 - **Três rótulos, nunca somados**: *estimado* (a hierarquia acima); *custo* (Σ `custo_aquisicao*` do rebanho ativo, o termo da conciliação); *negociado* (vendas vigentes do período).
 - **Série histórica** sem tabela de snapshots (DV-10): cada ponto = inventário em D por replay × preço vigente em D. Evento retroativo corrige a série sozinho; mudar o preço de hoje não altera o passado, porque a vigência antiga continua na tabela.
 - Valor por categoria e por pasto = a mesma soma, agrupada pelo atributo do animal em D.
@@ -398,7 +384,7 @@ Exemplo: 80 expostas, 76 diagnosticadas (cobertura de 95,0%), 64 prenhas, 60 par
 - Cobertura de protocolo = elegíveis com aplicação em dia ÷ elegíveis pelo sexo, idade e categoria do protocolo (PROTOCOLOS_SANITARIOS, SANIDADE); `null` sem elegíveis. Exemplo: 188 de 200 = 94,0%.
 - Pendências vencidas e próximas = contagem por (animal, protocolo) ou (animal, produto), com `agenda_antecedencia_dias` e `agenda_tolerancia_dias`; animais em carência = ativos com `data_fim_carencia` ≥ hoje. Zero é informação.
 - Custo sanitário de P = Σ lançamentos de contas de classe SANITARIO com competência em P, alocado × não alocado.
-- Mortalidade de P = mortes em P ÷ (cabeças no início de P + entradas em P), de BAIXAS e EVENTO_ANIMAIS; `null` se P começa antes de D0. Exemplo: 6 ÷ (430 + 52) = 1,24%. Baixa por DIVERGENCIA_CONTAGEM é causa própria.
+- Mortalidade de P = mortes em P ÷ (cabeças no início de P + entradas em P), de BAIXAS e EVENTO_ANIMAIS; `null` se P começa antes de D0. Exemplo: 6 ÷ (430 + 52) = 1,24%.
 
 ## 9. Matriz do dashboard (§12)
 
