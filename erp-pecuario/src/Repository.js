@@ -326,6 +326,23 @@ var Repository = (function () {
         eventoVigente: eventoVigente, contador: contador, carregada: carregada,
       };
     }
+    /**
+     * Fachada de leitura CRUA (UnitOfWork, recuperação, projeções da fase C e integridade): a pública mais as
+     * linhas como estão na planilha, sem nenhum método que altere a memória.
+     */
+    function leituraCrua() {
+      var f = publico();
+      f.cru = cru;
+      f.cruPorId = cruPorId;
+      f.cruPor = cruPor;
+      f.linhaDe = linhaDe;
+      f.avaliar = avaliar;
+      f.operacoesOrfas = operacoesOrfas;
+      f.celulaCoercida = celulaCoercida;
+      f.alertas = function () { return alertas.slice(); };
+      f.cabecalho = function (tabela) { return tabela_(tabela).cabecalho.slice(); };
+      return f;
+    }
     return {
       carregar: carregar, carregada: carregada,
       carregadas: function () { return Object.keys(dados); },
@@ -336,7 +353,7 @@ var Repository = (function () {
       operacoesOrfas: operacoesOrfas, celulaCoercida: celulaCoercida,
       alertas: function () { return alertas.slice(); },
       resolver: resolver, incluir: incluir, alterar: alterar,
-      publico: publico,
+      publico: publico, leituraCrua: leituraCrua,
     };
   }
 

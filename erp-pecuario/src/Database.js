@@ -294,7 +294,7 @@ var Database = (function () {
         }));
         return onde;
       },
-      /** blocos: [{aba, linha, coluna (base 0), valores, texto}] — texto vale para todas as colunas do bloco. */
+      /** blocos: [{aba, linha, coluna (base 0), valores, texto: [booleano por coluna do bloco]}]. */
       gravar: function (blocos) {
         if (!tipada) {
           valores_(blocos.map(function (b) {
@@ -306,7 +306,7 @@ var Database = (function () {
         pedidos_(blocos.map(function (b) {
           return { updateCells: {
             start: { sheetId: m.abas[b.aba].sheetId, rowIndex: b.linha - 1, columnIndex: b.coluna },
-            rows: linhasTipadas_(b.valores, b.valores[0].map(function () { return b.texto; })),
+            rows: linhasTipadas_(b.valores, b.texto),
             fields: CAMPOS_CELULA,
           } };
         }));
@@ -424,7 +424,7 @@ var Database = (function () {
       },
       gravar: function (blocos) {
         blocos.forEach(function (b) {
-          bloco_(aba_(b.aba), b.linha, b.coluna + 1, b.valores, formatos_(b.valores, b.valores[0].map(function () { return b.texto; })));
+          bloco_(aba_(b.aba), b.linha, b.coluna + 1, b.valores, formatos_(b.valores, b.texto));
         });
       },
       criarAbas: function (abas) {
@@ -580,8 +580,9 @@ var Database = (function () {
       return onde;
     }
     /**
-     * Atualiza células por índice de linha: [{tabela, linha, campos: {coluna: valor}}]. Células da mesma coluna em
-     * linhas seguidas viram um bloco só. Devolve o número de células gravadas.
+     * Atualiza células por índice de linha: [{tabela, linha, campos: {coluna: valor}}]. As células viram blocos
+     * retangulares: colunas vizinhas da mesma linha se juntam numa faixa, e faixas iguais em linhas seguidas, num
+     * bloco só (menos escritas na primitiva SPREADSHEET_APP). Devolve o número de células gravadas.
      */
     function atualizar(itens) {
       var celulas = {};
@@ -591,17 +592,30 @@ var Database = (function () {
         Object.keys(it.campos || {}).forEach(function (campo) {
           var col = coluna_(it.tabela, campo);
           if (pos[campo] === undefined) throw Validation.erro('CONFIG', 'A coluna ' + campo + ' não existe na aba ' + it.tabela + '. Execute a configuração (setup) para atualizar a planilha.');
-          celulas[it.tabela + '\u0000' + pos[campo] + '\u0000' + it.linha] = { aba: it.tabela, coluna: pos[campo], linha: it.linha, valor: codificar(col, it.campos[campo]), texto: !!TIPOS_TEXTO[col.tipo] };
+          celulas[it.tabela + '\u0000' + it.linha + '\u0000' + pos[campo]] = { aba: it.tabela, coluna: pos[campo], linha: it.linha, valor: codificar(col, it.campos[campo]), texto: !!TIPOS_TEXTO[col.tipo] };
         });
       });
       var lista = Object.keys(celulas).map(function (k) { return celulas[k]; });
       if (!lista.length) return 0;
-      lista.sort(function (a, b) { return a.aba < b.aba ? -1 : a.aba > b.aba ? 1 : a.coluna - b.coluna || a.linha - b.linha; });
-      var blocos = [];
-      var atual = null;
+      lista.sort(function (a, b) { return a.aba < b.aba ? -1 : a.aba > b.aba ? 1 : a.linha - b.linha || a.coluna - b.coluna; });
+      var faixas = [];
+      var f = null;
       lista.forEach(function (c) {
-        if (atual && atual.aba === c.aba && atual.coluna === c.coluna && atual.linha + atual.valores.length === c.linha) atual.valores.push([c.valor]);
-        else blocos.push(atual = { aba: c.aba, linha: c.linha, coluna: c.coluna, valores: [[c.valor]], texto: c.texto });
+        if (f && f.aba === c.aba && f.linha === c.linha && f.coluna + f.valores.length === c.coluna) {
+          f.valores.push(c.valor);
+          f.texto.push(c.texto);
+        } else faixas.push(f = { aba: c.aba, linha: c.linha, coluna: c.coluna, valores: [c.valor], texto: [c.texto] });
+      });
+      var blocos = [];
+      var abertos = {}; // aba + coluna + largura → bloco cuja última linha pode receber a faixa seguinte
+      faixas.forEach(function (fx) {
+        var k = fx.aba + '\u0000' + fx.coluna + '\u0000' + fx.valores.length;
+        var b = abertos[k];
+        if (b && b.linha + b.valores.length === fx.linha) {
+          b.valores.push(fx.valores);
+          return;
+        }
+        blocos.push(abertos[k] = { aba: fx.aba, linha: fx.linha, coluna: fx.coluna, valores: [fx.valores], texto: fx.texto });
       });
       p.gravar(blocos);
       return lista.length;
@@ -773,6 +787,27 @@ var Database = (function () {
     return conferirCorpus(ssId, primitiva, nomeAba);
   }
 
+  /**
+   * Roda o corpus nas primitivas, na ordem de preferência (desenho-base, seção 16.13), e devolve
+   * {primitiva, resultados}: `primitiva` é a primeira com ok = true (null se nenhuma passou); `resultados` tem uma
+   * entrada por primitiva tentada — o retorno de `corpus`, ou {primitiva, ok: false, erro} se o serviço falhou.
+   * Para na primeira aprovada. O setup grava o resultado e mostra na tela de sistema.
+   */
+  function escolherPrimitiva(ssId, opcoes) {
+    var resultados = [];
+    for (var i = 0; i < PRIMITIVAS.length; i++) {
+      var r;
+      try {
+        r = corpus(ssId, PRIMITIVAS[i], opcoes && opcoes.abas ? { aba: opcoes.abas[PRIMITIVAS[i]] } : null);
+      } catch (e) {
+        r = { primitiva: PRIMITIVAS[i], ok: false, erro: String(e && e.message ? e.message : e) };
+      }
+      resultados.push(r);
+      if (r.ok) return { primitiva: PRIMITIVAS[i], resultados: resultados };
+    }
+    return { primitiva: null, resultados: resultados };
+  }
+
   // ------------------------------------------------------------------ portas reais ----
   /** Porta Lock: lock de script. tentar(ms) espera até ms e devolve se obteve; soltar(); tem(). */
   function lock() {
@@ -854,6 +889,7 @@ var Database = (function () {
     paraTexto: paraTexto,
     deTexto: deTexto,
     corpus: corpus,
+    escolherPrimitiva: escolherPrimitiva,
     conferirCorpus: conferirCorpus,
     corpusDefinicao: corpusDefinicao,
     corpusRegistros: corpusRegistros,

@@ -58,7 +58,7 @@ var UnitOfWork = (function () {
     var cmd = est.cmd || {};
     return {
       repo: est.repo.publico(),
-      cru: comCru || cmd.acessoCru ? est.repo : null,
+      cru: comCru || cmd.acessoCru ? est.repo.leituraCrua() : null,
       plano: Repository.plano(),
       rota: cmd.rota || null,
       dados: cmd.dados === undefined ? {} : cmd.dados,
@@ -89,20 +89,30 @@ var UnitOfWork = (function () {
     var fila = ctx.errosPendentes || [];
     var n = fila.length;
     if (!n) return { gravados: 0, descartados: 0, motivo: null };
-    var tinha = ctx.lock.tem();
-    if (!tinha && !ctx.lock.tentar(ESPERA_ERROS_MS)) {
-      fila.length = 0;
-      return { gravados: 0, descartados: n, motivo: 'LOCKED' };
-    }
+    var lote = fila.splice(0, n);
+    var tinha = null;
     try {
-      ctx.io.anexar({ ERROS_LOG: fila.map(function (r) { return AuditService.linhaErro(ctx, r); }) });
+      tinha = ctx.lock.tem();
+      if (!tinha && !ctx.lock.tentar(ESPERA_ERROS_MS)) {
+        tinha = null;
+        return { gravados: 0, descartados: n, motivo: 'LOCKED' };
+      }
+      ctx.io.anexar({ ERROS_LOG: lote.map(function (r) { return AuditService.linhaErro(ctx, r); }) });
       ctx.io.flush();
       return { gravados: n, descartados: 0, motivo: null };
     } catch (e) {
       return { gravados: 0, descartados: n, motivo: String(e && e.message ? e.message : e) };
     } finally {
-      fila.length = 0;
-      if (!tinha) ctx.lock.soltar();
+      if (tinha === false) soltarSemFalhar_(ctx);
+    }
+  }
+  /** Solta o lock obtido só para gravar ERROS_LOG; falha aqui não muda o resultado (o lock cai com a execução). */
+  function soltarSemFalhar_(ctx) {
+    try {
+      ctx.lock.soltar();
+      return null;
+    } catch (e) {
+      return e;
     }
   }
   function anotarCoercoes_(est, contexto) {
@@ -256,7 +266,7 @@ var UnitOfWork = (function () {
     if (!registros.length && p.marcador) {
       registros.push({ contexto: 'recuperacao', codigo: 'MARCADOR_SEM_OPERACAO', mensagem: 'Havia marcador de operação em curso sem operação pendente: derivados conferidos e marcador removido.' });
     }
-    gravar_(est, resumo.refeitas.map(function (id) { return { tabela: 'OPERACOES', id: id, campos: { aplicada_em: agora, finished_at: agora } }; }));
+    // A trilha vai antes de aplicada_em: uma queda depois dela leva a próxima recuperação a refazer (e a registrar de novo).
     var lote = { AUDITORIA: [], ERROS_LOG: registros.map(function (r) { return AuditService.linhaErro(ctx, r); }) };
     resumo.refeitas.forEach(function (id) {
       lote.AUDITORIA = lote.AUDITORIA.concat(AuditService.linhas(ctx, { op_id: id, usuario: vazio_(ctx.usuario) ? 'sistema' : ctx.usuario, timestamp: agora }, [
@@ -264,6 +274,8 @@ var UnitOfWork = (function () {
       ]));
     });
     anexar_(est, lote, false);
+    io.flush();
+    gravar_(est, resumo.refeitas.map(function (id) { return { tabela: 'OPERACOES', id: id, campos: { aplicada_em: agora, finished_at: agora } }; }));
     io.flush();
     est.versao += 1;
     ctx.props.gravar(chaveVersao(ctx.banco), String(est.versao));
@@ -416,7 +428,9 @@ var UnitOfWork = (function () {
     // Fase A — só anexa: marcador, OPERACOES INICIADA, linhas inertes, auditoria.
     est.fase = 'A';
     ctx.props.gravar(chaveMarcador(ctx.banco), JSON.stringify({ op_id: est.opId, comando: cmd.rota, desde: est.agora }));
+    // Ordem das escritas da fase A (06, seção 5): OPERACOES, EVENTOS, linhas filhas, AUDITORIA.
     var lote = { OPERACOES: [op] };
+    if (plano.lote.EVENTOS) lote.EVENTOS = plano.lote.EVENTOS;
     Object.keys(plano.lote).forEach(function (t) { lote[t] = plano.lote[t]; });
     if (plano.auditoria.length) lote.AUDITORIA = plano.auditoria;
     anexar_(est, lote, true);
@@ -471,7 +485,13 @@ var UnitOfWork = (function () {
   function run(ctx, comando) {
     exigirContexto_(ctx);
     var cmd = normalizarComando_(comando);
-    if (cmd.modo === 'SIMULAR') return simular_(ctx, cmd);
+    if (cmd.modo === 'SIMULAR') {
+      try {
+        return simular_(ctx, cmd);
+      } finally {
+        descarregarErros(ctx);
+      }
+    }
     if (cmd.modo !== 'EXECUTAR') throw interno_('Modo de comando desconhecido: ' + cmd.modo + '.');
     if (!cmd.chave) throw Validation.erro('VALIDATION', 'O pedido veio sem a chave de idempotência. Atualize a tela e tente de novo.');
     if (vazio_(ctx.usuario)) throw interno_('Contexto de execução sem usuário.');
@@ -556,7 +576,11 @@ var UnitOfWork = (function () {
     var q = consulta || {};
     if (typeof q.tratador !== 'function') throw interno_('Consulta sem tratador.');
     var cmd = { rota: q.rota || 'consulta', dados: q.dados === undefined || q.dados === null ? {} : q.dados, avisosAceitos: [], reads: q.reads || [], acessoCru: !!q.acessoCru };
-    return lerValidado_(ctx, cmd, cmd.reads, function (est) { return q.tratador(novoTx_(est, false)); });
+    try {
+      return lerValidado_(ctx, cmd, cmd.reads, function (est) { return q.tratador(novoTx_(est, false)); });
+    } finally {
+      descarregarErros(ctx); // ERROS_LOG: a única escrita que uma consulta pode causar (06, seção 6)
+    }
   }
 
   // ------------------------------------------------------------------ estado da operação ----
@@ -567,7 +591,7 @@ var UnitOfWork = (function () {
   /**
    * `operacao.status(chave)` (06, seções 7 e 8): CONFIRMADA | EM_ANDAMENTO | FALHOU | INEXISTENTE. Com marcador
    * presente, ou operação da chave ainda pendente, tenta o lock SEM esperar: não obteve → EM_ANDAMENTO (há
-   * gravação em curso); obteve → a execução original morreu: recupera e responde o estado final.
+   * gravação em curso; CONFIRMADA se a da chave já está completa); obteve → recupera e responde o estado final.
    */
   function status(ctx, chave) {
     exigirContexto_(ctx);
@@ -579,9 +603,9 @@ var UnitOfWork = (function () {
     var ops = est.repo.cruPor('OPERACOES', 'idempotency_key', String(chave));
     var completa = ops.filter(function (op) { return op.status === 'CONFIRMADA' && !vazio_(op.aplicada_em); })[0];
     var pendente = ops.some(function (op) { return op.status === 'INICIADA' || (op.status === 'CONFIRMADA' && vazio_(op.aplicada_em)); });
-    if (completa && !pendente) return situacao_('CONFIRMADA', completa);
     if (p.marcador || pendente) {
-      if (!ctx.lock.tentar(0)) return situacao_('EM_ANDAMENTO', null);
+      // Regra dos leitores (desenho-base, 16.5): com marcador ou operação pendente, tenta o lock sem esperar.
+      if (!ctx.lock.tentar(0)) return completa && !pendente ? situacao_('CONFIRMADA', completa) : situacao_('EM_ANDAMENTO', null);
       try {
         recuperar_(est, {});
         ops = est.repo.cruPor('OPERACOES', 'idempotency_key', String(chave));
