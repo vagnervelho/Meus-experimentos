@@ -94,7 +94,7 @@ function problemasDaLinha(ls, nasc) {
       dentro = true; pasto = l.destino; per.push({ ini: l.data, fim: null }); return;
     }
     if (!dentro) { probs.push({ cod: 'FORA_DO_REBANHO', ev: l.ev }); return; }
-    if (l.origem && l.origem !== pasto) probs.push({ cod: 'ORIGEM_DIVERGENTE', ev: l.ev });
+    if (l.origem && l.origem !== pasto) probs.push({ cod: 'ORIGEM_DIVERGENTE', ev: l.ev, derivada: !!l.derivada });
     if (l.efeito === 0) { pasto = l.destino; return; }
     dentro = false; pasto = null; per[per.length - 1].fim = l.data;
     if (l.tipo === 'MORTE') morte = l.data;
@@ -157,7 +157,11 @@ function prever(M, p) {
   if (p.pre && p.pre.length) return { cat: 'VALIDATION', por: p.pre };
   const own = [];
   const outros = new Set();
-  Array.from(new Set(p.tocados)).forEach((id) => problemasDoAnimal(M, id, p.excl, p.novo).forEach((x) => { if (x.ev === 'NOVO') own.push(x.cod); else outros.add(x.ev); }));
+  // A origem que o servidor tira da linha do tempo nunca é erro do próprio comando: só diverge quando outro registro a
+  // quebrou, e o problema mostrado é esse (CONTRATOS, seção 14).
+  Array.from(new Set(p.tocados)).forEach((id) => problemasDoAnimal(M, id, p.excl, p.novo).forEach((x) => {
+    if (x.ev === 'NOVO') { if (!(x.cod === 'ORIGEM_DIVERGENTE' && x.derivada)) own.push(x.cod); } else outros.add(x.ev);
+  }));
   (p.removidosCriados || []).forEach((id) => vigentes(M, p.excl).forEach((e) => { if (e.linhas.some((l) => l.animal === id)) outros.add(e.id); }));
   if (own.length) return { cat: 'VALIDATION', por: own };
   if (outros.size) return { cat: 'CONFLICT', outros };
@@ -222,7 +226,7 @@ function propSaida(M, amb, tipo, data, ids, opcoes, substitui) {
   const pre = [];
   sujeitos(M, ids, excl, pre);
   const novo = novoEvento(M, tipo === 'DIVERGENCIA_CONTAGEM' ? 'AJUSTE_INVENTARIO' : tipo, data, { sub: tipo === 'DIVERGENCIA_CONTAGEM' ? 'DIVERGENCIA_CONTAGEM' : null, raiz: substitui ? substitui.raiz : M.seq + 1 });
-  ids.forEach((id) => novo.linhas.push({ animal: id, efeito: -1, origem: antesDaSaida(linhasDe(M, id, excl), data).pasto, destino: null }));
+  ids.forEach((id) => novo.linhas.push({ animal: id, efeito: -1, origem: antesDaSaida(linhasDe(M, id, excl), data).pasto, destino: null, derivada: true }));
   const campos = { event_date: data };
   if (tipo === 'MORTE') { campos.causa = 'DOENCA'; if (o.valor) { campos.custo_valor = o.valor; campos.custo_conta_id = amb.custeio; } }
   if (tipo === 'DESCARTE') { campos.destino = 'CONSUMO_PROPRIO'; campos.motivo = 'IDADE'; if (o.valor) campos.receita_valor = o.valor; }
@@ -298,7 +302,7 @@ function propVenda(M, amb, data, ids, negocio, rnd, substitui) {
   sujeitos(M, ids, excl, pre);
   const g = negocio;
   const novo = novoEvento(M, 'VENDA', data, { raiz: substitui ? substitui.raiz : M.seq + 1 });
-  ids.forEach((id) => novo.linhas.push({ animal: id, efeito: -1, origem: g.origem || antesDaSaida(linhasDe(M, id, excl), data).pasto, destino: null }));
+  ids.forEach((id) => novo.linhas.push({ animal: id, efeito: -1, origem: g.origem || antesDaSaida(linhasDe(M, id, excl), data).pasto, destino: null, derivada: !g.origem }));
   const n = ids.length;
   const bruto = g.bruto !== undefined ? g.bruto : g.modalidade === 'CABECA' ? n * g.preco : Math.round(soma(g.pesos, (p) => Math.round(p * 10)) * g.preco / 10);
   const desconto = g.desconto || 0;

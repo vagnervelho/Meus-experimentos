@@ -37,7 +37,7 @@ function vigencia(r) {
     assert.equal(e.import_id || null, null, 'nenhum evento importado neste ataque');
     vig.set(e.event_id, confirmado(e) && e.event_type !== 'ESTORNO' && !anuladoPor.has(e.event_id));
   });
-  return { vig, anuladoPor, porId: new Map(r.EVENTOS.map((e) => [e.event_id, e])) };
+  return { vig, anuladoPor, confirmado, porId: new Map(r.EVENTOS.map((e) => [e.event_id, e])) };
 }
 function classe(l) {
   return l.efeito === 1 ? 0 : l.efeito === -1 ? 2 : 1;
@@ -118,6 +118,8 @@ function invariantesCruas(r) {
     if (!(f.valor > 0)) out.push('1: valor não positivo em ' + id);
     if (!c || c.natureza !== f.natureza || c.tipo !== f.tipo || c.grupo !== f.categoria) out.push('2: natureza/tipo/grupo ≠ conta em ' + id);
     if (!vale) {
+      // Linha de operação que falhou (ou ainda pendente) é inerte: nunca valeu e a projeção não a toca.
+      if (!ev || !V.confirmado(ev)) return;
       // 20: lançamento de evento anulado fica CANCELADO, apontando quem o anulou, sem animal direto.
       if (f.status !== 'CANCELADO' || f.status_pagamento !== 'CANCELADO' || f.cancelado_por_event_id !== (V.anuladoPor.get(f.event_id) || null) || f.animal_id) out.push('20: lançamento de evento anulado não está CANCELADO por quem o anulou: ' + id);
       return;

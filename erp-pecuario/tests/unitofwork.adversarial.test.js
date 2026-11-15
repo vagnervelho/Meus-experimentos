@@ -14,6 +14,10 @@
  *   dois bancos no mesmo projeto; exceção tratável em cada escrita; estado da operação com a original morta ou viva.
  * - Corpus de tipos com valores hostis nas três primitivas; células hostis digitadas pelo dono; valores hostis pelo
  *   caminho inteiro (AUDITORIA como registro de refazer e chave de idempotência).
+ * - Nos comandos-modelo da Fase 2, depois de cada queda e recuperação, também os oráculos independentes de
+ *   apoio-oraculos.js (invariantes de 03b, seção 14, sobre as linhas cruas; inventário por replay sem Timeline) e, nos
+ *   pontos de buffer cheio (antes de cada flush, na primitiva SpreadsheetApp), subconjuntos densos das pendentes
+ *   (todos até 5 escritas; acima, 24 sorteados com semente fixa e densidades de chegada de 10%, 50% e 90%: 09, seção 5).
  */
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -21,6 +25,7 @@ const A = require('./apoio-persistencia');
 
 const { js, ambiente, cmdEvento, cmdPasto, consultaVigentes, rodarInstrumentado, recuperarInstrumentado } = A;
 const { sementes } = require('./apoio-eventos');
+const O = require('./apoio-oraculos');
 const PRIMITIVAS = ['SHEETS_TYPED', 'SHEETS_RAW', 'SPREADSHEET_APP'];
 const ABAS = ['OPERACOES', 'EVENTOS', 'EVENTO_ANIMAIS', 'ANIMAIS', 'PASTOS', 'AUDITORIA', 'ERROS_LOG', 'IMPORTACOES'];
 
@@ -182,8 +187,24 @@ function prepararCompra(amb) {
   amb.gas.clock.now += 60000;
   return { pasto, eventId: r.dados.event_id, ids: r.dados.animais.map((a) => a.animal_id) };
 }
+/**
+ * Oráculos independentes (apoio-oraculos.js) depois da recuperação: invariantes de 03b, seção 14, sobre as linhas cruas
+ * e o inventário por replay (sem Timeline) = Timeline.inventario nas datas dadas.
+ */
+function oraculosIndependentes(amb, msg, datas) {
+  const G = amb.G;
+  const r = O.cru(amb);
+  assert.deepEqual(O.invariantesCruas(r), [], msg + ': invariantes de 03b, seção 14, sobre as linhas cruas');
+  const R = O.replayCru(r);
+  const sis = amb.read({ rota: 'teste.inventario', reads: G.Timeline.LEITURAS, acessoCru: true, tratador: (tx) => {
+    const todas = G.Timeline.fonte(tx).todasAsLinhas();
+    return datas.map((D) => G.Timeline.inventario(todas, D, '2026-01-01'));
+  } }).dados;
+  datas.forEach((D, i) => assert.deepEqual({ total: sis[i].total, porPasto: sis[i].porPasto, semPasto: sis[i].semPasto }, O.inventarioDe(R.linhas, D), msg + ': inventário em ' + D + ' (replay independente)'));
+}
 function desfechoCorrecaoCompra(amb, e, confirmado, msg, prep) {
   const G = amb.G;
+  oraculosIndependentes(amb, msg, ['2026-11-04', DATA_COMPRA, '2026-11-13']);
   const r = amb.read({ rota: 'teste.compra', reads: G.FinancialService.leituras(), acessoCru: true, tratador: (tx) => ({
     proj: G.Timeline.conferir(tx), fin: G.FinancialService.conferir(tx),
     animais: prep.ids.map((id) => tx.cru.cruPorId('ANIMAIS', id)), original: tx.cru.avaliar(prep.eventId).status,
@@ -223,6 +244,7 @@ function prepararVenda(amb) {
 }
 function desfechoVenda(amb, e, confirmado, msg, prep) {
   const G = amb.G;
+  oraculosIndependentes(amb, msg, ['2026-01-01', '2026-08-19', DATA_VENDA, '2026-11-13']);
   const r = amb.read({ rota: 'teste.venda', reads: G.FinancialService.leituras(), acessoCru: true, tratador: (tx) => ({
     proj: G.Timeline.conferir(tx), fin: G.FinancialService.conferir(tx),
     animais: prep.ids.map((id) => tx.cru.cruPorId('ANIMAIS', id)), vendas: tx.repo.vigentes('VENDAS').length,
@@ -264,6 +286,7 @@ function prepararEstornoTransferencia(amb) {
 }
 function desfechoEstornoTransferencia(amb, e, confirmado, msg, prep) {
   const G = amb.G;
+  oraculosIndependentes(amb, msg, ['2026-04-09', DATA_TRANSF, '2026-11-13']);
   const r = amb.read({ rota: 'teste.estorno', reads: G.FinancialService.leituras(), acessoCru: true, tratador: (tx) => ({
     proj: G.Timeline.conferir(tx), fin: G.FinancialService.conferir(tx),
     animais: prep.ids.map((id) => tx.cru.cruPorId('ANIMAIS', id)), transfer: tx.cru.avaliar(prep.transfer).status,
@@ -488,6 +511,43 @@ for (const primitiva of PRIMITIVAS) {
     }
   });
 }
+
+/**
+ * Subconjuntos das pendentes num ponto de buffer cheio: todos até 5 escritas; acima, 24 sorteados com semente fixa,
+ * com densidades de chegada de 10%, 50% e 90% (o quase nada e o quase tudo também são cobertos).
+ */
+function subconjuntosDensos(p, semente) {
+  if (p <= 5) {
+    const todos = [];
+    for (let mask = 0; mask < 1 << p; mask++) todos.push(Array.from({ length: p }, (_, j) => !!(mask & (1 << j))));
+    return todos;
+  }
+  const rnd = A.aleatorio(semente);
+  return Array.from({ length: 24 }, (_, i) => Array.from({ length: p }, () => rnd() < [0.1, 0.5, 0.9][i % 3]));
+}
+test('subconjuntos densos (SPREADSHEET_APP, 09 seção 5): venda, estorno de transferência e correção de compra mortos ANTES de cada flush, com o buffer cheio, em muitos subconjuntos das escritas pendentes; tudo ou nada, invariantes e reenvio', () => {
+  let casos = 0;
+  for (const nome of ['venda', 'estornoTransferencia', 'correcaoCompra']) {
+    const cen = CENARIOS[nome];
+    const ref = ambiente(ambienteDo('SPREADSHEET_APP', cen));
+    const passos = rodarInstrumentado(ref, cen.comando(ref, cen.preparar(ref)), {}).chamadas;
+    passos.forEach((rotulo, i) => {
+      if (rotulo !== 'flush') return;
+      const k = i + 1;
+      let combos = null;
+      for (let c = 0; combos === null || c < combos.length; c++) {
+        const amb = ambiente(ambienteDo('SPREADSHEET_APP', cen));
+        const prep = cen.preparar(amb);
+        const { r } = rodarInstrumentado(amb, cen.comando(amb, prep), { antes: k, chegam: combos ? combos[c] : 'nenhuma' });
+        assert.equal(r.morta, true);
+        if (!combos) { combos = subconjuntosDensos(r.pendentes.length, k * 101 + nome.length); if (!combos.length) break; }
+        const msg = 'SPREADSHEET_APP ' + nome + ' antes do flush ' + k + ' (' + r.pendentes.length + ' pendentes) chegam=' + (combos[c] || []).map((x) => (x ? 1 : 0)).join('');
+        conferirQueda(amb, cen, prep, MODOS[casos++ % MODOS.length], msg);
+      }
+    });
+  }
+  assert.ok(casos >= 150, 'casos: ' + casos);
+});
 
 // ------------------------------------------------------------------ (7) recuperação morta e repetida ----
 for (const primitiva of PRIMITIVAS) {
