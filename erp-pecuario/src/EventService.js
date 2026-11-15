@@ -1263,7 +1263,11 @@ var EventService = (function () {
     }
     var frete = 0;
     var outros = 0;
-    custos.forEach(function (x, k) {
+    // Os fretes são lançados antes dos outros custos: COMPRAS guarda só os dois totais, e assim o tipo de cada item
+    // se reconstrói pela ordem das linhas (o prefixo que soma o frete), sem chave própria no payload (03b, seção 2.6).
+    custos.map(function (x, k) { return { x: x, k: k }; }).sort(function (a, b) { return ((a.x.tipo === 'OUTRO') - (b.x.tipo === 'OUTRO')) || a.k - b.k; }).forEach(function (o) {
+      var x = o.x;
+      var k = o.k;
       if (typeof x.valor !== 'number') return;
       var eFrete = x.tipo !== 'OUTRO';
       var pl = FinancialService.planejar(m.tx, {
@@ -1274,7 +1278,6 @@ var EventService = (function () {
       }, m.col);
       if (!pl) return;
       if (eFrete) frete += x.valor; else outros += x.valor;
-      (ctxEv.custosPayload = ctxEv.custosPayload || []).push({ financial_id: pl.financial_id, tipo: eFrete ? 'FRETE' : 'OUTRO' });
       planejados.push(pl);
       lancs.push(resumoLancamento_(m, pl, contaCustos, { papel: eFrete ? 'FRETE' : 'OUTRO' }));
     });
@@ -1423,7 +1426,6 @@ var EventService = (function () {
     var extra = {
       justificativa: ctxEv.original ? nulo_(m.tx.dados.justificativa) : null, valor_abertura_origem: ctxEv.abertura ? 'INFORMADO' : null,
       gta_numero: ctxEv.tipo === 'TRANSFERENCIA' && typeof ctxEv.campos.gta_numero === 'string' ? nulo_(Utils.aparar(ctxEv.campos.gta_numero)) : null,
-      custos: ctxEv.custosPayload && ctxEv.custosPayload.length ? ctxEv.custosPayload : null,
     };
     ev.payload_json = payload_(m, ctxEv, extra);
     var itensPorAnimal = {};

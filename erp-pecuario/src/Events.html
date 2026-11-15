@@ -10,7 +10,7 @@
  */
 var TelaEventos = (function () {
   var h = Util.h;
-  var CORRIGIVEIS = ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'NASCIMENTO', 'TRANSFERENCIA', 'MORTE', 'DESCARTE'];
+  var CORRIGIVEIS = ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'NASCIMENTO', 'COMPRA', 'TRANSFERENCIA', 'MORTE', 'DESCARTE'];
   var filtros = { tipo: '', de: '', ate: '', vigentes: false, pagina: 1 };
   function situacao(e) {
     if (e.event_type === 'ESTORNO') return 'Estorno';
@@ -89,6 +89,83 @@ var TelaEventos = (function () {
   function boolDe(v) { return v === 'S' || v === true ? true : v === 'N' || v === false ? false : null; }
   function pesoTexto_(v) { return v === null || v === undefined ? null : Fmt.numero(v, 1).replace(/\./g, ''); }
   function limpo_(v) { Object.keys(v).forEach(function (k) { if (v[k] === null || v[k] === undefined) delete v[k]; }); return v; }
+  function dinheiroTexto_(v) { return v === null || v === undefined ? null : Fmt.centavosParaTexto(v); }
+  function codigoConta_(f) { var c = Store.conta(f.conta_id); return c ? c.codigo : null; }
+  /** Lançamento opcional da morte (custos) ou do descarte (receita): campos do cabeçalho a partir do lançamento e do título. */
+  function lancamentoDaSaida_(det, origem, tipo) {
+    var f = (det.FINANCEIRO || [])[0];
+    if (!f) return;
+    var p = tipo === 'MORTE' ? 'custo_' : 'receita_';
+    var t = (det.PARCELAS || []).filter(function (x) { return x.financial_id === f.financial_id; })[0] || {};
+    origem[p + 'valor'] = dinheiroTexto_(f.valor);
+    if (tipo === 'MORTE') origem.custo_conta_id = f.conta_id;
+    origem[p + 'partner_id'] = f.partner_id; origem[p + 'vencimento'] = t.data_vencimento; origem[p + 'forma_pagamento'] = t.forma_pagamento;
+    origem[p + 'documento'] = f.documento; origem[p + 'descricao'] = f.descricao;
+  }
+  /**
+   * Correção de compra: o cabeçalho vem de COMPRAS, do evento e dos lançamentos (parcelas do valor dos animais; frete e
+   * outros custos, um por item, os fretes primeiro); cada animal, da linha do evento (o criado leva os
+   * atributos de criação; o que voltou ao rebanho, só os campos da volta).
+   */
+  function previaCompra_(o, def, origem) {
+    var ev = o.evento, det = o.detalhes || {}, linhasEv = (o.linhas || []).filter(function (l) { return Number(l.efeito_inventario) === 1; });
+    var cp = (det.COMPRAS || [])[0] || {};
+    var fins = det.FINANCEIRO || [];
+    var principal = fins.filter(function (f) { return codigoConta_(f) === 'COMPRA_ANIMAIS'; })[0] || fins[0] || {};
+    // Fretes foram gravados antes dos outros custos: o prefixo dos lançamentos acessórios que soma o frete é de fretes.
+    var acess = fins.filter(function (f) { return f !== principal; });
+    var tipos = {};
+    var acum = 0;
+    acess.forEach(function (f) { tipos[f.financial_id] = acum < (cp.frete || 0) ? 'FRETE' : 'OUTRO'; acum += f.valor || 0; });
+    var parcelasDe = function (id) { return (det.PARCELAS || []).filter(function (x) { return x.financial_id === id; }); };
+    var rat = (det.RATEIOS || []).filter(function (r) { return r.financial_id === principal.financial_id; })[0] || {};
+    var bases = {};
+    (det.ALOCACOES_FINANCEIRAS || []).forEach(function (a) { if (a.rateio_id === rat.rateio_id) bases[a.animal_id] = a.base_valor; });
+    var idents = Utils_agrupar(det.IDENTIFICACOES || []);
+    var pesos = Utils_agrupar(det.PESAGENS || []);
+    var pastoLote = linhasEv.length ? linhasEv[0].pasto_destino_id : null;
+    var todosPesados = linhasEv.length && linhasEv.every(function (l) { return l.peso !== null && l.peso !== undefined; });
+    origem.partner_id = ev.partner_id || principal.partner_id; origem.finalidade = cp.finalidade; origem.modalidade = cp.modalidade;
+    origem.base_peso = cp.modalidade === 'ARROBA' ? cp.base_peso : null;
+    if (cp.rendimento_tipo === 'NEGOCIADO' || cp.rendimento_tipo === 'ESTIMADO') { origem.rendimento_carcaca_pct = pesoTexto_(cp.rendimento_carcaca_pct); origem.rendimento_tipo = cp.rendimento_tipo; }
+    origem.preco_unitario = dinheiroTexto_(cp.preco_unitario); origem.peso_total_kg = todosPesados ? null : pesoTexto_(cp.peso_total_kg);
+    origem.valor_animais = dinheiroTexto_(cp.valor_animais); origem.criterio_rateio = cp.modalidade === 'LOTE' ? cp.criterio_rateio : null;
+    origem.justificativa_rateio = rat.justificativa; origem.pasto_destino_id = pastoLote; origem.gta_numero = cp.gta_numero; origem.nota_fiscal = cp.nota_fiscal; origem.condicoes = cp.observacoes;
+    var comValor = cp.criterio_rateio === 'VALOR_INDIVIDUAL';
+    var antes = { campos: {}, linhas: {} };
+    var linhas = linhasEv.map(function (l) {
+      var at = l.atributos_iniciais_json;
+      var ids = idents[l.animal_id] || [];
+      var cod = function (t) { var x = ids.filter(function (i) { return i.tipo === t; })[0]; return x ? x.codigo : null; };
+      var ps = (pesos[l.animal_id] || [])[0];
+      var v = { brinco: cod('BRINCO'), brinco_origem: cod('BRINCO_ORIGEM'), pasto_destino_id: l.pasto_destino_id !== pastoLote ? l.pasto_destino_id : null,
+        peso: pesoTexto_(l.peso), metodo_pesagem: ps ? ps.metodo : null, peso_carcaca_kg: pesoTexto_(l.peso_carcaca_kg),
+        valor_individual: comValor ? dinheiroTexto_(l.valor_individual) : null, base_manual: cp.criterio_rateio === 'MANUAL' && bases[l.animal_id] !== undefined ? String(bases[l.animal_id]).replace('.', ',') : null, observacoes: l.observacoes };
+      if (at) {
+        var a = Store.animal(l.animal_id);
+        Object.assign(v, { nome: a ? a.nome : null, sexo: at.sexo, raca: at.raca, data_nascimento: at.data_nascimento, data_nascimento_confianca: at.data_nascimento_confianca,
+          castrado: boolDe(at.castrado), reprodutor: boolDe(at.reprodutor), partos_previos: at.partos_previos === undefined || at.partos_previos === null ? null : String(at.partos_previos),
+          situacao_reprodutiva: at.situacao_reprodutiva, data_prevista_parto: at.data_prevista_parto });
+        var outras = ids.filter(function (x) { return x.tipo !== 'BRINCO' && x.tipo !== 'BRINCO_ORIGEM'; }).map(function (x) { return { tipo: x.tipo, codigo: x.codigo }; });
+        if (outras.length) v.outras_identificacoes = outras;
+      }
+      limpo_(v);
+      antes.linhas[l.animal_id] = Util.clonar(v);
+      return { animal_id: l.animal_id, criado: !!at, valores: v };
+    });
+    var grupos = {
+      parcelas: parcelasDe(principal.financial_id).map(function (x) { return { valores: limpo_({ data_vencimento: x.data_vencimento, valor: dinheiroTexto_(x.valor), forma_pagamento: x.forma_pagamento, documento: x.documento }) }; }),
+      custos: fins.filter(function (f) { return f !== principal; }).map(function (f) {
+        var t = parcelasDe(f.financial_id)[0] || {};
+        return { valores: limpo_({ tipo: tipos[f.financial_id] || 'FRETE', valor: dinheiroTexto_(f.valor), partner_id: f.partner_id, data_vencimento: t.data_vencimento, forma_pagamento: t.forma_pagamento, documento: f.documento, descricao: f.descricao }) };
+      }),
+    };
+    var campos = {};
+    (def.campos || []).forEach(function (d) { if (texto_(origem[d.id]) !== null) campos[d.id] = origem[d.id]; });
+    antes.campos = Util.clonar(campos);
+    antes.grupos = Util.clonar(grupos);
+    return { campos: campos, linhas: linhas, grupos: grupos, origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotuloEvento(ev), antes: antes } };
+  }
   /**
    * Correção de transferência, parto, morte e descarte: o cabeçalho vem do evento, dos pastos da linha, do detalhe
    * (BAIXAS, REPRODUCAO) e do payload; as crias do parto vêm como linhas do grupo, com o animal reaproveitado.
@@ -108,6 +185,7 @@ var TelaEventos = (function () {
     } else if (tipo === 'MORTE' || tipo === 'DESCARTE') {
       var b0 = (det.BAIXAS || [])[0] || {};
       origem.causa = b0.causa; origem.diagnostico = b0.diagnostico; origem.destino = b0.destino; origem.motivo = b0.motivo;
+      lancamentoDaSaida_(det, origem, tipo);
       linhasEv.forEach(function (l) { var v = limpo_({ observacoes: l.observacoes }); linhas.push({ animal_id: l.animal_id, valores: v }); antes.linhas[l.animal_id] = Util.clonar(v); });
     } else if (tipo === 'NASCIMENTO') {
       var rep = (det.REPRODUCAO || [])[0] || {};
@@ -137,6 +215,7 @@ var TelaEventos = (function () {
     var def = Store.tipoEvento(ev.event_type);
     var origem = { event_date: ev.event_date, property_id: ev.property_id, description: ev.description, responsible: ev.responsible, notes: ev.notes };
     if (['NASCIMENTO', 'TRANSFERENCIA', 'MORTE', 'DESCARTE'].indexOf(ev.event_type) >= 0) return previaMovimento_(o, def, origem);
+    if (ev.event_type === 'COMPRA') return previaCompra_(o, def, origem);
     var campos = {};
     (def.campos || []).forEach(function (d) { if (texto_(origem[d.id]) !== null) campos[d.id] = origem[d.id]; });
     var idents = Utils_agrupar(det.IDENTIFICACOES || []);
@@ -232,7 +311,30 @@ var TelaEventos = (function () {
         return ['Mãe ' + quem(x), (x.qtd_nascidos_vivos === 1 ? '1 nascido vivo' : x.qtd_nascidos_vivos + ' nascidos vivos') + (x.qtd_natimortos ? ' · ' + x.qtd_natimortos + (x.qtd_natimortos === 1 ? ' natimorto' : ' natimortos') : '') + (x.tipo_parto ? ' · ' + Store.rotuloLista('TIPO_PARTO', x.tipo_parto) : '')];
       })), { dado: 'parto' }));
       if (payload.gta_numero) corpo.appendChild(UI.secao('Trânsito', UI.pares([['GTA', payload.gta_numero]])));
-      if ((det.FINANCEIRO || []).length) corpo.appendChild(UI.secao('Lançamentos financeiros', h('ul', { class: 'lista-simples' }, det.FINANCEIRO.map(function (x) { return h('li', { text: (x.descricao || 'lançamento') + ': ' + Fmt.dinheiro(x.valor) + (x.status === 'CANCELADO' ? ' (cancelado)' : '') }); }))));
+      var cp = (det.COMPRAS || [])[0];
+      if (cp) {
+        var unidade = { CABECA: 'por cabeça', KG_VIVO: 'por kg vivo', ARROBA: cp.base_peso === 'CARCACA' ? 'por arroba de carcaça' : 'por arroba (peso vivo)' }[cp.unidade_preco] || '';
+        var forn = Store.parceiro(ev.partner_id);
+        corpo.appendChild(UI.secao('Negociação', UI.pares([
+          ['Fornecedor', forn ? forn.nome : null], ['Forma do preço', Fmt.rotulo('MODALIDADE', cp.modalidade)],
+          cp.preco_unitario ? ['Preço', Fmt.dinheiro(cp.preco_unitario) + ' ' + unidade] : null,
+          cp.rendimento_carcaca_pct ? ['Rendimento', Fmt.numero(cp.rendimento_carcaca_pct, 1) + '% (' + Fmt.rotulo('RENDIMENTO_TIPO', cp.rendimento_tipo).toLowerCase() + ')'] : null,
+          cp.peso_total_kg ? ['Peso vivo do lote', Fmt.peso(cp.peso_total_kg)] : null, ['Animais', String(cp.qtd_animais)],
+          ['Valor dos animais', Fmt.dinheiro(cp.valor_animais)], ['Frete', Fmt.dinheiro(cp.frete)], ['Outros custos', Fmt.dinheiro(cp.outros_custos)],
+          ['Custo total', Fmt.dinheiro(cp.valor_total)], ['Divisão entre os animais', Fmt.rotulo('CRITERIO_RATEIO', cp.criterio_rateio)],
+          cp.finalidade ? ['Finalidade', Store.rotuloLista('FINALIDADE_NEGOCIO', cp.finalidade)] : null,
+          cp.gta_numero ? ['GTA', cp.gta_numero] : null, cp.nota_fiscal ? ['Nota fiscal', cp.nota_fiscal] : null, cp.observacoes ? ['Condições', cp.observacoes] : null,
+        ].filter(Boolean)), { dado: 'compra' }));
+      }
+      if ((det.FINANCEIRO || []).length) corpo.appendChild(UI.secao('Lançamentos financeiros', h('ul', { class: 'lista-simples' }, det.FINANCEIRO.map(function (x) {
+        var pa = Store.parceiro(x.partner_id);
+        var titulos = (det.PARCELAS || []).filter(function (p) { return p.financial_id === x.financial_id; }).map(function (p) { return Fmt.dinheiro(p.valor) + ' vence ' + Fmt.data(p.data_vencimento) + ' (' + Fmt.rotulo('STATUS_PARCELA', p.status).toLowerCase() + ')'; });
+        var rat = (det.RATEIOS || []).filter(function (r) { return r.financial_id === x.financial_id; })[0];
+        return h('li', { dataset: { lancamento: x.financial_id } }, h('span', { class: 'dado', text: (x.descricao || 'lançamento') + ': ' + Fmt.dinheiro(x.valor) }),
+          ' · ' + Fmt.rotulo('NATUREZA', x.natureza) + (pa ? ' · ' + pa.nome : '') + ' · ' + (x.status === 'CANCELADO' ? 'cancelado' : Fmt.rotulo('STATUS_PAGAMENTO', x.status_pagamento).toLowerCase()),
+          titulos.length ? h('div', { class: 'suave', text: 'Títulos: ' + titulos.join('; ') }) : null,
+          rat ? h('div', { class: 'suave', text: 'Rateio: ' + Fmt.rotulo('CRITERIO_RATEIO', rat.criterio).toLowerCase() + ', ' + Fmt.dinheiro(rat.total_alocado) + ' distribuídos' }) : null);
+      })), { dado: 'financeiro' }));
       if (ev.vigente && ev.event_type !== 'ESTORNO' && Store.tipoEvento('ESTORNO')) {
         acoes.appendChild(UI.botao('Estornar', { tipo: 'perigo', aoClicar: function () {
           var rot = {};

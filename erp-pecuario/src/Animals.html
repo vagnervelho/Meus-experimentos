@@ -417,6 +417,31 @@ var TelaRebanho = (function () {
     return caixa;
   }
   /** Bloco G (reprodução): na Fase 2, a parte de partos; o que chega depois aparece como aviso. */
+  var ORIGEM_CUSTO = { NEGOCIADO: 'preço da compra', ABERTURA_INFORMADA: 'valor de abertura informado', ABERTURA_ESTIMADA: 'valor de abertura pela tabela de preços', NAO_SE_APLICA: 'nasceu na fazenda', DESCONHECIDO: 'não informado' };
+  /** Bloco H (§11.2): custo de aquisição e lançamentos do animal, sempre pelas alocações (o que coube a ele de cada lançamento). */
+  function blocoFinanceiro(f) {
+    var b = f.financeiro || {};
+    var caixa = h('div', { dataset: { blocoFinanceiro: '1' } });
+    if (b.entregue === false) { caixa.appendChild(UI.nota(b.mensagem, 'info')); return caixa; }
+    var custo = b.custo_aquisicao === null || b.custo_aquisicao === undefined ? '— (sem valor de aquisição)' : Fmt.dinheiro(b.custo_aquisicao) + (b.custo_aquisicao_origem ? ' · ' + (ORIGEM_CUSTO[b.custo_aquisicao_origem] || b.custo_aquisicao_origem) : '');
+    caixa.appendChild(UI.pares([
+      ['Custo de aquisição', custo], ['Custeio alocado', Fmt.dinheiro(b.custeio)],
+      ['Custo acumulado', b.custo_acumulado === null ? '—' : Fmt.dinheiro(b.custo_acumulado)],
+      b.receitas ? ['Receitas', Fmt.dinheiro(b.receitas)] : null, b.despesas_venda ? ['Despesas de venda', Fmt.dinheiro(b.despesas_venda)] : null,
+      ['Resultado', b.resultado && b.resultado.valor !== null ? Fmt.dinheiro(b.resultado.valor) : '— (' + ((b.resultado && b.resultado.mensagem) || Fmt.rotulo('MOTIVO', 'DADOS_INSUFICIENTES')) + ')'],
+    ].filter(Boolean)));
+    caixa.appendChild((b.lancamentos || []).length ? UI.tabela({ id: 'lancamentos-animal', rotulo: 'Lançamentos do animal', linhas: b.lancamentos, chave: function (x) { return x.financial_id; },
+      colunas: [
+        { id: 'event_date', rotulo: 'Data', formatar: function (x) { return Fmt.data(x.event_date); } },
+        { id: 'descricao', rotulo: 'Lançamento', formatar: function (x) { var r = 'evento/' + x.event_id; return x.event_id ? h('a', { class: 'botao botao-texto', href: Roteador.href(r), dataset: { rota: r } }, x.descricao || x.conta_nome || 'lançamento') : (x.descricao || '—'); } },
+        { id: 'natureza', rotulo: 'Natureza', valor: function (x) { return Fmt.rotulo('NATUREZA', x.natureza); } },
+        { id: 'criterio', rotulo: 'Divisão', valor: function (x) { return Fmt.rotulo('CRITERIO_RATEIO', x.criterio); } },
+        { id: 'valor_lancamento', rotulo: 'Valor do lançamento', num: true, formatar: function (x) { return Fmt.dinheiro(x.valor_lancamento); } },
+        { id: 'valor_alocado', rotulo: 'Deste animal', num: true, formatar: function (x) { return Fmt.dinheiro(x.valor_alocado); } },
+      ] }).el : UI.nota('Nenhum lançamento atribuído a este animal.', 'info'));
+    if (b.parcial && b.pendente) caixa.appendChild(UI.nota(b.pendente.mensagem, 'info'));
+    return caixa;
+  }
   function blocoReproducao(f) {
     var g = f.reprodutivo || {};
     var caixa = h('div', { dataset: { blocoReproducao: '1' } });
@@ -533,6 +558,7 @@ var TelaRebanho = (function () {
       else if (aba === 'genealogia') corpo.appendChild(blocoGenealogia(f, abrirEdicao));
       else if (aba === 'pastos') corpo.appendChild(UI.secao('Histórico de pastos', blocoPastos(f)));
       else if (aba === 'reproducao') corpo.appendChild(UI.secao('Reprodução', blocoReproducao(f), { dado: 'reproducao' }));
+      else if (aba === 'financeiro') corpo.appendChild(UI.secao('Financeiro', blocoFinanceiro(f), { dado: 'financeiro' }));
       else if (aba === 'eventos') corpo.appendChild(UI.secao('Linha do tempo', blocoEventos(f), { dado: 'linha-tempo' }));
       else if (aba === 'anexos') corpo.appendChild(UI.secao('Fotos e documentos', blocoAnexos(f, linha)));
       else if (BLOCO_DA_ABA[aba]) {

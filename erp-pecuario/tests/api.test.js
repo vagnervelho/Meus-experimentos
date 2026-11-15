@@ -192,13 +192,14 @@ test('carga inicial condicional: completa na primeira vez; {atual: true} com a v
   assert.equal(b1.ok, true);
   const d = b1.data;
   assert.equal(d.atual, false);
-  for (const k of ['configuracoes', 'listas', 'categorias', 'cobertura', 'parceiros', 'propriedades', 'pastos', 'animais', 'alertas', 'catalogo', 'modulos', 'ambiente', 'sistema']) assert.ok(k in d, 'bootstrap sem ' + k);
+  for (const k of ['configuracoes', 'listas', 'categorias', 'cobertura', 'parceiros', 'contas', 'propriedades', 'pastos', 'animais', 'alertas', 'catalogo', 'modulos', 'ambiente', 'sistema']) assert.ok(k in d, 'bootstrap sem ' + k);
+  assert.equal(d.contas.length, 29, 'o plano de contas vai ao cliente (conta do custo da morte)');
   assert.deepEqual(d.ambiente, { codigo: 'PRODUCAO', base_de_teste: false, faixa: null });
   assert.equal(d.animais.n, 2, 'ATIVOS + EXTERNOS');
   assert.deepEqual(d.animais.valores.situacao_cadastral.sort(), ['ATIVO', 'EXTERNO']);
   assert.deepEqual(d.pastos.map((p) => p.pasture_id).sort(), [PASTOS.A, PASTOS.B].sort());
   assert.deepEqual(d.modulos.map((m) => m.id), ['DASHBOARD', 'REBANHO', 'PASTOS', 'EVENTOS', 'CONFIGURACOES', 'IMPORTACAO'], 'só os módulos entregues');
-  assert.deepEqual(d.catalogo.tipos.map((t) => t.tipo), ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'NASCIMENTO', 'TRANSFERENCIA', 'MORTE', 'DESCARTE', 'AJUSTE_INVENTARIO', 'ESTORNO']);
+  assert.deepEqual(d.catalogo.tipos.map((t) => t.tipo), ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'NASCIMENTO', 'COMPRA', 'TRANSFERENCIA', 'MORTE', 'DESCARTE', 'AJUSTE_INVENTARIO', 'ESTORNO']);
   assert.equal(d.catalogo.fase, 2);
   assert.ok(Array.isArray(d.alertas.alertas));
   assert.equal(d.dataVersion, b1.meta.dataVersion);

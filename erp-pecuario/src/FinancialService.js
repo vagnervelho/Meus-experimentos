@@ -471,11 +471,9 @@ var FinancialService = (function () {
         var total = soma_(porEvento[c.event_id] || [], 'valor');
         if (total !== c.valor_total || c.valor_total !== c.valor_animais + c.frete + c.outros_custos) achado(16, 'COMPRAS', c.purchase_id, 'A compra registra ' + reais_(c.valor_total) + ' no total e os lançamentos do evento somam ' + reais_(total) + '.');
         if (ev && ev.total_value !== c.valor_total) achado(16, 'EVENTOS', c.event_id, 'O valor do evento de compra (' + reais_(ev.total_value) + ') difere do total da compra (' + reais_(c.valor_total) + ').');
-        var tipos = {};
-        ((ev && ev.payload_json && ev.payload_json.custos) || []).forEach(function (x) { tipos[x.financial_id] = x.tipo; });
+        // Fretes primeiro, depois os outros custos (EventService): o frete é um prefixo dos lançamentos acessórios.
         var acess = (porEvento[c.event_id] || []).filter(function (f) { return f !== fin; });
-        var fretes = soma_(acess.filter(function (f) { return tipos[f.financial_id] !== 'OUTRO'; }), 'valor');
-        if (fretes !== c.frete || soma_(acess, 'valor') - fretes !== c.outros_custos) achado(16, 'COMPRAS', c.purchase_id, 'O frete (' + reais_(c.frete) + ') e os outros custos (' + reais_(c.outros_custos) + ') da compra não conferem com os lançamentos de cada item.');
+        if (tiposDosCustos(acess, c.frete) === null || soma_(acess, 'valor') - c.frete !== c.outros_custos) achado(16, 'COMPRAS', c.purchase_id, 'O frete (' + reais_(c.frete) + ') e os outros custos (' + reais_(c.outros_custos) + ') da compra não conferem com os lançamentos de cada item.');
         if (c.qtd_animais !== ea.filter(function (l) { return l.efeito_inventario === 1; }).length) achado(16, 'COMPRAS', c.purchase_id, 'A quantidade de animais da compra não confere com os animais do evento.');
       });
     }
@@ -489,6 +487,20 @@ var FinancialService = (function () {
         if (deducoes !== (v.frete || 0) + (v.comissao || 0) + (v.outras_deducoes || 0)) achado(16, 'VENDAS', v.sale_id, 'As deduções da venda não conferem com os lançamentos de despesa de venda (' + reais_(deducoes) + ').');
       });
     }
+  }
+  /**
+   * Tipo (FRETE ou OUTRO) de cada lançamento acessório de uma compra, na ordem em que foram gravados: o prefixo que
+   * soma `frete` é de fretes (a compra lança os fretes antes dos outros custos). null se nenhum prefixo fecha.
+   */
+  function tiposDosCustos(lancamentos, frete) {
+    var acum = 0;
+    var corte = frete === 0 ? 0 : -1;
+    for (var i = 0; i < lancamentos.length && corte < 0; i++) {
+      acum += lancamentos[i].valor || 0;
+      if (acum === frete) corte = i + 1;
+    }
+    if (corte < 0) return null;
+    return lancamentos.map(function (f, i) { return i < corte ? 'FRETE' : 'OUTRO'; });
   }
   /** Invariante 18: custo de aquisição do animal = Σ alocações vigentes AQUISICAO_ANIMAIS do período mais recente. */
   function conferirCustoAquisicao_(tx, achado) {
@@ -593,6 +605,7 @@ var FinancialService = (function () {
     negociacao: negociacao,
     conferir: conferir,
     situacaoPagamento: situacaoPagamento,
+    tiposDosCustos: tiposDosCustos,
     titulos: titulos,
     blocoFicha: blocoFicha,
   };

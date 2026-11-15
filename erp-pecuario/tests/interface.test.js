@@ -183,7 +183,10 @@ test('contrato do erro por animal: animal novo sem brinco vem como "Animal N da 
   assert.equal(semBrinco[0].animal_id, null);
   const comBrinco = env.error.details.filter((d) => d.brinco === '33');
   assert.equal(comBrinco.length, 1, 'com brinco, o detalhe traz o brinco digitado');
-  // Os campos do animal que volta ao rebanho, fixos no cliente, são os do servidor.
-  assert.match(ler('Components.html'), /var CAMPOS_VOLTA = \['brinco', 'pasto_destino_id', 'observacoes'\];/);
-  assert.match(ler('EventService.js'), /var CAMPOS_REENTRADA = \['animal_id', 'brinco', 'pasto_destino_id', 'observacoes'\];/);
+  // Os campos do animal que volta ao rebanho, fixos no cliente, são os do servidor (outra entrada e compra).
+  const lista = (texto, re) => { const m = re.exec(texto); assert.ok(m, 'lista não encontrada: ' + re); return JSON.parse(m[1].replace(/'/g, '"')); };
+  const cli = ler('Components.html');
+  const srv = ler('EventService.js');
+  assert.deepEqual(['animal_id'].concat(lista(cli, /var CAMPOS_VOLTA = (\[[^\]]*\]);/)), lista(srv, /OUTRA_ENTRADA: (\[[^\]]*\]),/));
+  assert.deepEqual(['animal_id'].concat(lista(cli, /var CAMPOS_VOLTA_COMPRA = (\[[^\]]*\]);/)), lista(srv, /\n    COMPRA: (\[[^\]]*\]),/));
 });
