@@ -10,7 +10,8 @@ Estado: etapas BASE (E1.1 e parte da E1.2) — `Schema`, `Utils`, `Validation`, 
 `PastureService` e `InventoryService` (seção 15) — e OPERAÇÃO DO SISTEMA (E1.10 e E1.11, backend) — `FileService`,
 `Maintenance`, `AuditService` (parte 2) e `ImportService` (seções 11, 16 a 18) — e API E PONTOS DE ENTRADA (E1.5 e parte
 da E1.12) — `Api`, `Code` e `TestRunner` (seções 19 a 21) — e INTERFACE, NÚCLEO E COMPONENTES (E1.9, parte 1) — `Index`,
-`Styles`, `JavaScript`, `Components` e `Dashboard` (seção 22).
+`Styles`, `JavaScript`, `Components` e `Dashboard` (seção 22) — e TELAS DA FASE 1 (E1.9 parte 2, E1.8 e E1.10 na tela) —
+`Dashboard`, `Animals`, `Pastures`, `Events`, `Settings` e `Import` (seção 23).
 
 ## 1. Regras que valem para todo arquivo de `src/`
 
@@ -708,7 +709,7 @@ dados, {chave, avisos})` (confere a projeção depois de cada comando), `ler(con
 |---|---|
 | `parametros(repo)` | `{chave: valor}` tipado das 45 chaves (NUMERO → número, BOOL → booleano, JSON → objeto, data validada). Chave ausente na aba (ou `repo` nulo/sem a aba) = padrão do código (Schema); célula vazia = `null`; célula inválida → `CONFIG`. `Timeline.parametros` delega aqui |
 | `valor(repo, chave)` | Um parâmetro tipado; chave desconhecida → `INTERNAL` |
-| `listar(repo)` | Tela de configurações, sem lançar: `{itens: [{chave, grupo, tipo, formato, descricao, padrao, texto, valor, origem: PLANILHA\|PADRAO, erro, faixa}], desconhecidas: [chave]}` |
+| `listar(repo)` | Tela de configurações, sem lançar: `{itens: [{chave, grupo, tipo, formato, descricao, padrao, texto, valor, origem: PLANILHA\|PADRAO, erro, faixa}], desconhecidas: [chave], codigos_aviso: CODIGOS_AVISO (13), politicas: [BLOQUEIA, AVISA, IGNORA]}` (a tela de parâmetros monta a política por código com eles) |
 | `normalizar(chave, bruto)` | `{texto (célula), valor (tipado)}` ou `{erro: {codigo, mensagem}}`: tipo, faixa (`FAIXAS`), datas, `faixas_etarias_meses` (inteiros crescentes), `avisos_politica` (códigos de `CODIGOS_AVISO` → BLOQUEIA/AVISA/IGNORA). Vazio só em chave sem padrão |
 | `planejarParametro(tx, chave, valor, justificativa?)` | Para outro comando: normaliza e põe no plano (altera a linha ou cria a que falta). `CONFIGURACOES` nas `reads`. Inválido → `VALIDATION` |
 | `aplicarPolitica(params, avisos, coletor)` | `avisos_politica`: BLOQUEIA vira erro no coletor; IGNORA some; devolve os que ficam (AVISA) |
@@ -908,6 +909,8 @@ banco/DENIED/rascunho), appVersion (= package.json), serverTime (ISO UTC)}`; em 
 | `config.salvar` | `Config.salvar`; mudando `fuso`, a planilha-banco recebe o fuso novo (e `pt_BR`) logo depois do commit |
 | `importacao.importarBloco`, `importacao.concluir`, `importacao.desfazer` | Comandos SEM chave do cliente (a chave é `ImportService.chaveBloco`) |
 | `importacao.obter`, `importacao.previa`, `importacao.linhas`, `importacao.relatorio`, `importacao.listar` | Consultas do assistente (`ImportService.obter`, `previaArquivo`, `consultaLinhas`, `consultaRelatorio`, `consultaListar`) — rotas extras, não canônicas |
+| `importacao.modelo` | Consulta extra: `ImportService.modelo()` → `{tipos, campos: [{campo, rotulo, tipo, obrigatorio (sexo, pasto), so_femea, so_macho}], confiancas: {data_nascimento, data_entrada, mae, pai: [valores]}, padroes, formatos_data, delimitadores (';' ',' 'TAB' '\|'), codificacoes, max_linhas, cabecalho_modelo}`. O cabeçalho do modelo para baixar são os rótulos dos campos, que `sugerirMapeamento` reconhece inteiros |
+| `sistema.diagnostico` | Consulta extra da tela de sistema, sem planilha temporária nem dado sensível: `{sessao (diagnosticoSessao), primitiva, gatilhos: {esperados, instalados, faltando}, fuso: {script, planilha}, data_version, gravacao_em_curso, app_version, editor: 'runDiagnostics'}`. Sem banco do ambiente → `CONFIG` |
 | `rascunho.salvar` / `rascunho.obter` / `rascunho.remover` | Seção 17, SP-06: `{chave (A-Z a-z 0-9 . _ : -, até 100), conteudo}` nas propriedades do USUÁRIO, chave `RASCUNHO:<ambiente>:<chave>`; fora da planilha, sem versão, funciona sem banco. `salvar → {chave, salvo_em, bytes}` (acima de 8 KB, ou com 40 guardados, `VALIDATION`; vencidos há 30 dias saem na gravação); `obter → {chave, existe, conteudo, salvo_em}`; `remover → {chave, removido}` |
 
 ## 20. `Code` (funções públicas)
@@ -994,3 +997,41 @@ catálogo e com as mensagens do servidor) e `tests/ui/interface.test.js` (Playwr
 `tests/ui/apoio.js` — `sistema`, `semear`, `abrir(s, {largura, historico, semLocalStorage, params, telasDeTeste, relogio,
 fuso, hash})`, `esperarTela`, `ir`, `semRolagemHorizontal`, `alvosDeToque`, `focoVisivel` — e mock em `tests/ui/mock-gas.js`,
 com `window.__gas = {atrasoMs, perder, falharTransporte, pedidos, violacoes}`).
+
+**Acréscimos da parte 2 ao núcleo e aos componentes** (usados pelas telas da seção 23; os contratos acima continuam):
+`Telas.resolver` dá preferência ao padrão literal sobre o padrão com parâmetro, em qualquer ordem de registro
+(`evento/novo` antes de `evento/:id`, `config/parametros` de teste antes de `config/:secao`). `Fmt.ROTULOS` ganhou
+`TIPO_PARCEIRO`, `POSSE`, `STATUS`, `SEXO_APLICAVEL`, `CONDICAO`, `TIPO_ANEXO`, `POLITICA_AVISO`, `STATUS_EVENTO`,
+`STATUS_IMPORTACAO`, `STATUS_LINHA`, `GRUPO_CONFIG`, `PAPEL`, `MOTIVO` (motivo do "—", P9) e `FONTE`.
+
+| Membro | Contrato |
+|---|---|
+| `UI.abas(rotulo, [{rotulo, rota, atual}])` | Abas como links de rota (cada aba é entrada de histórico; `aria-current="page"`) |
+| `UI.valorInd(ind, formatar)` → `{texto, motivo}` | Indicador `{valor, motivo, n, estimado}` (P9): `valor` nulo → `"—"` e o motivo em palavras com o `n`; estimado ganha "(estimado)" |
+| `UI.indicador(rotulo, valor, nota, dado)`, `UI.pares([[rótulo, valor]], classe)`, `UI.secao(titulo, conteudo, {dado, classe})` | Cartão de indicador (`data-indicador`), lista de definição (vazio → "—") e seção com h2 (`data-secao`) |
+| `UI.tabela` | Novos: opção `semPaginacao` (paginação feita no servidor), `ordenadas()` (todas as linhas na ordem da tela, para exportar igual ao que se vê), `limparSelecao()` |
+| `Exportar.celula(v)`, `Exportar.csv(colunas [{rotulo, valor(l)}], linhas, {preambulo})`, `Exportar.baixar(nome, texto, mime)`, `Exportar.nome(base)` | CSV no aparelho: BOM, `;`, CRLF; saneamento contra fórmula só aqui (começa com `= + - @`, tabulação ou retorno e não é número → apóstrofo); `;`, aspas e quebra → entre aspas. `baixar` entrega por link `download` (sem ida ao servidor). Nome `base-yyyy-MM-dd.csv` |
+| `Cadastro.envio({rota, botao, rotuloBotao, status, bloco, aoSucesso(r)})` → `{enviar(dados), chave()}` | Comando sem evento com chave guardada até o sucesso; NEEDS_CONFIRMATION → avisos com "Vi e confirmo" e reenvio com os códigos; VALIDATION → campos do bloco (o resto em lista); depois do sucesso, `Store.aplicarResultado` + `App.recasca` |
+| `Cadastro.folha({titulo, defs, valores, rota, montar(conv, brutos) → dados \| null, validar(conv, brutos) → [{campo, mensagem}], verbo, perigo, sucesso(data) → texto, aoSalvar(r), extra, aoMudar(id, brutos, bloco), novoFixos, origem, idBase})` | Formulário de cadastro numa folha (`data-cadastro=<rota>`, botão principal `data-acao-principal`); `montar` devolvendo `null` não envia |
+| `Campos.criar(def, {novoFixos})`, `Formulario.bloco(defs, valores, {novoFixos: {campo: fixos}})` | "+ Novo" com valores fixos que saem da tela (ex.: arrendador nasce com `tipos: ['ARRENDADOR']`). O miniformulário de parceiro pede "O que ele é" (o servidor exige `tipos`) |
+| `Registro.abrir(tipo, {corrige: {event_id, rotulo, antes: {campos, linhas: {animal_id: valores}}}, campos, linhas: [{animal_id, criado, valores}], origem})` | Correção (evento substituto do mesmo tipo): rota `evento.corrigir`, revisão sempre pelo servidor (`evento.simular` com `acao: 'corrigir'`), campo "Por que corrigir" (`dados.justificativa`, obrigatório) e a folha com a diferença para o original (`data-diferencas`). Linha `criado` = animal criado pelo original: todos os campos de animal novo, com o `animal_id` reaproveitado; tirar a linha anula o cadastro |
+
+## 23. Telas da Fase 1 (E1.9 parte 2, E1.8 e E1.10 na tela) — `Dashboard`, `Animals`, `Pastures`, `Events`, `Settings`, `Import`
+
+Cada arquivo registra as suas rotas na carga (`Telas.registrar`) e entra no `Index` entre `Dashboard` e o boot. Nada de
+dado na rota (§17): filtros e escolhas ficam na memória da tela. Tudo o que aparece vem de `api()` (carga inicial do
+store ou consulta da tela); nenhum botão sem função (atalho de evento só aparece se o tipo está no catálogo).
+
+| Tela (namespace) | Rotas | Consultas e comandos | Membros para outras telas |
+|---|---|---|---|
+| Início (`TelaInicio`) | `inicio` | `dashboard.obter` + `alerta.listar` (guardados por `dataVersion`; "Atualizar" pede de novo); rascunhos | `carregar(forcar)`. Cada alerta com a sua ação (`ACOES`): sem pasto, sem brinco e sem categoria abrem o rebanho filtrado; backup e integridade, `config/sistema`; importação incompleta, `importar/<id>`. `data-gerado-em` = "Dados de dd/mm/aaaa hh:mm" (`geradoEm` no fuso da fazenda); indicadores `data-indicador` cabecas, machos, femeas, sem-pasto, peso, ua |
+| Rebanho (`TelaRebanho`) | `rebanho`, `animal/:id/:aba?` (abas `resumo`, `genealogia`, `pastos`, `peso`, `sanidade`, `reproducao`, `financeiro`, `eventos`, `anexos`) | store (+ `animal.listar` ao filtrar baixados), `animal.ficha` (guardada por `dataVersion`), `animal.editar`, `animal.cadastrarExterno`, `anexo.adicionar`/`obter`/`remover` | `filtrar(animais, f, {cortes, ignoraZeros})` (puro; `f` = {texto, pasto (id ou `__SEM__`), sexo, categoria (id ou `__SEM__`), situacao (código, `SAIRAM` ou vazio = todas), faixa, atalho (SEM_PASTO, SEM_BRINCO, SEM_CATEGORIA)}), `faixas(cortes)` (0–12, 12–24, 24–36, 36+ e `__SEM__`), `COLUNAS` (as 10 da §5: `texto(a)` = tela = CSV), `linhasCsv(linhas)`, `abrirCom(filtros)`, `editar(ficha, origem)`, `ficha(id, forcar)` |
+| Pastos (`TelaPastos`) | `pastos`, `pasto/:id` | store (cartões de hoje), `pasto.painel` (com "Posição em", a partir do marco zero), `pasto.salvar` | `formulario(pasto \| null, origem, aoSalvar)`; `posse = PROPRIO` limpa o arrendador |
+| Eventos (`TelaEventos`) | `eventos`, `evento/:id` | `evento.listar` (paginado no servidor), `evento.obter`; estorno e correção pelo `Registro` | `previaCorrecao(eventoObter)` → previa do `Registro.abrir` (entradas: ENTRADA_INICIAL e OUTRA_ENTRADA); `situacao(evento)` |
+| Configurações (`TelaConfig`) | `config/:secao` (`parametros`, `listas`, `categorias`, `propriedades`, `parceiros`, `sistema`, `auditoria`) | `config.salvar` (só as chaves que mudaram), `lista.salvar`, `categoria.salvar`, `propriedade.salvar`, `parceiro.salvar`, `sistema.estado`, `sistema.backup`, `sistema.restaurarBackup` (escolha na lista de backups, consequência descrita, palavra RESTAURAR e justificativa), `sistema.integridade` (e o reparo), `sistema.diagnostico`, `auditoria.listar` | `valorParam(item, bruto)` (faixas etárias "12, 24, 36" → `[12, 24, 36]`), `ROTULOS` dos 45 parâmetros |
+| Importação (`TelaImportacao`) | `importar`, `importar/novo`, `importar/:id/:etapa?` (`mapeamento`, `validacao`, `confirmacao`, `execucao`); a etapa errada para o estado é corrigida pela tela | `importacao.modelo`, `criar`, `previa`, `validarBloco` (um pedido por bloco, chave nova por rodada), `obter`, `linhas`, `importarBloco` (bloco 1 com `modo`/`aprovacao`/`property_id`), `concluir`, `relatorio`, `desfazer`, `listar` | `etapaDoStatus(status)`. Com reprovadas, "Importar" só habilita com a caixa "importar só as N válidas e ignorar M" (PARCIAL_APROVADO com a aprovação igual aos números da validação); IMPORTANDO → Retomar · Desfazer |
+
+Testes: `tests/telas.test.js` (Node: rotas novas, exportação, filtros, parâmetros e o pré-preenchimento da correção
+aceito pelo servidor) e `tests/ui/telas.test.js` (Playwright, a 1280 e a 360 px: cadastrar pela entrada inicial e ver
+na lista e na ficha; editar campo sensível; importar 30 linhas com 2 erros e 1 duplicata; estornar e corrigir;
+exportar e conferir contra a tela; pastos, configurações e sistema a 360 px).
