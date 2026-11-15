@@ -147,6 +147,20 @@ var Fmt = (function () {
     METODO_PESAGEM: { BALANCA: 'Balança', FITA: 'Fita', ESTIMATIVA_VISUAL: 'Estimativa visual', MEDIA_LOTE: 'Média do lote' },
     SITUACAO_CADASTRAL: { PENDENTE: 'Pendente', ATIVO: 'Ativo', VENDIDO: 'Vendido', MORTO: 'Morto', DESCARTADO: 'Descartado', BAIXADO_AJUSTE: 'Baixado por ajuste', HISTORICO: 'Histórico', EXTERNO: 'De fora do rebanho', ANULADO: 'Anulado' },
     IDENTIFICACAO: { BRINCO_ORIGEM: 'Brinco de origem', RFID: 'RFID (chip)', SISBOV: 'SISBOV', TATUAGEM: 'Tatuagem', OUTRO: 'Outra' },
+    TIPO_PARCEIRO: { FORNECEDOR: 'Fornecedor', COMPRADOR: 'Comprador', VETERINARIO: 'Veterinário', TRANSPORTADOR: 'Transportador', ARRENDADOR: 'Arrendador (pasto alugado)', OUTRO: 'Outro' },
+    POSSE: { PROPRIO: 'Próprio', ARRENDADO: 'Arrendado (alugado)' },
+    STATUS: { ATIVO: 'Ativo', INATIVO: 'Inativo' },
+    SEXO_APLICAVEL: { M: 'Machos', F: 'Fêmeas', AMBOS: 'Machos e fêmeas' },
+    CONDICAO: { NENHUMA: 'Nenhuma', CASTRADO: 'Castrado', INTEIRO: 'Inteiro (não castrado)', REPRODUTOR: 'Reprodutor', NAO_REPRODUTOR: 'Não reprodutor', PARIDA: 'Já pariu', NAO_PARIDA: 'Ainda não pariu' },
+    TIPO_ANEXO: { FOTO: 'Foto', DOCUMENTO: 'Documento', GTA: 'GTA', NOTA_FISCAL: 'Nota fiscal', OUTRO: 'Outro' },
+    POLITICA_AVISO: { BLOQUEIA: 'Bloqueia', AVISA: 'Avisa e pede confirmação', IGNORA: 'Não avisa' },
+    STATUS_EVENTO: { CONFIRMADO: 'Vale', ESTORNADO: 'Estornado', PENDENTE: 'Pendente', FALHOU: 'Falhou', CANCELADO: 'Cancelado' },
+    STATUS_IMPORTACAO: { RASCUNHO: 'Arquivo lido', VALIDADO: 'Validada', IMPORTANDO: 'Importação incompleta', IMPORTADO: 'Importada', CANCELADO: 'Desfeita' },
+    STATUS_LINHA: { VALIDA: 'Válida', ERRO: 'Com erro', DUPLICADA: 'Duplicada', IMPORTADA: 'Importada', IGNORADA: 'Deixada de fora' },
+    GRUPO_CONFIG: { geral: 'Geral', identificacao: 'Identificação', pecuaria: 'Pecuária', sanidade: 'Sanidade', financeiro: 'Financeiro', alertas: 'Alertas', avisos: 'Avisos', sistema: 'Sistema' },
+    PAPEL: { SUJEITO: 'Animal', CRIA: 'Cria', MATRIZ: 'Matriz', TOURO: 'Touro' },
+    MOTIVO: { DADOS_INSUFICIENTES: 'dados insuficientes', ANTERIOR_AO_MARCO_ZERO: 'data anterior ao marco zero', FILTRO_NAO_APLICAVEL: 'o filtro não se aplica', SEM_VALOR_DE_REFERENCIA: 'sem valor de referência' },
+    FONTE: { APP: 'Lançado no app', IMPORTACAO: 'Importação', SISTEMA: 'Sistema' },
     CAMPO_CORRIGIVEL: {
       sexo: 'Sexo', data_nascimento: 'Data de nascimento', data_nascimento_confianca: 'Certeza do nascimento', mae_id: 'Mãe', mae_confianca: 'Certeza da mãe',
       pai_id: 'Pai', pai_confianca: 'Certeza do pai', castrado: 'Castrado', reprodutor: 'Reprodutor (touro)', partos_previos: 'Partos anteriores',
@@ -156,6 +170,7 @@ var Fmt = (function () {
   var DOMINIO_DO_CAMPO = {
     sexo: 'SEXO', data_nascimento_confianca: 'CONFIANCA', mae_confianca: 'CONFIANCA', pai_confianca: 'CONFIANCA', data_entrada_confianca: 'CONFIANCA',
     origem: 'ORIGEM', situacao_reprodutiva: 'SITUACAO_REPRODUTIVA', metodo_pesagem: 'METODO_PESAGEM', campo: 'CAMPO_CORRIGIVEL', situacao_cadastral: 'SITUACAO_CADASTRAL',
+    tipos: 'TIPO_PARCEIRO', posse: 'POSSE', status: 'STATUS', sexo_aplicavel: 'SEXO_APLICAVEL', condicao: 'CONDICAO', tipo_anexo: 'TIPO_ANEXO', politica: 'POLITICA_AVISO',
   };
 
   function configurar(o) { Object.keys(o || {}).forEach(function (k) { if (o[k] !== undefined && o[k] !== null) cfg[k] = o[k]; }); cache = {}; }

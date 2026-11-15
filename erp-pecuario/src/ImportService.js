@@ -171,6 +171,24 @@ var ImportService = (function () {
     });
     return out;
   }
+  /**
+   * Descrição do importador para o assistente (rota `importacao.modelo`): tipos entregues, campos de destino com
+   * rótulo e tipo de leitura, campos obrigatórios, confianças padrão aceitas por campo, valores padrão, formatos de
+   * data, separadores, codificações, limite de linhas e o cabeçalho do modelo para baixar (rótulos dos campos, que o
+   * próprio sugerirMapeamento reconhece).
+   */
+  function modelo() {
+    var campos = Object.keys(CAMPOS).map(function (k) {
+      return { campo: k, rotulo: CAMPOS[k].rotulo, tipo: CAMPOS[k].tipo, obrigatorio: k === 'sexo' || k === 'pasto', so_femea: SO_FEMEA.indexOf(k) >= 0, so_macho: SO_MACHO.indexOf(k) >= 0 };
+    });
+    return {
+      tipos: TIPOS_SUPORTADOS.slice(), campos: campos,
+      confiancas: { data_nascimento: CONFIANCAS.slice(), data_entrada: CONFIANCAS.slice(), mae: CONFIANCAS_VINCULO.slice(), pai: CONFIANCAS_VINCULO.slice() },
+      padroes: Utils.clonar(PADROES), formatos_data: FORMATOS_DATA.slice(), delimitadores: [';', ',', 'TAB', '|'],
+      codificacoes: ['UTF-8', 'ISO-8859-1', 'WINDOWS-1252', 'US-ASCII'], max_linhas: MAX_LINHAS,
+      cabecalho_modelo: campos.map(function (c) { return c.rotulo; }),
+    };
+  }
   function conferirFormato_(f) {
     var x = f || {};
     var problemas = [];
@@ -1094,6 +1112,7 @@ var ImportService = (function () {
     lerCsv: lerCsv,
     interpretarArquivo: interpretarArquivo,
     sugerirMapeamento: sugerirMapeamento,
+    modelo: modelo,
     conferirMapeamento: conferirMapeamento,
     validarLinhas: validarLinhas,
     criar: criar,

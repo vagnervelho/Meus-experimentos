@@ -75,6 +75,7 @@ var Api = (function () {
     // Sistema
     'sistema.bootstrap': consulta_(function (ctx, p, info) { return bootstrap_(ctx, p, info); }),
     'sistema.estado': consulta_(function (ctx) { return semDados_(Maintenance.estado(ctx)); }),
+    'sistema.diagnostico': consulta_(function (ctx) { return semDados_(diagnosticoSistema_(ctx)); }),
     'sistema.backup': manutencao_(function (ctx) { return semDados_(Maintenance.backup(ctx, { motivo: 'SOB_DEMANDA' })); }),
     'sistema.restaurarBackup': manutencao_(function (ctx, p) {
       var r = Maintenance.restaurar(ctx, { dados: p.dados });
@@ -141,6 +142,7 @@ var Api = (function () {
     'importacao.linhas': consulta_(function (ctx, p) { return UnitOfWork.read(ctx, ImportService.consultaLinhas(p.dados)); }),
     'importacao.relatorio': consulta_(function (ctx, p) { return UnitOfWork.read(ctx, ImportService.consultaRelatorio(p.dados)); }),
     'importacao.listar': consulta_(function (ctx) { return UnitOfWork.read(ctx, ImportService.consultaListar()); }),
+    'importacao.modelo': consulta_(function () { return semDados_(ImportService.modelo()); }),
     // Anexos e auditoria
     'anexo.adicionar': comando_(function (ctx, p) { return FileService.adicionarAnexo(ctx, p); }),
     'anexo.remover': comando_(function (ctx, p) { return FileService.removerAnexo(ctx, p); }),
@@ -362,6 +364,29 @@ var Api = (function () {
     dados.usuario = info.usuario;
     dados.sistema = { primitiva: estado.primitiva, ultimo_backup: estado.ultimo_backup, integridade: estado.integridade, gatilhos: estado.gatilhos.length };
     return { dados: dados, dataVersion: r.dataVersion };
+  }
+  /**
+   * `sistema.diagnostico` (tela de sistema): o que se confere sem planilha temporária nem dado sensível — sessão
+   * (SP-04, `diagnosticoSessao`), forma de gravação, gatilhos esperados × instalados, fuso do script × da planilha,
+   * versão dos dados e marcador de gravação em curso. O roteiro completo (SP-01 a SP-10) é o `runDiagnostics` do editor.
+   */
+  function diagnosticoSistema_(ctx) {
+    var props = ctx.props.ler();
+    var instalados = ScriptApp.getProjectTriggers().map(function (t) { return t.getHandlerFunction(); });
+    var esperados = Maintenance.GATILHOS.map(function (g) { return g.funcao; });
+    var fusoPlanilha = null;
+    try {
+      fusoPlanilha = ctx.io.fuso();
+    } catch (e) {
+      console.error('diagnóstico: fuso da planilha ilegível: ' + texto_(e));
+    }
+    return {
+      sessao: diagnosticoSessao(), primitiva: Maintenance.primitivaDoBanco(props, ctx.banco),
+      gatilhos: { esperados: esperados, instalados: instalados, faltando: esperados.filter(function (f) { return instalados.indexOf(f) < 0; }) },
+      fuso: { script: Session.getScriptTimeZone(), planilha: fusoPlanilha },
+      data_version: parseInt(props[UnitOfWork.chaveVersao(ctx.banco)], 10) || 0, gravacao_em_curso: !vazio_(props[UnitOfWork.chaveMarcador(ctx.banco)]),
+      app_version: APP_VERSION, editor: 'runDiagnostics',
+    };
   }
   /** `config.salvar` + o fuso da planilha-banco acompanhando CONFIGURACOES.fuso (o "hoje" do servidor vem dele). */
   function salvarConfig_(ctx, p) {

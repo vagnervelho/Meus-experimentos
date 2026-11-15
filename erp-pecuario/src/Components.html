@@ -371,10 +371,41 @@ var UI = (function () {
     return fig;
   }
 
+  // ------------------------------------------------------- abas, indicador, lista de definição ----
+  /** Abas como links de rota (cada aba é uma entrada de histórico): itens [{rotulo, rota, atual}]. */
+  function abas(rotulo, itens) {
+    return h('nav', { class: 'abas', 'aria-label': rotulo }, h('ul', null, itens.map(function (a) {
+      return h('li', null, h('a', { class: 'aba', href: Roteador.href(a.rota), dataset: { rota: a.rota }, 'aria-current': a.atual ? 'page' : null }, a.rotulo));
+    })));
+  }
+  /** Texto de um indicador {valor, motivo, n} (P9): valor formatado, ou "—" com o motivo ao lado (nunca zero inventado). */
+  function valorInd(ind, formatar) {
+    var f = formatar || function (v) { return Fmt.numero(v, 0); };
+    if (ind === null || ind === undefined) return { texto: '—', motivo: Fmt.rotulo('MOTIVO', 'DADOS_INSUFICIENTES') };
+    if (typeof ind !== 'object') return { texto: f(ind), motivo: null };
+    if (ind.valor === null || ind.valor === undefined) return { texto: '—', motivo: Fmt.rotulo('MOTIVO', ind.motivo || 'DADOS_INSUFICIENTES') + (typeof ind.n === 'number' ? ' (n = ' + ind.n + ')' : '') };
+    return { texto: f(ind.valor) + (ind.estimado ? ' (estimado)' : ''), motivo: null };
+  }
+  /** Cartão de indicador: rótulo, valor e nota ("em 14/11", motivo do "—"). */
+  function indicador(rotulo, valor, nota, dado) {
+    return h('div', { class: 'indicador', role: 'listitem', dataset: { indicador: dado || null } }, h('div', { class: 'indicador-rotulo', text: rotulo }), h('div', { class: 'indicador-valor', text: valor }), nota ? h('div', { class: 'indicador-nota', text: nota }) : null);
+  }
+  /** Lista de definição: pares [rótulo, valor (texto ou nó)]; valor vazio vira "—". */
+  function pares(lista, classe) {
+    var dl = h('dl', { class: classe || 'resumo-revisao' });
+    lista.forEach(function (p) { if (!p) return; dl.appendChild(h('dt', { text: p[0] })); dl.appendChild(h('dd', null, p[1] === null || p[1] === undefined || p[1] === '' ? '—' : p[1])); });
+    return dl;
+  }
+  /** Seção com título (h2) e conteúdo. */
+  function secao(titulo, conteudo, o) {
+    var id = 'sec-' + Util.uuid().slice(0, 8);
+    return h('section', { class: 'cartao' + (o && o.classe ? ' ' + o.classe : ''), 'aria-labelledby': id, dataset: o && o.dado ? { secao: o.dado } : null }, h('h2', { id: id, text: titulo }), conteudo);
+  }
+
   return {
     icone: icone, botao: botao, travar: travar, definirTexto: definirTexto, faixa: faixa, nota: nota, aviso: aviso, carregando: carregando, vazio: vazio,
     estadoErro: estadoErro, folha: folha, fecharTudo: fecharTudo, confirmar: confirmar, buscaBrinco: buscaBrinco, tabela: tabela, grafico: grafico,
-    comparar: comparar_, TITULOS_ERRO: TITULOS_ERRO,
+    comparar: comparar_, TITULOS_ERRO: TITULOS_ERRO, abas: abas, valorInd: valorInd, indicador: indicador, pares: pares, secao: secao,
   };
 })();
 
@@ -393,6 +424,7 @@ var Campos = (function () {
     ], fixos: { posse: 'PROPRIO' } },
     PARCEIROS: { titulo: 'Novo parceiro', rota: 'parceiro.salvar', pk: 'partner_id', campos: [
       { id: 'nome', rotulo: 'Nome', tipo: 'texto', obrigatorio: true },
+      { id: 'tipos', rotulo: 'O que ele é', tipo: 'lista', opcoes: ['FORNECEDOR', 'COMPRADOR', 'VETERINARIO', 'TRANSPORTADOR', 'ARRENDADOR', 'OUTRO'], obrigatorio: true },
       { id: 'telefone', rotulo: 'Telefone', tipo: 'texto' },
       { id: 'documento', rotulo: 'CPF ou CNPJ', tipo: 'texto' },
     ], fixos: {} },
@@ -519,7 +551,7 @@ var Campos = (function () {
       sel.addEventListener('change', function () { mudou(sel.value === '' ? null : sel.value); });
       var linha = h('div', { class: 'campo-linha' }, sel);
       if (ref && NOVOS[ref[1]] && o.aoNovo !== false) {
-        linha.appendChild(UI.botao('+ Novo', { aoClicar: function (ev) { abrirNovo_(ref[1], ev.currentTarget, function (novoId) { atual = novoId; preencher(); sel.value = novoId; mudou(novoId); sel.focus(); }); } }));
+        linha.appendChild(UI.botao('+ Novo', { aoClicar: function (ev) { abrirNovo_(ref[1], ev.currentTarget, function (novoId) { atual = novoId; preencher(); sel.value = novoId; mudou(novoId); sel.focus(); }, o.novoFixos); } }));
       }
       controle = linha;
       focavel = function () { return sel; };
@@ -637,10 +669,12 @@ var Campos = (function () {
     return caixa;
   }
 
-  function abrirNovo_(tabela, origem, aoCriar) {
+  /** Miniformulário "+ Novo": grava o cadastro e devolve o id. `fixosExtra` (ex.: {tipos: ['ARRENDADOR']}) tira o campo da tela. */
+  function abrirNovo_(tabela, origem, aoCriar, fixosExtra) {
     var def = NOVOS[tabela];
+    var fixos = Object.assign({}, def.fixos, fixosExtra || {});
     var chave = Util.uuid();
-    var bloco = Formulario.bloco(def.campos, {}, { idBase: 'novo-' + tabela.toLowerCase(), aoNovo: false });
+    var bloco = Formulario.bloco(def.campos.filter(function (c) { return fixos[c.id] === undefined; }), {}, { idBase: 'novo-' + tabela.toLowerCase(), aoNovo: false });
     var status = h('div', { role: 'status' });
     var f = UI.folha({ titulo: def.titulo, conteudo: h('div', { class: 'formulario' }, bloco.el, status), origem: origem });
     var salvarB = UI.botao('Salvar', { tipo: 'primario', aoClicar: salvar });
@@ -651,7 +685,8 @@ var Campos = (function () {
       var destravar = UI.travar(salvarB, 'Salvando…');
       Util.limpar(status);
       try {
-        var campos = Object.assign({}, def.fixos, c.valores);
+        var campos = Object.assign({}, c.valores, fixos);
+        if (typeof campos.tipos === 'string') campos.tipos = [campos.tipos];
         var r = await Cliente.comando(def.rota, { campos: campos }, { chave: chave });
         await Store.aplicarResultado(def.rota, r.data, r.meta);
         f.fechar({ forcar: true });
@@ -732,7 +767,7 @@ var Formulario = (function () {
       return false;
     };
     defs.forEach(function (d) {
-      var c = Campos.criar(d, { valor: valores[d.id], idBase: o.idBase, rotulos: o.rotulos, aoNovo: o.aoNovo, aoMudar: function (v) { valores[d.id] = v; c.erro(null); atualizar(); if (o.aoMudar) o.aoMudar(d.id); } });
+      var c = Campos.criar(d, { valor: valores[d.id], idBase: o.idBase, rotulos: o.rotulos, aoNovo: o.aoNovo, novoFixos: o.novoFixos ? o.novoFixos[d.id] : null, aoMudar: function (v) { valores[d.id] = v; c.erro(null); atualizar(); if (o.aoMudar) o.aoMudar(d.id); } });
       ctrls[d.id] = c;
       (principal(d) ? grade : gradeExtras).appendChild(c.el);
     });
@@ -807,6 +842,142 @@ var Formulario = (function () {
     });
   }
   return { bloco: bloco, converterValores: converterValores, enterPercorre: enterPercorre };
+})();
+
+var Exportar = (function () {
+  var h = Util.h;
+  var NUMERO = /^-?(?:\d{1,3}(?:\.\d{3})+|\d+)(?:,\d+)?$/;
+  /**
+   * Célula de CSV (08, seção 13): texto como na tela; saneamento contra fórmula SÓ aqui, na exportação — começa com
+   * =, +, -, @, tabulação ou retorno e não é número → ganha apóstrofo na frente; ; " e quebra de linha → entre aspas.
+   */
+  function celula(v) {
+    if (v === null || v === undefined) return '';
+    var t = typeof v === 'number' ? String(v).replace('.', ',') : typeof v === 'boolean' ? (v ? 'Sim' : 'Não') : String(v);
+    if (/^[=+\-@\t\r]/.test(t) && !NUMERO.test(t)) t = "'" + t;
+    if (/[;"\r\n]/.test(t)) t = '"' + t.replace(/"/g, '""') + '"';
+    return t;
+  }
+  /** CSV para o Excel em pt-BR: BOM, ponto e vírgula, CRLF. colunas: [{rotulo, valor(l)}]; o.preambulo: linhas de texto antes do cabeçalho. */
+  function csv(colunas, linhas, o) {
+    var out = [];
+    ((o && o.preambulo) || []).forEach(function (p) { out.push(celula(p)); });
+    if (out.length) out.push('');
+    out.push(colunas.map(function (c) { return celula(c.rotulo); }).join(';'));
+    linhas.forEach(function (l) { out.push(colunas.map(function (c) { return celula(c.valor(l)); }).join(';')); });
+    return '\uFEFF' + out.join('\r\n') + '\r\n';
+  }
+  /** Entrega o arquivo montado no aparelho (sem ida ao servidor). */
+  function baixar(nome, texto, mime) {
+    var url = URL.createObjectURL(new Blob([texto], { type: (mime || 'text/csv') + ';charset=utf-8' }));
+    var a = h('a', { href: url, download: nome, hidden: true });
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(url); if (a.parentNode) a.parentNode.removeChild(a); }, 2000);
+    return nome;
+  }
+  function nome(base) { return base + '-' + Fmt.hoje() + '.csv'; }
+  return { celula: celula, csv: csv, baixar: baixar, nome: nome };
+})();
+
+var Cadastro = (function () {
+  var h = Util.h;
+  /**
+   * Envio de comando sem evento (cadastros, configuração, manutenção com chave): a chave nasce aqui e só muda depois
+   * do sucesso; NEEDS_CONFIRMATION mostra os avisos com "Vi e confirmo" e o reenvio leva os códigos aceitos;
+   * VALIDATION vai para os campos do bloco (o que não tem campo, para a lista); depois do sucesso, o store é
+   * atualizado (delta ou nova carga). o: {rota, botao, rotuloBotao, status (nó), bloco, aoSucesso(r)}.
+   */
+  function envio(o) {
+    var chave = Util.uuid(), avisos = [], aceites = {};
+    function todosAceitos() { return avisos.every(function (a, i) { return aceites[i]; }); }
+    function desenharAvisos() {
+      var ul = h('ul', { class: 'lista-avisos', 'aria-label': 'Avisos a confirmar' });
+      avisos.forEach(function (a, i) {
+        var cx = h('input', { type: 'checkbox', id: 'cad-aceite-' + i });
+        cx.addEventListener('change', function () { aceites[i] = cx.checked; o.botao.disabled = !todosAceitos(); });
+        ul.appendChild(h('li', { dataset: { aviso: a.codigo } }, h('div', { class: 'campo-linha' }, UI.icone('aviso'), h('span', { text: a.mensagem })), h('label', { class: 'marca', for: 'cad-aceite-' + i }, cx, h('span', { text: 'Vi e confirmo' }))));
+      });
+      o.status.appendChild(h('div', { class: 'formulario' }, h('h3', { text: avisos.length === 1 ? 'Confira o aviso antes de gravar' : 'Confira os ' + avisos.length + ' avisos antes de gravar' }), ul));
+      UI.definirTexto(o.botao, 'Confirmar mesmo assim');
+      o.botao.disabled = true;
+      var p = ul.querySelector('input');
+      if (p) p.focus();
+    }
+    async function enviar(dados) {
+      if (avisos.length && !todosAceitos()) return null;
+      var aceitos = avisos.map(function (a) { return a.codigo; }).filter(function (c, i, l) { return l.indexOf(c) === i; });
+      var destravar = UI.travar(o.botao, 'Enviando…');
+      Util.limpar(o.status);
+      var r;
+      try {
+        r = await Cliente.comando(o.rota, dados, { chave: chave, avisosAceitos: aceitos, aoEstado: function (e) { if (e.estado === 'OCUPADO') { Util.limpar(o.status); o.status.appendChild(UI.nota('Sistema ocupado, tentando de novo (' + e.tentativa + ' de ' + e.de + ')…', 'aviso')); } } });
+      } catch (e) {
+        destravar(o.rotuloBotao);
+        Util.limpar(o.status);
+        if (e.code === 'NEEDS_CONFIRMATION') { avisos = e.details || []; aceites = {}; desenharAvisos(); return null; }
+        avisos = []; aceites = {};
+        if (e.code === 'IDEMPOTENCY_MISMATCH') chave = Util.uuid();
+        var soltos = e.details || [];
+        if (e.code === 'VALIDATION' && o.bloco) {
+          o.bloco.mostrarErros(soltos);
+          soltos = soltos.filter(function (d) { return !d.campo || !o.bloco.campo(d.campo); });
+          o.bloco.focarPrimeiroErro();
+        }
+        var caixa = UI.estadoErro(e, e.repetida || e.code === 'DENIED' ? { acao: App.acaoRecarregar('Entrar de novo') } : null);
+        if (soltos.length) caixa.insertBefore(h('ul', null, soltos.map(function (d) { return h('li', { text: d.mensagem }); })), caixa.querySelector('details'));
+        o.status.appendChild(caixa);
+        return null;
+      }
+      chave = Util.uuid(); avisos = []; aceites = {};
+      destravar(o.rotuloBotao);
+      try {
+        await Store.aplicarResultado(o.rota, r.data, r.meta);
+        App.recasca();
+      } catch (e) {
+        r.falhaAtualizar = e.message;
+        UI.aviso('Gravado. A lista deste aparelho se atualiza na próxima abertura (' + e.message + ').', { tipo: 'info' });
+      }
+      if (o.aoSucesso) o.aoSucesso(r);
+      return r;
+    }
+    return { enviar: enviar, chave: function () { return chave; } };
+  }
+  /**
+   * Formulário de cadastro numa folha (pasto, propriedade, parceiro, lista, categoria, edição do animal): campos na
+   * forma do catálogo, conversão e validação de formato no aparelho, gravação pelo servidor. o: {titulo, defs,
+   * valores (brutos), rota, montar(convertidos, brutos) → dados, validar(convertidos, brutos) → [{campo, mensagem}],
+   * verbo, sucesso(data) → texto, aoSalvar(r), extra (nó), aoMudar(id, brutos, bloco), novoFixos, origem, idBase}.
+   */
+  function folha(o) {
+    var valores = o.valores || {};
+    var status = h('div', { role: 'status', 'aria-live': 'polite', dataset: { statusEnvio: '1' } });
+    var bloco = Formulario.bloco(o.defs, valores, { idBase: o.idBase || 'cad', novoFixos: o.novoFixos, aoMudar: function (id) { if (o.aoMudar) o.aoMudar(id, valores, bloco); } });
+    var corpo = h('form', { class: 'formulario', novalidate: true, dataset: { cadastro: o.rota } }, bloco.el, o.extra || null, status);
+    var f = UI.folha({ titulo: o.titulo, conteudo: corpo, origem: o.origem });
+    var verbo = o.verbo || 'Salvar';
+    var salvarB = UI.botao(verbo, { tipo: o.perigo ? 'perigo' : 'primario', aoClicar: function () { salvar(); } });
+    salvarB.setAttribute('data-acao-principal', '1');
+    var env = envio({ rota: o.rota, botao: salvarB, rotuloBotao: verbo, status: status, bloco: bloco, aoSucesso: function (r) {
+      f.fechar({ forcar: true });
+      UI.aviso(o.sucesso ? o.sucesso(r.data) : 'Gravado.', { tipo: 'ok' });
+      if (o.aoSalvar) o.aoSalvar(r);
+    } });
+    async function salvar() {
+      var c = bloco.converter();
+      var extras = c.erros.length ? [] : (o.validar ? o.validar(c.valores, valores) : []) || [];
+      if (extras.length) bloco.mostrarErros(extras);
+      if (c.erros.length || extras.length) { bloco.focarPrimeiroErro(); return null; }
+      var dados = o.montar ? o.montar(c.valores, valores) : { campos: c.valores };
+      if (!dados) return null;
+      return env.enviar(dados);
+    }
+    corpo.addEventListener('submit', function (ev) { ev.preventDefault(); salvar(); });
+    Formulario.enterPercorre(corpo, function () { return salvarB; });
+    f.definirAcoes([UI.botao('Cancelar', { aoClicar: function () { f.fechar(); } }), salvarB]);
+    return { folha: f, bloco: bloco, valores: valores, salvar: salvar, status: status };
+  }
+  return { envio: envio, folha: folha };
 })();
 
 var Seletor = (function () {
