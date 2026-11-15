@@ -925,13 +925,15 @@ var Telas = (function () {
     defs = defs.filter(function (d) { return d.padrao !== padrao; });
     defs.push({ padrao: padrao, re: new RegExp(re), nomes: nomes, def: def });
   }
+  /** Rota → tela. Padrão literal ("evento/novo") vale antes de padrão com parâmetro ("evento/:id"), em qualquer ordem de registro. */
   function resolver(rota) {
-    for (var i = 0; i < defs.length; i++) {
-      var m = defs[i].re.exec(rota);
+    var ordem = defs.filter(function (d) { return !d.nomes.length; }).concat(defs.filter(function (d) { return d.nomes.length; }));
+    for (var i = 0; i < ordem.length; i++) {
+      var m = ordem[i].re.exec(rota);
       if (m) {
         var params = {};
-        defs[i].nomes.forEach(function (n, k) { params[n] = m[k + 1] === undefined ? null : decodeURIComponent(m[k + 1]); });
-        return { padrao: defs[i].padrao, def: defs[i].def, params: params };
+        ordem[i].nomes.forEach(function (n, k) { params[n] = m[k + 1] === undefined ? null : decodeURIComponent(m[k + 1]); });
+        return { padrao: ordem[i].padrao, def: ordem[i].def, params: params };
       }
     }
     return null;

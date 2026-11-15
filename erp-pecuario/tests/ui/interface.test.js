@@ -47,7 +47,7 @@ test('carga inicial: página do doGet, carga completa, casca com os módulos ati
   assert.deepEqual(boot[0].dados, {}, 'primeira abertura: sem versão guardada');
   assert.equal(boot[0].ambiente, undefined, 'produção não envia ambiente');
   assert.match(await page.textContent('.grade-cartoes'), /Cabeças\s*4/);
-  assert.deepEqual(await textos(page, '#menu .menu-item'), ['Visão geral']);
+  assert.deepEqual(await textos(page, '#menu .menu-item'), ['Visão geral', 'Rebanho', 'Pastos', 'Eventos', 'Configurações'], 'as telas da Fase 1 instaladas, cada uma com o seu módulo ativo');
   assert.ok(await page.isVisible('.topo-acoes a:has-text("REGISTRAR EVENTO")'));
   assert.equal(await page.$('[data-faixa="base-teste"]'), null, 'produção sem faixa de base de teste');
   assert.match(await page.textContent('[data-alerta="SEM_BRINCO"]'), /sem brinco/);
