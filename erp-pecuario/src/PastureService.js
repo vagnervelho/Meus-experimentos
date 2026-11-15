@@ -152,7 +152,8 @@ var PastureService = (function () {
    * REFERENCIA); ocupação % = UA/ha ÷ capacidade em UA/ha; sem ela (ou sem UA/ha), cabeças ÷ capacidade em cabeças;
    * sem capacidade informada → null (SEM_VALOR_DE_REFERENCIA). Contas sobre o peso total, arredondando só no fim.
    * `acima_da_capacidade` (RN-027, a regra do aviso LOTACAO_ACIMA_DA_CAPACIDADE): {ua_ha, cabecas} = true quando a
-   * conta exata passa da capacidade informada, false quando não passa, null quando não há como comparar.
+   * conta passa da capacidade informada (UA/ha na precisão da capacidade, 4 casas, sem resíduo de ponto flutuante;
+   * cabeças exatas), false quando não passa, null quando não há como comparar.
    * comp: {cabecas, peso_vivo_total: {valor}, ua: {valor, motivo, n, estimado, ua_peso_kg}} (InventoryService.compor).
    */
   function lotacao(pasto, comp) {
@@ -175,7 +176,7 @@ var PastureService = (function () {
       capacidade: { ua_ha: capUa, cabecas: capCab },
       ocupacao_pct: { valor: ocup, motivo: ocup === null ? motivoOcup : null, n: comp.cabecas, base: base, estimado: base === 'UA_HA' && comp.ua.estimado },
       acima_da_capacidade: {
-        ua_ha: capUa === null || uaHaBruta === null ? null : uaHaBruta > capUa,
+        ua_ha: capUa === null || uaHaBruta === null ? null : Utils.arredondar(uaHaBruta, 4) > capUa,
         cabecas: capCab === null ? null : comp.cabecas > capCab,
       },
     };

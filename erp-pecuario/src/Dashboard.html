@@ -163,7 +163,7 @@ var TelaInicio = (function () {
       el.appendChild(UI.nota('Para começar: cadastre a propriedade e os pastos, defina a data do marco zero nas configurações e registre o rebanho inicial (ou importe a planilha dos animais).', 'info', links.length ? h('div', { class: 'acoes' }, links) : null));
     }
     var hoje = Fmt.hoje();
-    var deIn = h('input', { type: 'date', id: 'ini-de', max: hoje, min: Store.param('data_marco_zero') || null, value: periodo.data_inicio || '' });
+    var deIn = h('input', { type: 'date', id: 'ini-de', max: hoje, value: periodo.data_inicio || '' });
     var ateIn = h('input', { type: 'date', id: 'ini-ate', max: hoje, value: periodo.data_fim || '' });
     el.appendChild(h('div', { class: 'busca-linha', dataset: { periodo: '1' } },
       h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo', for: 'ini-de', text: 'De' }), deIn),

@@ -97,8 +97,11 @@ test('lotação: os exemplos conferidos do dicionário (40 ha, 1,2 UA/ha, 23.400
   const comp = { cabecas: 60, peso_vivo_total: { valor: 23400 }, ua: { valor: 52, motivo: null, n: 60, estimado: false, ua_peso_kg: 450 } };
   const l1 = js(c.G.PastureService.lotacao({ area_hectares: 40, capacidade_estimada_ua_ha: 1.2 }, comp));
   assert.deepEqual([l1.ua_ha.valor, l1.ocupacao_pct.valor, l1.ocupacao_pct.base], [1.3, 108.3, 'UA_HA']);
+  assert.deepEqual(l1.acima_da_capacidade, { ua_ha: true, cabecas: null }, '108,3%: o caso que gera o aviso numa transferência (03a, seção 4.2)');
   const l2 = js(c.G.PastureService.lotacao({ area_hectares: 40, capacidade_estimada_cabecas: 55 }, comp));
   assert.deepEqual([l2.ocupacao_pct.valor, l2.ocupacao_pct.base], [109.1, 'CABECAS']);
+  assert.deepEqual(l2.acima_da_capacidade, { ua_ha: null, cabecas: true });
+  assert.deepEqual(js(c.G.PastureService.lotacao({ area_hectares: 40, capacidade_estimada_ua_ha: 1.3, capacidade_estimada_cabecas: 60 }, comp)).acima_da_capacidade, { ua_ha: false, cabecas: false }, 'no limite exato não passa');
   const l3 = js(c.G.PastureService.lotacao({ area_hectares: 40 }, comp));
   assert.deepEqual([l3.ocupacao_pct.valor, l3.ocupacao_pct.motivo], [null, 'SEM_VALOR_DE_REFERENCIA']);
   const l4 = js(c.G.PastureService.lotacao({ capacidade_estimada_ua_ha: 1.2 }, comp));

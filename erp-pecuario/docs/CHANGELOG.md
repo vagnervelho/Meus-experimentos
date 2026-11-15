@@ -321,3 +321,29 @@ três comandos-modelo da Fase 2 e os subconjuntos densos das pendentes antes de 
 Testes novos: `tests/anexos.test.js` (compra, venda, transferência, morte; estorno com e sem dependente; correção de compra,
 venda e morte, retroativa e em cadeia; limites e tipos; queda na fase A da correção; rotas pela `api()`) e
 `tests/ui/anexos.test.js` (detalhe da compra a 360 px).
+- Verificado em Node (`npm test`: 475 testes, 475 aprovados, com os da etapa de inventário que corria em paralelo) e no
+  navegador com o backend real (`npm run ui:check`: 48 testes, 48 aprovados). Nada validado na conta do dono nem no Drive
+  real (o fake do Drive reproduz as hipóteses de `CONTRATOS.md`, seção 6.5).
+
+## 15/11/2026 — Fase 2, etapa INVENTÁRIO HISTÓRICO E LOTAÇÃO (E2.8)
+
+- `Timeline`: situação do animal na data (`situacaoEm`: ATIVO, VENDIDO, MORTO, DESCARTADO, BAIXADO_AJUSTE ou "ainda não
+  entrou", com o pasto e o "desde quando"), estadas por pasto (`estadas`, a regra única do bloco D da ficha, do "desde
+  quando" e dos dias de permanência), presentes em D (`presentesEm`), inventário com a contagem por situação e os dias de
+  permanência num período por rebanho, pasto, lista ou categoria (`diasPermanencia`, 05, seção 4.6: a base do rateio
+  DIAS_PERMANENCIA da Fase 4), conferidos com os exemplos dos documentos (base 57 e 65, com o rateio pelo maior resto).
+- `inventario.posicao`: filtros de propriedade, pasto, sexo e categoria (por sexo, por pasto e por categoria ignoram o
+  próprio filtro, com etiqueta), peso médio e situação na data; com `animal_id`, a situação, o pasto, o "desde quando", a
+  categoria, a idade e o peso vigente do animal naquele dia.
+- `pasto.painel`: peso médio, "acima da capacidade" em UA/ha e em cabeças, o "desde quando" de cada animal e, com um
+  período, os dias de permanência de cada animal no pasto.
+- `dashboard.obter`: período (padrão dos últimos 12 meses; Df antes do marco zero devolve null com o motivo), filtros, a
+  posição em Df, o movimento do período (nascimentos, compras e vendas com valor, mortes, descartes, baixas na contagem),
+  a receita de vendas por competência (com filtro de animal, só a parte alocada) e as séries mensais (evolução do
+  rebanho, nascimentos e mortes, compras e vendas).
+- Aviso LOTACAO_ACIMA_DA_CAPACIDADE também em UA/ha (RN-027), com a UA das consultas e o peso do próprio lançamento; um
+  aviso por pasto. Os testes de pastos que montavam um pasto acima da capacidade em UA/ha passaram a aceitar o aviso.
+- Interface: Início com o período, o peso médio, o movimento e os gráficos mensais; painel do pasto com o peso médio, a
+  coluna "No pasto desde" e os dias de permanência num período.
+
+Testes novos: `tests/lotacao.test.js` e `tests/ui/lotacao.test.js`.

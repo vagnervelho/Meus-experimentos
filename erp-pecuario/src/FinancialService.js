@@ -27,8 +27,12 @@ var FinancialService = (function () {
   var CRITERIOS_LOTE = ['CABECAS', 'PESO_VIVO', 'PESO_CARCACA', 'VALOR_INDIVIDUAL', 'MANUAL'];
   /** Naturezas que nunca são rateadas (invariante 14: o insumo vira custo no consumo; não operacional não é do animal). */
   var SEM_RATEIO = ['ESTOQUE_INSUMOS', 'NAO_OPERACIONAL'];
-  /** Eventos cujos lançamentos são 100% alocados aos animais (invariante 10; a abertura também: RN-070). */
-  var CEM_POR_CENTO = { COMPRA: true, VENDA: true, ENTRADA_INICIAL: true };
+  /**
+   * Eventos cujos lançamentos são 100% alocados aos animais pelo rateio que o próprio evento grava (invariante 10; 03b,
+   * seção 10.3): compra e venda, principal e acessórios; a abertura (RN-070, VALOR_INDIVIDUAL dos animais com valor); o
+   * custo da morte e a receita do descarte (CABECAS sobre todos os animais do evento).
+   */
+  var CEM_POR_CENTO = { COMPRA: true, VENDA: true, ENTRADA_INICIAL: true, MORTE: true, DESCARTE: true };
   var MAX_PARCELAS = 120;
   var NOME_NATUREZA = {
     RECEITA_VENDA_ANIMAIS: 'venda de animais', OUTRA_RECEITA: 'outras receitas', AQUISICAO_ANIMAIS: 'aquisição de animais', CUSTEIO: 'custeio',
@@ -47,6 +51,11 @@ var FinancialService = (function () {
   }
   function br_(d) {
     return vazio_(d) ? '' : String(d).slice(8, 10) + '/' + String(d).slice(5, 7) + '/' + String(d).slice(0, 4);
+  }
+  /** "compra de 05/02/2026": o evento na linguagem do pecuarista, para as mensagens da conferência. */
+  function rotuloEvento_(ev) {
+    var nome = EventCatalog.existe(ev.event_type) ? EventCatalog.tipo(ev.event_type).rotulo.toLowerCase() : String(ev.event_type).toLowerCase();
+    return nome + ' de ' + br_(ev.event_date);
   }
   function inteiroPositivo_(v) {
     return typeof v === 'number' && isFinite(v) && Math.floor(v) === v && v > 0;
@@ -494,9 +503,10 @@ var FinancialService = (function () {
         else if (c.natureza !== fin.natureza || c.tipo !== fin.tipo || c.grupo !== fin.categoria) achado(2, 'FINANCEIRO', fin.financial_id, 'O lançamento ' + nome + ' tem natureza, tipo ou grupo diferentes da conta "' + c.nome + '".');
         if (c && c.codigo === CONTAS.ABERTURA && repo.por('PARCELAS', 'financial_id', fin.financial_id).length) achado(4, 'FINANCEIRO', fin.financial_id, 'O saldo de abertura ' + nome + ' não pode ter parcela: não é caixa.');
       }
-      var parcelas = repo.por('PARCELAS', 'financial_id', fin.financial_id);
+      // A parcela CANCELADA (substituída por desdobramento; desenho-base 16.11) não conta para a soma nem para o caixa.
+      var parcelas = repo.por('PARCELAS', 'financial_id', fin.financial_id).filter(function (p) { return p.status !== 'CANCELADA'; });
       if (!vazio_(fin.product_id) && fin.natureza === 'CUSTEIO' && parcelas.length) achado(4, 'FINANCEIRO', fin.financial_id, 'O consumo de insumo ' + nome + ' não pode ter parcela.');
-      if (parcelas.length && soma_(parcelas, 'valor') !== fin.valor) achado(3, 'FINANCEIRO', fin.financial_id, 'As parcelas de ' + nome + ' somam ' + reais_(soma_(parcelas, 'valor')) + ' e o lançamento vale ' + reais_(fin.valor) + '.');
+      if (parcelas.length && soma_(parcelas, 'valor') !== fin.valor) achado(3, 'FINANCEIRO', fin.financial_id, 'As parcelas somam ' + reais_(soma_(parcelas, 'valor')) + ' e o lançamento vale ' + reais_(fin.valor) + ' (' + nome + ').');
       parcelas.forEach(function (p) {
         if (p.status === 'LIQUIDADA') {
           var esperado = (p.valor || 0) + (p.juros_multa || 0) - (p.desconto || 0);
@@ -515,14 +525,16 @@ var FinancialService = (function () {
       var ev = repo.porId('EVENTOS', fin.event_id);
       if (rat && SEM_RATEIO.indexOf(fin.natureza) >= 0) achado(14, 'RATEIOS', rat.rateio_id, 'O lançamento ' + nome + ' é de ' + fin.natureza + ' e não pode ser rateado aos animais.');
       if (rat && rat.total_alocado > fin.valor) achado(9, 'RATEIOS', rat.rateio_id, 'O rateio de ' + nome + ' distribui ' + reais_(rat.total_alocado) + ', mais que o lançamento (' + reais_(fin.valor) + ').');
-      if (ev && CEM_POR_CENTO[ev.event_type] && (!rat || rat.total_alocado !== fin.valor)) achado(10, 'FINANCEIRO', fin.financial_id, 'O lançamento ' + nome + ' de ' + ev.event_type + ' precisa estar 100% alocado aos animais.');
+      if (ev && CEM_POR_CENTO[ev.event_type] && (!rat || rat.total_alocado !== fin.valor)) {
+        achado(10, 'FINANCEIRO', fin.financial_id, 'O lançamento ' + nome + ' (' + rotuloEvento_(ev) + ') precisa estar 100% alocado aos animais: ' + (rat ? 'alocados ' + reais_(rat.total_alocado) + ' de ' + reais_(fin.valor) : 'não tem rateio para os animais') + '.');
+      }
       var allocs = rat ? repo.por('ALOCACOES_FINANCEIRAS', 'rateio_id', rat.rateio_id) : [];
       var direta = rat && rat.criterio === 'DIRETO' && allocs.length === 1 && allocs[0].valor_alocado === fin.valor ? allocs[0].animal_id : null;
       if (nulo_(fin.animal_id) !== direta) achado(12, 'FINANCEIRO', fin.financial_id, 'O animal do lançamento ' + nome + ' (' + (fin.animal_id || 'vazio') + ') não corresponde à alocação direta (' + (direta || 'nenhuma') + ').');
     });
     repo.vigentes('RATEIOS').forEach(function (rat) {
       var allocs = repo.por('ALOCACOES_FINANCEIRAS', 'rateio_id', rat.rateio_id);
-      if (soma_(allocs, 'valor_alocado') !== rat.total_alocado) achado(8, 'RATEIOS', rat.rateio_id, 'O rateio soma ' + reais_(soma_(allocs, 'valor_alocado')) + ' nas alocações e registra ' + reais_(rat.total_alocado) + '.');
+      if (soma_(allocs, 'valor_alocado') !== rat.total_alocado) achado(8, 'RATEIOS', rat.rateio_id, 'O rateio soma ' + reais_(soma_(allocs, 'valor_alocado')) + ' nas alocações, mas registra ' + reais_(rat.total_alocado) + '.');
       var bases = Utils.arredondar(allocs.reduce(function (t, a) { return t + (a.base_valor || 0); }, 0), 4);
       if (Math.abs(bases - (rat.base_total || 0)) > 1e-9) achado(8, 'RATEIOS', rat.rateio_id, 'As bases das alocações somam ' + bases + ' e o rateio registra ' + rat.base_total + '.');
       var vistos = {};

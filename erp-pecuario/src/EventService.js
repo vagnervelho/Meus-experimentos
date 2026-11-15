@@ -13,6 +13,12 @@ var EventService = (function () {
   var MAX_CRIAS = 4;
   /** Tipos cujo evento pode ter data anterior ao marco zero: registro informativo, sem efeito no inventário (04, seção 6). */
   var ACEITA_HISTORICO = ['NASCIMENTO'];
+  /**
+   * Tipos cujo histórico anterior ao marco zero entra pela importação de planilha (04, seção 6: compras, vendas,
+   * transferências, nascimentos e mortes antigos): no formulário só o parto aceita data antiga; a correção de um
+   * registro histórico continua histórica.
+   */
+  var HISTORICO_IMPORTADO = ['COMPRA', 'VENDA', 'TRANSFERENCIA', 'NASCIMENTO', 'MORTE'];
   var ROTAS = { registrar: 'evento.registrar', corrigir: 'evento.corrigir', estornar: 'evento.estornar' };
   var IDENT_EXTRAS = ['BRINCO_ORIGEM', 'RFID', 'SISBOV', 'TATUAGEM', 'OUTRO'];
   var SITUACAO_ROTULO = {
@@ -112,6 +118,25 @@ var EventService = (function () {
   function leiturasEntrada() {
     return Utils.unicos(EventCatalog.leituras('ENTRADA_INICIAL').concat(Timeline.LEITURAS));
   }
+  /**
+   * O equivalente de planejarEntradaImportada para os eventos históricos da importação (COMPRA, VENDA, TRANSFERENCIA,
+   * NASCIMENTO, MORTE; RN-090): o MESMO planejamento do formulário, dentro do tratador de outro comando, sem abrir
+   * unidade. dados: {tipo, subtipo, campos, animais, crias, parcelas, custos, deducoes} como em registrar. opcoes:
+   * {importacao: {import_id}, rotulos: [texto por item], rotulosCrias: [texto por cria]}. Com import_id a data anterior
+   * ao marco zero vira registro histórico (pre_marco_zero, efeito 0, financeiro sem caixa). O tx precisa ter lido
+   * `leiturasEvento(tipo)` e ter acesso cru. Devolve o resultado do tratador; CONFLICT e CONFIG são lançados.
+   */
+  function planejarEventoImportado(tx, dados, opcoes) {
+    var o = opcoes || {};
+    var d = dados || {};
+    if (!o.importacao || vazio_(o.importacao.import_id)) throw interno_('planejarEventoImportado precisa do import_id.');
+    if (HISTORICO_IMPORTADO.indexOf(d.tipo) < 0) throw interno_('Tipo sem importação de eventos: ' + d.tipo + '.');
+    return planejarEvento_(tx, 'registrar', { dados: d, importacao: o.importacao, conhecidos: o.conhecidos || {}, rotulos: o.rotulos || null, rotulosCrias: o.rotulosCrias || null });
+  }
+  /** Abas que o tratador precisa ler para planejar um evento do tipo (reads do comando que chama planejarEventoImportado). */
+  function leiturasEvento(tipo) {
+    return Utils.unicos(EventCatalog.leituras(tipo).concat(Timeline.LEITURAS, ['ANEXOS']));
+  }
   function corrigir(ctx, pedido) {
     return UnitOfWork.run(ctx, comando('corrigir', pedido));
   }
@@ -197,10 +222,11 @@ var EventService = (function () {
   function camposDoItem_(m, it, definicoes, valores) {
     EventCatalog.validarCampos(definicoes, valores, { listas: m.listas }).forEach(function (d) { erroItem_(m, it, d.campo, d.codigo, d.mensagem); });
   }
-  function pastoAtivo_(m, it, campo, id) {
+  function pastoAtivo_(m, it, campo, id, historico) {
     var p = m.f.pasto(id);
     if (!p) { erroItem_(m, it, campo, 'NAO_ENCONTRADO', 'o pasto informado não existe.'); return false; }
-    if (p.status !== 'ATIVO') { erroItem_(m, it, campo, 'PASTO_INATIVO', 'o pasto ' + p.nome + ' está desativado.'); return false; }
+    // Registro anterior ao marco zero: o pasto pode ter sido desativado depois; basta existir.
+    if (p.status !== 'ATIVO' && !historico) { erroItem_(m, it, campo, 'PASTO_INATIVO', 'o pasto ' + p.nome + ' está desativado.'); return false; }
     return true;
   }
   function exigirMarcoZero_(m) {
@@ -312,7 +338,8 @@ var EventService = (function () {
     var historico = false;
     if (Utils.dataValida(data)) {
       if (data > m.hoje) erroGeral_(m, 'event_date', 'DATA_FUTURA', 'A data ' + br_(data) + ' ainda não chegou.');
-      if (data < m.D0 && ACEITA_HISTORICO.indexOf(tipo) >= 0) historico = true;
+      var importado = HISTORICO_IMPORTADO.indexOf(tipo) >= 0 && (!!m.opcoes.importacao || (!!original && original.pre_marco_zero === true));
+      if (data < m.D0 && (ACEITA_HISTORICO.indexOf(tipo) >= 0 || importado)) historico = true;
       else if (data < m.D0) erroGeral_(m, 'event_date', 'ANTES_DO_MARCO_ZERO', 'A data ' + br_(data) + ' é anterior ao marco zero (' + br_(m.D0) + '): o rebanho só é controlado a partir dele.');
     }
     var prop = vazio_(campos.property_id) ? m.params.propriedade_padrao_id : campos.property_id;
@@ -383,9 +410,11 @@ var EventService = (function () {
       ctxEv.plano.ANIMAIS.push({ animal_id: it.animal_id, codigo_interno: it.codigo_interno, nome: nulo_(d.nome), raca: nulo_(d.raca) });
     }
     var at = atributos_(m, ctxEv, it);
-    if (!vazio_(d.pasto_destino_id)) pastoAtivo_(m, it, 'pasto_destino_id', d.pasto_destino_id);
+    var hist = ctxEv.ev.pre_marco_zero === true;
+    if (!vazio_(d.pasto_destino_id)) pastoAtivo_(m, it, 'pasto_destino_id', d.pasto_destino_id, hist);
     var pasto = nulo_(d.pasto_destino_id) || (compra ? nulo_(ctxEv.campos.pasto_destino_id) : null);
-    var ea = { efeito_inventario: 1, pasto_destino_id: pasto, atributos_iniciais_json: at, observacoes: nulo_(d.observacoes) };
+    // Compra anterior ao marco zero (importação): registro histórico, efeito 0 no inventário (04, seção 6).
+    var ea = { efeito_inventario: hist ? 0 : 1, pasto_destino_id: pasto, atributos_iniciais_json: at, observacoes: nulo_(d.observacoes) };
     if (tipo === 'ENTRADA_INICIAL') {
       if (typeof d.peso === 'number') ea.peso = d.peso;
       if (typeof d.valor_abertura === 'number') ea.valor_individual = d.valor_abertura;
@@ -421,16 +450,20 @@ var EventService = (function () {
     if (!e) { erroItem_(m, it, 'animal_id', 'NAO_ENCONTRADO', 'animal não encontrado.'); return; }
     it.codigo_interno = e.codigo_interno;
     if (vazio_(it.brincoTexto)) it.quem = nomeAnimal_(e);
-    if (e.situacao_cadastral === 'ATIVO') { erroItem_(m, it, 'animal_id', 'JA_NO_REBANHO', 'o animal já está no rebanho.'); return; }
-    if (e.situacao_cadastral === 'MORTO') { erroItem_(m, it, 'animal_id', 'ANIMAL_MORTO', 'o animal morreu em ' + br_(e.data_saida) + ' e não pode voltar ao rebanho.'); return; }
+    // Compra histórica (antes do marco zero) de animal já cadastrado: registro informativo, validado só contra o
+    // nascimento e a chegada declarada (04, seção 6); a situação de hoje não conta.
+    var hist = ctxEv.ev.pre_marco_zero === true;
+    if (e.situacao_cadastral === 'ATIVO' && !hist) { erroItem_(m, it, 'animal_id', 'JA_NO_REBANHO', 'o animal já está no rebanho.'); return; }
+    if (e.situacao_cadastral === 'MORTO' && !hist) { erroItem_(m, it, 'animal_id', 'ANIMAL_MORTO', 'o animal morreu em ' + br_(e.data_saida) + ' e não pode voltar ao rebanho.'); return; }
     if (e.situacao_cadastral === 'EXTERNO') { erroItem_(m, it, 'animal_id', 'ANIMAL_EXTERNO', 'animal de referência (touro de sêmen, progenitor de outra fazenda) não entra no rebanho: ele é só um cadastro de referência. Se ele chegou à fazenda, lance a entrada como animal novo.'); return; }
     it.final = { sexo: e.sexo, data_nascimento: e.data_nascimento };
-    if (!vazio_(d.pasto_destino_id)) pastoAtivo_(m, it, 'pasto_destino_id', d.pasto_destino_id);
+    if (!vazio_(d.pasto_destino_id)) pastoAtivo_(m, it, 'pasto_destino_id', d.pasto_destino_id, hist);
     var pasto = nulo_(d.pasto_destino_id) || (compra ? nulo_(ctxEv.campos.pasto_destino_id) : null);
-    var ea = { efeito_inventario: 1, pasto_destino_id: pasto, observacoes: nulo_(d.observacoes) };
+    var ea = { efeito_inventario: hist ? 0 : 1, pasto_destino_id: pasto, observacoes: nulo_(d.observacoes) };
     if (compra) pesosDaCompra_(it, ea);
     linhaEA_(m, ctxEv, it, ea);
-    if (!vazio_(it.brincoTexto) && Utils.normalizarBrinco(it.brincoTexto) !== (e.brinco_norm || '')) identificacoes_(m, ctxEv, it);
+    // No registro histórico o brinco da casa não muda (o de hoje veio depois); só o brinco do vendedor entra.
+    if (!hist && !vazio_(it.brincoTexto) && Utils.normalizarBrinco(it.brincoTexto) !== (e.brinco_norm || '')) identificacoes_(m, ctxEv, it);
     else {
       it.brincoProposto = null;
       if (compra) identificacoesExtras_(m, ctxEv, it);
@@ -559,7 +592,7 @@ var EventService = (function () {
     if (!vazio_(c.pasto_destino_id)) {
       var p = m.f.pasto(c.pasto_destino_id);
       if (!p) { erroGeral_(m, 'pasto_destino_id', 'NAO_ENCONTRADO', 'O pasto de destino não existe.'); ok = false; }
-      else if (p.status !== 'ATIVO') { erroGeral_(m, 'pasto_destino_id', 'PASTO_INATIVO', 'O pasto ' + p.nome + ' está desativado e não recebe animais.'); ok = false; }
+      else if (p.status !== 'ATIVO' && ctxEv.ev.pre_marco_zero !== true) { erroGeral_(m, 'pasto_destino_id', 'PASTO_INATIVO', 'O pasto ' + p.nome + ' está desativado e não recebe animais.'); ok = false; }
     }
     if (ok && c.pasto_origem_id === c.pasto_destino_id) { erroGeral_(m, 'pasto_destino_id', 'DESTINO_IGUAL_ORIGEM', 'O pasto de destino precisa ser diferente do pasto de origem.'); ok = false; }
     ctxEv.transf = ok ? { pasto_origem_id: c.pasto_origem_id, pasto_destino_id: c.pasto_destino_id } : null;
@@ -584,9 +617,11 @@ var EventService = (function () {
     var ev = ctxEv.ev;
     camposDoItem_(m, it, EventCatalog.camposAnimal(ctxEv.tipo), semAnimalId_(d));
     if (!sujeito_(m, it, ctxEv.tipo === 'MORTE' ? 'registra como morto' : 'descarta')) return;
-    var onde = Timeline.pastoAntesDaSaida(m.f.linhas(it.animal_id), ev.event_date, m.D0);
+    // Morte anterior ao marco zero (importação): registro histórico, sem efeito no inventário nem pasto de origem.
+    var hist = ev.pre_marco_zero === true;
+    var onde = hist ? { presente: false } : Timeline.pastoAntesDaSaida(m.f.linhas(it.animal_id), ev.event_date, m.D0);
     it.origemDerivada = true;
-    linhaEA_(m, ctxEv, it, { efeito_inventario: -1, pasto_origem_id: onde.presente ? nulo_(onde.pasture_id) : null, observacoes: nulo_(d.observacoes) });
+    linhaEA_(m, ctxEv, it, { efeito_inventario: hist ? 0 : -1, pasto_origem_id: onde.presente ? nulo_(onde.pasture_id) : null, observacoes: nulo_(d.observacoes) });
     var morte = ctxEv.tipo === 'MORTE';
     ctxEv.plano.BAIXAS.push({
       baixa_id: m.tx.novoId(), event_id: ev.event_id, animal_id: it.animal_id, tipo: ctxEv.tipo,
@@ -715,7 +750,8 @@ var EventService = (function () {
     lista.forEach(function (bruto, k) {
       var d = bruto && typeof bruto === 'object' && !Array.isArray(bruto) ? bruto : {};
       var codigo = typeof d.brinco === 'string' && !vazio_(Utils.aparar(d.brinco)) ? Utils.aparar(d.brinco) : null;
-      var it = { indice: k, dados: d, animal_id: null, publico: false, quem: 'Cria ' + (k + 1) + (codigo ? ' (brinco ' + codigo + ')' : ''), brincoTexto: codigo, linhas: [], novo: false, final: {}, cria: true };
+      var rotulo = m.opcoes.rotulosCrias ? m.opcoes.rotulosCrias[k] : null;
+      var it = { indice: k, dados: d, animal_id: null, publico: false, quem: !vazio_(rotulo) ? rotulo : 'Cria ' + (k + 1) + (codigo ? ' (brinco ' + codigo + ')' : ''), brincoTexto: codigo, linhas: [], novo: false, final: {}, cria: true };
       camposDoItem_(m, it, defs, semAnimalId_(d));
       if (d.situacao_nascimento === 'NATIMORTO') { natimortos++; return; }
       if (d.situacao_nascimento !== 'VIVO') return;
@@ -1467,6 +1503,7 @@ var EventService = (function () {
    * por pasto, com as duas contas quando as duas passam.
    */
   function conferirLotacao_(m, ctxEv) {
+    if (ctxEv.ev.pre_marco_zero === true) return; // antes do marco zero não há inventário nem lotação
     var destinos = {};
     ctxEv.itens.forEach(function (it) { if (it.linhaEA && !vazio_(it.linhaEA.pasto_destino_id)) destinos[it.linhaEA.pasto_destino_id] = true; });
     var comCapacidade = Object.keys(destinos).filter(function (id) {
@@ -1533,7 +1570,7 @@ var EventService = (function () {
     if (!vazio_(c.pasto_destino_id)) {
       var p = m.f.pasto(c.pasto_destino_id);
       if (!p) erroGeral_(m, 'pasto_destino_id', 'NAO_ENCONTRADO', 'O pasto de destino não existe.');
-      else if (p.status !== 'ATIVO') erroGeral_(m, 'pasto_destino_id', 'PASTO_INATIVO', 'O pasto ' + p.nome + ' está desativado e não recebe animais.');
+      else if (p.status !== 'ATIVO' && ctxEv.ev.pre_marco_zero !== true) erroGeral_(m, 'pasto_destino_id', 'PASTO_INATIVO', 'O pasto ' + p.nome + ' está desativado e não recebe animais.');
     }
   }
   function plural_(n, um, varios) {
@@ -1563,6 +1600,16 @@ var EventService = (function () {
       }),
     };
   }
+  /**
+   * Evento anterior ao marco zero (importação): o pagamento é anterior ao controle do sistema, então os lançamentos
+   * nascem sem caixa (sem parcela, como o saldo de abertura) e ficam no custo e no resultado da época. Parcela
+   * informada nesse evento é recusada. Devolve se o evento é histórico.
+   */
+  function semCaixaHistorico_(m, ctxEv, d) {
+    if (ctxEv.ev.pre_marco_zero !== true) return false;
+    if (Array.isArray(d.parcelas) && d.parcelas.length) erroGeral_(m, 'parcelas', 'PARCELA_ANTES_DO_MARCO_ZERO', 'Este lançamento é anterior ao marco zero (' + br_(m.D0) + '): o pagamento já aconteceu antes do controle do sistema e não leva parcelas.');
+    return true;
+  }
   /** Itens do grupo repetível `custos` da compra, validados pelo catálogo; erros com "Custo k:". */
   function custosDaCompra_(m, ctxEv, lista) {
     var defs = EventCatalog.camposGrupo('COMPRA', 'custos');
@@ -1588,6 +1635,7 @@ var EventService = (function () {
     var itens = ctxEv.itens.filter(function (it) { return it.linhaEA && it.negocio; });
     var custos = custosDaCompra_(m, ctxEv, d.custos);
     if (d.parcelas !== undefined && d.parcelas !== null && !Array.isArray(d.parcelas)) { erroGeral_(m, 'parcelas', 'TIPO_INVALIDO', 'As parcelas precisam vir como lista.'); return; }
+    var hist = semCaixaHistorico_(m, ctxEv, d);
     var defsParcela = EventCatalog.camposGrupo('COMPRA', 'parcelas');
     (d.parcelas || []).forEach(function (p, k) {
       EventCatalog.validarCampos(defsParcela, p && typeof p === 'object' ? p : {}, { listas: m.listas }).forEach(function (e) {
@@ -1623,7 +1671,7 @@ var EventService = (function () {
     var lancs = [];
     var principal = FinancialService.planejar(m.tx, {
       evento: ev, conta: contaAnimais, naturezas: ['AQUISICAO_ANIMAIS'], valor: c.valor_animais, descricao: 'Compra de ' + plural_(n, 'animal', 'animais'),
-      partner_id: c.partner_id, documento: nulo_(c.nota_fiscal), quantidade: n, parcelas: d.parcelas, rateio: rateio,
+      partner_id: c.partner_id, documento: nulo_(c.nota_fiscal), quantidade: n, parcelas: hist ? undefined : d.parcelas, semCaixa: hist, rateio: rateio,
       campo: 'valor_animais', campoParcelas: 'parcelas', rotulo: 'a compra',
     }, m.col);
     if (principal) {
@@ -1644,7 +1692,7 @@ var EventService = (function () {
       var pl = FinancialService.planejar(m.tx, {
         evento: ev, conta: contaCustos, naturezas: ['AQUISICAO_ANIMAIS'], valor: x.valor,
         descricao: nulo_(x.descricao) || (eFrete ? 'Frete' : 'Outros custos') + ' da compra de ' + br_(ev.event_date), partner_id: nulo_(x.partner_id), documento: nulo_(x.documento),
-        parcelas: [{ data_vencimento: nulo_(x.data_vencimento) || ev.event_date, valor: x.valor, forma_pagamento: nulo_(x.forma_pagamento), documento: nulo_(x.documento) }],
+        parcelas: hist ? undefined : [{ data_vencimento: nulo_(x.data_vencimento) || ev.event_date, valor: x.valor, forma_pagamento: nulo_(x.forma_pagamento), documento: nulo_(x.documento) }], semCaixa: hist,
         rateio: rateio, campo: 'custos', rotulo: (eFrete ? 'o frete' : 'o custo') + (custos.length > 1 ? ' ' + (k + 1) : ''),
       }, m.col);
       if (!pl) return;
@@ -1692,11 +1740,12 @@ var EventService = (function () {
     parceiroValido_(m, ctxEv, p + 'partner_id', c[p + 'partner_id']);
     var itens = ctxEv.itens.filter(function (it) { return it.linhaEA; });
     if (!itens.length || itens.length !== ctxEv.itens.length || typeof c[p + 'valor'] !== 'number') return;
+    var hist = ctxEv.ev.pre_marco_zero === true;
     var pl = FinancialService.planejar(m.tx, {
       evento: ev, conta: conta, naturezas: morte ? ['CUSTEIO'] : ['OUTRA_RECEITA'], valor: c[p + 'valor'],
       descricao: nulo_(c[p + 'descricao']) || (morte ? 'Custos da morte de ' : 'Receita do descarte de ') + br_(ev.event_date),
       partner_id: nulo_(c[p + 'partner_id']), documento: nulo_(c[p + 'documento']),
-      parcelas: [{ data_vencimento: nulo_(c[p + 'vencimento']) || ev.event_date, valor: c[p + 'valor'], forma_pagamento: nulo_(c[p + 'forma_pagamento']), documento: nulo_(c[p + 'documento']) }],
+      parcelas: hist ? undefined : [{ data_vencimento: nulo_(c[p + 'vencimento']) || ev.event_date, valor: c[p + 'valor'], forma_pagamento: nulo_(c[p + 'forma_pagamento']), documento: nulo_(c[p + 'documento']) }], semCaixa: hist,
       rateio: { criterio: 'CABECAS', itens: itens.map(function (it) { return { animal_id: it.animal_id, chave: it.codigo_interno, base: 1, quem: it.quem }; }), cemPorCento: true },
       campo: morte ? 'custo_conta_id' : 'receita_valor', rotulo: morte ? 'o custo da morte' : 'a receita do descarte',
     }, m.col);
@@ -1741,10 +1790,12 @@ var EventService = (function () {
     var ev = ctxEv.ev;
     camposDoItem_(m, it, EventCatalog.camposAnimal('VENDA'), semAnimalId_(d));
     if (!sujeito_(m, it, 'vende')) return;
-    var onde = Timeline.pastoAntesDaSaida(m.f.linhas(it.animal_id), ev.event_date, m.D0);
+    // Venda anterior ao marco zero (importação): registro histórico, efeito 0, origem só a informada.
+    var hist = ev.pre_marco_zero === true;
+    var onde = hist ? { presente: false } : Timeline.pastoAntesDaSaida(m.f.linhas(it.animal_id), ev.event_date, m.D0);
     var origem = ctxEv.pastoOrigem || (onde.presente ? nulo_(onde.pasture_id) : null);
     it.origemDerivada = !ctxEv.pastoOrigem;
-    var ea = { efeito_inventario: -1, pasto_origem_id: origem, motivo_saida: nulo_(d.motivo_saida), observacoes: nulo_(d.observacoes) };
+    var ea = { efeito_inventario: hist ? 0 : -1, pasto_origem_id: origem, motivo_saida: nulo_(d.motivo_saida), observacoes: nulo_(d.observacoes) };
     if (typeof d.peso === 'number') ea.peso = d.peso;
     if (typeof d.peso_carcaca_kg === 'number') ea.peso_carcaca_kg = d.peso_carcaca_kg;
     it.negocio = {
@@ -1807,6 +1858,7 @@ var EventService = (function () {
     var itens = ctxEv.itens.filter(function (it) { return it.linhaEA && it.negocio; });
     var deducoes = deducoesDaVenda_(m, ctxEv, d.deducoes);
     if (d.parcelas !== undefined && d.parcelas !== null && !Array.isArray(d.parcelas)) { erroGeral_(m, 'parcelas', 'TIPO_INVALIDO', 'As parcelas precisam vir como lista.'); return; }
+    var hist = semCaixaHistorico_(m, ctxEv, d);
     var defsParcela = EventCatalog.camposGrupo('VENDA', 'parcelas');
     (d.parcelas || []).forEach(function (p, k) {
       EventCatalog.validarCampos(defsParcela, p && typeof p === 'object' ? p : {}, { listas: m.listas }).forEach(function (e) {
@@ -1850,7 +1902,7 @@ var EventService = (function () {
     var lancs = [];
     var principal = FinancialService.planejar(m.tx, {
       evento: ev, conta: contaReceita, naturezas: ['RECEITA_VENDA_ANIMAIS'], valor: receita, descricao: 'Venda de ' + plural_(n, 'animal', 'animais'),
-      partner_id: c.partner_id, documento: nulo_(c.nota_fiscal), quantidade: n, parcelas: d.parcelas, rateio: rateio,
+      partner_id: c.partner_id, documento: nulo_(c.nota_fiscal), quantidade: n, parcelas: hist ? undefined : d.parcelas, semCaixa: hist, rateio: rateio,
       campo: 'valor_bruto', campoParcelas: 'parcelas', rotulo: 'a receita da venda', pagamento: 'será recebida',
     }, m.col);
     var porVenc = {};
@@ -1869,7 +1921,8 @@ var EventService = (function () {
       var retida = x.retida_pelo_comprador === true;
       var quem = 'Dedução ' + (k + 1) + ': ';
       var venc = nulo_(x.data_vencimento);
-      if (retida) {
+      if (hist) venc = null; // sem caixa: a dedução histórica não tem título
+      else if (retida) {
         if (!principal) return;
         if (venc && vencimentos.indexOf(venc) < 0) {
           erroGeral_(m, 'deducoes', 'RETIDA_FORA_DO_RECEBIMENTO', quem + 'o que o comprador desconta sai num recebimento da venda: use o vencimento de uma parcela da venda (' + Utils.unicos(vencimentos).map(br_).join(', ') + ') ou deixe em branco.');
@@ -1883,7 +1936,7 @@ var EventService = (function () {
       var pl = FinancialService.planejar(m.tx, {
         evento: ev, conta: conta, naturezas: ['DESPESA_VENDA'], valor: x.valor, descricao: nulo_(x.descricao) || nome + ' da venda de ' + br_(ev.event_date),
         partner_id: nulo_(x.partner_id) || (retida ? nulo_(c.partner_id) : null), documento: nulo_(x.documento), retida: retida,
-        parcelas: [{ data_vencimento: venc, valor: x.valor, forma_pagamento: nulo_(x.forma_pagamento), documento: nulo_(x.documento) }],
+        parcelas: hist ? undefined : [{ data_vencimento: venc, valor: x.valor, forma_pagamento: nulo_(x.forma_pagamento), documento: nulo_(x.documento) }], semCaixa: hist,
         rateio: rateio, campo: 'deducoes', rotulo: 'a dedução ' + (k + 1) + ' (' + nome.toLowerCase() + ')',
       }, m.col);
       if (!pl) return;
@@ -2358,6 +2411,9 @@ var EventService = (function () {
     registrar: registrar,
     planejarEntradaImportada: planejarEntradaImportada,
     leiturasEntrada: leiturasEntrada,
+    planejarEventoImportado: planejarEventoImportado,
+    leiturasEvento: leiturasEvento,
+    HISTORICO_IMPORTADO: HISTORICO_IMPORTADO,
     corrigir: corrigir,
     estornar: estornar,
     simular: simular,

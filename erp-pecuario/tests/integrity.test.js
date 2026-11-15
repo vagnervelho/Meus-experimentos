@@ -31,10 +31,11 @@ function base(opcoes) {
 test('integridade limpa: todas as checagens executadas, sem achados; o relatório tem a forma do contrato', () => {
   const { s } = base();
   const r = s.integridade();
-  assert.deepEqual(Object.keys(r).sort(), ['abas_ausentes', 'achados', 'alertas', 'banco', 'checagens', 'data_version', 'erros', 'gerado_em', 'ok', 'reparavel', 'truncado']);
+  assert.deepEqual(Object.keys(r).sort(), ['abas_ausentes', 'achados', 'alertas', 'banco', 'checagens', 'data_version', 'duracao_ms', 'erros', 'gerado_em', 'ok', 'reparavel', 'truncado']);
   assert.equal(r.checagens.length, s.G.AuditService.CHECAGENS.length);
   assert.deepEqual(r.checagens.filter((c) => c.situacao !== 'OK').map((c) => c.codigo), [], 'todas executadas e OK');
   assert.equal(r.reparavel, false);
+  assert.ok(Number.isInteger(r.duracao_ms) && r.duracao_ms >= 0, 'tempo da verificação pelo relógio do contexto');
 });
 
 test('projeção alterada à mão: PROJECAO (com reparo) e INVENTARIO por pasto; o reparo reconstrói, audita e limpa', () => {

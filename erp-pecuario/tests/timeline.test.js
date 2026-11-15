@@ -109,8 +109,8 @@ test('marco zero: registros anteriores ficam fora do replay e do inventário; va
   assert.deepEqual(codigos(T.validar([pesagemAntiga, ent], { nascimento: '2025-07-01' })), ['ANTES_DO_NASCIMENTO@' + pesagemAntiga.event_id]);
   assert.deepEqual(codigos(T.validar([pesagemAntiga, ent], { dataEntrada: '2025-09-01' })), ['ANTES_DA_ENTRADA@' + pesagemAntiga.event_id]);
   const inv = T.inventario([pesagemAntiga, vendaAntiga, ent], '2026-01-31', '2026-01-01');
-  assert.deepEqual(js(inv), { data: '2026-01-31', total: 1, porPasto: { A: 1 }, semPasto: 0, motivo: null });
-  assert.deepEqual(js(T.inventario([ent], '2025-12-31', '2026-01-01')), { data: '2025-12-31', total: null, porPasto: null, semPasto: null, motivo: 'ANTERIOR_AO_MARCO_ZERO' });
+  assert.deepEqual(js(inv), { data: '2026-01-31', total: 1, porPasto: { A: 1 }, semPasto: 0, porSituacao: { ATIVO: 1, VENDIDO: 0, MORTO: 0, DESCARTADO: 0, BAIXADO_AJUSTE: 0 }, motivo: null }, 'a venda histórica não conta na situação da data');
+  assert.deepEqual(js(T.inventario([ent], '2025-12-31', '2026-01-01')), { data: '2025-12-31', total: null, porPasto: null, semPasto: null, porSituacao: null, motivo: 'ANTERIOR_AO_MARCO_ZERO' });
   assert.deepEqual(js(T.pastoEm([ent], '2025-12-31', '2026-01-01')), { presente: null, pasture_id: null, motivo: 'ANTERIOR_AO_MARCO_ZERO' });
   assert.equal(T.inventario([ent], '2026-02-01', null).motivo, 'DADOS_INSUFICIENTES');
 });

@@ -158,23 +158,28 @@ function ok(env) {
   assert.equal(env.ok, true, JSON.stringify(env.error));
   return env.data;
 }
+/** Comando pela api(); depois dele, projeção gravada = reconstrução. */
+function cmd(s, pedido) {
+  const d = ok(chamar(s, pedido));
+  s.conferirProjecoes('depois de ' + pedido.rota + ' ' + pedido.idempotencyKey);
+  return d;
+}
 
 test('CT-08 pela api(): inventário por pasto, sexo, categoria e situação em 31/12, 31/01, 15/02 e 31/03; o animal vendido na data; estornada a venda, o passado muda', () => {
   const s = S.sistema();
   const animais = [];
   for (let i = 1; i <= 100; i++) animais.push(S.bicho({ brinco: String(800 + i), sexo: i % 2 ? 'F' : 'M', pasto_destino_id: i <= 60 ? S.PASTOS.A : S.PASTOS.B, data_nascimento: '2022-01-01', data_nascimento_confianca: 'ESTIMADA' }));
-  const ent = ok(chamar(s, { rota: 'evento.registrar', idempotencyKey: 'ct08-d0', dados: S.entradaInicial(animais) })).animais;
+  const ent = cmd(s, { rota: 'evento.registrar', idempotencyKey: 'ct08-d0', dados: S.entradaInicial(animais) }).animais;
   const noA = ent.slice(0, 60).map((a) => a.animal_id);
   const noB = ent.slice(60).map((a) => a.animal_id);
   const femeasA = ent.slice(0, 60).filter((a) => a.sexo === 'F').map((a) => a.animal_id);
-  ok(chamar(s, { rota: 'evento.registrar', idempotencyKey: 'ct08-n1', dados: { tipo: 'NASCIMENTO', campos: { event_date: '2026-01-15' }, animais: [{ animal_id: femeasA[0] }], crias: [{ situacao_nascimento: 'VIVO', sexo: 'F' }] } }));
-  ok(chamar(s, { rota: 'evento.registrar', idempotencyKey: 'ct08-n2', dados: { tipo: 'NASCIMENTO', campos: { event_date: '2026-01-15' }, animais: [{ animal_id: femeasA[1] }], crias: [{ situacao_nascimento: 'VIVO', sexo: 'M' }] } }));
-  ok(chamar(s, { rota: 'evento.registrar', idempotencyKey: 'ct08-t', dados: { tipo: 'TRANSFERENCIA', campos: { event_date: '2026-02-01', pasto_origem_id: S.PASTOS.A, pasto_destino_id: S.PASTOS.B }, animais: noA.slice(10, 20).map((animal_id) => ({ animal_id })) } }));
-  const comp = ok(chamar(s, { rota: 'parceiro.salvar', idempotencyKey: 'ct08-p', dados: { campos: { nome: 'Comprador', tipos: 'COMPRADOR' } } })).partner_id;
+  cmd(s, { rota: 'evento.registrar', idempotencyKey: 'ct08-n1', dados: { tipo: 'NASCIMENTO', campos: { event_date: '2026-01-15' }, animais: [{ animal_id: femeasA[0] }], crias: [{ situacao_nascimento: 'VIVO', sexo: 'F' }] } });
+  cmd(s, { rota: 'evento.registrar', idempotencyKey: 'ct08-n2', dados: { tipo: 'NASCIMENTO', campos: { event_date: '2026-01-15' }, animais: [{ animal_id: femeasA[1] }], crias: [{ situacao_nascimento: 'VIVO', sexo: 'M' }] } });
+  cmd(s, { rota: 'evento.registrar', idempotencyKey: 'ct08-t', dados: { tipo: 'TRANSFERENCIA', campos: { event_date: '2026-02-01', pasto_origem_id: S.PASTOS.A, pasto_destino_id: S.PASTOS.B }, animais: noA.slice(10, 20).map((animal_id) => ({ animal_id })) } });
+  const comp = cmd(s, { rota: 'parceiro.salvar', idempotencyKey: 'ct08-p', dados: { campos: { nome: 'Comprador', tipos: 'COMPRADOR' } } }).partner_id;
   const vendidos = noB.slice(0, 5);
-  const v = ok(chamar(s, { rota: 'evento.registrar', idempotencyKey: 'ct08-v', dados: { tipo: 'VENDA', campos: { event_date: '2026-02-20', partner_id: comp, finalidade: 'RECRIA_ENGORDA', modalidade: 'CABECA', preco_unitario: 400000, valor_bruto: 2000000 }, animais: vendidos.map((animal_id) => ({ animal_id })), parcelas: [{ data_vencimento: '2026-02-20' }] } })).event_id;
-  ok(chamar(s, { rota: 'evento.registrar', idempotencyKey: 'ct08-m', dados: { tipo: 'MORTE', campos: { event_date: '2026-03-10', causa: 'DOENCA' }, animais: [{ animal_id: noA[30] }] } }));
-  s.conferirProjecoes('CT-08');
+  const v = cmd(s, { rota: 'evento.registrar', idempotencyKey: 'ct08-v', dados: { tipo: 'VENDA', campos: { event_date: '2026-02-20', partner_id: comp, finalidade: 'RECRIA_ENGORDA', modalidade: 'CABECA', preco_unitario: 400000, valor_bruto: 2000000 }, animais: vendidos.map((animal_id) => ({ animal_id })), parcelas: [{ data_vencimento: '2026-02-20' }] } }).event_id;
+  cmd(s, { rota: 'evento.registrar', idempotencyKey: 'ct08-m', dados: { tipo: 'MORTE', campos: { event_date: '2026-03-10', causa: 'DOENCA' }, animais: [{ animal_id: noA[30] }] } });
   const pos = (dados) => ok(chamar(s, { rota: 'inventario.posicao', dados }));
   const resumo = (data) => {
     const p = pos({ data });
@@ -210,9 +215,14 @@ test('CT-08 pela api(): inventário por pasto, sexo, categoria e situação em 3
   assert.deepEqual([em15.peso.situacao, em15.peso.kg], ['SEM_PESO', null], 'sem peso: null, nunca zero');
   const em31 = pos({ data: '2026-03-31', animal_id: vend });
   assert.deepEqual([em31.presente, em31.situacao, em31.pasture_id, em31.saida.event_type, em31.saida.event_date, em31.categoria, em31.peso], [false, 'VENDIDO', null, 'VENDA', '2026-02-20', null, null]);
+  // A composição do Pasto 2 em 15/02 pela rota pasto.painel: os 40 do marco zero e os 10 transferidos em 01/02; dias de
+  // fevereiro: 35 × 28 + 5 vendidos × 19 (01 a 19/02; o dia da venda não conta) + 10 × 28 = 1.355.
+  const pb = ok(chamar(s, { rota: 'pasto.painel', dados: { pasture_id: S.PASTOS.B, data: '2026-02-15', periodo_inicio: '2026-02-01', periodo_fim: '2026-02-28' } }));
+  assert.deepEqual([pb.cabecas, pb.animais.filter((a) => a.no_pasto_desde === '2026-02-01').length, pb.permanencia.base_total, pb.permanencia.n], [50, 10, 1355, 50]);
+  assert.deepEqual(pb.permanencia.itens.filter((x) => vendidos.indexOf(x.animal_id) >= 0).map((x) => x.dias), [19, 19, 19, 19, 19]);
+  assert.equal(chamar(s, { rota: 'pasto.painel', dados: { pasture_id: S.PASTOS.B, data: '2026-12-01' } }).error.code, 'VALIDATION');
   // Estornada a venda (em abril, hoje): o inventário de 31/03 passa a 101, e o vendido volta a estar no Pasto B.
-  ok(chamar(s, { rota: 'evento.estornar', idempotencyKey: 'ct08-est', dados: { event_id: v, justificativa: 'Venda desfeita' } }));
-  s.conferirProjecoes('CT-08 depois do estorno');
+  cmd(s, { rota: 'evento.estornar', idempotencyKey: 'ct08-est', dados: { event_id: v, justificativa: 'Venda desfeita' } });
   assert.deepEqual(resumo('2026-03-31'), [101, 51, 50, null]);
   assert.deepEqual(pos({ data: '2026-03-31' }).por_situacao, { ATIVO: 101, VENDIDO: 0, MORTO: 1, DESCARTADO: 0, BAIXADO_AJUSTE: 0 });
   assert.deepEqual([pos({ data: '2026-03-31', animal_id: vend }).situacao, pos({ data: '2026-03-31', animal_id: vend }).pasture_id], ['ATIVO', S.PASTOS.B]);
@@ -389,7 +399,7 @@ test('aviso LOTACAO_ACIMA_DA_CAPACIDADE em UA/ha (RN-027): compra retroativa com
 /** Rebanho com movimento: 4 no marco zero, 2 compras, 1 parto, 1 venda de 2, 1 morte, 1 descarte e 1 baixa na contagem. */
 function movimentado() {
   const s = S.sistema();
-  const r = (chave, dados, avisos) => ok(chamar(s, { rota: 'evento.registrar', idempotencyKey: chave, dados, avisosAceitos: avisos || [] }));
+  const r = (chave, dados, avisos) => cmd(s, { rota: 'evento.registrar', idempotencyKey: chave, dados, avisosAceitos: avisos || [] });
   const ent = r('d0', S.entradaInicial([
     S.bicho({ brinco: 'V1', data_nascimento: '2020-01-01', data_nascimento_confianca: 'ESTIMADA', partos_previos: 1 }),
     S.bicho({ brinco: 'V2', data_nascimento: '2020-01-01', data_nascimento_confianca: 'ESTIMADA', partos_previos: 1, pasto_destino_id: S.PASTOS.B }),
@@ -397,8 +407,8 @@ function movimentado() {
     S.bicho({ brinco: 'B2', sexo: 'M', data_nascimento: '2023-01-01', data_nascimento_confianca: 'ESTIMADA', castrado: true, pasto_destino_id: S.PASTOS.B }),
   ])).animais;
   const id = (b) => ent.find((a) => a.brinco === b).animal_id;
-  const forn = ok(chamar(s, { rota: 'parceiro.salvar', idempotencyKey: 'pf', dados: { campos: { nome: 'Fornecedor', tipos: 'FORNECEDOR' } } })).partner_id;
-  const compr = ok(chamar(s, { rota: 'parceiro.salvar', idempotencyKey: 'pc', dados: { campos: { nome: 'Comprador', tipos: 'COMPRADOR' } } })).partner_id;
+  const forn = cmd(s, { rota: 'parceiro.salvar', idempotencyKey: 'pf', dados: { campos: { nome: 'Fornecedor', tipos: 'FORNECEDOR' } } }).partner_id;
+  const compr = cmd(s, { rota: 'parceiro.salvar', idempotencyKey: 'pc', dados: { campos: { nome: 'Comprador', tipos: 'COMPRADOR' } } }).partner_id;
   const garrote = (b, sexo) => ({ brinco: b, sexo, castrado: sexo === 'M' ? false : undefined, reprodutor: sexo === 'M' ? false : undefined, idade_meses: 14 });
   const c1 = r('c1', { tipo: 'COMPRA', campos: { event_date: '2026-02-01', partner_id: forn, pasto_destino_id: S.PASTOS.A, modalidade: 'CABECA', preco_unitario: 250000, valor_animais: 500000 }, animais: [garrote('C1', 'M'), garrote('C2', 'F')], parcelas: [{ data_vencimento: '2026-03-01' }] });
   r('c2', { tipo: 'COMPRA', campos: { event_date: '2026-04-15', partner_id: forn, pasto_destino_id: S.PASTOS.B, modalidade: 'CABECA', preco_unitario: 300000, valor_animais: 300000 }, animais: [garrote('C3', 'M')], parcelas: [{ data_vencimento: '2026-05-15' }] });
@@ -407,7 +417,6 @@ function movimentado() {
   r('m1', { tipo: 'MORTE', campos: { event_date: '2026-06-05', causa: 'DOENCA' }, animais: [{ animal_id: c1.animais.find((a) => a.brinco === 'C1').animal_id }] });
   r('d1', { tipo: 'DESCARTE', campos: { event_date: '2026-07-01', destino: 'CONSUMO_PROPRIO', motivo: 'IDADE' }, animais: [{ animal_id: id('V2') }] });
   r('a1', { tipo: 'AJUSTE_INVENTARIO', subtipo: 'DIVERGENCIA_CONTAGEM', campos: { event_date: '2026-08-01', justificativa: 'Contagem do curral' }, animais: [{ animal_id: c1.animais.find((a) => a.brinco === 'C2').animal_id }] });
-  s.conferirProjecoes('rebanho movimentado');
   return { s, id, venda: venda.event_id };
 }
 const visao = (s, dados) => chamar(s, { rota: 'dashboard.obter', dados: dados || {} });
@@ -439,8 +448,7 @@ test('visão geral (dashboard.obter): movimento do período, receita de vendas, 
   assert.deepEqual([mai.movimento.vendas.cabecas, mai.movimento.compras.cabecas, mai.movimento.nascimentos.cabecas, mai.receita_vendas.valor, mai.cabecas, mai.data], [2, 0, 0, 800000, 6, '2026-05-31']);
   assert.equal(mai.etiquetas.titulos, 'em aberto hoje, sem os filtros');
   // Estornada a venda: o movimento, a receita e a série do rebanho mudam no passado.
-  ok(chamar(s, { rota: 'evento.estornar', idempotencyKey: 'est-v', dados: { event_id: venda, justificativa: 'Venda desfeita' } }));
-  s.conferirProjecoes('depois do estorno da venda');
+  cmd(s, { rota: 'evento.estornar', idempotencyKey: 'est-v', dados: { event_id: venda, justificativa: 'Venda desfeita' } });
   const depois = ok(visao(s));
   assert.deepEqual([depois.movimento.vendas.cabecas, depois.receita_vendas.valor, depois.series.rebanho[5].cabecas, depois.cabecas], [0, 0, 8, 5]);
 });
