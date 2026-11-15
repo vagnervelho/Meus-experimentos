@@ -230,7 +230,7 @@ var PastureService = (function () {
   function consultaPainel(dados) {
     var d = dados || {};
     return {
-      rota: 'pasto.painel', dados: d, reads: leiturasConsulta_(),
+      rota: 'pasto.painel', dados: d, reads: leiturasConsulta_(), acessoCru: true,
       tratador: function (tx) {
         var L = AnimalService.leitor(tx);
         var data = dataConsulta_(L, d.data);
@@ -249,7 +249,7 @@ var PastureService = (function () {
   function consultaListar(filtros) {
     var o = filtros || {};
     return {
-      rota: 'pasto.listar', dados: o, reads: leiturasConsulta_(),
+      rota: 'pasto.listar', dados: o, reads: leiturasConsulta_(), acessoCru: true,
       tratador: function (tx) {
         var L = AnimalService.leitor(tx);
         var pr = InventoryService.presentes(L, L.hoje);

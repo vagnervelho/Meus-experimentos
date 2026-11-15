@@ -258,6 +258,9 @@ var Timeline = (function () {
         for (var guarda = 0; guarda < 10000; guarda++) {
           if (vazio_(atual.reversal_of_event_id) || atual.event_type === 'ESTORNO') break;
           var alvo = evento(atual.reversal_of_event_id);
+          // Sem acesso cru o evento anulado não aparece e a cadeia pararia no substituto, que cairia no fim do dia:
+          // a ordem do dia ficaria errada em silêncio. Quem reproduz a linha do tempo declara `acessoCru`.
+          if (!alvo && !cru) throw Validation.erro('INTERNAL', 'A consulta precisa de acesso cru para achar a posição de um evento corrigido na ordem do dia (desenho-base 16.1).');
           if (!alvo || alvo.event_type !== atual.event_type) break;
           atual = alvo;
         }

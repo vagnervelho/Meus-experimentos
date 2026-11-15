@@ -809,6 +809,34 @@ function conferirTudo(amb, M, msg, datasSistema) {
   assert.deepEqual(invariantesCruas(r), [], msg + ': invariantes de 03b, seção 14 (conferidas sobre as linhas cruas)');
 }
 
+/**
+ * As outras consultas que reproduzem a linha do tempo (painel de cada pasto em várias datas, cartões dos pastos e
+ * visão geral de hoje, carga inicial dos animais) dizem o mesmo que o replay cru.
+ */
+function conferirConsultas(amb, M, msg) {
+  const { m, G } = amb;
+  const R = replayCru(cru(m));
+  const datas = [D0, HOJE];
+  for (let k = 30; k < DIAS; k += 45) datas.push(somaDias(D0, k));
+  M.eventos.slice(-4).forEach((e) => { if (e.data >= D0) datas.push(e.data); });
+  Array.from(new Set(datas)).forEach((D) => {
+    const rep = inventarioDe(R.linhas, D);
+    USO.forEach((p) => assert.equal(m.ler(G.PastureService.consultaPainel({ pasture_id: p, data: D })).cabecas, rep.porPasto[p] || 0, msg + ': painel do pasto em ' + D));
+  });
+  const hoje = inventarioDe(R.linhas, HOJE);
+  m.ler(G.PastureService.consultaListar({})).forEach((c2) => assert.equal(c2.cabecas, hoje.porPasto[c2.pasture_id] || 0, msg + ': cartão do pasto ' + c2.nome));
+  assert.equal(m.ler(G.InventoryService.consultaVisaoGeral()).cabecas, hoje.total, msg + ': visão geral');
+  const carga = m.ler(G.AnimalService.consultaCargaInicial());
+  const ativos = [];
+  M.animais.forEach((a, id) => { if (situacaoDe(linhasDe(M, id)).situacao === 'ATIVO') ativos.push(id); });
+  const daCarga = carga.valores.animal_id.filter((id, i) => carga.valores.situacao_cadastral[i] === 'ATIVO');
+  assert.deepEqual(daCarga.sort(), ativos.sort(), msg + ': carga inicial (ativos)');
+  daCarga.forEach((id) => {
+    const i = carga.valores.animal_id.indexOf(id);
+    assert.equal(carga.valores.pasto_atual_id[i], situacaoDe(linhasDe(M, id)).pasto, msg + ': pasto na carga inicial');
+  });
+}
+
 // ------------------------------------------------------------------ rebanho inicial ----
 /** Rebanho do marco zero: 6 vacas e 4 bois em A, B e C, todos com brinco. Devolve {M, ids: {brinco: id}}. */
 function rebanhoInicial(amb, M) {
@@ -1024,6 +1052,7 @@ function sequencia(semente, passos, opcoes) {
     const data = p.novo ? p.novo.data : p.alvo.data;
     conferirTudo(amb, M, msg, [data, somaDias(data, -1), dataAleatoria(rnd)]);
   }
+  conferirConsultas(amb, M, 'semente ' + semente + ', fim');
   return M;
 }
 
@@ -1206,6 +1235,7 @@ test('correção de localização: a origem é a da linha do tempo na POSIÇÃO 
   const v = passo(amb, M, propVenda(M, amb, '2026-05-01', [boi], CABECA(300000), null), 'OK', 'venda do boi');
   assert.deepEqual(Array.from(passo(amb, M, propLocalizacao(M, '2026-05-01', boi, PASTOS.B, null), 'CONFLICT', 'correção de localização no dia da venda').prev.outros), [v.ev.id]);
   passo(amb, M, propLocalizacao(M, '2026-05-02', boi, PASTOS.B, null), 'VALIDATION', 'no dia seguinte à venda, fora do rebanho');
+  conferirConsultas(amb, M, 'correção de localização');
 });
 
 /** Ambiente sem o modelo, para negociações que o modelo não cobre (arroba, lote, peso só do lote): 3 bois no marco zero. */

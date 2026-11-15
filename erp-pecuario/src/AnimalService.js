@@ -219,7 +219,7 @@ var AnimalService = (function () {
    */
   function consultaCargaInicial() {
     return {
-      rota: 'sistema.bootstrap', reads: leituras(),
+      rota: 'sistema.bootstrap', reads: leituras(), acessoCru: true,
       tratador: function (tx) {
         var L = leitor(tx);
         return colunar_(L, L.animais.filter(function (a) { return SITUACOES_CARGA.indexOf(a.situacao_cadastral) >= 0; }));
@@ -234,7 +234,7 @@ var AnimalService = (function () {
   function consultaListar(filtros) {
     var o = filtros || {};
     return {
-      rota: 'animal.listar', dados: o, reads: leituras(),
+      rota: 'animal.listar', dados: o, reads: leituras(), acessoCru: true,
       tratador: function (tx) {
         var sit = vazio_(o.situacoes) ? SITUACOES_BAIXADOS : o.situacoes;
         var validas = SITUACOES_CARGA.concat(SITUACOES_BAIXADOS);

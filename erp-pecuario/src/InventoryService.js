@@ -186,7 +186,7 @@ var InventoryService = (function () {
   function consultaPosicao(dados) {
     var d = dados || {};
     return {
-      rota: 'inventario.posicao', dados: d, reads: leituras(),
+      rota: 'inventario.posicao', dados: d, reads: leituras(), acessoCru: true,
       tratador: function (tx) {
         var L = AnimalService.leitor(tx);
         var data = conferirData_(L, d.data);
@@ -205,7 +205,7 @@ var InventoryService = (function () {
    */
   function consultaVisaoGeral() {
     return {
-      rota: 'dashboard.obter', reads: leituras().concat(['FINANCEIRO', 'PARCELAS']),
+      rota: 'dashboard.obter', reads: leituras().concat(['FINANCEIRO', 'PARCELAS']), acessoCru: true,
       tratador: function (tx) {
         var L = AnimalService.leitor(tx);
         var out = posicao(L, L.hoje);
@@ -277,7 +277,7 @@ var InventoryService = (function () {
   /** Consulta `alerta.listar`: `estado` como em `alertas`. */
   function consultaAlertas(estado) {
     return {
-      rota: 'alerta.listar', reads: Utils.unicos(leituras().concat(['IMPORTACOES'])),
+      rota: 'alerta.listar', reads: Utils.unicos(leituras().concat(['IMPORTACOES'])), acessoCru: true,
       tratador: function (tx) { return alertas(AnimalService.leitor(tx), estado); },
     };
   }
@@ -295,7 +295,7 @@ var InventoryService = (function () {
   function consultaElegiveis(dados) {
     var d = dados || {};
     return {
-      rota: 'inventario.elegiveis', dados: d, reads: leituras(),
+      rota: 'inventario.elegiveis', dados: d, reads: leituras(), acessoCru: true,
       tratador: function (tx) {
         var tipo = d.tipo;
         var def = !vazio_(tipo) && EventCatalog.existe(tipo) && EventCatalog.ativo(tipo, d.subtipo || null) ? EventCatalog.tipo(tipo) : null;
