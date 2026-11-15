@@ -188,11 +188,25 @@ for (const largura of LARGURAS) {
     await page.click('label[for="imp-parcial"]');
     assert.equal(await importarB.isDisabled(), false);
     await semProblemasDeLeiaute(page, largura, 'importação, confirmação');
+    // Queda de rede no bloco 2: a tela mostra a importação incompleta com Retomar, que continua do bloco 2.
+    await page.evaluate(() => {
+      const orig = window.__erpServidor;
+      let caiu = false;
+      window.__erpServidor = (json) => {
+        const p = JSON.parse(json);
+        if (!caiu && p.rota === 'importacao.importarBloco' && p.dados.bloco === 2) { caiu = true; return Promise.reject(new Error('NetworkError: queda de sinal')); }
+        return orig(json);
+      };
+    });
     await importarB.click();
+    await page.waitForSelector('button:has-text("Retomar")', { timeout: 20000 });
+    assert.match(await textoTela(page, '#conteudo [role=alert]'), /Sem conexão/);
+    assert.equal(vigentesDe(s, 'IMPORTACOES')[0].status, 'IMPORTANDO', 'só o bloco 1 gravado: importação incompleta');
+    await page.click('button:has-text("Retomar")');
     await page.waitForSelector('[data-relatorio="IMPORTADO"]', { timeout: 20000 });
     assert.match(await textoTela(page, '[data-relatorio]'), /27 animais entraram no rebanho/);
     const blocos = a.pedidos('importacao.importarBloco').filter((p) => p.idempotencyKey !== 'teste-total');
-    assert.deepEqual(blocos.map((p) => p.dados.bloco), [1, 2, 3], 'importação em blocos de 10, com progresso');
+    assert.deepEqual(blocos.map((p) => p.dados.bloco), [1, 2, 3], 'importação em blocos de 10, com progresso; o bloco 2 que caiu nem chegou ao servidor e foi reenviado pelo Retomar');
     assert.deepEqual(blocos[0].dados.aprovacao, { importar: 27, ignorar: 3 });
     assert.equal(blocos[0].dados.modo, 'PARCIAL_APROVADO');
     assert.match(await textoTela(page, '[data-secao="relatorio"]'), /parcial, aprovada por dono@gmail\.com/);
@@ -375,6 +389,20 @@ test('telas a 360 px: pastos, configurações e sistema sem rolagem e com alvos 
   await page.click('button:has-text("Fazer backup agora")');
   await page.waitForFunction(() => /Backup feito/.test(document.querySelector('[data-secao="backups"]').textContent));
   await page.waitForSelector('[data-secao="backups"] button:has-text("Restaurar")');
+  // Restaurar: consequência descrita, palavra RESTAURAR e justificativa; o banco em uso passa a ser a cópia.
+  const bancoAntes = s.banco();
+  await page.click('[data-secao="backups"] button:has-text("Restaurar")');
+  await page.waitForSelector(dialogo + ' #rst-palavra');
+  assert.match(await textoTela(page, dialogo), /serão substituídos pela cópia/);
+  await page.fill(dialogo + ' textarea', 'Ensaio de restauração');
+  await page.click(dialogo + ' button:has-text("Restaurar o backup")');
+  await page.waitForSelector(dialogo + ' .nota-erro');
+  assert.equal(a.pedidos('sistema.restaurarBackup').length, 0, 'sem a palavra, nada vai ao servidor');
+  await page.fill(dialogo + ' #rst-palavra', 'restaurar');
+  await page.click(dialogo + ' button:has-text("Restaurar o backup")');
+  await page.waitForSelector(dialogo, { state: 'detached', timeout: 20000 });
+  assert.notEqual(s.banco(), bancoAntes, 'o banco em uso é a cópia restaurada');
+  await page.waitForSelector('[data-secao="backups"] button:has-text("Restaurar")');
   await page.click('button:has-text("Verificar a integridade agora")');
   await page.waitForFunction(() => /Tudo certo/.test((document.querySelector('[data-integridade]') || {}).textContent || ''));
   await page.click('button:has-text("Rodar o diagnóstico")');
@@ -389,6 +417,50 @@ test('telas a 360 px: pastos, configurações e sistema sem rolagem e com alvos 
   assert.match(await textoTela(page, '[data-indicador="machos"]'), /Machos\s*1/);
   assert.match(await textoTela(page, '[data-indicador="femeas"]'), /Fêmeas\s*3/);
   await semProblemasDeLeiaute(page, 360, 'início');
+  assert.deepEqual(a.estado.erros, []);
+  await a.fechar();
+});
+
+test('fotos e documentos na ficha: imagem reduzida no aparelho, foto principal no cabeçalho, abrir e remover com justificativa', async () => {
+  const s = A.sistema();
+  const sem = A.semear(s);
+  const id = sem.animais.filter((x) => x.brinco === '0391')[0].animal_id;
+  const a = await A.abrir(s, { largura: 1280, hash: 'animal/' + id + '/anexos' });
+  const { page } = a;
+  await A.esperarTela(page, '0391');
+  await page.waitForSelector('button:has-text("Adicionar foto ou documento")');
+  await page.click('button:has-text("Adicionar foto ou documento")');
+  const form = dialogo + ' [data-cadastro="anexo.adicionar"]';
+  await page.waitForSelector(form);
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+  await page.setInputFiles(form + ' input[type=file]', { name: 'vaca.png', mimeType: 'image/png', buffer: png });
+  await page.waitForFunction(() => /Arquivo: vaca\.jpg/.test(document.querySelector('[data-cadastro="anexo.adicionar"]').textContent));
+  await page.click(form + ' [data-campo="definir_como_foto"] label.opcao:has-text("Sim")');
+  await page.click(dialogo + ' [data-acao-principal]');
+  await page.waitForSelector(dialogo, { state: 'detached' });
+  const ped = a.pedidos('anexo.adicionar')[0];
+  assert.equal(ped.dados.mime_type, 'image/jpeg', 'imagem convertida e reduzida no aparelho');
+  assert.ok(ped.dados.miniatura_base64 && ped.dados.miniatura_base64.length * 3 / 4 <= 15 * 1024, 'miniatura de até ~15 KB');
+  assert.equal(ped.dados.definir_como_foto, true);
+  const anexo = vigentesDe(s, 'ANEXOS').filter((x) => x.entity_id === id)[0];
+  assert.equal(anexo.status, 'ATIVO');
+  assert.equal(vigentesDe(s, 'ANIMAIS').filter((x) => x.animal_id === id)[0].foto_anexo_id, anexo.anexo_id);
+  await page.waitForSelector('.ficha-foto[src^="data:image/"]');
+  await page.waitForSelector('[data-anexo="' + anexo.anexo_id + '"] img[src^="data:image/"]');
+  await page.click('[data-anexo="' + anexo.anexo_id + '"] button:has-text("Abrir")');
+  await page.waitForSelector(dialogo + ' img.imagem-cheia[src^="data:image/"]');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector(dialogo, { state: 'detached' });
+  await page.click('[data-anexo="' + anexo.anexo_id + '"] button:has-text("Remover")');
+  await page.waitForSelector(dialogo + ' textarea');
+  await page.click(dialogo + ' [data-acao-principal]');
+  await page.waitForSelector(dialogo + ' [data-campo="justificativa"] .campo-erro:not([hidden])');
+  await page.fill(dialogo + ' textarea', 'Foto de outro animal');
+  await page.click(dialogo + ' [data-acao-principal]');
+  await page.waitForSelector(dialogo, { state: 'detached' });
+  await page.waitForFunction(() => /Nenhuma foto ou documento/.test(document.getElementById('conteudo').textContent));
+  assert.equal(vigentesDe(s, 'ANEXOS').filter((x) => x.anexo_id === anexo.anexo_id)[0].status, 'REMOVIDO');
+  assert.equal(vigentesDe(s, 'ANIMAIS').filter((x) => x.animal_id === id)[0].foto_anexo_id, null, 'a foto principal sai junto');
   assert.deepEqual(a.estado.erros, []);
   await a.fechar();
 });
