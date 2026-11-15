@@ -1015,9 +1015,38 @@ var Anexos = (function () {
    * ([[financial_id, rótulo]]: o arquivo pode ir para um lançamento financeiro do evento), fotoPrincipal (animal),
    * aoSalvar(r)}. O cliente só confere o formato; tipo de arquivo, tamanho e dono são do servidor.
    */
+  function defsArquivo_(tipo) {
+    return [{ id: 'arquivo', rotulo: 'Arquivo (imagem ou PDF)', tipo: 'anexo', obrigatorio: true, ajuda: 'Fotos são reduzidas neste aparelho antes de enviar. Documentos até 5 MB.' },
+      { id: 'tipo', rotulo: 'Tipo', tipo: 'lista', opcoes: TIPOS, rotulos_de: 'tipo_anexo', obrigatorio: true, default: tipo || 'FOTO' }];
+  }
+  function conferir_(c) { return c.tipo === 'FOTO' && c.arquivo && !ehImagem(c.arquivo) ? [{ campo: 'tipo', mensagem: 'Uma foto precisa ser uma imagem. Para um PDF, escolha outro tipo.' }] : []; }
+  /** Tipo de arquivo sugerido pelo tipo do evento: nota fiscal na compra e na venda, GTA na transferência; documento nos demais. */
+  function tipoPadrao(tipoEvento) { return tipoEvento === 'COMPRA' || tipoEvento === 'VENDA' ? 'NOTA_FISCAL' : tipoEvento === 'TRANSFERENCIA' ? 'GTA' : 'DOCUMENTO'; }
+  /** O pedido de anexo.adicionar de um arquivo escolhido no formulário ({arquivo, tipo, descricao}) para o evento gravado. */
+  function pedidoEvento(a, eventId) {
+    return { entidade: 'EVENTOS', entity_id: eventId, tipo: a.tipo, descricao: a.descricao || null, nome_arquivo: a.arquivo.nome_arquivo, mime_type: a.arquivo.mime_type, conteudo_base64: a.arquivo.conteudo_base64, miniatura_base64: a.arquivo.miniatura_base64 || null };
+  }
+  /**
+   * Escolha de um arquivo SEM enviar (formulário de evento, 08, seção 4.3: o arquivo vai ao servidor depois que o
+   * lançamento é gravado, por anexo.adicionar). o: {origem, tipoPadrao, aoEscolher({arquivo, tipo, descricao})}.
+   */
+  function escolher(o) {
+    var bloco = Formulario.bloco(defsArquivo_(o.tipoPadrao).concat([{ id: 'descricao', rotulo: 'Descrição', tipo: 'texto' }]), {}, { idBase: 'anx-form' });
+    var f = UI.folha({ titulo: 'Documento ou foto do lançamento', origem: o.origem, conteudo: h('div', { class: 'formulario', dataset: { escolherAnexo: '1' } }, bloco.el) });
+    var incluir = UI.botao('Incluir', { tipo: 'primario', aoClicar: function () {
+      var c = bloco.converter();
+      var e = c.erros.length ? [] : conferir_(c.valores);
+      if (e.length) bloco.mostrarErros(e);
+      if (c.erros.length || e.length) { bloco.focarPrimeiroErro(); return; }
+      f.fechar({ forcar: true });
+      o.aoEscolher({ arquivo: c.valores.arquivo, tipo: c.valores.tipo, descricao: c.valores.descricao || null });
+    } });
+    incluir.setAttribute('data-acao-principal', '1');
+    f.definirAcoes([UI.botao('Cancelar', { aoClicar: function () { f.fechar(); } }), incluir]);
+    return f;
+  }
   function enviar(o) {
-    var defs = [{ id: 'arquivo', rotulo: 'Arquivo (imagem ou PDF)', tipo: 'anexo', obrigatorio: true, ajuda: 'Fotos são reduzidas neste aparelho antes de enviar. Documentos até 5 MB.' },
-      { id: 'tipo', rotulo: 'Tipo', tipo: 'lista', opcoes: TIPOS, rotulos_de: 'tipo_anexo', obrigatorio: true, default: o.tipoPadrao || 'FOTO' }];
+    var defs = defsArquivo_(o.tipoPadrao);
     if (o.ligacoes && o.ligacoes.length) {
       defs.push({ id: 'ligar_a', rotulo: 'O arquivo é de', tipo: 'lista', obrigatorio: true, default: 'EVENTO', opcoes: ['EVENTO'].concat(o.ligacoes.map(function (l) { return l[0]; })),
         rotulos_opcoes: ['O lançamento todo'].concat(o.ligacoes.map(function (l) { return l[1]; })), ajuda: 'Escolha o lançamento financeiro quando o arquivo for só dele (boleto do frete, recibo da comissão).' });
@@ -1027,8 +1056,7 @@ var Anexos = (function () {
     return Cadastro.folha({
       titulo: o.titulo || 'Foto ou documento', rota: 'anexo.adicionar', origem: o.origem, idBase: o.idBase || 'anx', verbo: 'Enviar', defs: defs,
       validar: function (c) {
-        var e = [];
-        if (c.tipo === 'FOTO' && c.arquivo && !ehImagem(c.arquivo)) e.push({ campo: 'tipo', mensagem: 'Uma foto precisa ser uma imagem. Para um PDF, escolha outro tipo.' });
+        var e = conferir_(c);
         if (c.definir_como_foto && c.arquivo && !ehImagem(c.arquivo)) e.push({ campo: 'definir_como_foto', mensagem: 'Só uma imagem pode ser a foto principal.' });
         return e;
       },
@@ -1067,7 +1095,7 @@ var Anexos = (function () {
     });
     return ul;
   }
-  return { TIPOS: TIPOS, carregarImagem: carregarImagem, abrir: abrir, enviar: enviar, remover: remover, lista: lista };
+  return { TIPOS: TIPOS, carregarImagem: carregarImagem, abrir: abrir, enviar: enviar, remover: remover, lista: lista, tipoPadrao: tipoPadrao, pedidoEvento: pedidoEvento, escolher: escolher };
 })();
 
 var Seletor = (function () {
@@ -1345,6 +1373,7 @@ var Registro = (function () {
       rotulos: Util.clonar(p.rotulos || {}), origem: p.origem || null, estado: 'EDITANDO', alterado: !!previa, restaurado: null,
       corrige: p.corrige ? Util.clonar(p.corrige) : null, justificativaCorrecao: p.justificativaCorrecao || '',
       erros: [], avisos: [], aceites: {}, justificativaAviso: '', simulacao: null, dvEsperada: null, resultado: null, envio: null, view: null, removidosComProblema: 0,
+      anexos: [],
     };
     (p.linhas || []).forEach(function (l) { s.linhas.push({ uid: uid(), animal_id: l.animal_id || null, criado: !!l.criado, valores: Util.clonar(l.valores || {}), erros: [] }); });
     if (def.selecao_animais === 'NOVOS' && !s.linhas.length) s.linhas.push(linhaNova_(s));
@@ -1764,12 +1793,14 @@ var Registro = (function () {
     form.appendChild(v.avisoData);
     v.animais = h('section', { class: 'bloco-animais', 'aria-label': 'Animais' });
     if (def.selecao_animais !== 'NENHUM') form.appendChild(v.animais);
-    v.meio = h('div');
+    // Âncora: o bloco do meio fica filho direto do formulário e é trocado no lugar quando o subtipo muda.
+    v.meio = document.createTextNode('');
     form.appendChild(v.meio);
     desenharMeio(s);
     v.grupos = h('div');
     form.appendChild(v.grupos);
     if (ultimo.length) { v.blocos.ultimo = Formulario.bloco(ultimo, s.campos, v.opEv); form.appendChild(v.blocos.ultimo.el); }
+    if (s.tipo !== 'ESTORNO') { v.anexos = h('section', { class: 'subgrupo', 'aria-label': 'Documentos e fotos', dataset: { anexosForm: '1' } }); form.appendChild(v.anexos); desenharAnexos(s); }
     if (s.corrige) {
       v.justCorrecao = Campos.criar({ id: 'justificativa_correcao', rotulo: 'Por que corrigir', tipo: 'texto', obrigatorio: true, ajuda: 'Fica gravado junto da correção.' }, { valor: s.justificativaCorrecao, idBase: 'corr', aoMudar: function (t) { s.justificativaCorrecao = t || ''; v.justCorrecao.erro(null); tocar(s); } });
       v.justCorrecao.marcarObrigatorio(true);
@@ -1787,13 +1818,27 @@ var Registro = (function () {
     desenharProblemas(s);
     return raiz;
   }
+  /** Documentos e fotos do formulário (08, seção 4.3): escolhidos aqui, enviados ao evento depois de gravar (não vão ao rascunho). */
+  function desenharAnexos(s) {
+    var sec = s.view.anexos;
+    Util.limpar(sec);
+    sec.appendChild(h('h2', { text: 'Documentos e fotos' }));
+    sec.appendChild(h('p', { class: 'suave', text: 'Nota fiscal, GTA, laudo ou foto. Os arquivos são enviados logo depois de gravar e não ficam guardados no rascunho.' }));
+    if (s.anexos.length) sec.appendChild(h('ul', { class: 'lista-simples' }, s.anexos.map(function (a, k) {
+      return h('li', { class: 'linha-acao', dataset: { anexoForm: a.arquivo.nome_arquivo } }, h('span', { text: Fmt.rotulo('TIPO_ANEXO', a.tipo) + ': ' + a.arquivo.nome_arquivo + (a.descricao ? ' (' + a.descricao + ')' : '') }),
+        UI.botao('Tirar', { tipo: 'texto', icone: 'remover', rotulo: 'Tirar ' + a.arquivo.nome_arquivo, aoClicar: function () { s.anexos.splice(k, 1); desenharAnexos(s); } }));
+    })));
+    sec.appendChild(UI.botao('Anexar nota fiscal, GTA, laudo ou foto', { icone: 'registrar', aoClicar: function (ev) {
+      Anexos.escolher({ origem: ev.currentTarget, tipoPadrao: Anexos.tipoPadrao(s.tipo), aoEscolher: function (a) { a.chave = 'anx:' + Util.uuid(); s.anexos.push(a); desenharAnexos(s); } });
+    } }));
+  }
   /** Campos do cabeçalho entre a data e as observações; com subtipo, os dele vêm junto (redesenhados ao trocar). */
   function desenharMeio(s) {
     var v = s.view;
-    Util.limpar(v.meio);
+    if (v.blocos.meio && v.blocos.meio.el.parentNode) v.blocos.meio.el.parentNode.removeChild(v.blocos.meio.el);
     delete v.blocos.meio;
     var meio = camposEvento(s).filter(function (d) { return d.id !== 'event_date' && d.id !== 'notes'; });
-    if (meio.length) { v.blocos.meio = Formulario.bloco(meio, s.campos, v.opEv); v.meio.appendChild(v.blocos.meio.el); }
+    if (meio.length) { v.blocos.meio = Formulario.bloco(meio, s.campos, v.opEv); v.meio.parentNode.insertBefore(v.blocos.meio.el, v.meio.nextSibling); }
   }
   function desenharRascunho(s) {
     var v = s.view;
@@ -2327,7 +2372,7 @@ var Registro = (function () {
       Util.limpar(corpo);
       if (revServidor(s) && s.simulacao) corpo.appendChild(UI.nota('Calculado pelo servidor com os dados de agora. Ao confirmar, ele confere de novo.', 'info'));
       var dl = h('dl', { class: 'resumo-revisao' });
-      resumoLocal(s).concat(revServidor(s) ? impactosServidor(s) : []).forEach(function (p) { dl.appendChild(h('dt', { text: p[0] })); dl.appendChild(h('dd', { text: p[1] })); });
+      resumoLocal(s).concat(revServidor(s) ? impactosServidor(s) : [], s.anexos.length ? [['Documentos e fotos', s.anexos.map(function (a) { return a.arquivo.nome_arquivo; }).join(', ') + ' (enviados depois de gravar)']] : []).forEach(function (p) { dl.appendChild(h('dt', { text: p[0] })); dl.appendChild(h('dd', { text: p[1] })); });
       corpo.appendChild(dl);
       if (s.corrige) {
         var dif = diferencas(s);
@@ -2474,7 +2519,8 @@ var Registro = (function () {
     await Rascunhos.remover(idRascunho(s.tipo)).catch(function (e) { Util.registrarFalha('remover rascunho', e); });
     delete sessoes[s.tipo];
     App.removerFaixa('rascunho-' + s.tipo);
-    var resultado = { tipo: s.tipo, def: s.def, data: r.data, meta: r.meta, duplicado: r.duplicado, verificado: r.verificado, n: (r.data && r.data.animais ? r.data.animais.length : 0), origem: s.origem, corrige: s.corrige, subtipo: s.subtipo, acao: s.dados && s.dados.campos ? s.dados.campos.acao : null };
+    var resultado = { tipo: s.tipo, def: s.def, data: r.data, meta: r.meta, duplicado: r.duplicado, verificado: r.verificado, n: (r.data && r.data.animais ? r.data.animais.length : 0), origem: s.origem, corrige: s.corrige, subtipo: s.subtipo, acao: s.dados && s.dados.campos ? s.dados.campos.acao : null,
+      anexos: r.data && r.data.event_id ? (s.anexos || []).map(function (a) { return { a: a, estado: 'PENDENTE', mensagem: null }; }) : [] };
     var nova = novaSessao(s.tipo, s.def);
     nova.alterado = false;
     nova.resultado = resultado;
@@ -2485,7 +2531,8 @@ var Registro = (function () {
     } catch (e) {
       resultado.falhaAtualizar = e.message;
     }
-    var coletivo = resultado.n > 1 || critico(s);
+    if (resultado.anexos.length) enviarAnexos(resultado);
+    var coletivo = resultado.n > 1 || critico(s) || resultado.anexos.length > 0;
     if (!coletivo) {
       nova.resultado = null;
       UI.aviso(resumoResultado(resultado) + (r.duplicado && !r.verificado ? ' Já estava gravado; nada foi duplicado.' : ''), { tipo: 'ok' });
@@ -2493,6 +2540,43 @@ var Registro = (function () {
       return;
     }
     Roteador.ir(rotaDoForm(s.tipo) + '/resultado', { substituir: true });
+  }
+  /** Envia ao evento gravado os arquivos do formulário: anexo.adicionar, um comando cada, com a chave de cada arquivo. */
+  async function enviarAnexos(res) {
+    var mudou = function () { if (res.aoMudarAnexos) res.aoMudarAnexos(); };
+    for (var i = 0; i < res.anexos.length; i++) {
+      var x = res.anexos[i];
+      if (x.estado === 'ENVIADO' || x.estado === 'ENVIANDO') continue;
+      x.estado = 'ENVIANDO';
+      x.mensagem = null;
+      mudou();
+      try {
+        var r = await Cliente.comando('anexo.adicionar', Anexos.pedidoEvento(x.a, res.data.event_id), { chave: x.a.chave });
+        x.estado = 'ENVIADO';
+        try { await Store.aplicarResultado('anexo.adicionar', r.data, r.meta); } catch (e2) { Util.registrarFalha('carga depois do anexo', e2); }
+      } catch (e) {
+        x.estado = 'FALHOU';
+        x.mensagem = e.message;
+      }
+      mudou();
+    }
+  }
+  function blocoAnexosResultado(el, res) {
+    var ul = h('ul', { class: 'lista-simples', dataset: { anexosResultado: '1' } });
+    var TEXTO = { PENDENTE: 'na fila', ENVIANDO: 'enviando…', ENVIADO: 'guardado no lançamento', FALHOU: 'não foi enviado' };
+    function desenhar() {
+      if (!ul.isConnected && ul.childNodes.length) return;
+      Util.limpar(ul);
+      res.anexos.forEach(function (x) {
+        ul.appendChild(h('li', { class: 'linha-acao', dataset: { anexoEstado: x.estado } }, h('span', { class: 'campo-linha' }, UI.icone(x.estado === 'ENVIADO' ? 'ok' : x.estado === 'FALHOU' ? 'erro' : 'info'),
+          h('span', { text: Fmt.rotulo('TIPO_ANEXO', x.a.tipo) + ' ' + x.a.arquivo.nome_arquivo + ': ' + TEXTO[x.estado] + (x.mensagem ? ' (' + x.mensagem + ')' : '') + '.' })),
+          x.estado === 'FALHOU' ? UI.botao('Tentar de novo', { aoClicar: function () { enviarAnexos(res); } }) : null));
+      });
+    }
+    res.aoMudarAnexos = desenhar;
+    desenhar();
+    el.appendChild(h('section', { 'aria-label': 'Documentos e fotos' }, h('h2', { text: 'Documentos e fotos' }), ul,
+      h('p', { class: 'suave', text: 'Também dá para anexar depois, no detalhe do lançamento ("Ver evento").' })));
   }
   function resumoResultado(res) {
     var n = res.n;
@@ -2523,6 +2607,7 @@ var Registro = (function () {
     if (res.verificado) caixa.appendChild(UI.nota('A resposta demorou, mas o servidor confirmou a gravação.', 'ok'));
     if (res.falhaAtualizar) caixa.appendChild(UI.nota('Gravado. A lista do rebanho deste aparelho não pôde ser atualizada agora (' + res.falhaAtualizar + '); ela se atualiza na próxima abertura.', 'aviso'));
     if (d.event_date) caixa.appendChild(h('p', { text: 'Data: ' + Fmt.data(d.event_date) }));
+    if (res.anexos && res.anexos.length) blocoAnexosResultado(caixa, res);
     if (d.animais && d.animais.length) {
       caixa.appendChild(h('ul', { class: 'lista-simples' }, d.animais.slice(0, 20).map(function (a) {
         var p = a.pasto_atual_id ? Store.pasto(a.pasto_atual_id) : null;
@@ -2688,6 +2773,7 @@ var Registro = (function () {
 
   return {
     abrir: abrir, conferirPendentes: conferirPendentes, descartar: descartar, montarDados: montarDados, mapearErros: mapearErros,
+    serieBrincos: serieBrincos, lerColagem: lerColagem, vencimentos: vencimentos, diferencas: diferencas, impactosServidor: impactosServidor,
     sessao: function (tipo) { return sessoes[tipo] || null; }, descricaoRascunho: descricaoRascunho,
     PRINCIPAIS_ANIMAL: PRINCIPAIS_ANIMAL, PRINCIPAIS_COMPRA: PRINCIPAIS_COMPRA, CAMPOS_VOLTA: CAMPOS_VOLTA, CAMPOS_VOLTA_COMPRA: CAMPOS_VOLTA_COMPRA,
   };

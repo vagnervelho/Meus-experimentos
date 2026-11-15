@@ -402,3 +402,39 @@ Testes novos: `tests/integrity.fase2.test.js`.
   primitivas, com o invariante (2) aceitando o animal PENDENTE do lote confirmado; `tests/ui/importacao.test.js` (importação
   de transferências na tela, a 1280 e a 360 px, com a reconciliação no relatório final).
 
+
+## 15/11/2026 — Fase 2, etapa INTERFACE DOS EVENTOS (E2.1 a E2.7 na tela)
+
+- Registrar evento, para todo tipo e subtipo ativo do catálogo: o subtipo é o primeiro campo, com a pergunta do tipo ("O que
+  fazer", "Marcar como", "O que corrigir"); os campos de cabeçalho do subtipo (o motivo do descarte na marcação) passaram a
+  ser desenhados e enviados (antes ficavam de fora e o motivo nunca chegava ao servidor); o brinco do vendedor só aparece na
+  retirada; a baixa por divergência é operação crítica (subtipo `critico: true` no catálogo: botão de perigo e tela de
+  resultado); verbos e resultados próprios da identificação, da marcação, da reclassificação e da baixa.
+- Grade de animais novos (compra e entradas): "Preencher em série" (N animais com brincos em sequência e os dados do lote) e
+  "Colar da planilha" (Brinco · Sexo · Idade ou nascimento · Peso · Valor, com os problemas pelo número da linha). Parcelas:
+  "Dividir em parcelas" (N vencimentos, todo mês ou a cada 30, 15 ou 7 dias) com o valor em branco — o servidor divide e a
+  revisão mostra.
+- Revisão: o valor de cada animal calculado pelo servidor ("Ver os animais"), o que muda em cada animal nos tipos com subtipo
+  e, no estorno, o financeiro que deixa de valer (`impactos.cancelados`, novo na simulação do estorno). Problema de
+  CONFLICT traz o link para o lançamento que impede.
+- Detalhe e histórico: "Corrigir" para todo tipo e subtipo (identificação, marcação e os cinco ajustes passaram a ter o
+  pré-preenchimento da correção; a correção de cadastro compara um item por campo), seções de marcação, identificação
+  (retirada), correções com os valores em palavras, motivo do ajuste, a baixa por divergência e, em cada lançamento
+  financeiro, as alocações por animal. Tela de auditoria com a trilha completa: filtros por o que mudou (inclui
+  lançamentos) e o que foi feito, período pela data na fazenda, o lançamento com link e o motivo.
+- Ficha: atalhos à vista (Transferir, Vender, Registrar morte, Registrar parto) e "Mais registros" (descarte, pôr, trocar e
+  tirar brinco, marcar e desmarcar descarte e não localizado, mudar a categoria, não encontrado na contagem, corrigir brinco
+  e pasto). Painel do pasto: "Vender daqui", como o "Transferir daqui".
+- Defeito corrigido no motor: a baixa por divergência de contagem com observação do animal perdia a justificativa do
+  lançamento (não há linha de AJUSTES nesse subtipo); agora fica em `payload_json.motivo_ajuste` e aparece na trilha.
+- Página: o doGet entrega cada include compactado (`Api.compactar`: sem recuo, linhas vazias e linhas só de comentário). Com
+  as telas desta etapa o fonte passou de 470 KB; a página montada ficou em cerca de 411 KB (antes, 441 KB). O `ui:check`
+  mede o orçamento no que vai ao aparelho e continua procurando recurso externo no fonte inteiro; `tests/interface.test.js`
+  confere que os includes não têm o que a compactação quebraria (template literal, linha que continua).
+- Testes novos: `tests/telas.fase2.test.js` e `tests/ui/eventos.fase2.test.js` (CT-03 e CT-04 inteiros pela tela, a 1280 e a
+  360 px, colar da planilha, estorno com dependente e auditoria, manejo pela ficha com as correções); apoio
+  `tests/apoio-telas.js` (cliente e Store mínimo, antes dentro de `tests/telas.test.js`).
+- Verificado em Node (`npm test`: 504 testes, 504 aprovados, 0 falhas, cerca de 6,4 minutos neste ambiente) e no navegador
+  com o backend real (`npm run ui:check`: 59 testes, 59 aprovados, 0 falhas; página montada com 411 KB de 450 KB). O modo
+  curral (identificação no brete) chega com a pesagem, na Fase 3 (E3.1); nesta fase a identificação usa o seletor e o
+  cartão de cada animal. Nada validado na conta do dono.

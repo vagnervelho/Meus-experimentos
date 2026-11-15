@@ -2131,7 +2131,8 @@ var ImportService = (function () {
   /**
    * Consulta das linhas (pré-visualização): filtros {import_id, status, pagina, por_pagina (até 500)}. Cada linha traz
    * o texto original ao lado do valor interpretado com o mapeamento gravado: {linha_num, status, erros,
-   * dados_originais, interpretado, entity_id_gerado, event_id_gerado}.
+   * dados_originais, interpretado, entity_id_gerado, event_id_gerado} e, na importação de eventos, `lancamento` (as
+   * linhas do arquivo que formam o mesmo lançamento, pela chave de agrupamento; null na linha repetida).
    */
   function consultaLinhas(filtros) {
     var f = filtros || {};
@@ -2144,15 +2145,36 @@ var ImportService = (function () {
         var gravadas = linhasGravadas_(tx, imp.import_id);
         var lista = Utils.ordenarPor(Object.keys(gravadas).map(function (k) { return gravadas[k]; }), ['linha_num']).filter(function (l) { return vazio_(f.status) || l.status === f.status; });
         var cv = !imp.mapeamento_json ? null : TIPOS_EVENTO[imp.tipo] ? contextoEventos_(tx) : contextoValidacao_(tx);
+        var deEventos = !!(cv && TIPOS_EVENTO[imp.tipo]);
+        var modelo = deEventos ? modeloDe_(imp.tipo) : null;
+        var lidosDe = {};
+        var lerEvento = function (l) {
+          if (!lidosDe[l.linha_num]) lidosDe[l.linha_num] = lerLinhaEvento_({ linha_num: l.linha_num, valores: l.dados_originais_json || {} }, modelo, imp.mapeamento_json, imp.formato_json || {}, cv).lidos;
+          return lidosDe[l.linha_num];
+        };
+        // Na importação de eventos, as linhas de cada lançamento (a chave de agrupamento da validação): deixar de fora
+        // vale para o lançamento inteiro (GRUPO_PARCIAL), e a tela marca as linhas juntas.
+        var chaveDe = {};
+        var linhasDaChave = {};
+        if (deEventos) {
+          Utils.ordenarPor(Object.keys(gravadas).map(function (k) { return gravadas[k]; }), ['linha_num']).forEach(function (l) {
+            if (l.status === 'DUPLICADA') return;
+            var k = chaveGrupo_(modelo, { linha_num: l.linha_num, lidos: lerEvento(l) });
+            chaveDe[l.linha_num] = k;
+            (linhasDaChave[k] = linhasDaChave[k] || []).push(l.linha_num);
+          });
+        }
         var itens = lista.slice((pagina - 1) * porPagina, pagina * porPagina).map(function (l) {
           var interpretado = null;
           var linha = { linha_num: l.linha_num, valores: l.dados_originais_json || {} };
-          if (cv && TIPOS_EVENTO[imp.tipo]) interpretado = lerLinhaEvento_(linha, modeloDe_(imp.tipo), imp.mapeamento_json, imp.formato_json || {}, cv).lidos;
+          if (deEventos) interpretado = lerEvento(l);
           else if (cv && !vazio_(cv.D0)) interpretado = lerLinha_(linha, imp.mapeamento_json, imp.formato_json || {}, cv).item;
-          return {
+          var item = {
             linha_num: l.linha_num, status: l.status, erros: l.erros_json || [], dados_originais: l.dados_originais_json, interpretado: interpretado,
             entity_id_gerado: l.entity_id_gerado || null, event_id_gerado: l.event_id_gerado || null,
           };
+          if (deEventos) item.lancamento = chaveDe[l.linha_num] ? linhasDaChave[chaveDe[l.linha_num]].slice() : null;
+          return item;
         });
         return { total: lista.length, pagina: pagina, por_pagina: porPagina, itens: itens };
       },

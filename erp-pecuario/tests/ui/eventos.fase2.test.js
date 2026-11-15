@@ -2,13 +2,14 @@
 /**
  * Interface dos eventos da Fase 2 (E2.1 a E2.7 na tela; nível 3, Playwright, com o backend real do harness), a 1280 e
  * a 360 px: CT-03 inteiro pela tela (20 garrotes pela grade em série, frete, parcelas que não somam recusadas pelo
- * servidor e "Dividir em 2 parcelas", revisão com os valores calculados pelo servidor, inclusive o de cada animal);
- * CT-04 inteiro (5 animais escolhidos pelo "Vender daqui" do painel do pasto ou pelos filtros do seletor, kg vivo,
- * comissão, a receita de cada animal na revisão); colar animais de uma planilha; estorno bloqueado por evento
- * posterior (o conflito com o link para o lançamento que impede), estorno na ordem certa e a trilha de auditoria;
- * identificação, marcação para descarte (campo de cabeçalho do subtipo), baixa por divergência (crítica) e a correção
- * de cada uma pelo detalhe. Depois de cada comando, projeção = reconstrução. Parto gemelar e transferência com erro em
- * um animal estão em movimentos.test.js. Roda por `npm run ui:check`.
+ * servidor e "Dividir em parcelas", revisão com os valores calculados pelo servidor, inclusive o de cada animal, e o
+ * detalhe com os títulos e as alocações); CT-04 inteiro (5 animais escolhidos pelo "Vender daqui" do painel do pasto ou
+ * pelos filtros do seletor, kg vivo, comissão, a receita de cada animal na revisão, o histórico do vendido); colar
+ * animais de uma planilha (a 360 px); estorno bloqueado por evento posterior (o conflito com o link para o lançamento que
+ * impede), estorno na ordem certa e a trilha de auditoria; identificação, marcação para descarte (campo de cabeçalho do
+ * subtipo), baixa por divergência (crítica) e a correção de cada uma pelo detalhe, pelos atalhos "Mais registros" da
+ * ficha. Depois de cada comando, projeção = reconstrução. Parto gemelar e transferência com erro em um animal, a 1280 e a
+ * 360 px, estão em movimentos.test.js. Roda por `npm run ui:check`.
  */
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -133,6 +134,19 @@ for (const largura of [1280, 360]) {
     assert.equal(aloc.length, 40);
     assert.deepEqual([...new Set(aloc.map((x) => x.valor_alocado))].sort((x, y) => x - y), [6000, 250000], 'R$ 2.500,00 e R$ 60,00 por animal');
     s.conferirProjecoes('compra do CT-03 pela tela');
+    // Detalhe do evento: lançamentos, títulos e o que coube a cada animal (alocações).
+    await page.click('[data-resultado] button:has-text("Ver evento")');
+    await A.esperarTela(page, 'Comprar animais');
+    await page.waitForSelector('[data-secao="financeiro"] [data-alocacoes="20"]');
+    const det = await textoTela(page, '[data-secao="financeiro"]');
+    assert.match(det, /Compra de 20 animais: R\$ 50\.000,00/);
+    assert.match(det, /Títulos: R\$ 25\.000,00 vence 05\/03\/2026 \(em aberto\); R\$ 25\.000,00 vence 05\/04\/2026 \(em aberto\)/);
+    assert.match(det, /Transportadora T1/);
+    assert.equal(await page.locator('[data-secao="financeiro"] [data-alocacoes="20"]').count(), 2, 'os dois lançamentos rateados entre os 20');
+    await page.locator('[data-secao="financeiro"] [data-alocacoes] summary').nth(0).click();
+    const porAnimal = await page.$$eval('[data-secao="financeiro"] [data-alocacoes]', (ds) => ds.map((d) => [...new Set([...d.querySelectorAll('[data-alocacao]')].map((e) => e.getAttribute('data-alocacao')))]));
+    assert.deepEqual(porAnimal, [['250000'], ['6000']], 'R$ 2.500,00 da compra e R$ 60,00 do frete para cada um');
+    await semProblemasDeLeiaute(page, largura, 'detalhe da compra');
     assert.deepEqual(a.estado.erros, []);
     await a.fechar();
   });
@@ -333,119 +347,121 @@ for (const largura of [1280, 360]) {
   });
 }
 
-test('manejo pela ficha: pôr brinco, marcar para descarte (motivo no cabeçalho do subtipo), baixa por divergência (crítica) e a correção de cada um pelo detalhe (360 px)', async () => {
-  const s = A.sistema();
-  const sem = A.semear(s);
-  const semBrinco = sem.animais.find((x) => !x.brinco).animal_id;
-  const b0457 = sem.animais.find((x) => x.brinco === '0457').animal_id;
-  const b12 = sem.animais.find((x) => x.brinco === '12').animal_id;
-  const a = await A.abrir(s, { largura: 360, hash: 'animal/' + semBrinco + '/resumo' });
-  const { page } = a;
-  await A.esperarTela(page);
-  // 1. Pôr brinco (IDENTIFICACAO / PRIMEIRA_IDENTIFICACAO).
-  await page.click('[data-atalho-ficha="MAIS"]');
-  await semProblemasDeLeiaute(page, 360, 'folha de mais registros', true);
-  await page.click(dialogo + ' [data-atalho-ficha="IDENTIFICACAO.PRIMEIRA_IDENTIFICACAO"]');
-  await A.esperarTela(page, 'Identificação (brinco)');
-  assert.match(await textoTela(page, '[data-campo="__subtipo"]'), /O que fazer/);
-  assert.equal(await page.locator('[data-campo="__subtipo"] input:checked').getAttribute('value'), 'PRIMEIRA_IDENTIFICACAO');
-  assert.equal(await page.locator('[data-campo="tipo_identificacao"] option[value="BRINCO_ORIGEM"]').count(), 0, 'o brinco do vendedor só se retira');
-  await page.fill('[data-campo="event_date"] input', '2026-10-01');
-  await page.locator('[data-linha] [data-campo="codigo"] input').fill('0500');
-  await semProblemasDeLeiaute(page, 360, 'formulário de identificação');
-  await page.click('.form-evento button[type=submit]');
-  await page.waitForSelector(dialogo + ' [data-acao-principal]:not([disabled])');
-  assert.match(await textoTela(page, dialogo), /Número: 0500/);
-  assert.equal(a.pedidos('evento.simular').length, 0, 'revisão LOCAL');
-  await principal(page);
-  await page.waitForFunction(() => /animal\//.test(window.Roteador.atual()));
-  assert.equal(vigentesDe(s, 'ANIMAIS').find((x) => x.animal_id === semBrinco).brinco, '0500');
-  s.conferirProjecoes('primeira identificação');
-  const ident = vigentesDe(s, 'EVENTOS').find((e) => e.event_type === 'IDENTIFICACAO');
-  await A.ir(page, 'evento/' + ident.event_id, 'Identificação');
-  await page.waitForSelector('[data-secao="identificacoes"]');
-  await page.click('[data-acoes-evento] button:has-text("Corrigir")');
-  await A.esperarTela(page, 'Corrigir: Identificação');
-  assert.equal(await page.locator('[data-linha] [data-campo="codigo"] input').inputValue(), '0500');
-  await page.locator('[data-linha] [data-campo="codigo"] input').fill('0501');
-  await page.fill('[data-campo="justificativa_correcao"] textarea', 'Número trocado');
-  await page.click('.form-evento button[type=submit]');
-  await page.waitForSelector(dialogo + ' [data-diferencas="1"]');
-  assert.match(await textoTela(page, dialogo + ' [data-diferencas]'), /número de 0500 para 0501/);
-  await principal(page);
-  await correcaoGravada(page);
-  assert.equal(vigentesDe(s, 'ANIMAIS').find((x) => x.animal_id === semBrinco).brinco, '0501');
-  s.conferirProjecoes('correção da identificação');
-  // 2. Marcar para descarte: o motivo é campo de cabeçalho do subtipo.
-  await A.ir(page, 'animal/' + b0457 + '/resumo', '0457');
-  await page.click('[data-atalho-ficha="MAIS"]');
-  await page.click(dialogo + ' [data-atalho-ficha="MARCACAO.DESCARTE"]');
-  await A.esperarTela(page, 'Marcar para descarte');
-  assert.match(await textoTela(page, '[data-campo="__subtipo"]'), /Marcar como/);
-  await page.fill('[data-campo="event_date"] input', '2026-10-02');
-  await page.locator('[data-campo="motivo_descarte"] select').selectOption({ label: 'Idade avançada' });
-  await page.click('.form-evento button[type=submit]');
-  await page.waitForSelector(dialogo + ' [data-acao-principal]:not([disabled])');
-  const revM = await textoTela(page, dialogo);
-  assert.match(revM, /Motivo do descarte\s*Idade avançada/);
-  assert.match(revM, /Consequência\s*1 animal fica marcado; o inventário não muda/);
-  await principal(page);
-  await page.waitForFunction(() => /animal\//.test(window.Roteador.atual()));
-  assert.equal(vigentesDe(s, 'ANIMAIS').find((x) => x.animal_id === b0457).marcado_descarte, true);
-  const marca = vigentesDe(s, 'EVENTOS').find((e) => e.event_type === 'MARCACAO');
-  assert.deepEqual(marca.payload_json, { acao: 'MARCAR', motivo_descarte: 'IDADE' });
-  s.conferirProjecoes('marcação');
-  await A.ir(page, 'evento/' + marca.event_id, 'Marcar para descarte');
-  await page.waitForSelector('[data-secao="marcacao"]');
-  assert.match(await textoTela(page, '[data-secao="marcacao"]'), /Marcar: para descarte\s*Motivo do descarte\s*Idade avançada/);
-  await page.click('[data-acoes-evento] button:has-text("Corrigir")');
-  await A.esperarTela(page, 'Corrigir: Marcar para descarte');
-  assert.equal(await page.locator('[data-campo="motivo_descarte"] select').inputValue(), 'IDADE');
-  await page.locator('[data-campo="motivo_descarte"] select').selectOption({ label: 'Baixo desempenho' });
-  await page.fill('[data-campo="justificativa_correcao"] textarea', 'Era desempenho');
-  await page.click('.form-evento button[type=submit]');
-  await page.waitForSelector(dialogo + ' [data-diferencas="1"]');
-  assert.match(await textoTela(page, dialogo + ' [data-diferencas]'), /Motivo do descarte: de Idade avançada para Baixo desempenho/);
-  await principal(page);
-  await correcaoGravada(page);
-  assert.equal(vigentesDe(s, 'EVENTOS').find((e) => e.event_type === 'MARCACAO').payload_json.motivo_descarte, 'BAIXO_DESEMPENHO');
-  s.conferirProjecoes('correção da marcação');
-  // 3. Baixa por divergência de contagem: operação crítica (botão de perigo e tela de resultado).
-  await A.ir(page, 'animal/' + b12 + '/resumo', '12');
-  await page.click('[data-atalho-ficha="MAIS"]');
-  await page.click(dialogo + ' [data-atalho-ficha="AJUSTE_INVENTARIO.DIVERGENCIA_CONTAGEM"]');
-  await A.esperarTela(page, 'Corrigir dados do animal');
-  await page.fill('[data-campo="event_date"] input', '2026-10-03');
-  await page.fill('[data-campo="justificativa"] textarea', 'Contagem de outubro');
-  await page.locator('[data-linha] [data-campo="observacoes"] input, [data-linha] [data-campo="observacoes"] textarea').first().fill('faltou no curral');
-  await page.click('.form-evento button[type=submit]');
-  await page.waitForSelector(dialogo + ' [data-acao-principal]:not([disabled])');
-  assert.match(await textoTela(page, dialogo), /Consequência\s*1 animal sai do rebanho como não encontrado na contagem; se aparecer, estorne esta baixa/);
-  assert.match(await textoTela(page, dialogo + ' [data-acao-principal]'), /Dar baixa de 1 animal/);
-  assert.match(await page.getAttribute(dialogo + ' [data-acao-principal]', 'class'), /botao-perigo/);
-  await principal(page);
-  await page.waitForSelector('[data-resultado="AJUSTE_INVENTARIO"]');
-  assert.match(await textoTela(page, '[data-resultado]'), /Baixa gravada: 1 animal saiu do rebanho como não encontrado na contagem\./);
-  const baixa = vigentesDe(s, 'EVENTOS').find((e) => e.event_subtype === 'DIVERGENCIA_CONTAGEM');
-  assert.equal(baixa.payload_json.motivo_ajuste, 'Contagem de outubro', 'o porquê fica no evento');
-  assert.equal(vigentesDe(s, 'ANIMAIS').find((x) => x.animal_id === b12).situacao_cadastral, 'BAIXADO_AJUSTE');
-  s.conferirProjecoes('baixa por divergência');
-  await page.click('[data-resultado] button:has-text("Ver evento")');
-  await A.esperarTela(page, 'Corrigir dados do animal');
-  await page.waitForSelector('[data-secao="baixas"]');
-  assert.match(await textoTela(page, '[data-secao="baixas"]'), /não encontrado na contagem/);
-  assert.match(await textoTela(page, '[data-secao="motivo-ajuste"]'), /Contagem de outubro/);
-  await page.click('[data-acoes-evento] button:has-text("Corrigir")');
-  await A.esperarTela(page, 'Corrigir: Corrigir dados do animal');
-  assert.equal(await page.locator('[data-campo="justificativa"] textarea').inputValue(), 'Contagem de outubro', 'o motivo do original vem preenchido');
-  await page.locator('[data-linha] [data-campo="observacoes"] input, [data-linha] [data-campo="observacoes"] textarea').first().fill('faltou na contagem do Pasto A');
-  await page.fill('[data-campo="justificativa_correcao"] textarea', 'Detalhe da contagem');
-  await page.click('.form-evento button[type=submit]');
-  await page.waitForSelector(dialogo + ' [data-diferencas="1"]');
-  await principal(page);
-  await page.waitForSelector('[data-resultado]');
-  assert.equal(vigentesDe(s, 'BAIXAS').find((x) => x.animal_id === b12).observacoes, 'faltou na contagem do Pasto A');
-  s.conferirProjecoes('correção da baixa');
-  assert.deepEqual(a.estado.erros, []);
-  await a.fechar();
-});
+for (const largura of [1280, 360]) {
+  test('manejo pela ficha: pôr brinco, marcar para descarte (motivo no cabeçalho do subtipo), baixa por divergência (crítica) e a correção de cada um pelo detalhe (' + largura + ' px)', async () => {
+    const s = A.sistema();
+    const sem = A.semear(s);
+    const semBrinco = sem.animais.find((x) => !x.brinco).animal_id;
+    const b0457 = sem.animais.find((x) => x.brinco === '0457').animal_id;
+    const b12 = sem.animais.find((x) => x.brinco === '12').animal_id;
+    const a = await A.abrir(s, { largura, hash: 'animal/' + semBrinco + '/resumo' });
+    const { page } = a;
+    await A.esperarTela(page);
+    // 1. Pôr brinco (IDENTIFICACAO / PRIMEIRA_IDENTIFICACAO).
+    await page.click('[data-atalho-ficha="MAIS"]');
+    await semProblemasDeLeiaute(page, largura, 'folha de mais registros', true);
+    await page.click(dialogo + ' [data-atalho-ficha="IDENTIFICACAO.PRIMEIRA_IDENTIFICACAO"]');
+    await A.esperarTela(page, 'Identificação (brinco)');
+    assert.match(await textoTela(page, '[data-campo="__subtipo"]'), /O que fazer/);
+    assert.equal(await page.locator('[data-campo="__subtipo"] input:checked').getAttribute('value'), 'PRIMEIRA_IDENTIFICACAO');
+    assert.equal(await page.locator('[data-campo="tipo_identificacao"] option[value="BRINCO_ORIGEM"]').count(), 0, 'o brinco do vendedor só se retira');
+    await page.fill('[data-campo="event_date"] input', '2026-10-01');
+    await page.locator('[data-linha] [data-campo="codigo"] input').fill('0500');
+    await semProblemasDeLeiaute(page, largura, 'formulário de identificação');
+    await page.click('.form-evento button[type=submit]');
+    await page.waitForSelector(dialogo + ' [data-acao-principal]:not([disabled])');
+    assert.match(await textoTela(page, dialogo), /Número: 0500/);
+    assert.equal(a.pedidos('evento.simular').length, 0, 'revisão LOCAL');
+    await principal(page);
+    await page.waitForFunction(() => /animal\//.test(window.Roteador.atual()));
+    assert.equal(vigentesDe(s, 'ANIMAIS').find((x) => x.animal_id === semBrinco).brinco, '0500');
+    s.conferirProjecoes('primeira identificação');
+    const ident = vigentesDe(s, 'EVENTOS').find((e) => e.event_type === 'IDENTIFICACAO');
+    await A.ir(page, 'evento/' + ident.event_id, 'Identificação');
+    await page.waitForSelector('[data-secao="identificacoes"]');
+    await page.click('[data-acoes-evento] button:has-text("Corrigir")');
+    await A.esperarTela(page, 'Corrigir: Identificação');
+    assert.equal(await page.locator('[data-linha] [data-campo="codigo"] input').inputValue(), '0500');
+    await page.locator('[data-linha] [data-campo="codigo"] input').fill('0501');
+    await page.fill('[data-campo="justificativa_correcao"] textarea', 'Número trocado');
+    await page.click('.form-evento button[type=submit]');
+    await page.waitForSelector(dialogo + ' [data-diferencas="1"]');
+    assert.match(await textoTela(page, dialogo + ' [data-diferencas]'), /número de 0500 para 0501/);
+    await principal(page);
+    await correcaoGravada(page);
+    assert.equal(vigentesDe(s, 'ANIMAIS').find((x) => x.animal_id === semBrinco).brinco, '0501');
+    s.conferirProjecoes('correção da identificação');
+    // 2. Marcar para descarte: o motivo é campo de cabeçalho do subtipo.
+    await A.ir(page, 'animal/' + b0457 + '/resumo', '0457');
+    await page.click('[data-atalho-ficha="MAIS"]');
+    await page.click(dialogo + ' [data-atalho-ficha="MARCACAO.DESCARTE"]');
+    await A.esperarTela(page, 'Marcar para descarte');
+    assert.match(await textoTela(page, '[data-campo="__subtipo"]'), /Marcar como/);
+    await page.fill('[data-campo="event_date"] input', '2026-10-02');
+    await page.locator('[data-campo="motivo_descarte"] select').selectOption({ label: 'Idade avançada' });
+    await page.click('.form-evento button[type=submit]');
+    await page.waitForSelector(dialogo + ' [data-acao-principal]:not([disabled])');
+    const revM = await textoTela(page, dialogo);
+    assert.match(revM, /Motivo do descarte\s*Idade avançada/);
+    assert.match(revM, /Consequência\s*1 animal fica marcado; o inventário não muda/);
+    await principal(page);
+    await page.waitForFunction(() => /animal\//.test(window.Roteador.atual()));
+    assert.equal(vigentesDe(s, 'ANIMAIS').find((x) => x.animal_id === b0457).marcado_descarte, true);
+    const marca = vigentesDe(s, 'EVENTOS').find((e) => e.event_type === 'MARCACAO');
+    assert.deepEqual(marca.payload_json, { acao: 'MARCAR', motivo_descarte: 'IDADE' });
+    s.conferirProjecoes('marcação');
+    await A.ir(page, 'evento/' + marca.event_id, 'Marcar para descarte');
+    await page.waitForSelector('[data-secao="marcacao"]');
+    assert.match(await textoTela(page, '[data-secao="marcacao"]'), /Marcar: para descarte\s*Motivo do descarte\s*Idade avançada/);
+    await page.click('[data-acoes-evento] button:has-text("Corrigir")');
+    await A.esperarTela(page, 'Corrigir: Marcar para descarte');
+    assert.equal(await page.locator('[data-campo="motivo_descarte"] select').inputValue(), 'IDADE');
+    await page.locator('[data-campo="motivo_descarte"] select').selectOption({ label: 'Baixo desempenho' });
+    await page.fill('[data-campo="justificativa_correcao"] textarea', 'Era desempenho');
+    await page.click('.form-evento button[type=submit]');
+    await page.waitForSelector(dialogo + ' [data-diferencas="1"]');
+    assert.match(await textoTela(page, dialogo + ' [data-diferencas]'), /Motivo do descarte: de Idade avançada para Baixo desempenho/);
+    await principal(page);
+    await correcaoGravada(page);
+    assert.equal(vigentesDe(s, 'EVENTOS').find((e) => e.event_type === 'MARCACAO').payload_json.motivo_descarte, 'BAIXO_DESEMPENHO');
+    s.conferirProjecoes('correção da marcação');
+    // 3. Baixa por divergência de contagem: operação crítica (botão de perigo e tela de resultado).
+    await A.ir(page, 'animal/' + b12 + '/resumo', '12');
+    await page.click('[data-atalho-ficha="MAIS"]');
+    await page.click(dialogo + ' [data-atalho-ficha="AJUSTE_INVENTARIO.DIVERGENCIA_CONTAGEM"]');
+    await A.esperarTela(page, 'Corrigir dados do animal');
+    await page.fill('[data-campo="event_date"] input', '2026-10-03');
+    await page.fill('[data-campo="justificativa"] textarea', 'Contagem de outubro');
+    await page.locator('[data-linha] [data-campo="observacoes"] input, [data-linha] [data-campo="observacoes"] textarea').first().fill('faltou no curral');
+    await page.click('.form-evento button[type=submit]');
+    await page.waitForSelector(dialogo + ' [data-acao-principal]:not([disabled])');
+    assert.match(await textoTela(page, dialogo), /Consequência\s*1 animal sai do rebanho como não encontrado na contagem; se aparecer, estorne esta baixa/);
+    assert.match(await textoTela(page, dialogo + ' [data-acao-principal]'), /Dar baixa de 1 animal/);
+    assert.match(await page.getAttribute(dialogo + ' [data-acao-principal]', 'class'), /botao-perigo/);
+    await principal(page);
+    await page.waitForSelector('[data-resultado="AJUSTE_INVENTARIO"]');
+    assert.match(await textoTela(page, '[data-resultado]'), /Baixa gravada: 1 animal saiu do rebanho como não encontrado na contagem\./);
+    const baixa = vigentesDe(s, 'EVENTOS').find((e) => e.event_subtype === 'DIVERGENCIA_CONTAGEM');
+    assert.equal(baixa.payload_json.motivo_ajuste, 'Contagem de outubro', 'o porquê fica no evento');
+    assert.equal(vigentesDe(s, 'ANIMAIS').find((x) => x.animal_id === b12).situacao_cadastral, 'BAIXADO_AJUSTE');
+    s.conferirProjecoes('baixa por divergência');
+    await page.click('[data-resultado] button:has-text("Ver evento")');
+    await A.esperarTela(page, 'Corrigir dados do animal');
+    await page.waitForSelector('[data-secao="baixas"]');
+    assert.match(await textoTela(page, '[data-secao="baixas"]'), /não encontrado na contagem/);
+    assert.match(await textoTela(page, '[data-secao="motivo-ajuste"]'), /Contagem de outubro/);
+    await page.click('[data-acoes-evento] button:has-text("Corrigir")');
+    await A.esperarTela(page, 'Corrigir: Corrigir dados do animal');
+    assert.equal(await page.locator('[data-campo="justificativa"] textarea').inputValue(), 'Contagem de outubro', 'o motivo do original vem preenchido');
+    await page.locator('[data-linha] [data-campo="observacoes"] input, [data-linha] [data-campo="observacoes"] textarea').first().fill('faltou na contagem do Pasto A');
+    await page.fill('[data-campo="justificativa_correcao"] textarea', 'Detalhe da contagem');
+    await page.click('.form-evento button[type=submit]');
+    await page.waitForSelector(dialogo + ' [data-diferencas="1"]');
+    await principal(page);
+    await page.waitForSelector('[data-resultado]');
+    assert.equal(vigentesDe(s, 'BAIXAS').find((x) => x.animal_id === b12).observacoes, 'faltou na contagem do Pasto A');
+    s.conferirProjecoes('correção da baixa');
+    assert.deepEqual(a.estado.erros, []);
+    await a.fechar();
+  });
+}

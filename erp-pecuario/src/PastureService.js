@@ -277,8 +277,10 @@ var PastureService = (function () {
     };
   }
   /**
-   * Consulta `pasto.listar`. filtros: {property_id?, incluir_inativos? (padrão false)}. Cartões de hoje: o cabeçalho
-   * de cada pasto + cabeças, UA, UA/ha e ocupação (sem a lista de animais), em ordem de nome.
+   * Consulta `pasto.listar`. filtros: {property_id?, incluir_inativos? (padrão false), data? (padrão hoje: a posição
+   * de todos os pastos ao fim do dia D, pelo mesmo replay do painel; antes do marco zero, os nulos com o motivo)}.
+   * Cartões: o cabeçalho de cada pasto + cabeças, UA, UA/ha e ocupação (sem a lista de animais), em ordem de nome.
+   * VALIDATION para data inválida ou futura.
    */
   function consultaListar(filtros) {
     var o = filtros || {};
@@ -286,12 +288,13 @@ var PastureService = (function () {
       rota: 'pasto.listar', dados: o, reads: leiturasConsulta_(), acessoCru: true,
       tratador: function (tx) {
         var L = AnimalService.leitor(tx);
-        var pr = InventoryService.presentes(L, L.hoje);
+        var data = dataConsulta_(L, o.data);
+        var pr = InventoryService.presentes(L, data);
         var pastos = tx.repo.vigentes('PASTOS').filter(function (p) {
           if (!vazio_(o.property_id) && p.property_id !== o.property_id) return false;
           return o.incluir_inativos === true || p.status === 'ATIVO';
         });
-        return Utils.ordenarPor(pastos, ['nome', 'pasture_id']).map(function (p) { return painel_(L, p, L.hoje, pr, false); });
+        return Utils.ordenarPor(pastos, ['nome', 'pasture_id']).map(function (p) { return painel_(L, p, data, pr, false); });
       },
     };
   }

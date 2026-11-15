@@ -38,7 +38,12 @@ planejamento do formulário, lotes de eventos inteiros, desfazer, reconciliaçã
 histórico anterior ao marco zero pela importação no motor (`planejarEventoImportado`, seção 14) e a tela de importação
 por tipo (seção 23). Fase 2, etapa VERIFICAÇÃO DE INTEGRIDADE COMPLETA (E2.11): as checagens da Fase 2 no `AuditService` (saída com
 evento posterior, partos, brinco ativo repetido, custo de aquisição e as invariantes do financeiro pela conferência do
-`FinancialService`; seção 11) e o 100% alocado também na morte e no descarte (seção 26).
+`FinancialService`; seção 11) e o 100% alocado também na morte e no descarte (seção 26). Fase 2, etapa INTERFACE DOS
+EVENTOS (E2.1 a E2.7 na tela): formulários de todos os tipos e subtipos ativos (campo de cabeçalho do subtipo, grade de
+animais novos em série e colada de planilha, parcelas divididas em N, o valor de cada animal e o financeiro do estorno na
+revisão, o conflito com o link do lançamento que impede), correção de todo tipo pelo detalhe, alocações no detalhe, atalhos
+"Mais registros" da ficha e "Vender daqui" do pasto, a trilha completa na tela de auditoria (seção 34), a página compactada
+no doGet (seção 19) e o motivo da baixa por divergência no evento (seção 14).
 
 ## 1. Regras que valem para todo arquivo de `src/`
 
@@ -432,7 +437,7 @@ Construtores: `bicho(extra)`, `entradaInicial(animais, campos)`, `outraEntrada(d
 |---|---|
 | `npm test` | `node --test tests/*.test.js` |
 | `npm run gen:schema` | Regenera `src/Schema.js`; `-- --check` só confere e sai com 1 se estiver desatualizado |
-| `npm run ui:check` | Confere `src/*.html`: nenhum recurso externo e página ≤ 450 KB (`conferirPaginas` é reutilizável pela etapa das telas) |
+| `npm run ui:check` | Confere `src/*.html`: nenhum recurso externo (no fonte inteiro) e página ≤ 450 KB medida no que vai ao aparelho (`conferirPaginas(arquivos, medidos)`; `servidas(paginas)` = cada include como o doGet o entrega, por `Api.compactar`) e na página montada pelo doGet; depois, os testes de navegador |
 | `npm run gas:push` | Envia `src/` com o clasp (versão fixa por `npx`) e publica; `-- --no-deploy` só envia. Recusa manifesto que não seja o do projeto |
 
 `src/appsscript.json`: fuso `America/Porto_Velho`, V8, Web App `USER_DEPLOYING` + `MYSELF`, cinco escopos
@@ -623,7 +628,7 @@ planilha. Tem de ser função determinística das linhas vigentes (pode rodar qu
 | `refazer(repo, io, op, linhasDaOperacao) → {atualizar, criar, semAlvo}` | O que a fase C aplica (idempotente; `updated_at`/`created_at` = `op.started_at`). Usado pela UnitOfWork |
 | `listar(tx, {entidade, entity_id, op_id, acao, de, ate}?) → [linhas]` | Trilha só de operações CONFIRMADAS, da mais recente para a mais antiga (cópias). A consulta declara `AuditService.LEITURAS` |
 | `linhaErro(ctx, {contexto, codigo, mensagem, erro, op_id}) → linha de ERROS_LOG` | Mensagem até 2.000 caracteres; pilha resumida (6 linhas) quando há `erro` |
-| `trilha(tx, filtros)` | A trilha COMPLETA (03a, seção 5.2; 05, seção 2.16): EVENTOS + AJUSTES + AUDITORIA, só de operações confirmadas (eventos anulados entram, com `status` e `vigente`), da mais recente para a mais antiga (instante; no empate EVENTO, AJUSTE, AUDITORIA). Item = a forma da linha de AUDITORIA (`audit_id` só nas de AUDITORIA) + `origem` (EVENTO \| AJUSTE \| AUDITORIA), `id`, `event_id`; nos de evento e de ajuste também `event_type`, `event_subtype` (no ajuste, o `tipo_ajuste`), `event_date`, `registration_date`, `reversal_of_event_id`, `status`, `vigente`, `descricao` ("Estorno de: Transferir de pasto de 10/04/2026"). Ações: REGISTRAR, CORRIGIR (substituto), ESTORNAR (o evento; `justificativa` = a do payload), AJUSTAR (cada linha de AJUSTES: campo, anterior, novo, justificativa); as de AUDITORIA como estão. Filtros: `entidade` (EVENTOS = só eventos; ANIMAIS com `entity_id` = também os eventos do animal), `entity_id` (registro: de um animal traz os eventos dele e os estornos e correções desses eventos; de um evento, ele, quem o anulou e os ajustes dele), `op_id` (operação), `acao`, `origem`, `de`/`ate` (período: data `yyyy-MM-dd` comparada pela data do instante no fuso da fazenda, ou instante ISO). Período inválido ou origem desconhecida → `VALIDATION`. Precisa de `tx.cru` (`LEITURAS_TRILHA` = AUDITORIA, EVENTOS, EVENTO_ANIMAIS, AJUSTES) |
+| `trilha(tx, filtros)` | A trilha COMPLETA (03a, seção 5.2; 05, seção 2.16): EVENTOS + AJUSTES + AUDITORIA, só de operações confirmadas (eventos anulados entram, com `status` e `vigente`), da mais recente para a mais antiga (instante; no empate EVENTO, AJUSTE, AUDITORIA). Item = a forma da linha de AUDITORIA (`audit_id` só nas de AUDITORIA) + `origem` (EVENTO \| AJUSTE \| AUDITORIA), `id`, `event_id`; nos de evento e de ajuste também `event_type`, `event_subtype` (no ajuste, o `tipo_ajuste`), `event_date`, `registration_date`, `reversal_of_event_id`, `status`, `vigente`, `descricao` ("Estorno de: Transferir de pasto de 10/04/2026"). Ações: REGISTRAR, CORRIGIR (substituto), ESTORNAR (o evento; `justificativa` = a do payload; na baixa por divergência sem correção, o `motivo_ajuste`), AJUSTAR (cada linha de AJUSTES: campo, anterior, novo, justificativa); as de AUDITORIA como estão. Filtros: `entidade` (EVENTOS = só eventos; ANIMAIS com `entity_id` = também os eventos do animal), `entity_id` (registro: de um animal traz os eventos dele e os estornos e correções desses eventos; de um evento, ele, quem o anulou e os ajustes dele), `op_id` (operação), `acao`, `origem`, `de`/`ate` (período: data `yyyy-MM-dd` comparada pela data do instante no fuso da fazenda, ou instante ISO). Período inválido ou origem desconhecida → `VALIDATION`. Precisa de `tx.cru` (`LEITURAS_TRILHA` = AUDITORIA, EVENTOS, EVENTO_ANIMAIS, AJUSTES) |
 | `consultaListar(filtros)` / `listarAuditoria(ctx, filtros)` | Rota `auditoria.listar`: a `trilha` (acesso cru) com os filtros dela + `pagina`, `por_pagina` (padrão 50, teto 500) → `{total, pagina, por_pagina, itens}`. `listar(tx, ...)` continua sendo só a trilha de AUDITORIA (o registro de refazer) |
 
 **Parte 2 — verificação de integridade (06, seção 9).** `verificarIntegridade(ctx) → {dados: relatório, dataVersion}`
@@ -673,7 +678,8 @@ TRANSFERENCIA, MORTE, DESCARTE, IDENTIFICACAO (PRIMEIRA_IDENTIFICACAO, SUBSTITUI
 NAO_LOCALIZADO), AJUSTE_INVENTARIO (CORRECAO_CADASTRO, IDENTIFICACAO_INCORRETA, CORRECAO_LOCALIZACAO, RECLASSIFICACAO,
 DIVERGENCIA_CONTAGEM) e ESTORNO (subtipo só é ativo com `campos_animal`; os da fase 2 não aparecem em `serializar(1)`).
 Subtipo pode ter campos de cabeçalho próprios em `subtipos[S].campos` (`camposEvento(tipo, subtipo)` junta os do tipo e
-os do subtipo; a tela atual só desenha os do tipo). Vocabulário fechado de 04
+os do subtipo; a tela desenha os dois, seção 34) e `critico: true` (a operação crítica é a do subtipo: DIVERGENCIA_CONTAGEM,
+a baixa por divergência de 08, 4.6). Vocabulário fechado de 04
 mais quatro atributos de campo: `opcoes` (enum fechado), `lista` (lista aberta de LISTAS), `casas` (decimais) e
 `naturezas` (em `ref:PLANO_CONTAS`: as naturezas de conta aceitas, para a tela filtrar as contas). No tipo, os campos de cabeçalho
 ficam em `campos`, os por animal em `campos_animal` (ou em `subtipos[S].campos_animal`) e os de grupo repetível em
@@ -923,13 +929,16 @@ PERIODO_BLOQUEADO)}`. Item por tipo:
   pasto e peso recalculados); recompra posterior → CONFLICT `ENTRADA_JA_DENTRO` com a compra; parcela LIQUIDADA →
   `PARCELA_LIQUIDADA`. Correção: mesmos ou menos animais (o que sai da venda volta ao rebanho), lançamentos novos.
 - Datas antes do marco zero só no NASCIMENTO; nos demais tipos, `ANTES_DO_MARCO_ZERO` sozinho (sem conferir a linha do tempo).
-- ESTORNO (`estornar`): `{event_id, justificativa}`.
+- ESTORNO (`estornar`): `{event_id, justificativa}`. Na simulação, `impactos = {acao: 'estornar', estorna, event_type,
+  event_date, animais, anulados, cancelados: {lancamentos, total (centavos), parcelas_abertas} | null}` (`cancelados`: os
+  lançamentos do evento, que deixam de valer pela vigência; a revisão do estorno mostra).
 
 Resposta (e reenvio duplicado): `{acao, event_id, event_type, event_subtype, event_date, status, total_value,
 substitui, estorna, animais: [{animal_id, codigo_interno, brinco, sexo, situacao_cadastral, pasto_atual_id}]}`
 (no estorno, os animais do evento estornado). `derivados` = `{animais, eventos}`. `payload_json`: `justificativa`
 (corrigir/estornar), `valor_abertura_origem` (`INFORMADO`), `gta_numero` (TRANSFERENCIA), `deducoes` (VENDA), `acao` e
-`motivo_descarte` (MARCACAO), `avisos_aceitos: [{codigo, n, justificativa?}]`. Os comandos de evento leem ANEXOS: a
+`motivo_descarte` (MARCACAO), `motivo_ajuste` (AJUSTE_INVENTARIO/DIVERGENCIA_CONTAGEM: a justificativa do lançamento, que
+esse subtipo não grava em AJUSTES), `avisos_aceitos: [{codigo, n, justificativa?}]`. Os comandos de evento leem ANEXOS: a
 correção passa ao substituto os anexos ativos do original (seção 32). `impactos` da simulação: `{acao, event_type, event_subtype, event_date, animais, novos, anulados,
 substitui, total_value, abertura, pre_marco_zero, anexos (quantos passam ao substituto), identificacoes (linhas de IDENTIFICACOES), ajustes (linhas de AJUSTES),
 marcacao: {subtipo, acao, motivo_descarte} | null, parto: {nascidos_vivos, natimortos, pasto_destino_id, historico} | null,
@@ -1189,7 +1198,8 @@ banco/DENIED/rascunho), appVersion (= package.json), serverTime (ISO UTC)}`; em 
 | `contexto({ambiente, usuario, props}) → ctx` | `Maintenance.contexto` + `fuso = io.fuso()` + `session = {usuario, ambiente, base_de_teste}`. Planilha inacessível → `CONFIG` (causa em `erro.causa` e no log) |
 | `rotas() → {rota: {tipo, fase, modulo, exigeChave}}` | `tipo` ∈ CONSULTA, COMANDO, MANUTENCAO, RASCUNHO, FUTURA. `ROTAS_CANONICAS` = as 51 da seção 15.3, na ordem |
 | `pagina(e)`, `paginaNegada(erro)` | doGet: `Index` (template com `appVersion`, `ambiente` e `urlApp`) com título "ERP Pecuário" e viewport; `?ambiente=TESTE\|DEMO` abre a SPA sobre essa base (outro valor → página de aviso "Endereço do app inválido"); `urlApp` = `ScriptApp.getService().getUrl()` (+ `?ambiente=` fora da produção; falha → `''` e causa no log); sem `Index.html` no projeto, página de aviso; `?pagina=concorrencia` → `TestRunner.paginaConcorrencia()` |
-| `incluir(nome)` | Conteúdo de `src/<nome>.html` da lista branca `INCLUDES` (Styles, JavaScript, Components, Dashboard, Animals, Pastures, Events, Weights, Health, Reproduction, Financial, Reports, Settings, Import); outro nome → `VALIDATION`. Templates chamam `<?!= include_('Styles') ?>` |
+| `incluir(nome)` | Conteúdo de `src/<nome>.html` da lista branca `INCLUDES` (Styles, JavaScript, Components, Dashboard, Animals, Pastures, Events, Weights, Health, Reproduction, Financial, Reports, Settings, Import), compactado (`compactar`); outro nome → `VALIDATION`. Templates chamam `<?!= include_('Styles') ?>` |
+| `compactar(texto)` | O include como vai ao aparelho (orçamento de ~450 KB, 01, seção 6.2): sem o recuo do começo das linhas, sem linha vazia e sem linha que é só comentário (`// …`, bloco `/* … */` que começa no início da linha); comentário no fim de uma linha de código fica. Pressupõe o que `tests/interface.test.js` confere nos includes: nenhum template literal e nenhuma linha que continua na seguinte. A página montada fica em cerca de 410 KB (o fonte, com a documentação, passa de 470 KB) |
 | `rascunho(acao, dados, info)` | Ver rotas `rascunho.*` |
 | `executarNoEditor(nome, fn)` | Corpo das funções do editor e dos gatilhos: resultado em JSON simples + resumo no log; erro registrado e relançado |
 | `diagnosticoSessao()` | SP-04 sem dado sensível: `{email_ativo_preenchido, email_ativo_e_do_dono, email_efetivo_preenchido, dono_registrado, contingencia_email_vazio}` |
@@ -1535,3 +1545,31 @@ peso vigente da compra e do nascimento; aviso em UA/ha na compra retroativa, na 
 com as duas capacidades, sem área e pela política; visão geral com período, filtros, estorno e falhas),
 `tests/pastures.test.js` e `tests/inventory.test.js` (ajustados ao contrato novo) e `tests/ui/lotacao.test.js` (Início e
 painel do pasto a 1280 e 360 px).
+
+## 34. Telas da Fase 2, etapa de interface dos eventos (E2.1 a E2.7 na tela) — `Components`, `Events`, `Animals`, `Pastures`, `Settings`, `JavaScript`, `Api`
+
+Todo tipo e subtipo ativo do catálogo passa pelo mesmo fluxo "Registrar evento" (08, seção 4): seletor → formulário do
+catálogo → revisão LOCAL ou pelo servidor (`evento.simular`) → avisos com aceite → resultado. Nenhum valor é calculado no
+aparelho: rateio, parcelas, valor de cada animal e o financeiro do estorno saem da simulação.
+
+| Peça | O que existe |
+|---|---|
+| `Registro` (subtipo) | O subtipo é o primeiro campo, com a pergunta do tipo ("O que fazer" na identificação, "Marcar como" na marcação, "O que corrigir" no ajuste); os campos de cabeçalho do subtipo (`subtipos[S].campos`, ex.: `motivo_descarte`) entram depois dos do tipo e são redesenhados ao trocar o subtipo; o pedido só leva os campos do subtipo escolhido. Na identificação, `BRINCO_ORIGEM` só aparece na retirada (a regra `TIPO_NAO_SE_APLICA` do servidor). Crítico = o do tipo ou o do subtipo (botão de perigo e tela de resultado na baixa por divergência). Verbos: "Gravar a identificação", "Gravar a marcação", "Dar baixa", "Mudar a categoria"; resultados próprios ("Identificação posta em 1 animal.", "1 animal marcado para descarte.", "Baixa gravada: …") |
+| Grade de animais novos (`grade_novos_animais`) | Fora da correção: "Preencher em série" (folha `data-folha-serie`: quantos, brinco do primeiro e os campos do lote — sexo, castrado, reprodutor, raça, nascimento e a certeza, idade, origem, pasto, peso, valor — iguais aos do catálogo; os cartões em branco são substituídos) e "Colar da planilha" (folha com as colunas Brinco · Sexo · Idade ou nascimento · Peso · Valor, separadas por tabulação ou ponto e vírgula; "Conferir as linhas" lista os problemas pelo número da linha e só inclui com tudo lido; castrado, reprodutor e a certeza do nascimento aplicados aos colados). O que entra são os valores como digitados: o cartão e o servidor validam |
+| `Registro.serieBrincos(inicio, n)` | `{brincos: [texto \| null]}` (0301 → 0301, 0302…; prefixo e zeros à esquerda ficam; vazio = sem brinco) ou `{erro}` (n fora de 1 a 1.000; primeiro brinco que não termina em número) |
+| `Registro.lerColagem(texto)` | `{animais: [{brinco, sexo (M\|F), idade_meses \| data_nascimento (yyyy-MM-dd), peso, valor}], problemas: [{linha, mensagem: 'Linha N: …'}], cabecalho}`: sexo M/F/macho/fêmea; nascimento dd/mm/aaaa ou aaaa-mm-dd; peso com 1 casa e > 0; valor > 0; brinco repetido na colagem (pela normalização do brinco); mais de 5 colunas |
+| Parcelas (`bloco_parcelas`) | "Dividir em parcelas" (folha `data-folha-parcelas`: quantas, vencimento da primeira, intervalo — todo mês no mesmo dia, 30, 15 ou 7 dias —, forma de pagamento) substitui as linhas por N vencimentos com o valor em branco: o servidor divide em partes iguais e a revisão mostra cada parcela. `Registro.vencimentos(primeiro, n, intervalo)` → `[yyyy-MM-dd]` (MES: o mesmo dia ou o último do mês) |
+| Revisão | "Ver os animais" traz, com a simulação, o valor de cada animal (`impactos.financeiro.por_animal`; `data-valor-animal` em centavos; na venda, o líquido) e, nos tipos com subtipo, o que muda em cada um (código, motivo, categoria, campo corrigido em palavras). No estorno, "Financeiro cancelado" (`impactos.cancelados`). `Registro.impactosServidor(s)` e `Registro.diferencas(s)` ficam expostos para os testes |
+| Problemas do servidor | Cada detalhe com `conflito` ganha o link "Abrir <tipo> de <data>" (`data-conflito` = `event_id`) para o lançamento que impede (08, seção 8), na lista do evento e no cartão do animal; o rascunho fica guardado ao sair |
+| Correção (`Registro.diferencas`) | Itens do original por animal (`corrige.antes.itens` na correção de cadastro, um item por campo): comparados na ordem; "mais uma correção", "N correções a menos" e, no tipo com subtipo, o animal tirado "fica como estava antes dele" |
+| `TelaEventos` | "Corrigir" para todo tipo e subtipo ativo, menos o ESTORNO (`previaManejo_`: identificação — tipo, código, motivo —, marcação — ação e motivo do descarte do payload —, ajustes — a justificativa de AJUSTES ou `payload_json.motivo_ajuste`; correção de cadastro com um item por linha de AJUSTES; brinco certo; pasto onde está; categoria; observação da baixa). Detalhe: "Identificações" (retirada como "retirado em"), "Marcação", "Correções" com os valores em palavras (categoria, pasto, mãe ou pai pelo nome; vazio na categoria = automática), "Motivo do ajuste", a baixa por divergência em "Saída do rebanho" e, em cada lançamento financeiro com rateio, "Por animal (N)" (`data-alocacoes`, `data-alocacao` em centavos; base em kg no rateio por peso) |
+| `TelaRebanho` (ficha) | Atalhos à vista: Transferir, Vender, Registrar morte, Registrar parto, Voltar ao rebanho; "Mais registros" (`data-atalho-ficha="MAIS"`) abre a folha com Descartar, Pôr brinco (sem brinco) ou Trocar e Tirar o brinco, Marcar ou tirar a marca de descarte e de não localizado (a ação vem pela marca do animal), Mudar a categoria, Não encontrado na contagem, Corrigir brinco lançado errado e Corrigir o pasto (`data-atalho-ficha="TIPO.SUBTIPO"`). Só tipo e subtipo ativos e animal ativo |
+| `TelaPastos` (painel) | "Transferir daqui" e "Vender daqui" (`data-atalho-pasto`): o pasto de origem e os animais do pasto já marcados |
+| `TelaConfig` (auditoria) | A trilha completa (`auditoria.listar`): filtros "O que mudou" (inclui Lançamentos), "O que foi feito" (gravado, corrigido, estornado, dado do animal corrigido, cadastro criado ou alterado…) e período pela data na fazenda; colunas Quando, Quem, O que foi feito, Em quê (o lançamento com link), De → para, Motivo |
+| `Fmt` | `ROTULOS.IDENTIFICACAO.BRINCO` ("Brinco da fazenda"), `ACAO_MARCACAO`; `rotuloOpcao` de `tipo_identificacao` e `acao` |
+
+Testes: `tests/telas.fase2.test.js` (Node: série, colagem e vencimentos; o que a grade produz aceito pelo servidor, com a
+divisão das parcelas; campo do subtipo; a correção de cada tipo e subtipo de manejo e ajuste reproduzindo o original; o
+financeiro do estorno; o motivo da baixa por divergência) e `tests/ui/eventos.fase2.test.js` (Playwright, a 1280 e a 360 px:
+CT-03 e CT-04 inteiros pela tela, colar da planilha, estorno com dependente e auditoria, manejo pela ficha com as
+correções); a compactação da página em `tests/interface.test.js`.

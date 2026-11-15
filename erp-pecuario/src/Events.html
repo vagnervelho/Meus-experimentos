@@ -373,6 +373,14 @@ var TelaEventos = (function () {
     if (Fmt.ehData(v)) return Fmt.data(v);
     return Fmt.rotuloOpcao(campo, v);
   }
+  /** Alocações de um rateio (o que coube a cada animal), com a base quando o critério é por peso. */
+  function alocacoes_(det, rat, nome) {
+    var itens = (det.ALOCACOES_FINANCEIRAS || []).filter(function (x) { return x.rateio_id === rat.rateio_id; });
+    if (!itens.length) return null;
+    var porPeso = rat.criterio === 'PESO_VIVO' || rat.criterio === 'PESO_CARCACA';
+    return h('details', { class: 'detalhe', dataset: { alocacoes: String(itens.length) } }, h('summary', { text: 'Por animal (' + itens.length + ')' }),
+      h('ul', { class: 'lista-simples' }, itens.map(function (x) { return h('li', { dataset: { alocacao: String(x.valor_alocado) } }, h('span', { class: 'dado', text: nome(x.animal_id) }), ': ' + Fmt.dinheiro(x.valor_alocado) + (porPeso ? ' (base ' + Fmt.peso(x.base_valor) + ')' : '')); })));
+  }
   function Utils_agrupar(lista) { var m = {}; lista.forEach(function (x) { (m[x.animal_id] = m[x.animal_id] || []).push(x); }); return m; }
 
   // ------------------------------------------------------------------ detalhe ----
@@ -392,10 +400,9 @@ var TelaEventos = (function () {
     (det.FINANCEIRO || []).forEach(function (f) { nomeLanc[f.financial_id] = f.descricao || 'lançamento financeiro'; });
     var aceita = ev.vigente && ev.event_type !== 'ESTORNO';
     if (aceita) {
-      var negocio = ev.event_type === 'COMPRA' || ev.event_type === 'VENDA';
       caixa.appendChild(h('div', { class: 'acoes' }, UI.botao('Anexar nota fiscal, GTA, laudo ou foto', { tipo: 'primario', icone: 'registrar', aoClicar: function (evt) {
         Anexos.enviar({
-          titulo: 'Arquivo do lançamento', origem: evt.currentTarget, entidade: 'EVENTOS', entity_id: ev.event_id, tipoPadrao: negocio ? 'NOTA_FISCAL' : 'DOCUMENTO', idBase: 'anx-ev',
+          titulo: 'Arquivo do lançamento', origem: evt.currentTarget, entidade: 'EVENTOS', entity_id: ev.event_id, tipoPadrao: Anexos.tipoPadrao(ev.event_type), idBase: 'anx-ev',
           ligacoes: (det.FINANCEIRO || []).map(function (f) { return [f.financial_id, nomeLanc[f.financial_id] + ' (' + Fmt.dinheiro(f.valor) + ')']; }), aoSalvar: recarregar,
         });
       } })));
@@ -510,6 +517,7 @@ var TelaEventos = (function () {
       }
       var tipoDeducao = {};
       var anexos = o.anexos || [];
+      var nomeDoAnimal = function (animalId) { return porId[animalId] ? nomeAnimal(porId[animalId]) : (Store.animal(animalId) ? Store.rotuloAnimal(Store.animal(animalId)) : 'animal'); };
       (payload.deducoes || []).forEach(function (x) { tipoDeducao[x.financial_id] = x.tipo; });
       if ((det.FINANCEIRO || []).length) corpo.appendChild(UI.secao('Lançamentos financeiros', h('ul', { class: 'lista-simples' }, det.FINANCEIRO.map(function (x) {
         var pa = Store.parceiro(x.partner_id);
@@ -521,6 +529,7 @@ var TelaEventos = (function () {
           (x.retida_pelo_comprador === true || x.retida_pelo_comprador === 'S' ? ' · descontada pelo comprador' : '') + (pa ? ' · ' + pa.nome : '') + ' · ' + (x.status === 'CANCELADO' ? 'cancelado' : Fmt.rotulo('STATUS_PAGAMENTO', x.status_pagamento).toLowerCase()),
           titulos.length ? h('div', { class: 'suave', text: 'Títulos: ' + titulos.join('; ') }) : null,
           rat ? h('div', { class: 'suave', text: 'Rateio: ' + Fmt.rotulo('CRITERIO_RATEIO', rat.criterio).toLowerCase() + ', ' + Fmt.dinheiro(rat.total_alocado) + ' distribuídos' }) : null,
+          rat ? alocacoes_(det, rat, nomeDoAnimal) : null,
           arquivos.length ? h('div', { class: 'suave', text: 'Arquivos: ' + arquivos.join(', ') }) : null);
       })), { dado: 'financeiro' }));
       if (ev.event_type !== 'ESTORNO') corpo.appendChild(UI.secao('Documentos e fotos', blocoAnexos(ev, det, anexos), { dado: 'anexos' }));
