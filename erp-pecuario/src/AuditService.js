@@ -818,6 +818,32 @@ var AuditService = (function () {
         var atomos = [];
         for (var k = 1; k <= Math.abs(soma - 1); k++) atomos.push(id + '|' + (soma > 1 ? '+' : '-') + k);
         if (soma !== 1) col.achado('ENTRADA_ABERTA', { tabela: 'ANIMAIS', id: id, mensagem: rotuloAnimal_(a, id) + ' está ativo, mas os eventos somam ' + soma + ' entrada(s) em aberto.', chaves: atomos });
+        // Pasto desativado só sem animal no rebanho dentro dele (03a, seção 2.1), por qualquer caminho: o estorno da saída
+        // ou da transferência que o tirou de lá, a correção que o tira da transferência, o desfazer da importação.
+        var pastoAtual = f.pasto(a.pasto_atual_id);
+        if (pastoAtual && pastoAtual.status !== 'ATIVO') {
+          var oPasto = (/^pasto\b/i.test(pastoAtual.nome || '') ? 'o ' : 'o pasto ') + pastoAtual.nome;
+          var poe = Timeline.ordenar(linhas.filter(function (l) { return !l.pre_marco_zero && l.pasto_destino_id === a.pasto_atual_id; })).pop();
+          col.achado('LINHA_DO_TEMPO', {
+            tabela: 'ANIMAIS', id: id, campo: 'pasto_atual_id', animal_id: id, event_id: poe ? poe.event_id : null, chaves: 'PASTO_INATIVO|' + id + '|' + a.pasto_atual_id,
+            mensagem: rotuloAnimal_(a, id) + ' está no rebanho dentro d' + oPasto + ', que está desativado.',
+            resolver: 'Reative ' + oPasto + ' na tela Pastos antes; depois transfira os animais dele e desative-o de novo, se for o caso.',
+          });
+        }
+      }
+      // Categoria desativada só sem animal reclassificado à mão nela (Config, CATEGORIA_EM_USO), por qualquer caminho: a
+      // correção que muda a ordem das reclassificações, o estorno da última.
+      if (a.categoria_modo === 'MANUAL' && !vazio_(a.categoria_manual_id) && a.situacao_cadastral !== 'ANULADO' && a.situacao_cadastral !== 'PENDENTE' && tx.repo.carregada('CATEGORIAS')) {
+        var catManual = tx.repo.porId('CATEGORIAS', a.categoria_manual_id);
+        if (catManual && catManual.ativo === false) {
+          var rec = f.ajustes(id).filter(function (x) { return x.tipo_ajuste === 'RECLASSIFICACAO' && x.valor_novo === catManual.category_id; }).map(function (x) { return f.evento(x.event_id); }).filter(Boolean)
+            .sort(function (x, y) { return x.event_date < y.event_date ? -1 : x.event_date > y.event_date ? 1 : x.event_seq - y.event_seq; }).pop();
+          col.achado('LINHA_DO_TEMPO', {
+            tabela: 'ANIMAIS', id: id, campo: 'categoria_manual_id', animal_id: id, event_id: rec ? rec.event_id : null, chaves: 'CATEGORIA_INATIVA|' + id + '|' + catManual.category_id,
+            mensagem: rotuloAnimal_(a, id) + ' está na categoria ' + catManual.nome + ', escolhida à mão, que está desativada.',
+            resolver: 'Reative a categoria ' + catManual.nome + ' nas configurações antes, ou reclassifique o animal.',
+          });
+        }
       }
       if (porAnimal) porAnimal(a, id, linhas);
     });

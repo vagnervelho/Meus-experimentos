@@ -124,6 +124,31 @@ test('linha do tempo de cada animal sobre o histórico inteiro: origem da transf
   assert.equal(s.integridade().ok, true);
 });
 
+test('cadastro desativado com animal dentro (teste aleatório, passada 2): pasto desativado com animal no rebanho e categoria desativada escolhida à mão, cada um um achado de LINHA_DO_TEMPO por animal', () => {
+  const { s, ids } = base();
+  // O Pasto B desativado à mão com o 200 (transferido para lá) no rebanho.
+  const brutoB = celula(s, 'PASTOS', PASTOS.B, 'status');
+  s.editar('PASTOS', PASTOS.B, 'status', 'INATIVO');
+  let r = s.integridade();
+  assert.deepEqual(situacoes(r), { LINHA_DO_TEMPO: 'ERRO' });
+  const noB = s.tabela('ANIMAIS').filter((a) => a.situacao_cadastral === 'ATIVO' && a.pasto_atual_id === PASTOS.B).map((a) => a.animal_id).sort();
+  assert.ok(noB.indexOf(ids['200']) >= 0);
+  assert.deepEqual(achadosDe(r, 'LINHA_DO_TEMPO').map((a) => a.id).sort(), noB);
+  assert.match(achadosDe(r, 'LINHA_DO_TEMPO').find((a) => a.id === ids['200']).mensagem, /brinco 200\) está no rebanho dentro do Pasto B, que está desativado/);
+  s.editar('PASTOS', PASTOS.B, 'status', brutoB);
+  assert.equal(s.integridade().ok, true);
+  // A categoria BOI (a do 102, reclassificado à mão e vendido) desativada à mão: o vendido também conta.
+  const boi = s.tabela('CATEGORIAS').find((c) => c.codigo === 'BOI');
+  const brutoBoi = celula(s, 'CATEGORIAS', boi.category_id, 'ativo');
+  s.editar('CATEGORIAS', boi.category_id, 'ativo', false);
+  r = s.integridade();
+  assert.deepEqual(situacoes(r), { LINHA_DO_TEMPO: 'ERRO' });
+  assert.deepEqual(achadosDe(r, 'LINHA_DO_TEMPO').map((a) => [a.id, a.campo]), [[ids['102'], 'categoria_manual_id']]);
+  assert.match(achadosDe(r, 'LINHA_DO_TEMPO')[0].mensagem, /na categoria Boi, escolhida à mão, que está desativada/i);
+  s.editar('CATEGORIAS', boi.category_id, 'ativo', brutoBoi);
+  assert.equal(s.integridade().ok, true);
+});
+
 test('animal baixado sem evento posterior vigente: morte com a data trocada para antes da transferência; identificação passada para o morto; venda e volta', () => {
   const { s, ids, ev, forn } = base();
   // A morte do 103 (01/07) foi para 15/03, antes da transferência corrigida de 02/04.

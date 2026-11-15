@@ -787,3 +787,9 @@ Nenhuma linha de código mudou nesta etapa: só documentos.
 - Modelo do teste corrigido (não o sistema): `tests/apoio-oraculos.js` passou a aceitar eventos importados (vigência com
   IMPORTADO), o lançamento sem parcela de evento anulado SEM_CAIXA (03b, 10.4), a importação desfeita sem anulador (02, 5.1)
   e a quantidade de animais do registro anterior ao marco zero. Nenhuma expectativa de teste antigo mudou.
+- Sementes rodadas nesta passada, com o oráculo completo: 1.700 sementes novas em levas (1.500 de 60 passos e 200 de 120),
+  além de cerca de 740 durante a montagem do oráculo. A leva final, depois dos consertos, foi de 400 sementes novas (20000 a
+  20399) × 60 passos: 13.162 comandos aceitos, 9.663 recusados, 0 falhas.
+- Verificado em Node: `tests/fase2.fuzz.test.js` (16 sementes fixas, cerca de 28 s) e `tests/fase2.fuzz.regressoes.test.js`
+  (2 casos); `npm test` completo com 638 testes, 638 aprovados e 0 falhas (531 s); `npm run ui:check` com 85 testes, 85
+  aprovados e 0 falhas (220 s), página montada com 446 KB de 450 KB.
