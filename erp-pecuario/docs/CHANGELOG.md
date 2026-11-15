@@ -460,3 +460,39 @@ Testes novos: `tests/integrity.fase2.test.js`.
 - Testes novos: `tests/telas.pastos-importacao.test.js` e `tests/ui/pastos-importacao.test.js` (a 1280 e a 360 px).
 - Verificado em Node (`npm test`: 508 testes, 508 aprovados, 0 falhas) e no navegador com o backend real (`npm run
   ui:check`: 65 testes, 65 aprovados, 0 falhas; página montada com 427 KB de 450 KB). Nada validado na conta do dono.
+
+## 15/11/2026 — Fase 2, etapa ACEITAÇÃO (nível 2 e jornada)
+
+- `runAcceptanceTests` (plano ACEITACAO) ganhou os cenários da Fase 2, pela `Api` na base de teste temporária, retomáveis
+  e no relatório JSON: CT-01, CT-02, CT-03, CT-04, CT-07, CT-08, CT-13 (na compra), CT-14, CT-17 e CT-18 (compra com
+  identificação e transferência, mais a variante da Fase 1). Cada cenário usa os seus pastos e parceiros (contagem por pasto
+  exata na base compartilhada), as datas do 09 contadas do marco zero, e termina com a verificação de integridade sem erro
+  (projeção = reconstrução e invariantes do financeiro). O CT-12 passou a conferir a reconciliação (transferência histórica
+  que diverge da fotografia e brinco sem animal, sem bloquear). Ficam `NAO_SE_APLICA`, com o motivo, só o resultado gerencial
+  (CT-03, Fase 4), o rateio por evento RATEIO (CT-13 c a f, Fase 4) e a pesagem (CT-10 passo 3, Fase 3).
+- Base de demonstração completa (09, seções 7 e 8): 240 em D0, 255 nascidos vivos (gêmeos e natimortos), 70 comprados, 240
+  vendidos (por cabeça, kg vivo, arroba de carcaça e arroba de peso vivo estimada), 15 mortes, 5 descartes, 1 baixa na
+  contagem, transferências, campanhas de identificação e uma troca de brinco, correções e estornos → 304 ativos. Semente
+  fixa, só por comandos, sem nenhuma recusa (o gerador simula o rebanho dia a dia); um passo por comando com chave
+  `seed:<n>` (retomável; reexecutar não grava de novo); conferência final pelo inventário, pelas saídas no cadastro e pela
+  integridade. O relatório lista o que da seção 7 chega nas fases 3 e 4.
+- `tests/jornada.fase2.test.js`: um ano de manejo só pela `api()`, a partir do rebanho importado, com o inventário em 11
+  datas contra um modelo independente, a pagar e a receber, ficha, trilha e integridade; projeção = reconstrução e
+  invariantes depois de cada comando.
+- `tests/regras.fase2.test.js`: o mapa RN → teste verificável (toda RN de 05 na Fase 2 com os testes que a exercitam, no
+  mapa da Fase 1 ou nas fases seguintes com o motivo; cada teste citado existe) e os testes das RN 006, 037, 049, 065, 071,
+  075 e 094 (importação de nascimentos).
+- Correções que os testes novos acharam: valor zero, negativo ou com fração de centavo dava até três erros iguais no mesmo
+  campo (catálogo, lançamento e parcela), em português quebrado ("O valor de a compra"); agora um erro só, e o lançamento não
+  segue para parcelas e rateio (`FinancialService.planejar`). Sem parcela, "Informe como a compra será paga". O desconto da
+  venda não é mais acusado quando o bruto já foi recusado. O erro de campo de um animal já cadastrado (peso da venda,
+  carcaça, campos da transferência, da saída, da identificação...) passou a trazer `animal_id` e brinco, e a carcaça recusada
+  não leva mais o erro do "rendimento de 0%" no cabeçalho (`EventService`).
+- Guia de implantação: os cenários das Fases 1 e 2 e a base de demonstração em várias execuções.
+- Testes novos: `tests/jornada.fase2.test.js` e `tests/regras.fase2.test.js`; ampliados `tests/acceptance.test.js` (cenários da
+  Fase 2, projeção = reconstrução na base de teste, conta errada do servidor que derruba os cenários, demonstração completa
+  e retomável) e `tests/integrity.fase2.test.js` (integridade sobre a demonstração de 304 ativos).
+- Verificado em Node (`npm test`: 518 testes, 518 aprovados, 0 falhas, cerca de 7,8 minutos neste ambiente) e no navegador
+  com o backend real (`npm run ui:check`: 65 testes, 65 aprovados, 0 falhas; página montada com 427 KB de 450 KB). Os
+  cenários de nível 2 e a base de demonstração rodaram aqui sobre os fakes do harness; na conta do dono continuam
+  pendentes. Nada validado na conta do dono.
