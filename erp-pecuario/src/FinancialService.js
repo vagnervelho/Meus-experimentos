@@ -269,6 +269,16 @@ var FinancialService = (function () {
   function dec_(v) {
     return Math.round(v * 10);
   }
+  /**
+   * Base estimada do rateio da venda só com o peso do lote (03b, seção 4.3): a última pesagem de cada animal, escalada
+   * para o peso do lote em kg (sem ele, a própria pesagem), com 4 casas. A mesma conta na gravação e na verificação de
+   * integridade (BASE_RATEIO).
+   */
+  function basesEstimadas(pesagens, pesoLoteKg) {
+    var vivoDec = pesoLoteKg === null || pesoLoteKg === undefined ? null : dec_(pesoLoteKg);
+    var somaUlt = pesagens.reduce(function (t, x) { return t + x; }, 0);
+    return pesagens.map(function (x) { return Utils.arredondar(vivoDec === null ? x : x * vivoDec / 10 / somaUlt, 4); });
+  }
   /** Peso para as mensagens: '1.234,5 kg'. */
   function kg_(v) {
     return Utils.formatarNumero(v) + ' kg';
@@ -429,11 +439,7 @@ var FinancialService = (function () {
     }
     if ((mod === 'KG_VIVO' || (mod === 'ARROBA' && r.base_peso === 'VIVO')) && vivoDec === null) erros.push(det_('PESO_OBRIGATORIO', campoVivo, 'Informe o peso vivo total do lote ou o peso de cada animal.'));
     r.criterio = n === 1 ? 'DIRETO' : crit || null;
-    var escala = null;
-    if (r.estimado) {
-      var somaUlt = ult.reduce(function (t, x) { return t + x; }, 0);
-      escala = ult.map(function (x) { return Utils.arredondar(vivoDec === null ? x : x * vivoDec / 10 / somaUlt, 4); });
-    }
+    var escala = r.estimado ? basesEstimadas(ult, vivoDec === null ? null : vivoDec / 10) : null;
     r.bases = animais.map(function (a, i) {
       switch (r.criterio) {
         case 'DIRETO': return typeof s.valor === 'number' ? s.valor / 100 : null;
@@ -626,9 +632,12 @@ var FinancialService = (function () {
         var total = soma_(porEvento[c.event_id] || [], 'valor');
         if (total !== c.valor_total || c.valor_total !== c.valor_animais + c.frete + c.outros_custos) achado(16, 'COMPRAS', c.purchase_id, 'A compra registra ' + reais_(c.valor_total) + ' no total e os lançamentos do evento somam ' + reais_(total) + '.');
         if (ev && ev.total_value !== c.valor_total) achado(16, 'EVENTOS', c.event_id, 'O valor do evento de compra (' + reais_(ev.total_value) + ') difere do total da compra (' + reais_(c.valor_total) + ').');
-        // Fretes primeiro, depois os outros custos (EventService): o frete é um prefixo dos lançamentos acessórios.
+        // O tipo de cada custo vem do registro do evento (payload_json.custos), nunca da ordem das linhas.
         var acess = (porEvento[c.event_id] || []).filter(function (f) { return f !== fin; });
-        if (tiposDosCustos(acess, c.frete) === null || soma_(acess, 'valor') - c.frete !== c.outros_custos) achado(16, 'COMPRAS', c.purchase_id, 'O frete (' + reais_(c.frete) + ') e os outros custos (' + reais_(c.outros_custos) + ') da compra não conferem com os lançamentos de cada item.');
+        var tipos = tiposDosCustos(ev && ev.payload_json, acess);
+        var porTipo = { FRETE: 0, OUTRO: 0 };
+        if (tipos) acess.forEach(function (f) { porTipo[tipos[f.financial_id]] += f.valor || 0; });
+        if (tipos === null || porTipo.FRETE !== c.frete || porTipo.OUTRO !== c.outros_custos) achado(16, 'COMPRAS', c.purchase_id, 'O frete (' + reais_(c.frete) + ') e os outros custos (' + reais_(c.outros_custos) + ') da compra não conferem com os lançamentos de cada item.');
         // Compra anterior ao marco zero (importação): os animais entram com efeito 0 (registro histórico).
         var efeitoCompra = ev && ev.pre_marco_zero === true ? 0 : 1;
         if (c.qtd_animais !== ea.filter(function (l) { return l.efeito_inventario === efeitoCompra; }).length) achado(16, 'COMPRAS', c.purchase_id, 'A quantidade de animais da compra não confere com os animais do evento.');
@@ -682,25 +691,30 @@ var FinancialService = (function () {
     });
   }
   /**
-   * Tipo (FRETE ou OUTRO) de cada lançamento acessório de uma compra, na ordem em que foram gravados: o prefixo que
-   * soma `frete` é de fretes (a compra lança os fretes antes dos outros custos). null se nenhum prefixo fecha.
+   * Tipo de cada custo acessório da compra (FRETE ou OUTRO), gravado no próprio evento (`payload_json.custos`:
+   * [{financial_id, tipo}], como as deduções da venda), nunca pela posição da linha na planilha (06, seção 12: classificar
+   * a aba não muda nenhum dado). {financial_id: tipo}, ou null quando algum lançamento acessório não está no registro do
+   * evento (dado mexido à mão).
    */
-  function tiposDosCustos(lancamentos, frete) {
-    var acum = 0;
-    var corte = frete === 0 ? 0 : -1;
-    for (var i = 0; i < lancamentos.length && corte < 0; i++) {
-      acum += lancamentos[i].valor || 0;
-      if (acum === frete) corte = i + 1;
+  function tiposDosCustos(payload, lancamentos) {
+    var por = {};
+    ((payload || {}).custos || []).forEach(function (x) { if (x && (x.tipo === 'FRETE' || x.tipo === 'OUTRO')) por[x.financial_id] = x.tipo; });
+    var out = {};
+    for (var i = 0; i < (lancamentos || []).length; i++) {
+      var t = por[lancamentos[i].financial_id];
+      if (!t) return null;
+      out[lancamentos[i].financial_id] = t;
     }
-    if (corte < 0) return null;
-    return lancamentos.map(function (f, i) { return i < corte ? 'FRETE' : 'OUTRO'; });
+    return out;
   }
   /** Invariante 18: custo de aquisição do animal = Σ alocações vigentes AQUISICAO_ANIMAIS do período mais recente. */
   function conferirCustoAquisicao_(tx, achado) {
     var f = Timeline.fonte(tx);
     tx.repo.vigentes('ANIMAIS').forEach(function (a) {
       if (a.situacao_cadastral === 'EXTERNO') return;
-      var entrada = Timeline.ordenar(f.linhas(a.animal_id).filter(function (l) { return l.efeito === 1 && !l.pre_marco_zero; })).pop();
+      // A mesma fronteira do projetor (03a, DL-08): a entrada vigente mais recente, ou a histórica do animal que só existe no histórico.
+      if (a.situacao_cadastral === 'ANULADO' || a.situacao_cadastral === 'PENDENTE') return;
+      var entrada = Timeline.entradaDoCusto(f.linhas(a.animal_id));
       if (!entrada) return;
       var alocs = f.aquisicoes(a.animal_id).filter(function (x) { return x.data_competencia >= entrada.event_date; });
       var esperado = alocs.length ? soma_(alocs, 'valor') : entrada.event_type === 'NASCIMENTO' ? 0 : null;
@@ -809,6 +823,7 @@ var FinancialService = (function () {
     conferir: conferir,
     situacaoPagamento: situacaoPagamento,
     tiposDosCustos: tiposDosCustos,
+    basesEstimadas: basesEstimadas,
     titulos: titulos,
     blocoFicha: blocoFicha,
   };

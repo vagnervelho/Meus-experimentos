@@ -464,10 +464,27 @@ var Timeline = (function () {
       if (pes) { campos.peso_atual = pes.x.peso_kg; campos.data_ultima_pesagem = pes.x.data_pesagem; }
       var brinco = codigoEmUso_(linhasDeIdentificacao_(f, id).BRINCO);
       if (brinco) { campos.brinco = brinco.codigo; campos.brinco_norm = brinco.codigo_norm; }
-      custo_(f, id, entrada, campos);
+      custo_(f, id, entradaDoCusto(vig), campos);
     }
     if (femea) campos.situacao_reprodutiva = situacaoReprodutiva_(f, id, fora, at, criacao);
-    return { campos: campos, meta: { situacao: situacao, entrada: entrada, criacao: criacao, chegada: chegada_(criacao, base) } };
+    return { campos: campos, meta: { situacao: situacao, entrada: entrada, entradaCusto: fora ? null : entradaDoCusto(vig), criacao: criacao, chegada: chegada_(criacao, base) } };
+  }
+  /**
+   * A entrada que abre o período de permanência do custo de aquisição (03a, ANIMAIS.custo_aquisicao: "do período de
+   * permanência atual ou do último", DL-08): a entrada vigente mais recente desde o marco zero; o animal que só existe no
+   * histórico (comprado, ou nascido, e vendido antes do marco zero) não tem nenhuma, e o último período dele é o
+   * histórico: a compra, a outra entrada ou o nascimento anterior ao marco zero mais recente. O animal do marco zero tem
+   * a entrada dele, e a compra histórica de antes dela fica fora do custo (04, seção 6). `linhas` = vigentes do animal.
+   */
+  function entradaDoCusto(linhas) {
+    var ent = null;
+    ordenar((linhas || []).filter(function (l) { return !l.pre_marco_zero; })).forEach(function (l) { if (l.efeito === 1) ent = l; });
+    if (ent) return ent;
+    if ((linhas || []).some(function (l) { return !l.pre_marco_zero && ((l.efeito || 0) !== 0 || !vazio_(l.pasto_destino_id)); })) return null;
+    var hist = ordenar((linhas || []).filter(function (l) {
+      return l.pre_marco_zero && (((l.event_type === 'COMPRA' || l.event_type === 'OUTRA_ENTRADA') && (l.papel || 'SUJEITO') === 'SUJEITO') || (l.event_type === 'NASCIMENTO' && l.papel === 'CRIA'));
+    }));
+    return hist.length ? hist[hist.length - 1] : null;
   }
   /**
    * Chegada declarada na fazenda (04, seção 6: os registros anteriores ao marco zero são validados contra ela, não
@@ -510,6 +527,21 @@ var Timeline = (function () {
     else if (t === 'ENTRADA_INICIAL' && alocs.some(function (a) { return a.event_id === entrada.event_id; })) {
       campos.custo_aquisicao_origem = entrada.payload && entrada.payload.valor_abertura_origem === 'TABELA_PRECOS' ? 'ABERTURA_ESTIMADA' : 'ABERTURA_INFORMADA';
     } else campos.custo_aquisicao_origem = 'DESCONHECIDO';
+  }
+  /**
+   * Última pesagem individual (não MEDIA_LOTE) do animal até a data, na fonte f, por (data, posição na cadeia de
+   * substituição, event_seq): a base estimada do rateio da venda só com o peso do lote (03b, seção 4.3), que a venda grava
+   * e a verificação de integridade refaz. {peso_kg, data, seq, ord} ou null.
+   */
+  function ultimaPesagem(f, animalId, data) {
+    var melhor = null;
+    f.pesagens(animalId).forEach(function (p) {
+      if (p.data_pesagem > data || p.metodo === 'MEDIA_LOTE' || typeof p.peso_kg !== 'number') return;
+      var ev = f.evento(p.event_id);
+      var x = { peso_kg: p.peso_kg, data: p.data_pesagem, seq: ev ? ev.event_seq : 0, ord: ev ? f.ordemSeq(p.event_id) : 0 };
+      if (!melhor || x.data > melhor.data || (x.data === melhor.data && (x.ord > melhor.ord || (x.ord === melhor.ord && x.seq > melhor.seq)))) melhor = x;
+    });
+    return melhor;
   }
   /** Linha de IDENTIFICACOES com o cabeçalho do evento que a gravou (forma de `validarIdentificacoes`). */
   function linhaIdentificacao(r, evento, ordemSeq) {
@@ -938,6 +970,8 @@ var Timeline = (function () {
     fonte: fonte,
     projetarAnimal: projetarAnimal,
     chegadaDeclarada: chegadaDeclarada,
+    entradaDoCusto: entradaDoCusto,
+    ultimaPesagem: ultimaPesagem,
     projetar: projetar,
     reconstruir: reconstruir,
     porta: porta,

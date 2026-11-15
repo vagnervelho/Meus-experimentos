@@ -1618,7 +1618,9 @@ var Registro = (function () {
         c.erros.forEach(function (e) { erros.push({ campo: e.campo, mensagem: e.mensagem, nivel: 'GRUPO', grupo: g, linha: row.uid }); });
         return row.animal_id ? Object.assign({ animal_id: row.animal_id }, c.valores) : c.valores;
       });
-      if (GRUPO_COM_UMA_LINHA[g] && !dados[g].length) erros.push({ campo: '__grupo_' + g, mensagem: 'Inclua ao menos uma linha em "' + rotuloGrupo(g, s.tipo)[0] + '".', nivel: 'EVENTO' });
+      // O registro anterior ao marco zero não tem caixa (04, seção 6): a correção dele vai sem parcelas, como o servidor grava.
+      var semCaixa = g === 'parcelas' && !!s.corrige && s.corrige.historico === true;
+      if (GRUPO_COM_UMA_LINHA[g] && !semCaixa && !dados[g].length) erros.push({ campo: '__grupo_' + g, mensagem: 'Inclua ao menos uma linha em "' + rotuloGrupo(g, s.tipo)[0] + '".', nivel: 'EVENTO' });
     });
     if (s.justificativaAviso) dados.justificativa_aviso = s.justificativaAviso;
     if (s.corrige) {

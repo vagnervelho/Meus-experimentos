@@ -333,7 +333,7 @@ var AnimalService = (function () {
    */
   function blocoFinanceiro_(tx, L, a) {
     // A passagem atual começa na entrada vigente mais recente (a mesma fronteira do custo de aquisição, 03a DL-08).
-    var entrada = Timeline.projetarAnimal(L.f, a.animal_id).meta.entrada;
+    var entrada = Timeline.projetarAnimal(L.f, a.animal_id).meta.entradaCusto;
     var b = FinancialService.blocoFicha(tx.repo, a, { desde: entrada ? entrada.event_date : null });
     var m = EventCatalog.modulosAtivos(99).filter(function (x) { return x.id === 'FINANCEIRO'; })[0];
     b.parcial = true;
@@ -359,6 +359,9 @@ var AnimalService = (function () {
       var def = EventCatalog.existe(ev.event_type) ? EventCatalog.tipo(ev.event_type) : null;
       var sub = def && def.subtipos && !vazio_(ev.event_subtype) ? def.subtipos[ev.event_subtype] : null;
       itens.push({
+        // Ordem canônica (desenho-base 4.3 e 16.1): data, classe da linha (entrada, movimento, saída) e a posição na cadeia
+        // de substituição — corrigir um lançamento não muda a ordem dos movimentos do dia.
+        ordem_: { classe: Timeline.classe({ efeito: l.efeito_inventario, event_type: ev.event_type }), posicao: L.f.ordemSeq(eid) || ev.event_seq || 0 },
         event_id: ev.event_id, event_seq: ev.event_seq, event_type: ev.event_type, event_subtype: nulo_(ev.event_subtype),
         rotulo: def ? def.rotulo : ev.event_type, rotulo_subtipo: sub ? sub.rotulo : null, event_date: ev.event_date,
         registration_date: ev.registration_date, status: av.status, vigente: av.vigente, anulado_por: av.anulador_id,
@@ -370,7 +373,11 @@ var AnimalService = (function () {
         }),
       });
     });
-    return Utils.ordenarPor(itens, ['event_date', 'event_seq']);
+    itens.sort(function (x, y) {
+      return (x.event_date < y.event_date ? -1 : x.event_date > y.event_date ? 1 : 0) || (x.ordem_.classe - y.ordem_.classe) || (x.ordem_.posicao - y.ordem_.posicao) || (x.event_seq - y.event_seq);
+    });
+    itens.forEach(function (x) { delete x.ordem_; });
+    return itens;
   }
   function anexos_(tx, a) {
     return Utils.ordenarPor(tx.repo.por('ANEXOS', 'entity_id', a.animal_id).filter(function (x) { return x.entidade === 'ANIMAIS' && x.status === 'ATIVO'; }), 'created_at').map(function (x) {

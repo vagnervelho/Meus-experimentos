@@ -120,9 +120,23 @@ var TelaEventos = (function () {
   }
   /**
    * Com um animal só o critério gravado é sempre DIRETO (03b, seção 4.3), que não é opção do formulário: no lote, a
-   * prévia propõe CABECAS (com um animal, todos dão 100%); por cabeça sem preço, o valor do animal vem da linha.
+   * prévia propõe um critério que aceita o que a linha gravou (com um animal, todos dão 100%): a carcaça na linha só se
+   * informa no rateio por carcaça; sem ela, CABECAS. Por cabeça sem preço, o valor do animal vem da linha.
    */
-  function criterioDaPrevia_(modalidade, criterio) { return modalidade === 'LOTE' ? (criterio === 'DIRETO' ? 'CABECAS' : criterio) : null; }
+  function criterioDaPrevia_(modalidade, criterio, linhasEv) {
+    if (modalidade !== 'LOTE') return null;
+    if (criterio !== 'DIRETO') return criterio;
+    var l = (linhasEv || [])[0] || {};
+    return l.peso_carcaca_kg !== null && l.peso_carcaca_kg !== undefined && l.peso_carcaca_kg !== '' ? 'PESO_CARCACA' : 'CABECAS';
+  }
+  /**
+   * As linhas dos animais do evento: as de entrada (+1) ou de saída (−1); no registro anterior ao marco zero (compra ou
+   * venda importada, histórica), todas têm efeito 0 (04, seção 6) e são as do próprio evento.
+   */
+  function linhasDoNegocio_(o, efeito) {
+    var hist = o.evento && o.evento.pre_marco_zero === true;
+    return (o.linhas || []).filter(function (l) { return Number(l.efeito_inventario) === (hist ? 0 : efeito); });
+  }
   function valorPorAnimal_(cab) { return cab.criterio_rateio === 'VALOR_INDIVIDUAL' || (cab.criterio_rateio === 'DIRETO' && cab.modalidade === 'CABECA' && (cab.preco_unitario === null || cab.preco_unitario === undefined)); }
   /**
    * Correção de compra: o cabeçalho vem de COMPRAS, do evento e dos lançamentos (parcelas do valor dos animais; frete e
@@ -130,11 +144,11 @@ var TelaEventos = (function () {
    * atributos de criação; o que voltou ao rebanho, só os campos da volta).
    */
   function previaCompra_(o, def, origem) {
-    var ev = o.evento, det = o.detalhes || {}, linhasEv = (o.linhas || []).filter(function (l) { return Number(l.efeito_inventario) === 1; });
+    var ev = o.evento, det = o.detalhes || {}, linhasEv = linhasDoNegocio_(o, 1);
     var cp = (det.COMPRAS || [])[0] || {};
     var fins = det.FINANCEIRO || [];
     var principal = fins.filter(function (f) { return codigoConta_(f) === 'COMPRA_ANIMAIS'; })[0] || fins[0] || {};
-    // O tipo de cada custo (FRETE ou OUTRO) vem do servidor (evento.obter: papeis, por FinancialService.tiposDosCustos).
+    // O tipo de cada custo (FRETE ou OUTRO) vem do servidor (evento.obter: papeis, pelo registro do evento em payload_json.custos).
     var tipos = o.papeis || {};
     var parcelasDe = function (id) { return (det.PARCELAS || []).filter(function (x) { return x.financial_id === id; }); };
     var rat = (det.RATEIOS || []).filter(function (r) { return r.financial_id === principal.financial_id; })[0] || {};
@@ -148,7 +162,7 @@ var TelaEventos = (function () {
     origem.base_peso = cp.modalidade === 'ARROBA' ? cp.base_peso : null;
     if (cp.rendimento_tipo === 'NEGOCIADO' || cp.rendimento_tipo === 'ESTIMADO') { origem.rendimento_carcaca_pct = pesoTexto_(cp.rendimento_carcaca_pct); origem.rendimento_tipo = cp.rendimento_tipo; }
     origem.preco_unitario = dinheiroTexto_(cp.preco_unitario); origem.peso_total_kg = todosPesados ? null : pesoTexto_(cp.peso_total_kg);
-    origem.valor_animais = dinheiroTexto_(cp.valor_animais); origem.criterio_rateio = criterioDaPrevia_(cp.modalidade, cp.criterio_rateio);
+    origem.valor_animais = dinheiroTexto_(cp.valor_animais); origem.criterio_rateio = criterioDaPrevia_(cp.modalidade, cp.criterio_rateio, linhasEv);
     origem.justificativa_rateio = rat.justificativa; origem.pasto_destino_id = pastoLote; origem.gta_numero = cp.gta_numero; origem.nota_fiscal = cp.nota_fiscal; origem.condicoes = cp.observacoes;
     var comValor = valorPorAnimal_(cp);
     var antes = { campos: {}, linhas: {} };
@@ -196,7 +210,7 @@ var TelaEventos = (function () {
    * servidor o tira da linha do tempo.
    */
   function previaVenda_(o, def, origem) {
-    var ev = o.evento, det = o.detalhes || {}, linhasEv = (o.linhas || []).filter(function (l) { return Number(l.efeito_inventario) === -1; });
+    var ev = o.evento, det = o.detalhes || {}, linhasEv = linhasDoNegocio_(o, -1);
     var vd = (det.VENDAS || [])[0] || {};
     var fins = det.FINANCEIRO || [];
     var receita = fins.filter(function (f) { return codigoConta_(f) === 'VENDA_ANIMAIS'; })[0] || fins[0] || {};
@@ -216,7 +230,7 @@ var TelaEventos = (function () {
     origem.peso_vivo_total_kg = todosPesados ? null : pesoTexto_(vd.peso_vivo_total_kg);
     origem.peso_carcaca_total_kg = vd.base_peso === 'CARCACA' && !todasCarcacas ? pesoTexto_(vd.peso_carcaca_total_kg) : null;
     origem.valor_bruto = dinheiroTexto_(vd.valor_bruto); origem.desconto_comercial = vd.desconto_comercial ? dinheiroTexto_(vd.desconto_comercial) : null;
-    origem.criterio_rateio = criterioDaPrevia_(vd.modalidade, vd.criterio_rateio);
+    origem.criterio_rateio = criterioDaPrevia_(vd.modalidade, vd.criterio_rateio, linhasEv);
     origem.justificativa_rateio = vd.criterio_rateio === 'MANUAL' ? rat.justificativa : null;
     origem.gta_numero = vd.gta_numero; origem.nota_fiscal = vd.nota_fiscal; origem.condicoes = vd.observacoes;
     var comValor = valorPorAnimal_(vd);

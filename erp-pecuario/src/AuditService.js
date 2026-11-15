@@ -354,7 +354,7 @@ var AuditService = (function () {
     { codigo: 'ALOCACAO_DIRETA', rotulo: 'Animal do lançamento ⇔ uma única alocação direta', severidade: 'ERRO', correcao: 'Reconstruir.', reparo: 'RECONSTRUIR' },
     { codigo: 'CUSTO_AQUISICAO', rotulo: 'Custo de aquisição de cada animal = soma das alocações de aquisição da permanência atual', severidade: 'ERRO', correcao: 'Reconstruir projeções; se a alocação foi mexida, corrigir pelo sistema.', reparo: 'RECONSTRUIR' },
     { codigo: 'BASE_RATEIO', rotulo: 'Rateio com base igual à recalculada hoje', severidade: 'ALERTA', correcao: 'Re-ratear, por decisão do dono.' },
-    { codigo: 'COPIAS', rotulo: 'Cópias × fonte (data do detalhe = data do evento; subtipo = tipo do detalhe; o detalhe que o tipo grava existe)', severidade: 'ERRO', correcao: 'Investigar edição manual.' },
+    { codigo: 'COPIAS', rotulo: 'Cópias × fonte (data do detalhe = data do evento; subtipo = tipo do detalhe; o detalhe e as linhas dos animais que o tipo grava existem, com o papel, o efeito e a marca de anterior ao marco zero certos)', severidade: 'ERRO', correcao: 'Investigar edição manual.' },
     { codigo: 'CELULAS', rotulo: 'Células fora do formato do tipo', severidade: 'ERRO', correcao: 'Corrigir a célula; rever a forma de gravação.' },
     { codigo: 'OPERACOES_ORFAS', rotulo: 'Operações interrompidas', severidade: 'ERRO', correcao: 'Recuperação.' },
     { codigo: 'FILHAS_SEM_PAI', rotulo: 'Linhas sem o registro de que dependem', severidade: 'ALERTA', correcao: 'Limpeza auditada; investigar edição manual.' },
@@ -581,6 +581,22 @@ var AuditService = (function () {
         Timeline.validar(linhas, { nascimento: calc.data_nascimento, dataEntrada: proj.meta.chegada ? proj.meta.chegada.data : null }).problemas.forEach(function (p) {
           col.achado('LINHA_DO_TEMPO', { tabela: 'ANIMAIS', id: id, mensagem: rotuloAnimal_(a, id) + ': ' + Timeline.descrever(p, nomePasto) + ' (evento de ' + br_(p.event_date) + ').' });
         });
+        // A categoria escolhida à mão serve ao sexo do animal (RELATORIO_FASE2, decisão 8; RN-012).
+        if (tx.repo.carregada('CATEGORIAS')) {
+          f.ajustes(id).forEach(function (x) {
+            if (x.tipo_ajuste !== 'RECLASSIFICACAO' || vazio_(x.valor_novo)) return;
+            var cat = tx.repo.porId('CATEGORIAS', x.valor_novo);
+            var evr = f.evento(x.event_id);
+            if (!cat || !evr || cat.sexo_aplicavel === 'AMBOS' || cat.sexo_aplicavel === calc.sexo || vazio_(calc.sexo)) return;
+            col.achado('LINHA_DO_TEMPO', { tabela: 'AJUSTES', id: x.ajuste_id, campo: 'valor_novo', mensagem: rotuloAnimal_(a, id) + ': a reclassificação de ' + br_(evr.event_date) + ' põe o animal na categoria ' + cat.nome + ', que é só de ' + (cat.sexo_aplicavel === 'M' ? 'machos' : 'fêmeas') + ', mas ele é ' + (calc.sexo === 'M' ? 'macho' : 'fêmea') + ' pelo cadastro. Volte-o à categoria automática ou corrija o sexo.' });
+          });
+        }
+        // A chegada declarada no rebanho inicial não fica antes do nascimento (RN-021); nas demais entradas a chegada é o
+        // próprio lançamento, que a linha do tempo acima já confere com o nascimento.
+        var chegou = proj.meta.chegada ? proj.meta.chegada.data : null;
+        if (proj.meta.criacao && proj.meta.criacao.event_type === 'ENTRADA_INICIAL' && Utils.dataValida(chegou) && Utils.dataValida(calc.data_nascimento) && chegou < calc.data_nascimento) {
+          col.achado('LINHA_DO_TEMPO', { tabela: 'ANIMAIS', id: id, campo: 'data_entrada', mensagem: rotuloAnimal_(a, id) + ': a chegada na fazenda (' + br_(chegou) + ') está antes do nascimento (' + br_(calc.data_nascimento) + '). Corrija uma das datas por correção de cadastro.' });
+        }
         // A ordem das identificações (primeira, troca, retirada) e das marcações (marcar, desmarcar) do animal.
         Timeline.validarIdentificacoes(Timeline.identificacoes(f, id)).concat(Timeline.validarMarcacoes(linhas)).forEach(function (p) {
           col.achado('LINHA_DO_TEMPO', { tabela: 'ANIMAIS', id: id, mensagem: rotuloAnimal_(a, id) + ': ' + Timeline.descrever(p) + ' (evento de ' + br_(p.event_date) + ').' });
@@ -881,10 +897,33 @@ var AuditService = (function () {
       PESO_CARCACA: function (l) { return typeof l.peso_carcaca_kg === 'number' ? l.peso_carcaca_kg : undefined; },
       CABECAS: function () { return 1; },
     };
+    var f = Timeline.LEITURAS.every(function (t) { return repo.carregada(t); }) ? Timeline.fonte(tx, {}) : null;
+    var nomeDe = function (id) { return rotuloAnimal_(tx.cru ? tx.cru.cruPorId('ANIMAIS', id) : null, id); };
     repo.vigentes('RATEIOS').forEach(function (r) {
       if ((!BASE_DA_LINHA[r.criterio] && r.criterio !== 'DIRETO') || r.escopo_tipo !== 'EVENTO' || vazio_(r.escopo_ref)) return;
-      if ((r.criterio === 'PESO_VIVO' || r.criterio === 'PESO_CARCACA') && /^Base estimada/.test(r.justificativa || '')) return;
       var allocs = repo.por('ALOCACOES_FINANCEIRAS', 'rateio_id', r.rateio_id);
+      if (r.criterio === 'PESO_CARCACA' && /^Base estimada/.test(r.justificativa || '')) return;
+      if (r.criterio === 'PESO_VIVO' && /^Base estimada/.test(r.justificativa || '')) {
+        // Base estimada da venda só com o peso do lote: a última pesagem de cada animal até a data da venda, escalada para
+        // o peso do lote, pela mesma conta da gravação (03b, seção 12.3: base desatualizada por evento retroativo ou
+        // correção da pesagem → alerta, nunca recálculo em silêncio).
+        var ev = repo.porId('EVENTOS', r.escopo_ref);
+        var vd = repo.carregada('VENDAS') ? repo.por('VENDAS', 'event_id', r.escopo_ref)[0] : null;
+        if (!f || !ev || !allocs.length) return;
+        var ults = allocs.map(function (a) { var u = Timeline.ultimaPesagem(f, a.animal_id, ev.event_date); return u ? u.peso_kg : null; });
+        var falta = allocs.filter(function (a, i) { return ults[i] === null; });
+        if (falta.length) {
+          col.achado('BASE_RATEIO', { tabela: 'RATEIOS', id: r.rateio_id, mensagem: 'A base estimada do rateio de "' + rotuloEvento_(ev) + '" não pode mais ser refeita: ' + falta.map(function (a) { return nomeDe(a.animal_id); }).join(', ') + ' não tem pesagem até ' + br_(ev.event_date) + '. Re-rateie por decisão do dono.' });
+          return;
+        }
+        var estimadas = FinancialService.basesEstimadas(ults, vd && typeof vd.peso_vivo_total_kg === 'number' ? vd.peso_vivo_total_kg : null);
+        allocs.forEach(function (a, i) {
+          if (Math.abs(estimadas[i] - (a.base_valor || 0)) > 1e-9) {
+            col.achado('BASE_RATEIO', { tabela: 'ALOCACOES_FINANCEIRAS', id: a.alloc_id, mensagem: 'A base estimada do rateio de ' + nomeDe(a.animal_id) + ' (' + a.base_valor + ') difere da recalculada hoje pela última pesagem até ' + br_(ev.event_date) + ', ajustada ao peso do lote (' + estimadas[i] + '): o rateio está desatualizado.' });
+          }
+        });
+        return;
+      }
       var bases = {};
       var lanc = r.criterio === 'DIRETO' ? repo.porId('FINANCEIRO', r.financial_id) : null;
       repo.por('EVENTO_ANIMAIS', 'event_id', r.escopo_ref).forEach(function (l) {
@@ -943,9 +982,78 @@ var AuditService = (function () {
       });
     });
   }
+  /**
+   * Linhas de EVENTO_ANIMAIS que cada tipo grava (desenho-base 4.1; 03b, seção 2.4): {papel: efeito no inventário}, e se
+   * a linha leva o pasto de destino (o movimento). O registro anterior ao marco zero grava efeito 0 em toda linha. Tipo
+   * sem regra aqui (das fases seguintes) não é conferido.
+   */
+  function linhasDoTipo_(ev) {
+    var t = ev.event_type;
+    var sub = ev.event_subtype;
+    if (t === 'ENTRADA_INICIAL' || t === 'OUTRA_ENTRADA' || t === 'COMPRA') return { papeis: { SUJEITO: 1 }, pasto: false };
+    // No parto, a linha sem papel de mãe ou de cria é da checagem PARTOS ("tem 0 mães"): aqui só o efeito de cada papel.
+    if (t === 'NASCIMENTO') return { papeis: { MATRIZ: 0, CRIA: 1 }, pasto: false, outrosPapeisEmPartos: true };
+    if (t === 'VENDA' || t === 'MORTE' || t === 'DESCARTE') return { papeis: { SUJEITO: -1 }, pasto: false };
+    if (t === 'TRANSFERENCIA') return { papeis: { SUJEITO: 0 }, pasto: true };
+    if (t === 'IDENTIFICACAO' || t === 'MARCACAO') return { papeis: { SUJEITO: 0 }, pasto: false };
+    if (t === 'AJUSTE_INVENTARIO') return sub === 'DIVERGENCIA_CONTAGEM' ? { papeis: { SUJEITO: -1 }, pasto: false } : { papeis: { SUJEITO: 0 }, pasto: sub === 'CORRECAO_LOCALIZACAO' };
+    return null;
+  }
+  var TEXTO_EFEITO = { '1': '+1 (entrada)', '0': '0 (sem entrada nem saída)', '-1': '−1 (saída)' };
+  /**
+   * A fonte de cada evento vigente (06, seções 9 e 12: linha apagada ou mexida à mão é acusada, e o reparo automático é só
+   * da projeção): o evento tem as linhas dos animais, cada uma com o papel e o efeito que o tipo grava (o movimento com o
+   * pasto de destino), `pre_marco_zero` = (data antes do marco zero) e o detalhe do evento (BAIXAS, AJUSTES,
+   * IDENTIFICACOES) só de animal que tem linha nele. Sem isso a reconstrução refaria a situação a partir do dado quebrado.
+   */
+  function conferirLinhasDosEventos_(tx, col) {
+    var repo = tx.repo;
+    if (!repo.carregada('EVENTO_ANIMAIS')) return;
+    var D0 = repo.carregada('CONFIGURACOES') ? Timeline.parametros(repo).data_marco_zero : null;
+    var aviso = ' Restaure o backup ou investigue a edição manual; o reparo automático só refaz a situação a partir dos lançamentos.';
+    repo.vigentes('EVENTOS').forEach(function (ev) {
+      var nome = '"' + rotuloEvento_(ev) + '"';
+      if (Utils.dataValida(D0) && Utils.dataValida(ev.event_date) && ev.event_type !== 'ESTORNO' && (ev.pre_marco_zero === true) !== (ev.event_date < D0)) {
+        col.achado('COPIAS', { tabela: 'EVENTOS', id: ev.event_id, campo: 'pre_marco_zero', mensagem: nome + ' está marcado como ' + (ev.pre_marco_zero === true ? 'anterior' : 'posterior') + ' ao marco zero (' + br_(D0) + '), mas a data é ' + (ev.pre_marco_zero === true ? 'depois' : 'antes') + ' dele.' + aviso });
+      }
+      var regra = linhasDoTipo_(ev);
+      if (!regra) return;
+      var linhas = repo.por('EVENTO_ANIMAIS', 'event_id', ev.event_id);
+      if (!linhas.length) col.achado('COPIAS', { tabela: 'EVENTOS', id: ev.event_id, campo: 'EVENTO_ANIMAIS', mensagem: nome + ' está sem as linhas dos animais (EVENTO_ANIMAIS) que o lançamento grava.' + aviso });
+      var comLinha = {};
+      linhas.forEach(function (l) {
+        comLinha[l.animal_id] = true;
+        var quem = rotuloAnimal_(tx.cru.cruPorId('ANIMAIS', l.animal_id), l.animal_id);
+        var papel = vazio_(l.papel) ? 'SUJEITO' : l.papel;
+        var esperado = regra.papeis[papel];
+        var ref = { tabela: 'EVENTO_ANIMAIS', id: l.event_animal_id, linha: linhaDe_(tx.cru, 'EVENTO_ANIMAIS', l.event_animal_id) };
+        if (esperado === undefined && regra.outrosPapeisEmPartos) return;
+        if (esperado === undefined) {
+          col.achado('COPIAS', { tabela: ref.tabela, id: ref.id, linha: ref.linha, campo: 'papel', mensagem: nome + ', ' + quem + ': a linha do animal tem o papel ' + papel + ', que esse lançamento não grava.' + aviso });
+          return;
+        }
+        // Anterior ao marco zero pela data (a marca errada já é achado à parte): efeito 0 em toda linha.
+        if (Utils.dataValida(D0) && Utils.dataValida(ev.event_date) ? ev.event_date < D0 : ev.pre_marco_zero === true) esperado = 0;
+        if ((l.efeito_inventario || 0) !== esperado) {
+          col.achado('COPIAS', { tabela: ref.tabela, id: ref.id, linha: ref.linha, campo: 'efeito_inventario', mensagem: nome + ', ' + quem + ': a linha do animal tem efeito ' + (TEXTO_EFEITO[String(l.efeito_inventario || 0)] || String(l.efeito_inventario)) + ' no inventário, mas esse lançamento grava ' + TEXTO_EFEITO[String(esperado)] + '.' + aviso });
+        }
+        if (regra.pasto && vazio_(l.pasto_destino_id)) {
+          col.achado('COPIAS', { tabela: ref.tabela, id: ref.id, linha: ref.linha, campo: 'pasto_destino_id', mensagem: nome + ', ' + quem + ': a linha do animal está sem o pasto de destino do movimento.' + aviso });
+        }
+      });
+      ['BAIXAS', 'AJUSTES', 'IDENTIFICACOES'].forEach(function (t) {
+        if (!repo.carregada(t)) return;
+        repo.por(t, 'event_id', ev.event_id).forEach(function (r) {
+          if (vazio_(r.animal_id) || comLinha[r.animal_id]) return;
+          col.achado('COPIAS', { tabela: t, id: r[Schema.pk(t)], campo: 'animal_id', mensagem: nome + ': a linha de ' + t + ' cita ' + rotuloAnimal_(tx.cru.cruPorId('ANIMAIS', r.animal_id), r.animal_id) + ', que não tem linha no lançamento (EVENTO_ANIMAIS).' + aviso });
+        });
+      });
+    });
+  }
   function conferirCopias_(tx, col) {
     col.aplicar('COPIAS');
     if (!tx.repo.carregada('EVENTOS')) return;
+    conferirLinhasDosEventos_(tx, col);
     conferirDetalhes_(tx, col);
     Object.keys(TIPO_DO_DETALHE).forEach(function (t) {
       if (!tx.repo.carregada(t)) return;

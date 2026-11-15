@@ -2122,7 +2122,7 @@ var ImportService = (function () {
   var ACOES_RECONCILIACAO = Object.freeze({
     SAIDA_HISTORICA_NA_FOTOGRAFIA: 'Se a fotografia está certa, nada a fazer: o animal fica no rebanho e a saída antiga vale só como histórico. Se a saída aconteceu, o animal não deveria estar no marco zero: corrija com "Corrigir inventário" (baixa na contagem) datado do marco zero ou estorne a saída antiga se ela foi lançada por engano.',
     PASTO_DIVERGENTE: 'Se a fotografia está certa, nada a fazer: vale o pasto do marco zero. Se o histórico está certo, corrija o pasto do marco zero com "Corrigir localização" datado do marco zero.',
-    FORA_DA_FOTOGRAFIA: 'Pelo histórico o animal estava na fazenda no marco zero, mas ele não está na fotografia: falta no histórico a saída dele (importe ou lance a venda, a morte ou o descarte antigo) ou falta o animal no rebanho inicial.',
+    FORA_DA_FOTOGRAFIA: 'Pelo histórico o animal estava na fazenda no marco zero, mas ele não está na fotografia. Se ele estava na fazenda, lance a entrada dele por "Outra entrada" datada do marco zero. Se ele saiu antes, importe a venda ou a morte antiga (planilha de vendas ou de mortes). O descarte antigo (doação, consumo, sacrifício) ainda não tem como ser registrado: anote-o nas observações do animal; a divergência continua na lista.',
   });
   /**
    * Relatório de reconciliação da base (sem gravar nada): para cada animal com registro anterior ao marco zero, a
@@ -2144,13 +2144,15 @@ var ImportService = (function () {
       if (!ev) return;
       if (ev.event_type === 'ENTRADA_INICIAL' && l.efeito_inventario === 1) foto[l.animal_id] = { pasto: nulo_(l.pasto_destino_id), event_id: ev.event_id };
       else if (ev.pre_marco_zero === true) (hist[l.animal_id] = hist[l.animal_id] || []).push({ l: l, ev: ev });
-      // A decisão do dono sobre a fotografia, pelos próprios lançamentos (04, seção 6; RN-095): a correção de
-      // localização e a baixa na contagem datadas do marco zero corrigem o que a fotografia declara.
-      else if (ev.event_date === D0 && ev.event_type === 'AJUSTE_INVENTARIO' && (ev.event_subtype === 'CORRECAO_LOCALIZACAO' || ev.event_subtype === 'DIVERGENCIA_CONTAGEM')) (noMarco[l.animal_id] = noMarco[l.animal_id] || []).push({ l: l, ev: ev });
+      // A decisão do dono sobre a fotografia, pelos próprios lançamentos (04, seção 6; RN-095): a entrada (outra entrada)
+      // do animal que faltava, a correção de localização e a baixa na contagem datadas do marco zero corrigem o que a
+      // fotografia declara.
+      else if (ev.event_date === D0 && ((ev.event_type === 'AJUSTE_INVENTARIO' && (ev.event_subtype === 'CORRECAO_LOCALIZACAO' || ev.event_subtype === 'DIVERGENCIA_CONTAGEM')) || (ev.event_type === 'OUTRA_ENTRADA' && l.efeito_inventario === 1))) (noMarco[l.animal_id] = noMarco[l.animal_id] || []).push({ l: l, ev: ev });
     });
     Object.keys(noMarco).forEach(function (id) {
-      if (!foto[id]) return;
       noMarco[id].sort(function (a, b) { return (posicao_(a.ev) - posicao_(b.ev)) || (a.ev.event_seq || 0) - (b.ev.event_seq || 0); }).forEach(function (x) {
+        if (x.ev.event_type === 'OUTRA_ENTRADA') { if (!foto[id] || foto[id].fora) foto[id] = { pasto: nulo_(x.l.pasto_destino_id), event_id: x.ev.event_id, porEntrada: true }; return; }
+        if (!foto[id]) return;
         if (x.ev.event_subtype === 'DIVERGENCIA_CONTAGEM') foto[id].fora = true;
         else if (!foto[id].fora) foto[id].pasto = nulo_(x.l.pasto_destino_id);
       });
@@ -2165,6 +2167,7 @@ var ImportService = (function () {
       var pasto = null;
       var ultimo = null;
       var mov = null;
+      var fato = null;
       // Ordem canônica (desenho-base 4.3; 04, seção 5.1): data, classe pelo tipo (entrada, movimento, saída), posição
       // na cadeia de substituição e event_seq — as linhas antigas têm efeito 0 e não dizem a classe por si.
       hist[id].sort(function (a, b) {
@@ -2179,9 +2182,12 @@ var ImportService = (function () {
           ultimo = x;
           return;
         }
-        if (dentro === null) dentro = true; // a mãe de um parto antigo estava na fazenda
+        if (dentro === null) { dentro = true; fato = x; } // a mãe de um parto antigo estava na fazenda
       });
       var recalculado = { no_rebanho: dentro === null ? declarado.no_rebanho : dentro, pasture_id: dentro ? pasto : null };
+      // O animal estava na fotografia e o dono o baixou na contagem do marco zero: a baixa é a decisão dele sobre o marco
+      // zero, e o histórico que o põe na fazenda não é divergência (nem por animal, nem na conta do pasto).
+      if (foto[id] && foto[id].fora && recalculado.no_rebanho) recalculado = declarado;
       if (recalculado.no_rebanho && !recalculado.pasture_id && declarado.no_rebanho) recalculado.pasture_id = declarado.pasture_id;
       posicao[id] = { declarado: declarado, recalculado: recalculado };
       var a = tx.repo.porId('ANIMAIS', id) || {};
@@ -2195,7 +2201,10 @@ var ImportService = (function () {
       if (declarado.no_rebanho && !recalculado.no_rebanho) {
         dif = { codigo: 'SAIDA_HISTORICA_NA_FOTOGRAFIA', evento: ultimo, explicacao: quem + ' foi ' + SAIDAS_HIST[ultimo.ev.event_type] + ' em ' + br_(ultimo.ev.event_date) + ' pelo histórico, mas está na fotografia do marco zero (' + br_(D0) + ').' };
       } else if (!declarado.no_rebanho && recalculado.no_rebanho) {
-        dif = { codigo: 'FORA_DA_FOTOGRAFIA', evento: ultimo, explicacao: quem + ' está na fazenda pelo histórico (' + NOME_EVENTO[ultimo.ev.event_type] + ' de ' + br_(ultimo.ev.event_date) + ') e não tem saída antes do marco zero, mas não está na fotografia de ' + br_(D0) + '.' };
+        // O que põe o animal na fazenda: a última entrada ou movimento antigo, ou o parto antigo de que ele é a mãe.
+        var porQue = ultimo || fato;
+        var oque = porQue ? NOME_EVENTO[porQue.ev.event_type] + (porQue === fato && porQue.l.papel === 'MATRIZ' ? ' em que ele é a mãe' : '') + ' de ' + br_(porQue.ev.event_date) : 'registro antigo';
+        dif = { codigo: 'FORA_DA_FOTOGRAFIA', evento: porQue, explicacao: quem + ' está na fazenda pelo histórico (' + oque + ') e não tem saída antes do marco zero, mas não está na fotografia de ' + br_(D0) + '.' };
       } else if (declarado.no_rebanho && recalculado.no_rebanho && mov && declarado.pasture_id && recalculado.pasture_id !== declarado.pasture_id) {
         dif = { codigo: 'PASTO_DIVERGENTE', evento: mov, explicacao: quem + ': o último pasto do histórico é ' + nomePasto(recalculado.pasture_id) + ' (' + br_(mov.ev.event_date) + '), mas a fotografia do marco zero o põe no ' + nomePasto(declarado.pasture_id) + '.' };
       }

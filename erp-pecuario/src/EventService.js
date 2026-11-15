@@ -185,6 +185,10 @@ var EventService = (function () {
         if (t === 'FINANCEIRO' && m.repo.carregada('PARCELAS')) m.repo.por('PARCELAS', 'financial_id', r.financial_id).forEach(coletar);
       });
     });
+    // O pasto, a propriedade e a categoria desativados depois de usados pelo original também continuam valendo (RN-045:
+    // mudar só valores ou observações nunca é bloqueado); um desativado novo continua recusado.
+    coletar(original.property_id);
+    m.usadosOriginal = usados;
     Object.keys(m.desativados).forEach(function (lista) {
       Object.keys(m.desativados[lista]).forEach(function (codigo) {
         if (!usados[codigo]) return;
@@ -294,11 +298,15 @@ var EventService = (function () {
   function camposDoItem_(m, it, definicoes, valores) {
     EventCatalog.validarCampos(definicoes, valores, { listas: m.listas, desativados: m.desativados }).forEach(function (d) { erroItem_(m, it, d.campo, d.codigo, d.mensagem); });
   }
+  /** Na correção, o cadastro (pasto, propriedade, categoria) que o original já usava: desativado depois, ainda vale. */
+  function usadoNoOriginal_(m, id) {
+    return !!m.usadosOriginal && !vazio_(id) && m.usadosOriginal[id] === true;
+  }
   function pastoAtivo_(m, it, campo, id, historico) {
     var p = m.f.pasto(id);
     if (!p) { erroItem_(m, it, campo, 'NAO_ENCONTRADO', 'o pasto informado não existe.'); return false; }
     // Registro anterior ao marco zero: o pasto pode ter sido desativado depois; basta existir.
-    if (p.status !== 'ATIVO' && !historico) { erroItem_(m, it, campo, 'PASTO_INATIVO', 'o pasto ' + p.nome + ' está desativado.'); return false; }
+    if (p.status !== 'ATIVO' && !historico && !usadoNoOriginal_(m, id)) { erroItem_(m, it, campo, 'PASTO_INATIVO', 'o pasto ' + p.nome + ' está desativado.'); return false; }
     return true;
   }
   function exigirMarcoZero_(m) {
@@ -381,10 +389,13 @@ var EventService = (function () {
     conferirBrincos_(m, ctxEv);
     conferirPeriodosDeBrinco_(m, ctxEv);
     conferirGenealogia_(m, ctxEv);
+    conferirCategoriasDoSexo_(m, ctxEv);
     conferirLinhaDoTempo_(m, ctxEv);
     if (original) conferirRemovidos_(m, ctxEv);
     conferirSequencias_(m, ctxEv, animaisConferidos_(m, ctxEv), ctxEv.ev.event_id);
     if (original) conferirEstadoRestaurado_(m, Object.keys(m.afetados).filter(function (id) { return !ctxEv.criadosOriginal[id]; }), 'a correção', ctxEv);
+    // Sem o original, os números dos animais que ele tocava (mesmo sem linha de brinco no substituto) mudam de período.
+    if (original) conferirPeriodosDeBrinco_(m, ctxEv, Object.keys(m.afetados), null);
     guardaDuplicidade_(m, ctxEv);
     conferirLotacao_(m, ctxEv);
     if (tipo === 'NASCIMENTO') avisosDoParto_(m, ctxEv);
@@ -421,7 +432,7 @@ var EventService = (function () {
     else {
       var p = m.repo.porId('PROPRIEDADES', prop);
       if (!p) erroGeral_(m, 'property_id', 'NAO_ENCONTRADO', 'A propriedade informada não existe.');
-      else if (p.status !== 'ATIVO') erroGeral_(m, 'property_id', 'PROPRIEDADE_INATIVA', 'A propriedade ' + p.nome + ' está desativada.');
+      else if (p.status !== 'ATIVO' && !usadoNoOriginal_(m, prop)) erroGeral_(m, 'property_id', 'PROPRIEDADE_INATIVA', 'A propriedade ' + p.nome + ' está desativada.');
     }
     var seq = m.repo.contador('EVENTOS', 'event_seq');
     var imp = m.opcoes.importacao || null;
@@ -620,6 +631,20 @@ var EventService = (function () {
       it.final.data_nascimento = corrigidoDepois_(m, it.animal_id, 'data_nascimento', it.final.data_nascimento);
       it.final.data_entrada = ctxEv.tipo === 'ENTRADA_INICIAL' ? corrigidoDepois_(m, it.animal_id, 'data_entrada', it.final.data_entrada) : data;
       it.final.mudouEntrada = true;
+      // A chegada e o nascimento do conjunto final (RN-021, RN-045): a correção de cadastro que continua valendo entra na
+      // conta, não só o que o substituto traz (o que ele mesmo traz já foi conferido acima).
+      var fn = it.final.data_nascimento;
+      var fe = it.final.data_entrada;
+      var corrigido = function (campo) { return corrigidoDepois_(m, it.animal_id, campo, undefined) !== undefined; };
+      var nota = function (campo) { return corrigido(campo) ? ', de uma correção de cadastro que continua valendo' : ''; };
+      if (ctxEv.tipo === 'ENTRADA_INICIAL') {
+        var jaVisto = !!nasc && !vazio_(d.data_entrada) && d.data_entrada < nasc;
+        if (!jaVisto && Utils.dataValida(fn) && Utils.dataValida(fe) && fe < fn) {
+          erroItem_(m, it, 'data_nascimento', 'ENTRADA_ANTES_DO_NASCIMENTO', 'a chegada na fazenda (' + br_(fe) + nota('data_entrada') + ') ficaria antes do nascimento (' + br_(fn) + nota('data_nascimento') + '). Confira as datas do animal.');
+        }
+      } else if (Utils.dataValida(fn) && Utils.dataValida(data) && fn > data && !(nasc && nasc > data)) {
+        erroItem_(m, it, 'event_date', 'NASCIMENTO_DEPOIS_DA_ENTRADA', 'o nascimento (' + br_(fn) + nota('data_nascimento') + ') ficaria depois da data do lançamento (' + br_(data) + '). Confira a data ou o nascimento do animal.');
+      }
     }
     return at;
   }
@@ -688,7 +713,7 @@ var EventService = (function () {
     if (!vazio_(c.pasto_destino_id)) {
       var p = m.f.pasto(c.pasto_destino_id);
       if (!p) { erroGeral_(m, 'pasto_destino_id', 'NAO_ENCONTRADO', 'O pasto de destino não existe.'); ok = false; }
-      else if (p.status !== 'ATIVO' && ctxEv.ev.pre_marco_zero !== true) { erroGeral_(m, 'pasto_destino_id', 'PASTO_INATIVO', 'O pasto ' + p.nome + ' está desativado e não recebe animais.'); ok = false; }
+      else if (p.status !== 'ATIVO' && ctxEv.ev.pre_marco_zero !== true && !usadoNoOriginal_(m, p.pasture_id)) { erroGeral_(m, 'pasto_destino_id', 'PASTO_INATIVO', 'O pasto ' + p.nome + ' está desativado e não recebe animais.'); ok = false; }
     }
     if (ok && c.pasto_origem_id === c.pasto_destino_id) { erroGeral_(m, 'pasto_destino_id', 'DESTINO_IGUAL_ORIGEM', 'O pasto de destino precisa ser diferente do pasto de origem.'); ok = false; }
     ctxEv.transf = ok ? { pasto_origem_id: c.pasto_origem_id, pasto_destino_id: c.pasto_destino_id } : null;
@@ -839,7 +864,7 @@ var EventService = (function () {
     if (pasto) {
       var p = m.f.pasto(pasto);
       if (!p) erroGeral_(m, 'pasto_destino_id', 'NAO_ENCONTRADO', 'O pasto informado para as crias não existe.');
-      else if (!hist && p.status !== 'ATIVO') erroGeral_(m, 'pasto_destino_id', 'PASTO_INATIVO', 'O pasto ' + p.nome + ' está desativado e não recebe animais.');
+      else if (!hist && p.status !== 'ATIVO' && !usadoNoOriginal_(m, pasto)) erroGeral_(m, 'pasto_destino_id', 'PASTO_INATIVO', 'O pasto ' + p.nome + ' está desativado e não recebe animais.');
     } else if (mat && !hist) {
       var onde = Timeline.pastoAntesDaSaida(m.f.linhas(mat.animal_id), ev.event_date, m.D0);
       pasto = onde.presente ? nulo_(onde.pasture_id) : null;
@@ -861,8 +886,12 @@ var EventService = (function () {
       criaViva_(m, ctxEv, it, pasto);
     });
     ctxEv.parto = { nascidos_vivos: vivos, natimortos: natimortos, pasto_destino_id: pasto, historico: hist };
-    // Sem cria viva não há cria que leve o pai à genealogia: o pai do parto (REPRODUCAO.touro_id) é conferido aqui.
+    // Sem cria viva não há cria que leve a mãe e o pai à genealogia: os dois são conferidos aqui (RN-009, RN-060).
     if (!vivos) conferirPaiDoParto_(m, ctxEv);
+    // Nascida depois do parto, a linha do tempo já recusa (ANTES_DO_NASCIMENTO); no próprio dia do parto, é aqui.
+    if (!vivos && mat && mat.estado && Utils.dataValida(ev.event_date) && mat.estado.data_nascimento === ev.event_date) {
+      erroItem_(m, mat, 'animal_id', 'NASCIMENTO_DO_PROGENITOR', 'a mãe nasceu em ' + br_(mat.estado.data_nascimento) + ', não antes do parto (' + br_(ev.event_date) + '). Confira a mãe ou as datas.');
+    }
     if (!mat) return;
     ctxEv.plano.REPRODUCAO.push({
       reproduction_id: m.tx.novoId(), animal_id: mat.animal_id, event_id: ev.event_id, tipo_evento: 'PARTO', data: ev.event_date,
@@ -932,6 +961,17 @@ var EventService = (function () {
     it.final = { sexo: d.sexo, data_nascimento: ev.event_date, data_entrada: null, mudouSexo: true, mudouNascimento: true };
     // Cria do original (correção do parto): o sexo corrigido depois do parto continua valendo.
     if (reuso) it.final.sexo = corrigidoDepois_(m, it.animal_id, 'sexo', it.final.sexo);
+    // O pai da cria nascida na fazenda é o do parto (RELATORIO_FASE2, decisão 5; 06, seção 9): o pai posto na cria por
+    // correção de cadastro (aceita enquanto o parto não dizia o pai) continuaria valendo por cima do que o parto passa a
+    // dizer. O dono decide qual vale: estorna essa correção ou deixa o pai do parto igual a ela.
+    if (reuso && !vazio_(c.pai_id)) {
+      var paiNaCria = corrigidoDepois_(m, it.animal_id, 'pai_id', undefined);
+      if (paiNaCria !== undefined && paiNaCria !== c.pai_id) {
+        var corPai = ultimaCorrecaoCampo_(m, it.animal_id, 'pai_id', 'PAI_DA_CRIA');
+        var nomePai = paiNaCria ? nomeAnimal_(existente_(m, paiNaCria)) : null;
+        conflito_(m, it, corPai, 'a correção de cadastro de ' + br_(corPai.event_date) + ' ' + (nomePai ? 'pôs ' + nomePai + ' como pai da cria' : 'tirou o pai da cria') + ', e ela continuaria valendo por cima do pai que o parto passa a informar. Estorne essa correção antes ou informe no parto o mesmo pai.');
+      }
+    }
     var ea = { papel: 'CRIA', efeito_inventario: hist ? 0 : 1, pasto_destino_id: nulo_(pasto), atributos_iniciais_json: at, observacoes: nulo_(d.observacoes) };
     if (typeof d.peso === 'number') ea.peso = d.peso;
     linhaEA_(m, ctxEv, it, ea);
@@ -1001,7 +1041,7 @@ var EventService = (function () {
     var cat = nova ? m.repo.porId('CATEGORIAS', nova) : null;
     if (nova) {
       if (!cat) { erroItem_(m, it, 'categoria_manual_id', 'NAO_ENCONTRADO', 'a categoria escolhida não existe. Atualize a tela e escolha de novo.'); return; }
-      if (cat.ativo === false) { erroItem_(m, it, 'categoria_manual_id', 'CATEGORIA_INATIVA', 'a categoria ' + cat.nome + ' está desativada.'); return; }
+      if (cat.ativo === false && !usadoNoOriginal_(m, cat.category_id)) { erroItem_(m, it, 'categoria_manual_id', 'CATEGORIA_INATIVA', 'a categoria ' + cat.nome + ' está desativada.'); return; }
       if (cat.sexo_aplicavel !== 'AMBOS' && cat.sexo_aplicavel !== e.sexo) { erroItem_(m, it, 'categoria_manual_id', 'CATEGORIA_INCOMPATIVEL', 'a categoria ' + cat.nome + ' é só de ' + (cat.sexo_aplicavel === 'M' ? 'machos' : 'fêmeas') + '.'); return; }
     }
     if (!Utils.dataValida(ctxEv.ev.event_date)) return;
@@ -1282,65 +1322,89 @@ var EventService = (function () {
    * mesmo número. O número corrigido por IDENTIFICACAO_INCORRETA não conta (desenho-base 16.2). CONFLICT com o registro
    * do outro animal: a troca que fecha o período dele, ou a linha que lhe deu o número.
    */
-  function conferirPeriodosDeBrinco_(m, ctxEv) {
-    var plano = ctxEv.plano.IDENTIFICACOES.filter(function (r) { return r.tipo === 'BRINCO' && !vazio_(r.codigo); });
-    if (!plano.length) return;
+  function conferirPeriodosDeBrinco_(m, ctxEv, extras, verboRestauracao) {
+    var plano = ctxEv ? ctxEv.plano.IDENTIFICACOES.filter(function (r) { return r.tipo === 'BRINCO' && !vazio_(r.codigo); }) : [];
+    var doPlano = Utils.agruparPor(plano, 'animal_id');
+    // Animais cujos períodos podem mudar: os que recebem linha de brinco do comando e os que o evento anulado tocava
+    // (o estorno, a correção que tira a linha de brinco do original, o desfazer de uma importação: RN-040, RN-045).
+    var alvos = Utils.unicos(Object.keys(doPlano).concat(extras || []));
+    if (!alvos.length) return;
     var semZeros = m.params.brinco_ignora_zeros_esquerda !== false;
     var chave = function (c) { return Utils.normalizarBrinco(String(c), !semZeros); };
-    var doPlano = Utils.agruparPor(plano, 'animal_id');
-    var errados = {};
-    function errado(id, k) {
-      if (!(id in errados)) {
-        errados[id] = {};
-        m.f.ajustes(id).concat(ctxEv.plano.AJUSTES.filter(function (a) { return a.animal_id === id; })).forEach(function (a) {
-          if (a.tipo_ajuste === 'IDENTIFICACAO_INCORRETA' && a.campo === 'brinco' && !vazio_(a.valor_anterior)) errados[id][chave(a.valor_anterior)] = true;
-        });
-      }
-      return errados[id][k] === true;
+    var ajustesDoPlano = ctxEv ? ctxEv.plano.AJUSTES : [];
+    function errados(fonte, comPlano, id) {
+      var out = {};
+      fonte.ajustes(id).concat(comPlano ? ajustesDoPlano.filter(function (a) { return a.animal_id === id; }) : []).forEach(function (a) {
+        if (a.tipo_ajuste === 'IDENTIFICACAO_INCORRETA' && a.campo === 'brinco' && !vazio_(a.valor_anterior)) out[chave(a.valor_anterior)] = true;
+      });
+      return out;
     }
-    var memo = {};
-    // Períodos de cada número no animal, com as linhas do comando: [{k, codigo, inicio, fim (null = em uso), linha, fecha}].
-    function periodos(id) {
-      if (memo[id]) return memo[id];
-      var seq = Timeline.identificacoes(m.f, id).filter(function (x) { return x.tipo === 'BRINCO'; })
-        .concat((doPlano[id] || []).map(function (r) { return Timeline.linhaIdentificacao(r, ctxEv.ev, ctxEv.ev.ordem_seq); }))
+    // Períodos de cada número no animal: [{k, codigo, inicio, fim (null = em uso), linha, fecha}]. "Depois" = sem o evento
+    // anulado e com as linhas do comando; "antes" = o que está gravado.
+    function calcular(fonte, comPlano, id) {
+      var seq = Timeline.identificacoes(fonte, id).filter(function (x) { return x.tipo === 'BRINCO'; })
+        .concat(comPlano ? (doPlano[id] || []).map(function (r) { return Timeline.linhaIdentificacao(r, ctxEv.ev, ctxEv.ev.ordem_seq); }) : [])
         .sort(function (a, b) { return (a.data_inicio < b.data_inicio ? -1 : a.data_inicio > b.data_inicio ? 1 : 0) || (a.ordem_seq - b.ordem_seq) || (a.event_seq - b.event_seq); });
+      var err = errados(fonte, comPlano, id);
       var out = [];
       seq.forEach(function (x, i) {
         if (x.remocao) return;
         var prox = seq[i + 1] || null;
         var k = chave(x.codigo);
-        if (errado(id, k) || (prox && prox.data_inicio <= x.data_inicio)) return;
+        if (err[k] === true || (prox && prox.data_inicio <= x.data_inicio)) return;
         out.push({ k: k, codigo: x.codigo, inicio: x.data_inicio, fim: prox ? prox.data_inicio : null, linha: x, fecha: prox });
       });
-      return (memo[id] = out);
+      return out;
     }
+    var memo = {};
+    function periodos(id) { return memo[id] || (memo[id] = calcular(m.f, true, id)); }
+    var assinatura = function (p) { return p.k + '|' + p.inicio + '|' + (p.fim || ''); };
     var cruza = function (a, b) { return (b.fim === null || a.inicio < b.fim) && (a.fim === null || b.inicio < a.fim); };
-    var verbo = ctxEv.original ? 'a correção' : 'o lançamento';
+    var verbo = verboRestauracao || (ctxEv && ctxEv.original ? 'a correção' : 'o lançamento');
     var citados = {};
-    Object.keys(doPlano).forEach(function (id) {
+    alvos.forEach(function (id) {
+      // Animal que o comando anula (criado pelo evento que sai) não fica com número nenhum; o que recebe linha do comando conta.
+      var eu = estado_(m, id);
+      if (!doPlano[id] && (!eu || eu.situacao_cadastral === 'ANULADO' || eu.situacao_cadastral === 'PENDENTE')) return;
+      var gravados = {};
+      calcular(m.real, false, id).forEach(function (p) { gravados[assinatura(p)] = true; });
       periodos(id).forEach(function (a) {
-        var meu = function (x) { return x && x.event_id === ctxEv.ev.event_id; };
-        if (!meu(a.linha) && !meu(a.fecha)) return;
+        // Período que começa ou termina numa linha do comando, ou que o evento anulado mudou (não está gravado assim).
+        var meu = function (x) { return !!ctxEv && !!x && x.event_id === ctxEv.ev.event_id; };
+        if (!meu(a.linha) && !meu(a.fecha) && gravados[assinatura(a)]) return;
         var outros = Utils.unicos(m.repo.por('IDENTIFICACOES', 'codigo_norm', Utils.normalizarBrinco(a.codigo)).map(function (r) { return r.animal_id; })
           .concat(plano.filter(function (r) { return chave(r.codigo) === a.k; }).map(function (r) { return r.animal_id; })));
         outros.forEach(function (oid) {
           if (oid === id) return;
           var o = estado_(m, oid);
-          if (!o || o.situacao_cadastral === 'ANULADO' || o.situacao_cadastral === 'PENDENTE') return;
+          if (!o || (!doPlano[oid] && (o.situacao_cadastral === 'ANULADO' || o.situacao_cadastral === 'PENDENTE'))) return;
           periodos(oid).filter(function (b) { return b.k === a.k && cruza(a, b); }).forEach(function (b) {
             var ev = b.inicio > a.inicio ? b.linha : (b.fecha || b.linha);
-            if (citados[id + '|' + ev.event_id]) return;
+            // Um conflito por par de animais e registro (os dois animais tocados pelo mesmo comando não se repetem).
+            if (citados[id + '|' + ev.event_id] || citados[oid + '|' + ev.event_id] || jaCitado_(m, id, 'BRINCO_DUPLICADO', ev.event_id)) return;
             citados[id + '|' + ev.event_id] = true;
-            var texto = b.inicio > a.inicio
-              ? verbo + ' deixaria o brinco ' + a.codigo + ' no animal ' + (a.fim ? 'até ' + br_(a.fim) : 'desde ' + br_(a.inicio)) + ', mas desde ' + br_(b.inicio) + ' ele é do animal ' + nomeAnimal_(o) + ' (' + o.codigo_interno + ').'
-              : verbo + ' daria ao animal o brinco ' + a.codigo + ' em ' + br_(a.inicio) + ', mas nessa data ele era do animal ' + nomeAnimal_(o) + ' (' + o.codigo_interno + ')' + (b.fim ? ', até ' + br_(b.fim) : '') + '.';
-            conflito_(m, itemDoAnimal_(m, ctxEv, id), { codigo: 'BRINCO_DUPLICADO', event_id: ev.event_id, event_type: ev.event_type, event_subtype: ev.event_subtype, event_date: ev.data_inicio },
-              texto + ' Um número fica em um animal por vez: mude a data deste lançamento ou corrija o registro do outro animal antes.');
+            var outro = nomeAnimal_(o) + ' (' + o.codigo_interno + ')';
+            var texto;
+            if (verboRestauracao) {
+              texto = b.inicio > a.inicio
+                ? verbo + ' devolveria ao animal o brinco ' + a.codigo + (a.fim ? ' até ' + br_(a.fim) : ' desde ' + br_(a.inicio)) + ', mas desde ' + br_(b.inicio) + ' ele é do animal ' + outro + '.'
+                : verbo + ' devolveria ao animal o brinco ' + a.codigo + ' desde ' + br_(a.inicio) + ', mas nessa data ele era do animal ' + outro + (b.fim ? ', até ' + br_(b.fim) : '') + '.';
+              texto += ' Um número fica em um animal por vez: corrija ou estorne antes o registro do outro animal.';
+            } else {
+              texto = b.inicio > a.inicio
+                ? verbo + ' deixaria o brinco ' + a.codigo + ' no animal ' + (a.fim ? 'até ' + br_(a.fim) : 'desde ' + br_(a.inicio)) + ', mas desde ' + br_(b.inicio) + ' ele é do animal ' + outro + '.'
+                : verbo + ' daria ao animal o brinco ' + a.codigo + ' em ' + br_(a.inicio) + ', mas nessa data ele era do animal ' + outro + (b.fim ? ', até ' + br_(b.fim) : '') + '.';
+              texto += ' Um número fica em um animal por vez: mude a data deste lançamento ou corrija o registro do outro animal antes.';
+            }
+            conflito_(m, itemDoAnimal_(m, ctxEv, id), { codigo: 'BRINCO_DUPLICADO', event_id: ev.event_id, event_type: ev.event_type, event_subtype: ev.event_subtype, event_date: ev.data_inicio }, texto);
           });
         });
       });
     });
+  }
+  /** O comando já tem um conflito com esse código, desse animal, com esse registro (uma causa, um conflito). */
+  function jaCitado_(m, animalId, codigo, eventId) {
+    return m.conflitos.some(function (c) { return c.animal_id === animalId && c.codigo === codigo && c.conflito && c.conflito.event_id === eventId; });
   }
   function reusoDeBrinco_(m, it, b, chave) {
     if (m.params.brinco_permite_reuso === true) return;
@@ -1398,6 +1462,11 @@ var EventService = (function () {
         if (it.atributos && it.genealogia.mae_id) it.atributos.mae_id = it.genealogia.mae_id;
         if (it.atributos && it.genealogia.pai_id) it.atributos.pai_id = it.genealogia.pai_id;
       }
+      // Correção do lançamento que criou o animal: a mãe e o pai do conjunto final são os do substituto com as correções de
+      // cadastro que continuam valendo (RN-045), e é com eles que as regras de genealogia (RN-007 a RN-010) se conferem.
+      if (it.reusado) {
+        it.genealogia = { mae_id: corrigidoDepois_(m, it.animal_id, 'mae_id', it.genealogia.mae_id), pai_id: corrigidoDepois_(m, it.animal_id, 'pai_id', it.genealogia.pai_id) };
+      }
     });
     function maeDe(id) { return final[id] && final[id].genealogia ? final[id].genealogia.mae_id : base(id).mae_id; }
     function paiDe(id) { return final[id] && final[id].genealogia ? final[id].genealogia.pai_id : base(id).pai_id; }
@@ -1428,7 +1497,8 @@ var EventService = (function () {
         var nf = nascDe(it.animal_id);
         var np = nascDe(pid);
         if (!vazio_(nf) && !vazio_(np) && np >= nf) {
-          erroItem_(m, it, cfg[0], 'NASCIMENTO_DO_PROGENITOR', 'a ' + cfg[2] + ' ' + nomeDe(pid) + ' nasceu em ' + br_(np) + ', não antes do animal (' + br_(nf) + '). Confira a ' + cfg[2] + ' ou as datas.');
+          var art = cfg[0] === 'mae_id' ? 'a ' : 'o ';
+          erroItem_(m, it, cfg[0], 'NASCIMENTO_DO_PROGENITOR', art + cfg[2] + ' ' + nomeDe(pid) + ' nasceu em ' + br_(np) + ', não antes do animal (' + br_(nf) + '). Confira ' + art + cfg[2] + ' ou as datas.');
           return;
         }
         var ciclo = caminho(pid, it.animal_id);
@@ -1460,11 +1530,14 @@ var EventService = (function () {
       if (it.novo || !it.final || (!it.final.mudouSexo && !it.final.mudouNascimento)) return;
       var filhos = Utils.unicos(m.repo.por('ANIMAIS', 'mae_id', it.animal_id).concat(m.repo.por('ANIMAIS', 'pai_id', it.animal_id)).map(function (a) { return a.animal_id; }));
       var maeRecusada = false;
+      var maeNascRecusada = false;
       var paiRecusado = { sexo: false, nascimento: false };
       filhos.forEach(function (fid) {
         var comoMae = maeDe(fid) === it.animal_id;
         var comoPai = paiDe(fid) === it.animal_id;
         if (!comoMae && !comoPai) return;
+        // Filho que o próprio comando cria ou recria: a mãe e o pai dele já foram conferidos acima (uma causa, um erro).
+        if (final[fid] && (final[fid].novo || final[fid].reusado)) return;
         var sexo = sexoDe(it.animal_id);
         if (comoMae && sexo !== 'F') maeRecusada = true;
         if (comoPai && sexo !== 'M') paiRecusado.sexo = true;
@@ -1473,9 +1546,15 @@ var EventService = (function () {
         var np = nascDe(it.animal_id);
         if (!vazio_(nf) && !vazio_(np) && np >= nf) {
           if (comoPai) paiRecusado.nascimento = true;
+          if (comoMae) maeNascRecusada = true;
           erroItem_(m, it, 'valor_novo', 'NASCIMENTO_DO_PROGENITOR', 'o animal é ' + (comoMae ? 'mãe' : 'pai') + ' de ' + nomeDe(fid) + ', nascido em ' + br_(nf) + ', e precisa ter nascido antes.');
         }
       });
+      // A mãe de um parto vigente (mesmo só de natimorto, sem cria cadastrada) nasceu antes dele (RN-009, RN-012): o parto
+      // anterior ao nascimento a linha do tempo já acusa (ANTES_DO_NASCIMENTO); o do próprio dia, aqui.
+      var npM = nascDe(it.animal_id);
+      var partoN = maeNascRecusada || vazio_(npM) ? null : Timeline.ordenar(m.f.linhas(it.animal_id).filter(function (l) { return l.papel === 'MATRIZ' && l.event_type === 'NASCIMENTO' && npM === l.event_date; }))[0];
+      if (partoN) erroItem_(m, it, 'valor_novo', 'NASCIMENTO_DO_PROGENITOR', 'o animal é a mãe do parto de ' + br_(partoN.event_date) + ' e precisa ter nascido antes dele.');
       // O touro de um parto (mesmo só de natimorto, sem cria cadastrada) é macho e nasceu antes dele (RN-012, RN-060).
       var touroDe = comoTouro_(m, it.animal_id);
       var sexoT = touroDe.length && !paiRecusado.sexo && sexoDe(it.animal_id) !== 'M' ? touroDe[0] : null;
@@ -1486,6 +1565,42 @@ var EventService = (function () {
       // A mãe de um parto vigente (mesmo só de natimorto, sem cria cadastrada) é fêmea (RN-012, RN-060).
       var parto = sexoDe(it.animal_id) !== 'F' && !maeRecusada ? partoDaMatriz_(m.f, it.animal_id) : null;
       if (parto) erroItem_(m, it, 'valor_novo', 'SEXO_DA_MATRIZ', 'o animal é a mãe do parto de ' + br_(parto.event_date) + ' e não pode deixar de ser fêmea. Se o parto foi lançado na vaca errada, corrija o parto antes.');
+    });
+  }
+  /**
+   * Reclassificação vigente do animal (na fonte do motor, sem o evento anulado) para uma categoria que não serve ao sexo
+   * `sexo` (RELATORIO_FASE2, decisão 8: a categoria escolhida à mão serve ao sexo; RN-012: corrigir o sexo reaplica as
+   * regras que dependem dele): {ajuste, categoria, evento} da primeira, ou null.
+   */
+  function reclassificacaoIncompativel_(m, id, sexo) {
+    if (vazio_(sexo) || !m.repo.carregada('CATEGORIAS')) return null;
+    var achada = null;
+    m.f.ajustes(id).forEach(function (a) {
+      if (achada || a.tipo_ajuste !== 'RECLASSIFICACAO' || vazio_(a.valor_novo)) return;
+      var cat = m.repo.porId('CATEGORIAS', a.valor_novo);
+      var ev = m.f.evento(a.event_id);
+      if (cat && ev && cat.sexo_aplicavel !== 'AMBOS' && cat.sexo_aplicavel !== sexo) achada = { ajuste: a, categoria: cat, evento: ev };
+    });
+    return achada;
+  }
+  function textoCategoriaDoSexo_(x) {
+    return 'a reclassificação de ' + br_(x.evento.event_date) + ' pôs o animal na categoria ' + x.categoria.nome + ', que é só de ' + (x.categoria.sexo_aplicavel === 'M' ? 'machos' : 'fêmeas');
+  }
+  /**
+   * O sexo que o comando muda (correção de cadastro, correção de quem criou o animal ou do parto da cria) e a categoria
+   * escolhida à mão que continua valendo: a que não serve ao sexo novo dá CONFLICT com a reclassificação.
+   */
+  function conferirCategoriasDoSexo_(m, ctxEv) {
+    var feitos = {};
+    ctxEv.itens.forEach(function (it) {
+      if (!it.animal_id || it.novo || it.ignorarNaLinhaDoTempo || feitos[it.animal_id] || !it.final || !it.final.mudouSexo) return;
+      feitos[it.animal_id] = true;
+      var gravado = m.real.animal(it.animal_id);
+      if (!gravado || gravado.sexo === it.final.sexo) return;
+      var x = reclassificacaoIncompativel_(m, it.animal_id, it.final.sexo);
+      if (!x) return;
+      conflito_(m, it, { codigo: 'CATEGORIA_INCOMPATIVEL', event_id: x.evento.event_id, event_type: x.evento.event_type, event_subtype: x.evento.event_subtype, event_date: x.evento.event_date },
+        'o animal ficaria ' + (it.final.sexo === 'M' ? 'macho' : 'fêmea') + ', mas ' + textoCategoriaDoSexo_(x) + '. Volte o animal à categoria automática (ou reclassifique-o) antes de corrigir o sexo.');
     });
   }
   /** Primeira linha MATRIZ vigente (parto) do animal na fonte f, ou null. */
@@ -1628,8 +1743,9 @@ var EventService = (function () {
       }
       if (!(item && item.brincoProposto) && !vazio_(brincoFinal) && chave(brincoFinal) !== chave(gravado.brinco || '')) {
         var dono = donoDe(brincoFinal);
-        if (dono) {
-          var p = eventoDoBrinco_(m, dono.animal_id) || { codigo: 'BRINCO_DUPLICADO', event_id: null, event_type: null, event_date: null };
+        var pDono = dono ? eventoDoBrinco_(m, dono.animal_id) : null;
+        if (dono && !(pDono && jaCitado_(m, id, 'BRINCO_DUPLICADO', pDono.event_id))) {
+          var p = pDono || { codigo: 'BRINCO_DUPLICADO', event_id: null, event_type: null, event_date: null };
           conflito_(m, it, p, verbo + ' devolveria ao animal o brinco ' + brincoFinal + ', que hoje é do animal ' + nomeAnimal_(dono) + ' (' + dono.codigo_interno + '). Troque o brinco de um dos dois antes.');
         }
       }
@@ -1644,6 +1760,12 @@ var EventService = (function () {
         if (ref.event_id) citados[ref.event_id] = true;
         conflito_(m, it, ref, texto);
       };
+      // A categoria escolhida à mão que continua valendo serve ao sexo que volta (decisão 8; RN-012).
+      var catSexo = !corrigeNoComando && depois.sexo !== gravado.sexo ? reclassificacaoIncompativel_(m, id, depois.sexo) : null;
+      if (catSexo) {
+        citar({ codigo: 'CATEGORIA_INCOMPATIVEL', event_id: catSexo.evento.event_id, event_type: catSexo.evento.event_type, event_subtype: catSexo.evento.event_subtype, event_date: catSexo.evento.event_date },
+          verbo + ' voltaria o sexo do animal para ' + (depois.sexo === 'M' ? 'macho' : 'fêmea') + ', mas ' + textoCategoriaDoSexo_(catSexo) + '. Volte o animal à categoria automática (ou reclassifique-o) antes.');
+      }
       if (!corrigeNoComando && depois.sexo !== 'F' && gravado.sexo === 'F') {
         var parto = partoDaMatriz_(m.f, id);
         if (parto) citar({ codigo: 'PARTO_DA_MATRIZ', event_id: parto.event_id, event_type: parto.event_type, event_subtype: parto.event_subtype, event_date: parto.event_date }, verbo + ' voltaria o sexo do animal para macho, mas ele é a mãe do parto de ' + br_(parto.event_date) + '. Corrija ou estorne o parto antes.');
@@ -1655,7 +1777,7 @@ var EventService = (function () {
           var comoMae = filho.mae_id === id;
           var comoPai = filho.pai_id === id;
           if (!comoMae && !comoPai) return;
-          var ref = refEvento_(m, 'REFERENCIA_GENEALOGICA', filho.evento_origem_id);
+          var ref = refVinculo_(m, fid, comoMae ? 'mae_id' : 'pai_id', id, filho.evento_origem_id);
           if ((comoMae && depois.sexo !== 'F') || (comoPai && depois.sexo !== 'M')) citar(ref, verbo + ' voltaria o sexo do animal para ' + (depois.sexo === 'M' ? 'macho' : 'fêmea') + ', mas ele é ' + (comoMae ? 'mãe' : 'pai') + ' de ' + nomeAnimal_(filho) + '.');
           else if (!vazio_(depois.data_nascimento) && !vazio_(filho.data_nascimento) && depois.data_nascimento >= filho.data_nascimento) citar(ref, verbo + ' voltaria o nascimento do animal para ' + br_(depois.data_nascimento) + ', mas ele é ' + (comoMae ? 'mãe' : 'pai') + ' de ' + nomeAnimal_(filho) + ', nascido em ' + br_(filho.data_nascimento) + '.');
         });
@@ -1665,6 +1787,27 @@ var EventService = (function () {
           if (depois.sexo !== 'M') citar(ref, verbo + ' voltaria o sexo do animal para fêmea, mas ele é o pai ' + doReproducao_(r) + '. Corrija ou estorne esse lançamento antes.');
           else if (!vazio_(depois.data_nascimento) && Utils.dataValida(r.data) && depois.data_nascimento >= r.data) citar(ref, verbo + ' voltaria o nascimento do animal para ' + br_(depois.data_nascimento) + ', mas ele é o pai ' + doReproducao_(r) + '. Corrija as datas ou esse lançamento antes.');
         });
+        // A mãe de um parto (mesmo só de natimorto): nascida antes dele (RN-009, RN-012). O parto anterior ao nascimento
+        // que volta a linha do tempo já acusa (ANTES_DO_NASCIMENTO); o do próprio dia, aqui.
+        if (!vazio_(depois.data_nascimento) && nulo_(depois.data_nascimento) !== nulo_(gravado.data_nascimento)) {
+          Timeline.ordenar(m.f.linhas(id).filter(function (l) { return l.papel === 'MATRIZ' && l.event_type === 'NASCIMENTO' && depois.data_nascimento === l.event_date; })).forEach(function (l) {
+            citar({ codigo: 'PARTO_DA_MATRIZ', event_id: l.event_id, event_type: l.event_type, event_subtype: l.event_subtype, event_date: l.event_date }, verbo + ' voltaria o nascimento do animal para ' + br_(depois.data_nascimento) + ', mas ele é a mãe do parto de ' + br_(l.event_date) + '. Corrija as datas ou o parto antes.');
+          });
+        }
+      }
+      // A chegada declarada no rebanho inicial não fica antes do nascimento (RN-021): o que volta é conferido com o que fica.
+      var corrigeDatas = item && ctxEv.tipo === 'AJUSTE_INVENTARIO' && ctxEv.subtipo === 'CORRECAO_CADASTRO' && !!item.final && (item.final.mudouNascimento || item.final.mudouEntrada);
+      var origemEv = vazio_(depois.evento_origem_id) ? null : m.f.evento(depois.evento_origem_id);
+      if (!corrigeDatas && origemEv && origemEv.event_type === 'ENTRADA_INICIAL') {
+        var chegou = Timeline.chegadaDeclarada(m.f, id).data;
+        var chegouAntes = Timeline.chegadaDeclarada(m.real, id).data;
+        var mudouData = nulo_(chegou) !== nulo_(chegouAntes) || nulo_(depois.data_nascimento) !== nulo_(gravado.data_nascimento);
+        if (mudouData && Utils.dataValida(chegou) && Utils.dataValida(depois.data_nascimento) && chegou < depois.data_nascimento) {
+          // Quem impede é o registro que deixou a outra data como está: a correção vigente dela, ou o rebanho inicial.
+          var campoQueFica = nulo_(chegou) !== nulo_(chegouAntes) ? 'data_nascimento' : 'data_entrada';
+          var refData = ultimaCorrecaoCampo_(m, id, campoQueFica, 'ENTRADA_ANTES_DO_NASCIMENTO') || refEvento_(m, 'ENTRADA_ANTES_DO_NASCIMENTO', origemEv.event_id);
+          conflito_(m, it, refData, verbo + ' deixaria a chegada na fazenda (' + br_(chegou) + ') antes do nascimento (' + br_(depois.data_nascimento) + '). Corrija a data de chegada ou o nascimento antes.');
+        }
       }
       conferirGenealogiaRestaurada_(m, ctxEv, id, depois, gravado, item, it, verbo);
       var reclassNoComando = item && ctxEv.tipo === 'AJUSTE_INVENTARIO' && ctxEv.subtipo === 'RECLASSIFICACAO';
@@ -1769,6 +1912,27 @@ var EventService = (function () {
     });
   }
   /**
+   * O registro que deu ao filho a mãe ou o pai `paiId` (CONTRATOS, seção 14: o conflito aponta o registro que impede): a
+   * correção de cadastro vigente mais recente do campo, quando foi ela que pôs esse animal; senão o lançamento que criou o
+   * filho (onde o vínculo nasceu).
+   */
+  function refVinculo_(m, filhoId, campo, paiId, origemId) {
+    var cor = ultimaCorrecaoCampo_(m, filhoId, campo, 'REFERENCIA_GENEALOGICA');
+    if (cor) {
+      var aj = m.f.ajustes(filhoId).filter(function (a) { return a.event_id === cor.event_id && a.tipo_ajuste === 'CORRECAO_CADASTRO' && a.campo === campo; })[0];
+      if (aj && aj.valor_novo === paiId) return cor;
+    }
+    return refEvento_(m, 'REFERENCIA_GENEALOGICA', origemId);
+  }
+  /** A correção de cadastro vigente mais recente de um campo do animal (o registro que o deixou assim), como conflito; ou null. */
+  function ultimaCorrecaoCampo_(m, id, campo, codigo) {
+    // Na ordem em que a projeção aplica as correções (a de corrigidoDepois_): a última é a que vale.
+    var ev = m.f.ajustes(id).filter(function (a) { return a.tipo_ajuste === 'CORRECAO_CADASTRO' && a.campo === campo; })
+      .map(function (a) { return m.f.evento(a.event_id); }).filter(Boolean)
+      .sort(function (a, b) { return (m.f.ordemSeq(a.event_id) - m.f.ordemSeq(b.event_id)) || (a.event_seq - b.event_seq); }).pop();
+    return ev ? { codigo: codigo, event_id: ev.event_id, event_type: ev.event_type, event_subtype: ev.event_subtype, event_date: ev.event_date } : null;
+  }
+  /**
    * O registro que impede, para o conflito (CONTRATOS, seção 14): tipo, subtipo e data do próprio lançamento, nunca um
    * pseudo-tipo; sem o lançamento (cadastro sem evento), tudo nulo.
    */
@@ -1792,9 +1956,11 @@ var EventService = (function () {
     ['mae_id', 'pai_id'].forEach(function (c) {
       m.repo.por('ANIMAIS', c, animalId).forEach(function (f) {
         if (anulados[f.animal_id]) return;
-        if (!vazio_(f.evento_origem_id) && outros[f.evento_origem_id]) return;
-        if (!vazio_(f.evento_origem_id)) outros[f.evento_origem_id] = true;
-        conflito_(m, it, refEvento_(m, 'REFERENCIA_GENEALOGICA', f.evento_origem_id), 'é ' + (c === 'mae_id' ? 'mãe' : 'pai') + ' de ' + nomeAnimal_(f) + '.');
+        // O registro que criou o vínculo: a correção de cadastro que pôs a mãe ou o pai, ou o lançamento que criou o filho.
+        var ref = refVinculo_(m, f.animal_id, c, animalId, f.evento_origem_id);
+        if (!vazio_(ref.event_id) && outros[ref.event_id]) return;
+        if (!vazio_(ref.event_id)) outros[ref.event_id] = true;
+        conflito_(m, it, ref, 'é ' + (c === 'mae_id' ? 'mãe' : 'pai') + ' de ' + nomeAnimal_(f) + '.');
       });
     });
     m.repo.por('REPRODUCAO', 'touro_id', animalId).forEach(function (r) {
@@ -2018,7 +2184,7 @@ var EventService = (function () {
     if (!vazio_(c.pasto_destino_id)) {
       var p = m.f.pasto(c.pasto_destino_id);
       if (!p) erroGeral_(m, 'pasto_destino_id', 'NAO_ENCONTRADO', 'O pasto de destino não existe.');
-      else if (p.status !== 'ATIVO' && ctxEv.ev.pre_marco_zero !== true) erroGeral_(m, 'pasto_destino_id', 'PASTO_INATIVO', 'O pasto ' + p.nome + ' está desativado e não recebe animais.');
+      else if (p.status !== 'ATIVO' && ctxEv.ev.pre_marco_zero !== true && !usadoNoOriginal_(m, p.pasture_id)) erroGeral_(m, 'pasto_destino_id', 'PASTO_INATIVO', 'O pasto ' + p.nome + ' está desativado e não recebe animais.');
     }
   }
   function plural_(n, um, varios) {
@@ -2129,8 +2295,10 @@ var EventService = (function () {
     }
     var frete = 0;
     var outros = 0;
-    // Os fretes são lançados antes dos outros custos: COMPRAS guarda só os dois totais, e assim o tipo de cada item
-    // se reconstrói pela ordem das linhas (o prefixo que soma o frete), sem chave própria no payload (03b, seção 2.6).
+    // O tipo de cada custo (frete ou outro) fica gravado no próprio evento (payload_json.custos: [{financial_id, tipo}]),
+    // como o das deduções da venda: COMPRAS guarda só os dois totais, e a ordem física das linhas não diz nada (06, seção
+    // 12: o dono pode classificar a aba). Os fretes continuam lançados primeiro, só por ordem de leitura.
+    ctxEv.custos = [];
     custos.map(function (x, k) { return { x: x, k: k }; }).sort(function (a, b) { return ((a.x.tipo === 'OUTRO') - (b.x.tipo === 'OUTRO')) || a.k - b.k; }).forEach(function (o) {
       var x = o.x;
       var k = o.k;
@@ -2144,6 +2312,7 @@ var EventService = (function () {
       }, m.col);
       if (!pl) return;
       if (eFrete) frete += x.valor; else outros += x.valor;
+      ctxEv.custos.push({ financial_id: pl.financial_id, tipo: eFrete ? 'FRETE' : 'OUTRO' });
       planejados.push(pl);
       lancs.push(resumoLancamento_(m, pl, contaCustos, { papel: eFrete ? 'FRETE' : 'OUTRO' }));
     });
@@ -2218,14 +2387,7 @@ var EventService = (function () {
   }
   /** Última pesagem individual (não MEDIA_LOTE) do animal até a data: base estimada do rateio sem peso na venda. */
   function ultimaPesagem_(m, animalId, data) {
-    var melhor = null;
-    m.f.pesagens(animalId).forEach(function (p) {
-      if (p.data_pesagem > data || p.metodo === 'MEDIA_LOTE' || typeof p.peso_kg !== 'number') return;
-      var ev = m.f.evento(p.event_id);
-      var x = { peso_kg: p.peso_kg, data: p.data_pesagem, seq: ev ? ev.event_seq : 0, ord: ev ? m.f.ordemSeq(p.event_id) : 0 };
-      if (!melhor || x.data > melhor.data || (x.data === melhor.data && (x.ord > melhor.ord || (x.ord === melhor.ord && x.seq > melhor.seq)))) melhor = x;
-    });
-    return melhor;
+    return Timeline.ultimaPesagem(m.f, animalId, data);
   }
   /**
    * Animal vendido (04, seção 4.3; 03b, seções 3.4 e 16.10): saída (−1) com a origem do cabeçalho (conferida pela
@@ -2544,10 +2706,9 @@ var EventService = (function () {
     var out = {};
     var codigo = function (f) { var c = m.repo.porId('PLANO_CONTAS', f.conta_id); return c ? c.codigo : null; };
     if (ev.event_type === 'COMPRA' && fins.length) {
-      var cp = m.repo.por('COMPRAS', 'event_id', ev.event_id)[0] || {};
       var custos = fins.filter(function (f) { if (codigo(f) !== 'COMPRA_ANIMAIS') return true; out[f.financial_id] = 'ANIMAIS'; return false; });
-      var tipos = FinancialService.tiposDosCustos(custos, cp.frete || 0);
-      custos.forEach(function (f, i) { out[f.financial_id] = tipos ? tipos[i] : f.conta_id; });
+      var tipos = FinancialService.tiposDosCustos(ev.payload_json, custos);
+      custos.forEach(function (f) { out[f.financial_id] = tipos ? tipos[f.financial_id] : f.conta_id; });
     } else if (ev.event_type === 'VENDA' && fins.length) {
       var deducoes = {};
       ((ev.payload_json || {}).deducoes || []).forEach(function (x) { deducoes[x.financial_id] = x.tipo; });
@@ -2589,6 +2750,7 @@ var EventService = (function () {
       justificativa: ctxEv.original ? nulo_(m.tx.dados.justificativa) : null, valor_abertura_origem: ctxEv.abertura ? 'INFORMADO' : null,
       gta_numero: ctxEv.tipo === 'TRANSFERENCIA' && typeof ctxEv.campos.gta_numero === 'string' ? nulo_(Utils.aparar(ctxEv.campos.gta_numero)) : null,
       deducoes: ctxEv.deducoes && ctxEv.deducoes.length ? ctxEv.deducoes : null,
+      custos: ctxEv.custos && ctxEv.custos.length ? ctxEv.custos : null,
       acao: ctxEv.tipo === 'MARCACAO' ? ctxEv.ev.payload_json.acao : null,
       motivo_descarte: ctxEv.tipo === 'MARCACAO' ? ctxEv.ev.payload_json.motivo_descarte : null,
       // A baixa por divergência não grava AJUSTES: o porquê do lançamento fica no evento (BAIXAS guarda em que contagem faltou).
@@ -2635,6 +2797,7 @@ var EventService = (function () {
   function conferirRestauracao(tx, eventos, ids, verbo) {
     var m = motor_(tx, eventos || []);
     conferirEstadoRestaurado_(m, ids || [], verbo || 'sem esses lançamentos, o animal', null);
+    conferirPeriodosDeBrinco_(m, null, ids || [], verbo || 'sem esses lançamentos, o animal');
     return m.conflitos;
   }
 
@@ -2680,6 +2843,7 @@ var EventService = (function () {
     var ficam = animais.filter(function (id) { return !criados[id]; });
     conferirSequencias_(m, null, ficam, null);
     conferirEstadoRestaurado_(m, ficam, 'o estorno', null);
+    conferirPeriodosDeBrinco_(m, null, ficam, 'o estorno');
     conferirParcelasLiquidadas_(m, alvo, 'estornar');
     m.repo.por('FINANCEIRO', 'event_id', alvo.event_id).forEach(function (fin) {
       if (!vazio_(m.params.fin_bloqueio_ate) && fin.data_competencia <= m.params.fin_bloqueio_ate) {
@@ -2788,7 +2952,12 @@ var EventService = (function () {
           if (!vazio_(o.ate) && ev.event_date > o.ate) return false;
           return true;
         });
-        lista = Utils.ordenarPor(lista, [{ campo: 'event_date', desc: true }, { campo: 'event_seq', desc: true }]);
+        // Mais recentes primeiro, com o substituto na posição do evento que ele corrige (desenho-base 16.1): a correção
+        // não vira o lançamento mais recente do dia.
+        var fonte = Timeline.fonte(tx);
+        var pos = {};
+        lista.forEach(function (ev) { pos[ev.event_id] = fonte.ordemSeq(ev.event_id) || ev.event_seq || 0; });
+        lista.sort(function (a, b) { return (a.event_date < b.event_date ? 1 : a.event_date > b.event_date ? -1 : 0) || (pos[b.event_id] - pos[a.event_id]) || (b.event_seq - a.event_seq); });
         var inicio = (pagina - 1) * porPagina;
         return { total: lista.length, pagina: pagina, por_pagina: porPagina, itens: lista.slice(inicio, inicio + porPagina).map(function (ev) { return eventoPublico_(tx, ev); }) };
       },
