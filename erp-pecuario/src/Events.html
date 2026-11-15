@@ -1,0 +1,203 @@
+<script>
+'use strict';
+/*
+ * ERP Pecuário — Eventos (08-ux-ui.md, seções 3 e 4). Histórico (evento.listar, paginado no servidor, com filtros de
+ * tipo, período e "só os que valem", e os registros não concluídos deste aparelho); detalhe (evento.obter: animais,
+ * detalhes, avisos aceitos, justificativa, o que ele substitui ou estorna e quem o anulou); "Estornar" (ESTORNO pelo
+ * fluxo de registro, com a simulação do servidor) e "Corrigir" (evento substituto do mesmo tipo, com os mesmos
+ * animais, simulação e a diferença para o original). O registro em si (seletor, formulário, revisão, resultado) é o
+ * do Registro (Components); as entradas por contexto ficam na ficha, no painel do pasto e na listagem.
+ */
+var TelaEventos = (function () {
+  var h = Util.h;
+  var CORRIGIVEIS = ['ENTRADA_INICIAL', 'OUTRA_ENTRADA'];
+  var filtros = { tipo: '', de: '', ate: '', vigentes: false, pagina: 1 };
+  function situacao(e) {
+    if (e.event_type === 'ESTORNO') return 'Estorno';
+    if (e.vigente) return 'Vale';
+    if (e.anulado_por) return 'Não vale (estornado ou corrigido)';
+    return Fmt.rotulo('STATUS_EVENTO', e.status);
+  }
+  function rotuloEvento(e) { return (e.rotulo || Fmt.rotulo('', e.event_type)) + ' de ' + Fmt.data(e.event_date) + (e.animais ? ' (' + e.animais + (e.animais === 1 ? ' animal)' : ' animais)') : ''); }
+  function linkEvento(id, texto) { var r = 'evento/' + id; return h('a', { class: 'botao botao-texto', href: Roteador.href(r), dataset: { rota: r } }, texto); }
+  function montarLista(el) {
+    var vivo = true;
+    el.appendChild(h('div', { class: 'tela-cabecalho' }, h('h1', { text: 'Eventos' }), App.podeRegistrar() ? h('a', { class: 'botao botao-primario', href: Roteador.href('evento/novo'), dataset: { rota: 'evento/novo' } }, 'Registrar evento') : null));
+    var pend = h('div');
+    el.appendChild(pend);
+    Rascunhos.listar().then(function (rs) {
+      var abertos = rs.filter(function (r) { return Store.tipoEvento(r.tipo); });
+      if (!vivo || !abertos.length) return;
+      pend.appendChild(UI.secao('Não concluídos neste aparelho', h('ul', { class: 'lista-simples' }, abertos.map(function (r) {
+        return h('li', { class: 'linha-acao' }, h('span', { text: Registro.descricaoRascunho(r) + (r.estado === 'ENVIANDO' ? ' · verificando se gravou' : '') }), h('a', { class: 'botao botao-secundario', href: Roteador.href('evento/novo/' + r.tipo), dataset: { rota: 'evento/novo/' + r.tipo } }, 'Continuar'));
+      })), { dado: 'nao-concluidos' }));
+    }, function (e) { pend.appendChild(UI.nota('Não foi possível ler os rascunhos: ' + e.message, 'aviso')); });
+    var tipos = [['', 'Todos']].concat((Store.catalogo().tipos || []).map(function (t) { return [t.tipo, t.rotulo]; }));
+    var sel = h('select', { id: 'ev-tipo' }, tipos.map(function (t) { return h('option', { value: t[0], text: t[1], selected: t[0] === filtros.tipo }); }));
+    var de = h('input', { type: 'date', id: 'ev-de', value: filtros.de });
+    var ate = h('input', { type: 'date', id: 'ev-ate', value: filtros.ate });
+    var vig = h('input', { type: 'checkbox', id: 'ev-vig', checked: filtros.vigentes });
+    var campo = function (id, rot, c) { return h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo', for: id, text: rot }), c); };
+    el.appendChild(h('form', { class: 'filtros', role: 'search', 'aria-label': 'Filtrar eventos', on: { submit: function (ev) { ev.preventDefault(); filtros.pagina = 1; carregar(); } } },
+      campo('ev-tipo', 'Tipo', sel), campo('ev-de', 'De', de), campo('ev-ate', 'Até', ate),
+      h('label', { class: 'marca', for: 'ev-vig' }, vig, h('span', { text: 'Só os que valem' })), UI.botao('Filtrar', { tipo: 'primario', atributos: { type: 'submit' } })));
+    var resumo = h('p', { class: 'dado', role: 'status' });
+    var corpo = h('div');
+    el.appendChild(resumo);
+    el.appendChild(corpo);
+    async function carregar() {
+      filtros.tipo = sel.value; filtros.de = de.value; filtros.ate = ate.value; filtros.vigentes = vig.checked;
+      Util.limpar(corpo);
+      corpo.appendChild(UI.carregando('Buscando os lançamentos…'));
+      try {
+        var q = { pagina: filtros.pagina };
+        ['tipo', 'de', 'ate'].forEach(function (k) { if (filtros[k]) q[k] = filtros[k]; });
+        if (filtros.vigentes) q.vigentes = true;
+        var r = (await Cliente.consulta('evento.listar', q)).data;
+        if (!vivo) return;
+        Util.limpar(corpo);
+        var paginas = Math.max(1, Math.ceil(r.total / r.por_pagina));
+        resumo.textContent = r.total + (r.total === 1 ? ' lançamento' : ' lançamentos');
+        corpo.appendChild(UI.tabela({
+          id: 'eventos', rotulo: 'Lançamentos', linhas: r.itens, chave: function (e) { return e.event_id; }, porPagina: r.por_pagina, semPaginacao: true, vazio: { texto: 'Nenhum lançamento com esses filtros.' },
+          colunas: [
+            { id: 'event_date', rotulo: 'Data', formatar: function (e) { return Fmt.data(e.event_date); } },
+            { id: 'rotulo', rotulo: 'Lançamento', formatar: function (e) { return linkEvento(e.event_id, e.rotulo + (e.event_subtype ? ' · ' + Fmt.rotulo('', e.event_subtype) : '')); } },
+            { id: 'animais', rotulo: 'Animais', num: true },
+            { id: 'total_value', rotulo: 'Valor', num: true, formatar: function (e) { return Fmt.dinheiro(e.total_value); } },
+            { id: 'situacao', rotulo: 'Situação', valor: situacao },
+            { id: 'source', rotulo: 'Origem', valor: function (e) { return Fmt.rotulo('FONTE', e.source); } },
+          ],
+        }).el);
+        if (paginas > 1) {
+          corpo.appendChild(h('div', { class: 'paginacao' }, h('span', { class: 'suave', text: 'Página ' + r.pagina + ' de ' + paginas }), h('div', { class: 'acoes', style: 'margin-top:0' },
+            UI.botao('Anterior', { desabilitado: r.pagina <= 1, aoClicar: function () { filtros.pagina -= 1; carregar(); } }),
+            UI.botao('Próxima', { desabilitado: r.pagina >= paginas, aoClicar: function () { filtros.pagina += 1; carregar(); } }))));
+        }
+      } catch (e) {
+        if (!vivo) return;
+        Util.limpar(corpo);
+        corpo.appendChild(UI.estadoErro(e, { acao: { texto: 'Tentar de novo', aoClicar: carregar } }));
+      }
+    }
+    carregar();
+    return function () { vivo = false; };
+  }
+
+  // ------------------------------------------------------------------ correção ----
+  function texto_(v) { return v === null || v === undefined || v === '' ? null : v; }
+  function boolDe(v) { return v === 'S' || v === true ? true : v === 'N' || v === false ? false : null; }
+  /** Pré-preenche o evento substituto com o que o original gravou (valores como digitados no formulário). */
+  function previaCorrecao(o) {
+    var ev = o.evento, det = o.detalhes || {};
+    var def = Store.tipoEvento(ev.event_type);
+    var origem = { event_date: ev.event_date, property_id: ev.property_id, description: ev.description, responsible: ev.responsible, notes: ev.notes };
+    var campos = {};
+    (def.campos || []).forEach(function (d) { if (texto_(origem[d.id]) !== null) campos[d.id] = origem[d.id]; });
+    var idents = Utils_agrupar(det.IDENTIFICACOES || []);
+    var pesos = Utils_agrupar(det.PESAGENS || []);
+    var antes = { campos: Util.clonar(campos), linhas: {} };
+    var linhas = (o.linhas || []).filter(function (l) { return Number(l.efeito_inventario) === 1; }).map(function (l) {
+      var at = l.atributos_iniciais_json;
+      var ids = idents[l.animal_id] || [];
+      var brinco = ids.filter(function (x) { return x.tipo === 'BRINCO'; })[0];
+      var v;
+      if (!at) v = { brinco: brinco ? brinco.codigo : null, pasto_destino_id: l.pasto_destino_id, observacoes: l.observacoes };
+      else {
+        var a = Store.animal(l.animal_id);
+        v = {
+          brinco: brinco ? brinco.codigo : null, nome: a ? a.nome : null, sexo: at.sexo, raca: at.raca, data_nascimento: at.data_nascimento, data_nascimento_confianca: at.data_nascimento_confianca,
+          mae_id: at.mae_id, mae_confianca: at.mae_confianca, pai_id: at.pai_id, pai_confianca: at.pai_confianca, origem: at.origem, castrado: boolDe(at.castrado), reprodutor: boolDe(at.reprodutor),
+          partos_previos: at.partos_previos === undefined || at.partos_previos === null ? null : String(at.partos_previos), situacao_reprodutiva: at.situacao_reprodutiva, data_prevista_parto: at.data_prevista_parto,
+          pasto_destino_id: l.pasto_destino_id, observacoes: l.observacoes,
+          outras_identificacoes: ids.filter(function (x) { return x.tipo !== 'BRINCO'; }).map(function (x) { return { tipo: x.tipo, codigo: x.codigo }; }),
+        };
+        if (ev.event_type === 'ENTRADA_INICIAL') {
+          var ps = (pesos[l.animal_id] || [])[0];
+          v.data_entrada = at.data_entrada; v.data_entrada_confianca = at.data_entrada_confianca;
+          v.peso = l.peso === null || l.peso === undefined ? null : Fmt.numero(l.peso, 1).replace(/\./g, '');
+          v.metodo_pesagem = ps ? ps.metodo : null;
+          v.valor_abertura = l.valor_individual === null || l.valor_individual === undefined ? null : Fmt.centavosParaTexto(l.valor_individual);
+        }
+        if (!v.outras_identificacoes.length) delete v.outras_identificacoes;
+      }
+      Object.keys(v).forEach(function (k) { if (v[k] === null || v[k] === undefined) delete v[k]; });
+      antes.linhas[l.animal_id] = Util.clonar(v);
+      return { animal_id: l.animal_id, criado: !!at, valores: v };
+    });
+    return { campos: campos, linhas: linhas, origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotuloEvento(ev), antes: antes } };
+  }
+  function Utils_agrupar(lista) { var m = {}; lista.forEach(function (x) { (m[x.animal_id] = m[x.animal_id] || []).push(x); }); return m; }
+
+  // ------------------------------------------------------------------ detalhe ----
+  function nomeAnimal(l) {
+    var a = Store.animal(l.animal_id);
+    return l.brinco || (a ? Store.rotuloAnimal(a) : l.codigo_interno || 'animal');
+  }
+  function montarDetalhe(el, p) {
+    var vivo = true;
+    var titulo = h('h1', { text: 'Lançamento' });
+    var acoes = h('div', { class: 'acoes', dataset: { acoesEvento: '1' } });
+    var corpo = h('div', null, UI.carregando('Buscando o lançamento…'));
+    el.appendChild(h('div', { class: 'tela-cabecalho' }, titulo));
+    el.appendChild(acoes);
+    el.appendChild(corpo);
+    Cliente.consulta('evento.obter', { event_id: p.id }).then(function (r) {
+      if (!vivo) return;
+      var o = r.data, ev = o.evento, det = o.detalhes || {};
+      titulo.textContent = ev.rotulo + (ev.event_subtype ? ' · ' + Fmt.rotulo('', ev.event_subtype) : '');
+      Util.limpar(corpo);
+      var prop = Store.propriedade(ev.property_id);
+      var payload = ev.payload || {};
+      var ligacoes = [];
+      if (o.anula) ligacoes.push([ev.event_type === 'ESTORNO' ? 'Estorna' : 'Substitui', linkEvento(o.anula.event_id, rotuloEvento(o.anula))]);
+      if (ev.anulado_por) ligacoes.push(['Deixou de valer por', linkEvento(ev.anulado_por, 'ver o lançamento que o anulou')]);
+      corpo.appendChild(UI.secao('Lançamento', UI.pares([
+        ['Data', Fmt.data(ev.event_date)], ['Registrado em', Fmt.data(ev.registration_date)], ['Situação', situacao(ev)], ['Animais', String(ev.animais)],
+        ['Propriedade', prop ? prop.nome : null], ['Descrição', ev.description], ['Responsável', ev.responsible], ['Observações', ev.notes],
+        ['Valor', ev.total_value === null ? null : Fmt.dinheiro(ev.total_value)], ['Origem', Fmt.rotulo('FONTE', ev.source)], ['Lançado por', ev.created_by],
+        ev.pre_marco_zero ? ['Histórico', 'antes do marco zero (sem efeito no inventário)'] : null, payload.justificativa ? ['Justificativa', payload.justificativa] : null,
+      ].concat(ligacoes)), { dado: 'cabecalho' }));
+      var aceitos = payload.avisos_aceitos || [];
+      if (aceitos.length) corpo.appendChild(UI.secao('Avisos aceitos ao gravar', h('ul', { class: 'lista-simples' }, aceitos.map(function (a) { return h('li', { text: Fmt.rotulo('', a.codigo) + (a.n ? ' (' + a.n + ')' : '') + (a.justificativa ? ': ' + a.justificativa : '') }); })), { dado: 'avisos' }));
+      var linhas = o.linhas || [];
+      if (linhas.length) corpo.appendChild(UI.secao('Animais', UI.tabela({
+        id: 'ev-animais', rotulo: 'Animais do lançamento', linhas: linhas, chave: function (l) { return l.event_animal_id; },
+        colunas: [
+          { id: 'animal', rotulo: 'Animal', valor: nomeAnimal, formatar: function (l) { var rr = 'animal/' + l.animal_id + '/resumo'; return h('a', { class: 'botao botao-texto', href: Roteador.href(rr), dataset: { rota: rr } }, nomeAnimal(l)); } },
+          { id: 'papel', rotulo: 'Papel', valor: function (l) { return Fmt.rotulo('PAPEL', l.papel); } },
+          { id: 'efeito', rotulo: 'No rebanho', valor: function (l) { var e = Number(l.efeito_inventario); return e > 0 ? 'entra' : e < 0 ? 'sai' : '—'; } },
+          { id: 'pasto', rotulo: 'Pasto', valor: function (l) { var po = l.pasto_origem_id ? (Store.pasto(l.pasto_origem_id) || {}).nome : null, pd = l.pasto_destino_id ? (Store.pasto(l.pasto_destino_id) || {}).nome : null; return po && pd ? po + ' → ' + pd : pd || po || '—'; } },
+          { id: 'peso', rotulo: 'Peso', num: true, formatar: function (l) { return Fmt.peso(l.peso); } },
+          { id: 'valor', rotulo: 'Valor', num: true, formatar: function (l) { return Fmt.dinheiro(l.valor_individual); } },
+        ],
+      }).el, { dado: 'animais' }));
+      var porId = {};
+      linhas.forEach(function (l) { porId[l.animal_id] = l; });
+      var quem = function (x) { return porId[x.animal_id] ? nomeAnimal(porId[x.animal_id]) : 'animal'; };
+      if ((det.AJUSTES || []).length) corpo.appendChild(UI.secao('Correções', h('ul', { class: 'lista-simples' }, det.AJUSTES.map(function (x) { return h('li', { text: quem(x) + ': ' + Fmt.rotuloOpcao('campo', x.campo) + ' de ' + (x.valor_anterior || '—') + ' para ' + (x.valor_novo || '—') + (x.justificativa ? ' · ' + x.justificativa : '') }); })), { dado: 'ajustes' }));
+      if ((det.IDENTIFICACOES || []).length) corpo.appendChild(UI.secao('Identificações', h('ul', { class: 'lista-simples' }, det.IDENTIFICACOES.map(function (x) { return h('li', { text: quem(x) + ': ' + (x.tipo === 'BRINCO' ? 'Brinco' : Fmt.rotulo('IDENTIFICACAO', x.tipo)) + ' ' + x.codigo + ' desde ' + Fmt.data(x.data_inicio) + (x.data_fim ? ' até ' + Fmt.data(x.data_fim) : '') }); }))));
+      if ((det.PESAGENS || []).length) corpo.appendChild(UI.secao('Pesagens', h('ul', { class: 'lista-simples' }, det.PESAGENS.map(function (x) { return h('li', { text: quem(x) + ': ' + Fmt.peso(x.peso_kg) + ' · ' + Fmt.rotulo('METODO_PESAGEM', x.metodo) }); }))));
+      if ((det.FINANCEIRO || []).length) corpo.appendChild(UI.secao('Lançamentos financeiros', h('ul', { class: 'lista-simples' }, det.FINANCEIRO.map(function (x) { return h('li', { text: (x.descricao || 'lançamento') + ': ' + Fmt.dinheiro(x.valor) + (x.status === 'CANCELADO' ? ' (cancelado)' : '') }); }))));
+      if (ev.vigente && ev.event_type !== 'ESTORNO' && Store.tipoEvento('ESTORNO')) {
+        acoes.appendChild(UI.botao('Estornar', { tipo: 'perigo', aoClicar: function () {
+          var rot = {};
+          rot[ev.event_id] = rotuloEvento(ev);
+          Registro.abrir('ESTORNO', { campos: { event_id: ev.event_id }, rotulos: rot, origem: 'evento/' + ev.event_id });
+        } }));
+      }
+      if (ev.vigente && CORRIGIVEIS.indexOf(ev.event_type) >= 0 && Store.tipoEvento(ev.event_type)) {
+        acoes.appendChild(UI.botao('Corrigir', { icone: 'editar', aoClicar: function () { Registro.abrir(ev.event_type, previaCorrecao(o)); } }));
+      }
+    }, function (e) {
+      if (!vivo) return;
+      Util.limpar(corpo);
+      corpo.appendChild(UI.estadoErro(e, { acao: { texto: 'Ver todos os lançamentos', aoClicar: function () { Roteador.ir('eventos'); } } }));
+    });
+    return function () { vivo = false; };
+  }
+  Telas.registrar('eventos', { titulo: 'Eventos', modulo: 'EVENTOS', montar: montarLista });
+  Telas.registrar('evento/:id', { titulo: 'Lançamento', modulo: 'EVENTOS', montar: montarDetalhe });
+  return { previaCorrecao: previaCorrecao, situacao: situacao };
+})();
+</script>

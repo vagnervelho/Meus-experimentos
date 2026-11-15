@@ -151,7 +151,7 @@ var Config = (function () {
       return item;
     });
     var desconhecidas = carregada ? repo.vigentes('CONFIGURACOES').filter(function (l) { return !semente_(l.chave); }).map(function (l) { return l.chave; }) : [];
-    return { itens: itens, desconhecidas: desconhecidas };
+    return { itens: itens, desconhecidas: desconhecidas, codigos_aviso: CODIGOS_AVISO.slice(), politicas: ['BLOQUEIA', 'AVISA', 'IGNORA'] };
   }
 
   // ------------------------------------------------------------------ validação de valor ----

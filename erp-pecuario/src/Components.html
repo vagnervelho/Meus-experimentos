@@ -261,7 +261,7 @@ var UI = (function () {
         });
         raiz.appendChild(ul);
       }
-      if (paginas > 1 || todas.length > 0) {
+      if (!o.semPaginacao && (paginas > 1 || todas.length > 0)) {
         raiz.appendChild(h('div', { class: 'paginacao' }, h('span', { class: 'suave', text: 'Página ' + pagina + ' de ' + paginas + ' · ' + todas.length + (todas.length === 1 ? ' item' : ' itens') }),
           h('div', { class: 'acoes', style: 'margin-top:0' }, botao('Anterior', { desabilitado: pagina <= 1, aoClicar: function () { pagina -= 1; desenhar(); } }), botao('Próxima', { desabilitado: pagina >= paginas, aoClicar: function () { pagina += 1; desenhar(); } }))));
       }

@@ -1,0 +1,147 @@
+<script>
+'use strict';
+/*
+ * ERP Pecuário — Pastos (§7; 08-ux-ui.md, seção 3). Lista em cartões (cabeças, UA/ha, ocupação %, próprio ou
+ * arrendado, com o arrendador), cadastro e edição (posse e arrendador; "+ Novo" arrendador já marcado como tal) e
+ * painel do pasto (pasto.painel): dados do pasto, composição por sexo e categoria, lotação com a parte estimada,
+ * animais e a "posição em [data]" (a partir do marco zero). Atalhos de registro só para os tipos entregues.
+ */
+var TelaPastos = (function () {
+  var h = Util.h;
+  var ATALHOS = [{ tipo: 'TRANSFERENCIA', rotulo: 'Transferir daqui', origem: true }, { tipo: 'PESAGEM', rotulo: 'Pesar' }, { tipo: 'SANIDADE', rotulo: 'Vacinar' }];
+  function texto(ind, formatar) { var v = UI.valorInd(ind, formatar); return v.motivo ? v.texto + ' (' + v.motivo + ')' : v.texto; }
+  function ocupacao(o) { if (!o) return '—'; var t = texto(o, function (v) { return Fmt.numero(v, 0) + '%'; }); return o.valor !== null && o.valor !== undefined ? t + (o.base === 'CABECAS' ? ' (por cabeças)' : ' (por UA/ha)') : t; }
+  function posse(p) { return Fmt.rotulo('POSSE', p.posse) + (p.posse === 'ARRENDADO' && p.arrendador_nome ? ' · ' + p.arrendador_nome : ''); }
+  /** Formulário do pasto (novo ou edição). */
+  function formulario(p, origem, aoSalvar) {
+    var novo = !p;
+    var defs = [
+      novo ? { id: 'property_id', rotulo: 'Propriedade', tipo: 'ref:PROPRIEDADES', obrigatorio: true, default: { de: 'CONFIGURACOES.propriedade_padrao_id' } } : null,
+      { id: 'nome', rotulo: 'Nome do pasto', tipo: 'texto', obrigatorio: true },
+      { id: 'identificacao', rotulo: 'Identificação (sigla ou número)', tipo: 'texto' },
+      { id: 'area_hectares', rotulo: 'Área', tipo: 'decimal', casas: 4, unidade: 'ha', min: 0 },
+      { id: 'tipo_capim', rotulo: 'Capim', tipo: 'texto' },
+      { id: 'capacidade_estimada_ua_ha', rotulo: 'Capacidade estimada', tipo: 'decimal', casas: 4, unidade: 'UA/ha', min: 0, ajuda: 'Informada por você; o sistema não deduz pela área.' },
+      { id: 'capacidade_estimada_cabecas', rotulo: 'Capacidade em cabeças', tipo: 'inteiro', min: 0 },
+      { id: 'posse', rotulo: 'O pasto é', tipo: 'lista', opcoes: ['PROPRIO', 'ARRENDADO'], obrigatorio: true, default: 'PROPRIO' },
+      { id: 'arrendador_id', rotulo: 'Arrendador (de quem é alugado)', tipo: 'ref:PARCEIROS', visivel_se: { campo: 'posse', valores: ['ARRENDADO'] } },
+      { id: 'observacoes', rotulo: 'Observações', tipo: 'texto' },
+      novo ? null : { id: 'status', rotulo: 'Situação', tipo: 'lista', opcoes: ['ATIVO', 'INATIVO'], obrigatorio: true },
+    ].filter(Boolean);
+    var num = function (v, c) { return v === null || v === undefined ? null : Fmt.numero(v, c === undefined ? 4 : c).replace(/\./g, '').replace(/,?0+$/, ''); };
+    var valores = novo ? {} : {
+      nome: p.nome, identificacao: p.identificacao, area_hectares: num(p.area_hectares), tipo_capim: p.tipo_capim, capacidade_estimada_ua_ha: num(p.capacidade_estimada_ua_ha),
+      capacidade_estimada_cabecas: p.capacidade_estimada_cabecas === null || p.capacidade_estimada_cabecas === undefined ? null : String(p.capacidade_estimada_cabecas),
+      posse: p.posse, arrendador_id: p.arrendador_id, observacoes: p.observacoes, status: p.status,
+    };
+    Cadastro.folha({
+      titulo: novo ? 'Novo pasto' : 'Editar ' + p.nome, rota: 'pasto.salvar', origem: origem, idBase: 'pst', defs: defs, valores: valores,
+      novoFixos: { arrendador_id: { tipos: ['ARRENDADOR'] } },
+      extra: !novo ? null : Store.propriedades().length ? null : UI.nota('Cadastre antes a propriedade (Configurações › Propriedades).', 'aviso'),
+      montar: function (c) {
+        if (c.posse !== 'ARRENDADO') c.arrendador_id = null;
+        return novo ? { campos: c } : { pasture_id: p.pasture_id, campos: c };
+      },
+      sucesso: function (d) { return 'Pasto "' + (d && d.nome) + '" ' + (novo ? 'cadastrado.' : 'atualizado.'); },
+      aoSalvar: aoSalvar,
+    });
+  }
+  function montarLista(el) {
+    var mostrarInativos = false;
+    var cab = h('div', { class: 'tela-cabecalho' }, h('h1', { text: 'Pastos' }), UI.botao('Novo pasto', { tipo: 'primario', icone: 'registrar', aoClicar: function (ev) { formulario(null, ev.currentTarget, function () { Roteador.ir('pastos', { forcar: true, substituir: true }); }); } }));
+    el.appendChild(cab);
+    var cx = h('input', { type: 'checkbox', id: 'pst-inativos' });
+    el.appendChild(h('label', { class: 'marca', for: 'pst-inativos' }, cx, h('span', { text: 'Mostrar pastos inativos' })));
+    var lista = h('ul', { class: 'lista-cartoes', 'aria-label': 'Pastos' });
+    el.appendChild(lista);
+    function desenhar() {
+      Util.limpar(lista);
+      var ps = Store.pastos({ todos: true }).filter(function (p) { return mostrarInativos || p.status !== 'INATIVO'; }).sort(function (a, b) { return UI.comparar(a.nome, b.nome); });
+      if (!ps.length) { lista.appendChild(h('li', null, UI.vazio({ texto: 'Nenhum pasto cadastrado.' }))); return; }
+      var varias = Store.propriedades({ todas: true }).length > 1;
+      ps.forEach(function (p) {
+        var r = 'pasto/' + p.pasture_id;
+        lista.appendChild(h('li', { class: 'cartao-linha', dataset: { pasto: p.pasture_id } },
+          h('div', { class: 'cartao-linha-topo' }, h('span', { class: 'cartao-linha-titulo', text: p.nome + (p.identificacao ? ' (' + p.identificacao + ')' : '') }), h('span', { class: 'selo', text: posse(p) })),
+          varias && p.propriedade_nome ? h('div', { class: 'suave', text: p.propriedade_nome }) : null,
+          UI.pares([['Cabeças', p.cabecas === null || p.cabecas === undefined ? '—' : Fmt.numero(p.cabecas)], ['UA/ha', texto(p.ua_ha, function (v) { return Fmt.numero(v, 2); })], ['Ocupação', ocupacao(p.ocupacao_pct)]]),
+          p.status === 'INATIVO' ? h('div', { class: 'suave', text: 'Inativo' }) : null,
+          h('a', { class: 'botao botao-secundario', href: Roteador.href(r), dataset: { rota: r } }, 'Abrir painel')));
+      });
+    }
+    cx.addEventListener('change', function () { mostrarInativos = cx.checked; desenhar(); });
+    desenhar();
+  }
+  function montarPainel(el, prm) {
+    var id = prm.id, vivo = true;
+    var p0 = Store.pasto(id);
+    var titulo = h('h1', { text: p0 ? p0.nome : 'Pasto' });
+    var acoes = h('div', { class: 'acoes' });
+    el.appendChild(h('div', { class: 'tela-cabecalho' }, titulo));
+    el.appendChild(acoes);
+    var d0 = Store.param('data_marco_zero');
+    var dataIn = h('input', { type: 'date', id: 'pst-data', value: Fmt.hoje(), max: Fmt.hoje(), min: d0 || null });
+    var corpo = h('div');
+    el.appendChild(h('div', { class: 'busca-linha' }, h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo', for: 'pst-data', text: 'Posição em' }), dataIn), UI.botao('Ver', { aoClicar: function () { carregar(); } })));
+    el.appendChild(corpo);
+    async function carregar() {
+      Util.limpar(corpo);
+      corpo.appendChild(UI.carregando('Calculando a composição do pasto…'));
+      try {
+        var r = await Cliente.consulta('pasto.painel', { pasture_id: id, data: dataIn.value || Fmt.hoje() });
+        if (vivo) desenhar(r.data);
+      } catch (e) {
+        if (!vivo) return;
+        Util.limpar(corpo);
+        corpo.appendChild(UI.estadoErro(e, { acao: { texto: 'Voltar aos pastos', aoClicar: function () { Roteador.ir('pastos'); } } }));
+      }
+    }
+    function desenhar(p) {
+      Util.limpar(corpo);
+      Util.limpar(acoes);
+      titulo.textContent = p.nome;
+      acoes.appendChild(UI.botao('Editar pasto', { icone: 'editar', aoClicar: function (ev) { formulario(p, ev.currentTarget, function () { Roteador.ir('pasto/' + id, { forcar: true, substituir: true }); }); } }));
+      var ids = (p.animais || []).map(function (a) { return a.animal_id; });
+      ATALHOS.forEach(function (x) {
+        if (!Store.tipoEvento(x.tipo) || !ids.length || p.data !== Fmt.hoje()) return;
+        acoes.appendChild(UI.botao(x.rotulo, { aoClicar: function () { Registro.abrir(x.tipo, { campos: x.origem ? { pasto_origem_id: id } : {}, linhas: ids.map(function (a) { return { animal_id: a }; }), origem: 'pasto/' + id }); } }));
+      });
+      var entrada = ['ENTRADA_INICIAL', 'OUTRA_ENTRADA'].filter(function (t) { return Store.tipoEvento(t); })[0];
+      corpo.appendChild(UI.secao('Dados do pasto', UI.pares([
+        ['Identificação', p.identificacao], ['Propriedade', p.propriedade_nome], ['Área', p.area_hectares === null ? null : Fmt.numero(p.area_hectares, 2) + ' ha'], ['Capim', p.tipo_capim],
+        ['Capacidade estimada', p.capacidade_estimada_ua_ha === null ? null : Fmt.numero(p.capacidade_estimada_ua_ha, 2) + ' UA/ha'], ['Capacidade em cabeças', p.capacidade_estimada_cabecas === null ? null : Fmt.numero(p.capacidade_estimada_cabecas)],
+        ['Posse', posse(p)], ['Situação', Fmt.rotulo('STATUS', p.status)], ['Observações', p.observacoes],
+      ]), { dado: 'dados' }));
+      if (p.motivo) { corpo.appendChild(UI.nota('Sem composição em ' + Fmt.data(p.data) + ': ' + Fmt.rotulo('MOTIVO', p.motivo) + '.', 'info')); return; }
+      var ua = p.ua || {};
+      var partes = ua.partes || {};
+      var parte = function (k, rot) { var x = partes[k]; return x && x.cabecas ? [rot, Fmt.numero(x.cabecas) + ' cab. · ' + Fmt.peso(x.peso_kg)] : null; };
+      corpo.appendChild(UI.secao('Composição em ' + Fmt.data(p.data), h('div', null, UI.pares([
+        ['Cabeças', Fmt.numero(p.cabecas)], ['Machos', Fmt.numero(p.machos)], ['Fêmeas', Fmt.numero(p.femeas)], ['Sem categoria', Fmt.numero(p.sem_categoria)],
+      ].concat((p.por_categoria || []).map(function (c) { return [c.nome, Fmt.numero(c.cabecas)]; })))), { dado: 'composicao' }));
+      corpo.appendChild(UI.secao('Lotação', UI.pares([
+        ['Peso vivo total', texto(p.peso_vivo_total, function (v) { return Fmt.peso(v); })], ['UA', texto(ua, function (v) { return Fmt.numero(v, 2); })],
+        parte('pesada', 'Com pesagem em dia'), parte('pesagem_vencida', 'Pesagem vencida (estimado)'), parte('sem_pesagem', 'Sem pesagem (peso de referência)'),
+        ['UA/ha', texto(p.ua_ha, function (v) { return Fmt.numero(v, 2); })], ['Ocupação', ocupacao(p.ocupacao_pct)], ua.rotulo ? ['Observação', ua.rotulo] : null,
+      ]), { dado: 'lotacao' }));
+      var animais = p.animais || [];
+      var conteudo = animais.length ? UI.tabela({
+        id: 'pasto-animais', rotulo: 'Animais do pasto', linhas: animais, chave: function (a) { return a.animal_id; },
+        colunas: [
+          { id: 'brinco', rotulo: 'Brinco', valor: function (a) { return a.brinco || a.codigo_interno; }, formatar: function (a) { var r = 'animal/' + a.animal_id + '/resumo'; return h('a', { class: 'botao botao-texto', href: Roteador.href(r), dataset: { rota: r } }, a.brinco || a.codigo_interno + ' (sem brinco)'); } },
+          { id: 'categoria', rotulo: 'Categoria', valor: function (a) { var c = Store.categoria(a.categoria_id); return c ? c.nome : 'Sem categoria'; } },
+          { id: 'sexo', rotulo: 'Sexo', valor: function (a) { return Fmt.rotulo('SEXO', a.sexo); } },
+          { id: 'idade_meses', rotulo: 'Idade', num: true, formatar: function (a) { return Fmt.idade(a.idade_meses); } },
+          { id: 'peso', rotulo: 'Peso', num: true, valor: function (a) { return a.peso && a.peso.kg; }, formatar: function (a) { return a.peso && a.peso.kg ? Fmt.peso(a.peso.kg) + (a.peso.estimado ? ' (estimado)' : '') : '—'; } },
+        ],
+      }).el : UI.vazio({ texto: 'Nenhum animal neste pasto em ' + Fmt.data(p.data) + '.', acao: entrada ? { texto: 'Registrar entrada aqui', aoClicar: function () { Registro.abrir(entrada, { linhas: [{ valores: { pasto_destino_id: id } }], origem: 'pasto/' + id }); } } : null });
+      corpo.appendChild(UI.secao('Animais', conteudo, { dado: 'animais' }));
+    }
+    carregar();
+    return function () { vivo = false; };
+  }
+  Telas.registrar('pastos', { titulo: 'Pastos', modulo: 'PASTOS', montar: montarLista });
+  Telas.registrar('pasto/:id', { titulo: 'Painel do pasto', modulo: 'PASTOS', montar: montarPainel });
+  return { formulario: formulario };
+})();
+</script>
