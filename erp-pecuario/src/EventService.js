@@ -971,11 +971,25 @@ var EventService = (function () {
     ctxEv.plano.IDENTIFICACOES.push({ ident_id: m.tx.novoId(), animal_id: it.animal_id, event_id: ctxEv.ev.event_id, tipo: 'BRINCO', codigo: codigo, codigo_norm: it.brincoProposto.norm, data_inicio: ctxEv.ev.event_date, motivo: null, created_at: m.tx.agora });
     it.quem = nomeAnimal_(e) + ' (novo brinco ' + codigo + ')';
   }
+  /**
+   * Onde o animal está na posição de uma linha de movimento do comando no dia (desenho-base 16.1): depois das entradas
+   * do dia e dos movimentos do dia que vêm antes dela na ordem canônica; as saídas do dia vêm depois. O substituto fica
+   * no lugar do original: a origem dele é a de antes do original, não a do fim do dia.
+   */
+  function pastoNaPosicao_(m, animalId, ev) {
+    var pos = posicao_(ev);
+    var antes = m.f.linhas(animalId).filter(function (l) {
+      if (l.event_date !== ev.event_date) return l.event_date < ev.event_date;
+      var c = Timeline.classe(l);
+      return c === 0 || (c === 1 && antesDe_({ data: l.event_date, ordem_seq: l.ordem_seq, event_seq: l.event_seq }, pos));
+    });
+    return Timeline.pastoEm(antes, ev.event_date, m.D0);
+  }
   function correcaoLocalizacao_(m, ctxEv, it, e) {
     var d = it.dados;
     var data = ctxEv.ev.event_date;
     if (vazio_(d.pasto_destino_id) || !Utils.dataValida(data)) return;
-    var onde = Timeline.pastoEm(m.f.linhas(it.animal_id), data, m.D0);
+    var onde = pastoNaPosicao_(m, it.animal_id, ctxEv.ev);
     if (!onde.presente) { erroItem_(m, it, 'animal_id', 'FORA_DO_REBANHO', 'em ' + br_(data) + ' o animal não estava no rebanho.'); return; }
     var origem = onde.pasture_id;
     if (!vazio_(d.pasto_origem_id) && d.pasto_origem_id !== origem) {

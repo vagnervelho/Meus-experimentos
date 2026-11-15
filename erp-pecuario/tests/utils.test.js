@@ -113,6 +113,21 @@ test('dinheiro: reais ↔ centavos sem erro de ponto flutuante', () => {
   assert.equal(U.formatarReais(-1250), '-R$ 12,50');
 });
 
+test('números nas mensagens: formato brasileiro (milhar com ponto, decimal com vírgula), casas pedidas ou as que o número usa', () => {
+  assert.equal(U.formatarNumero(0.0001), '0,0001');
+  assert.equal(U.formatarNumero(2000), '2.000');
+  assert.equal(U.formatarNumero(1575.5), '1.575,5');
+  assert.equal(U.formatarNumero(0.1 + 0.2), '0,3', 'ruído binário não vira casa');
+  assert.equal(U.formatarNumero(99.955, 2), '99,96', 'meio para cima');
+  assert.equal(U.formatarNumero(0.025, 2), '0,03');
+  assert.equal(U.formatarNumero(52.06, 1), '52,1');
+  assert.equal(U.formatarNumero(-1234567.891, 2), '-1.234.567,89');
+  assert.equal(U.formatarNumero(-0.001, 1), '0,0', 'zero arredondado não leva sinal');
+  assert.equal(U.formatarNumero(5, 2), '5,00');
+  assert.throws(() => U.formatarNumero(NaN), codigo('INTERNAL'));
+  assert.throws(() => U.formatarNumero('1,5'), codigo('INTERNAL'));
+});
+
 test('números: arredondamento meio para cima e casas decimais', () => {
   assert.equal(U.arredondar(387.46, 1), 387.5);
   assert.equal(U.arredondar(387.44, 1), 387.4);

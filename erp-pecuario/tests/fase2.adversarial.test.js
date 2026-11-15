@@ -567,6 +567,33 @@ function propMarcacao(M, sub, marcar, data, id, substitui) {
   novo.dados = { tipo: 'MARCACAO', subtipo: sub, campos: { event_date: data, acao: marcar ? 'MARCAR' : 'DESMARCAR' }, animais: [{ animal_id: id }] };
   return { novo, excl, pre, tocados: [id].concat(substitui ? substitui.linhas.map((l) => l.animal) : []), substitui, acao: substitui ? 'corrigir' : 'registrar' };
 }
+/**
+ * Onde o animal está na POSIÇÃO de uma linha de movimento do dia D (desenho-base 16.1): depois das entradas de D e dos
+ * movimentos de D que vêm antes dela na ordem canônica (raiz, sequência); as saídas de D vêm depois.
+ */
+function pastoNaPosicao(M, id, D, raiz, seq, excl) {
+  const antes = linhasDe(M, id, excl).filter((l) => !l.fato && (l.data < D || (l.data === D && (classe(l) === 0 || (classe(l) === 1 && (l.raiz < raiz || (l.raiz === raiz && l.seq < seq)))))));
+  let s2 = 0;
+  let p = null;
+  ordenar(antes).forEach((l) => { s2 += l.efeito; if (l.destino) p = l.destino; if (l.efeito === -1) p = null; });
+  return s2 >= 1 ? { presente: true, pasto: p } : { presente: false, pasto: null };
+}
+/** AJUSTE_INVENTARIO/CORRECAO_LOCALIZACAO: o animal estava em outro pasto; a origem é a da linha do tempo na posição. */
+function propLocalizacao(M, data, id, destino, origemInformada, substitui) {
+  const excl = new Set(substitui ? [substitui.id] : []);
+  const pre = [];
+  sujeitos(M, [id], excl, pre);
+  const novo = novoEvento(M, 'AJUSTE_INVENTARIO', data, { sub: 'CORRECAO_LOCALIZACAO', raiz: substitui ? substitui.raiz : M.seq + 1 });
+  const onde = pastoNaPosicao(M, id, data, novo.raiz, novo.seq, excl);
+  if (!pre.length) {
+    if (!onde.presente) pre.push('FORA_DO_REBANHO');
+    else if (origemInformada && origemInformada !== onde.pasto) pre.push('ORIGEM_DIVERGENTE');
+    else if (destino === onde.pasto) pre.push('VALOR_IGUAL');
+  }
+  novo.linhas.push({ animal: id, efeito: 0, origem: onde.pasto, destino });
+  novo.dados = { tipo: 'AJUSTE_INVENTARIO', subtipo: 'CORRECAO_LOCALIZACAO', campos: { event_date: data, justificativa: 'Achado em outro pasto na conferência' }, animais: [Object.assign({ animal_id: id, pasto_destino_id: destino }, origemInformada ? { pasto_origem_id: origemInformada } : {})] };
+  return { novo, excl, pre, tocados: [id].concat(substitui ? substitui.linhas.map((l) => l.animal) : []), substitui, acao: substitui ? 'corrigir' : 'registrar' };
+}
 /** OUTRA_ENTRADA de animal que já existe (volta ao rebanho). */
 function propVolta(M, data, id, pasto) {
   const pre = [];
@@ -911,6 +938,11 @@ function gerar(M, amb, rnd) {
   if (x < 0.7) {
     const ids = plausivel ? animaisNoDia(M, D, null, true) : todos;
     if (!ids.length) return null;
+    if (rnd() < 0.4) {
+      const id = sorteio(rnd, ids);
+      const onde = antesDaSaida(linhasDe(M, id), D).pasto;
+      return propLocalizacao(M, D, id, sorteio(rnd, USO.filter((p) => p !== onde)), rnd() < 0.3 ? sorteio(rnd, USO) : null);
+    }
     return propMarcacao(M, sorteio(rnd, ['DESCARTE', 'NAO_LOCALIZADO']), rnd() < 0.6, D, sorteio(rnd, ids));
   }
   const evs = M.eventos.filter((e) => e.tipo !== 'ENTRADA_INICIAL' || rnd() < 0.1);
@@ -937,6 +969,10 @@ function gerarCorrecao(M, amb, rnd, evs) {
     return propIdentificacao(M, alvo.sub, D, it.animal_id, alvo.sub === 'REMOCAO' ? null : rnd() < 0.5 ? it.codigo : 'R' + (++M.brinco), alvo);
   }
   if (alvo.tipo === 'MARCACAO') return propMarcacao(M, alvo.sub, alvo.marca.marcar, D, d.animais[0].animal_id, alvo);
+  if (alvo.tipo === 'AJUSTE_INVENTARIO' && alvo.sub === 'CORRECAO_LOCALIZACAO') {
+    const it = d.animais[0];
+    return propLocalizacao(M, D, it.animal_id, rnd() < 0.5 ? it.pasto_destino_id : sorteio(rnd, USO), rnd() < 0.3 ? sorteio(rnd, USO) : null, alvo);
+  }
   if (alvo.tipo === 'AJUSTE_INVENTARIO') return propSaida(M, amb, 'DIVERGENCIA_CONTAGEM', D, d.animais.map((a) => a.animal_id), {}, alvo);
   if (alvo.tipo === 'MORTE' || alvo.tipo === 'DESCARTE') {
     return propSaida(M, amb, alvo.tipo, D, d.animais.map((a) => a.animal_id), { valor: rnd() < 0.5 ? sorteio(rnd, [1, 7777]) : 0 }, alvo);
@@ -1151,6 +1187,25 @@ test('gêmeos com um natimorto: o parto grava 1 vivo e 1 natimorto; a correção
   assert.deepEqual([f1, f2].map((id) => m.animal(id).situacao_cadastral), ['ANULADO', 'ANULADO']);
   assert.deepEqual([m.animal(vaca).cria_ao_pe, m.animal(vaca).situacao_reprodutiva, m.animal(vaca).partos_previos], [antes.cria_ao_pe, antes.situacao_reprodutiva, antes.partos_previos], 'a mãe volta ao que era');
   assert.equal(m.tabela('REPRODUCAO').filter((r) => r.animal_id === vaca).length, 2, 'nada se apaga: as linhas dos dois partos ficam, anuladas');
+});
+
+test('correção de localização: a origem é a da linha do tempo na POSIÇÃO do lançamento (desenho-base 16.1) — corrigir a correção mantém o lugar dela antes de uma transferência posterior do mesmo dia; no dia da venda, o problema é da venda (CONFLICT), não "fora do rebanho"', () => {
+  const { amb, M, ids } = preparar();
+  const x = ids.I10; // Pasto A
+  const D = '2026-04-10';
+  const cl = passo(amb, M, propLocalizacao(M, D, x, PASTOS.B, null), 'OK', 'correção de localização A → B');
+  const t = passo(amb, M, propTransferencia(M, D, PASTOS.B, PASTOS.C, [x]), 'OK', 'transferência B → C no mesmo dia, depois');
+  const k1 = passo(amb, M, propLocalizacao(M, D, x, PASTOS.B, null, cl.ev), 'OK', 'corrigir a correção sem mudar nada (só a justificativa)');
+  const k2 = passo(amb, M, propLocalizacao(M, D, x, PASTOS.B, PASTOS.A, k1.ev), 'OK', 'corrigir informando a origem certa (A)');
+  assert.equal(amb.m.tabela('EVENTO_ANIMAIS').find((l) => l.event_id === k2.ev.id).pasto_origem_id, PASTOS.A, 'a origem gravada é a da posição, não a do fim do dia');
+  passo(amb, M, propLocalizacao(M, D, x, PASTOS.B, PASTOS.C, k2.ev), 'VALIDATION', 'origem informada errada');
+  assert.deepEqual(Array.from(passo(amb, M, propLocalizacao(M, D, x, PASTOS.C, null, k2.ev), 'CONFLICT', 'corrigir o destino para C quebra a transferência B → C').prev.outros), [t.ev.id]);
+  assert.equal(amb.m.animal(x).pasto_atual_id, PASTOS.C);
+  // No dia da venda: a correção de localização vem antes da saída e deixa a venda sem origem → CONFLICT com a venda.
+  const boi = ids.I16; // Pasto A
+  const v = passo(amb, M, propVenda(M, amb, '2026-05-01', [boi], CABECA(300000), null), 'OK', 'venda do boi');
+  assert.deepEqual(Array.from(passo(amb, M, propLocalizacao(M, '2026-05-01', boi, PASTOS.B, null), 'CONFLICT', 'correção de localização no dia da venda').prev.outros), [v.ev.id]);
+  passo(amb, M, propLocalizacao(M, '2026-05-02', boi, PASTOS.B, null), 'VALIDATION', 'no dia seguinte à venda, fora do rebanho');
 });
 
 /** Ambiente sem o modelo, para negociações que o modelo não cobre (arroba, lote, peso só do lote): 3 bois no marco zero. */
