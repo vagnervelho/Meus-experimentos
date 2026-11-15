@@ -74,9 +74,9 @@ npm run gen:schema -- --check   # confere se src/Schema.js está em dia com os d
 `npm run ui:check` precisa do Playwright com o Chromium instalados no ambiente (não são dependências declaradas do
 projeto; aqui foi usado o Playwright 1.63.0). Sem eles, `npm run ui:check -- --so-estatica` faz só a parte estática.
 
-Última execução (15/11/2026, Node 22.23.4): `npm test` com 327 testes, 327 aprovados, 0 falhas; `npm run ui:check`
-com 29 testes de navegador, 29 aprovados, 0 falhas. Contagem por arquivo em
-[`docs/RELATORIO_FASE1.md`](docs/RELATORIO_FASE1.md).
+Última execução (15/11/2026, Node 22.23.4): `npm test` com 555 testes, 555 aprovados, 0 falhas (cerca de 8 minutos
+neste ambiente); `npm run ui:check` com 77 testes de navegador, 77 aprovados, 0 falhas, e a página montada com 437 KB
+de 450 KB. Contagem por arquivo em [`docs/RELATORIO_FASE2.md`](docs/RELATORIO_FASE2.md).
 
 ## Como implantar (resumo)
 

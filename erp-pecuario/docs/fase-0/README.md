@@ -42,7 +42,7 @@ Além dos doze: modelo financeiro e indicadores ([`07`](07-financeiro-e-indicado
 | Tipos de evento | 21 |
 | Regras de negócio numeradas | 112 (50 erros, 13 avisos com aceite, 6 alertas, 43 invariantes) |
 | Cenários de teste | 20 (os 10 da §18 e mais 10) |
-| Riscos mapeados | 30 |
+| Riscos mapeados | 31 (o R-31, orçamento da página, entrou na Fase 2) |
 | Premissas a validar | 16 (1 já respondida) |
 | Itens do spike técnico | 10 |
 | Fases de implementação | 5 |

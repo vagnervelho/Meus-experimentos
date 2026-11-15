@@ -570,3 +570,56 @@ depois o conserto da causa.
 - Verificado em Node (`npm test`: 555 testes, 555 aprovados, 0 falhas, cerca de 7 minutos neste ambiente) e no navegador
   com o backend real (`npm run ui:check`: 77 testes, 77 aprovados, 0 falhas; página montada com 437 KB de 450 KB). Nada
   validado na conta do dono.
+
+## 15/11/2026 — Fase 2, DOCUMENTAÇÃO DE ENTREGA (E2.1 a E2.11 e §20)
+
+Nenhuma linha de código mudou nesta etapa: só documentos, conferidos contra o código.
+
+- `docs/RELATORIO_FASE2.md` (novo), com a estrutura e a regra de honestidade do relatório da Fase 1: entregas E2.1 a E2.11
+  com arquivos, testes e estado; contagens reais de `npm test` e `npm run ui:check`, por arquivo (cada um rodado
+  sozinho); cenários da Fase 2 por nível; o que só o dono pode executar (inclusive validar as fórmulas de compra e venda
+  com um caso real, confirmar a PR-09 e rodar `runAcceptanceTests` com os cenários da Fase 2); decisões; limitações; a
+  revisão adversarial (ataque interno e as duas rodadas independentes, por lente e gravidade, com o que foi corrigido,
+  refutado em parte e adiado).
+- `docs/GUIA_DE_IMPLANTACAO.md`: título das Fases 1 e 2; seção 11.1, atualização para a Fase 2 (backup antes, enviar o
+  código de novo, `setup` — o esquema não mudou nesta fase, então ele só confere, faz backup e roda as 26 conferências —,
+  `runAcceptanceTests`, o que conferir no app, validar as contas com um caso real, PR-09, publicar, e como voltar atrás:
+  código e dados juntos, restaurando pelo sistema o backup do passo 1 antes de enviar o código antigo); 34 arquivos (23
+  `.gs`); a tabela de arquivos com o `HealthService` e as dependências de hoje (tiradas do código); importação do
+  histórico na seção 8.
+- `README.md`: estado das Fases 1 e 2, o que a Fase 2 acrescenta, contagens e documentos.
+- `docs/CONTRATOS.md`: estado com as rodadas de revisão; conferido por amostra contra o código (superfície pública de
+  cada módulo e as 63 rotas de `Api.rotas()`: 51 canônicas e 12 extras, todas documentadas); acrescentados os membros
+  públicos que não estavam citados: `EventCatalog.subtipos`, `Timeline.dataBr`, `FinancialService.MODALIDADES`,
+  `CRITERIOS_LOTE` e `SEM_RATEIO`, as formas `x(ctx, dados)` do `InventoryService` e `ImportService.TIPOS_EVENTO`.
+  Nenhum contrato mudou.
+- Documentos da Fase 0 (permitido nesta etapa), onde a implementação contrariou ou estendeu o texto:
+  - `10-plano-de-implementacao.md`: seção 8 com uma linha por entrega E2.1 a E2.11 e o estado real, e uma linha aberta
+    para a validação na conta do dono; seção 4, os arquivos que a fase também tocou (`HealthService` antecipado da Fase 3).
+  - `11-riscos-e-premissas.md`: R-02, R-12, R-13, R-24, R-25, R-27 e R-30 com o que a Fase 2 fez; risco novo R-31
+    (orçamento da página: 437 KB de 450 KB); limitações do MVP (consequências de evento sem hora, títulos sempre em aberto
+    antes da baixa, um critério de rateio por evento, histórico só pela importação); PR-09 entregue sem modalidade
+    sugerida, confirmação pendente.
+  - `03a-dicionario-cadastros-suporte.md`: 4.3.4, só linha de inventário decide as ordens 2 e 3 (por quê: lida ao pé da
+    letra, a tabela levava a ANULADO o animal do histórico com uma correção de cadastro depois do marco zero; achado
+    ALTA da revisão 1) e o animal EXTERNO não entra pela compra (estornar a compra o deixaria ANULADO); 5.1, o anexo
+    enviado depois do registro leva o `event_id` e a entidade FINANCEIRO é aceita (o anexo de evento é filho dele). O
+    `Schema` não muda: `npm run gen:schema -- --check` confere.
+  - `03b-dicionario-eventos-financeiro.md`: 2.6, chave `motivo_ajuste` na baixa por divergência (a justificativa
+    obrigatória não tinha onde ficar: esse subtipo não grava AJUSTES); 14, invariantes 10 (100% alocado também na
+    abertura, no custo da morte e na receita do descarte) e 16 (`EVENTOS.total_value` em todo tipo) estendidas como o
+    código confere.
+  - `04-motor-de-eventos.md`, seção 6: a chegada declarada, o histórico só pela importação (fora o parto) com o
+    financeiro sem caixa, o custo de aquisição pelas alocações da permanência atual (a compra histórica não vira custo do
+    animal do marco zero; fica para a Fase 4) e a reconciliação sem tabela de decisão (o relatório não bloqueia; a ação
+    é pelos próprios lançamentos).
+  - `06-persistencia-e-integridade.md`, seção 9: as checagens da Fase 2 (saída com evento posterior, partos, genealogia,
+    brinco ativo nas identificações, demais invariantes do financeiro) e o 100% alocado estendido.
+  - `08-ux-ui.md`, 4.2: Nascimento no grupo Reprodução, como o `EventCatalog` ficou.
+  - `09-plano-de-testes.md`, seção 5: a varredura de quedas como foi executada (todos os subconjuntos até 5 escritas e 24
+    sorteados nos pontos de buffer cheio), com o critério original de 1.024 e 500 como meta fora da suíte.
+  - `fase-0/README.md`: a contagem de riscos (31).
+- Verificado em Node (`npm test`: 555 testes, 555 aprovados, 0 falhas, cerca de 8 minutos; cada arquivo rodado sozinho
+  dá a mesma soma) e no navegador com o backend real (`npm run ui:check`: 77 testes, 77 aprovados, 0 falhas; página
+  montada com 437 KB de 450 KB); `npm run gen:schema -- --check` confere depois das mudanças em `03a` e `03b`. Nada
+  validado na conta do dono.
