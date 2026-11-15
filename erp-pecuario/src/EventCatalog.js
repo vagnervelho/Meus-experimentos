@@ -6,8 +6,8 @@
  * Vocabulário (fechado). Tipo: rotulo, grupo_ui, ordem, frequente, selecao_animais, filtro_elegiveis, modo_entrada,
  * revisao, critico, reads, fase, campos, campos_animal, componentes, grupos_repetiveis, subtipos. Campo: id, rotulo,
  * tipo, obrigatorio, visivel_se, obrigatorio_se, default, escopo, unidade, min, max, casas, ajuda, opcoes (enum
- * fechado) e lista (lista aberta de LISTAS). Condição de visivel_se / obrigatorio_se: {campo, valores} ou
- * {campo, preenchido: true}.
+ * fechado), lista (lista aberta de LISTAS) e naturezas (ref:PLANO_CONTAS: naturezas de conta aceitas). Condição de
+ * visivel_se / obrigatorio_se: {campo, valores} ou {campo, preenchido: true}.
  */
 var EventCatalog = (function () {
   var FASE_ATUAL = 2;
@@ -36,6 +36,15 @@ var EventCatalog = (function () {
     NASCIMENTO: { rotulo: 'Nascimento', grupo_ui: 'Reprodução', ordem: 30, fase: 2 },
     COMPRA: { rotulo: 'Comprar animais', grupo_ui: 'Movimentação', ordem: 40, fase: 2 },
     VENDA: { rotulo: 'Vender animais', grupo_ui: 'Movimentação', ordem: 50, fase: 2 },
+    COMPRA: {
+      frequente: true, selecao_animais: 'NOVOS', filtro_elegiveis: { situacao: ['VENDIDO', 'DESCARTADO', 'BAIXADO_AJUSTE', 'HISTORICO'] },
+      modo_entrada: 'FORM', revisao: 'SERVIDOR', critico: true,
+      reads: LEITURAS_MOTOR.concat(LEITURAS_FINANCEIRO),
+      campos: CAMPOS_COMPRA,
+      campos_animal: CAMPOS_ANIMAL_COMPRA,
+      componentes: ['grade_novos_animais', 'seletor_animais', 'bloco_negociacao', 'bloco_parcelas'],
+      grupos_repetiveis: { parcelas: CAMPOS_PARCELA, custos: CAMPOS_CUSTO_COMPRA },
+    },
     TRANSFERENCIA: { rotulo: 'Transferir de pasto', grupo_ui: 'Movimentação', ordem: 60, fase: 2 },
     MORTE: { rotulo: 'Morte', grupo_ui: 'Movimentação', ordem: 70, fase: 2 },
     DESCARTE: { rotulo: 'Descarte (consumo, doação, sacrifício)', grupo_ui: 'Movimentação', ordem: 80, fase: 2 },
@@ -136,6 +145,24 @@ var EventCatalog = (function () {
     a_('metodo_pesagem', 'Como foi pesado', 'lista', { opcoes: ['BALANCA', 'FITA', 'ESTIMATIVA_VISUAL'], visivel_se: quando_('peso', true), obrigatorio_se: quando_('peso', true) }),
     a_('observacoes', 'Observações da cria', 'texto', { visivel_se: VIVO }),
   ];
+  /**
+   * Lançamento opcional de uma saída sem negociação (03b, seção 10.3): na MORTE, custos associados numa conta de
+   * custeio escolhida (necropsia, tratamento final, remoção); no DESCARTE, a receita simples (OUTRAS_RECEITAS_
+   * OPERACIONAIS). Um título só, com vencimento próprio (vazio = à vista, na data do evento); rateio por cabeça.
+   */
+  function camposLancamentoSaida_(tipo) {
+    var p = tipo === 'MORTE' ? 'custo_' : 'receita_';
+    var tem = quando_(p + 'valor', true);
+    var l = [c_(p + 'valor', tipo === 'MORTE' ? 'Custos associados (opcional)' : 'Receita do descarte (opcional)', 'dinheiro', { min: 0.01,
+      ajuda: tipo === 'MORTE' ? 'Necropsia, remoção, tratamento final: vira custo dos animais desta morte.' : 'Valor recebido na permuta ou na entrega, se houve. Venda é pelo "Vender animais".' })];
+    if (tipo === 'MORTE') l.push(c_('custo_conta_id', 'Conta do custo', 'ref:PLANO_CONTAS', { naturezas: ['CUSTEIO'], visivel_se: tem, obrigatorio_se: tem }));
+    l.push(c_(p + 'partner_id', tipo === 'MORTE' ? 'Pago a' : 'Recebido de', 'ref:PARCEIROS', { visivel_se: tem }));
+    l.push(c_(p + 'vencimento', 'Vencimento', 'data', { visivel_se: tem, ajuda: 'Vazio = à vista, na data do evento.' }));
+    l.push(c_(p + 'forma_pagamento', 'Forma de pagamento', 'lista', { lista: 'FORMA_PAGAMENTO', visivel_se: tem }));
+    l.push(c_(p + 'documento', 'Recibo ou nota', 'texto', { visivel_se: tem }));
+    l.push(c_(p + 'descricao', 'Descrição do lançamento', 'texto', { visivel_se: tem }));
+    return l;
+  }
   /** Campos de cabeçalho de uma saída sem negociação (MORTE, DESCARTE); BAIXAS guarda uma linha por animal. */
   function camposSaida_(tipo) {
     var l = [c_('event_date', tipo === 'MORTE' ? 'Data da morte' : 'Data do descarte', 'data', { obrigatorio: true, default: 'HOJE' })];
@@ -146,12 +173,83 @@ var EventCatalog = (function () {
       l.push(c_('destino', 'O que foi feito do animal', 'lista', { obrigatorio: true, lista: 'DESTINO_DESCARTE', ajuda: 'Consumo próprio, doação, permuta ou sacrifício. Se houve venda, use "Vender animais".' }));
       l.push(c_('motivo', 'Por que foi descartado', 'lista', { obrigatorio: true, lista: 'MOTIVO_DESCARTE' }));
     }
+    l = l.concat(camposLancamentoSaida_(tipo));
     l.push(c_('property_id', 'Propriedade', 'ref:PROPRIEDADES', { default: { de: 'CONFIGURACOES.propriedade_padrao_id' } }));
     l.push(c_('responsible', tipo === 'MORTE' ? 'Quem constatou' : 'Responsável', 'texto'));
     l.push(c_('notes', 'Observações', 'texto'));
     return l;
   }
-  var LEITURAS_FINANCEIRO = ['FINANCEIRO', 'PARCELAS', 'RATEIOS', 'ALOCACOES_FINANCEIRAS', 'PLANO_CONTAS'];
+  var LEITURAS_FINANCEIRO = ['FINANCEIRO', 'PARCELAS', 'RATEIOS', 'ALOCACOES_FINANCEIRAS', 'PLANO_CONTAS', 'COMPRAS', 'PARCEIROS'];
+  var METODOS_PESAGEM = ['BALANCA', 'FITA', 'ESTIMATIVA_VISUAL'];
+  var MOD = function (valores) { return quando_('modalidade', valores); };
+  /**
+   * COMPRA (04, seção 4.2; 03b, seções 4.1 e 4.3 a 4.5; 16.9): cabeçalho da negociação (modalidade × base de peso,
+   * preço, valor dos animais da nota, critério só no lote fechado), pasto de destino do lote, animais novos (ou que
+   * voltam ao rebanho) com brinco da casa e de origem, peso e valor individual, as parcelas do valor dos animais e o
+   * frete e os outros custos (um lançamento por item, com parceiro e vencimento próprios).
+   */
+  var CAMPOS_COMPRA = [
+    c_('event_date', 'Data da compra', 'data', { obrigatorio: true, default: 'HOJE' }),
+    c_('partner_id', 'Fornecedor (quem vendeu)', 'ref:PARCEIROS', { obrigatorio: true }),
+    c_('finalidade', 'Para que foram comprados', 'lista', { lista: 'FINALIDADE_NEGOCIO' }),
+    c_('modalidade', 'Como foi o preço', 'lista', { obrigatorio: true, opcoes: ['CABECA', 'KG_VIVO', 'ARROBA', 'LOTE'] }),
+    c_('base_peso', 'Arroba de', 'lista', { opcoes: ['VIVO', 'CARCACA'], visivel_se: MOD(['ARROBA']), obrigatorio_se: MOD(['ARROBA']), ajuda: 'Vivo: peso de balança com rendimento combinado. Carcaça: romaneio do frigorífico.' }),
+    c_('rendimento_carcaca_pct', 'Rendimento de carcaça', 'decimal', { unidade: '%', min: 0.1, max: 99.9, casas: 1, visivel_se: quando_('base_peso', ['VIVO']), obrigatorio_se: quando_('base_peso', ['VIVO']) }),
+    c_('rendimento_tipo', 'O rendimento foi', 'lista', { opcoes: ['NEGOCIADO', 'ESTIMADO'], visivel_se: quando_('base_peso', ['VIVO']), obrigatorio_se: quando_('base_peso', ['VIVO']) }),
+    c_('preco_unitario', 'Preço', 'dinheiro', { min: 0.01, visivel_se: MOD(['CABECA', 'KG_VIVO', 'ARROBA']), obrigatorio_se: MOD(['KG_VIVO', 'ARROBA']), ajuda: 'Por cabeça, por kg vivo ou por arroba, conforme a forma do preço. Por cabeça, deixe vazio se cada animal teve o seu valor.' }),
+    c_('peso_total_kg', 'Peso vivo total do lote', 'decimal', { unidade: 'kg', min: 0.1, casas: 1, ajuda: 'Vazio = a soma dos pesos dos animais.' }),
+    c_('valor_animais', 'Valor dos animais (nota)', 'dinheiro', { obrigatorio: true, min: 0.01, ajuda: 'Sem frete nem outros custos. Vale o valor da nota; a conta pelo preço é só conferência.' }),
+    c_('criterio_rateio', 'Como dividir o valor entre os animais', 'lista', { opcoes: ['CABECAS', 'PESO_VIVO', 'PESO_CARCACA', 'VALOR_INDIVIDUAL', 'MANUAL'], visivel_se: MOD(['LOTE']), obrigatorio_se: MOD(['LOTE']) }),
+    c_('justificativa_rateio', 'Por que essa divisão', 'texto', { visivel_se: quando_('criterio_rateio', ['MANUAL']), obrigatorio_se: quando_('criterio_rateio', ['MANUAL']) }),
+    c_('pasto_destino_id', 'Pasto de destino', 'ref:PASTOS', { obrigatorio: true, ajuda: 'Onde o lote fica; cada animal pode ir para outro pasto.' }),
+    c_('gta_numero', 'Número da GTA', 'texto'),
+    c_('nota_fiscal', 'Número da nota fiscal', 'texto'),
+    c_('condicoes', 'Condições da negociação', 'texto', { ajuda: 'Texto livre: entrega na fazenda, prazo combinado.' }),
+    c_('property_id', 'Propriedade', 'ref:PROPRIEDADES', { default: { de: 'CONFIGURACOES.propriedade_padrao_id' } }),
+    c_('responsible', 'Responsável', 'texto'),
+    c_('notes', 'Observações', 'texto'),
+  ];
+  var CAMPOS_ANIMAL_COMPRA = [
+    a_('animal_id', 'Animal já cadastrado (volta ao rebanho)', 'ref:ANIMAIS'),
+    a_('brinco', 'Brinco da fazenda', 'texto', { ajuda: 'Opcional. Zeros à esquerda não diferenciam números (0012 = 12).' }),
+    a_('brinco_origem', 'Brinco do vendedor', 'texto', { ajuda: 'Fica como identificação de origem, sem exigir que seja único.' }),
+    a_('nome', 'Nome ou apelido', 'texto'),
+    a_('sexo', 'Sexo', 'lista', { obrigatorio: true, opcoes: ['M', 'F'] }),
+    a_('raca', 'Raça', 'lista', { lista: 'RACA' }),
+    a_('data_nascimento', 'Nascimento', 'data'),
+    a_('idade_meses', 'Idade (meses)', 'inteiro', { min: 0, max: 360, ajuda: 'Use quando não souber a data: o sistema estima o nascimento.' }),
+    a_('data_nascimento_confianca', 'Nascimento é', 'lista', { opcoes: CONFIANCAS, obrigatorio_se: quando_('data_nascimento', true) }),
+    a_('castrado', 'Castrado', 'bool', { visivel_se: quando_('sexo', ['M']), obrigatorio_se: quando_('sexo', ['M']) }),
+    a_('reprodutor', 'Reprodutor (touro)', 'bool', { visivel_se: quando_('sexo', ['M']), obrigatorio_se: quando_('sexo', ['M']) }),
+    a_('partos_previos', 'Partos anteriores', 'inteiro', { min: 0, max: 30, visivel_se: quando_('sexo', ['F']) }),
+    a_('situacao_reprodutiva', 'Situação reprodutiva', 'lista', { opcoes: ['VAZIA', 'EXPOSTA', 'INSEMINADA', 'PRENHA'], visivel_se: quando_('sexo', ['F']) }),
+    a_('data_prevista_parto', 'Previsão de parto', 'data', { visivel_se: quando_('situacao_reprodutiva', ['PRENHA']) }),
+    a_('pasto_destino_id', 'Pasto (se não for o do lote)', 'ref:PASTOS'),
+    a_('peso', 'Peso vivo na chegada', 'decimal', { unidade: 'kg', min: 0.1, max: PESO_MAX_KG, casas: 1 }),
+    a_('metodo_pesagem', 'Como foi pesado', 'lista', { opcoes: METODOS_PESAGEM, visivel_se: quando_('peso', true), ajuda: 'Vazio = balança.' }),
+    a_('peso_carcaca_kg', 'Peso de carcaça', 'decimal', { unidade: 'kg', min: 0.1, max: PESO_MAX_KG, casas: 1, ajuda: 'Só na arroba de carcaça ou no lote dividido por carcaça. Nunca vira pesagem.' }),
+    a_('valor_individual', 'Valor deste animal', 'dinheiro', { min: 0.01, ajuda: 'Só quando cada animal teve o seu preço (por cabeça) ou no lote dividido pelo valor de cada um.' }),
+    a_('base_manual', 'Peso na divisão manual', 'decimal', { min: 0.0001, casas: 4, ajuda: 'Só no lote com divisão manual: percentual ou proporção deste animal.' }),
+    a_('outras_identificacoes', 'Outras identificações', 'texto', { ajuda: 'Lista de {tipo, codigo}: RFID, SISBOV, tatuagem.' }),
+    a_('observacoes', 'Observações deste animal', 'texto'),
+  ];
+  /** Parcelas do valor dos animais (bloco_parcelas): vencimento e valor; valor vazio = divisão igual do que falta. */
+  var CAMPOS_PARCELA = [
+    a_('data_vencimento', 'Vencimento', 'data', { obrigatorio: true }),
+    a_('valor', 'Valor', 'dinheiro', { min: 0.01, ajuda: 'Vazio = divide em partes iguais o que falta.' }),
+    a_('forma_pagamento', 'Forma de pagamento', 'lista', { lista: 'FORMA_PAGAMENTO' }),
+    a_('documento', 'Boleto, cheque ou duplicata', 'texto'),
+  ];
+  /** Frete e outros custos de aquisição: cada item é um lançamento próprio, com parceiro e um título com vencimento próprio. */
+  var CAMPOS_CUSTO_COMPRA = [
+    a_('tipo', 'Custo', 'lista', { obrigatorio: true, opcoes: ['FRETE', 'OUTRO'], default: 'FRETE' }),
+    a_('valor', 'Valor', 'dinheiro', { obrigatorio: true, min: 0.01 }),
+    a_('partner_id', 'Pago a', 'ref:PARCEIROS', { ajuda: 'O transportador, o corretor: quem recebe este valor.' }),
+    a_('data_vencimento', 'Vencimento', 'data', { ajuda: 'Vazio = à vista, na data da compra.' }),
+    a_('forma_pagamento', 'Forma de pagamento', 'lista', { lista: 'FORMA_PAGAMENTO' }),
+    a_('documento', 'Recibo ou nota', 'texto'),
+    a_('descricao', 'Descrição', 'texto', { ajuda: 'Ex.: comissão do corretor, taxa da GTA.' }),
+  ];
 
   /** Definições completas dos tipos da Fase 1. */
   var DEFINICOES = {

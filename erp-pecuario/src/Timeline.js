@@ -510,7 +510,7 @@ var Timeline = (function () {
       status: ativo ? 'ATIVO' : 'CANCELADO',
       cancelado_em: ativo ? null : anulador ? anulador.created_at : null,
       cancelado_por_event_id: ativo ? null : a.anulador_id,
-      status_pagamento: sp, data_pagamento: dataPag, animal_id: animal,
+      status_pagamento: sp.status_pagamento, data_pagamento: sp.data_pagamento, animal_id: animal,
     };
   }
   /**

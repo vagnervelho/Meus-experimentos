@@ -19,7 +19,11 @@ var EventService = (function () {
     ATIVO: 'no rebanho', VENDIDO: 'vendido', MORTO: 'morto', DESCARTADO: 'descartado', BAIXADO_AJUSTE: 'baixado na contagem',
     HISTORICO: 'do histórico', EXTERNO: 'de fora do rebanho',
   };
-  var CAMPOS_REENTRADA = ['animal_id', 'brinco', 'pasto_destino_id', 'observacoes'];
+  /** Campos de um animal já cadastrado que volta ao rebanho, por tipo de entrada (o resto está no cadastro dele). */
+  var CAMPOS_REENTRADA = {
+    OUTRA_ENTRADA: ['animal_id', 'brinco', 'pasto_destino_id', 'observacoes'],
+    COMPRA: ['animal_id', 'brinco', 'brinco_origem', 'pasto_destino_id', 'peso', 'metodo_pesagem', 'peso_carcaca_kg', 'valor_individual', 'base_manual', 'observacoes'],
+  };
   var CONTA_ABERTURA = 'SALDO_ABERTURA_REBANHO';
   var PERFIS_CATEGORIA = [
     { id: 'MACHO_REPRODUTOR', rotulo: 'macho reprodutor', sexo: 'M', castrado: false, reprodutor: true, parida: false },
@@ -245,12 +249,13 @@ var EventService = (function () {
     // Data antes do marco zero num tipo sem registro histórico: a linha do tempo nem começou; só o erro da data.
     if (ev.event_date < m.D0 && ev.pre_marco_zero !== true) return { erros: m.col.erros };
 
-    var plano = { EVENTOS: [], ANIMAIS: [], EVENTO_ANIMAIS: [], IDENTIFICACOES: [], PESAGENS: [], REPRODUCAO: [], BAIXAS: [], AJUSTES: [], FINANCEIRO: [], RATEIOS: [], ALOCACOES_FINANCEIRAS: [] };
+    var plano = { EVENTOS: [], ANIMAIS: [], EVENTO_ANIMAIS: [], IDENTIFICACOES: [], PESAGENS: [], REPRODUCAO: [], BAIXAS: [], AJUSTES: [], COMPRAS: [], FINANCEIRO: [], PARCELAS: [], RATEIOS: [], ALOCACOES_FINANCEIRAS: [] };
     var ctxEv = { tipo: tipo, subtipo: subtipo, ev: ev, campos: campos, original: original, plano: plano, itens: [], criadosOriginal: {}, auditorias: [] };
     if (original) {
       m.f.linhasDoEvento(original.event_id).forEach(function (l) { if (l.atributos_iniciais_json) ctxEv.criadosOriginal[l.animal_id] = true; });
     }
     if (tipo === 'TRANSFERENCIA') cabecalhoTransferencia_(m, ctxEv);
+    if (tipo === 'COMPRA') cabecalhoCompra_(m, ctxEv);
     animais.forEach(function (item, i) {
       var it = novoItem_(m, item || {}, i);
       ctxEv.itens.push(it);
@@ -270,7 +275,15 @@ var EventService = (function () {
     conferirLotacao_(m, ctxEv);
     if (tipo === 'NASCIMENTO') avisosDoParto_(m, ctxEv);
     if (tipo === 'ENTRADA_INICIAL') abertura_(m, ctxEv);
-    if (original) conferirParcelasLiquidadas_(m, original, 'corrigir');
+    if (tipo === 'COMPRA') financeiroCompra_(m, ctxEv, d);
+    if (tipo === 'MORTE' || tipo === 'DESCARTE') financeiroSaida_(m, ctxEv);
+    if (original) {
+      conferirParcelasLiquidadas_(m, original, 'corrigir');
+      m.repo.por('FINANCEIRO', 'event_id', original.event_id).forEach(function (fin) {
+        var a = FinancialService.avisoPeriodo(m.params, fin.data_competencia, 'A correção cancela um lançamento que');
+        if (a) avisoItem_(m, null, a.codigo, a.mensagem);
+      });
+    }
     return fechar_(m, ctxEv);
   }
   /** Cabeçalho do evento: data, propriedade, textos; ENTRADA_INICIAL sempre no marco zero (RN-022). */
@@ -326,12 +339,15 @@ var EventService = (function () {
   function itemEntrada_(m, ctxEv, it) {
     var d = it.dados;
     var tipo = ctxEv.tipo;
+    var compra = tipo === 'COMPRA';
     var defs = EventCatalog.camposAnimal(tipo, null);
     if (!vazio_(d.animal_id) && !ctxEv.criadosOriginal[d.animal_id]) {
-      if (tipo !== 'OUTRA_ENTRADA') { erroItem_(m, it, 'animal_id', 'SO_ANIMAIS_NOVOS', 'o rebanho inicial só cadastra animais novos; para um animal que já existe, use outra entrada.'); return; }
-      return reentrada_(m, ctxEv, it, defs.filter(function (x) { return CAMPOS_REENTRADA.indexOf(x.id) >= 0; }));
+      if (!CAMPOS_REENTRADA[tipo]) { erroItem_(m, it, 'animal_id', 'SO_ANIMAIS_NOVOS', 'o rebanho inicial só cadastra animais novos; para um animal que já existe, use outra entrada.'); return; }
+      return reentrada_(m, ctxEv, it, defs.filter(function (x) { return CAMPOS_REENTRADA[tipo].indexOf(x.id) >= 0; }));
     }
     camposDoItem_(m, it, defs.filter(function (x) { return x.id !== 'animal_id'; }), Object.keys(d).reduce(function (o, k) { if (k !== 'animal_id') o[k] = d[k]; return o; }, {}));
+    // Na compra a origem é sempre COMPRADO (não é campo do formulário).
+    if (compra) d = it.dados = Object.keys(d).reduce(function (o, k) { o[k] = d[k]; return o; }, { origem: 'COMPRADO' });
     var reuso = !vazio_(d.animal_id);
     it.novo = !reuso;
     it.reusado = reuso;
@@ -353,16 +369,19 @@ var EventService = (function () {
     }
     var at = atributos_(m, ctxEv, it);
     if (!vazio_(d.pasto_destino_id)) pastoAtivo_(m, it, 'pasto_destino_id', d.pasto_destino_id);
-    var ea = { efeito_inventario: 1, pasto_destino_id: nulo_(d.pasto_destino_id), atributos_iniciais_json: at, observacoes: nulo_(d.observacoes) };
+    var pasto = nulo_(d.pasto_destino_id) || (compra ? nulo_(ctxEv.campos.pasto_destino_id) : null);
+    var ea = { efeito_inventario: 1, pasto_destino_id: pasto, atributos_iniciais_json: at, observacoes: nulo_(d.observacoes) };
     if (tipo === 'ENTRADA_INICIAL') {
       if (typeof d.peso === 'number') ea.peso = d.peso;
       if (typeof d.valor_abertura === 'number') ea.valor_individual = d.valor_abertura;
     }
+    if (compra) pesosDaCompra_(it, ea);
     linhaEA_(m, ctxEv, it, ea);
     identificacoes_(m, ctxEv, it);
     if (tipo === 'ENTRADA_INICIAL' && typeof d.peso === 'number' && !vazio_(d.metodo_pesagem)) {
       ctxEv.plano.PESAGENS.push({ weight_id: m.tx.novoId(), animal_id: it.animal_id, event_id: ctxEv.ev.event_id, data_pesagem: ctxEv.ev.event_date, peso_kg: d.peso, metodo: d.metodo_pesagem, tipo: 'ENTRADA', observacoes: null });
     }
+    if (compra) pesagemDaCompra_(m, ctxEv, it);
     if (at.sexo === 'F' && at.situacao_reprodutiva === 'PRENHA') {
       ctxEv.plano.REPRODUCAO.push({
         reproduction_id: m.tx.novoId(), animal_id: it.animal_id, event_id: ctxEv.ev.event_id, tipo_evento: 'DIAGNOSTICO_GESTACAO',
@@ -370,11 +389,16 @@ var EventService = (function () {
       });
     }
   }
-  /** Volta ao rebanho de animal que já existe (OUTRA_ENTRADA): só animal fora do rebanho e não morto (RN-015, RN-016). */
+  /**
+   * Volta ao rebanho de animal que já existe (OUTRA_ENTRADA, ou COMPRA de animal que tinha saído): só animal fora do
+   * rebanho e não morto (RN-015, RN-016). Na compra, a linha traz também peso, carcaça e a base do rateio.
+   */
   function reentrada_(m, ctxEv, it, defs) {
     var d = it.dados;
-    var outros = Object.keys(d).filter(function (k) { return CAMPOS_REENTRADA.indexOf(k) < 0 && !vazio_(d[k]); });
-    camposDoItem_(m, it, defs, Object.keys(d).reduce(function (o, k) { if (CAMPOS_REENTRADA.indexOf(k) >= 0) o[k] = d[k]; return o; }, {}));
+    var compra = ctxEv.tipo === 'COMPRA';
+    var aceitos = CAMPOS_REENTRADA[ctxEv.tipo];
+    var outros = Object.keys(d).filter(function (k) { return aceitos.indexOf(k) < 0 && !vazio_(d[k]); });
+    camposDoItem_(m, it, defs, Object.keys(d).reduce(function (o, k) { if (aceitos.indexOf(k) >= 0) o[k] = d[k]; return o; }, {}));
     outros.forEach(function (k) { erroItem_(m, it, k, 'CAMPO_NAO_SE_APLICA', 'na volta de um animal já cadastrado não se informa "' + k + '": corrija o cadastro por "Corrigir dados do animal".'); });
     var e = existente_(m, d.animal_id);
     it.animal_id = d.animal_id;
@@ -384,12 +408,35 @@ var EventService = (function () {
     if (vazio_(it.brincoTexto)) it.quem = nomeAnimal_(e);
     if (e.situacao_cadastral === 'ATIVO') { erroItem_(m, it, 'animal_id', 'JA_NO_REBANHO', 'o animal já está no rebanho.'); return; }
     if (e.situacao_cadastral === 'MORTO') { erroItem_(m, it, 'animal_id', 'ANIMAL_MORTO', 'o animal morreu em ' + br_(e.data_saida) + ' e não pode voltar ao rebanho.'); return; }
-    if (e.situacao_cadastral === 'EXTERNO') { erroItem_(m, it, 'animal_id', 'ANIMAL_EXTERNO', 'animal de fora do rebanho (touro de sêmen, progenitor) entra pelo lançamento de compra.'); return; }
+    if (e.situacao_cadastral === 'EXTERNO') { erroItem_(m, it, 'animal_id', 'ANIMAL_EXTERNO', 'animal de referência (touro de sêmen, progenitor de outra fazenda) não entra no rebanho: ele é só um cadastro de referência. Se ele chegou à fazenda, lance a entrada como animal novo.'); return; }
     it.final = { sexo: e.sexo, data_nascimento: e.data_nascimento };
     if (!vazio_(d.pasto_destino_id)) pastoAtivo_(m, it, 'pasto_destino_id', d.pasto_destino_id);
-    linhaEA_(m, ctxEv, it, { efeito_inventario: 1, pasto_destino_id: nulo_(d.pasto_destino_id), observacoes: nulo_(d.observacoes) });
+    var pasto = nulo_(d.pasto_destino_id) || (compra ? nulo_(ctxEv.campos.pasto_destino_id) : null);
+    var ea = { efeito_inventario: 1, pasto_destino_id: pasto, observacoes: nulo_(d.observacoes) };
+    if (compra) pesosDaCompra_(it, ea);
+    linhaEA_(m, ctxEv, it, ea);
     if (!vazio_(it.brincoTexto) && Utils.normalizarBrinco(it.brincoTexto) !== (e.brinco_norm || '')) identificacoes_(m, ctxEv, it);
-    else it.brincoProposto = null;
+    else {
+      it.brincoProposto = null;
+      if (compra) identificacoesExtras_(m, ctxEv, it);
+    }
+    if (compra) pesagemDaCompra_(m, ctxEv, it);
+  }
+  /** Peso vivo e de carcaça do animal na linha da compra; guarda o que a negociação usa (peso, carcaça, valor, base manual). */
+  function pesosDaCompra_(it, ea) {
+    var d = it.dados;
+    if (typeof d.peso === 'number') ea.peso = d.peso;
+    if (typeof d.peso_carcaca_kg === 'number') ea.peso_carcaca_kg = d.peso_carcaca_kg;
+    it.negocio = {
+      peso: typeof d.peso === 'number' ? d.peso : null, peso_carcaca_kg: typeof d.peso_carcaca_kg === 'number' ? d.peso_carcaca_kg : null,
+      valor_individual: typeof d.valor_individual === 'number' ? d.valor_individual : null, base_manual: typeof d.base_manual === 'number' ? d.base_manual : null,
+    };
+  }
+  /** Peso vivo individual da compra vira PESAGENS (tipo COMPRA; método padrão balança). Carcaça nunca vira pesagem. */
+  function pesagemDaCompra_(m, ctxEv, it) {
+    var d = it.dados;
+    if (typeof d.peso !== 'number') return;
+    ctxEv.plano.PESAGENS.push({ weight_id: m.tx.novoId(), animal_id: it.animal_id, event_id: ctxEv.ev.event_id, data_pesagem: ctxEv.ev.event_date, peso_kg: d.peso, metodo: nulo_(d.metodo_pesagem) || 'BALANCA', tipo: 'COMPRA', observacoes: null });
   }
   /** atributos_iniciais_json (03b, seção 3.5) do item, com as regras de sexo, datas e reprodução. */
   function atributos_(m, ctxEv, it) {
@@ -448,6 +495,14 @@ var EventService = (function () {
       it.brincoProposto = { codigo: it.brincoTexto, norm: Utils.normalizarBrinco(it.brincoTexto) };
       ctxEv.plano.IDENTIFICACOES.push({ ident_id: m.tx.novoId(), animal_id: it.animal_id, event_id: ctxEv.ev.event_id, tipo: 'BRINCO', codigo: it.brincoTexto, codigo_norm: it.brincoProposto.norm, data_inicio: data, motivo: null, created_at: m.tx.agora });
     }
+    identificacoesExtras_(m, ctxEv, it);
+  }
+  /** Brinco do vendedor (BRINCO_ORIGEM, sem unicidade; 03b, seção 16.9) e as demais identificações do item. */
+  function identificacoesExtras_(m, ctxEv, it) {
+    var d = it.dados;
+    var data = ctxEv.ev.event_date;
+    var origem = typeof d.brinco_origem === 'string' ? Utils.aparar(d.brinco_origem) : '';
+    if (origem) ctxEv.plano.IDENTIFICACOES.push({ ident_id: m.tx.novoId(), animal_id: it.animal_id, event_id: ctxEv.ev.event_id, tipo: 'BRINCO_ORIGEM', codigo: origem, codigo_norm: Utils.normalizarBrinco(origem), data_inicio: data, motivo: null, created_at: m.tx.agora });
     if (Array.isArray(d.outras_identificacoes)) {
       d.outras_identificacoes.forEach(function (x, k) {
         var t = x && x.tipo;
