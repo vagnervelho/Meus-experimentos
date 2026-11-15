@@ -400,6 +400,11 @@ Construtores: `bicho(extra)`, `entradaInicial(animais, campos)`, `outraEntrada(d
 `tests/static.test.js` e `scripts/push-gas.js` juntos (a contingência do escopo `drive` completo já é aceita pelo
 `gas:push`, no lugar de `drive.file`).
 
+Documentação de entrega (E1.12): `README.md`, `docs/GUIA_DE_IMPLANTACAO.md` e `docs/RELATORIO_FASE1.md`. O guia lista
+cada arquivo de `src/` (seção 3: nome no editor, conteúdo, dependências); quem acrescenta, renomeia ou remove um
+arquivo de `src/`, ou muda o manifesto, uma função pública ou um texto que o guia cita, atualiza o guia na mesma
+entrega. O relatório de cada fase copia as contagens reais de `npm test` e `npm run ui:check`.
+
 ## 8. `Database` (adaptador `SheetsAdapter`, codec e portas reais)
 
 Únicos pontos com serviço do Google na persistência. Três primitivas atrás da mesma porta, nunca misturadas no mesmo

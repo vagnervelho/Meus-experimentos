@@ -267,19 +267,19 @@ O caminho crítico é spike → persistência → UnitOfWork → motor → anima
 
 ### Fase 1 — Fundação
 
-- [ ] E1.0 Spike técnico
-- [ ] E1.1 Estrutura do projeto e testes
-- [ ] E1.2 Esquema e `setup()`
-- [ ] E1.3 Persistência
-- [ ] E1.4 UnitOfWork
-- [ ] E1.5 API
-- [ ] E1.6 Motor de eventos (entradas, ajustes, estorno)
-- [ ] E1.7 Cadastros
-- [ ] E1.8 Animais
-- [ ] E1.9 Interface base
-- [ ] E1.10 Importação de animais
-- [ ] E1.11 Backup e integridade
-- [ ] E1.12 Aceitação, guia de implantação e relatório
+- [ ] E1.0 Spike técnico — decisões da seção 17 do desenho-base e roteiro `runDiagnostics` entregues; execução e relatório pendentes na conta do dono
+- [x] E1.1 Estrutura do projeto e testes
+- [x] E1.2 Esquema e `setup()`
+- [x] E1.3 Persistência
+- [x] E1.4 UnitOfWork
+- [x] E1.5 API
+- [x] E1.6 Motor de eventos (entradas, ajustes, estorno)
+- [x] E1.7 Cadastros
+- [x] E1.8 Animais
+- [x] E1.9 Interface base
+- [x] E1.10 Importação de animais
+- [x] E1.11 Backup e integridade
+- [x] E1.12 Aceitação, guia de implantação e relatório — `runAcceptanceTests` executado em Node; execução na conta do dono pendente (`docs/RELATORIO_FASE1.md`)
 
 ### Fases 2 a 5
 
