@@ -251,3 +251,7 @@ repositório; "a verificar na conta do dono" significa que só o roteiro de diag
 - Cenários: CT-07, CT-08, CT-09 completo pela `api()` (o brinco do vendido, a identificação do morto) e na aceitação de
   nível 2, CT-17 (b) com a identificação e CT-18 da Fase 2 (compra com a identificação e a transferência). Varredura de
   quedas com o estorno de transferência como comando-modelo (09, seção 8).
+- Verificado em Node (`npm test`: 439 testes, 439 aprovados, cerca de 5 minutos neste ambiente) e no navegador com o
+  backend real (`npm run ui:check`: 43 testes, 43 aprovados; o seletor de tipos ganhou o grupo Manejo). Os formulários
+  próprios de identificação e marcação (o campo de cabeçalho do subtipo, o modo curral) e a tela de auditoria com a trilha
+  completa ficam para a etapa de telas. Nada validado na conta do dono.
