@@ -70,7 +70,7 @@ var TelaImportacao = (function () {
         { id: 'declarado', rotulo: 'No marco zero', valor: function (x) { return lado(x.declarado); } },
         { id: 'recalculado', rotulo: 'Pelo histórico', valor: function (x) { return lado(x.recalculado); } },
         { id: 'acao', rotulo: 'O que fazer', ordenavel: false, valor: function (x) { return x.acao; } },
-        { id: 'evento', rotulo: 'Registro', ordenavel: false, formatar: function (x) { var e = x.evento; return e ? linkRota('evento/' + e.event_id, 'Abrir ' + Store.nomeEvento(e.tipo, e.subtipo, e.nome) + ' de ' + Fmt.data(e.data)) : '—'; } },
+        { id: 'evento', rotulo: 'Registro', ordenavel: false, formatar: function (x) { var e = x.evento; return e ? linkRota('evento/' + e.event_id, 'Abrir ' + (e.nome || Store.nomeEvento(e.tipo, e.subtipo)) + ' de ' + Fmt.data(e.data)) : '—'; } },
       ] }).el));
     if (rec.pastos.length) caixa.appendChild(h('div', { dataset: { reconciliacao: 'pastos' } }, h('h3', { text: 'Pastos com contagem diferente' }), UI.tabela({ id: 'rec-pastos', rotulo: 'Pastos com contagem diferente no marco zero', linhas: rec.pastos, chave: function (x) { return x.pasture_id || 'sem'; },
       colunas: [

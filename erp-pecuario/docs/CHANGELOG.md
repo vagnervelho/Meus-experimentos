@@ -527,3 +527,10 @@ depois o conserto da causa.
   muda; o link do conflito diz "Abrir a marcação para descarte de 01/05/2026"; a trilha de auditoria fala em palavras
   (campo, parâmetro e valores pelo nome); subtipos e avisos aceitos pelos rótulos certos; o detalhe da venda e a correção
   da compra não calculam nada no aparelho.
+- Testes atualizados ao contrato novo, sem afrouxar: `conflito.tipo` passa a ser o tipo e o subtipo vem à parte
+  (`identificacao.test.js`, `validation.test.js`); os textos de tela "Abrir a transferência…", "Estornar a entrada de 2
+  animais", "Será desfeito: O rebanho inicial…" e "Abrir a compra de 15/03/2025" (`tests/ui`); a consulta da posição na
+  data quando a data muda (`tests/ui/movimentos.test.js`).
+- Verificado em Node (`npm test`: 538 testes, 538 aprovados, 0 falhas, cerca de 7 minutos neste ambiente) e no navegador
+  com o backend real (`npm run ui:check`: 71 testes, 71 aprovados, 0 falhas; página montada com 433 KB de 450 KB). Nada
+  validado na conta do dono.

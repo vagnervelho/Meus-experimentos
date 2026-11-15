@@ -2061,7 +2061,7 @@ var Registro = (function () {
     var link = null;
     if (c && c.event_id && Telas.existe('evento/' + c.event_id)) {
       // Tipo e subtipo vêm separados, com o nome pronto do servidor ("a marcação para descarte"; CONTRATOS, seção 14).
-      link = h('a', { class: 'botao botao-texto', href: Roteador.href('evento/' + c.event_id), dataset: { rota: 'evento/' + c.event_id, conflito: c.event_id } }, 'Abrir ' + (c.tipo || c.nome ? Store.nomeEvento(c.tipo, c.subtipo, c.nome) : 'o lançamento') + (c.data ? ' de ' + Fmt.data(c.data) : ''));
+      link = h('a', { class: 'botao botao-texto', href: Roteador.href('evento/' + c.event_id), dataset: { rota: 'evento/' + c.event_id, conflito: c.event_id } }, 'Abrir ' + (c.tipo || c.nome ? (c.nome || Store.nomeEvento(c.tipo, c.subtipo)) : 'o lançamento') + (c.data ? ' de ' + Fmt.data(c.data) : ''));
     }
     return h(tag, { dataset: { codigo: d.codigo || null } }, h('span', { text: d.mensagem }), link ? ' ' : null, link);
   }
@@ -2262,7 +2262,7 @@ var Registro = (function () {
     var im = (s.simulacao && s.simulacao.impactos) || {};
     var l = [];
     if (im.acao === 'estornar') {
-      l.push(['Será desfeito', maiuscula_(Store.nomeEvento(im.event_type, im.event_subtype, im.nome)) + ' de ' + Fmt.data(im.event_date)]);
+      l.push(['Será desfeito', maiuscula_((im.nome || Store.nomeEvento(im.event_type, im.event_subtype))) + ' de ' + Fmt.data(im.event_date)]);
       if (im.corrige) l.push(['Atenção', 'Este lançamento corrigiu ' + (im.corrige.nome || 'outro lançamento') + (im.corrige.event_date ? ' de ' + Fmt.data(im.corrige.event_date) : '') + '. Estornar apaga o lançamento inteiro: o original não volta a valer. Para mudar só um dado, use "Corrigir".']);
       if (im.animais !== undefined) l.push(['Animais do evento', String(im.animais)]);
       if (im.anulados) l.push(['Animais que deixam de existir', String(im.anulados)]);
@@ -2430,7 +2430,7 @@ var Registro = (function () {
     if (s.tipo === 'ESTORNO') {
       var im = (s.simulacao && s.simulacao.impactos) || {};
       // 08, seção 4.6: o botão diz a consequência ("Estornar a venda de 30 animais").
-      return 'Estornar ' + (im.event_type ? Store.nomeEvento(im.event_type, im.event_subtype, im.nome) : 'o evento') + (im.animais ? ' de ' + plural(im.animais, 'animal', 'animais') : '');
+      return 'Estornar ' + (im.event_type ? (im.nome || Store.nomeEvento(im.event_type, im.event_subtype)) : 'o evento') + (im.animais ? ' de ' + plural(im.animais, 'animal', 'animais') : '');
     }
     var n = s.dados && s.dados.animais ? s.dados.animais.length : 0;
     if (s.tipo === 'NASCIMENTO' && !s.corrige) return verbo(s);
