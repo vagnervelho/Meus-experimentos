@@ -9,6 +9,10 @@
  */
 var EventService = (function () {
   var MAX_ANIMAIS = 1000;
+  /** Crias por parto: um parto bovino passa raramente de gêmeos; quatro cobre trigêmeos e quadrigêmeos. */
+  var MAX_CRIAS = 4;
+  /** Tipos cujo evento pode ter data anterior ao marco zero: registro informativo, sem efeito no inventário (04, seção 6). */
+  var ACEITA_HISTORICO = ['NASCIMENTO'];
   var ROTAS = { registrar: 'evento.registrar', corrigir: 'evento.corrigir', estornar: 'evento.estornar' };
   var IDENT_EXTRAS = ['BRINCO_ORIGEM', 'RFID', 'SISBOV', 'TATUAGEM', 'OUTRO'];
   var SITUACAO_ROTULO = {
@@ -233,22 +237,28 @@ var EventService = (function () {
     var campos = d.campos || {};
     var animais = d.animais;
     var ev = cabecalho_(m, tipo, subtipo, campos, original);
-    if (!Array.isArray(animais) || !animais.length) erroGeral_(m, 'animais', 'SEM_ANIMAIS', 'Inclua ao menos um animal.');
+    if (!Array.isArray(animais) || !animais.length) erroGeral_(m, 'animais', 'SEM_ANIMAIS', tipo === 'NASCIMENTO' ? 'Escolha a mãe (a vaca que pariu).' : 'Inclua ao menos um animal.');
     else if (animais.length > MAX_ANIMAIS) erroGeral_(m, 'animais', 'ANIMAIS_DEMAIS', 'Um lançamento aceita até ' + MAX_ANIMAIS + ' animais; divida em partes.');
+    else if (tipo === 'NASCIMENTO' && animais.length > 1) { erroGeral_(m, 'animais', 'UMA_MATRIZ', 'Um parto é de uma vaca só: escolha só a mãe. Gêmeos vão como duas crias do mesmo parto.'); return { erros: m.col.erros }; }
     // Sem data válida ou sem lista de animais não há linha do tempo a conferir; os demais erros do cabeçalho seguem juntos com os dos animais.
     if (!Utils.dataValida(ev.event_date) || !Array.isArray(animais) || !animais.length || animais.length > MAX_ANIMAIS) return { erros: m.col.erros };
 
-    var plano = { EVENTOS: [], ANIMAIS: [], EVENTO_ANIMAIS: [], IDENTIFICACOES: [], PESAGENS: [], REPRODUCAO: [], AJUSTES: [], FINANCEIRO: [], RATEIOS: [], ALOCACOES_FINANCEIRAS: [] };
-    var ctxEv = { tipo: tipo, subtipo: subtipo, ev: ev, original: original, plano: plano, itens: [], criadosOriginal: {}, auditorias: [] };
+    var plano = { EVENTOS: [], ANIMAIS: [], EVENTO_ANIMAIS: [], IDENTIFICACOES: [], PESAGENS: [], REPRODUCAO: [], BAIXAS: [], AJUSTES: [], FINANCEIRO: [], RATEIOS: [], ALOCACOES_FINANCEIRAS: [] };
+    var ctxEv = { tipo: tipo, subtipo: subtipo, ev: ev, campos: campos, original: original, plano: plano, itens: [], criadosOriginal: {}, auditorias: [] };
     if (original) {
       m.f.linhasDoEvento(original.event_id).forEach(function (l) { if (l.atributos_iniciais_json) ctxEv.criadosOriginal[l.animal_id] = true; });
     }
+    if (tipo === 'TRANSFERENCIA') cabecalhoTransferencia_(m, ctxEv);
     animais.forEach(function (item, i) {
       var it = novoItem_(m, item || {}, i);
       ctxEv.itens.push(it);
       if (tipo === 'AJUSTE_INVENTARIO') itemAjuste_(m, ctxEv, it);
+      else if (tipo === 'TRANSFERENCIA') itemTransferencia_(m, ctxEv, it);
+      else if (tipo === 'MORTE' || tipo === 'DESCARTE') itemSaida_(m, ctxEv, it);
+      else if (tipo === 'NASCIMENTO') itemMatriz_(m, ctxEv, it);
       else itemEntrada_(m, ctxEv, it);
     });
+    if (tipo === 'NASCIMENTO') crias_(m, ctxEv, d.crias);
     conferirRepetidos_(m, ctxEv);
     conferirBrincos_(m, ctxEv);
     conferirGenealogia_(m, ctxEv);
@@ -256,6 +266,7 @@ var EventService = (function () {
     if (original) conferirRemovidos_(m, ctxEv);
     guardaDuplicidade_(m, ctxEv);
     conferirLotacao_(m, ctxEv);
+    if (tipo === 'NASCIMENTO') avisosDoParto_(m, ctxEv);
     if (tipo === 'ENTRADA_INICIAL') abertura_(m, ctxEv);
     if (original) conferirParcelasLiquidadas_(m, original, 'corrigir');
     return fechar_(m, ctxEv);
@@ -268,9 +279,11 @@ var EventService = (function () {
       if (!vazio_(data) && data !== m.D0) erroGeral_(m, 'event_date', 'FORA_DO_MARCO_ZERO', 'O rebanho inicial é sempre lançado na data do marco zero (' + br_(m.D0) + ').');
       data = m.D0;
     }
+    var historico = false;
     if (Utils.dataValida(data)) {
       if (data > m.hoje) erroGeral_(m, 'event_date', 'DATA_FUTURA', 'A data ' + br_(data) + ' ainda não chegou.');
-      if (data < m.D0) erroGeral_(m, 'event_date', 'ANTES_DO_MARCO_ZERO', 'A data ' + br_(data) + ' é anterior ao marco zero (' + br_(m.D0) + '): o rebanho só é controlado a partir dele.');
+      if (data < m.D0 && ACEITA_HISTORICO.indexOf(tipo) >= 0) historico = true;
+      else if (data < m.D0) erroGeral_(m, 'event_date', 'ANTES_DO_MARCO_ZERO', 'A data ' + br_(data) + ' é anterior ao marco zero (' + br_(m.D0) + '): o rebanho só é controlado a partir dele.');
     }
     var prop = vazio_(campos.property_id) ? m.params.propriedade_padrao_id : campos.property_id;
     if (vazio_(prop)) erroGeral_(m, 'property_id', 'CAMPO_OBRIGATORIO', 'Escolha a propriedade (ou defina a propriedade padrão nas configurações).');
@@ -285,7 +298,7 @@ var EventService = (function () {
       event_id: m.tx.novoId(), event_seq: seq, ordem_seq: original ? m.f.ordemSeq(original.event_id) : seq,
       event_type: tipo, event_subtype: subtipo, event_date: data, registration_date: m.hoje, property_id: prop,
       description: nulo_(campos.description), total_value: null, responsible: nulo_(campos.responsible),
-      created_by: m.tx.usuario, source: imp ? 'IMPORTACAO' : 'APP', confiabilidade: 'CONFIRMADA', pre_marco_zero: false, partner_id: null,
+      created_by: m.tx.usuario, source: imp ? 'IMPORTACAO' : 'APP', confiabilidade: 'CONFIRMADA', pre_marco_zero: historico, partner_id: null,
       notes: nulo_(campos.notes), payload_json: null, reversal_of_event_id: original ? original.event_id : null, import_id: imp ? imp.import_id : null,
       justificativa: nulo_(campos.justificativa),
     };
@@ -442,6 +455,180 @@ var EventService = (function () {
         ctxEv.plano.IDENTIFICACOES.push({ ident_id: m.tx.novoId(), animal_id: it.animal_id, event_id: ctxEv.ev.event_id, tipo: t, codigo: c, codigo_norm: Utils.normalizarBrinco(c), data_inicio: data, motivo: null, created_at: m.tx.agora });
       });
     }
+  }
+
+  // ------------------------------------------------------------------ movimentos e saídas ----
+  /**
+   * Animal já cadastrado que é sujeito do evento (transferência, morte, descarte, matriz do parto): existe, não está
+   * anulado e não é de fora do rebanho. A presença na data é da linha do tempo (conferirLinhaDoTempo_).
+   */
+  function sujeito_(m, it, verbo) {
+    var d = it.dados;
+    if (vazio_(d.animal_id)) { erroItem_(m, it, 'animal_id', 'CAMPO_OBRIGATORIO', 'escolha o animal.'); return null; }
+    var e = existente_(m, d.animal_id);
+    it.animal_id = d.animal_id;
+    it.publico = true;
+    if (!e) { erroItem_(m, it, 'animal_id', 'NAO_ENCONTRADO', 'animal não encontrado.'); return null; }
+    it.codigo_interno = e.codigo_interno;
+    it.estado = e;
+    it.quem = nomeAnimal_(e);
+    it.brincoTexto = nulo_(e.brinco);
+    if (e.situacao_cadastral === 'EXTERNO') { erroItem_(m, it, 'animal_id', 'ANIMAL_EXTERNO', 'animal de fora do rebanho (touro de sêmen, progenitor de outra fazenda) não se ' + verbo + ': ele não está no inventário.'); return null; }
+    return e;
+  }
+  function semAnimalId_(d) {
+    return Object.keys(d).reduce(function (o, k) { if (k !== 'animal_id') o[k] = d[k]; return o; }, {});
+  }
+  /** Pastos do cabeçalho da transferência (RN-019): origem existe; destino existe, está ativo e é outro pasto. */
+  function cabecalhoTransferencia_(m, ctxEv) {
+    var c = ctxEv.campos;
+    var ok = !vazio_(c.pasto_origem_id) && !vazio_(c.pasto_destino_id);
+    if (!vazio_(c.pasto_origem_id) && !m.f.pasto(c.pasto_origem_id)) { erroGeral_(m, 'pasto_origem_id', 'NAO_ENCONTRADO', 'O pasto de origem não existe.'); ok = false; }
+    if (!vazio_(c.pasto_destino_id)) {
+      var p = m.f.pasto(c.pasto_destino_id);
+      if (!p) { erroGeral_(m, 'pasto_destino_id', 'NAO_ENCONTRADO', 'O pasto de destino não existe.'); ok = false; }
+      else if (p.status !== 'ATIVO') { erroGeral_(m, 'pasto_destino_id', 'PASTO_INATIVO', 'O pasto ' + p.nome + ' está desativado e não recebe animais.'); ok = false; }
+    }
+    if (ok && c.pasto_origem_id === c.pasto_destino_id) { erroGeral_(m, 'pasto_destino_id', 'DESTINO_IGUAL_ORIGEM', 'O pasto de destino precisa ser diferente do pasto de origem.'); ok = false; }
+    ctxEv.transf = ok ? { pasto_origem_id: c.pasto_origem_id, pasto_destino_id: c.pasto_destino_id } : null;
+  }
+  /**
+   * TRANSFERENCIA (04, seção 4.4): uma linha de movimento por animal, origem e destino do cabeçalho. A origem é
+   * conferida pela linha do tempo na data (ORIGEM_DIVERGENTE por animal, RN-018); tudo ou nada (RN-028).
+   */
+  function itemTransferencia_(m, ctxEv, it) {
+    camposDoItem_(m, it, EventCatalog.camposAnimal('TRANSFERENCIA'), semAnimalId_(it.dados));
+    if (!sujeito_(m, it, 'transfere') || !ctxEv.transf) return;
+    linhaEA_(m, ctxEv, it, { efeito_inventario: 0, pasto_origem_id: ctxEv.transf.pasto_origem_id, pasto_destino_id: ctxEv.transf.pasto_destino_id });
+  }
+  /**
+   * MORTE e DESCARTE (04, seção 4.3; 03b, seção 8): saída (−1) com a origem tirada da linha do tempo no dia (antes
+   * das saídas daquele dia) e uma linha de BAIXAS por animal com causa e diagnóstico (morte) ou motivo e destino
+   * (descarte). A situação final (MORTO, DESCARTADO) é projeção; MORTO é terminal (RN-015).
+   */
+  function itemSaida_(m, ctxEv, it) {
+    var d = it.dados;
+    var c = ctxEv.campos;
+    var ev = ctxEv.ev;
+    camposDoItem_(m, it, EventCatalog.camposAnimal(ctxEv.tipo), semAnimalId_(d));
+    if (!sujeito_(m, it, ctxEv.tipo === 'MORTE' ? 'registra como morto' : 'descarta')) return;
+    var onde = Timeline.pastoAntesDaSaida(m.f.linhas(it.animal_id), ev.event_date, m.D0);
+    linhaEA_(m, ctxEv, it, { efeito_inventario: -1, pasto_origem_id: onde.presente ? nulo_(onde.pasture_id) : null, observacoes: nulo_(d.observacoes) });
+    var morte = ctxEv.tipo === 'MORTE';
+    ctxEv.plano.BAIXAS.push({
+      baixa_id: m.tx.novoId(), event_id: ev.event_id, animal_id: it.animal_id, tipo: ctxEv.tipo,
+      causa: morte ? nulo_(c.causa) : null, diagnostico: morte ? nulo_(c.diagnostico) : null,
+      motivo: morte ? null : nulo_(c.motivo), destino: morte ? null : nulo_(c.destino),
+      responsavel: nulo_(ev.responsible), observacoes: nulo_(d.observacoes),
+    });
+  }
+
+  // ------------------------------------------------------------------ nascimento ----
+  /** A matriz do parto (papel MATRIZ, efeito 0): fêmea do rebanho; a presença na data é conferida como fato (RN-017). */
+  function itemMatriz_(m, ctxEv, it) {
+    camposDoItem_(m, it, EventCatalog.camposAnimal('NASCIMENTO'), semAnimalId_(it.dados));
+    var e = sujeito_(m, it, 'registra como mãe');
+    if (!e) return;
+    if (e.sexo !== 'F') { erroItem_(m, it, 'animal_id', 'MATRIZ_NAO_FEMEA', 'só uma fêmea pode ser a mãe de um parto.'); return; }
+    ctxEv.matriz = it;
+    linhaEA_(m, ctxEv, it, { papel: 'MATRIZ', efeito_inventario: 0 });
+  }
+  /**
+   * Crias do parto (grupo repetível `crias`; 04, seção 4.2; 03b, seções 3.5, 7 e 16.8): cada nascida viva cria um
+   * animal (+1, papel CRIA) com mãe = matriz, nascimento = data do parto, origem NASCIDO, pasto do cabeçalho ou o da
+   * mãe no dia, raça da mãe por padrão, brinco opcional e peso ao nascer em PESAGENS (NASCIMENTO); natimorto não cria
+   * animal. Sempre uma linha REPRODUCAO (PARTO) na matriz, com vivos e natimortos (RN-062, RN-063).
+   */
+  function crias_(m, ctxEv, lista) {
+    var ev = ctxEv.ev;
+    var c = ctxEv.campos;
+    var mat = ctxEv.matriz || null;
+    var hist = ev.pre_marco_zero === true;
+    if (!Array.isArray(lista) || !lista.length) { erroGeral_(m, 'crias', 'SEM_CRIAS', 'Informe a cria do parto (nascida viva ou natimorta).'); return; }
+    if (lista.length > MAX_CRIAS) { erroGeral_(m, 'crias', 'CRIAS_DEMAIS', 'Um parto aceita no máximo ' + MAX_CRIAS + ' crias.'); return; }
+    var pasto = nulo_(c.pasto_destino_id);
+    if (pasto) {
+      var p = m.f.pasto(pasto);
+      if (!p) erroGeral_(m, 'pasto_destino_id', 'NAO_ENCONTRADO', 'O pasto informado para as crias não existe.');
+      else if (!hist && p.status !== 'ATIVO') erroGeral_(m, 'pasto_destino_id', 'PASTO_INATIVO', 'O pasto ' + p.nome + ' está desativado e não recebe animais.');
+    } else if (mat && !hist) {
+      var onde = Timeline.pastoAntesDaSaida(m.f.linhas(mat.animal_id), ev.event_date, m.D0);
+      pasto = onde.presente ? nulo_(onde.pasture_id) : null;
+      if (onde.presente && !pasto) erroGeral_(m, 'pasto_destino_id', 'CAMPO_OBRIGATORIO', 'A mãe está sem pasto registrado em ' + br_(ev.event_date) + ': escolha o pasto das crias.');
+    }
+    var defs = EventCatalog.camposGrupo('NASCIMENTO', 'crias');
+    var vivos = 0;
+    var natimortos = 0;
+    lista.forEach(function (bruto, k) {
+      var d = bruto && typeof bruto === 'object' && !Array.isArray(bruto) ? bruto : {};
+      var codigo = typeof d.brinco === 'string' && !vazio_(Utils.aparar(d.brinco)) ? Utils.aparar(d.brinco) : null;
+      var it = { indice: k, dados: d, animal_id: null, publico: false, quem: 'Cria ' + (k + 1) + (codigo ? ' (brinco ' + codigo + ')' : ''), brincoTexto: codigo, linhas: [], novo: false, final: {}, cria: true };
+      camposDoItem_(m, it, defs, semAnimalId_(d));
+      if (d.situacao_nascimento === 'NATIMORTO') { natimortos++; return; }
+      if (d.situacao_nascimento !== 'VIVO') return;
+      vivos++;
+      ctxEv.itens.push(it);
+      criaViva_(m, ctxEv, it, pasto);
+    });
+    ctxEv.parto = { nascidos_vivos: vivos, natimortos: natimortos, pasto_destino_id: pasto, historico: hist };
+    if (!mat) return;
+    ctxEv.plano.REPRODUCAO.push({
+      reproduction_id: m.tx.novoId(), animal_id: mat.animal_id, event_id: ev.event_id, tipo_evento: 'PARTO', data: ev.event_date,
+      touro_id: nulo_(c.pai_id), qtd_nascidos_vivos: vivos, qtd_natimortos: natimortos, tipo_parto: nulo_(c.tipo_parto), data_parto: ev.event_date,
+    });
+  }
+  function criaViva_(m, ctxEv, it, pasto) {
+    var d = it.dados;
+    var c = ctxEv.campos;
+    var ev = ctxEv.ev;
+    var mat = ctxEv.matriz || null;
+    var hist = ev.pre_marco_zero === true;
+    var reuso = !vazio_(d.animal_id);
+    if (reuso && !ctxEv.criadosOriginal[d.animal_id]) { erroItem_(m, it, 'animal_id', 'SO_ANIMAIS_NOVOS', 'a cria de um parto é sempre um animal novo.'); return; }
+    var raca = !vazio_(d.raca) ? d.raca : mat && mat.estado ? nulo_(mat.estado.raca) : null;
+    it.novo = !reuso;
+    it.reusado = reuso;
+    if (reuso) {
+      var ex = m.f.animal(d.animal_id);
+      it.animal_id = d.animal_id;
+      it.publico = true;
+      it.codigo_interno = ex.codigo_interno;
+      var cad = {};
+      if (!vazio_(d.nome) && d.nome !== ex.nome) cad.nome = d.nome;
+      if (!vazio_(raca) && raca !== ex.raca) cad.raca = raca;
+      if (Object.keys(cad).length) ctxEv.auditorias.push({ id: it.animal_id, campos: cad });
+    } else {
+      it.animal_id = m.tx.novoId();
+      it.codigo_interno = 'A-' + pad_(m.repo.contador('ANIMAIS', 'codigo_interno', extrairCodigo_), 6);
+      ctxEv.plano.ANIMAIS.push({ animal_id: it.animal_id, codigo_interno: it.codigo_interno, nome: nulo_(d.nome), raca: raca });
+    }
+    if (vazio_(it.brincoTexto)) it.quem = it.quem + ' (' + it.codigo_interno + ')';
+    var at = { sexo: d.sexo, data_nascimento: ev.event_date, data_nascimento_confianca: 'CONFIRMADA', origem: 'NASCIDO' };
+    if (raca) at.raca = raca;
+    if (d.sexo === 'M') { at.castrado = 'N'; at.reprodutor = 'N'; }
+    if (mat) { at.mae_id = mat.animal_id; at.mae_confianca = 'CONFIRMADA'; }
+    if (!vazio_(c.pai_id)) { at.pai_id = c.pai_id; if (!vazio_(c.pai_confianca)) at.pai_confianca = c.pai_confianca; }
+    it.atributos = at;
+    // A genealogia (mãe fêmea, pai macho, nascimentos, ciclos) é a mesma das entradas; o aviso de idade da mãe é do parto.
+    it.parentesco = { mae_id: mat ? mat.animal_id : null, mae_ref: null, pai_id: nulo_(c.pai_id), pai_ref: null };
+    it.semAvisoIdade = true;
+    it.final = { sexo: d.sexo, data_nascimento: ev.event_date, data_entrada: null, mudouSexo: true, mudouNascimento: true };
+    var ea = { papel: 'CRIA', efeito_inventario: hist ? 0 : 1, pasto_destino_id: nulo_(pasto), atributos_iniciais_json: at, observacoes: nulo_(d.observacoes) };
+    if (typeof d.peso === 'number') ea.peso = d.peso;
+    linhaEA_(m, ctxEv, it, ea);
+    identificacoes_(m, ctxEv, it);
+    if (typeof d.peso === 'number' && !vazio_(d.metodo_pesagem)) {
+      ctxEv.plano.PESAGENS.push({ weight_id: m.tx.novoId(), animal_id: it.animal_id, event_id: ev.event_id, data_pesagem: ev.event_date, peso_kg: d.peso, metodo: d.metodo_pesagem, tipo: 'NASCIMENTO', observacoes: null });
+    }
+  }
+  /** Avisos do parto na matriz (RN-061 idade reprodutiva; RN-064 intervalo entre partos), uma vez por parto. */
+  function avisosDoParto_(m, ctxEv) {
+    var mat = ctxEv.matriz;
+    if (!mat || !mat.estado || !Utils.dataValida(ctxEv.ev.event_date)) return;
+    var outros = ReproductionService.partos(m.f, mat.animal_id);
+    ReproductionService.avisosParto(m.params, mat.estado, ctxEv.ev.event_date, outros).forEach(function (a) {
+      avisoItem_(m, mat, a.codigo, mat.quem + ': ' + a.mensagem);
+    });
   }
 
   // ------------------------------------------------------------------ ajustes ----
@@ -737,7 +924,7 @@ var EventService = (function () {
           return;
         }
         var minimo = m.params.idade_min_reprodutiva_meses;
-        if (cfg[0] === 'mae_id' && !vazio_(nf) && !vazio_(np) && typeof minimo === 'number' && Utils.idadeMeses(np, nf) < minimo) {
+        if (cfg[0] === 'mae_id' && !it.semAvisoIdade && !vazio_(nf) && !vazio_(np) && typeof minimo === 'number' && Utils.idadeMeses(np, nf) < minimo) {
           avisoItem_(m, it, 'IDADE_REPRODUTIVA', it.quem + ': a mãe ' + nomeDe(pid) + ' tinha ' + Utils.idadeMeses(np, nf) + ' meses no nascimento, abaixo da idade reprodutiva mínima (' + minimo + ' meses).');
         }
       });
@@ -859,7 +1046,7 @@ var EventService = (function () {
       return c.event_type === ev.event_type && nulo_(c.event_subtype) === nulo_(ev.event_subtype) && !m.f.excluidos[c.event_id];
     });
     candidatos.forEach(function (c) {
-      var linhas = m.repo.por('EVENTO_ANIMAIS', 'event_id', c.event_id).filter(function (l) { return l.papel === 'SUJEITO' || l.papel === 'CRIA'; });
+      var linhas = m.repo.por('EVENTO_ANIMAIS', 'event_id', c.event_id).filter(function (l) { return l.papel === 'SUJEITO' || l.papel === 'CRIA' || l.papel === 'MATRIZ'; });
       var ids = {};
       var assin = {};
       linhas.forEach(function (l) {
@@ -980,7 +1167,10 @@ var EventService = (function () {
   function fechar_(m, ctxEv) {
     var ev = ctxEv.ev;
     aplicarPolitica_(m);
-    var extra = { justificativa: ctxEv.original ? nulo_(m.tx.dados.justificativa) : null, valor_abertura_origem: ctxEv.abertura ? 'INFORMADO' : null };
+    var extra = {
+      justificativa: ctxEv.original ? nulo_(m.tx.dados.justificativa) : null, valor_abertura_origem: ctxEv.abertura ? 'INFORMADO' : null,
+      gta_numero: ctxEv.tipo === 'TRANSFERENCIA' && typeof ctxEv.campos.gta_numero === 'string' ? nulo_(Utils.aparar(ctxEv.campos.gta_numero)) : null,
+    };
     ev.payload_json = payload_(m, ctxEv, extra);
     var itensPorAnimal = {};
     ctxEv.itens.forEach(function (it) { if (it.animal_id && !itensPorAnimal[it.animal_id]) itensPorAnimal[it.animal_id] = it; });
@@ -1000,7 +1190,8 @@ var EventService = (function () {
       impactos: {
         acao: resumo.acao, event_type: ev.event_type, event_subtype: ev.event_subtype, event_date: ev.event_date,
         animais: animais.length, novos: ctxEv.plano.ANIMAIS.length, anulados: (ctxEv.removidos || []).length, substitui: resumo.substitui,
-        total_value: ev.total_value, abertura: ctxEv.abertura || null,
+        total_value: ev.total_value, abertura: ctxEv.abertura || null, pre_marco_zero: ev.pre_marco_zero === true,
+        parto: ctxEv.parto || null, transferencia: ctxEv.transf || null, baixas: ctxEv.plano.BAIXAS.length,
       },
       derivados: { animais: animais, eventos: [ev.event_id].concat(ctxEv.original ? [ctxEv.original.event_id] : []) },
       resposta: function (t) { return resposta_(t, resumo); },
@@ -1078,7 +1269,7 @@ var EventService = (function () {
     };
   }
   function leiturasConsulta_() {
-    return Timeline.LEITURAS.concat(['PROPRIEDADES']);
+    return Timeline.LEITURAS.concat(['PROPRIEDADES', 'BAIXAS']);
   }
   function eventoPublico_(tx, ev) {
     var a = tx.cru.avaliar(ev.event_id);
@@ -1129,7 +1320,7 @@ var EventService = (function () {
         var st = ev ? tx.cru.avaliar(ev.event_id).status : null;
         if (!ev || st === 'FALHOU' || st === 'PENDENTE') throw Validation.erro('NOT_FOUND', 'Evento não encontrado.');
         var detalhes = {};
-        ['IDENTIFICACOES', 'PESAGENS', 'REPRODUCAO', 'AJUSTES', 'FINANCEIRO', 'RATEIOS'].forEach(function (t) {
+        ['IDENTIFICACOES', 'PESAGENS', 'REPRODUCAO', 'BAIXAS', 'AJUSTES', 'FINANCEIRO', 'RATEIOS'].forEach(function (t) {
           detalhes[t] = tx.cru.cruPor(t, 'event_id', ev.event_id).map(Utils.clonar);
         });
         detalhes.ALOCACOES_FINANCEIRAS = [];
@@ -1215,6 +1406,7 @@ var EventService = (function () {
 
   return {
     MAX_ANIMAIS: MAX_ANIMAIS,
+    MAX_CRIAS: MAX_CRIAS,
     ROTAS: ROTAS,
     comando: comando,
     registrar: registrar,

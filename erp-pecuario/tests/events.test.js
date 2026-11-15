@@ -24,11 +24,14 @@ function falha(m, acao, dados, op) {
 }
 
 // ------------------------------------------------------------------ catálogo ----
-test('catálogo: 21 tipos; na Fase 1 só as entradas, os três ajustes e o estorno; módulos por fase; serialização é só dado', () => {
+test('catálogo: 21 tipos; na Fase 2 (até esta etapa) entradas, nascimento, transferência, morte, descarte, três ajustes e estorno; módulos por fase; serialização é só dado', () => {
   const G = createGas({ order: 'alpha' }).G;
   const C = G.EventCatalog;
   assert.equal(C.nomes().length, 21);
-  assert.deepEqual(js(C.tiposAtivos()), ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'AJUSTE_INVENTARIO', 'ESTORNO']);
+  assert.equal(C.FASE_ATUAL, 2);
+  assert.deepEqual(js(C.tiposAtivos()), ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'NASCIMENTO', 'TRANSFERENCIA', 'MORTE', 'DESCARTE', 'AJUSTE_INVENTARIO', 'ESTORNO']);
+  assert.deepEqual(js(C.tiposAtivos(1)), ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'AJUSTE_INVENTARIO', 'ESTORNO'], 'a Fase 1 continua a mesma');
+  for (const t of ['COMPRA', 'VENDA', 'IDENTIFICACAO', 'MARCACAO']) assert.equal(C.ativo(t), false, t + ' é da Fase 2, mas ainda sem campos: inativo');
   assert.deepEqual([C.ativo('AJUSTE_INVENTARIO', 'CORRECAO_LOCALIZACAO'), C.ativo('AJUSTE_INVENTARIO', 'RECLASSIFICACAO'), C.ativo('VENDA'), C.ativo('VENDA', null, 2)], [true, false, false, false]);
   assert.deepEqual(js(C.modulosAtivos().map((x) => x.id)), ['DASHBOARD', 'REBANHO', 'PASTOS', 'EVENTOS', 'CONFIGURACOES', 'IMPORTACAO']);
   assert.equal(C.modulosAtivos(5).filter((x) => x.menu).length, 10, 'o menu chega aos 10 itens da §15 na Fase 5');
@@ -38,7 +41,7 @@ test('catálogo: 21 tipos; na Fase 1 só as entradas, os três ajustes e o estor
   assert.deepEqual(Object.keys(copia.tipos.find((t) => t.tipo === 'AJUSTE_INVENTARIO').subtipos), ['CORRECAO_CADASTRO', 'IDENTIFICACAO_INCORRETA', 'CORRECAO_LOCALIZACAO']);
   for (const t of copia.tipos) {
     for (const k of ['rotulo', 'grupo_ui', 'ordem', 'selecao_animais', 'modo_entrada', 'revisao', 'critico', 'reads', 'fase']) assert.ok(k in t, t.tipo + ' sem ' + k);
-    const campos = t.campos.concat(t.campos_animal || []).concat(...Object.values(t.subtipos || {}).map((x) => x.campos_animal || []));
+    const campos = t.campos.concat(t.campos_animal || []).concat(...Object.values(t.subtipos || {}).map((x) => x.campos_animal || [])).concat(...Object.values(t.grupos_repetiveis || {}));
     for (const c of campos) {
       assert.ok(C.TIPOS_CAMPO.indexOf(c.tipo) >= 0 || /^ref:[A-Z_]+$/.test(c.tipo), t.tipo + '.' + c.id + ': tipo renderizável');
       if (/^ref:/.test(c.tipo)) assert.ok(G.Schema.temTabela(c.tipo.slice(4)), 'referência a aba existente: ' + c.tipo);

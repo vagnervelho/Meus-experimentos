@@ -32,7 +32,7 @@ var AnimalService = (function () {
   var GERACOES_PADRAO = 3;
   var GERACOES_MAX = 6;
   /** Blocos da ficha cujo módulo ainda não foi entregue: voltam vazios, com a marca (§20: nada sem função). */
-  var BLOCOS_DE_MODULO = { peso: 'PESAGENS', sanitario: 'SANIDADE', reprodutivo: 'REPRODUCAO', financeiro: 'FINANCEIRO' };
+  var BLOCOS_DE_MODULO = { peso: 'PESAGENS', sanitario: 'SANIDADE', financeiro: 'FINANCEIRO' };
 
   function vazio_(v) {
     return v === null || v === undefined || v === '';
@@ -320,6 +320,18 @@ var AnimalService = (function () {
     });
     return out;
   }
+  /** Dias de permanência somados por pasto (o dia da saída não conta; período aberto conta até hoje). */
+  function diasPorPasto_(periodos) {
+    var g = {};
+    periodos.forEach(function (p) {
+      var k = p.pasture_id || '';
+      var x = g[k] = g[k] || { pasture_id: p.pasture_id, pasto_nome: p.pasto_nome, dias: 0, periodos: 0, atual: false };
+      x.dias += p.dias;
+      x.periodos++;
+      if (p.em_andamento) x.atual = true;
+    });
+    return Utils.ordenarPor(Object.keys(g).map(function (k) { return g[k]; }), [{ campo: 'dias', desc: true }, 'pasto_nome']);
+  }
   function moduloNaoEntregue_(modulo) {
     var m = EventCatalog.modulosAtivos(99).filter(function (x) { return x.id === modulo; })[0];
     return {
@@ -386,7 +398,8 @@ var AnimalService = (function () {
    * Ficha do animal (§5.1; consulta `animal.ficha`): dados {animal_id, geracoes?} (1 a 6; padrão 3).
    * Devolve {animal_id, data, geral (A), genealogia (B), localizacao (C), pastos (D), peso (E), sanitario (F),
    * reprodutivo (G), financeiro (H), eventos (I), anexos (J)}; cada bloco traz `entregue`. Os blocos de módulos
-   * ainda não entregues voltam com `entregue: false`, o módulo, a fase e `itens: []`. NOT_FOUND se o animal não
+   * ainda não entregues voltam com `entregue: false`, o módulo, a fase e `itens: []`. O bloco G já traz a parte de
+   * partos (ReproductionService.blocoFicha), com `parcial: true` e o que chega na Fase 3. NOT_FOUND se o animal não
    * existe (ou foi anulado).
    */
   function consultaFicha(dados) {
@@ -417,7 +430,8 @@ var AnimalService = (function () {
             propriedade_nome: prop ? prop.nome : null, desde: aberto && aberto.pasture_id === nulo_(a.pasto_atual_id) ? aberto.inicio : null,
             sem_pasto: a.situacao_cadastral === 'ATIVO' && vazio_(a.pasto_atual_id), situacao_cadastral: a.situacao_cadastral,
           },
-          pastos: { entregue: true, periodos: periodos },
+          pastos: { entregue: true, periodos: periodos, por_pasto: diasPorPasto_(periodos) },
+          reprodutivo: ReproductionService.blocoFicha(L.f, a),
           eventos: { entregue: true, itens: eventos_(tx, L, a) },
           anexos: { entregue: true, itens: anexos_(tx, a) },
         };

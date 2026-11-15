@@ -312,14 +312,18 @@ var EventCatalog = (function () {
     var d = DEFINICOES[nome];
     return d && d.subtipos ? Object.keys(d.subtipos) : [];
   }
+  /** Subtipo entregue na fase e com campos (subtipo da fase sem campos ainda não passa pelo motor). */
+  function subtipoPronto_(sub, f) {
+    return !!sub && sub.fase <= f && Array.isArray(sub.campos_animal) && sub.campos_animal.length > 0;
+  }
   /** Tipo (e subtipo) entregue na fase dada (padrão: a corrente) e com definição de campos. */
   function ativo(nome, subtipo, fase) {
     var f = fase === undefined || fase === null ? FASE_ATUAL : fase;
     if (!existe(nome) || RESUMO[nome].fase > f || !DEFINICOES[nome]) return false;
     var subs = DEFINICOES[nome].subtipos;
     if (!subs) return vazio_(subtipo);
-    if (vazio_(subtipo)) return Object.keys(subs).some(function (s) { return subs[s].fase <= f; });
-    return !!subs[subtipo] && subs[subtipo].fase <= f;
+    if (vazio_(subtipo)) return Object.keys(subs).some(function (s) { return subtipoPronto_(subs[s], f); });
+    return subtipoPronto_(subs[subtipo], f);
   }
   function tiposAtivos(fase) {
     return nomes().filter(function (n) { return ativo(n, null, fase); });
@@ -354,7 +358,7 @@ var EventCatalog = (function () {
       var t = Utils.clonar(tipo(n));
       if (t.subtipos) {
         var subs = {};
-        Object.keys(t.subtipos).forEach(function (s) { if (t.subtipos[s].fase <= f) subs[s] = t.subtipos[s]; });
+        Object.keys(t.subtipos).forEach(function (s) { if (subtipoPronto_(t.subtipos[s], f)) subs[s] = t.subtipos[s]; });
         t.subtipos = subs;
       }
       return t;

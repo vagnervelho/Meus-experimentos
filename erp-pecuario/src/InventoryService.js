@@ -254,7 +254,46 @@ var InventoryService = (function () {
     };
   }
 
+  /**
+   * Consulta `inventario.elegiveis` (08, seção 7): os animais que podem entrar num lançamento do tipo na data D,
+   * resolvidos pela linha do tempo (o store do aparelho só sabe a posição de hoje). dados: {tipo, data?, pasture_id?}.
+   * Vale para os tipos cujo filtro de elegíveis pede animal no rebanho (ATIVO): elegível = no rebanho ao fim do dia D,
+   * no pasto pedido nessa data e com o sexo que o tipo exige (`filtro_elegiveis.sexo`). Devolve {data, tipo,
+   * pasture_id, motivo, n, itens: [{animal_id, codigo_interno, brinco, sexo, pasture_id}]}; antes do marco zero (ou
+   * sem ele) n e itens voltam null com o motivo. VALIDATION: tipo indisponível ou sem elegíveis por presença, data
+   * inválida ou futura; NOT_FOUND: pasto inexistente.
+   */
+  function consultaElegiveis(dados) {
+    var d = dados || {};
+    return {
+      rota: 'inventario.elegiveis', dados: d, reads: leituras(),
+      tratador: function (tx) {
+        var tipo = d.tipo;
+        var def = !vazio_(tipo) && EventCatalog.existe(tipo) && EventCatalog.ativo(tipo, d.subtipo || null) ? EventCatalog.tipo(tipo) : null;
+        var filtro = def ? def.filtro_elegiveis : null;
+        if (!def || !filtro || filtro.situacao !== 'ATIVO') {
+          throw Validation.erro('VALIDATION', 'Escolha um tipo de lançamento de animais que estão no rebanho (transferência, nascimento, morte, descarte).', [Validation.detalhe({ codigo: 'TIPO_SEM_ELEGIVEIS', campo: 'tipo', mensagem: 'Tipo sem lista de elegíveis por data.' })]);
+        }
+        var L = AnimalService.leitor(tx);
+        var data = conferirData_(L, d.data);
+        if (!vazio_(d.pasture_id) && !L.f.pasto(d.pasture_id)) throw Validation.erro('NOT_FOUND', 'Pasto não encontrado. Atualize a tela e tente de novo.');
+        var pres = presentes(L, data);
+        var base = { data: data, tipo: tipo, pasture_id: vazio_(d.pasture_id) ? null : d.pasture_id, motivo: pres.motivo, n: null, itens: null };
+        if (pres.motivo) return base;
+        base.itens = pres.itens.filter(function (x) {
+          if (!vazio_(d.pasture_id) && x.pasture_id !== d.pasture_id) return false;
+          return !filtro.sexo || x.animal.sexo === filtro.sexo;
+        }).map(function (x) {
+          return { animal_id: x.animal.animal_id, codigo_interno: x.animal.codigo_interno, brinco: vazio_(x.animal.brinco) ? null : x.animal.brinco, sexo: x.animal.sexo, pasture_id: x.pasture_id };
+        });
+        base.n = base.itens.length;
+        return base;
+      },
+    };
+  }
+
   function posicaoEm(ctx, dados) { return UnitOfWork.read(ctx, consultaPosicao(dados)); }
+  function elegiveis(ctx, dados) { return UnitOfWork.read(ctx, consultaElegiveis(dados)); }
   function visaoGeral(ctx) { return UnitOfWork.read(ctx, consultaVisaoGeral()); }
   function listarAlertas(ctx, estado) { return UnitOfWork.read(ctx, consultaAlertas(estado)); }
 
@@ -268,7 +307,9 @@ var InventoryService = (function () {
     consultaPosicao: consultaPosicao,
     consultaVisaoGeral: consultaVisaoGeral,
     consultaAlertas: consultaAlertas,
+    consultaElegiveis: consultaElegiveis,
     posicaoEm: posicaoEm,
+    elegiveis: elegiveis,
     visaoGeral: visaoGeral,
     listarAlertas: listarAlertas,
   };

@@ -103,7 +103,7 @@ var Api = (function () {
     'animal.editar': comando_(function (ctx, p) { return AnimalService.editar(ctx, p); }),
     'animal.cadastrarExterno': comando_(function (ctx, p) { return AnimalService.cadastrarExterno(ctx, p); }),
     'inventario.posicao': consulta_(function (ctx, p) { return InventoryService.posicaoEm(ctx, p.dados); }),
-    'inventario.elegiveis': futura_(2, 'Eventos de movimentação (compra, venda, transferência)'),
+    'inventario.elegiveis': consulta_(function (ctx, p) { return InventoryService.elegiveis(ctx, p.dados); }),
     // Pastos, propriedades e cadastros de apoio
     'pasto.listar': consulta_(function (ctx, p) { return PastureService.listar(ctx, p.dados); }),
     'pasto.painel': consulta_(function (ctx, p) { return PastureService.painel(ctx, p.dados); }),
