@@ -135,6 +135,12 @@ test('base de demonstração (TEST_PLAN = DEMO): 314 ativos só por comandos, pl
   assert.ok(eventos.every((e) => e.source === 'APP' && e.status !== 'FALHOU'), 'tudo pelos comandos do app');
   assert.equal(eventos.filter((e) => e.event_type === 'ESTORNO').length, 1);
   assert.ok(s.tabela('ANIMAIS', demo).filter((a) => a.mae_id).length >= 48, 'bezerros ao pé com a mãe');
+  // As 8 compras gravam o financeiro completo (P11): 2 lançamentos, 3 títulos e 16 alocações cada.
+  assert.equal(s.tabela('COMPRAS', demo).length, 8);
+  assert.equal(s.tabela('PARCELAS', demo).length, 8 * 3);
+  const comprados = s.tabela('ANIMAIS', demo).filter((a) => a.origem === 'COMPRADO');
+  assert.equal(comprados.reduce((t, a) => t + a.custo_aquisicao, 0), s.tabela('COMPRAS', demo).reduce((t, c) => t + c.valor_total, 0), 'custo de aquisição = soma das alocações = custo total das compras');
+  assert.ok(comprados.every((a) => a.custo_aquisicao > (a.sexo === 'M' ? 280000 : 260000)), 'o frete entra no custo de cada animal');
   // Determinismo: rodar de novo não grava nada novo (mesmas chaves seed:<n>, mesmo conteúdo).
   const rel2 = js(s.gas.exec(() => s.G.runAcceptanceTests()));
   assert.deepEqual([rel2.ok, rel2.demonstracao.cabecas], [true, 314]);

@@ -13,7 +13,10 @@ da E1.12) — `Api`, `Code` e `TestRunner` (seções 19 a 21) — e INTERFACE, N
 `Styles`, `JavaScript`, `Components` e `Dashboard` (seção 22) — e TELAS DA FASE 1 (E1.9 parte 2, E1.8 e E1.10 na tela) —
 `Dashboard`, `Animals`, `Pastures`, `Events`, `Settings` e `Import` (seção 23). Fase 2, etapa MOVIMENTOS E SAÍDAS (E2.1, E2.2
 e E2.5): NASCIMENTO, TRANSFERENCIA, MORTE e DESCARTE no motor (seções 12 a 14), `ReproductionService` (seção 24),
-`inventario.elegiveis` (seção 15.4), ficha com os blocos D e G (parte de partos) e as telas (seção 25).
+`inventario.elegiveis` (seção 15.4), ficha com os blocos D e G (parte de partos) e as telas (seção 25). Fase 2, etapa
+FINANCEIRO DO EVENTO E COMPRA (E2.3): `FinancialService` (seção 26), COMPRA e os lançamentos opcionais da MORTE e do
+DESCARTE no motor (seções 12 e 14), parceiros validados nos eventos, plano de contas no bootstrap (seção 15.1), ficha com
+o bloco H (seção 15.2), títulos na visão geral (seção 15.4) e as telas (seção 27).
 
 ## 1. Regras que valem para todo arquivo de `src/`
 
@@ -382,7 +385,9 @@ projetor real) deve entrar em `CENARIOS` desse arquivo — o cenário `motor` (O
 `tests/apoio-eventos.js`: `ambienteEventos({primitiva, order, marcoZero, config, categorias})` = banco semeado
 (propriedade, 5 pastos `PASTOS.A/B/C/INATIVO/PEQUENO` — o último com capacidade de 2 cabeças —, CONFIGURACOES com
 `data_marco_zero = 2026-01-01`, LISTAS, PLANO_CONTAS, CATEGORIAS) e o projetor real. `m.run(acao, dados, {chave, avisos})`,
-`m.tentar(...)` e `m.simular(...)` conferem, depois de CADA comando, que a projeção gravada = `Timeline.conferir` vazio.
+`m.tentar(...)` e `m.simular(...)` conferem, depois de CADA comando, que a projeção gravada = `Timeline.conferir` vazio
+e que as invariantes financeiras de 03b, seção 14 fecham (`FinancialService.conferir` vazio); `m.invariantes()` devolve
+só os achados financeiros. O cenário `correcaoCompra` da varredura de quedas é a correção de compra de 04, 5.2 (iv).
 Construtores: `bicho(extra)`, `entradaInicial(animais, campos)`, `outraEntrada(data, animais, campos)`,
 `ajuste(subtipo, data, animais, campos)`; `sementes(G, opcoes)` dá as linhas de semente.
 
@@ -608,11 +613,12 @@ LOCKED, CONFIG.
 ## 12. `EventCatalog` (puro, só dados)
 
 Definição declarativa dos eventos (04, seção 7). Os 21 tipos estão no catálogo com `fase`; só passam pelo motor os
-entregues na fase corrente E com campos (`FASE_ATUAL = 2`): ENTRADA_INICIAL, OUTRA_ENTRADA, NASCIMENTO, TRANSFERENCIA,
-MORTE, DESCARTE, AJUSTE_INVENTARIO (subtipos CORRECAO_CADASTRO, IDENTIFICACAO_INCORRETA, CORRECAO_LOCALIZACAO) e ESTORNO.
-COMPRA, VENDA, IDENTIFICACAO, MARCACAO e os subtipos RECLASSIFICACAO e DIVERGENCIA_CONTAGEM são da fase 2 mas ainda não
-têm campos: ficam inativos (subtipo só é ativo com `campos_animal`). Vocabulário fechado de 04 mais três atributos de
-campo: `opcoes` (enum fechado), `lista` (lista aberta de LISTAS) e `casas` (decimais). No tipo, os campos de cabeçalho
+entregues na fase corrente E com campos (`FASE_ATUAL = 2`): ENTRADA_INICIAL, OUTRA_ENTRADA, NASCIMENTO, COMPRA,
+TRANSFERENCIA, MORTE, DESCARTE, AJUSTE_INVENTARIO (subtipos CORRECAO_CADASTRO, IDENTIFICACAO_INCORRETA,
+CORRECAO_LOCALIZACAO) e ESTORNO. VENDA, IDENTIFICACAO, MARCACAO e os subtipos RECLASSIFICACAO e DIVERGENCIA_CONTAGEM são
+da fase 2 mas ainda não têm campos: ficam inativos (subtipo só é ativo com `campos_animal`). Vocabulário fechado de 04
+mais quatro atributos de campo: `opcoes` (enum fechado), `lista` (lista aberta de LISTAS), `casas` (decimais) e
+`naturezas` (em `ref:PLANO_CONTAS`: as naturezas de conta aceitas, para a tela filtrar as contas). No tipo, os campos de cabeçalho
 ficam em `campos`, os por animal em `campos_animal` (ou em `subtipos[S].campos_animal`) e os de grupo repetível em
 `grupos_repetiveis[g]` (NASCIMENTO: `crias`). `filtro_elegiveis` aceita `situacao`, `pasto: '$campo'` e `sexo`.
 
@@ -623,11 +629,27 @@ Tipos desta etapa (cabeçalho · por animal):
   peso, metodo_pesagem, observacoes` (só `situacao_nascimento` vale para natimorto).
 - TRANSFERENCIA (`VARIOS`, ATIVO no pasto de origem; LOCAL): `event_date, pasto_origem_id, pasto_destino_id,
   gta_numero, property_id, responsible, notes` · nenhum campo por animal.
-- MORTE (`VARIOS`, ATIVO; LOCAL; crítico): `event_date, causa (LISTAS.CAUSA_MORTE), diagnostico, property_id,
-  responsible, notes` · `observacoes`.
+- MORTE (`VARIOS`, ATIVO; LOCAL; crítico): `event_date, causa (LISTAS.CAUSA_MORTE), diagnostico, custo_valor
+  (dinheiro, opcional), custo_conta_id (ref:PLANO_CONTAS, naturezas CUSTEIO; obrigatória com valor), custo_partner_id,
+  custo_vencimento (vazio = à vista), custo_forma_pagamento, custo_documento, custo_descricao, property_id, responsible,
+  notes` · `observacoes`. A tela revisa pelo servidor quando há custo.
 - DESCARTE (`VARIOS`, ATIVO; LOCAL; crítico): `event_date, destino (LISTAS.DESTINO_DESCARTE: consumo próprio, doação,
-  permuta, sacrifício), motivo (LISTAS.MOTIVO_DESCARTE), property_id, responsible, notes` · `observacoes`. Sem
-  `event_subtype` (03b, seção 2.4); a receita opcional chega com o FinancialService.
+  permuta, sacrifício), motivo (LISTAS.MOTIVO_DESCARTE), receita_valor, receita_partner_id, receita_vencimento,
+  receita_forma_pagamento, receita_documento, receita_descricao, property_id, responsible, notes` · `observacoes`. Sem
+  `event_subtype` (03b, seção 2.4).
+- COMPRA (`NOVOS`, aceita também animal já cadastrado fora do rebanho; SERVIDOR; crítico; `filtro_elegiveis.situacao`
+  VENDIDO, DESCARTADO, BAIXADO_AJUSTE, HISTORICO): `event_date, partner_id (fornecedor, obrigatório), finalidade
+  (LISTAS.FINALIDADE_NEGOCIO), modalidade (CABECA|KG_VIVO|ARROBA|LOTE), base_peso (só ARROBA: VIVO|CARCACA),
+  rendimento_carcaca_pct e rendimento_tipo (NEGOCIADO|ESTIMADO; só base VIVO), preco_unitario (centavos por cabeça, kg ou
+  @; obrigatório em KG_VIVO e ARROBA), peso_total_kg (vazio = soma dos pesos), valor_animais (obrigatório: vale a nota),
+  criterio_rateio (só LOTE: CABECAS|PESO_VIVO|PESO_CARCACA|VALOR_INDIVIDUAL|MANUAL), justificativa_rateio (MANUAL),
+  pasto_destino_id (obrigatório: o do lote), gta_numero, nota_fiscal, condicoes (→ COMPRAS.observacoes), property_id,
+  responsible, notes` · `animal_id (volta ao rebanho), brinco, brinco_origem, nome, sexo, raca, data_nascimento |
+  idade_meses, data_nascimento_confianca, castrado, reprodutor, partos_previos, situacao_reprodutiva, data_prevista_parto,
+  pasto_destino_id (vazio = o do lote), peso, metodo_pesagem (vazio = BALANCA), peso_carcaca_kg, valor_individual,
+  base_manual, outras_identificacoes, observacoes` · grupos `parcelas: [data_vencimento*, valor (vazio = divisão igual
+  do que falta), forma_pagamento (LISTAS.FORMA_PAGAMENTO), documento]` e `custos: [tipo* (FRETE|OUTRO), valor*,
+  partner_id, data_vencimento (vazio = à vista), forma_pagamento, documento, descricao]`.
 
 | Função | Contrato |
 |---|---|
@@ -658,7 +680,7 @@ substituição (desenho-base 16.1).
 | `descrever(problema, nomePasto?)` | Frase para o pecuarista, sem o "quem" |
 | `fonte(tx, {excluir, parametros})` | Acesso indexado às linhas da unidade (usa `tx.cru` quando há); `excluir` = eventos tratados como anulados (validação de estorno e de substituição) |
 | `projetarAnimal(fonte, id)` → `{campos, meta}`; `projetar(fonte, ids \| null)` | A ÚNICA rotina que calcula as projeções de ANIMAIS (03a, 4.3.3 e 4.3.4); `projetar` inclui as mães alcançadas e `cria_ao_pe` |
-| `porta()` / `reconstruir(tx, escopo)` | Porta `ctx.projecoes`. Escopo `{animais, eventos}` (o `derivados` do EventService) ou `{tudo: true}`. Grava ANIMAIS (+ `updated_at` quando algo muda), `IDENTIFICACOES.data_fim` e FINANCEIRO (`status`, `cancelado_em` = `created_at` do anulador, `cancelado_por_event_id`, `status_pagamento`, `data_pagamento`, `animal_id` da alocação DIRETA) |
+| `porta()` / `reconstruir(tx, escopo)` | Porta `ctx.projecoes`. Escopo `{animais, eventos}` (o `derivados` do EventService) ou `{tudo: true}`. Grava ANIMAIS (+ `updated_at` quando algo muda), `IDENTIFICACOES.data_fim` e FINANCEIRO (`status`, `cancelado_em` = `created_at` do anulador, `cancelado_por_event_id`, `status_pagamento` e `data_pagamento` por `FinancialService.situacaoPagamento`, `animal_id` da alocação DIRETA) |
 | `conferir(tx)` | Projeção gravada × reconstrução total (precisa de `tx.cru`): `[{tabela, id, campo, gravado, calculado}]`, vazio = coincidem. Base da integridade (E1.11) |
 | `inventario(linhas, D, marcoZero)` | `{data, total, porPasto: {pasture_id: n}, semPasto, motivo}`; D < marco zero → nulos com `ANTERIOR_AO_MARCO_ZERO`; sem marco zero → `DADOS_INSUFICIENTES` |
 | `pastoEm(linhasDoAnimal, D, marcoZero)` | `{presente, pasture_id, motivo}` ao fim do dia D |

@@ -619,8 +619,9 @@ var TestRunner = (function () {
   /**
    * Os animais da demonstração, sorteados com semente fixa a partir de D0 (09, seção 7, na parte que as fases
    * entregues cobrem): 240 em D0 (110 vacas, 4 touros, 30 novilhas, 48 bezerros ao pé com a mãe no mesmo lote, 48
-   * garrotes) em 6 lotes de 40; 8 entradas de 8 animais ao longo dos três anos; 1 entrada estornada; 3 transferências
-   * de garrotes; 12 partos (um gemelar com natimorto); 1 morte e 1 descarte. Fecha em 314 ativos.
+   * garrotes) em 6 lotes de 40; 8 compras de 8 animais ao longo dos três anos (valor de cada animal, frete e duas
+   * parcelas); 1 entrada estornada; 3 transferências de garrotes; 12 partos (um gemelar com natimorto); 1 morte e 1
+   * descarte. Fecha em 314 ativos.
    */
   function geracaoDemo_(d0) {
     var rnd = sorteio_(20261114);
@@ -673,6 +674,12 @@ var TestRunner = (function () {
     var partos = maes.map(function (b, j) { return { mae: b, data: Utils.somaDias(d0, 300 + 7 * j), crias: j === 5 ? [{ situacao_nascimento: 'VIVO', sexo: 'F' }, { situacao_nascimento: 'NATIMORTO' }] : [{ situacao_nascimento: 'VIVO', sexo: rnd() < 0.5 ? 'M' : 'F', peso: entre(28, 38), metodo_pesagem: 'BALANCA' }] }; });
     return { lotes: lotes, entradas: entradas, estornada: estornada, garrotes: garrotes, partos: partos, descartada: descartada, total_ativos: 240 + 64 + 12 - 2 };
   }
+  /** Animal comprado da demonstração: os mesmos dados do sorteio, com o pasto dele e o valor de cada animal. */
+  function itemCompraDemo_(t, a) {
+    var out = { pasto_destino_id: t.estado.pastos[a.pasto], valor_individual: a.sexo === 'M' ? 280000 : 260000 };
+    Object.keys(a).forEach(function (k) { if (k !== 'pasto') out[k] = a[k]; });
+    return out;
+  }
   function itemDemo_(t, a) {
     var out = { origem: 'DESCONHECIDA', pasto_destino_id: t.estado.pastos[a.pasto] };
     Object.keys(a).forEach(function (k) { if (k !== 'pasto') out[k] = a[k]; });
@@ -700,9 +707,16 @@ var TestRunner = (function () {
     for (var e = 0; e < 8; e++) {
       (function (k) {
         var n = passos.length;
-        passos.push({ nome: 'entrada-' + (k + 1), executar: function (t, gen) {
+        passos.push({ nome: 'compra-' + (k + 1), executar: function (t, gen) {
           var g = gen.entradas[k];
-          t.ok(t.api('evento.registrar', { tipo: 'OUTRA_ENTRADA', campos: { event_date: g.data, description: 'Doação recebida (demonstração)' }, animais: g.animais.map(function (a) { return itemDemo_(t, a); }) }, { chave: chave(n) }), 'entrada ' + (k + 1));
+          var animais = g.animais.map(function (a) { return itemCompraDemo_(t, a); });
+          var dados = {
+            tipo: 'COMPRA', campos: { event_date: g.data, partner_id: t.estado.fornecedor, finalidade: 'RECRIA_ENGORDA', modalidade: 'CABECA', pasto_destino_id: t.estado.pastos[4],
+              valor_animais: animais.reduce(function (s, a) { return s + a.valor_individual; }, 0) },
+            animais: animais, parcelas: [{ data_vencimento: Utils.somaDias(g.data, 30) }, { data_vencimento: Utils.somaDias(g.data, 60) }],
+            custos: [{ tipo: 'FRETE', valor: 40000, data_vencimento: g.data }],
+          };
+          t.ok(t.api('evento.registrar', dados, { chave: chave(n) }), 'compra ' + (k + 1));
         } });
       })(e);
     }
@@ -744,7 +758,7 @@ var TestRunner = (function () {
     } });
     return passos;
   }
-  /** Preparo da demonstração: banco DEMO pelo setup (se ainda não existe), propriedade, 6 pastos e marco zero. */
+  /** Preparo da demonstração: banco DEMO pelo setup (se ainda não existe), propriedade, 6 pastos, marco zero e o fornecedor das compras. */
   function prepararDemo_(t) {
     var p = props_().ler();
     t.estado.producao = { banco: p.SPREADSHEET_ID || null, versao: p.SPREADSHEET_ID ? p[UnitOfWork.chaveVersao(p.SPREADSHEET_ID)] || null : null };
@@ -758,6 +772,7 @@ var TestRunner = (function () {
       return t.ok(t.api('pasto.salvar', { campos: campos }, { chave: 'seed:pasto:' + i }), 'pasto ' + x.nome).pasture_id;
     });
     t.ok(t.api('config.salvar', { valores: { data_marco_zero: d0, propriedade_padrao_id: prop.property_id } }, { chave: 'seed:config' }), 'marco zero');
+    t.estado.fornecedor = t.ok(t.api('parceiro.salvar', { campos: { nome: 'Fazenda Vizinha (demonstração)', tipos: ['FORNECEDOR'] } }, { chave: 'seed:parceiro' }), 'fornecedor').partner_id;
     t.estado.d0 = d0;
     t.estado.prop = prop.property_id;
     t.estado.pastos = pastos;
