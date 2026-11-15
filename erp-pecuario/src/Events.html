@@ -10,7 +10,7 @@
  */
 var TelaEventos = (function () {
   var h = Util.h;
-  var CORRIGIVEIS = ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'NASCIMENTO', 'COMPRA', 'TRANSFERENCIA', 'MORTE', 'DESCARTE'];
+  var CORRIGIVEIS = ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'NASCIMENTO', 'COMPRA', 'VENDA', 'TRANSFERENCIA', 'MORTE', 'DESCARTE'];
   var filtros = { tipo: '', de: '', ate: '', vigentes: false, pagina: 1 };
   function situacao(e) {
     if (e.event_type === 'ESTORNO') return 'Estorno';
@@ -167,6 +167,60 @@ var TelaEventos = (function () {
     return { campos: campos, linhas: linhas, grupos: grupos, origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotuloEvento(ev), antes: antes } };
   }
   /**
+   * Correção de venda: o cabeçalho vem de VENDAS e do evento; as parcelas, da receita (conta VENDA_ANIMAIS); cada
+   * dedução, do seu lançamento, com o tipo guardado em payload_json.deducoes; cada animal, da linha de saída (peso
+   * vivo, carcaça, valor só quando foi informado por animal, motivo de saída). O pasto de origem fica vazio: o
+   * servidor o tira da linha do tempo.
+   */
+  function previaVenda_(o, def, origem) {
+    var ev = o.evento, det = o.detalhes || {}, linhasEv = (o.linhas || []).filter(function (l) { return Number(l.efeito_inventario) === -1; });
+    var vd = (det.VENDAS || [])[0] || {};
+    var fins = det.FINANCEIRO || [];
+    var receita = fins.filter(function (f) { return codigoConta_(f) === 'VENDA_ANIMAIS'; })[0] || fins[0] || {};
+    var tipoDe = {};
+    ((ev.payload || {}).deducoes || []).forEach(function (x) { tipoDe[x.financial_id] = x.tipo; });
+    var parcelasDe = function (id) { return (det.PARCELAS || []).filter(function (x) { return x.financial_id === id; }); };
+    var rat = (det.RATEIOS || []).filter(function (r) { return r.financial_id === receita.financial_id; })[0] || {};
+    var bases = {};
+    (det.ALOCACOES_FINANCEIRAS || []).forEach(function (a) { if (a.rateio_id === rat.rateio_id) bases[a.animal_id] = a.base_valor; });
+    var pesos = Utils_agrupar(det.PESAGENS || []);
+    var todosPesados = linhasEv.length && linhasEv.every(function (l) { return l.peso !== null && l.peso !== undefined; });
+    var todasCarcacas = linhasEv.length && linhasEv.every(function (l) { return l.peso_carcaca_kg !== null && l.peso_carcaca_kg !== undefined; });
+    origem.partner_id = ev.partner_id || receita.partner_id; origem.finalidade = vd.finalidade; origem.modalidade = vd.modalidade;
+    origem.base_peso = vd.modalidade === 'ARROBA' ? vd.base_peso : null;
+    if (vd.rendimento_tipo === 'NEGOCIADO' || vd.rendimento_tipo === 'ESTIMADO') { origem.rendimento_carcaca_pct = pesoTexto_(vd.rendimento_carcaca_pct); origem.rendimento_tipo = vd.rendimento_tipo; }
+    origem.preco_unitario = dinheiroTexto_(vd.preco_unitario);
+    origem.peso_vivo_total_kg = todosPesados ? null : pesoTexto_(vd.peso_vivo_total_kg);
+    origem.peso_carcaca_total_kg = vd.base_peso === 'CARCACA' && !todasCarcacas ? pesoTexto_(vd.peso_carcaca_total_kg) : null;
+    origem.valor_bruto = dinheiroTexto_(vd.valor_bruto); origem.desconto_comercial = vd.desconto_comercial ? dinheiroTexto_(vd.desconto_comercial) : null;
+    origem.criterio_rateio = vd.modalidade === 'LOTE' ? vd.criterio_rateio : null;
+    origem.justificativa_rateio = vd.criterio_rateio === 'MANUAL' ? rat.justificativa : null;
+    origem.gta_numero = vd.gta_numero; origem.nota_fiscal = vd.nota_fiscal; origem.condicoes = vd.observacoes;
+    var comValor = vd.criterio_rateio === 'VALOR_INDIVIDUAL';
+    var antes = { campos: {}, linhas: {} };
+    var linhas = linhasEv.map(function (l) {
+      var ps = (pesos[l.animal_id] || [])[0];
+      var v = limpo_({ peso: pesoTexto_(l.peso), metodo_pesagem: ps && ps.metodo !== 'BALANCA' ? ps.metodo : null, peso_carcaca_kg: pesoTexto_(l.peso_carcaca_kg),
+        valor_individual: comValor ? dinheiroTexto_(l.valor_individual) : null, base_manual: vd.criterio_rateio === 'MANUAL' && bases[l.animal_id] !== undefined ? String(bases[l.animal_id]).replace('.', ',') : null,
+        motivo_saida: l.motivo_saida, observacoes: l.observacoes });
+      antes.linhas[l.animal_id] = Util.clonar(v);
+      return { animal_id: l.animal_id, valores: v };
+    });
+    var grupos = {
+      parcelas: parcelasDe(receita.financial_id).map(function (x) { return { valores: limpo_({ data_vencimento: x.data_vencimento, valor: dinheiroTexto_(x.valor), forma_pagamento: x.forma_pagamento, documento: x.documento }) }; }),
+      deducoes: fins.filter(function (f) { return f !== receita; }).map(function (f) {
+        var t = parcelasDe(f.financial_id)[0] || {};
+        return { valores: limpo_({ tipo: tipoDe[f.financial_id] || 'OUTRA', valor: dinheiroTexto_(f.valor), retida_pelo_comprador: f.retida_pelo_comprador === true || f.retida_pelo_comprador === 'S' ? true : null,
+          partner_id: f.partner_id, data_vencimento: t.data_vencimento, forma_pagamento: t.forma_pagamento, documento: f.documento, descricao: f.descricao }) };
+      }),
+    };
+    var campos = {};
+    (def.campos || []).forEach(function (d) { if (texto_(origem[d.id]) !== null) campos[d.id] = origem[d.id]; });
+    antes.campos = Util.clonar(campos);
+    antes.grupos = Util.clonar(grupos);
+    return { campos: campos, linhas: linhas, grupos: grupos, origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotuloEvento(ev), antes: antes } };
+  }
+  /**
    * Correção de transferência, parto, morte e descarte: o cabeçalho vem do evento, dos pastos da linha, do detalhe
    * (BAIXAS, REPRODUCAO) e do payload; as crias do parto vêm como linhas do grupo, com o animal reaproveitado.
    */
@@ -216,6 +270,7 @@ var TelaEventos = (function () {
     var origem = { event_date: ev.event_date, property_id: ev.property_id, description: ev.description, responsible: ev.responsible, notes: ev.notes };
     if (['NASCIMENTO', 'TRANSFERENCIA', 'MORTE', 'DESCARTE'].indexOf(ev.event_type) >= 0) return previaMovimento_(o, def, origem);
     if (ev.event_type === 'COMPRA') return previaCompra_(o, def, origem);
+    if (ev.event_type === 'VENDA') return previaVenda_(o, def, origem);
     var campos = {};
     (def.campos || []).forEach(function (d) { if (texto_(origem[d.id]) !== null) campos[d.id] = origem[d.id]; });
     var idents = Utils_agrupar(det.IDENTIFICACOES || []);
@@ -293,8 +348,10 @@ var TelaEventos = (function () {
           { id: 'efeito', rotulo: 'No rebanho', valor: function (l) { var e = Number(l.efeito_inventario); return e > 0 ? 'entra' : e < 0 ? 'sai' : '—'; } },
           { id: 'pasto', rotulo: 'Pasto', valor: function (l) { var po = l.pasto_origem_id ? (Store.pasto(l.pasto_origem_id) || {}).nome : null, pd = l.pasto_destino_id ? (Store.pasto(l.pasto_destino_id) || {}).nome : null; return po && pd ? po + ' → ' + pd : pd || po || '—'; } },
           { id: 'peso', rotulo: 'Peso', num: true, formatar: function (l) { return Fmt.peso(l.peso); } },
+          linhas.some(function (l) { return l.peso_carcaca_kg !== null && l.peso_carcaca_kg !== undefined; }) ? { id: 'carcaca', rotulo: 'Carcaça', num: true, formatar: function (l) { return Fmt.peso(l.peso_carcaca_kg); } } : null,
           { id: 'valor', rotulo: 'Valor', num: true, formatar: function (l) { return Fmt.dinheiro(l.valor_individual); } },
-        ],
+          linhas.some(function (l) { return l.motivo_saida; }) ? { id: 'motivo', rotulo: 'Descarte por', valor: function (l) { return l.motivo_saida ? Store.rotuloLista('MOTIVO_DESCARTE', l.motivo_saida) : '—'; } } : null,
+        ].filter(Boolean),
       }).el, { dado: 'animais' }));
       var porId = {};
       linhas.forEach(function (l) { porId[l.animal_id] = l; });
@@ -326,12 +383,35 @@ var TelaEventos = (function () {
           cp.gta_numero ? ['GTA', cp.gta_numero] : null, cp.nota_fiscal ? ['Nota fiscal', cp.nota_fiscal] : null, cp.observacoes ? ['Condições', cp.observacoes] : null,
         ].filter(Boolean)), { dado: 'compra' }));
       }
+      var vd = (det.VENDAS || [])[0];
+      if (vd) {
+        var arroba = vd.base_peso === 'CARCACA' ? 'por arroba de carcaça' : vd.rendimento_tipo === 'NEGOCIADO' ? 'por arroba a ' + Fmt.numero(vd.rendimento_carcaca_pct, 1) + '% (negociada)' : 'por arroba estimada a ' + Fmt.numero(vd.rendimento_carcaca_pct, 1) + '%';
+        var unidadeV = { CABECA: 'por cabeça', KG_VIVO: 'por kg vivo', ARROBA: arroba }[vd.unidade_preco] || '';
+        var compr = Store.parceiro(ev.partner_id);
+        var receitaV = vd.valor_bruto - (vd.desconto_comercial || 0);
+        var deducoesV = (vd.frete || 0) + (vd.comissao || 0) + (vd.outras_deducoes || 0);
+        var retidas = (det.FINANCEIRO || []).filter(function (f) { return f.natureza === 'DESPESA_VENDA' && (f.retida_pelo_comprador === true || f.retida_pelo_comprador === 'S'); }).reduce(function (t, f) { return t + (f.valor || 0); }, 0);
+        corpo.appendChild(UI.secao('Venda', UI.pares([
+          ['Comprador', compr ? compr.nome : null], ['Finalidade', Store.rotuloLista('FINALIDADE_NEGOCIO', vd.finalidade)], ['Forma do preço', Fmt.rotulo('MODALIDADE', vd.modalidade)],
+          vd.preco_unitario ? ['Preço', Fmt.dinheiro(vd.preco_unitario) + ' ' + unidadeV] : null,
+          vd.rendimento_carcaca_pct ? ['Rendimento', Fmt.numero(vd.rendimento_carcaca_pct, 1) + '% (' + Fmt.rotulo('RENDIMENTO_TIPO', vd.rendimento_tipo).toLowerCase() + ')'] : null,
+          vd.peso_vivo_total_kg ? ['Peso vivo do lote', Fmt.peso(vd.peso_vivo_total_kg)] : null, vd.peso_carcaca_total_kg ? ['Carcaça (romaneio)', Fmt.peso(vd.peso_carcaca_total_kg)] : null,
+          ['Animais', String(vd.qtd_animais)], ['Valor bruto', Fmt.dinheiro(vd.valor_bruto)], vd.desconto_comercial ? ['Desconto no preço', Fmt.dinheiro(vd.desconto_comercial)] : null,
+          ['Receita da venda', Fmt.dinheiro(receitaV)], vd.frete ? ['Frete', Fmt.dinheiro(vd.frete)] : null, vd.comissao ? ['Comissão', Fmt.dinheiro(vd.comissao)] : null,
+          vd.outras_deducoes ? ['Taxas e retenções', Fmt.dinheiro(vd.outras_deducoes)] : null, ['Resultado da negociação', Fmt.dinheiro(receitaV - deducoesV)],
+          ['Depósito esperado do comprador', Fmt.dinheiro(receitaV - retidas)], ['Divisão entre os animais', Fmt.rotulo('CRITERIO_RATEIO', vd.criterio_rateio)],
+          vd.gta_numero ? ['GTA', vd.gta_numero] : null, vd.nota_fiscal ? ['Nota fiscal', vd.nota_fiscal] : null, vd.observacoes ? ['Condições', vd.observacoes] : null,
+        ].filter(Boolean)), { dado: 'venda' }));
+      }
+      var tipoDeducao = {};
+      (payload.deducoes || []).forEach(function (x) { tipoDeducao[x.financial_id] = x.tipo; });
       if ((det.FINANCEIRO || []).length) corpo.appendChild(UI.secao('Lançamentos financeiros', h('ul', { class: 'lista-simples' }, det.FINANCEIRO.map(function (x) {
         var pa = Store.parceiro(x.partner_id);
         var titulos = (det.PARCELAS || []).filter(function (p) { return p.financial_id === x.financial_id; }).map(function (p) { return Fmt.dinheiro(p.valor) + ' vence ' + Fmt.data(p.data_vencimento) + ' (' + Fmt.rotulo('STATUS_PARCELA', p.status).toLowerCase() + ')'; });
         var rat = (det.RATEIOS || []).filter(function (r) { return r.financial_id === x.financial_id; })[0];
         return h('li', { dataset: { lancamento: x.financial_id } }, h('span', { class: 'dado', text: (x.descricao || 'lançamento') + ': ' + Fmt.dinheiro(x.valor) }),
-          ' · ' + Fmt.rotulo('NATUREZA', x.natureza) + (pa ? ' · ' + pa.nome : '') + ' · ' + (x.status === 'CANCELADO' ? 'cancelado' : Fmt.rotulo('STATUS_PAGAMENTO', x.status_pagamento).toLowerCase()),
+          ' · ' + Fmt.rotulo('NATUREZA', x.natureza) + (tipoDeducao[x.financial_id] ? ' (' + Store.rotuloLista('TIPO_DEDUCAO_VENDA', tipoDeducao[x.financial_id]).toLowerCase() + ')' : '') +
+          (x.retida_pelo_comprador === true || x.retida_pelo_comprador === 'S' ? ' · descontada pelo comprador' : '') + (pa ? ' · ' + pa.nome : '') + ' · ' + (x.status === 'CANCELADO' ? 'cancelado' : Fmt.rotulo('STATUS_PAGAMENTO', x.status_pagamento).toLowerCase()),
           titulos.length ? h('div', { class: 'suave', text: 'Títulos: ' + titulos.join('; ') }) : null,
           rat ? h('div', { class: 'suave', text: 'Rateio: ' + Fmt.rotulo('CRITERIO_RATEIO', rat.criterio).toLowerCase() + ', ' + Fmt.dinheiro(rat.total_alocado) + ' distribuídos' }) : null);
       })), { dado: 'financeiro' }));

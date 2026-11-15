@@ -1218,14 +1218,19 @@ var Registro = (function () {
   /** Animal que volta ao rebanho (OUTRA_ENTRADA, ou COMPRA de animal que já foi da fazenda): só estes campos (contrato do EventService). */
   var CAMPOS_VOLTA = ['brinco', 'pasto_destino_id', 'observacoes'];
   var CAMPOS_VOLTA_COMPRA = ['brinco', 'brinco_origem', 'pasto_destino_id', 'peso', 'metodo_pesagem', 'peso_carcaca_kg', 'valor_individual', 'base_manual', 'observacoes'];
+  /** Na venda, o que se digita de cada animal: peso vivo, carcaça (romaneio) e valor; o resto em "Mais dados". */
+  var PRINCIPAIS_VENDA = ['peso', 'peso_carcaca_kg', 'valor_individual'];
   function camposVolta(tipo) { return tipo === 'COMPRA' ? CAMPOS_VOLTA_COMPRA : CAMPOS_VOLTA; }
   var VERBOS = {
     ENTRADA_INICIAL: 'Gravar o rebanho inicial', OUTRA_ENTRADA: 'Gravar a entrada', AJUSTE_INVENTARIO: 'Gravar a correção', ESTORNO: 'Estornar',
     NASCIMENTO: 'Gravar o parto', TRANSFERENCIA: 'Transferir', MORTE: 'Registrar a morte', DESCARTE: 'Registrar o descarte', COMPRA: 'Gravar a compra',
+    VENDA: 'Gravar a venda',
   };
   /** Grupos repetíveis que começam com uma linha (o parto tem ao menos uma cria). */
   var GRUPO_COM_UMA_LINHA = { crias: true, parcelas: true };
-  var ROTULO_GRUPO = { crias: ['Crias', 'Cria'], parcelas: ['Parcelas do valor dos animais', 'Parcela'], deducoes: ['Deduções', 'Dedução'], custos: ['Frete e outros custos', 'Custo'] };
+  var ROTULO_GRUPO = { crias: ['Crias', 'Cria'], parcelas: ['Parcelas do valor dos animais', 'Parcela'], deducoes: ['Deduções (frete, comissão, impostos)', 'Dedução'], custos: ['Frete e outros custos', 'Custo'] };
+  /** Rótulo do grupo que muda com o tipo: na venda, as parcelas são o recebimento. */
+  var ROTULO_GRUPO_TIPO = { VENDA: { parcelas: ['Parcelas do recebimento', 'Parcela'] } };
   var ROTAS = { ESTORNO: 'evento.estornar' };
   var sessoes = {};
   var uidSeq = 0;
@@ -1381,7 +1386,7 @@ var Registro = (function () {
         c.erros.forEach(function (e) { erros.push({ campo: e.campo, mensagem: e.mensagem, nivel: 'GRUPO', grupo: g, linha: row.uid }); });
         return row.animal_id ? Object.assign({ animal_id: row.animal_id }, c.valores) : c.valores;
       });
-      if (GRUPO_COM_UMA_LINHA[g] && !dados[g].length) erros.push({ campo: '__grupo_' + g, mensagem: 'Inclua ao menos uma linha em "' + rotuloGrupo(g)[0] + '".', nivel: 'EVENTO' });
+      if (GRUPO_COM_UMA_LINHA[g] && !dados[g].length) erros.push({ campo: '__grupo_' + g, mensagem: 'Inclua ao menos uma linha em "' + rotuloGrupo(g, s.tipo)[0] + '".', nivel: 'EVENTO' });
     });
     if (s.justificativaAviso) dados.justificativa_aviso = s.justificativaAviso;
     if (s.corrige) {
@@ -1588,7 +1593,7 @@ var Registro = (function () {
     var defs = defsLinha(s, l);
     if (corr) defs = defs.map(function (d) { return d.id === 'campo' ? Object.assign({}, d, { opcoes: d.opcoes || Object.keys(corr) }) : d; });
     var bloco = Formulario.bloco(defs, l.valores, {
-      idBase: l.uid, principais: l.animal_id && !l.criado ? null : s.tipo === 'COMPRA' ? PRINCIPAIS_COMPRA : PRINCIPAIS_ANIMAL, tituloExtras: 'Mais dados deste animal (opcional)', extras: function () { return s.campos; },
+      idBase: l.uid, principais: s.tipo === 'VENDA' ? PRINCIPAIS_VENDA : l.animal_id && !l.criado ? null : s.tipo === 'COMPRA' ? PRINCIPAIS_COMPRA : PRINCIPAIS_ANIMAL, tituloExtras: 'Mais dados deste animal (opcional)', extras: function () { return s.campos; },
       aoMudar: function (id) {
         tocar(s);
         if (id === 'brinco') titulo.textContent = tituloTxt();
@@ -1617,14 +1622,14 @@ var Registro = (function () {
     desenharAcoes(s);
     UI.aviso('Animal tirado da lista.', { tipo: 'info' });
   }
-  function rotuloGrupo(g) { return ROTULO_GRUPO[g] || [Fmt.rotulo('', g), Fmt.rotulo('', g)]; }
+  function rotuloGrupo(g, tipo) { return (ROTULO_GRUPO_TIPO[tipo] || {})[g] || ROTULO_GRUPO[g] || [Fmt.rotulo('', g), Fmt.rotulo('', g)]; }
   function desenharGrupos(s) {
     var v = s.view;
     Util.limpar(v.grupos);
     v.blocosGrupo = {};
     Object.keys(s.def.grupos_repetiveis || {}).forEach(function (g) {
       var defs = s.def.grupos_repetiveis[g];
-      var rot = rotuloGrupo(g);
+      var rot = rotuloGrupo(g, s.tipo);
       var sec = h('section', { class: 'subgrupo', 'aria-label': rot[0], dataset: { grupo: g } }, h('h2', { text: rot[0] }));
       (s.grupos[g] || []).forEach(function (row, k) {
         var b = Formulario.bloco(defs, row.valores, { idBase: g + row.uid, aoMudar: function () { tocar(s); } });
@@ -1635,7 +1640,7 @@ var Registro = (function () {
         sec.appendChild(h('div', { class: 'cartao-animal', dataset: { linhaGrupo: row.uid } }, h('div', { class: 'cartao-animal-cabecalho' }, h('span', { class: 'cartao-animal-titulo', text: rot[1] + ' ' + (k + 1) + (a ? ' · ' + Store.rotuloAnimal(a) : '') }),
           UI.botao('Tirar', { tipo: 'texto', icone: 'remover', rotulo: 'Tirar ' + rot[1].toLowerCase() + ' ' + (k + 1), aoClicar: function () { s.grupos[g].splice(k, 1); tocar(s); desenharGrupos(s); } })), b.el));
       });
-      sec.appendChild(UI.botao('+ ' + (g === 'crias' ? 'Outra cria (gêmeos)' : g === 'parcelas' ? 'Outra parcela' : g === 'custos' ? 'Frete ou outro custo' : 'Adicionar'), { aoClicar: function () { (s.grupos[g] = s.grupos[g] || []).push({ uid: uid(), valores: {} }); tocar(s); desenharGrupos(s); } }));
+      sec.appendChild(UI.botao('+ ' + (g === 'crias' ? 'Outra cria (gêmeos)' : g === 'parcelas' ? 'Outra parcela' : g === 'custos' ? 'Frete ou outro custo' : g === 'deducoes' ? 'Frete, comissão ou imposto' : 'Adicionar'), { aoClicar: function () { (s.grupos[g] = s.grupos[g] || []).push({ uid: uid(), valores: {} }); tocar(s); desenharGrupos(s); } }));
       v.grupos.appendChild(sec);
     });
   }
@@ -1740,6 +1745,7 @@ var Registro = (function () {
       linhas.push(['Movimento', (po ? po.nome : 'origem') + ' → ' + (pd ? pd.nome : 'destino')]);
     }
     if ((s.tipo === 'MORTE' || s.tipo === 'DESCARTE') && d.animais) linhas.push(['Consequência', plural(d.animais.length, 'animal sai', 'animais saem') + ' do rebanho' + (s.tipo === 'MORTE' ? ' de vez (não pode voltar)' : '')]);
+    if (s.tipo === 'VENDA' && d.animais) linhas.push(['Consequência', plural(d.animais.length, 'animal sai', 'animais saem') + ' do rebanho como vendido' + (d.animais.length === 1 ? '' : 's') + '; o histórico fica']);
     (def.campos || []).forEach(function (c) {
       if (c.id === 'event_date' || !d.campos || Util.vazio(d.campos[c.id])) return;
       if (s.tipo === 'TRANSFERENCIA' && (c.id === 'pasto_origem_id' || c.id === 'pasto_destino_id')) return;
@@ -1807,7 +1813,35 @@ var Registro = (function () {
     if (im.anulados) l.push(['Animais anulados', String(im.anulados)]);
     if (im.substitui) l.push(['Substitui o lançamento', s.corrige ? s.corrige.rotulo : im.substitui]);
     if (im.abertura && im.abertura.total !== undefined) l.push(['Valor de abertura', Fmt.dinheiro(im.abertura.total) + ' em ' + plural(im.abertura.animais, 'animal', 'animais')]);
-    return l.concat(linhasCompra(im.compra), linhasFinanceiro(im.financeiro));
+    return l.concat(linhasCompra(im.compra), linhasVenda(im.venda), linhasFinanceiro(im.financeiro));
+  }
+  /** Base de todo R$/@ exibido (07, 4.1): de carcaça (apurada no romaneio), negociada a x% ou estimada. */
+  function baseArroba(base, rend) {
+    if (base === 'CARCACA') return '@ de carcaça';
+    var pct = rend !== null && rend !== undefined ? ' a ' + Fmt.numero(rend, 1) + '%' : '';
+    return base === 'NEGOCIADA' ? '@' + pct + ' (negociada)' : '@ estimada' + (pct ? 's' + pct : 's');
+  }
+  /** Negociação da venda (calculada no servidor): bruto, desconto, receita, deduções, depósito esperado, preços médios. */
+  function linhasVenda(v) {
+    if (!v) return [];
+    var l = [['Valor bruto', Fmt.dinheiro(v.valor_bruto)]];
+    if (v.desconto_comercial) l.push(['Desconto no preço', '− ' + Fmt.dinheiro(v.desconto_comercial)]);
+    l.push(['Receita da venda', Fmt.dinheiro(v.receita)]);
+    if (v.frete) l.push(['Frete', '− ' + Fmt.dinheiro(v.frete)]);
+    if (v.comissao) l.push(['Comissão', '− ' + Fmt.dinheiro(v.comissao)]);
+    if (v.outras_deducoes) l.push(['Taxas e retenções', '− ' + Fmt.dinheiro(v.outras_deducoes)]);
+    l.push(['Resultado da negociação', Fmt.dinheiro(v.resultado_negociacao)]);
+    l.push(['Depósito esperado do comprador', Fmt.dinheiro(v.deposito_esperado) + (v.retidas ? ' (já sem ' + Fmt.dinheiro(v.retidas) + ' descontados por ele)' : '')]);
+    if (v.conferencia !== null && v.conferencia !== undefined) l.push(['Conta pelo preço (conferência)', Fmt.dinheiro(v.conferencia) + (v.desvio_pct ? ' · diferença de ' + Fmt.numero(v.desvio_pct, 2) + '%' : ' · confere')]);
+    if (v.peso_vivo_total) l.push(['Peso vivo do lote', Fmt.peso(v.peso_vivo_total)]);
+    if (v.peso_carcaca_total) l.push(['Carcaça (romaneio)', Fmt.peso(v.peso_carcaca_total) + (v.rendimento_pct && v.base_peso === 'CARCACA' ? ' · rendimento apurado de ' + Fmt.numero(v.rendimento_pct, 1) + '%' : '')]);
+    if (v.arrobas) l.push(['Arrobas', Fmt.numero(v.arrobas, 2) + ' ' + baseArroba(v.arroba_base, v.rendimento_pct)]);
+    l.push(['Preço médio por cabeça', Fmt.dinheiro(v.preco_medio_cabeca)]);
+    if (v.preco_medio_kg) l.push(['Preço médio por kg vivo', Fmt.dinheiro(v.preco_medio_kg)]);
+    if (v.preco_medio_arroba) l.push(['Preço médio por arroba', Fmt.dinheiro(v.preco_medio_arroba) + ' por ' + baseArroba(v.arroba_base, v.rendimento_pct)]);
+    if (v.equivalente_arroba) l.push(['Equivalente em arrobas', Fmt.numero(v.equivalente_arroba.arrobas, 2) + ' ' + baseArroba('ESTIMADA', v.equivalente_arroba.rendimento_pct) + ', a ' + Fmt.dinheiro(v.equivalente_arroba.preco_arroba) + ' (só referência)']);
+    l.push(['Divisão entre os animais', Fmt.rotulo('CRITERIO_RATEIO', v.criterio) + (v.base_estimada ? ' (pela última pesagem, estimada)' : '')]);
+    return l;
   }
   /** Negociação da compra (calculada no servidor): valores, conferência pelo preço, critério de rateio. */
   function linhasCompra(c) {
@@ -1870,7 +1904,9 @@ var Registro = (function () {
       var ant = antes.linhas[l.animal_id];
       defsLinha(s, l).forEach(function (d) { if (!igual(ant[d.id], l.valores[d.id])) out.push(quem + ': ' + Campos.rotuloDe(d).toLowerCase() + ' de ' + textoValor_(d, ant[d.id]) + ' para ' + textoValor_(d, l.valores[d.id])); });
     });
-    Object.keys(antes.linhas).forEach(function (id) { if (!vistos[id]) { var a = Store.animal(id); out.push((a ? Store.rotuloAnimal(a) : 'Animal') + ': sai do lançamento e o cadastro é anulado'); } });
+    // Animal do rebanho que sai de uma saída ou de um movimento volta ao que era antes dele; o criado pelo lançamento é anulado.
+    var sai = s.def.selecao_animais === 'NOVOS' ? 'sai do lançamento e o cadastro é anulado' : s.tipo === 'TRANSFERENCIA' ? 'sai do lançamento e fica no pasto de origem' : 'sai do lançamento e continua no rebanho';
+    Object.keys(antes.linhas).forEach(function (id) { if (!vistos[id]) { var a = Store.animal(id); out.push((a ? Store.rotuloAnimal(a) : 'Animal') + ': ' + sai); } });
     // Grupos repetíveis (crias do parto): linha a linha, pelo animal reaproveitado; a cria viva que sai é anulada.
     Object.keys(antes.grupos || {}).forEach(function (g) {
       var defs = s.def.grupos_repetiveis[g] || [];
@@ -1878,7 +1914,7 @@ var Registro = (function () {
         // Parcelas e custos: linha a linha pela posição (não são animais).
         var a0 = antes.grupos[g] || [], a1 = s.grupos[g] || [];
         for (var k = 0; k < Math.max(a0.length, a1.length); k++) {
-          var quemG = rotuloGrupo(g)[1] + ' ' + (k + 1);
+          var quemG = rotuloGrupo(g, s.tipo)[1] + ' ' + (k + 1);
           if (!a1[k]) { out.push(quemG + ': sai do lançamento'); continue; }
           if (!a0[k]) { out.push(quemG + ': nova'); continue; }
           defs.forEach(function (d) { if (!igual(a0[k].valores[d.id], a1[k].valores[d.id])) out.push(quemG + ': ' + Campos.rotuloDe(d).toLowerCase() + ' de ' + textoValor_(d, a0[k].valores[d.id]) + ' para ' + textoValor_(d, a1[k].valores[d.id])); });
@@ -1891,7 +1927,7 @@ var Registro = (function () {
       var mortosAgora = 0;
       var ficam = {};
       (s.grupos[g] || []).forEach(function (r, k) {
-        var quem = rotuloGrupo(g)[1] + ' ' + (k + 1);
+        var quem = rotuloGrupo(g, s.tipo)[1] + ' ' + (k + 1);
         if (!r.animal_id || !porAnimal[r.animal_id]) { if (r.valores.situacao_nascimento === 'NATIMORTO') mortosAgora++; else out.push(quem + ': nova neste lançamento'); return; }
         if (r.valores.situacao_nascimento === 'NATIMORTO') return;
         ficam[r.animal_id] = true;
@@ -2103,6 +2139,7 @@ var Registro = (function () {
     if (res.tipo === 'MORTE') return n === 1 ? 'Morte registrada: 1 animal saiu do rebanho.' : 'Morte registrada: ' + n + ' animais saíram do rebanho.';
     if (res.tipo === 'DESCARTE') return n === 1 ? 'Descarte registrado: 1 animal saiu do rebanho.' : 'Descarte registrado: ' + n + ' animais saíram do rebanho.';
     if (res.tipo === 'COMPRA') return 'Compra gravada: ' + (n === 1 ? '1 animal entrou' : n + ' animais entraram') + ' no rebanho' + (res.data && res.data.total_value ? ', custo total de ' + Fmt.dinheiro(res.data.total_value) : '') + '.';
+    if (res.tipo === 'VENDA') return 'Venda gravada: ' + (n === 1 ? '1 animal saiu' : n + ' animais saíram') + ' do rebanho' + (res.data && res.data.total_value ? ', valor bruto de ' + Fmt.dinheiro(res.data.total_value) : '') + '.';
     return res.def.rotulo + ' gravado' + (n ? ' com ' + plural(n, 'animal', 'animais') : '') + '.';
   }
   /** Tela de resultado persistente (08, 4.6): o que foi gravado, com Ver evento · Registrar outro · Desfazer. */
