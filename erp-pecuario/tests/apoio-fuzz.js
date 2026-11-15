@@ -1074,7 +1074,8 @@ function arquivoImportacao(sis, S, rnd, tipo) {
   const data = () => { const d = dataPara(S, rnd, [], { antiga: true }); return d > HOJE ? HOJE : d; };
   const qual = () => (rnd() < 0.85 && ativos.length ? sorteio(rnd, ativos) : sorteio(rnd, comBrinco));
   if (tipo === 'ANIMAIS') {
-    const linhas = ['brinco;sexo;nascimento;pasto;mae;castrado;reprodutor'];
+    const linhas = ['brinco;sexo;nascimento;pasto;mae;castrado;reprodutor;pai;chegada;raca'];
+    const pais = MOVEIS(S).filter((id) => !fem(S, id) && S.animais.get(id).brinco).map(b).concat(EXTERNOS(S).map((id) => S.animais.get(id).nome));
     const n = 1 + Math.floor(rnd() * 3);
     const noArquivo = [];
     for (let i = 0; i < n; i++) {
@@ -1083,10 +1084,12 @@ function arquivoImportacao(sis, S, rnd, tipo) {
       const nasc = rnd() < 0.8 ? br(somaDias(S.marco || D0, -100 - Math.floor(rnd() * 2000))) : '';
       const maes = MOVEIS(S).filter((id) => fem(S, id) && S.animais.get(id).brinco).map(b).concat(noArquivo);
       const mae = rnd() < 0.3 ? sorteio(rnd, maes) || '' : '';
-      linhas.push([bb, sexo, nasc, pastoNome(), mae, sexo === 'M' ? (rnd() < 0.5 ? 'S' : 'N') : '', sexo === 'M' ? 'N' : ''].join(';'));
+      const pai = rnd() < 0.25 ? sorteio(rnd, pais) || '' : '';
+      const chegada = nasc && rnd() < 0.25 ? br(somaDias(S.marco || D0, -1 - Math.floor(rnd() * 90))) : '';
+      linhas.push([bb, sexo, nasc, pastoNome(), mae, sexo === 'M' ? (rnd() < 0.5 ? 'S' : 'N') : '', sexo === 'M' ? 'N' : '', pai, chegada, rnd() < 0.2 ? 'Nelore' : ''].join(';'));
       if (sexo === 'F') noArquivo.push(bb);
     }
-    return { texto: linhas.join('\n'), mapa: { colunas: { brinco: 'brinco', sexo: 'sexo', nascimento: 'data_nascimento', pasto: 'pasto', mae: 'mae', castrado: 'castrado', reprodutor: 'reprodutor' }, confiancas: { data_nascimento: 'ESTIMADA', mae: 'CONFIRMADA' }, padroes: {} } };
+    return { texto: linhas.join('\n'), mapa: { colunas: { brinco: 'brinco', sexo: 'sexo', nascimento: 'data_nascimento', pasto: 'pasto', mae: 'mae', castrado: 'castrado', reprodutor: 'reprodutor', pai: 'pai', chegada: 'data_entrada', raca: 'raca' }, confiancas: { data_nascimento: 'ESTIMADA', mae: 'CONFIRMADA', pai: 'ESTIMADA', data_entrada: 'ESTIMADA' }, padroes: {} } };
   }
   if (tipo === 'TRANSFERENCIAS') {
     const linhas = ['data;origem;destino;brinco'];
@@ -1108,16 +1111,18 @@ function arquivoImportacao(sis, S, rnd, tipo) {
     return { texto: linhas.join('\n'), mapa: { colunas: { data: 'data', causa: 'causa', brinco: 'brinco' }, confiancas: {}, padroes: {} } };
   }
   if (tipo === 'NASCIMENTOS') {
-    const linhas = ['data;mae;situacao;sexo;cria'];
+    const linhas = ['data;mae;situacao;sexo;cria;pai'];
+    const pais = MOVEIS(S).filter((id) => !fem(S, id) && S.animais.get(id).brinco).map(b).concat(EXTERNOS(S).map((id) => S.animais.get(id).nome));
+    const pai = rnd() < 0.3 ? sorteio(rnd, pais) || '' : '';
     const maes = MOVEIS(S).filter((id) => fem(S, id) && S.animais.get(id).brinco);
     const mae = sorteio(rnd, rnd() < 0.9 && maes.length ? maes : comBrinco);
     if (!mae) return null;
     const d = br(data());
     for (let i = 0; i < 1 + (rnd() < 0.3 ? 1 : 0); i++) {
       const vivo = rnd() < 0.85;
-      linhas.push([d, b(mae), vivo ? 'vivo' : 'natimorto', vivo ? (rnd() < 0.5 ? 'M' : 'F') : '', vivo ? brinco(rnd, S) || '' : ''].join(';'));
+      linhas.push([d, b(mae), vivo ? 'vivo' : 'natimorto', vivo ? (rnd() < 0.5 ? 'M' : 'F') : '', vivo ? brinco(rnd, S) || '' : '', pai].join(';'));
     }
-    return { texto: linhas.join('\n'), mapa: { colunas: { data: 'data', mae: 'mae', situacao: 'situacao', sexo: 'sexo', cria: 'brinco' }, confiancas: {}, padroes: {} } };
+    return { texto: linhas.join('\n'), mapa: { colunas: { data: 'data', mae: 'mae', situacao: 'situacao', sexo: 'sexo', cria: 'brinco', pai: 'pai' }, confiancas: { pai: 'ESTIMADA' }, padroes: {} } };
   }
   if (tipo === 'COMPRAS') {
     const linhas = ['grupo;data;fornecedor;modalidade;valor;preco;brinco;sexo;pasto'];
@@ -1176,7 +1181,7 @@ function gerar(sis, S, rnd, k) {
   }
   const acao = pesado(rnd, [
     ['registrar', 55], ['corrigir', 14], ['estornar', 11], ['editar', 5], ['reuso', 2], ['zeros', 0.6], ['marco', 1],
-    ['importar', 4], ['desfazer', 1.5], ['reenvio', 1.5], ['versao', 1.5], ['cadastro', 3], ['outraChave', 1],
+    ['importar', 4], ['desfazer', 1.5], ['reenvio', 1.5], ['versao', 1.5], ['cadastro', 5], ['outraChave', 1], ['lote', 0.5], ['faixas', 0.3],
   ]);
   return gerarAcao(sis, S, rnd, k, acao, base);
 }
@@ -1245,6 +1250,8 @@ function gerarAcao(sis, S, rnd, k, acao, base) {
   }
   if (acao === 'reuso') return Object.assign(base, { rota: 'config.salvar', dados: { valores: { brinco_permite_reuso: S.reuso ? 'N' : 'S' } }, rotulo: 'reuso' });
   if (acao === 'zeros') return Object.assign(base, { rota: 'config.salvar', dados: { valores: { brinco_ignora_zeros_esquerda: S.config.get('brinco_ignora_zeros_esquerda') === 'S' ? 'N' : 'S' } }, rotulo: 'zeros' });
+  if (acao === 'lote') return Object.assign(base, { rota: 'config.salvar', dados: { valores: { importacao_lote_linhas: sorteio(rnd, ['1', '2', '3']) } }, rotulo: 'lote da importação' });
+  if (acao === 'faixas') return Object.assign(base, { rota: 'config.salvar', dados: { valores: { faixas_etarias_meses: sorteio(rnd, ['[12,24,36]', '[6,18,30]', '[24,12]']) } }, rotulo: 'faixas etárias' });
   if (acao === 'marco') return Object.assign(base, { rota: 'config.salvar', dados: { valores: { data_marco_zero: sorteio(rnd, [D0, somaDias(D0, -31), somaDias(D0, 14), somaDias(HOJE, 3)]) } }, rotulo: 'marco zero' });
   if (acao === 'importar') {
     const tipo = sorteio(rnd, ['ANIMAIS', 'ANIMAIS', 'TRANSFERENCIAS', 'MORTES', 'NASCIMENTOS', 'COMPRAS', 'VENDAS']);
@@ -1253,18 +1260,23 @@ function gerarAcao(sis, S, rnd, k, acao, base) {
     return Object.assign(base, { rota: 'importacao.criar', dados: { tipo, arquivo_nome: tipo.toLowerCase() + '-' + k + '.csv', texto: arq.texto, formato: FORMATO }, mapa: arq.mapa, rotulo: 'importar ' + tipo });
   }
   if (acao === 'desfazer') {
-    const imp = sorteio(rnd, S.t.IMPORTACOES.filter((i) => i.status !== 'CANCELADO'));
+    const vivas = S.t.IMPORTACOES.filter((i) => i.status !== 'CANCELADO');
+    // Passada 3: de preferência a que tem evento corrigido ou estornado (a cadeia de substituição é dela).
+    const mexidas = vivas.filter((i) => S.t.EVENTOS.some((e) => e.import_id === i.import_id && S.anuladoPor.has(e.event_id)));
+    const imp = sorteio(rnd, mexidas.length && rnd() < 0.6 ? mexidas : vivas);
     if (!imp) return null;
     return Object.assign(base, { rota: 'importacao.desfazer', dados: { import_id: imp.import_id, justificativa: 'Arquivo errado' }, rotulo: 'desfazer ' + imp.status });
   }
+  // Passada 3: o reenvio e a mesma chave com outro conteúdo também de um comando antigo (o estado já mudou depois dele).
+  const antigo = () => (rnd() < 0.5 || !(sis.aceitos || []).length ? sis.ultimoAceito : sorteio(rnd, sis.aceitos));
   if (acao === 'reenvio') {
-    const ult = sis.ultimoAceito;
+    const ult = antigo();
     if (!ult) return null;
     return Object.assign({}, ult.cmd, { chaveDe: ult.k, reenvio: true, simular: false, rotulo: 'reenvio do passo ' + ult.k });
   }
   if (acao === 'versao') {
     // Qualquer comando com a dataVersionEsperada de antes do último gravado.
-    const sub = pesado(rnd, [['registrar', 3], ['corrigir', 1], ['estornar', 1], ['editar', 0.5], ['cadastro', 0.5], ['marco', 0.2]]);
+    const sub = pesado(rnd, [['registrar', 3], ['corrigir', 1], ['estornar', 1], ['editar', 0.5], ['cadastro', 0.8], ['marco', 0.2], ['reuso', 0.2]]);
     const c = gerarAcao(sis, S, rnd, k, sub, base);
     if (!c) return null;
     return Object.assign(c, { dvVelha: true, simular: false, rotulo: 'versão velha: ' + (c.rotulo || c.rota) });
@@ -1294,7 +1306,7 @@ function gerarAcao(sis, S, rnd, k, acao, base) {
   }
   if (acao === 'outraChave') {
     // A mesma chave de um comando gravado com outro conteúdo: IDEMPOTENCY_MISMATCH, nada gravado.
-    const ult = sis.ultimoAceito;
+    const ult = antigo();
     if (!ult) return null;
     // O conteúdo muda num campo que o comando leva (a importação monta os dados dela e ignora o resto; as chaves de
     // importarBloco, concluir e desfazer vêm do import_id e do bloco, não do cliente).
@@ -1306,6 +1318,7 @@ function gerarAcao(sis, S, rnd, k, acao, base) {
     else if (rota === 'importacao.validarBloco') dados.mapeamento = Object.assign({}, dados.mapeamento, { confiancas: Object.assign({}, dados.mapeamento.confiancas, { data_nascimento: 'DESCONHECIDA', mae: 'ESTIMADA' }) });
     else if (rota === 'importacao.importarBloco' && dados.bloco === 1) dados.ignorar_linhas = [1];
     else if (rota === 'importacao.importarBloco' || rota === 'importacao.concluir') return null;
+    else if (rota === 'lista.salvar' || rota === 'animal.cadastrarExterno' || (rota === 'pasto.salvar' && !dados.pasture_id) || (rota === 'parceiro.salvar' && !dados.partner_id)) { if (dados.campos) dados.campos.observacoes = outro; else dados.rotulo = outro; }
     else dados.justificativa = outro;
     return Object.assign({}, ult.cmd, { dados, chaveDe: ult.k, outraChave: true, reenvio: false, simular: false, dvVelha: false, rotulo: 'mesma chave, outro conteúdo' });
   }
@@ -1538,7 +1551,7 @@ function memorizar(sis, k, cmd, r, A, S) {
   if (r && !r.ok && cmd.rota === 'importacao.importarBloco' && r.error.code === 'CONFLICT' && sis.imps.has(cmd.dados.import_id)) sis.imps.get(cmd.dados.import_id).revalidar = true;
   if (!r || !r.ok) return;
   // Sem alteração não há operação nem chave gravada: o reenvio dele seria um comando novo.
-  if (!cmd.reenvio && !(r.meta && r.meta.semAlteracao)) sis.ultimoAceito = { k, cmd };
+  if (!cmd.reenvio && !(r.meta && r.meta.semAlteracao)) { sis.ultimoAceito = { k, cmd }; (sis.aceitos = sis.aceitos || []).push({ k, cmd }); }
   if (r.data && Array.isArray(r.data.animais)) sis.foco = r.data.animais.map((a) => a.animal_id).concat(sis.foco || []).slice(0, 4);
   if (cmd.rota === 'importacao.criar') sis.imps.set(r.data.import_id, { mapa: cmd.mapa, validado: 0 });
   if (cmd.rota === 'importacao.validarBloco') { const m = sis.imps.get(cmd.dados.import_id); if (m) { m.validado = cmd.dados.bloco; m.revalidar = false; } }
