@@ -22,6 +22,13 @@ var Timeline = (function () {
     SANIDADE: 'o manejo sanitário', REPRODUCAO: 'o registro reprodutivo', DESMAMA: 'a desmama', CASTRACAO: 'a castração',
     IDENTIFICACAO: 'a identificação', MARCACAO: 'a marcação', AJUSTE_INVENTARIO: 'a correção', OCORRENCIA: 'a ocorrência',
   };
+  /** Nome do evento pelo subtipo, quando ele diz mais que o tipo. */
+  var NOME_SUBTIPO = {
+    CORRECAO_LOCALIZACAO: 'a correção de localização', DIVERGENCIA_CONTAGEM: 'a baixa na contagem', RECLASSIFICACAO: 'a reclassificação',
+    SUBSTITUICAO: 'a troca de identificação', REMOCAO: 'a retirada de identificação',
+  };
+  var NOME_IDENTIFICACAO = { BRINCO: 'brinco', BRINCO_ORIGEM: 'brinco de origem', RFID: 'chip (RFID)', SISBOV: 'SISBOV', TATUAGEM: 'tatuagem', OUTRO: 'identificação' };
+  var NOME_MARCA = { DESCARTE: 'para descarte', NAO_LOCALIZADO: 'como não localizado' };
 
   function vazio_(v) {
     return v === null || v === undefined || v === '';
@@ -136,6 +143,55 @@ var Timeline = (function () {
     });
     return { problemas: probs, periodos: periodos, pasto: pasto, dentro: dentro, morte: morte };
   }
+  function ordemDoFato_(a, b) {
+    return comparar_(a.data, b.data) || ((a.ordem_seq || 0) - (b.ordem_seq || 0)) || ((a.event_seq || 0) - (b.event_seq || 0)) || comparar_(String(a.id), String(b.id));
+  }
+  /**
+   * Sequência das identificações de UM animal (03a, seção 4.4), por tipo, na ordem (data_inicio, posição na cadeia,
+   * event_seq): a primeira identificação exige o tipo sem código em uso; a troca e a retirada exigem um em uso, e a
+   * retirada tira exatamente o código em uso. Linhas das entradas, da compra e da correção de brinco abrem o código
+   * sem conferência (substituem o anterior). rows: [{ident_id, event_id, tipo, codigo, codigo_norm, data_inicio,
+   * event_type, event_subtype, event_seq, ordem_seq}]. Devolve [{codigo (IDENTIFICACAO_JA_EXISTE | SEM_IDENTIFICACAO |
+   * REMOCAO_DE_OUTRO_CODIGO), event_id, event_type, event_subtype, event_date, tipo, codigo_ident, aberto}].
+   */
+  function validarIdentificacoes(rows) {
+    var probs = [];
+    var porTipo = Object.create(null);
+    (rows || []).forEach(function (r) { (porTipo[r.tipo] = porTipo[r.tipo] || []).push(r); });
+    Object.keys(porTipo).forEach(function (tipo) {
+      var aberto = null;
+      porTipo[tipo].map(function (r) { return { r: r, data: r.data_inicio, ordem_seq: r.ordem_seq, event_seq: r.event_seq, id: r.ident_id }; }).sort(ordemDoFato_).forEach(function (x) {
+        var r = x.r;
+        var p = function (codigo) {
+          probs.push({ codigo: codigo, event_id: r.event_id, event_type: r.event_type, event_subtype: r.event_subtype, event_date: r.data_inicio, tipo: tipo, codigo_ident: r.codigo, aberto: aberto ? { codigo: aberto.codigo, data_inicio: aberto.data_inicio, event_id: aberto.event_id } : null, papel: null });
+        };
+        if (r.event_type !== 'IDENTIFICACAO') { aberto = r; return; }
+        if (r.event_subtype === 'PRIMEIRA_IDENTIFICACAO') { if (aberto) p('IDENTIFICACAO_JA_EXISTE'); aberto = r; return; }
+        if (r.event_subtype === 'SUBSTITUICAO') { if (!aberto) p('SEM_IDENTIFICACAO'); aberto = r; return; }
+        if (!aberto) p('SEM_IDENTIFICACAO');
+        else if (aberto.codigo_norm !== r.codigo_norm) p('REMOCAO_DE_OUTRO_CODIGO');
+        aberto = null;
+      });
+    });
+    return probs;
+  }
+  /**
+   * Sequência das marcações de UM animal (03a, 4.3.3), por subtipo, na ordem canônica: marcar exige o animal
+   * desmarcado; desmarcar, marcado. linhas: linhas da linha do tempo de eventos MARCACAO (com `payload.acao`).
+   * Devolve [{codigo (JA_MARCADO | NAO_MARCADO), event_id, event_type, event_subtype, event_date, papel}].
+   */
+  function validarMarcacoes(linhas) {
+    var probs = [];
+    var marcado = Object.create(null);
+    (linhas || []).filter(function (l) { return l.event_type === 'MARCACAO'; })
+      .map(function (l) { return { l: l, data: l.event_date, ordem_seq: l.ordem_seq, event_seq: l.event_seq, id: l.event_id }; }).sort(ordemDoFato_).forEach(function (x) {
+        var l = x.l;
+        var marcar = !!l.payload && l.payload.acao === 'MARCAR';
+        if (marcar === !!marcado[l.event_subtype]) probs.push(problema_(l, marcar ? 'JA_MARCADO' : 'NAO_MARCADO'));
+        marcado[l.event_subtype] = marcar;
+      });
+    return probs;
+  }
   /** Problemas de `depois` que não existiam em `antes` (o que a alteração proposta quebrou). */
   function problemasNovos(antes, depois) {
     var visto = conjunto_((antes || []).map(function (p) { return p.codigo + '|' + p.event_id; }));
@@ -144,9 +200,15 @@ var Timeline = (function () {
   /** Frase do problema, sem o "quem" (o serviço põe o brinco na frente). `nomePasto(id)` resolve o nome. */
   function descrever(p, nomePasto) {
     var np = nomePasto || function (id) { return id; };
-    var nome = p.event_subtype === 'CORRECAO_LOCALIZACAO' ? 'a correção de localização' : p.event_type === 'NASCIMENTO' && p.papel === 'MATRIZ' ? 'o parto' : NOME_EVENTO[p.event_type] || 'o registro';
+    var nome = NOME_SUBTIPO[p.event_subtype] || (p.event_type === 'NASCIMENTO' && p.papel === 'MATRIZ' ? 'o parto' : NOME_EVENTO[p.event_type] || 'o registro');
     var oque = nome + ' de ' + dataBr(p.event_date);
+    var ident = NOME_IDENTIFICACAO[p.tipo] || 'identificação';
     switch (p.codigo) {
+      case 'IDENTIFICACAO_JA_EXISTE': return oque + ' põe o primeiro ' + ident + ', mas nessa data o animal já tinha o ' + ident + ' ' + p.aberto.codigo + ' (desde ' + dataBr(p.aberto.data_inicio) + '). Para trocar, use a troca de identificação.';
+      case 'SEM_IDENTIFICACAO': return oque + ' não cabe: nessa data o animal não tinha ' + ident + '.';
+      case 'REMOCAO_DE_OUTRO_CODIGO': return oque + ' tira o ' + ident + ' ' + p.codigo_ident + ', mas nessa data o animal estaria com o ' + p.aberto.codigo + '.';
+      case 'JA_MARCADO': return oque + ' marca o animal ' + (NOME_MARCA[p.event_subtype] || '') + ', mas nessa data ele já estava marcado.';
+      case 'NAO_MARCADO': return oque + ' desmarca o animal, mas nessa data ele não estava marcado ' + (NOME_MARCA[p.event_subtype] || '') + '.';
       case 'ENTRADA_JA_DENTRO': return oque + ' não cabe: nessa data o animal já estava no rebanho.';
       case 'FORA_DO_REBANHO': return oque + ' não cabe: nessa data o animal não estava no rebanho.';
       case 'FORA_DA_PERMANENCIA': return oque + ' cai fora do período em que o animal esteve no rebanho.';
@@ -333,7 +395,7 @@ var Timeline = (function () {
     base.reprodutor = boolJson_(at.reprodutor);
     base.data_entrada = nulo_(at.data_entrada);
     base.data_entrada_confianca = nulo_(at.data_entrada_confianca);
-    var ajustes = f.ajustes(id).map(function (a) { var ev = f.evento(a.event_id); return { a: a, seq: ev ? ev.event_seq : 0, data: ev ? ev.event_date : '' }; });
+    var ajustes = f.ajustes(id).map(function (a) { var ev = f.evento(a.event_id); return { a: a, seq: ev ? ev.event_seq : 0, ord: ev ? f.ordemSeq(a.event_id) : 0, data: ev ? ev.event_date : '' }; });
     if (!fora) {
       ajustes.filter(function (x) { return x.a.tipo_ajuste === 'CORRECAO_CADASTRO'; }).sort(function (x, y) { return x.seq - y.seq; }).forEach(function (x) {
         if (Object.prototype.hasOwnProperty.call(base, x.a.campo)) base[x.a.campo] = deTexto_(x.a.campo, x.a.valor_novo);
@@ -344,7 +406,8 @@ var Timeline = (function () {
     var femea = sexo === 'F';
     var castracao = !fora && vig.some(function (l) { return l.event_type === 'CASTRACAO'; });
     var castrado = macho ? base.castrado === true || castracao : null;
-    var reclass = ultimoPor_(fora ? [] : ajustes.filter(function (x) { return x.a.tipo_ajuste === 'RECLASSIFICACAO'; }), function (x, y) { return comparar_(x.data, y.data) || x.seq - y.seq; });
+    // Reclassificação: a última por (data, posição na cadeia de substituição, event_seq) — o substituto fica no lugar do original.
+    var reclass = ultimoPor_(fora ? [] : ajustes.filter(function (x) { return x.a.tipo_ajuste === 'RECLASSIFICACAO'; }), function (x, y) { return comparar_(x.data, y.data) || x.ord - y.ord || x.seq - y.seq; });
     var campos = {
       sexo: sexo,
       data_nascimento: base.data_nascimento,
@@ -391,8 +454,8 @@ var Timeline = (function () {
     if (!fora) {
       var pes = ultimoPor_(f.pesagens(id).map(function (x) { var ev = f.evento(x.event_id); return { x: x, seq: ev ? ev.event_seq : 0 }; }), function (a, b) { return comparar_(a.x.data_pesagem, b.x.data_pesagem) || a.seq - b.seq; });
       if (pes) { campos.peso_atual = pes.x.peso_kg; campos.data_ultima_pesagem = pes.x.data_pesagem; }
-      var brincos = linhasDeIdentificacao_(f, id).BRINCO || [];
-      if (brincos.length) { campos.brinco = brincos[brincos.length - 1].codigo; campos.brinco_norm = brincos[brincos.length - 1].codigo_norm; }
+      var brinco = codigoEmUso_(linhasDeIdentificacao_(f, id).BRINCO);
+      if (brinco) { campos.brinco = brinco.codigo; campos.brinco_norm = brinco.codigo_norm; }
       custo_(f, id, entrada, campos);
     }
     if (femea) campos.situacao_reprodutiva = situacaoReprodutiva_(f, id, fora, at, criacao);
@@ -425,17 +488,36 @@ var Timeline = (function () {
       campos.custo_aquisicao_origem = entrada.payload && entrada.payload.valor_abertura_origem === 'TABELA_PRECOS' ? 'ABERTURA_ESTIMADA' : 'ABERTURA_INFORMADA';
     } else campos.custo_aquisicao_origem = 'DESCONHECIDO';
   }
-  /** IDENTIFICACOES vigentes do animal por tipo, na ordem (data_inicio, event_seq). */
+  /** Linha de IDENTIFICACOES com o cabeçalho do evento que a gravou (forma de `validarIdentificacoes`). */
+  function linhaIdentificacao(r, evento, ordemSeq) {
+    var ev = evento || {};
+    return {
+      ident_id: r.ident_id, event_id: r.event_id, animal_id: r.animal_id, tipo: r.tipo, codigo: r.codigo, codigo_norm: r.codigo_norm,
+      data_inicio: r.data_inicio, motivo: nulo_(r.motivo), event_type: ev.event_type || null, event_subtype: nulo_(ev.event_subtype),
+      event_seq: ev.event_seq || 0, ordem_seq: ordemSeq === undefined || ordemSeq === null ? ev.event_seq || 0 : ordemSeq,
+      remocao: ev.event_type === 'IDENTIFICACAO' && ev.event_subtype === 'REMOCAO',
+    };
+  }
+  /** IDENTIFICACOES vigentes do animal (com o cabeçalho do evento), na ordem (data_inicio, posição na cadeia, event_seq). */
+  function identificacoes(f, id) {
+    return f.identificacoes(id).map(function (r) { return linhaIdentificacao(r, f.evento(r.event_id), f.ordemSeq(r.event_id)); })
+      .map(function (x) { return { x: x, data: x.data_inicio, ordem_seq: x.ordem_seq, event_seq: x.event_seq, id: x.ident_id }; }).sort(ordemDoFato_).map(function (o) { return o.x; });
+  }
+  /**
+   * IDENTIFICACOES vigentes do animal por tipo, na ordem de `identificacoes`. A linha de uma retirada (IDENTIFICACAO/
+   * REMOCAO) guarda o código tirado e o motivo: fecha o código em uso e fecha a si mesma (data_fim = data_inicio).
+   */
   function linhasDeIdentificacao_(f, id) {
     var por = {};
-    f.identificacoes(id).forEach(function (r) {
-      var ev = f.evento(r.event_id);
-      (por[r.tipo] = por[r.tipo] || []).push({ r: r, seq: ev ? ev.event_seq : 0 });
-    });
-    Object.keys(por).forEach(function (t) {
-      por[t] = por[t].sort(function (a, b) { return comparar_(a.r.data_inicio, b.r.data_inicio) || a.seq - b.seq; }).map(function (x) { return x.r; });
+    identificacoes(f, id).forEach(function (x) {
+      (por[x.tipo] = por[x.tipo] || []).push(x);
     });
     return por;
+  }
+  /** Código em uso de um tipo ao fim da sequência (ou vazio, depois de uma retirada). */
+  function codigoEmUso_(lista) {
+    var ultima = lista && lista.length ? lista[lista.length - 1] : null;
+    return ultima && !ultima.remocao ? ultima : null;
   }
   /**
    * Projeções completas de um conjunto de animais (com as mães que a mudança alcança e `cria_ao_pe`).
@@ -526,7 +608,7 @@ var Timeline = (function () {
       var por = linhasDeIdentificacao_(f, id);
       Object.keys(por).forEach(function (t) {
         por[t].forEach(function (r, i) {
-          var fim = i + 1 < por[t].length ? por[t][i + 1].data_inicio : null;
+          var fim = r.remocao ? r.data_inicio : i + 1 < por[t].length ? por[t][i + 1].data_inicio : null;
           emitir_(tx, f, 'IDENTIFICACOES', r.ident_id, { data_fim: fim });
         });
       });
@@ -631,6 +713,7 @@ var Timeline = (function () {
 
   return {
     LEITURAS: LEITURAS,
+    NOME_IDENTIFICACAO: NOME_IDENTIFICACAO,
     dataBr: dataBr,
     parametros: parametros,
     classe: classe,
@@ -639,6 +722,10 @@ var Timeline = (function () {
     linha: linha,
     validar: validar,
     problemasNovos: problemasNovos,
+    validarIdentificacoes: validarIdentificacoes,
+    validarMarcacoes: validarMarcacoes,
+    linhaIdentificacao: linhaIdentificacao,
+    identificacoes: identificacoes,
     descrever: descrever,
     fonte: fonte,
     projetarAnimal: projetarAnimal,

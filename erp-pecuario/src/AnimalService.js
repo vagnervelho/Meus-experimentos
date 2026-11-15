@@ -147,7 +147,9 @@ var AnimalService = (function () {
       if (x.tipo_ajuste !== 'RECLASSIFICACAO') return;
       var ev = L.f.evento(x.event_id);
       if (!ev || ev.event_date > data) return;
-      if (!reclass || ev.event_date > reclass.data || (ev.event_date === reclass.data && ev.event_seq >= reclass.seq)) reclass = { data: ev.event_date, seq: ev.event_seq, valor: x.valor_novo };
+      // Mesma ordem do projetor: data, posição na cadeia de substituição (o substituto fica no lugar do original), event_seq.
+      var ord = L.f.ordemSeq(x.event_id);
+      if (!reclass || ev.event_date > reclass.data || (ev.event_date === reclass.data && (ord > reclass.ord || (ord === reclass.ord && ev.event_seq >= reclass.seq)))) reclass = { data: ev.event_date, ord: ord, seq: ev.event_seq, valor: x.valor_novo };
     });
     var manual = !!reclass && !vazio_(reclass.valor);
     return {
@@ -400,8 +402,10 @@ var AnimalService = (function () {
     g.categoria = cat;
     g.sem_categoria = !cat && a.situacao_cadastral !== 'EXTERNO';
     g.peso_vigente = a.situacao_cadastral === 'ATIVO' ? pesoVigente(L, a, L.hoje, cat) : null;
-    g.identificacoes = Utils.ordenarPor(L.f.identificacoes(a.animal_id), ['tipo', 'data_inicio']).map(function (x) {
-      return { tipo: x.tipo, codigo: x.codigo, data_inicio: x.data_inicio, data_fim: nulo_(x.data_fim), motivo: nulo_(x.motivo) };
+    // A linha de uma retirada (IDENTIFICACAO/REMOCAO) vem marcada `remocao`: guarda o código tirado e o motivo.
+    var porIdent = Utils.indexarPor(L.f.identificacoes(a.animal_id), 'ident_id');
+    g.identificacoes = Utils.ordenarPor(Timeline.identificacoes(L.f, a.animal_id), ['tipo']).map(function (x) {
+      return { tipo: x.tipo, codigo: x.codigo, data_inicio: x.data_inicio, data_fim: nulo_(porIdent[x.ident_id].data_fim), motivo: nulo_(x.motivo), remocao: x.remocao, event_id: x.event_id };
     });
     return g;
   }

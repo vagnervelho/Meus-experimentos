@@ -255,6 +255,8 @@ var EventService = (function () {
       m.f.linhasDoEvento(original.event_id).forEach(function (l) { if (l.atributos_iniciais_json) ctxEv.criadosOriginal[l.animal_id] = true; });
     }
     if (tipo === 'TRANSFERENCIA') cabecalhoTransferencia_(m, ctxEv);
+    if (tipo === 'IDENTIFICACAO') cabecalhoIdentificacao_(m, ctxEv);
+    if (tipo === 'MARCACAO') cabecalhoMarcacao_(m, ctxEv);
     if (tipo === 'COMPRA') cabecalhoCompra_(m, ctxEv);
     if (tipo === 'VENDA') cabecalhoVenda_(m, ctxEv);
     animais.forEach(function (item, i) {
@@ -262,6 +264,8 @@ var EventService = (function () {
       ctxEv.itens.push(it);
       if (tipo === 'AJUSTE_INVENTARIO') itemAjuste_(m, ctxEv, it);
       else if (tipo === 'TRANSFERENCIA') itemTransferencia_(m, ctxEv, it);
+      else if (tipo === 'IDENTIFICACAO') itemIdentificacao_(m, ctxEv, it);
+      else if (tipo === 'MARCACAO') itemMarcacao_(m, ctxEv, it);
       else if (tipo === 'MORTE' || tipo === 'DESCARTE') itemSaida_(m, ctxEv, it);
       else if (tipo === 'VENDA') itemVenda_(m, ctxEv, it);
       else if (tipo === 'NASCIMENTO') itemMatriz_(m, ctxEv, it);
@@ -273,6 +277,8 @@ var EventService = (function () {
     conferirGenealogia_(m, ctxEv);
     conferirLinhaDoTempo_(m, ctxEv);
     if (original) conferirRemovidos_(m, ctxEv);
+    conferirSequencias_(m, ctxEv, animaisConferidos_(m, ctxEv), ctxEv.ev.event_id);
+    if (original) conferirEstadoRestaurado_(m, Object.keys(m.afetados).filter(function (id) { return !ctxEv.criadosOriginal[id]; }), 'a correção', ctxEv);
     guardaDuplicidade_(m, ctxEv);
     conferirLotacao_(m, ctxEv);
     if (tipo === 'NASCIMENTO') avisosDoParto_(m, ctxEv);
@@ -291,7 +297,7 @@ var EventService = (function () {
   }
   /** Cabeçalho do evento: data, propriedade, textos; ENTRADA_INICIAL sempre no marco zero (RN-022). */
   function cabecalho_(m, tipo, subtipo, campos, original) {
-    EventCatalog.validarCampos(EventCatalog.camposEvento(tipo), campos, { listas: m.listas }).forEach(function (x) { erroGeral_(m, x.campo, x.codigo, x.mensagem); });
+    EventCatalog.validarCampos(EventCatalog.camposEvento(tipo, subtipo), campos, { listas: m.listas }).forEach(function (x) { erroGeral_(m, x.campo, x.codigo, x.mensagem); });
     var data = campos.event_date;
     if (tipo === 'ENTRADA_INICIAL') {
       if (!vazio_(data) && data !== m.D0) erroGeral_(m, 'event_date', 'FORA_DO_MARCO_ZERO', 'O rebanho inicial é sempre lançado na data do marco zero (' + br_(m.D0) + ').');
@@ -708,7 +714,69 @@ var EventService = (function () {
     if (e.situacao_cadastral === 'EXTERNO') { erroItem_(m, it, 'animal_id', 'ANIMAL_EXTERNO', 'animal de fora do rebanho é corrigido pela edição do cadastro de referência.'); return; }
     if (ctxEv.subtipo === 'CORRECAO_CADASTRO') return correcaoCadastro_(m, ctxEv, it, e);
     if (ctxEv.subtipo === 'IDENTIFICACAO_INCORRETA') return identificacaoIncorreta_(m, ctxEv, it, e);
+    if (ctxEv.subtipo === 'RECLASSIFICACAO') return reclassificacao_(m, ctxEv, it, e);
+    if (ctxEv.subtipo === 'DIVERGENCIA_CONTAGEM') return divergenciaContagem_(m, ctxEv, it);
     return correcaoLocalizacao_(m, ctxEv, it, e);
+  }
+  /** Posição do evento do comando na ordem dos fatos (data, posição na cadeia de substituição, event_seq). */
+  function posicao_(ev) {
+    return { data: ev.event_date, ordem_seq: ev.ordem_seq, event_seq: ev.event_seq };
+  }
+  function antesDe_(x, pos) {
+    return x.data < pos.data || (x.data === pos.data && (x.ordem_seq < pos.ordem_seq || (x.ordem_seq === pos.ordem_seq && x.event_seq < pos.event_seq)));
+  }
+  /** Categoria manual que valia para o animal logo antes da posição do comando (null = automática). */
+  function reclassificacaoAntes_(m, animalId, pos) {
+    var ultima = null;
+    m.f.ajustes(animalId).forEach(function (a) {
+      if (a.tipo_ajuste !== 'RECLASSIFICACAO') return;
+      var ev = m.f.evento(a.event_id);
+      if (!ev) return;
+      var x = { data: ev.event_date, ordem_seq: m.f.ordemSeq(a.event_id), event_seq: ev.event_seq, a: a };
+      if (!antesDe_(x, pos)) return;
+      if (!ultima || antesDe_(ultima, x)) ultima = x;
+    });
+    return ultima ? nulo_(ultima.a.valor_novo) : null;
+  }
+  /**
+   * RECLASSIFICACAO (04, seção 4.6; 03b, seção 9): categoria escolhida à mão (MANUAL) ou volta à automática (vazio).
+   * A categoria precisa existir, estar ativa e servir ao sexo do animal; idade e condição não contam (a escolha manual
+   * vale sobre a regra). Grava AJUSTES (`categoria_manual_id`, valor que valia antes → novo); o projetor faz o resto.
+   */
+  function reclassificacao_(m, ctxEv, it, e) {
+    var nova = nulo_(it.dados.categoria_manual_id);
+    var cat = nova ? m.repo.porId('CATEGORIAS', nova) : null;
+    if (nova) {
+      if (!cat) { erroItem_(m, it, 'categoria_manual_id', 'NAO_ENCONTRADO', 'a categoria escolhida não existe. Atualize a tela e escolha de novo.'); return; }
+      if (cat.ativo === false) { erroItem_(m, it, 'categoria_manual_id', 'CATEGORIA_INATIVA', 'a categoria ' + cat.nome + ' está desativada.'); return; }
+      if (cat.sexo_aplicavel !== 'AMBOS' && cat.sexo_aplicavel !== e.sexo) { erroItem_(m, it, 'categoria_manual_id', 'CATEGORIA_INCOMPATIVEL', 'a categoria ' + cat.nome + ' é só de ' + (cat.sexo_aplicavel === 'M' ? 'machos' : 'fêmeas') + '.'); return; }
+    }
+    if (!Utils.dataValida(ctxEv.ev.event_date)) return;
+    var antes = reclassificacaoAntes_(m, it.animal_id, posicao_(ctxEv.ev));
+    if (antes === nova) {
+      var nomeAntes = cat ? cat.nome : '';
+      erroItem_(m, it, 'categoria_manual_id', 'VALOR_IGUAL', nova ? 'o animal já está na categoria ' + nomeAntes + ' em ' + br_(ctxEv.ev.event_date) + '.' : 'o animal já está na categoria automática em ' + br_(ctxEv.ev.event_date) + '.');
+      return;
+    }
+    linhaEA_(m, ctxEv, it, { efeito_inventario: 0 });
+    ajusteRow_(m, ctxEv, it, 'categoria_manual_id', antes, nova);
+  }
+  /**
+   * DIVERGENCIA_CONTAGEM (04, seção 4.6; 03b, seções 8 e 16.15): animal dado como perdido na contagem. Saída (−1) com
+   * a origem da linha do tempo no dia e uma linha de BAIXAS (tipo DIVERGENCIA_CONTAGEM, sem causa; observações =
+   * em que contagem faltou, ou a justificativa do lançamento). Situação BAIXADO_AJUSTE (projeção); se o animal
+   * reaparecer, estorna-se a baixa. Não grava AJUSTES (não corrige campo).
+   */
+  function divergenciaContagem_(m, ctxEv, it) {
+    var ev = ctxEv.ev;
+    var obs = typeof it.dados.observacoes === 'string' ? nulo_(Utils.aparar(it.dados.observacoes)) : null;
+    var onde = Timeline.pastoAntesDaSaida(m.f.linhas(it.animal_id), ev.event_date, m.D0);
+    it.origemDerivada = true;
+    linhaEA_(m, ctxEv, it, { efeito_inventario: -1, pasto_origem_id: onde.presente ? nulo_(onde.pasture_id) : null, observacoes: obs });
+    ctxEv.plano.BAIXAS.push({
+      baixa_id: m.tx.novoId(), event_id: ev.event_id, animal_id: it.animal_id, tipo: 'DIVERGENCIA_CONTAGEM', causa: null, diagnostico: null,
+      motivo: null, destino: null, responsavel: nulo_(ev.responsible), observacoes: obs || nulo_(ev.justificativa),
+    });
   }
   function textoCampo_(campo, v) {
     if (vazio_(v)) return null;
