@@ -648,8 +648,8 @@ var TestRunner = (function () {
    * Os animais da demonstração, sorteados com semente fixa a partir de D0 (09, seção 7, na parte que as fases
    * entregues cobrem): 240 em D0 (110 vacas, 4 touros, 30 novilhas, 48 bezerros ao pé com a mãe no mesmo lote, 48
    * garrotes) em 6 lotes de 40; 8 compras de 8 animais ao longo dos três anos (valor de cada animal, frete e duas
-   * parcelas); 1 entrada estornada; 3 transferências de garrotes; 12 partos (um gemelar com natimorto); 1 morte e 1
-   * descarte. Fecha em 314 ativos.
+   * parcelas); 1 entrada estornada; 3 transferências de garrotes; 12 partos (um gemelar com natimorto); 1 morte, 1
+   * descarte e 1 venda de 6 garrotes por kg vivo (com comissão). Fecha em 308 ativos.
    */
   function geracaoDemo_(d0) {
     var rnd = sorteio_(20261114);
@@ -700,7 +700,7 @@ var TestRunner = (function () {
     var descartada = String(primeiraVaca);
     while (descartada.length < 4) descartada = '0' + descartada;
     var partos = maes.map(function (b, j) { return { mae: b, data: Utils.somaDias(d0, 300 + 7 * j), crias: j === 5 ? [{ situacao_nascimento: 'VIVO', sexo: 'F' }, { situacao_nascimento: 'NATIMORTO' }] : [{ situacao_nascimento: 'VIVO', sexo: rnd() < 0.5 ? 'M' : 'F', peso: entre(28, 38), metodo_pesagem: 'BALANCA' }] }; });
-    return { lotes: lotes, entradas: entradas, estornada: estornada, garrotes: garrotes, partos: partos, descartada: descartada, total_ativos: 240 + 64 + 12 - 2 };
+    return { lotes: lotes, entradas: entradas, estornada: estornada, garrotes: garrotes, partos: partos, descartada: descartada, vendidos: garrotes.slice(30, 36), total_ativos: 240 + 64 + 12 - 2 - 6 };
   }
   /** Animal comprado da demonstração: os mesmos dados do sorteio, com o pasto dele e o valor de cada animal. */
   function itemCompraDemo_(t, a) {
@@ -715,7 +715,7 @@ var TestRunner = (function () {
   }
   /** Animais da demonstração por brinco, no rebanho ou já baixados (reexecutar o seed acha o mesmo animal). */
   function todosPorBrinco_(t) {
-    var d = t.ok(t.api('animal.listar', { situacoes: ['ATIVO', 'MORTO', 'DESCARTADO'] }), 'animal.listar');
+    var d = t.ok(t.api('animal.listar', { situacoes: ['ATIVO', 'MORTO', 'DESCARTADO', 'VENDIDO'] }), 'animal.listar');
     var out = {};
     d.valores.brinco.forEach(function (b, i) { if (b) out[b] = { animal_id: d.valores.animal_id[i], pasto_atual_id: d.valores.pasto_atual_id[i] }; });
     return out;
@@ -778,6 +778,15 @@ var TestRunner = (function () {
       var d0 = t.estado.d0;
       t.ok(t.api('evento.registrar', { tipo: 'MORTE', campos: { event_date: Utils.somaDias(d0, 900), causa: 'PICADA_COBRA' }, animais: [{ animal_id: todos[gen.garrotes[47]].animal_id }] }, { chave: chave(nSaidas) + ':morte' }), 'morte');
       t.ok(t.api('evento.registrar', { tipo: 'DESCARTE', campos: { event_date: Utils.somaDias(d0, 950), destino: 'CONSUMO_PROPRIO', motivo: 'IDADE' }, animais: [{ animal_id: todos[gen.descartada].animal_id }] }, { chave: chave(nSaidas) + ':descarte' }), 'descarte');
+      // Venda de 6 garrotes por kg vivo (pesos fixos no plano: reexecutar = mesmo conteúdo), com a comissão do corretor.
+      var pesos = gen.vendidos.map(function (b, i) { return 420 + 5 * i; });
+      var kg = pesos.reduce(function (x, y) { return x + y; }, 0);
+      var dataVenda = Utils.somaDias(d0, 1000);
+      t.ok(t.api('evento.registrar', {
+        tipo: 'VENDA', campos: { event_date: dataVenda, partner_id: t.estado.comprador, finalidade: 'RECRIA_ENGORDA', modalidade: 'KG_VIVO', preco_unitario: 1100, valor_bruto: kg * 1100 },
+        animais: gen.vendidos.map(function (b, i) { return { animal_id: todos[b].animal_id, peso: pesos[i] }; }),
+        parcelas: [{ data_vencimento: Utils.somaDias(dataVenda, 30) }], deducoes: [{ tipo: 'COMISSAO', valor: Math.round(kg * 1100 * 0.02) }],
+      }, { chave: chave(nSaidas) + ':venda' }), 'venda');
     } });
     passos.push({ nome: 'conferir', executar: function (t, gen) {
       var pos = t.ok(t.api('inventario.posicao', {}), 'inventário');
@@ -786,7 +795,7 @@ var TestRunner = (function () {
     } });
     return passos;
   }
-  /** Preparo da demonstração: banco DEMO pelo setup (se ainda não existe), propriedade, 6 pastos, marco zero e o fornecedor das compras. */
+  /** Preparo da demonstração: banco DEMO pelo setup (se ainda não existe), propriedade, 6 pastos, marco zero, o fornecedor das compras e o comprador da venda. */
   function prepararDemo_(t) {
     var p = props_().ler();
     t.estado.producao = { banco: p.SPREADSHEET_ID || null, versao: p.SPREADSHEET_ID ? p[UnitOfWork.chaveVersao(p.SPREADSHEET_ID)] || null : null };
@@ -801,6 +810,7 @@ var TestRunner = (function () {
     });
     t.ok(t.api('config.salvar', { valores: { data_marco_zero: d0, propriedade_padrao_id: prop.property_id } }, { chave: 'seed:config' }), 'marco zero');
     t.estado.fornecedor = t.ok(t.api('parceiro.salvar', { campos: { nome: 'Fazenda Vizinha (demonstração)', tipos: ['FORNECEDOR'] } }, { chave: 'seed:parceiro' }), 'fornecedor').partner_id;
+    t.estado.comprador = t.ok(t.api('parceiro.salvar', { campos: { nome: 'Recriador da Região (demonstração)', tipos: ['COMPRADOR'] } }, { chave: 'seed:comprador' }), 'comprador').partner_id;
     t.estado.d0 = d0;
     t.estado.prop = prop.property_id;
     t.estado.pastos = pastos;

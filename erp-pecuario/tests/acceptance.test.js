@@ -4,7 +4,7 @@
  * dono (09, seção 8: CT-09 de brinco e mãe, CT-10, CT-11, CT-12, CT-18 de entradas, CT-20 e o ensaio de restauração),
  * com a nota do "cenário que usa peça de fase posterior" (passos NAO_SE_APLICA). O lock disputado, que uma execução
  * real não consegue provocar sozinha, entra por `injetar`. Também: a base real não muda, o teste é retomável, falha de
- * cenário aparece no relatório, a base de demonstração (314 ativos, só por comandos) e o diagnóstico do spike.
+ * cenário aparece no relatório, a base de demonstração (308 ativos, só por comandos) e o diagnóstico do spike.
  */
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -118,17 +118,17 @@ test('falha de cenário aparece no relatório (não é engolida) e não impede o
   assert.equal(r2.resumo.cenarios.FALHOU, 1);
 });
 
-test('base de demonstração (TEST_PLAN = DEMO): 314 ativos só por comandos, planilha DEMO com faixa BASE DE TESTE, idempotente e sem tocar a base real', () => {
+test('base de demonstração (TEST_PLAN = DEMO): 308 ativos só por comandos, planilha DEMO com faixa BASE DE TESTE, idempotente e sem tocar a base real', () => {
   const s = S.sistema();
   const antes = retratoProducao(s);
   s.gas.props.script.setProperty('TEST_PLAN', 'DEMO');
   const rel = js(s.gas.exec(() => s.G.runAcceptanceTests()));
-  assert.deepEqual([rel.plano, rel.completo, rel.ok, rel.demonstracao, rel.faixa], ['DEMO', true, true, { cabecas: 314, por_pasto: 6 }, 'BASE DE TESTE']);
+  assert.deepEqual([rel.plano, rel.completo, rel.ok, rel.demonstracao, rel.faixa], ['DEMO', true, true, { cabecas: 308, por_pasto: 6 }, 'BASE DE TESTE']);
   const demo = s.props().DEMO_SPREADSHEET_ID;
   assert.ok(demo && demo !== s.banco());
   assert.match(s.gas.drive.arquivo(demo).name, /BASE DE TESTE/);
   const boot = js(s.gas.exec(() => s.G.api({ rota: 'sistema.bootstrap', ambiente: 'DEMO', dados: {} })));
-  assert.deepEqual([boot.data.ambiente.faixa, boot.data.animais.n, boot.data.pastos.length], ['BASE DE TESTE', 314, 6]);
+  assert.deepEqual([boot.data.ambiente.faixa, boot.data.animais.n, boot.data.pastos.length], ['BASE DE TESTE', 308, 6]);
   assert.equal(boot.data.pastos.filter((p) => p.posse === 'ARRENDADO').length, 1, 'um pasto arrendado');
   const eventos = s.tabela('EVENTOS', demo);
   assert.ok(eventos.every((e) => e.source === 'APP' && e.status !== 'FALHOU'), 'tudo pelos comandos do app');
@@ -142,7 +142,7 @@ test('base de demonstração (TEST_PLAN = DEMO): 314 ativos só por comandos, pl
   assert.ok(comprados.every((a) => a.custo_aquisicao > (a.sexo === 'M' ? 280000 : 260000)), 'o frete entra no custo de cada animal');
   // Determinismo: rodar de novo não grava nada novo (mesmas chaves seed:<n>, mesmo conteúdo).
   const rel2 = js(s.gas.exec(() => s.G.runAcceptanceTests()));
-  assert.deepEqual([rel2.ok, rel2.demonstracao.cabecas], [true, 314]);
+  assert.deepEqual([rel2.ok, rel2.demonstracao.cabecas], [true, 308]);
   assert.equal(s.tabela('EVENTOS', demo).length, eventos.length);
   assert.deepEqual(retratoProducao(s), antes);
   // Mesmo sorteio a cada execução.

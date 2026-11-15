@@ -191,3 +191,32 @@ repositório; "a verificar na conta do dono" significa que só o roteiro de diag
   testes, 40 aprovados): CT-03 completo, CT-13 na parte da compra, o exemplo de 03b, seção 15.1, linha a linha, as
   invariantes de 03b, seção 14, depois de cada comando de todos os testes do motor. A varredura de quedas com a correção
   de compra levou o `npm test` a cerca de 3 minutos. Nada validado na conta do dono.
+
+## 15/11/2026 — Fase 2, etapa VENDA (E2.4)
+
+- VENDA no motor (`EventCatalog`, `EventService`), com o financeiro do próprio evento (P11): comprador, finalidade,
+  pasto de onde o lote sai (opcional, conferido animal a animal), modalidade × base de peso (cabeça, kg vivo, arroba de
+  peso vivo com rendimento negociado ou estimado — padrão `rendimento_carcaca_padrao_pct` —, arroba de carcaça pelo
+  romaneio de cada animal ou só pelo total, lote fechado), valor bruto da nota (a conta pelo preço é conferência),
+  desconto comercial, parcelas do recebimento e deduções (frete, comissão, taxas e retenções; uma despesa de venda por
+  item, na conta do tipo, com parceiro e título próprios; a retida pelo comprador nasce com `retida_pelo_comprador` = S e
+  vence num recebimento da venda, para o encontro de contas da Fase 4). Receita e deduções 100% rateadas pelo mesmo
+  critério; sem o peso de cada animal, a última pesagem escalada para o lote (estimada, registrada no rateio) ou por
+  cabeça, com aviso. Saída (−1) com a origem pela linha do tempo, VENDIDO com o histórico preservado, PESAGENS (VENDA) só
+  com peso vivo individual, carcaça nunca vira pesagem, VENDAS com os totais, `payload_json.deducoes` com o tipo.
+- Carência (RN-072): `HealthService` (novo, puro) calcula o fim da carência das aplicações de SANIDADE; a venda avisa por
+  animal (CARENCIA_ATIVA) e, na finalidade ABATE, segue a política (padrão: bloqueia); nas demais é sempre aviso.
+- Estorno e correção da venda: o animal volta à posição certa da linha do tempo; recompra posterior, correção de data para
+  depois dela ou tirar da venda um animal recomprado → CONFLICT com o evento; lançamentos cancelados pela vigência.
+  A origem de saída que o servidor tira da linha do tempo não vira erro próprio (o problema mostrado é o registro que a
+  quebrou). `FinancialService`: contas das deduções, totais da venda, negociação com romaneio total, bruto como conferência
+  e base estimada; invariantes 15 e 16 da venda completas (por conta, valor do evento, quantidade).
+- Aceitação de nível 2: o CT-09 roda inteiro (venda de animal vendido, transferência de animal morto, compra de animal
+  vendido antes e depois da saída). Varredura de quedas com a venda do CT-04 como modelo (9 abas).
+- Telas: formulário da venda (atalho "Vender" da ficha), revisão pelo servidor com bruto, deduções, resultado da negociação,
+  depósito esperado, preços médios e arrobas sempre com a base; correção pelo detalhe (os animais baixados são carregados
+  antes; os do original não aparecem como inelegíveis); detalhe com a seção "Venda"; a diferença da correção ignora campo
+  oculto e formata o dinheiro.
+- Verificado em Node (`npm test`) e no navegador com o backend real (`npm run ui:check`): CT-04 e CT-14 com os números de
+  09, os exemplos de 07, seção 4.3, e os exemplos 4 e 5 de 03b, seção 4.4, o resultado por animal do caso de 07, seção 2.2,
+  e as invariantes de 03b, seção 14, depois de cada comando. Nada validado na conta do dono.

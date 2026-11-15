@@ -203,3 +203,33 @@ test('situação de pagamento (03b, 10.4) e tipo dos custos acessórios pela ord
   assert.deepEqual(js(F.tiposDosCustos(l([5000]), 0)), ['OUTRO']);
   assert.equal(F.tiposDosCustos(l([100, 200]), 150), null, 'nenhum prefixo fecha: o cabeçalho não confere');
 });
+
+test('venda (03b, 4.2 e 4.3; 07, 4.2): totais com retenção, conta de cada dedução pelo tipo e a negociação com romaneio total, bruto conferido e base pela pesagem anterior', () => {
+  // Totais do exemplo 4 de 03b, 4.4: frete retido e retenção; depósito esperado 103.728,96.
+  assert.deepEqual(js(F.totaisVenda({ valor_bruto: 10713600, desconto_comercial: 0, deducoes: [{ tipo: 'FRETE', valor: 180000, retida: true }, { tipo: 'FUNRURAL', valor: 160704, retida: true }, { tipo: 'COMISSAO', valor: 5000 }] })),
+    { valor_bruto: 10713600, desconto_comercial: 0, receita: 10713600, frete: 180000, comissao: 5000, outras_deducoes: 160704, deducoes: 345704, retidas: 340704, resultado_negociacao: 10367896, deposito_esperado: 10372896 });
+  assert.deepEqual(js(F.totaisVenda({ valor_bruto: 600000, desconto_comercial: 20000 })).receita, 580000, 'receita = bruto − desconto comercial');
+  assert.deepEqual(['FRETE', 'COMISSAO', 'FUNRURAL', 'SENAR', 'OUTRA'].map(F.contaDeducao), ['FRETE_VENDA', 'COMISSAO_VENDA', 'TAXAS_RETENCOES_VENDA', 'TAXAS_RETENCOES_VENDA', 'TAXAS_RETENCOES_VENDA']);
+  const base = { modalidade: 'ARROBA', base_peso: 'CARCACA', preco_unitario: 32000, carcacaTotal: true, arroba_kg: 15, tolerancia_pct: 1 };
+  // Só o total do romaneio e o peso vivo do lote: rendimento apurado; sem peso de ninguém, divisão por cabeça com aviso.
+  const t = F.negociacao(Object.assign({}, base, { peso_total_kg: 9540, peso_carcaca_total_kg: 5022, valor: 10713600, animais: [{ chave: 'a' }, { chave: 'b' }] }));
+  assert.deepEqual(js([t.erros, t.peso_carcaca_total, t.rendimento_pct, t.rendimento_tipo, t.arrobas, t.conferencia, t.criterio, t.avisos.map((a) => a.codigo)]), [[], 5022, 52.6, 'APURADO', 334.8, 10713600, 'CABECAS', ['RATEIO_SEM_PESO']]);
+  // Com a última pesagem de cada um: peso vivo estimado, escalado para o lote.
+  const e = F.negociacao(Object.assign({}, base, { modalidade: 'KG_VIVO', base_peso: null, preco_unitario: 1000, peso_total_kg: 1000, valor: 1000000, animais: [{ chave: 'a' }, { chave: 'b' }], pesagens: [300, 500] }));
+  assert.deepEqual(js([e.erros, e.criterio, e.estimado, e.bases]), [[], 'PESO_VIVO', true, [375, 625]]);
+  assert.equal(F.negociacao(Object.assign({}, base, { modalidade: 'KG_VIVO', base_peso: null, preco_unitario: 1000, peso_total_kg: 1000, valor: 1000000, animais: [{ chave: 'a' }, { chave: 'b' }], pesagens: [300, null] })).criterio, 'CABECAS', 'falta a pesagem de um: por cabeça');
+  // A conta pelo preço é conferida contra o bruto; os valores por animal somam a receita distribuída.
+  const d = F.negociacao({ modalidade: 'CABECA', preco_unitario: 300000, valor: 580000, valor_conferencia: 612000, campo_valor: 'valor_bruto', tolerancia_pct: 1, animais: [{ chave: 'a' }, { chave: 'b' }] });
+  assert.deepEqual(js([d.conferencia, d.desvio_pct, d.avisos.map((a) => [a.codigo, a.campo])]), [600000, 2, [['VALOR_DIVERGENTE', 'valor_bruto']]]);
+  const vi = F.negociacao({ modalidade: 'CABECA', valor: 580000, valor_conferencia: 600000, rotulo_valor: 'a receita da venda', animais: [{ chave: 'a', valor_individual: 300000 }, { chave: 'b', valor_individual: 300000 }] });
+  assert.deepEqual(js(vi.erros.map((x) => x.codigo)), ['VALOR_INDIVIDUAL_NAO_SOMA']);
+  assert.match(vi.erros[0].mensagem, /difere da receita da venda \(R\$ 5\.800,00\)/);
+  // Falhas da carcaça na venda: parte dos animais; total diferente da soma; total fora da arroba de carcaça.
+  const carc = (animais, extra) => js(F.negociacao(Object.assign({}, base, { valor: 1184000, animais }, extra || {})).erros.map((x) => x.codigo));
+  assert.deepEqual(carc([{ chave: 'a', peso_carcaca_kg: 285 }, { chave: 'b' }]), ['PESO_INCOMPLETO']);
+  assert.deepEqual(carc([{ chave: 'a', peso_carcaca_kg: 285 }, { chave: 'b', peso_carcaca_kg: 270 }], { peso_carcaca_total_kg: 556 }), ['PESO_TOTAL_DIVERGENTE']);
+  assert.deepEqual(carc([{ chave: 'a' }, { chave: 'b' }]), ['PESO_OBRIGATORIO']);
+  assert.deepEqual(js(F.negociacao({ modalidade: 'LOTE', criterio_rateio: 'CABECAS', valor: 100, carcacaTotal: true, peso_carcaca_total_kg: 10, animais: [{ chave: 'a' }, { chave: 'b' }] }).erros.map((x) => x.codigo)), ['CAMPO_NAO_SE_APLICA']);
+  // Na compra (sem carcacaTotal) nada disso muda: o total do romaneio não é aceito e a carcaça é de cada animal.
+  assert.deepEqual(js(F.negociacao(Object.assign({}, base, { carcacaTotal: undefined, peso_carcaca_total_kg: 555, valor: 1184000, animais: [{ chave: 'a' }, { chave: 'b' }] })).erros.map((x) => x.codigo)), ['PESO_OBRIGATORIO']);
+});
