@@ -81,7 +81,7 @@ var Timeline = (function () {
 
   // ------------------------------------------------------------------ validador ----
   function problema_(l, codigo, extra) {
-    var p = { codigo: codigo, event_id: l.event_id, event_type: l.event_type, event_subtype: l.event_subtype, event_date: l.event_date };
+    var p = { codigo: codigo, event_id: l.event_id, event_type: l.event_type, event_subtype: l.event_subtype, event_date: l.event_date, papel: l.papel || null };
     Object.keys(extra || {}).forEach(function (k) { p[k] = extra[k]; });
     return p;
   }
@@ -144,7 +144,8 @@ var Timeline = (function () {
   /** Frase do problema, sem o "quem" (o serviço põe o brinco na frente). `nomePasto(id)` resolve o nome. */
   function descrever(p, nomePasto) {
     var np = nomePasto || function (id) { return id; };
-    var oque = (p.event_subtype === 'CORRECAO_LOCALIZACAO' ? 'a correção de localização' : NOME_EVENTO[p.event_type] || 'o registro') + ' de ' + dataBr(p.event_date);
+    var nome = p.event_subtype === 'CORRECAO_LOCALIZACAO' ? 'a correção de localização' : p.event_type === 'NASCIMENTO' && p.papel === 'MATRIZ' ? 'o parto' : NOME_EVENTO[p.event_type] || 'o registro';
+    var oque = nome + ' de ' + dataBr(p.event_date);
     switch (p.codigo) {
       case 'ENTRADA_JA_DENTRO': return oque + ' não cabe: nessa data o animal já estava no rebanho.';
       case 'FORA_DO_REBANHO': return oque + ' não cabe: nessa data o animal não estava no rebanho.';
@@ -354,7 +355,8 @@ var Timeline = (function () {
       evento_origem_id: !fora && criacao ? criacao.event_id : null,
       castrado: castrado,
       reprodutor: macho ? (castrado ? false : base.reprodutor === true) : null,
-      partos_previos: femea ? (base.partos_previos === null ? null : Number(base.partos_previos)) : null,
+      // Fêmea nascida no sistema não tem parto anterior (03a, 4.3.5): 0, não "desconhecido".
+      partos_previos: femea ? (base.partos_previos !== null ? Number(base.partos_previos) : criacao && criacao.event_type === 'NASCIMENTO' ? 0 : null) : null,
       pasto_atual_id: situacao === 'ATIVO' ? pastoAtual : null,
       propriedade_atual_id: null,
       categoria_modo: reclass && !vazio_(reclass.a.valor_novo) ? 'MANUAL' : 'AUTO',
@@ -603,6 +605,17 @@ var Timeline = (function () {
     });
     return { data: data, total: total, porPasto: porPasto, semPasto: semPasto, motivo: null };
   }
+  /**
+   * Onde o animal estava no dia D antes das saídas desse dia (entradas e movimentos de D já aplicados): é a origem
+   * de uma saída lançada em D e o pasto padrão das crias de um parto em D. {presente, pasture_id, motivo}.
+   */
+  function pastoAntesDaSaida(linhasDoAnimal, data, marcoZero) {
+    if (vazio_(marcoZero)) return { presente: null, pasture_id: null, motivo: 'DADOS_INSUFICIENTES' };
+    if (data < marcoZero) return { presente: null, pasture_id: null, motivo: 'ANTERIOR_AO_MARCO_ZERO' };
+    var antes = (linhasDoAnimal || []).filter(function (l) { return l.event_date < data || (l.event_date === data && classe(l) < 2); });
+    var e = estadoEm_(antes, data);
+    return { presente: e.presente, pasture_id: e.pasture_id, motivo: null };
+  }
   /** Pasto do animal ao fim do dia D: {presente, pasture_id, motivo}. */
   function pastoEm(linhasDoAnimal, data, marcoZero) {
     if (vazio_(marcoZero)) return { presente: null, pasture_id: null, motivo: 'DADOS_INSUFICIENTES' };
@@ -643,6 +656,7 @@ var Timeline = (function () {
     conferir: conferir,
     inventario: inventario,
     pastoEm: pastoEm,
+    pastoAntesDaSaida: pastoAntesDaSaida,
     consultaInventario: consultaInventario,
   };
 })();

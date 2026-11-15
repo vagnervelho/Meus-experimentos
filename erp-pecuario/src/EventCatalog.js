@@ -10,7 +10,7 @@
  * {campo, preenchido: true}.
  */
 var EventCatalog = (function () {
-  var FASE_ATUAL = 1;
+  var FASE_ATUAL = 2;
   var TIPOS_CAMPO = ['texto', 'inteiro', 'decimal', 'dinheiro', 'data', 'lista', 'bool', 'anexo'];
   var PESO_MAX_KG = 2000;
 
@@ -123,7 +123,34 @@ var EventCatalog = (function () {
   };
 
   var LEITURAS_MOTOR = ['EVENTOS', 'EVENTO_ANIMAIS', 'ANIMAIS', 'IDENTIFICACOES', 'AJUSTES', 'PESAGENS', 'REPRODUCAO',
-    'PASTOS', 'PROPRIEDADES', 'CONFIGURACOES', 'LISTAS', 'CATEGORIAS'];
+    'BAIXAS', 'PASTOS', 'PROPRIEDADES', 'CONFIGURACOES', 'LISTAS', 'CATEGORIAS'];
+  var VIVO = quando_('situacao_nascimento', ['VIVO']);
+  /** Campos de uma cria do parto (grupo repetível `crias`; 03b, seções 3.5 e 16.8). Natimorto não cria animal. */
+  var CAMPOS_CRIA = [
+    a_('situacao_nascimento', 'Nasceu', 'lista', { obrigatorio: true, opcoes: ['VIVO', 'NATIMORTO'], default: 'VIVO' }),
+    a_('sexo', 'Sexo', 'lista', { opcoes: ['M', 'F'], visivel_se: VIVO, obrigatorio_se: VIVO }),
+    a_('brinco', 'Brinco', 'texto', { visivel_se: VIVO, ajuda: 'Opcional: o brinco pode ser colocado depois.' }),
+    a_('nome', 'Nome ou apelido', 'texto', { visivel_se: VIVO }),
+    a_('raca', 'Raça', 'lista', { lista: 'RACA', visivel_se: VIVO, ajuda: 'Vazio = a raça da mãe.' }),
+    a_('peso', 'Peso ao nascer', 'decimal', { unidade: 'kg', min: 0.1, max: PESO_MAX_KG, casas: 1, visivel_se: VIVO }),
+    a_('metodo_pesagem', 'Como foi pesado', 'lista', { opcoes: ['BALANCA', 'FITA', 'ESTIMATIVA_VISUAL'], visivel_se: quando_('peso', true), obrigatorio_se: quando_('peso', true) }),
+    a_('observacoes', 'Observações da cria', 'texto', { visivel_se: VIVO }),
+  ];
+  /** Campos de cabeçalho de uma saída sem negociação (MORTE, DESCARTE); BAIXAS guarda uma linha por animal. */
+  function camposSaida_(tipo) {
+    var l = [c_('event_date', tipo === 'MORTE' ? 'Data da morte' : 'Data do descarte', 'data', { obrigatorio: true, default: 'HOJE' })];
+    if (tipo === 'MORTE') {
+      l.push(c_('causa', 'Causa da morte', 'lista', { obrigatorio: true, lista: 'CAUSA_MORTE', ajuda: 'Sem causa conhecida, escolha "Causa desconhecida".' }));
+      l.push(c_('diagnostico', 'Diagnóstico ou laudo', 'texto'));
+    } else {
+      l.push(c_('destino', 'O que foi feito do animal', 'lista', { obrigatorio: true, lista: 'DESTINO_DESCARTE', ajuda: 'Consumo próprio, doação, permuta ou sacrifício. Se houve venda, use "Vender animais".' }));
+      l.push(c_('motivo', 'Por que foi descartado', 'lista', { obrigatorio: true, lista: 'MOTIVO_DESCARTE' }));
+    }
+    l.push(c_('property_id', 'Propriedade', 'ref:PROPRIEDADES', { default: { de: 'CONFIGURACOES.propriedade_padrao_id' } }));
+    l.push(c_('responsible', tipo === 'MORTE' ? 'Quem constatou' : 'Responsável', 'texto'));
+    l.push(c_('notes', 'Observações', 'texto'));
+    return l;
+  }
   var LEITURAS_FINANCEIRO = ['FINANCEIRO', 'PARCELAS', 'RATEIOS', 'ALOCACOES_FINANCEIRAS', 'PLANO_CONTAS'];
 
   /** Definições completas dos tipos da Fase 1. */
@@ -154,6 +181,55 @@ var EventCatalog = (function () {
       ],
       campos_animal: [a_('animal_id', 'Animal já cadastrado (volta ao rebanho)', 'ref:ANIMAIS')].concat(camposNovoAnimal_(false)),
       componentes: ['grade_novos_animais', 'seletor_animais'],
+      grupos_repetiveis: {},
+    },
+    NASCIMENTO: {
+      frequente: true, selecao_animais: 'UM', filtro_elegiveis: { situacao: 'ATIVO', sexo: 'F' }, modo_entrada: 'FORM', revisao: 'LOCAL', critico: false,
+      reads: LEITURAS_MOTOR.concat(LEITURAS_FINANCEIRO),
+      campos: [
+        c_('event_date', 'Data do parto', 'data', { obrigatorio: true, default: 'HOJE' }),
+        c_('pasto_destino_id', 'Pasto das crias', 'ref:PASTOS', { ajuda: 'Vazio = o pasto em que a mãe estava no dia do parto.' }),
+        c_('pai_id', 'Pai (touro)', 'ref:ANIMAIS', { ajuda: 'Opcional. Deixe vazio se a vaca esteve com mais de um touro.' }),
+        c_('pai_confianca', 'Pai é', 'lista', { opcoes: ['CONFIRMADA', 'ESTIMADA'], visivel_se: quando_('pai_id', true), obrigatorio_se: quando_('pai_id', true) }),
+        c_('tipo_parto', 'Como foi o parto', 'lista', { lista: 'TIPO_PARTO' }),
+        c_('property_id', 'Propriedade', 'ref:PROPRIEDADES', { default: { de: 'CONFIGURACOES.propriedade_padrao_id' } }),
+        c_('responsible', 'Responsável', 'texto'),
+        c_('notes', 'Observações', 'texto'),
+      ],
+      campos_animal: [],
+      componentes: ['seletor_animais'],
+      grupos_repetiveis: { crias: CAMPOS_CRIA },
+    },
+    TRANSFERENCIA: {
+      frequente: true, selecao_animais: 'VARIOS', filtro_elegiveis: { situacao: 'ATIVO', pasto: '$pasto_origem_id' }, modo_entrada: 'FORM', revisao: 'LOCAL', critico: false,
+      reads: LEITURAS_MOTOR.concat(LEITURAS_FINANCEIRO),
+      campos: [
+        c_('event_date', 'Data', 'data', { obrigatorio: true, default: 'HOJE' }),
+        c_('pasto_origem_id', 'Pasto de origem', 'ref:PASTOS', { obrigatorio: true }),
+        c_('pasto_destino_id', 'Pasto de destino', 'ref:PASTOS', { obrigatorio: true }),
+        c_('gta_numero', 'Número da GTA', 'texto', { ajuda: 'Opcional: quando o destino fica em outra propriedade.' }),
+        c_('property_id', 'Propriedade', 'ref:PROPRIEDADES', { default: { de: 'CONFIGURACOES.propriedade_padrao_id' } }),
+        c_('responsible', 'Responsável', 'texto'),
+        c_('notes', 'Observações', 'texto'),
+      ],
+      campos_animal: [],
+      componentes: ['seletor_animais'],
+      grupos_repetiveis: {},
+    },
+    MORTE: {
+      frequente: true, selecao_animais: 'VARIOS', filtro_elegiveis: { situacao: 'ATIVO' }, modo_entrada: 'FORM', revisao: 'LOCAL', critico: true,
+      reads: LEITURAS_MOTOR.concat(LEITURAS_FINANCEIRO),
+      campos: camposSaida_('MORTE'),
+      campos_animal: [a_('observacoes', 'Observações deste animal', 'texto')],
+      componentes: ['seletor_animais'],
+      grupos_repetiveis: {},
+    },
+    DESCARTE: {
+      frequente: false, selecao_animais: 'VARIOS', filtro_elegiveis: { situacao: 'ATIVO' }, modo_entrada: 'FORM', revisao: 'LOCAL', critico: true,
+      reads: LEITURAS_MOTOR.concat(LEITURAS_FINANCEIRO),
+      campos: camposSaida_('DESCARTE'),
+      campos_animal: [a_('observacoes', 'Observações deste animal', 'texto')],
+      componentes: ['seletor_animais'],
       grupos_repetiveis: {},
     },
     AJUSTE_INVENTARIO: {
@@ -262,6 +338,11 @@ var EventCatalog = (function () {
   function camposEvento(nome) {
     return (DEFINICOES[nome] && DEFINICOES[nome].campos) || [];
   }
+  /** Campos de um grupo repetível do tipo (ex.: as crias do NASCIMENTO); grupo inexistente → lista vazia. */
+  function camposGrupo(nome, grupo) {
+    var g = DEFINICOES[nome] && DEFINICOES[nome].grupos_repetiveis;
+    return (g && g[grupo]) || [];
+  }
   /** Abas que o comando do tipo lê. */
   function leituras(nome) {
     return (DEFINICOES[nome] && DEFINICOES[nome].reads) || LEITURAS_MOTOR.concat(LEITURAS_FINANCEIRO);
@@ -364,6 +445,7 @@ var EventCatalog = (function () {
     modulosAtivos: modulosAtivos,
     camposEvento: camposEvento,
     camposAnimal: camposAnimal,
+    camposGrupo: camposGrupo,
     leituras: leituras,
     serializar: serializar,
     validarCampos: validarCampos,
