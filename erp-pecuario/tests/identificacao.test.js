@@ -300,7 +300,10 @@ test('DIVERGENCIA_CONTAGEM: baixa (−1) com BAIXAS e sem AJUSTES; BAIXADO_AJUST
   const dup = falha(m, 'registrar', outraEntrada('2026-07-01', [bicho({ brinco: '104' })]));
   assert.deepEqual(codigos(dup), ['BRINCO_DUPLICADO']);
   assert.match(dup.details[0].mensagem, /já é do animal A-000004, baixado na contagem em 15\/06\/2026/);
-  // Regras: animal fora do rebanho na data; justificativa obrigatória; data anterior ao marco zero.
+  // Baixado na contagem aceita fato retroativo dentro da permanência (03a, 4.3.4: "como VENDIDO"); depois da baixa, não.
+  m.run('registrar', ident('PRIMEIRA_IDENTIFICACAO', '2026-06-10', [{ animal_id: ids.m2, codigo: 'SB-102' }], { tipo_identificacao: 'SISBOV' }));
+  assert.deepEqual(codigos(falha(m, 'registrar', ident('PRIMEIRA_IDENTIFICACAO', '2026-06-16', [{ animal_id: ids.f4, codigo: 'SB-104' }], { tipo_identificacao: 'SISBOV' }))), ['FORA_DA_PERMANENCIA']);
+  // Regras: animal fora do rebanho na data; justificativa obrigatória.
   assert.deepEqual(codigos(falha(m, 'registrar', divergencia('2026-07-01', [{ animal_id: ids.f4 }]))), ['FORA_DO_REBANHO']);
   assert.deepEqual(codigos(falha(m, 'registrar', divergencia('2026-07-01', [{ animal_id: ids.f1 }], { justificativa: '' }))), ['CAMPO_OBRIGATORIO']);
   // Reaparecimento: estorno da baixa de um, por correção (tirando-o da lista); o outro volta por outra entrada.
@@ -345,4 +348,21 @@ test('rotas pela api(): identificação, marcação, reclassificação e diverg�
   assert.deepEqual([est2.ok, est2.error.code, est2.error.details.map((d) => d.codigo)], [false, 'VALIDATION', ['ESTORNO_NAO_SE_ESTORNA']]);
   s.conferirProjecoes('rotas');
   assert.equal(s.integridade().ok, true);
+});
+
+test('integridade: a ordem das identificações e das marcações gravadas é conferida (edição à mão que tira a primeira identificação deixa a retirada sem código: LINHA_DO_TEMPO)', () => {
+  const s = S.sistema();
+  const ev = (dados, chave) => s.evento('registrar', dados, chave);
+  const r = ev(S.entradaInicial([S.bicho({ brinco: '1' }), S.bicho({})]), 'int-1');
+  const bez = r.dados.animais[1].animal_id;
+  const p = ev(ident('PRIMEIRA_IDENTIFICACAO', '2026-03-01', [{ animal_id: bez, codigo: '77' }]), 'int-2');
+  ev(ident('REMOCAO', '2026-04-01', [{ animal_id: bez, motivo: 'PERDA' }]), 'int-3');
+  ev(marca('DESCARTE', 'MARCAR', '2026-04-02', [bez], { motivo_descarte: 'IDADE' }), 'int-4');
+  assert.equal(s.integridade().ok, true);
+  // Alguém troca à mão o subtipo da primeira identificação para "retirada": a sequência do 77 fica incoerente.
+  s.editar('EVENTOS', p.dados.event_id, 'event_subtype', 'REMOCAO');
+  const rel = s.integridade();
+  const achados = rel.achados.filter((a) => a.checagem === 'LINHA_DO_TEMPO');
+  assert.ok(achados.some((a) => /a retirada de identificação de 01\/03\/2026 não cabe: nessa data o animal não tinha brinco/.test(a.mensagem)), JSON.stringify(achados));
+  assert.equal(rel.ok, false);
 });

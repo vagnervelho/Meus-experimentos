@@ -239,6 +239,9 @@ test('CT-07: estorno da transferência anula sem apagar (linhas idênticas, salv
   const posterior = m.run('registrar', transferencia('2026-05-01', PASTOS.B, PASTOS.C, [ids[0]])).dados.event_id;
   const p4 = falha(m, 'estornar', { event_id: e1b, justificativa: 'teste' });
   assert.deepEqual([p4.code, p4.details.map((d) => [d.codigo, d.brinco, d.conflito.event_id, d.conflito.data])], ['CONFLICT', [['ORIGEM_DIVERGENTE', '0701', posterior, '2026-05-01']]]);
+  // A simulação do estorno (revisão pelo servidor) lista o mesmo bloqueio, sem gravar.
+  const sim = m.simular('estornar', { event_id: e1b, justificativa: 'teste' });
+  assert.deepEqual([sim.ok, sim.erro.code, sim.erro.details], [false, 'CONFLICT', p4.details]);
   // Passo 4b: entrada de animal sem outros eventos → ANULADO, com o brinco liberado.
   const so = m.run('registrar', outraEntrada('2026-02-01', [bicho({ brinco: '0709' })])).dados;
   m.run('estornar', { event_id: so.event_id, justificativa: 'Lançado por engano' });
