@@ -118,6 +118,9 @@ test('corrigir a venda pelo detalhe do evento: preço de 10,00 para 10,50 por kg
   const ded = page.locator('[data-grupo="deducoes"] [data-linha-grupo]').nth(0);
   await ded.locator('[data-campo="tipo"] select').selectOption({ label: 'Frete' });
   await ded.locator('[data-campo="retida_pelo_comprador"] label.opcao', { hasText: 'Sim' }).click();
+  // A comissão vencia à vista; descontada pelo comprador, ela sai no recebimento: o vencimento fica vazio.
+  await ded.locator('[data-campo="data_vencimento"] input').fill('');
+  assert.equal(await page.locator('.marca-inelegivel').count(), 0, 'os animais da venda corrigida não aparecem como inelegíveis');
   await page.fill('[data-campo="justificativa_correcao"] textarea', 'Preço do romaneio e frete descontado');
   await page.click('.form-evento button[type=submit]');
   await page.waitForSelector(dialogo + ' [data-diferencas="1"]');

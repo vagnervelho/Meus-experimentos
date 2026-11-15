@@ -1011,7 +1011,8 @@ var Seletor = (function () {
 
   /**
    * Seletor de animais (08, seção 7). o: {modo: UM|VARIOS, filtro (filtro_elegiveis), tipo, selecionados: [ids],
-   * aoMudar(ids), dataEvento() → yyyy-MM-dd, valorCampo(id), titulo}. Modos: busca (brinco com a resolução do
+   * aoMudar(ids), dataEvento() → yyyy-MM-dd, valorCampo(id), titulo, isentos: [ids que nunca são marcados inelegíveis: os
+   * animais do lançamento que está sendo corrigido]}. Modos: busca (brinco com a resolução do
    * curral, nome, código, crias da mãe), filtros, todos do pasto, colar lista. Devolve {el, selecionados(), definir(ids)}.
    */
   function criar(o) {
@@ -1024,7 +1025,9 @@ var Seletor = (function () {
     var contador = h('p', { class: 'dado', role: 'status' });
     var modoAtual = 'busca';
     var botoesModo = {};
-    function elegivel(a) { return motivoInelegivel(a, o.filtro, o.valorCampo); }
+    var isentos = {};
+    (o.isentos || []).forEach(function (id) { isentos[id] = true; });
+    function elegivel(a) { return isentos[a.animal_id] ? null : motivoInelegivel(a, o.filtro, o.valorCampo); }
     function candidatos() { return baixados ? Store.animais().concat(Store.baixados() || []) : Store.animais(); }
     function mudou() { if (o.aoMudar) o.aoMudar(ids.slice()); desenharSelecionados(); }
     function adicionar(novos) {
@@ -1539,6 +1542,8 @@ var Registro = (function () {
       modo: def.selecao_animais, filtro: def.filtro_elegiveis, tipo: s.tipo, titulo: def.selecao_animais === 'UM' ? 'Animal' : 'Animais',
       selecionados: Util.clonar(s.linhas.map(function (l) { return l.animal_id; }).filter(function (x, i, a) { return a.indexOf(x) === i; })),
       dataEvento: function () { return s.campos.event_date || Fmt.hoje(); }, valorCampo: function (id) { return s.campos[id]; },
+      // Na correção, os animais do original (vendido, morto: já fora do rebanho) continuam escolhíveis; o servidor decide.
+      isentos: s.corrige && s.corrige.antes ? Object.keys(s.corrige.antes.linhas || {}) : [],
       aoMudar: function (ids) {
         var porId = {};
         s.linhas.forEach(function (l) { (porId[l.animal_id] = porId[l.animal_id] || []).push(l); });

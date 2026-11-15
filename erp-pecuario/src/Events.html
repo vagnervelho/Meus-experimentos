@@ -207,7 +207,8 @@ var TelaEventos = (function () {
       return { animal_id: l.animal_id, valores: v };
     });
     var grupos = {
-      parcelas: parcelasDe(receita.financial_id).map(function (x) { return { valores: limpo_({ data_vencimento: x.data_vencimento, valor: dinheiroTexto_(x.valor), forma_pagamento: x.forma_pagamento, documento: x.documento }) }; }),
+      // Parcela única = o recebimento inteiro: o valor fica vazio, para acompanhar a receita se o preço for corrigido.
+      parcelas: parcelasDe(receita.financial_id).map(function (x, k, todas) { return { valores: limpo_({ data_vencimento: x.data_vencimento, valor: todas.length === 1 ? null : dinheiroTexto_(x.valor), forma_pagamento: x.forma_pagamento, documento: x.documento }) }; }),
       deducoes: fins.filter(function (f) { return f !== receita; }).map(function (f) {
         var t = parcelasDe(f.financial_id)[0] || {};
         return { valores: limpo_({ tipo: tipoDe[f.financial_id] || 'OUTRA', valor: dinheiroTexto_(f.valor), retida_pelo_comprador: f.retida_pelo_comprador === true || f.retida_pelo_comprador === 'S' ? true : null,
@@ -423,7 +424,19 @@ var TelaEventos = (function () {
         } }));
       }
       if (ev.vigente && CORRIGIVEIS.indexOf(ev.event_type) >= 0 && Store.tipoEvento(ev.event_type)) {
-        acoes.appendChild(UI.botao('Corrigir', { icone: 'editar', aoClicar: function () { Registro.abrir(ev.event_type, previaCorrecao(o)); } }));
+        acoes.appendChild(UI.botao('Corrigir', { icone: 'editar', aoClicar: async function (evt) {
+          var botao = evt && evt.currentTarget;
+          var destravar = botao ? UI.travar(botao, 'Abrindo…') : null;
+          try {
+            // Os animais de uma saída (venda, morte, descarte) já não estão na carga do aparelho: busca-os antes de abrir.
+            if ((o.linhas || []).some(function (l) { return Number(l.efeito_inventario) === -1; })) await Store.carregarBaixados();
+            Registro.abrir(ev.event_type, previaCorrecao(o));
+          } catch (e) {
+            UI.aviso('Não foi possível abrir a correção: ' + e.message, { tipo: 'erro' });
+          } finally {
+            if (destravar) destravar();
+          }
+        } }));
       }
     }, function (e) {
       if (!vivo) return;
