@@ -13,7 +13,15 @@ var FinancialService = (function () {
   var CONTAS = Object.freeze({
     COMPRA: 'COMPRA_ANIMAIS', FRETE_COMPRA: 'FRETE_DESPESAS_COMPRA', ABERTURA: 'SALDO_ABERTURA_REBANHO',
     RECEITA_DESCARTE: 'OUTRAS_RECEITAS_OPERACIONAIS', VENDA: 'VENDA_ANIMAIS',
+    FRETE_VENDA: 'FRETE_VENDA', COMISSAO_VENDA: 'COMISSAO_VENDA', TAXAS_VENDA: 'TAXAS_RETENCOES_VENDA',
   });
+  /**
+   * Conta de cada dedução da venda pelo tipo (LISTAS.TIPO_DEDUCAO_VENDA; 03b, seção 2.6): FRETE e COMISSAO são códigos
+   * reservados, com conta e total próprios em VENDAS; qualquer outro tipo vai para "Taxas e retenções sobre venda".
+   */
+  var CONTA_DEDUCAO = Object.freeze({ FRETE: CONTAS.FRETE_VENDA, COMISSAO: CONTAS.COMISSAO_VENDA });
+  /** Coluna de VENDAS que soma a dedução do tipo: frete, comissao ou outras_deducoes. */
+  var TOTAL_DEDUCAO = Object.freeze({ FRETE: 'frete', COMISSAO: 'comissao' });
   var MODALIDADES = ['CABECA', 'KG_VIVO', 'ARROBA', 'LOTE'];
   /** Critérios que o operador escolhe numa compra ou venda por lote (03b, seção 4.3); DIAS_PERMANENCIA não cabe num evento. */
   var CRITERIOS_LOTE = ['CABECAS', 'PESO_VIVO', 'PESO_CARCACA', 'VALOR_INDIVIDUAL', 'MANUAL'];
@@ -141,7 +149,7 @@ var FinancialService = (function () {
    * do próprio evento (escopo EVENTO) e uma ALOCACOES_FINANCEIRAS por animal. spec: {evento: {event_id, event_date,
    * property_id}, conta (linha de PLANO_CONTAS), naturezas (aceitas), valor, descricao, partner_id, documento,
    * observacoes, quantidade, pasture_id, retida, semCaixa, parcelas: [{data_vencimento, valor?, forma_pagamento,
-   * documento}], rateio: {criterio, itens: [{animal_id, chave, base}], cemPorCento, justificativa} | null, campo,
+   * documento}], rateio: {criterio, itens: [{animal_id, chave, base}], cemPorCento, justificativa, estimado} | null, campo,
    * rotulo, prefixo}. Erros vão para `col`; com erro devolve null. Devolve {linhas: {FINANCEIRO: [..], PARCELAS,
    * RATEIOS, ALOCACOES_FINANCEIRAS}, financial_id, rateio (o de `ratear`), parcelas}.
    */
@@ -201,7 +209,8 @@ var FinancialService = (function () {
       linhas.RATEIOS.push({
         rateio_id: ratId, event_id: ev.event_id, financial_id: finId, criterio: rat.criterio, escopo_tipo: 'EVENTO', escopo_ref: ev.event_id,
         periodo_inicio: null, periodo_fim: null, data_base: ev.event_date, base_total: rat.baseTotal, total_alocado: rat.totalAlocado,
-        justificativa: rat.criterio === 'MANUAL' ? nulo_(s.rateio.justificativa) : null, created_by: tx.usuario,
+        // A justificativa explica o MANUAL e também a base estimada (venda só com o peso do lote: 03b, seção 4.3).
+        justificativa: rat.criterio === 'MANUAL' || s.rateio.estimado ? nulo_(s.rateio.justificativa) : null, created_by: tx.usuario,
       });
       rat.itens.forEach(function (it) {
         linhas.ALOCACOES_FINANCEIRAS.push({ alloc_id: tx.novoId(), rateio_id: ratId, financial_id: finId, animal_id: it.animal_id, base_valor: it.base, valor_alocado: it.valor });
@@ -231,10 +240,16 @@ var FinancialService = (function () {
    * Conta da negociação de compra ou venda (07, seções 4.1 e 4.2; 03b, seções 4.3 a 4.5; RN-067, RN-068, RN-073).
    * spec: {modalidade, base_peso, rendimento_carcaca_pct, rendimento_tipo, preco_unitario (centavos), peso_total_kg,
    * valor (centavos: valor dos animais ou receita), criterio_rateio (só LOTE), arroba_kg, tolerancia_pct,
-   * animais: [{chave, peso, peso_carcaca_kg, valor_individual, base_manual}]}. Puro.
+   * animais: [{chave, peso, peso_carcaca_kg, valor_individual, base_manual}]}. Puro. Na venda (03b, seções 4.2 e 4.3)
+   * também: peso_carcaca_total_kg (o total do romaneio, aceito na arroba de carcaça; com `carcacaTotal: true`),
+   * valor_conferencia (o bruto, contra o qual a conta pelo preço é conferida; padrão = valor), campo_valor e
+   * rotulo_valor (para as mensagens) e pesagens: [última pesagem individual de cada animal até a data, em kg, ou null]
+   * — sem o peso de cada animal, o rateio usa essas pesagens escaladas para o peso do lote (estimado) ou cai para
+   * CABECAS, com aviso nos dois casos.
    * Devolve {base_peso, rendimento_pct, rendimento_tipo, unidade_preco, preco_unitario, peso_vivo_total,
-   * peso_carcaca_total, arrobas, criterio, bases: [número por animal], conferencia, desvio_pct, erros, avisos}; erros
-   * e avisos: [{codigo, campo, mensagem, indice?}] (indice = posição do animal).
+   * peso_carcaca_total, arrobas, criterio, bases: [número por animal], estimado (base por pesagem anterior escalada),
+   * conferencia, desvio_pct, erros, avisos}; erros e avisos: [{codigo, campo, mensagem, indice?}] (indice = posição do
+   * animal).
    */
   function negociacao(spec) {
     var s = spec || {};
@@ -243,7 +258,10 @@ var FinancialService = (function () {
     var erros = [];
     var avisos = [];
     var r = { base_peso: null, rendimento_pct: null, rendimento_tipo: null, unidade_preco: null, preco_unitario: nulo_(s.preco_unitario), peso_vivo_total: null,
-      peso_carcaca_total: null, arrobas: null, criterio: null, bases: [], conferencia: null, desvio_pct: null, erros: erros, avisos: avisos };
+      peso_carcaca_total: null, arrobas: null, criterio: null, bases: [], estimado: false, conferencia: null, desvio_pct: null, erros: erros, avisos: avisos };
+    var campoValor = s.campo_valor || 'valor_animais';
+    var rotuloValor = s.rotulo_valor || 'o valor dos animais';
+    var campoVivo = s.carcacaTotal === true ? 'peso_vivo_total_kg' : 'peso_total_kg';
     var arroba = typeof s.arroba_kg === 'number' && s.arroba_kg > 0 ? s.arroba_kg : 15;
     var mod = s.modalidade;
     if (MODALIDADES.indexOf(mod) < 0) { erros.push(det_('CAMPO_OBRIGATORIO', 'modalidade', 'Escolha como o preço foi feito: por cabeça, por kg vivo, por arroba ou lote fechado.')); return r; }
@@ -277,7 +295,7 @@ var FinancialService = (function () {
     var vivoDec = null;
     if (typeof s.peso_total_kg === 'number') {
       vivoDec = dec_(s.peso_total_kg);
-      if (temPeso === n && n && vivoDec !== somaVivo) erros.push(det_('PESO_TOTAL_DIVERGENTE', 'peso_total_kg', 'O peso total do lote (' + s.peso_total_kg + ' kg) difere da soma dos pesos dos animais (' + somaVivo / 10 + ' kg). Deixe o total em branco ou acerte os pesos.'));
+      if (temPeso === n && n && vivoDec !== somaVivo) erros.push(det_('PESO_TOTAL_DIVERGENTE', campoVivo, 'O peso total do lote (' + s.peso_total_kg + ' kg) difere da soma dos pesos dos animais (' + somaVivo / 10 + ' kg). Deixe o total em branco ou acerte os pesos.'));
     } else if (temPeso === n && n) vivoDec = somaVivo;
     r.peso_vivo_total = vivoDec === null ? null : vivoDec / 10;
     var carcaca = r.base_peso === 'CARCACA' || (mod === 'LOTE' && s.criterio_rateio === 'PESO_CARCACA');
@@ -285,13 +303,26 @@ var FinancialService = (function () {
     animais.forEach(function (a, i) {
       if (typeof a.peso_carcaca_kg === 'number' && typeof a.peso === 'number' && a.peso_carcaca_kg >= a.peso) erros.push(det_('CARCACA_MAIOR_QUE_VIVO', 'peso_carcaca_kg', 'o peso de carcaça (' + a.peso_carcaca_kg + ' kg) não pode passar do peso vivo (' + a.peso + ' kg).', { indice: i }));
     });
-    if (carcaca && temCarc !== n) erros.push(det_('PESO_OBRIGATORIO', 'peso_carcaca_kg', 'Informe o peso de carcaça de cada animal (romaneio).'));
-    if (carcaca && temCarc === n) {
-      r.peso_carcaca_total = somaCarc / 10;
+    // Carcaça: a de cada animal (romaneio) ou, na venda por arroba de carcaça, só o total do romaneio (03b, seção 4.3).
+    var totalCarc = s.carcacaTotal === true && typeof s.peso_carcaca_total_kg === 'number' ? dec_(s.peso_carcaca_total_kg) : null;
+    if (totalCarc !== null && r.base_peso !== 'CARCACA') erros.push(det_('CAMPO_NAO_SE_APLICA', 'peso_carcaca_total_kg', 'O peso de carcaça total (romaneio) só se informa na arroba de carcaça.'));
+    var carcDec = null;
+    if (carcaca && temCarc === n && n) {
+      carcDec = somaCarc;
+      if (totalCarc !== null && r.base_peso === 'CARCACA' && totalCarc !== somaCarc) erros.push(det_('PESO_TOTAL_DIVERGENTE', 'peso_carcaca_total_kg', 'O peso de carcaça total (' + s.peso_carcaca_total_kg + ' kg) difere da soma das carcaças dos animais (' + somaCarc / 10 + ' kg). Deixe o total em branco ou acerte as carcaças.'));
+    } else if (carcaca && s.carcacaTotal === true && r.base_peso === 'CARCACA' && temCarc) {
+      erros.push(det_('PESO_INCOMPLETO', 'peso_carcaca_kg', 'Informe a carcaça de todos os animais ou de nenhum (só o total do romaneio).'));
+    } else if (carcaca && totalCarc !== null && r.base_peso === 'CARCACA') {
+      carcDec = totalCarc;
+    } else if (carcaca) {
+      erros.push(det_('PESO_OBRIGATORIO', 'peso_carcaca_kg', s.carcacaTotal === true && r.base_peso === 'CARCACA' ? 'Informe o peso de carcaça de cada animal ou o total do romaneio.' : 'Informe o peso de carcaça de cada animal (romaneio).'));
+    }
+    if (carcDec !== null) {
+      r.peso_carcaca_total = carcDec / 10;
       if (vivoDec !== null && r.base_peso === 'CARCACA') {
-        r.rendimento_pct = Utils.arredondar(somaCarc / vivoDec * 100, 1);
+        r.rendimento_pct = Utils.arredondar(carcDec / vivoDec * 100, 1);
         r.rendimento_tipo = 'APURADO';
-        if (!(r.rendimento_pct > 0 && r.rendimento_pct < 100)) erros.push(det_('VALOR_FORA_DA_FAIXA', 'peso_total_kg', 'A carcaça total não pode passar do peso vivo total.'));
+        if (!(r.rendimento_pct > 0 && r.rendimento_pct < 100)) erros.push(det_('VALOR_FORA_DA_FAIXA', campoVivo, 'A carcaça total não pode passar do peso vivo total.'));
       }
     }
     // Preço e valor por animal.
@@ -308,7 +339,7 @@ var FinancialService = (function () {
     if (temValor && !aceitaValor) animais.forEach(function (a, i) { if (typeof a.valor_individual === 'number') erros.push(det_('CAMPO_NAO_SE_APLICA', 'valor_individual', 'o valor por animal só se informa no preço por cabeça ou no lote com rateio pelo valor de cada animal: nos demais o sistema calcula.', { indice: i })); });
     if (aceitaValor && temValor && temValor !== n) erros.push(det_('VALORES_INCOMPLETOS', 'valor_individual', 'Informe o valor de todos os animais ou de nenhum.'));
     if (aceitaValor && temValor === n && n && typeof s.valor === 'number' && soma_(animais, 'valor_individual') !== s.valor) {
-      erros.push(det_('VALOR_INDIVIDUAL_NAO_SOMA', 'valor_individual', 'A soma dos valores por animal (' + reais_(soma_(animais, 'valor_individual')) + ') difere do valor dos animais (' + reais_(s.valor) + ').'));
+      erros.push(det_('VALOR_INDIVIDUAL_NAO_SOMA', 'valor_individual', 'A soma dos valores por animal (' + reais_(soma_(animais, 'valor_individual')) + ') difere d' + rotuloValor + ' (' + reais_(s.valor) + ').'));
     }
     animais.forEach(function (a, i) { if (typeof a.valor_individual === 'number' && !(a.valor_individual > 0)) erros.push(det_('VALOR_FORA_DA_FAIXA', 'valor_individual', 'o valor do animal precisa ser maior que zero.', { indice: i })); });
     // Critério de rateio (03b, seção 4.5): um animal = DIRETO; LOTE = o escolhido; os demais derivam da modalidade.
@@ -320,25 +351,40 @@ var FinancialService = (function () {
       if (crit === 'VALOR_INDIVIDUAL' && temValor !== n) erros.push(det_('VALORES_INCOMPLETOS', 'valor_individual', 'Para dividir pelo valor de cada animal, informe o valor de todos.'));
     } else {
       if (!vazio_(s.criterio_rateio)) erros.push(det_('CAMPO_NAO_SE_APLICA', 'criterio_rateio', 'O critério de rateio só se escolhe no lote fechado; nas demais formas ele vem da negociação.'));
+      // Sem o peso de cada animal (só o do lote, ou só o total do romaneio): a última pesagem de cada um, escalada para o
+      // peso do lote (estimado), quando todos têm; senão CABECAS. Aviso nos dois casos (03b, seção 4.3; RN-073).
+      var ult = Array.isArray(s.pesagens) && s.pesagens.length === n ? s.pesagens : null;
+      var temUlt = ult && ult.every(function (x) { return typeof x === 'number' && x > 0; });
       if (mod === 'CABECA') crit = temValor ? 'VALOR_INDIVIDUAL' : 'CABECAS';
-      else if (r.base_peso === 'CARCACA') crit = 'PESO_CARCACA';
-      else if (temPeso === n && n) crit = 'PESO_VIVO';
-      else {
+      else if (r.base_peso === 'CARCACA' && (temCarc === n || s.carcacaTotal !== true)) crit = 'PESO_CARCACA';
+      else if (temPeso === n && n) {
+        crit = 'PESO_VIVO';
+        if (r.base_peso === 'CARCACA' && n > 1) avisos.push(det_('RATEIO_SEM_PESO', 'peso_carcaca_kg', 'Sem a carcaça de cada animal, o valor e as deduções serão divididos pelo peso vivo de cada um.'));
+      } else if (temUlt && !temPeso && n > 1) {
+        crit = 'PESO_VIVO';
+        r.estimado = true;
+        avisos.push(det_('RATEIO_SEM_PESO', 'peso', 'Sem o peso de cada animal, o valor e as deduções serão divididos pela última pesagem de cada um, ajustada ao peso do lote (estimado).'));
+      } else {
         crit = 'CABECAS';
         if (n > 1) avisos.push(det_('RATEIO_SEM_PESO', 'peso', 'Sem o peso de cada animal, o valor e os custos serão divididos igualmente por cabeça.'));
       }
-      if (temPeso && temPeso !== n && crit === 'CABECAS' && mod !== 'CABECA') erros.push(det_('PESO_INCOMPLETO', 'peso', 'Informe o peso de todos os animais ou de nenhum (só o total do lote).'));
+      if (temPeso && temPeso !== n && crit !== 'PESO_CARCACA' && mod !== 'CABECA') erros.push(det_('PESO_INCOMPLETO', 'peso', 'Informe o peso de todos os animais ou de nenhum (só o total do lote).'));
     }
     if (temManual && crit !== 'MANUAL') animais.forEach(function (a, i) { if (typeof a.base_manual === 'number') erros.push(det_('CAMPO_NAO_SE_APLICA', 'base_manual', 'o peso no rateio manual só se informa com o critério manual.', { indice: i })); });
     if (crit === 'MANUAL' && temManual !== n) erros.push(det_('CAMPO_OBRIGATORIO', 'base_manual', 'No rateio manual, informe o peso de cada animal na divisão (percentual ou proporção).'));
-    if ((mod === 'KG_VIVO' || (mod === 'ARROBA' && r.base_peso === 'VIVO')) && vivoDec === null) erros.push(det_('PESO_OBRIGATORIO', 'peso_total_kg', 'Informe o peso vivo total do lote ou o peso de cada animal.'));
+    if ((mod === 'KG_VIVO' || (mod === 'ARROBA' && r.base_peso === 'VIVO')) && vivoDec === null) erros.push(det_('PESO_OBRIGATORIO', campoVivo, 'Informe o peso vivo total do lote ou o peso de cada animal.'));
     r.criterio = n === 1 ? 'DIRETO' : crit || null;
-    r.bases = animais.map(function (a) {
+    var escala = null;
+    if (r.estimado) {
+      var somaUlt = ult.reduce(function (t, x) { return t + x; }, 0);
+      escala = ult.map(function (x) { return Utils.arredondar(vivoDec === null ? x : x * vivoDec / 10 / somaUlt, 4); });
+    }
+    r.bases = animais.map(function (a, i) {
       switch (r.criterio) {
         case 'DIRETO': return typeof s.valor === 'number' ? s.valor / 100 : null;
         case 'VALOR_INDIVIDUAL': return typeof a.valor_individual === 'number' ? a.valor_individual / 100 : null;
         case 'CABECAS': return 1;
-        case 'PESO_VIVO': return typeof a.peso === 'number' ? a.peso : null;
+        case 'PESO_VIVO': return escala ? escala[i] : typeof a.peso === 'number' ? a.peso : null;
         case 'PESO_CARCACA': return typeof a.peso_carcaca_kg === 'number' ? a.peso_carcaca_kg : null;
         case 'MANUAL': return typeof a.base_manual === 'number' ? a.base_manual : null;
         default: return null;
@@ -351,20 +397,50 @@ var FinancialService = (function () {
       else if (mod === 'ARROBA' && r.base_peso === 'VIVO' && vivoDec !== null && rend !== null) {
         r.arrobas = Utils.arredondar(vivoDec / 10 * rend / 100 / arroba, 2);
         r.conferencia = Math.round(vivoDec * dec_(rend) * preco / (10000 * arroba));
-      } else if (mod === 'ARROBA' && r.base_peso === 'CARCACA' && r.peso_carcaca_total !== null) {
-        r.arrobas = Utils.arredondar(somaCarc / 10 / arroba, 2);
-        r.conferencia = Math.round(somaCarc * preco / (10 * arroba));
+      } else if (mod === 'ARROBA' && r.base_peso === 'CARCACA' && carcDec !== null) {
+        r.arrobas = Utils.arredondar(carcDec / 10 / arroba, 2);
+        r.conferencia = Math.round(carcDec * preco / (10 * arroba));
       }
-    } else if (mod === 'CABECA' && temValor === n && n) r.conferencia = soma_(animais, 'valor_individual');
-    if (r.arrobas === null && r.peso_carcaca_total !== null) r.arrobas = Utils.arredondar(somaCarc / 10 / arroba, 2);
-    if (r.conferencia !== null && r.conferencia > 0 && typeof s.valor === 'number') {
-      r.desvio_pct = Utils.arredondar(Math.abs(s.valor - r.conferencia) / r.conferencia * 100, 2);
+    } else if (mod === 'CABECA' && temValor === n && n) {
+      // Valor por animal: a soma já é conferida contra o valor distribuído; a conferência mostra o bruto que ela implica.
+      r.conferencia = soma_(animais, 'valor_individual') + (typeof s.valor_conferencia === 'number' && typeof s.valor === 'number' ? s.valor_conferencia - s.valor : 0);
+    }
+    if (r.arrobas === null && carcDec !== null) r.arrobas = Utils.arredondar(carcDec / 10 / arroba, 2);
+    // O valor informado (valor dos animais na compra, bruto na venda) prevalece; a conta pelo preço é só conferência.
+    var conferido = typeof s.valor_conferencia === 'number' ? s.valor_conferencia : s.valor;
+    if (r.conferencia !== null && r.conferencia > 0 && typeof conferido === 'number') {
+      r.desvio_pct = Utils.arredondar(Math.abs(conferido - r.conferencia) / r.conferencia * 100, 2);
       var tol = typeof s.tolerancia_pct === 'number' ? s.tolerancia_pct : 1;
-      if (Math.abs(s.valor - r.conferencia) * 100 > tol * r.conferencia) {
-        avisos.push(det_('VALOR_DIVERGENTE', 'valor_animais', 'O valor informado (' + reais_(s.valor) + ') difere em ' + String(r.desvio_pct).replace('.', ',') + '% da conta pela negociação (' + reais_(r.conferencia) + '), acima da tolerância de ' + String(tol).replace('.', ',') + '%. Vale o valor informado: confira a nota.'));
+      if (Math.abs(conferido - r.conferencia) * 100 > tol * r.conferencia) {
+        avisos.push(det_('VALOR_DIVERGENTE', campoValor, 'O valor informado (' + reais_(conferido) + ') difere em ' + String(r.desvio_pct).replace('.', ',') + '% da conta pela negociação (' + reais_(r.conferencia) + '), acima da tolerância de ' + String(tol).replace('.', ',') + '%. Vale o valor informado: confira a nota.'));
       }
     }
     return r;
+  }
+
+  /** Código da conta de uma dedução de venda pelo tipo (FRETE, COMISSAO; os demais tipos: taxas e retenções). */
+  function contaDeducao(tipo) {
+    return CONTA_DEDUCAO[tipo] || CONTAS.TAXAS_VENDA;
+  }
+  /**
+   * Totais da venda (03b, seção 4.2; 07, seção 4.2), em centavos: receita = bruto − desconto comercial; frete,
+   * comissão e outras deduções pelo tipo; resultado da negociação = receita − deduções; depósito esperado = receita −
+   * deduções retidas pelo comprador. spec: {valor_bruto, desconto_comercial, deducoes: [{tipo, valor, retida}]}.
+   */
+  function totaisVenda(spec) {
+    var s = spec || {};
+    var bruto = typeof s.valor_bruto === 'number' ? s.valor_bruto : 0;
+    var desconto = typeof s.desconto_comercial === 'number' ? s.desconto_comercial : 0;
+    var t = { valor_bruto: bruto, desconto_comercial: desconto, receita: bruto - desconto, frete: 0, comissao: 0, outras_deducoes: 0, deducoes: 0, retidas: 0 };
+    (s.deducoes || []).forEach(function (d) {
+      var v = typeof d.valor === 'number' ? d.valor : 0;
+      t[TOTAL_DEDUCAO[d.tipo] || 'outras_deducoes'] += v;
+      t.deducoes += v;
+      if (d.retida === true) t.retidas += v;
+    });
+    t.resultado_negociacao = t.receita - t.deducoes;
+    t.deposito_esperado = t.receita - t.retidas;
+    return t;
   }
 
   // ------------------------------------------------------------------ invariantes (03b, seção 14) ----
@@ -489,8 +565,20 @@ var FinancialService = (function () {
         var ea = repo.por('EVENTO_ANIMAIS', 'event_id', v.event_id);
         var fin = principal(v.event_id, CONTAS.VENDA);
         if (soma_(ea, 'valor_individual') !== receita || !fin || fin.valor !== receita || alocado(fin) !== receita) achado(15, 'VENDAS', v.sale_id, 'A venda: valores por animal, receita (' + reais_(receita) + ') e lançamento de receita não fecham.');
-        var deducoes = soma_((porEvento[v.event_id] || []).filter(function (f) { return f.natureza === 'DESPESA_VENDA'; }), 'valor');
+        var lancs = porEvento[v.event_id] || [];
+        var deducoes = soma_(lancs.filter(function (f) { return f.natureza === 'DESPESA_VENDA'; }), 'valor');
         if (deducoes !== (v.frete || 0) + (v.comissao || 0) + (v.outras_deducoes || 0)) achado(16, 'VENDAS', v.sale_id, 'As deduções da venda não conferem com os lançamentos de despesa de venda (' + reais_(deducoes) + ').');
+        if (lancs.some(function (f) { return f !== fin && f.natureza !== 'DESPESA_VENDA'; })) achado(16, 'VENDAS', v.sale_id, 'A venda tem um lançamento que não é a receita nem uma despesa de venda.');
+        if (contas) {
+          // Cada total de VENDAS é a soma dos lançamentos na conta própria (frete, comissão; o resto em taxas e retenções).
+          var porConta = function (codigo) { return soma_(lancs.filter(function (f) { var c = repo.porId('PLANO_CONTAS', f.conta_id); return c && c.codigo === codigo; }), 'valor'); };
+          if (porConta(CONTAS.FRETE_VENDA) !== (v.frete || 0) || porConta(CONTAS.COMISSAO_VENDA) !== (v.comissao || 0) || porConta(CONTAS.TAXAS_VENDA) !== (v.outras_deducoes || 0)) {
+            achado(16, 'VENDAS', v.sale_id, 'O frete, a comissão ou as outras deduções da venda não conferem com os lançamentos de cada conta.');
+          }
+        }
+        var evv = repo.porId('EVENTOS', v.event_id);
+        if (evv && evv.total_value !== v.valor_bruto) achado(16, 'EVENTOS', v.event_id, 'O valor do evento de venda (' + reais_(evv.total_value) + ') difere do valor bruto (' + reais_(v.valor_bruto) + ').');
+        if (v.qtd_animais !== ea.filter(function (l) { return l.efeito_inventario === -1; }).length) achado(16, 'VENDAS', v.sale_id, 'A quantidade de animais da venda não confere com os animais do evento.');
       });
     }
   }
