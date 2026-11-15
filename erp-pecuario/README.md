@@ -29,7 +29,10 @@ O que a Fase 1 faz:
 - Visão geral com números reais; backup diário e sob demanda, restauração pelo sistema, verificação de integridade.
 - Testes de aceitação e base de demonstração (cerca de 300 animais) que rodam na conta do dono, sem tocar a base real.
 
-Pesagens, sanidade, reprodução, compra, venda, transferência, morte e financeiro chegam nas Fases 2 a 5
+Fase 2 (motor de eventos), em andamento: nascimento, compra (com o financeiro completo do evento: lançamentos,
+parcelas a pagar, rateio do custo entre os animais ao centavo e custo de aquisição na ficha), transferência, morte e
+descarte (com custo ou receita opcional), cada um com estorno e correção. Venda, identificação, marcação e o restante
+da Fase 2, e pesagens, sanidade, reprodução e o módulo Financeiro chegam nas etapas e fases seguintes
 ([`docs/fase-0/10-plano-de-implementacao.md`](docs/fase-0/10-plano-de-implementacao.md)). O menu mostra só o que já
 foi entregue.
 
@@ -37,7 +40,7 @@ foi entregue.
 
 | Pasta | Conteúdo |
 |---|---|
-| `src/` | O que vai para o Apps Script: 20 arquivos `.js` (viram `.gs`), 10 `.html` e o manifesto `appsscript.json` |
+| `src/` | O que vai para o Apps Script: 22 arquivos `.js` (viram `.gs`), 10 `.html` e o manifesto `appsscript.json` |
 | `tests/` | Testes em Node (`*.test.js`), harness `vm` com fakes fiéis das APIs do Google (`harness.js`, `fakes/`) e testes de interface com Playwright (`ui/`) |
 | `scripts/` | `push-gas.js` (envio com clasp), `gen-schema.js` (gera `src/Schema.js` dos dicionários de dados), `ui-check.js` |
 | `docs/` | Desenho (`fase-0/`), contratos entre módulos (`CONTRATOS.md`), guia de implantação, relatório da Fase 1, registro de alterações |
@@ -69,7 +72,7 @@ O passo a passo completo, para quem não é especialista em Apps Script, está e
 
 1. Criar um projeto vazio em script.google.com e ativar a Google Apps Script API nas configurações do usuário.
 2. Enviar o código: `npm run gas:push -- <ID do script>` (clasp em versão fixa, pelo Cloud Shell ou por um terminal
-   com Node 22+), ou copiar os 31 arquivos à mão.
+   com Node 22+), ou copiar os 33 arquivos à mão.
 3. No editor: executar `setup`, autorizar, depois `runDiagnostics` e `runAcceptanceTests`, e guardar os relatórios.
 4. Abrir o app pela URL de desenvolvimento (`/dev`) ou pela publicada (`/exec`), cadastrar propriedade e pastos,
    informar a data do marco zero e importar o rebanho.

@@ -162,3 +162,31 @@ repositório; "a verificar na conta do dono" significa que só o roteiro de diag
 - Telas: formulários, revisão, resultado, correção e detalhe dos quatro tipos; atalhos "Registrar parto" e "Descartar".
 - Base de demonstração: transferências no lugar das correções de localização, 12 partos, 1 morte e 1 descarte (314 ativos).
 - Verificado em Node (`npm test`) e no navegador com o backend real (`npm run ui:check`); nada validado na conta do dono.
+
+## 15/11/2026 — Fase 2, etapa FINANCEIRO DO EVENTO E COMPRA (E2.3)
+
+- `FinancialService` (novo, puro): lançamento completo no plano do evento (FINANCEIRO, PARCELAS, RATEIOS e
+  ALOCACOES_FINANCEIRAS), parcelas que somam o valor (valor vazio = divisão igual do que falta), rateio pelo maior resto
+  com os critérios do dicionário (DIRETO com um animal), a conta da negociação por modalidade × base de peso
+  (conferência com tolerância, arrobas, rendimento apurado, critério e bases), a conferência das 20 invariantes de 03b,
+  seção 14 (exportada para a etapa de integridade), os totais a pagar e a receber e o bloco H da ficha.
+- COMPRA no motor (`EventCatalog`, `EventService`): fornecedor, finalidade, modalidade, base de peso, rendimento, preço,
+  peso do lote, valor da nota, critério (só no lote), pasto do lote; grade de animais novos (brinco da fazenda e do
+  vendedor, sexo, raça, nascimento ou idade, peso, carcaça, valor individual, peso no rateio manual) ou que voltam ao
+  rebanho; parcelas do valor dos animais e frete e outros custos, um lançamento por item com parceiro e vencimento
+  próprios, todos 100% rateados; COMPRAS, PESAGENS (COMPRA), IDENTIFICACOES (BRINCO e BRINCO_ORIGEM); custo de
+  aquisição só pelas alocações. Estorno com CONFLICT se um animal comprado tem evento posterior; correção com os mesmos
+  animal_id; lançamentos do original cancelados pela vigência (parcelas não regravadas, desenho-base 16.11).
+- MORTE e DESCARTE: custos associados (conta de custeio escolhida) e receita simples (outras receitas operacionais), com
+  um título e rateio por cabeça, estorno e correção.
+- Parceiros: inativo é recusado como contraparte nova de evento (aceito na correção do evento que já o usava).
+  Plano de contas no bootstrap; `ref:PLANO_CONTAS` com `naturezas` no catálogo. Visão geral com os títulos a pagar e a
+  receber. `AuditService` (BASE_RATEIO): DIRETO confere a base pelo valor do lançamento.
+- Telas: formulário da compra (grade, parcelas, frete), revisão pelo servidor com a negociação e o valor por animal,
+  correção e detalhe da compra (negociação, lançamentos, títulos e rateio), custo e receita na morte e no descarte,
+  aba Financeiro da ficha (custo de aquisição e lançamentos do animal).
+- Base de demonstração: as 8 entradas ao longo dos três anos passam a ser compras (valor por animal, frete e duas
+  parcelas). Correção de compra entra como modelo na varredura de quedas (`tests/unitofwork.adversarial.test.js`).
+- Verificado em Node (`npm test`) e no navegador com o backend real (`npm run ui:check`): CT-03 completo, CT-13 na parte
+  da compra, o exemplo de 03b, seção 15.1, linha a linha, as invariantes de 03b, seção 14, depois de cada comando de
+  todos os testes do motor. Nada validado na conta do dono.

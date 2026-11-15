@@ -591,3 +591,24 @@ test('rotas pela api(): parceiro.salvar, evento.simular e evento.registrar de co
   const inv = s.read({ rota: 'teste.invariantes', reads: s.G.FinancialService.leituras(), acessoCru: true, tratador: (tx) => s.G.FinancialService.conferir(tx) });
   assert.deepEqual(inv, []);
 });
+
+test('período financeiro fechado (RN-082): compra, correção e estorno com competência até fin_bloqueio_ate pedem um aviso só, com justificativa', () => {
+  const amb = ambiente({ config: { fin_bloqueio_ate: '2026-03-31' } });
+  const { m } = amb;
+  const f = amb.parceiro('Fornecedor', 'FORNECEDOR');
+  const dados = compra('2026-03-10', f, PASTOS.A, [garrote('1301'), garrote('1302')], { modalidade: 'CABECA', preco_unitario: 100000, valor_animais: 200000 },
+    { parcelas: [{ data_vencimento: '2026-04-10' }], custos: [{ tipo: 'FRETE', valor: 1000 }] });
+  const av = falha(m, 'registrar', dados);
+  assert.deepEqual([av.code, codigos(av)], ['NEEDS_CONFIRMATION', ['PERIODO_BLOQUEADO']], 'um aviso só, embora haja dois lançamentos');
+  const semJust = falha(m, 'registrar', dados, { avisos: ['PERIODO_BLOQUEADO'] });
+  assert.deepEqual(codigos(semJust), ['CAMPO_OBRIGATORIO']);
+  const r = m.run('registrar', Object.assign({}, dados, { justificativa_aviso: 'Nota que chegou atrasada' }), { avisos: ['PERIODO_BLOQUEADO'] });
+  assert.deepEqual(m.evento(r.dados.event_id).payload_json.avisos_aceitos, [{ codigo: 'PERIODO_BLOQUEADO', n: 1, justificativa: 'Nota que chegou atrasada' }]);
+  // Corrigir para depois do período ainda cancela lançamentos do período fechado: aviso.
+  const corr = { tipo: 'COMPRA', event_id: r.dados.event_id, justificativa: 'Data', campos: Object.assign({}, dados.campos, { event_date: '2026-04-02' }),
+    animais: r.dados.animais.map((a, i) => Object.assign(garrote('130' + (i + 1)), { animal_id: a.animal_id })), parcelas: dados.parcelas, custos: dados.custos };
+  assert.deepEqual(codigos(falha(m, 'corrigir', corr)), ['PERIODO_BLOQUEADO']);
+  const k = m.run('corrigir', Object.assign({}, corr, { justificativa_aviso: 'Data certa é abril' }), { avisos: ['PERIODO_BLOQUEADO'] });
+  // O estorno da correção (abril) não mexe no período fechado: sem aviso.
+  assert.ok(m.run('estornar', { event_id: k.dados.event_id, justificativa: 'Desfeita' }).dados.event_id);
+});

@@ -91,6 +91,9 @@ for (const largura of [1280, 360]) {
     assert.match(h, /Frete da compra de 10\/03\/2026/);
     assert.match(h, /Fase|Financeiro/, 'diz o que ainda chega');
     await semProblemasDeLeiaute(page, largura, 'bloco financeiro da ficha');
+    await A.ir(page, 'inicio', 'Início');
+    await page.waitForSelector('[data-secao="titulos"]');
+    assert.match(await textoTela(page, '[data-secao="titulos"]'), /A pagar\s*R\$ 3\.060,00/);
     assert.deepEqual(a.estado.erros, []);
     await a.fechar();
   });

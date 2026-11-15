@@ -30,7 +30,7 @@ Mantenha o projeto no **projeto Cloud padrão** que o Apps Script cria. Não é 
 ## 2. Enviar o código
 
 Há dois caminhos. O recomendado é o `clasp`, a ferramenta oficial do Google, pelo script `npm run gas:push` (o mesmo
-fluxo que você já usou no Inbox Intelligence). A cópia manual funciona, mas são 31 arquivos e cada atualização exige
+fluxo que você já usou no Inbox Intelligence). A cópia manual funciona, mas são 33 arquivos e cada atualização exige
 repetir tudo.
 
 ### 2.1 Pelo `npm run gas:push` (recomendado)
@@ -54,7 +54,7 @@ repetir tudo.
    terminal, na mesma execução.
 5. O script mostra a conta e o projeto e pergunta *"Enviar src/ para esse projeto, substituindo todos os arquivos dele,
    e publicar o Web App (acesso: somente você)? [s/N]"*. Confira e responda `s`.
-6. O clasp envia os 31 arquivos (os 20 `.js` viram `.gs`, mais os 10 `.html` e o manifesto), apaga o `Código.gs` vazio
+6. O clasp envia os 33 arquivos (os 22 `.js` viram `.gs`, mais os 10 `.html` e o manifesto), apaga o `Código.gs` vazio
    do projeto novo e publica o Web App. No fim aparece a URL `https://script.google.com/macros/s/…/exec`. Guarde-a.
 7. Recarregue o editor do Apps Script e abra **Serviços** na barra lateral: devem aparecer **Sheets** e **Drive**. Se
    algum faltar, adicione-o ali (*Google Sheets API* v4 com o nome `Sheets`; *Drive API* v3 com o nome `Drive`).
@@ -110,11 +110,13 @@ todos precisam estar presentes; um que falte faz a função parar com erro.
 | `UnitOfWork.js` | `UnitOfWork` | Toda gravação: trava, registro da operação, as três fases, recuperação de operação interrompida, proteção contra envio repetido, leitura conferida | AuditService, Repository, Schema, Utils, Validation |
 | `AuditService.js` | `AuditService` | Trilha de auditoria, verificação de integridade (20 conferências), reparo e consulta da auditoria | EventService, Repository, Schema, Timeline, UnitOfWork, Utils, Validation |
 | `EventCatalog.js` | `EventCatalog` | A definição dos tipos de evento (campos, regras, quem aparece no formulário) | Utils, Validation |
-| `EventService.js` | `EventService` | Registrar, corrigir, estornar e simular eventos; brinco único, genealogia, avisos com confirmação, guarda de duplicidade | AuditService, EventCatalog, Schema, Timeline, UnitOfWork, Utils, Validation |
-| `Timeline.js` | `Timeline` | Linha do tempo de cada animal (ordem dos eventos e o que pode vir depois do quê), situação atual calculada pelos eventos, rebanho numa data | Config, Repository, Schema, Utils, Validation |
-| `AnimalService.js` | `AnimalService` | Lista do rebanho, ficha do animal, árvore genealógica, edição com auditoria, animal de fora do rebanho (touro de sêmen, mãe de outra fazenda) | AuditService, Config, EventCatalog, EventService, Schema, Timeline, UnitOfWork, Utils, Validation |
+| `EventService.js` | `EventService` | Registrar, corrigir, estornar e simular eventos (entradas, nascimento, compra, transferência, morte, descarte, correções); brinco único, genealogia, avisos com confirmação, guarda de duplicidade | AuditService, EventCatalog, FinancialService, ReproductionService, Schema, Timeline, UnitOfWork, Utils, Validation |
+| `FinancialService.js` | `FinancialService` | O dinheiro de cada evento: lançamentos, parcelas (a pagar e a receber), rateio entre os animais ao centavo, a conta da negociação de compra (por cabeça, kg, arroba ou lote), as conferências que garantem que os valores fecham, o custo do animal na ficha | Timeline, Utils, Validation |
+| `ReproductionService.js` | `ReproductionService` | Partos e histórico reprodutivo da vaca (ficha, avisos do parto) | Utils |
+| `Timeline.js` | `Timeline` | Linha do tempo de cada animal (ordem dos eventos e o que pode vir depois do quê), situação atual calculada pelos eventos, rebanho numa data | Config, FinancialService, Repository, Schema, Utils, Validation |
+| `AnimalService.js` | `AnimalService` | Lista do rebanho, ficha do animal (inclusive custo de aquisição e lançamentos), árvore genealógica, edição com auditoria, animal de fora do rebanho (touro de sêmen, mãe de outra fazenda) | AuditService, Config, EventCatalog, EventService, FinancialService, ReproductionService, Schema, Timeline, UnitOfWork, Utils, Validation |
 | `PastureService.js` | `PastureService` | Propriedades, pastos (próprios e arrendados) e painel do pasto | AnimalService, AuditService, Config, InventoryService, Schema, Timeline, UnitOfWork, Utils, Validation |
-| `InventoryService.js` | `InventoryService` | Posição do rebanho hoje e numa data, números da Visão geral, alertas | AnimalService, Timeline, UnitOfWork, Utils, Validation |
+| `InventoryService.js` | `InventoryService` | Posição do rebanho hoje e numa data, números da Visão geral (com o total a pagar e a receber), alertas | AnimalService, FinancialService, Timeline, UnitOfWork, Utils, Validation |
 | `ImportService.js` | `ImportService` | Importação da planilha de animais: leitura, colunas, validação, duplicidades, aprovação, lotes, conclusão, desfazer, relatório | AuditService, EventCatalog, EventService, Maintenance, Schema, Timeline, UnitOfWork, Utils, Validation |
 | `FileService.js` | `FileService` | Google Drive: pastas do sistema, planilhas, cópias, lixeira, leitura de arquivos; fotos e documentos (anexos) | AuditService, Schema, UnitOfWork, Utils, Validation |
 | `Maintenance.js` | `Maintenance` | Configuração inicial (`setup`), backup, retenção, restauração, rotina diária e semanal, gatilhos, estado do sistema | AuditService, Database, FileService, Schema, Timeline, UnitOfWork, Utils, Validation |

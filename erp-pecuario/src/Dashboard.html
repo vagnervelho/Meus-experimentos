@@ -78,6 +78,12 @@ var TelaInicio = (function () {
       UI.indicador('Peso vivo total', peso.texto, peso.motivo || nota, 'peso'),
       UI.indicador('Unidades animais', ua.texto, ua.motivo || nota, 'ua'));
     el.appendChild(cartoes);
+    // Títulos das compras e dos lançamentos dos eventos (a baixa e o fluxo de caixa chegam com o módulo Financeiro).
+    var t = v.titulos;
+    if (t && (t.a_pagar || t.a_receber)) {
+      var venc = function (x) { return x ? ' (' + Fmt.dinheiro(x) + ' vencidos)' : ''; };
+      el.appendChild(UI.secao('Contas a pagar e a receber', UI.pares([['A pagar', Fmt.dinheiro(t.a_pagar) + venc(t.vencido_pagar)], ['A receber', Fmt.dinheiro(t.a_receber) + venc(t.vencido_receber)]]), { dado: 'titulos' }));
+    }
 
     var lista = h('ul', { class: 'lista-simples', dataset: { pendencias: '1' } });
     el.appendChild(UI.secao('Pendências', lista, { dado: 'pendencias' }));

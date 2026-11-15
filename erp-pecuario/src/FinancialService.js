@@ -22,6 +22,10 @@ var FinancialService = (function () {
   /** Eventos cujos lançamentos são 100% alocados aos animais (invariante 10; a abertura também: RN-070). */
   var CEM_POR_CENTO = { COMPRA: true, VENDA: true, ENTRADA_INICIAL: true };
   var MAX_PARCELAS = 120;
+  var NOME_NATUREZA = {
+    RECEITA_VENDA_ANIMAIS: 'venda de animais', OUTRA_RECEITA: 'outras receitas', AQUISICAO_ANIMAIS: 'aquisição de animais', CUSTEIO: 'custeio',
+    DESPESA_VENDA: 'despesa de venda', ESTOQUE_INSUMOS: 'compra de insumos', NAO_OPERACIONAL: 'não operacional',
+  };
   var SAIDAS = ['VENDIDO', 'MORTO', 'DESCARTADO', 'BAIXADO_AJUSTE'];
 
   function vazio_(v) {
@@ -148,7 +152,7 @@ var FinancialService = (function () {
     var rotulo = s.rotulo || 'o lançamento';
     var antes = col.erros.length;
     if (!c) throw Validation.erro('INTERNAL', 'planejar: conta ausente.');
-    if (s.naturezas && s.naturezas.indexOf(c.natureza) < 0) col.erro(det_('CONTA_INVALIDA', campo, 'A conta "' + c.nome + '" não serve para ' + rotulo + ': escolha uma conta de ' + s.naturezas.join(' ou ').toLowerCase().replace(/_/g, ' ') + '.'));
+    if (s.naturezas && s.naturezas.indexOf(c.natureza) < 0) col.erro(det_('CONTA_INVALIDA', campo, 'A conta "' + c.nome + '" não serve para ' + rotulo + ': escolha uma conta de ' + s.naturezas.map(function (n) { return NOME_NATUREZA[n] || n; }).join(' ou ') + '.'));
     if (c.ativo === false) col.erro(det_('CONTA_INATIVA', campo, 'A conta "' + c.nome + '" está desativada.'));
     if (!inteiroPositivo_(s.valor)) col.erro(det_('VALOR_FORA_DA_FAIXA', campo, 'O valor de ' + rotulo + ' precisa ser maior que zero.'));
     var parcelas = [];
