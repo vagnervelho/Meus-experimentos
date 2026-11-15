@@ -716,10 +716,11 @@ function conferirTudo(amb, M, msg, datasSistema) {
   } });
   amostra.forEach((D, i) => {
     const x = sis[i];
+    if (D < D0) { assert.deepEqual([x.total, x.motivo], [null, 'ANTERIOR_AO_MARCO_ZERO'], msg + ': antes do marco zero não há inventário'); return; }
     assert.deepEqual({ total: x.total, porPasto: x.porPasto, semPasto: x.semPasto }, inventarioDe(R.linhas, D), msg + ': inventário do sistema em ' + D);
   });
   // A posição do rebanho (InventoryService) e os elegíveis de cada tipo na data, pela mesma linha do tempo.
-  if (datasSistema && datasSistema.length) {
+  if (datasSistema && datasSistema.length && datasSistema[datasSistema.length - 1] >= D0) {
     const D = datasSistema[datasSistema.length - 1];
     const pos = m.ler(G.InventoryService.consultaPosicao({ data: D }));
     const rep = inventarioDe(R.linhas, D);
