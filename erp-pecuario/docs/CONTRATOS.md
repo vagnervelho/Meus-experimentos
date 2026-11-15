@@ -1,4 +1,4 @@
-# Contratos entre módulos (Fase 1)
+# Contratos entre módulos (Fases 1 e 2)
 
 Interfaces que cada etapa entrega para as seguintes. Uma seção curta por módulo: funções públicas, parâmetros,
 retorno e erros. Quem acrescenta um módulo acrescenta a seção dele aqui. O desenho está em `docs/fase-0/`; este
@@ -11,7 +11,9 @@ Estado: etapas BASE (E1.1 e parte da E1.2) — `Schema`, `Utils`, `Validation`, 
 `Maintenance`, `AuditService` (parte 2) e `ImportService` (seções 11, 16 a 18) — e API E PONTOS DE ENTRADA (E1.5 e parte
 da E1.12) — `Api`, `Code` e `TestRunner` (seções 19 a 21) — e INTERFACE, NÚCLEO E COMPONENTES (E1.9, parte 1) — `Index`,
 `Styles`, `JavaScript`, `Components` e `Dashboard` (seção 22) — e TELAS DA FASE 1 (E1.9 parte 2, E1.8 e E1.10 na tela) —
-`Dashboard`, `Animals`, `Pastures`, `Events`, `Settings` e `Import` (seção 23).
+`Dashboard`, `Animals`, `Pastures`, `Events`, `Settings` e `Import` (seção 23). Fase 2, etapa MOVIMENTOS E SAÍDAS (E2.1, E2.2
+e E2.5): NASCIMENTO, TRANSFERENCIA, MORTE e DESCARTE no motor (seções 12 a 14), `ReproductionService` (seção 24),
+`inventario.elegiveis` (seção 15.4), ficha com os blocos D e G (parte de partos) e as telas (seção 25).
 
 ## 1. Regras que valem para todo arquivo de `src/`
 
@@ -605,12 +607,27 @@ LOCKED, CONFIG.
 
 ## 12. `EventCatalog` (puro, só dados)
 
-Definição declarativa dos eventos (04, seção 7). Os 21 tipos estão no catálogo com `fase`; só os da fase corrente
-(`FASE_ATUAL = 1`) têm campos e passam pelo motor: ENTRADA_INICIAL, OUTRA_ENTRADA, AJUSTE_INVENTARIO (subtipos
-CORRECAO_CADASTRO, IDENTIFICACAO_INCORRETA, CORRECAO_LOCALIZACAO; RECLASSIFICACAO e DIVERGENCIA_CONTAGEM são da fase 2)
-e ESTORNO. Vocabulário fechado de 04 mais três atributos de campo: `opcoes` (enum fechado), `lista` (lista aberta de
-LISTAS) e `casas` (decimais). No tipo, os campos de cabeçalho ficam em `campos` e os por animal em `campos_animal`
-(ou em `subtipos[S].campos_animal`).
+Definição declarativa dos eventos (04, seção 7). Os 21 tipos estão no catálogo com `fase`; só passam pelo motor os
+entregues na fase corrente E com campos (`FASE_ATUAL = 2`): ENTRADA_INICIAL, OUTRA_ENTRADA, NASCIMENTO, TRANSFERENCIA,
+MORTE, DESCARTE, AJUSTE_INVENTARIO (subtipos CORRECAO_CADASTRO, IDENTIFICACAO_INCORRETA, CORRECAO_LOCALIZACAO) e ESTORNO.
+COMPRA, VENDA, IDENTIFICACAO, MARCACAO e os subtipos RECLASSIFICACAO e DIVERGENCIA_CONTAGEM são da fase 2 mas ainda não
+têm campos: ficam inativos (subtipo só é ativo com `campos_animal`). Vocabulário fechado de 04 mais três atributos de
+campo: `opcoes` (enum fechado), `lista` (lista aberta de LISTAS) e `casas` (decimais). No tipo, os campos de cabeçalho
+ficam em `campos`, os por animal em `campos_animal` (ou em `subtipos[S].campos_animal`) e os de grupo repetível em
+`grupos_repetiveis[g]` (NASCIMENTO: `crias`). `filtro_elegiveis` aceita `situacao`, `pasto: '$campo'` e `sexo`.
+
+Tipos desta etapa (cabeçalho · por animal):
+- NASCIMENTO (`selecao_animais: UM` = a matriz, fêmea ativa; revisão LOCAL): `event_date, pasto_destino_id (vazio = o
+  da mãe no dia), pai_id, pai_confianca (obrigatória com pai), tipo_parto (LISTAS.TIPO_PARTO), property_id,
+  responsible, notes` · crias: `situacao_nascimento (VIVO|NATIMORTO), sexo, brinco, nome, raca (vazio = a da mãe),
+  peso, metodo_pesagem, observacoes` (só `situacao_nascimento` vale para natimorto).
+- TRANSFERENCIA (`VARIOS`, ATIVO no pasto de origem; LOCAL): `event_date, pasto_origem_id, pasto_destino_id,
+  gta_numero, property_id, responsible, notes` · nenhum campo por animal.
+- MORTE (`VARIOS`, ATIVO; LOCAL; crítico): `event_date, causa (LISTAS.CAUSA_MORTE), diagnostico, property_id,
+  responsible, notes` · `observacoes`.
+- DESCARTE (`VARIOS`, ATIVO; LOCAL; crítico): `event_date, destino (LISTAS.DESTINO_DESCARTE: consumo próprio, doação,
+  permuta, sacrifício), motivo (LISTAS.MOTIVO_DESCARTE), property_id, responsible, notes` · `observacoes`. Sem
+  `event_subtype` (03b, seção 2.4); a receita opcional chega com o FinancialService.
 
 | Função | Contrato |
 |---|---|
@@ -618,7 +635,7 @@ LISTAS) e `casas` (decimais). No tipo, os campos de cabeçalho ficam em `campos`
 | `tipo(nome)` | Resumo + definição (`rotulo, grupo_ui, ordem, fase, frequente, selecao_animais, filtro_elegiveis, modo_entrada, revisao, critico, reads, campos, campos_animal, componentes, grupos_repetiveis, subtipos`). Tipo inexistente → `INTERNAL` |
 | `ativo(tipo, subtipo?, fase?)` | Entregue na fase (padrão: a corrente) e com campos; tipo com subtipos exige subtipo ativo |
 | `tiposAtivos(fase?)`, `modulosAtivos(fase?)` | Listas por fase. Módulos: os 10 itens do menu (§15) + IMPORTACAO (`menu: false`), cada um com `fase` |
-| `camposEvento(tipo)`, `camposAnimal(tipo, subtipo?)`, `leituras(tipo)` | Definições e abas que o comando lê |
+| `camposEvento(tipo)`, `camposAnimal(tipo, subtipo?)`, `camposGrupo(tipo, grupo)`, `leituras(tipo)` | Definições e abas que o comando lê (o motor lê também BAIXAS) |
 | `serializar(fase?)` | `{fase, modulos, tipos}` só dados (vai ao cliente no bootstrap), só tipos e subtipos ativos |
 | `validarCampos(definicoes, valores, {listas}?)` | Formato, obrigatório, `obrigatorio_se`, `visivel_se` (preenchido e não visível → `CAMPO_NAO_SE_APLICA`; `false` passa), lista, faixa (`dinheiro` em centavos, `min`/`max` em reais) e chave desconhecida não vazia (`CAMPO_DESCONHECIDO`). Devolve `[{codigo, campo, mensagem}]` |
 | `CAMPOS_CORRIGIVEIS`, `PESO_MAX_KG` (2000), `TIPOS_CAMPO` | Constantes |
@@ -645,13 +662,16 @@ substituição (desenho-base 16.1).
 | `conferir(tx)` | Projeção gravada × reconstrução total (precisa de `tx.cru`): `[{tabela, id, campo, gravado, calculado}]`, vazio = coincidem. Base da integridade (E1.11) |
 | `inventario(linhas, D, marcoZero)` | `{data, total, porPasto: {pasture_id: n}, semPasto, motivo}`; D < marco zero → nulos com `ANTERIOR_AO_MARCO_ZERO`; sem marco zero → `DADOS_INSUFICIENTES` |
 | `pastoEm(linhasDoAnimal, D, marcoZero)` | `{presente, pasture_id, motivo}` ao fim do dia D |
+| `pastoAntesDaSaida(linhasDoAnimal, D, marcoZero)` | Onde o animal estava no dia D depois das entradas e movimentos de D e antes das saídas de D: a origem de uma saída lançada em D e o pasto padrão das crias de um parto em D |
 | `consultaInventario({data, animal_id?})` | Consulta pronta para `UnitOfWork.read` (rota `inventario.posicao`) |
 
 Regras do projetor que valem como contrato: atributo = criação (`atributos_iniciais_json`, booleanos `S`/`N`) + correção
 CORRECAO_CADASTRO vigente de maior `event_seq`; ANULADO/PENDENTE conservam os atributos declarados na linha de criação
 mais recente (inertes) e zeram o resto; ANIMAIS sem nenhuma linha em EVENTO_ANIMAIS é EXTERNO, salvo se a linha gravada
 está PENDENTE ou ANULADO (queda na fase A) — então ANULADO; estoque (`PRODUTOS.estoque_atual`) ainda não é projetado
-(só a Fase 3 grava MOVIMENTOS_ESTOQUE).
+(só a Fase 3 grava MOVIMENTOS_ESTOQUE). Fêmea nascida por NASCIMENTO tem `partos_previos = 0` (03a, 4.3.5); MORTE →
+MORTO (terminal), DESCARTE → DESCARTADO; PARTO → VAZIA e cria ao pé enquanto houver cria ATIVA sem desmama. Todo
+problema do validador traz também `papel` (no parto, a linha MATRIZ é descrita como "o parto").
 
 ## 14. `EventService` (puro: comandos e consultas do motor)
 
@@ -666,11 +686,12 @@ CONFIG (sem marco zero; conta SALDO_ABERTURA_REBANHO ausente), além dos da Unit
 | `registrar/corrigir/estornar(ctx, pedido)` | `UnitOfWork.run(ctx, comando(...))` → `{dados: resposta, duplicado, opId, dataVersion}` |
 | `simular(ctx, {acao, dados, avisosAceitos})` | Mesmo tratador em modo SIMULAR → `{dados: {simulacao, impactos, avisos, linhas}}`; erro de validação e bloqueio (CONFLICT) são lançados como no commit |
 | `consultaListar(filtros)` / `listar(ctx, filtros)` | `{total, pagina, por_pagina, itens: [evento]}`; filtros `{tipo, de, ate, animal_id, vigentes, pagina, por_pagina}`; inclui anulados e estornos; não inclui operações que falharam |
-| `consultaObter({event_id})` / `obter(ctx, dados)` | `{evento, linhas (com codigo_interno e brinco), detalhes: {IDENTIFICACOES, PESAGENS, REPRODUCAO, AJUSTES, FINANCEIRO, RATEIOS, ALOCACOES_FINANCEIRAS}, anula}`; NOT_FOUND |
+| `consultaObter({event_id})` / `obter(ctx, dados)` | `{evento, linhas (com codigo_interno e brinco), detalhes: {IDENTIFICACOES, PESAGENS, REPRODUCAO, BAIXAS, AJUSTES, FINANCEIRO, RATEIOS, ALOCACOES_FINANCEIRAS}, anula}`; NOT_FOUND |
 | `planejarEntradaImportada(tx, {campos, animais}, {importacao: {import_id}, conhecidos, rotulos})` | O MESMO planejamento da ENTRADA_INICIAL (todas as regras do formulário) dentro do tratador de outro comando: o evento nasce com `import_id` e `source = IMPORTACAO`; `conhecidos` = `{animal_id: {sexo, data_nascimento, mae_id, pai_id, nome}}` de animais ainda pendentes da mesma importação, aceitos como mãe ou pai; `rotulos[i]` substitui o "quem" das mensagens (ex.: `Linha 12`). Devolve o resultado do tratador (`{erros}` ou `{avisos, resumo, derivados, ...}`); exige `leiturasEntrada()` e acesso cru |
 | `leiturasEntrada()` | Abas que esse planejamento lê |
 | `classificarCategoria(perfil, data, categorias)` | Perfil `{sexo, data_nascimento, castrado, reprodutor, parida, categoria_modo, categoria_manual_id}` (valores em D) → `{category_id, codigo, nome, manual}` ou `null` |
 | `coberturaCategorias(categorias)` | `{completa, testes, lacunas: [{perfil, rotulo, idade_de, idade_ate}]}` (05, seção 4.9); base do aviso CATEGORIAS_SEM_COBERTURA em `categoria.salvar` |
+| `MAX_ANIMAIS` (1000), `MAX_CRIAS` (4) | Limites de um lançamento e de crias por parto |
 
 `dados` de registrar/corrigir: `{tipo, subtipo?, campos: {event_date, property_id, description, responsible, notes,
 justificativa (AJUSTE)}, animais: [item], event_id (corrigir), justificativa (corrigir), justificativa_aviso (com
@@ -687,14 +708,38 @@ PERIODO_BLOQUEADO)}`. Item por tipo:
 - AJUSTE_INVENTARIO: CORRECAO_CADASTRO `{animal_id, campo, valor_novo}` (um item por campo; texto canônico, `''` =
   desconhecido; apagar mãe, pai ou nascimento apaga a confiança); IDENTIFICACAO_INCORRETA `{animal_id, brinco}`;
   CORRECAO_LOCALIZACAO `{animal_id, pasto_destino_id, pasto_origem_id?}` (a origem é a da linha do tempo na data).
+- NASCIMENTO: `animais: [{animal_id: matriz}]` (exatamente uma; `UMA_MATRIZ`) e `crias: [{situacao_nascimento, sexo,
+  brinco, nome, raca, peso, metodo_pesagem, observacoes}]` (1 a 4; `SEM_CRIAS`, `CRIAS_DEMAIS`). Cada viva cria um animal
+  (papel CRIA, +1) com mãe = matriz (CONFIRMADA), nascimento = data do parto (CONFIRMADA), origem NASCIDO, castrado e
+  reprodutor N no macho, raça da mãe por padrão, pai do cabeçalho; brinco opcional (pendência "sem brinco"); peso →
+  PESAGENS tipo NASCIMENTO. A matriz tem linha MATRIZ (efeito 0, validada como fato: presença na data, limites
+  inclusivos). Uma linha REPRODUCAO PARTO na matriz (`qtd_nascidos_vivos`, `qtd_natimortos`, `tipo_parto`, `touro_id` =
+  pai, `data_parto`), mesmo sem vivos. Erros: `MATRIZ_NAO_FEMEA`, `ANIMAL_EXTERNO`, linha do tempo (`FORA_DA_PERMANENCIA`,
+  `APOS_MORTE`, `ANTES_DO_NASCIMENTO`), genealogia do pai (`SEXO_DO_PROGENITOR`, `NASCIMENTO_DO_PROGENITOR`, `NAO_ENCONTRADO`),
+  brinco, `PASTO_INATIVO`, `CAMPO_OBRIGATORIO` (mãe sem pasto no dia e pasto vazio). Avisos (uma vez por parto):
+  `IDADE_REPRODUTIVA`, `INTERVALO_PARTO_CURTO` (outro parto a menos de `dias_gestacao`, antes ou depois). Data antes do
+  marco zero: registro histórico (`pre_marco_zero = S`, efeito 0, pasto opcional, sem lotação), crias HISTORICO, validado só
+  contra nascimento e chegada declarada da matriz. Na correção, a cria viva leva o `animal_id` do original (outro →
+  `SO_ANIMAIS_NOVOS`); cria que vira natimorta ou sai é anulada com as regras do estorno.
+- TRANSFERENCIA: `animais: [{animal_id}]`; origem e destino no cabeçalho. Erros: `DESTINO_IGUAL_ORIGEM`, `PASTO_INATIVO`,
+  `NAO_ENCONTRADO` (pastos e animal), `ANIMAL_EXTERNO`, `ANIMAL_REPETIDO`, `ORIGEM_DIVERGENTE` por animal (a origem é
+  conferida pela linha do tempo na data), `FORA_DO_REBANHO`, `APOS_MORTE`; retroativa que quebra evento posterior →
+  CONFLICT com o evento. Aviso `LOTACAO_ACIMA_DA_CAPACIDADE`. `payload_json.gta_numero` quando informado.
+- MORTE / DESCARTE: `animais: [{animal_id, observacoes?}]`. Linha de saída (−1) com `pasto_origem_id` tirado da linha do
+  tempo (`Timeline.pastoAntesDaSaida`) e uma linha de BAIXAS por animal (`tipo`, `causa`/`diagnostico` ou
+  `motivo`/`destino`, `responsavel` = `responsible`, `observacoes`). Sem `total_value` nesta etapa.
+- Datas antes do marco zero só no NASCIMENTO; nos demais tipos, `ANTES_DO_MARCO_ZERO` sozinho (sem conferir a linha do tempo).
 - ESTORNO (`estornar`): `{event_id, justificativa}`.
 
 Resposta (e reenvio duplicado): `{acao, event_id, event_type, event_subtype, event_date, status, total_value,
 substitui, estorna, animais: [{animal_id, codigo_interno, brinco, sexo, situacao_cadastral, pasto_atual_id}]}`
 (no estorno, os animais do evento estornado). `derivados` = `{animais, eventos}`. `payload_json`: `justificativa`
-(corrigir/estornar), `valor_abertura_origem` (`INFORMADO`), `avisos_aceitos: [{codigo, n, justificativa?}]`.
-Códigos de aviso emitidos: POSSIVEL_DUPLICIDADE, BRINCO_PARECIDO, IDADE_REPRODUTIVA, LOTACAO_ACIMA_DA_CAPACIDADE (em
-cabeças), PERIODO_BLOQUEADO; política por código em `avisos_politica` (ausente = AVISA).
+(corrigir/estornar), `valor_abertura_origem` (`INFORMADO`), `gta_numero` (TRANSFERENCIA), `avisos_aceitos: [{codigo, n,
+justificativa?}]`. `impactos` da simulação: `{acao, event_type, event_subtype, event_date, animais, novos, anulados,
+substitui, total_value, abertura, pre_marco_zero, parto: {nascidos_vivos, natimortos, pasto_destino_id, historico} | null,
+transferencia: {pasto_origem_id, pasto_destino_id} | null, baixas}`. Códigos de aviso emitidos: POSSIVEL_DUPLICIDADE (a
+matriz conta como animal do parto), BRINCO_PARECIDO, IDADE_REPRODUTIVA, INTERVALO_PARTO_CURTO, LOTACAO_ACIMA_DA_CAPACIDADE
+(em cabeças), PERIODO_BLOQUEADO; política por código em `avisos_politica` (ausente = AVISA).
 
 ## 15. Serviços de cadastro e consulta (E1.7 e E1.8): `Config`, `AnimalService`, `PastureService`, `InventoryService`
 
@@ -735,7 +780,7 @@ dados, {chave, avisos})` (confere a projeção depois de cada comando), `ler(con
 | `linhaLeve(L, a)`, `COLUNAS_LEVE` | Linha do store. Idade/categoria na data de referência (hoje; baixado: data da saída); `categoria_id` null no EXTERNO; `peso_vencido` só em ATIVO |
 | `consultaCargaInicial()` / `cargaInicial(ctx)` | ATIVOS + EXTERNOS em colunas: `{data, n, colunas, valores: {coluna: [..]}}` (ordem de `codigo_interno`) |
 | `consultaListar({situacoes?})` — `animal.listar` | Mesmo formato; padrão = baixados (VENDIDO, MORTO, DESCARTADO, BAIXADO_AJUSTE, HISTORICO); PENDENTE/ANULADO → `VALIDATION` |
-| `consultaFicha({animal_id, geracoes?})` — `animal.ficha` | `{animal_id, data, geral (A), genealogia (B), localizacao (C), pastos (D: períodos [início, fim) com dias), peso (E), sanitario (F), reprodutivo (G), financeiro (H), eventos (I: linha do tempo com status, vigente, anulado_por, ajustes), anexos (J: ANEXOS ativos do animal)}`; todo bloco traz `entregue`; E, F, G e H voltam `{entregue: false, modulo, fase, mensagem, itens: []}`. Genealogia: `{sem_genealogia, mae, pai, arvore (nós {..., confianca, confirmado, geracao, disponivel, tem_ancestrais, mae, pai}), filhos [{..., papel MAE\|PAI, confianca}]}`; `geracoes` 1–6 (padrão 3). `NOT_FOUND`; `VALIDATION` |
+| `consultaFicha({animal_id, geracoes?})` — `animal.ficha` | `{animal_id, data, geral (A), genealogia (B), localizacao (C), pastos (D: `periodos` [início, fim) com dias, evento de `entrada` e de `saida` — entrada, transferência, correção de localização, saída —, e `por_pasto: [{pasture_id, pasto_nome, dias, periodos, atual}]`), peso (E), sanitario (F), reprodutivo (G), financeiro (H), eventos (I: linha do tempo com status, vigente, anulado_por, ajustes; no parto aparece também na mãe, papel MATRIZ), anexos (J: ANEXOS ativos do animal)}`; todo bloco traz `entregue`; E, F e H voltam `{entregue: false, modulo, fase, mensagem, itens: []}`; G é `ReproductionService.blocoFicha` (seção 24: parte de partos, `parcial: true`). Genealogia: `{sem_genealogia, mae, pai, arvore (nós {..., confianca, confirmado, geracao, disponivel, tem_ancestrais, mae, pai}), filhos [{..., papel MAE\|PAI, confianca}]}`; `geracoes` 1–6 (padrão 3). `NOT_FOUND`; `VALIDATION` |
 | `comandoEditar` — `animal.editar` | Um formulário só. `dados: {animal_id, campos, justificativa?, justificativa_aviso?}`; só o que muda é gravado. `nome, raca, observacoes, foto_anexo_id` → AUDITORIA; campos de `EventCatalog.CAMPOS_CORRIGIVEIS` → evento AJUSTE_INVENTARIO/CORRECAO_CADASTRO datado de hoje, com todas as regras do motor (justificativa obrigatória: `CAMPO_OBRIGATORIO`), NA MESMA operação da auditoria. EXTERNO: sexo e nascimento por AUDITORIA (`AuditService.alteracao(..., {externo: true})`), demais sensíveis `CAMPO_NAO_SE_APLICA`. `brinco`, pasto, situação, colunas calculadas → `CAMPO_NAO_EDITAVEL` (mensagem com o caminho certo); `ANEXO_INVALIDO`; `CAMPO_DESCONHECIDO`. Resposta `{animal_id, event_id, correcoes, cadastro, animal (linha leve)}`; nada muda → `semAlteracao` |
 | `comandoCadastrarExterno` — `animal.cadastrarExterno` | `dados: {campos: {nome*, sexo*, raca, data_nascimento, data_nascimento_confianca, observacoes}}`; nome repetido entre externos → aviso `POSSIVEL_DUPLICIDADE`; linha de ANIMAIS nasce na fase C (AUDITORIA CRIAR), situação EXTERNO. Resposta `{animal_id, animal}` |
 
@@ -757,6 +802,7 @@ dados, {chave, avisos})` (confere a projeção depois de cada comando), `ler(con
 | `compor(L, itens, data, {animais}?)` | `{cabecas, machos, femeas, por_categoria (por prioridade), sem_categoria, peso_vivo_total, ua, animais?}` |
 | `consultaPosicao({data?, animal_id?})` — `inventario.posicao` | `{data, marco_zero, motivo, cabecas, por_sexo: {M, F}, por_pasto: [{pasture_id, nome, cabecas}], sem_pasto, por_categoria, sem_categoria, peso_vivo_total, ua}`; com `animal_id`: `{data, animal_id, presente, pasture_id, motivo}`. Futura/inválida → `VALIDATION`; animal inexistente → `NOT_FOUND` |
 | `consultaVisaoGeral()` — `dashboard.obter` (Fase 1) | Posição de hoje + `geradoEm` + `pendencias: {sem_pasto, sem_brinco, sem_categoria}` |
+| `consultaElegiveis({tipo, subtipo?, data?, pasture_id?})` — `inventario.elegiveis` | Animais elegíveis a um tipo ativo cujo `filtro_elegiveis.situacao` é ATIVO (transferência, nascimento, morte, descarte), pela linha do tempo na data: no rebanho ao fim de D, no pasto pedido em D, com o `sexo` do filtro. `{data, tipo, pasture_id, motivo, n, itens: [{animal_id, codigo_interno, brinco, sexo, pasture_id}]}`; antes do marco zero (ou sem ele) `n`/`itens` null com o motivo. `VALIDATION` (`TIPO_SEM_ELEGIVEIS`, data inválida ou futura), `NOT_FOUND` (pasto) |
 | `consultaAlertas(estado)` — `alerta.listar` | `estado = {backup: {ultimo_em: ISO\|null}, integridade: {verificado_em, erros}\|null}` vem de quem chama (Maintenance/Api; fora da planilha). Devolve `{data, geradoEm, alertas: [{codigo, nivel AVISO\|ERRO, mensagem, n, ids, entidade}], nao_avaliados: [{codigo, motivo, mensagem}]}`; códigos `ALERTAS`: ATIVO_SEM_PASTO, SEM_BRINCO, SEM_CATEGORIA, BACKUP_ATRASADO (`alerta_backup_atrasado_dias`; nenhum backup = alerta), INTEGRIDADE_COM_ERRO, IMPORTACAO_INCOMPLETA (IMPORTACOES `IMPORTANDO`). Parte do `estado` ausente vai para `nao_avaliados` |
 
 ## 16. `FileService` (plataforma: Drive v3 e UrlFetchApp)
@@ -903,7 +949,7 @@ banco/DENIED/rascunho), appVersion (= package.json), serverTime (ISO UTC)}`; em 
 | `APP_VERSION`, `TITULO`, `FAIXA_TESTE` (`'BASE DE TESTE'`), `RASCUNHO` (`{prefixo, maxBytes: 8000, max: 40, validadeDias: 30}`) | Constantes |
 
 **Rotas.** As 51 canônicas; as de fase futura respondem `NOT_FOUND` "Esta função faz parte do módulo X, que chega na fase N"
-(`inventario.elegiveis` 2; `produto.salvar`, `protocolo.salvar`, `estacao.salvar`, `sanidade.agenda`,
+(`produto.salvar`, `protocolo.salvar`, `estacao.salvar`, `sanidade.agenda`,
 `reproducao.indicadores`, `peso.desempenho` 3; `conta.salvar`, `preco.salvar`, `parcela.*`, `financeiro.*` 4;
 `relatorio.*` 5); rota desconhecida → `NOT_FOUND`. Cada uma chama o serviço da seção correspondente com
 `pedido = {idempotencyKey, dados, avisosAceitos, dataVersionEsperada}` (comando) ou `dados` (consulta). Particularidades:
@@ -937,7 +983,7 @@ falha → exceção (a execução aparece com erro).
 |---|---|
 | `runAcceptanceTests({usuario, plano?, limiteMs?, reiniciar?, injetar?})` | `plano` = `ACEITACAO` (padrão, ou `TEST_PLAN`) ou `DEMO`. ACEITACAO: base de teste NOVA (a anterior vai para a lixeira) por `Maintenance.setup({ambiente: 'TESTE'})` e os cenários `CENARIOS` (PREPARO, CT-09, CT-10, CT-12, CT-18, RESTAURACAO, CT-20, CT-11, ISOLAMENTO), todos pela `Api` com `ambiente: 'TESTE'`. Relatório `{plano, completo: true, ok, resumo: {cenarios: {PASSOU, FALHOU}, passos: {PASSOU, FALHOU, NAO_SE_APLICA, PENDENTE_NA_CONTA_DO_DONO}}, cenarios: [{id, titulo, situacao, falha, ms, passos: [{passo, titulo, situacao, detalhe}]}], corpus, limpeza, arquivo: {nome, id}}`, gravado em JSON na pasta Testes. Pausa perto de `limiteMs` (padrão 4 min) → `{completo: false, proximo, mensagem}`; a chamada seguinte continua (cursor `TEST_CURSOR`, resultados `TEST_RESULTADO:<i>`, apagados no fim). Falha de cenário vai para o relatório (e para o log) e os demais seguem; falha no PREPARO encerra. No fim: backups e bancos antigos da rodada para a lixeira; a base de teste final fica (página de concorrência) |
 | `injetar` (só no Node) | `{ocuparLock(), liberarLock()}`: outra execução segura o lock (CT-10, passo 5). Sem ele, o passo é NAO_SE_APLICA |
-| DEMO | Base de demonstração em `DEMO_SPREADSHEET_ID` (criada pelo setup se não existe): propriedade, 6 pastos (1 arrendado), D0 = hoje − 1095 (ou o marco zero já gravado), 6 ENTRADA_INICIAL de 40 animais (110 vacas, 4 touros, 30 novilhas, 48 bezerros ao pé com a mãe, 48 garrotes), 8 OUTRA_ENTRADA de 8, 1 entrada estornada, 3 correções de localização → 304 ativos conferidos pelo inventário. Sorteio com semente fixa (`geracaoDemo(d0)`), chaves `seed:<n>`: reexecutar não grava de novo. Comando recusado para o seed: `{completo: false, ok: false, proximo, falha}` (cursor fica no passo) |
+| DEMO | Base de demonstração em `DEMO_SPREADSHEET_ID` (criada pelo setup se não existe): propriedade, 6 pastos (1 arrendado), D0 = hoje − 1095 (ou o marco zero já gravado), 6 ENTRADA_INICIAL de 40 animais (110 vacas, 4 touros, 30 novilhas, 48 bezerros ao pé com a mãe, 48 garrotes), 8 OUTRA_ENTRADA de 8, 1 entrada estornada, 3 TRANSFERENCIA de garrotes (origem fixa no plano), 12 NASCIMENTO (um gemelar com natimorto), 1 MORTE e 1 DESCARTE → 314 ativos conferidos pelo inventário. Sorteio com semente fixa (`geracaoDemo(d0)`), chaves `seed:<n>`: reexecutar não grava de novo. Comando recusado para o seed: `{completo: false, ok: false, proximo, falha}` (cursor fica no passo) |
 | `runDiagnostics({usuario, linhas?})` | Itens SP-01 a SP-10 e RUNTIME `{id, titulo, situacao: OK \| FALHOU \| ALERTA \| NAO_SE_APLICA, medidas, observacao}`: corpus nas três formas + coerção Geral (formato do fixture) + atomicidade; sonda do Drive + abertura pelo SpreadsheetApp; lock; e-mail ativo; tempos com `linhas` (padrão 10.000) em EVENTO_ANIMAIS + custo de ler as propriedades; gatilhos; fuso do V8. Planilhas temporárias na pasta Testes (lixeira no fim); sem e-mail nem ID de arquivo no relatório; JSON também na pasta Testes |
 | `paginaConcorrencia()` | HTML autocontido (CT-10, passo 6): 5 gravações com chaves diferentes + 2 com a mesma chave, em paralelo, na base de TESTE; confere 7 respostas boas, 1 duplicada e 6 eventos com `event_seq` distintos |
 | `CENARIOS`, `SITUACAO`, `LIMITE_MS`, `geracaoDemo(d0)` | Constantes e o gerador determinístico |
@@ -999,7 +1045,7 @@ registram suas rotas na carga com `Telas.registrar` (o `JavaScript` já foi carr
 | `Campos.criar(def, {valor, aoMudar, idBase, rotulos, aoNovo})` | Um campo do catálogo (todos os `TIPOS_CAMPO` + `ref:TABELA`): rótulo sempre visível, ajuda, unidade, erro sob o campo; `lista`/`bool` com até 3 opções viram botões; `ref:PASTOS`/`ref:PARCEIROS` com "+ Novo" (miniformulário que grava e seleciona); `ref:ANIMAIS` com a resolução de brinco; `anexo` lê o arquivo (imagem reduzida a ~300 KB + miniatura ~15 KB) em `{nome_arquivo, mime_type, tamanho_bytes, conteudo_base64, miniatura_base64}` |
 | `Campos.converter(def, bruto)` | Bruto → valor do contrato ou `{erro}`: dinheiro em centavos (min/max em reais), decimal com `casas`, data yyyy-MM-dd, `outras_identificacoes` → `[{tipo, codigo}]`; `min_exclusivo: true` recusa o próprio mínimo ("maior que 0"), espelhando `minExclusivo` do esquema (formulários de pasto, propriedade e categoria) |
 | `Formulario.bloco(defs, valores, o)` / `Formulario.converterValores(defs, valores, contexto)` | Campos com `visivel_se`, `obrigatorio_se` e `default` (`HOJE`, literal, `{de: 'CONFIGURACOES.chave'}`); oculto não vai ao servidor; vazio visível vai `null` |
-| `Seletor.criar({modo: UM\|VARIOS, filtro (filtro_elegiveis), tipo, selecionados, aoMudar, dataEvento, valorCampo})` | Busca, filtros, todos do pasto (data ≠ hoje → `inventario.elegiveis`; `NOT_FOUND` na Fase 1 → posição de hoje com o rótulo), colar lista (achados, não encontrados, repetidos). Inelegíveis só pré-marcados |
+| `Seletor.criar({modo: UM\|VARIOS, filtro (filtro_elegiveis), tipo, selecionados, aoMudar, dataEvento, valorCampo})` | Busca, filtros, todos do pasto (data ≠ hoje → `inventario.elegiveis` `{tipo, data, pasture_id}`, rótulo "Posição em …"; animal que estava no pasto na data e já saiu aparece pelo código), colar lista (achados, não encontrados, repetidos). Inelegíveis só pré-marcados (situação, pasto e `sexo` do filtro) |
 | `Registro.abrir(tipo, {subtipo, campos, linhas: [{animal_id, valores}], rotulos: {event_id: texto}, origem})` | Atalho com pré-preenchimento (ficha, pasto, listagem, "Desfazer"); pergunta antes de apagar um rascunho do mesmo tipo |
 | Rotas `evento/novo` e `evento/novo/:tipo/:etapa?` (`revisao`, `resultado`) | Seletor de tipo (grupos de `grupo_ui`, sem ESTORNO) → formulário (data → animais → campos → grupos → observações; Enter percorre) → revisão LOCAL ou SERVIDOR (`evento.simular`; o commit leva `dataVersionEsperada`) → resultado (coletivo ou crítico) ou aviso + volta à origem. Pedido: o de `EventService` (seção 14); grupos repetíveis vão em `dados.<grupo>`. Erros por animal ligados à linha por `animal_id`, brinco ou "Animal N da lista" |
 | `Registro.conferirPendentes()` | Na abertura: rascunho `ENVIANDO` → `operacao.status` antes de tudo (CONFIRMADA → resultado; senão volta a editar com faixa "não foi gravado"); `EDITANDO` → faixa "… — registro não concluído (N animais) · Continuar · Descartar" |
@@ -1048,3 +1094,29 @@ Testes: `tests/telas.test.js` (Node: rotas novas, exportação, filtros, parâme
 aceito pelo servidor) e `tests/ui/telas.test.js` (Playwright, a 1280 e a 360 px: cadastrar pela entrada inicial e ver
 na lista e na ficha; editar campo sensível; importar 30 linhas com 2 erros e 1 duplicata; estornar e corrigir;
 exportar e conferir contra a tela; pastos, configurações e sistema a 360 px).
+
+## 24. `ReproductionService` (puro: partos e histórico reprodutivo da matriz, Fase 2)
+
+Um parto = um NASCIMENTO = uma linha REPRODUCAO PARTO (DV-15). Recebe `f = Timeline.fonte(tx, ...)` (respeita os eventos
+excluídos da fonte: validação de estorno e de substituição). Exposição, cobertura, IA, diagnóstico, aborto, desmama e os
+indicadores por estação são da Fase 3.
+
+| Função | Contrato |
+|---|---|
+| `partos(f, matrizId)` | Partos vigentes, do mais antigo ao mais recente (data, `event_seq`): `[{reproduction_id, event_id, event_seq, data, nascidos_vivos, natimortos, tipo_parto, pai_id, pre_marco_zero}]` |
+| `contarPartos(partosPrevios, partos, dataEntrada)` | Número de partos: `max(partos_previos declarados, partos registrados antes da entrada) + partos registrados da entrada em diante` (o declarado e o registrado antes da entrada descrevem o mesmo passado) |
+| `avisosParto(params, {data_nascimento}, data, outrosPartos)` | `[{codigo, mensagem}]` sem o "quem": `IDADE_REPRODUTIVA` (meses completos < `idade_min_reprodutiva_meses`), `INTERVALO_PARTO_CURTO` (outro parto a menos de `dias_gestacao` dias, antes, depois ou no mesmo dia) |
+| `historico(f, animal)` | `{partos: [{event_id, data, nascidos_vivos, natimortos, gemelar, tipo_parto, pai_id, pre_marco_zero, intervalo_dias, crias: [{animal_id, codigo_interno, brinco, sexo, situacao_cadastral}]}], partos_previos, partos_registrados, n_partos, ultimo_parto, crias_nascidas_vivas, natimortos, intervalo_medio_dias: {valor, motivo, n}}` |
+| `blocoFicha(f, animal)` | Bloco G da ficha: `{entregue: true, parcial: true, aplica (fêmea), pendente: {modulo: 'REPRODUCAO', fase: 3, mensagem}, situacao_reprodutiva, cria_ao_pe}` + o `historico` (fêmea) ou `{mensagem, partos: []}` (macho) |
+
+## 25. Telas da Fase 2, etapa de movimentos e saídas — `Components`, `Events`, `Animals`, `JavaScript`
+
+| Peça | O que existe |
+|---|---|
+| Seletor de tipo | Só os tipos ativos do catálogo: "Mais usados" (nascimento, transferência, morte) e os grupos (Movimentação, Reprodução, Correções) |
+| `Registro` (formulário) | Grupos repetíveis: `crias` começa com uma linha, "+ Outra cria (gêmeos)"; linha do grupo leva `animal_id` na correção (`dados.crias[i].animal_id`); erro do servidor "Cria N: …" volta para a linha N do grupo. Revisão LOCAL com o resumo do tipo (crias vivas e natimortas, pasto das crias; "Pasto A → Pasto B"; consequência da saída); verbos "Gravar o parto", "Transferir", "Registrar a morte", "Registrar o descarte" (botão de perigo nos críticos); resultado persistente ("Parto gravado: 1 cria entrou no rebanho.", "N animais transferidos.", "Morte registrada: …") |
+| `Registro.abrir(tipo, {campos, linhas, grupos: {crias: [{animal_id?, valores}]}, corrige, origem})` | Pré-preenchimento também dos grupos repetíveis; a correção compara as crias pela `animal_id` (`antes.grupos`) |
+| `TelaEventos` | Corrigir também NASCIMENTO, TRANSFERENCIA, MORTE e DESCARTE (`previaCorrecao`: cabeçalho do evento, pastos da linha, BAIXAS, REPRODUCAO e payload; crias como linhas do grupo); detalhe com "Saída do rebanho" (BAIXAS), "Parto" (REPRODUCAO) e GTA |
+| `TelaRebanho` (ficha) | Atalhos "Registrar parto" (fêmea ativa, pelo `filtro_elegiveis`), "Transferir", "Registrar morte", "Descartar"; aba Pastos com o evento de entrada e de saída de cada período e "Dias em cada pasto"; aba Reprodução com situação, cria ao pé, nº de partos, partos (crias, intervalo) e o que chega na Fase 3 |
+| `Fmt` | Rótulos `SITUACAO_NASCIMENTO` (VIVO, NATIMORTO) e `TIPO_BAIXA` |
+
