@@ -76,6 +76,12 @@ LINHA_DO_TEMPO e a base estimada em BASE_RATEIO (seção 11); `Timeline.entradaD
 entrada do marco zero (seção 18); as telas da rodada (seção 34).
 Fase 2, DOCUMENTAÇÃO DE ENTREGA: este arquivo conferido com o código por amostra (a superfície pública de cada módulo
 contra as seções e as 63 rotas de `Api.rotas()`: 51 canônicas, 12 extras), sem mudança de contrato.
+Etapa TRAVA ÚNICA DE INTEGRIDADE ANTES DE GRAVAR: as checagens de domínio da verificação de integridade numa função só,
+com escopo (`AuditService`, seção 11), rodadas pela `UnitOfWork` sobre o retrato do que ficaria gravado, entre o tratador
+e a fase A de todo comando, também no SIMULAR (seção 10.5); o retrato em memória com cópia na escrita e a memória refeita
+só na aba alterada (`Repository.bifurcar`, seção 9); o financeiro conferido por escopo (`FinancialService.conferir(tx,
+escopo)`, seção 26); a fêmea de cada registro reprodutivo que não é parto conferida na GENEALOGIA (seção 11); a medição
+`npm run trava:medir` (seção 7).
 
 ## 1. Regras que valem para todo arquivo de `src/`
 
@@ -424,8 +430,9 @@ Nada disto foi conferido na conta real; o `runDiagnostics` precisa medir e, onde
 
 ### 6.6 Apoio aos testes de persistência (`tests/apoio-persistencia.js`)
 
-`ambiente({primitiva, order, projecoes, gas, nome})` (`projecoes` aceita também `(G) => porta`, ex.: `G.Timeline.porta`) cria a planilha-banco com as 34 abas pela própria porta de
-E/S e devolve `{gas, G, banco, ctx(), run(cmd), tentarRun(cmd), read(q), status(chave), recoverAll(), marcador(),
+`ambiente({primitiva, order, projecoes, gas, nome, propriedade})` (`projecoes` aceita também `(G) => porta`, ex.: `G.Timeline.porta`) cria a planilha-banco com as 34 abas pela própria porta de
+E/S e a propriedade que os comandos de exemplo citam (`PROPRIEDADE`; sem ela, o evento de exemplo seria um ERRO de chave
+estrangeira e a trava de integridade o recusaria; `propriedade: false` quando o teste semeia o próprio cadastro) e devolve `{gas, G, banco, ctx(), run(cmd), tentarRun(cmd), read(q), status(chave), recoverAll(), marcador(),
 versao(), tabela(aba), lido(abas), vigentes()}`. Comandos de exemplo: `cmdEvento({chave, animais, avisos, erros,
 modo, ...})` e `cmdPasto(G, {chave, dados})`; `projetorDeTeste()` cumpre a porta de projeções (animal com entrada
 vigente → ATIVO; sem → ANULADO). `rodarInstrumentado(amb, cmd, {antes: k | depois: k, chegam, antesDe(k, rotulo)})`
@@ -472,6 +479,7 @@ Construtores: `bicho(extra)`, `entradaInicial(animais, campos)`, `outraEntrada(d
 | `npm run gen:schema` | Regenera `src/Schema.js`; `-- --check` só confere e sai com 1 se estiver desatualizado |
 | `npm run ui:check` | Confere `src/*.html`: nenhum recurso externo (no fonte inteiro) e página ≤ 450 KB medida no que vai ao aparelho (`conferirPaginas(arquivos, medidos)`; `servidas(paginas)` = cada include como o doGet o entrega, por `Api.compactar`) e na página montada pelo doGet; depois, os testes de navegador |
 | `npm run gas:push` | Envia `src/` com o clasp (versão fixa por `npx`) e publica; `-- --no-deploy` só envia. Recusa manifesto que não seja o do projeto |
+| `npm run trava:medir` | Tempo dos 391 comandos da base de demonstração (TestRunner, `TEST_PLAN = DEMO`) no harness e quanto dele fica em `AuditService.travar`; `-- <raiz>` mede outra cópia do projeto (a de antes da trava, para o "sem a trava"), `-- --vezes N` dá a mediana de N execuções (seção 10.5) |
 
 `src/appsscript.json`: fuso `America/Porto_Velho`, V8, Web App `USER_DEPLOYING` + `MYSELF`, cinco escopos
 (`spreadsheets`, `drive.file`, `script.scriptapp`, `userinfo.email`, `script.external_request`), serviços avançados
@@ -572,10 +580,18 @@ fuso) → {utilities, utils}`.
 |---|---|
 | Pública (`tx.repo`) | `vigentes(aba)`; `porId(aba, id)`; `por(aba, campos, valor)` (índice múltiplo; `campos` nome ou lista, `valor` valor ou lista; devolve cópia da lista); `unico(aba, campos, valor)`; `agrupados(aba, campos)` (mapa inteiro; chave composta unida por `'\u0000'`); `eventoVigente(id)`; `contador(aba, campo, extrair?)` (máximo + 1 sobre TODAS as linhas, inclusive inertes; cada chamada reserva um número); `carregada(aba)` |
 | Crua (`tx.cru`) | a pública + `cru(aba)`, `cruPorId`, `cruPor`, `linhaDe(aba, id)`, `avaliar(eventId)`, `operacoesOrfas()`, `celulaCoercida(aba, linha, coluna)`, `alertas()`, `cabecalho(aba)` — nenhum método que altere a memória |
-| Interna (UnitOfWork) | a crua + `carregar`, `carregadas`, `resolver(atualizacoes)` (por chave → por linha, só o que muda; célula coercida é regravada), `incluir(aba, registros, primeiraLinha)`, `alterar(aba, id, campos)`, `publico()`, `leituraCrua()` |
+| Interna (UnitOfWork) | a crua + `carregar`, `carregadas`, `resolver(atualizacoes)` (por chave → por linha, só o que muda; célula coercida é regravada), `incluir(aba, registros, primeiraLinha)`, `alterar(aba, id, campos)`, `bifurcar()`, `publico()`, `leituraCrua()` |
 
 Índices (`02`, seção 8) são montados sob demanda, uma vez por unidade, com uma passada sobre as linhas vigentes (ou
-cruas, no acesso cru); chave vazia não indexa. Aba não declarada → `INTERNAL`.
+cruas, no acesso cru); chave vazia não indexa. Aba não declarada → `INTERNAL`. `incluir` refaz toda a memória (índices,
+vigentes, avaliações); `alterar` refaz só a da aba alterada, salvo quando o campo decide a vigência de outras abas
+(`OPERACOES.status`, `IMPORTACOES.status`; em EVENTOS `event_id`, `op_id`, `import_id`, `reversal_of_event_id`,
+`event_type`, `event_seq`; as chaves de FINANCEIRO e RATEIOS): aí toda.
+
+**Retrato** (trava de integridade, seção 10.5): `bifurcar()` devolve um repositório interno novo com as abas JÁ lidas,
+que compartilha as linhas e copia cada uma antes da primeira mudança (`alterar` no retrato não toca no de origem;
+`incluir` sem `primeiraLinha` põe as linhas depois da última); não lê a planilha (`carregar` de aba que faltava →
+`INTERNAL`) e nada dele é gravado.
 
 **Plano de escrita** `Repository.plano()`: `anexar(aba, registro)` (fase A), `auditar(mudanca)` (vira AUDITORIA na
 fase A e é aplicada na C), `atualizar(aba, id, campos)` (só a porta de projeções, na fase C); `linhas()`,
@@ -596,11 +612,15 @@ Sequência (`06`, seção 5; desenho-base 4.2 e 16.4): `lock.tentar(25 s)` (sen�
 preventiva → idempotência por `OPERACOES` (mesma chave CONFIRMADA: mesmo `payload_hash` → `duplicado: true` com a
 resposta de `reconstruir`; hash diferente → `IDEMPOTENCY_MISMATCH`) → importação em curso (`CONFLICT`, salvo
 `permiteDuranteImportacao`) → `dataVersionEsperada` (`CONFLICT`) → tratador → avisos não aceitos
-(`NEEDS_CONFIRMATION`, nada gravado, chave não consumida) → plano validado contra o esquema → **fase A**
+(`NEEDS_CONFIRMATION`, nada gravado, chave não consumida) → plano validado contra o esquema → **trava de integridade**
+(seção 10.5: o retrato do que ficaria gravado pelas checagens de domínio; achado de ERRO novo → `VALIDATION`/`CONFLICT`
+`INTEGRIDADE_<CHECAGEM>`, nada gravado, chave não consumida) → **fase A**
 (`props` marcador, `anexar` OPERACOES INICIADA + EVENTOS + filhas + AUDITORIA, `flush`) → **fase B**
 (`OPERACOES.status = CONFIRMADA`, `flush`) → **fase C** (refaz a auditoria, `EVENTOS.status`/`confirmed_at`/
 `reversed_by_event_id`, projeções e `finished_at` na mesma gravação; `flush`; `aplicada_em`; `flush`) → `DATA_VERSION++` → remove o
-marcador → grava ERROS_LOG pendente → solta o lock.
+marcador → grava ERROS_LOG pendente → solta o lock. As projeções da fase C são as que o projetor deu no retrato da trava
+(o mesmo projetor, sobre o mesmo estado: as linhas lidas + as da operação + a auditoria refeita); a porta só roda de novo
+na recuperação (que refaz todas).
 
 Carimbos da UnitOfWork: EVENTOS `op_id`, `status = PENDENTE`, `idempotency_key`, `reversed_by_event_id`,
 `confirmed_at` vazios, `created_by` = usuário se vazio; ANIMAIS `situacao_cadastral = PENDENTE`; `created_at` e
@@ -610,8 +630,9 @@ usa `plano.atualizar`; contexto sem porta ou sem usuário; unidade aninhada. Com
 
 Devolve `{dados, duplicado, opId, dataVersion}` (+ `semAlteracao: true` com plano vazio: nada gravado, sem
 operação; + `recuperada: true` quando uma exceção depois do commit foi resolvida pela recuperação). `SIMULAR`
-devolve `{dados: {simulacao: true, impactos, avisos, linhas: {ABA: n}}, dataVersion}`: mesmo tratador e mesmo
-plano, por leitura validada, sem lock de escrita e sem gravar; erro de validação é lançado como no comando.
+devolve `{dados: {simulacao: true, impactos, avisos, linhas: {ABA: n}}, dataVersion}`: mesmo tratador, mesmo
+plano e a mesma trava de integridade, por leitura validada (que já lê as abas da trava), sem lock de escrita e sem
+gravar; erro de validação e recusa da trava são lançados como no comando.
 
 **Exceção tratada depois do início da fase A:** a UnitOfWork, ainda com o lock, aplica a recuperação à própria
 operação relendo a planilha: CONFIRMADA → fase C refeita e sucesso (`recuperada`); INICIADA ou ausente → FALHOU
@@ -651,6 +672,87 @@ ou `{tudo: true}` (recuperação). O projetor lê por `tx.repo` (vigentes) e `tx
 `tx.plano.atualizar(aba, id, campos)` para cada projeção; a UnitOfWork grava só o que difere do que está na
 planilha. Tem de ser função determinística das linhas vigentes (pode rodar quantas vezes for preciso).
 
+### 10.5 Trava única de integridade (antes da fase A)
+
+Todo comando com plano não vazio passa por ela, qualquer que seja o caminho: evento registrado, simulado, corrigido ou
+estornado; correção de cadastro (do animal, do animal de referência, da categoria, dos parâmetros); anexo; importação
+(blocos, conclusão e desfazer). Ela fica depois do tratador e do plano validado contra o esquema e antes de qualquer
+escrita (no SIMULAR, no mesmo ponto). As conferências próprias de cada caminho continuam, com as mensagens delas; a trava é
+a conferência final do ESTADO RESULTANTE.
+
+1. **Sementes** (`AuditService.sementesDaTrava(lote, mudancas, derivados)`, sem ler a planilha): o que o plano toca. São as
+   linhas novas de cada aba (e a chave estrangeira de cada uma), as mudanças de auditoria e o escopo das projeções. Nas
+   mudanças de auditoria contam o animal (criação, sexo e nascimento do animal de referência), a importação (`status`:
+   concluir e desfazer), a categoria, o plano de contas e a parcela. Os parâmetros `data_marco_zero`,
+   `brinco_ignora_zeros_esquerda` e `idade_desmama_padrao_meses` fazem a trava conferir o banco inteiro. Com animal, evento,
+   lançamento ou parâmetro, a trava lê também `AuditService.leiturasTrava()` (as abas das checagens; o comando de evento e
+   o desfazer e a conclusão da importação já leem todas). Sem eles, confere só a chave estrangeira das linhas citadas, com o
+   que o comando já leu.
+2. **Retrato DEPOIS** (`UnitOfWork`): `Repository.bifurcar()` do estado lido, mais o plano como se a operação estivesse
+   CONFIRMADA (as linhas carimbadas como na fase A), mais a auditoria refeita (`AuditService.refazer`), mais as projeções do
+   tratador pelo MESMO projetor (`ctx.projecoes.reconstruir(tx, derivados)`). A fase C grava exatamente essas projeções.
+   O retrato de ANTES é o estado lido.
+3. **Escopo** (resolvido nos dois retratos):
+   - os animais **tocados**: os das sementes, os dos eventos gravados ou anulados e os dos lançamentos deles, mais os que a
+     projeção muda;
+   - os **vizinhos** que entram na genealogia: mãe, pai, crias, o touro e as fêmeas dos registros reprodutivos;
+   - os **partos** em que um tocado é mãe ou cria;
+   - os **números de brinco** dos tocados (quem tem ou teve o número entra pela checagem do número);
+   - os **lançamentos** e as **linhas citadas**.
+
+   Cada checagem olha só a parte do escopo que pode mudar:
+   - a linha do tempo, a entrada aberta, a saída e o custo de cada tocado;
+   - a genealogia dos tocados e dos vizinhos;
+   - a FK das linhas gravadas, a do cadastro de cada tocado, a das linhas que apontam para um tocado que fica anulado e a
+     dos eventos importados que passam a valer;
+   - a PROJECAO só do que o comando grava e não projeta. A projeção de um animal só depende das linhas dele; a cria ao pé
+     depende das crias, e o projetor refaz a mãe junto.
+4. **Checagens**: as de domínio (`AuditService.CHECAGENS_DOMINIO`: BRINCO, IDENTIFICACOES_ATIVAS, FK, ENTRADA_ABERTA,
+   LINHA_DO_TEMPO — com a categoria escolhida à mão × sexo e os registros antes do nascimento ou da chegada declarada —,
+   BAIXADO_SEM_POSTERIOR, PARTOS, GENEALOGIA — com o touro e a fêmea de cada registro reprodutivo na data —, PROJECAO,
+   ALOCACOES, PARCELAS, FINANCEIRO, ALOCACAO_DIRETA, CUSTO_AQUISICAO, COPIAS). É a mesma função da verificação de
+   integridade (seção 11), aqui no retrato de DEPOIS e no escopo. Só quando ela dá ERRO a trava roda também o retrato de
+   ANTES, no mesmo escopo.
+   - Cada achado tem **chaves**: o problema e o registro, sem o texto. Onde um problema pode piorar sem mudar de registro,
+     há um átomo por animal, período ou unidade (mais um animal com o brinco repetido; uma entrada a mais em aberto). Sem
+     chave própria, valem a checagem, o registro, o campo e a frase sem os números.
+   - Achado de ERRO com uma chave que o ANTES não tinha **recusa o comando**. O problema antigo, como uma adulteração à
+     mão, não bloqueia o comando que não o piora; o que o piora é recusado.
+   - Ficam fora, por construção: PK (chaves novas), CONTADORES (máximo + 1 sob o lock), CELULAS (o plano é validado
+     contra o esquema), STATUS_EVENTOS (a fase C refaz o status de todos os eventos lidos) e INVENTARIO (é a soma das
+     entradas em aberto por animal, que ENTRADA_ABERTA e PROJECAO conferem). Os alertas (BASE_RATEIO, PENDENCIAS) não
+     bloqueiam.
+5. **Recusa** (`AuditService.travar`):
+   - `VALIDATION` quando todo achado novo é do próprio lançamento (aponta um evento ou uma linha que ele grava; no
+     brinco, o número que ele dá); senão `CONFLICT`.
+   - `details[]`: `codigo = INTEGRIDADE_<CHECAGEM>`, `animal_id` e `brinco` quando é de um animal, `conflito =
+     {event_id, tipo, subtipo, data, nome}` do lançamento já gravado que impede, e a mensagem com o que ficaria errado e
+     como resolver, na linguagem do pecuarista (a frase do achado sem o conselho da verificação, mais `COMO_RESOLVER` da
+     checagem ou o do achado).
+   - A mensagem do erro: "Não dá para gravar: os dados ficariam errados. … Nada foi gravado." (com mais de um: "… em N
+     pontos (veja cada um abaixo)").
+   - Nada é gravado: a operação nem começa e a chave de idempotência continua livre.
+
+**Caminhos sem conferência própria fechados pela trava** (achados nesta etapa; `tests/trava.integridade.test.js`):
+- a correção do cadastro de referência do touro externo de um parto só de natimorto (sexo e nascimento;
+  `INTEGRIDADE_GENEALOGIA`);
+- a correção de cadastro da fêmea que entrou prenhe (sexo e nascimento contra o diagnóstico do rebanho inicial;
+  `INTEGRIDADE_GENEALOGIA`);
+- a troca do sexo de uma categoria escolhida à mão (`INTEGRIDADE_LINHA_DO_TEMPO`);
+- ligar "ignorar zeros à esquerda" com 012 e 12 em dois animais (`INTEGRIDADE_BRINCO`, `INTEGRIDADE_IDENTIFICACOES_ATIVAS`);
+- mudar o marco zero depois de um histórico importado (`INTEGRIDADE_COPIAS`).
+
+**Desempenho** (`npm run trava:medir`; base de demonstração do TestRunner, 391 comandos; CPU do Node sobre a planilha
+falsa; mediana de três execuções alternadas com a cópia do projeto de antes da trava):
+- sem a trava: 16.757 ms, 42,9 ms por comando (p50 42,2, p95 70,2);
+- com a trava: 19.462 ms, 49,8 ms por comando (p50 48,4, p95 85,2);
+- **+16 %** (entre +6 % e +22 % nos três pares), com cerca de 1,8 s dentro de `AuditService.travar` e o resto no retrato.
+
+A primeira versão, com as checagens de cada animal também nos vizinhos e a memória inteira refeita a cada mudança no
+retrato, ficava entre +24 % e +28 %. O escopo foi restringido pelo papel de cada checagem, e a trava nunca desliga. A
+leitura das abas no Google Sheets não entra na medida: o comando de evento já lê todas as abas que a trava confere, e só
+a correção de categoria e de parâmetro e o cadastro de animal de referência passam a ler mais.
+
 ## 11. `AuditService` (parte 1, puro)
 
 | Função | Contrato |
@@ -671,7 +773,13 @@ ausente, só a estrutura é conferida (as demais checagens ficam `NAO_EXECUTADA`
 data_version, ok (nenhum ERRO), erros, alertas, reparavel, abas_ausentes, checagens: [{codigo, rotulo, severidade,
 situacao (OK|ERRO|ALERTA|NAO_EXECUTADA), achados, correcao, reparo}], achados: [{checagem, severidade, tabela, id,
 linha, campo, mensagem, reparo}] (até 300), truncado, duracao_ms}` (`duracao_ms` = leitura, recuperação e conferência
-pelo relógio do contexto; a tela de sistema mostra). As 26 checagens (`AuditService.CHECAGENS`, na ordem do relatório): `PK`, `BRINCO`,
+pelo relógio do contexto; a tela de sistema mostra). As checagens de domínio (`AuditService.CHECAGENS_DOMINIO`: BRINCO,
+IDENTIFICACOES_ATIVAS, FK, ENTRADA_ABERTA, LINHA_DO_TEMPO, BAIXADO_SEM_POSTERIOR, PARTOS, GENEALOGIA, PROJECAO, ALOCACOES,
+PARCELAS, FINANCEIRO, ALOCACAO_DIRETA, CUSTO_AQUISICAO, COPIAS) são UMA função sobre um retrato (tx com acesso cru) e um
+escopo opcional — a verificação a roda sobre tudo, e a trava de integridade dos comandos (seção 10.5) sobre o retrato de
+antes e o de depois, no escopo afetado; a PROJECAO usa a porta de projeções dada (na verificação, `Timeline.porta()`). As
+demais (estrutura, células, chaves, contadores, operações, status dos eventos, inventário, pendências, base de rateio) são
+só da verificação. As 26 checagens (`AuditService.CHECAGENS`, na ordem do relatório): `PK`, `BRINCO`,
 `IDENTIFICACOES_ATIVAS` (Fase 2: nenhum BRINCO com `data_fim` vazio repetido entre as linhas vigentes, com a normalização
 da unicidade de brinco; a retirada e o brinco trocado ficam fechados; revisão 3: nem o mesmo número em dois animais ao mesmo
 tempo — períodos `[data_inicio, data_fim)` que se cruzam, fora o número corrigido por IDENTIFICACAO_INCORRETA), `FK`
@@ -689,7 +797,9 @@ PARTO na mãe com `data_parto` = data do evento, `qtd_nascidos_vivos` = linhas C
 reconstruído (a projeção, com as correções vigentes: correção só na cria ou edição à mão; o pai só quando o parto o
 informa); PARTO de evento que não é nascimento vigente), `GENEALOGIA` (revisão 2: de cada animal que vale, a mãe é fêmea,
 o pai é macho, os dois nasceram antes dele e nenhum é ancestral dele mesmo — um achado por ciclo; RN-008 a RN-010; revisão 3:
-o touro de cada REPRODUCAO vigente — o pai do parto, mesmo só de natimorto — é macho e nasceu antes do registro, RN-060),
+o touro de cada REPRODUCAO vigente — o pai do parto, mesmo só de natimorto — é macho e nasceu antes do registro, RN-060; trava
+de integridade: a fêmea de cada REPRODUCAO vigente que não é parto — o diagnóstico de gestação do rebanho inicial, da compra e
+da outra entrada — é fêmea e nasceu antes do registro; a do parto é conferida em PARTOS),
 `PROJECAO` e `STATUS_EVENTOS` (reparo `RECONSTRUIR`; a reconstrução cobre todo campo de projeção do
 esquema, menos `PRODUTOS.estoque_atual`, da Fase 3, e `EVENTOS.confirmed_at`, instante da fase C), `INVENTARIO`
 (total e por pasto, hoje), `ALOCACOES`, `PARCELAS`, `FINANCEIRO`, `ALOCACAO_DIRETA` (reparo) e `CUSTO_AQUISICAO` (Fase 2,
@@ -721,10 +831,16 @@ evento: o reparo (RECONSTRUIR) refaria a situação a partir do dado quebrado, e
 categoria). `repararIntegridade(ctx, justificativa?) → {recuperacao, integridade}`: o reparo oferecido —
 `UnitOfWork.recoverAll` (status dos eventos e todas as projeções), AUDITORIA `MANUTENCAO` e nova verificação; fato
 adulterado (lançamento, parcela, cabeçalho de compra, detalhe) continua acusado: só se corrige pelo sistema (RN-112). Erros:
-LOCKED, CONFIG. Testes: `tests/integrity.test.js` (Fase 1) e `tests/integrity.fase2.test.js` (cada checagem da Fase 2
+LOCKED, CONFIG. Testes: `tests/integrity.test.js` (Fase 1), `tests/trava.integridade.test.js` (a trava, seção 10.5) e `tests/integrity.fase2.test.js` (cada checagem da Fase 2
 disparada por adulteração à mão, cada campo de projeção do esquema, reparo, e o tempo sobre a base de demonstração:
 cerca de 55 ms no fake para 317 animais, 34 eventos, 367 linhas de EVENTO_ANIMAIS e 380 alocações — só CPU do Node; a
 leitura real das abas no Sheets não entra nessa medida).
+
+Trava de integridade (seção 10.5), a mesma função das checagens de domínio: `CHECAGENS_DOMINIO`; `leiturasTrava()` (as abas
+que ela lê quando o comando toca animal, evento, lançamento ou parâmetro); `sementesDaTrava(lote, mudancas, derivados) →
+{animais, eventos, lancamentos, importacoes, categorias, contas, parcelas, linhas, tudo, dominio}` (puro, pelo plano);
+`travar({antes, depois, sementes, lote, projecoes, derivados, projetor, proprios}) → {escopo, achados_depois,
+achados_antes}` ou a recusa `VALIDATION`/`CONFLICT` com `INTEGRIDADE_<CHECAGEM>`. Só a `UnitOfWork` chama `travar`.
 
 ## 12. `EventCatalog` (puro, só dados)
 
@@ -863,7 +979,8 @@ problema do validador traz também `papel` (no parto, a linha MATRIZ é descrita
 Pedido de comando: `{idempotencyKey, dados, avisosAceitos: [códigos], dataVersionEsperada?}`. Dinheiro em centavos
 inteiros; datas `yyyy-MM-dd`. Erros: VALIDATION (detalhes por animal e campo), CONFLICT (detalhe com
 `conflito: {event_id, tipo, subtipo, data, nome}`: `tipo` é sempre o `event_type` do evento que impede (nunca o subtipo), `subtipo` o `event_subtype` e `nome` o lançamento como substantivo, `EventCatalog.nomeEvento`), NEEDS_CONFIRMATION (avisos sem aceite; nada gravado; chave livre), NOT_FOUND,
-CONFIG (sem marco zero; conta SALDO_ABERTURA_REBANHO ausente), além dos da UnitOfWork.
+CONFIG (sem marco zero; conta SALDO_ABERTURA_REBANHO ausente), além dos da UnitOfWork (entre eles a recusa da trava de
+integridade, `VALIDATION`/`CONFLICT` com `INTEGRIDADE_<CHECAGEM>` nos detalhes, seção 10.5).
 
 | Função | Contrato |
 |---|---|
@@ -1551,7 +1668,7 @@ VALOR_INDIVIDUAL, kg em PESO_VIVO e PESO_CARCACA, 1 em CABECAS, peso relativo em
 | `juntar(plano, planejado)` | Junta as linhas ao dicionário `{aba: [linhas]}` do evento |
 | `avisoPeriodo(params, data, oque)` | `{codigo: 'PERIODO_BLOQUEADO', mensagem}` quando `data ≤ fin_bloqueio_ate`; senão null |
 | `negociacao(spec)` | Modalidade × base de peso (07, 4.1 e 4.2; 03b, 4.3 a 4.5). `spec: {modalidade, base_peso, rendimento_carcaca_pct, rendimento_tipo, preco_unitario, peso_total_kg, valor, criterio_rateio, arroba_kg, tolerancia_pct, animais: [{chave, peso, peso_carcaca_kg, valor_individual, base_manual}]}` e, na venda, `carcacaTotal: true` (aceita `peso_carcaca_total_kg`, o total do romaneio, na arroba de carcaça; campos de erro `peso_vivo_total_kg`), `valor_conferencia` (o bruto: a conta pelo preço é conferida contra ele; `valor` é a receita distribuída e o que os valores por animal somam), `campo_valor`, `rotulo_valor` e `pesagens` (última pesagem individual de cada animal até a data, ou null) → `{base_peso, rendimento_pct, rendimento_tipo (APURADO na carcaça com peso vivo), unidade_preco, preco_unitario, peso_vivo_total, peso_carcaca_total, arrobas, criterio, bases, estimado, conferencia (centavos), desvio_pct, erros: [{codigo, campo, mensagem, indice?}], avisos}`. Na venda sem o peso de cada animal: com a pesagem anterior de todos, PESO_VIVO com bases = pesagem × peso do lote ÷ Σ pesagens (4 casas, `estimado: true`); senão CABECAS; na arroba de carcaça só com o total do romaneio, PESO_VIVO (peso de cada um) ou o mesmo recurso; `RATEIO_SEM_PESO` em todos. Critério: DIRETO com um animal; CABECA → CABECAS (preço único) ou VALOR_INDIVIDUAL (valor por animal); KG_VIVO e ARROBA VIVO → PESO_VIVO, ou CABECAS com aviso `RATEIO_SEM_PESO` quando só há o peso do lote; ARROBA CARCACA → PESO_CARCACA; LOTE → o escolhido. Aviso `VALOR_DIVERGENTE` acima de `tolerancia_pct`. Erros: `CAMPO_OBRIGATORIO`, `BASE_PESO_INVALIDA`, `CAMPO_NAO_SE_APLICA`, `VALOR_FORA_DA_FAIXA`, `CONFLITO_DE_CAMPOS`, `VALORES_INCOMPLETOS`, `VALOR_INDIVIDUAL_NAO_SOMA`, `PESO_TOTAL_DIVERGENTE`, `PESO_OBRIGATORIO`, `PESO_INCOMPLETO`, `CARCACA_MAIOR_QUE_VIVO`; a base de cada animal no rateio (peso, carcaça ou peso manual) que não é maior que zero ou tem mais de 4 casas é erro do animal (`indice`, no campo dele: `VALOR_FORA_DA_FAIXA`, `FORMATO_INVALIDO`), e o motor não repete o erro de um campo do animal que o catálogo já recusou; rendimento apurado que arredonda para 0% ou 100% é `VALOR_FORA_DA_FAIXA` com o rendimento calculado (não "carcaça maior que o vivo"); `VALOR_DIVERGENTE` diz "mais de x%" quando o desvio arredondado empata com a tolerância |
-| `conferir(tx)` | As invariantes de 03b, seção 14, sobre as linhas vigentes (`tx.repo`; `tx.cru` para 19 e 20): `[{invariante (1 a 20), tabela, id, mensagem}]`, vazio = fecha ao centavo. A 10 (100% alocado) vale nos lançamentos de COMPRA, VENDA, ENTRADA_INICIAL, MORTE e DESCARTE (`CEM_POR_CENTO`: o rateio que o próprio evento grava; 03b, seção 10.3); a 3 e a situação de pagamento ignoram a parcela CANCELADA (desenho-base 16.11). A verificação de integridade distribui os achados pelas checagens (seção 11). Na venda: 15 (Σ valor_individual = receita = lançamento = alocado) e 16 (deduções = Σ DESPESA_VENDA; frete, comissão e outras = Σ por conta; nenhum outro lançamento; `EVENTOS.total_value` = `valor_bruto`; `qtd_animais` = saídas). Nos demais tipos (16), `EVENTOS.total_value` = Σ FINANCEIRO.valor vigentes do evento (abertura do rebanho inicial, lançamento da morte ou do descarte) e vazio sem lançamento (03b, 2.5). A consulta declara `leituras()` com acesso cru; aba não lida desliga as invariantes que dependem dela (17 só com SANIDADE). Base da etapa de integridade |
+| `conferir(tx, escopo?)` | As invariantes de 03b, seção 14, sobre as linhas vigentes (`tx.repo`; `tx.cru` para 19 e 20): `[{invariante (1 a 20), tabela, id, mensagem}]`, vazio = fecha ao centavo. `escopo` (trava de integridade, seção 10.5): `{lancamentos, eventos, animais: {id: true}}` — só os lançamentos citados e os dos eventos citados, os rateios deles, os cabeçalhos de compra e venda e o valor desses eventos, a sanidade deles e o custo de aquisição dos animais citados; sem ele, tudo. A 10 (100% alocado) vale nos lançamentos de COMPRA, VENDA, ENTRADA_INICIAL, MORTE e DESCARTE (`CEM_POR_CENTO`: o rateio que o próprio evento grava; 03b, seção 10.3); a 3 e a situação de pagamento ignoram a parcela CANCELADA (desenho-base 16.11). A verificação de integridade distribui os achados pelas checagens (seção 11). Na venda: 15 (Σ valor_individual = receita = lançamento = alocado) e 16 (deduções = Σ DESPESA_VENDA; frete, comissão e outras = Σ por conta; nenhum outro lançamento; `EVENTOS.total_value` = `valor_bruto`; `qtd_animais` = saídas). Nos demais tipos (16), `EVENTOS.total_value` = Σ FINANCEIRO.valor vigentes do evento (abertura do rebanho inicial, lançamento da morte ou do descarte) e vazio sem lançamento (03b, 2.5). A consulta declara `leituras()` com acesso cru; aba não lida desliga as invariantes que dependem dela (17 só com SANIDADE). Base da etapa de integridade |
 | `leituras()` | `Timeline.LEITURAS` + COMPRAS, VENDAS, PLANO_CONTAS, PARCEIROS |
 | `situacaoPagamento(parcelas, ativo)` | `{status_pagamento, data_pagamento}` pela ordem de 03b, 10.4 (o projetor usa esta função) |
 | `tiposDosCustos(lancamentosAcessorios, frete)` | `FRETE` ou `OUTRO` para cada lançamento (na ordem da lista recebida), pelo prefixo que soma o frete na ordem do `financial_id` (revisão 4: os fretes da compra recebem os menores identificadores; a ordem física das linhas, que o dono pode classificar, não conta — 06, seção 12); null se nenhum prefixo fecha |

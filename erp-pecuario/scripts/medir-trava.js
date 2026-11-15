@@ -17,7 +17,8 @@ const path = require('node:path');
 const args = process.argv.slice(2);
 const iVezes = args.indexOf('--vezes');
 const vezes = iVezes >= 0 ? Math.max(1, Number(args[iVezes + 1]) || 1) : 1;
-const raiz = path.resolve(args.filter((a, i) => a !== '--vezes' && i !== iVezes + 1)[0] || path.join(__dirname, '..'));
+const posicionais = args.filter((a, i) => iVezes < 0 || (i !== iVezes && i !== iVezes + 1));
+const raiz = path.resolve(posicionais[0] || path.join(__dirname, '..'));
 
 function medirUmaVez() {
   const S = require(path.join(raiz, 'tests', 'apoio-sistema'));

@@ -2,9 +2,10 @@
  * UnitOfWork — a única fronteira de escrita (P2) e a leitura otimista validada.
  *
  * Comando (06, seção 5; desenho-base 4.2 e 16.4/16.5): lock de script (até 25 s) → recuperação preventiva →
- * idempotência por OPERACOES → tratador → fase A (marcador, OPERACOES INICIADA, linhas inertes, flush) →
- * fase B (OPERACOES.status = CONFIRMADA: a célula de commit, flush) → fase C (derivados, flush, aplicada_em,
- * flush, DATA_VERSION, remove o marcador) → solta o lock.
+ * idempotência por OPERACOES → tratador → trava de integridade (o retrato do que ficaria gravado pelas checagens de
+ * domínio da verificação de integridade; CONTRATOS, seção 10.5) → fase A (marcador, OPERACOES INICIADA, linhas
+ * inertes, flush) → fase B (OPERACOES.status = CONFIRMADA: a célula de commit, flush) → fase C (derivados, flush,
+ * aplicada_em, flush, DATA_VERSION, remove o marcador) → solta o lock.
  * Regra que sustenta tudo: a fase A só anexa; a fase B troca uma célula; a fase C recalcula e pode ser repetida.
  * A recuperação nunca desfaz nada, decide só pelo que relê com o lock na mão e é reentrante.
  *

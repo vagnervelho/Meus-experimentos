@@ -13,6 +13,9 @@
  * (reconstruir projeções e o cache de status dos eventos) é um comando à parte, auditado. Fase 2 (E2.11): saída com
  * evento posterior, partos × reprodução × crias, brinco ativo repetido nas identificações, custo de aquisição e as
  * invariantes do financeiro de 03b, seção 14, pela conferência do próprio FinancialService (uma regra, um lugar).
+ * As checagens de domínio são uma função só, com escopo: a verificação a roda sobre tudo, e a TRAVA DE INTEGRIDADE dos
+ * comandos (`travar`, chamada pela UnitOfWork antes da fase A) a roda sobre o retrato de antes e o de depois do comando,
+ * no escopo que ele toca — o que a verificação acusaria como ERRO não chega a ser gravado (CONTRATOS, seção 10.5).
  */
 var AuditService = (function () {
   /** Tabelas que `listar` precisa nas leituras (reads) da consulta. */

@@ -39,8 +39,10 @@ function base(opcoes) {
     return r.valor.dados;
   };
   s.cmd = (fn) => { const r = s.tentar(fn); s.conferirProjecoes('comando'); return r; };
+  /** Comando que tem de passar (preparo do cenário), também com a projeção conferida depois. */
+  s.ok = (fn) => { const r = s.cmd(fn); if (!r.ok) throw new Error(JSON.stringify(r.erro)); return r.valor; };
   s.erros = () => (s.integridade().achados || []).filter((x) => x.severidade === 'ERRO').map((x) => x.checagem);
-  s.parceiro = (nome, tipos) => s.exec((ctx) => s.G.UnitOfWork.run(ctx, s.G.Config.comandoSalvarParceiro({ idempotencyKey: 'p-' + nome, dados: { campos: { nome, tipos } } }))).dados.partner_id;
+  s.parceiro = (nome, tipos) => s.ok((ctx) => s.G.UnitOfWork.run(ctx, s.G.Config.comandoSalvarParceiro({ idempotencyKey: 'p-' + nome, dados: { campos: { nome, tipos } } }))).dados.partner_id;
   s.retrato = () => ({ ops: s.tabela('OPERACOES').length, eventos: s.tabela('EVENTOS').length, versao: s.props()['DATA_VERSION:' + s.banco()] });
   return s;
 }
@@ -175,20 +177,20 @@ function trocaSemProjetar(s, animalId, codigo, data, chave) {
 
 // ---------------------------------------------------------------- importação (apoio) ----
 function criarImportacao(s, tipo, csv, chave) {
-  return s.exec((ctx) => s.G.ImportService.criar(ctx, { idempotencyKey: chave, avisosAceitos: ['POSSIVEL_DUPLICIDADE'], dados: { tipo, arquivo_nome: chave + '.csv', conteudo_base64: b64(csv), formato: FORMATO } })).dados;
+  return s.ok((ctx) => s.G.ImportService.criar(ctx, { idempotencyKey: chave, avisosAceitos: ['POSSIVEL_DUPLICIDADE'], dados: { tipo, arquivo_nome: chave + '.csv', conteudo_base64: b64(csv), formato: FORMATO } })).dados;
 }
 function validarTudo(s, id, mapa) {
   for (let b = 1; b < 100; b++) {
-    const e = s.exec((ctx) => s.G.ImportService.validarBloco(ctx, { idempotencyKey: 'val-' + id + '-' + b, dados: { import_id: id, bloco: b, mapeamento: mapa } })).dados;
+    const e = s.ok((ctx) => s.G.ImportService.validarBloco(ctx, { idempotencyKey: 'val-' + id + '-' + b, dados: { import_id: id, bloco: b, mapeamento: mapa } })).dados;
     if (e.importacao.status === 'VALIDADO') return e;
   }
   throw new Error('validação não terminou');
 }
 function importarBlocos(s, id) {
-  let r = s.tentar((ctx) => s.G.ImportService.importarBloco(ctx, { avisosAceitos: AV, dados: { import_id: id, bloco: 1, modo: 'TOTAL' } }));
+  let r = s.cmd((ctx) => s.G.ImportService.importarBloco(ctx, { avisosAceitos: AV, dados: { import_id: id, bloco: 1, modo: 'TOTAL' } }));
   assert.ok(r.ok, JSON.stringify(r.erro));
   for (let b = 2; r.valor.dados.blocos.proximo !== null; b++) {
-    r = s.tentar((ctx) => s.G.ImportService.importarBloco(ctx, { avisosAceitos: AV, dados: { import_id: id, bloco: b } }));
+    r = s.cmd((ctx) => s.G.ImportService.importarBloco(ctx, { avisosAceitos: AV, dados: { import_id: id, bloco: b } }));
     assert.ok(r.ok, JSON.stringify(r.erro));
   }
 }
@@ -203,7 +205,7 @@ const MAPA_TRANSF = { colunas: { Data: 'data', 'Pasto de origem': 'pasto_origem'
 // ================================================================ caminhos sem a conferência própria (achados aqui) ====
 test('GENEALOGIA pela correção do cadastro de referência: o touro externo de um parto só de natimorto não vira fêmea nem nasce depois do parto (RN-060)', () => {
   const s = base();
-  const ext = s.exec((ctx) => s.G.AnimalService.cadastrarExterno(ctx, { idempotencyKey: 'ext', dados: { campos: { nome: 'Touro de sêmen', sexo: 'M', data_nascimento: '2015-01-01', data_nascimento_confianca: 'ESTIMADA' } } })).dados.animal_id;
+  const ext = s.ok((ctx) => s.G.AnimalService.cadastrarExterno(ctx, { idempotencyKey: 'ext', dados: { campos: { nome: 'Touro de sêmen', sexo: 'M', data_nascimento: '2015-01-01', data_nascimento_confianca: 'ESTIMADA' } } })).dados.animal_id;
   const V = s.reg('registrar', S.entradaInicial([vaca('100')])).animais[0].animal_id;
   const p = s.reg('registrar', parto('2026-03-10', V, [{ situacao_nascimento: 'NATIMORTO' }], { pai_id: ext, pai_confianca: 'CONFIRMADA' }));
   const antes = s.retrato();
@@ -519,7 +521,7 @@ test('problema antigo não bloqueia o comando que não o piora; o comando que o 
 
 test('a simulação passa pela mesma trava; a recusa não consome a chave, e o mesmo formulário corrigido grava com ela', () => {
   const s = base();
-  const ext = s.exec((ctx) => s.G.AnimalService.cadastrarExterno(ctx, { idempotencyKey: 'ext', dados: { campos: { nome: 'Touro de sêmen', sexo: 'M' } } })).dados.animal_id;
+  const ext = s.ok((ctx) => s.G.AnimalService.cadastrarExterno(ctx, { idempotencyKey: 'ext', dados: { campos: { nome: 'Touro de sêmen', sexo: 'M' } } })).dados.animal_id;
   const V = s.reg('registrar', S.entradaInicial([vaca('100')])).animais[0].animal_id;
   s.reg('registrar', parto('2026-03-10', V, [{ situacao_nascimento: 'NATIMORTO' }], { pai_id: ext, pai_confianca: 'CONFIRMADA' }));
   const pedido = { animal_id: ext, campos: { sexo: 'F' } };

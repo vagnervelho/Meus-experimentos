@@ -731,3 +731,37 @@ Nenhuma linha de código mudou nesta etapa: só documentos.
   E2.11 continuam entregues, com 26 checagens, e a validação na conta do dono continua aberta. O arquivo não mudou.
 - Ficaram com números antigos, fora desta etapa: `README.md` (555 e 77 testes, 437 KB) e
   `docs/fase-0/11-riscos-e-premissas.md` (R-12 com duas rodadas e 42 achados; R-31 com 437 KB).
+
+## 15/11/2026 — Trava única de integridade antes de gravar
+
+- Por quê: nas quatro rodadas de revisão da Fase 2, quase metade dos achados eram correções incompletas. O defeito
+  consertado no registro voltava pela correção, pelo estorno, pela importação, pelo desfazer ou pela correção de
+  cadastro, porque cada caminho tinha a sua lista de conferências. As conferências de cada caminho continuam, e agora todos
+  passam também por uma conferência final do estado que deixariam gravado.
+- `AuditService`: as checagens de domínio da verificação de integridade viraram uma função só, sobre um retrato e um escopo
+  opcional (BRINCO, IDENTIFICACOES_ATIVAS, FK, ENTRADA_ABERTA, LINHA_DO_TEMPO, BAIXADO_SEM_POSTERIOR, PARTOS, GENEALOGIA,
+  PROJECAO, ALOCACOES, PARCELAS, FINANCEIRO, ALOCACAO_DIRETA, CUSTO_AQUISICAO, COPIAS). A verificação de integridade usa a
+  mesma função, sobre tudo; o relatório não mudou de forma. GENEALOGIA passou a conferir também a fêmea de cada registro
+  reprodutivo que não é parto (diagnóstico de gestação), que precisa ser fêmea e ter nascido antes dele. Ganhou ainda
+  `sementesDaTrava`, `travar` e `leiturasTrava` (CONTRATOS, seções 10.5 e 11).
+- `UnitOfWork`: entre o tratador e a fase A de todo comando, também no SIMULAR, monta o retrato DEPOIS. O retrato é o estado
+  lido, mais o plano como se a operação estivesse confirmada, mais a auditoria refeita, mais as projeções pelo mesmo
+  projetor. A trava confere esse retrato no escopo afetado e com os vizinhos, e confere o de ANTES quando há erro. Achado
+  de ERRO novo recusa com `VALIDATION`/`CONFLICT` e `INTEGRIDADE_<CHECAGEM>`; nada é gravado e a chave fica livre. A fase C
+  grava as projeções do retrato.
+- `Repository`: `bifurcar()` (o retrato em memória, com cópia na escrita) e `alterar` que refaz só a memória da aba alterada,
+  salvo quando o campo decide a vigência de outras abas. `FinancialService.conferir(tx, escopo)`.
+- Caminhos sem conferência própria que a trava agora fecha, com teste:
+  - a correção do sexo ou do nascimento do touro externo de um parto só de natimorto;
+  - a correção de cadastro da fêmea que entrou prenhe;
+  - a troca do sexo de uma categoria escolhida à mão;
+  - ligar "ignorar zeros à esquerda" com 012 e 12 em dois animais;
+  - mudar o marco zero depois de um histórico importado.
+- Recusas da trava nos testes que já existiam: uma só causa, real. O comando de exemplo dos testes de persistência gravava
+  um evento que apontava para uma propriedade inexistente (ERRO de chave estrangeira). O banco desses testes passou a ter a
+  propriedade (`tests/apoio-persistencia.js`, opção `propriedade`). Nenhuma expectativa de teste mudou. Nenhuma recusa foi
+  falso positivo.
+- Desempenho (`npm run trava:medir`, base de demonstração, 391 comandos, mediana de três execuções alternadas): sem a trava
+  42,9 ms por comando, com a trava 49,8 ms (+16 %).
+- Verificado em Node: `tests/trava.integridade.test.js` (16 testes); `npm test` e `npm run ui:check` completos (números
+  no fim da etapa).
