@@ -218,6 +218,8 @@ repositório; "a verificar na conta do dono" significa que só o roteiro de diag
   depósito esperado, preços médios e arrobas sempre com a base; correção pelo detalhe (os animais baixados são carregados
   antes; os do original não aparecem como inelegíveis); detalhe com a seção "Venda"; a diferença da correção ignora campo
   oculto e formata o dinheiro.
-- Verificado em Node (`npm test`) e no navegador com o backend real (`npm run ui:check`): CT-04 e CT-14 com os números de
-  09, os exemplos de 07, seção 4.3, e os exemplos 4 e 5 de 03b, seção 4.4, o resultado por animal do caso de 07, seção 2.2,
-  e as invariantes de 03b, seção 14, depois de cada comando. Nada validado na conta do dono.
+- Verificado em Node (`npm test`: 399 testes, 399 aprovados) e no navegador com o backend real (`npm run ui:check`: 43
+  testes, 43 aprovados): CT-04 e CT-14 com os números de 09, os exemplos de 07, seção 4.3, e os exemplos 4 e 5 de 03b,
+  seção 4.4, o resultado por animal do caso de 07, seção 2.2, e as invariantes de 03b, seção 14, depois de cada comando.
+  A varredura de quedas com a venda levou o `npm test` a cerca de 4,6 minutos neste ambiente. Nada validado na conta do
+  dono.
