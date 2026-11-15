@@ -140,7 +140,7 @@ test('cadastro desativado com animal dentro (teste aleatório, passada 2): pasto
   // A categoria BOI (a do 102, reclassificado à mão e vendido) desativada à mão: o vendido também conta.
   const boi = s.tabela('CATEGORIAS').find((c) => c.codigo === 'BOI');
   const brutoBoi = celula(s, 'CATEGORIAS', boi.category_id, 'ativo');
-  s.editar('CATEGORIAS', boi.category_id, 'ativo', false);
+  s.editar('CATEGORIAS', boi.category_id, 'ativo', 'N');
   r = s.integridade();
   assert.deepEqual(situacoes(r), { LINHA_DO_TEMPO: 'ERRO' });
   assert.deepEqual(achadosDe(r, 'LINHA_DO_TEMPO').map((a) => [a.id, a.campo]), [[ids['102'], 'categoria_manual_id']]);
