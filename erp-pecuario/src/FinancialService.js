@@ -236,6 +236,11 @@ var FinancialService = (function () {
   function dec_(v) {
     return Math.round(v * 10);
   }
+  /** Peso para as mensagens: '1.234,5 kg'. */
+  function kg_(v) {
+    return Utils.formatarNumero(v) + ' kg';
+  }
+  var NOME_BASE = { peso: 'peso vivo', peso_carcaca_kg: 'peso de carcaça', base_manual: 'peso na divisão manual' };
   /**
    * Conta da negociação de compra ou venda (07, seções 4.1 e 4.2; 03b, seções 4.3 a 4.5; RN-067, RN-068, RN-073).
    * spec: {modalidade, base_peso, rendimento_carcaca_pct, rendimento_tipo, preco_unitario (centavos), peso_total_kg,
@@ -295,13 +300,13 @@ var FinancialService = (function () {
     var vivoDec = null;
     if (typeof s.peso_total_kg === 'number') {
       vivoDec = dec_(s.peso_total_kg);
-      if (temPeso === n && n && vivoDec !== somaVivo) erros.push(det_('PESO_TOTAL_DIVERGENTE', campoVivo, 'O peso total do lote (' + s.peso_total_kg + ' kg) difere da soma dos pesos dos animais (' + somaVivo / 10 + ' kg). Deixe o total em branco ou acerte os pesos.'));
+      if (temPeso === n && n && vivoDec !== somaVivo) erros.push(det_('PESO_TOTAL_DIVERGENTE', campoVivo, 'O peso total do lote (' + kg_(s.peso_total_kg) + ') difere da soma dos pesos dos animais (' + kg_(somaVivo / 10) + '). Deixe o total em branco ou acerte os pesos.'));
     } else if (temPeso === n && n) vivoDec = somaVivo;
     r.peso_vivo_total = vivoDec === null ? null : vivoDec / 10;
     var carcaca = r.base_peso === 'CARCACA' || (mod === 'LOTE' && s.criterio_rateio === 'PESO_CARCACA');
     if (temCarc && !carcaca) animais.forEach(function (a, i) { if (typeof a.peso_carcaca_kg === 'number') erros.push(det_('CAMPO_NAO_SE_APLICA', 'peso_carcaca_kg', 'o peso de carcaça só se informa na arroba de carcaça ou no rateio por carcaça.', { indice: i })); });
     animais.forEach(function (a, i) {
-      if (typeof a.peso_carcaca_kg === 'number' && typeof a.peso === 'number' && a.peso_carcaca_kg >= a.peso) erros.push(det_('CARCACA_MAIOR_QUE_VIVO', 'peso_carcaca_kg', 'o peso de carcaça (' + a.peso_carcaca_kg + ' kg) não pode passar do peso vivo (' + a.peso + ' kg).', { indice: i }));
+      if (typeof a.peso_carcaca_kg === 'number' && typeof a.peso === 'number' && a.peso_carcaca_kg >= a.peso) erros.push(det_('CARCACA_MAIOR_QUE_VIVO', 'peso_carcaca_kg', 'o peso de carcaça (' + kg_(a.peso_carcaca_kg) + ') não pode passar do peso vivo (' + kg_(a.peso) + ').', { indice: i }));
     });
     // Carcaça: a de cada animal (romaneio) ou, na venda por arroba de carcaça, só o total do romaneio (03b, seção 4.3).
     var totalCarc = s.carcacaTotal === true && typeof s.peso_carcaca_total_kg === 'number' ? dec_(s.peso_carcaca_total_kg) : null;
@@ -309,7 +314,7 @@ var FinancialService = (function () {
     var carcDec = null;
     if (carcaca && temCarc === n && n) {
       carcDec = somaCarc;
-      if (totalCarc !== null && r.base_peso === 'CARCACA' && totalCarc !== somaCarc) erros.push(det_('PESO_TOTAL_DIVERGENTE', 'peso_carcaca_total_kg', 'O peso de carcaça total (' + s.peso_carcaca_total_kg + ' kg) difere da soma das carcaças dos animais (' + somaCarc / 10 + ' kg). Deixe o total em branco ou acerte as carcaças.'));
+      if (totalCarc !== null && r.base_peso === 'CARCACA' && totalCarc !== somaCarc) erros.push(det_('PESO_TOTAL_DIVERGENTE', 'peso_carcaca_total_kg', 'O peso de carcaça total (' + kg_(s.peso_carcaca_total_kg) + ') difere da soma das carcaças dos animais (' + kg_(somaCarc / 10) + '). Deixe o total em branco ou acerte as carcaças.'));
     } else if (carcaca && s.carcacaTotal === true && r.base_peso === 'CARCACA' && temCarc) {
       erros.push(det_('PESO_INCOMPLETO', 'peso_carcaca_kg', 'Informe a carcaça de todos os animais ou de nenhum (só o total do romaneio).'));
     } else if (carcaca && totalCarc !== null && r.base_peso === 'CARCACA') {
@@ -320,9 +325,15 @@ var FinancialService = (function () {
     if (carcDec !== null) {
       r.peso_carcaca_total = carcDec / 10;
       if (vivoDec !== null && r.base_peso === 'CARCACA') {
-        r.rendimento_pct = Utils.arredondar(carcDec / vivoDec * 100, 1);
+        var apurado = carcDec / vivoDec * 100;
+        r.rendimento_pct = Utils.arredondar(apurado, 1);
         r.rendimento_tipo = 'APURADO';
-        if (!(r.rendimento_pct > 0 && r.rendimento_pct < 100)) erros.push(det_('VALOR_FORA_DA_FAIXA', campoVivo, 'A carcaça total não pode passar do peso vivo total.'));
+        // O rendimento gravado tem 1 casa e fica entre 0 e 100% (exclusivos): a carcaça igual ou acima do vivo é um erro; a
+        // que arredonda para 0% ou 100% (rendimento abaixo de 0,05% ou acima de 99,95%) é outro, e a mensagem diz qual.
+        if (carcDec >= vivoDec) erros.push(det_('VALOR_FORA_DA_FAIXA', campoVivo, 'A carcaça total não pode passar do peso vivo total.'));
+        else if (!(r.rendimento_pct > 0 && r.rendimento_pct < 100)) {
+          erros.push(det_('VALOR_FORA_DA_FAIXA', campoVivo, 'O rendimento de carcaça calculado (' + Utils.formatarNumero(apurado, 2) + '% da carcaça sobre o peso vivo) não é possível: confira o peso vivo e o de carcaça.'));
+        }
       }
     }
     // Preço e valor por animal.
@@ -372,6 +383,17 @@ var FinancialService = (function () {
     }
     if (temManual && crit !== 'MANUAL') animais.forEach(function (a, i) { if (typeof a.base_manual === 'number') erros.push(det_('CAMPO_NAO_SE_APLICA', 'base_manual', 'o peso no rateio manual só se informa com o critério manual.', { indice: i })); });
     if (crit === 'MANUAL' && temManual !== n) erros.push(det_('CAMPO_OBRIGATORIO', 'base_manual', 'No rateio manual, informe o peso de cada animal na divisão (percentual ou proporção).'));
+    // A base de cada animal no rateio (03b, seção 13.3) precisa ser maior que zero e ter até 4 casas: o erro vai para o
+    // campo do próprio animal, não para o valor do lançamento.
+    var campoBase = { PESO_VIVO: 'peso', PESO_CARCACA: 'peso_carcaca_kg', MANUAL: 'base_manual' }[crit];
+    if (campoBase && n > 1) {
+      animais.forEach(function (a, i) {
+        var b = a[campoBase];
+        if (typeof b !== 'number') return;
+        if (!(b > 0)) erros.push(det_('VALOR_FORA_DA_FAIXA', campoBase, 'o ' + NOME_BASE[campoBase] + ' precisa ser maior que zero para dividir o valor.', { indice: i }));
+        else if (Utils.casasDecimais(b) > 4) erros.push(det_('FORMATO_INVALIDO', campoBase, 'o ' + NOME_BASE[campoBase] + ' aceita no máximo 4 casas decimais.', { indice: i }));
+      });
+    }
     if ((mod === 'KG_VIVO' || (mod === 'ARROBA' && r.base_peso === 'VIVO')) && vivoDec === null) erros.push(det_('PESO_OBRIGATORIO', campoVivo, 'Informe o peso vivo total do lote ou o peso de cada animal.'));
     r.criterio = n === 1 ? 'DIRETO' : crit || null;
     var escala = null;
@@ -412,7 +434,10 @@ var FinancialService = (function () {
       r.desvio_pct = Utils.arredondar(Math.abs(conferido - r.conferencia) / r.conferencia * 100, 2);
       var tol = typeof s.tolerancia_pct === 'number' ? s.tolerancia_pct : 1;
       if (Math.abs(conferido - r.conferencia) * 100 > tol * r.conferencia) {
-        avisos.push(det_('VALOR_DIVERGENTE', campoValor, 'O valor informado (' + reais_(conferido) + ') difere em ' + String(r.desvio_pct).replace('.', ',') + '% da conta pela negociação (' + reais_(r.conferencia) + '), acima da tolerância de ' + String(tol).replace('.', ',') + '%. Vale o valor informado: confira a nota.'));
+        // O desvio é mostrado com 2 casas; no limite ele arredonda para a própria tolerância ("difere em 1%, acima de 1%"):
+        // aí a mensagem diz "mais de".
+        var desvio = r.desvio_pct > tol ? 'em ' + Utils.formatarNumero(r.desvio_pct) + '%' : 'em mais de ' + Utils.formatarNumero(tol) + '%';
+        avisos.push(det_('VALOR_DIVERGENTE', campoValor, 'O valor informado (' + reais_(conferido) + ') difere ' + desvio + ' da conta pela negociação (' + reais_(r.conferencia) + '), acima da tolerância de ' + Utils.formatarNumero(tol) + '%. Vale o valor informado: confira a nota.'));
       }
     }
     return r;

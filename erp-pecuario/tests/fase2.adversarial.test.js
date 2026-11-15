@@ -1153,4 +1153,169 @@ test('gêmeos com um natimorto: o parto grava 1 vivo e 1 natimorto; a correção
   assert.equal(m.tabela('REPRODUCAO').filter((r) => r.animal_id === vaca).length, 2, 'nada se apaga: as linhas dos dois partos ficam, anuladas');
 });
 
+/** Ambiente sem o modelo, para negociações que o modelo não cobre (arroba, lote, peso só do lote): 3 bois no marco zero. */
+function direto() {
+  const amb = ambiente();
+  const m = amb.m;
+  const r = m.run('registrar', entradaInicial(['B1', 'B2', 'B3'].map((b) => bicho({ brinco: b, sexo: 'M', castrado: true, reprodutor: false, data_nascimento: '2023-01-01', data_nascimento_confianca: 'ESTIMADA' }))));
+  const ok = (rr, msg) => { assert.equal(rr.ok, true, msg + ': ' + (rr.erro && rr.erro.message + ' ' + JSON.stringify(rr.erro.details))); return rr.valor; };
+  const invariantes = (msg) => assert.deepEqual(invariantesCruas(cru(m)), [], msg + ': invariantes de 03b, seção 14 (cruas)');
+  return { amb, m, ids: r.dados.animais.map((a) => a.animal_id), ok, invariantes };
+}
+const garrote = (brinco, extra) => Object.assign({ brinco, sexo: 'M', castrado: false, reprodutor: false, idade_meses: 14 }, extra || {});
+
+test('rateio com centavos patológicos: 1 centavo para 3 animais e frete de 2 centavos pelo maior resto (o centavo para o menor código); receita de 1 centavo; base zero e base com casas demais dão UM erro, no campo do animal; peso faltando num animal é recusado; peso só do lote usa a pesagem anterior escalada', () => {
+  const { amb, M, m } = preparar();
+  const nv = novosAnimais(M, 3);
+  const um = { modalidade: 'CABECA', preco: 1, valor: 1, frete: 2, parcelas: { n: 1, modo: 'vazias' } };
+  passo(amb, M, propCompra(M, amb, '2026-02-01', PASTOS.A, nv, [], um, null), 'OK', 'compra de 1 centavo com frete de 2');
+  const cods = nv.map((n) => M.animais.get(n.id).codigo);
+  assert.deepEqual(cods.slice().sort(), cods, 'os códigos crescem na ordem do lançamento');
+  assert.deepEqual(nv.map((n) => [m.animal(n.id).custo_aquisicao, m.tabela('EVENTO_ANIMAIS').find((l) => l.animal_id === n.id).valor_individual]), [[2, 1], [1, 0], [0, 0]]);
+  passo(amb, M, propCompra(M, amb, '2026-02-02', PASTOS.A, novosAnimais(M, 1), [], { modalidade: 'CABECA', preco: 2, parcelas: { n: 3, modo: 'vazias' } }, null), 'VALIDATION', '2 centavos em 3 parcelas sem valor');
+  // Venda dos três por 2 centavos, com 1 de desconto: receita de 1 centavo; o comprador retém 1 (depósito zero) mas não 2.
+  const ids = nv.map((n) => n.id);
+  const v2 = { modalidade: 'CABECA', preco: 1, bruto: 2, desconto: 1, parcelas: { n: 1, modo: 'vazias' }, deducoes: [{ tipo: 'FUNRURAL', valor: 2, retida: true }] };
+  const rr = passo(amb, M, propVenda(M, amb, '2026-03-01', ids, v2, null), 'VALIDATION', 'retenção maior que o recebimento');
+  assert.deepEqual(codigos(rr.r.erro), ['RETENCAO_MAIOR_QUE_RECEBIMENTO']);
+  const v = passo(amb, M, propVenda(M, amb, '2026-03-01', ids, Object.assign({}, v2, { deducoes: [{ tipo: 'FUNRURAL', valor: 1, retida: true }, { tipo: 'COMISSAO', valor: 2 }] }), null), 'OK', 'venda de 1 centavo de receita');
+  const venda = m.tabela('VENDAS').find((x) => x.event_id === v.ev.id);
+  assert.deepEqual([venda.valor_bruto, venda.desconto_comercial, venda.comissao, venda.outras_deducoes, venda.qtd_animais], [2, 1, 2, 1, 3]);
+  // Base zero e base com casas demais: um erro só, no campo do animal (não no valor do lançamento).
+  const d = direto();
+  const F = d.amb.P.fornecedor;
+  const lote = (bases, valor) => ({ tipo: 'COMPRA', campos: { event_date: '2026-02-03', partner_id: F, pasto_destino_id: PASTOS.A, modalidade: 'LOTE', criterio_rateio: 'MANUAL', justificativa_rateio: 'acordo com o vendedor', valor_animais: valor || 100000 }, animais: bases.map((b, i) => garrote('L' + i, { base_manual: b })), parcelas: [{ data_vencimento: '2026-03-03' }] });
+  for (const [bases, codigo] of [[[0, 1], 'VALOR_FORA_DA_FAIXA'], [[-1, 1], 'VALOR_FORA_DA_FAIXA'], [[0.00005, 1], 'FORMATO_INVALIDO']]) {
+    const e = d.m.tentar('registrar', lote(bases), { avisos: AVISOS }).erro;
+    assert.deepEqual([e.code, e.details.map((x) => [x.codigo, x.campo, x.brinco])], ['VALIDATION', [[codigo, 'base_manual', 'L0']]], 'base ' + bases[0] + ': um erro só, no animal');
+    assert.ok(!/0\.0/.test(e.details[0].mensagem) && !/casa decimal\./.test(e.details[0].mensagem), 'mensagem em português: ' + e.details[0].mensagem);
+  }
+  const fino = d.ok(d.m.tentar('registrar', lote([0.0001, 99.9999], 1), { avisos: AVISOS }), 'manual de 1 centavo com bases de 4 casas');
+  d.invariantes('manual de 1 centavo');
+  assert.deepEqual(d.m.tabela('ALOCACOES_FINANCEIRAS').filter((x) => fino.dados.animais.some((a) => a.animal_id === x.animal_id)).map((x) => [x.base_valor, x.valor_alocado]), [[0.0001, 0], [99.9999, 1]]);
+  // Peso faltando num animal: recusado (todos ou nenhum; sem os de todos, falta o total); só o peso do lote: a pesagem anterior de cada um, escalada.
+  const pesos = [200.3, 250.1, 299.9];
+  const comp = d.ok(d.m.tentar('registrar', { tipo: 'COMPRA', campos: { event_date: '2026-02-04', partner_id: F, pasto_destino_id: PASTOS.B, modalidade: 'KG_VIVO', preco_unitario: 1000, valor_animais: 750300 }, animais: pesos.map((p, i) => garrote('K' + i, { peso: p })), parcelas: [{ data_vencimento: '2026-03-04' }] }, { avisos: AVISOS }), 'compra por kg');
+  const bois = comp.dados.animais.map((a) => a.animal_id);
+  const venda2 = (animais, campos) => ({ tipo: 'VENDA', campos: Object.assign({ event_date: '2026-06-01', partner_id: d.amb.P.comprador, finalidade: 'RECRIA_ENGORDA', modalidade: 'KG_VIVO', preco_unitario: 1100, valor_bruto: 880000 }, campos || {}), animais, parcelas: [{ data_vencimento: '2026-07-01' }] });
+  const inc = d.m.tentar('registrar', venda2([{ animal_id: bois[0], peso: 300 }, { animal_id: bois[1], peso: 250 }, { animal_id: bois[2] }]), { avisos: AVISOS }).erro;
+  assert.deepEqual([inc.code, codigos(inc)], ['VALIDATION', ['PESO_INCOMPLETO', 'PESO_OBRIGATORIO']], 'peso de um só faltando');
+  const semAceite = d.m.tentar('registrar', venda2(bois.map((animal_id) => ({ animal_id })), { peso_vivo_total_kg: 800 }), { avisos: [], chave: 'k-lote' });
+  assert.deepEqual([semAceite.erro.code, codigos(semAceite.erro)], ['NEEDS_CONFIRMATION', ['RATEIO_SEM_PESO']]);
+  const est = d.ok(d.m.tentar('registrar', venda2(bois.map((animal_id) => ({ animal_id })), { peso_vivo_total_kg: 800 }), { avisos: ['RATEIO_SEM_PESO'], chave: 'k-lote' }), 'com o aceite, a mesma chave');
+  d.invariantes('venda com base estimada');
+  const rat = d.m.tabela('RATEIOS').find((x) => x.event_id === est.dados.event_id && x.criterio === 'PESO_VIVO');
+  assert.match(rat.justificativa, /^Base estimada: última pesagem de cada animal até 01\/06\/2026, ajustada ao peso vivo do lote \(800 kg\)\.$/);
+  const somaP = pesos.reduce((a, b) => a + b, 0);
+  const bases4 = pesos.map((p) => Math.round(p * 800 / somaP * 10000) / 10000);
+  const alocs = d.m.tabela('ALOCACOES_FINANCEIRAS').filter((x) => x.rateio_id === rat.rateio_id);
+  assert.deepEqual(alocs.map((x) => x.base_valor), bases4, 'base = pesagem × peso do lote ÷ Σ pesagens, com 4 casas');
+  const esperado = maiorResto(880000, bois.map((id, i) => ({ animal: id, codigo: comp.dados.animais[i].codigo_interno, base: Math.round(bases4[i] * 10000) })));
+  assert.deepEqual(alocs.map((x) => x.valor_alocado), bois.map((id) => esperado.get(id)), 'maior resto sobre as bases estimadas');
+  assert.equal(d.m.tabela('PESAGENS').filter((x) => x.event_id === est.dados.event_id).length, 0, 'peso só do lote não vira pesagem');
+});
+
+test('arroba e carcaça com arredondamento: romaneio de 820,3 kg dá 54,69 @ e rendimento apurado de 52,1%; a conferência no limite da tolerância (1%) não avisa e 1 centavo acima avisa sem dizer "1% acima de 1%"; rendimento que arredonda para 100% ou 0% não é chamado de carcaça maior que o vivo; arroba de peso vivo a 50% (07, 4.3 c)', () => {
+  const d = direto();
+  const { m } = d;
+  const venda = (bruto, animais, extra) => Object.assign({ tipo: 'VENDA', campos: { event_date: '2026-08-01', partner_id: d.amb.P.comprador, finalidade: 'ABATE', modalidade: 'ARROBA', base_peso: 'CARCACA', preco_unitario: 32000, valor_bruto: bruto }, animais, parcelas: [{ data_vencimento: '2026-08-31' }] }, extra || {});
+  const vivos = [540, 520, 515.5];
+  const carcacas = [282.3, 271.1, 266.9];
+  const lote = d.ids.map((id, i) => ({ animal_id: id, peso: vivos[i], peso_carcaca_kg: carcacas[i] }));
+  const conf = Math.round(8203 * 32000 / 150);
+  assert.equal(conf, 1749973);
+  const noLimite = m.simular('registrar', venda(conf + Math.floor(conf / 100), lote));
+  const v = noLimite.valor.dados.impactos.venda;
+  assert.deepEqual([noLimite.valor.dados.avisos.length, v.arrobas, v.rendimento_pct, v.arroba_base, v.conferencia, v.peso_carcaca_total, v.peso_vivo_total], [0, 54.69, 52.1, 'CARCACA', conf, 820.3, 1575.5]);
+  const acima = m.tentar('registrar', venda(conf + Math.floor(conf / 100) + 1, lote), { avisos: [] }).erro;
+  assert.equal(acima.code, 'NEEDS_CONFIRMATION');
+  assert.match(acima.details[0].mensagem, /difere em mais de 1% da conta pela negociação \(R\$ 17\.499,73\), acima da tolerância de 1%/);
+  const r = d.ok(m.tentar('registrar', venda(conf, lote), { avisos: AVISOS }), 'venda pelo romaneio');
+  d.invariantes('venda por arroba de carcaça');
+  const vd = m.tabela('VENDAS').find((x) => x.event_id === r.dados.event_id);
+  assert.deepEqual([vd.rendimento_carcaca_pct, vd.rendimento_tipo, vd.peso_carcaca_total_kg, vd.criterio_rateio], [52.1, 'APURADO', 820.3, 'PESO_CARCACA']);
+  const fin = m.tabela('FINANCEIRO').find((x) => x.event_id === r.dados.event_id);
+  const al = m.tabela('ALOCACOES_FINANCEIRAS').filter((x) => x.financial_id === fin.financial_id);
+  const esperado = maiorResto(conf, d.ids.map((id, i) => ({ animal: id, codigo: 'A-00000' + (i + 1), base: Math.round(carcacas[i] * 10) })));
+  assert.deepEqual(al.map((x) => x.valor_alocado), d.ids.map((id) => esperado.get(id)), 'receita pela carcaça de cada um, maior resto');
+  assert.equal(m.tabela('PESAGENS').filter((x) => x.event_id === r.dados.event_id).map((x) => x.peso_kg).join(), vivos.join(), 'o peso vivo vira pesagem; a carcaça nunca');
+  // Rendimento que arredonda para 100% ou para 0%: recusado, mas sem dizer que a carcaça passou do vivo.
+  const d2 = direto();
+  for (const [vivo, carc, txt] of [[1000, 999.6, '99,96%'], [1999.9, 0.5, '0,03%'], [500, 500, null]]) {
+    const e = d2.m.tentar('registrar', venda(1000000, [{ animal_id: d2.ids[0], peso: vivo, peso_carcaca_kg: carc }]), { avisos: AVISOS }).erro;
+    assert.equal(e.code, 'VALIDATION');
+    if (txt) assert.ok(e.details.some((x) => x.mensagem.includes('rendimento de carcaça calculado (' + txt)) && !e.details.some((x) => /passar do peso vivo total/.test(x.mensagem)), txt + ': ' + JSON.stringify(e.details));
+    else assert.deepEqual(codigos(e), ['CARCACA_MAIOR_QUE_VIVO', 'VALOR_FORA_DA_FAIXA'], 'carcaça igual ao vivo');
+  }
+  // Compra por arroba de peso vivo a 50% negociado (07, 4.3 c): 4.800,0 kg → 160 @ × R$ 300,00 = R$ 48.000,00; a nota de 48.150,00 vale (0,31%).
+  const c = d2.ok(d2.m.tentar('registrar', { tipo: 'COMPRA', campos: { event_date: '2026-03-01', partner_id: d2.amb.P.fornecedor, pasto_destino_id: PASTOS.C, modalidade: 'ARROBA', base_peso: 'VIVO', rendimento_carcaca_pct: 50, rendimento_tipo: 'NEGOCIADO', preco_unitario: 30000, valor_animais: 4815000 }, animais: Array.from({ length: 20 }, (_, i) => garrote('G' + i, { peso: 240 })), parcelas: [{ data_vencimento: '2026-04-01' }] }, { avisos: [] }), 'compra por arroba viva');
+  d2.invariantes('compra por arroba viva');
+  const cp = d2.m.tabela('COMPRAS').find((x) => x.event_id === c.dados.event_id);
+  assert.deepEqual([cp.rendimento_carcaca_pct, cp.rendimento_tipo, cp.peso_total_kg, cp.valor_animais, cp.criterio_rateio], [50, 'NEGOCIADO', 4800, 4815000, 'PESO_VIVO']);
+  assert.deepEqual(d2.m.tabela('ANIMAIS').filter((a) => c.dados.animais.some((x) => x.animal_id === a.animal_id)).map((a) => a.custo_aquisicao).reduce((s2, x) => s2 + x, 0), 4815000, 'o custo do lote = a nota');
+});
+
+test('parcelas que diferem de 1 centavo: a soma 1 centavo acima ou abaixo é recusada; valor explícito com parcelas vazias divide o resto (sobra para as primeiras vazias); retida igual ao recebimento do dia passa (depósito zero), 1 centavo acima não; retida fora de um vencimento da venda é recusada', () => {
+  const d = direto();
+  const { m } = d;
+  const F = d.amb.P.fornecedor;
+  const compra = (parcelas, b) => ({ tipo: 'COMPRA', campos: { event_date: '2026-02-10', partner_id: F, pasto_destino_id: PASTOS.A, modalidade: 'CABECA', preco_unitario: 10000, valor_animais: 10000 }, animais: [garrote(b)], parcelas });
+  const p = (v, mes) => Object.assign({ data_vencimento: '2026-0' + mes + '-10' }, v === null ? {} : { valor: v });
+  for (const lista of [[p(3333, 3), p(3333, 4), p(3333, 5)], [p(3334, 3), p(3333, 4), p(3334, 5)], [p(10001, 3)], [p(9999, 3)], [p(10000, 3), p(null, 4)]]) {
+    const e = m.tentar('registrar', compra(lista, 'P1'), { avisos: AVISOS }).erro;
+    assert.deepEqual([e.code, codigos(e)], ['VALIDATION', ['PARCELAS_NAO_SOMAM']], JSON.stringify(lista.map((x) => x.valor)));
+  }
+  const r = d.ok(m.tentar('registrar', compra([p(3333, 3), p(null, 4), p(null, 5)], 'P2'), { avisos: AVISOS }), 'explícita e vazias');
+  const fin = m.tabela('FINANCEIRO').find((x) => x.event_id === r.dados.event_id);
+  assert.deepEqual(m.tabela('PARCELAS').filter((x) => x.financial_id === fin.financial_id).map((x) => x.valor), [3333, 3334, 3333]);
+  d.invariantes('parcelas');
+  const vendaDe = (deducoes, parcelas) => ({ tipo: 'VENDA', campos: { event_date: '2026-05-01', partner_id: d.amb.P.comprador, finalidade: 'RECRIA_ENGORDA', modalidade: 'CABECA', preco_unitario: 300000, valor_bruto: 300000 }, animais: [{ animal_id: d.ids[0] }], parcelas: parcelas || [p(100000, 6), p(200000, 7)], deducoes });
+  const ret = (valor, venc) => Object.assign({ tipo: 'FUNRURAL', valor, retida_pelo_comprador: true }, venc ? { data_vencimento: venc } : {});
+  assert.deepEqual(codigos(m.tentar('registrar', vendaDe([ret(100001)]), { avisos: AVISOS }).erro), ['RETENCAO_MAIOR_QUE_RECEBIMENTO']);
+  assert.deepEqual(codigos(m.tentar('registrar', vendaDe([ret(1000, '2026-06-11')]), { avisos: AVISOS }).erro), ['RETIDA_FORA_DO_RECEBIMENTO']);
+  assert.deepEqual(codigos(m.tentar('registrar', vendaDe([ret(100000), ret(1, '2026-06-10')]), { avisos: AVISOS }).erro), ['RETENCAO_MAIOR_QUE_RECEBIMENTO'], 'duas retenções no mesmo dia somam');
+  const v = d.ok(m.tentar('registrar', vendaDe([ret(100000), ret(200000, '2026-07-10')]), { avisos: AVISOS }), 'retidas iguais aos recebimentos');
+  d.invariantes('venda com retenção total');
+  const sim = m.simular('registrar', vendaDe([ret(100000), ret(200000, '2026-07-10')]));
+  assert.deepEqual([sim.ok, sim.erro.code, codigos(sim.erro)], [false, 'VALIDATION', ['FORA_DO_REBANHO']], 'a mesma venda já não cabe: o animal foi vendido');
+  assert.equal(m.tabela('VENDAS').find((x) => x.event_id === v.dados.event_id).outras_deducoes, 300000, 'resultado da negociação zero, depósito zero: aceito');
+});
+
+test('reenvio com a mesma chave: mesmo conteúdo (chaves em outra ordem, vazio a mais, sem o aceite) → duplicado com a mesma resposta e nada gravado; conteúdo diferente, outra rota ou outra ação → IDEMPOTENCY_MISMATCH; aviso sem aceite e VALIDATION não consomem a chave', () => {
+  const d = direto();
+  const { m } = d;
+  const vendaDe = (bruto, extra) => Object.assign({ tipo: 'VENDA', campos: { event_date: '2026-05-01', partner_id: d.amb.P.comprador, finalidade: 'RECRIA_ENGORDA', modalidade: 'CABECA', preco_unitario: 300000, valor_bruto: bruto }, animais: [{ animal_id: d.ids[0] }, { animal_id: d.ids[1] }], parcelas: [{ data_vencimento: '2026-06-01' }] }, extra || {});
+  // Aviso sem aceite: nada gravado, a chave fica livre; o reenvio com o aceite grava uma vez.
+  const antes = contagens(cru(m));
+  const sem = m.tentar('registrar', vendaDe(610000), { avisos: [], chave: 'K1' });
+  assert.deepEqual([sem.erro.code, codigos(sem.erro)], ['NEEDS_CONFIRMATION', ['VALOR_DIVERGENTE']]);
+  assert.deepEqual(contagens(cru(m)), antes, 'nada gravado sem o aceite');
+  const um = d.ok(m.tentar('registrar', vendaDe(610000), { avisos: ['VALOR_DIVERGENTE'], chave: 'K1' }), 'com o aceite');
+  const depois = contagens(cru(m));
+  // Mesmo conteúdo em outra forma: chaves em outra ordem e um campo vazio a mais (o hash é do JSON canônico).
+  const d0 = vendaDe(610000);
+  const reordenado = { parcelas: d0.parcelas, animais: d0.animais, campos: Object.assign({ notes: null, description: '' }, Object.keys(d0.campos).reverse().reduce((o, k) => { o[k] = d0.campos[k]; return o; }, {})), tipo: d0.tipo };
+  for (const [dados, avisos] of [[d0, []], [reordenado, ['VALOR_DIVERGENTE']], [reordenado, []]]) {
+    const dup = d.ok(m.tentar('registrar', dados, { avisos, chave: 'K1' }), 'reenvio');
+    assert.deepEqual([dup.duplicado, dup.dados, dup.opId], [true, um.dados, um.opId], 'duplicado com a mesma resposta');
+  }
+  assert.deepEqual(contagens(cru(m)), depois, 'o duplicado não grava nada');
+  // Conteúdo diferente, outra ação (estornar, corrigir) com a mesma chave: IDEMPOTENCY_MISMATCH, nada gravado.
+  for (const [acao, dados] of [['registrar', vendaDe(610001)], ['registrar', Object.assign(vendaDe(610000), { deducoes: [{ tipo: 'COMISSAO', valor: 1 }] })], ['estornar', { event_id: um.dados.event_id, justificativa: 'errado' }], ['corrigir', Object.assign(vendaDe(610000), { event_id: um.dados.event_id, justificativa: 'errado' })]]) {
+    const e = m.tentar(acao, dados, { avisos: AVISOS, chave: 'K1' }).erro;
+    assert.equal(e && e.code, 'IDEMPOTENCY_MISMATCH', acao);
+  }
+  assert.deepEqual(contagens(cru(m)), depois, 'o IDEMPOTENCY_MISMATCH não grava nada');
+  // VALIDATION não consome a chave: o comando certo com a mesma chave grava.
+  const ruim = m.tentar('estornar', { event_id: um.dados.event_id }, { chave: 'K2' }).erro;
+  assert.equal(ruim.code, 'VALIDATION', 'estorno sem justificativa');
+  const est = d.ok(m.tentar('estornar', { event_id: um.dados.event_id, justificativa: 'comprador desistiu' }, { chave: 'K2' }), 'estorno com a chave da tentativa recusada');
+  assert.equal(est.duplicado, false);
+  // Depois do estorno, o reenvio da venda original com a sua chave continua duplicado (não grava a venda de novo).
+  const dup = d.ok(m.tentar('registrar', d0, { avisos: [], chave: 'K1' }), 'reenvio depois do estorno');
+  assert.deepEqual([dup.duplicado, dup.dados.event_id, dup.dados.status], [true, um.dados.event_id, 'ESTORNADO']);
+  assert.deepEqual(m.tabela('ANIMAIS').filter((a) => d.ids.slice(0, 2).includes(a.animal_id)).map((a) => a.situacao_cadastral), ['ATIVO', 'ATIVO']);
+  d.invariantes('depois do reenvio');
+});
+
 module.exports = { ambiente, criarModelo, rebanhoInicial, executar, conferirTudo, propTransferencia, propSaida, propCompra, propVenda, propNascimento, propIdentificacao, propMarcacao, propVolta, propEstorno, depoisDoComando, maiorResto, invariantesCruas, cru, passo, preparar, D0, HOJE, AVISOS };

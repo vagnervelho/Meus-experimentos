@@ -177,6 +177,7 @@ var EventService = (function () {
     return p ? p.nome : id;
   }
   function erroItem_(m, it, campo, codigo, mensagem) {
+    if (campo) (it.camposComErro = it.camposComErro || {})[campo] = true;
     m.col.erro({ codigo: codigo, animal_id: it.publico ? it.animal_id : null, brinco: it.brincoTexto || null, campo: campo, mensagem: it.quem + ': ' + mensagem });
   }
   function avisoItem_(m, it, codigo, mensagem, conflito) {
@@ -1527,7 +1528,8 @@ var EventService = (function () {
     var jaRecusados = {};
     m.col.erros.forEach(function (e) { if (!e.animal_id && e.campo) jaRecusados[e.campo] = true; });
     neg.erros.forEach(function (e) {
-      if (typeof e.indice === 'number') erroItem_(m, itens[e.indice], e.campo, e.codigo, e.mensagem);
+      // O campo do animal que o catálogo já recusou (fora da faixa, casas demais) também não leva um segundo erro.
+      if (typeof e.indice === 'number') { if (!(itens[e.indice].camposComErro || {})[e.campo]) erroItem_(m, itens[e.indice], e.campo, e.codigo, e.mensagem); }
       else if (!jaRecusados[e.campo]) erroGeral_(m, e.campo, e.codigo, e.mensagem);
     });
     neg.avisos.forEach(function (a) { avisoItem_(m, null, a.codigo, a.mensagem); });
@@ -1752,7 +1754,8 @@ var EventService = (function () {
     var jaRecusados = {};
     m.col.erros.forEach(function (e) { if (!e.animal_id && e.campo) jaRecusados[e.campo] = true; });
     neg.erros.forEach(function (e) {
-      if (typeof e.indice === 'number') erroItem_(m, itens[e.indice], e.campo, e.codigo, e.mensagem);
+      // O campo do animal que o catálogo já recusou (fora da faixa, casas demais) também não leva um segundo erro.
+      if (typeof e.indice === 'number') { if (!(itens[e.indice].camposComErro || {})[e.campo]) erroItem_(m, itens[e.indice], e.campo, e.codigo, e.mensagem); }
       else if (!jaRecusados[e.campo]) erroGeral_(m, e.campo, e.codigo, e.mensagem);
     });
     neg.avisos.forEach(function (a) { avisoItem_(m, null, a.codigo, a.mensagem); });
@@ -1762,7 +1765,7 @@ var EventService = (function () {
     var n = itens.length;
     var rateioItens = itens.map(function (it, i) { return { animal_id: it.animal_id, chave: it.codigo_interno, base: neg.bases[i], quem: it.quem }; });
     var justificativa = neg.criterio === 'MANUAL' ? nulo_(c.justificativa_rateio)
-      : neg.estimado ? 'Base estimada: última pesagem de cada animal até ' + br_(ev.event_date) + (neg.peso_vivo_total !== null ? ', ajustada ao peso vivo do lote (' + String(neg.peso_vivo_total).replace('.', ',') + ' kg).' : '.') : null;
+      : neg.estimado ? 'Base estimada: última pesagem de cada animal até ' + br_(ev.event_date) + (neg.peso_vivo_total !== null ? ', ajustada ao peso vivo do lote (' + Utils.formatarNumero(neg.peso_vivo_total) + ' kg).' : '.') : null;
     var rateio = { criterio: neg.criterio, itens: rateioItens, cemPorCento: true, justificativa: justificativa, estimado: neg.estimado };
     var planejados = [];
     var lancs = [];
