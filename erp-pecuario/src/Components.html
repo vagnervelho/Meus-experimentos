@@ -1828,9 +1828,10 @@ var Registro = (function () {
     if (!f || !f.lancamentos || !f.lancamentos.length) return [];
     var l = [];
     f.lancamentos.forEach(function (x) {
-      var p = x.parcelas.map(function (q) { return Fmt.dinheiro(q.valor) + ' em ' + Fmt.data(q.data_vencimento); });
+      var p = x.parcelas.length === 1 ? 'vence ' + Fmt.data(x.parcelas[0].data_vencimento)
+        : x.parcelas.length ? x.parcelas.length + ' parcelas: ' + x.parcelas.map(function (q) { return Fmt.dinheiro(q.valor) + ' em ' + Fmt.data(q.data_vencimento); }).join('; ') : '';
       var parc = Store.parceiro(x.partner_id);
-      l.push([x.descricao || x.conta_nome, Fmt.dinheiro(x.valor) + (parc ? ' · ' + parc.nome : '') + (p.length ? ' · ' + (p.length === 1 ? 'vence ' + p[0] : p.length + ' parcelas: ' + p.join('; ')) : '')]);
+      l.push([x.descricao || x.conta_nome, Fmt.dinheiro(x.valor) + (parc ? ' · ' + parc.nome : '') + (p ? ' · ' + p : '')]);
     });
     if (f.a_pagar) l.push(['A pagar', Fmt.dinheiro(f.a_pagar)]);
     if (f.a_receber) l.push(['A receber', Fmt.dinheiro(f.a_receber)]);
