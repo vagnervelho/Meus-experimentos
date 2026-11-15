@@ -133,6 +133,7 @@ function montar(opcoes) {
   Object.keys(sis.pastos).forEach((k) => nomear0(sis.pastos[k], '@p:' + k));
   Object.keys(sis.parceiros).forEach((k) => nomear0(sis.parceiros[k], '@f:' + k));
   nomear0(sis.externo, '@x');
+  nomear0(sis.prop, '@r:base');
   nomear0(sis.custeio, '@conta');
   sis.categorias.forEach((c) => nomear0(c.id, '@c:' + c.codigo));
   tabelas(sis).LISTAS.forEach((x) => nomear0(x.lista_id, '@l:' + x.lista + ':' + x.codigo));
@@ -237,7 +238,7 @@ function simbolizar(sis, v) {
 }
 /** Resolve os símbolos; símbolo sem dono (o passo que o criou ficou fora) → null. */
 function resolver(sis, v, faltou) {
-  if (typeof v === 'string' && /^@(\d+\.[aeipcfl]\d+|[bpfc]:\w+|l:\w+:\w+|x|conta)$/.test(v)) { if (!sis.uuid.has(v)) { faltou.push(v); return v; } return sis.uuid.get(v); }
+  if (typeof v === 'string' && /^@(\d+\.[aeipcflrnm]\d+|[bpfcr]:\w+|l:\w+:\w+|x|conta)$/.test(v)) { if (!sis.uuid.has(v)) { faltou.push(v); return v; } return sis.uuid.get(v); }
   if (Array.isArray(v)) return v.map((x) => resolver(sis, x, faltou));
   if (v && typeof v === 'object') { const o = {}; Object.keys(v).forEach((k) => { o[k] = resolver(sis, v[k], faltou); }); return o; }
   return v;
@@ -245,7 +246,7 @@ function resolver(sis, v, faltou) {
 /** Dá nome aos registros que o passo k criou (animais, eventos, importações), na ordem das linhas. */
 function nomear(sis, k, antes, depois) {
   // Passada 3: também os cadastros criados no meio (pasto, categoria, parceiro, item de lista).
-  [['ANIMAIS', 'animal_id', 'a'], ['EVENTOS', 'event_id', 'e'], ['IMPORTACOES', 'import_id', 'i'], ['PASTOS', 'pasture_id', 'p'], ['CATEGORIAS', 'category_id', 'c'], ['PARCEIROS', 'partner_id', 'f'], ['LISTAS', 'lista_id', 'l']].forEach(([aba, pk, l]) => {
+  [['ANIMAIS', 'animal_id', 'a'], ['EVENTOS', 'event_id', 'e'], ['IMPORTACOES', 'import_id', 'i'], ['PASTOS', 'pasture_id', 'p'], ['CATEGORIAS', 'category_id', 'c'], ['PARCEIROS', 'partner_id', 'f'], ['LISTAS', 'lista_id', 'l'], ['PROPRIEDADES', 'property_id', 'r'], ['ANEXOS', 'anexo_id', 'n'], ['FINANCEIRO', 'financial_id', 'm']].forEach(([aba, pk, l]) => {
     const velhos = new Set(antes[aba].map((x) => x[pk]));
     let n = 0;
     depois[aba].forEach((x) => {
@@ -346,6 +347,10 @@ function oraculoGlobal(sis, S, datas) {
   const pastoInativo = new Set(S.t.PASTOS.filter((p) => p.status !== 'ATIVO').map((p) => p.pasture_id));
   const catInativa = new Set(S.t.CATEGORIAS.filter((c) => c.ativo === false).map((c) => c.category_id));
   S.animais.forEach((a) => {
+    // Passada 3: a propriedade atual é a do pasto em que o animal está (os pastos novos podem ser de outra propriedade).
+    const pst = a.situacao_cadastral === 'ATIVO' && a.pasto_atual_id ? S.t.PASTOS.find((p) => p.pasture_id === a.pasto_atual_id) : null;
+    if (pst && a.propriedade_atual_id !== pst.property_id) out.push(falha('REPLAY:PROPRIEDADE', a.codigo_interno + ' está no ' + pst.nome + ', da propriedade ' + pst.property_id + ', mas a propriedade atual gravada é ' + a.propriedade_atual_id));
+    if (a.situacao_cadastral !== 'ATIVO' && a.propriedade_atual_id) out.push(falha('REPLAY:PROPRIEDADE', a.codigo_interno + ' (' + a.situacao_cadastral + ') com propriedade atual ' + a.propriedade_atual_id));
     if (a.situacao_cadastral === 'ATIVO' && pastoInativo.has(a.pasto_atual_id)) out.push(falha('REPLAY:PASTO_INATIVO', a.codigo_interno + ' está no rebanho dentro do pasto desativado ' + (sis.nomePasto[a.pasto_atual_id] || a.pasto_atual_id)));
     if (a.situacao_cadastral !== 'ANULADO' && a.situacao_cadastral !== 'PENDENTE' && a.categoria_modo === 'MANUAL' && catInativa.has(a.categoria_manual_id)) out.push(falha('REPLAY:CATEGORIA_INATIVA', a.codigo_interno + ' (' + a.situacao_cadastral + ') ficou na categoria desativada ' + a.categoria_manual_id));
   });
@@ -400,7 +405,7 @@ function oraculoEfeito(sis, cmd, resp, A, S) {
   }
   // Cadastros desativados e reativados no meio da sequência.
   // Passada 3: também criados e editados (todo campo pedido gravado; o novo é a única linha nova da aba).
-  const CADASTRO = { 'pasto.salvar': ['PASTOS', 'pasture_id'], 'parceiro.salvar': ['PARCEIROS', 'partner_id'], 'categoria.salvar': ['CATEGORIAS', 'category_id'], 'lista.salvar': ['LISTAS', 'lista_id'], 'animal.cadastrarExterno': ['ANIMAIS', 'animal_id'] }[cmd.rota];
+  const CADASTRO = { 'propriedade.salvar': ['PROPRIEDADES', 'property_id'], 'pasto.salvar': ['PASTOS', 'pasture_id'], 'parceiro.salvar': ['PARCEIROS', 'partner_id'], 'categoria.salvar': ['CATEGORIAS', 'category_id'], 'lista.salvar': ['LISTAS', 'lista_id'], 'animal.cadastrarExterno': ['ANIMAIS', 'animal_id'] }[cmd.rota];
   if (CADASTRO) {
     const [aba, pk] = CADASTRO;
     const lista = cmd.rota === 'lista.salvar' ? { [pk]: d.lista_id, campos: Object.fromEntries(['rotulo', 'ativo'].filter((c) => d[c] !== undefined).map((c) => [c, d[c]])) } : null;
@@ -429,6 +434,19 @@ function oraculoEfeito(sis, cmd, resp, A, S) {
       evs.forEach((e) => { if (S.vig.get(e.event_id)) erro('evento importado ainda vale depois de desfazer'); });
       const criados = new Set(S.t.EVENTO_ANIMAIS.filter((l) => evs.some((e) => e.event_id === l.event_id) && !A.animais.has(l.animal_id)).map((l) => l.animal_id));
       criados.forEach((x) => { const a = S.animais.get(x); if (a && a.situacao_cadastral !== 'ANULADO') erro('animal criado pela importação desfeita está ' + a.situacao_cadastral); });
+    }
+    return out;
+  }
+  if (cmd.rota === 'anexo.adicionar' || cmd.rota === 'anexo.remover') {
+    const id = cmd.rota === 'anexo.remover' ? d.anexo_id : resp && resp.anexo_id;
+    const x = S.t.ANEXOS.find((y) => y.anexo_id === id);
+    if (!x) { erro('anexo ' + id + ' não gravado'); return out; }
+    if (x.status !== (cmd.rota === 'anexo.remover' ? 'REMOVIDO' : 'ATIVO')) erro('anexo ' + x.status + ' depois de ' + cmd.rota);
+    if (cmd.rota === 'anexo.adicionar') {
+      const ev = d.entidade === 'EVENTOS' ? d.entity_id : d.entidade === 'FINANCEIRO' ? (S.t.FINANCEIRO.find((f) => f.financial_id === d.entity_id) || {}).event_id : null;
+      if (d.entidade !== 'ANIMAIS' && x.event_id !== ev) erro('anexo ligado ao evento ' + x.event_id + ', pedido ' + ev);
+      if (d.entidade !== 'ANIMAIS' && !S.vig.get(ev)) erro('anexo aceito em evento que não vale');
+      if (d.definir_como_foto && (S.animais.get(d.entity_id) || {}).foto_anexo_id !== id) erro('a foto não virou a foto principal do animal');
     }
     return out;
   }
@@ -705,6 +723,12 @@ const fem = (S, id) => (S.animais.get(id) || {}).sexo === 'F';
 
 /** Monta os dados de cada tipo a partir de uma especificação (a correção muda a especificação e monta de novo). */
 function montarDados(sis, spec) {
+  const d = montarDadosDoTipo(sis, spec);
+  // Passada 3: a propriedade do lançamento escolhida (outra, desativada), em vez da padrão.
+  if (spec.prop) d.campos.property_id = spec.prop;
+  return d;
+}
+function montarDadosDoTipo(sis, spec) {
   const s = spec;
   const P = sis.parceiros;
   if (s.tipo === 'TRANSFERENCIA') return { tipo: s.tipo, campos: { event_date: s.data, pasto_origem_id: s.origem, pasto_destino_id: s.destino }, animais: s.ids.map((animal_id) => ({ animal_id })) };
@@ -1179,9 +1203,15 @@ function gerar(sis, S, rnd, k) {
       return Object.assign(base, { rota: 'importacao.concluir', dados: { import_id: imp.import_id }, rotulo: 'concluir' });
     }
   }
+  if (sis.snapImp && rnd() < 0.3) {
+    const imp = S.t.IMPORTACOES.find((i) => i.import_id === sis.snapImp.import_id);
+    if (imp && imp.status === 'IMPORTADO') return Object.assign(base, { rota: 'importacao.desfazer', dados: { import_id: imp.import_id, justificativa: 'Arquivo errado' }, desfazerImediato: true, rotulo: 'desfazer logo depois de importar' });
+  }
+  if (sis.snap && sis.snap.dv === sis.versao() && rnd() < 0.18) { const c = gerarAcao(sis, S, rnd, k, rnd() < 0.65 ? 'estornoImediato' : 'correcaoIdentica', base); if (c) return c; }
   const acao = pesado(rnd, [
     ['registrar', 55], ['corrigir', 14], ['estornar', 11], ['editar', 5], ['reuso', 2], ['zeros', 0.6], ['marco', 1],
     ['importar', 4], ['desfazer', 1.5], ['reenvio', 1.5], ['versao', 1.5], ['cadastro', 5], ['outraChave', 1], ['lote', 0.5], ['faixas', 0.3],
+    ['estornoImediato', 4], ['anexo', 2.5],
   ]);
   return gerarAcao(sis, S, rnd, k, acao, base);
 }
@@ -1198,6 +1228,7 @@ function gerarAcao(sis, S, rnd, k, acao, base) {
     ]);
     const spec = propor(sis, S, rnd, tipo);
     if (!spec) return null;
+    if (S.t.PROPRIEDADES.length > 1 && rnd() < 0.2) spec.prop = sorteio(rnd, S.t.PROPRIEDADES).property_id;
     return Object.assign(base, { rota: 'evento.registrar', dados: montarDados(sis, spec), spec, rotulo: tipo });
   }
   if (acao === 'corrigir' || acao === 'estornar') {
@@ -1248,6 +1279,46 @@ function gerarAcao(sis, S, rnd, k, acao, base) {
     if (rnd() < 0.3) campos.nome = sorteio(rnd, ['Mimosa', 'Estrela', 'Valente']);
     return Object.assign(base, { rota: 'animal.editar', dados: Object.assign({ animal_id: id, campos }, rnd() < 0.95 ? { justificativa: 'Conferido na ficha' } : {}), rotulo: 'editar ' + c.campo });
   }
+  // Passada 3: o estorno logo depois do registro (nada gravado entre os dois) devolve cada animal que já existia ao que era.
+  if (acao === 'estornoImediato') {
+    const snap = sis.snap;
+    if (!snap || snap.dv !== sis.versao()) return null;
+    return Object.assign(base, { rota: 'evento.estornar', dados: { event_id: snap.eid, justificativa: 'Lançado errado' }, aceitar: true, estornoImediato: true, rotulo: 'estorno imediato de ' + snap.tipo });
+  }
+  // Passada 3: a correção logo depois do registro com a mesma especificação (os mesmos animais criados) não muda nenhum
+  // animal: o substituto fica na posição do original.
+  if (acao === 'correcaoIdentica') {
+    const snap = sis.snap;
+    if (!snap || snap.dv !== sis.versao() || !sis.specs.has(snap.eid)) return null;
+    const dados = Object.assign(montarDados(sis, js(sis.specs.get(snap.eid).spec)), { event_id: snap.eid, justificativa: 'Conferido de novo' });
+    return Object.assign(base, { rota: 'evento.corrigir', dados, aceitar: true, correcaoIdentica: true, rotulo: 'correção idêntica de ' + snap.tipo });
+  }
+  // Passada 3: anexos (E2.9) no evento, no lançamento e no animal, e a remoção; o evento anexado é depois corrigido,
+  // estornado ou desfeito pela importação como qualquer outro.
+  if (acao === 'anexo') {
+    const B64 = (t) => Buffer.from(t).toString('base64');
+    const ativos = S.t.ANEXOS.filter((x) => x.status === 'ATIVO');
+    if (ativos.length && rnd() < 0.25) {
+      const x = sorteio(rnd, rnd() < 0.9 ? ativos : S.t.ANEXOS);
+      return Object.assign(base, { rota: 'anexo.remover', dados: Object.assign({ anexo_id: x.anexo_id }, rnd() < 0.95 ? { justificativa: 'Documento errado' } : {}), rotulo: 'anexo removido' });
+    }
+    const y = rnd();
+    const doc = { tipo: sorteio(rnd, ['DOCUMENTO', 'NOTA_FISCAL', 'GTA']), nome_arquivo: 'doc-' + k + '.pdf', mime_type: 'application/pdf', conteudo_base64: B64('%PDF-1.4 doc ' + k) };
+    if (y < 0.55) {
+      const evs = S.t.EVENTOS.filter((e) => S.op.get(e.op_id) === 'CONFIRMADA');
+      const e = sorteio(rnd, rnd() < 0.85 ? evs.filter((x) => S.vig.get(x.event_id)) : evs);
+      if (!e) return null;
+      return Object.assign(base, { rota: 'anexo.adicionar', dados: Object.assign({ entidade: 'EVENTOS', entity_id: e.event_id }, doc), rotulo: 'anexo no evento ' + e.event_type });
+    }
+    if (y < 0.8) {
+      const f = sorteio(rnd, S.t.FINANCEIRO);
+      if (!f) return null;
+      return Object.assign(base, { rota: 'anexo.adicionar', dados: Object.assign({ entidade: 'FINANCEIRO', entity_id: f.financial_id }, doc), rotulo: 'anexo no lançamento' });
+    }
+    const id = sorteio(rnd, MOVEIS(S));
+    if (!id) return null;
+    return Object.assign(base, { rota: 'anexo.adicionar', dados: { entidade: 'ANIMAIS', entity_id: id, tipo: 'FOTO', nome_arquivo: 'foto-' + k + '.jpg', mime_type: 'image/jpeg', conteudo_base64: B64('jpeg ' + k), miniatura_base64: B64('mini'), definir_como_foto: rnd() < 0.4 }, rotulo: 'foto do animal' });
+  }
   if (acao === 'reuso') return Object.assign(base, { rota: 'config.salvar', dados: { valores: { brinco_permite_reuso: S.reuso ? 'N' : 'S' } }, rotulo: 'reuso' });
   if (acao === 'zeros') return Object.assign(base, { rota: 'config.salvar', dados: { valores: { brinco_ignora_zeros_esquerda: S.config.get('brinco_ignora_zeros_esquerda') === 'S' ? 'N' : 'S' } }, rotulo: 'zeros' });
   if (acao === 'lote') return Object.assign(base, { rota: 'config.salvar', dados: { valores: { importacao_lote_linhas: sorteio(rnd, ['1', '2', '3']) } }, rotulo: 'lote da importação' });
@@ -1283,7 +1354,7 @@ function gerarAcao(sis, S, rnd, k, acao, base) {
   }
   if (acao === 'cadastro') {
     // Desativar e reativar no meio: o pasto (sobretudo o D, vazio na montagem), o parceiro e a categoria.
-    const qual = pesado(rnd, [['pasto', 3], ['parceiro', 1.5], ['categoria', 1.5], ['pastoNovo', 0.8], ['pastoEditar', 0.6], ['parceiroNovo', 0.5], ['parceiroTipos', 0.4], ['categoriaNova', 0.7], ['categoriaEditar', 1.2], ['lista', 1.5], ['externo', 0.6]]);
+    const qual = pesado(rnd, [['pasto', 3], ['parceiro', 1.5], ['categoria', 1.5], ['pastoNovo', 0.8], ['pastoEditar', 0.6], ['parceiroNovo', 0.5], ['parceiroTipos', 0.4], ['categoriaNova', 0.7], ['categoriaEditar', 1.2], ['lista', 1.5], ['externo', 0.6], ['propriedadeNova', 0.5], ['propriedadeStatus', 0.5], ['propriedadePadrao', 0.3]]);
     const extra = gerarCadastro(sis, S, rnd, k, qual, base);
     if (extra !== undefined) return extra;
     if (qual === 'pasto') {
@@ -1338,7 +1409,7 @@ function gerarCadastro(sis, S, rnd, k, qual, base) {
   const com = (rota, dados, rotulo) => Object.assign(base, { rota, dados, rotulo });
   if (qual === 'pastoNovo') {
     const nomes = S.t.PASTOS.map((p) => p.nome);
-    const campos = { property_id: sis.prop, nome: rnd() < 0.1 && nomes.length ? sorteio(rnd, nomes) : 'Pasto N' + k, posse: 'PROPRIO' };
+    const campos = { property_id: rnd() < 0.5 ? sis.prop : sorteio(rnd, S.t.PROPRIEDADES).property_id, nome: rnd() < 0.1 && nomes.length ? sorteio(rnd, nomes) : 'Pasto N' + k, posse: 'PROPRIO' };
     if (rnd() < 0.6) campos.area_hectares = sorteio(rnd, [1, 3.5, 40]);
     if (rnd() < 0.4) campos.capacidade_estimada_cabecas = sorteio(rnd, [1, 2, 10]);
     return com('pasto.salvar', { campos }, 'pasto novo');
@@ -1396,6 +1467,15 @@ function gerarCadastro(sis, S, rnd, k, qual, base) {
     if (x < 0.2) return com('lista.salvar', { lista_id: it.lista_id, rotulo: it.rotulo + ' (revisto)', justificativa: 'Nome revisto' }, 'item de lista renomeado');
     return com('lista.salvar', { lista_id: it.lista_id, ativo: it.ativo === false, justificativa: 'Lista revista' }, 'item de lista ' + (it.ativo === false ? 'reativado' : 'desativado'));
   }
+  // Outra propriedade (os pastos novos vão para ela; 00, seção 9: a estrutura de várias propriedades), desativada e
+  // reativada, e a propriedade padrão trocada.
+  if (qual === 'propriedadeNova') return com('propriedade.salvar', { campos: { nome: 'Fazenda ' + k, area_total_ha: sorteio(rnd, [50, 300]) } }, 'propriedade nova');
+  if (qual === 'propriedadeStatus') {
+    const p = sorteio(rnd, S.t.PROPRIEDADES);
+    const status = p.status === 'ATIVO' ? 'INATIVO' : 'ATIVO';
+    return com('propriedade.salvar', { property_id: p.property_id, campos: { status }, justificativa: 'Propriedade revista' }, 'propriedade ' + status);
+  }
+  if (qual === 'propriedadePadrao') return com('config.salvar', { valores: { propriedade_padrao_id: sorteio(rnd, S.t.PROPRIEDADES).property_id } }, 'propriedade padrão');
   if (qual === 'externo') {
     const campos = { nome: sorteio(rnd, ['Touro do sêmen', 'Touro Nelore Elite', 'Reprodutor do vizinho ' + k]), sexo: rnd() < 0.9 ? 'M' : 'F' };
     if (rnd() < 0.5) { campos.data_nascimento = somaDias(D0, -400 - Math.floor(rnd() * 3000)); campos.data_nascimento_confianca = 'ESTIMADA'; }
@@ -1430,7 +1510,7 @@ function specDoGravado(sis, S, rnd, e) {
       if (a.mae_id) n.mae = a.mae_id;
       if (a.pai_id) n.pai = a.pai_id;
       if (a.raca) n.raca = a.raca;
-      if (t === 'ENTRADA_INICIAL') { if (a.data_entrada) n.entrada = a.data_entrada; if (a.partos_previos) n.partos = a.partos_previos; }
+      if (t === 'ENTRADA_INICIAL') { if (a.data_entrada && a.data_entrada < data) n.entrada = a.data_entrada; if (a.partos_previos) n.partos = a.partos_previos; }
       if (a.sexo === 'F' && a.situacao_reprodutiva === 'PRENHA' && a.data_prevista_parto) n.prenha = a.data_prevista_parto;
       novos.push(n);
     });
@@ -1531,6 +1611,15 @@ function executar(sis, k, cmd, antesT, opcoes) {
     } else if (r.meta && r.meta.duplicado) falhas.push(falha('REENVIO', 'comando novo tratado como duplicado'));
     else if (!r.meta || !r.meta.semAlteracao) falhas.push(...oraculoEfeito(sis, cmd, r.data, A, S));
   }
+  if (cmd.estornoImediato) falhas.push(...oraculoEstornoImediato(sis, cmd, r, S, dv0));
+  if (cmd.correcaoIdentica) falhas.push(...oraculoCorrecaoIdentica(sis, cmd, r, S, dv0));
+  if (cmd.desfazerImediato) falhas.push(...oraculoDesfazerImediato(sis, cmd, r, S));
+  // O retrato de antes do primeiro bloco de uma importação vale enquanto só os comandos dela forem gravados.
+  const gravou = r.ok && !(r.meta && (r.meta.duplicado || r.meta.semAlteracao)) && dv1 !== dv0;
+  if (gravou && sis.snapImp && (cmd.dados || {}).import_id !== sis.snapImp.import_id) sis.snapImp = null;
+  if (gravou && cmd.rota === 'importacao.importarBloco' && cmd.dados.bloco === 1) sis.snapImp = { import_id: cmd.dados.import_id, animais: antesT.ANIMAIS };
+  if (sis.snapImp && cmd.rota === 'importacao.desfazer' && cmd.dados.import_id === sis.snapImp.import_id && r.ok) sis.snapImp = null;
+  if (r.ok && cmd.rota === 'evento.registrar' && !cmd.reenvio && !(r.meta && r.meta.duplicado) && r.data && r.data.event_id) sis.snap = { eid: r.data.event_id, dv: dv1, tipo: cmd.dados.tipo + (cmd.dados.subtipo ? '/' + cmd.dados.subtipo : ''), animais: antesT.ANIMAIS, depois: depoisT.ANIMAIS };
   // A simulação é consulta: corre com a importação em curso, que só recusa o comando (desenho-base 16.8).
   if (sim && !(r.ok === false && r.error.code === 'CONFLICT' && A.emCurso.length)) {
     const real = r.ok ? 'OK' : r.error.code;
@@ -1545,6 +1634,61 @@ function executar(sis, k, cmd, antesT, opcoes) {
   return { falhas, r, depoisT, S };
 }
 
+/**
+ * Estorno logo depois do registro, sem nada gravado entre os dois (passada 3): aceito, e cada animal que existia antes do
+ * registro volta a cada campo de projeção que tinha (situação, pasto, propriedade, brinco, sexo, nascimento, mãe, pai,
+ * categoria, marcações, cria ao pé, chegada, saída, custo, peso). Os que o registro criou ficam anulados.
+ */
+const PROJETADOS = ['brinco', 'brinco_norm', 'sexo', 'data_nascimento', 'data_nascimento_confianca', 'mae_id', 'mae_confianca', 'pai_id', 'pai_confianca', 'origem', 'evento_origem_id', 'castrado', 'reprodutor', 'partos_previos', 'propriedade_atual_id', 'pasto_atual_id', 'categoria_modo', 'categoria_manual_id', 'situacao_reprodutiva', 'cria_ao_pe', 'marcado_descarte', 'nao_localizado', 'situacao_cadastral', 'data_entrada', 'data_entrada_confianca', 'data_saida', 'peso_atual', 'data_ultima_pesagem', 'data_ultimo_movimento', 'custo_aquisicao', 'custo_aquisicao_origem'];
+function oraculoEstornoImediato(sis, cmd, r, S, dv0) {
+  const snap = sis.snap;
+  if (!snap || snap.eid !== cmd.dados.event_id || snap.dv !== dv0) return [];
+  if (!r.ok) return [falha('ESTORNO_IMEDIATO:RECUSADO', 'o estorno logo depois do registro (' + snap.tipo + ') foi recusado: ' + r.error.code + ' ' + r.error.message + ' ' + JSON.stringify((r.error.details || []).map((d) => d.codigo + ': ' + d.mensagem)).slice(0, 600))];
+  const out = [];
+  const antes = new Map(snap.animais.map((a) => [a.animal_id, a]));
+  S.animais.forEach((a, id) => {
+    const b = antes.get(id);
+    if (!b) { if (a.situacao_cadastral !== 'ANULADO') out.push(falha('ESTORNO_IMEDIATO:CRIADO', a.codigo_interno + ', criado pelo registro estornado (' + snap.tipo + '), está ' + a.situacao_cadastral)); return; }
+    const dif = PROJETADOS.filter((c) => norm(a[c]) !== norm(b[c]));
+    if (dif.length) out.push(falha('ESTORNO_IMEDIATO:' + dif[0], a.codigo_interno + ' não voltou ao que era antes do registro estornado (' + snap.tipo + '): ' + dif.map((c) => c + ' ' + JSON.stringify(b[c]) + ' → ' + JSON.stringify(a[c])).join('; ')));
+  });
+  return out;
+}
+
+/**
+ * Desfazer a importação logo depois de importá-la (passada 3), sem nenhum outro comando gravado desde o primeiro bloco:
+ * aceito, cada animal que já existia volta ao que era e os que ela criou ficam anulados (02, seção 5.1).
+ */
+function oraculoDesfazerImediato(sis, cmd, r, S) {
+  const snap = sis.snapImp;
+  if (!snap || snap.import_id !== cmd.dados.import_id) return [];
+  if (!r.ok) return [falha('DESFAZER_IMEDIATO:RECUSADO', 'desfazer a importação logo depois de importá-la foi recusado: ' + r.error.code + ' ' + r.error.message + ' ' + JSON.stringify((r.error.details || []).map((d) => d.codigo + ': ' + d.mensagem)).slice(0, 600))];
+  const out = [];
+  const antes = new Map(snap.animais.map((a) => [a.animal_id, a]));
+  S.animais.forEach((a, id) => {
+    const b = antes.get(id);
+    if (!b) { if (a.situacao_cadastral !== 'ANULADO') out.push(falha('DESFAZER_IMEDIATO:CRIADO', a.codigo_interno + ', criado pela importação desfeita, está ' + a.situacao_cadastral)); return; }
+    const dif = PROJETADOS.filter((c) => norm(a[c]) !== norm(b[c]));
+    if (dif.length) out.push(falha('DESFAZER_IMEDIATO:' + dif[0], a.codigo_interno + ' não voltou ao que era antes da importação desfeita: ' + dif.map((c) => c + ' ' + JSON.stringify(b[c]) + ' → ' + JSON.stringify(a[c])).join('; ')));
+  });
+  return out;
+}
+function oraculoCorrecaoIdentica(sis, cmd, r, S, dv0) {
+  const snap = sis.snap;
+  if (!snap || snap.eid !== cmd.dados.event_id || snap.dv !== dv0 || (r.ok && r.meta && r.meta.semAlteracao)) return [];
+  // O mesmo pedido, sobre o mesmo estado (só o original no lugar dele), não tem por que ser recusado.
+  if (!r.ok) return [falha('CORRECAO_IDENTICA:RECUSADA', 'a correção logo depois do registro, com a mesma especificação (' + snap.tipo + '), foi recusada: ' + r.error.code + ' ' + r.error.message + ' ' + JSON.stringify((r.error.details || []).map((d) => d.codigo + ': ' + d.mensagem)).slice(0, 600))];
+  const out = [];
+  const depois = new Map(snap.depois.map((a) => [a.animal_id, a]));
+  S.animais.forEach((a, id) => {
+    const b = depois.get(id);
+    if (!b) { out.push(falha('CORRECAO_IDENTICA:CRIADO', 'a correção idêntica (' + snap.tipo + ') criou ' + a.codigo_interno + ' em vez de reaproveitar o animal')); return; }
+    const dif = PROJETADOS.filter((c) => (c === 'evento_origem_id' ? (b[c] === snap.eid ? a[c] !== r.data.event_id : norm(a[c]) !== norm(b[c])) : norm(a[c]) !== norm(b[c])));
+    if (dif.length) out.push(falha('CORRECAO_IDENTICA:' + dif[0], a.codigo_interno + ' mudou com a correção idêntica (' + snap.tipo + '): ' + dif.map((c) => c + ' ' + JSON.stringify(b[c]) + ' → ' + JSON.stringify(a[c])).join('; ')));
+  });
+  return out;
+}
+
 /** Atualiza a memória do gerador depois de um passo aceito (especificação do lançamento, importação, último aceito). */
 function memorizar(sis, k, cmd, r, A, S) {
   // "Valide de novo": a confirmação recusou porque o resultado da validação mudou.
@@ -1555,7 +1699,9 @@ function memorizar(sis, k, cmd, r, A, S) {
   if (r.data && Array.isArray(r.data.animais)) sis.foco = r.data.animais.map((a) => a.animal_id).concat(sis.foco || []).slice(0, 4);
   if (cmd.rota === 'importacao.criar') sis.imps.set(r.data.import_id, { mapa: cmd.mapa, validado: 0 });
   if (cmd.rota === 'importacao.validarBloco') { const m = sis.imps.get(cmd.dados.import_id); if (m) { m.validado = cmd.dados.bloco; m.revalidar = false; } }
-  if (cmd.spec && r.data && r.data.event_id && /^evento\.(registrar|corrigir)$/.test(cmd.rota)) {
+  // O reenvio (duplicado) não cria nada: refazer a especificação por ele apagaria os animais que o original criou
+  // (passada 3: a correção seguinte criava animais novos em vez de reaproveitar os do lançamento).
+  if (cmd.spec && !cmd.reenvio && !(r.meta && r.meta.duplicado) && r.data && r.data.event_id && /^evento\.(registrar|corrigir)$/.test(cmd.rota)) {
     // Os animais que o lançamento criou vão com o mesmo animal_id na correção: o item novo recebe o animal criado, na
     // ordem do código interno (a ordem de criação, que é a dos itens).
     const eid = r.data.event_id;
@@ -1611,6 +1757,9 @@ function gravavel(sis, cmd) {
   const o = { rota: cmd.rota, dados: simbolizar(sis, cmd.dados), avisos: cmd.avisos, aceitar: cmd.aceitar };
   if (cmd.simular) o.simular = true;
   if (cmd.dvVelha) o.dvVelha = true;
+  if (cmd.estornoImediato) o.estornoImediato = true;
+  if (cmd.correcaoIdentica) o.correcaoIdentica = true;
+  if (cmd.desfazerImediato) o.desfazerImediato = true;
   if (cmd.chaveDe !== undefined) { o.chaveDe = cmd.chaveDe; if (cmd.outraChave) o.outraChave = true; else o.reenvio = true; }
   if (cmd.rotulo) o.rotulo = cmd.rotulo;
   return o;

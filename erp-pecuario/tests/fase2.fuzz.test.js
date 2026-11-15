@@ -11,7 +11,9 @@
  * evento e ANIMAIS (validar, importar, concluir, desfazer; também uma desfeita enquanto outra está em curso) e o marco
  * zero; desde a passada 2, também desativar e reativar pasto, parceiro e categoria no meio, corrigir o evento importado
  * (montado pelas linhas gravadas), corrigir para outro tipo, a mesma chave com outro conteúdo e a versão velha em qualquer
- * comando. Datas e animais provocam as combinações raras (mesmo dia, véspera do nascimento, depois da morte, número de
+ * comando; desde a passada 3, também criar e editar no meio pasto, parceiro, categoria, item de lista e touro de
+ * referência (e usá-los depois), corrigir a entrada gravada (o rebanho de base e a importada), reenviar um comando antigo e
+ * mudar o tamanho do lote da importação. Datas e animais provocam as combinações raras (mesmo dia, véspera do nascimento, depois da morte, número de
  * brinco reaproveitado).
  *
  * Oráculo depois de CADA passo: aceito → verificação de integridade sem ERRO, projeção = reconstrução, invariantes do

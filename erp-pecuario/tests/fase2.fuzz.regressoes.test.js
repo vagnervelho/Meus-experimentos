@@ -17,6 +17,7 @@ const troca = (data, animal, codigo, extra) => Object.assign({ tipo: 'IDENTIFICA
 const passo = (k, rota, dados) => ({ k, rota, dados, avisos: [], aceitar: true });
 const doacaoNoD = { tipo: 'OUTRA_ENTRADA', campos: { event_date: '2026-06-09', description: 'Doação do vizinho' }, animais: [{ sexo: 'M', pasto_destino_id: '@p:D', origem: 'DESCONHECIDA', brinco: '84', data_nascimento: '2023-01-15', data_nascimento_confianca: 'ESTIMADA', castrado: true, reprodutor: false }] };
 const desativarD = { pasture_id: '@p:D', campos: { status: 'INATIVO' }, justificativa: 'Pasto em reforma' };
+const entrada45 = { tipo: 'OUTRA_ENTRADA', campos: { event_date: '2026-03-10', description: 'Doação do vizinho' }, animais: [{ sexo: 'F', pasto_destino_id: '@p:C', origem: 'DESCONHECIDA', brinco: '45', mae_id: '@b:1', mae_confianca: 'CONFIRMADA', data_nascimento: '2025-06-01', data_nascimento_confianca: 'ESTIMADA' }] };
 const reclassificar = (data, cat, extra) => Object.assign({ tipo: 'AJUSTE_INVENTARIO', subtipo: 'RECLASSIFICACAO', campos: { event_date: data, justificativa: 'Categoria conferida no curral' }, animais: [{ animal_id: '@b:5', categoria_manual_id: cat }] }, extra || {});
 
 const CASOS = [
@@ -75,6 +76,21 @@ const CASOS = [
     ],
     // Antes do conserto: o passo 3 era aceito, com o animal na VACA desativada; o estorno (passo 4) já era recusado.
     esperado: { 0: 'OK', 1: 'OK', 2: 'OK', 3: 'CONFLICT:INTEGRIDADE_LINHA_DO_TEMPO', 4: 'CONFLICT:CATEGORIA_INATIVA' },
+  },
+  {
+    // Passada 3 (semente 73261, defeito do MODELO, não do sistema): o reenvio do registro refazia a especificação
+    // memorizada sem os animais criados, e a "correção idêntica" seguinte saía sem o animal_id (o sistema, certo, anulava
+    // o animal e criava outro). Fixa o desfecho certo: reenvio duplicado e a correção com a mesma especificação e o mesmo
+    // animal, que não muda nenhum animal (oráculo da correção idêntica e do estorno imediato).
+    nome: 'entrada registrada, reenviada e corrigida com a mesma especificação: o animal criado é o mesmo e nada muda; o estorno logo depois devolve tudo',
+    comandos: [
+      passo(0, 'evento.registrar', entrada45),
+      Object.assign(passo(1, 'evento.registrar', entrada45), { chaveDe: 0, reenvio: true }),
+      Object.assign(passo(2, 'evento.corrigir', Object.assign({}, entrada45, { animais: [Object.assign({ animal_id: '@0.a0' }, entrada45.animais[0])], event_id: '@0.e0', justificativa: 'Conferido de novo' })), { correcaoIdentica: true }),
+      passo(3, 'evento.registrar', reclassificar('2026-04-01', '@c:VACA')),
+      Object.assign(passo(4, 'evento.estornar', { event_id: '@3.e0', justificativa: 'Lançado errado' }), { estornoImediato: true }),
+    ],
+    esperado: { 0: 'OK', 1: 'OK', 2: 'OK', 3: 'OK', 4: 'OK' },
   },
 ];
 
