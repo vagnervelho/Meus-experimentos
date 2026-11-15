@@ -923,7 +923,7 @@ var TestRunner = (function () {
       var tinha = lock.tem();
       lock.soltar();
       var soltou = !lock.tem();
-      return { situacao: m.valor && tinha && soltou ? 'OK' : 'FALHOU', medidas: { obteve: m.valor, ms: m.ms, soltou: soltou }, observacao: 'A liberação do lock quando a execução morre se confere com a página de concorrência (CT-10, passo 6).' };
+      return { situacao: m.valor && tinha && soltou ? 'OK' : 'FALHOU', medidas: { obteve: m.valor, ms: m.ms, soltou: soltou }, observacao: 'Confere obter e soltar o lock. A disputa entre execuções paralelas se confere na página de concorrência (CT-10, passo 6); a liberação do lock quando uma execução morre por tempo não tem medida automática nesta versão.' };
     });
     item('SP-04', 'E-mail do usuário ativo', function () {
       var s = Api.diagnosticoSessao();
@@ -952,7 +952,7 @@ var TestRunner = (function () {
         return {
           situacao: le.valor === n ? 'OK' : 'FALHOU',
           medidas: { linhas: n, gravacao_ms: grava.ms, leitura_ms: le.ms, lidas: le.valor, anexar_5_ms: anexa.ms, propriedades_ms_por_leitura: Math.round(props.ms / 5) },
-          observacao: 'Orçamento do desenho: comando p95 ≤ 5 s com 10 mil linhas em EVENTO_ANIMAIS e ≤ 15 s com 100 mil (rode com linhas maiores para ver a curva).',
+          observacao: 'Orçamento do desenho: comando p95 ≤ 5 s com 10 mil linhas em EVENTO_ANIMAIS e ≤ 15 s com 100 mil. Pelo editor, a massa medida é a de 10 mil linhas.',
         };
       });
     });
