@@ -1204,11 +1204,21 @@ var EventService = (function () {
   /** Animais já cadastrados que o comando toca (itens que não são animal novo) e os do original, na correção. */
   function animaisConferidos_(m, ctxEv) {
     var ids = ctxEv.itens.filter(function (it) { return it.animal_id && !it.novo; }).map(function (it) { return it.animal_id; });
-    Object.keys(m.afetados).forEach(function (id) { if (!ctxEv.criadosOriginal[id] || ctxEv.itens.some(function (it) { return it.animal_id === id; })) ids.push(id); });
+    var porAnimal = itensPorAnimal_(ctxEv);
+    Object.keys(m.afetados).forEach(function (id) { if (!ctxEv.criadosOriginal[id] || porAnimal[id]) ids.push(id); });
     return Utils.unicos(ids);
   }
+  /** Itens do comando por animal (memoizado no ctxEv, depois que os itens foram montados): {animal_id: [item]}. */
+  function itensPorAnimal_(ctxEv) {
+    if (!ctxEv.porAnimalItens) {
+      var por = {};
+      ctxEv.itens.forEach(function (it) { if (it.animal_id) (por[it.animal_id] = por[it.animal_id] || []).push(it); });
+      ctxEv.porAnimalItens = por;
+    }
+    return ctxEv.porAnimalItens;
+  }
   function itemDoAnimal_(m, ctxEv, id) {
-    var it = ctxEv ? ctxEv.itens.filter(function (x) { return x.animal_id === id; })[0] : null;
+    var it = ctxEv && itensPorAnimal_(ctxEv)[id] ? itensPorAnimal_(ctxEv)[id][0] : null;
     if (it) return it;
     var e = m.f.animal(id) || {};
     return { animal_id: id, publico: true, brincoTexto: e.brinco || null, quem: nomeAnimal_(e), linhas: [] };
@@ -1221,13 +1231,14 @@ var EventService = (function () {
    * ctxEv null = estorno (só as linhas gravadas, sem as do evento estornado).
    */
   function conferirSequencias_(m, ctxEv, ids, proprio) {
+    var identPorAnimal = ctxEv ? Utils.agruparPor(ctxEv.plano.IDENTIFICACOES, 'animal_id') : {};
     ids.forEach(function (id) {
       // Animal repetido no lançamento: o erro ANIMAL_REPETIDO já explica; as linhas duplicadas não têm sequência a conferir.
       if (ctxEv && ctxEv.repetidos && ctxEv.repetidos[id]) return;
       var it = itemDoAnimal_(m, ctxEv, id);
-      var novasIdent = ctxEv ? ctxEv.plano.IDENTIFICACOES.filter(function (r) { return r.animal_id === id; }).map(function (r) { return Timeline.linhaIdentificacao(r, ctxEv.ev, ctxEv.ev.ordem_seq); }) : [];
+      var novasIdent = ctxEv ? (identPorAnimal[id] || []).map(function (r) { return Timeline.linhaIdentificacao(r, ctxEv.ev, ctxEv.ev.ordem_seq); }) : [];
       var novasLinhas = [];
-      if (ctxEv) ctxEv.itens.forEach(function (x) { if (x.animal_id === id) novasLinhas = novasLinhas.concat(x.linhas); });
+      if (ctxEv) (itensPorAnimal_(ctxEv)[id] || []).forEach(function (x) { novasLinhas = novasLinhas.concat(x.linhas); });
       var antes = Timeline.validarIdentificacoes(Timeline.identificacoes(m.real, id)).concat(Timeline.validarMarcacoes(m.real.linhas(id)));
       var depois = Timeline.validarIdentificacoes(Timeline.identificacoes(m.f, id).concat(novasIdent)).concat(Timeline.validarMarcacoes(m.f.linhas(id).concat(novasLinhas)));
       Timeline.problemasNovos(antes, depois).forEach(function (p) {
@@ -1260,7 +1271,7 @@ var EventService = (function () {
       var gravado = m.f.animal(id);
       var depois = estado_(m, id);
       if (!gravado || !depois || depois.situacao_cadastral === 'ANULADO' || depois.situacao_cadastral === 'PENDENTE') return;
-      var item = ctxEv ? ctxEv.itens.filter(function (x) { return x.animal_id === id; })[0] : null;
+      var item = ctxEv && itensPorAnimal_(ctxEv)[id] ? itensPorAnimal_(ctxEv)[id][0] : null;
       var it = itemDoAnimal_(m, ctxEv, id);
       if (!(item && item.brincoProposto) && !vazio_(depois.brinco) && chave(depois.brinco) !== chave(gravado.brinco || '')) {
         if (!donos) {

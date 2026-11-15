@@ -19,7 +19,10 @@ DESCARTE no motor (seções 12 e 14), parceiros validados nos eventos, plano de 
 o bloco H (seção 15.2), títulos na visão geral (seção 15.4) e as telas (seção 27). Fase 2, etapa VENDA (E2.4): VENDA no
 motor (seções 12 e 14) com o financeiro do próprio evento (`FinancialService`, seção 26: deduções, totais da venda,
 carcaça do romaneio, base estimada), a carência na venda (`HealthService`, seção 28), o CT-09 inteiro na aceitação
-(seção 21) e as telas (seção 29).
+(seção 21) e as telas (seção 29). Fase 2, etapa IDENTIFICAÇÃO, MARCAÇÃO, AJUSTES E ESTORNO GERAL (E2.6 e E2.7, backend):
+IDENTIFICACAO, MARCACAO e os subtipos RECLASSIFICACAO e DIVERGENCIA_CONTAGEM no motor (seções 12 a 14), as sequências de
+identificação e de marcação e a retirada de brinco no projetor (seção 13), a trilha completa de `auditoria.listar` (seção
+11), o alerta NAO_LOCALIZADO (seção 15.4) e o estorno e a correção de qualquer evento (seção 30).
 
 ## 1. Regras que valem para todo arquivo de `src/`
 
@@ -592,7 +595,8 @@ planilha. Tem de ser função determinística das linhas vigentes (pode rodar qu
 | `refazer(repo, io, op, linhasDaOperacao) → {atualizar, criar, semAlvo}` | O que a fase C aplica (idempotente; `updated_at`/`created_at` = `op.started_at`). Usado pela UnitOfWork |
 | `listar(tx, {entidade, entity_id, op_id, acao, de, ate}?) → [linhas]` | Trilha só de operações CONFIRMADAS, da mais recente para a mais antiga (cópias). A consulta declara `AuditService.LEITURAS` |
 | `linhaErro(ctx, {contexto, codigo, mensagem, erro, op_id}) → linha de ERROS_LOG` | Mensagem até 2.000 caracteres; pilha resumida (6 linhas) quando há `erro` |
-| `consultaListar(filtros)` / `listarAuditoria(ctx, filtros)` | Rota `auditoria.listar`: os filtros de `listar` + `pagina`, `por_pagina` (padrão 50, teto 500) → `{total, pagina, por_pagina, itens}` |
+| `trilha(tx, filtros)` | A trilha COMPLETA (03a, seção 5.2; 05, seção 2.16): EVENTOS + AJUSTES + AUDITORIA, só de operações confirmadas (eventos anulados entram, com `status` e `vigente`), da mais recente para a mais antiga (instante; no empate EVENTO, AJUSTE, AUDITORIA). Item = a forma da linha de AUDITORIA (`audit_id` só nas de AUDITORIA) + `origem` (EVENTO \| AJUSTE \| AUDITORIA), `id`, `event_id`; nos de evento e de ajuste também `event_type`, `event_subtype` (no ajuste, o `tipo_ajuste`), `event_date`, `registration_date`, `reversal_of_event_id`, `status`, `vigente`, `descricao` ("Estorno de: Transferir de pasto de 10/04/2026"). Ações: REGISTRAR, CORRIGIR (substituto), ESTORNAR (o evento; `justificativa` = a do payload), AJUSTAR (cada linha de AJUSTES: campo, anterior, novo, justificativa); as de AUDITORIA como estão. Filtros: `entidade` (EVENTOS = só eventos; ANIMAIS com `entity_id` = também os eventos do animal), `entity_id` (registro: de um animal traz os eventos dele e os estornos e correções desses eventos; de um evento, ele, quem o anulou e os ajustes dele), `op_id` (operação), `acao`, `origem`, `de`/`ate` (período: data `yyyy-MM-dd` comparada pela data do instante no fuso da fazenda, ou instante ISO). Período inválido ou origem desconhecida → `VALIDATION`. Precisa de `tx.cru` (`LEITURAS_TRILHA` = AUDITORIA, EVENTOS, EVENTO_ANIMAIS, AJUSTES) |
+| `consultaListar(filtros)` / `listarAuditoria(ctx, filtros)` | Rota `auditoria.listar`: a `trilha` (acesso cru) com os filtros dela + `pagina`, `por_pagina` (padrão 50, teto 500) → `{total, pagina, por_pagina, itens}`. `listar(tx, ...)` continua sendo só a trilha de AUDITORIA (o registro de refazer) |
 
 **Parte 2 — verificação de integridade (06, seção 9).** `verificarIntegridade(ctx) → {dados: relatório, dataVersion}`
 (rota `sistema.integridade`; fim do setup; gatilho semanal): lê os cabeçalhos e a localidade pela porta e entra por
@@ -602,7 +606,7 @@ data_version, ok (nenhum ERRO), erros, alertas, reparavel, abas_ausentes, checag
 situacao (OK|ERRO|ALERTA|NAO_EXECUTADA), achados, correcao, reparo}], achados: [{checagem, severidade, tabela, id,
 linha, campo, mensagem, reparo}] (até 300), truncado}`. Checagens (`AuditService.CHECAGENS`): `PK`, `BRINCO`, `FK`
 (linhas vigentes; alvo inexistente ou animal ANULADO; ANEXOS pela entidade; ERROS_LOG só alerta), `ENTRADA_ABERTA`
-(ATIVO ⇔ soma dos efeitos = 1), `LINHA_DO_TEMPO`, `PROJECAO` e `STATUS_EVENTOS` (reparo `RECONSTRUIR`), `INVENTARIO`
+(ATIVO ⇔ soma dos efeitos = 1), `LINHA_DO_TEMPO` (com a ordem das identificações e das marcações: `Timeline.validarIdentificacoes`/`validarMarcacoes`), `PROJECAO` e `STATUS_EVENTOS` (reparo `RECONSTRUIR`), `INVENTARIO`
 (total e por pasto, hoje), `ALOCACOES` (soma = total do rateio, ≤ lançamento, 100% em COMPRA, VENDA e ENTRADA_INICIAL),
 `PARCELAS`, `ALOCACAO_DIRETA` (reparo), `BASE_RATEIO` (alerta; VALOR_INDIVIDUAL de escopo EVENTO pela base do animal, DIRETO pelo valor do lançamento), `COPIAS`
 (data de PESAGENS, REPRODUCAO e IDENTIFICACOES = data do evento), `CELULAS` (COERCIDA = alerta; ERRO = erro),
@@ -617,9 +621,11 @@ LOCKED, CONFIG.
 
 Definição declarativa dos eventos (04, seção 7). Os 21 tipos estão no catálogo com `fase`; só passam pelo motor os
 entregues na fase corrente E com campos (`FASE_ATUAL = 2`): ENTRADA_INICIAL, OUTRA_ENTRADA, NASCIMENTO, COMPRA, VENDA,
-TRANSFERENCIA, MORTE, DESCARTE, AJUSTE_INVENTARIO (subtipos CORRECAO_CADASTRO, IDENTIFICACAO_INCORRETA,
-CORRECAO_LOCALIZACAO) e ESTORNO. IDENTIFICACAO, MARCACAO e os subtipos RECLASSIFICACAO e DIVERGENCIA_CONTAGEM são
-da fase 2 mas ainda não têm campos: ficam inativos (subtipo só é ativo com `campos_animal`). Vocabulário fechado de 04
+TRANSFERENCIA, MORTE, DESCARTE, IDENTIFICACAO (PRIMEIRA_IDENTIFICACAO, SUBSTITUICAO, REMOCAO), MARCACAO (DESCARTE,
+NAO_LOCALIZADO), AJUSTE_INVENTARIO (CORRECAO_CADASTRO, IDENTIFICACAO_INCORRETA, CORRECAO_LOCALIZACAO, RECLASSIFICACAO,
+DIVERGENCIA_CONTAGEM) e ESTORNO (subtipo só é ativo com `campos_animal`; os da fase 2 não aparecem em `serializar(1)`).
+Subtipo pode ter campos de cabeçalho próprios em `subtipos[S].campos` (`camposEvento(tipo, subtipo)` junta os do tipo e
+os do subtipo; a tela atual só desenha os do tipo). Vocabulário fechado de 04
 mais quatro atributos de campo: `opcoes` (enum fechado), `lista` (lista aberta de LISTAS), `casas` (decimais) e
 `naturezas` (em `ref:PLANO_CONTAS`: as naturezas de conta aceitas, para a tela filtrar as contas). No tipo, os campos de cabeçalho
 ficam em `campos`, os por animal em `campos_animal` (ou em `subtipos[S].campos_animal`) e os de grupo repetível em
@@ -640,6 +646,15 @@ Tipos desta etapa (cabeçalho · por animal):
   permuta, sacrifício), motivo (LISTAS.MOTIVO_DESCARTE), receita_valor, receita_partner_id, receita_vencimento,
   receita_forma_pagamento, receita_documento, receita_descricao, property_id, responsible, notes` · `observacoes`. Sem
   `event_subtype` (03b, seção 2.4).
+- IDENTIFICACAO (`VARIOS`, ATIVO; `modo_entrada: CURRAL`; LOCAL): `event_date, tipo_identificacao (BRINCO padrão, RFID,
+  SISBOV, TATUAGEM, OUTRO, BRINCO_ORIGEM — este só na retirada), property_id, responsible, notes` · PRIMEIRA_IDENTIFICACAO:
+  `animal_id*, codigo*, observacoes`; SUBSTITUICAO: `animal_id*, codigo*, motivo* (LISTAS.MOTIVO_IDENTIFICACAO),
+  observacoes`; REMOCAO: `animal_id*, motivo*, observacoes`. `TIPOS_IDENTIFICACAO` = a lista do campo.
+- MARCACAO (`VARIOS`, ATIVO; LOCAL): `event_date, acao* (MARCAR | DESMARCAR; vai para o payload), property_id, responsible,
+  notes`; o subtipo DESCARTE tem ainda o campo de cabeçalho `motivo_descarte` (LISTAS.MOTIVO_DESCARTE, só com MARCAR) ·
+  `animal_id*, observacoes`.
+- AJUSTE_INVENTARIO, subtipos da Fase 2: RECLASSIFICACAO `animal_id*, categoria_manual_id (ref:CATEGORIAS; vazio = volta à
+  automática)`; DIVERGENCIA_CONTAGEM `animal_id*, observacoes (em que contagem faltou; vazio = a justificativa)`.
 - COMPRA (`NOVOS`, aceita também animal já cadastrado fora do rebanho; SERVIDOR; crítico; `filtro_elegiveis.situacao`
   VENDIDO, DESCARTADO, BAIXADO_AJUSTE, HISTORICO): `event_date, partner_id (fornecedor, obrigatório), finalidade
   (LISTAS.FINALIDADE_NEGOCIO), modalidade (CABECA|KG_VIVO|ARROBA|LOTE), base_peso (só ARROBA: VIVO|CARCACA),
@@ -673,10 +688,10 @@ Tipos desta etapa (cabeçalho · por animal):
 | `tipo(nome)` | Resumo + definição (`rotulo, grupo_ui, ordem, fase, frequente, selecao_animais, filtro_elegiveis, modo_entrada, revisao, critico, reads, campos, campos_animal, componentes, grupos_repetiveis, subtipos`). Tipo inexistente → `INTERNAL` |
 | `ativo(tipo, subtipo?, fase?)` | Entregue na fase (padrão: a corrente) e com campos; tipo com subtipos exige subtipo ativo |
 | `tiposAtivos(fase?)`, `modulosAtivos(fase?)` | Listas por fase. Módulos: os 10 itens do menu (§15) + IMPORTACAO (`menu: false`), cada um com `fase` |
-| `camposEvento(tipo)`, `camposAnimal(tipo, subtipo?)`, `camposGrupo(tipo, grupo)`, `leituras(tipo)` | Definições e abas que o comando lê (o motor lê também BAIXAS); `leituras(tipo desconhecido)` = a união das de todos os tipos (correção que não diz o tipo) |
+| `camposEvento(tipo, subtipo?)`, `camposAnimal(tipo, subtipo?)`, `camposGrupo(tipo, grupo)`, `leituras(tipo)` | Definições e abas que o comando lê (o motor lê também BAIXAS); `camposEvento` com subtipo acrescenta `subtipos[S].campos`; `leituras(tipo desconhecido)` = a união das de todos os tipos (correção que não diz o tipo) |
 | `serializar(fase?)` | `{fase, modulos, tipos}` só dados (vai ao cliente no bootstrap), só tipos e subtipos ativos |
 | `validarCampos(definicoes, valores, {listas}?)` | Formato, obrigatório, `obrigatorio_se`, `visivel_se` (preenchido e não visível → `CAMPO_NAO_SE_APLICA`; `false` passa), lista, faixa (`dinheiro` em centavos, `min`/`max` em reais) e chave desconhecida não vazia (`CAMPO_DESCONHECIDO`). Devolve `[{codigo, campo, mensagem}]` |
-| `CAMPOS_CORRIGIVEIS`, `PESO_MAX_KG` (2000), `TIPOS_CAMPO` | Constantes |
+| `CAMPOS_CORRIGIVEIS`, `PESO_MAX_KG` (2000), `TIPOS_CAMPO`, `TIPOS_IDENTIFICACAO` | Constantes |
 
 ## 13. `Timeline` (puro: linha do tempo, projetor, inventário)
 
@@ -693,7 +708,11 @@ substituição (desenho-base 16.1).
 | `ordenar(linhas)`, `classe(l)`, `papelNaLinha(l)` | Ordem `(event_date, classe 0/1/2, ordem_seq, event_seq)`; papel ENTRADA, SAIDA, MOVIMENTO (efeito 0 com destino), FATO (exige presença, limites inclusivos) ou NEUTRO (CORRECAO_CADASTRO e IDENTIFICACAO_INCORRETA: valem para todo o histórico) |
 | `validar(linhas, {nascimento, dataEntrada})` | Linha do tempo de UM animal já com a mudança: `{problemas, periodos, pasto, dentro, morte}`. Códigos: `ENTRADA_JA_DENTRO`, `FORA_DO_REBANHO`, `ORIGEM_DIVERGENTE` (com `pasto_esperado`/`pasto_informado`), `FORA_DA_PERMANENCIA`, `APOS_MORTE`, `ANTES_DO_NASCIMENTO`, `ANTES_DA_ENTRADA`. Linhas `pre_marco_zero` ficam fora do replay e só são conferidas contra nascimento e chegada declarada |
 | `problemasNovos(antes, depois)` | O que a mudança quebrou (por `codigo` + `event_id`). Regra do serviço: problema em linha do comando → VALIDATION; em evento gravado → CONFLICT |
-| `descrever(problema, nomePasto?)` | Frase para o pecuarista, sem o "quem" |
+| `identificacoes(f, id)` / `linhaIdentificacao(registro, evento, ordemSeq)` | IDENTIFICACOES vigentes do animal com o cabeçalho do evento (`{ident_id, event_id, tipo, codigo, codigo_norm, data_inicio, motivo, event_type, event_subtype, event_seq, ordem_seq, remocao}`), na ordem (data_inicio, posição na cadeia de substituição, event_seq). `remocao` = a linha é de uma IDENTIFICACAO/REMOCAO |
+| `validarIdentificacoes(linhas)` | Sequência por tipo de identificação de UM animal: PRIMEIRA_IDENTIFICACAO exige o tipo sem código em uso (`IDENTIFICACAO_JA_EXISTE`, com `aberto: {codigo, data_inicio}`); SUBSTITUICAO e REMOCAO exigem um em uso (`SEM_IDENTIFICACAO`); a REMOCAO tira exatamente o código em uso (`REMOCAO_DE_OUTRO_CODIGO`). Linhas de entrada, compra e correção de brinco abrem o código sem conferência |
+| `validarMarcacoes(linhas)` | Sequência por subtipo das linhas MARCACAO de UM animal (`payload.acao`): `JA_MARCADO`, `NAO_MARCADO` |
+| `descrever(problema, nomePasto?)` | Frase para o pecuarista, sem o "quem" (inclui os códigos das duas sequências; nomes por subtipo: "a baixa na contagem", "a reclassificação", "a troca de identificação", "a retirada de identificação") |
+| `NOME_IDENTIFICACAO` | Nome de cada tipo de identificação nas mensagens (brinco, chip (RFID), SISBOV...) |
 | `fonte(tx, {excluir, parametros})` | Acesso indexado às linhas da unidade (usa `tx.cru` quando há); `excluir` = eventos tratados como anulados (validação de estorno e de substituição) |
 | `projetarAnimal(fonte, id)` → `{campos, meta}`; `projetar(fonte, ids \| null)` | A ÚNICA rotina que calcula as projeções de ANIMAIS (03a, 4.3.3 e 4.3.4); `projetar` inclui as mães alcançadas e `cria_ao_pe` |
 | `porta()` / `reconstruir(tx, escopo)` | Porta `ctx.projecoes`. Escopo `{animais, eventos}` (o `derivados` do EventService) ou `{tudo: true}`. Grava ANIMAIS (+ `updated_at` quando algo muda), `IDENTIFICACOES.data_fim` e FINANCEIRO (`status`, `cancelado_em` = `created_at` do anulador, `cancelado_por_event_id`, `status_pagamento` e `data_pagamento` por `FinancialService.situacaoPagamento`, `animal_id` da alocação DIRETA) |
@@ -707,7 +726,11 @@ Regras do projetor que valem como contrato: atributo = criação (`atributos_ini
 CORRECAO_CADASTRO vigente de maior `event_seq`; ANULADO/PENDENTE conservam os atributos declarados na linha de criação
 mais recente (inertes) e zeram o resto; ANIMAIS sem nenhuma linha em EVENTO_ANIMAIS é EXTERNO, salvo se a linha gravada
 está PENDENTE ou ANULADO (queda na fase A) — então ANULADO; estoque (`PRODUTOS.estoque_atual`) ainda não é projetado
-(só a Fase 3 grava MOVIMENTOS_ESTOQUE). Fêmea nascida por NASCIMENTO tem `partos_previos = 0` (03a, 4.3.5); MORTE →
+(só a Fase 3 grava MOVIMENTOS_ESTOQUE). A linha de IDENTIFICACOES de uma retirada guarda o código tirado e o motivo: fecha
+o código em uso (`data_fim` = data da retirada) e fecha a si mesma (`data_fim = data_inicio`); `brinco` é o último BRINCO
+que não seja retirada. Identificações e reclassificações seguem a posição na cadeia de substituição (desenho-base 16.1);
+as correções de cadastro, a ordem de registro (`event_seq`). DIVERGENCIA_CONTAGEM → BAIXADO_AJUSTE; MARCACAO → `marcado_descarte`
+/ `nao_localizado` pela última marcação do subtipo. Fêmea nascida por NASCIMENTO tem `partos_previos = 0` (03a, 4.3.5); MORTE →
 MORTO (terminal), DESCARTE → DESCARTADO; PARTO → VAZIA e cria ao pé enquanto houver cria ATIVA sem desmama. Todo
 problema do validador traz também `papel` (no parto, a linha MATRIZ é descrita como "o parto").
 
@@ -723,15 +746,16 @@ CONFIG (sem marco zero; conta SALDO_ABERTURA_REBANHO ausente), além dos da Unit
 | `comando(acao, pedido)` | Comando para `UnitOfWork.run` (`acessoCru: true`: o motor lê eventos anulados para a posição do substituto e para o histórico). `acao` ∈ `registrar` (rota `evento.registrar`), `corrigir` (`evento.corrigir`), `estornar` (`evento.estornar`) |
 | `registrar/corrigir/estornar(ctx, pedido)` | `UnitOfWork.run(ctx, comando(...))` → `{dados: resposta, duplicado, opId, dataVersion}` |
 | `simular(ctx, {acao, dados, avisosAceitos})` | Mesmo tratador em modo SIMULAR → `{dados: {simulacao, impactos, avisos, linhas}}`; erro de validação e bloqueio (CONFLICT) são lançados como no commit |
-| `consultaListar(filtros)` / `listar(ctx, filtros)` | `{total, pagina, por_pagina, itens: [evento]}`; filtros `{tipo, de, ate, animal_id, vigentes, pagina, por_pagina}`; inclui anulados e estornos; não inclui operações que falharam |
-| `consultaObter({event_id})` / `obter(ctx, dados)` | `{evento (com partner_id e payload), linhas (com codigo_interno e brinco), detalhes: {IDENTIFICACOES, PESAGENS, REPRODUCAO, BAIXAS, AJUSTES, COMPRAS, VENDAS, FINANCEIRO (na ordem de gravação), PARCELAS (por lançamento, por número), RATEIOS, ALOCACOES_FINANCEIRAS}, anula}`; NOT_FOUND |
+| `consultaListar(filtros)` / `listar(ctx, filtros)` | `{total, pagina, por_pagina, itens: [evento]}`; filtros `{tipo, subtipo, de, ate, animal_id, vigentes, pagina, por_pagina}`; inclui anulados e estornos (com `animal_id`, também os ESTORNO dos eventos do animal, que não têm linha de animal); não inclui operações que falharam. Evento: `{event_id, event_seq, event_type, event_subtype, rotulo, rotulo_subtipo, event_date, registration_date, property_id, partner_id, status, vigente, description, notes, responsible, total_value, created_by, source, pre_marco_zero, payload, reversal_of_event_id, anulado_por, animais (n), created_at}` |
+| `consultaObter({event_id})` / `obter(ctx, dados)` | `{evento (como na lista), linhas (com codigo_interno e brinco), detalhes: {IDENTIFICACOES, PESAGENS, REPRODUCAO, BAIXAS, AJUSTES, COMPRAS, VENDAS, FINANCEIRO (na ordem de gravação, com `status` e `cancelado_por_event_id`), PARCELAS (por lançamento, por número), RATEIOS, ALOCACOES_FINANCEIRAS}, anula}`, também de evento anulado e de ESTORNO (sem linhas); NOT_FOUND |
 | `planejarEntradaImportada(tx, {campos, animais}, {importacao: {import_id}, conhecidos, rotulos})` | O MESMO planejamento da ENTRADA_INICIAL (todas as regras do formulário) dentro do tratador de outro comando: o evento nasce com `import_id` e `source = IMPORTACAO`; `conhecidos` = `{animal_id: {sexo, data_nascimento, mae_id, pai_id, nome}}` de animais ainda pendentes da mesma importação, aceitos como mãe ou pai; `rotulos[i]` substitui o "quem" das mensagens (ex.: `Linha 12`). Devolve o resultado do tratador (`{erros}` ou `{avisos, resumo, derivados, ...}`); exige `leiturasEntrada()` e acesso cru |
 | `leiturasEntrada()` | Abas que esse planejamento lê |
 | `classificarCategoria(perfil, data, categorias)` | Perfil `{sexo, data_nascimento, castrado, reprodutor, parida, categoria_modo, categoria_manual_id}` (valores em D) → `{category_id, codigo, nome, manual}` ou `null` |
 | `coberturaCategorias(categorias)` | `{completa, testes, lacunas: [{perfil, rotulo, idade_de, idade_ate}]}` (05, seção 4.9); base do aviso CATEGORIAS_SEM_COBERTURA em `categoria.salvar` |
 | `MAX_ANIMAIS` (1000), `MAX_CRIAS` (4) | Limites de um lançamento e de crias por parto |
 
-`dados` de registrar/corrigir: `{tipo, subtipo?, campos: {event_date, property_id, description, responsible, notes,
+`dados` de registrar/corrigir: `{tipo, subtipo (obrigatório nos tipos com subtipos: `CAMPO_OBRIGATORIO` em `subtipo`;
+subtipo fora da fase → `TIPO_INDISPONIVEL`), campos: {event_date, property_id, description, responsible, notes,
 justificativa (AJUSTE)}, animais: [item], event_id (corrigir), justificativa (corrigir), justificativa_aviso (com
 PERIODO_BLOQUEADO)}`. Item por tipo:
 - ENTRADA_INICIAL / OUTRA_ENTRADA (novo): campos de `EventCatalog.camposAnimal`: `brinco, nome, sexo, raca,
@@ -758,6 +782,31 @@ PERIODO_BLOQUEADO)}`. Item por tipo:
   `PARCEIRO_INATIVO` (aceito na correção se o original já o usava), `NAO_ENCONTRADO`, `PASTO_INATIVO`, os da negociação
   e das parcelas (`SEM_PARCELAS`, `PARCELAS_NAO_SOMAM`, `PARCELAS_DEMAIS`...), `CONFIG` sem a conta do sistema. Avisos:
   `VALOR_DIVERGENTE`, `RATEIO_SEM_PESO`, `PERIODO_BLOQUEADO`. Data antes do marco zero → `ANTES_DO_MARCO_ZERO`.
+- IDENTIFICACAO: `animais: [{animal_id, codigo?, motivo?, observacoes?}]` (seção 12); tipo do lançamento em
+  `campos.tipo_identificacao`. Fato independente (presença na data, o dia da saída conta). Uma linha de EVENTO_ANIMAIS
+  (efeito 0) e uma de IDENTIFICACOES por animal: o código novo (a projeção fecha o anterior) ou, na REMOCAO, o código em uso
+  na data com o motivo (fecha o código e a si mesma). Erros: `TIPO_NAO_SE_APLICA` (BRINCO_ORIGEM fora da retirada),
+  `SEM_IDENTIFICACAO` (retirada sem código em uso), `VALOR_IGUAL`, `IDENTIFICACAO_JA_EXISTE` e `SEM_IDENTIFICACAO` pela
+  sequência (`Timeline.validarIdentificacoes`), e, no brinco, a unicidade (`BRINCO_DUPLICADO`, `BRINCO_REPETIDO`,
+  `BRINCO_NAO_NUMERICO`, aviso `BRINCO_PARECIDO`) e o reuso (`BRINCO_APOSENTADO`: código já usado por outro animal, aberto ou
+  fechado, com `brinco_permite_reuso = N`; o próprio animal retoma o seu; o código que é `valor_anterior` de uma
+  IDENTIFICACAO_INCORRETA vigente do mesmo animal não conta — desenho-base 16.2; com o reuso desligado, o número que um
+  animal deixa no lançamento não vai para outro do mesmo lançamento). Retroativa que quebra a sequência gravada (uma
+  primeira antes de outra primeira; uma troca antes de uma retirada) → CONFLICT com o evento. Demais: os do sujeito
+  (`NAO_ENCONTRADO`, `ANIMAL_EXTERNO`, `ANIMAL_REPETIDO`) e da linha do tempo (`FORA_DA_PERMANENCIA`, `APOS_MORTE`).
+- MARCACAO: `animais: [{animal_id, observacoes?}]`; `payload_json = {acao, motivo_descarte?}`. Linha de efeito 0; presença
+  na data. Marcar o já marcado / desmarcar o desmarcado (na data) → `JA_MARCADO` / `NAO_MARCADO` (sequência
+  `Timeline.validarMarcacoes`; retroativa que quebra a seguinte → CONFLICT). A guarda de duplicidade só compara marcações
+  da mesma ação. `motivo_descarte` fora do subtipo DESCARTE → `CAMPO_DESCONHECIDO`; com DESMARCAR → `CAMPO_NAO_SE_APLICA`.
+- AJUSTE_INVENTARIO/RECLASSIFICACAO: `{animal_id, categoria_manual_id | null}`. A categoria existe (`NAO_ENCONTRADO`), está
+  ativa (`CATEGORIA_INATIVA`) e serve ao sexo (`CATEGORIA_INCOMPATIVEL`; idade e condição não contam); igual à que valia na
+  data (manual ou automática) → `VALOR_IGUAL`. AJUSTES: `campo = categoria_manual_id`, `valor_anterior` = a manual que valia
+  logo antes (null = automática), `valor_novo` (null = volta à automática). Presença na data.
+- AJUSTE_INVENTARIO/DIVERGENCIA_CONTAGEM: `{animal_id, observacoes?}`. Saída (−1) com a origem da linha do tempo no dia e
+  uma linha de BAIXAS (`tipo` DIVERGENCIA_CONTAGEM, sem causa; `observacoes` = as do item ou a justificativa); não grava
+  AJUSTES. Situação BAIXADO_AJUSTE (fora do inventário e dos elegíveis, na lista de baixados, dono do brinco); reentrada por
+  OUTRA_ENTRADA ou COMPRA de animal existente; reaparecimento = estorno da baixa (`ENTRADA_JA_DENTRO` CONFLICT se houve
+  reentrada depois). Erros: `FORA_DO_REBANHO`, os do sujeito, e CONFLICT com fato posterior (`FORA_DA_PERMANENCIA`).
 - MORTE / DESCARTE com lançamento: `custo_valor` + `custo_conta_id` (CUSTEIO; outra natureza → `CONTA_INVALIDA`) ou
   `receita_valor` (OUTRAS_RECEITAS_OPERACIONAIS): um lançamento com um título (vencimento vazio = data do evento) e rateio
   CABECAS entre os animais (DIRETO com um); `total_value` = o valor; no descarte, EVENTOS.partner_id = quem pagou.
@@ -812,9 +861,10 @@ PERIODO_BLOQUEADO)}`. Item por tipo:
 Resposta (e reenvio duplicado): `{acao, event_id, event_type, event_subtype, event_date, status, total_value,
 substitui, estorna, animais: [{animal_id, codigo_interno, brinco, sexo, situacao_cadastral, pasto_atual_id}]}`
 (no estorno, os animais do evento estornado). `derivados` = `{animais, eventos}`. `payload_json`: `justificativa`
-(corrigir/estornar), `valor_abertura_origem` (`INFORMADO`), `gta_numero` (TRANSFERENCIA), `deducoes` (VENDA),
-`avisos_aceitos: [{codigo, n, justificativa?}]`. `impactos` da simulação: `{acao, event_type, event_subtype, event_date, animais, novos, anulados,
-substitui, total_value, abertura, pre_marco_zero, parto: {nascidos_vivos, natimortos, pasto_destino_id, historico} | null,
+(corrigir/estornar), `valor_abertura_origem` (`INFORMADO`), `gta_numero` (TRANSFERENCIA), `deducoes` (VENDA), `acao` e
+`motivo_descarte` (MARCACAO), `avisos_aceitos: [{codigo, n, justificativa?}]`. `impactos` da simulação: `{acao, event_type, event_subtype, event_date, animais, novos, anulados,
+substitui, total_value, abertura, pre_marco_zero, identificacoes (linhas de IDENTIFICACOES), ajustes (linhas de AJUSTES),
+marcacao: {subtipo, acao, motivo_descarte} | null, parto: {nascidos_vivos, natimortos, pasto_destino_id, historico} | null,
 transferencia: {pasto_origem_id, pasto_destino_id} | null, baixas, compra: {modalidade, base_peso, criterio,
 valor_animais, frete, outros_custos, valor_total, conferencia, desvio_pct, peso_vivo_total, peso_carcaca_total, arrobas,
 rendimento_pct, rendimento_tipo, preco_unitario, unidade_preco} | null, venda: {finalidade, modalidade, base_peso,
@@ -829,7 +879,12 @@ forma_pagamento}]}], total, a_pagar, a_receber, por_animal: [{animal_id, codigo_
 receita do animal), base?, deducoes?, liquido?}]} | null}`. Estorno e correção: os lançamentos do original deixam de valer pela vigência (FINANCEIRO `status` e
 `status_pagamento` CANCELADO na fase C; parcelas não são regravadas, desenho-base 16.11); parcela LIQUIDADA do original
 → CONFLICT `PARCELA_LIQUIDADA` (o transporte da baixa chega com `parcela.baixar`, Fase 4); cancelar lançamento com
-competência até `fin_bloqueio_ate` → aviso `PERIODO_BLOQUEADO` (um só por comando). Códigos de aviso emitidos: POSSIVEL_DUPLICIDADE (a
+competência até `fin_bloqueio_ate` → aviso `PERIODO_BLOQUEADO` (um só por comando). Todo registro, correção e estorno confere
+também, para cada animal já cadastrado que toca, as sequências de identificação e de marcação antes e depois (problema na
+linha do comando → VALIDATION; o que quebra num evento gravado → CONFLICT com ele) e, no estorno e na correção, o que a
+anulação DEVOLVE ao animal (seção 30): brinco hoje de outro animal (`BRINCO_DUPLICADO`), sexo ou nascimento que não cabem
+com os filhos (`REFERENCIA_GENEALOGICA`, RN-012) e categoria manual desativada (`CATEGORIA_INATIVA`) — CONFLICT com o
+registro que impede. Códigos de aviso emitidos: POSSIVEL_DUPLICIDADE (a
 matriz conta como animal do parto), BRINCO_PARECIDO, IDADE_REPRODUTIVA, INTERVALO_PARTO_CURTO, LOTACAO_ACIMA_DA_CAPACIDADE
 (em cabeças), VALOR_DIVERGENTE, RATEIO_SEM_PESO, CARENCIA_ATIVA, PERIODO_BLOQUEADO; política por código em `avisos_politica`
 (ausente = AVISA; CARENCIA_ATIVA só na venda para ABATE).
@@ -873,7 +928,7 @@ dados, {chave, avisos})` (confere a projeção depois de cada comando), `ler(con
 | `linhaLeve(L, a)`, `COLUNAS_LEVE` | Linha do store. Idade/categoria na data de referência (hoje; baixado: data da saída); `categoria_id` null no EXTERNO; `peso_vencido` só em ATIVO |
 | `consultaCargaInicial()` / `cargaInicial(ctx)` | ATIVOS + EXTERNOS em colunas: `{data, n, colunas, valores: {coluna: [..]}}` (ordem de `codigo_interno`) |
 | `consultaListar({situacoes?})` — `animal.listar` | Mesmo formato; padrão = baixados (VENDIDO, MORTO, DESCARTADO, BAIXADO_AJUSTE, HISTORICO); PENDENTE/ANULADO → `VALIDATION` |
-| `consultaFicha({animal_id, geracoes?})` — `animal.ficha` | `{animal_id, data, geral (A), genealogia (B), localizacao (C), pastos (D: `periodos` [início, fim) com dias, evento de `entrada` e de `saida` — entrada, transferência, correção de localização, saída —, e `por_pasto: [{pasture_id, pasto_nome, dias, periodos, atual}]`), peso (E), sanitario (F), reprodutivo (G), financeiro (H), eventos (I: linha do tempo com status, vigente, anulado_por, ajustes; no parto aparece também na mãe, papel MATRIZ), anexos (J: ANEXOS ativos do animal)}`; todo bloco traz `entregue`; E e F voltam `{entregue: false, modulo, fase, mensagem, itens: []}`; G é `ReproductionService.blocoFicha` (seção 24: parte de partos, `parcial: true`); H é `FinancialService.blocoFicha` (seção 26) com `parcial: true` e `pendente: {modulo: 'FINANCEIRO', fase: 4, mensagem}`. Genealogia: `{sem_genealogia, mae, pai, arvore (nós {..., confianca, confirmado, geracao, disponivel, tem_ancestrais, mae, pai}), filhos [{..., papel MAE\|PAI, confianca}]}`; `geracoes` 1–6 (padrão 3). `NOT_FOUND`; `VALIDATION` |
+| `consultaFicha({animal_id, geracoes?})` — `animal.ficha` | `{animal_id, data, geral (A), genealogia (B; `geral.identificacoes: [{tipo, codigo, data_inicio, data_fim, motivo, remocao, event_id}]`, na ordem das identificações por tipo, com a linha da retirada marcada `remocao`), localizacao (C), pastos (D: `periodos` [início, fim) com dias, evento de `entrada` e de `saida` — entrada, transferência, correção de localização, saída —, e `por_pasto: [{pasture_id, pasto_nome, dias, periodos, atual}]`), peso (E), sanitario (F), reprodutivo (G), financeiro (H), eventos (I: linha do tempo com status, vigente, anulado_por, ajustes; no parto aparece também na mãe, papel MATRIZ), anexos (J: ANEXOS ativos do animal)}`; todo bloco traz `entregue`; E e F voltam `{entregue: false, modulo, fase, mensagem, itens: []}`; G é `ReproductionService.blocoFicha` (seção 24: parte de partos, `parcial: true`); H é `FinancialService.blocoFicha` (seção 26) com `parcial: true` e `pendente: {modulo: 'FINANCEIRO', fase: 4, mensagem}`. Genealogia: `{sem_genealogia, mae, pai, arvore (nós {..., confianca, confirmado, geracao, disponivel, tem_ancestrais, mae, pai}), filhos [{..., papel MAE\|PAI, confianca}]}`; `geracoes` 1–6 (padrão 3). `NOT_FOUND`; `VALIDATION` |
 | `comandoEditar` — `animal.editar` | Um formulário só. `dados: {animal_id, campos, justificativa?, justificativa_aviso?}`; só o que muda é gravado. `nome, raca, observacoes, foto_anexo_id` → AUDITORIA; campos de `EventCatalog.CAMPOS_CORRIGIVEIS` → evento AJUSTE_INVENTARIO/CORRECAO_CADASTRO datado de hoje, com todas as regras do motor (justificativa obrigatória: `CAMPO_OBRIGATORIO`), NA MESMA operação da auditoria. EXTERNO: sexo e nascimento por AUDITORIA (`AuditService.alteracao(..., {externo: true})`), demais sensíveis `CAMPO_NAO_SE_APLICA`. `brinco`, pasto, situação, colunas calculadas → `CAMPO_NAO_EDITAVEL` (mensagem com o caminho certo); `ANEXO_INVALIDO`; `CAMPO_DESCONHECIDO`. Resposta `{animal_id, event_id, correcoes, cadastro, animal (linha leve)}`; nada muda → `semAlteracao` |
 | `comandoCadastrarExterno` — `animal.cadastrarExterno` | `dados: {campos: {nome*, sexo*, raca, data_nascimento, data_nascimento_confianca, observacoes}}`; nome repetido entre externos → aviso `POSSIVEL_DUPLICIDADE`; linha de ANIMAIS nasce na fase C (AUDITORIA CRIAR), situação EXTERNO. Resposta `{animal_id, animal}` |
 
@@ -895,8 +950,8 @@ dados, {chave, avisos})` (confere a projeção depois de cada comando), `ler(con
 | `compor(L, itens, data, {animais}?)` | `{cabecas, machos, femeas, por_categoria (por prioridade), sem_categoria, peso_vivo_total, ua, animais?}` |
 | `consultaPosicao({data?, animal_id?})` — `inventario.posicao` | `{data, marco_zero, motivo, cabecas, por_sexo: {M, F}, por_pasto: [{pasture_id, nome, cabecas}], sem_pasto, por_categoria, sem_categoria, peso_vivo_total, ua}`; com `animal_id`: `{data, animal_id, presente, pasture_id, motivo}`. Futura/inválida → `VALIDATION`; animal inexistente → `NOT_FOUND` |
 | `consultaVisaoGeral()` — `dashboard.obter` (Fase 1) | Posição de hoje + `geradoEm` + `pendencias: {sem_pasto, sem_brinco, sem_categoria}` + `titulos` (`FinancialService.titulos` de hoje: a pagar e a receber) |
-| `consultaElegiveis({tipo, subtipo?, data?, pasture_id?})` — `inventario.elegiveis` | Animais elegíveis a um tipo ativo cujo `filtro_elegiveis.situacao` é ATIVO (transferência, nascimento, venda, morte, descarte), pela linha do tempo na data: no rebanho ao fim de D, no pasto pedido em D, com o `sexo` do filtro. `{data, tipo, pasture_id, motivo, n, itens: [{animal_id, codigo_interno, brinco, sexo, pasture_id}]}`; antes do marco zero (ou sem ele) `n`/`itens` null com o motivo. `VALIDATION` (`TIPO_SEM_ELEGIVEIS`, data inválida ou futura), `NOT_FOUND` (pasto) |
-| `consultaAlertas(estado)` — `alerta.listar` | `estado = {backup: {ultimo_em: ISO\|null}, integridade: {verificado_em, erros}\|null}` vem de quem chama (Maintenance/Api; fora da planilha). Devolve `{data, geradoEm, alertas: [{codigo, nivel AVISO\|ERRO, mensagem, n, ids, entidade}], nao_avaliados: [{codigo, motivo, mensagem}]}`; códigos `ALERTAS`: ATIVO_SEM_PASTO, SEM_BRINCO, SEM_CATEGORIA, BACKUP_ATRASADO (`alerta_backup_atrasado_dias`; nenhum backup = alerta), INTEGRIDADE_COM_ERRO, IMPORTACAO_INCOMPLETA (IMPORTACOES `IMPORTANDO`). Parte do `estado` ausente vai para `nao_avaliados` |
+| `consultaElegiveis({tipo, subtipo?, data?, pasture_id?})` — `inventario.elegiveis` | Animais elegíveis a um tipo ativo cujo `filtro_elegiveis.situacao` é ATIVO (transferência, nascimento, venda, morte, descarte, identificação, marcação), pela linha do tempo na data: no rebanho ao fim de D, no pasto pedido em D, com o `sexo` do filtro. `{data, tipo, pasture_id, motivo, n, itens: [{animal_id, codigo_interno, brinco, sexo, pasture_id}]}`; antes do marco zero (ou sem ele) `n`/`itens` null com o motivo. `VALIDATION` (`TIPO_SEM_ELEGIVEIS`, data inválida ou futura), `NOT_FOUND` (pasto) |
+| `consultaAlertas(estado)` — `alerta.listar` | `estado = {backup: {ultimo_em: ISO\|null}, integridade: {verificado_em, erros}\|null}` vem de quem chama (Maintenance/Api; fora da planilha). Devolve `{data, geradoEm, alertas: [{codigo, nivel AVISO\|ERRO, mensagem, n, ids, entidade}], nao_avaliados: [{codigo, motivo, mensagem}]}`; códigos `ALERTAS`: ATIVO_SEM_PASTO, SEM_BRINCO, SEM_CATEGORIA, NAO_LOCALIZADO (ATIVO com `nao_localizado`, marcado por MARCACAO/NAO_LOCALIZADO; some com a baixa na contagem ou a desmarcação), BACKUP_ATRASADO (`alerta_backup_atrasado_dias`; nenhum backup = alerta), INTEGRIDADE_COM_ERRO, IMPORTACAO_INCOMPLETA (IMPORTACOES `IMPORTANDO`). Parte do `estado` ausente vai para `nao_avaliados` |
 
 ## 16. `FileService` (plataforma: Drive v3 e UrlFetchApp)
 
@@ -1058,6 +1113,7 @@ banco/DENIED/rascunho), appVersion (= package.json), serverTime (ISO UTC)}`; em 
 | `importacao.importarBloco`, `importacao.concluir`, `importacao.desfazer` | Comandos SEM chave do cliente (a chave é `ImportService.chaveBloco`) |
 | `importacao.obter`, `importacao.previa`, `importacao.linhas`, `importacao.relatorio`, `importacao.listar` | Consultas do assistente (`ImportService.obter`, `previaArquivo`, `consultaLinhas`, `consultaRelatorio`, `consultaListar`) — rotas extras, não canônicas |
 | `importacao.modelo` | Consulta extra: `ImportService.modelo()` → `{tipos, campos: [{campo, rotulo, tipo, obrigatorio (sexo, pasto), so_femea, so_macho}], confiancas: {data_nascimento, data_entrada, mae, pai: [valores]}, padroes, formatos_data, delimitadores (';' ',' 'TAB' '\|'), codificacoes, max_linhas, cabecalho_modelo}`. O cabeçalho do modelo para baixar são os rótulos dos campos, que `sugerirMapeamento` reconhece inteiros |
+| `auditoria.listar` | `AuditService.listarAuditoria`: a trilha completa (EVENTOS + AJUSTES + AUDITORIA, seção 11) com filtros de entidade, registro, período e operação, paginada |
 | `sistema.diagnostico` | Consulta extra da tela de sistema, sem planilha temporária nem dado sensível: `{sessao (diagnosticoSessao), primitiva, gatilhos: {esperados, instalados, faltando}, fuso: {script, planilha}, data_version, gravacao_em_curso, app_version, editor: 'runDiagnostics'}`. Sem banco do ambiente → `CONFIG` |
 | `rascunho.salvar` / `rascunho.obter` / `rascunho.remover` | Seção 17, SP-06: `{chave (A-Z a-z 0-9 . _ : -, até 100), conteudo}` nas propriedades do USUÁRIO, chave `RASCUNHO:<ambiente>:<chave>`; fora da planilha, sem versão, funciona sem banco. `salvar → {chave, salvo_em, bytes}` (acima de 8 KB, ou com 40 guardados, `VALIDATION`; vencidos há 30 dias saem na gravação); `obter → {chave, existe, conteudo, salvo_em}`; `remover → {chave, removido}` |
 
@@ -1074,7 +1130,7 @@ falha → exceção (a execução aparece com erro).
 
 | Função | Contrato |
 |---|---|
-| `runAcceptanceTests({usuario, plano?, limiteMs?, reiniciar?, injetar?})` | `plano` = `ACEITACAO` (padrão, ou `TEST_PLAN`) ou `DEMO`. ACEITACAO: base de teste NOVA (a anterior vai para a lixeira) por `Maintenance.setup({ambiente: 'TESTE'})` e os cenários `CENARIOS` (PREPARO, CT-09, CT-10, CT-12, CT-18, RESTAURACAO, CT-20, CT-11, ISOLAMENTO), todos pela `Api` com `ambiente: 'TESTE'`. O CT-09 roda inteiro desde a VENDA: venda de animal vendido (1), transferência de animal morto (2) e compra de animal vendido antes da saída (recusada) e depois (reentrada com o mesmo `animal_id`) (10). Relatório `{plano, completo: true, ok, resumo: {cenarios: {PASSOU, FALHOU}, passos: {PASSOU, FALHOU, NAO_SE_APLICA, PENDENTE_NA_CONTA_DO_DONO}}, cenarios: [{id, titulo, situacao, falha, ms, passos: [{passo, titulo, situacao, detalhe}]}], corpus, limpeza, arquivo: {nome, id}}`, gravado em JSON na pasta Testes. Pausa perto de `limiteMs` (padrão 4 min) → `{completo: false, proximo, mensagem}`; a chamada seguinte continua (cursor `TEST_CURSOR`, resultados `TEST_RESULTADO:<i>`, apagados no fim). Falha de cenário vai para o relatório (e para o log) e os demais seguem; falha no PREPARO encerra. No fim: backups e bancos antigos da rodada para a lixeira; a base de teste final fica (página de concorrência) |
+| `runAcceptanceTests({usuario, plano?, limiteMs?, reiniciar?, injetar?})` | `plano` = `ACEITACAO` (padrão, ou `TEST_PLAN`) ou `DEMO`. ACEITACAO: base de teste NOVA (a anterior vai para a lixeira) por `Maintenance.setup({ambiente: 'TESTE'})` e os cenários `CENARIOS` (PREPARO, CT-09, CT-10, CT-12, CT-18, RESTAURACAO, CT-20, CT-11, ISOLAMENTO), todos pela `Api` com `ambiente: 'TESTE'`. O CT-09 roda inteiro desde a VENDA: venda de animal vendido (1), transferência de animal morto (2), o brinco do vendido (" 0901 " e "901", 3a e 3b; na troca de brinco de outro animal, 3c), identificação de animal morto (3d) e compra de animal vendido antes da saída (recusada) e depois (reentrada com o mesmo `animal_id`) (10). Relatório `{plano, completo: true, ok, resumo: {cenarios: {PASSOU, FALHOU}, passos: {PASSOU, FALHOU, NAO_SE_APLICA, PENDENTE_NA_CONTA_DO_DONO}}, cenarios: [{id, titulo, situacao, falha, ms, passos: [{passo, titulo, situacao, detalhe}]}], corpus, limpeza, arquivo: {nome, id}}`, gravado em JSON na pasta Testes. Pausa perto de `limiteMs` (padrão 4 min) → `{completo: false, proximo, mensagem}`; a chamada seguinte continua (cursor `TEST_CURSOR`, resultados `TEST_RESULTADO:<i>`, apagados no fim). Falha de cenário vai para o relatório (e para o log) e os demais seguem; falha no PREPARO encerra. No fim: backups e bancos antigos da rodada para a lixeira; a base de teste final fica (página de concorrência) |
 | `injetar` (só no Node) | `{ocuparLock(), liberarLock()}`: outra execução segura o lock (CT-10, passo 5). Sem ele, o passo é NAO_SE_APLICA |
 | DEMO | Base de demonstração em `DEMO_SPREADSHEET_ID` (criada pelo setup se não existe): propriedade, 6 pastos (1 arrendado), D0 = hoje − 1095 (ou o marco zero já gravado), 6 ENTRADA_INICIAL de 40 animais (110 vacas, 4 touros, 30 novilhas, 48 bezerros ao pé com a mãe, 48 garrotes), 8 COMPRA de 8 (valor de cada animal, frete de R$ 400,00 e duas parcelas, do fornecedor `seed:parceiro`), 1 entrada estornada, 3 TRANSFERENCIA de garrotes (origem fixa no plano), 12 NASCIMENTO (um gemelar com natimorto), 1 MORTE, 1 DESCARTE e 1 VENDA de 6 garrotes por kg vivo com comissão (ao comprador `seed:comprador`) → 308 ativos conferidos pelo inventário. Sorteio com semente fixa (`geracaoDemo(d0)`), chaves `seed:<n>`: reexecutar não grava de novo. Comando recusado para o seed: `{completo: false, ok: false, proximo, falha}` (cursor fica no passo) |
 | `runDiagnostics({usuario, linhas?})` | Itens SP-01 a SP-10 e RUNTIME `{id, titulo, situacao: OK \| FALHOU \| ALERTA \| NAO_SE_APLICA, medidas, observacao}`: corpus nas três formas + coerção Geral (formato do fixture) + atomicidade; sonda do Drive + abertura pelo SpreadsheetApp; lock; e-mail ativo; tempos com `linhas` (padrão 10.000) em EVENTO_ANIMAIS + custo de ler as propriedades; gatilhos; fuso do V8. Planilhas temporárias na pasta Testes (lixeira no fim); sem e-mail nem ID de arquivo no relatório; JSON também na pasta Testes |
@@ -1276,3 +1332,24 @@ da fonte). Testes: `tests/venda.test.js` (SANIDADE gravada pelo harness).
 
 Testes: `tests/ui/venda.test.js` (venda pela ficha a 1280 e 360 px, correção pelo detalhe com frete retido) e, em Node,
 `tests/telas.test.js` (o pré-preenchimento da correção de venda, convertido como o formulário converte, reproduz o original).
+
+## 30. Estorno e correção de qualquer evento (E2.7) — `EventService`, `Timeline`, `AuditService`
+
+O mecanismo é um só para todos os tipos ativos (`evento.estornar` e `evento.corrigir`, seção 14); o que cada tipo traz são
+as linhas e as regras do próprio registro. Garantias (testadas para cada tipo e subtipo ativo em `tests/estorno.test.js`):
+
+| Garantia | Como |
+|---|---|
+| Anula sem apagar (RN-039, RN-108) | O ESTORNO (`event_date` = hoje, sem linha filha, `payload_json.justificativa`) e o substituto apontam o original em `reversal_of_event_id`; o original só muda nos caches `status` (ESTORNADO) e `reversed_by_event_id`; as linhas dele ficam idênticas |
+| Um commit | Corrigir anula e substitui na mesma operação; o substituto é do mesmo tipo e subtipo (`TIPO_DIFERENTE`) e reaproveita os `animal_id` criados (o que sai fica ANULADO, com as regras do estorno) |
+| Posição na cadeia (desenho-base 16.1) | O substituto tem `event_seq` novo e a posição (`ordem_seq`) do primeiro evento da cadeia: corrigir não muda a ordem dos movimentos, identificações, marcações e reclassificações do dia |
+| Dependentes (RN-040, RN-041) | Estorno (e correção estrutural) revalida a linha do tempo, as sequências de identificação e de marcação e as referências fora da linha do tempo (mãe, pai, touro, rateio) sem o original → CONFLICT com `details[].conflito = {event_id, tipo, data}` do evento que impede: transferência posterior (`ORIGEM_DIVERGENTE`), fato ou saída de animal criado (`EVENTO_DEPENDENTE`), recompra ou reentrada (`ENTRADA_JA_DENTRO`), retirada ou troca de brinco (`SEM_IDENTIFICACAO`, `REMOCAO_DE_OUTRO_CODIGO`, `IDENTIFICACAO_JA_EXISTE`), desmarcação (`NAO_MARCADO`), cria de quem teve o sexo corrigido (`REFERENCIA_GENEALOGICA`) |
+| O que volta | Sem o original, o animal volta ao que a reconstrução dá (situação, pasto, brinco, categoria, marcações, custo); se o brinco que volta já é de outro animal (`BRINCO_DUPLICADO`) ou a categoria manual que volta está desativada (`CATEGORIA_INATIVA`) → CONFLICT |
+| Sem ressurreição, sem estorno de estorno (RN-043) | Estornar o substituto não revive o original (a anulação é definitiva); evento já anulado → `JA_ANULADO`; ESTORNO → `ESTORNO_NAO_SE_ESTORNA` (estornar ou corrigir) |
+| Financeiro | Os lançamentos do original deixam de valer pela vigência (`status`/`status_pagamento` CANCELADO, `cancelado_por_event_id`); parcela LIQUIDADA → `PARCELA_LIQUIDADA`; competência no período fechado → aviso `PERIODO_BLOQUEADO` |
+| Histórico e trilha | `evento.listar` mostra anulados e estornos (no histórico de um animal, também os estornos dos eventos dele); `evento.obter` traz o anulado com o anulador; `auditoria.listar` mostra o ESTORNO com quem, quando e o motivo (seção 11) |
+
+Testes: `tests/estorno.test.js` (um caso por tipo e subtipo ativo, CT-07, CT-08, CT-09 pela `api()`, CT-17 (b), CT-18 com a
+identificação, cadeia de substituição, histórico e auditoria), `tests/identificacao.test.js` (IDENTIFICACAO, MARCACAO,
+RECLASSIFICACAO, DIVERGENCIA_CONTAGEM, RN-004 e CATEGORIA_EM_USO) e a varredura de quedas com o estorno de transferência
+(`tests/unitofwork.adversarial.test.js`, cenário `estornoTransferencia`).
