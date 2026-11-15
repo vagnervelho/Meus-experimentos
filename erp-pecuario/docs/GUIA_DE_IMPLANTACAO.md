@@ -1,8 +1,8 @@
 # Guia de implantação — ERP Pecuário, Fase 1
 
 Para o dono do sistema. Não é preciso conhecer Apps Script: cada passo diz onde clicar, o que deve aparecer e o que
-fazer quando aparece outra coisa. Tempo estimado da primeira implantação: 30 a 40 minutos, mais o tempo da importação
-do rebanho.
+fazer quando aparece outra coisa. A primeira implantação deve levar menos de uma hora, mais o tempo da importação do
+rebanho (estimativa, ainda não medida na sua conta).
 
 > Faça tudo com a **conta Google pessoal que será a dona do sistema**. Só essa conta abre o app; a planilha-banco,
 > os backups e as fotos ficam no Google Drive dela.
@@ -148,7 +148,7 @@ todos precisam estar presentes; um que falte faz a função parar com erro.
    - gerenciar os gatilhos do script (`script.scriptapp`): backup diário e verificação semanal;
    - ver seu e-mail (`userinfo.email`): reconhecer o dono;
    - conectar a serviço externo (`script.external_request`): só `www.googleapis.com`, para ler fotos e arquivos.
-3. Espere terminar (de 1 a 3 minutos na primeira vez). Abra o **Registro de execução** (aparece embaixo): a linha
+3. Espere terminar (pode levar alguns minutos; o Google interrompe qualquer execução aos 6). Abra o **Registro de execução** (aparece embaixo): a linha
    `setup: {...}` mostra o resultado.
 
 O que o `setup` faz, nesta ordem, e que pode ser repetido sem estragar nada: registra você como dono (`OWNER_EMAIL`);
@@ -171,7 +171,7 @@ O diagnóstico confere, na sua conta, o que não dá para confirmar fora dela. E
 na pasta `Testes` (vão para a lixeira no fim), não lê nem grava a base real, e o relatório não contém e-mail nem
 identificador de arquivo.
 
-1. No editor, função **`runDiagnostics`** → **Executar**. Leva de 1 a 4 minutos.
+1. No editor, função **`runDiagnostics`** → **Executar**. Pode levar alguns minutos.
 2. O resultado aparece no registro e fica salvo em `ERP Pecuário/Testes/ERP Pecuário — diagnóstico <data e hora>.json`.
    **Envie esse arquivo** para quem acompanha o desenvolvimento: é a evidência que fecha os itens do spike (E1.0).
 3. `"ok": true` quer dizer que nenhum item FALHOU. Cada item tem `situacao`: `OK`, `ALERTA`, `FALHOU` ou
