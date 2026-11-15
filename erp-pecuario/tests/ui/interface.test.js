@@ -86,10 +86,10 @@ test('navegação: menu lateral só com módulos ativos e telas instaladas; REGI
   await A.esperarTela(page, 'Registrar evento');
   assert.deepEqual(await textos(page, '[data-grupo] h2'), ['Movimentação', 'Reprodução', 'Correções']);
   assert.deepEqual(await textos(page, '[data-tipo-evento]'), [
-    'Nascimento', 'Comprar animais', 'Transferir de pasto', 'Morte',
-    'Rebanho inicial (marco zero)', 'Outra entrada (doação, permuta, achado)', 'Comprar animais', 'Transferir de pasto', 'Morte', 'Descarte (consumo, doação, sacrifício)',
+    'Nascimento', 'Comprar animais', 'Vender animais', 'Transferir de pasto', 'Morte',
+    'Rebanho inicial (marco zero)', 'Outra entrada (doação, permuta, achado)', 'Comprar animais', 'Vender animais', 'Transferir de pasto', 'Morte', 'Descarte (consumo, doação, sacrifício)',
     'Nascimento', 'Corrigir dados do animal',
-  ], 'os mais usados no alto; só os tipos entregues (a venda chega numa etapa seguinte); estorno não entra no seletor');
+  ], 'os mais usados no alto; só os tipos entregues (identificação e marcação chegam numa etapa seguinte); estorno não entra no seletor');
   await page.click('[data-tipo-evento="OUTRA_ENTRADA"]');
   await A.esperarTela(page, 'Outra entrada');
   await page.goBack();
