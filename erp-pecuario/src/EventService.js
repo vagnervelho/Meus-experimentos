@@ -1196,7 +1196,15 @@ var EventService = (function () {
     if (vazio_(e.brinco)) { erroItem_(m, it, 'brinco', 'SEM_BRINCO', 'o animal não tem brinco para corrigir; o primeiro brinco é colocado pelo lançamento de identificação.'); return; }
     if (Utils.normalizarBrinco(codigo) === e.brinco_norm) { erroItem_(m, it, 'brinco', 'VALOR_IGUAL', 'o brinco informado é o mesmo que já está no cadastro.'); return; }
     var aberta = m.f.identificacoes(it.animal_id).filter(function (r) { return r.tipo === 'BRINCO' && r.codigo_norm === e.brinco_norm; });
-    if (aberta.some(function (r) { return ctxEv.ev.event_date < r.data_inicio; })) { erroItem_(m, it, 'brinco', 'ANTES_DA_IDENTIFICACAO', 'a correção não pode ter data anterior ao lançamento do brinco errado.'); return; }
+    // A correção vem depois do lançamento do brinco que está no cadastro, na ordem canônica: no mesmo dia, pela posição
+    // (o substituto fica no lugar do original, desenho-base 16.1; antes de uma troca do mesmo dia, ele corrigiria um
+    // número que a troca ainda não tinha posto, e a troca continuaria valendo depois dele).
+    var pos = posicao_(ctxEv.ev);
+    var antes = aberta.some(function (r) {
+      var evr = m.f.evento(r.event_id);
+      return antesDe_(pos, { data: r.data_inicio, ordem_seq: evr ? m.f.ordemSeq(r.event_id) : 0, event_seq: evr ? evr.event_seq : 0 });
+    });
+    if (antes) { erroItem_(m, it, 'brinco', 'ANTES_DA_IDENTIFICACAO', 'a correção precisa vir depois do lançamento do brinco ' + e.brinco + ', que está no cadastro desde ' + br_(aberta[0].data_inicio) + '.'); return; }
     linhaEA_(m, ctxEv, it, { efeito_inventario: 0 });
     ajusteRow_(m, ctxEv, it, 'brinco', e.brinco, codigo);
     it.brincoTexto = codigo;

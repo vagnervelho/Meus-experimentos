@@ -763,5 +763,5 @@ Nenhuma linha de código mudou nesta etapa: só documentos.
   falso positivo.
 - Desempenho (`npm run trava:medir`, base de demonstração, 391 comandos, mediana de três execuções alternadas): sem a trava
   42,9 ms por comando, com a trava 49,8 ms (+16 %).
-- Verificado em Node: `tests/trava.integridade.test.js` (16 testes); `npm test` e `npm run ui:check` completos (números
-  no fim da etapa).
+- Verificado em Node: `tests/trava.integridade.test.js` (16 testes); `npm test` completo com 635 testes, 635 aprovados e
+  0 falhas (523 s); `npm run ui:check` com 85 testes, 85 aprovados e 0 falhas (223 s), página montada com 446 KB de 450 KB.

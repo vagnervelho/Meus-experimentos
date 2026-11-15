@@ -33,11 +33,14 @@ function vigencia(r) {
   const anuladoPor = new Map();
   r.EVENTOS.forEach((e) => { if (e.reversal_of_event_id && confirmado(e)) anuladoPor.set(e.reversal_of_event_id, e.event_id); });
   const vig = new Map();
+  // Com IMPORTACOES nas linhas (o teste aleatório), o evento importado só vale com a importação IMPORTADO (P3); sem
+  // ela (os ataques), nenhum evento pode ser importado.
+  const imp = r.IMPORTACOES ? new Map(r.IMPORTACOES.map((i) => [i.import_id, i.status])) : null;
   r.EVENTOS.forEach((e) => {
-    assert.equal(e.import_id || null, null, 'nenhum evento importado neste ataque');
-    vig.set(e.event_id, confirmado(e) && e.event_type !== 'ESTORNO' && !anuladoPor.has(e.event_id));
+    if (!imp) assert.equal(e.import_id || null, null, 'nenhum evento importado neste ataque');
+    vig.set(e.event_id, confirmado(e) && e.event_type !== 'ESTORNO' && !anuladoPor.has(e.event_id) && (!e.import_id || imp.get(e.import_id) === 'IMPORTADO'));
   });
-  return { vig, anuladoPor, confirmado, porId: new Map(r.EVENTOS.map((e) => [e.event_id, e])) };
+  return { vig, anuladoPor, confirmado, importacao: (id) => (imp ? imp.get(id) : null), porId: new Map(r.EVENTOS.map((e) => [e.event_id, e])) };
 }
 function classe(l) {
   return l.efeito === 1 ? 0 : l.efeito === -1 ? 2 : 1;
@@ -118,10 +121,14 @@ function invariantesCruas(r) {
     if (!(f.valor > 0)) out.push('1: valor não positivo em ' + id);
     if (!c || c.natureza !== f.natureza || c.tipo !== f.tipo || c.grupo !== f.categoria) out.push('2: natureza/tipo/grupo ≠ conta em ' + id);
     if (!vale) {
-      // Linha de operação que falhou (ou ainda pendente) é inerte: nunca valeu e a projeção não a toca.
+      // Linha de operação que falhou (ou ainda pendente) é inerte: nunca valeu e a projeção não a toca. O mesmo vale
+      // para a importação que ainda não foi concluída (os eventos dela só valem com IMPORTADO).
       if (!ev || !V.confirmado(ev)) return;
-      // 20: lançamento de evento anulado fica CANCELADO, apontando quem o anulou, sem animal direto.
-      if (f.status !== 'CANCELADO' || f.status_pagamento !== 'CANCELADO' || f.cancelado_por_event_id !== (V.anuladoPor.get(f.event_id) || null) || f.animal_id) out.push('20: lançamento de evento anulado não está CANCELADO por quem o anulou: ' + id);
+      if (ev.import_id && V.importacao(ev.import_id) !== 'IMPORTADO' && V.importacao(ev.import_id) !== 'CANCELADO') return;
+      // 20: lançamento de evento anulado fica CANCELADO, apontando quem o anulou, sem animal direto. O pagamento fica
+      // CANCELADO; sem parcela, continua SEM_CAIXA ("lançamento sem parcela, vigente ou não": 03b, seção 10.4).
+      const pagamento = (parcelas.get(id) || []).length ? 'CANCELADO' : 'SEM_CAIXA';
+      if (f.status !== 'CANCELADO' || f.status_pagamento !== pagamento || f.cancelado_por_event_id !== (V.anuladoPor.get(f.event_id) || null) || f.animal_id) out.push('20: lançamento de evento anulado não está CANCELADO por quem o anulou: ' + id);
       return;
     }
     const ps = (parcelas.get(id) || []).filter((p) => p.status !== 'CANCELADA');
@@ -159,7 +166,8 @@ function invariantesCruas(r) {
     const ea = linhasDoEvento.get(x.event_id) || [];
     if (soma(fs, 'valor') !== x.valor_total || x.valor_animais + x.frete + x.outros_custos !== x.valor_total || ev.total_value !== x.valor_total) out.push('16: COMPRAS.valor_total × lançamentos em ' + x.event_id);
     if (soma(ea, 'valor_individual') !== x.valor_animais || !fs.length || fs[0].valor !== x.valor_animais || alocDe(fs[0]) !== x.valor_animais) out.push('15: valor_individual × valor_animais × alocado em ' + x.event_id);
-    if (x.qtd_animais !== ea.filter((l) => l.efeito_inventario === 1).length) out.push('qtd_animais da compra em ' + x.event_id);
+    // O registro anterior ao marco zero tem efeito 0 em todas as linhas (04, seção 6): conta cada animal dele.
+    if (x.qtd_animais !== ea.filter((l) => l.efeito_inventario === 1 || ev.pre_marco_zero === true).length) out.push('qtd_animais da compra em ' + x.event_id);
   });
   r.VENDAS.filter((x) => V.vig.get(x.event_id)).forEach((x) => {
     const ev = V.porId.get(x.event_id);
@@ -169,7 +177,7 @@ function invariantesCruas(r) {
     const desp = fs.filter((f) => f.natureza === 'DESPESA_VENDA');
     if (soma(ea, 'valor_individual') !== receita || !fs.length || fs[0].natureza !== 'RECEITA_VENDA_ANIMAIS' || fs[0].valor !== receita || alocDe(fs[0]) !== receita) out.push('15: receita × valor_individual × alocado em ' + x.event_id);
     if (soma(desp, 'valor') !== x.frete + x.comissao + x.outras_deducoes || fs.length !== desp.length + 1) out.push('16: deduções × DESPESA_VENDA em ' + x.event_id);
-    if (ev.total_value !== x.valor_bruto || x.qtd_animais !== ea.filter((l) => l.efeito_inventario === -1).length) out.push('total_value/qtd da venda em ' + x.event_id);
+    if (ev.total_value !== x.valor_bruto || x.qtd_animais !== ea.filter((l) => l.efeito_inventario === -1 || ev.pre_marco_zero === true).length) out.push('total_value/qtd da venda em ' + x.event_id);
   });
   // 18: custo de aquisição = Σ alocações vigentes AQUISICAO_ANIMAIS do período de permanência mais recente.
   const aquis = new Map();
