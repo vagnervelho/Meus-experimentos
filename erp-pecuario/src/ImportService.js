@@ -1002,6 +1002,34 @@ var ImportService = (function () {
     }
     return UnitOfWork.run(ctx, comando);
   }
+  /**
+   * Evento da importação que o dono corrigiu depois: o substituto (fora da importação) ocupa o lugar dele (04, seção 1)
+   * e continuaria valendo depois do desfazer. A cadeia de substituição inteira é da importação: o desfazer fica
+   * bloqueado até a correção ser estornada (06, seção 5.3: os eventos dela deixam de valer de uma vez).
+   */
+  function correcoesDeFora_(tx, imp) {
+    var out = [];
+    var vistos = {};
+    var fila = tx.cru.cru('EVENTOS').filter(function (e) { return e.import_id === imp.import_id; });
+    while (fila.length) {
+      var e = fila.shift();
+      if (vistos[e.event_id]) continue;
+      vistos[e.event_id] = true;
+      tx.cru.cruPor('EVENTOS', 'reversal_of_event_id', e.event_id).forEach(function (x) {
+        if (x.event_type === 'ESTORNO' || x.import_id === imp.import_id) return;
+        if (tx.repo.eventoVigente(x.event_id)) {
+          var nome = EventCatalog.nomeEvento(x.event_type, x.event_subtype);
+          out.push(Validation.detalhe({
+            codigo: 'DEPENDENTE',
+            mensagem: 'Um lançamento desta importação (' + EventCatalog.nomeEvento(e.event_type, e.event_subtype) + ' de ' + br_(e.event_date) + ') recebeu uma correção depois, registrada em ' + br_(x.registration_date || x.event_date) + '. Estorne a correção antes de desfazer a importação.',
+            conflito: { event_id: x.event_id, tipo: x.event_type, subtipo: x.event_subtype || null, data: x.event_date, nome: nome },
+          }));
+        }
+        fila.push(x);
+      });
+    }
+    return out;
+  }
   /** Quem depende dos animais importados fora da importação (bloqueia desfazer uma importação concluída). */
   function dependentes_(tx, imp, gravadas) {
     if (TIPOS_EVENTO[imp.tipo]) return dependentesEventos_(tx, imp);
@@ -1024,7 +1052,8 @@ var ImportService = (function () {
       tx.repo.por('EVENTO_ANIMAIS', 'animal_id', id).forEach(function (l) {
         if (eventos[l.event_id]) return;
         var ev = tx.repo.porId('EVENTOS', l.event_id) || {};
-        out.push(Validation.detalhe({ codigo: 'DEPENDENTE', animal_id: id, brinco: a.brinco || null, mensagem: quem + ' tem o lançamento ' + (ev.event_type || '').toLowerCase() + ' de ' + br_(ev.event_date) + ' feito depois da importação.', conflito: { event_id: l.event_id, tipo: ev.event_subtype || ev.event_type || null, data: ev.event_date || null } }));
+        var nome = ev.event_type ? EventCatalog.nomeEvento(ev.event_type, ev.event_subtype) : 'um lançamento';
+        out.push(Validation.detalhe({ codigo: 'DEPENDENTE', animal_id: id, brinco: a.brinco || null, mensagem: quem + ' tem um lançamento posterior à importação: ' + nome + ' de ' + br_(ev.event_date) + '. Estorne esse lançamento antes.', conflito: { event_id: l.event_id, tipo: ev.event_type || null, subtipo: ev.event_subtype || null, data: ev.event_date || null, nome: ev.event_type ? nome : null } }));
       });
       tx.repo.por('ANIMAIS', 'mae_id', id).concat(tx.repo.por('ANIMAIS', 'pai_id', id)).forEach(function (f) {
         if (animais[f.animal_id]) return;
@@ -1051,7 +1080,7 @@ var ImportService = (function () {
     ids.forEach(function (id) {
       tx.repo.por('EVENTO_ANIMAIS', 'event_id', id).forEach(function (l) { if (l.atributos_iniciais_json) criados[l.animal_id] = true; else tocados[l.animal_id] = true; });
     });
-    var out = dependentesCriados_(tx, criados, eventos);
+    var out = dependentesCriados_(tx, criados, eventos).concat(correcoesDeFora_(tx, imp));
     var com = Timeline.fonte(tx);
     var sem = Timeline.fonte(tx, { excluir: ids });
     var nomePasto = function (id) { var p = tx.repo.porId('PASTOS', id); return p ? p.nome : id; };
@@ -1064,7 +1093,7 @@ var ImportService = (function () {
         out.push(Validation.detalhe({
           codigo: 'DEPENDENTE', animal_id: id, brinco: a.brinco || null,
           mensagem: (a.codigo_interno || id) + (vazio_(a.brinco) ? '' : ' (brinco ' + a.brinco + ')') + ': sem os eventos desta importação, ' + Timeline.descrever(p, nomePasto) + ' Estorne esse registro antes.',
-          conflito: { event_id: p.event_id, tipo: p.event_subtype || p.event_type || null, data: p.event_date || null },
+          conflito: { event_id: p.event_id, tipo: p.event_type || null, subtipo: p.event_subtype || null, data: p.event_date || null, nome: p.event_type ? EventCatalog.nomeEvento(p.event_type, p.event_subtype) : null },
         }));
       });
     });
@@ -1981,6 +2010,13 @@ var ImportService = (function () {
 
   // ---- reconciliação: fotografia do marco zero × histórico importado (RN-095; 04, seção 6) ----
   var SAIDAS_HIST = { VENDA: 'vendido', MORTE: 'morto', DESCARTE: 'descartado' };
+  /** Classe de uma linha histórica pelo tipo do evento: entrada 0, movimento ou fato 1, saída 2. */
+  function classeHist_(x) {
+    var t = x.ev.event_type;
+    if (SAIDAS_HIST[t]) return 2;
+    if (t === 'COMPRA' || t === 'OUTRA_ENTRADA' || (t === 'NASCIMENTO' && x.l.papel === 'CRIA')) return 0;
+    return 1;
+  }
   var NOME_EVENTO = { COMPRA: 'compra', VENDA: 'venda', TRANSFERENCIA: 'transferência', NASCIMENTO: 'parto', MORTE: 'morte', OUTRA_ENTRADA: 'entrada', DESCARTE: 'descarte' };
   var ACOES_RECONCILIACAO = Object.freeze({
     SAIDA_HISTORICA_NA_FOTOGRAFIA: 'Se a fotografia está certa, nada a fazer: o animal fica no rebanho e a saída antiga vale só como histórico. Se a saída aconteceu, o animal não deveria estar no marco zero: corrija com "Corrigir inventário" (baixa na contagem) ou estorne a saída antiga se ela foi lançada por engano.',
@@ -1995,6 +2031,8 @@ var ImportService = (function () {
    */
   function reconciliacao_(tx) {
     var params = Timeline.parametros(tx.repo);
+    var fonte = tx.cru ? Timeline.fonte(tx, { parametros: params }) : null;
+    var posicao_ = function (ev) { return (fonte ? fonte.ordemSeq(ev.event_id) : null) || ev.event_seq || 0; };
     var D0 = params.data_marco_zero;
     var nomePasto = function (id) { var p = vazio_(id) ? null : tx.repo.porId('PASTOS', id); return p ? p.nome : null; };
     var foto = {};
@@ -2015,7 +2053,12 @@ var ImportService = (function () {
       var pasto = null;
       var ultimo = null;
       var mov = null;
-      hist[id].sort(function (a, b) { return (a.ev.event_date < b.ev.event_date ? -1 : a.ev.event_date > b.ev.event_date ? 1 : 0) || (a.ev.event_seq || 0) - (b.ev.event_seq || 0); }).forEach(function (x) {
+      // Ordem canônica (desenho-base 4.3; 04, seção 5.1): data, classe pelo tipo (entrada, movimento, saída), posição
+      // na cadeia de substituição e event_seq — as linhas antigas têm efeito 0 e não dizem a classe por si.
+      hist[id].sort(function (a, b) {
+        return (a.ev.event_date < b.ev.event_date ? -1 : a.ev.event_date > b.ev.event_date ? 1 : 0) || (classeHist_(a) - classeHist_(b)) ||
+          (posicao_(a.ev) - posicao_(b.ev)) || (a.ev.event_seq || 0) - (b.ev.event_seq || 0);
+      }).forEach(function (x) {
         var t = x.ev.event_type;
         if (SAIDAS_HIST[t]) { dentro = false; pasto = null; ultimo = x; return; }
         if (t === 'COMPRA' || t === 'TRANSFERENCIA' || t === 'OUTRA_ENTRADA' || (t === 'NASCIMENTO' && x.l.papel === 'CRIA')) {
@@ -2048,7 +2091,7 @@ var ImportService = (function () {
       base.codigo = dif.codigo;
       base.explicacao = dif.explicacao;
       base.acao = ACOES_RECONCILIACAO[dif.codigo];
-      base.evento = dif.evento ? { event_id: dif.evento.ev.event_id, tipo: dif.evento.ev.event_type, data: dif.evento.ev.event_date } : null;
+      base.evento = dif.evento ? { event_id: dif.evento.ev.event_id, tipo: dif.evento.ev.event_type, subtipo: nulo_(dif.evento.ev.event_subtype), data: dif.evento.ev.event_date, nome: EventCatalog.nomeEvento(dif.evento.ev.event_type, dif.evento.ev.event_subtype) } : null;
       animais.push(base);
     });
     var porPasto = {};
@@ -2094,7 +2137,7 @@ var ImportService = (function () {
   }
   /** Consulta (importacao.reconciliacao): o relatório de reconciliação da base. */
   function consultaReconciliacao() {
-    return { rota: 'importacao.reconciliacao', reads: leiturasConsulta_(), tratador: function (tx) { return reconciliacao_(tx); } };
+    return { rota: 'importacao.reconciliacao', reads: leiturasConsulta_(), acessoCru: true, tratador: function (tx) { return reconciliacao_(tx); } };
   }
 
   // ------------------------------------------------------------------ consultas ----
@@ -2233,7 +2276,7 @@ var ImportService = (function () {
   /** Relatório final (importacao.relatorio): contadores, aprovação registrada, criados, reprovadas com o motivo, pendências. */
   function consultaRelatorio(dados) {
     var id = (dados || {}).import_id;
-    return { rota: 'importacao.relatorio', reads: leiturasConsulta_(), tratador: function (tx) { return relatorioFinal_(tx, id); } };
+    return { rota: 'importacao.relatorio', reads: leiturasConsulta_(), acessoCru: true, tratador: function (tx) { return relatorioFinal_(tx, id); } };
   }
   /** Importações, da mais recente para a mais antiga, e a que está em andamento (para a faixa "importação incompleta"). */
   function consultaListar() {

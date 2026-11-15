@@ -1100,10 +1100,23 @@ var Anexos = (function () {
 
 var Seletor = (function () {
   var h = Util.h;
+  /** Posições do rebanho numa data já consultadas (inventario.elegiveis), por tipo, data e versão dos dados. */
+  var POSICOES = {};
   /** Elegibilidade pelo filtro_elegiveis do catálogo: null = elegível; senão o motivo (pré-marcação; o servidor decide). */
-  function motivoInelegivel(a, filtro, valorCampo) {
+  function motivoInelegivel(a, filtro, valorCampo, posicao) {
     if (!filtro) return null;
     var sit = filtro.situacao;
+    // Data diferente de hoje (08, seção 7): presença e pasto vêm da posição na data devolvida pelo servidor
+    // (inventario.elegiveis), não da posição de hoje do aparelho.
+    if (posicao && sit === 'ATIVO') {
+      var naData = posicao.mapa[a.animal_id];
+      if (!naData) return 'fora do rebanho em ' + Fmt.data(posicao.data);
+      if (filtro.pasto && typeof filtro.pasto === 'string' && filtro.pasto.charAt(0) === '$' && valorCampo) {
+        var po = valorCampo(filtro.pasto.slice(1));
+        if (po && naData.pasture_id !== po) return 'fora do pasto de origem em ' + Fmt.data(posicao.data);
+      }
+      return null;
+    }
     if (sit === 'NAO_ANULADO') { if (a.situacao_cadastral === 'ANULADO' || a.situacao_cadastral === 'PENDENTE') return Fmt.rotulo('SITUACAO_CADASTRAL', a.situacao_cadastral).toLowerCase(); }
     else if (Array.isArray(sit)) { if (sit.indexOf(a.situacao_cadastral) < 0) return Fmt.rotulo('SITUACAO_CADASTRAL', a.situacao_cadastral).toLowerCase(); }
     else if (sit && a.situacao_cadastral !== sit) return Fmt.rotulo('SITUACAO_CADASTRAL', a.situacao_cadastral).toLowerCase();
@@ -1138,7 +1151,37 @@ var Seletor = (function () {
     var botoesModo = {};
     var isentos = {};
     (o.isentos || []).forEach(function (id) { isentos[id] = true; });
-    function elegivel(a) { return isentos[a.animal_id] ? null : motivoInelegivel(a, o.filtro, o.valorCampo); }
+    /**
+     * Posição do rebanho na data do lançamento, quando ela não é hoje: {data, mapa: {animal_id: {pasture_id}}}, pelo
+     * servidor (inventario.elegiveis); null = vale a posição de hoje do aparelho. Recarregada quando a data muda.
+     */
+    var posicao = null;
+    var posicaoErro = null;
+    var porData = !!(o.filtro && o.filtro.situacao === 'ATIVO' && o.tipo);
+    function dataAtual() { return o.dataEvento ? o.dataEvento() : Fmt.hoje(); }
+    function posicaoValida() { return posicao && posicao.data === dataAtual() ? posicao : null; }
+    async function garantirPosicao() {
+      var data = dataAtual();
+      posicaoErro = null;
+      if (!porData || !data || data === Fmt.hoje()) { posicao = null; return true; }
+      if (posicao && posicao.data === data) return true;
+      try {
+        // A mesma posição (tipo, data, versão dos dados) serve a todo seletor redesenhado do formulário.
+        var chave = o.tipo + '|' + data + '|' + Store.versao();
+        var r = POSICOES[chave] || (POSICOES[chave] = await Cliente.consulta('inventario.elegiveis', { tipo: o.tipo, data: data }));
+        if (r.data.motivo) { posicao = null; posicaoErro = 'Sem posição do rebanho em ' + Fmt.data(data) + ' (' + Fmt.rotulo('MOTIVO', r.data.motivo) + ').'; return false; }
+        var mapa = {};
+        (r.data.itens || []).forEach(function (x) { mapa[x.animal_id] = { pasture_id: x.pasture_id }; daPosicao[x.animal_id] = x; });
+        posicao = { data: data, mapa: mapa };
+        return true;
+      } catch (e) {
+        posicao = null;
+        posicaoErro = 'Não foi possível conferir a posição do rebanho em ' + Fmt.data(data) + ': ' + e.message;
+        return false;
+      }
+    }
+    function pastoDe(a) { var p = posicaoValida(); return p ? (p.mapa[a.animal_id] ? p.mapa[a.animal_id].pasture_id : null) : a.pasto_atual_id; }
+    function elegivel(a) { return isentos[a.animal_id] ? null : motivoInelegivel(a, o.filtro, o.valorCampo, posicaoValida()); }
     function candidatos() { return baixados ? Store.animais().concat(Store.baixados() || []) : Store.animais(); }
     function mudou() { if (o.aoMudar) o.aoMudar(ids.slice()); desenharSelecionados(); }
     function adicionar(novos) {
@@ -1190,10 +1233,12 @@ var Seletor = (function () {
       var idc = 'sel-busca-' + Util.uuid().slice(0, 6);
       var inp = h('input', { type: 'search', id: idc, autocomplete: 'off', inputmode: Store.param('brinco_somente_numerico') === true ? 'numeric' : null, dataset: { enterProprio: '1' } });
       var saida = h('div', { class: 'conferencia', role: 'status', 'aria-live': 'polite' });
-      function buscar() {
+      async function buscar() {
         Util.limpar(saida);
         var t = inp.value.trim();
         if (!t) return;
+        await garantirPosicao();
+        if (posicaoErro) saida.appendChild(UI.nota(posicaoErro + ' A marcação de elegível usa a posição de hoje; o servidor confere na gravação.', 'aviso'));
         var filtro = baixados ? function (a) { return !elegivel(a); } : null;
         var r = Store.buscar(t, filtro);
         if (!r.candidatos.length) { saida.appendChild(UI.nota('Nenhum animal com "' + t + '"' + (baixados ? ' entre os que saíram do rebanho.' : '.'), 'aviso')); return; }
@@ -1227,9 +1272,11 @@ var Seletor = (function () {
       var saida = h('div', { class: 'conferencia', role: 'status', 'aria-live': 'polite' });
       function filtrar() {
         var r = candidatos().filter(function (a) {
-          return !elegivel(a) && (!fp.sel.value || a.pasto_atual_id === fp.sel.value) && (!fs.sel.value || a.sexo === fs.sel.value) && (!fc.sel.value || a.categoria_id === fc.sel.value) && (!semBrinco.checked || !a.brinco);
+          return !elegivel(a) && (!fp.sel.value || pastoDe(a) === fp.sel.value) && (!fs.sel.value || a.sexo === fs.sel.value) && (!fc.sel.value || a.categoria_id === fc.sel.value) && (!semBrinco.checked || !a.brinco);
         });
         Util.limpar(saida);
+        if (posicaoErro) saida.appendChild(UI.nota(posicaoErro + ' A lista abaixo usa a posição de hoje; o servidor confere na gravação.', 'aviso'));
+        else if (posicaoValida()) saida.appendChild(UI.nota('Pasto e presença em ' + Fmt.data(posicao.data) + ', conferidos pelo servidor.', 'info'));
         saida.appendChild(h('p', { class: 'dado', text: r.length + (r.length === 1 ? ' animal elegível com esses filtros' : ' animais elegíveis com esses filtros') }));
         if (r.length && varios) saida.appendChild(UI.botao('Incluir os ' + r.length + ' filtrados', { tipo: 'primario', aoClicar: function () { var n = adicionar(r.map(function (a) { return a.animal_id; })); UI.aviso(n + ' incluídos.', { tipo: 'ok' }); } }));
         saida.appendChild(listaCandidatos(r));
@@ -1237,7 +1284,7 @@ var Seletor = (function () {
       [fp.sel, fs.sel, fc.sel, semBrinco].forEach(function (x) { x.addEventListener('change', filtrar); });
       painel.appendChild(h('div', { class: 'grade-campos' }, fp.el, fs.el, fc.el, h('label', { class: 'marca', for: base + 'b' }, semBrinco, h('span', { text: 'Só os sem brinco' }))));
       painel.appendChild(saida);
-      garantirBaixados(painel).then(function (ok) { if (ok) filtrar(); });
+      garantirBaixados(painel).then(function (ok) { return ok ? garantirPosicao().then(function () { return true; }) : false; }).then(function (ok) { if (ok) filtrar(); });
     }
     function painelPasto() {
       var base = 'sel-p-' + Util.uuid().slice(0, 6);
@@ -1273,8 +1320,9 @@ var Seletor = (function () {
       var idc = 'sel-colar-' + Util.uuid().slice(0, 6);
       var ta = h('textarea', { id: idc, rows: 5, placeholder: '0457\n0391; 0388' });
       var saida = h('div', { class: 'conferencia', role: 'status', 'aria-live': 'polite' });
-      function conferir() {
+      async function conferir() {
         Util.limpar(saida);
+        await garantirPosicao();
         var itens = ta.value.split(/[\n,;\t]+/).map(function (x) { return x.trim(); }).filter(Boolean);
         var achados = [], nao = [], repetidos = [], varios_ = [], vistos = {};
         var filtro = function (a) { return !elegivel(a); };
@@ -1313,10 +1361,13 @@ var Seletor = (function () {
     el.appendChild(lista);
     trocarModo('busca');
     desenharSelecionados();
+    garantirPosicao().then(desenharSelecionados);
     return {
       el: el,
       selecionados: function () { return ids.slice(); },
       definir: function (novos) { ids = novos.slice(); desenharSelecionados(); },
+      /** A data do lançamento mudou: refaz a consulta da posição e remarca os escolhidos (marca, não tira). */
+      dataMudou: async function () { await garantirPosicao(); desenharSelecionados(); trocarModo(modoAtual); },
     };
   }
   return { criar: criar, motivoInelegivel: motivoInelegivel, precisaBaixados: precisaBaixados };
@@ -1444,8 +1495,27 @@ var Registro = (function () {
     var def = Store.tipoEvento(tipo);
     if (!def) { UI.aviso('Este registro não está disponível nesta fase.', { tipo: 'erro' }); return false; }
     var existente = sessoes[tipo] || await Rascunhos.obter(idRascunho(tipo));
+    var texto = 'Começar este registro apaga o rascunho anterior deste tipo, que ainda não foi gravado.';
+    // Envio anterior sem resposta (ENVIANDO): talvez já esteja gravado. Pergunta ao servidor antes de qualquer outra
+    // coisa (08, seção 9); o rascunho só some por sucesso confirmado ou por descarte de algo que se sabe não gravado.
+    if (existente && existente.estado === 'ENVIANDO') {
+      var s = await sessao(tipo, def);
+      var sit;
+      try {
+        sit = await retomarEnvio(s);
+      } catch (e) {
+        UI.aviso('Ainda não sabemos se o registro anterior (' + def.nome + ') foi gravado: ' + e.message + ' O rascunho foi mantido; abra o formulário para verificar de novo antes de lançar outro.', { tipo: 'erro' });
+        return false;
+      }
+      if (sit === 'CONFIRMADA') {
+        UI.aviso('O registro anterior (' + def.nome + ') já estava gravado no servidor. Confira o resultado antes de lançar outro.', { tipo: 'aviso' });
+        return false;
+      }
+      existente = sessoes[tipo];
+      texto = 'O servidor confirmou que o envio anterior deste tipo não foi gravado. Começar este registro apaga esse rascunho.';
+    }
     if (existente && (existente.alterado !== false)) {
-      var ok = await UI.confirmar({ titulo: 'Há um rascunho de ' + def.rotulo.toLowerCase(), texto: 'Começar este registro apaga o rascunho anterior deste tipo, que ainda não foi gravado.', verbo: 'Apagar o rascunho e começar', cancelar: 'Manter o rascunho', perigo: true });
+      var ok = await UI.confirmar({ titulo: 'Há um rascunho de ' + def.rotulo.toLowerCase(), texto: texto, verbo: 'Apagar o rascunho e começar', cancelar: 'Manter o rascunho', perigo: true });
       if (!ok) { Roteador.ir(rotaDoForm(tipo)); return false; }
       await descartar(tipo);
     }
@@ -1787,7 +1857,12 @@ var Registro = (function () {
     var cEv = camposEvento(s);
     var primeiro = cEv.filter(function (d) { return d.id === 'event_date'; });
     var ultimo = cEv.filter(function (d) { return d.id === 'notes'; });
-    v.opEv = { idBase: 'ev', rotulos: s.rotulos, aoMudar: function (id) { tocar(s); if (id === 'event_date') desenharAvisoData(s); } };
+    v.opEv = { idBase: 'ev', rotulos: s.rotulos, aoMudar: function (id) {
+      tocar(s);
+      if (id !== 'event_date') return;
+      desenharAvisoData(s);
+      if (v.seletor && v.seletor.dataMudou) v.seletor.dataMudou().catch(function (e) { Util.registrarFalha('posição na data', e); });
+    } };
     if (primeiro.length) { v.blocos.primeiro = Formulario.bloco(primeiro, s.campos, v.opEv); form.appendChild(v.blocos.primeiro.el); }
     v.avisoData = h('div');
     form.appendChild(v.avisoData);
@@ -1985,8 +2060,8 @@ var Registro = (function () {
     var c = d && d.conflito;
     var link = null;
     if (c && c.event_id && Telas.existe('evento/' + c.event_id)) {
-      var t = Store.tipoEvento(c.tipo);
-      link = h('a', { class: 'botao botao-texto', href: Roteador.href('evento/' + c.event_id), dataset: { rota: 'evento/' + c.event_id, conflito: c.event_id } }, 'Abrir ' + (t ? t.rotulo.toLowerCase() : 'o lançamento') + (c.data ? ' de ' + Fmt.data(c.data) : ''));
+      // Tipo e subtipo vêm separados, com o nome pronto do servidor ("a marcação para descarte"; CONTRATOS, seção 14).
+      link = h('a', { class: 'botao botao-texto', href: Roteador.href('evento/' + c.event_id), dataset: { rota: 'evento/' + c.event_id, conflito: c.event_id } }, 'Abrir ' + (c.tipo || c.nome ? Store.nomeEvento(c.tipo, c.subtipo, c.nome) : 'o lançamento') + (c.data ? ' de ' + Fmt.data(c.data) : ''));
     }
     return h(tag, { dataset: { codigo: d.codigo || null } }, h('span', { text: d.mensagem }), link ? ' ' : null, link);
   }
@@ -2187,7 +2262,8 @@ var Registro = (function () {
     var im = (s.simulacao && s.simulacao.impactos) || {};
     var l = [];
     if (im.acao === 'estornar') {
-      l.push(['Será desfeito', (Store.tipoEvento(im.event_type) ? Store.tipoEvento(im.event_type).rotulo : Fmt.rotulo('', im.event_type)) + ' de ' + Fmt.data(im.event_date)]);
+      l.push(['Será desfeito', maiuscula_(Store.nomeEvento(im.event_type, im.event_subtype, im.nome)) + ' de ' + Fmt.data(im.event_date)]);
+      if (im.corrige) l.push(['Atenção', 'Este lançamento corrigiu ' + (im.corrige.nome || 'outro lançamento') + (im.corrige.event_date ? ' de ' + Fmt.data(im.corrige.event_date) : '') + '. Estornar apaga o lançamento inteiro: o original não volta a valer. Para mudar só um dado, use "Corrigir".']);
       if (im.animais !== undefined) l.push(['Animais do evento', String(im.animais)]);
       if (im.anulados) l.push(['Animais que deixam de existir', String(im.anulados)]);
       if (im.cancelados) l.push(['Financeiro cancelado', plural(im.cancelados.lancamentos, 'lançamento', 'lançamentos') + ' (' + Fmt.dinheiro(im.cancelados.total) + ')' + (im.cancelados.parcelas_abertas ? ', com ' + plural(im.cancelados.parcelas_abertas, 'título em aberto', 'títulos em aberto') : '') + ' deixa' + (im.cancelados.lancamentos === 1 ? '' : 'm') + ' de valer']);
@@ -2349,11 +2425,12 @@ var Registro = (function () {
     });
     return out;
   }
+  function maiuscula_(t) { return t ? t.charAt(0).toUpperCase() + t.slice(1) : t; }
   function textoVerbo(s) {
     if (s.tipo === 'ESTORNO') {
       var im = (s.simulacao && s.simulacao.impactos) || {};
-      var t = Store.tipoEvento(im.event_type);
-      return 'Estornar ' + (t ? t.rotulo.toLowerCase() : 'o evento') + (im.animais ? ' de ' + plural(im.animais, 'animal', 'animais') : '');
+      // 08, seção 4.6: o botão diz a consequência ("Estornar a venda de 30 animais").
+      return 'Estornar ' + (im.event_type ? Store.nomeEvento(im.event_type, im.event_subtype, im.nome) : 'o evento') + (im.animais ? ' de ' + plural(im.animais, 'animal', 'animais') : '');
     }
     var n = s.dados && s.dados.animais ? s.dados.animais.length : 0;
     if (s.tipo === 'NASCIMENTO' && !s.corrige) return verbo(s);
@@ -2617,7 +2694,9 @@ var Registro = (function () {
     var acoes = h('div', { class: 'acoes' });
     if (d.event_id && Telas.existe('evento/' + d.event_id)) acoes.appendChild(UI.botao('Ver evento', { aoClicar: function () { Roteador.ir('evento/' + d.event_id); } }));
     if (res.tipo !== 'ESTORNO') acoes.appendChild(UI.botao('Registrar outro', { tipo: 'primario', aoClicar: function () { s.resultado = null; Roteador.ir(rotaDoForm(res.tipo), { substituir: true, forcar: true }); } }));
-    if (res.tipo !== 'ESTORNO' && d.event_id && Store.tipoEvento('ESTORNO')) acoes.appendChild(UI.botao('Desfazer', { aoClicar: function () {
+    // Desfazer uma correção estornaria o substituto e apagaria o lançamento inteiro (o original não volta): na correção,
+    // o caminho é abrir o evento e corrigir de novo, ou estornar com a revisão que avisa disso.
+    if (res.tipo !== 'ESTORNO' && !res.corrige && d.event_id && Store.tipoEvento('ESTORNO')) acoes.appendChild(UI.botao('Desfazer', { aoClicar: function () {
       var rot = {};
       rot[d.event_id] = res.def.rotulo + ' de ' + Fmt.data(d.event_date) + (res.n ? ' (' + plural(res.n, 'animal', 'animais') + ')' : '');
       abrir('ESTORNO', { campos: { event_id: d.event_id }, rotulos: rot, origem: 'evento/novo' });

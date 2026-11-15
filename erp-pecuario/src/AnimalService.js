@@ -327,8 +327,10 @@ var AnimalService = (function () {
    * Bloco H (§11.2): custo de aquisição e lançamentos do animal a partir das alocações (FinancialService.blocoFicha).
    * Parcial na Fase 2: rateio de custos compartilhados, baixa de parcelas e custos por animal chegam com o Financeiro.
    */
-  function blocoFinanceiro_(tx, a) {
-    var b = FinancialService.blocoFicha(tx.repo, a);
+  function blocoFinanceiro_(tx, L, a) {
+    // A passagem atual começa na entrada vigente mais recente (a mesma fronteira do custo de aquisição, 03a DL-08).
+    var entrada = Timeline.projetarAnimal(L.f, a.animal_id).meta.entrada;
+    var b = FinancialService.blocoFicha(tx.repo, a, { desde: entrada ? entrada.event_date : null });
     var m = EventCatalog.modulosAtivos(99).filter(function (x) { return x.id === 'FINANCEIRO'; })[0];
     b.parcial = true;
     b.pendente = { modulo: 'FINANCEIRO', fase: m ? m.fase : null, mensagem: 'O rateio de custos gerais (pasto, mão de obra, insumos) e o custo completo por animal chegam com o módulo Financeiro.' };
@@ -437,7 +439,7 @@ var AnimalService = (function () {
           },
           pastos: { entregue: true, periodos: periodos, por_pasto: diasPorPasto_(periodos) },
           reprodutivo: ReproductionService.blocoFicha(L.f, a),
-          financeiro: blocoFinanceiro_(tx, a),
+          financeiro: blocoFinanceiro_(tx, L, a),
           eventos: { entregue: true, itens: eventos_(tx, L, a) },
           anexos: { entregue: true, itens: anexos_(tx, a) },
         };

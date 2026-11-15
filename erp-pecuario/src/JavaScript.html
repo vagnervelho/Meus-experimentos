@@ -172,10 +172,24 @@ var Fmt = (function () {
     STATUS_PAGAMENTO: { SEM_CAIXA: 'Sem pagamento (não é caixa)', ABERTO: 'A pagar ou receber', PARCIAL: 'Pago em parte', LIQUIDADO: 'Pago', CANCELADO: 'Cancelado' },
     STATUS_PARCELA: { ABERTA: 'Em aberto', LIQUIDADA: 'Paga', CANCELADA: 'Cancelada' },
     NATUREZA: { RECEITA_VENDA_ANIMAIS: 'Venda de animais', OUTRA_RECEITA: 'Outra receita', AQUISICAO_ANIMAIS: 'Aquisição de animais', CUSTEIO: 'Custeio', DESPESA_VENDA: 'Despesa de venda', ESTOQUE_INSUMOS: 'Compra de insumos', NAO_OPERACIONAL: 'Não operacional' },
+    /** Os 13 códigos de aviso (05, seção 1; desenho-base 16.12): configuração, detalhe do evento e revisão. */
+    AVISO: {
+      CARENCIA_ATIVA: 'Animal em carência (venda para abate)', POSSIVEL_DUPLICIDADE: 'Lançamento possivelmente repetido', BRINCO_PARECIDO: 'Brinco parecido com o de outro animal', LOTACAO_ACIMA_DA_CAPACIDADE: 'Pasto acima da capacidade',
+      PESO_IMPLAUSIVEL: 'Peso fora do esperado', IDADE_REPRODUTIVA: 'Mãe abaixo da idade reprodutiva', PERIODO_BLOQUEADO: 'Período financeiro fechado', VALOR_DIVERGENTE: 'Valor diferente da conta',
+      RATEIO_SEM_PESO: 'Rateio por peso sem pesagem', INTERVALO_PARTO_CURTO: 'Intervalo entre partos curto', PRODUTO_VENCIDO: 'Produto vencido', ESTOQUE_INSUFICIENTE: 'Estoque insuficiente', CATEGORIAS_SEM_COBERTURA: 'Categorias com lacuna',
+    },
     CAMPO_CORRIGIVEL: {
       sexo: 'Sexo', data_nascimento: 'Data de nascimento', data_nascimento_confianca: 'Certeza do nascimento', mae_id: 'Mãe', mae_confianca: 'Certeza da mãe',
       pai_id: 'Pai', pai_confianca: 'Certeza do pai', castrado: 'Castrado', reprodutor: 'Reprodutor (touro)', partos_previos: 'Partos anteriores',
       origem: 'Origem', data_entrada: 'Chegada na fazenda', data_entrada_confianca: 'Certeza da chegada',
+      pasto_atual_id: 'Pasto', categoria_manual_id: 'Categoria', brinco: 'Brinco', situacao_cadastral: 'Situação no rebanho',
+    },
+    /** Colunas de cadastro que aparecem na trilha de auditoria (Configurações › Auditoria). */
+    CAMPO_CADASTRO: {
+      nome: 'Nome', status: 'Situação', property_id: 'Propriedade', area_ha: 'Área (ha)', capacidade_estimada_cabecas: 'Capacidade (cabeças)', posse: 'Posse',
+      identificacao: 'Identificação', observacoes: 'Observações', tipos: 'Tipos', documento: 'Documento', telefone: 'Telefone', email: 'E-mail', cidade: 'Cidade', uf: 'UF',
+      ativo: 'Em uso', rotulo: 'Nome na lista', ordem: 'Ordem', codigo: 'Código', valor: 'Valor', raca: 'Raça', nome_arquivo: 'Arquivo', municipio: 'Município',
+      idade_min_meses: 'Idade mínima (meses)', idade_max_meses: 'Idade máxima (meses)', sexo_aplicavel: 'Sexo', condicao: 'Condição', prioridade: 'Prioridade', ua_fator: 'UA por cabeça',
     },
   };
   var DOMINIO_DO_CAMPO = {
@@ -256,6 +270,7 @@ var Fmt = (function () {
     return t.charAt(0).toUpperCase() + t.slice(1);
   }
   function rotuloOpcao(campoId, codigo) { return rotulo(DOMINIO_DO_CAMPO[campoId] || '', codigo); }
+  function temDominio(campoId) { return !!DOMINIO_DO_CAMPO[campoId]; }
 
   /** Decimal digitado (vírgula decimal; ponto como milhar em "1.500"). {valor} | {erro}. Vazio → {valor: null}. */
   function lerDecimal(texto, casas) {
@@ -295,7 +310,7 @@ var Fmt = (function () {
   return {
     configurar: configurar, ajustarRelogio: ajustarRelogio, agoraMs: agoraMs, hoje: hoje, ehData: ehData, data: data, dataCurta: dataCurta,
     instante: instante, diasEntre: diasEntre, numero: numero, peso: peso, dinheiro: dinheiro, idade: idade, rotulo: rotulo, rotuloOpcao: rotuloOpcao,
-    lerDecimal: lerDecimal, lerDinheiro: lerDinheiro, lerInteiro: lerInteiro, centavosParaTexto: centavosParaTexto, ROTULOS: ROTULOS,
+    lerDecimal: lerDecimal, lerDinheiro: lerDinheiro, lerInteiro: lerInteiro, centavosParaTexto: centavosParaTexto, ROTULOS: ROTULOS, temDominio: temDominio,
     config: function () { return Util.clonar(cfg); },
   };
 })();
@@ -635,6 +650,35 @@ var Store = (function () {
   function tipoEvento(nome) { return (catalogo().tipos || []).filter(function (t) { return t.tipo === nome; })[0] || null; }
 
   /** Nome curto do animal: brinco; sem brinco, "A-000123 · cria da 0231 · 12/09/2026" (08, seção 7). */
+  /** O lançamento como substantivo com artigo ("a transferência", "a marcação para descarte"): do servidor ou do catálogo. */
+  function nomeEvento(tipo, subtipo, pronto) {
+    if (pronto) return pronto;
+    var t = tipoEvento(tipo);
+    var sub = t && subtipo && t.subtipos ? t.subtipos[subtipo] : null;
+    return (sub && sub.nome) || (t && t.nome) || 'o lançamento';
+  }
+  var RE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  /** Nome de um registro de cadastro pelo identificador (pasto, propriedade, categoria, parceiro, conta, animal); null se não achar. */
+  function nomeDeReferencia(id) {
+    var p = pasto(id); if (p) return p.nome;
+    var pr = propriedade(id); if (pr) return pr.nome;
+    var c = categoria(id); if (c) return c.nome;
+    var pa = parceiro(id); if (pa) return pa.nome;
+    var ct = conta(id); if (ct) return ct.nome;
+    var a = animal(id); if (a) return rotuloAnimal(a);
+    return null;
+  }
+  /**
+   * Valor de um campo em palavras, para a trilha e o detalhe dos ajustes: identificador vira o nome do registro (nunca
+   * o código cru), S/N vira sim/não, data vira dd/mm/aaaa, opção de lista vira o rótulo.
+   */
+  function valorLegivel(campo, v) {
+    if (v === null || v === undefined || v === '') return campo === 'categoria_manual_id' ? 'automática' : '—';
+    if (typeof v === 'string' && RE_UUID.test(v)) return nomeDeReferencia(v) || (campo === 'pasto_atual_id' ? 'outro pasto' : campo === 'categoria_manual_id' ? 'outra categoria' : campo === 'mae_id' || campo === 'pai_id' ? 'outro animal' : 'outro registro');
+    if (v === 'S' || v === 'N' || v === true || v === false) return v === 'S' || v === true ? 'sim' : 'não';
+    if (Fmt.ehData(v)) return Fmt.data(v);
+    return Fmt.temDominio(campo) ? Fmt.rotuloOpcao(campo, v) : String(v);
+  }
   function rotuloAnimal(a) {
     if (!a) return '—';
     if (a.brinco) return a.brinco;
@@ -715,7 +759,7 @@ var Store = (function () {
     configurar: configurar, carregar: carregar, aplicarResultado: aplicarResultado, assinar: assinar, carregado: carregado, versao: versao,
     param: param, lista: lista, rotuloLista: rotuloLista, pastos: pastos, pasto: pasto, propriedades: propriedades, propriedade: propriedade,
     parceiros: parceiros, parceiro: parceiro, contas: contas, conta: conta, categorias: categorias, categoria: categoria, animais: animais, animal: animal, filhosDe: filhosDe,
-    modulos: modulos, modulo: modulo, catalogo: catalogo, tipoEvento: tipoEvento, rotuloAnimal: rotuloAnimal, descricaoAnimal: descricaoAnimal,
+    modulos: modulos, modulo: modulo, catalogo: catalogo, tipoEvento: tipoEvento, nomeEvento: nomeEvento, nomeDeReferencia: nomeDeReferencia, valorLegivel: valorLegivel, rotuloAnimal: rotuloAnimal, descricaoAnimal: descricaoAnimal,
     resolverBrinco: resolverBrinco, buscar: buscar, carregarBaixados: carregarBaixados, normalizarBrinco: normalizarBrinco,
     baixados: function () { return est.baixados; },
     dados: function () { return est.dados; },

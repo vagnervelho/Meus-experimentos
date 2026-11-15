@@ -274,8 +274,8 @@ for (const largura of LARGURAS) {
     await page.fill('[data-campo="justificativa"] textarea', 'Lançado na base errada');
     await page.click('.form-evento button[type=submit]');
     await page.waitForSelector(dialogo + ' [data-acao-principal]:not([disabled])');
-    assert.match(await textoTela(page, dialogo), /Será desfeito\s*Rebanho inicial \(marco zero\) de 01\/01\/2026/);
-    assert.match(await page.textContent(dialogo + ' [data-acao-principal]'), /Estornar rebanho inicial \(marco zero\) de 4 animais/, 'o botão repete o verbo');
+    assert.match(await textoTela(page, dialogo), /Será desfeito\s*O rebanho inicial de 01\/01\/2026/);
+    assert.match(await page.textContent(dialogo + ' [data-acao-principal]'), /Estornar o rebanho inicial de 4 animais/, 'o botão repete o verbo');
     await semProblemasDeLeiaute(page, largura, 'revisão do estorno');
     await principal(page);
     await page.waitForSelector('[data-resultado="ESTORNO"]');

@@ -161,7 +161,7 @@ test('IDENTIFICACAO: estorno e correção — a troca estornada devolve o brinco
   const rm = m.run('registrar', ident('REMOCAO', '2026-04-10', [{ animal_id: ids.bez, motivo: 'PERDA' }]));
   const e = falha(m, 'estornar', { event_id: p.dados.event_id, justificativa: 'teste' });
   assert.equal(e.code, 'CONFLICT');
-  assert.deepEqual(e.details.map((d) => [d.codigo, d.animal_id, d.conflito.event_id, d.conflito.tipo, d.conflito.data]), [['SEM_IDENTIFICACAO', ids.bez, rm.dados.event_id, 'REMOCAO', '2026-04-10']]);
+  assert.deepEqual(e.details.map((d) => [d.codigo, d.animal_id, d.conflito.event_id, d.conflito.tipo, d.conflito.subtipo, d.conflito.nome, d.conflito.data]), [['SEM_IDENTIFICACAO', ids.bez, rm.dados.event_id, 'IDENTIFICACAO', 'REMOCAO', 'a retirada de brinco', '2026-04-10']]);
   // Retroativo: outra primeira identificação antes da de 10/03 deixa a de 10/03 incoerente → CONFLICT citando-a.
   const r1 = falha(m, 'registrar', ident('PRIMEIRA_IDENTIFICACAO', '2026-03-05', [{ animal_id: ids.bez, codigo: '0499' }]));
   assert.deepEqual([r1.code, r1.details.map((d) => [d.codigo, d.conflito.event_id])], ['CONFLICT', [['IDENTIFICACAO_JA_EXISTE', p.dados.event_id]]]);
@@ -216,7 +216,7 @@ test('MARCACAO: estorno com desmarcação posterior → CONFLICT com ela; marca�
   const mk = m.run('registrar', marca('NAO_LOCALIZADO', 'MARCAR', '2026-05-01', [ids.f1]));
   const dm = m.run('registrar', marca('NAO_LOCALIZADO', 'DESMARCAR', '2026-05-20', [ids.f1]));
   const e = falha(m, 'estornar', { event_id: mk.dados.event_id, justificativa: 'teste' });
-  assert.deepEqual([e.code, e.details.map((d) => [d.codigo, d.animal_id, d.conflito.event_id, d.conflito.tipo])], ['CONFLICT', [['NAO_MARCADO', ids.f1, dm.dados.event_id, 'NAO_LOCALIZADO']]]);
+  assert.deepEqual([e.code, e.details.map((d) => [d.codigo, d.animal_id, d.conflito.event_id, d.conflito.tipo, d.conflito.subtipo, d.conflito.nome])], ['CONFLICT', [['NAO_MARCADO', ids.f1, dm.dados.event_id, 'MARCACAO', 'NAO_LOCALIZADO', 'a marcação de não localizado']]]);
   const r = falha(m, 'registrar', marca('NAO_LOCALIZADO', 'MARCAR', '2026-04-20', [ids.f1]));
   assert.deepEqual([r.code, r.details.map((d) => [d.codigo, d.conflito.event_id])], ['CONFLICT', [['JA_MARCADO', mk.dados.event_id]]]);
   // Estornar a desmarcação vale: o animal volta a "não localizado".

@@ -19,7 +19,7 @@ test('AppError: código, mensagem e details[] no formato de 01 seção 3.3', () 
   assert.equal(e.name, 'AppError');
   assert.equal(e.code, 'VALIDATION');
   assert.equal(e.message, '1 de 80 animais com problema');
-  assert.deepEqual(plano(e.details), [{ codigo: 'DATA_ANTERIOR_AO_NASCIMENTO', animal_id: null, brinco: '0612', campo: 'event_date', mensagem: 'x', conflito: { event_id: null, tipo: 'NASCIMENTO', data: '2026-11-11' } }]);
+  assert.deepEqual(plano(e.details), [{ codigo: 'DATA_ANTERIOR_AO_NASCIMENTO', animal_id: null, brinco: '0612', campo: 'event_date', mensagem: 'x', conflito: { event_id: null, tipo: 'NASCIMENTO', subtipo: null, data: '2026-11-11', nome: null } }]);
   assert.equal(typeof e.stack, 'string');
   assert.equal(gas.run('(function (e) { return e instanceof Error && e instanceof Validation.AppError; })')(e), true);
   assert.equal(gas.run('(function () { try { throw Validation.erro("LOCKED", "ocupado"); } catch (e) { return e.code + ":" + e.message + ":" + e.details.length; } })')(), 'LOCKED:ocupado:0');

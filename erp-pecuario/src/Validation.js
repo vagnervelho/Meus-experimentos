@@ -38,7 +38,7 @@ var Validation = (function () {
       brinco: texto_(o.brinco),
       campo: texto_(o.campo),
       mensagem: texto_(o.mensagem),
-      conflito: c ? { event_id: texto_(c.event_id), tipo: texto_(c.tipo), data: texto_(c.data) } : null,
+      conflito: c ? { event_id: texto_(c.event_id), tipo: texto_(c.tipo), subtipo: texto_(c.subtipo), data: texto_(c.data), nome: texto_(c.nome) } : null,
     };
   }
   /**

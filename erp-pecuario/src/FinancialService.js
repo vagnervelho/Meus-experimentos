@@ -139,6 +139,19 @@ var FinancialService = (function () {
     });
   }
 
+  /**
+   * Parcelas de um título pago (ou recebido) em `qtd` vezes, de mês em mês a partir de `primeiro` (Utils.somaMeses),
+   * em partes iguais (dividirParcelas): a forma de "1 ou mais parcelas" dos custos da compra e do lançamento da
+   * morte e do descarte (03b, seção 10.3). qtd vazio = 1. Devolve a lista no formato de `resolverParcelas`.
+   */
+  function parcelasMensais(valor, primeiro, qtd, extra) {
+    var n = qtd === null || qtd === undefined || qtd === '' ? 1 : qtd;
+    var x = extra || {};
+    if (!inteiroPositivo_(valor) || !inteiroPositivo_(n) || n > MAX_PARCELAS || !Utils.dataValida(primeiro)) return [{ data_vencimento: primeiro, valor: valor, forma_pagamento: nulo_(x.forma_pagamento), documento: nulo_(x.documento) }];
+    var partes = dividirParcelas(valor, n);
+    return partes.map(function (v, i) { return { data_vencimento: Utils.somaMeses(primeiro, i), valor: v, forma_pagamento: nulo_(x.forma_pagamento), documento: nulo_(x.documento) }; });
+  }
+
   // ------------------------------------------------------------------ rateio ----
   /**
    * Rateio de `valor` centavos pelo maior resto (07, seção 3.2; 03b, seção 13.3; Utils.ratear), com o desempate
@@ -633,6 +646,17 @@ var FinancialService = (function () {
         if (v.qtd_animais !== ea.filter(function (l) { return l.efeito_inventario === efeitoVenda; }).length) achado(16, 'VENDAS', v.sale_id, 'A quantidade de animais da venda não confere com os animais do evento.');
       });
     }
+    // EVENTOS.total_value dos demais tipos é cópia gravada na fase A e conferida contra a fonte (03b, 2.5): a soma dos
+    // lançamentos do evento (rebanho inicial = abertura; morte e descarte = o lançamento opcional); vazio sem lançamento.
+    repo.vigentes('EVENTOS').forEach(function (ev) {
+      if (ev.event_type === 'COMPRA' || ev.event_type === 'VENDA') return;
+      var doEvento = porEvento[ev.event_id] || [];
+      var esperado = doEvento.length ? soma_(doEvento, 'valor') : null;
+      var gravado = vazio_(ev.total_value) ? null : ev.total_value;
+      if (gravado !== esperado) {
+        achado(16, 'EVENTOS', ev.event_id, 'O valor gravado no evento ' + rotuloEvento_(ev) + ' (' + (gravado === null ? 'vazio' : reais_(gravado)) + ') difere do que os lançamentos dele somam (' + (esperado === null ? 'nenhum lançamento' : reais_(esperado)) + ').');
+      }
+    });
   }
   /**
    * Tipo (FRETE ou OUTRO) de cada lançamento acessório de uma compra, na ordem em que foram gravados: o prefixo que
@@ -702,17 +726,23 @@ var FinancialService = (function () {
    * ALOCACOES_FINANCEIRAS, PLANO_CONTAS e EVENTOS. Devolve {entregue, animal_id, custo_aquisicao,
    * custo_aquisicao_origem, por_natureza, custeio, custo_acumulado, receitas, despesas_venda, resultado, lancamentos}.
    */
-  function blocoFicha(repo, animal) {
+  function blocoFicha(repo, animal, opcoes) {
     var a = animal || {};
+    var desde = opcoes && !vazio_(opcoes.desde) ? opcoes.desde : null;
     var temContas = repo.carregada('PLANO_CONTAS');
     var por = { RECEITA_VENDA_ANIMAIS: 0, OUTRA_RECEITA: 0, AQUISICAO_ANIMAIS: 0, CUSTEIO: 0, DESPESA_VENDA: 0 };
+    var anteriores = 0;
     var itens = repo.por('ALOCACOES_FINANCEIRAS', 'animal_id', a.animal_id).map(function (al) {
       var fin = repo.porId('FINANCEIRO', al.financial_id) || {};
       var rat = repo.porId('RATEIOS', al.rateio_id) || {};
       var ev = repo.porId('EVENTOS', fin.event_id) || {};
       var c = temContas ? repo.porId('PLANO_CONTAS', fin.conta_id) : null;
-      if (Object.prototype.hasOwnProperty.call(por, fin.natureza)) por[fin.natureza] += al.valor_alocado || 0;
+      // Uma base só (a do custo de aquisição da projeção, 03a DL-08): a passagem atual pela fazenda.
+      var atual = desde === null || !(fin.data_competencia < desde);
+      if (!atual) anteriores++;
+      if (atual && Object.prototype.hasOwnProperty.call(por, fin.natureza)) por[fin.natureza] += al.valor_alocado || 0;
       return {
+        passagem_atual: atual,
         financial_id: fin.financial_id || al.financial_id, event_id: fin.event_id || null, event_type: ev.event_type || null, event_date: ev.event_date || null,
         data_competencia: fin.data_competencia || null, conta_codigo: c ? c.codigo : null, conta_nome: c ? c.nome : null, natureza: fin.natureza || null,
         tipo: fin.tipo || null, classe_custo_animal: c ? c.classe_custo_animal : null, descricao: fin.descricao || null, valor_lancamento: fin.valor || 0,
@@ -729,6 +759,7 @@ var FinancialService = (function () {
       : { valor: null, motivo: 'DADOS_INSUFICIENTES', mensagem: saiu ? 'Sem custo de aquisição conhecido, o resultado não é calculado.' : 'O resultado só existe depois que o animal sai do rebanho.' };
     return {
       entregue: true, animal_id: a.animal_id || null, custo_aquisicao: custo, custo_aquisicao_origem: nulo_(a.custo_aquisicao_origem),
+      desde: desde, lancamentos_anteriores: anteriores,
       por_natureza: por, custeio: por.CUSTEIO, custo_acumulado: acumulado, receitas: receitas, despesas_venda: por.DESPESA_VENDA,
       resultado: resultado, lancamentos: itens,
     };
@@ -744,6 +775,7 @@ var FinancialService = (function () {
     conta: conta,
     dividirParcelas: dividirParcelas,
     resolverParcelas: resolverParcelas,
+    parcelasMensais: parcelasMensais,
     ratear: ratear,
     planejar: planejar,
     juntar: juntar,

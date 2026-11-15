@@ -212,8 +212,22 @@ var EventService = (function () {
   function conflito_(m, it, p, mensagem) {
     m.conflitos.push(Validation.detalhe({
       codigo: p.codigo, animal_id: it.animal_id, brinco: it.brincoTexto || null, mensagem: it.quem + ': ' + mensagem,
-      conflito: { event_id: p.event_id, tipo: p.event_subtype || p.event_type, data: p.event_date },
+      conflito: conflitoCom_(p.event_id, p.event_type, p.event_subtype, p.event_date),
     }));
+  }
+  /**
+   * Estorno de um substituto: o original que ele corrigiu ({event_id, event_date, nome}), para a revisão avisar que o
+   * lançamento some por inteiro e o original não volta (03b, seção 4: anulação definitiva); null se não é correção.
+   */
+  function originalDaCorrecao_(m, alvo) {
+    if (vazio_(alvo.reversal_of_event_id) || alvo.event_type === 'ESTORNO') return null;
+    var o = m.tx.cru ? m.tx.cru.cruPorId('EVENTOS', alvo.reversal_of_event_id) : m.repo.porId('EVENTOS', alvo.reversal_of_event_id);
+    return o ? { event_id: o.event_id, event_date: o.event_date, nome: EventCatalog.nomeEvento(o.event_type, o.event_subtype) } : { event_id: alvo.reversal_of_event_id, event_date: null, nome: null };
+  }
+  /** O evento que impede, para o link da tela (CONTRATOS, seção 14): tipo e subtipo separados e o nome pronto. */
+  function conflitoCom_(eventId, tipoEvento, subtipo, data) {
+    var conhecido = !vazio_(tipoEvento) && EventCatalog.existe(tipoEvento);
+    return { event_id: eventId, tipo: conhecido ? tipoEvento : null, subtipo: conhecido ? nulo_(subtipo) : null, data: data, nome: conhecido ? EventCatalog.nomeEvento(tipoEvento, subtipo) : null };
   }
   function erroGeral_(m, campo, codigo, mensagem) {
     m.col.erro({ codigo: codigo, campo: campo, mensagem: mensagem });
@@ -1469,10 +1483,23 @@ var EventService = (function () {
       if (r.event_id === eventoId) return;
       conflito_(m, it, { codigo: 'REFERENCIA_TOURO', event_id: r.event_id, event_type: 'REPRODUCAO', event_date: r.data }, 'é o touro de um registro reprodutivo de ' + br_(r.data) + '.');
     });
+    // Valor alocado ao animal por outro evento: o conflito é com o evento dono do rateio (tipo e data dele), uma vez
+    // só por evento (o que já entrou como dependente pela linha do tempo não se repete).
+    var porRateio = {};
     m.repo.por('ALOCACOES_FINANCEIRAS', 'animal_id', animalId).forEach(function (a) {
       var rat = m.repo.porId('RATEIOS', a.rateio_id);
-      if (!rat || rat.event_id === eventoId) return;
-      conflito_(m, it, { codigo: 'REFERENCIA_RATEIO', event_id: rat.event_id, event_type: 'RATEIO', event_date: null }, 'recebeu ' + Utils.formatarReais(a.valor_alocado) + ' de um custo rateado; refaça o rateio antes.');
+      if (!rat || rat.event_id === eventoId || m.f.excluidos[rat.event_id]) return;
+      porRateio[rat.event_id] = (porRateio[rat.event_id] || 0) + (a.valor_alocado || 0);
+    });
+    Object.keys(porRateio).forEach(function (evId) {
+      if (outros[evId]) return;
+      outros[evId] = true;
+      var dono = m.f.evento(evId) || {};
+      var rateio = dono.event_type === 'RATEIO';
+      var texto = rateio
+        ? 'recebeu ' + Utils.formatarReais(porRateio[evId]) + ' do rateio de custo de ' + br_(dono.event_date) + '; refaça o rateio sem este animal antes.'
+        : 'recebeu ' + Utils.formatarReais(porRateio[evId]) + ' do financeiro de ' + EventCatalog.nomeEvento(dono.event_type, dono.event_subtype) + ' de ' + br_(dono.event_date) + '; estorne ou corrija esse lançamento antes.';
+      conflito_(m, it, { codigo: 'REFERENCIA_RATEIO', event_id: evId, event_type: dono.event_type || null, event_subtype: dono.event_subtype || null, event_date: dono.event_date || null }, texto);
     });
   }
   /** Na correção de evento que criou animais: o animal criado que ficou fora do substituto é anulado. */
@@ -1501,7 +1528,7 @@ var EventService = (function () {
         m.conflitos.push(Validation.detalhe({
           codigo: 'PARCELA_LIQUIDADA', campo: 'event_id',
           mensagem: 'O evento tem parcela paga em ' + br_(p.data_pagamento) + ' (' + Utils.formatarReais(p.valor) + '). Desfaça a baixa antes de ' + verbo + '.',
-          conflito: { event_id: ev.event_id, tipo: ev.event_type, data: ev.event_date },
+          conflito: conflitoCom_(ev.event_id, ev.event_type, ev.event_subtype, ev.event_date),
         }));
       });
     });
@@ -1774,7 +1801,7 @@ var EventService = (function () {
       var pl = FinancialService.planejar(m.tx, {
         evento: ev, conta: contaCustos, naturezas: ['AQUISICAO_ANIMAIS'], valor: x.valor,
         descricao: nulo_(x.descricao) || (eFrete ? 'Frete' : 'Outros custos') + ' da compra de ' + br_(ev.event_date), partner_id: nulo_(x.partner_id), documento: nulo_(x.documento),
-        parcelas: hist ? undefined : [{ data_vencimento: nulo_(x.data_vencimento) || ev.event_date, valor: x.valor, forma_pagamento: nulo_(x.forma_pagamento), documento: nulo_(x.documento) }], semCaixa: hist,
+        parcelas: hist ? undefined : FinancialService.parcelasMensais(x.valor, nulo_(x.data_vencimento) || ev.event_date, nulo_(x.parcelas_qtd), { forma_pagamento: x.forma_pagamento, documento: x.documento }), semCaixa: hist,
         rateio: rateio, campo: 'custos', rotulo: (eFrete ? 'o frete' : 'o custo') + (custos.length > 1 ? ' ' + (k + 1) : ''),
       }, m.col);
       if (!pl) return;
@@ -1827,7 +1854,7 @@ var EventService = (function () {
       evento: ev, conta: conta, naturezas: morte ? ['CUSTEIO'] : ['OUTRA_RECEITA'], valor: c[p + 'valor'],
       descricao: nulo_(c[p + 'descricao']) || (morte ? 'Custos da morte de ' : 'Receita do descarte de ') + br_(ev.event_date),
       partner_id: nulo_(c[p + 'partner_id']), documento: nulo_(c[p + 'documento']),
-      parcelas: hist ? undefined : [{ data_vencimento: nulo_(c[p + 'vencimento']) || ev.event_date, valor: c[p + 'valor'], forma_pagamento: nulo_(c[p + 'forma_pagamento']), documento: nulo_(c[p + 'documento']) }], semCaixa: hist,
+      parcelas: hist ? undefined : FinancialService.parcelasMensais(c[p + 'valor'], nulo_(c[p + 'vencimento']) || ev.event_date, nulo_(c[p + 'parcelas_qtd']), { forma_pagamento: c[p + 'forma_pagamento'], documento: c[p + 'documento'] }), semCaixa: hist,
       rateio: { criterio: 'CABECAS', itens: itens.map(function (it) { return { animal_id: it.animal_id, chave: it.codigo_interno, base: 1, quem: it.quem }; }), cemPorCento: true },
       campo: morte ? 'custo_conta_id' : 'receita_valor', rotulo: morte ? 'o custo da morte' : 'a receita do descarte',
     }, m.col);
@@ -2321,7 +2348,8 @@ var EventService = (function () {
     return {
       avisos: m.avisos,
       resumo: resumo,
-      impactos: { acao: 'estornar', estorna: alvo.event_id, event_type: alvo.event_type, event_date: alvo.event_date, animais: animais.length, anulados: Object.keys(criados).length, cancelados: canceladosDoEstorno_(m, alvo) },
+      impactos: { acao: 'estornar', estorna: alvo.event_id, event_type: alvo.event_type, event_subtype: nulo_(alvo.event_subtype), nome: EventCatalog.nomeEvento(alvo.event_type, alvo.event_subtype),
+        event_date: alvo.event_date, animais: animais.length, anulados: Object.keys(criados).length, cancelados: canceladosDoEstorno_(m, alvo), corrige: originalDaCorrecao_(m, alvo) },
       derivados: { animais: animais, eventos: [alvo.event_id, id] },
       resposta: function (t) { return resposta_(t, resumo); },
     };
@@ -2346,7 +2374,19 @@ var EventService = (function () {
     };
   }
   function leiturasConsulta_() {
-    return Timeline.LEITURAS.concat(['PROPRIEDADES', 'BAIXAS', 'COMPRAS', 'VENDAS', 'ANEXOS']);
+    return Timeline.LEITURAS.concat(['PROPRIEDADES', 'BAIXAS', 'COMPRAS', 'VENDAS', 'ANEXOS', 'PLANO_CONTAS']);
+  }
+  /**
+   * Totais de uma venda gravada (FinancialService.totaisVenda sobre a linha de VENDAS e os lançamentos de dedução do
+   * evento, com o tipo de cada um pelo papel e a retenção pelo lançamento); null fora da venda.
+   */
+  function totaisDaVendaGravada_(detalhes, papeis) {
+    var vd = (detalhes.VENDAS || [])[0];
+    if (!vd) return null;
+    var deducoes = (detalhes.FINANCEIRO || []).filter(function (f) { return /^DEDUCAO:/.test(papeis[f.financial_id] || ''); }).map(function (f) {
+      return { tipo: papeis[f.financial_id].slice('DEDUCAO:'.length), valor: f.valor, retida: f.retida_pelo_comprador === true };
+    });
+    return FinancialService.totaisVenda({ valor_bruto: vd.valor_bruto, desconto_comercial: vd.desconto_comercial || 0, deducoes: deducoes });
   }
   function eventoPublico_(tx, ev) {
     var a = tx.cru.avaliar(ev.event_id);
@@ -2428,7 +2468,13 @@ var EventService = (function () {
           return c;
         });
         var anula = vazio_(ev.reversal_of_event_id) ? null : tx.cru.cruPorId('EVENTOS', ev.reversal_of_event_id);
-        return { evento: eventoPublico_(tx, ev), linhas: linhas, detalhes: detalhes, anexos: FileService.anexosDoEvento(tx.cru, ev.event_id), anula: anula ? eventoPublico_(tx, anula) : null };
+        // Papel de cada lançamento e os totais da venda pelas mesmas funções que gravam: a tela só exibe (§20, regra 8).
+        var leitor = { repo: { porId: function (t, id) { return tx.repo.porId(t, id); }, por: function (t, c, v) { return tx.cru.cruPor(t, c, v); } } };
+        var papeis = papeisGravados_(leitor, ev, detalhes.FINANCEIRO);
+        return {
+          evento: eventoPublico_(tx, ev), linhas: linhas, detalhes: detalhes, anexos: FileService.anexosDoEvento(tx.cru, ev.event_id), anula: anula ? eventoPublico_(tx, anula) : null,
+          papeis: papeis, totais_venda: totaisDaVendaGravada_(detalhes, papeis),
+        };
       },
     };
   }

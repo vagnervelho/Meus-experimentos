@@ -67,7 +67,7 @@ var TelaEventos = (function () {
           id: 'eventos', rotulo: 'Lançamentos', linhas: r.itens, chave: function (e) { return e.event_id; }, porPagina: r.por_pagina, semPaginacao: true, vazio: { texto: 'Nenhum lançamento com esses filtros.' },
           colunas: [
             { id: 'event_date', rotulo: 'Data', formatar: function (e) { return Fmt.data(e.event_date); } },
-            { id: 'rotulo', rotulo: 'Lançamento', formatar: function (e) { return linkEvento(e.event_id, e.rotulo + (e.event_subtype ? ' · ' + Fmt.rotulo('', e.event_subtype) : '')); } },
+            { id: 'rotulo', rotulo: 'Lançamento', formatar: function (e) { return linkEvento(e.event_id, e.rotulo + (e.event_subtype ? ' · ' + (e.rotulo_subtipo || Fmt.rotulo('', e.event_subtype)) : '')); } },
             { id: 'animais', rotulo: 'Animais', num: true },
             { id: 'total_value', rotulo: 'Valor', num: true, formatar: function (e) { return Fmt.dinheiro(e.total_value); } },
             { id: 'situacao', rotulo: 'Situação', valor: situacao },
@@ -96,15 +96,19 @@ var TelaEventos = (function () {
   function limpo_(v) { Object.keys(v).forEach(function (k) { if (v[k] === null || v[k] === undefined) delete v[k]; }); return v; }
   function dinheiroTexto_(v) { return v === null || v === undefined ? null : Fmt.centavosParaTexto(v); }
   function codigoConta_(f) { var c = Store.conta(f.conta_id); return c ? c.codigo : null; }
+  /** Parcelas de um lançamento na ordem do número da parcela (a primeira tem o primeiro vencimento). */
+  function parcelasOrdem_(lista) { return lista.slice().sort(function (a, b) { return (a.parcela_num || 0) - (b.parcela_num || 0); }); }
   /** Lançamento opcional da morte (custos) ou do descarte (receita): campos do cabeçalho a partir do lançamento e do título. */
   function lancamentoDaSaida_(det, origem, tipo) {
     var f = (det.FINANCEIRO || [])[0];
     if (!f) return;
     var p = tipo === 'MORTE' ? 'custo_' : 'receita_';
-    var t = (det.PARCELAS || []).filter(function (x) { return x.financial_id === f.financial_id; })[0] || {};
+    var ts = parcelasOrdem_((det.PARCELAS || []).filter(function (x) { return x.financial_id === f.financial_id; }));
+    var t = ts[0] || {};
     origem[p + 'valor'] = dinheiroTexto_(f.valor);
     if (tipo === 'MORTE') origem.custo_conta_id = f.conta_id;
     origem[p + 'partner_id'] = f.partner_id; origem[p + 'vencimento'] = t.data_vencimento; origem[p + 'forma_pagamento'] = t.forma_pagamento;
+    origem[p + 'parcelas_qtd'] = ts.length > 1 ? String(ts.length) : null;
     origem[p + 'documento'] = f.documento; origem[p + 'descricao'] = f.descricao;
   }
   /**
@@ -117,11 +121,8 @@ var TelaEventos = (function () {
     var cp = (det.COMPRAS || [])[0] || {};
     var fins = det.FINANCEIRO || [];
     var principal = fins.filter(function (f) { return codigoConta_(f) === 'COMPRA_ANIMAIS'; })[0] || fins[0] || {};
-    // Fretes foram gravados antes dos outros custos: o prefixo dos lançamentos acessórios que soma o frete é de fretes.
-    var acess = fins.filter(function (f) { return f !== principal; });
-    var tipos = {};
-    var acum = 0;
-    acess.forEach(function (f) { tipos[f.financial_id] = acum < (cp.frete || 0) ? 'FRETE' : 'OUTRO'; acum += f.valor || 0; });
+    // O tipo de cada custo (FRETE ou OUTRO) vem do servidor (evento.obter: papeis, por FinancialService.tiposDosCustos).
+    var tipos = o.papeis || {};
     var parcelasDe = function (id) { return (det.PARCELAS || []).filter(function (x) { return x.financial_id === id; }); };
     var rat = (det.RATEIOS || []).filter(function (r) { return r.financial_id === principal.financial_id; })[0] || {};
     var bases = {};
@@ -161,8 +162,9 @@ var TelaEventos = (function () {
     var grupos = {
       parcelas: parcelasDe(principal.financial_id).map(function (x) { return { valores: limpo_({ data_vencimento: x.data_vencimento, valor: dinheiroTexto_(x.valor), forma_pagamento: x.forma_pagamento, documento: x.documento }) }; }),
       custos: fins.filter(function (f) { return f !== principal; }).map(function (f) {
-        var t = parcelasDe(f.financial_id)[0] || {};
-        return { valores: limpo_({ tipo: tipos[f.financial_id] || 'FRETE', valor: dinheiroTexto_(f.valor), partner_id: f.partner_id, data_vencimento: t.data_vencimento, forma_pagamento: t.forma_pagamento, documento: f.documento, descricao: f.descricao }) };
+        var ts = parcelasOrdem_(parcelasDe(f.financial_id));
+        var t = ts[0] || {};
+        return { valores: limpo_({ tipo: tipos[f.financial_id] === 'OUTRO' ? 'OUTRO' : 'FRETE', valor: dinheiroTexto_(f.valor), partner_id: f.partner_id, data_vencimento: t.data_vencimento, parcelas_qtd: ts.length > 1 ? String(ts.length) : null, forma_pagamento: t.forma_pagamento, documento: f.documento, descricao: f.descricao }) };
       }),
     };
     var campos = {};
@@ -364,15 +366,7 @@ var TelaEventos = (function () {
   }
   var ROTULO_AJUSTE = { categoria_manual_id: 'Categoria', pasto_atual_id: 'Pasto', brinco: 'Brinco' };
   /** Valor gravado em AJUSTES (texto canônico) em palavras: categoria, pasto, mãe ou pai pelo nome; vazio = desconhecido. */
-  function valorAjuste_(campo, v) {
-    if (v === null || v === undefined || v === '') return campo === 'categoria_manual_id' ? 'automática' : '—';
-    if (campo === 'categoria_manual_id') { var c = Store.categoria(v); return c ? c.nome : 'outra categoria'; }
-    if (campo === 'pasto_atual_id') { var p = Store.pasto(v); return p ? p.nome : 'outro pasto'; }
-    if (campo === 'mae_id' || campo === 'pai_id') { var a = Store.animal(v); return a ? Store.rotuloAnimal(a) : 'outro animal'; }
-    if (v === 'S' || v === 'N') return v === 'S' ? 'sim' : 'não';
-    if (Fmt.ehData(v)) return Fmt.data(v);
-    return Fmt.rotuloOpcao(campo, v);
-  }
+  function valorAjuste_(campo, v) { return Store.valorLegivel(campo, v); }
   /** Alocações de um rateio (o que coube a cada animal), com a base quando o critério é por peso. */
   function alocacoes_(det, rat, nome) {
     var itens = (det.ALOCACOES_FINANCEIRAS || []).filter(function (x) { return x.rateio_id === rat.rateio_id; });
@@ -425,7 +419,7 @@ var TelaEventos = (function () {
     Cliente.consulta('evento.obter', { event_id: p.id }).then(function (r) {
       if (!vivo) return;
       var o = r.data, ev = o.evento, det = o.detalhes || {};
-      titulo.textContent = ev.rotulo + (ev.event_subtype ? ' · ' + Fmt.rotulo('', ev.event_subtype) : '');
+      titulo.textContent = ev.rotulo + (ev.event_subtype ? ' · ' + (ev.rotulo_subtipo || Fmt.rotulo('', ev.event_subtype)) : '');
       Util.limpar(corpo);
       var prop = Store.propriedade(ev.property_id);
       var payload = ev.payload || {};
@@ -439,7 +433,7 @@ var TelaEventos = (function () {
         ev.pre_marco_zero ? ['Histórico', 'antes do marco zero (sem efeito no inventário)'] : null, payload.justificativa ? ['Justificativa', payload.justificativa] : null,
       ].concat(ligacoes)), { dado: 'cabecalho' }));
       var aceitos = payload.avisos_aceitos || [];
-      if (aceitos.length) corpo.appendChild(UI.secao('Avisos aceitos ao gravar', h('ul', { class: 'lista-simples' }, aceitos.map(function (a) { return h('li', { text: Fmt.rotulo('', a.codigo) + (a.n ? ' (' + a.n + ')' : '') + (a.justificativa ? ': ' + a.justificativa : '') }); })), { dado: 'avisos' }));
+      if (aceitos.length) corpo.appendChild(UI.secao('Avisos aceitos ao gravar', h('ul', { class: 'lista-simples' }, aceitos.map(function (a) { return h('li', { text: Fmt.rotulo('AVISO', a.codigo) + (a.n ? ' (' + a.n + ')' : '') + (a.justificativa ? ': ' + a.justificativa : '') }); })), { dado: 'avisos' }));
       var linhas = o.linhas || [];
       if (linhas.length) corpo.appendChild(UI.secao('Animais', UI.tabela({
         id: 'ev-animais', rotulo: 'Animais do lançamento', linhas: linhas, chave: function (l) { return l.event_animal_id; },
@@ -500,18 +494,17 @@ var TelaEventos = (function () {
         var arroba = vd.base_peso === 'CARCACA' ? 'por arroba de carcaça' : vd.rendimento_tipo === 'NEGOCIADO' ? 'por arroba a ' + Fmt.numero(vd.rendimento_carcaca_pct, 1) + '% (negociada)' : 'por arroba estimada a ' + Fmt.numero(vd.rendimento_carcaca_pct, 1) + '%';
         var unidadeV = { CABECA: 'por cabeça', KG_VIVO: 'por kg vivo', ARROBA: arroba }[vd.unidade_preco] || '';
         var compr = Store.parceiro(ev.partner_id);
-        var receitaV = vd.valor_bruto - (vd.desconto_comercial || 0);
-        var deducoesV = (vd.frete || 0) + (vd.comissao || 0) + (vd.outras_deducoes || 0);
-        var retidas = (det.FINANCEIRO || []).filter(function (f) { return f.natureza === 'DESPESA_VENDA' && (f.retida_pelo_comprador === true || f.retida_pelo_comprador === 'S'); }).reduce(function (t, f) { return t + (f.valor || 0); }, 0);
+        // Os totais vêm calculados do servidor (FinancialService.totaisVenda): nenhum valor é calculado no aparelho.
+        var tv = o.totais_venda || {};
         corpo.appendChild(UI.secao('Venda', UI.pares([
           ['Comprador', compr ? compr.nome : null], ['Finalidade', Store.rotuloLista('FINALIDADE_NEGOCIO', vd.finalidade)], ['Forma do preço', Fmt.rotulo('MODALIDADE', vd.modalidade)],
           vd.preco_unitario ? ['Preço', Fmt.dinheiro(vd.preco_unitario) + ' ' + unidadeV] : null,
           vd.rendimento_carcaca_pct ? ['Rendimento', Fmt.numero(vd.rendimento_carcaca_pct, 1) + '% (' + Fmt.rotulo('RENDIMENTO_TIPO', vd.rendimento_tipo).toLowerCase() + ')'] : null,
           vd.peso_vivo_total_kg ? ['Peso vivo do lote', Fmt.peso(vd.peso_vivo_total_kg)] : null, vd.peso_carcaca_total_kg ? ['Carcaça (romaneio)', Fmt.peso(vd.peso_carcaca_total_kg)] : null,
           ['Animais', String(vd.qtd_animais)], ['Valor bruto', Fmt.dinheiro(vd.valor_bruto)], vd.desconto_comercial ? ['Desconto no preço', Fmt.dinheiro(vd.desconto_comercial)] : null,
-          ['Receita da venda', Fmt.dinheiro(receitaV)], vd.frete ? ['Frete', Fmt.dinheiro(vd.frete)] : null, vd.comissao ? ['Comissão', Fmt.dinheiro(vd.comissao)] : null,
-          vd.outras_deducoes ? ['Taxas e retenções', Fmt.dinheiro(vd.outras_deducoes)] : null, ['Resultado da negociação', Fmt.dinheiro(receitaV - deducoesV)],
-          ['Depósito esperado do comprador', Fmt.dinheiro(receitaV - retidas)], ['Divisão entre os animais', Fmt.rotulo('CRITERIO_RATEIO', vd.criterio_rateio)],
+          ['Receita da venda', Fmt.dinheiro(tv.receita)], tv.frete ? ['Frete', Fmt.dinheiro(tv.frete)] : null, tv.comissao ? ['Comissão', Fmt.dinheiro(tv.comissao)] : null,
+          tv.outras_deducoes ? ['Taxas e retenções', Fmt.dinheiro(tv.outras_deducoes)] : null, ['Resultado da negociação', Fmt.dinheiro(tv.resultado_negociacao)],
+          ['Depósito esperado do comprador', Fmt.dinheiro(tv.deposito_esperado)], ['Divisão entre os animais', Fmt.rotulo('CRITERIO_RATEIO', vd.criterio_rateio)],
           vd.gta_numero ? ['GTA', vd.gta_numero] : null, vd.nota_fiscal ? ['Nota fiscal', vd.nota_fiscal] : null, vd.observacoes ? ['Condições', vd.observacoes] : null,
         ].filter(Boolean)), { dado: 'venda' }));
       }

@@ -188,7 +188,9 @@ test('transferência com data passada: "Todos do pasto" usa a posição na data,
   await page.locator('.seletor-painel select').selectOption(S.PASTOS.A);
   await page.click('.seletor-painel button:has-text("Incluir todos")');
   await page.waitForSelector('.seletor-painel .conferencia :text("Posição em 01/03/2026")');
-  const pedido = a.pedidos('inventario.elegiveis')[0];
+  // A mudança de data já consulta a posição do rebanho inteiro na data (sem pasto); o "Incluir todos" pede a do pasto.
+  assert.ok(a.pedidos('inventario.elegiveis').some((p) => p.dados.data === '2026-03-01' && !p.dados.pasture_id), 'a data passada reconsulta a posição');
+  const pedido = a.pedidos('inventario.elegiveis').find((p) => p.dados.pasture_id);
   assert.deepEqual([pedido.dados.tipo, pedido.dados.data, pedido.dados.pasture_id], ['TRANSFERENCIA', '2026-03-01', S.PASTOS.A]);
   const escolhidos = await page.$$eval('.selecionados [data-animal]', (els) => els.map((e) => e.getAttribute('data-animal')));
   assert.ok(escolhidos.includes(b0457), 'em 01/03 o 0457 ainda estava no Pasto A (hoje está no B)');

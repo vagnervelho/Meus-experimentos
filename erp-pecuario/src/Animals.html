@@ -461,6 +461,7 @@ var TelaRebanho = (function () {
         { id: 'valor_lancamento', rotulo: 'Valor do lançamento', num: true, formatar: function (x) { return Fmt.dinheiro(x.valor_lancamento); } },
         { id: 'valor_alocado', rotulo: 'Deste animal', num: true, formatar: function (x) { return Fmt.dinheiro(x.valor_alocado); } },
       ] }).el : UI.nota('Nenhum lançamento atribuído a este animal.', 'info'));
+    if (b.lancamentos_anteriores && b.desde) caixa.appendChild(UI.nota('Os totais e o resultado são desta passagem pela fazenda, desde ' + Fmt.data(b.desde) + '. Os lançamentos de passagens anteriores aparecem na lista, mas ficam fora das contas.', 'info'));
     if (b.parcial && b.pendente) caixa.appendChild(UI.nota(b.pendente.mensagem, 'info'));
     return caixa;
   }

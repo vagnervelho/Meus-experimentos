@@ -26,11 +26,6 @@ var TelaConfig = (function () {
     backup_retencao_diarios: 'Backups diários guardados', backup_retencao_mensais: 'Backups mensais guardados', importacao_lote_linhas: 'Linhas por bloco na importação',
     json_celula_max_caracteres: 'Tamanho máximo de texto por célula', arquivamento_limiar_linhas: 'Linhas por tabela para arquivar',
   };
-  var AVISOS = {
-    CARENCIA_ATIVA: 'Animal em carência (venda para abate)', POSSIVEL_DUPLICIDADE: 'Lançamento possivelmente repetido', BRINCO_PARECIDO: 'Brinco parecido com o de outro animal', LOTACAO_ACIMA_DA_CAPACIDADE: 'Pasto acima da capacidade',
-    PESO_IMPLAUSIVEL: 'Peso fora do esperado', IDADE_REPRODUTIVA: 'Mãe abaixo da idade reprodutiva', PERIODO_BLOQUEADO: 'Período financeiro fechado', VALOR_DIVERGENTE: 'Valor diferente da conta',
-    RATEIO_SEM_PESO: 'Rateio por peso sem pesagem', INTERVALO_PARTO_CURTO: 'Intervalo entre partos curto', PRODUTO_VENCIDO: 'Produto vencido', ESTOQUE_INSUFICIENTE: 'Estoque insuficiente', CATEGORIAS_SEM_COBERTURA: 'Categorias com lacuna',
-  };
   var LISTAS = {
     RACA: 'Raças', CAUSA_MORTE: 'Causas de morte', MOTIVO_DESCARTE: 'Motivos de descarte', DESTINO_DESCARTE: 'Destinos do descarte', FORMA_PAGAMENTO: 'Formas de pagamento', VIA_APLICACAO: 'Vias de aplicação',
     TIPO_OCORRENCIA: 'Tipos de ocorrência', TIPO_PARTO: 'Tipos de parto', TIPO_DEDUCAO_VENDA: 'Deduções da venda', MOTIVO_IDENTIFICACAO: 'Motivos de identificação', FINALIDADE_NEGOCIO: 'Finalidades de compra e venda',
@@ -76,12 +71,12 @@ var TelaConfig = (function () {
     var tabelaPol = null;
     if (politica) {
       var atual = politica.valor || {};
-      var cods = (Store.dados().configuracoes.codigos_aviso || Object.keys(AVISOS));
+      var cods = (Store.dados().configuracoes.codigos_aviso || Object.keys(Fmt.ROTULOS.AVISO));
       tabelaPol = h('div', { class: 'grade-campos', dataset: { politica: '1' } }, cods.map(function (c) {
         var id = 'pol-' + c;
         var sel = h('select', { id: id }, ['BLOQUEIA', 'AVISA', 'IGNORA'].map(function (p) { return h('option', { value: p, text: Fmt.rotulo('POLITICA_AVISO', p), selected: (atual[c] || 'AVISA') === p }); }));
         selects[c] = sel;
-        return h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo', for: id, text: AVISOS[c] || Fmt.rotulo('', c) }), sel);
+        return h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo', for: id, text: Fmt.rotulo('AVISO', c) }), sel);
       }));
     }
     var just = Campos.criar({ id: 'justificativa', rotulo: 'Motivo da mudança (opcional)', tipo: 'texto' }, { idBase: 'cfgj-' + grupo });
@@ -360,7 +355,19 @@ var TelaConfig = (function () {
     var link = function (texto) { var r = 'evento/' + x.event_id; return Telas.existe(r) ? h('a', { class: 'botao botao-texto', href: Roteador.href(r), dataset: { rota: r } }, texto) : h('span', { text: texto }); };
     if (x.origem === 'EVENTO') return link(x.descricao + (x.vigente === false && x.acao !== 'ESTORNAR' ? ' (não vale mais)' : ''));
     if (x.origem === 'AJUSTE') return h('span', null, Fmt.rotuloOpcao('campo', x.campo) + ' · ', link(x.descricao));
-    return h('span', { text: (ROTULO_ENTIDADE[x.entidade] || Fmt.rotulo('', x.entidade)) + (x.campo ? ' · ' + x.campo : '') });
+    var c = campoAuditoria_(x);
+    return h('span', { text: (ROTULO_ENTIDADE[x.entidade] || Fmt.rotulo('', x.entidade)) + quemAuditoria_(x) + (c ? ' · ' + c : '') });
+  }
+  /** O registro de cadastro em palavras: o parâmetro pelo rótulo; o pasto, a propriedade, o parceiro pelo nome. */
+  function quemAuditoria_(x) {
+    if (x.entidade === 'CONFIGURACOES' && x.entity_id) return ' · ' + (ROTULOS[x.entity_id] || Fmt.rotulo('', x.entity_id));
+    var nome = x.entity_id ? Store.nomeDeReferencia(x.entity_id) : null;
+    return nome ? ' · ' + nome : '';
+  }
+  /** A coluna alterada em palavras (nunca o nome técnico); no parâmetro, o rótulo dele já diz o que mudou. */
+  function campoAuditoria_(x) {
+    if (!x.campo || (x.entidade === 'CONFIGURACOES' && x.campo === 'valor')) return '';
+    return Fmt.ROTULOS.CAMPO_CADASTRO[x.campo] || Fmt.ROTULOS.CAMPO_CORRIGIVEL[x.campo] || Fmt.rotulo('', String(x.campo).replace(/_id$/, ''));
   }
   function secaoAuditoria(el) {
     var f = { pagina: 1 };
@@ -387,13 +394,12 @@ var TelaConfig = (function () {
         Util.limpar(corpo);
         var paginas = Math.max(1, Math.ceil(d.total / d.por_pagina));
         corpo.appendChild(h('p', { class: 'dado', text: d.total + (d.total === 1 ? ' registro' : ' registros') + ' de alteração' }));
-        var valor = function (v) { return v === null || v === undefined || v === '' ? '—' : String(v); };
         corpo.appendChild(UI.tabela({ id: 'auditoria', rotulo: 'Auditoria', linhas: d.itens, chave: function (x) { return x.origem + ':' + (x.id || x.audit_id); }, porPagina: d.por_pagina, semPaginacao: true, vazio: { texto: 'Nada com esses filtros.' },
           colunas: [
             { id: 'timestamp', rotulo: 'Quando', formatar: function (x) { return Fmt.instante(x.timestamp); } }, { id: 'usuario', rotulo: 'Quem' },
             { id: 'acao', rotulo: 'O que foi feito', valor: function (x) { return ROTULO_ACAO[x.acao] || Fmt.rotulo('', x.acao); } },
             { id: 'oque', rotulo: 'Em quê', valor: function (x) { return x.descricao || x.campo || x.entidade; }, formatar: oQueAuditoria_ },
-            { id: 'mudanca', rotulo: 'De → para', valor: function (x) { return x.origem === 'EVENTO' ? '—' : valor(x.valor_anterior) + ' → ' + valor(x.valor_novo); } },
+            { id: 'mudanca', rotulo: 'De → para', valor: function (x) { return x.origem === 'EVENTO' ? '—' : Store.valorLegivel(x.campo, x.valor_anterior) + ' → ' + Store.valorLegivel(x.campo, x.valor_novo); } },
             { id: 'justificativa', rotulo: 'Motivo', valor: function (x) { return x.justificativa || '—'; } },
           ] }).el);
         if (paginas > 1) corpo.appendChild(h('div', { class: 'paginacao' }, h('span', { class: 'suave', text: 'Página ' + d.pagina + ' de ' + paginas }), h('div', { class: 'acoes', style: 'margin-top:0' },

@@ -67,6 +67,20 @@ var Utils = (function () {
     if (typeof n !== 'number' || Math.floor(n) !== n) throw falha_('INTERNAL', 'somaDias espera um número inteiro de dias.');
     return deSerial_(serial_(exigirData_(data, 'somaDias')) + n);
   }
+  /**
+   * Data `n` meses depois (n ≥ 0), no mesmo dia do mês; quando o mês de destino é mais curto, o último dia dele
+   * (31/01 + 1 mês = 28/02 ou 29/02). Vencimentos mensais de parcelas.
+   */
+  function somaMeses(data, n) {
+    if (typeof n !== 'number' || Math.floor(n) !== n || n < 0) throw falha_('INTERNAL', 'somaMeses espera um número inteiro de meses, a partir de 0.');
+    var d = exigirData_(data, 'somaMeses');
+    var total = d.ano * 12 + (d.mes - 1) + n;
+    var ano = Math.floor(total / 12);
+    var mes = total % 12 + 1;
+    var ultimo = [31, ano % 4 === 0 && (ano % 100 !== 0 || ano % 400 === 0) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][mes - 1];
+    var dia = Math.min(d.dia, ultimo);
+    return String(ano).padStart(4, '0') + '-' + String(mes).padStart(2, '0') + '-' + String(dia).padStart(2, '0');
+  }
   /** -1, 0 ou 1. Datas yyyy-MM-dd válidas ordenam como texto. */
   function compararDatas(a, b) {
     exigirData_(a, 'compararDatas');
@@ -445,6 +459,7 @@ var Utils = (function () {
     vazio: vazio,
     dataValida: dataValida,
     diffDias: diffDias,
+    somaMeses: somaMeses,
     somaDias: somaDias,
     compararDatas: compararDatas,
     idadeMeses: idadeMeses,

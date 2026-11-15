@@ -326,7 +326,7 @@ test('erro por animal: "2 de 4 com problema" (por brinco e por "Animal N da list
   await page.fill('[data-campo="justificativa"] textarea', 'Lançado por engano');
   await page.locator('.form-evento button[type=submit]').click();
   await page.waitForSelector('[role=dialog] [data-acao-principal]:not([disabled])');
-  assert.equal(await page.textContent('[role=dialog] [data-acao-principal]'), 'Estornar outra entrada (doação, permuta, achado) de 2 animais');
+  assert.equal(await page.textContent('[role=dialog] [data-acao-principal]'), 'Estornar a entrada de 2 animais');
   await page.click('[role=dialog] [data-acao-principal]');
   await page.waitForSelector('[data-resultado="ESTORNO"]');
   const est = a.pedidos('evento.estornar')[0];

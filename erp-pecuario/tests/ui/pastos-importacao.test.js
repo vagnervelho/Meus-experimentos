@@ -151,7 +151,7 @@ for (const largura of [1280, 360]) {
     assert.match(rec, /no rebanho, Pasto A/);
     assert.match(rec, /no rebanho, Pasto B/);
     assert.ok(await page.$('[data-reconciliacao="pastos"]'), 'pastos com contagem diferente');
-    assert.ok(await page.$('[data-secao="reconciliacao"] a:has-text("Abrir comprar animais de 15/03/2025")'), 'o registro que explica, com link');
+    assert.ok(await page.$('[data-secao="reconciliacao"] a:has-text("Abrir a compra de 15/03/2025")'), 'o registro que explica, com link');
     await semProblemasDeLeiaute(page, largura, 'relatório com reconciliação');
     const ativos = vigentesDe(s, 'ANIMAIS').filter((x) => x.situacao_cadastral === 'ATIVO').map((x) => x.brinco).filter(Boolean).sort();
     assert.deepEqual(ativos, ['0391', '0457', '12', '203'], 'a compra deixada de fora não entrou');

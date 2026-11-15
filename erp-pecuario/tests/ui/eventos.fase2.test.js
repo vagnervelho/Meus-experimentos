@@ -298,7 +298,7 @@ for (const largura of [1280, 360]) {
     await page.waitForSelector('[data-problemas] [data-conflito]');
     const prob = await textoTela(page, '[data-problemas]');
     assert.match(prob, /0457/);
-    assert.match(prob, /Abrir transferir de pasto de 01\/04\/2026/);
+    assert.match(prob, /Abrir a transferência de 01\/04\/2026/);
     assert.equal(await page.getAttribute('[data-problemas] [data-conflito]', 'data-conflito'), t2.event_id, 'o link leva ao lançamento que impede');
     assert.equal(vigentesDe(s, 'EVENTOS').filter((e) => e.event_type === 'ESTORNO').length, 0, 'nada gravado');
     await semProblemasDeLeiaute(page, largura, 'estorno recusado');
@@ -311,8 +311,8 @@ for (const largura of [1280, 360]) {
     await page.fill('[data-campo="justificativa"] textarea', 'A volta não aconteceu');
     await page.click('.form-evento button[type=submit]');
     await page.waitForSelector(dialogo + ' [data-acao-principal]:not([disabled])');
-    assert.match(await textoTela(page, dialogo), /Será desfeito\s*Transferir de pasto de 01\/04\/2026/);
-    assert.match(await textoTela(page, dialogo + ' [data-acao-principal]'), /Estornar transferir de pasto de 1 animal/);
+    assert.match(await textoTela(page, dialogo), /Será desfeito\s*A transferência de 01\/04\/2026/);
+    assert.match(await textoTela(page, dialogo + ' [data-acao-principal]'), /Estornar a transferência de 1 animal/);
     await principal(page);
     await page.waitForSelector('[data-resultado="ESTORNO"]');
     s.conferirProjecoes('estorno da segunda transferência');

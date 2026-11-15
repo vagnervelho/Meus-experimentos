@@ -356,10 +356,18 @@ var InventoryService = (function () {
    * Linhas de fluxo do período (07, seção 9, itens 4 a 7): cada linha vigente de NASCIMENTO (cria nascida viva),
    * COMPRA (entrada), VENDA, MORTE, DESCARTE e baixa na contagem (saídas), de D0 em diante, com o animal, o pasto
    * (destino na entrada, origem na saída) e a propriedade do dia do evento, filtradas. [{tipo, data, mes, event_id,
-   * valor (valor_individual: o valor do animal na compra e a receita do animal na venda)}].
+   * valor (o que coube ao animal no lançamento principal: compra dos animais ou receita da venda, pelas alocações
+   * vigentes; desenho-base §7: valor_individual é só base de rateio)}].
    */
   function fluxos_(L, periodo, f) {
     var out = [];
+    var porEvento = {};
+    function valor(l, tipo) {
+      if (!COM_VALOR[tipo]) return null;
+      if (!porEvento[l.event_id]) porEvento[l.event_id] = valoresDoPrincipal_(L, l.event_id, tipo);
+      var v = porEvento[l.event_id][l.animal_id];
+      return typeof v === 'number' ? v : null;
+    }
     L.f.todasAsLinhas().forEach(function (l) {
       if (l.pre_marco_zero || l.event_date < periodo.inicio_efetivo || l.event_date > periodo.fim) return;
       var tipo = null;
@@ -376,8 +384,23 @@ var InventoryService = (function () {
         : !vazio_(l.pasto_origem_id) ? l.pasto_origem_id : Timeline.pastoAntesDaSaida(L.f.linhas(l.animal_id), l.event_date, L.marcoZero).pasture_id;
       var x = { animal: a, pasture_id: nulo_(pasto), property_id: propriedadeDe_(L, pasto, l.event_id) };
       if (!casa_(L, f, x, l.event_date)) return;
-      out.push({ tipo: tipo, data: l.event_date, mes: l.event_date.slice(0, 7), event_id: l.event_id, valor: typeof l.valor_individual === 'number' ? l.valor_individual : null });
+      out.push({ tipo: tipo, data: l.event_date, mes: l.event_date.slice(0, 7), event_id: l.event_id, valor: valor(l, tipo) });
     });
+    return out;
+  }
+  /**
+   * {animal_id: valor alocado} do lançamento principal do evento (conta COMPRA_ANIMAIS na compra, VENDA_ANIMAIS na
+   * venda), pelo rateio vigente dele: um re-rateio (Fase 4) muda o valor por animal sem estornar o evento.
+   */
+  function valoresDoPrincipal_(L, eventId, tipo) {
+    var codigo = tipo === 'compras' ? FinancialService.CONTAS.COMPRA : FinancialService.CONTAS.VENDA;
+    var conta = L.repo.carregada('PLANO_CONTAS') ? L.repo.vigentes('PLANO_CONTAS').filter(function (c) { return c.codigo === codigo; })[0] : null;
+    var natureza = tipo === 'compras' ? 'AQUISICAO_ANIMAIS' : 'RECEITA_VENDA_ANIMAIS';
+    var fin = L.repo.por('FINANCEIRO', 'event_id', eventId).filter(function (x) {
+      return x.status !== 'CANCELADO' && (conta ? x.conta_id === conta.conta_id : x.natureza === natureza);
+    })[0];
+    var out = {};
+    if (fin) alocacoesVigentes_(L, fin.financial_id).forEach(function (a) { out[a.animal_id] = (out[a.animal_id] || 0) + (a.valor_alocado || 0); });
     return out;
   }
   var TIPOS_FLUXO = ['nascimentos', 'compras', 'vendas', 'mortes', 'descartes', 'baixas_contagem'];
@@ -468,7 +491,7 @@ var InventoryService = (function () {
     var d = dados || {};
     return {
       rota: 'dashboard.obter', dados: d,
-      reads: Utils.unicos(leiturasPosicao_().concat(['FINANCEIRO', 'PARCELAS', 'RATEIOS', 'ALOCACOES_FINANCEIRAS'])), acessoCru: true,
+      reads: Utils.unicos(leiturasPosicao_().concat(['FINANCEIRO', 'PARCELAS', 'RATEIOS', 'ALOCACOES_FINANCEIRAS', 'PLANO_CONTAS'])), acessoCru: true,
       tratador: function (tx) {
         var L = AnimalService.leitor(tx);
         var periodo = periodo_(L, d);

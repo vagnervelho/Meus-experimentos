@@ -496,3 +496,34 @@ Testes novos: `tests/integrity.fase2.test.js`.
   com o backend real (`npm run ui:check`: 65 testes, 65 aprovados, 0 falhas; página montada com 427 KB de 450 KB). Os
   cenários de nível 2 e a base de demonstração rodaram aqui sobre os fakes do harness; na conta do dono continuam
   pendentes. Nada validado na conta do dono.
+
+## 15/11/2026 — Fase 2, conserto da revisão independente (rodada 1)
+
+Cada achado confirmado virou primeiro um teste que falhava (`tests/revisao1.motor.test.js`,
+`tests/revisao1.financeiro.test.js`, `tests/ui/revisao1.test.js`, conferidos contra o código de antes do conserto) e
+depois o conserto da causa.
+
+- Motor: correção de cadastro ou de brinco depois do marco zero não transforma mais o animal do histórico em ANULADO
+  (só linha de inventário decide as ordens 2 e 3 de 03a, 4.3.4); registro anterior ao marco zero se confere com a
+  chegada declarada (`Timeline.chegadaDeclarada`), não com a volta mais recente, no comando, na integridade e no
+  desfazer da importação, e a chegada declarada se corrige depois de uma volta; o número de partos conta da primeira
+  entrada; corrigir só o texto ou o valor de uma volta ou de uma recompra não esbarra mais na morte ou venda posterior
+  (a linha do tempo final decide); corrigir só o motivo de uma retirada de brinco não "devolve" o número que foi para
+  outro animal (e a retirada levada para depois disso é recusada); mãe de parto só de natimorto não deixa de ser fêmea
+  (`SEXO_DA_MATRIZ`, `PARTO_DA_MATRIZ`).
+- Importação: uma importação em curso por vez (`IMPORTACAO_EM_CURSO`); gêmeos de linha idêntica em NASCIMENTOS não são
+  mais "linha repetida"; o desfazer fica bloqueado enquanto valer a correção de um evento importado; a reconciliação
+  ordena o histórico pela ordem canônica; os motivos do bloqueio citam o lançamento em palavras.
+- Financeiro: o bloco H da ficha soma numa base só (a passagem atual); `EVENTOS.total_value` de todo tipo é conferido
+  contra os lançamentos; o estorno bloqueado por valor alocado aponta o evento dono, uma vez só, sem mandar refazer um
+  rateio que não existe; frete e outros custos da compra, custo da morte e receita do descarte em uma ou mais parcelas
+  mensais (`parcelas_qtd`); a visão geral lê o valor de compras e vendas pelas alocações.
+- Contrato: `conflito = {event_id, tipo (sempre o event_type), subtipo, data, nome}` e `EventCatalog.nomeEvento`; o
+  catálogo serializado leva `nome` por tipo e subtipo; `evento.obter` devolve `papeis` e `totais_venda`; o estorno simulado
+  traz `corrige` quando o alvo é uma correção.
+- Interface: "Registrar" com rascunho ENVIANDO pergunta ao servidor antes de apagar; o resultado de uma correção não
+  oferece "Desfazer" e a revisão do estorno de um substituto avisa que o original não volta; o botão diz "Estornar a
+  transferência de 2 animais"; o seletor com data retroativa usa a posição na data e remarca os escolhidos quando a data
+  muda; o link do conflito diz "Abrir a marcação para descarte de 01/05/2026"; a trilha de auditoria fala em palavras
+  (campo, parâmetro e valores pelo nome); subtipos e avisos aceitos pelos rótulos certos; o detalhe da venda e a correção
+  da compra não calculam nada no aparelho.

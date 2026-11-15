@@ -53,6 +53,25 @@ var EventCatalog = (function () {
     ESTOQUE: { rotulo: 'Estoque de insumos', grupo_ui: 'Financeiro', ordem: 200, fase: 3 },
     ESTORNO: { rotulo: 'Estornar evento', grupo_ui: 'Correções', ordem: 210, fase: 1 },
   };
+  /**
+   * O lançamento como substantivo, com artigo, para as frases da tela e das mensagens ("Abrir a compra de 01/03",
+   * "Estornar a venda de 30 animais"): o rótulo do tipo é um verbo ("Comprar animais") e não serve no meio da frase.
+   * Por subtipo quando ele diz mais que o tipo (chave TIPO.SUBTIPO).
+   */
+  var NOME_TIPO = {
+    ENTRADA_INICIAL: 'o rebanho inicial', OUTRA_ENTRADA: 'a entrada', NASCIMENTO: 'o parto', COMPRA: 'a compra', VENDA: 'a venda',
+    TRANSFERENCIA: 'a transferência', MORTE: 'a morte', DESCARTE: 'o descarte', PESAGEM: 'a pesagem', SANIDADE: 'o manejo sanitário',
+    REPRODUCAO: 'o registro reprodutivo', DESMAMA: 'a desmama', CASTRACAO: 'a castração', IDENTIFICACAO: 'a identificação',
+    MARCACAO: 'a marcação', AJUSTE_INVENTARIO: 'a correção de dados', OCORRENCIA: 'a ocorrência', LANCAMENTO_FINANCEIRO: 'o lançamento financeiro',
+    RATEIO: 'o rateio de custo', ESTOQUE: 'o movimento de estoque', ESTORNO: 'o estorno',
+  };
+  var NOME_SUBTIPO = {
+    'AJUSTE_INVENTARIO.CORRECAO_CADASTRO': 'a correção de cadastro', 'AJUSTE_INVENTARIO.IDENTIFICACAO_INCORRETA': 'a correção de brinco',
+    'AJUSTE_INVENTARIO.CORRECAO_LOCALIZACAO': 'a correção de localização', 'AJUSTE_INVENTARIO.RECLASSIFICACAO': 'a reclassificação',
+    'AJUSTE_INVENTARIO.DIVERGENCIA_CONTAGEM': 'a baixa na contagem', 'IDENTIFICACAO.PRIMEIRA_IDENTIFICACAO': 'a primeira identificação',
+    'IDENTIFICACAO.SUBSTITUICAO': 'a troca de brinco', 'IDENTIFICACAO.REMOCAO': 'a retirada de brinco',
+    'MARCACAO.DESCARTE': 'a marcação para descarte', 'MARCACAO.NAO_LOCALIZADO': 'a marcação de não localizado',
+  };
 
   // ------------------------------------------------------------------ campos ----
   var CONFIANCAS = ['CONFIRMADA', 'ESTIMADA', 'DESCONHECIDA'];
@@ -139,7 +158,8 @@ var EventCatalog = (function () {
   /**
    * Lançamento opcional de uma saída sem negociação (03b, seção 10.3): na MORTE, custos associados numa conta de
    * custeio escolhida (necropsia, tratamento final, remoção); no DESCARTE, a receita simples (OUTRAS_RECEITAS_
-   * OPERACIONAIS). Um título só, com vencimento próprio (vazio = à vista, na data do evento); rateio por cabeça.
+   * OPERACIONAIS). Um título, com vencimento próprio (vazio = à vista, na data do evento), em uma ou mais parcelas
+   * mensais; rateio por cabeça.
    */
   function camposLancamentoSaida_(tipo) {
     var p = tipo === 'MORTE' ? 'custo_' : 'receita_';
@@ -148,7 +168,8 @@ var EventCatalog = (function () {
       ajuda: tipo === 'MORTE' ? 'Necropsia, remoção, tratamento final: vira custo dos animais desta morte.' : 'Valor recebido na permuta ou na entrega, se houve. Venda é pelo "Vender animais".' })];
     if (tipo === 'MORTE') l.push(c_('custo_conta_id', 'Conta do custo', 'ref:PLANO_CONTAS', { naturezas: ['CUSTEIO'], visivel_se: tem, obrigatorio_se: tem }));
     l.push(c_(p + 'partner_id', tipo === 'MORTE' ? 'Pago a' : 'Recebido de', 'ref:PARCEIROS', { visivel_se: tem }));
-    l.push(c_(p + 'vencimento', 'Vencimento', 'data', { visivel_se: tem, ajuda: 'Vazio = à vista, na data do evento.' }));
+    l.push(c_(p + 'vencimento', 'Vencimento', 'data', { visivel_se: tem, ajuda: 'Vazio = à vista, na data do evento. Em mais de uma vez, é o vencimento da primeira parcela.' }));
+    l.push(c_(p + 'parcelas_qtd', 'Em quantas vezes', 'inteiro', { min: 1, max: 120, visivel_se: tem, ajuda: 'Vazio = uma vez. Com mais de uma, as parcelas vencem de mês em mês, em partes iguais.' }));
     l.push(c_(p + 'forma_pagamento', 'Forma de pagamento', 'lista', { lista: 'FORMA_PAGAMENTO', visivel_se: tem }));
     l.push(c_(p + 'documento', 'Recibo ou nota', 'texto', { visivel_se: tem }));
     l.push(c_(p + 'descricao', 'Descrição do lançamento', 'texto', { visivel_se: tem }));
@@ -321,7 +342,8 @@ var EventCatalog = (function () {
     a_('tipo', 'Custo', 'lista', { obrigatorio: true, opcoes: ['FRETE', 'OUTRO'], default: 'FRETE' }),
     a_('valor', 'Valor', 'dinheiro', { obrigatorio: true, min: 0.01 }),
     a_('partner_id', 'Pago a', 'ref:PARCEIROS', { ajuda: 'O transportador, o corretor: quem recebe este valor.' }),
-    a_('data_vencimento', 'Vencimento', 'data', { ajuda: 'Vazio = à vista, na data da compra.' }),
+    a_('data_vencimento', 'Vencimento', 'data', { ajuda: 'Vazio = à vista, na data da compra. Em mais de uma vez, é o vencimento da primeira parcela.' }),
+    a_('parcelas_qtd', 'Em quantas vezes', 'inteiro', { min: 1, max: 120, ajuda: 'Vazio = uma vez. Com mais de uma, as parcelas vencem de mês em mês, em partes iguais.' }),
     a_('forma_pagamento', 'Forma de pagamento', 'lista', { lista: 'FORMA_PAGAMENTO' }),
     a_('documento', 'Recibo ou nota', 'texto'),
     a_('descricao', 'Descrição', 'texto', { ajuda: 'Ex.: comissão do corretor, taxa da GTA.' }),
@@ -528,6 +550,11 @@ var EventCatalog = (function () {
   function nomes() {
     return Object.keys(RESUMO);
   }
+  /** O lançamento como substantivo com artigo ("a marcação para descarte"); tipo desconhecido → "o lançamento". */
+  function nomeEvento(tipoEvento, subtipo) {
+    if (!vazio_(subtipo) && NOME_SUBTIPO[tipoEvento + '.' + subtipo]) return NOME_SUBTIPO[tipoEvento + '.' + subtipo];
+    return NOME_TIPO[tipoEvento] || 'o lançamento';
+  }
   function existe(tipo) {
     return Object.prototype.hasOwnProperty.call(RESUMO, tipo);
   }
@@ -596,9 +623,14 @@ var EventCatalog = (function () {
     var f = fase === undefined || fase === null ? FASE_ATUAL : fase;
     var tipos = tiposAtivos(f).map(function (n) {
       var t = Utils.clonar(tipo(n));
+      t.nome = nomeEvento(n, null);
       if (t.subtipos) {
         var subs = {};
-        Object.keys(t.subtipos).forEach(function (s) { if (subtipoPronto_(t.subtipos[s], f)) subs[s] = t.subtipos[s]; });
+        Object.keys(t.subtipos).forEach(function (s) {
+          if (!subtipoPronto_(t.subtipos[s], f)) return;
+          subs[s] = t.subtipos[s];
+          subs[s].nome = nomeEvento(n, s);
+        });
         t.subtipos = subs;
       }
       return t;
@@ -686,6 +718,7 @@ var EventCatalog = (function () {
     PESO_MAX_KG: PESO_MAX_KG,
     CAMPOS_CORRIGIVEIS: CAMPOS_CORRIGIVEIS,
     nomes: nomes,
+    nomeEvento: nomeEvento,
     existe: existe,
     tipo: tipo,
     subtipos: subtipos,
