@@ -178,7 +178,7 @@ var TelaConfig = (function () {
       { id: 'idade_maxima_meses', rotulo: 'Idade máxima (meses, sem incluir)', tipo: 'inteiro', min: 1 },
       { id: 'condicao', rotulo: 'Condição', tipo: 'lista', opcoes: ['NENHUMA', 'CASTRADO', 'INTEIRO', 'REPRODUTOR', 'NAO_REPRODUTOR', 'PARIDA', 'NAO_PARIDA'], obrigatorio: true, default: 'NENHUMA' },
       { id: 'prioridade', rotulo: 'Prioridade (menor vale primeiro)', tipo: 'inteiro', obrigatorio: true, min: 0 },
-      { id: 'peso_referencia_kg', rotulo: 'Peso de referência', tipo: 'decimal', casas: 1, unidade: 'kg', min: 0 },
+      { id: 'peso_referencia_kg', rotulo: 'Peso de referência', tipo: 'decimal', casas: 1, unidade: 'kg', min: 0, min_exclusivo: true },
       { id: 'descricao', rotulo: 'Descrição', tipo: 'texto' },
       { id: 'ativo', rotulo: 'Ativa', tipo: 'bool', obrigatorio: true, default: true },
     ]);
@@ -206,7 +206,7 @@ var TelaConfig = (function () {
   function formPropriedade(p, origem) {
     var novo = !p;
     var defs = [{ id: 'nome', rotulo: 'Nome', tipo: 'texto', obrigatorio: true }, { id: 'descricao', rotulo: 'Descrição', tipo: 'texto' }, { id: 'localizacao', rotulo: 'Localização (município, estrada)', tipo: 'texto' },
-      { id: 'area_total_ha', rotulo: 'Área total', tipo: 'decimal', casas: 4, unidade: 'ha', min: 0 }];
+      { id: 'area_total_ha', rotulo: 'Área total', tipo: 'decimal', casas: 4, unidade: 'ha', min: 0, min_exclusivo: true }];
     if (!novo) defs.push({ id: 'status', rotulo: 'Situação', tipo: 'lista', opcoes: ['ATIVO', 'INATIVO'], obrigatorio: true });
     Cadastro.folha({ titulo: novo ? 'Nova propriedade' : 'Editar ' + p.nome, rota: 'propriedade.salvar', origem: origem, idBase: 'prp', defs: defs,
       valores: novo ? {} : { nome: p.nome, descricao: p.descricao, localizacao: p.localizacao, area_total_ha: p.area_total_ha === null || p.area_total_ha === undefined ? null : String(p.area_total_ha).replace('.', ','), status: p.status },

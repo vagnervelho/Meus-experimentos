@@ -457,7 +457,10 @@ var Config = (function () {
           Object.keys(campos).forEach(function (c) { final[c] = nulo_(campos[c]); });
           if (typeof final.idade_minima_meses === 'number' && typeof final.idade_maxima_meses === 'number' && final.idade_maxima_meses <= final.idade_minima_meses) {
             erro('FAIXA_INVALIDA', 'idade_maxima_meses', 'a idade máxima (' + final.idade_maxima_meses + ' meses) precisa ser maior que a mínima (' + final.idade_minima_meses + ').');
+          } else if (typeof final.idade_maxima_meses === 'number' && final.idade_maxima_meses < 1) {
+            erro('FAIXA_INVALIDA', 'idade_maxima_meses', 'a idade máxima não inclui o próprio mês: precisa ser de pelo menos 1 mês (vazio = sem teto).');
           }
+          if (typeof final.prioridade === 'number' && final.prioridade < 0) erro('VALOR_FORA_DA_FAIXA', 'prioridade', 'a prioridade é um número a partir de 0 (o menor vale primeiro).');
           if (final.sexo_aplicavel === 'F' && CONDICOES_MACHO.indexOf(final.condicao) >= 0) erro('CONDICAO_INCOMPATIVEL', 'condicao', 'a condição escolhida só vale para machos.');
           if (final.sexo_aplicavel === 'M' && CONDICOES_FEMEA.indexOf(final.condicao) >= 0) erro('CONDICAO_INCOMPATIVEL', 'condicao', 'parida e não parida só valem para fêmeas.');
           if (atual && atual.ativo !== false && final.ativo === false) {

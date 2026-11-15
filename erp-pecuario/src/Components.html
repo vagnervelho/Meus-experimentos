@@ -504,6 +504,8 @@ var Campos = (function () {
     else return { valor: String(bruto) };
     if (r.erro) return r;
     var escala = t === 'dinheiro' ? 100 : 1;
+    // min_exclusivo: o mínimo não vale (área, capacidade, peso de referência: "maior que 0", como no servidor).
+    if (def.min_exclusivo && def.min !== undefined && def.min !== null && r.valor <= def.min * escala) return { erro: 'Informe um valor maior que ' + (t === 'dinheiro' ? Fmt.dinheiro(def.min * 100) : Fmt.numero(def.min, 0) + (def.unidade ? ' ' + def.unidade : '')) + '.' };
     if (def.min !== undefined && def.min !== null && r.valor < def.min * escala) return { erro: 'O mínimo é ' + (t === 'dinheiro' ? Fmt.dinheiro(def.min * 100) : Fmt.numero(def.min, t === 'inteiro' ? 0 : (def.casas || 1)) + (def.unidade ? ' ' + def.unidade : '')) + '.' };
     if (def.max !== undefined && def.max !== null && r.valor > def.max * escala) return { erro: 'O máximo é ' + (t === 'dinheiro' ? Fmt.dinheiro(def.max * 100) : Fmt.numero(def.max, t === 'inteiro' ? 0 : (def.casas || 1)) + (def.unidade ? ' ' + def.unidade : '')) + '.' };
     return r;

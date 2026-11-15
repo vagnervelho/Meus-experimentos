@@ -124,7 +124,7 @@ test('ENSAIO DE RESTAURAÇÃO: backup com operação interrompida → banco novo
   // Recusas: arquivo que não é backup → NOT_FOUND; lock ocupado → LOCKED.
   assert.equal(s.tentar((ctx) => G.Maintenance.restaurar(ctx, { dados: { backup_id: antigo } })).erro.code, 'NOT_FOUND');
   gas.lock.segurarPorOutra();
-  assert.equal(s.tentar((ctx) => G.Maintenance.restaurar(ctx, { dados: { backup_id: backupId } })).erro.code, 'LOCKED');
+  assert.equal(s.tentar((ctx) => G.Maintenance.restaurar(ctx, { dados: { backup_id: backupId, justificativa: 'Ensaio com o banco ocupado' } })).erro.code, 'LOCKED');
   gas.lock.soltarOutra();
 });
 

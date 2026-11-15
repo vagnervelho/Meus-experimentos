@@ -705,6 +705,7 @@ var Database = (function () {
       try {
         lidos = p.lerCelulas(celulas);
       } catch (e) {
+        console.error('Database.conferirPosicoes: leitura das células falhou; as abas serão relidas inteiras: ' + String(e && e.message ? e.message : e));
         return false;
       }
       return lista.every(function (it, k) { return lidos[k] === it.id; });

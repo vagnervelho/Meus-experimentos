@@ -89,6 +89,8 @@ var FileService = (function () {
       try {
         guardadas = JSON.parse(store.getProperty(PROP_PASTAS) || '{}') || {};
       } catch (e) {
+        // Propriedade ilegível: as pastas são reencontradas pelo nome (ou recriadas) e a propriedade é regravada.
+        console.error('FileService: ' + PROP_PASTAS + ' ilegível, pastas reencontradas pelo nome: ' + texto_(e));
         guardadas = {};
       }
       var criadas = [];

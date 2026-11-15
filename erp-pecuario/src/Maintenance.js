@@ -214,8 +214,9 @@ var Maintenance = (function () {
    * Restauração (sistema.restaurarBackup; 06, seção 10): copia o backup pelo Drive (a cópia passa a ser o banco),
    * cria a versão de dados do banco novo acima da última servida, grava o marcador do banco novo ANTES de trocá-lo,
    * troca o banco em uso e roda recoverAll; registra em AUDITORIA e verifica a integridade. O banco anterior fica no
-   * Drive. pedido: {dados: {backup_id, justificativa}}. Devolve {banco_anterior, banco, backup, recuperacao,
-   * dataVersion, integridade}. Erros: NOT_FOUND, LOCKED, CONFIG.
+   * Drive. pedido: {dados: {backup_id, justificativa (obrigatória)}}. Devolve {banco_anterior, banco, backup, recuperacao,
+   * dataVersion, integridade}. Erros: NOT_FOUND, VALIDATION (sem justificativa; backup de outro ambiente:
+   * BACKUP_DE_OUTRA_BASE), LOCKED, CONFIG.
    */
   function restaurar(ctx, pedido) {
     var d = (pedido && pedido.dados) || {};
@@ -230,6 +231,9 @@ var Maintenance = (function () {
     // Backup de outra base (a de teste ou a de demonstração no lugar da real, ou o contrário) nunca é restaurado.
     var ambiente = ambienteDoBanco_(props, ctx.banco);
     var deOutra = !vazio_(ap.erp_ambiente) ? ap.erp_ambiente !== ambiente : CHAVES_BANCO.some(function (k) { return k !== chave && !vazio_(props[k]) && props[k] === ap.erp_banco; });
+    if (vazio_(d.justificativa) || !String(d.justificativa).trim()) {
+      throw Validation.erro('VALIDATION', 'Diga por que está restaurando o backup: o motivo fica registrado no histórico do sistema.', [Validation.detalhe({ codigo: 'CAMPO_OBRIGATORIO', campo: 'justificativa', mensagem: 'Diga por que está restaurando o backup.' })]);
+    }
     if (deOutra) throw Validation.erro('VALIDATION', 'Este backup é de outra base (' + (ap.erp_ambiente === 'PRODUCAO' ? 'a base real' : 'uma base de teste ou de demonstração') + '), não da que está aberta. Escolha um backup desta base na lista.', [Validation.detalhe({ codigo: 'BACKUP_DE_OUTRA_BASE', campo: 'backup_id', mensagem: 'Escolha um backup desta base.' })]);
     if (!ctx.lock.tentar(ESPERA_LOCK_MS)) throw Validation.erro('LOCKED', 'O sistema está ocupado gravando outra operação. Aguarde alguns segundos e tente de novo.');
     var novo;
@@ -253,7 +257,7 @@ var Maintenance = (function () {
       rota: 'sistema.restaurarBackup', idempotencyKey: 'restauracao:' + novo, dados: { backup_id: b.id }, reads: [], permiteDuranteImportacao: true,
       tratador: function (tx) {
         tx.plano.auditar({
-          entidade: 'SISTEMA', acao: 'MANUTENCAO', justificativa: vazio_(d.justificativa) ? null : String(d.justificativa),
+          entidade: 'SISTEMA', acao: 'MANUTENCAO', justificativa: String(d.justificativa).trim(),
           valor_novo: 'Banco restaurado do backup "' + b.name + '" (' + b.id + '). O banco anterior (' + ctx.banco + ') continua no Drive.',
         });
         return { resumo: { banco: novo, backup_id: b.id, banco_anterior: ctx.banco } };
