@@ -644,6 +644,17 @@ var FinancialService = (function () {
         var deducoes = soma_(lancs.filter(function (f) { return f.natureza === 'DESPESA_VENDA'; }), 'valor');
         if (deducoes !== (v.frete || 0) + (v.comissao || 0) + (v.outras_deducoes || 0)) achado(16, 'VENDAS', v.sale_id, 'As deduções da venda não conferem com os lançamentos de despesa de venda (' + reais_(deducoes) + ').');
         if (lancs.some(function (f) { return f !== fin && f.natureza !== 'DESPESA_VENDA'; })) achado(16, 'VENDAS', v.sale_id, 'A venda tem um lançamento que não é a receita nem uma despesa de venda.');
+        // A dedução descontada pelo comprador sai num recebimento da venda (03b, 2.5: encontro de contas na baixa da
+        // receita): o título dela vence num dos vencimentos da receita.
+        if (fin) {
+          var recebimentos = repo.por('PARCELAS', 'financial_id', fin.financial_id).map(function (p) { return p.data_vencimento; });
+          lancs.forEach(function (f) {
+            if (f === fin || f.retida_pelo_comprador !== true || !recebimentos.length) return;
+            repo.por('PARCELAS', 'financial_id', f.financial_id).forEach(function (p) {
+              if (recebimentos.indexOf(p.data_vencimento) < 0) achado(16, 'FINANCEIRO', f.financial_id, 'A dedução "' + (f.descricao || f.financial_id) + '", descontada pelo comprador, vence em ' + br_(p.data_vencimento) + ', fora dos recebimentos da venda (' + recebimentos.map(br_).join(', ') + ').');
+            });
+          });
+        }
         if (contas) {
           // Cada total de VENDAS é a soma dos lançamentos na conta própria (frete, comissão; o resto em taxas e retenções).
           var porConta = function (codigo) { return soma_(lancs.filter(function (f) { var c = repo.porId('PLANO_CONTAS', f.conta_id); return c && c.codigo === codigo; }), 'valor'); };

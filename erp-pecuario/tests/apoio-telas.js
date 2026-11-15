@@ -31,6 +31,7 @@ function storeDe(s) {
     tipoEvento: (t) => b.catalogo.tipos.filter((x) => x.tipo === t)[0] || null,
     animal: (id) => animais.filter((a) => a.animal_id === id)[0] || null,
     lista: (n) => b.listas.filter((l) => l.lista === n && l.ativo !== false),
+    itemLista: (n, c) => b.listas.filter((l) => l.lista === n && l.codigo === c)[0] || null,
     param: (k) => (params[k] === undefined ? null : params[k]),
     pasto: (id) => b.pastos.filter((p) => p.pasture_id === id)[0] || null,
     categoria: (id) => b.categorias.filter((c) => c.category_id === id)[0] || null,

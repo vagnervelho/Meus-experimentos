@@ -443,7 +443,7 @@ var TelaImportacao = (function () {
     Util.limpar(corpo);
     var b = estado.blocos;
     corpo.appendChild(UI.nota('Importação incompleta: ' + b.importados + ' de ' + b.total + ' blocos gravados (' + Fmt.numero(estado.contadores.importadas) + ' animais). Nada vale até concluir.', 'erro'));
-    corpo.appendChild(h('div', { class: 'acoes' }, UI.botao('Retomar', { tipo: 'primario', aoClicar: function () { executar(corpo, id, estado, {}, []); } }), UI.botao('Desfazer', { tipo: 'perigo', aoClicar: function (ev) { desfazer(id, ev.currentTarget); } })));
+    corpo.appendChild(h('div', { class: 'acoes' }, UI.botao('Retomar', { tipo: 'primario', aoClicar: function () { executar(corpo, id, estado, {}, []); } }), UI.botao('Desfazer', { tipo: 'perigo', aoClicar: function (ev) { desfazer(id, ev.currentTarget, { tipo: estado.importacao.tipo, status: estado.importacao.status }); } })));
   }
   async function executar(corpo, id, estado, conf, aceitos) {
     Util.limpar(corpo);
@@ -473,7 +473,7 @@ var TelaImportacao = (function () {
       corpo.appendChild(caixa);
       try {
         var atual = (await Cliente.consulta('importacao.obter', { import_id: id })).data;
-        if (atual.importacao.status === 'IMPORTANDO') corpo.appendChild(h('div', { class: 'acoes' }, UI.botao('Retomar', { tipo: 'primario', aoClicar: function () { executar(corpo, id, atual, conf, aceitos); } }), UI.botao('Desfazer', { tipo: 'perigo', aoClicar: function (ev) { desfazer(id, ev.currentTarget); } })));
+        if (atual.importacao.status === 'IMPORTANDO') corpo.appendChild(h('div', { class: 'acoes' }, UI.botao('Retomar', { tipo: 'primario', aoClicar: function () { executar(corpo, id, atual, conf, aceitos); } }), UI.botao('Desfazer', { tipo: 'perigo', aoClicar: function (ev) { desfazer(id, ev.currentTarget, { tipo: atual.importacao.tipo, status: atual.importacao.status }); } })));
         else if (atual.importacao.status === 'VALIDADO') corpo.appendChild(h('div', { class: 'acoes' }, h('a', { class: 'botao botao-secundario', href: Roteador.href('importar/' + id + '/validacao'), dataset: { rota: 'importar/' + id + '/validacao' } }, 'Voltar à validação')));
       } catch (e4) { corpo.appendChild(UI.nota('Não foi possível ler a situação da importação agora: ' + e4.message, 'aviso')); }
     }
@@ -514,16 +514,32 @@ var TelaImportacao = (function () {
       if ((d.reprovadas || []).length) corpo.appendChild(UI.secao('Linhas que ficaram de fora', h('ul', { class: 'lista-simples' }, d.reprovadas.map(function (l) { return h('li', { text: 'Linha ' + l.linha_num + ' (' + Fmt.rotulo('STATUS_LINHA', l.status).toLowerCase() + '): ' + (l.erros || []).map(function (e) { return e.mensagem; }).join(' / ') }); })), { dado: 'reprovadas' }));
       var acoes = h('div', { class: 'acoes' });
       if (!desfeita) acoes.appendChild(h('a', { class: 'botao botao-primario', href: Roteador.href('rebanho'), dataset: { rota: 'rebanho' } }, 'Ver o rebanho'));
-      if (!desfeita) acoes.appendChild(UI.botao('Desfazer importação', { tipo: 'perigo', aoClicar: function (ev) { desfazer(id, ev.currentTarget); } }));
+      if (!desfeita) acoes.appendChild(UI.botao('Desfazer importação', { tipo: 'perigo', aoClicar: function (ev) { desfazer(id, ev.currentTarget, { tipo: imp.tipo, status: imp.status, eventos: d.criados.eventos, animais: d.criados.animais }); } }));
       acoes.appendChild(h('a', { class: 'botao botao-secundario', href: Roteador.href('importar'), dataset: { rota: 'importar' } }, 'Ver as importações'));
       corpo.appendChild(acoes);
     }, function (e) { Util.limpar(corpo); erro(corpo, e, { texto: 'Tentar de novo', aoClicar: function () { relatorio(corpo, id); } }); });
   }
-  function desfazer(id, origem) {
+  /**
+   * A consequência do desfazer em palavras (08, seção 4.6), pelo tipo e pela situação da importação: na de animais, os
+   * animais deixam de valer; na de eventos, os lançamentos (e os animais que eles cadastraram: compra, cria) deixam de
+   * valer, sem mexer nos animais que eles só tocaram; em curso, nada dela chegou a valer.
+   */
+  function consequenciaDesfazer(info) {
+    var x = info || {};
+    var registrado = ' (nada é apagado; fica registrado).';
+    if (x.status === 'IMPORTANDO' || x.status === 'VALIDADO' || x.status === 'RASCUNHO') return 'Nada desta importação chegou a valer: os blocos já importados ficam sem efeito' + registrado;
+    if (!eventos(x.tipo)) return 'Os animais desta importação deixam de valer' + registrado + ' Lançamentos feitos depois sobre eles impedem desfazer.';
+    var n = typeof x.eventos === 'number' ? x.eventos : null;
+    var a = typeof x.animais === 'number' ? x.animais : 0;
+    var lanc = n === null ? 'Os lançamentos desta importação deixam de valer' : n === 1 ? 'O lançamento desta importação deixa de valer' : 'Os ' + Fmt.numero(n) + ' lançamentos desta importação deixam de valer';
+    var anim = a ? '; ' + (a === 1 ? 'o animal que ela cadastrou é anulado' : 'os ' + Fmt.numero(a) + ' animais que ela cadastrou são anulados') : '';
+    return lanc + anim + registrado + ' Os animais que eles só movimentaram voltam a como estavam sem eles; lançamentos feitos depois que dependem deles impedem desfazer.';
+  }
+  function desfazer(id, origem, info) {
     var just = Campos.criar({ id: 'justificativa', rotulo: 'Por que desfazer', tipo: 'texto', obrigatorio: true }, { idBase: 'desf' });
     just.marcarObrigatorio(true);
     var st = h('div', { role: 'status', 'aria-live': 'polite' });
-    var f = UI.folha({ titulo: 'Desfazer a importação', origem: origem, conteudo: h('div', { class: 'formulario' }, UI.nota('Todos os animais desta importação deixam de valer (nada é apagado; fica registrado). Lançamentos feitos depois sobre eles impedem desfazer.', 'aviso'), just.el, st) });
+    var f = UI.folha({ titulo: 'Desfazer a importação', origem: origem, conteudo: h('div', { class: 'formulario' }, UI.nota(consequenciaDesfazer(info), 'aviso'), just.el, st) });
     var b = UI.botao('Desfazer a importação', { tipo: 'perigo', aoClicar: async function () {
       Util.limpar(st);
       if (Util.vazio(just.ler())) { just.erro('Diga por que desfazer.'); just.focar(); return; }
@@ -586,6 +602,6 @@ var TelaImportacao = (function () {
   }
   Telas.registrar('importar', { titulo: 'Importação', modulo: 'IMPORTACAO', montar: montarLista });
   Telas.registrar('importar/:id/:etapa?', { titulo: 'Importação', modulo: 'IMPORTACAO', telaCheia: false, montar: montarAssistente });
-  return { etapaDoStatus: etapaDoStatus, planoConfirmacao: planoConfirmacao, valorLido: valorLido };
+  return { etapaDoStatus: etapaDoStatus, planoConfirmacao: planoConfirmacao, valorLido: valorLido, consequenciaDesfazer: consequenciaDesfazer };
 })();
 </script>

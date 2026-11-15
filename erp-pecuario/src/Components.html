@@ -458,10 +458,19 @@ var Campos = (function () {
     if (def.tipo === 'decimal' && typeof d === 'number') return Fmt.numero(d, def.casas === undefined ? 1 : def.casas).replace(/\./g, '');
     return d;
   }
-  function opcoesDe(def) {
+  /**
+   * Opções de um campo de lista. `atual`: o valor que o campo já tem (na correção, o do original): se o item foi
+   * desativado depois de usado, ele continua na lista com o rótulo de verdade e a marca "— desativado" (CONTRATOS,
+   * seção 14: o servidor aceita o código desativado que o original usava; quem decide é ele, §20, regra 8).
+   */
+  function opcoesDe(def, atual) {
     // rotulos_opcoes: rótulos na ordem de `opcoes`, para listas montadas na hora (ex.: os lançamentos de um evento).
     if (def.opcoes) return def.opcoes.map(function (c, i) { return { valor: c, rotulo: def.rotulos_opcoes && def.rotulos_opcoes[i] !== undefined ? def.rotulos_opcoes[i] : Fmt.rotuloOpcao(def.rotulos_de || def.id, c) }; });
-    if (def.lista) return Store.lista(def.lista).map(function (l) { return { valor: l.codigo, rotulo: l.rotulo }; });
+    if (def.lista) {
+      var ops = Store.lista(def.lista).map(function (l) { return { valor: l.codigo, rotulo: l.rotulo }; });
+      if (!vazio(atual) && !ops.some(function (x) { return x.valor === atual; }) && Store.itemLista(def.lista, atual)) ops.push({ valor: atual, rotulo: Store.rotuloLista(def.lista, atual) + ' — desativado', desativado: true });
+      return ops;
+    }
     return [];
   }
   function opcoesRef(tabela, atual, def) {
@@ -473,10 +482,14 @@ var Campos = (function () {
       itens = Store.propriedades({ todas: true }).filter(function (p) { return p.status !== 'INATIVO' || p.property_id === atual; }).map(function (p) { return { valor: p.property_id, rotulo: p.nome }; });
     } else if (tabela === 'PARCEIROS') {
       itens = Store.parceiros().map(function (p) { return { valor: p.partner_id, rotulo: p.nome }; });
+      var pa = vazio(atual) || itens.some(function (x) { return x.valor === atual; }) ? null : Store.parceiro(atual);
+      if (pa) itens.push({ valor: pa.partner_id, rotulo: pa.nome + ' — desativado' });
     } else if (tabela === 'PLANO_CONTAS') {
       itens = Store.contas(def && def.naturezas).map(function (c) { return { valor: c.conta_id, rotulo: c.nome }; });
+      var co = vazio(atual) || itens.some(function (x) { return x.valor === atual; }) ? null : Store.conta(atual);
+      if (co) itens.push({ valor: co.conta_id, rotulo: co.nome + ' — desativada' });
     } else if (tabela === 'CATEGORIAS') {
-      itens = Store.categorias().filter(function (c) { return c.ativo !== false; }).map(function (c) { return { valor: c.category_id, rotulo: c.nome }; });
+      itens = Store.categorias().filter(function (c) { return c.ativo !== false || c.category_id === atual; }).map(function (c) { return { valor: c.category_id, rotulo: c.nome + (c.ativo === false ? ' — desativada' : '') }; });
     }
     return itens.sort(function (a, b) { return UI.comparar(a.rotulo, b.rotulo); });
   }
@@ -501,7 +514,7 @@ var Campos = (function () {
     else if (t === 'data') return Fmt.ehData(bruto) ? { valor: bruto } : { erro: 'Data inválida. Use o calendário ou dd/mm/aaaa.' };
     else if (t === 'bool') return { valor: bruto === true || bruto === 'S' || bruto === 'true' };
     else if (t === 'lista') {
-      var ops = opcoesDe(def).map(function (x) { return x.valor; });
+      var ops = opcoesDe(def, bruto).map(function (x) { return x.valor; });
       return ops.indexOf(bruto) >= 0 || (!def.opcoes && !def.lista) ? { valor: bruto } : { erro: 'Escolha uma das opções da lista.' };
     } else if (t === 'anexo') return { valor: bruto };
     else return { valor: String(bruto) };
@@ -536,8 +549,8 @@ var Campos = (function () {
       controle = compostoIdent_(def, id, atual, mudou);
       focavel = function () { return controle.querySelector('select, input, button'); };
       el.appendChild(h('div', { class: 'campo-rotulo', id: id + '-r', text: rotuloDe(def) }));
-    } else if (t === 'bool' || (t === 'lista' && opcoesDe(def).length > 0 && opcoesDe(def).length <= 3)) {
-      var ops = t === 'bool' ? [{ valor: true, rotulo: 'Sim' }, { valor: false, rotulo: 'Não' }] : opcoesDe(def);
+    } else if (t === 'bool' || (t === 'lista' && opcoesDe(def, atual).length > 0 && opcoesDe(def, atual).length <= 3)) {
+      var ops = t === 'bool' ? [{ valor: true, rotulo: 'Sim' }, { valor: false, rotulo: 'Não' }] : opcoesDe(def, atual);
       var grupo = h('div', { class: 'opcoes-lista' });
       controle = h('fieldset', { class: 'opcoes', 'aria-describedby': describedby }, h('legend', { class: 'campo-rotulo', text: rotuloDe(def) }), grupo);
       ops.forEach(function (op, k) {
@@ -551,9 +564,10 @@ var Campos = (function () {
       var preencher = function () {
         Util.limpar(sel);
         sel.appendChild(h('option', { value: '', text: 'Escolha…' }));
-        var itens = t === 'lista' ? opcoesDe(def) : opcoesRef(ref[1], atual, def);
+        var itens = t === 'lista' ? opcoesDe(def, atual) : opcoesRef(ref[1], atual, def);
         itens.forEach(function (op) { sel.appendChild(h('option', { value: op.valor, text: op.rotulo, selected: op.valor === atual })); });
-        if (!vazio(atual) && !itens.some(function (op) { return op.valor === atual; })) sel.appendChild(h('option', { value: atual, text: 'Valor anterior (' + atual + ')', selected: true }));
+        // Valor que não está em nenhuma lista (cadastro apagado à mão): nunca o código cru na tela.
+        if (!vazio(atual) && !itens.some(function (op) { return op.valor === atual; })) sel.appendChild(h('option', { value: atual, text: 'Valor anterior (não está mais no cadastro)', selected: true }));
       };
       preencher();
       sel.addEventListener('change', function () { mudou(sel.value === '' ? null : sel.value); });
@@ -1464,6 +1478,13 @@ var Registro = (function () {
   }
   function avisarFalhaRascunho_(e) {
     App.faixa('rascunho-falhou', { tipo: 'aviso', texto: 'Não foi possível guardar o rascunho (' + e.message + '). Não feche esta tela antes de gravar.' });
+  }
+  // O envio adiado do rascunho ao servidor (sem localStorage) falha depois de o formulário seguir: a faixa avisa.
+  var ouvindoFalhas = false;
+  function ouvirFalhasDoRascunho_() {
+    if (ouvindoFalhas) return;
+    ouvindoFalhas = true;
+    Rascunhos.aoFalhar(function (e) { avisarFalhaRascunho_(e); });
   }
   function tocar(s) {
     var antes = s.alterado;
@@ -2406,7 +2427,7 @@ var Registro = (function () {
     if (ref && ref[1] === 'CATEGORIAS') { var ca = Store.categoria(v); return ca ? ca.nome : 'categoria'; }
     if (def.tipo === 'dinheiro') { var c = typeof v === 'number' ? v : Fmt.lerDinheiro(String(v)).valor; return typeof c === 'number' ? Fmt.dinheiro(c) : 'R$ ' + v; }
     if (def.tipo === 'data') return Fmt.data(v);
-    if (def.tipo === 'lista') { var op = Campos.opcoesDe(def).filter(function (x) { return x.valor === v; })[0]; return op ? op.rotulo : String(v); }
+    if (def.tipo === 'lista') { var op = Campos.opcoesDe(def, v).filter(function (x) { return x.valor === v; })[0]; return op ? op.rotulo : String(v); }
     if (Array.isArray(v)) return v.map(function (x) { return x.codigo; }).join(', ');
     return String(v) + (def.unidade ? ' ' + def.unidade : '');
   }
@@ -2780,9 +2801,26 @@ var Registro = (function () {
   function descricaoRascunho(r) {
     var p = [r.rotulo || r.tipo];
     if (r.data) p.push('de ' + Fmt.dataCurta(r.data));
-    var t = p.join(' ') + ' — registro não concluído';
+    // Enviado sem resposta: talvez já esteja gravado (08, seção 9); não se diz "não concluído" antes de perguntar.
+    var t = p.join(' ') + (r.estado === 'ENVIANDO' ? ' — enviado sem resposta do servidor' : ' — registro não concluído');
     if (r.n) t += ' (' + plural(r.n, 'animal', 'animais') + ')';
     return t;
+  }
+  /**
+   * Descarte vindo de fora do formulário (Visão geral): o rascunho que ficou ENVIANDO só é apagado depois de o servidor
+   * dizer que não gravou (08, seção 9: o rascunho só some por sucesso confirmado ou por descarte de algo que se sabe
+   * não gravado). Resolve 'CONFIRMADA' (gravado: nada se apaga; o resultado fica na sessão) ou 'DESCARTADO'; sem
+   * resposta do servidor, rejeita e o rascunho fica.
+   */
+  async function descartarVerificando(tipo) {
+    var def = Store.tipoEvento(tipo);
+    var r = sessoes[tipo] || await Rascunhos.obter(idRascunho(tipo));
+    if (def && r && r.estado === 'ENVIANDO') {
+      var sit = await retomarEnvio(await sessao(tipo, def));
+      if (sit === 'CONFIRMADA') return 'CONFIRMADA';
+    }
+    await descartar(tipo);
+    return 'DESCARTADO';
   }
   /** Na abertura do app: confere os envios pendentes e anuncia os rascunhos (08, seção 9). */
   async function conferirPendentes() {
@@ -2852,6 +2890,7 @@ var Registro = (function () {
   }
   function montarTipo(el, p) {
     var tipo = p.tipo, etapa = p.etapa;
+    ouvirFalhasDoRascunho_();
     var def = Store.tipoEvento(tipo);
     if (!def) {
       el.appendChild(UI.estadoErro({ code: 'NOT_FOUND', message: 'Este tipo de registro não está disponível nesta fase do sistema.' }, { acao: { texto: 'Escolher outro registro', aoClicar: function () { Roteador.ir('evento/novo'); } } }));
@@ -2900,14 +2939,23 @@ var Registro = (function () {
       var s = sessoes[tipo];
       if (!s) return;
       if (s.salvarAdiado.pendente()) s.salvarAdiado.agora();
-      if (Roteador.atual().indexOf(rotaDoForm(tipo)) !== 0 && s.alterado && !s.resultado) UI.aviso(Rascunhos.modo() === 'SERVIDOR' ? 'Rascunho guardado no servidor. Continue depois pelo Registrar.' : 'Rascunho guardado neste aparelho. Continue depois pelo Registrar.', { tipo: 'info' });
+      if (Roteador.atual().indexOf(rotaDoForm(tipo)) === 0 || !s.alterado || s.resultado) return;
+      if (Rascunhos.modo() !== 'SERVIDOR') { UI.aviso('Rascunho guardado neste aparelho. Continue depois pelo Registrar.', { tipo: 'info' }); return; }
+      // No servidor, "guardado" só depois de ele confirmar (08-ux-ui, seção 9: o rascunho não some calado).
+      Rascunhos.descarregar().then(function () {
+        var st = Rascunhos.situacao(idRascunho(tipo));
+        if (st && st.estado === 'FALHOU') throw st.erro;
+        UI.aviso('Rascunho guardado no servidor. Continue depois pelo Registrar.', { tipo: 'info' });
+      }).catch(function (e) {
+        UI.aviso('O rascunho não pôde ser guardado no servidor (' + e.message + '). Volte ao formulário e grave o lançamento: o que foi digitado se perde se a página for recarregada.', { tipo: 'aviso' });
+      });
     };
   }
   Telas.registrar('evento/novo', { titulo: 'Registrar evento', telaCheia: true, montar: montarSeletorTipo });
   Telas.registrar('evento/novo/:tipo/:etapa?', { titulo: 'Registrar evento', telaCheia: true, montar: montarTipo });
 
   return {
-    abrir: abrir, conferirPendentes: conferirPendentes, descartar: descartar, montarDados: montarDados, mapearErros: mapearErros,
+    abrir: abrir, conferirPendentes: conferirPendentes, descartar: descartar, descartarVerificando: descartarVerificando, montarDados: montarDados, mapearErros: mapearErros,
     serieBrincos: serieBrincos, lerColagem: lerColagem, vencimentos: vencimentos, diferencas: diferencas, impactosServidor: impactosServidor, notaCorrecao: notaCorrecao,
     sessao: function (tipo) { return sessoes[tipo] || null; }, descricaoRascunho: descricaoRascunho,
     PRINCIPAIS_ANIMAL: PRINCIPAIS_ANIMAL, PRINCIPAIS_COMPRA: PRINCIPAIS_COMPRA, CAMPOS_VOLTA: CAMPOS_VOLTA, CAMPOS_VOLTA_COMPRA: CAMPOS_VOLTA_COMPRA,

@@ -1248,14 +1248,15 @@ var EventService = (function () {
     var noEvento = {};
     propostos.forEach(function (it) {
       var b = it.brincoProposto;
-      var k = chave(b.codigo);
-      if (noEvento[k]) { erroItem_(m, it, 'brinco', 'BRINCO_REPETIDO', 'o brinco ' + b.codigo + ' aparece mais de uma vez neste lançamento.'); return; }
-      noEvento[k] = it;
-      if ((it.reusado || ctxEv.criadosOriginal[it.animal_id]) && doOriginal[it.animal_id + '|' + k]) return;
-      if (m.params.brinco_somente_numerico === true && !/^\d+$/.test(b.codigo.replace(/\s+/g, ''))) {
+      var mantido = (it.reusado || ctxEv.criadosOriginal[it.animal_id]) && doOriginal[it.animal_id + '|' + chave(b.codigo)];
+      if (!mantido && m.params.brinco_somente_numerico === true && !/^\d+$/.test(b.codigo.replace(/\s+/g, ''))) {
         erroItem_(m, it, 'brinco', 'BRINCO_NAO_NUMERICO', 'o brinco precisa ter só números.');
         return;
       }
+      var k = chave(b.codigo);
+      if (noEvento[k]) { erroItem_(m, it, 'brinco', 'BRINCO_REPETIDO', 'o brinco ' + b.codigo + ' aparece mais de uma vez neste lançamento.'); return; }
+      noEvento[k] = it;
+      if (mantido) return;
       var dono = ocupados[k];
       if (dono) {
         var sit = dono.situacao_cadastral === 'ATIVO' ? '' : ', ' + (SITUACAO_ROTULO[dono.situacao_cadastral] || '') + (vazio_(dono.data_saida) ? '' : ' em ' + br_(dono.data_saida));

@@ -90,14 +90,27 @@ var TelaInicio = (function () {
     return Rascunhos.listar().then(function (rs) {
       if (!el.isConnected) return;
       rs.filter(function (r) { return Store.tipoEvento(r.tipo); }).forEach(function (r) {
-        lista.appendChild(h('li', { class: 'linha-acao', dataset: { rascunho: r.tipo } }, h('span', { class: 'campo-linha' }, UI.icone('editar'), h('span', { text: Registro.descricaoRascunho(r) })),
+        var enviando = r.estado === 'ENVIANDO';
+        var descricao = Registro.descricaoRascunho(r);
+        lista.appendChild(h('li', { class: 'linha-acao', dataset: { rascunho: r.tipo, estado: r.estado || 'EDITANDO' } }, h('span', { class: 'campo-linha' }, UI.icone(enviando ? 'aviso' : 'editar'), h('span', { text: descricao + (enviando ? ' · verificando se gravou' : '') })),
           h('div', { class: 'acoes', style: 'margin-top:0' },
-            h('a', { class: 'botao botao-secundario', href: Roteador.href('evento/novo/' + r.tipo), dataset: { rota: 'evento/novo/' + r.tipo } }, 'Continuar'),
+            h('a', { class: 'botao botao-secundario', href: Roteador.href('evento/novo/' + r.tipo), dataset: { rota: 'evento/novo/' + r.tipo } }, enviando ? 'Verificar se gravou' : 'Continuar'),
             UI.botao('Descartar', { tipo: 'texto', aoClicar: async function () {
-              var ok = await UI.confirmar({ titulo: 'Descartar o rascunho?', texto: Registro.descricaoRascunho(r) + '. O que foi digitado será apagado.', verbo: 'Descartar o rascunho', cancelar: 'Manter', perigo: true });
+              var ok = await UI.confirmar({ titulo: 'Descartar o rascunho?', texto: descricao + (enviando ? '. Antes de apagar, o sistema pergunta ao servidor se ele foi gravado; se foi, nada é apagado.' : '. O que foi digitado será apagado.'), verbo: 'Descartar o rascunho', cancelar: 'Manter', perigo: true });
               if (!ok) return;
-              await Registro.descartar(r.tipo);
+              var res;
+              try {
+                res = await Registro.descartarVerificando(r.tipo);
+              } catch (e) {
+                UI.aviso('Ainda não sabemos se o registro foi gravado (' + e.message + '). O rascunho foi mantido; tente de novo em instantes.', { tipo: 'erro', duracaoMs: 12000 });
+                return;
+              }
               App.removerFaixa('rascunho-' + r.tipo);
+              if (res === 'CONFIRMADA') {
+                UI.aviso('Este registro já estava gravado no servidor: nada foi apagado. Confira o resultado.', { tipo: 'aviso' });
+                Roteador.ir('evento/novo/' + r.tipo + '/resultado');
+                return;
+              }
               Roteador.ir('inicio', { forcar: true, substituir: true });
             } }))));
       });

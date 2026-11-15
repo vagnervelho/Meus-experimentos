@@ -264,9 +264,23 @@ test('rascunho no servidor: salvar, obter e remover nas propriedades do usuário
   // Recusas.
   assert.equal(chamar(s, { rota: 'rascunho.salvar', dados: { chave: '../x', conteudo: 1 } }).error.code, 'VALIDATION');
   assert.equal(chamar(s, { rota: 'rascunho.salvar', dados: { chave: 'a' } }).error.code, 'VALIDATION');
-  const grande = chamar(s, { rota: 'rascunho.salvar', dados: { chave: 'grande', conteudo: 'é'.repeat(4500) } });
+  // Acima de um valor das propriedades (9 KB), o rascunho vai em partes e volta inteiro (revisão 3: o lote de 80
+  // animais do 08-ux-ui, seção 9); acima de 96 KB, recusa.
+  const medio = { linhas: Array.from({ length: 80 }, (_, i) => ({ brinco: 'Bezerro ' + i, peso: '240,5', obs: 'é'.repeat(40) })) };
+  const sm = chamar(s, { rota: 'rascunho.salvar', dados: { chave: 'medio', conteudo: medio } });
+  assert.equal(sm.ok, true, JSON.stringify(sm.error));
+  assert.ok(sm.data.bytes > 9 * 1024 && sm.data.partes > 1, JSON.stringify(sm.data));
+  assert.deepEqual(chamar(s, { rota: 'rascunho.obter', dados: { chave: 'medio' } }).data.conteudo, medio);
+  assert.equal(Object.keys(gas.props.user.getProperties()).filter((k) => k.indexOf('RASCUNHO:PRODUCAO:medio#') === 0).length, sm.data.partes);
+  assert.equal(chamar(s, { rota: 'rascunho.salvar', dados: { chave: 'medio', conteudo: 'pequeno' } }).data.partes, 1, 'regravado menor');
+  assert.equal(Object.keys(gas.props.user.getProperties()).some((k) => k.indexOf('RASCUNHO:PRODUCAO:medio#') === 0), false, 'as partes antigas saem');
+  assert.equal(chamar(s, { rota: 'rascunho.obter', dados: { chave: 'medio' } }).data.conteudo, 'pequeno');
+  chamar(s, { rota: 'rascunho.salvar', dados: { chave: 'medio', conteudo: medio } });
+  assert.equal(chamar(s, { rota: 'rascunho.remover', dados: { chave: 'medio' } }).data.removido, true);
+  assert.equal(Object.keys(gas.props.user.getProperties()).some((k) => k.indexOf('RASCUNHO:PRODUCAO:medio') === 0), false, 'remover leva as partes');
+  const grande = chamar(s, { rota: 'rascunho.salvar', dados: { chave: 'grande', conteudo: 'é'.repeat(50000) } });
   assert.equal(grande.error.code, 'VALIDATION');
-  assert.match(grande.error.message, /grande demais/);
+  assert.match(grande.error.message, /grande demais.*o limite é 96 KB/);
   // Rascunho vencido (30 dias) sai na próxima gravação; acima de 40 guardados, recusa.
   gas.props.user.setProperty('RASCUNHO:PRODUCAO:velho', JSON.stringify({ conteudo: 1, salvo_em: '2026-09-01T00:00:00.000Z' }));
   for (let i = 0; i < 40; i++) assert.equal(chamar(s, { rota: 'rascunho.salvar', dados: { chave: 'r' + i, conteudo: i } }).ok, true);

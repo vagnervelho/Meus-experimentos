@@ -289,7 +289,7 @@ test('R3 achado 8: desfazer uma importação concluída enquanto outra está em 
   assert.deepEqual(s.erros(), []);
 });
 
-test('R3 achado 8 (e 11): com eventos, desfazer a primeira importação com a segunda em curso é recusado; concluída a segunda, ela impede o desfazer', () => {
+test('R3 achado 8: com eventos, desfazer a primeira importação com a segunda em curso é recusado; concluída a segunda, ela impede o desfazer', () => {
   const s = base({ config: { importacao_lote_linhas: '50' } });
   const X = s.reg('registrar', S.entradaInicial([vaca('100')])).animais[0].animal_id;
   const imp1 = criarImportacao(s, 'TRANSFERENCIAS', 'Data;Pasto de origem;Pasto de destino;Brinco\n05/02/2026;Pasto A;Pasto B;100', 't1');
@@ -336,7 +336,7 @@ test('R3 achado 8: a importação em curso ainda pode ser desfeita, e a que não
   assert.deepEqual(s.erros(), []);
 });
 
-// ---------------------------------------------------------------- achados 11 e 20 (MÉDIA) ----
+// ---------------------------------------------------------------- achados 11 e 19 (MÉDIA) ----
 test('R3 achado 11: com o reuso ligado, o número só vai para outro animal depois do período de quem o tinha (primeira identificação retroativa, correção da data da troca)', () => {
   const s = base({ config: { brinco_permite_reuso: 'S' } });
   const [X, Y] = s.reg('registrar', S.entradaInicial([vaca('100'), vaca(undefined, { data_nascimento: '2024-01-10' })])).animais.map((a) => a.animal_id);
@@ -358,7 +358,7 @@ test('R3 achado 11: com o reuso ligado, o número só vai para outro animal depo
   assert.ok(s.erros().some((e) => e[0] === 'IDENTIFICACOES_ATIVAS' && /ficou em dois animais ao mesmo tempo/.test(e[1])), JSON.stringify(s.erros()));
 });
 
-test('R3 achado 20: a TROCA de brinco levada para depois de o número ir para outro animal dá CONFLICT com a entrada dele (como a retirada)', () => {
+test('R3 achado 19: a TROCA de brinco levada para depois de o número ir para outro animal dá CONFLICT com a entrada dele (como a retirada)', () => {
   const s = base({ config: { brinco_permite_reuso: 'S' } });
   const A = s.reg('registrar', S.entradaInicial([vaca('100', { data_nascimento: '2023-01-01', data_nascimento_confianca: 'ESTIMADA' })])).animais[0].animal_id;
   const troca = s.reg('registrar', ident('SUBSTITUICAO', '2026-06-01', [{ animal_id: A, codigo: '200', motivo: 'PERDA' }]));

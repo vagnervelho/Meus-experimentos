@@ -337,6 +337,7 @@ var Cliente = (function () {
 
   var MSG = {
     TRANSPORTE: 'Sem conexão. O que você digitou está guardado neste aparelho.',
+    TRANSPORTE_SEM_ARMAZEM: 'Sem conexão. O que você digitou continua nesta tela, mas não pôde ser guardado: não feche nem recarregue a página e tente gravar de novo quando o sinal voltar.',
     TRANSPORTE_CONSULTA: 'Sem conexão com o servidor. Confira o sinal e tente de novo.',
     ACESSO: 'Não foi possível confirmar seu acesso. Entre de novo; o que você digitou fica guardado.',
     SEM_RESPOSTA: 'O servidor não respondeu a tempo e ainda não sabemos se gravou. A verificação se repete quando você abrir este formulário de novo.',
@@ -389,7 +390,9 @@ var Cliente = (function () {
   function erroTransporte_(r, consulta) {
     falhasSeguidas += 1;
     var repetida = falhasSeguidas >= 3;
-    return new ErroApi('TRANSPORTE', repetida ? MSG.ACESSO : consulta ? MSG.TRANSPORTE_CONSULTA : MSG.TRANSPORTE, [], { repetida: repetida, causa: String(r.erro && r.erro.message ? r.erro.message : r.erro) });
+    // Sem o localStorage, o rascunho fica no servidor, que não responde: o que foi digitado só está na tela (SP-06).
+    var semArmazem = typeof Rascunhos !== 'undefined' && Rascunhos.modo() === 'SERVIDOR';
+    return new ErroApi('TRANSPORTE', repetida ? MSG.ACESSO : consulta ? MSG.TRANSPORTE_CONSULTA : semArmazem ? MSG.TRANSPORTE_SEM_ARMAZEM : MSG.TRANSPORTE, [], { repetida: repetida, causa: String(r.erro && r.erro.message ? r.erro.message : r.erro) });
   }
   function avisar_(o, estado) { if (o && typeof o.aoEstado === 'function') o.aoEstado(estado); }
 
@@ -625,6 +628,8 @@ var Store = (function () {
   function versao() { return est.dados ? est.dados.dataVersion : null; }
   function param(chave) { return est.params[chave] === undefined ? null : est.params[chave]; }
   function lista(nome) { return (est.listas[nome] || []).filter(function (l) { return l.ativo !== false; }); }
+  /** Item da lista pelo código, inclusive desativado (o lançamento antigo e a correção dele o mostram pelo nome). */
+  function itemLista(nome, codigo) { return (est.listas[nome] || []).filter(function (x) { return x.codigo === codigo; })[0] || null; }
   function rotuloLista(nome, codigo) {
     var l = (est.listas[nome] || []).filter(function (x) { return x.codigo === codigo; })[0];
     return l ? l.rotulo : Fmt.rotulo('', codigo);
@@ -757,7 +762,7 @@ var Store = (function () {
   }
   return {
     configurar: configurar, carregar: carregar, aplicarResultado: aplicarResultado, assinar: assinar, carregado: carregado, versao: versao,
-    param: param, lista: lista, rotuloLista: rotuloLista, pastos: pastos, pasto: pasto, propriedades: propriedades, propriedade: propriedade,
+    param: param, lista: lista, itemLista: itemLista, rotuloLista: rotuloLista, pastos: pastos, pasto: pasto, propriedades: propriedades, propriedade: propriedade,
     parceiros: parceiros, parceiro: parceiro, contas: contas, conta: conta, categorias: categorias, categoria: categoria, animais: animais, animal: animal, filhosDe: filhosDe,
     modulos: modulos, modulo: modulo, catalogo: catalogo, tipoEvento: tipoEvento, nomeEvento: nomeEvento, nomeDeReferencia: nomeDeReferencia, valorLegivel: valorLegivel, rotuloAnimal: rotuloAnimal, descricaoAnimal: descricaoAnimal,
     resolverBrinco: resolverBrinco, buscar: buscar, carregarBaixados: carregarBaixados, normalizarBrinco: normalizarBrinco,
@@ -774,6 +779,14 @@ var Rascunhos = (function () {
   var cfg = { ambiente: 'PRODUCAO' };
   var pendentesServidor = {};
   var gravarServidorAdiado = null;
+  // No servidor o envio é adiado: quem gravou precisa saber se ele falhou (§20, regra 9: não esconder erro).
+  var situacoes = {};
+  var ouvintesFalha = [];
+  var emCurso = null;
+  function falhou_(ids, e) {
+    ids.forEach(function (id) { situacoes[id] = { estado: 'FALHOU', erro: e }; });
+    ouvintesFalha.forEach(function (fn) { try { fn(e, ids); } catch (x) { Util.registrarFalha('aviso de rascunho', x); } });
+  }
 
   function prefixo_() { return 'erp:' + cfg.ambiente + ':rascunho:'; }
   function indiceLocal_() { return 'erp:' + cfg.ambiente + ':rascunhos'; }
@@ -781,7 +794,7 @@ var Rascunhos = (function () {
   function iniciar(o) {
     Object.keys(o || {}).forEach(function (k) { cfg[k] = o[k]; });
     modo = Util.armazem.disponivel() ? 'LOCAL' : 'SERVIDOR';
-    gravarServidorAdiado = Util.adiar(descarregarServidor_, 1000);
+    gravarServidorAdiado = Util.adiar(function () { descarregarServidor_().catch(function (e) { Util.registrarFalha('rascunho no servidor', e); }); }, 1000);
     // Ao sair da página (recarga, aba em segundo plano), o que estiver pendente vai ao servidor na hora.
     var sair = function () {
       if (!Object.keys(pendentesServidor).length) return;
@@ -824,30 +837,47 @@ var Rascunhos = (function () {
       modo = 'SERVIDOR';
     }
     pendentesServidor[id] = r;
+    situacoes[id] = { estado: 'PENDENTE', erro: null };
     if (o && o.imediato) { await descarregarServidor_(); return { onde: 'SERVIDOR' }; }
     gravarServidorAdiado();
-    return { onde: 'SERVIDOR' };
+    return { onde: 'SERVIDOR', pendente: true };
   }
-  async function descarregarServidor_() {
+  /**
+   * Envia ao servidor o que está pendente, depois do envio que já estiver em curso (um de cada vez): resolve só quando o
+   * servidor confirmou; a falha (sem conexão, rascunho grande demais) volta a quem chamou e aos ouvintes de falha.
+   */
+  function descarregarServidor_() {
+    var antes = emCurso || Promise.resolve();
+    var p = antes.catch(function () { return null; }).then(enviarPendentes_);
+    emCurso = p;
+    var fim = function () { if (emCurso === p) emCurso = null; };
+    p.then(fim, fim);
+    return p;
+  }
+  async function enviarPendentes_() {
     var ids = Object.keys(pendentesServidor);
     if (!ids.length) return;
     var lote = pendentesServidor;
     pendentesServidor = {};
-    var indice = await listar();
-    for (var i = 0; i < ids.length; i++) {
-      var id = ids[i], r = lote[id];
-      try {
+    var feitos = [];
+    try {
+      var indice = await listar();
+      for (var i = 0; i < ids.length; i++) {
+        var id = ids[i], r = lote[id];
         if (r === null) await Cliente.consulta('rascunho.remover', { chave: 'r.' + id });
         else await Cliente.consulta('rascunho.salvar', { chave: 'r.' + id, conteudo: r });
-      } catch (e) {
-        if (pendentesServidor[id] === undefined) pendentesServidor[id] = r;
-        Util.registrarFalha('rascunho no servidor', e);
-        throw e;
+        feitos.push(id);
+        indice = indice.filter(function (x) { return x.id !== id; });
+        if (r !== null) indice.push(resumo_(id, r));
       }
-      indice = indice.filter(function (x) { return x.id !== id; });
-      if (r !== null) indice.push(resumo_(id, r));
+      await Cliente.consulta('rascunho.salvar', { chave: 'indice', conteudo: indice });
+    } catch (e) {
+      var falhos = ids.filter(function (id) { return feitos.indexOf(id) < 0; });
+      falhos.forEach(function (id) { if (pendentesServidor[id] === undefined) pendentesServidor[id] = lote[id]; });
+      falhou_(falhos.length ? falhos : ids, e);
+      throw e;
     }
-    await Cliente.consulta('rascunho.salvar', { chave: 'indice', conteudo: indice });
+    ids.forEach(function (id) { if (pendentesServidor[id] === undefined) situacoes[id] = { estado: 'GUARDADO', erro: null }; });
   }
   async function remover(id) {
     if (modo === 'LOCAL') {
@@ -863,6 +893,10 @@ var Rascunhos = (function () {
     iniciar: iniciar, listar: listar, obter: obter, salvar: salvar, remover: remover,
     descarregar: function () { return descarregarServidor_(); },
     modo: function () { return modo; },
+    /** {estado: PENDENTE | GUARDADO | FALHOU, erro} do rascunho no servidor (null no aparelho ou nunca guardado). */
+    situacao: function (id) { return situacoes[id] || null; },
+    /** fn(erro, ids) quando um envio ao servidor falha (o adiado também). */
+    aoFalhar: function (fn) { ouvintesFalha.push(fn); },
   };
 })();
 

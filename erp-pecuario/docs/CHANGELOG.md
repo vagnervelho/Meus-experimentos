@@ -623,3 +623,37 @@ Nenhuma linha de código mudou nesta etapa: só documentos, conferidos contra o 
   dá a mesma soma) e no navegador com o backend real (`npm run ui:check`: 77 testes, 77 aprovados, 0 falhas; página
   montada com 437 KB de 450 KB); `npm run gen:schema -- --check` confere depois das mudanças em `03a` e `03b`. Nada
   validado na conta do dono.
+
+## 15/11/2026 — Fase 2, conserto da revisão independente (rodada 3)
+
+23 achados (7 de gravidade alta), todos reproduzidos por um teste que falhava antes do conserto e corrigidos; nenhum
+refutado nem adiado. Testes novos: `tests/revisao3.motor.test.js`, `tests/revisao3.financeiro.test.js`,
+`tests/revisao3.interface.test.js` e `tests/ui/revisao3.test.js`.
+
+- Motor: o pai do parto só de natimorto passa pela mesma conferência da cria viva (existe, não anulado, macho, nascido
+  antes do parto); corrigir ou estornar o sexo ou o nascimento de quem é touro de um registro reprodutivo é recusado
+  (RN-012, RN-060). O estorno e a correção conferem os registros anteriores ao marco zero com o nascimento e a chegada que
+  voltam, a correção de quem criou o animal usa a chegada do conjunto final, e o nascimento corrigido do filho fica depois
+  do da mãe e do pai (VALIDATION no comando, CONFLICT no estorno). Um número de brinco fica em um animal por vez: a
+  primeira identificação retroativa, a troca ou a retirada levada para depois e a entrada com o número que outro usava no
+  período dão CONFLICT com o registro do outro animal (`conferirPeriodosDeBrinco_`); o brinco de criação igual ao do
+  original não é proposta nova na correção. Conflitos de genealogia e de touro com o tipo, a data e o nome do lançamento,
+  uma vez por lançamento.
+- Importação: o brinco é resolvido pela identificação em uso na data do evento; desfazer uma importação concluída com
+  outra em curso é recusado (`IMPORTACAO_EM_CURSO`); o desfazer confere o touro dos partos e o valor alocado por outro
+  lançamento; o rebanho inicial importado não recebe o número que outro animal usava no marco zero; a reconciliação usa a
+  correção de localização e a baixa na contagem datadas do marco zero.
+- Integridade: evento vigente sem o detalhe que o tipo grava (COMPRAS, VENDAS, BAIXAS, AJUSTES, IDENTIFICACOES) é acusado;
+  GENEALOGIA confere o touro dos registros reprodutivos; IDENTIFICACOES_ATIVAS acusa o número em dois animais ao mesmo
+  tempo; a dedução retida precisa vencer num recebimento da venda; BASE_RATEIO recalcula também peso vivo, carcaça e
+  cabeças. Continuam 26 checagens.
+- Interface e financeiro: a prévia da correção não fixa como digitado o que o servidor propôs (descrição, vencimento à
+  vista, parceiro e vencimento da dedução retida, parcela única) e trata o critério DIRETO de um animal só; o item de lista,
+  o parceiro, a conta e a categoria desativados depois de usados aparecem pelo nome com "— desativado" e são aceitos pelo
+  formulário; o rascunho no servidor vai em partes (até 96 KB) e a falha do envio adiado aparece (faixa e aviso de saída
+  verdadeiro); a confirmação do desfazer da importação diz o que acontece pelo tipo; a Visão geral não chama de "não
+  concluído" o rascunho enviado sem resposta e pergunta ao servidor antes de descartá-lo.
+- Testes atualizados ao contrato novo, sem afrouxar: o parto citado uma vez como `PARTO_DA_MATRIZ` em
+  `tests/estorno.test.js`; o número em dois animais ao mesmo tempo agora acusado em `tests/integrity.fase2.test.js`; o
+  rascunho grande guardado em partes em `tests/api.test.js` (o limite passou de 8 KB a 96 KB); o vencimento à vista que
+  a prévia já deixa vazio em `tests/ui/venda.test.js`.

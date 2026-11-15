@@ -98,8 +98,14 @@ var TelaEventos = (function () {
   function codigoConta_(f) { var c = Store.conta(f.conta_id); return c ? c.codigo : null; }
   /** Parcelas de um lançamento na ordem do número da parcela (a primeira tem o primeiro vencimento). */
   function parcelasOrdem_(lista) { return lista.slice().sort(function (a, b) { return (a.parcela_num || 0) - (b.parcela_num || 0); }); }
+  /**
+   * O que o servidor propôs quando o campo veio vazio não é do usuário (§20, regra 8; 03b, seção 10.2): a descrição
+   * proposta ("Frete da compra de 10/03/2026") e o vencimento "à vista" (o primeiro título na data do evento) ficam
+   * vazios na prévia, para acompanhar o tipo e a data corrigidos.
+   */
+  function propostoOuValor_(valor, proposto) { return valor === proposto ? null : valor; }
   /** Lançamento opcional da morte (custos) ou do descarte (receita): campos do cabeçalho a partir do lançamento e do título. */
-  function lancamentoDaSaida_(det, origem, tipo) {
+  function lancamentoDaSaida_(det, origem, tipo, ev) {
     var f = (det.FINANCEIRO || [])[0];
     if (!f) return;
     var p = tipo === 'MORTE' ? 'custo_' : 'receita_';
@@ -107,10 +113,17 @@ var TelaEventos = (function () {
     var t = ts[0] || {};
     origem[p + 'valor'] = dinheiroTexto_(f.valor);
     if (tipo === 'MORTE') origem.custo_conta_id = f.conta_id;
-    origem[p + 'partner_id'] = f.partner_id; origem[p + 'vencimento'] = t.data_vencimento; origem[p + 'forma_pagamento'] = t.forma_pagamento;
+    origem[p + 'partner_id'] = f.partner_id; origem[p + 'vencimento'] = propostoOuValor_(t.data_vencimento, ev.event_date); origem[p + 'forma_pagamento'] = t.forma_pagamento;
     origem[p + 'parcelas_qtd'] = ts.length > 1 ? String(ts.length) : null;
-    origem[p + 'documento'] = f.documento; origem[p + 'descricao'] = f.descricao;
+    origem[p + 'documento'] = f.documento;
+    origem[p + 'descricao'] = propostoOuValor_(f.descricao, (tipo === 'MORTE' ? 'Custos da morte de ' : 'Receita do descarte de ') + Fmt.data(ev.event_date));
   }
+  /**
+   * Com um animal só o critério gravado é sempre DIRETO (03b, seção 4.3), que não é opção do formulário: no lote, a
+   * prévia propõe CABECAS (com um animal, todos dão 100%); por cabeça sem preço, o valor do animal vem da linha.
+   */
+  function criterioDaPrevia_(modalidade, criterio) { return modalidade === 'LOTE' ? (criterio === 'DIRETO' ? 'CABECAS' : criterio) : null; }
+  function valorPorAnimal_(cab) { return cab.criterio_rateio === 'VALOR_INDIVIDUAL' || (cab.criterio_rateio === 'DIRETO' && cab.modalidade === 'CABECA' && (cab.preco_unitario === null || cab.preco_unitario === undefined)); }
   /**
    * Correção de compra: o cabeçalho vem de COMPRAS, do evento e dos lançamentos (parcelas do valor dos animais; frete e
    * outros custos, um por item, os fretes primeiro); cada animal, da linha do evento (o criado leva os
@@ -135,9 +148,9 @@ var TelaEventos = (function () {
     origem.base_peso = cp.modalidade === 'ARROBA' ? cp.base_peso : null;
     if (cp.rendimento_tipo === 'NEGOCIADO' || cp.rendimento_tipo === 'ESTIMADO') { origem.rendimento_carcaca_pct = pesoTexto_(cp.rendimento_carcaca_pct); origem.rendimento_tipo = cp.rendimento_tipo; }
     origem.preco_unitario = dinheiroTexto_(cp.preco_unitario); origem.peso_total_kg = todosPesados ? null : pesoTexto_(cp.peso_total_kg);
-    origem.valor_animais = dinheiroTexto_(cp.valor_animais); origem.criterio_rateio = cp.modalidade === 'LOTE' ? cp.criterio_rateio : null;
+    origem.valor_animais = dinheiroTexto_(cp.valor_animais); origem.criterio_rateio = criterioDaPrevia_(cp.modalidade, cp.criterio_rateio);
     origem.justificativa_rateio = rat.justificativa; origem.pasto_destino_id = pastoLote; origem.gta_numero = cp.gta_numero; origem.nota_fiscal = cp.nota_fiscal; origem.condicoes = cp.observacoes;
-    var comValor = cp.criterio_rateio === 'VALOR_INDIVIDUAL';
+    var comValor = valorPorAnimal_(cp);
     var antes = { campos: {}, linhas: {} };
     var linhas = linhasEv.map(function (l) {
       var at = l.atributos_iniciais_json;
@@ -160,11 +173,14 @@ var TelaEventos = (function () {
       return { animal_id: l.animal_id, criado: !!at, valores: v };
     });
     var grupos = {
-      parcelas: parcelasDe(principal.financial_id).map(function (x) { return { valores: limpo_({ data_vencimento: x.data_vencimento, valor: dinheiroTexto_(x.valor), forma_pagamento: x.forma_pagamento, documento: x.documento }) }; }),
+      // Parcela única = o pagamento inteiro: o valor fica vazio, para acompanhar o valor dos animais se o preço for corrigido.
+      parcelas: parcelasOrdem_(parcelasDe(principal.financial_id)).map(function (x, k, todas) { return { valores: limpo_({ data_vencimento: x.data_vencimento, valor: todas.length === 1 ? null : dinheiroTexto_(x.valor), forma_pagamento: x.forma_pagamento, documento: x.documento }) }; }),
       custos: fins.filter(function (f) { return f !== principal; }).map(function (f) {
         var ts = parcelasOrdem_(parcelasDe(f.financial_id));
         var t = ts[0] || {};
-        return { valores: limpo_({ tipo: tipos[f.financial_id] === 'OUTRO' ? 'OUTRO' : 'FRETE', valor: dinheiroTexto_(f.valor), partner_id: f.partner_id, data_vencimento: t.data_vencimento, parcelas_qtd: ts.length > 1 ? String(ts.length) : null, forma_pagamento: t.forma_pagamento, documento: f.documento, descricao: f.descricao }) };
+        var tipo = tipos[f.financial_id] === 'OUTRO' ? 'OUTRO' : 'FRETE';
+        var proposta = (tipo === 'FRETE' ? 'Frete' : 'Outros custos') + ' da compra de ' + Fmt.data(ev.event_date);
+        return { valores: limpo_({ tipo: tipo, valor: dinheiroTexto_(f.valor), partner_id: f.partner_id, data_vencimento: propostoOuValor_(t.data_vencimento, ev.event_date), parcelas_qtd: ts.length > 1 ? String(ts.length) : null, forma_pagamento: t.forma_pagamento, documento: f.documento, descricao: propostoOuValor_(f.descricao, proposta) }) };
       }),
     };
     var campos = {};
@@ -200,10 +216,10 @@ var TelaEventos = (function () {
     origem.peso_vivo_total_kg = todosPesados ? null : pesoTexto_(vd.peso_vivo_total_kg);
     origem.peso_carcaca_total_kg = vd.base_peso === 'CARCACA' && !todasCarcacas ? pesoTexto_(vd.peso_carcaca_total_kg) : null;
     origem.valor_bruto = dinheiroTexto_(vd.valor_bruto); origem.desconto_comercial = vd.desconto_comercial ? dinheiroTexto_(vd.desconto_comercial) : null;
-    origem.criterio_rateio = vd.modalidade === 'LOTE' ? vd.criterio_rateio : null;
+    origem.criterio_rateio = criterioDaPrevia_(vd.modalidade, vd.criterio_rateio);
     origem.justificativa_rateio = vd.criterio_rateio === 'MANUAL' ? rat.justificativa : null;
     origem.gta_numero = vd.gta_numero; origem.nota_fiscal = vd.nota_fiscal; origem.condicoes = vd.observacoes;
-    var comValor = vd.criterio_rateio === 'VALOR_INDIVIDUAL';
+    var comValor = valorPorAnimal_(vd);
     var antes = { campos: {}, linhas: {} };
     var linhas = linhasEv.map(function (l) {
       var ps = (pesos[l.animal_id] || [])[0];
@@ -213,16 +229,22 @@ var TelaEventos = (function () {
       antes.linhas[l.animal_id] = Util.clonar(v);
       return { animal_id: l.animal_id, valores: v };
     });
+    var recebimentos = parcelasOrdem_(parcelasDe(receita.financial_id));
     var grupos = {
       // Parcela única = o recebimento inteiro: o valor fica vazio, para acompanhar a receita se o preço for corrigido.
-      parcelas: parcelasDe(receita.financial_id).map(function (x, k, todas) { return { valores: limpo_({ data_vencimento: x.data_vencimento, valor: todas.length === 1 ? null : dinheiroTexto_(x.valor), forma_pagamento: x.forma_pagamento, documento: x.documento }) }; }),
+      parcelas: recebimentos.map(function (x, k, todas) { return { valores: limpo_({ data_vencimento: x.data_vencimento, valor: todas.length === 1 ? null : dinheiroTexto_(x.valor), forma_pagamento: x.forma_pagamento, documento: x.documento }) }; }),
       deducoes: fins.filter(function (f) { return f !== receita; }).map(function (f) {
         var t = parcelasDe(f.financial_id)[0] || {};
         var tipo = tipoDe[f.financial_id] || 'OUTRA';
-        // A descrição que o servidor propôs ("Comissão da venda de 20/08/2026") não é do usuário: fica vazia, para seguir o tipo.
+        var retida = f.retida_pelo_comprador === true || f.retida_pelo_comprador === 'S';
+        // O que o servidor propôs não é do usuário: a descrição ("Comissão da venda de 20/08/2026") segue o tipo; na
+        // retida, o parceiro vazio é o comprador e o vencimento vazio é o primeiro recebimento; na outra, o vencimento
+        // vazio é a data da venda. Assim a correção do comprador, da data ou do recebimento leva a dedução junto.
         var proposta = Store.rotuloLista('TIPO_DEDUCAO_VENDA', tipo) + ' da venda de ' + Fmt.data(ev.event_date);
-        return { valores: limpo_({ tipo: tipo, valor: dinheiroTexto_(f.valor), retida_pelo_comprador: f.retida_pelo_comprador === true || f.retida_pelo_comprador === 'S',
-          partner_id: f.partner_id, data_vencimento: t.data_vencimento, forma_pagamento: t.forma_pagamento, documento: f.documento, descricao: f.descricao === proposta ? null : f.descricao }) };
+        var vencPadrao = retida ? (recebimentos[0] || {}).data_vencimento : ev.event_date;
+        return { valores: limpo_({ tipo: tipo, valor: dinheiroTexto_(f.valor), retida_pelo_comprador: retida,
+          partner_id: retida ? propostoOuValor_(f.partner_id, ev.partner_id) : f.partner_id, data_vencimento: propostoOuValor_(t.data_vencimento, vencPadrao),
+          forma_pagamento: t.forma_pagamento, documento: f.documento, descricao: propostoOuValor_(f.descricao, proposta) }) };
       }),
     };
     var campos = {};
@@ -250,7 +272,7 @@ var TelaEventos = (function () {
     } else if (tipo === 'MORTE' || tipo === 'DESCARTE') {
       var b0 = (det.BAIXAS || [])[0] || {};
       origem.causa = b0.causa; origem.diagnostico = b0.diagnostico; origem.destino = b0.destino; origem.motivo = b0.motivo;
-      lancamentoDaSaida_(det, origem, tipo);
+      lancamentoDaSaida_(det, origem, tipo, ev);
       linhasEv.forEach(function (l) { var v = limpo_({ observacoes: l.observacoes }); linhas.push({ animal_id: l.animal_id, valores: v }); antes.linhas[l.animal_id] = Util.clonar(v); });
     } else if (tipo === 'NASCIMENTO') {
       var rep = (det.REPRODUCAO || [])[0] || {};

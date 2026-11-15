@@ -23,7 +23,10 @@ var Api = (function () {
   var PROP_SEM_EMAIL = 'ALLOW_EMPTY_ACTIVE_USER';
   var CHAVE_MAX = 200;
   /** Rascunho no servidor: abaixo dos 9 KB por valor das Properties; no máximo 40 guardados; vencem em 30 dias. */
-  var RASCUNHO = Object.freeze({ prefixo: 'RASCUNHO:', maxBytes: 8000, max: 40, validadeDias: 30 });
+  // Um rascunho grande (o lote de 80 animais do 08-ux-ui, seção 9) não cabe num valor das propriedades (9 KB): vai em
+  // partes de até `parteBytes`, até `maxBytes` no total; os rascunhos juntos ficam abaixo de `totalBytes` (a cota do
+  // store do usuário é 500 KB).
+  var RASCUNHO = Object.freeze({ prefixo: 'RASCUNHO:', maxBytes: 96000, parteBytes: 8000, totalBytes: 400000, max: 40, validadeDias: 30 });
   var DIA_MS = 86400000;
   /** Rotas canônicas (desenho-base, seção 15.3), na ordem do desenho. Toda uma tem tratador ou NOT_FOUND explícito. */
   var ROTAS_CANONICAS = Object.freeze([
@@ -413,12 +416,37 @@ var Api = (function () {
     }
     return n;
   }
+  /** O texto em partes de até `max` bytes em UTF-8 (sem partir um caractere). */
+  function partesUtf8_(texto, max) {
+    var out = [];
+    var ini = 0;
+    var n = 0;
+    for (var i = 0; i < texto.length; i++) {
+      var c = texto.charCodeAt(i);
+      var par = c >= 0xd800 && c <= 0xdbff;
+      var b = c < 0x80 ? 1 : c < 0x800 ? 2 : par ? 4 : 3;
+      if (n + b > max && i > ini) { out.push(texto.slice(ini, i)); ini = i; n = 0; }
+      n += b;
+      if (par) i++;
+    }
+    out.push(texto.slice(ini));
+    return out;
+  }
+  /** Chave da parte p (1, 2, …) de um rascunho guardado em partes. */
+  function parteRascunho_(k, p) { return k + '#' + p; }
+  /** Apaga o rascunho e as partes dele (as de uma gravação anterior maior também). */
+  function apagarRascunho_(store, k, todos) {
+    store.deleteProperty(k);
+    Object.keys(todos || store.getProperties()).forEach(function (chave) { if (chave.indexOf(k + '#') === 0) store.deleteProperty(chave); });
+  }
   /**
    * Rascunho de formulário guardado no servidor quando o `localStorage` do iframe não serve (seção 17, SP-06):
    * propriedades do USUÁRIO (fora da planilha e do journal; não mudam a versão dos dados), chave
-   * `RASCUNHO:<ambiente>:<chave>`. dados: {chave (letras, números, . _ : -; até 100), conteudo (salvar)}.
-   * salvar → {chave, salvo_em, bytes}; obter → {chave, existe, conteudo, salvo_em}; remover → {chave, removido}.
-   * Erros VALIDATION: chave inválida, sem conteúdo, acima de 8 KB, mais de 40 rascunhos guardados.
+   * `RASCUNHO:<ambiente>:<chave>`; acima de um valor das propriedades, o texto vai em partes (`<chave>#1`, `#2`…) e a
+   * chave guarda só quantas são. dados: {chave (letras, números, . _ : -; até 100), conteudo (salvar)}.
+   * salvar → {chave, salvo_em, bytes, partes}; obter → {chave, existe, conteudo, salvo_em}; remover → {chave, removido}.
+   * Erros VALIDATION: chave inválida, sem conteúdo, acima de 96 KB, mais de 40 rascunhos guardados, rascunhos juntos
+   * acima de 400 KB.
    */
   function rascunho(acao, dados, info) {
     var d = dados || {};
@@ -432,6 +460,15 @@ var Api = (function () {
       var o;
       try {
         o = JSON.parse(t);
+        if (typeof o.partes === 'number') {
+          var juntas = '';
+          for (var p = 1; p <= o.partes; p++) {
+            var parte = store.getProperty(parteRascunho_(k, p));
+            if (parte === null) throw new Error('parte ' + p + ' ausente');
+            juntas += parte;
+          }
+          o = JSON.parse(juntas);
+        }
       } catch (e) {
         throw Validation.erro('INTERNAL', 'O rascunho guardado está ilegível. Descarte-o e preencha o formulário de novo.');
       }
@@ -439,7 +476,7 @@ var Api = (function () {
     }
     if (acao === 'remover') {
       var existia = store.getProperty(k) !== null;
-      store.deleteProperty(k);
+      apagarRascunho_(store, k);
       return { dados: { chave: d.chave, removido: existia } };
     }
     if (acao !== 'salvar') throw Validation.erro('INTERNAL', 'Ação de rascunho desconhecida: ' + acao + '.');
@@ -451,20 +488,30 @@ var Api = (function () {
     var todos = store.getProperties();
     var limite = Date.parse(agora) - RASCUNHO.validadeDias * DIA_MS;
     var restantes = 0;
+    var ocupado = 0;
     Object.keys(todos).forEach(function (chave) {
-      if (chave.indexOf(RASCUNHO.prefixo) !== 0 || chave === k) return;
+      if (chave.indexOf(RASCUNHO.prefixo) !== 0 || chave === k || chave.indexOf(k + '#') === 0 || chave.indexOf('#') >= 0) return;
       var salvo = null;
       try {
         salvo = Date.parse(JSON.parse(todos[chave]).salvo_em);
       } catch (e) {
         console.error('rascunho ilegível descartado (' + chave + '): ' + texto_(e));
       }
-      if (!isFinite(salvo) || salvo < limite) store.deleteProperty(chave);
-      else restantes += 1;
+      if (!isFinite(salvo) || salvo < limite) { apagarRascunho_(store, chave, todos); return; }
+      restantes += 1;
+      ocupado += bytesUtf8_(todos[chave]);
+      Object.keys(todos).forEach(function (x) { if (x.indexOf(chave + '#') === 0) ocupado += bytesUtf8_(todos[x]); });
     });
     if (restantes >= RASCUNHO.max) throw validacao_('Há rascunhos demais guardados no servidor (' + RASCUNHO.max + '). Conclua ou descarte alguns formulários abertos.', 'chave');
-    store.setProperty(k, texto);
-    return { dados: { chave: d.chave, salvo_em: agora, bytes: bytes } };
+    if (ocupado + bytes > RASCUNHO.totalBytes) throw validacao_('Os rascunhos guardados no servidor já ocupam o espaço que ele tem (' + Math.ceil(ocupado / 1024) + ' KB). Conclua ou descarte alguns formulários abertos.', 'conteudo');
+    var partes = bytes > RASCUNHO.parteBytes ? partesUtf8_(texto, RASCUNHO.parteBytes) : null;
+    apagarRascunho_(store, k, todos);
+    if (!partes) store.setProperty(k, texto);
+    else {
+      partes.forEach(function (x, i) { store.setProperty(parteRascunho_(k, i + 1), x); });
+      store.setProperty(k, JSON.stringify({ partes: partes.length, salvo_em: agora }));
+    }
+    return { dados: { chave: d.chave, salvo_em: agora, bytes: bytes, partes: partes ? partes.length : 1 } };
   }
 
   // ------------------------------------------------------------------ páginas ----

@@ -859,7 +859,7 @@ var AuditService = (function () {
   /**
    * Financeiro: as invariantes de 03b, seção 14, pela conferência do próprio FinancialService (uma regra, um lugar),
    * distribuídas pelas checagens (CHECAGEM_DA_INVARIANTE); e o alerta de base de rateio desatualizada (BASE_RATEIO), que
-   * não é invariante: VALOR_INDIVIDUAL de escopo EVENTO pela base do animal, DIRETO pelo valor do lançamento.
+   * não é invariante: todo critério de escopo EVENTO que a linha do evento permite recalcular (BASE_DA_LINHA).
    */
   function conferirFinanceiro_(tx, col) {
     var repo = tx.repo;
@@ -871,19 +871,29 @@ var AuditService = (function () {
       if ((codigo === 'ALOCACAO_DIRETA' || codigo === 'CUSTO_AQUISICAO') && col.tem(codigo, a.id)) return;
       col.achado(codigo, { tabela: a.tabela, id: a.id, linha: linhaDe_(tx.cru, a.tabela, a.id), mensagem: a.mensagem });
     });
+    // Base de cada animal pelo critério, a partir da linha do evento (03b, seção 12.3): VALOR_INDIVIDUAL, o valor do animal
+    // no evento; DIRETO, o valor do próprio lançamento; PESO_VIVO, o peso do evento; PESO_CARCACA, a carcaça do animal no
+    // evento; CABECAS, 1. A base estimada (última pesagem escalada, registrada na justificativa) e a MANUAL não se
+    // recalculam pela linha do evento.
+    var BASE_DA_LINHA = {
+      VALOR_INDIVIDUAL: function (l) { return typeof l.valor_individual === 'number' ? l.valor_individual / 100 : undefined; },
+      PESO_VIVO: function (l) { return typeof l.peso === 'number' ? l.peso : undefined; },
+      PESO_CARCACA: function (l) { return typeof l.peso_carcaca_kg === 'number' ? l.peso_carcaca_kg : undefined; },
+      CABECAS: function () { return 1; },
+    };
     repo.vigentes('RATEIOS').forEach(function (r) {
-      if ((r.criterio !== 'VALOR_INDIVIDUAL' && r.criterio !== 'DIRETO') || r.escopo_tipo !== 'EVENTO' || vazio_(r.escopo_ref)) return;
+      if ((!BASE_DA_LINHA[r.criterio] && r.criterio !== 'DIRETO') || r.escopo_tipo !== 'EVENTO' || vazio_(r.escopo_ref)) return;
+      if ((r.criterio === 'PESO_VIVO' || r.criterio === 'PESO_CARCACA') && /^Base estimada/.test(r.justificativa || '')) return;
       var allocs = repo.por('ALOCACOES_FINANCEIRAS', 'rateio_id', r.rateio_id);
       var bases = {};
-      // VALOR_INDIVIDUAL: a base é o valor do animal no evento; DIRETO: o valor do próprio lançamento (03b, seção 12.3).
       var lanc = r.criterio === 'DIRETO' ? repo.porId('FINANCEIRO', r.financial_id) : null;
       repo.por('EVENTO_ANIMAIS', 'event_id', r.escopo_ref).forEach(function (l) {
         if (lanc) bases[l.animal_id] = lanc.valor / 100;
-        else if (typeof l.valor_individual === 'number') bases[l.animal_id] = l.valor_individual / 100;
+        else if (BASE_DA_LINHA[r.criterio]) bases[l.animal_id] = BASE_DA_LINHA[r.criterio](l);
       });
       allocs.forEach(function (a) {
         if (bases[a.animal_id] !== undefined && Math.abs(bases[a.animal_id] - (a.base_valor || 0)) > 1e-9) {
-          col.achado('BASE_RATEIO', { tabela: 'ALOCACOES_FINANCEIRAS', id: a.alloc_id, mensagem: 'A base do rateio do animal ' + a.animal_id + ' (' + a.base_valor + ') difere da recalculada hoje (' + bases[a.animal_id] + ').' });
+          col.achado('BASE_RATEIO', { tabela: 'ALOCACOES_FINANCEIRAS', id: a.alloc_id, mensagem: 'A base do rateio de ' + rotuloAnimal_(tx.cru ? tx.cru.cruPorId('ANIMAIS', a.animal_id) : null, a.animal_id) + ' (' + a.base_valor + ') difere da recalculada hoje pela linha do evento (' + bases[a.animal_id] + ', critério ' + r.criterio + ').' });
         }
       });
     });

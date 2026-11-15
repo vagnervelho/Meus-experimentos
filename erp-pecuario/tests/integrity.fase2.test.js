@@ -221,13 +221,16 @@ test('IDENTIFICACOES sem dois brincos ativos iguais: código do brinco trocado �
   s.editar('IDENTIFICACOES', row.ident_id, 'codigo', '102');
   s.editar('IDENTIFICACOES', row.ident_id, 'codigo_norm', '102');
   assert.equal(s.integridade().ok, true);
-  // O brinco antigo do 101 (trocado por 1101) está fechado: dar o mesmo número ao 106 na planilha não é "dois ativos".
+  // O brinco antigo do 101 (trocado por 1101) está fechado: dar o mesmo número ao 106 na planilha não é "dois ativos",
+  // mas os dois tiveram o 101 ao mesmo tempo, do marco zero até a troca (revisão 3: um número em um animal por vez).
   const antigo = s.tabela('IDENTIFICACOES').find((x) => x.animal_id === ids['101'] && x.codigo === '101');
   assert.equal(antigo.data_fim, '2026-08-01');
   const r106 = s.tabela('IDENTIFICACOES').find((x) => x.animal_id === ids['106'] && x.tipo === 'BRINCO');
   s.editar('IDENTIFICACOES', r106.ident_id, 'codigo', '101');
   r = s.integridade();
-  assert.equal(achadosDe(r, 'IDENTIFICACOES_ATIVAS').length, 0);
+  const cruzados = achadosDe(r, 'IDENTIFICACOES_ATIVAS');
+  assert.equal(cruzados.length, 1, JSON.stringify(cruzados));
+  assert.match(cruzados[0].mensagem, /^O brinco 101 ficou em dois animais ao mesmo tempo: .* de 01\/01\/2026 até 01\/08\/2026; .* desde 01\/01\/2026\.$/);
   // Reaberto à mão (data_fim apagada), o antigo vira ativo e repete o do 106.
   s.editar('IDENTIFICACOES', antigo.ident_id, 'data_fim', '');
   r = s.integridade();
