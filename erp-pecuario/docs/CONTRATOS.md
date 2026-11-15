@@ -1388,6 +1388,6 @@ lançamentos), resposta com as projeções do modelo, reenvio com a mesma chave 
 outro conteúdo (`IDEMPOTENCY_MISMATCH`), recusado sem linha gravada, e, pelo `apoio-oraculos.js`, modelo = replay cru =
 sistema no inventário (Timeline, `inventario.posicao`), nos elegíveis de cada tipo, na ficha de cada animal (situação,
 pasto, saída, brinco, marcações, custo de aquisição), nas alocações e nas invariantes de 03b, seção 14; no fim de cada
-sequência, painel e cartões dos pastos, visão geral e carga inicial. Três sementes fixas de 140 passos e casos dirigidos
+sequência, painel e cartões dos pastos, visão geral, carga inicial e a verificação de integridade sem erro de dado. Três sementes fixas de 140 passos e casos dirigidos
 (fato no dia da saída, mesmo dia com as classes 0, 1 e 2, substituição em cadeia, estorno de compra com venda posterior,
 gêmeos com natimorto, correção de localização, centavos patológicos, arroba e carcaça, parcelas de 1 centavo, reenvio).

@@ -653,6 +653,12 @@ function conferirConsultas(amb, M, msg) {
     const i = carga.valores.animal_id.indexOf(id);
     assert.equal(carga.valores.pasto_atual_id[i], situacaoDe(linhasDe(M, id)).pasto, msg + ': pasto na carga inicial');
   });
+  // A verificação de integridade (outra implementação das mesmas regras) não acha erro de dado. O banco do apoio não
+  // passa pelo setup(): cabeçalhos (SCHEMA_META) e localidade da planilha ficam de fora.
+  const rel = js(m.gas.exec(() => G.AuditService.verificarIntegridade(m.amb.ctx()).dados));
+  const erros = rel.achados.filter((a) => a.severidade === 'ERRO' && a.checagem !== 'CABECALHOS' && a.checagem !== 'FUSO_LOCALE');
+  assert.deepEqual(erros, [], msg + ': verificação de integridade sem erro de dado');
+  rel.checagens.filter((c2) => c2.codigo !== 'CABECALHOS' && c2.codigo !== 'FUSO_LOCALE').forEach((c2) => assert.ok(c2.situacao === 'OK' || c2.situacao === 'ALERTA', msg + ': checagem ' + c2.codigo + ' ' + c2.situacao));
 }
 
 // ------------------------------------------------------------------ rebanho inicial ----

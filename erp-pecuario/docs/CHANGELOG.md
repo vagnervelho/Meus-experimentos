@@ -255,3 +255,40 @@ repositório; "a verificar na conta do dono" significa que só o roteiro de diag
   backend real (`npm run ui:check`: 43 testes, 43 aprovados; o seletor de tipos ganhou o grupo Manejo). Os formulários
   próprios de identificação e marcação (o campo de cabeçalho do subtipo, o modo curral) e a tela de auditoria com a trilha
   completa ficam para a etapa de telas. Nada validado na conta do dono.
+
+## 15/11/2026 — Fase 2, etapa ATAQUE AO MOTOR E AO FINANCEIRO
+
+Etapa adversária sobre o que as anteriores escreveram (nascimento, transferência, morte, descarte, compra, venda,
+identificação, marcação, ajustes, estorno e substituição, `FinancialService`). Três oráculos escritos à parte, sem usar
+`Timeline` nem `FinancialService` (`tests/apoio-oraculos.js` e o modelo de `tests/fase2.adversarial.test.js`): um modelo de
+referência do rebanho que prevê, para cada comando, aceito, VALIDATION ou CONFLICT e QUAIS eventos impedem; um replay das
+linhas cruas da planilha (vigência P3 reescrita) que dá o inventário em cada data, por pasto, e a situação de cada animal;
+e as invariantes de 03b, seção 14, conferidas de novo sobre as linhas cruas. Defeitos achados e corrigidos, cada um com o
+teste que falhava antes:
+
+- `inventario.elegiveis` (InventoryService): para parto, identificação e marcação (fatos), o animal que saiu do rebanho no
+  dia D não era elegível em D, embora o servidor aceite o fato no dia da saída (RN-017; a vaca que morre no parto, o brinco
+  do vendido). Agora fato = no rebanho em algum momento de D, no pasto de antes das saídas do dia (`presentesNoDia`);
+  movimento e saída continuam pelo fim do dia.
+- Correção de uma correção de localização (EventService): a origem vinha do fim do dia, não da posição do lançamento; o
+  substituto, que fica no lugar do original (desenho-base 16.1), antes de uma transferência posterior do mesmo dia, era
+  recusado com uma mensagem sem sentido ("parte do pasto C, mas estaria no A"), mesmo sem mudar nada. Agora a origem é a da
+  posição (`pastoNaPosicao_`); no dia de uma venda, a correção de localização dá CONFLICT com a venda, não "fora do rebanho".
+- Consultas que reproduzem a linha do tempo sem acesso cru (`inventario.posicao`, `inventario.elegiveis`,
+  `dashboard.obter`, `alerta.listar`, `pasto.painel`, `pasto.listar`, `animal.listar` e a carga inicial do
+  `sistema.bootstrap`): o evento anulado não aparece e a cadeia de substituição parava no substituto, que caía no fim do
+  dia — com duas movimentações do mesmo animal no mesmo dia e a primeira corrigida, o painel e a posição mostravam o pasto
+  errado. Todas declaram `acessoCru`; `Timeline.fonte` sem acesso cru lança `INTERNAL` ao achar um substituto, em vez de
+  errar em silêncio.
+- Mensagens ao pecuarista (EventCatalog, FinancialService, EventService): números do servidor com ponto decimal ("a
+  partir de 0.0001", "999.6 kg") e "aceita no máximo 4 casa decimal" — agora no formato brasileiro (`Utils.formatarNumero`,
+  novo) e no plural; base zero ou com casas demais num rateio manual dava dois erros (um no campo errado, o valor da
+  compra); agora um erro, no campo do animal; rendimento de carcaça que arredonda para 100% ou 0% era chamado de "carcaça
+  maior que o vivo" (falso); `VALOR_DIVERGENTE` no limite dizia "difere em 1%, acima da tolerância de 1%" — agora "mais de 1%".
+
+Testes novos: `tests/fase2.adversarial.test.js` (sequências aleatórias com três sementes fixas e casos dirigidos: fato no dia
+da saída, mesmo dia com as classes 0, 1 e 2, substituição em cadeia, estorno de compra com venda posterior, gêmeos com
+natimorto, correção de localização, centavos patológicos, arroba e carcaça com arredondamento, parcelas que diferem de 1
+centavo, reenvio com a mesma chave); em `tests/unitofwork.adversarial.test.js`, os oráculos independentes no desfecho dos
+três comandos-modelo da Fase 2 e os subconjuntos densos das pendentes antes de cada flush (SpreadsheetApp); em
+`tests/utils.test.js`, `formatarNumero`.
