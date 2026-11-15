@@ -1066,7 +1066,8 @@ function mutar(sis, S, rnd, spec) {
     }
   } else if (x < 0.7) {
     // Valores e atributos (campos não estruturais, e o que o animal criado é).
-    if (s.neg) s.neg = Object.assign(negocio(rnd, (s.ids || []).length + (s.novos || []).length + (s.voltas || []).length, s.tipo === 'VENDA'), rnd() < 0.5 ? { mod: s.neg.mod, preco: s.neg.preco } : {});
+    // Mantida a modalidade, vão junto os campos dela (passada 3: o lote mantido sem o critério e o valor dava NaN).
+    if (s.neg) s.neg = Object.assign(negocio(rnd, (s.ids || []).length + (s.novos || []).length + (s.voltas || []).length, s.tipo === 'VENDA'), rnd() < 0.5 ? Object.fromEntries(['mod', 'preco', 'criterio', 'lote', 'rend'].filter((c) => s.neg[c] !== undefined).map((c) => [c, s.neg[c]])) : {});
     else if (s.novos && s.novos.length) {
       const n = sorteio(rnd, s.novos);
       const c = sorteio(rnd, ['sexo', 'nasc', 'mae', 'brinco', 'entrada', 'pasto']);
@@ -1389,6 +1390,8 @@ function gerarAcao(sis, S, rnd, k, acao, base) {
     else if (rota === 'importacao.validarBloco') dados.mapeamento = Object.assign({}, dados.mapeamento, { confiancas: Object.assign({}, dados.mapeamento.confiancas, { data_nascimento: 'DESCONHECIDA', mae: 'ESTIMADA' }) });
     else if (rota === 'importacao.importarBloco' && dados.bloco === 1) dados.ignorar_linhas = [1];
     else if (rota === 'importacao.importarBloco' || rota === 'importacao.concluir') return null;
+    // O anexo leva os metadados e o resumo do arquivo, não a justificativa (FileService.adicionarAnexo): muda a descrição.
+    else if (rota === 'anexo.adicionar') dados.descricao = outro;
     else if (rota === 'lista.salvar' || rota === 'animal.cadastrarExterno' || (rota === 'pasto.salvar' && !dados.pasture_id) || (rota === 'parceiro.salvar' && !dados.partner_id)) { if (dados.campos) dados.campos.observacoes = outro; else dados.rotulo = outro; }
     else dados.justificativa = outro;
     return Object.assign({}, ult.cmd, { dados, chaveDe: ult.k, outraChave: true, reenvio: false, simular: false, dvVelha: false, rotulo: 'mesma chave, outro conteúdo' });

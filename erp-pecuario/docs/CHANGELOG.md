@@ -825,3 +825,29 @@ Nenhuma linha de código mudou nesta etapa: só documentos.
   testes, 85 aprovados e 0 falhas (224 s), página montada com 446 KB de 450 KB. Na primeira execução do `ui:check`, um
   tempo esgotado em `tests/ui/movimentos.test.js` ("transferência com data passada", espera de 30 s pela conferência da
   posição na data); sozinho passou duas vezes e a execução completa seguinte passou inteira.
+
+## 15/11/2026 — Teste aleatório de todos os comandos da Fase 2 (etapa 2, passada 3: gerador ampliado e oráculos metamórficos)
+
+- Por quê: a passada 2 ficou limpa; o gerador ainda não gerava. Lacunas achadas na leitura de `tests/apoio-fuzz.js`:
+  cadastros só desativados, nunca criados ou editados (pasto, parceiro, categoria com outro sexo, faixa, condição ou
+  prioridade, item de lista, touro de referência, propriedade), e os comandos só usavam os da montagem; a entrada gravada
+  sem especificação do gerador (o rebanho de base e a entrada da importação de ANIMAIS) nunca era corrigida; anexos
+  (E2.9) fora do teste; reenvio e mesma chave só do último comando; a causa, o motivo, o destino, o tipo de parto e a raça
+  fixos; o tamanho do lote da importação e as faixas etárias fixos; a importação de ANIMAIS sem pai, chegada e raça, e a
+  de NASCIMENTOS sem pai; uma propriedade só. E o oráculo não via recusa indevida.
+- Tudo isso entrou (`gerarCadastro`, `specDoGravado` com ENTRADA_INICIAL e OUTRA_ENTRADA, ação `anexo`, `antigo()` no
+  reenvio, `lote`, `faixas`), com o efeito de cada cadastro e anexo, a propriedade atual = a do pasto, e três oráculos
+  metamórficos: o estorno logo depois do registro devolve cada animal ao que era; a correção logo depois com a mesma
+  especificação não muda nenhum animal; desfazer a importação logo depois de concluí-la devolve tudo (CONTRATOS, seção 36).
+  As rotas `importacao.*` não levam `dataVersionEsperada` e ficaram fora da versão velha.
+- Nenhum defeito do sistema. Três do modelo do teste, consertados na causa: o reenvio refazia a especificação memorizada
+  sem os animais criados (sementes 73261 e 73364: a correção idêntica saía sem `animal_id`); a mesma chave do anexo com
+  outra justificativa, campo que o `anexo.adicionar` não leva (sementes 74134, 74280, 74292, 74322, 74343, 74370 e 74406:
+  o sistema tratava, certo, como o mesmo pedido); a correção que mantinha a modalidade LOTE ou ARROBA de peso vivo sem o
+  critério, o lote ou o rendimento mandava `valor_animais` NaN (sementes 75247 e 75341). Dois casos novos em
+  `tests/fase2.fuzz.regressoes.test.js`. Nenhuma expectativa de teste antigo mudou.
+- Sementes rodadas nesta passada: 2.085 sementes novas (70000 a 77039, em levas de 100 a 150 passos). Triagem: 320 × 100
+  com o gerador ampliado (71000 a 71319), 320 × 150 com as propriedades (72100 a 72419), 320 × 120 com os oráculos
+  metamórficos (73100 a 73419), 320 × 120 com os anexos (74100 a 74419) e 320 × 120 (75100 a 75419). A leva final, depois
+  dos consertos, foi de 440 sementes novas × 120 passos (76000 a 76399 e, pelo `FUZZ_SEMENTES`, 77000 a 77039): 27.203
+  comandos aceitos, 21.573 recusados, 0 falhas.

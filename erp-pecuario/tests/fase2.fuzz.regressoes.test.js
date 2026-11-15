@@ -18,6 +18,7 @@ const passo = (k, rota, dados) => ({ k, rota, dados, avisos: [], aceitar: true }
 const doacaoNoD = { tipo: 'OUTRA_ENTRADA', campos: { event_date: '2026-06-09', description: 'Doação do vizinho' }, animais: [{ sexo: 'M', pasto_destino_id: '@p:D', origem: 'DESCONHECIDA', brinco: '84', data_nascimento: '2023-01-15', data_nascimento_confianca: 'ESTIMADA', castrado: true, reprodutor: false }] };
 const desativarD = { pasture_id: '@p:D', campos: { status: 'INATIVO' }, justificativa: 'Pasto em reforma' };
 const entrada45 = { tipo: 'OUTRA_ENTRADA', campos: { event_date: '2026-03-10', description: 'Doação do vizinho' }, animais: [{ sexo: 'F', pasto_destino_id: '@p:C', origem: 'DESCONHECIDA', brinco: '45', mae_id: '@b:1', mae_confianca: 'CONFIRMADA', data_nascimento: '2025-06-01', data_nascimento_confianca: 'ESTIMADA' }] };
+const anexoNoEvento = (ev) => ({ entidade: 'EVENTOS', entity_id: ev, tipo: 'DOCUMENTO', nome_arquivo: 'termo.pdf', mime_type: 'application/pdf', conteudo_base64: Buffer.from('%PDF-1.4 termo').toString('base64') });
 const reclassificar = (data, cat, extra) => Object.assign({ tipo: 'AJUSTE_INVENTARIO', subtipo: 'RECLASSIFICACAO', campos: { event_date: data, justificativa: 'Categoria conferida no curral' }, animais: [{ animal_id: '@b:5', categoria_manual_id: cat }] }, extra || {});
 
 const CASOS = [
@@ -91,6 +92,20 @@ const CASOS = [
       Object.assign(passo(4, 'evento.estornar', { event_id: '@3.e0', justificativa: 'Lançado errado' }), { estornoImediato: true }),
     ],
     esperado: { 0: 'OK', 1: 'OK', 2: 'OK', 3: 'OK', 4: 'OK' },
+  },
+  {
+    // Passada 3 (sementes 74134, 74280, 74292, 74322, 74343, 74370 e 74406; defeito do MODELO): a "mesma chave com outro
+    // conteúdo" do anexo punha uma justificativa, que o anexo.adicionar não leva (o hash é dos metadados e do resumo do
+    // arquivo), e o sistema, certo, tratava como o mesmo pedido. Fixa os dois desfechos: a justificativa a mais é o mesmo
+    // pedido (duplicado, nada gravado); outra descrição é outro conteúdo (IDEMPOTENCY_MISMATCH, nada gravado).
+    nome: 'anexo no evento: a mesma chave com um campo que o anexo não leva é o mesmo pedido; com outra descrição, outro conteúdo',
+    comandos: [
+      passo(0, 'evento.registrar', doacaoNoD),
+      passo(1, 'anexo.adicionar', anexoNoEvento('@0.e0')),
+      Object.assign(passo(2, 'anexo.adicionar', Object.assign(anexoNoEvento('@0.e0'), { justificativa: 'Outro conteúdo com a mesma chave' })), { chaveDe: 1, reenvio: true }),
+      Object.assign(passo(3, 'anexo.adicionar', Object.assign(anexoNoEvento('@0.e0'), { descricao: 'Outro conteúdo com a mesma chave' })), { chaveDe: 1, outraChave: true }),
+    ],
+    esperado: { 0: 'OK', 1: 'OK', 2: 'OK', 3: 'IDEMPOTENCY_MISMATCH:' },
   },
 ];
 
