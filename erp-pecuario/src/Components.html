@@ -1032,11 +1032,14 @@ var Seletor = (function () {
       return ids.length - antes;
     }
     function rotuloCand(a) { return h('div', { class: 'candidato-texto' }, h('div', { class: 'candidato-titulo brinco', text: Store.rotuloAnimal(a) }), h('div', { class: 'suave', text: Store.descricaoAnimal(a) }), elegivel(a) ? h('div', { class: 'marca-inelegivel' }, UI.icone('aviso', 'icone-pequeno'), 'Não elegível: ' + elegivel(a)) : null); }
+    /** Animais vindos da posição numa data passada que já não estão no store do aparelho (saíram depois). */
+    var daPosicao = {};
     function desenharSelecionados() {
       Util.limpar(lista);
       ids.forEach(function (id) {
         var a = Store.animal(id);
-        lista.appendChild(h('li', { class: 'candidato', dataset: { animal: id } }, a ? rotuloCand(a) : h('div', { class: 'candidato-texto', text: 'Animal ' + id }),
+        var vindo = daPosicao[id];
+        lista.appendChild(h('li', { class: 'candidato', dataset: { animal: id } }, a ? rotuloCand(a) : h('div', { class: 'candidato-texto', text: vindo ? (vindo.brinco || vindo.codigo_interno) + ' · ' + vindo.codigo_interno + ' (estava no pasto na data; hoje fora do rebanho)' : 'Animal ' + id }),
           UI.botao('Tirar', { tipo: 'texto', icone: 'remover', aoClicar: function () { ids = ids.filter(function (x) { return x !== id; }); mudou(); } })));
       });
       contador.textContent = ids.length ? ids.length + (ids.length === 1 ? ' animal escolhido' : ' animais escolhidos') : 'Nenhum animal escolhido ainda.';
@@ -1133,13 +1136,13 @@ var Seletor = (function () {
         var rotuloPos = null, achados;
         if (data && data !== Fmt.hoje()) {
           try {
-            var r = await Cliente.consulta('inventario.elegiveis', { tipo: o.tipo, data: data, pasto: p });
-            var lst = r.data.animais || r.data.itens || [];
-            achados = lst.map(function (x) { return typeof x === 'string' ? x : x.animal_id; });
+            var r = await Cliente.consulta('inventario.elegiveis', { tipo: o.tipo, data: data, pasture_id: p });
+            if (r.data.motivo) { saida.appendChild(UI.nota('Sem posição do rebanho em ' + Fmt.data(data) + ' (' + Fmt.rotulo('MOTIVO', r.data.motivo) + ').', 'aviso')); return; }
+            achados = (r.data.itens || []).map(function (x) { daPosicao[x.animal_id] = x; return x.animal_id; });
             rotuloPos = 'Posição em ' + Fmt.data(data) + ', conferida pelo servidor.';
           } catch (e) {
-            if (e.code !== 'NOT_FOUND') { saida.appendChild(UI.estadoErro(e)); return; }
-            rotuloPos = 'Lista com a posição de hoje: a consulta da posição em ' + Fmt.data(data) + ' ainda não está disponível. Ao gravar, o servidor confere cada animal na data.';
+            saida.appendChild(UI.estadoErro(e));
+            return;
           }
         }
         if (!achados) achados = Store.animais().filter(function (a) { return a.pasto_atual_id === p && !elegivel(a); }).map(function (a) { return a.animal_id; });

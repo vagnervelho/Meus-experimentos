@@ -174,3 +174,25 @@ test('corrigir um parto pelo detalhe do evento: mesmas crias, diferença na revi
   assert.deepEqual(a.estado.erros, []);
   await a.fechar();
 });
+
+test('transferência com data passada: "Todos do pasto" usa a posição na data, pelo servidor (inventario.elegiveis), não a de hoje (1280 px)', async () => {
+  const s = A.sistema();
+  const sem = A.semear(s);
+  const b0457 = porBrinco(sem, '0457');
+  s.registrar({ tipo: 'TRANSFERENCIA', campos: { event_date: '2026-06-01', pasto_origem_id: S.PASTOS.A, pasto_destino_id: S.PASTOS.B }, animais: [{ animal_id: b0457 }] }, 'tr-junho');
+  const a = await A.abrir(s, { largura: 1280, hash: 'evento/novo/TRANSFERENCIA' });
+  const { page } = a;
+  await A.esperarTela(page, 'Transferir de pasto');
+  await page.fill('[data-campo="event_date"] input', '2026-03-01');
+  await page.click('.seletor-modos button:has-text("Todos do pasto")');
+  await page.locator('.seletor-painel select').selectOption(S.PASTOS.A);
+  await page.click('.seletor-painel button:has-text("Incluir todos")');
+  await page.waitForSelector('.seletor-painel .conferencia :text("Posição em 01/03/2026")');
+  const pedido = a.pedidos('inventario.elegiveis')[0];
+  assert.deepEqual([pedido.dados.tipo, pedido.dados.data, pedido.dados.pasture_id], ['TRANSFERENCIA', '2026-03-01', S.PASTOS.A]);
+  const escolhidos = await page.$$eval('.selecionados [data-animal]', (els) => els.map((e) => e.getAttribute('data-animal')));
+  assert.ok(escolhidos.includes(b0457), 'em 01/03 o 0457 ainda estava no Pasto A (hoje está no B)');
+  assert.equal(escolhidos.length, 3, 'os 3 que estavam no Pasto A em 01/03');
+  assert.deepEqual(a.estado.erros, []);
+  await a.fechar();
+});

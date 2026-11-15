@@ -617,9 +617,10 @@ var TestRunner = (function () {
     { nome: 'Pasto Arrendado do Vizinho', area_hectares: 30, capacidade_estimada_ua_ha: 2, posse: 'ARRENDADO' },
   ];
   /**
-   * Os animais da demonstração, sorteados com semente fixa a partir de D0 (09, seção 7, na parte que a Fase 1
-   * entrega): 240 em D0 (110 vacas, 4 touros, 30 novilhas, 48 bezerros ao pé com a mãe no mesmo lote, 48 garrotes)
-   * em 6 lotes de 40; 8 entradas de 8 animais ao longo dos três anos; 1 entrada estornada. Fecha em 304 ativos.
+   * Os animais da demonstração, sorteados com semente fixa a partir de D0 (09, seção 7, na parte que as fases
+   * entregues cobrem): 240 em D0 (110 vacas, 4 touros, 30 novilhas, 48 bezerros ao pé com a mãe no mesmo lote, 48
+   * garrotes) em 6 lotes de 40; 8 entradas de 8 animais ao longo dos três anos; 1 entrada estornada; 3 transferências
+   * de garrotes; 12 partos (um gemelar com natimorto); 1 morte e 1 descarte. Fecha em 314 ativos.
    */
   function geracaoDemo_(d0) {
     var rnd = sorteio_(20261114);
@@ -630,17 +631,21 @@ var TestRunner = (function () {
     var raca = function () { return rnd() < 0.8 ? 'NELORE' : 'GUZERA'; };
     var lotes = [[], [], [], [], [], []];
     var garrotes = [];
+    var maes = [];
     for (var i = 0; i < 48; i++) {
       var k = Math.floor(i / 8);
       var pasto = i % 3;
       var ref = 'v' + i;
-      lotes[k].push({ brinco: brinco(), sexo: 'F', raca: raca(), data_nascimento: nasc(d0, 1100, 3600), data_nascimento_confianca: 'ESTIMADA', partos_previos: entre(1, 5), ref: ref, pasto: pasto, peso: entre(380, 520), metodo_pesagem: 'BALANCA', valor_abertura: entre(4500, 6500) * 100 });
+      var vaca = { brinco: brinco(), sexo: 'F', raca: raca(), data_nascimento: nasc(d0, 1100, 3600), data_nascimento_confianca: 'ESTIMADA', partos_previos: entre(1, 5), ref: ref, pasto: pasto, peso: entre(380, 520), metodo_pesagem: 'BALANCA', valor_abertura: entre(4500, 6500) * 100 };
+      lotes[k].push(vaca);
+      if (i < 12) maes.push(vaca.brinco);
       var macho = rnd() < 0.5;
       var cria = { brinco: brinco(), sexo: macho ? 'M' : 'F', raca: raca(), data_nascimento: nasc(d0, 60, 210), data_nascimento_confianca: 'CONFIRMADA', mae_ref: ref, mae_confianca: 'CONFIRMADA', pasto: pasto, peso: entre(80, 200), metodo_pesagem: 'BALANCA', valor_abertura: entre(1500, 2500) * 100 };
       if (macho) { cria.castrado = false; cria.reprodutor = false; }
       lotes[k].push(cria);
     }
     var outros = [];
+    var primeiraVaca = seq + 1;
     for (var v = 0; v < 62; v++) outros.push({ brinco: brinco(), sexo: 'F', raca: raca(), data_nascimento: nasc(d0, 1100, 3600), data_nascimento_confianca: 'ESTIMADA', partos_previos: entre(1, 6), pasto: v % 3, peso: entre(380, 520), metodo_pesagem: 'BALANCA', valor_abertura: entre(4500, 6500) * 100 });
     for (var r = 0; r < 4; r++) outros.push({ brinco: brinco(), sexo: 'M', raca: 'NELORE', reprodutor: true, castrado: false, data_nascimento: nasc(d0, 1500, 2500), data_nascimento_confianca: 'ESTIMADA', pasto: r % 2, peso: entre(700, 900), metodo_pesagem: 'BALANCA', valor_abertura: 1200000 });
     for (var n = 0; n < 30; n++) outros.push({ brinco: brinco(), sexo: 'F', raca: raca(), data_nascimento: nasc(d0, 430, 730), data_nascimento_confianca: 'ESTIMADA', partos_previos: 0, pasto: 3, peso: entre(260, 360), metodo_pesagem: 'BALANCA', valor_abertura: entre(2500, 3200) * 100 });
@@ -663,11 +668,21 @@ var TestRunner = (function () {
       entradas.push({ data: data, animais: grupo });
     }
     var estornada = { data: Utils.somaDias(d0, 1000), animais: [{ brinco: brinco(), sexo: 'F', raca: 'NELORE', partos_previos: 0, data_nascimento: nasc(Utils.somaDias(d0, 1000), 400, 600), data_nascimento_confianca: 'ESTIMADA', pasto: 3 }] };
-    return { lotes: lotes, entradas: entradas, estornada: estornada, garrotes: garrotes, total_ativos: 240 + 64 };
+    var descartada = String(primeiraVaca);
+    while (descartada.length < 4) descartada = '0' + descartada;
+    var partos = maes.map(function (b, j) { return { mae: b, data: Utils.somaDias(d0, 300 + 7 * j), crias: j === 5 ? [{ situacao_nascimento: 'VIVO', sexo: 'F' }, { situacao_nascimento: 'NATIMORTO' }] : [{ situacao_nascimento: 'VIVO', sexo: rnd() < 0.5 ? 'M' : 'F', peso: entre(28, 38), metodo_pesagem: 'BALANCA' }] }; });
+    return { lotes: lotes, entradas: entradas, estornada: estornada, garrotes: garrotes, partos: partos, descartada: descartada, total_ativos: 240 + 64 + 12 - 2 };
   }
   function itemDemo_(t, a) {
     var out = { origem: 'DESCONHECIDA', pasto_destino_id: t.estado.pastos[a.pasto] };
     Object.keys(a).forEach(function (k) { if (k !== 'pasto') out[k] = a[k]; });
+    return out;
+  }
+  /** Animais da demonstração por brinco, no rebanho ou já baixados (reexecutar o seed acha o mesmo animal). */
+  function todosPorBrinco_(t) {
+    var d = t.ok(t.api('animal.listar', { situacoes: ['ATIVO', 'MORTO', 'DESCARTADO'] }), 'animal.listar');
+    var out = {};
+    d.valores.brinco.forEach(function (b, i) { if (b) out[b] = { animal_id: d.valores.animal_id[i], pasto_atual_id: d.valores.pasto_atual_id[i] }; });
     return out;
   }
   /** Os passos do seed, cada um com a chave `seed:<n>`: reexecutar devolve duplicado e não grava de novo. */
@@ -697,14 +712,31 @@ var TestRunner = (function () {
       var r = t.ok(t.api('evento.registrar', { tipo: 'OUTRA_ENTRADA', campos: { event_date: g.data, description: 'Lançada por engano (demonstração)' }, animais: g.animais.map(function (a) { return itemDemo_(t, a); }) }, { chave: chave(nEst) }), 'entrada a estornar');
       t.ok(t.api('evento.estornar', { event_id: r.event_id, justificativa: 'Lançada por engano (demonstração)' }, { chave: chave(nEst) + ':estorno' }), 'estorno');
     } });
-    [[200, 0, 10, 5], [500, 10, 20, 5], [800, 0, 10, 4]].forEach(function (m, i) {
+    // [dia, garrotes de, até, pasto de origem, pasto de destino]: origem fixa no plano (reexecutar = mesmo conteúdo).
+    [[200, 0, 10, 4, 5], [500, 10, 20, 4, 5], [800, 0, 10, 5, 4]].forEach(function (m, i) {
       var n = passos.length;
       passos.push({ nome: 'mover-' + (i + 1), executar: function (t, gen) {
-        var ativos = t.ativos();
-        var itens = gen.garrotes.slice(m[1], m[2]).map(function (b) { return { animal_id: ativos[b].animal_id, pasto_destino_id: t.estado.pastos[m[3]] }; });
-        t.ok(t.api('evento.registrar', ajuste_('CORRECAO_LOCALIZACAO', Utils.somaDias(t.estado.d0, m[0]), itens), { chave: chave(n) }), 'mover ' + (i + 1));
+        var todos = todosPorBrinco_(t);
+        var lote = gen.garrotes.slice(m[1], m[2]).map(function (b) { return todos[b]; });
+        var dados = { tipo: 'TRANSFERENCIA', campos: { event_date: Utils.somaDias(t.estado.d0, m[0]), pasto_origem_id: t.estado.pastos[m[3]], pasto_destino_id: t.estado.pastos[m[4]] }, animais: lote.map(function (a) { return { animal_id: a.animal_id }; }) };
+        t.ok(t.api('evento.registrar', dados, { chave: chave(n) }), 'transferir ' + (i + 1));
       } });
     });
+    var nPartos = passos.length;
+    passos.push({ nome: 'partos', executar: function (t, gen) {
+      var todos = todosPorBrinco_(t);
+      gen.partos.forEach(function (p, j) {
+        var dados = { tipo: 'NASCIMENTO', campos: { event_date: p.data }, animais: [{ animal_id: todos[p.mae].animal_id }], crias: p.crias };
+        t.ok(t.api('evento.registrar', dados, { chave: chave(nPartos) + ':' + j }), 'parto ' + (j + 1));
+      });
+    } });
+    var nSaidas = passos.length;
+    passos.push({ nome: 'saidas', executar: function (t, gen) {
+      var todos = todosPorBrinco_(t);
+      var d0 = t.estado.d0;
+      t.ok(t.api('evento.registrar', { tipo: 'MORTE', campos: { event_date: Utils.somaDias(d0, 900), causa: 'PICADA_COBRA' }, animais: [{ animal_id: todos[gen.garrotes[47]].animal_id }] }, { chave: chave(nSaidas) + ':morte' }), 'morte');
+      t.ok(t.api('evento.registrar', { tipo: 'DESCARTE', campos: { event_date: Utils.somaDias(d0, 950), destino: 'CONSUMO_PROPRIO', motivo: 'IDADE' }, animais: [{ animal_id: todos[gen.descartada].animal_id }] }, { chave: chave(nSaidas) + ':descarte' }), 'descarte');
+    } });
     passos.push({ nome: 'conferir', executar: function (t, gen) {
       var pos = t.ok(t.api('inventario.posicao', {}), 'inventário');
       igual_(pos.cabecas, gen.total_ativos, 'cabeças no rebanho ao fim do seed');
