@@ -441,14 +441,19 @@ var UnitOfWork = (function () {
     }
     return { repo: v, projecoes: projecoes };
   }
-  /** O que o plano grava (para a trava dizer se o problema é do próprio lançamento): {eventos, linhas: {ABA\u0000id: true}}. */
+  /**
+   * O que o plano grava (para a trava dizer se o problema é do próprio lançamento): {eventos, linhas: {ABA\u0000id: true},
+   * brincos: {id: true} (os animais novos e as identificações que ele grava, com os animais delas)}.
+   */
   function propriosDoPlano_(plano) {
-    var out = { eventos: {}, linhas: {} };
+    var out = { eventos: {}, linhas: {}, brincos: {} };
     Object.keys(plano.lote).forEach(function (t) {
       var pk = Schema.pk(t);
       plano.lote[t].forEach(function (r) {
         out.linhas[t + '\u0000' + r[pk]] = true;
         if (t === 'EVENTOS') out.eventos[r.event_id] = true;
+        if (t === 'ANIMAIS') out.brincos[r.animal_id] = true;
+        if (t === 'IDENTIFICACOES') { out.brincos[r.ident_id] = true; out.brincos[r.animal_id] = true; }
       });
     });
     return out;
@@ -464,14 +469,12 @@ var UnitOfWork = (function () {
     var ctx = est.ctx;
     var sementes = AuditService.sementesDaTrava(plano.lote, tx.plano.mudancas(), res.derivados);
     if (!sementes.dominio && !sementes.linhas.length) return null;
-    var inicio = ctx.clock.agoraMs();
     if (sementes.dominio) est.repo.carregar(AuditService.leiturasTrava().concat(leiturasDasProjecoes_(ctx)));
     var retrato = retratoDepois_(est, op, plano, res.derivados);
-    var r = AuditService.travar({
-      antes: txDoRepo_(est, est.repo, tx.simulacao), depois: txDoRepo_(est, retrato.repo, tx.simulacao), sementes: sementes,
+    AuditService.travar({
+      antes: txDoRepo_(est, est.repo, tx.simulacao), depois: txDoRepo_(est, retrato.repo, tx.simulacao), sementes: sementes, lote: plano.lote,
       projecoes: retrato.projecoes, derivados: res.derivados, projetor: ctx.projecoes || null, proprios: propriosDoPlano_(plano),
     });
-    if (ctx.medirTrava) ctx.medirTrava({ rota: est.cmd.rota, ms: ctx.clock.agoraMs() - inicio, escopo: r.escopo, achados_depois: r.achados_depois, achados_antes: r.achados_antes });
     return retrato;
   }
   function executar_(est) {

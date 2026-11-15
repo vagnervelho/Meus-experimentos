@@ -39,8 +39,9 @@ function projetorDeTeste() {
 }
 
 /**
- * Ambiente de teste: harness + planilha-banco com todas as abas. opcoes: {primitiva, order, projecoes (false
- * desliga; função (G) → porta, ex.: G.Timeline.porta), gas (reaproveita um harness: dois bancos no mesmo projeto)}.
+ * Ambiente de teste: harness + planilha-banco com todas as abas e a propriedade dos comandos de exemplo. opcoes:
+ * {primitiva, order, projecoes (false desliga; função (G) → porta, ex.: G.Timeline.porta), gas (reaproveita um harness:
+ * dois bancos no mesmo projeto), propriedade (false: o teste semeia o próprio cadastro, com a mesma propriedade)}.
  */
 function ambiente(opcoes) {
   const o = opcoes || {};
@@ -49,6 +50,17 @@ function ambiente(opcoes) {
   const primitiva = o.primitiva || 'SHEETS_TYPED';
   const banco = gas.planilhas.criar(o.nome || 'Banco');
   gas.exec(() => G.Database.abrir(banco, { primitiva }).criarTabelas(G.Schema.nomesTabelas()));
+  // A propriedade que os comandos de exemplo citam (EVENTOS.property_id, PASTOS.property_id) existe no banco desde o
+  // começo, como um cadastro anterior: sem ela o evento de exemplo apontaria para uma propriedade inexistente — ERRO de
+  // chave estrangeira que a verificação de integridade acusa e que a trava de integridade da UnitOfWork recusa. Quem
+  // semeia o próprio cadastro (com a mesma propriedade) passa `propriedade: false`.
+  if (o.propriedade !== false) {
+    gas.exec(() => {
+      const io = G.Database.abrir(banco, { primitiva });
+      io.anexar({ PROPRIEDADES: [{ property_id: PROPRIEDADE, nome: 'Fazenda de teste', status: 'ATIVO', created_at: '2026-01-01T00:00:00.000Z' }] });
+      io.flush();
+    });
+  }
   const projecoes = o.projecoes === false ? null : typeof o.projecoes === 'function' ? o.projecoes(G) : o.projecoes || projetorDeTeste();
   const amb = {
     gas, G, banco, primitiva, projecoes,

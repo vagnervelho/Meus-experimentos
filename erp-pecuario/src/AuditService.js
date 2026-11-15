@@ -377,6 +377,9 @@ var AuditService = (function () {
   });
   /** Campos da reconstrução que têm checagem própria (o resto da diferença fica em PROJECAO). */
   var CHECAGEM_DO_CAMPO = Object.freeze({ 'FINANCEIRO.animal_id': 'ALOCACAO_DIRETA', 'ANIMAIS.custo_aquisicao': 'CUSTO_AQUISICAO', 'ANIMAIS.custo_aquisicao_origem': 'CUSTO_AQUISICAO' });
+  /** Como resolver, na trava, o touro e a fêmea de um registro reprodutivo que deixariam de valer na data dele. */
+  var RESOLVER_TOURO = 'O pai (touro) de um parto ou de um registro reprodutivo é macho e nasceu antes dele: confira o sexo e o nascimento do touro, ou corrija antes o registro.';
+  var RESOLVER_FEMEA = 'O registro reprodutivo é de uma fêmea nascida antes dele: confira o sexo e o nascimento, ou corrija antes o lançamento que gravou o registro.';
   /** Detalhes com data que citam o animal sem linha em EVENTO_ANIMAIS (edição à mão): a data de cada um. */
   var DETALHES_DO_ANIMAL = Object.freeze({ IDENTIFICACOES: 'data_inicio', PESAGENS: 'data_pesagem', REPRODUCAO: 'data' });
 
@@ -422,6 +425,7 @@ var AuditService = (function () {
           item.animal_id = !vazio_(a.animal_id) ? String(a.animal_id) : a.tabela === 'ANIMAIS' && !vazio_(a.id) ? String(a.id) : null;
           item.brinco = nulo_(a.brinco);
           item.resolver = nulo_(a.resolver);
+          item.oque = nulo_(a.oque);
         }
         lista.push(item);
       },
@@ -633,6 +637,29 @@ var AuditService = (function () {
     conferirCopias_(tx, col, esc);
     return { fonte: f };
   }
+  /**
+   * O que ficaria errado (na trava) quando uma linha aponta para um animal que a mudança anula, na linguagem do pecuarista:
+   * o filho com a mãe ou o pai anulado, o registro reprodutivo com o touro anulado, ou o lançamento que cita o animal.
+   */
+  function quemAponta_(tx, t, r, coluna, animal) {
+    if (t === 'ANIMAIS' && (coluna === 'mae_id' || coluna === 'pai_id')) {
+      var mae = coluna === 'mae_id';
+      return rotuloAnimal_(r, r.animal_id) + ' ficaria com ' + (mae ? 'a mãe ' : 'o pai ') + animal + ', que seria ' + (mae ? 'anulada (sem o lançamento que a criou).' : 'anulado (sem o lançamento que o criou).');
+    }
+    if (t === 'REPRODUCAO' && coluna === 'touro_id') return 'O registro reprodutivo de ' + br_(r.data) + ' ficaria com o touro ' + animal + ', que seria anulado (sem o lançamento que o criou).';
+    var ev = !vazio_(r.event_id) && tx.repo.carregada('EVENTOS') ? tx.cru.cruPorId('EVENTOS', r.event_id) : null;
+    return (ev ? '"' + rotuloEvento_(ev) + '"' : 'Um registro') + ' continuaria citando o animal ' + animal + ', que seria anulado (sem o lançamento que o criou).';
+  }
+  /** A linha vale (o predicado de vigência da aba, como `repo.vigentes`), sem montar a lista de vigentes da aba inteira. */
+  function vigenteNaAba_(repo, t, r) {
+    switch (Repository.regra(t)) {
+      case 'SEMPRE': return true;
+      case 'EVENTO': return repo.eventoVigente(r.event_id);
+      case 'FILHA': return vazio_(r.event_id) || repo.eventoVigente(r.event_id);
+      case 'ANIMAL': return !vazio_(r.situacao_cadastral) && r.situacao_cadastral !== 'PENDENTE' && r.situacao_cadastral !== 'ANULADO';
+      default: return !!repo.porId(t, r[Schema.pk(t)]);
+    }
+  }
   /** Colunas que apontam para ANIMAIS: no escopo, as linhas que citam um animal que a mudança pode anular. */
   function colunasParaAnimais_() {
     var out = [];
@@ -666,7 +693,12 @@ var AuditService = (function () {
         var alvo = cru.cruPorId(c.fk.tabela, v);
         var sev = t === 'ERROS_LOG' ? 'ALERTA' : null;
         if (!alvo) { col.achado('FK', { tabela: t, id: id, campo: c.nome, mensagem: t + '.' + c.nome + ' do registro ' + id + ' aponta para ' + c.fk.tabela + ' ' + v + ', que não existe.', chaves: t + '|' + id + '|' + c.nome + '|INEXISTENTE|' + v, event_id: evento }, sev); return; }
-        if (c.fk.tabela === 'ANIMAIS' && alvo.situacao_cadastral === 'ANULADO') col.achado('FK', { tabela: t, id: id, campo: c.nome, mensagem: t + '.' + c.nome + ' do registro ' + id + ' aponta para o animal ' + rotuloAnimal_(alvo, v) + ', que está anulado.', chaves: t + '|' + id + '|' + c.nome + '|ANULADO|' + v, event_id: evento, animal_id: v }, sev);
+        if (c.fk.tabela === 'ANIMAIS' && alvo.situacao_cadastral === 'ANULADO') {
+          col.achado('FK', {
+            tabela: t, id: id, campo: c.nome, mensagem: t + '.' + c.nome + ' do registro ' + id + ' aponta para o animal ' + rotuloAnimal_(alvo, v) + ', que está anulado.',
+            oque: quemAponta_(tx, t, r, c.nome, rotuloAnimal_(alvo, v)), chaves: t + '|' + id + '|' + c.nome + '|ANULADO|' + v, event_id: evento, animal_id: t === 'ANIMAIS' ? id : v,
+          }, sev);
+        }
       });
       if (anexo && Schema.temTabela(r.entidade) && carregada(r.entidade) && !cru.cruPorId(r.entidade, r.entity_id)) {
         col.achado('FK', { tabela: t, id: id, campo: 'entity_id', mensagem: 'O anexo ' + r.nome_arquivo + ' pertence a ' + r.entidade + ' ' + r.entity_id + ', que não existe.', chaves: t + '|' + id + '|entity_id|INEXISTENTE|' + r.entity_id, event_id: evento });
@@ -681,27 +713,34 @@ var AuditService = (function () {
     }
     var vistos = {};
     var visitar = function (t, r) {
-      if (!r) return;
+      if (!r || !vigenteNaAba_(repo, t, r)) return;
       var k = t + '\u0000' + r[Schema.pk(t)];
       if (vistos[k]) return;
       vistos[k] = true;
       if (fksDe(t).length || t === 'ANEXOS') conferirLinha(t, r);
     };
+    // As linhas que o comando grava (as dos eventos dele) e a do cadastro de cada animal tocado; as que apontam para um
+    // animal tocado só quando ele fica anulado (linha gravada não muda: só o alvo dela pode deixar de valer).
     var comEvento = Schema.nomesTabelas().filter(function (t) { return carregada(t) && Repository.regra(t) === 'FILHA'; });
     var paraAnimais = colunasParaAnimais_().filter(function (x) { return carregada(x.tabela); });
     Object.keys(esc.animais).forEach(function (id) {
-      if (carregada('ANIMAIS')) visitar('ANIMAIS', repo.porId('ANIMAIS', id));
+      if (!carregada('ANIMAIS')) return;
+      visitar('ANIMAIS', repo.porId('ANIMAIS', id));
+      var a = cru.cruPorId('ANIMAIS', id);
+      if (!a || a.situacao_cadastral !== 'ANULADO') return;
       paraAnimais.forEach(function (x) { repo.por(x.tabela, x.coluna, id).forEach(function (r) { visitar(x.tabela, r); }); });
     });
-    Object.keys(esc.eventos).forEach(function (id) {
-      if (carregada('EVENTOS')) visitar('EVENTOS', repo.porId('EVENTOS', id));
-      comEvento.forEach(function (t) { repo.por(t, 'event_id', id).forEach(function (r) { visitar(t, r); }); });
+    // Os eventos que passam a valer sem estar no plano (a conclusão de uma importação): todas as linhas deles.
+    Object.keys(esc.eventosImportados).forEach(function (id) {
+      if (carregada('EVENTOS')) visitar('EVENTOS', cru.cruPorId('EVENTOS', id));
+      comEvento.forEach(function (t) { cru.cruPor(t, 'event_id', id).forEach(function (r) { visitar(t, r); }); });
+      if (carregada('FINANCEIRO')) {
+        cru.cruPor('FINANCEIRO', 'event_id', id).forEach(function (f) {
+          ['PARCELAS', 'RATEIOS', 'ALOCACOES_FINANCEIRAS'].forEach(function (t) { if (carregada(t)) cru.cruPor(t, 'financial_id', f.financial_id).forEach(function (r) { visitar(t, r); }); });
+        });
+      }
     });
-    Object.keys(esc.lancamentos).forEach(function (id) {
-      if (carregada('FINANCEIRO')) visitar('FINANCEIRO', repo.porId('FINANCEIRO', id));
-      ['PARCELAS', 'RATEIOS', 'ALOCACOES_FINANCEIRAS'].forEach(function (t) { if (carregada(t)) repo.por(t, 'financial_id', id).forEach(function (r) { visitar(t, r); }); });
-    });
-    esc.linhas.forEach(function (x) { if (carregada(x.tabela)) visitar(x.tabela, repo.porId(x.tabela, x.id)); });
+    esc.linhas.forEach(function (x) { if (carregada(x.tabela)) visitar(x.tabela, cru.cruPorId(x.tabela, x.id)); });
   }
   /** Brinco único (projeção dos animais que valem); no escopo, só os números que os animais dele usam ou usaram. */
   function conferirBrincos_(tx, col, params, esc) {
@@ -915,7 +954,7 @@ var AuditService = (function () {
     tx.cru.cru('ANIMAIS').forEach(function (a) { if (a.situacao_cadastral !== 'ANULADO' && a.situacao_cadastral !== 'PENDENTE') vale[a.animal_id] = a; });
     var nome = function (id) { return rotuloAnimal_(vale[id], id); };
     var noCiclo = {};
-    var alvo = esc ? Object.keys(esc.animais).filter(function (id) { return !!vale[id]; }) : Object.keys(vale);
+    var alvo = esc ? Object.keys(esc.genealogia).filter(function (id) { return !!vale[id]; }) : Object.keys(vale);
     alvo.forEach(function (id) {
       var a = vale[id];
       [['mae_id', 'F', 'mãe', 'fêmea'], ['pai_id', 'M', 'pai', 'macho']].forEach(function (cfg) {
@@ -931,19 +970,19 @@ var AuditService = (function () {
     });
     if (tx.repo.carregada('REPRODUCAO')) {
       tx.repo.vigentes('REPRODUCAO').forEach(function (r) {
-        if (esc && !esc.animais[r.animal_id] && !(r.touro_id && esc.animais[r.touro_id])) return;
+        if (esc && !esc.genealogia[r.animal_id] && !(r.touro_id && esc.genealogia[r.touro_id])) return;
         var oque = (r.tipo_evento === 'PARTO' ? 'O parto de ' : 'O registro reprodutivo de ') + br_(r.data) + ' (mãe ' + nome(r.animal_id) + ')';
         // O touro de um registro reprodutivo (o pai do parto, mesmo só de natimorto): macho e nascido antes dele (RN-060).
         var t = vazio_(r.touro_id) ? null : vale[r.touro_id];
-        if (t && t.sexo !== 'M') col.achado('GENEALOGIA', { tabela: 'REPRODUCAO', id: r.reproduction_id, campo: 'touro_id', mensagem: oque + ' tem como pai ' + nome(t.animal_id) + ', que não é macho pelo cadastro.', chaves: 'TOURO|' + r.reproduction_id + '|SEXO|' + t.animal_id, event_id: r.event_id, animal_id: t.animal_id });
+        if (t && t.sexo !== 'M') col.achado('GENEALOGIA', { tabela: 'REPRODUCAO', id: r.reproduction_id, campo: 'touro_id', mensagem: oque + ' tem como pai ' + nome(t.animal_id) + ', que não é macho pelo cadastro.', chaves: 'TOURO|' + r.reproduction_id + '|SEXO|' + t.animal_id, event_id: r.event_id, animal_id: t.animal_id, resolver: RESOLVER_TOURO });
         else if (t && Utils.dataValida(t.data_nascimento) && Utils.dataValida(r.data) && t.data_nascimento >= r.data) {
-          col.achado('GENEALOGIA', { tabela: 'REPRODUCAO', id: r.reproduction_id, campo: 'touro_id', mensagem: oque + ' tem como pai ' + nome(t.animal_id) + ', que nasceu em ' + br_(t.data_nascimento) + ', não antes dele.', chaves: 'TOURO|' + r.reproduction_id + '|NASCIMENTO|' + t.animal_id, event_id: r.event_id, animal_id: t.animal_id });
+          col.achado('GENEALOGIA', { tabela: 'REPRODUCAO', id: r.reproduction_id, campo: 'touro_id', mensagem: oque + ' tem como pai ' + nome(t.animal_id) + ', que nasceu em ' + br_(t.data_nascimento) + ', não antes dele.', chaves: 'TOURO|' + r.reproduction_id + '|NASCIMENTO|' + t.animal_id, event_id: r.event_id, animal_id: t.animal_id, resolver: RESOLVER_TOURO });
         }
         // A fêmea do registro reprodutivo que não é parto (diagnóstico de gestação, cobertura...): fêmea e nascida antes dele.
         var m = r.tipo_evento === 'PARTO' ? null : vale[r.animal_id];
-        if (m && !vazio_(m.sexo) && m.sexo !== 'F') col.achado('GENEALOGIA', { tabela: 'REPRODUCAO', id: r.reproduction_id, campo: 'animal_id', mensagem: 'O registro reprodutivo de ' + br_(r.data) + ' é de ' + nome(m.animal_id) + ', que não é fêmea pelo cadastro.', chaves: 'FEMEA|' + r.reproduction_id + '|SEXO|' + m.animal_id, event_id: r.event_id, animal_id: m.animal_id });
+        if (m && !vazio_(m.sexo) && m.sexo !== 'F') col.achado('GENEALOGIA', { tabela: 'REPRODUCAO', id: r.reproduction_id, campo: 'animal_id', mensagem: 'O registro reprodutivo de ' + br_(r.data) + ' é de ' + nome(m.animal_id) + ', que não é fêmea pelo cadastro.', chaves: 'FEMEA|' + r.reproduction_id + '|SEXO|' + m.animal_id, event_id: r.event_id, animal_id: m.animal_id, resolver: RESOLVER_FEMEA });
         else if (m && Utils.dataValida(m.data_nascimento) && Utils.dataValida(r.data) && m.data_nascimento >= r.data) {
-          col.achado('GENEALOGIA', { tabela: 'REPRODUCAO', id: r.reproduction_id, campo: 'animal_id', mensagem: 'O registro reprodutivo de ' + br_(r.data) + ' é de ' + nome(m.animal_id) + ', que nasceu em ' + br_(m.data_nascimento) + ', não antes dele.', chaves: 'FEMEA|' + r.reproduction_id + '|NASCIMENTO|' + m.animal_id, event_id: r.event_id, animal_id: m.animal_id });
+          col.achado('GENEALOGIA', { tabela: 'REPRODUCAO', id: r.reproduction_id, campo: 'animal_id', mensagem: 'O registro reprodutivo de ' + br_(r.data) + ' é de ' + nome(m.animal_id) + ', que nasceu em ' + br_(m.data_nascimento) + ', não antes dele.', chaves: 'FEMEA|' + r.reproduction_id + '|NASCIMENTO|' + m.animal_id, event_id: r.event_id, animal_id: m.animal_id, resolver: RESOLVER_FEMEA });
         }
       });
     }
@@ -1025,11 +1064,15 @@ var AuditService = (function () {
     ['PROJECAO', 'ALOCACAO_DIRETA', 'CUSTO_AQUISICAO'].forEach(col.aplicar);
     if (!o.projetor || !tx.cru) return;
     var alvo = { tudo: true };
+    var cob = o.cobertos || {};
+    if (cob.tudo) return; // o próprio comando projeta tudo (a fase C grava o que o projetor deu no retrato)
     if (esc) {
-      var cob = o.cobertos || {};
-      if (cob.tudo) return;
-      var animais = Object.keys(esc.animais).filter(function (id) { return !(cob.animais && cob.animais[id]); });
-      var eventos = Object.keys(esc.eventos).filter(function (id) { return !(cob.eventos && cob.eventos[id]); });
+      // No escopo, só o que o comando grava e não manda projetar: a projeção de um animal só depende das linhas dele (e a
+      // cria ao pé, das crias: o projetor refaz a mãe junto), então o vizinho que o comando não tocou não muda.
+      var animais = Object.keys(esc.tocados).filter(function (id) { return !(cob.animais && cob.animais[id]); });
+      // Do evento, o projetor refaz os lançamentos (FINANCEIRO: situação e pagamento): só os eventos com lançamento contam.
+      var comLancamento = function (id) { return tx.repo.carregada('FINANCEIRO') && tx.cru.cruPor('FINANCEIRO', 'event_id', id).length > 0; };
+      var eventos = Object.keys(esc.eventosGravados).filter(function (id) { return !(cob.eventos && cob.eventos[id]) && comLancamento(id); });
       if (!animais.length && !eventos.length) return;
       alvo = { animais: animais, eventos: eventos };
     }
@@ -1191,7 +1234,8 @@ var AuditService = (function () {
           var n = porAnimal[id] || 0;
           if (n === 1 || (n > 1 && d.quantos === 'ALGUM')) return;
           var quem = rotuloAnimal_(tx.cru.cruPorId('ANIMAIS', id), id);
-          col.achado('COPIAS', { tabela: 'EVENTOS', id: ev.event_id, campo: d.tabela, mensagem: '"' + rotuloEvento_(ev) + '" de ' + br_(ev.event_date) + ', ' + quem + ': ' + (n ? 'tem ' + n + ' linhas de ' + d.tabela + '; precisa ter uma só.' : 'está sem a linha de ' + d.tabela + ' que o lançamento grava. Restaure o backup ou investigue a edição manual.'), chaves: ev.event_id + '|' + d.tabela + '|' + id + '|' + (n ? 'VARIAS' : 'FALTA'), event_id: ev.event_id, animal_id: id });
+          var oqueDet = '"' + rotuloEvento_(ev) + '" de ' + br_(ev.event_date) + ', ' + quem + ': ' + (n ? 'tem ' + n + ' linhas de ' + d.tabela + '; precisa ter uma só.' : 'está sem a linha de ' + d.tabela + ' que o lançamento grava.');
+          col.achado('COPIAS', { tabela: 'EVENTOS', id: ev.event_id, campo: d.tabela, mensagem: oqueDet + (n ? '' : ' Restaure o backup ou investigue a edição manual.'), oque: oqueDet, chaves: ev.event_id + '|' + d.tabela + '|' + id + '|' + (n ? 'VARIAS' : 'FALTA'), event_id: ev.event_id, animal_id: id });
         });
       });
     });
@@ -1214,6 +1258,8 @@ var AuditService = (function () {
     return null;
   }
   var TEXTO_EFEITO = { '1': '+1 (entrada)', '0': '0 (sem entrada nem saída)', '-1': '−1 (saída)' };
+  /** Como resolver, na trava, o lançamento cuja marca de anterior ao marco zero deixaria de bater com a data (o marco zero mudou). */
+  var MARCO_ZERO_GRAVADO = 'Os registros anteriores ao marco zero foram gravados com a data dele: mantenha o marco zero, ou desfaça antes o que foi lançado com a data antiga.';
   /**
    * A fonte de cada evento vigente (06, seções 9 e 12: linha apagada ou mexida à mão é acusada, e o reparo automático é só
    * da projeção): o evento tem as linhas dos animais, cada uma com o papel e o efeito que o tipo grava (o movimento com o
@@ -1228,12 +1274,13 @@ var AuditService = (function () {
     eventos.forEach(function (ev) {
       var nome = '"' + rotuloEvento_(ev) + '"';
       if (Utils.dataValida(D0) && Utils.dataValida(ev.event_date) && ev.event_type !== 'ESTORNO' && (ev.pre_marco_zero === true) !== (ev.event_date < D0)) {
-        col.achado('COPIAS', { tabela: 'EVENTOS', id: ev.event_id, campo: 'pre_marco_zero', mensagem: nome + ' está marcado como ' + (ev.pre_marco_zero === true ? 'anterior' : 'posterior') + ' ao marco zero (' + br_(D0) + '), mas a data é ' + (ev.pre_marco_zero === true ? 'depois' : 'antes') + ' dele.' + aviso, chaves: ev.event_id + '|MARCO_ZERO', event_id: ev.event_id });
+        var oqueMarco = nome + ' está marcado como ' + (ev.pre_marco_zero === true ? 'anterior' : 'posterior') + ' ao marco zero (' + br_(D0) + '), mas a data é ' + (ev.pre_marco_zero === true ? 'depois' : 'antes') + ' dele.';
+        col.achado('COPIAS', { tabela: 'EVENTOS', id: ev.event_id, campo: 'pre_marco_zero', mensagem: oqueMarco + aviso, oque: oqueMarco, resolver: MARCO_ZERO_GRAVADO, chaves: ev.event_id + '|MARCO_ZERO', event_id: ev.event_id });
       }
       var regra = linhasDoTipo_(ev);
       if (!regra) return;
       var linhas = repo.por('EVENTO_ANIMAIS', 'event_id', ev.event_id);
-      if (!linhas.length) col.achado('COPIAS', { tabela: 'EVENTOS', id: ev.event_id, campo: 'EVENTO_ANIMAIS', mensagem: nome + ' está sem as linhas dos animais (EVENTO_ANIMAIS) que o lançamento grava.' + aviso, chaves: ev.event_id + '|SEM_LINHAS', event_id: ev.event_id });
+      if (!linhas.length) col.achado('COPIAS', { tabela: 'EVENTOS', id: ev.event_id, campo: 'EVENTO_ANIMAIS', mensagem: nome + ' está sem as linhas dos animais (EVENTO_ANIMAIS) que o lançamento grava.' + aviso, oque: nome + ' ficaria sem as linhas dos animais que o lançamento grava.', chaves: ev.event_id + '|SEM_LINHAS', event_id: ev.event_id });
       var comLinha = {};
       linhas.forEach(function (l) {
         comLinha[l.animal_id] = true;
@@ -1243,23 +1290,27 @@ var AuditService = (function () {
         var ref = { tabela: 'EVENTO_ANIMAIS', id: l.event_animal_id, linha: linhaDe_(tx.cru, 'EVENTO_ANIMAIS', l.event_animal_id) };
         if (esperado === undefined && regra.outrosPapeisEmPartos) return;
         if (esperado === undefined) {
-          col.achado('COPIAS', { tabela: ref.tabela, id: ref.id, linha: ref.linha, campo: 'papel', mensagem: nome + ', ' + quem + ': a linha do animal tem o papel ' + papel + ', que esse lançamento não grava.' + aviso, chaves: l.event_animal_id + '|PAPEL', event_id: ev.event_id, animal_id: l.animal_id });
+          var oquePapel = nome + ', ' + quem + ': a linha do animal tem o papel ' + papel + ', que esse lançamento não grava.';
+          col.achado('COPIAS', { tabela: ref.tabela, id: ref.id, linha: ref.linha, campo: 'papel', mensagem: oquePapel + aviso, oque: oquePapel, chaves: l.event_animal_id + '|PAPEL', event_id: ev.event_id, animal_id: l.animal_id });
           return;
         }
         // Anterior ao marco zero pela data (a marca errada já é achado à parte): efeito 0 em toda linha.
         if (Utils.dataValida(D0) && Utils.dataValida(ev.event_date) ? ev.event_date < D0 : ev.pre_marco_zero === true) esperado = 0;
         if ((l.efeito_inventario || 0) !== esperado) {
-          col.achado('COPIAS', { tabela: ref.tabela, id: ref.id, linha: ref.linha, campo: 'efeito_inventario', mensagem: nome + ', ' + quem + ': a linha do animal tem efeito ' + (TEXTO_EFEITO[String(l.efeito_inventario || 0)] || String(l.efeito_inventario)) + ' no inventário, mas esse lançamento grava ' + TEXTO_EFEITO[String(esperado)] + '.' + aviso, chaves: l.event_animal_id + '|EFEITO|' + esperado, event_id: ev.event_id, animal_id: l.animal_id });
+          var oqueEfeito = nome + ', ' + quem + ': a linha do animal tem efeito ' + (TEXTO_EFEITO[String(l.efeito_inventario || 0)] || String(l.efeito_inventario)) + ' no inventário, mas esse lançamento grava ' + TEXTO_EFEITO[String(esperado)] + '.';
+          col.achado('COPIAS', { tabela: ref.tabela, id: ref.id, linha: ref.linha, campo: 'efeito_inventario', mensagem: oqueEfeito + aviso, oque: oqueEfeito, resolver: MARCO_ZERO_GRAVADO, chaves: l.event_animal_id + '|EFEITO|' + esperado, event_id: ev.event_id, animal_id: l.animal_id });
         }
         if (regra.pasto && vazio_(l.pasto_destino_id)) {
-          col.achado('COPIAS', { tabela: ref.tabela, id: ref.id, linha: ref.linha, campo: 'pasto_destino_id', mensagem: nome + ', ' + quem + ': a linha do animal está sem o pasto de destino do movimento.' + aviso, chaves: l.event_animal_id + '|PASTO', event_id: ev.event_id, animal_id: l.animal_id });
+          var oquePasto = nome + ', ' + quem + ': a linha do animal está sem o pasto de destino do movimento.';
+          col.achado('COPIAS', { tabela: ref.tabela, id: ref.id, linha: ref.linha, campo: 'pasto_destino_id', mensagem: oquePasto + aviso, oque: oquePasto, chaves: l.event_animal_id + '|PASTO', event_id: ev.event_id, animal_id: l.animal_id });
         }
       });
       ['BAIXAS', 'AJUSTES', 'IDENTIFICACOES'].forEach(function (t) {
         if (!repo.carregada(t)) return;
         repo.por(t, 'event_id', ev.event_id).forEach(function (r) {
           if (vazio_(r.animal_id) || comLinha[r.animal_id]) return;
-          col.achado('COPIAS', { tabela: t, id: r[Schema.pk(t)], campo: 'animal_id', mensagem: nome + ': a linha de ' + t + ' cita ' + rotuloAnimal_(tx.cru.cruPorId('ANIMAIS', r.animal_id), r.animal_id) + ', que não tem linha no lançamento (EVENTO_ANIMAIS).' + aviso, chaves: r[Schema.pk(t)] + '|SEM_LINHA', event_id: ev.event_id, animal_id: r.animal_id });
+          var oqueSem = nome + ': a linha de ' + t + ' cita ' + rotuloAnimal_(tx.cru.cruPorId('ANIMAIS', r.animal_id), r.animal_id) + ', que não tem linha no lançamento (EVENTO_ANIMAIS).';
+          col.achado('COPIAS', { tabela: t, id: r[Schema.pk(t)], campo: 'animal_id', mensagem: oqueSem + aviso, oque: oqueSem, chaves: r[Schema.pk(t)] + '|SEM_LINHA', event_id: ev.event_id, animal_id: r.animal_id });
         });
       });
     });
@@ -1442,6 +1493,7 @@ var AuditService = (function () {
     var linha = function (tabela, id) { if (!vazio_(id)) s.linhas.push({ tabela: tabela, id: String(id) }); };
     Object.keys(lote || {}).forEach(function (t) {
       (lote[t] || []).forEach(function (r) {
+        linha(t, r[Schema.pk(t)]); // a chave estrangeira de toda linha que o comando grava
         if (t === 'EVENTOS') { marcar('eventos', r.event_id); marcar('eventos', r.reversal_of_event_id); return; }
         if (t === 'ANIMAIS') { marcar('animais', r.animal_id); return; }
         if (t === 'EVENTO_ANIMAIS' || DETALHES_COM_ANIMAL.indexOf(t) >= 0) { marcar('animais', r.animal_id); marcar('eventos', r.event_id); if (t === 'REPRODUCAO') marcar('animais', r.touro_id); return; }
@@ -1449,8 +1501,7 @@ var AuditService = (function () {
         if (t === 'FINANCEIRO') { marcar('lancamentos', r.financial_id); marcar('eventos', r.event_id); marcar('animais', r.animal_id); return; }
         if (t === 'PARCELAS' || t === 'RATEIOS') { marcar('lancamentos', r.financial_id); return; }
         if (t === 'ALOCACOES_FINANCEIRAS') { marcar('lancamentos', r.financial_id); marcar('animais', r.animal_id); return; }
-        if (t === 'CONFIGURACOES' && PARAMETROS_DO_DOMINIO.indexOf(r.chave) >= 0) { s.tudo = true; s.dominio = true; return; }
-        linha(t, r[Schema.pk(t)]);
+        if (t === 'CONFIGURACOES' && PARAMETROS_DO_DOMINIO.indexOf(r.chave) >= 0) { s.tudo = true; s.dominio = true; }
       });
     });
     (mudancas || []).forEach(function (m) {
@@ -1477,78 +1528,92 @@ var AuditService = (function () {
     return s;
   }
   /**
-   * O escopo da trava: as sementes resolvidas nos dois retratos e os vizinhos que a mudança pode afetar — os animais e os
-   * lançamentos dos eventos do escopo, os animais dos lançamentos (alocações), e, de cada animal, a mãe, o pai, as crias,
-   * o touro e as fêmeas dos registros reprodutivos, os partos em que ele é mãe ou cria e quem teve o mesmo número de
-   * brinco. Um nível de vizinhos: as checagens de cada animal só olham a ele, à genealogia dele e ao número dele.
+   * O escopo da trava, resolvido nos dois retratos (o de antes e o de depois):
+   *  - `animais` (os tocados): os das sementes, os dos eventos que o comando grava ou anula, os dos lançamentos deles e os
+   *    que a fase C regrava — as checagens de cada animal (linha do tempo, entrada aberta, saída, custo) rodam neles;
+   *  - `genealogia`: os tocados e os vizinhos que a mudança pode afetar — mãe, pai, crias, o touro e as fêmeas dos
+   *    registros reprodutivos (um nível: a checagem de genealogia de cada um olha só a ele e aos pais dele);
+   *  - `eventos`: os que o comando grava ou anula (`eventosGravados`) e os partos em que um animal tocado é mãe ou cria;
+   *  - `brincos`: os números que os animais tocados usam ou usaram (quem teve o mesmo número entra pela checagem do número);
+   *  - `lancamentos` e `linhas` (as linhas citadas, para a chave estrangeira).
    */
-  function escopoDaTrava_(antes, depois, s, projecoes) {
-    var esc = { animais: {}, eventos: {}, lancamentos: {}, linhas: s.linhas.slice(), brincos: {} };
-    var retratos = [antes, depois];
-    var carregada = function (t, tab) { return t.repo.carregada(tab); };
-    ['animais', 'eventos', 'lancamentos'].forEach(function (k) { Object.keys(s[k]).forEach(function (id) { esc[k][id] = true; }); });
-    retratos.forEach(function (t) {
-      var cru = t.cru;
-      if (Object.keys(s.importacoes).length && carregada(t, 'EVENTOS')) cru.cru('EVENTOS').forEach(function (e) { if (!vazio_(e.import_id) && s.importacoes[e.import_id]) esc.eventos[e.event_id] = true; });
-      if (Object.keys(s.categorias).length && carregada(t, 'AJUSTES')) {
-        t.repo.vigentes('AJUSTES').forEach(function (x) { if (x.tipo_ajuste === 'RECLASSIFICACAO' && !vazio_(x.valor_novo) && s.categorias[x.valor_novo]) esc.animais[x.animal_id] = true; });
+  function escopoDaTrava_(antes, depois, s, projecoes, lote) {
+    var esc = { animais: {}, genealogia: {}, eventos: {}, eventosGravados: {}, eventosImportados: {}, lancamentos: {}, linhas: s.linhas.slice(), brincos: {} };
+    esc.tocados = esc.animais;
+    var cru = antes.cru;
+    var carregada = function (tab) { return antes.repo.carregada(tab); };
+    // As linhas de antes (com os índices que o comando já montou) mais as que o comando grava: as linhas gravadas não mudam,
+    // então o retrato de depois só acrescenta as do plano (as projeções que mudam entram pelas atualizações da fase C).
+    var doPlano = {};
+    var planoPor = function (tab, campo, valor) {
+      var k = tab + '\u0000' + campo;
+      if (!doPlano[k]) {
+        var idx = {};
+        ((lote || {})[tab] || []).forEach(function (r) { if (!vazio_(r[campo])) (idx[r[campo]] = idx[r[campo]] || []).push(r); });
+        doPlano[k] = idx;
       }
-      if (Object.keys(s.contas).length && carregada(t, 'FINANCEIRO')) cru.cru('FINANCEIRO').forEach(function (f) { if (s.contas[f.conta_id]) esc.lancamentos[f.financial_id] = true; });
-      if (carregada(t, 'PARCELAS')) Object.keys(s.parcelas).forEach(function (id) { var p = cru.cruPorId('PARCELAS', id); if (p) esc.lancamentos[p.financial_id] = true; });
-    });
+      return doPlano[k][valor] || [];
+    };
+    var linhasPor = function (tab, campo, valor) {
+      if (vazio_(valor)) return [];
+      return (carregada(tab) ? cru.cruPor(tab, campo, valor) : []).concat(planoPor(tab, campo, valor));
+    };
+    Object.keys(s.animais).forEach(function (id) { esc.animais[id] = true; });
+    Object.keys(s.eventos).forEach(function (id) { esc.eventos[id] = true; esc.eventosGravados[id] = true; });
+    Object.keys(s.lancamentos).forEach(function (id) { esc.lancamentos[id] = true; });
+    if (Object.keys(s.importacoes).length && carregada('EVENTOS')) {
+      cru.cru('EVENTOS').forEach(function (e) { if (!vazio_(e.import_id) && s.importacoes[e.import_id]) { esc.eventos[e.event_id] = true; esc.eventosGravados[e.event_id] = true; esc.eventosImportados[e.event_id] = true; } });
+    }
+    if (Object.keys(s.categorias).length) {
+      [antes, depois].forEach(function (t) {
+        if (!t.repo.carregada('AJUSTES')) return;
+        t.repo.vigentes('AJUSTES').forEach(function (x) { if (x.tipo_ajuste === 'RECLASSIFICACAO' && !vazio_(x.valor_novo) && s.categorias[x.valor_novo]) esc.animais[x.animal_id] = true; });
+      });
+    }
+    if (Object.keys(s.contas).length && carregada('FINANCEIRO')) cru.cru('FINANCEIRO').forEach(function (f) { if (s.contas[f.conta_id]) esc.lancamentos[f.financial_id] = true; });
+    if (carregada('PARCELAS')) Object.keys(s.parcelas).forEach(function (id) { var p = cru.cruPorId('PARCELAS', id); if (p) esc.lancamentos[p.financial_id] = true; });
     // O que a fase C regrava (as projeções que mudam) também é tocado pelo comando.
     (projecoes || []).forEach(function (u) {
       if (u.tabela === 'ANIMAIS') esc.animais[u.id] = true;
       else if (u.tabela === 'FINANCEIRO') esc.lancamentos[u.id] = true;
-      else if (u.tabela === 'IDENTIFICACOES' && carregada(depois, 'IDENTIFICACOES')) { var r = depois.cru.cruPorId('IDENTIFICACOES', u.id); if (r) esc.animais[r.animal_id] = true; }
+      else if (u.tabela === 'IDENTIFICACOES') {
+        var r = (carregada('IDENTIFICACOES') ? cru.cruPorId('IDENTIFICACOES', u.id) : null) || planoPor('IDENTIFICACOES', 'ident_id', u.id)[0];
+        if (r) esc.animais[r.animal_id] = true;
+      }
     });
-    // Os animais e os lançamentos dos eventos do escopo; os animais dos lançamentos do escopo.
-    retratos.forEach(function (t) {
-      var cru = t.cru;
-      Object.keys(esc.eventos).forEach(function (eid) {
-        if (carregada(t, 'EVENTO_ANIMAIS')) cru.cruPor('EVENTO_ANIMAIS', 'event_id', eid).forEach(function (l) { esc.animais[l.animal_id] = true; });
-        DETALHES_COM_ANIMAL.forEach(function (tab) {
-          if (!carregada(t, tab)) return;
-          cru.cruPor(tab, 'event_id', eid).forEach(function (r) { if (!vazio_(r.animal_id)) esc.animais[r.animal_id] = true; if (!vazio_(r.touro_id)) esc.animais[r.touro_id] = true; });
-        });
-        if (carregada(t, 'FINANCEIRO')) cru.cruPor('FINANCEIRO', 'event_id', eid).forEach(function (f) { esc.lancamentos[f.financial_id] = true; });
+    // Os animais e os lançamentos dos eventos gravados ou anulados; os animais dos lançamentos do escopo.
+    Object.keys(esc.eventosGravados).forEach(function (eid) {
+      linhasPor('EVENTO_ANIMAIS', 'event_id', eid).forEach(function (l) { esc.animais[l.animal_id] = true; });
+      DETALHES_COM_ANIMAL.forEach(function (tab) {
+        linhasPor(tab, 'event_id', eid).forEach(function (r) { if (!vazio_(r.animal_id)) esc.animais[r.animal_id] = true; if (!vazio_(r.touro_id)) esc.genealogia[r.touro_id] = true; });
       });
-      if (carregada(t, 'ALOCACOES_FINANCEIRAS')) Object.keys(esc.lancamentos).forEach(function (fid) { cru.cruPor('ALOCACOES_FINANCEIRAS', 'financial_id', fid).forEach(function (a) { esc.animais[a.animal_id] = true; }); });
+      linhasPor('FINANCEIRO', 'event_id', eid).forEach(function (f) { esc.lancamentos[f.financial_id] = true; });
     });
-    // Os vizinhos de cada animal tocado (um nível).
+    Object.keys(esc.lancamentos).forEach(function (fid) { linhasPor('ALOCACOES_FINANCEIRAS', 'financial_id', fid).forEach(function (a) { esc.animais[a.animal_id] = true; }); });
+    // Os vizinhos de cada animal tocado (um nível), os partos dele e os números de brinco dele. A mãe e o pai de depois vêm do
+    // retrato (a projeção pode tê-los mudado); a cria cuja mãe mudou é ela mesma um animal tocado (a projeção dela mudou).
     var base = Object.keys(esc.animais);
-    retratos.forEach(function (t) {
-      var cru = t.cru;
-      var semZeros = (carregada(t, 'CONFIGURACOES') ? Timeline.parametros(t.repo) : {}).brinco_ignora_zeros_esquerda !== false;
-      var numero = function (c) { return vazio_(c) ? null : Utils.normalizarBrinco(String(c), !semZeros); };
-      base.forEach(function (id) {
-        var a = carregada(t, 'ANIMAIS') ? cru.cruPorId('ANIMAIS', id) : null;
-        if (a) {
-          [a.mae_id, a.pai_id].forEach(function (p) { if (!vazio_(p)) esc.animais[p] = true; });
-          var n = numero(a.brinco);
-          if (n) esc.brincos[n] = true;
-          ['mae_id', 'pai_id'].forEach(function (c) { cru.cruPor('ANIMAIS', c, id).forEach(function (x) { esc.animais[x.animal_id] = true; }); });
-        }
-        if (carregada(t, 'REPRODUCAO')) {
-          cru.cruPor('REPRODUCAO', 'animal_id', id).forEach(function (r) { if (!vazio_(r.touro_id)) esc.animais[r.touro_id] = true; });
-          cru.cruPor('REPRODUCAO', 'touro_id', id).forEach(function (r) { esc.animais[r.animal_id] = true; });
-        }
-        if (carregada(t, 'EVENTO_ANIMAIS') && carregada(t, 'EVENTOS')) {
-          cru.cruPor('EVENTO_ANIMAIS', 'animal_id', id).forEach(function (l) {
-            var ev = cru.cruPorId('EVENTOS', l.event_id);
-            if (ev && ev.event_type === 'NASCIMENTO') esc.eventos[l.event_id] = true;
-          });
-        }
-        if (carregada(t, 'IDENTIFICACOES')) cru.cruPor('IDENTIFICACOES', 'animal_id', id).forEach(function (r) { if (r.tipo === 'BRINCO') { var k = numero(r.codigo); if (k) esc.brincos[k] = true; } });
-      });
+    base.forEach(function (id) { esc.genealogia[id] = true; });
+    var numeros = [antes, depois].map(function (t) {
+      var semZeros = (t.repo.carregada('CONFIGURACOES') ? Timeline.parametros(t.repo) : {}).brinco_ignora_zeros_esquerda !== false;
+      return function (c) { return vazio_(c) ? null : Utils.normalizarBrinco(String(c), !semZeros); };
     });
-    // Quem teve (ou tem) o mesmo número de brinco.
-    retratos.forEach(function (t) {
-      var cru = t.cru;
-      var semZeros = (carregada(t, 'CONFIGURACOES') ? Timeline.parametros(t.repo) : {}).brinco_ignora_zeros_esquerda !== false;
-      var numero = function (c) { return vazio_(c) ? null : Utils.normalizarBrinco(String(c), !semZeros); };
-      if (carregada(t, 'IDENTIFICACOES')) cru.cru('IDENTIFICACOES').forEach(function (r) { if (r.tipo === 'BRINCO' && esc.brincos[numero(r.codigo)]) esc.animais[r.animal_id] = true; });
-      if (carregada(t, 'ANIMAIS')) cru.cru('ANIMAIS').forEach(function (a) { var n = numero(a.brinco); if (n && esc.brincos[n]) esc.animais[a.animal_id] = true; });
+    var marcarNumero = function (c) { numeros.forEach(function (n) { var k = n(c); if (k) esc.brincos[k] = true; }); };
+    base.forEach(function (id) {
+      [antes, depois].forEach(function (t) {
+        var a = t.repo.carregada('ANIMAIS') ? t.cru.cruPorId('ANIMAIS', id) : null;
+        if (!a) return;
+        [a.mae_id, a.pai_id].forEach(function (p) { if (!vazio_(p)) esc.genealogia[p] = true; });
+        marcarNumero(a.brinco);
+      });
+      ['mae_id', 'pai_id'].forEach(function (c) { linhasPor('ANIMAIS', c, id).forEach(function (x) { esc.genealogia[x.animal_id] = true; }); });
+      linhasPor('REPRODUCAO', 'animal_id', id).forEach(function (r) { if (!vazio_(r.touro_id)) esc.genealogia[r.touro_id] = true; });
+      linhasPor('REPRODUCAO', 'touro_id', id).forEach(function (r) { esc.genealogia[r.animal_id] = true; });
+      linhasPor('EVENTO_ANIMAIS', 'animal_id', id).forEach(function (l) {
+        var ev = (carregada('EVENTOS') ? cru.cruPorId('EVENTOS', l.event_id) : null) || planoPor('EVENTOS', 'event_id', l.event_id)[0];
+        if (ev && ev.event_type === 'NASCIMENTO') esc.eventos[l.event_id] = true;
+      });
+      linhasPor('IDENTIFICACOES', 'animal_id', id).forEach(function (r) { if (r.tipo === 'BRINCO') marcarNumero(r.codigo); });
     });
     return esc;
   }
@@ -1557,9 +1622,9 @@ var AuditService = (function () {
     var conta = {};
     antes.forEach(function (a) { a.chaves.forEach(function (k) { conta[k] = (conta[k] || 0) + 1; }); });
     return depois.filter(function (a) {
-      var novo = false;
-      a.chaves.forEach(function (k) { if (conta[k]) conta[k] -= 1; else novo = true; });
-      return novo;
+      a.atomosNovos = [];
+      a.chaves.forEach(function (k) { if (conta[k]) conta[k] -= 1; else a.atomosNovos.push(k); });
+      return a.atomosNovos.length > 0;
     });
   }
   /**
@@ -1569,14 +1634,21 @@ var AuditService = (function () {
    */
   function recusaDaTrava_(novos, depois, proprios) {
     var cru = depois.cru;
-    var proprio = function (a) { return (!vazio_(a.event_id) && proprios.eventos[a.event_id]) || (!vazio_(a.tabela) && !vazio_(a.id) && proprios.linhas[a.tabela + '\u0000' + a.id]); };
+    // Do próprio lançamento: o achado aponta um evento ou uma linha que ele grava; no brinco, o número que ele dá (um
+    // átomo novo com um animal ou uma identificação dele).
+    var proprio = function (a) {
+      if (!vazio_(a.event_id) && proprios.eventos[a.event_id]) return true;
+      if (!vazio_(a.tabela) && !vazio_(a.id) && proprios.linhas[a.tabela + '\u0000' + a.id]) return true;
+      if (a.checagem !== 'BRINCO' && a.checagem !== 'IDENTIFICACOES_ATIVAS') return false;
+      return (a.atomosNovos || []).some(function (k) { return k.split('|').some(function (x) { return proprios.brincos[x] === true; }); });
+    };
     var algumConflito = novos.some(function (a) { return !proprio(a); });
     var detalhes = novos.map(function (a) {
       var ev = !vazio_(a.event_id) && !proprios.eventos[a.event_id] && depois.repo.carregada('EVENTOS') ? cru.cruPorId('EVENTOS', a.event_id) : null;
       var animal = !vazio_(a.animal_id) && depois.repo.carregada('ANIMAIS') ? cru.cruPorId('ANIMAIS', a.animal_id) : null;
       return Validation.detalhe({
         codigo: 'INTEGRIDADE_' + a.checagem, animal_id: a.animal_id, brinco: animal && !vazio_(animal.brinco) ? animal.brinco : a.brinco,
-        campo: a.campo, mensagem: a.mensagem + ' ' + (a.resolver || COMO_RESOLVER[a.checagem]),
+        campo: a.campo, mensagem: (a.oque || a.mensagem) + ' ' + (a.resolver || COMO_RESOLVER[a.checagem]),
         conflito: ev ? { event_id: ev.event_id, tipo: ev.event_type, subtipo: nulo_(ev.event_subtype), data: ev.event_date, nome: EventCatalog.existe(ev.event_type) ? EventCatalog.nomeEvento(ev.event_type, ev.event_subtype) : null } : null,
       });
     });
@@ -1587,16 +1659,25 @@ var AuditService = (function () {
   }
   /**
    * A trava (chamada pela UnitOfWork entre o tratador e a fase A, também no SIMULAR). t: {antes, depois (tx com acesso
-   * cru: o retrato de antes e o de depois), sementes (sementesDaTrava), projecoes (as atualizações que a fase C grava),
+   * cru: o retrato de antes e o de depois), sementes (sementesDaTrava), lote (as linhas que o plano anexa: {ABA: [linhas]}),
+   * projecoes (as atualizações que a fase C grava),
    * derivados (o escopo das projeções do tratador), projetor (ctx.projecoes), proprios: {eventos, linhas} (o que o plano
    * grava)}. Lança VALIDATION/CONFLICT INTEGRIDADE_<CHECAGEM>; devolve {escopo: {animais, eventos, lancamentos, linhas},
    * achados_depois, achados_antes (null quando não foi preciso olhar o antes)}.
    */
   function travar(t) {
     var s = t.sementes;
-    var esc = s.tudo ? null : escopoDaTrava_(t.antes, t.depois, s, t.projecoes);
+    var esc = s.tudo ? null : escopoDaTrava_(t.antes, t.depois, s, t.projecoes, t.lote);
+    // O que o próprio comando projeta (a fase C grava o que o projetor deu no retrato): o escopo dele e o que o projetor
+    // regravou (a mãe alcançada pela cria, por exemplo).
     var d = t.derivados || null;
-    var cobertos = !d ? {} : d.tudo ? { tudo: true } : { animais: Utils.indexarPor((d.animais || []).map(function (id) { return { id: id }; }), 'id'), eventos: Utils.indexarPor((d.eventos || []).map(function (id) { return { id: id }; }), 'id') };
+    var cobertos = { animais: {}, eventos: {} };
+    if (d && d.tudo) cobertos = { tudo: true };
+    else {
+      if (d) (d.animais || []).forEach(function (id) { cobertos.animais[id] = true; });
+      if (d) (d.eventos || []).forEach(function (id) { cobertos.eventos[id] = true; });
+      (t.projecoes || []).forEach(function (u) { if (u.tabela === 'ANIMAIS') cobertos.animais[u.id] = true; });
+    }
     var opcoes = { projetor: t.projetor || null, cobertos: cobertos };
     var rodar = function (tx) {
       var col = coletorAchados_({ completo: true });
@@ -1605,7 +1686,7 @@ var AuditService = (function () {
     };
     var depois = rodar(t.depois);
     var resumo = {
-      escopo: esc ? { animais: Object.keys(esc.animais).length, eventos: Object.keys(esc.eventos).length, lancamentos: Object.keys(esc.lancamentos).length, linhas: esc.linhas.length } : { tudo: true },
+      escopo: esc ? { animais: Object.keys(esc.animais).length, genealogia: Object.keys(esc.genealogia).length, eventos: Object.keys(esc.eventos).length, lancamentos: Object.keys(esc.lancamentos).length, linhas: esc.linhas.length } : { tudo: true },
       achados_depois: depois.length, achados_antes: null,
     };
     if (!depois.some(function (a) { return a.severidade === 'ERRO'; })) return resumo;

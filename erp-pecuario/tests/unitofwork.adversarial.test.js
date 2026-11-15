@@ -355,7 +355,7 @@ const CENARIOS = {
   },
   motor: {
     chave: 'k-motor',
-    ambiente: { projecoes: (G) => G.Timeline.porta() },
+    ambiente: { projecoes: (G) => G.Timeline.porta(), propriedade: false },
     preparar: (amb) => {
       const s = sementes(amb.G);
       amb.gas.exec(() => amb.G.Database.abrir(amb.banco, { primitiva: amb.primitiva }).anexar({ CONFIGURACOES: s.CONFIGURACOES, PROPRIEDADES: s.PROPRIEDADES }));
@@ -374,7 +374,7 @@ const CENARIOS = {
   },
   correcaoCompra: {
     chave: 'k-corr-compra',
-    ambiente: { projecoes: (G) => G.Timeline.porta() },
+    ambiente: { projecoes: (G) => G.Timeline.porta(), propriedade: false },
     preparar: prepararCompra,
     comando: (amb, prep) => amb.G.EventService.comando('corrigir', {
       idempotencyKey: 'k-corr-compra',
@@ -386,7 +386,7 @@ const CENARIOS = {
   },
   venda: {
     chave: 'k-venda',
-    ambiente: { projecoes: (G) => G.Timeline.porta() },
+    ambiente: { projecoes: (G) => G.Timeline.porta(), propriedade: false },
     preparar: prepararVenda,
     comando: (amb, prep) => amb.G.EventService.comando('registrar', {
       idempotencyKey: 'k-venda',
@@ -400,7 +400,7 @@ const CENARIOS = {
   },
   estornoTransferencia: {
     chave: 'k-est-transf',
-    ambiente: { projecoes: (G) => G.Timeline.porta() },
+    ambiente: { projecoes: (G) => G.Timeline.porta(), propriedade: false },
     preparar: prepararEstornoTransferencia,
     comando: (amb, prep) => amb.G.EventService.comando('estornar', { idempotencyKey: 'k-est-transf', dados: { event_id: prep.transfer, justificativa: 'pasto errado' } }),
     desfecho: desfechoEstornoTransferencia,
@@ -1220,7 +1220,7 @@ const CENARIOS_IMPORTACAO = {};
 ['ANIMAIS', 'COMPRAS'].forEach((tipo) => {
   CENARIOS_IMPORTACAO['importacao' + tipo] = {
     chave: (amb, prep) => amb.G.ImportService.chaveBloco(prep.id, 1),
-    ambiente: { projecoes: (G) => G.Timeline.porta() },
+    ambiente: { projecoes: (G) => G.Timeline.porta(), propriedade: false },
     modos: ['recoverAll', 'leitura', 'status'],
     preparar: (amb) => prepararImportacao(amb, tipo),
     comando: (amb, prep) => amb.G.ImportService.comandoBloco({ dados: { import_id: prep.id, bloco: 1, modo: 'TOTAL' } }),

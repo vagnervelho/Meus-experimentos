@@ -49,7 +49,7 @@ function sementes(G, opcoes) {
 /** Ambiente com o projetor real e o banco semeado. opcoes: {primitiva, order, marcoZero, config, categorias}. */
 function ambienteEventos(opcoes) {
   const o = opcoes || {};
-  const amb = A.ambiente({ primitiva: o.primitiva, order: o.order, projecoes: (G) => G.Timeline.porta() });
+  const amb = A.ambiente({ primitiva: o.primitiva, order: o.order, projecoes: (G) => G.Timeline.porta(), propriedade: false });
   const G = amb.G;
   const linhas = sementes(G, o);
   amb.gas.exec(() => G.Database.abrir(amb.banco, { primitiva: amb.primitiva }).anexar(linhas));

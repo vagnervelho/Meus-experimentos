@@ -13,6 +13,15 @@ var Repository = (function () {
     EVENTOS: 'EVENTO', AUDITORIA: 'OPERACAO', ANIMAIS: 'ANIMAL', FINANCEIRO: 'FILHA',
     PARCELAS: 'PARCELA', RATEIOS: 'RATEIO', ALOCACOES_FINANCEIRAS: 'ALOCACAO',
   });
+  /**
+   * Campos que decidem a vigência de linhas de OUTRAS abas (o predicado de 02, seção 5.3): mudar um deles refaz toda a
+   * memória da execução; mudar os demais refaz só a da própria aba (a situação do animal, a da parcela e os índices são da
+   * própria aba).
+   */
+  var CAMPOS_DA_VIGENCIA = Object.freeze({
+    OPERACOES: ['status'], IMPORTACOES: ['status'], EVENTOS: ['event_id', 'op_id', 'import_id', 'reversal_of_event_id', 'event_type', 'event_seq'],
+    FINANCEIRO: ['financial_id', 'event_id'], RATEIOS: ['rateio_id', 'financial_id', 'event_id'],
+  });
   var DEPENDE = Object.freeze({
     EVENTO: ['OPERACOES', 'IMPORTACOES'], OPERACAO: ['OPERACOES'], FILHA: ['EVENTOS'], PARCELA: ['FINANCEIRO'],
     RATEIO: ['FINANCEIRO', 'EVENTOS'], ALOCACAO: ['RATEIOS'], ANIMAL: [], SEMPRE: [],
@@ -117,6 +126,18 @@ var Repository = (function () {
 
     function invalidar_() {
       memo = {};
+    }
+    /**
+     * Depois de mudar células de uma aba: só a memória dela (índices, vigentes, chaves vigentes) é refeita, salvo quando o
+     * campo mudado decide a vigência de outras abas (CAMPOS_DA_VIGENCIA): aí tudo. As posições não mudam.
+     */
+    function invalidarAba_(tabela, campos) {
+      var gatilho = CAMPOS_DA_VIGENCIA[tabela];
+      if (gatilho && campos.some(function (c) { return gatilho.indexOf(c) >= 0; })) { invalidar_(); return; }
+      Object.keys(memo).forEach(function (k) {
+        var p = k.split(SEP);
+        if ((p[0] === 'i' && p[2] === tabela) || ((p[0] === 'v' || p[0] === 's') && p[1] === tabela)) delete memo[k];
+      });
     }
     function carregada(tabela) {
       return Object.prototype.hasOwnProperty.call(dados, tabela);
@@ -344,7 +365,7 @@ var Repository = (function () {
         reg[c] = io.normalizarValor(tabela, c, campos[c]);
         if (coercidas) delete coercidas[c];
       });
-      invalidar_();
+      invalidarAba_(tabela, Object.keys(campos));
     }
     /**
      * Retrato em memória (trava de integridade): um repositório novo com as abas JÁ lidas, que compartilha as linhas com

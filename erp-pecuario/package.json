@@ -11,7 +11,8 @@
     "test": "node --test tests/*.test.js",
     "gen:schema": "node scripts/gen-schema.js",
     "ui:check": "node scripts/ui-check.js",
-    "gas:push": "node scripts/push-gas.js"
+    "gas:push": "node scripts/push-gas.js",
+    "trava:medir": "node scripts/medir-trava.js"
   },
   "devDependencies": {
     "@types/google-apps-script": "2.0.15"
