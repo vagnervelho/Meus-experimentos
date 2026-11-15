@@ -1344,6 +1344,245 @@ var EventService = (function () {
     if (a) avisoItem_(m, null, a.codigo, a.mensagem);
   }
 
+  // ------------------------------------------------------------------ venda ----
+  /** Cabeçalho da venda: comprador e o pasto de onde o lote sai (opcional; a origem de cada animal é conferida). */
+  function cabecalhoVenda_(m, ctxEv) {
+    var c = ctxEv.campos;
+    parceiroValido_(m, ctxEv, 'partner_id', c.partner_id);
+    ctxEv.pastoOrigem = null;
+    if (!vazio_(c.pasto_origem_id)) {
+      if (!m.f.pasto(c.pasto_origem_id)) erroGeral_(m, 'pasto_origem_id', 'NAO_ENCONTRADO', 'O pasto de origem não existe.');
+      else ctxEv.pastoOrigem = c.pasto_origem_id;
+    }
+  }
+  /** Última pesagem individual (não MEDIA_LOTE) do animal até a data: base estimada do rateio sem peso na venda. */
+  function ultimaPesagem_(m, animalId, data) {
+    var melhor = null;
+    m.f.pesagens(animalId).forEach(function (p) {
+      if (p.data_pesagem > data || p.metodo === 'MEDIA_LOTE' || typeof p.peso_kg !== 'number') return;
+      var ev = m.f.evento(p.event_id);
+      var x = { peso_kg: p.peso_kg, data: p.data_pesagem, seq: ev ? ev.event_seq : 0 };
+      if (!melhor || x.data > melhor.data || (x.data === melhor.data && x.seq > melhor.seq)) melhor = x;
+    });
+    return melhor;
+  }
+  /**
+   * Animal vendido (04, seção 4.3; 03b, seções 3.4 e 16.10): saída (−1) com a origem do cabeçalho (conferida pela
+   * linha do tempo: ORIGEM_DIVERGENTE) ou, sem ela, a da linha do tempo no dia; peso vivo, carcaça, valor e motivo de
+   * saída na linha; o peso vivo individual vira PESAGENS (VENDA). A situação VENDIDO é projeção; o histórico fica.
+   */
+  function itemVenda_(m, ctxEv, it) {
+    var d = it.dados;
+    var ev = ctxEv.ev;
+    camposDoItem_(m, it, EventCatalog.camposAnimal('VENDA'), semAnimalId_(d));
+    if (!sujeito_(m, it, 'vende')) return;
+    var onde = Timeline.pastoAntesDaSaida(m.f.linhas(it.animal_id), ev.event_date, m.D0);
+    var origem = ctxEv.pastoOrigem || (onde.presente ? nulo_(onde.pasture_id) : null);
+    var ea = { efeito_inventario: -1, pasto_origem_id: origem, motivo_saida: nulo_(d.motivo_saida), observacoes: nulo_(d.observacoes) };
+    if (typeof d.peso === 'number') ea.peso = d.peso;
+    if (typeof d.peso_carcaca_kg === 'number') ea.peso_carcaca_kg = d.peso_carcaca_kg;
+    it.negocio = {
+      peso: typeof d.peso === 'number' ? d.peso : null, peso_carcaca_kg: typeof d.peso_carcaca_kg === 'number' ? d.peso_carcaca_kg : null,
+      valor_individual: typeof d.valor_individual === 'number' ? d.valor_individual : null, base_manual: typeof d.base_manual === 'number' ? d.base_manual : null,
+    };
+    it.ultimaPesagem = ultimaPesagem_(m, it.animal_id, ev.event_date);
+    linhaEA_(m, ctxEv, it, ea);
+    if (typeof d.peso === 'number') {
+      ctxEv.plano.PESAGENS.push({ weight_id: m.tx.novoId(), animal_id: it.animal_id, event_id: ev.event_id, data_pesagem: ev.event_date, peso_kg: d.peso, metodo: nulo_(d.metodo_pesagem) || 'BALANCA', tipo: 'VENDA', observacoes: null });
+    }
+  }
+  /**
+   * Carência na venda (RN-072; 05, seção 4.8): animal com carência sanitária vigente na data gera CARENCIA_ATIVA, um
+   * aviso por animal. Na finalidade ABATE vale a política de `avisos_politica` (padrão BLOQUEIA → VALIDATION); nas
+   * demais é sempre aviso com aceite (aplicarPolitica_).
+   */
+  function carenciaNaVenda_(m, ctxEv) {
+    var data = ctxEv.ev.event_date;
+    var abate = ctxEv.campos.finalidade === 'ABATE';
+    m.carenciaSemPolitica = !abate;
+    ctxEv.itens.forEach(function (it) {
+      if (!it.linhaEA) return;
+      var regs = m.repo.por('SANIDADE', 'animal_id', it.animal_id).filter(function (r) { return !m.f.excluidos[r.event_id]; });
+      var car = HealthService.carenciaEm(regs, data);
+      if (!car) return;
+      var oque = car.nome_produto ? car.nome_produto + ', aplicado em ' + br_(car.data_aplicacao) : 'aplicação de ' + br_(car.data_aplicacao);
+      avisoItem_(m, it, 'CARENCIA_ATIVA', it.quem + ': está em carência sanitária até ' + br_(car.fim) + ' (' + oque + ').' +
+        (abate ? ' Para o abate, a carência precisa ter terminado.' : ' Confirme que o comprador sabe da carência.'));
+    });
+  }
+  function rotuloLista_(m, lista, codigo) {
+    var l = m.repo.por('LISTAS', 'lista', lista).filter(function (x) { return x.codigo === codigo; })[0];
+    return l && !vazio_(l.rotulo) ? l.rotulo : codigo;
+  }
+  /** Itens do grupo repetível `deducoes` da venda, validados pelo catálogo; erros com "Dedução k:". */
+  function deducoesDaVenda_(m, ctxEv, lista) {
+    var defs = EventCatalog.camposGrupo('VENDA', 'deducoes');
+    if (lista !== undefined && lista !== null && !Array.isArray(lista)) { erroGeral_(m, 'deducoes', 'TIPO_INVALIDO', 'As deduções precisam vir como lista.'); return []; }
+    return (lista || []).map(function (bruto, k) {
+      var x = bruto && typeof bruto === 'object' ? bruto : {};
+      var quem = 'Dedução ' + (k + 1) + ': ';
+      EventCatalog.validarCampos(defs, x, { listas: m.listas }).forEach(function (e) { erroGeral_(m, 'deducoes', e.codigo, quem + e.mensagem); });
+      parceiroValido_(m, ctxEv, 'deducoes', x.partner_id, quem);
+      return x;
+    });
+  }
+  /**
+   * Financeiro da VENDA (03b, seções 4.2, 4.5, 10.3 e 2.6; 07, seção 4; P11): a receita (bruto − desconto comercial) é
+   * um lançamento RECEITA_VENDA_ANIMAIS com as parcelas de recebimento; cada dedução é um lançamento DESPESA_VENDA na
+   * conta do tipo (frete, comissão, taxas e retenções), com parceiro e título próprios; todos 100% rateados pelas
+   * mesmas bases do critério do evento. A dedução retida pelo comprador nasce com `retida_pelo_comprador` = S e o
+   * título no vencimento de um recebimento da venda (o encontro de contas da Fase 4 liquida os dois juntos). O valor
+   * individual de cada animal é a alocação da receita; VENDAS guarda o cabeçalho e os totais; o tipo de cada dedução
+   * fica em `payload_json.deducoes`.
+   */
+  function financeiroVenda_(m, ctxEv, d) {
+    var c = ctxEv.campos;
+    var ev = ctxEv.ev;
+    var itens = ctxEv.itens.filter(function (it) { return it.linhaEA && it.negocio; });
+    var deducoes = deducoesDaVenda_(m, ctxEv, d.deducoes);
+    if (d.parcelas !== undefined && d.parcelas !== null && !Array.isArray(d.parcelas)) { erroGeral_(m, 'parcelas', 'TIPO_INVALIDO', 'As parcelas precisam vir como lista.'); return; }
+    var defsParcela = EventCatalog.camposGrupo('VENDA', 'parcelas');
+    (d.parcelas || []).forEach(function (p, k) {
+      EventCatalog.validarCampos(defsParcela, p && typeof p === 'object' ? p : {}, { listas: m.listas }).forEach(function (e) {
+        if (e.campo === 'data_vencimento' || e.campo === 'valor') return; // vencimento e valor: FinancialService.resolverParcelas
+        erroGeral_(m, 'parcelas', e.codigo, 'Parcela ' + (k + 1) + ': ' + e.mensagem);
+      });
+    });
+    if (!itens.length || itens.length !== ctxEv.itens.length) return;
+    var bruto = typeof c.valor_bruto === 'number' ? c.valor_bruto : null;
+    var desconto = typeof c.desconto_comercial === 'number' ? c.desconto_comercial : 0;
+    if (bruto !== null && desconto >= bruto) erroGeral_(m, 'desconto_comercial', 'VALOR_FORA_DA_FAIXA', 'O desconto (' + Utils.formatarReais(desconto) + ') precisa ser menor que o valor bruto da venda (' + Utils.formatarReais(bruto) + ').');
+    var receita = bruto !== null && desconto < bruto ? bruto - desconto : null;
+    var neg = FinancialService.negociacao({
+      modalidade: c.modalidade, base_peso: nulo_(c.base_peso), rendimento_carcaca_pct: typeof c.rendimento_carcaca_pct === 'number' ? c.rendimento_carcaca_pct : null,
+      rendimento_tipo: nulo_(c.rendimento_tipo), preco_unitario: typeof c.preco_unitario === 'number' ? c.preco_unitario : null,
+      peso_total_kg: typeof c.peso_vivo_total_kg === 'number' ? c.peso_vivo_total_kg : null,
+      peso_carcaca_total_kg: typeof c.peso_carcaca_total_kg === 'number' ? c.peso_carcaca_total_kg : null, carcacaTotal: true,
+      valor: receita, valor_conferencia: bruto, campo_valor: 'valor_bruto', rotulo_valor: 'a receita da venda (bruto menos desconto)',
+      criterio_rateio: nulo_(c.criterio_rateio), arroba_kg: m.params.arroba_kg, tolerancia_pct: m.params.fin_tolerancia_conferencia_pct,
+      animais: itens.map(function (it) { var n = it.negocio; return { chave: it.codigo_interno, peso: n.peso, peso_carcaca_kg: n.peso_carcaca_kg, valor_individual: n.valor_individual, base_manual: n.base_manual }; }),
+      pesagens: itens.map(function (it) { return it.ultimaPesagem ? it.ultimaPesagem.peso_kg : null; }),
+    });
+    var jaRecusados = {};
+    m.col.erros.forEach(function (e) { if (!e.animal_id && e.campo) jaRecusados[e.campo] = true; });
+    neg.erros.forEach(function (e) {
+      if (typeof e.indice === 'number') erroItem_(m, itens[e.indice], e.campo, e.codigo, e.mensagem);
+      else if (!jaRecusados[e.campo]) erroGeral_(m, e.campo, e.codigo, e.mensagem);
+    });
+    neg.avisos.forEach(function (a) { avisoItem_(m, null, a.codigo, a.mensagem); });
+    ctxEv.negociacao = neg;
+    if (neg.erros.length || receita === null) return;
+    var contaReceita = FinancialService.conta(m.repo, FinancialService.CONTAS.VENDA);
+    var n = itens.length;
+    var rateioItens = itens.map(function (it, i) { return { animal_id: it.animal_id, chave: it.codigo_interno, base: neg.bases[i], quem: it.quem }; });
+    var justificativa = neg.criterio === 'MANUAL' ? nulo_(c.justificativa_rateio)
+      : neg.estimado ? 'Base estimada: última pesagem de cada animal até ' + br_(ev.event_date) + (neg.peso_vivo_total !== null ? ', ajustada ao peso vivo do lote (' + String(neg.peso_vivo_total).replace('.', ',') + ' kg).' : '.') : null;
+    var rateio = { criterio: neg.criterio, itens: rateioItens, cemPorCento: true, justificativa: justificativa, estimado: neg.estimado };
+    var planejados = [];
+    var lancs = [];
+    var principal = FinancialService.planejar(m.tx, {
+      evento: ev, conta: contaReceita, naturezas: ['RECEITA_VENDA_ANIMAIS'], valor: receita, descricao: 'Venda de ' + plural_(n, 'animal', 'animais'),
+      partner_id: c.partner_id, documento: nulo_(c.nota_fiscal), quantidade: n, parcelas: d.parcelas, rateio: rateio,
+      campo: 'valor_bruto', campoParcelas: 'parcelas', rotulo: 'a receita da venda', pagamento: 'será recebida',
+    }, m.col);
+    var porVenc = {};
+    if (principal) {
+      planejados.push(principal);
+      lancs.push(resumoLancamento_(m, principal, contaReceita, { papel: 'RECEITA' }));
+      var porAnimal = Utils.indexarPor(principal.rateio.itens, 'animal_id');
+      itens.forEach(function (it) { it.linhaEA.valor_individual = porAnimal[it.animal_id].valor; });
+      principal.parcelas.forEach(function (p) { porVenc[p.data_vencimento] = (porVenc[p.data_vencimento] || 0) + p.valor; });
+    }
+    var vencimentos = principal ? principal.parcelas.map(function (p) { return p.data_vencimento; }) : [];
+    var retidoPorVenc = {};
+    var feitas = [];
+    deducoes.forEach(function (x, k) {
+      if (typeof x.valor !== 'number' || vazio_(x.tipo)) return;
+      var retida = x.retida_pelo_comprador === true;
+      var quem = 'Dedução ' + (k + 1) + ': ';
+      var venc = nulo_(x.data_vencimento);
+      if (retida) {
+        if (!principal) return;
+        if (venc && vencimentos.indexOf(venc) < 0) {
+          erroGeral_(m, 'deducoes', 'RETIDA_FORA_DO_RECEBIMENTO', quem + 'o que o comprador desconta sai num recebimento da venda: use o vencimento de uma parcela da venda (' + Utils.unicos(vencimentos).map(br_).join(', ') + ') ou deixe em branco.');
+          return;
+        }
+        venc = venc || vencimentos[0];
+        retidoPorVenc[venc] = (retidoPorVenc[venc] || 0) + x.valor;
+      } else venc = venc || ev.event_date;
+      var conta = FinancialService.conta(m.repo, FinancialService.contaDeducao(x.tipo));
+      var nome = rotuloLista_(m, 'TIPO_DEDUCAO_VENDA', x.tipo);
+      var pl = FinancialService.planejar(m.tx, {
+        evento: ev, conta: conta, naturezas: ['DESPESA_VENDA'], valor: x.valor, descricao: nulo_(x.descricao) || nome + ' da venda de ' + br_(ev.event_date),
+        partner_id: nulo_(x.partner_id) || (retida ? nulo_(c.partner_id) : null), documento: nulo_(x.documento), retida: retida,
+        parcelas: [{ data_vencimento: venc, valor: x.valor, forma_pagamento: nulo_(x.forma_pagamento), documento: nulo_(x.documento) }],
+        rateio: rateio, campo: 'deducoes', rotulo: 'a dedução ' + (k + 1) + ' (' + nome.toLowerCase() + ')',
+      }, m.col);
+      if (!pl) return;
+      planejados.push(pl);
+      lancs.push(resumoLancamento_(m, pl, conta, { papel: 'DEDUCAO', tipo_deducao: x.tipo, retida: retida }));
+      feitas.push({ financial_id: pl.financial_id, tipo: x.tipo, valor: x.valor, retida: retida });
+    });
+    Object.keys(retidoPorVenc).sort().forEach(function (v) {
+      if (retidoPorVenc[v] > (porVenc[v] || 0)) {
+        erroGeral_(m, 'deducoes', 'RETENCAO_MAIOR_QUE_RECEBIMENTO', 'O comprador descontaria ' + Utils.formatarReais(retidoPorVenc[v]) + ' em ' + br_(v) + ', mais do que ele paga nesse dia (' + Utils.formatarReais(porVenc[v] || 0) + ').');
+      }
+    });
+    if (m.col.temErros()) return;
+    planejados.forEach(function (pl) { FinancialService.juntar(ctxEv.plano, pl); });
+    var tot = FinancialService.totaisVenda({ valor_bruto: bruto, desconto_comercial: desconto, deducoes: feitas });
+    ctxEv.plano.VENDAS.push({
+      sale_id: m.tx.novoId(), event_id: ev.event_id, finalidade: c.finalidade, modalidade: c.modalidade, base_peso: neg.base_peso,
+      rendimento_carcaca_pct: neg.rendimento_pct, rendimento_tipo: neg.rendimento_tipo, qtd_animais: n, peso_vivo_total_kg: neg.peso_vivo_total,
+      peso_carcaca_total_kg: neg.peso_carcaca_total, preco_unitario: neg.unidade_preco ? neg.preco_unitario : null, unidade_preco: neg.unidade_preco,
+      valor_bruto: bruto, desconto_comercial: desconto, frete: tot.frete, comissao: tot.comissao, outras_deducoes: tot.outras_deducoes,
+      criterio_rateio: neg.criterio, gta_numero: nulo_(c.gta_numero), nota_fiscal: nulo_(c.nota_fiscal), observacoes: nulo_(c.condicoes),
+    });
+    ev.partner_id = c.partner_id;
+    ev.total_value = bruto;
+    ctxEv.deducoes = feitas.map(function (x) { return { financial_id: x.financial_id, tipo: x.tipo }; });
+    resumoFinanceiro_(m, ctxEv, lancs, planejados);
+    // Por animal, a receita e as deduções separadas (não se somam: uma é entrada, a outra saída).
+    var receitaDe = Utils.indexarPor(principal.rateio.itens, 'animal_id');
+    var deducaoDe = {};
+    planejados.slice(1).forEach(function (pl) { pl.rateio.itens.forEach(function (x) { deducaoDe[x.animal_id] = (deducaoDe[x.animal_id] || 0) + x.valor; }); });
+    ctxEv.financeiro.por_animal = itens.map(function (it) {
+      var r = receitaDe[it.animal_id];
+      return { animal_id: it.animal_id, codigo_interno: it.codigo_interno || null, brinco: it.brincoTexto || null, base: r.base, valor: r.valor, deducoes: deducaoDe[it.animal_id] || 0, liquido: r.valor - (deducaoDe[it.animal_id] || 0) };
+    });
+    ctxEv.venda = resumoVenda_(m, c, neg, tot, n);
+    var a = FinancialService.avisoPeriodo(m.params, ev.event_date, 'A venda');
+    if (a) avisoItem_(m, null, a.codigo, a.mensagem);
+  }
+  /**
+   * Resumo da negociação para a revisão (07, seções 4.2 e 4.3; calculado na leitura, nunca gravado): totais, conferência
+   * pelo preço, pesos, arrobas com a base, preços médios pela receita e, sem arroba na negociação, o equivalente em
+   * arrobas estimadas pelo rendimento padrão (rotulado).
+   */
+  function resumoVenda_(m, c, neg, tot, n) {
+    var arroba = m.params.arroba_kg || 15;
+    var vivo = neg.peso_vivo_total;
+    var exatas = neg.peso_carcaca_total !== null ? neg.peso_carcaca_total / arroba
+      : neg.base_peso === 'VIVO' && vivo !== null && neg.rendimento_pct !== null ? vivo * neg.rendimento_pct / 100 / arroba : null;
+    var base = neg.peso_carcaca_total !== null ? 'CARCACA' : exatas !== null ? (neg.rendimento_tipo === 'NEGOCIADO' ? 'NEGOCIADA' : 'ESTIMADA') : null;
+    var equivalente = null;
+    var rend = m.params.rendimento_carcaca_padrao_pct;
+    if (exatas === null && vivo !== null && typeof rend === 'number' && rend > 0) {
+      var eq = vivo * rend / 100 / arroba;
+      equivalente = { rendimento_pct: rend, arrobas: Utils.arredondar(eq, 2), preco_arroba: Math.round(tot.receita / eq), base: 'ESTIMADA' };
+    }
+    return {
+      finalidade: c.finalidade, modalidade: c.modalidade, base_peso: neg.base_peso, criterio: neg.criterio, base_estimada: neg.estimado,
+      valor_bruto: tot.valor_bruto, desconto_comercial: tot.desconto_comercial, receita: tot.receita, frete: tot.frete, comissao: tot.comissao,
+      outras_deducoes: tot.outras_deducoes, deducoes: tot.deducoes, retidas: tot.retidas, resultado_negociacao: tot.resultado_negociacao,
+      deposito_esperado: tot.deposito_esperado, conferencia: neg.conferencia, desvio_pct: neg.desvio_pct, peso_vivo_total: vivo,
+      peso_carcaca_total: neg.peso_carcaca_total, rendimento_pct: neg.rendimento_pct, rendimento_tipo: neg.rendimento_tipo,
+      arrobas: exatas === null ? null : Utils.arredondar(exatas, 2), arroba_base: base, preco_unitario: neg.preco_unitario, unidade_preco: neg.unidade_preco,
+      preco_medio_cabeca: Math.round(tot.receita / n), preco_medio_kg: vivo ? Math.round(tot.receita / vivo) : null,
+      preco_medio_arroba: exatas ? Math.round(tot.receita / exatas) : null, equivalente_arroba: equivalente,
+    };
+  }
+
   // ------------------------------------------------------------------ valor de abertura ----
   /**
    * Valor de abertura (03b, seções 10.3 e 13): um lançamento AQUISICAO_ANIMAIS na conta SALDO_ABERTURA_REBANHO,
