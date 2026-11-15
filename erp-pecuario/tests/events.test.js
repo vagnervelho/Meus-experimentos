@@ -24,15 +24,15 @@ function falha(m, acao, dados, op) {
 }
 
 // ------------------------------------------------------------------ catálogo ----
-test('catálogo: 21 tipos; na Fase 2 (até esta etapa) entradas, nascimento, compra, transferência, morte, descarte, três ajustes e estorno; módulos por fase; serialização é só dado', () => {
+test('catálogo: 21 tipos; na Fase 2 (até esta etapa) entradas, nascimento, compra, venda, transferência, morte, descarte, três ajustes e estorno; módulos por fase; serialização é só dado', () => {
   const G = createGas({ order: 'alpha' }).G;
   const C = G.EventCatalog;
   assert.equal(C.nomes().length, 21);
   assert.equal(C.FASE_ATUAL, 2);
-  assert.deepEqual(js(C.tiposAtivos()), ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'NASCIMENTO', 'COMPRA', 'TRANSFERENCIA', 'MORTE', 'DESCARTE', 'AJUSTE_INVENTARIO', 'ESTORNO']);
+  assert.deepEqual(js(C.tiposAtivos()), ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'NASCIMENTO', 'COMPRA', 'VENDA', 'TRANSFERENCIA', 'MORTE', 'DESCARTE', 'AJUSTE_INVENTARIO', 'ESTORNO']);
   assert.deepEqual(js(C.tiposAtivos(1)), ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'AJUSTE_INVENTARIO', 'ESTORNO'], 'a Fase 1 continua a mesma');
-  for (const t of ['VENDA', 'IDENTIFICACAO', 'MARCACAO']) assert.equal(C.ativo(t), false, t + ' é da Fase 2, mas ainda sem campos: inativo');
-  assert.deepEqual([C.ativo('AJUSTE_INVENTARIO', 'CORRECAO_LOCALIZACAO'), C.ativo('AJUSTE_INVENTARIO', 'RECLASSIFICACAO'), C.ativo('VENDA'), C.ativo('VENDA', null, 2)], [true, false, false, false]);
+  for (const t of ['IDENTIFICACAO', 'MARCACAO']) assert.equal(C.ativo(t), false, t + ' é da Fase 2, mas ainda sem campos: inativo');
+  assert.deepEqual([C.ativo('AJUSTE_INVENTARIO', 'CORRECAO_LOCALIZACAO'), C.ativo('AJUSTE_INVENTARIO', 'RECLASSIFICACAO'), C.ativo('VENDA'), C.ativo('VENDA', null, 2), C.ativo('VENDA', null, 1)], [true, false, true, true, false]);
   assert.deepEqual(js(C.modulosAtivos().map((x) => x.id)), ['DASHBOARD', 'REBANHO', 'PASTOS', 'EVENTOS', 'CONFIGURACOES', 'IMPORTACAO']);
   assert.equal(C.modulosAtivos(5).filter((x) => x.menu).length, 10, 'o menu chega aos 10 itens da §15 na Fase 5');
   const s = C.serializar();
@@ -110,7 +110,7 @@ test('ENTRADA_INICIAL: só na data do marco zero; sem marco zero é CONFIG; OUTR
   assert.deepEqual(codigos(falha(m, 'registrar', outraEntrada('2026-03-01', [bicho()], { description: '' }))), ['CAMPO_OBRIGATORIO']);
   assert.deepEqual(codigos(falha(m, 'registrar', outraEntrada('2026-03-01', [bicho({ pasto_destino_id: PASTOS.INATIVO })]))), ['PASTO_INATIVO']);
   assert.deepEqual(codigos(falha(m, 'registrar', outraEntrada('2026-03-01', [bicho({ pasto_destino_id: E.id(0xdead) })]))), ['NAO_ENCONTRADO']);
-  assert.deepEqual(codigos(falha(m, 'registrar', { tipo: 'VENDA', campos: {}, animais: [{}] })), ['TIPO_INDISPONIVEL']);
+  assert.deepEqual(codigos(falha(m, 'registrar', { tipo: 'IDENTIFICACAO', campos: {}, animais: [{}] })), ['TIPO_INDISPONIVEL']);
   assert.deepEqual(codigos(falha(m, 'registrar', outraEntrada('2026-03-01', []))), ['SEM_ANIMAIS']);
   const e = falha(m, 'registrar', outraEntrada('2026-03-01', [bicho({ sexo: 'M', castrado: true, reprodutor: true, data_nascimento: '2026-04-01', data_nascimento_confianca: 'CONFIRMADA' })]));
   assert.deepEqual(codigos(e).sort(), ['CASTRADO_REPRODUTOR', 'NASCIMENTO_DEPOIS_DA_ENTRADA']);
