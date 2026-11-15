@@ -1,0 +1,400 @@
+<script>
+'use strict';
+/*
+ * ERP Pecuário — Configurações (08-ux-ui.md, seção 3): parâmetros por grupo (config.salvar, com a política dos avisos
+ * por código), listas abertas (lista.salvar), categorias com o teste de cobertura (categoria.salvar; lacuna vira aviso
+ * com aceite), propriedades (propriedade.salvar), parceiros (parceiro.salvar) e sistema: backup agora, restaurar
+ * (escolha do backup, consequência descrita e a palavra RESTAURAR), verificação de integridade com reparo,
+ * diagnóstico (sistema.diagnostico + o que este aparelho sabe de si) e auditoria (auditoria.listar).
+ */
+var TelaConfig = (function () {
+  var h = Util.h;
+  var SECOES = [['parametros', 'Parâmetros'], ['listas', 'Listas'], ['categorias', 'Categorias'], ['propriedades', 'Propriedades'], ['parceiros', 'Parceiros'], ['sistema', 'Sistema'], ['auditoria', 'Auditoria']];
+  var ROTULOS = {
+    propriedade_padrao_id: 'Propriedade principal', fuso: 'Fuso horário da fazenda', data_marco_zero: 'Marco zero (data do rebanho inicial)', unidade_peso_exibicao: 'Mostrar os pesos em',
+    itens_por_pagina: 'Itens por página nas listas', brinco_somente_numerico: 'Brinco só com números', brinco_ignora_zeros_esquerda: 'Achar o brinco sem os zeros à esquerda', brinco_permite_reuso: 'Permitir reusar brinco de outro animal',
+    ua_peso_kg: 'Peso de 1 UA (kg)', arroba_kg: 'Peso da arroba (kg)', rendimento_carcaca_padrao_pct: 'Rendimento de carcaça padrão (%)', dias_gestacao: 'Dias de gestação',
+    idade_min_reprodutiva_meses: 'Idade mínima para reproduzir (meses)', idade_desmama_padrao_meses: 'Idade de desmama (meses)', faixas_etarias_meses: 'Cortes das faixas etárias (meses, separados por vírgula)',
+    peso_validade_dias: 'Validade da pesagem (dias)', gmd_intervalo_min_dias: 'Intervalo mínimo para o GMD (dias)', gmd_plausivel_min_kg_dia: 'GMD mínimo plausível (kg/dia)', gmd_plausivel_max_kg_dia: 'GMD máximo plausível (kg/dia)',
+    gmd_referencia_janela_dias: 'Janela do GMD de referência (dias)', gmd_aceita_fita: 'Pesagem por fita conta no GMD', projecao_peso_horizonte_dias: 'Horizonte da projeção de peso (dias)',
+    peso_nascer_padrao_kg_macho: 'Peso ao nascer padrão do macho (kg)', peso_nascer_padrao_kg_femea: 'Peso ao nascer padrão da fêmea (kg)', parto_tolerancia_dias: 'Tolerância da previsão de parto (dias)',
+    prenhez_cobertura_dg_min_pct: 'Cobertura mínima do diagnóstico de gestação (%)', indicador_n_minimo: 'Mínimo de animais para um indicador', agenda_antecedencia_dias: 'Avisar procedimento com antecedência (dias)',
+    agenda_tolerancia_dias: 'Tolerância da agenda sanitária (dias)', fin_bloqueio_ate: 'Financeiro fechado até', fin_tolerancia_conferencia_pct: 'Tolerância na conferência de valores (%)',
+    caixa_saldo_inicial: 'Saldo inicial do caixa (R$)', caixa_saldo_inicial_data: 'Data do saldo inicial do caixa', patrimonio_valor_manual_validade_dias: 'Validade do valor manual do animal (dias)',
+    alerta_sem_pesagem_dias: 'Alertar animal sem pesagem há (dias)', alerta_parto_previsto_dias: 'Alertar parto previsto em (dias)', alerta_prenhez_vencida_dias: 'Alertar prenhez vencida há (dias)',
+    alerta_parcela_a_vencer_dias: 'Alertar parcela a vencer em (dias)', alerta_backup_atrasado_dias: 'Alertar backup atrasado há (dias)', avisos_politica: 'O que fazer com cada aviso',
+    backup_retencao_diarios: 'Backups diários guardados', backup_retencao_mensais: 'Backups mensais guardados', importacao_lote_linhas: 'Linhas por bloco na importação',
+    json_celula_max_caracteres: 'Tamanho máximo de texto por célula', arquivamento_limiar_linhas: 'Linhas por tabela para arquivar',
+  };
+  var AVISOS = {
+    CARENCIA_ATIVA: 'Animal em carência (venda para abate)', POSSIVEL_DUPLICIDADE: 'Lançamento possivelmente repetido', BRINCO_PARECIDO: 'Brinco parecido com o de outro animal', LOTACAO_ACIMA_DA_CAPACIDADE: 'Pasto acima da capacidade',
+    PESO_IMPLAUSIVEL: 'Peso fora do esperado', IDADE_REPRODUTIVA: 'Mãe abaixo da idade reprodutiva', PERIODO_BLOQUEADO: 'Período financeiro fechado', VALOR_DIVERGENTE: 'Valor diferente da conta',
+    RATEIO_SEM_PESO: 'Rateio por peso sem pesagem', INTERVALO_PARTO_CURTO: 'Intervalo entre partos curto', PRODUTO_VENCIDO: 'Produto vencido', ESTOQUE_INSUFICIENTE: 'Estoque insuficiente', CATEGORIAS_SEM_COBERTURA: 'Categorias com lacuna',
+  };
+  var LISTAS = {
+    RACA: 'Raças', CAUSA_MORTE: 'Causas de morte', MOTIVO_DESCARTE: 'Motivos de descarte', DESTINO_DESCARTE: 'Destinos do descarte', FORMA_PAGAMENTO: 'Formas de pagamento', VIA_APLICACAO: 'Vias de aplicação',
+    TIPO_OCORRENCIA: 'Tipos de ocorrência', TIPO_PARTO: 'Tipos de parto', TIPO_DEDUCAO_VENDA: 'Deduções da venda', MOTIVO_IDENTIFICACAO: 'Motivos de identificação', FINALIDADE_NEGOCIO: 'Finalidades de compra e venda',
+  };
+  var TIPOS_PARCEIRO = ['FORNECEDOR', 'COMPRADOR', 'VETERINARIO', 'TRANSPORTADOR', 'ARRENDADOR', 'OUTRO'];
+  var listaAtual = 'RACA';
+  function recarregar(secao) { Roteador.ir('config/' + secao, { forcar: true, substituir: true }); }
+  function botaoEditar(texto, fn) { return UI.botao(texto || 'Editar', { icone: 'editar', aoClicar: fn }); }
+
+  // ------------------------------------------------------------------ parâmetros ----
+  function defParam(it) {
+    var ajuda = it.descricao + (it.padrao ? ' Padrão: ' + it.padrao + '.' : '') + (it.origem === 'PADRAO' ? ' (usando o padrão)' : '') + (it.erro ? ' Valor gravado inválido: ' + it.erro : '');
+    var d = { id: it.chave, rotulo: ROTULOS[it.chave] || Fmt.rotulo('', it.chave), ajuda: ajuda, tipo: 'texto' };
+    if (it.chave === 'propriedade_padrao_id') d.tipo = 'ref:PROPRIEDADES';
+    else if (it.chave === 'unidade_peso_exibicao') { d.tipo = 'lista'; d.opcoes = ['KG', 'ARROBA']; }
+    else if (it.formato === 'DATA') d.tipo = 'data';
+    else if (it.tipo === 'BOOL') d.tipo = 'bool';
+    else if (it.tipo === 'NUMERO') d.tipo = 'decimal';
+    return d;
+  }
+  function brutoParam(it) {
+    var v = it.valor;
+    if (v === null || v === undefined) return null;
+    if (it.tipo === 'NUMERO') return String(v).replace('.', ',');
+    if (it.chave === 'faixas_etarias_meses' && Array.isArray(v)) return v.join(', ');
+    return v;
+  }
+  function valorParam(it, v) {
+    if (it.chave !== 'faixas_etarias_meses' || v === null) return { valor: v };
+    var partes = String(v).split(/[;,\s]+/).filter(Boolean);
+    if (!partes.every(function (x) { return /^\d+$/.test(x); })) return { erro: 'Use meses inteiros separados por vírgula (ex.: 12, 24, 36).' };
+    return { valor: partes.map(Number) };
+  }
+  function grupoParametros(grupo, itens) {
+    var normais = itens.filter(function (i) { return i.chave !== 'avisos_politica'; });
+    var defs = normais.map(defParam);
+    var valores = {};
+    normais.forEach(function (i) { valores[i.chave] = brutoParam(i); });
+    var antes = Formulario.converterValores(defs, Util.clonar(valores)).valores;
+    var bloco = Formulario.bloco(defs, valores, { idBase: 'cfg-' + grupo, aoNovo: false });
+    var politica = itens.filter(function (i) { return i.chave === 'avisos_politica'; })[0];
+    var selects = {};
+    var tabelaPol = null;
+    if (politica) {
+      var atual = politica.valor || {};
+      var cods = (Store.dados().configuracoes.codigos_aviso || Object.keys(AVISOS));
+      tabelaPol = h('div', { class: 'grade-campos', dataset: { politica: '1' } }, cods.map(function (c) {
+        var id = 'pol-' + c;
+        var sel = h('select', { id: id }, ['BLOQUEIA', 'AVISA', 'IGNORA'].map(function (p) { return h('option', { value: p, text: Fmt.rotulo('POLITICA_AVISO', p), selected: (atual[c] || 'AVISA') === p }); }));
+        selects[c] = sel;
+        return h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo', for: id, text: AVISOS[c] || Fmt.rotulo('', c) }), sel);
+      }));
+    }
+    var just = Campos.criar({ id: 'justificativa', rotulo: 'Motivo da mudança (opcional)', tipo: 'texto' }, { idBase: 'cfgj-' + grupo });
+    var status = h('div', { role: 'status', 'aria-live': 'polite' });
+    var salvarB = UI.botao('Salvar ' + Fmt.rotulo('GRUPO_CONFIG', grupo).toLowerCase(), { tipo: 'primario', aoClicar: salvar });
+    var env = Cadastro.envio({ rota: 'config.salvar', botao: salvarB, rotuloBotao: 'Salvar ' + Fmt.rotulo('GRUPO_CONFIG', grupo).toLowerCase(), status: status, bloco: bloco, aoSucesso: function (r) {
+      UI.aviso((r.data.chaves || []).length + ((r.data.chaves || []).length === 1 ? ' parâmetro salvo.' : ' parâmetros salvos.'), { tipo: 'ok' });
+      recarregar('parametros');
+    } });
+    function salvar() {
+      Util.limpar(status);
+      var c = bloco.converter();
+      if (c.erros.length) { bloco.focarPrimeiroErro(); return; }
+      var mudou = {}, erros = [];
+      normais.forEach(function (it) {
+        var a = antes[it.chave] === undefined ? null : antes[it.chave], n = c.valores[it.chave] === undefined ? null : c.valores[it.chave];
+        if (JSON.stringify(a) === JSON.stringify(n)) return;
+        var v = valorParam(it, n);
+        if (v.erro) erros.push({ campo: it.chave, mensagem: v.erro }); else mudou[it.chave] = v.valor;
+      });
+      if (politica) {
+        var pol = {};
+        Object.keys(selects).forEach(function (k) { if (selects[k].value !== 'AVISA') pol[k] = selects[k].value; });
+        if (JSON.stringify(pol) !== JSON.stringify(politica.valor || {})) mudou.avisos_politica = pol;
+      }
+      if (erros.length) { bloco.mostrarErros(erros); bloco.focarPrimeiroErro(); return; }
+      if (!Object.keys(mudou).length) { status.appendChild(UI.nota('Nada mudou neste grupo.', 'info')); return; }
+      var dados = { valores: mudou };
+      if (!Util.vazio(just.ler())) dados.justificativa = String(just.ler()).trim();
+      env.enviar(dados);
+    }
+    return UI.secao(Fmt.rotulo('GRUPO_CONFIG', grupo), h('div', { class: 'formulario', dataset: { grupo: grupo } }, bloco.el, tabelaPol, just.el, h('div', { class: 'acoes' }, salvarB), status), { dado: 'grupo-' + grupo });
+  }
+  function secaoParametros(el) {
+    var cfg = Store.dados().configuracoes || { itens: [] };
+    var grupos = [];
+    cfg.itens.forEach(function (i) { if (grupos.indexOf(i.grupo) < 0) grupos.push(i.grupo); });
+    if ((cfg.desconhecidas || []).length) el.appendChild(UI.nota('Há parâmetros na planilha que o sistema não conhece: ' + cfg.desconhecidas.join(', ') + '. Eles são ignorados.', 'aviso'));
+    el.appendChild(UI.nota('Os valores zootécnicos e financeiros são pontos de partida a validar com o uso da fazenda.', 'info'));
+    grupos.forEach(function (g) { el.appendChild(grupoParametros(g, cfg.itens.filter(function (i) { return i.grupo === g; }))); });
+  }
+
+  // ------------------------------------------------------------------ listas ----
+  function secaoListas(el) {
+    var todas = Store.dados().listas || [];
+    var nomes = Object.keys(LISTAS);
+    var sel = h('select', { id: 'cfg-lista' }, nomes.map(function (n) { return h('option', { value: n, text: LISTAS[n], selected: n === listaAtual }); }));
+    sel.addEventListener('change', function () { listaAtual = sel.value; recarregar('listas'); });
+    el.appendChild(h('div', { class: 'busca-linha' }, h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo', for: 'cfg-lista', text: 'Lista' }), sel),
+      UI.botao('Novo item', { tipo: 'primario', icone: 'registrar', aoClicar: function (ev) { formLista(null, ev.currentTarget); } })));
+    var itens = todas.filter(function (l) { return l.lista === listaAtual; }).sort(function (a, b) { return (a.ordem || 0) - (b.ordem || 0); });
+    el.appendChild(UI.tabela({ id: 'listas', rotulo: LISTAS[listaAtual], linhas: itens, chave: function (l) { return l.lista_id; }, vazio: { texto: 'Lista vazia.' },
+      colunas: [
+        { id: 'rotulo', rotulo: 'Rótulo' }, { id: 'codigo', rotulo: 'Código' }, { id: 'ordem', rotulo: 'Ordem', num: true },
+        { id: 'ativo', rotulo: 'Situação', valor: function (l) { return l.ativo === false ? 'Desativado' : 'Ativo'; } },
+        { id: 'acao', rotulo: 'Ação', ordenavel: false, formatar: function (l) { return botaoEditar('Editar', function (ev) { formLista(l, ev.currentTarget); }); } },
+      ] }).el);
+  }
+  function formLista(item, origem) {
+    var novo = !item;
+    var defs = [{ id: 'rotulo', rotulo: 'Rótulo (como aparece na tela)', tipo: 'texto', obrigatorio: true }];
+    if (novo) defs.push({ id: 'codigo', rotulo: 'Código', tipo: 'texto', ajuda: 'Letras maiúsculas, sem acento. Em branco, sai do rótulo. Não muda depois.' });
+    defs.push({ id: 'ordem', rotulo: 'Ordem na lista', tipo: 'inteiro', min: 0 });
+    if (!novo) defs.push({ id: 'ativo', rotulo: 'Ativo', tipo: 'bool', obrigatorio: true });
+    Cadastro.folha({ titulo: novo ? 'Novo item em ' + LISTAS[listaAtual] : 'Editar ' + item.rotulo, rota: 'lista.salvar', origem: origem, idBase: 'lst', defs: defs,
+      valores: novo ? {} : { rotulo: item.rotulo, ordem: String(item.ordem), ativo: item.ativo !== false },
+      montar: function (c) { var d = Object.assign({ lista: listaAtual }, c); if (!novo) d.lista_id = item.lista_id; Object.keys(d).forEach(function (k) { if (d[k] === null) delete d[k]; }); return d; },
+      sucesso: function (d) { return 'Item "' + (d && d.rotulo) + '" salvo.'; }, aoSalvar: function () { recarregar('listas'); } });
+  }
+
+  // ------------------------------------------------------------------ categorias ----
+  function secaoCategorias(el) {
+    var cob = Store.dados().cobertura || {};
+    if (cob.completa) el.appendChild(UI.nota('Cobertura completa: todo animal do rebanho cai em alguma categoria ativa (' + (cob.testes || 0) + ' perfis conferidos).', 'ok'));
+    else el.appendChild(UI.nota('Há perfis de animal sem categoria. Eles aparecem como "Sem categoria" até a regra ser ajustada:', 'erro', h('ul', null, (cob.lacunas || []).map(function (l) { return h('li', { text: l.rotulo }); }))));
+    el.appendChild(h('div', { class: 'acoes' }, UI.botao('Nova categoria', { tipo: 'primario', icone: 'registrar', aoClicar: function (ev) { formCategoria(null, ev.currentTarget); } })));
+    var cats = Store.categorias().slice().sort(function (a, b) { return a.prioridade - b.prioridade; });
+    var idade = function (c) { var a = c.idade_minima_meses, b = c.idade_maxima_meses; return a === null && b === null ? 'qualquer' : (a === null ? 0 : a) + (b === null ? ' meses ou mais' : ' a ' + b + ' meses'); };
+    el.appendChild(UI.tabela({ id: 'categorias', rotulo: 'Categorias', linhas: cats, chave: function (c) { return c.category_id; },
+      colunas: [
+        { id: 'prioridade', rotulo: 'Prioridade', num: true }, { id: 'nome', rotulo: 'Categoria' }, { id: 'sexo', rotulo: 'Sexo', valor: function (c) { return Fmt.rotulo('SEXO_APLICAVEL', c.sexo_aplicavel); } },
+        { id: 'idade', rotulo: 'Idade', valor: idade }, { id: 'condicao', rotulo: 'Condição', valor: function (c) { return Fmt.rotulo('CONDICAO', c.condicao); } },
+        { id: 'ativo', rotulo: 'Situação', valor: function (c) { return c.ativo === false ? 'Desativada' : 'Ativa'; } },
+        { id: 'acao', rotulo: 'Ação', ordenavel: false, formatar: function (c) { return botaoEditar('Editar', function (ev) { formCategoria(c, ev.currentTarget); }); } },
+      ] }).el);
+  }
+  function formCategoria(c, origem) {
+    var novo = !c;
+    var defs = [{ id: 'nome', rotulo: 'Nome', tipo: 'texto', obrigatorio: true }];
+    if (novo) defs.push({ id: 'codigo', rotulo: 'Código', tipo: 'texto', obrigatorio: true, ajuda: 'Letras maiúsculas, sem acento. Não muda depois.' });
+    defs = defs.concat([
+      { id: 'sexo_aplicavel', rotulo: 'Para', tipo: 'lista', opcoes: ['M', 'F', 'AMBOS'], obrigatorio: true },
+      { id: 'idade_minima_meses', rotulo: 'Idade mínima (meses, inclusive)', tipo: 'inteiro', min: 0 },
+      { id: 'idade_maxima_meses', rotulo: 'Idade máxima (meses, sem incluir)', tipo: 'inteiro', min: 1 },
+      { id: 'condicao', rotulo: 'Condição', tipo: 'lista', opcoes: ['NENHUMA', 'CASTRADO', 'INTEIRO', 'REPRODUTOR', 'NAO_REPRODUTOR', 'PARIDA', 'NAO_PARIDA'], obrigatorio: true, default: 'NENHUMA' },
+      { id: 'prioridade', rotulo: 'Prioridade (menor vale primeiro)', tipo: 'inteiro', obrigatorio: true, min: 0 },
+      { id: 'peso_referencia_kg', rotulo: 'Peso de referência', tipo: 'decimal', casas: 1, unidade: 'kg', min: 0 },
+      { id: 'descricao', rotulo: 'Descrição', tipo: 'texto' },
+      { id: 'ativo', rotulo: 'Ativa', tipo: 'bool', obrigatorio: true, default: true },
+    ]);
+    var s = function (v) { return v === null || v === undefined ? null : String(v); };
+    Cadastro.folha({ titulo: novo ? 'Nova categoria' : 'Editar ' + c.nome, rota: 'categoria.salvar', origem: origem, idBase: 'cat', defs: defs,
+      valores: novo ? {} : { nome: c.nome, sexo_aplicavel: c.sexo_aplicavel, idade_minima_meses: s(c.idade_minima_meses), idade_maxima_meses: s(c.idade_maxima_meses), condicao: c.condicao, prioridade: s(c.prioridade), peso_referencia_kg: c.peso_referencia_kg === null ? null : Fmt.numero(c.peso_referencia_kg, 1).replace(/\./g, ''), descricao: c.descricao, ativo: c.ativo !== false },
+      extra: UI.nota('Ao salvar, o sistema confere se todo perfil de animal continua com categoria; se não, mostra a lacuna e pede confirmação.', 'info'),
+      montar: function (v) { return novo ? { campos: v } : { category_id: c.category_id, campos: v }; },
+      sucesso: function (d) { return d && d.cobertura && !d.cobertura.completa ? 'Categoria salva. Ainda há perfis sem categoria.' : 'Categoria salva.'; }, aoSalvar: function () { recarregar('categorias'); } });
+  }
+
+  // ------------------------------------------------------------------ propriedades e parceiros ----
+  function secaoPropriedades(el) {
+    el.appendChild(h('div', { class: 'acoes' }, UI.botao('Nova propriedade', { tipo: 'primario', icone: 'registrar', aoClicar: function (ev) { formPropriedade(null, ev.currentTarget); } })));
+    var padrao = Store.param('propriedade_padrao_id');
+    el.appendChild(UI.tabela({ id: 'propriedades', rotulo: 'Propriedades', linhas: Store.propriedades({ todas: true }), chave: function (p) { return p.property_id; }, vazio: { texto: 'Nenhuma propriedade cadastrada. Comece por aqui.' },
+      colunas: [
+        { id: 'nome', rotulo: 'Propriedade', valor: function (p) { return p.nome + (p.property_id === padrao ? ' (principal)' : ''); } }, { id: 'localizacao', rotulo: 'Localização' },
+        { id: 'area_total_ha', rotulo: 'Área (ha)', num: true, valor: function (p) { return p.area_total_ha === null || p.area_total_ha === undefined ? null : Fmt.numero(p.area_total_ha, 2); } },
+        { id: 'status', rotulo: 'Situação', valor: function (p) { return Fmt.rotulo('STATUS', p.status); } },
+        { id: 'acao', rotulo: 'Ação', ordenavel: false, formatar: function (p) { return botaoEditar('Editar', function (ev) { formPropriedade(p, ev.currentTarget); }); } },
+      ] }).el);
+    if (!Store.param('data_marco_zero')) el.appendChild(UI.nota('Falta a data do marco zero (Parâmetros › Geral): é a data do rebanho inicial e o começo da linha do tempo.', 'aviso'));
+  }
+  function formPropriedade(p, origem) {
+    var novo = !p;
+    var defs = [{ id: 'nome', rotulo: 'Nome', tipo: 'texto', obrigatorio: true }, { id: 'descricao', rotulo: 'Descrição', tipo: 'texto' }, { id: 'localizacao', rotulo: 'Localização (município, estrada)', tipo: 'texto' },
+      { id: 'area_total_ha', rotulo: 'Área total', tipo: 'decimal', casas: 4, unidade: 'ha', min: 0 }];
+    if (!novo) defs.push({ id: 'status', rotulo: 'Situação', tipo: 'lista', opcoes: ['ATIVO', 'INATIVO'], obrigatorio: true });
+    Cadastro.folha({ titulo: novo ? 'Nova propriedade' : 'Editar ' + p.nome, rota: 'propriedade.salvar', origem: origem, idBase: 'prp', defs: defs,
+      valores: novo ? {} : { nome: p.nome, descricao: p.descricao, localizacao: p.localizacao, area_total_ha: p.area_total_ha === null || p.area_total_ha === undefined ? null : String(p.area_total_ha).replace('.', ','), status: p.status },
+      montar: function (c) { return novo ? { campos: c } : { property_id: p.property_id, campos: c }; },
+      sucesso: function (d) { return 'Propriedade "' + (d && d.nome) + '" salva.'; }, aoSalvar: function () { recarregar('propriedades'); } });
+  }
+  function secaoParceiros(el) {
+    el.appendChild(h('div', { class: 'acoes' }, UI.botao('Novo parceiro', { tipo: 'primario', icone: 'registrar', aoClicar: function (ev) { formParceiro(null, ev.currentTarget); } })));
+    var todos = (Store.dados().parceiros || []).slice().sort(function (a, b) { return UI.comparar(a.nome, b.nome); });
+    var tipos = function (p) { return (Array.isArray(p.tipos) ? p.tipos : String(p.tipos || '').split(',')).filter(Boolean).map(function (t) { return Fmt.rotulo('TIPO_PARCEIRO', t.trim()); }).join(', '); };
+    el.appendChild(UI.tabela({ id: 'parceiros', rotulo: 'Parceiros', linhas: todos, chave: function (p) { return p.partner_id; }, vazio: { texto: 'Nenhum parceiro cadastrado.' },
+      colunas: [
+        { id: 'nome', rotulo: 'Nome' }, { id: 'tipos', rotulo: 'É', valor: tipos }, { id: 'telefone', rotulo: 'Telefone' }, { id: 'documento', rotulo: 'CPF ou CNPJ' },
+        { id: 'ativo', rotulo: 'Situação', valor: function (p) { return p.ativo === false ? 'Inativo' : 'Ativo'; } },
+        { id: 'acao', rotulo: 'Ação', ordenavel: false, formatar: function (p) { return botaoEditar('Editar', function (ev) { formParceiro(p, ev.currentTarget); }); } },
+      ] }).el);
+  }
+  function formParceiro(p, origem) {
+    var novo = !p;
+    var atuais = p ? (Array.isArray(p.tipos) ? p.tipos : String(p.tipos || '').split(',').map(function (x) { return x.trim(); })) : [];
+    var erroTipos = h('div', { class: 'campo-erro', hidden: true });
+    var caixas = {};
+    var fs = h('fieldset', { class: 'opcoes', dataset: { campo: 'tipos' } }, h('legend', { class: 'campo-rotulo campo-obrigatorio', text: 'O que ele é' }), h('div', { class: 'opcoes-lista' }, TIPOS_PARCEIRO.map(function (t) {
+      var cx = h('input', { type: 'checkbox', id: 'prc-t-' + t, checked: atuais.indexOf(t) >= 0 });
+      caixas[t] = cx;
+      return h('label', { class: 'marca', for: 'prc-t-' + t }, cx, h('span', { text: Fmt.rotulo('TIPO_PARCEIRO', t) }));
+    })), erroTipos);
+    var defs = [{ id: 'nome', rotulo: 'Nome', tipo: 'texto', obrigatorio: true }, { id: 'documento', rotulo: 'CPF ou CNPJ', tipo: 'texto' }, { id: 'telefone', rotulo: 'Telefone', tipo: 'texto' },
+      { id: 'endereco', rotulo: 'Endereço', tipo: 'texto' }, { id: 'observacoes', rotulo: 'Observações', tipo: 'texto' }];
+    if (!novo) defs.push({ id: 'ativo', rotulo: 'Ativo', tipo: 'bool', obrigatorio: true });
+    Cadastro.folha({ titulo: novo ? 'Novo parceiro' : 'Editar ' + p.nome, rota: 'parceiro.salvar', origem: origem, idBase: 'prc', defs: defs, extra: fs,
+      valores: novo ? {} : { nome: p.nome, documento: p.documento, telefone: p.telefone, endereco: p.endereco, observacoes: p.observacoes, ativo: p.ativo !== false },
+      montar: function (c) {
+        var tipos = TIPOS_PARCEIRO.filter(function (t) { return caixas[t].checked; });
+        Util.limpar(erroTipos);
+        erroTipos.hidden = !!tipos.length;
+        if (!tipos.length) { erroTipos.appendChild(h('span', { text: 'Marque pelo menos uma opção.' })); caixas.FORNECEDOR.focus(); return null; }
+        c.tipos = tipos;
+        return novo ? { campos: c } : { partner_id: p.partner_id, campos: c };
+      },
+      sucesso: function (d) { return 'Parceiro "' + (d && d.nome) + '" salvo.'; }, aoSalvar: function () { recarregar('parceiros'); } });
+  }
+
+  // ------------------------------------------------------------------ sistema ----
+  function rodar(botao, texto, saida, rota, dados, desenhar) {
+    var destravar = UI.travar(botao, texto);
+    Util.limpar(saida);
+    saida.appendChild(UI.carregando(texto));
+    return Cliente.consulta(rota, dados || {}, { semPrazo: true }).then(function (r) {
+      destravar();
+      Util.limpar(saida);
+      desenhar(r.data, r);
+      return r;
+    }, function (e) {
+      destravar();
+      Util.limpar(saida);
+      saida.appendChild(UI.estadoErro(e));
+      return null;
+    });
+  }
+  function nomeGatilho(f) { return f === 'trgManutencaoDiaria' ? 'Backup e limpeza diários' : f === 'trgIntegridadeSemanal' ? 'Verificação semanal' : f; }
+  function relatorioIntegridade(saida, d) {
+    saida.appendChild(UI.nota(d.ok ? 'Tudo certo: nenhum erro de integridade (' + d.alertas + ' alertas).' : d.erros + (d.erros === 1 ? ' erro' : ' erros') + ' e ' + d.alertas + ' alertas encontrados.', d.ok ? 'ok' : 'erro'));
+    saida.appendChild(UI.tabela({ id: 'integridade', rotulo: 'Conferências', linhas: d.checagens || [], chave: function (c) { return c.codigo; }, porPagina: 50,
+      colunas: [{ id: 'rotulo', rotulo: 'Conferência' }, { id: 'situacao', rotulo: 'Resultado', valor: function (c) { return { OK: 'ok', ERRO: 'erro', ALERTA: 'alerta', NAO_EXECUTADA: 'não executada' }[c.situacao] || c.situacao; } }, { id: 'achados', rotulo: 'Achados', num: true }, { id: 'correcao', rotulo: 'Como corrigir' }] }).el);
+    if ((d.achados || []).length) saida.appendChild(h('details', { class: 'detalhe' }, h('summary', { text: 'Ver os achados (' + d.achados.length + (d.truncado ? '+' : '') + ')' }), h('ul', { class: 'lista-simples' }, d.achados.slice(0, 100).map(function (a) { return h('li', { text: a.tabela + (a.linha ? ' linha ' + a.linha : '') + ': ' + a.mensagem }); }))));
+    if (d.reparavel) saida.appendChild(UI.botao('Reparar: refazer a situação pelos lançamentos', { tipo: 'primario', aoClicar: function (ev) {
+      var ta = Campos.criar({ id: 'justificativa', rotulo: 'Por que reparar', tipo: 'texto' }, { idBase: 'rep' });
+      var st = h('div', { role: 'status' });
+      var f = UI.folha({ titulo: 'Reparar a integridade', origem: ev.currentTarget, conteudo: h('div', { class: 'formulario' }, UI.nota('Recalcula a situação de todos os animais e lançamentos a partir dos lançamentos que valem. Nada é apagado.', 'info'), ta.el, st) });
+      var b = UI.botao('Reparar agora', { tipo: 'primario', aoClicar: function () {
+        rodar(b, 'Reparando…', st, 'sistema.integridade', { reparar: true, justificativa: Util.vazio(ta.ler()) ? null : ta.ler() }, function (r) {
+          f.fechar({ forcar: true });
+          Util.limpar(saida);
+          relatorioIntegridade(saida, r.integridade);
+          Store.carregar({ forcar: true }).then(App.recasca, function (e) { UI.aviso('A lista deste aparelho não foi atualizada: ' + e.message, { tipo: 'erro' }); });
+        });
+      } });
+      f.definirAcoes([UI.botao('Cancelar', { aoClicar: function () { f.fechar(); } }), b]);
+    } }));
+  }
+  function restaurar(b, origem) {
+    var palavra = h('input', { type: 'text', id: 'rst-palavra', autocomplete: 'off' });
+    var just = Campos.criar({ id: 'justificativa', rotulo: 'Por que restaurar', tipo: 'texto', obrigatorio: true }, { idBase: 'rst' });
+    just.marcarObrigatorio(true);
+    var st = h('div', { role: 'status', 'aria-live': 'polite' });
+    var f = UI.folha({ titulo: 'Restaurar o backup de ' + Fmt.instante(b.instante), origem: origem, conteudo: h('div', { class: 'formulario' },
+      UI.nota('Os dados atuais do sistema serão substituídos pela cópia de ' + Fmt.instante(b.instante) + ' (' + Fmt.rotulo('', b.motivo).toLowerCase() + '). O que foi gravado depois deixa de aparecer. A planilha atual fica guardada no Drive.', 'aviso'),
+      h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo campo-obrigatorio', for: 'rst-palavra', text: 'Para confirmar, digite RESTAURAR' }), palavra), just.el, st) });
+    var bt = UI.botao('Restaurar o backup', { tipo: 'perigo', aoClicar: function () {
+      Util.limpar(st);
+      if (palavra.value.trim().toUpperCase() !== 'RESTAURAR') { st.appendChild(UI.nota('Digite RESTAURAR para confirmar.', 'erro')); palavra.focus(); return; }
+      if (Util.vazio(just.ler())) { just.erro('Diga por que restaurar.'); just.focar(); return; }
+      rodar(bt, 'Restaurando…', st, 'sistema.restaurarBackup', { backup_id: b.id, justificativa: String(just.ler()).trim() }, function () {
+        f.fechar({ forcar: true });
+        UI.aviso('Backup restaurado. O sistema voltou para os dados de ' + Fmt.instante(b.instante) + '.', { tipo: 'ok' });
+        Store.carregar({ forcar: true }).then(function () { App.recasca(); recarregar('sistema'); }, function (e) { UI.aviso('Recarregue a página: ' + e.message, { tipo: 'erro' }); });
+      });
+    } });
+    f.definirAcoes([UI.botao('Cancelar', { aoClicar: function () { f.fechar(); } }), bt]);
+  }
+  function secaoSistema(el) {
+    var est = h('div', null, UI.carregando('Lendo o estado do sistema…'));
+    el.appendChild(est);
+    Cliente.consulta('sistema.estado', {}).then(function (r) {
+      var d = r.data;
+      Util.limpar(est);
+      var ub = d.ultimo_backup;
+      var integ = d.integridade;
+      est.appendChild(UI.secao('Estado', UI.pares([
+        ['Versão do app', App.raiz().getAttribute('data-app-version')], ['Versão dos dados', String(d.data_version)], ['Forma de gravação', d.primitiva],
+        ['Rotinas automáticas', (d.gatilhos || []).map(nomeGatilho).join(' · ') || 'nenhuma instalada (rode a configuração)'],
+        ['Último backup', ub ? Fmt.instante(ub.instante) + ' (' + Fmt.rotulo('', ub.motivo).toLowerCase() + ')' : 'nenhum ainda'],
+        ['Última verificação semanal', integ && integ.gerado_em ? Fmt.instante(integ.gerado_em) + (integ.ok ? ' · sem erros' : ' · ' + integ.erros + ' erros') : 'ainda não rodou'],
+      ]), { dado: 'estado' }));
+      var saidaBackup = h('div', { role: 'status', 'aria-live': 'polite' });
+      var bb = UI.botao('Fazer backup agora', { tipo: 'primario', aoClicar: function () { rodar(bb, 'Fazendo o backup…', saidaBackup, 'sistema.backup', {}, function (x) { saidaBackup.appendChild(UI.nota('Backup feito: ' + x.backup.nome + '.', 'ok')); setTimeout(function () { recarregar('sistema'); }, 800); }); } });
+      est.appendChild(UI.secao('Backups', h('div', null, h('div', { class: 'acoes' }, bb), saidaBackup, UI.tabela({ id: 'backups', rotulo: 'Backups', linhas: d.backups || [], chave: function (x) { return x.id; }, vazio: { texto: 'Nenhum backup ainda.' }, porPagina: 10,
+        colunas: [{ id: 'instante', rotulo: 'Feito em', formatar: function (x) { return Fmt.instante(x.instante); } }, { id: 'motivo', rotulo: 'Motivo', valor: function (x) { return Fmt.rotulo('', x.motivo); } },
+          { id: 'acao', rotulo: 'Ação', ordenavel: false, formatar: function (x) { return UI.botao('Restaurar', { tipo: 'perigo', aoClicar: function (ev) { restaurar(x, ev.currentTarget); } }); } }] }).el), { dado: 'backups' }));
+      var saidaInt = h('div', { role: 'status', 'aria-live': 'polite', dataset: { integridade: '1' } });
+      var bi = UI.botao('Verificar a integridade agora', { aoClicar: function () { rodar(bi, 'Conferindo…', saidaInt, 'sistema.integridade', {}, function (x) { relatorioIntegridade(saidaInt, x); }); } });
+      est.appendChild(UI.secao('Integridade', h('div', null, h('p', { class: 'suave', text: 'Confere chaves, brincos, referências, linha do tempo de cada animal e a situação gravada contra os lançamentos.' }), h('div', { class: 'acoes' }, bi), saidaInt), { dado: 'integridade' }));
+      var saidaDiag = h('div', { role: 'status', 'aria-live': 'polite', dataset: { diagnostico: '1' } });
+      var bd = UI.botao('Rodar o diagnóstico', { aoClicar: function () { rodar(bd, 'Diagnosticando…', saidaDiag, 'sistema.diagnostico', {}, function (x) {
+        var fusoAparelho = '';
+        try { fusoAparelho = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) { Util.registrarFalha('fuso do aparelho', e); }
+        saidaDiag.appendChild(UI.pares([
+          ['Seu acesso', x.sessao.email_ativo_e_do_dono ? 'confirmado como dono' : x.sessao.contingencia_email_vazio ? 'liberado pela contingência de e-mail vazio' : 'não confirmado'],
+          ['Forma de gravação', x.primitiva], ['Rotinas faltando', x.gatilhos.faltando.length ? x.gatilhos.faltando.map(nomeGatilho).join(', ') : 'nenhuma'],
+          ['Fuso do sistema', x.fuso.script + ' · planilha ' + (x.fuso.planilha || 'ilegível')], ['Fuso deste aparelho', fusoAparelho + (fusoAparelho && fusoAparelho !== Fmt.config().fuso ? ' (as datas seguem o da fazenda)' : '')],
+          ['Gravação em curso', x.gravacao_em_curso ? 'sim' : 'não'], ['Versão do servidor', x.app_version + (x.app_version !== App.raiz().getAttribute('data-app-version') ? ' (recarregue a página)' : '')],
+          ['Rascunhos deste aparelho', Rascunhos.modo() === 'SERVIDOR' ? 'guardados no servidor' : 'guardados no aparelho'], ['Navegação', { GAS: 'pelo endereço do app', HASH: 'pelo endereço do quadro', MEMORIA: 'só na memória (o Voltar do aparelho não recua)' }[Roteador.modo()] || Roteador.modo()],
+        ]));
+        saidaDiag.appendChild(UI.nota('O roteiro completo (gravação, Drive, tempo de resposta) roda no editor do Apps Script: função ' + x.editor + '.', 'info'));
+      }); } });
+      est.appendChild(UI.secao('Diagnóstico', h('div', null, h('div', { class: 'acoes' }, bd), saidaDiag), { dado: 'diagnostico' }));
+    }, function (e) { Util.limpar(est); est.appendChild(UI.estadoErro(e, { acao: { texto: 'Tentar de novo', aoClicar: function () { recarregar('sistema'); } } })); });
+  }
+
+  // ------------------------------------------------------------------ auditoria ----
+  function secaoAuditoria(el) {
+    var f = { pagina: 1 };
+    var ents = [['', 'Todas'], ['ANIMAIS', 'Animais'], ['PASTOS', 'Pastos'], ['PROPRIEDADES', 'Propriedades'], ['PARCEIROS', 'Parceiros'], ['CONFIGURACOES', 'Parâmetros'], ['LISTAS', 'Listas'], ['CATEGORIAS', 'Categorias'], ['ANEXOS', 'Anexos'], ['IMPORTACOES', 'Importações']];
+    var sel = h('select', { id: 'aud-ent' }, ents.map(function (e) { return h('option', { value: e[0], text: e[1] }); }));
+    var de = h('input', { type: 'date', id: 'aud-de' }), ate = h('input', { type: 'date', id: 'aud-ate' });
+    var campo = function (id, rot, c) { return h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo', for: id, text: rot }), c); };
+    var corpo = h('div');
+    el.appendChild(h('form', { class: 'filtros', on: { submit: function (ev) { ev.preventDefault(); f.pagina = 1; carregar(); } } }, campo('aud-ent', 'O que mudou', sel), campo('aud-de', 'De', de), campo('aud-ate', 'Até', ate), UI.botao('Filtrar', { tipo: 'primario', atributos: { type: 'submit' } })));
+    el.appendChild(corpo);
+    function carregar() {
+      var q = { pagina: f.pagina };
+      if (sel.value) q.entidade = sel.value;
+      if (de.value) q.de = de.value + 'T00:00:00.000Z';
+      if (ate.value) q.ate = ate.value + 'T23:59:59.999Z';
+      Util.limpar(corpo);
+      corpo.appendChild(UI.carregando('Buscando a auditoria…'));
+      Cliente.consulta('auditoria.listar', q).then(function (r) {
+        var d = r.data;
+        Util.limpar(corpo);
+        var paginas = Math.max(1, Math.ceil(d.total / d.por_pagina));
+        corpo.appendChild(h('p', { class: 'dado', text: d.total + (d.total === 1 ? ' registro' : ' registros') + ' de alteração' }));
+        corpo.appendChild(UI.tabela({ id: 'auditoria', rotulo: 'Auditoria', linhas: d.itens, chave: function (x) { return x.audit_id; }, porPagina: d.por_pagina, semPaginacao: true, vazio: { texto: 'Nenhuma alteração com esses filtros.' },
+          colunas: [
+            { id: 'timestamp', rotulo: 'Quando', formatar: function (x) { return Fmt.instante(x.timestamp); } }, { id: 'usuario', rotulo: 'Quem' },
+            { id: 'entidade', rotulo: 'O quê', valor: function (x) { return Fmt.rotulo('', x.entidade) + ' · ' + Fmt.rotulo('', x.acao).toLowerCase(); } }, { id: 'campo', rotulo: 'Campo' },
+            { id: 'mudanca', rotulo: 'De → para', valor: function (x) { return (x.valor_anterior === null || x.valor_anterior === undefined ? '—' : String(x.valor_anterior)) + ' → ' + (x.valor_novo === null || x.valor_novo === undefined ? '—' : String(x.valor_novo)); } },
+            { id: 'justificativa', rotulo: 'Justificativa' },
+          ] }).el);
+        if (paginas > 1) corpo.appendChild(h('div', { class: 'paginacao' }, h('span', { class: 'suave', text: 'Página ' + d.pagina + ' de ' + paginas }), h('div', { class: 'acoes', style: 'margin-top:0' },
+          UI.botao('Anterior', { desabilitado: d.pagina <= 1, aoClicar: function () { f.pagina -= 1; carregar(); } }), UI.botao('Próxima', { desabilitado: d.pagina >= paginas, aoClicar: function () { f.pagina += 1; carregar(); } }))));
+      }, function (e) { Util.limpar(corpo); corpo.appendChild(UI.estadoErro(e, { acao: { texto: 'Tentar de novo', aoClicar: carregar } })); });
+    }
+    carregar();
+  }
+
+  var MONTAR = { parametros: secaoParametros, listas: secaoListas, categorias: secaoCategorias, propriedades: secaoPropriedades, parceiros: secaoParceiros, sistema: secaoSistema, auditoria: secaoAuditoria };
+  function montar(el, p) {
+    var secao = MONTAR[p.secao] ? p.secao : 'parametros';
+    el.appendChild(h('div', { class: 'tela-cabecalho' }, h('h1', { text: 'Configurações' })));
+    var itens = SECOES.map(function (s) { return { rotulo: s[1], rota: 'config/' + s[0], atual: s[0] === secao }; });
+    if (Telas.existe('importar')) itens.push({ rotulo: 'Importação', rota: 'importar', atual: false });
+    el.appendChild(UI.abas('Partes das configurações', itens));
+    var corpo = h('div', { dataset: { secao: secao } }, h('h2', { text: SECOES.filter(function (s) { return s[0] === secao; })[0][1] }));
+    el.appendChild(corpo);
+    MONTAR[secao](corpo);
+  }
+  Telas.registrar('config/:secao', { titulo: 'Configurações', modulo: 'CONFIGURACOES', montar: montar });
+  return { ROTULOS: ROTULOS, valorParam: valorParam };
+})();
+</script>
