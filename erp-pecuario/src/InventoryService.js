@@ -10,6 +10,12 @@ var InventoryService = (function () {
   /** Alertas entregues até a Fase 2 (lista fechada do desenho-base, seção 6, no recorte das fases entregues). */
   var ALERTAS = ['ATIVO_SEM_PASTO', 'SEM_BRINCO', 'SEM_CATEGORIA', 'NAO_LOCALIZADO', 'BACKUP_ATRASADO', 'INTEGRIDADE_COM_ERRO', 'IMPORTACAO_INCOMPLETA'];
   var DIA_MS = 86400000;
+  /**
+   * Tipos cujas linhas são movimento ou saída: o elegível em D é quem está no rebanho ao fim do dia (depois das saídas
+   * de D). Nos demais tipos de animais do rebanho (fatos: parto, identificação, marcação e, nas fases seguintes, pesagem,
+   * sanidade...) vale quem esteve no rebanho em algum momento de D — o dia da saída conta (RN-017), como na validação.
+   */
+  var MOVIMENTO_OU_SAIDA = ['TRANSFERENCIA', 'VENDA', 'MORTE', 'DESCARTE'];
 
   function vazio_(v) {
     return v === null || v === undefined || v === '';
@@ -44,6 +50,24 @@ var InventoryService = (function () {
     var itens = [];
     Object.keys(porAnimal).forEach(function (id) {
       var p = Timeline.pastoEm(porAnimal[id], data, L.marcoZero);
+      if (!p.presente) return;
+      var a = L.repo.porId('ANIMAIS', id);
+      if (a) itens.push({ animal: a, pasture_id: p.pasture_id });
+    });
+    return { motivo: null, itens: Utils.ordenarPor(itens, function (x) { return x.animal.codigo_interno; }) };
+  }
+  /**
+   * Animais no rebanho em algum momento do dia D (o dia da entrada e o da saída contam: RN-017), com o pasto em que
+   * estavam antes das saídas do dia (Timeline.pastoAntesDaSaida): os que podem receber um fato datado de D. Mesma
+   * forma e mesmos motivos de `presentes`.
+   */
+  function presentesNoDia(L, data) {
+    if (vazio_(L.marcoZero)) return { motivo: 'DADOS_INSUFICIENTES', itens: null };
+    if (data < L.marcoZero) return { motivo: 'ANTERIOR_AO_MARCO_ZERO', itens: null };
+    var porAnimal = Utils.agruparPor(L.f.todasAsLinhas(), 'animal_id');
+    var itens = [];
+    Object.keys(porAnimal).forEach(function (id) {
+      var p = Timeline.pastoAntesDaSaida(porAnimal[id], data, L.marcoZero);
       if (!p.presente) return;
       var a = L.repo.porId('ANIMAIS', id);
       if (a) itens.push({ animal: a, pasture_id: p.pasture_id });
@@ -261,8 +285,9 @@ var InventoryService = (function () {
   /**
    * Consulta `inventario.elegiveis` (08, seção 7): os animais que podem entrar num lançamento do tipo na data D,
    * resolvidos pela linha do tempo (o store do aparelho só sabe a posição de hoje). dados: {tipo, data?, pasture_id?}.
-   * Vale para os tipos cujo filtro de elegíveis pede animal no rebanho (ATIVO): elegível = no rebanho ao fim do dia D,
-   * no pasto pedido nessa data e com o sexo que o tipo exige (`filtro_elegiveis.sexo`). Devolve {data, tipo,
+   * Vale para os tipos cujo filtro de elegíveis pede animal no rebanho (ATIVO): elegível = no rebanho ao fim do dia D
+   * (movimentos e saídas) ou em algum momento de D (fatos: parto, identificação, marcação — o dia da saída conta, como
+   * na validação), no pasto pedido nessa data e com o sexo que o tipo exige (`filtro_elegiveis.sexo`). Devolve {data, tipo,
    * pasture_id, motivo, n, itens: [{animal_id, codigo_interno, brinco, sexo, pasture_id}]}; antes do marco zero (ou
    * sem ele) n e itens voltam null com o motivo. VALIDATION: tipo indisponível ou sem elegíveis por presença, data
    * inválida ou futura; NOT_FOUND: pasto inexistente.
@@ -281,7 +306,7 @@ var InventoryService = (function () {
         var L = AnimalService.leitor(tx);
         var data = conferirData_(L, d.data);
         if (!vazio_(d.pasture_id) && !L.f.pasto(d.pasture_id)) throw Validation.erro('NOT_FOUND', 'Pasto não encontrado. Atualize a tela e tente de novo.');
-        var pres = presentes(L, data);
+        var pres = MOVIMENTO_OU_SAIDA.indexOf(tipo) >= 0 ? presentes(L, data) : presentesNoDia(L, data);
         var base = { data: data, tipo: tipo, pasture_id: vazio_(d.pasture_id) ? null : d.pasture_id, motivo: pres.motivo, n: null, itens: null };
         if (pres.motivo) return base;
         base.itens = pres.itens.filter(function (x) {
@@ -305,6 +330,7 @@ var InventoryService = (function () {
     ALERTAS: ALERTAS,
     leituras: leituras,
     presentes: presentes,
+    presentesNoDia: presentesNoDia,
     compor: compor,
     posicao: posicao,
     alertas: alertas,

@@ -540,30 +540,32 @@ function propNascimento(M, data, matriz, crias, pasto, substitui) {
   return { novo, excl, pre, tocados, removidosCriados, substitui, novos, acao: substitui ? 'corrigir' : 'registrar' };
 }
 /** IDENTIFICACAO de brinco: PRIMEIRA_IDENTIFICACAO e SUBSTITUICAO com código novo; REMOCAO tira o código em uso na data. */
-function propIdentificacao(M, sub, data, id, codigo) {
+function propIdentificacao(M, sub, data, id, codigo, substitui) {
+  const excl = new Set(substitui ? [substitui.id] : []);
   const pre = [];
-  sujeitos(M, [id], new Set(), pre);
-  const novo = novoEvento(M, 'IDENTIFICACAO', data, { sub });
+  sujeitos(M, [id], excl, pre);
+  const novo = novoEvento(M, 'IDENTIFICACAO', data, { sub, raiz: substitui ? substitui.raiz : M.seq + 1 });
   novo.linhas.push({ animal: id, efeito: 0, origem: null, destino: null, fato: true });
   let cod = codigo;
   if (sub === 'REMOCAO') {
-    cod = brincoAntes(M, id, data, new Set());
+    cod = brincoAntes(M, id, data, excl);
     if (!cod) pre.push('SEM_IDENTIFICACAO');
-  }
+  } else if (brincoAntes(M, id, data, excl) === codigo) pre.push('VALOR_IGUAL');
   novo.idents.push({ animal: id, kind: sub === 'PRIMEIRA_IDENTIFICACAO' ? 'PRIMEIRA' : sub === 'SUBSTITUICAO' ? 'SUBST' : 'REMOCAO', codigo: cod });
   const item = { animal_id: id };
   if (sub !== 'REMOCAO') item.codigo = codigo;
   if (sub !== 'PRIMEIRA_IDENTIFICACAO') item.motivo = 'PERDA';
   novo.dados = { tipo: 'IDENTIFICACAO', subtipo: sub, campos: { event_date: data, tipo_identificacao: 'BRINCO' }, animais: [item] };
-  return { novo, excl: new Set(), pre, tocados: [id], acao: 'registrar' };
+  return { novo, excl, pre, tocados: [id].concat(substitui ? substitui.linhas.map((l) => l.animal) : []), substitui, acao: substitui ? 'corrigir' : 'registrar' };
 }
-function propMarcacao(M, sub, marcar, data, id) {
+function propMarcacao(M, sub, marcar, data, id, substitui) {
+  const excl = new Set(substitui ? [substitui.id] : []);
   const pre = [];
-  sujeitos(M, [id], new Set(), pre);
-  const novo = novoEvento(M, 'MARCACAO', data, { sub, marca: { sub, marcar } });
+  sujeitos(M, [id], excl, pre);
+  const novo = novoEvento(M, 'MARCACAO', data, { sub, marca: { sub, marcar }, raiz: substitui ? substitui.raiz : M.seq + 1 });
   novo.linhas.push({ animal: id, efeito: 0, origem: null, destino: null, fato: true });
   novo.dados = { tipo: 'MARCACAO', subtipo: sub, campos: { event_date: data, acao: marcar ? 'MARCAR' : 'DESMARCAR' }, animais: [{ animal_id: id }] };
-  return { novo, excl: new Set(), pre, tocados: [id], acao: 'registrar' };
+  return { novo, excl, pre, tocados: [id].concat(substitui ? substitui.linhas.map((l) => l.animal) : []), substitui, acao: substitui ? 'corrigir' : 'registrar' };
 }
 /** OUTRA_ENTRADA de animal que já existe (volta ao rebanho). */
 function propVolta(M, data, id, pasto) {
@@ -594,33 +596,105 @@ function contagens(r) {
   ABAS_CRU.forEach((a) => { o[a] = r[a].length; });
   return o;
 }
-/** Roda a proposta, confere o desfecho previsto e, aceita, grava no modelo. Devolve {r, prev}. */
-function executar(amb, M, p, msg, op) {
-  const prev = prever(M, p);
-  const antes = contagens(cru(amb.m));
-  const dados = p.estorno ? p.dados : Object.assign({}, p.novo.dados, p.substitui ? { event_id: p.substitui.id, justificativa: 'Corrigindo o lançamento' } : {});
-  const r = amb.m.tentar(p.acao, dados, Object.assign({ avisos: AVISOS }, op || {}));
-  const tipo = p.estorno ? 'ESTORNO' : p.novo.tipo + (p.substitui ? '/corrigir' : '');
-  const st = (M.stats[tipo] = M.stats[tipo] || { OK: 0, VALIDATION: 0, CONFLICT: 0 });
-  const quem = msg + ' [' + tipo + ' ' + (p.novo ? p.novo.data : p.alvo.data) + '] previsto ' + prev.cat + (prev.por ? ' (' + prev.por.join(',') + ')' : '') +
-    (prev.outros ? ' com ' + Array.from(prev.outros).map((id) => (M.porId.get(id) || {}).tipo + '@' + (M.porId.get(id) || {}).data).join(',') : '') +
-    '; sistema: ' + (r.ok ? 'OK' : r.erro.code + ' ' + r.erro.message + ' ' + JSON.stringify(r.erro.details.map((d) => [d.codigo, d.conflito && d.conflito.tipo, d.conflito && d.conflito.data])));
-  if (prev.cat === 'OK') {
-    assert.equal(r.ok, true, quem);
-    st.OK++;
-    return { r, prev, ev: aceitar(M, p, r.valor.dados) };
-  }
+/** Desfecho de um comando (ou da simulação) × previsão do modelo; no CONFLICT, os mesmos eventos que impedem. */
+function conferirDesfecho(M, prev, r, quem) {
+  if (prev.cat === 'OK') { assert.equal(r.ok, true, quem); return; }
   assert.equal(r.ok, false, quem);
   assert.equal(r.erro.code, prev.cat, quem);
   if (prev.cat === 'CONFLICT') {
     const vistos = new Set(r.erro.details.map((d) => d.conflito && d.conflito.event_id).filter(Boolean));
     assert.deepEqual(Array.from(vistos).sort(), Array.from(prev.outros).sort(), quem + ': os eventos que impedem');
   }
+}
+function dadosDe(p) {
+  return p.estorno ? p.dados : Object.assign({}, p.novo.dados, p.substitui ? { event_id: p.substitui.id, justificativa: 'Corrigindo o lançamento' } : {});
+}
+/**
+ * Roda a proposta: primeiro a simulação (o MESMO tratador: mesmo desfecho e os mesmos lançamentos que a gravação),
+ * depois o comando; confere o desfecho previsto e, aceito, grava no modelo, confere a resposta e, às vezes, reenvia
+ * com a mesma chave (duplicado idêntico, nada gravado) ou com outro conteúdo (IDEMPOTENCY_MISMATCH). op: {chave, rnd}.
+ */
+function executar(amb, M, p, msg, op) {
+  const o = op || {};
+  const prev = prever(M, p);
+  const antes = contagens(cru(amb.m));
+  const dados = dadosDe(p);
+  const tipo = p.estorno ? 'ESTORNO' : p.novo.tipo + (p.substitui ? '/corrigir' : '');
+  const descr = (r) => (r.ok ? 'OK' : r.erro.code + ' ' + r.erro.message + ' ' + JSON.stringify(r.erro.details.map((d) => [d.codigo, d.conflito && d.conflito.tipo, d.conflito && d.conflito.data])));
+  const quem0 = msg + ' [' + tipo + ' ' + (p.novo ? p.novo.data : p.alvo.data) + '] previsto ' + prev.cat + (prev.por ? ' (' + prev.por.join(',') + ')' : '') +
+    (prev.outros ? ' com ' + Array.from(prev.outros).map((id) => (M.porId.get(id) || {}).tipo + '@' + (M.porId.get(id) || {}).data).join(',') : '');
+  const sim = amb.m.simular(p.acao, dados, { avisos: AVISOS });
+  conferirDesfecho(M, prev, sim, quem0 + '; simulação: ' + descr(sim));
+  const r = amb.m.tentar(p.acao, dados, { avisos: AVISOS, chave: o.chave });
+  const quem = quem0 + '; sistema: ' + descr(r);
+  conferirDesfecho(M, prev, r, quem);
+  const st = (M.stats[tipo] = M.stats[tipo] || { OK: 0, VALIDATION: 0, CONFLICT: 0 });
   st[prev.cat]++;
-  assert.deepEqual(contagens(cru(amb.m)), antes, quem + ': o comando recusado não gravou nada');
-  return { r, prev, ev: null };
+  if (prev.cat !== 'OK') {
+    assert.deepEqual(contagens(cru(amb.m)), antes, quem + ': o comando recusado não gravou nada');
+    return { r, prev, ev: null };
+  }
+  const ev = aceitar(M, p, r.valor.dados);
+  // A simulação mostrou os mesmos lançamentos que a gravação fez (P5: o valor definitivo vem do servidor).
+  const fin = sim.valor.dados.impactos.financeiro;
+  if (ev.finEsperado && ev.finEsperado.length) {
+    assert.deepEqual(fin.lancamentos.map((l) => [l.natureza, l.valor]), ev.finEsperado.map((f) => [f.natureza, f.valor]), quem + ': lançamentos da simulação');
+    const porAnimal = {};
+    ev.finEsperado.forEach((f, i) => f.alocs.forEach((v, k) => { if (i === 0 || ev.tipo === 'COMPRA') porAnimal[k] = (porAnimal[k] || 0) + v; }));
+    const simulado = {};
+    fin.por_animal.forEach((x) => { simulado[x.animal_id] = x.valor; });
+    if (ev.tipo !== 'COMPRA' || !p.novos || !p.novos.length) assert.deepEqual(simulado, porAnimal, quem + ': valor por animal da simulação');
+  } else assert.ok(!fin, quem + ': sem lançamento na simulação');
+  // A resposta traz os animais já com as projeções do modelo.
+  r.valor.dados.animais.forEach((a) => {
+    const st2 = situacaoDe(linhasDe(M, a.animal_id));
+    assert.deepEqual([a.situacao_cadastral, a.pasto_atual_id], [st2.situacao, st2.pasto], quem + ': resposta, animal ' + a.codigo_interno);
+  });
+  const rnd = o.rnd;
+  if (rnd && o.chave) {
+    const x = rnd();
+    if (x < 0.15) {
+      const depois = contagens(cru(amb.m));
+      const dup = amb.m.tentar(p.acao, dados, { avisos: [], chave: o.chave });
+      assert.equal(dup.ok, true, quem + ': reenvio com a mesma chave');
+      assert.deepEqual([dup.valor.duplicado, dup.valor.dados, dup.valor.opId], [true, r.valor.dados, r.valor.opId], quem + ': reenvio = duplicado com a mesma resposta');
+      assert.deepEqual(contagens(cru(amb.m)), depois, quem + ': o duplicado não gravou nada');
+    } else if (x < 0.25) {
+      const depois = contagens(cru(amb.m));
+      const outro = Object.assign({}, dados, p.estorno ? { justificativa: 'Outro motivo' } : { campos: Object.assign({}, dados.campos, { notes: 'Conteúdo mudado com a mesma chave' }) });
+      const mm = amb.m.tentar(p.acao, outro, { avisos: AVISOS, chave: o.chave });
+      assert.equal(mm.ok ? 'OK' : mm.erro.code, 'IDEMPOTENCY_MISMATCH', quem + ': mesma chave, conteúdo diferente');
+      assert.deepEqual(contagens(cru(amb.m)), depois, quem + ': o IDEMPOTENCY_MISMATCH não gravou nada');
+    }
+  }
+  return { r, prev, ev };
 }
 
+/**
+ * Elegíveis pelo modelo: num fato (parto, identificação, marcação) vale o animal presente em algum momento do dia D
+ * (o dia da saída conta, RN-017) e o pasto em que ele estava antes das saídas do dia; num movimento ou numa saída, o
+ * animal no rebanho ao fim de D, no pasto de então.
+ */
+function elegiveisDoModelo(M, D) {
+  const fim = [];
+  const fato = [];
+  const pasto = USO[0];
+  M.animais.forEach((a, id) => {
+    const ls = linhasDe(M, id);
+    const st = inventarioDe(ls, D);
+    const p = Object.keys(st.porPasto)[0] || null;
+    if (st.total >= 1) fim.push({ id, pasto: p });
+    if (presenteNoDia(ls, D)) fato.push({ id, pasto: antesDaSaida(ls, D).pasto, sexo: a.sexo });
+  });
+  return [
+    { tipo: 'TRANSFERENCIA', ids: fim.map((x) => x.id) },
+    { tipo: 'VENDA', pasto, ids: fim.filter((x) => x.pasto === pasto).map((x) => x.id) },
+    { tipo: 'MORTE', ids: fim.map((x) => x.id) },
+    { tipo: 'NASCIMENTO', ids: fato.filter((x) => x.sexo === 'F').map((x) => x.id) },
+    { tipo: 'IDENTIFICACAO', pasto, ids: fato.filter((x) => x.pasto === pasto).map((x) => x.id) },
+    { tipo: 'MARCACAO', ids: fato.map((x) => x.id) },
+  ];
+}
 /** Modelo = replay cru = sistema: inventário em várias datas, ficha de cada animal, alocações e invariantes. */
 function conferirTudo(amb, M, msg, datasSistema) {
   const { m, G } = amb;
@@ -644,6 +718,19 @@ function conferirTudo(amb, M, msg, datasSistema) {
     const x = sis[i];
     assert.deepEqual({ total: x.total, porPasto: x.porPasto, semPasto: x.semPasto }, inventarioDe(R.linhas, D), msg + ': inventário do sistema em ' + D);
   });
+  // A posição do rebanho (InventoryService) e os elegíveis de cada tipo na data, pela mesma linha do tempo.
+  if (datasSistema && datasSistema.length) {
+    const D = datasSistema[datasSistema.length - 1];
+    const pos = m.ler(G.InventoryService.consultaPosicao({ data: D }));
+    const rep = inventarioDe(R.linhas, D);
+    const porPasto = {};
+    pos.por_pasto.forEach((x) => { if (x.cabecas) porPasto[x.pasture_id] = x.cabecas; });
+    assert.deepEqual([pos.cabecas, porPasto, pos.sem_pasto], [rep.total, rep.porPasto, rep.semPasto], msg + ': inventario.posicao em ' + D);
+    elegiveisDoModelo(M, D).forEach((q) => {
+      const x = m.ler(G.InventoryService.consultaElegiveis({ tipo: q.tipo, data: D, pasture_id: q.pasto || null }));
+      assert.deepEqual(x.itens.map((i) => i.animal_id).sort(), q.ids.sort(), msg + ': inventario.elegiveis de ' + q.tipo + (q.pasto ? ' no pasto' : '') + ' em ' + D);
+    });
+  }
   // Ficha de cada animal: modelo e replay.
   const linhaAnimal = new Map(r.ANIMAIS.map((a) => [a.animal_id, a]));
   M.animais.forEach((a, id) => {
@@ -773,18 +860,26 @@ function gerar(M, amb, rnd) {
     if (!ids.length) return null;
     return propTransferencia(M, D, origem, plausivel ? sorteio(rnd, USO.filter((p) => p !== origem)) : sorteio(rnd, USO), alguns(rnd, ids, 3));
   }
-  if (x < 0.27) {
-    const ids = alguns(rnd, plausivel ? animaisNoDia(M, D) : todos, 3);
-    if (!ids.length) return null;
-    const g = negocioVenda(rnd, ids.length);
-    if (!plausivel && rnd() < 0.5) g.origem = sorteio(rnd, USO);
-    return propVenda(M, amb, D, ids, g, rnd);
-  }
   if (x < 0.35) {
-    const tipo = sorteio(rnd, ['MORTE', 'DESCARTE', 'DIVERGENCIA_CONTAGEM']);
-    const ids = alguns(rnd, plausivel ? animaisNoDia(M, D) : todos, 2);
+    const venda = x < 0.27;
+    const tipo = venda ? 'VENDA' : sorteio(rnd, ['MORTE', 'DESCARTE', 'DIVERGENCIA_CONTAGEM']);
+    let ids;
+    let Ds = D;
+    if (plausivel && rnd() < 0.5) {
+      // Saída depois de tudo o que o animal já tem: a que costuma ser aceita.
+      ids = alguns(rnd, todos.filter((id) => estadoAtual(M, id).situacao === 'ATIVO'), venda ? 3 : 2);
+      if (!ids.length) return null;
+      const ultima = ids.map((id) => linhasDe(M, id).reduce((u, l) => (l.data > u ? l.data : u), D0)).reduce((u, d) => (d > u ? d : u), D0);
+      const folga = Math.round((Date.parse(HOJE) - Date.parse(ultima)) / 86400000);
+      Ds = somaDias(ultima, Math.floor(rnd() * (folga + 1)));
+    } else ids = alguns(rnd, plausivel ? animaisNoDia(M, D) : todos, venda ? 3 : 2);
     if (!ids.length) return null;
-    return propSaida(M, amb, tipo, D, ids, { valor: tipo !== 'DIVERGENCIA_CONTAGEM' && rnd() < 0.4 ? sorteio(rnd, [1, 2, 25000]) : 0 });
+    if (venda) {
+      const g = negocioVenda(rnd, ids.length);
+      if (!plausivel && rnd() < 0.5) g.origem = sorteio(rnd, USO);
+      return propVenda(M, amb, Ds, ids, g, rnd);
+    }
+    return propSaida(M, amb, tipo, Ds, ids, { valor: tipo !== 'DIVERGENCIA_CONTAGEM' && rnd() < 0.4 ? sorteio(rnd, [1, 2, 25000]) : 0 });
   }
   if (x < 0.45) {
     const n = 1 + Math.floor(rnd() * 3);
@@ -826,7 +921,7 @@ function gerar(M, amb, rnd) {
   return gerarCorrecao(M, amb, rnd, evs.filter((e) => e.vigente));
 }
 function gerarCorrecao(M, amb, rnd, evs) {
-  const alvo = sorteio(rnd, evs.filter((e) => ['TRANSFERENCIA', 'VENDA', 'COMPRA', 'MORTE', 'DESCARTE', 'NASCIMENTO'].includes(e.tipo) && !e.dados.animais.some((a) => a.animal_id && !M.animais.has(a.animal_id))));
+  const alvo = sorteio(rnd, evs.filter((e) => ['TRANSFERENCIA', 'VENDA', 'COMPRA', 'MORTE', 'DESCARTE', 'NASCIMENTO', 'IDENTIFICACAO', 'MARCACAO', 'AJUSTE_INVENTARIO'].includes(e.tipo) && !e.dados.animais.some((a) => a.animal_id && !M.animais.has(a.animal_id))));
   if (!alvo) return null;
   const D = rnd() < 0.5 ? alvo.data : dataAleatoria(rnd);
   const d = alvo.dados;
@@ -836,6 +931,12 @@ function gerarCorrecao(M, amb, rnd, evs) {
     const destino = sorteio(rnd, USO.filter((p) => p !== origem));
     return propTransferencia(M, D, origem, destino, rnd() < 0.3 && ids.length > 1 ? ids.slice(1) : ids, alvo);
   }
+  if (alvo.tipo === 'IDENTIFICACAO') {
+    const it = d.animais[0];
+    return propIdentificacao(M, alvo.sub, D, it.animal_id, alvo.sub === 'REMOCAO' ? null : rnd() < 0.5 ? it.codigo : 'R' + (++M.brinco), alvo);
+  }
+  if (alvo.tipo === 'MARCACAO') return propMarcacao(M, alvo.sub, alvo.marca.marcar, D, d.animais[0].animal_id, alvo);
+  if (alvo.tipo === 'AJUSTE_INVENTARIO') return propSaida(M, amb, 'DIVERGENCIA_CONTAGEM', D, d.animais.map((a) => a.animal_id), {}, alvo);
   if (alvo.tipo === 'MORTE' || alvo.tipo === 'DESCARTE') {
     return propSaida(M, amb, alvo.tipo, D, d.animais.map((a) => a.animal_id), { valor: rnd() < 0.5 ? sorteio(rnd, [1, 7777]) : 0 }, alvo);
   }
@@ -872,11 +973,16 @@ function sequencia(semente, passos, opcoes) {
   rebanhoInicial(amb, M);
   conferirTudo(amb, M, 'rebanho inicial');
   const rnd = A.aleatorio(semente);
+  let chave = null;
+  let recusado = false;
   for (let k = 0; k < passos; k++) {
     const p = gerar(M, amb, rnd);
     if (!p) continue;
     const msg = 'semente ' + semente + ', passo ' + k;
-    const ex = executar(amb, M, p, msg);
+    // A chave de um comando recusado não é consumida: o próximo comando a reaproveita.
+    chave = recusado ? chave : 'k-' + semente + '-' + k;
+    const ex = executar(amb, M, p, msg, { chave, rnd });
+    recusado = !ex.ev;
     depoisDoComando(M, p, !!ex.ev);
     const data = p.novo ? p.novo.data : p.alvo.data;
     conferirTudo(amb, M, msg, [data, somaDias(data, -1), dataAleatoria(rnd)]);
