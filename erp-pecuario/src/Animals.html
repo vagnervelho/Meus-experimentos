@@ -1,0 +1,529 @@
+<script>
+'use strict';
+/*
+ * ERP Pecuário — Rebanho (§5; 08-ux-ui.md, seções 3, 7 e 10). Listagem com as 10 colunas da §5 (tabela no desktop,
+ * cartões abaixo de 900 px), busca por brinco (com a regra dos zeros à esquerda), nome ou código; filtros por pasto,
+ * sexo, categoria, situação e faixa etária (cortes de faixas_etarias_meses) e os atalhos "sem pasto", "sem brinco" e
+ * "sem categoria"; ordenação, paginação, seleção múltipla ("Registrar evento com N selecionados") e CSV do conjunto
+ * filtrado. "Cadastrar animal" pergunta como o animal entrou e abre o evento certo (ou o cadastro de animal de fora
+ * do rebanho). Ficha (animal.ficha) com os blocos A a J em abas, linha do tempo e árvore genealógica; edição num
+ * formulário só (cadastro direto com auditoria; campo sensível pede justificativa e vira evento de ajuste no
+ * servidor); fotos e documentos reduzidos no aparelho. Filtros ficam na memória (§17: nada de dado na rota).
+ */
+var TelaRebanho = (function () {
+  var h = Util.h;
+  var BAIXADOS = ['VENDIDO', 'MORTO', 'DESCARTADO', 'BAIXADO_AJUSTE', 'HISTORICO'];
+  var SITUACOES = [['ATIVO', 'Ativos'], ['EXTERNO', 'De fora do rebanho'], ['SAIRAM', 'Todos que saíram'], ['VENDIDO', 'Vendidos'], ['MORTO', 'Mortos'], ['DESCARTADO', 'Descartados'], ['BAIXADO_AJUSTE', 'Baixados por ajuste'], ['HISTORICO', 'Do histórico'], ['', 'Todas as situações']];
+  var ATALHOS = [['SEM_PASTO', 'Sem pasto'], ['SEM_BRINCO', 'Sem brinco'], ['SEM_CATEGORIA', 'Sem categoria']];
+  var SEM = '__SEM__';
+  var filtros = { texto: '', pasto: '', sexo: '', categoria: '', situacao: 'ATIVO', faixa: '', atalho: '' };
+
+  // ------------------------------------------------------------------ regras da listagem (puras) ----
+  function semAcento(t) { return String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim(); }
+  /** Faixas etárias pelos cortes (meses): [12,24,36] → 0–12, 12–24, 24–36, 36+ (mínima inclusiva, máxima exclusiva). */
+  function faixas(cortes) {
+    var c = (Array.isArray(cortes) && cortes.length ? cortes : [12, 24, 36]).slice().sort(function (a, b) { return a - b; });
+    var out = [];
+    var de = 0;
+    c.forEach(function (x) { out.push({ id: de + '-' + x, rotulo: de + ' a ' + x + ' meses', de: de, ate: x }); de = x; });
+    out.push({ id: de + '+', rotulo: 'Mais de ' + de + ' meses', de: de, ate: null });
+    out.push({ id: SEM, rotulo: 'Sem nascimento informado', de: null, ate: null });
+    return out;
+  }
+  function casaTexto(a, t, ignoraZeros) {
+    if (!t) return true;
+    if (a.brinco) {
+      if (Store.normalizarBrinco(a.brinco, true) === Store.normalizarBrinco(t, true)) return true;
+      if (ignoraZeros && /^\d+$/.test(String(t).trim()) && Store.normalizarBrinco(a.brinco, false) === Store.normalizarBrinco(t, false)) return true;
+    }
+    var cod = /^(?:A-?)?0*(\d{1,9})$/i.exec(String(t).trim());
+    if (cod && a.codigo_interno === 'A-' + cod[1].padStart(6, '0')) return true;
+    return !!(a.nome && semAcento(a.nome).indexOf(semAcento(t)) >= 0);
+  }
+  /**
+   * Filtra as linhas leves do store. f: {texto, pasto (id | __SEM__), sexo, categoria (id | __SEM__), situacao (código,
+   * SAIRAM ou vazio = todas), faixa (id de `faixas`), atalho (SEM_PASTO | SEM_BRINCO | SEM_CATEGORIA)}. ctx: {cortes, ignoraZeros}.
+   */
+  function filtrar(animais, f, ctx) {
+    var fx = f.faixa ? faixas(ctx.cortes).filter(function (x) { return x.id === f.faixa; })[0] : null;
+    return animais.filter(function (a) {
+      var sit = a.situacao_cadastral;
+      if (sit === 'ANULADO' || sit === 'PENDENTE') return false;
+      if (f.situacao === 'SAIRAM' ? BAIXADOS.indexOf(sit) < 0 : f.situacao && sit !== f.situacao) return false;
+      if (!casaTexto(a, f.texto, ctx.ignoraZeros)) return false;
+      if (f.pasto === SEM ? !(sit === 'ATIVO' && !a.pasto_atual_id) : f.pasto && a.pasto_atual_id !== f.pasto) return false;
+      if (f.sexo && a.sexo !== f.sexo) return false;
+      if (f.categoria === SEM ? !!a.categoria_id || sit === 'EXTERNO' : f.categoria && a.categoria_id !== f.categoria) return false;
+      if (fx) {
+        var m = a.idade_meses;
+        if (fx.id === SEM ? m !== null && m !== undefined : m === null || m === undefined || m < fx.de || (fx.ate !== null && m >= fx.ate)) return false;
+      }
+      if (f.atalho === 'SEM_PASTO' && !(sit === 'ATIVO' && !a.pasto_atual_id)) return false;
+      if (f.atalho === 'SEM_BRINCO' && (sit !== 'ATIVO' || a.brinco)) return false;
+      if (f.atalho === 'SEM_CATEGORIA' && (sit !== 'ATIVO' || a.categoria_id)) return false;
+      return true;
+    });
+  }
+  function precisaBaixados(f) { return f.situacao === '' || f.situacao === 'SAIRAM' || BAIXADOS.indexOf(f.situacao) >= 0; }
+  /** As 10 colunas da §5: texto da tela (= texto do CSV) e chave de ordenação. */
+  var COLUNAS = [
+    { id: 'brinco', rotulo: 'Brinco', valor: function (a) { return a.brinco || null; }, texto: function (a) { return a.brinco || 'sem brinco'; } },
+    { id: 'codigo_interno', rotulo: 'ID', texto: function (a) { return a.codigo_interno || '—'; } },
+    { id: 'sexo', rotulo: 'Sexo', texto: function (a) { return Fmt.rotulo('SEXO', a.sexo); } },
+    { id: 'raca', rotulo: 'Raça', texto: function (a) { return a.raca ? Store.rotuloLista('RACA', a.raca) : '—'; } },
+    { id: 'idade_meses', rotulo: 'Idade', num: true, valor: function (a) { return a.idade_meses; }, texto: function (a) { return Fmt.idade(a.idade_meses, a.data_nascimento_confianca === 'ESTIMADA'); } },
+    { id: 'categoria', rotulo: 'Categoria', texto: function (a) { var c = a.categoria_id ? Store.categoria(a.categoria_id) : null; return c ? c.nome + (a.categoria_manual ? ' (manual)' : '') : a.situacao_cadastral === 'ATIVO' ? 'Sem categoria' : '—'; } },
+    { id: 'peso_atual', rotulo: 'Peso atual', num: true, valor: function (a) { return a.peso_atual; }, texto: function (a) { return a.peso_atual ? Fmt.peso(a.peso_atual) + (a.data_ultima_pesagem ? ' em ' + Fmt.data(a.data_ultima_pesagem) : '') + (a.peso_vencido ? ' (vencido)' : '') : '—'; } },
+    { id: 'pasto', rotulo: 'Pasto atual', texto: function (a) { var p = a.pasto_atual_id ? Store.pasto(a.pasto_atual_id) : null; return p ? p.nome : a.situacao_cadastral === 'ATIVO' ? 'sem pasto' : '—'; } },
+    { id: 'situacao', rotulo: 'Situação', texto: function (a) { return Fmt.rotulo('SITUACAO_CADASTRAL', a.situacao_cadastral); } },
+    { id: 'data_nascimento', rotulo: 'Nascimento', valor: function (a) { return a.data_nascimento; }, texto: function (a) { return a.data_nascimento ? Fmt.data(a.data_nascimento) + (a.data_nascimento_confianca === 'ESTIMADA' ? ' (estimada)' : '') : '—'; } },
+  ];
+  function descreverFiltros(f) {
+    var p = [];
+    var sit = SITUACOES.filter(function (x) { return x[0] === f.situacao; })[0];
+    p.push('situação: ' + (sit ? sit[1] : f.situacao));
+    if (f.texto) p.push('busca: "' + f.texto + '"');
+    if (f.pasto) p.push('pasto: ' + (f.pasto === SEM ? 'sem pasto' : (Store.pasto(f.pasto) || {}).nome));
+    if (f.sexo) p.push('sexo: ' + Fmt.rotulo('SEXO', f.sexo));
+    if (f.categoria) p.push('categoria: ' + (f.categoria === SEM ? 'sem categoria' : (Store.categoria(f.categoria) || {}).nome));
+    if (f.faixa) p.push('idade: ' + (faixas(Store.param('faixas_etarias_meses')).filter(function (x) { return x.id === f.faixa; })[0] || {}).rotulo);
+    if (f.atalho) p.push((ATALHOS.filter(function (x) { return x[0] === f.atalho; })[0] || [0, f.atalho])[1].toLowerCase());
+    return p.join('; ');
+  }
+  function linhasCsv(linhas) {
+    return Exportar.csv(COLUNAS.map(function (c) { return { rotulo: c.rotulo, valor: c.texto }; }), linhas, {
+      preambulo: ['Rebanho — ' + linhas.length + (linhas.length === 1 ? ' animal' : ' animais'), 'Filtros: ' + descreverFiltros(filtros), 'Dados de ' + Fmt.instante(new Date(Store.atualizadoEm()).toISOString())],
+    });
+  }
+
+  // ------------------------------------------------------------------ listagem ----
+  function linkFicha(a, texto, classe) {
+    var r = 'animal/' + a.animal_id + '/resumo';
+    return h('a', { class: 'botao botao-texto' + (classe ? ' ' + classe : ''), href: Roteador.href(r), dataset: { rota: r } }, texto);
+  }
+  function cartao(a) {
+    var cat = COLUNAS[5].texto(a), pasto = COLUNAS[7].texto(a);
+    return h('div', { class: 'cartao-linha-corpo', dataset: { animal: a.animal_id } },
+      h('div', { class: 'cartao-linha-topo' }, h('span', { class: 'cartao-linha-titulo brinco', text: a.brinco || 'sem brinco' }), h('span', { text: cat + ' · ' + (a.sexo || '?') })),
+      h('div', { text: [COLUNAS[3].texto(a), COLUNAS[4].texto(a), 'nasc. ' + COLUNAS[9].texto(a)].join(' · ') }),
+      h('div', { class: pasto === 'sem pasto' ? 'destaque-erro' : null, text: pasto + ' · ' + COLUNAS[6].texto(a) }),
+      h('div', { class: 'cartao-linha-topo' }, h('span', { text: COLUNAS[8].texto(a) }), h('span', { class: 'suave', text: a.codigo_interno })),
+      linkFicha(a, 'Abrir ficha'));
+  }
+  function selectFiltro(id, rotulo, opcoes, valor, aoMudar) {
+    var sel = h('select', { id: id }, opcoes.map(function (o) { return h('option', { value: o[0], text: o[1], selected: o[0] === valor }); }));
+    sel.addEventListener('change', function () { aoMudar(sel.value); });
+    return h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo', for: id, text: rotulo }), sel);
+  }
+  function tiposParaSelecao(n) {
+    var out = [];
+    (Store.catalogo().tipos || []).forEach(function (t) {
+      if (t.tipo === 'ESTORNO' || (t.selecao_animais !== 'VARIOS' && !(t.selecao_animais === 'UM' && n === 1))) return;
+      if (t.subtipos) Object.keys(t.subtipos).forEach(function (k) { out.push({ tipo: t.tipo, subtipo: k, rotulo: t.rotulo + ': ' + t.subtipos[k].rotulo }); });
+      else out.push({ tipo: t.tipo, rotulo: t.rotulo });
+    });
+    return out;
+  }
+  function registrarSelecionados(ids, origem) {
+    var tipos = tiposParaSelecao(ids.length);
+    var lista = h('ul', { class: 'lista-simples' });
+    var f = UI.folha({ titulo: 'Registrar com ' + ids.length + (ids.length === 1 ? ' animal' : ' animais'), conteudo: lista, origem: origem });
+    if (!tipos.length) lista.appendChild(h('li', { class: 'suave', text: 'Nenhum registro com vários animais disponível nesta fase.' }));
+    tipos.forEach(function (t) {
+      lista.appendChild(h('li', null, UI.botao(t.rotulo, { bloco: true, aoClicar: function () {
+        f.fechar({ forcar: true });
+        Registro.abrir(t.tipo, { subtipo: t.subtipo || null, linhas: ids.map(function (id) { return { animal_id: id }; }), origem: 'rebanho' });
+      } })));
+    });
+  }
+  function defsAnimal(ids, ajustes) {
+    var base = (Store.tipoEvento('ENTRADA_INICIAL') || Store.tipoEvento('OUTRA_ENTRADA') || {}).campos_animal || [];
+    return ids.map(function (id) {
+      var d = base.filter(function (x) { return x.id === id; })[0] || { id: id, tipo: 'texto', rotulo: Fmt.rotulo('', id) };
+      return Object.assign({}, d, (ajustes || {})[id] || {});
+    });
+  }
+  function cadastrarExterno(origem) {
+    Cadastro.folha({
+      titulo: 'Animal de fora do rebanho', rota: 'animal.cadastrarExterno', origem: origem, idBase: 'ext', verbo: 'Cadastrar',
+      defs: defsAnimal(['nome', 'sexo', 'raca', 'data_nascimento', 'data_nascimento_confianca', 'observacoes'], { nome: { obrigatorio: true, rotulo: 'Nome ou identificação (ex.: touro de sêmen)' } }),
+      extra: UI.nota('Touro de sêmen ou progenitor que não é do rebanho: fica como referência para a genealogia e não entra no inventário.', 'info'),
+      montar: function (c) { return { campos: c }; },
+      sucesso: function () { return 'Animal de fora do rebanho cadastrado.'; },
+      aoSalvar: function (r) { Roteador.ir('animal/' + r.data.animal_id + '/resumo'); },
+    });
+  }
+  /** "Cadastrar animal": como entrou? Só as opções cujo evento já foi entregue (08, seção 3). */
+  function comoEntrou(origem) {
+    var opcoes = [
+      { tipo: 'NASCIMENTO', rotulo: 'Nasceu aqui', ajuda: 'Parto de uma vaca do rebanho.' },
+      { tipo: 'COMPRA', rotulo: 'Foi comprado', ajuda: 'Compra com valor e vendedor.' },
+      { tipo: 'ENTRADA_INICIAL', rotulo: 'Já estava no rebanho', ajuda: 'Animal que já estava na fazenda no marco zero (rebanho inicial).' },
+      { tipo: 'OUTRA_ENTRADA', rotulo: 'Outra entrada', ajuda: 'Doação, permuta, animal achado ou que volta sem compra.' },
+    ].filter(function (o) { return Store.tipoEvento(o.tipo); });
+    var lista = h('ul', { class: 'lista-simples', dataset: { comoEntrou: '1' } });
+    var f = UI.folha({ titulo: 'Como o animal entrou?', conteudo: lista, origem: origem });
+    opcoes.forEach(function (o) {
+      lista.appendChild(h('li', { class: 'linha-acao' }, h('div', null, h('div', { class: 'dado', text: o.rotulo }), h('div', { class: 'suave', text: o.ajuda })),
+        UI.botao('Escolher', { rotulo: o.rotulo, atributos: { 'data-entrada': o.tipo }, aoClicar: function () { f.fechar({ forcar: true }); Roteador.ir('evento/novo/' + o.tipo); } })));
+    });
+    lista.appendChild(h('li', { class: 'linha-acao' }, h('div', null, h('div', { class: 'dado', text: 'É de fora do rebanho' }), h('div', { class: 'suave', text: 'Touro de sêmen ou progenitor de outra fazenda.' })),
+      UI.botao('Escolher', { rotulo: 'É de fora do rebanho', atributos: { 'data-entrada': 'EXTERNO' }, aoClicar: function () { f.fechar({ forcar: true }); cadastrarExterno(origem); } })));
+  }
+  function montarLista(el) {
+    var vivo = true;
+    var cortes = Store.param('faixas_etarias_meses');
+    var ctx = { cortes: cortes, ignoraZeros: Store.param('brinco_ignora_zeros_esquerda') !== false };
+    var cab = h('div', { class: 'tela-cabecalho' }, h('h1', { text: 'Rebanho' }));
+    var acoes = h('div', { class: 'acoes', style: 'margin-top:0' });
+    if (App.podeRegistrar()) acoes.appendChild(UI.botao('Cadastrar animal', { tipo: 'primario', icone: 'registrar', aoClicar: function (ev) { comoEntrou(ev.currentTarget); } }));
+    var exportarB = UI.botao('Exportar CSV', { aoClicar: function () {
+      var linhas = tabela.ordenadas();
+      var nome = Exportar.baixar(Exportar.nome('rebanho'), linhasCsv(linhas));
+      UI.aviso('Arquivo ' + nome + ' com ' + linhas.length + (linhas.length === 1 ? ' animal.' : ' animais.'), { tipo: 'ok' });
+    } });
+    acoes.appendChild(exportarB);
+    cab.appendChild(acoes);
+    el.appendChild(cab);
+    var idb = 'reb-' + Util.uuid().slice(0, 6);
+    var busca = h('input', { type: 'search', id: idb + 'q', value: filtros.texto, autocomplete: 'off', inputmode: Store.param('brinco_somente_numerico') === true ? 'numeric' : null });
+    busca.addEventListener('input', Util.adiar(function () { filtros.texto = busca.value.trim(); aplicar(); }, 250));
+    var pastos = [['', 'Todos'], [SEM, 'Sem pasto']].concat(Store.pastos({ todos: true }).map(function (p) { return [p.pasture_id, p.nome + (p.status === 'INATIVO' ? ' (inativo)' : '')]; }));
+    var cats = [['', 'Todas'], [SEM, 'Sem categoria']].concat(Store.categorias().map(function (c) { return [c.category_id, c.nome]; }));
+    var fx = [['', 'Todas']].concat(faixas(cortes).map(function (x) { return [x.id, x.rotulo]; }));
+    var mudar = function (k) { return function (v) { filtros[k] = v; aplicar(); }; };
+    var grade = h('div', { class: 'filtros', role: 'search', 'aria-label': 'Filtrar o rebanho' },
+      h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo', for: idb + 'q', text: 'Brinco, nome ou código' }), busca),
+      selectFiltro(idb + 'p', 'Pasto', pastos, filtros.pasto, mudar('pasto')),
+      selectFiltro(idb + 's', 'Sexo', [['', 'Todos'], ['M', 'Macho'], ['F', 'Fêmea']], filtros.sexo, mudar('sexo')),
+      selectFiltro(idb + 'c', 'Categoria', cats, filtros.categoria, mudar('categoria')),
+      selectFiltro(idb + 'x', 'Situação', SITUACOES, filtros.situacao, mudar('situacao')),
+      selectFiltro(idb + 'f', 'Faixa etária', fx, filtros.faixa, mudar('faixa')));
+    el.appendChild(grade);
+    var atalhos = h('div', { class: 'acoes', role: 'group', 'aria-label': 'Atalhos' });
+    ATALHOS.forEach(function (x) {
+      var b = UI.botao(x[1], { aoClicar: function () { filtros.atalho = filtros.atalho === x[0] ? '' : x[0]; if (filtros.atalho) filtros.situacao = 'ATIVO'; Roteador.ir('rebanho', { forcar: true, substituir: true }); } });
+      b.setAttribute('aria-pressed', filtros.atalho === x[0] ? 'true' : 'false');
+      b.setAttribute('data-atalho', x[0]);
+      atalhos.appendChild(b);
+    });
+    el.appendChild(atalhos);
+    var resumo = h('p', { class: 'dado', role: 'status', dataset: { contagem: '1' } });
+    var barraSel = h('div', { class: 'acoes', dataset: { barraSelecao: '1' } });
+    el.appendChild(resumo);
+    el.appendChild(barraSel);
+    var corpo = h('div');
+    el.appendChild(corpo);
+    var tabela = UI.tabela({
+      id: 'rebanho', rotulo: 'Animais do rebanho', chave: function (a) { return a.animal_id; }, rotuloLinha: function (a) { return Store.rotuloAnimal(a); },
+      colunas: COLUNAS.map(function (c, i) {
+        return { id: c.id, rotulo: c.rotulo, num: c.num, valor: c.valor || c.texto, formatar: i === 0 ? function (a) { return linkFicha(a, c.texto(a), a.brinco ? 'brinco' : 'suave'); } : i === 7 ? function (a) { var t = c.texto(a); return t === 'sem pasto' ? h('span', { class: 'destaque-erro', text: t }) : t; } : c.texto };
+      }),
+      linhas: [], cartao: cartao, vazio: { texto: 'Nenhum animal com esses filtros.' },
+      selecao: { aoMudar: function (ids) { desenharSelecao(ids); } },
+    });
+    corpo.appendChild(tabela.el);
+    function desenharSelecao(ids) {
+      Util.limpar(barraSel);
+      if (!ids.length) return;
+      var ativos = ids.filter(function (id) { var a = Store.animal(id); return a && a.situacao_cadastral !== 'EXTERNO'; });
+      barraSel.appendChild(UI.botao('Registrar evento com ' + ids.length + (ids.length === 1 ? ' selecionado' : ' selecionados'), { tipo: 'primario', aoClicar: function (ev) { registrarSelecionados(ativos.length ? ativos : ids, ev.currentTarget); } }));
+    }
+    async function aplicar() {
+      if (precisaBaixados(filtros) && !Store.baixados()) {
+        resumo.textContent = 'Buscando os animais que saíram do rebanho…';
+        try {
+          await Store.carregarBaixados();
+        } catch (e) {
+          if (!vivo) return;
+          Util.limpar(corpo);
+          corpo.appendChild(UI.estadoErro(e, { acao: { texto: 'Tentar de novo', aoClicar: function () { Roteador.ir('rebanho', { forcar: true, substituir: true }); } } }));
+          return;
+        }
+        if (!vivo) return;
+      }
+      var base = Store.animais().concat(precisaBaixados(filtros) ? (Store.baixados() || []) : []);
+      var linhas = filtrar(base, filtros, ctx);
+      resumo.textContent = linhas.length + (linhas.length === 1 ? ' animal' : ' animais') + ' · ' + descreverFiltros(filtros);
+      exportarB.disabled = !linhas.length;
+      tabela.atualizar(linhas);
+    }
+    aplicar();
+    return function () { vivo = false; };
+  }
+
+  // ------------------------------------------------------------------ ficha ----
+  var ABAS = [['resumo', 'Resumo'], ['genealogia', 'Genealogia'], ['pastos', 'Pastos'], ['peso', 'Peso'], ['sanidade', 'Sanidade'], ['reproducao', 'Reprodução'], ['financeiro', 'Financeiro'], ['eventos', 'Linha do tempo'], ['anexos', 'Fotos e documentos']];
+  var BLOCO_DA_ABA = { peso: 'peso', sanidade: 'sanitario', reproducao: 'reprodutivo', financeiro: 'financeiro' };
+  var ATALHOS_FICHA = [
+    { tipo: 'PESAGEM', rotulo: 'Pesar' }, { tipo: 'SANIDADE', rotulo: 'Vacinar ou tratar' }, { tipo: 'TRANSFERENCIA', rotulo: 'Transferir' },
+    { tipo: 'VENDA', rotulo: 'Vender' }, { tipo: 'MORTE', rotulo: 'Registrar morte' }, { tipo: 'OUTRA_ENTRADA', rotulo: 'Voltar ao rebanho', volta: true },
+    { tipo: 'AJUSTE_INVENTARIO', subtipo: 'IDENTIFICACAO_INCORRETA', rotulo: 'Corrigir brinco lançado errado' },
+    { tipo: 'AJUSTE_INVENTARIO', subtipo: 'CORRECAO_LOCALIZACAO', rotulo: 'Corrigir o pasto' },
+  ];
+  var fichas = {};
+  async function ficha(id, forcar) {
+    var k = fichas[id];
+    if (!forcar && k && k.versao === Store.versao()) return k.dados;
+    var r = await Cliente.consulta('animal.ficha', { animal_id: id });
+    fichas[id] = { versao: Store.versao(), dados: r.data };
+    return r.data;
+  }
+  function nomeNo(n) { return n ? (n.brinco || n.rotulo || n.codigo_interno || 'animal') : '—'; }
+  function atalhosFicha(a, id) {
+    var out = [];
+    ATALHOS_FICHA.forEach(function (x) {
+      var def = Store.tipoEvento(x.tipo);
+      if (!def || (x.subtipo && !(def.subtipos && def.subtipos[x.subtipo]))) return;
+      if (x.volta ? Seletor.motivoInelegivel(a, def.filtro_elegiveis) !== null : a.situacao_cadastral !== 'ATIVO') return;
+      out.push(UI.botao(x.rotulo, { atributos: { 'data-atalho-ficha': x.subtipo || x.tipo }, aoClicar: function () { Registro.abrir(x.tipo, { subtipo: x.subtipo || null, linhas: [{ animal_id: id }], origem: 'animal/' + id + '/resumo' }); } }));
+    });
+    return out;
+  }
+  function carregarImagem(img, anexoId, miniatura) {
+    Cliente.consulta('anexo.obter', { anexo_id: anexoId, miniatura: !!miniatura }).then(function (r) {
+      if (r.data && r.data.data_url) img.src = r.data.data_url;
+    }, function (e) { img.alt = 'Imagem indisponível (' + e.message + ')'; });
+  }
+  /** Edição num formulário só (DV-07): cadastro direto com auditoria; campo sensível pede justificativa e vira ajuste. */
+  function editar(f, origem) {
+    var g = f.geral, gen = f.genealogia || {};
+    var externo = g.situacao_cadastral === 'EXTERNO';
+    var sensiveis = Object.keys(Fmt.ROTULOS.CAMPO_CORRIGIVEL);
+    var ids = externo ? ['nome', 'sexo', 'raca', 'data_nascimento', 'data_nascimento_confianca', 'observacoes']
+      : ['nome', 'raca', 'sexo', 'data_nascimento', 'data_nascimento_confianca', 'mae_id', 'mae_confianca', 'pai_id', 'pai_confianca', 'castrado', 'reprodutor', 'partos_previos', 'origem', 'data_entrada', 'data_entrada_confianca', 'observacoes'];
+    var ajustes = { mae_confianca: { visivel_se: { campo: 'mae_id', preenchido: true }, obrigatorio_se: { campo: 'mae_id', preenchido: true } }, pai_confianca: { visivel_se: { campo: 'pai_id', preenchido: true }, obrigatorio_se: { campo: 'pai_id', preenchido: true } }, origem: { obrigatorio: false } };
+    var defs = defsAnimal(ids, ajustes).concat([{ id: 'justificativa', rotulo: 'Justificativa da correção', tipo: 'texto', ajuda: 'Obrigatória quando muda sexo, nascimento, mãe, pai, castração ou origem: vira um lançamento de ajuste.' }]);
+    var str = function (v) { return v === null || v === undefined ? null : typeof v === 'number' ? String(v) : v; };
+    var bruto = {
+      nome: g.nome, raca: g.raca, sexo: g.sexo, data_nascimento: g.data_nascimento, data_nascimento_confianca: g.data_nascimento_confianca,
+      mae_id: gen.mae ? gen.mae.animal_id : null, mae_confianca: gen.mae ? gen.mae.confianca : null, pai_id: gen.pai ? gen.pai.animal_id : null, pai_confianca: gen.pai ? gen.pai.confianca : null,
+      castrado: g.castrado, reprodutor: g.reprodutor, partos_previos: str(g.partos_previos), origem: g.origem, data_entrada: g.data_entrada, data_entrada_confianca: g.data_entrada_confianca, observacoes: g.observacoes,
+    };
+    var antes = Formulario.converterValores(defs, Util.clonar(bruto)).valores;
+    function mudancas(c) {
+      var out = {};
+      ids.forEach(function (k) { var a = antes[k] === undefined ? null : antes[k], n = c[k] === undefined ? null : c[k]; if (JSON.stringify(a) !== JSON.stringify(n)) out[k] = n; });
+      return out;
+    }
+    function temSensivel(m) { return !externo && Object.keys(m).some(function (k) { return sensiveis.indexOf(k) >= 0; }); }
+    var form = Cadastro.folha({
+      titulo: 'Editar ' + (g.brinco || g.codigo_interno), rota: 'animal.editar', origem: origem, idBase: 'edit', verbo: 'Salvar', defs: defs, valores: Util.clonar(bruto),
+      aoMudar: function (id, v, bloco) {
+        var c = Formulario.converterValores(defs, Util.clonar(v)).valores;
+        var sens = temSensivel(mudancas(c));
+        bloco.campo('justificativa').mostrar(sens);
+        bloco.campo('justificativa').marcarObrigatorio(sens);
+      },
+      validar: function (c) {
+        var m = mudancas(c);
+        if (!Object.keys(m).length) return [{ campo: 'nome', mensagem: 'Nada mudou no cadastro.' }];
+        if (temSensivel(m) && Util.vazio(c.justificativa)) return [{ campo: 'justificativa', mensagem: 'Diga por que o dado está sendo corrigido.' }];
+        return [];
+      },
+      montar: function (c) {
+        var m = mudancas(c);
+        var d = { animal_id: f.animal_id, campos: m };
+        if (temSensivel(m)) d.justificativa = c.justificativa;
+        return d;
+      },
+      sucesso: function (d) { return d && d.event_id ? 'Correção gravada com a justificativa (lançamento de ajuste).' : 'Cadastro atualizado.'; },
+      aoSalvar: function () { delete fichas[f.animal_id]; Roteador.ir(Roteador.atual(), { forcar: true, substituir: true }); },
+    });
+    form.bloco.campo('justificativa').mostrar(false);
+    return form;
+  }
+  function blocoResumo(f, a) {
+    var g = f.geral, loc = f.localizacao;
+    var cat = g.categoria ? g.categoria.nome + (g.categoria.manual ? ' (manual)' : '') : g.sem_categoria ? 'Sem categoria' : '—';
+    var pv = g.peso_vigente;
+    var ids = (g.identificacoes || []).filter(function (x) { return !x.data_fim; }).map(function (x) { return Fmt.rotulo('IDENTIFICACAO', x.tipo) + ': ' + x.codigo; });
+    return h('div', null,
+      UI.secao('Informações gerais', UI.pares([
+        ['Brinco', g.brinco || 'sem brinco'], ['Código', g.codigo_interno], ['Nome', g.nome], ['Sexo', Fmt.rotulo('SEXO', g.sexo)], ['Raça', g.raca_rotulo || g.raca],
+        ['Nascimento', g.data_nascimento ? Fmt.data(g.data_nascimento) + ' (' + Fmt.rotulo('CONFIANCA', g.data_nascimento_confianca).toLowerCase() + ')' : 'não informado'],
+        ['Idade', Fmt.idade(g.idade_meses, g.data_nascimento_confianca === 'ESTIMADA')], ['Categoria', cat], ['Situação', Fmt.rotulo('SITUACAO_CADASTRAL', g.situacao_cadastral)],
+        ['Origem', Fmt.rotulo('ORIGEM', g.origem)], g.sexo === 'M' ? ['Castrado', g.castrado === null ? '—' : g.castrado ? 'Sim' : 'Não'] : null, g.sexo === 'M' ? ['Reprodutor', g.reprodutor === null ? '—' : g.reprodutor ? 'Sim' : 'Não'] : null,
+        g.sexo === 'F' ? ['Partos anteriores', g.partos_previos === null ? '—' : String(g.partos_previos)] : null, g.sexo === 'F' ? ['Situação reprodutiva', Fmt.rotulo('SITUACAO_REPRODUTIVA', g.situacao_reprodutiva)] : null,
+        ['Chegou na fazenda', g.data_entrada ? Fmt.data(g.data_entrada) + (g.data_entrada_confianca ? ' (' + Fmt.rotulo('CONFIANCA', g.data_entrada_confianca).toLowerCase() + ')' : '') : '—'],
+        ['Peso', pv && pv.kg ? Fmt.peso(pv.kg) + (pv.data_pesagem ? ' em ' + Fmt.data(pv.data_pesagem) : '') + (pv.estimado ? ' (estimado)' : '') : '—'],
+        ['Outras identificações', ids.join(' · ')], ['Observações', g.observacoes],
+      ]), { dado: 'geral' }),
+      UI.secao('Localização atual', UI.pares([
+        ['Pasto', loc.sem_pasto ? h('span', { class: 'destaque-erro', text: 'sem pasto' }) : loc.pasto_nome], ['Propriedade', loc.propriedade_nome], ['Desde', loc.desde ? Fmt.data(loc.desde) : null],
+      ]), { dado: 'localizacao' }));
+  }
+  function noArvore(n, papel, id) {
+    if (!n) return h('div', { class: 'no-arvore desconhecido' }, h('span', { class: 'suave', text: papel }), h('span', { text: 'desconhecido' }));
+    var classe = 'no-arvore' + (n.confirmado ? '' : ' nao-confirmado') + (n.disponivel === false ? ' desconhecido' : '');
+    var corpo = [h('span', { class: 'suave', text: papel }), h('span', { class: 'dado brinco', text: nomeNo(n) })];
+    if (n.data_nascimento) corpo.push(h('span', { text: 'nasc. ' + Fmt.data(n.data_nascimento) }));
+    corpo.push(h('span', { class: 'suave', text: n.disponivel === false ? 'registro indisponível' : n.confirmado ? 'confirmado' : 'não confirmado (' + Fmt.rotulo('CONFIANCA', n.confianca || 'DESCONHECIDA').toLowerCase() + ')' }));
+    if (n.disponivel !== false && n.animal_id !== id) { var r = 'animal/' + n.animal_id + '/genealogia'; corpo.push(h('a', { class: 'botao botao-texto', href: Roteador.href(r), dataset: { rota: r } }, 'Abrir')); }
+    return h('div', { class: classe, dataset: { no: papel } }, corpo);
+  }
+  function blocoGenealogia(f, aoEditar) {
+    var gen = f.genealogia;
+    var caixa = h('div');
+    var edit = aoEditar ? UI.botao('Informar mãe ou pai', { aoClicar: aoEditar }) : null;
+    if (gen.sem_genealogia) caixa.appendChild(UI.secao('Árvore genealógica', h('div', null, UI.nota('Sem genealogia registrada.', 'info'), edit), { dado: 'arvore' }));
+    else {
+      var geracoes = [['Pais', [[gen.arvore.mae, 'Mãe'], [gen.arvore.pai, 'Pai']]]];
+      var proxima = function (nivel) {
+        var out = [];
+        nivel.forEach(function (p) {
+          var n = p[0], base = p[1];
+          var sufixo = base === 'Mãe' ? ' materna' : base === 'Pai' ? ' paterna' : ' (' + base.toLowerCase() + ')';
+          out.push([n ? n.mae : null, (base === 'Mãe' || base === 'Pai' ? 'Avó' : 'Bisavó') + sufixo], [n ? n.pai : null, (base === 'Mãe' || base === 'Pai' ? 'Avô' : 'Bisavô') + (base === 'Mãe' ? ' materno' : base === 'Pai' ? ' paterno' : ' (' + base.toLowerCase() + ')')]);
+        });
+        return out;
+      };
+      if ((gen.geracoes || 3) >= 2) geracoes.push(['Avós', proxima(geracoes[0][1])]);
+      if ((gen.geracoes || 3) >= 3) geracoes.push(['Bisavós', proxima(geracoes[1][1])]);
+      var arvore = h('div', { class: 'arvore', dataset: { arvore: '1' } }, geracoes.map(function (g) {
+        if (!g[1].some(function (p) { return p[0]; }) && g[0] !== 'Pais') return null;
+        return h('div', null, h('h3', { text: g[0] }), h('div', { class: 'arvore-ramo' }, g[1].map(function (p) { return noArvore(p[0], p[1], f.animal_id); })));
+      }));
+      caixa.appendChild(UI.secao('Árvore genealógica', h('div', null, arvore, h('p', { class: 'suave', text: 'Borda tracejada: parentesco não confirmado.' }), edit), { dado: 'arvore' }));
+    }
+    var filhos = gen.filhos || [];
+    caixa.appendChild(UI.secao('Crias (' + filhos.length + ')', filhos.length ? UI.tabela({
+      id: 'crias', rotulo: 'Crias', linhas: filhos, chave: function (c) { return c.animal_id; },
+      colunas: [
+        { id: 'brinco', rotulo: 'Cria', valor: function (c) { return c.brinco || c.codigo_interno; }, formatar: function (c) { var r = 'animal/' + c.animal_id + '/resumo'; return h('a', { class: 'botao botao-texto', href: Roteador.href(r), dataset: { rota: r } }, c.brinco || c.rotulo || c.codigo_interno); } },
+        { id: 'sexo', rotulo: 'Sexo', formatar: function (c) { return Fmt.rotulo('SEXO', c.sexo); } },
+        { id: 'data_nascimento', rotulo: 'Nascimento', formatar: function (c) { return Fmt.data(c.data_nascimento); } },
+        { id: 'papel', rotulo: 'Parentesco', formatar: function (c) { return (c.papel === 'MAE' ? 'mãe' : 'pai') + ' · ' + (c.confianca === 'CONFIRMADA' ? 'confirmado' : 'não confirmado'); } },
+        { id: 'situacao_cadastral', rotulo: 'Situação', formatar: function (c) { return Fmt.rotulo('SITUACAO_CADASTRAL', c.situacao_cadastral); } },
+      ],
+    }).el : h('p', { class: 'suave', text: 'Nenhuma cria registrada.' }), { dado: 'crias' }));
+    return caixa;
+  }
+  function blocoPastos(f) {
+    var per = (f.pastos && f.pastos.periodos) || [];
+    if (!per.length) return UI.nota('Nenhum período em pasto registrado.', 'info');
+    return UI.tabela({ id: 'periodos', rotulo: 'Períodos em cada pasto', linhas: per.slice().reverse(), chave: function (p) { return p.inicio + p.pasture_id; },
+      colunas: [
+        { id: 'pasto_nome', rotulo: 'Pasto', formatar: function (p) { return p.pasto_nome || 'sem pasto'; } },
+        { id: 'inicio', rotulo: 'Entrou em', formatar: function (p) { return Fmt.data(p.inicio); } },
+        { id: 'fim', rotulo: 'Saiu em', formatar: function (p) { return p.em_andamento ? 'está lá' : Fmt.data(p.fim); } },
+        { id: 'dias', rotulo: 'Dias', num: true },
+      ] }).el;
+  }
+  function blocoEventos(f) {
+    var itens = (f.eventos && f.eventos.itens) || [];
+    if (!itens.length) return UI.nota('Nenhum lançamento.', 'info');
+    var ul = h('ol', { class: 'linha-tempo', 'aria-label': 'Linha do tempo' });
+    itens.slice().reverse().forEach(function (e) {
+      var pasto = e.pasto_destino_id ? (Store.pasto(e.pasto_destino_id) || {}).nome : null;
+      var sit = !e.vigente ? (e.anulado_por ? 'não vale mais (estornado ou corrigido)' : Fmt.rotulo('STATUS_EVENTO', e.status).toLowerCase()) : 'vale';
+      var r = 'evento/' + e.event_id;
+      ul.appendChild(h('li', { class: e.vigente ? null : 'riscado', dataset: { evento: e.event_id } },
+        h('div', { class: 'linha-tempo-titulo dado', text: Fmt.data(e.event_date) + ' · ' + e.rotulo + (e.rotulo_subtipo ? ' · ' + e.rotulo_subtipo : '') }),
+        h('div', { class: 'suave', text: [pasto ? 'pasto: ' + pasto : null, e.pre_marco_zero ? 'histórico (antes do marco zero)' : null, sit].filter(Boolean).join(' · ') }),
+        (e.ajustes || []).map(function (x) { return h('div', { text: Fmt.rotuloOpcao('campo', x.campo) + ': ' + (x.valor_anterior || '—') + ' → ' + (x.valor_novo || '—') + (x.justificativa ? ' (' + x.justificativa + ')' : '') }); }),
+        Telas.existe(r) ? h('a', { class: 'botao botao-texto', href: Roteador.href(r), dataset: { rota: r } }, 'Ver lançamento') : null));
+    });
+    return ul;
+  }
+  function blocoAnexos(f, a) {
+    var caixa = h('div');
+    var itens = (f.anexos && f.anexos.itens) || [];
+    var recarregar = function () { delete fichas[f.animal_id]; Roteador.ir('animal/' + f.animal_id + '/anexos', { forcar: true, substituir: true }); };
+    caixa.appendChild(h('div', { class: 'acoes' }, UI.botao('Adicionar foto ou documento', { tipo: 'primario', icone: 'registrar', aoClicar: function (ev) {
+      Cadastro.folha({
+        titulo: 'Foto ou documento', rota: 'anexo.adicionar', origem: ev.currentTarget, idBase: 'anx', verbo: 'Enviar',
+        defs: [{ id: 'arquivo', rotulo: 'Arquivo (imagem ou PDF)', tipo: 'anexo', obrigatorio: true, ajuda: 'Fotos são reduzidas neste aparelho antes de enviar.' },
+          { id: 'tipo', rotulo: 'Tipo', tipo: 'lista', opcoes: ['FOTO', 'DOCUMENTO', 'GTA', 'NOTA_FISCAL', 'OUTRO'], rotulos_de: 'tipo_anexo', obrigatorio: true, default: 'FOTO' },
+          { id: 'descricao', rotulo: 'Descrição', tipo: 'texto' },
+          { id: 'definir_como_foto', rotulo: 'Usar como foto principal', tipo: 'bool', visivel_se: { campo: 'tipo', valores: ['FOTO'] } }],
+        validar: function (c) { return c.definir_como_foto && !/^image\//.test(c.arquivo.mime_type) ? [{ campo: 'definir_como_foto', mensagem: 'Só uma imagem pode ser a foto principal.' }] : []; },
+        montar: function (c) { return { entidade: 'ANIMAIS', entity_id: f.animal_id, tipo: c.tipo, descricao: c.descricao, nome_arquivo: c.arquivo.nome_arquivo, mime_type: c.arquivo.mime_type, conteudo_base64: c.arquivo.conteudo_base64, miniatura_base64: c.arquivo.miniatura_base64, definir_como_foto: c.definir_como_foto === true }; },
+        sucesso: function () { return 'Arquivo guardado.'; }, aoSalvar: recarregar,
+      });
+    } })));
+    if (!itens.length) { caixa.appendChild(UI.nota('Nenhuma foto ou documento.', 'info')); return caixa; }
+    var ul = h('ul', { class: 'anexos' });
+    itens.forEach(function (x) {
+      var img = /^image\//.test(x.mime_type) && x.tem_miniatura ? h('img', { alt: x.descricao || x.nome_arquivo }) : null;
+      if (img) carregarImagem(img, x.anexo_id, true);
+      var acoes = [UI.botao('Abrir', { aoClicar: function (ev) { abrirAnexo(x, ev.currentTarget); } })];
+      if (/^image\//.test(x.mime_type) && !x.principal) acoes.push(UI.botao('Usar como foto principal', { aoClicar: function (ev) { definirFoto(f.animal_id, x, ev.currentTarget, recarregar); } }));
+      acoes.push(UI.botao('Remover', { tipo: 'texto', icone: 'remover', aoClicar: function (ev) { removerAnexo(x, ev.currentTarget, recarregar); } }));
+      ul.appendChild(h('li', { class: 'anexo', dataset: { anexo: x.anexo_id } }, img, h('div', { class: 'dado', text: x.nome_arquivo }), h('div', { class: 'suave', text: Fmt.rotulo('TIPO_ANEXO', x.tipo) + (x.principal ? ' · foto principal' : '') + ' · ' + Fmt.instante(x.created_at) }), acoes));
+    });
+    caixa.appendChild(ul);
+    return caixa;
+  }
+  function abrirAnexo(x, origem) {
+    var corpo = h('div', null, UI.carregando('Buscando o arquivo…'));
+    UI.folha({ titulo: x.nome_arquivo, conteudo: corpo, origem: origem });
+    Cliente.consulta('anexo.obter', { anexo_id: x.anexo_id }).then(function (r) {
+      Util.limpar(corpo);
+      if (/^image\//.test(x.mime_type)) corpo.appendChild(h('img', { class: 'imagem-cheia', src: r.data.data_url, alt: x.descricao || x.nome_arquivo }));
+      else corpo.appendChild(h('a', { class: 'botao botao-primario', href: r.data.data_url, download: x.nome_arquivo }, 'Baixar ' + x.nome_arquivo));
+    }, function (e) { Util.limpar(corpo); corpo.appendChild(UI.estadoErro(e)); });
+  }
+  function definirFoto(animalId, x, botao, depois) {
+    var status = h('div');
+    botao.parentNode.appendChild(status);
+    Cadastro.envio({ rota: 'animal.editar', botao: botao, rotuloBotao: 'Usar como foto principal', status: status, aoSucesso: function () { UI.aviso('Foto principal trocada.', { tipo: 'ok' }); depois(); } })
+      .enviar({ animal_id: animalId, campos: { foto_anexo_id: x.anexo_id } });
+  }
+  function removerAnexo(x, origem, depois) {
+    Cadastro.folha({ titulo: 'Remover ' + x.nome_arquivo, rota: 'anexo.remover', origem: origem, verbo: 'Remover o arquivo', perigo: true, idBase: 'rmx',
+      defs: [{ id: 'justificativa', rotulo: 'Por que remover', tipo: 'texto', obrigatorio: true }],
+      extra: UI.nota('O arquivo sai da ficha e vai para a lixeira do Drive; o registro de que existiu fica na auditoria.', 'aviso'),
+      montar: function (c) { return { anexo_id: x.anexo_id, justificativa: c.justificativa }; }, sucesso: function () { return 'Arquivo removido.'; }, aoSalvar: depois });
+  }
+  function montarFicha(el, p) {
+    var id = p.id, aba = p.aba || 'resumo';
+    var vivo = true;
+    var a = Store.animal(id);
+    var titulo = h('h1', { class: 'brinco', text: a ? Store.rotuloAnimal(a) : 'Animal' });
+    var foto = h('div');
+    var sub = h('p', { class: 'suave', text: a ? Store.descricaoAnimal(a) : '' });
+    var acoes = h('div', { class: 'acoes', dataset: { acoesFicha: '1' } });
+    el.appendChild(h('div', { class: 'ficha-cabecalho' }, foto, h('div', null, titulo, sub)));
+    el.appendChild(acoes);
+    el.appendChild(UI.abas('Partes da ficha', ABAS.map(function (x) { return { rotulo: x[1], rota: 'animal/' + id + '/' + x[0], atual: x[0] === aba }; })));
+    var corpo = h('div', { dataset: { aba: aba } }, UI.carregando('Abrindo a ficha…'));
+    el.appendChild(corpo);
+    ficha(id, false).then(function (f) {
+      if (!vivo) return;
+      var g = f.geral;
+      var linha = a || { animal_id: id, situacao_cadastral: g.situacao_cadastral, brinco: g.brinco, codigo_interno: g.codigo_interno };
+      titulo.textContent = g.brinco || Store.rotuloAnimal(linha);
+      sub.textContent = [g.categoria ? g.categoria.nome : Fmt.rotulo('SEXO', g.sexo), Fmt.rotulo('SITUACAO_CADASTRAL', g.situacao_cadastral), g.codigo_interno].join(' · ');
+      if (g.foto_anexo_id) { var img = h('img', { class: 'ficha-foto', alt: 'Foto de ' + (g.brinco || g.codigo_interno) }); foto.appendChild(img); carregarImagem(img, g.foto_anexo_id, true); }
+      var abrirEdicao = g.situacao_cadastral === 'ANULADO' ? null : function (ev) { editar(f, ev && ev.currentTarget); };
+      if (abrirEdicao) acoes.appendChild(UI.botao('Editar cadastro', { icone: 'editar', aoClicar: abrirEdicao }));
+      atalhosFicha(linha, id).forEach(function (b) { acoes.appendChild(b); });
+      Util.limpar(corpo);
+      if (aba === 'resumo') corpo.appendChild(blocoResumo(f, linha));
+      else if (aba === 'genealogia') corpo.appendChild(blocoGenealogia(f, abrirEdicao));
+      else if (aba === 'pastos') corpo.appendChild(UI.secao('Histórico de pastos', blocoPastos(f)));
+      else if (aba === 'eventos') corpo.appendChild(UI.secao('Linha do tempo', blocoEventos(f), { dado: 'linha-tempo' }));
+      else if (aba === 'anexos') corpo.appendChild(UI.secao('Fotos e documentos', blocoAnexos(f, linha)));
+      else if (BLOCO_DA_ABA[aba]) {
+        var b = f[BLOCO_DA_ABA[aba]];
+        corpo.appendChild(UI.secao(ABAS.filter(function (x) { return x[0] === aba; })[0][1], b && b.entregue === false ? UI.nota(b.mensagem, 'info') : UI.nota('Sem registros.', 'info')));
+      } else corpo.appendChild(UI.estadoErro({ code: 'NOT_FOUND', message: 'Esta parte da ficha não existe.' }));
+    }, function (e) {
+      if (!vivo) return;
+      Util.limpar(corpo);
+      corpo.appendChild(UI.estadoErro(e, { acao: { texto: 'Voltar ao rebanho', aoClicar: function () { Roteador.ir('rebanho'); } } }));
+    });
+    return function () { vivo = false; };
+  }
+  /** Abre a listagem com um filtro (atalho do início: "sem brinco", "sem pasto", "sem categoria"). */
+  function abrirCom(f) {
+    filtros = { texto: '', pasto: '', sexo: '', categoria: '', situacao: 'ATIVO', faixa: '', atalho: '' };
+    Object.keys(f || {}).forEach(function (k) { filtros[k] = f[k]; });
+    Roteador.ir('rebanho', { forcar: true });
+  }
+  Telas.registrar('rebanho', { titulo: 'Rebanho', modulo: 'REBANHO', montar: montarLista });
+  Telas.registrar('animal/:id/:aba?', { titulo: 'Ficha do animal', modulo: 'REBANHO', montar: montarFicha });
+  return { filtrar: filtrar, faixas: faixas, COLUNAS: COLUNAS, linhasCsv: linhasCsv, abrirCom: abrirCom, filtros: function () { return Util.clonar(filtros); }, editar: editar, ficha: ficha };
+})();
+</script>
