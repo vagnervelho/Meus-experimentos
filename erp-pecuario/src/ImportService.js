@@ -352,11 +352,28 @@ var ImportService = (function () {
     });
     var semZeros = params.brinco_ignora_zeros_esquerda !== false;
     var base = {};
+    // Progenitor que não tem brinco (RN-094: o dono cadastra o touro de sêmen como animal de referência): achado pelo
+    // nome do EXTERNO ou pelo código interno (A-000123) de qualquer animal; nome repetido entre externos fica ambíguo.
+    var externos = {};
+    var codigos = {};
     tx.repo.vigentes('ANIMAIS').forEach(function (a) {
-      if (vazio_(a.brinco) || a.situacao_cadastral === 'ANULADO' || a.situacao_cadastral === 'PENDENTE') return;
+      if (a.situacao_cadastral === 'ANULADO' || a.situacao_cadastral === 'PENDENTE') return;
+      if (!vazio_(a.codigo_interno)) codigos[String(a.codigo_interno).toUpperCase()] = a;
+      if (a.situacao_cadastral === 'EXTERNO' && !vazio_(a.nome)) {
+        var n = Utils.normalizarTexto(a.nome);
+        externos[n] = externos[n] ? AMBIGUO : a;
+      }
+      if (vazio_(a.brinco)) return;
       base[Utils.normalizarBrinco(a.brinco, !semZeros)] = a;
     });
-    return { params: params, D0: params.data_marco_zero, pastos: pastos, pastosPorId: pastosPorId, racas: racas, listas: listas, base: base, semZeros: semZeros };
+    return { params: params, D0: params.data_marco_zero, pastos: pastos, pastosPorId: pastosPorId, racas: racas, listas: listas, base: base, externos: externos, codigos: codigos, semZeros: semZeros };
+  }
+  var AMBIGUO = Object.freeze({ ambiguo: true });
+  /** Progenitor no rebanho pela referência do arquivo: brinco; senão código interno; senão nome de animal de referência. */
+  function progenitorNaBase_(cv, ref, chave) {
+    if (chave && cv.base[chave]) return cv.base[chave];
+    var t = Utils.aparar(ref);
+    return (cv.codigos && cv.codigos[t.toUpperCase()]) || (cv.externos && cv.externos[Utils.normalizarTexto(t)]) || null;
   }
   function chaveBrinco_(cv, b) {
     return vazio_(b) ? null : Utils.normalizarBrinco(b, !cv.semZeros);
@@ -453,7 +470,11 @@ var ImportService = (function () {
         var k = chaveBrinco_(cv, b);
         if (k === r.chave) { r.erros.push(det_(cfg[0], 'PROPRIO_PROGENITOR', 'o animal não pode ser ' + cfg[2] + ' de si mesmo')); return; }
         var noArq = noArquivo[k];
-        var naBase = cv.base[k];
+        var naBase = noArq ? null : progenitorNaBase_(cv, b, k);
+        if (naBase === AMBIGUO) {
+          r.erros.push(det_(cfg[0], cfg[0] === 'mae' ? 'MAE_NAO_ENCONTRADA' : 'PAI_NAO_ENCONTRADO', 'há mais de um animal de referência chamado "' + b + '". Use o código interno dele (A-000…) nesta coluna'));
+          return;
+        }
         if (!noArq && !naBase) {
           r.erros.push(det_(cfg[0], cfg[0] === 'mae' ? 'MAE_NAO_ENCONTRADA' : 'PAI_NAO_ENCONTRADO', (cfg[0] === 'mae' ? 'a mãe' : 'o pai') + ' de brinco ' + b + ' não está no arquivo nem no rebanho. Deixe em branco (desconhecido), cadastre-' + (cfg[0] === 'mae' ? 'a' : 'o') + ' antes como animal de referência ou corrija o brinco'));
           return;

@@ -256,3 +256,36 @@ test('restauração: exige o motivo; recusa backup de outra base; depois dela os
   const novo = s.exec((ctx) => G.Maintenance.backup(ctx, {})).backup;
   assert.deepEqual(s.exec((ctx) => G.Maintenance.listarBackups(ctx)).map((b) => b.id).slice(0, 2), [novo.id, bk.id], 'do mais novo para o mais antigo, os dois bancos');
 });
+
+// ------------------------------------------------------------------ 2.13 importação ----
+test('RN-094: progenitor fora do rebanho cadastrado como animal de referência é achado pelo nome (ou pelo código interno) ao validar de novo', () => {
+  const s = S.sistema();
+  const { G } = s;
+  const csv = ['Brinco;Sexo;Pai;Mãe;Pasto', '700;F;;;Pasto A', '701;M;Touro Sêmen Nelore;700;Pasto A', '702;F;A-000099;;Pasto A'].join('\r\n');
+  const formato = { delimitador: ';', codificacao: 'UTF-8', formato_data: 'dd/MM/yyyy', decimal: ',' };
+  const mapa = { colunas: { Brinco: 'brinco', Sexo: 'sexo', Pai: 'pai', 'Mãe': 'mae', Pasto: 'pasto' }, confiancas: { pai: 'ESTIMADA', mae: 'CONFIRMADA' }, padroes: { castrado: false, reprodutor: false } };
+  const imp = s.exec((ctx) => G.ImportService.criar(ctx, { idempotencyKey: 'rn094', avisosAceitos: [], dados: { tipo: 'ANIMAIS', arquivo_nome: 'a.csv', texto: csv, formato } })).dados;
+  const validar = (k) => s.exec((ctx) => G.ImportService.validarBloco(ctx, { idempotencyKey: 'rn094-v' + k, dados: { import_id: imp.import_id, bloco: 1, mapeamento: mapa } })).dados;
+  const porLinha = () => Object.fromEntries(s.read(G.ImportService.consultaLinhas({ import_id: imp.import_id, por_pagina: 50 })).itens.map((l) => [l.linha_num, l]));
+  let v = validar(1);
+  assert.deepEqual([v.contadores.validas, v.contadores.erro], [1, 2]);
+  assert.deepEqual([porLinha()[3].erros[0].codigo, porLinha()[4].erros[0].codigo], ['PAI_NAO_ENCONTRADO', 'PAI_NAO_ENCONTRADO']);
+  // O dono segue a saída "cadastrar como animal de referência" e valida de novo.
+  const touro = s.exec((ctx) => G.AnimalService.cadastrarExterno(ctx, { idempotencyKey: 'rn094-ext', dados: { campos: { nome: 'Touro Sêmen Nelore', sexo: 'M' } } })).dados;
+  v = validar(2);
+  assert.deepEqual([v.contadores.validas, v.contadores.erro], [2, 1], JSON.stringify(porLinha()[3].erros));
+  assert.match(porLinha()[4].erros[0].mensagem, /A-000099 não está no arquivo nem no rebanho/);
+  // Nome repetido entre animais de referência fica ambíguo: a linha pede o código interno.
+  s.exec((ctx) => G.AnimalService.cadastrarExterno(ctx, { idempotencyKey: 'rn094-ext2', avisosAceitos: ['POSSIVEL_DUPLICIDADE'], dados: { campos: { nome: 'touro sêmen nelore', sexo: 'M' } } }));
+  validar(3);
+  assert.match(porLinha()[3].erros[0].mensagem, /mais de um animal de referência chamado "Touro Sêmen Nelore"\. Use o código interno/);
+  const csv2 = ['Brinco;Sexo;Pai;Mãe;Pasto', '700;F;;;Pasto A', '701;M;' + touro.animal.codigo_interno + ';700;Pasto A'].join('\r\n');
+  const imp2 = s.exec((ctx) => G.ImportService.criar(ctx, { idempotencyKey: 'rn094-2', avisosAceitos: [], dados: { tipo: 'ANIMAIS', arquivo_nome: 'b.csv', texto: csv2, formato } })).dados;
+  const v2 = s.exec((ctx) => G.ImportService.validarBloco(ctx, { idempotencyKey: 'rn094-2v', dados: { import_id: imp2.import_id, bloco: 1, mapeamento: mapa } })).dados;
+  assert.deepEqual([v2.contadores.validas, v2.contadores.erro], [2, 0]);
+  s.exec((ctx) => G.ImportService.importarBloco(ctx, { dados: { import_id: imp2.import_id, bloco: 1, modo: 'TOTAL' } }));
+  s.exec((ctx) => G.ImportService.concluir(ctx, { dados: { import_id: imp2.import_id } }));
+  const filho = s.tabela('ANIMAIS').find((a) => a.brinco === '701');
+  assert.deepEqual([filho.situacao_cadastral, filho.pai_id, filho.pai_confianca], ['ATIVO', touro.animal_id, 'ESTIMADA']);
+  s.conferirProjecoes('importação com pai de referência');
+});

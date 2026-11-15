@@ -571,6 +571,7 @@ var AuditService = (function () {
    * severidade, situacao (OK|ERRO|ALERTA|NAO_EXECUTADA), achados, correcao, reparo}], achados: [{checagem,
    * severidade, tabela, id, linha, campo, mensagem, reparo}] (até 300), truncado}. Erros: LOCKED, CONFIG.
    */
+  var CHAVE_RESUMO = 'INTEGRIDADE:';
   function verificarIntegridade(ctx) {
     var todas = Schema.nomesTabelas();
     var cabecalhos = ctx.io.lerCabecalhos(todas);
@@ -583,12 +584,22 @@ var AuditService = (function () {
     if (ausentes.indexOf('OPERACOES') >= 0) {
       // Sem o journal não há unidade possível: só a estrutura é conferida.
       var tx0 = { repo: { carregada: function () { return false; } }, cru: null, agora: ctx.clock.agora(), dataVersion: UnitOfWork.versao(ctx), ctx: ctx };
-      return { dados: conferirTudo_(tx0, estrutura), dataVersion: tx0.dataVersion };
+      return guardarResumo_(ctx, { dados: conferirTudo_(tx0, estrutura), dataVersion: tx0.dataVersion });
     }
-    return UnitOfWork.exclusivo(ctx, {
+    return guardarResumo_(ctx, UnitOfWork.exclusivo(ctx, {
       rota: 'sistema.integridade', reads: leitura, acessoCru: true,
       tratador: function (tx) { return conferirTudo_(tx, estrutura); },
-    });
+    }));
+  }
+  /**
+   * Resumo da ÚLTIMA verificação do banco em `INTEGRIDADE:<banco>` (Script Properties, fora da planilha), que alimenta o
+   * alerta INTEGRIDADE_COM_ERRO (RN-107): qualquer verificação completa o atualiza — a semanal, a sob demanda, a do fim
+   * do setup, a da restauração e a que confirma um reparo —, para o alerta não ficar uma semana desatualizado.
+   */
+  function guardarResumo_(ctx, r) {
+    var rel = r.dados;
+    ctx.props.gravar(CHAVE_RESUMO + ctx.banco, JSON.stringify({ gerado_em: rel.gerado_em, ok: rel.ok, erros: rel.erros, alertas: rel.alertas }));
+    return r;
   }
   /**
    * Reparo oferecido pela verificação (RECONSTRUIR): recuperação total (situação dos eventos e todas as projeções

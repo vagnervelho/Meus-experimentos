@@ -353,8 +353,7 @@ var Maintenance = (function () {
    * (`INTEGRIDADE:<banco>`, para o alerta "integridade com erro") e, havendo erro, em ERROS_LOG. Devolve o relatório.
    */
   function integridadeSemanal(ctx) {
-    var rel = AuditService.verificarIntegridade(ctx).dados;
-    ctx.props.gravar('INTEGRIDADE:' + ctx.banco, JSON.stringify({ gerado_em: rel.gerado_em, ok: rel.ok, erros: rel.erros, alertas: rel.alertas }));
+    var rel = AuditService.verificarIntegridade(ctx).dados; // a verificação guarda o resumo em INTEGRIDADE:<banco>
     if (!rel.ok) {
       UnitOfWork.anotarErro(ctx, { contexto: 'trgIntegridadeSemanal', codigo: 'INTEGRIDADE_COM_ERRO', mensagem: 'Verificação de integridade: ' + rel.erros + ' erro(s) e ' + rel.alertas + ' alerta(s). Abra Sistema → Integridade.' });
       UnitOfWork.descarregarErros(ctx);
