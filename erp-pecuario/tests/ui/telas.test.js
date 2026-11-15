@@ -41,7 +41,7 @@ for (const largura of LARGURAS) {
     await page.click('button:has-text("Cadastrar animal")');
     await page.waitForSelector(dialogo + ' [data-como-entrou]');
     const opcoes = await page.$$eval(dialogo + ' [data-entrada]', (els) => els.map((e) => e.getAttribute('data-entrada')));
-    assert.deepEqual(opcoes, ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'EXTERNO'], 'só as entradas entregues na Fase 1 (nascimento e compra chegam na Fase 2)');
+    assert.deepEqual(opcoes, ['NASCIMENTO', 'ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'EXTERNO'], 'só as entradas entregues (a compra chega na etapa seguinte da Fase 2)');
     await page.click(dialogo + ' [data-entrada="ENTRADA_INICIAL"]');
     await A.esperarTela(page, 'Rebanho inicial');
     const c = page.locator(cartoes).nth(0);
