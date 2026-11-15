@@ -657,3 +657,7 @@ refutado nem adiado. Testes novos: `tests/revisao3.motor.test.js`, `tests/revisa
   `tests/estorno.test.js`; o número em dois animais ao mesmo tempo agora acusado em `tests/integrity.fase2.test.js`; o
   rascunho grande guardado em partes em `tests/api.test.js` (o limite passou de 8 KB a 96 KB); o vencimento à vista que
   a prévia já deixa vazio em `tests/ui/venda.test.js`.
+- Verificado em Node (`npm test`: 587 testes, 587 aprovados, 0 falhas, cerca de 8 minutos neste ambiente) e no navegador
+  com o backend real (`npm run ui:check`: 81 testes, 81 aprovados, 0 falhas; página montada com 443 KB de 450 KB). Os 35
+  testes novos de achado falham no código anterior à rodada (o 36º, "a importação em curso ainda pode ser desfeita", é a
+  guarda do que precisa continuar valendo). Nada validado na conta do dono.
