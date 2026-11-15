@@ -499,15 +499,7 @@ var Timeline = (function () {
     if (!a || (a.status !== 'CONFIRMADO' && a.status !== 'ESTORNADO' && a.status !== 'CANCELADO')) return null;
     var ativo = a.status === 'CONFIRMADO';
     var anulador = a.anulador_id ? tx.cru.cruPorId('EVENTOS', a.anulador_id) : null;
-    var parcelas = tx.cru.cruPor('PARCELAS', 'financial_id', r.financial_id).filter(function (p) { return p.status !== 'CANCELADA'; });
-    var sp;
-    var dataPag = null;
-    if (!parcelas.length) sp = 'SEM_CAIXA';
-    else if (!ativo) sp = 'CANCELADO';
-    else if (parcelas.every(function (p) { return p.status === 'LIQUIDADA'; })) {
-      sp = 'LIQUIDADO';
-      dataPag = parcelas.reduce(function (m, p) { return vazio_(p.data_pagamento) || (m && m >= p.data_pagamento) ? m : p.data_pagamento; }, null);
-    } else sp = parcelas.some(function (p) { return p.status === 'LIQUIDADA'; }) ? 'PARCIAL' : 'ABERTO';
+    var sp = FinancialService.situacaoPagamento(tx.cru.cruPor('PARCELAS', 'financial_id', r.financial_id), ativo);
     var animal = null;
     if (ativo) {
       var rat = tx.repo.por('RATEIOS', 'financial_id', r.financial_id)[0];
