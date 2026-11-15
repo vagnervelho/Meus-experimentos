@@ -257,7 +257,8 @@ var TelaRebanho = (function () {
   var BLOCO_DA_ABA = { peso: 'peso', sanidade: 'sanitario', reproducao: 'reprodutivo', financeiro: 'financeiro' };
   var ATALHOS_FICHA = [
     { tipo: 'PESAGEM', rotulo: 'Pesar' }, { tipo: 'SANIDADE', rotulo: 'Vacinar ou tratar' }, { tipo: 'TRANSFERENCIA', rotulo: 'Transferir' },
-    { tipo: 'VENDA', rotulo: 'Vender' }, { tipo: 'MORTE', rotulo: 'Registrar morte' }, { tipo: 'OUTRA_ENTRADA', rotulo: 'Voltar ao rebanho', volta: true },
+    { tipo: 'VENDA', rotulo: 'Vender' }, { tipo: 'MORTE', rotulo: 'Registrar morte' }, { tipo: 'DESCARTE', rotulo: 'Descartar' },
+    { tipo: 'NASCIMENTO', rotulo: 'Registrar parto', filtro: true }, { tipo: 'OUTRA_ENTRADA', rotulo: 'Voltar ao rebanho', volta: true },
     { tipo: 'AJUSTE_INVENTARIO', subtipo: 'IDENTIFICACAO_INCORRETA', rotulo: 'Corrigir brinco lançado errado' },
     { tipo: 'AJUSTE_INVENTARIO', subtipo: 'CORRECAO_LOCALIZACAO', rotulo: 'Corrigir o pasto' },
   ];
@@ -275,7 +276,7 @@ var TelaRebanho = (function () {
     ATALHOS_FICHA.forEach(function (x) {
       var def = Store.tipoEvento(x.tipo);
       if (!def || (x.subtipo && !(def.subtipos && def.subtipos[x.subtipo]))) return;
-      if (x.volta ? Seletor.motivoInelegivel(a, def.filtro_elegiveis) !== null : a.situacao_cadastral !== 'ATIVO') return;
+      if (x.volta || x.filtro ? Seletor.motivoInelegivel(a, def.filtro_elegiveis) !== null : a.situacao_cadastral !== 'ATIVO') return;
       out.push(UI.botao(x.rotulo, { atributos: { 'data-atalho-ficha': x.subtipo || x.tipo }, aoClicar: function () { Registro.abrir(x.tipo, { subtipo: x.subtipo || null, linhas: [{ animal_id: id }], origem: 'animal/' + id + '/resumo' }); } }));
     });
     return out;
@@ -399,16 +400,44 @@ var TelaRebanho = (function () {
     }).el : h('p', { class: 'suave', text: 'Nenhuma cria registrada.' }), { dado: 'crias' }));
     return caixa;
   }
+  function rotuloMovimento(r) { if (!r) return ''; var t = Store.tipoEvento(r.event_type); return t ? t.rotulo : Fmt.rotulo('', r.event_type); }
   function blocoPastos(f) {
     var per = (f.pastos && f.pastos.periodos) || [];
     if (!per.length) return UI.nota('Nenhum período em pasto registrado.', 'info');
-    return UI.tabela({ id: 'periodos', rotulo: 'Períodos em cada pasto', linhas: per.slice().reverse(), chave: function (p) { return p.inicio + p.pasture_id; },
+    var caixa = h('div');
+    caixa.appendChild(UI.tabela({ id: 'periodos', rotulo: 'Períodos em cada pasto', linhas: per.slice().reverse(), chave: function (p) { return p.inicio + p.pasture_id; },
       colunas: [
         { id: 'pasto_nome', rotulo: 'Pasto', formatar: function (p) { return p.pasto_nome || 'sem pasto'; } },
-        { id: 'inicio', rotulo: 'Entrou em', formatar: function (p) { return Fmt.data(p.inicio); } },
-        { id: 'fim', rotulo: 'Saiu em', formatar: function (p) { return p.em_andamento ? 'está lá' : Fmt.data(p.fim); } },
+        { id: 'inicio', rotulo: 'Entrou em', formatar: function (p) { return Fmt.data(p.inicio) + (p.entrada ? ' · ' + rotuloMovimento(p.entrada).toLowerCase() : ''); } },
+        { id: 'fim', rotulo: 'Saiu em', formatar: function (p) { return p.em_andamento ? 'está lá' : Fmt.data(p.fim) + (p.saida ? ' · ' + rotuloMovimento(p.saida).toLowerCase() : ''); } },
         { id: 'dias', rotulo: 'Dias', num: true },
-      ] }).el;
+      ] }).el);
+    var tot = (f.pastos && f.pastos.por_pasto) || [];
+    if (tot.length > 1) caixa.appendChild(UI.secao('Dias em cada pasto', UI.pares(tot.map(function (p) { return [p.pasto_nome || 'sem pasto', p.dias + (p.dias === 1 ? ' dia' : ' dias') + (p.atual ? ' (está lá)' : '')]; })), { dado: 'dias-por-pasto' }));
+    return caixa;
+  }
+  /** Bloco G (reprodução): na Fase 2, a parte de partos; o que chega depois aparece como aviso. */
+  function blocoReproducao(f) {
+    var g = f.reprodutivo || {};
+    var caixa = h('div', { dataset: { blocoReproducao: '1' } });
+    if (g.entregue === false) { caixa.appendChild(UI.nota(g.mensagem, 'info')); return caixa; }
+    if (!g.aplica) { caixa.appendChild(UI.nota(g.mensagem || 'Não se aplica.', 'info')); return caixa; }
+    caixa.appendChild(UI.pares([
+      ['Situação reprodutiva', Fmt.rotulo('SITUACAO_REPRODUTIVA', g.situacao_reprodutiva)], ['Cria ao pé', g.cria_ao_pe ? 'sim' : 'não'],
+      ['Partos', String(g.n_partos) + (g.partos_previos ? ' (' + g.partos_previos + ' anteriores à entrada declarados)' : '')], ['Último parto', g.ultimo_parto ? Fmt.data(g.ultimo_parto) : '—'],
+      ['Crias nascidas vivas', String(g.crias_nascidas_vivas)], ['Natimortos', String(g.natimortos)],
+      ['Intervalo médio entre partos', g.intervalo_medio_dias && g.intervalo_medio_dias.valor !== null ? g.intervalo_medio_dias.valor + ' dias' : '— (' + Fmt.rotulo('MOTIVO', g.intervalo_medio_dias ? g.intervalo_medio_dias.motivo : 'DADOS_INSUFICIENTES') + ')'],
+    ]));
+    var partos = (g.partos || []).slice().reverse();
+    caixa.appendChild(partos.length ? UI.tabela({ id: 'partos', rotulo: 'Partos', linhas: partos, chave: function (p) { return p.event_id; },
+      colunas: [
+        { id: 'data', rotulo: 'Data', formatar: function (p) { var r = 'evento/' + p.event_id; return h('a', { class: 'botao botao-texto', href: Roteador.href(r), dataset: { rota: r } }, Fmt.data(p.data) + (p.pre_marco_zero ? ' (histórico)' : '')); } },
+        { id: 'crias', rotulo: 'Crias', valor: function (p) { return (p.nascidos_vivos === 1 ? '1 viva' : p.nascidos_vivos + ' vivas') + (p.natimortos ? ' · ' + p.natimortos + (p.natimortos === 1 ? ' natimorta' : ' natimortas') : ''); } },
+        { id: 'quem', rotulo: 'Quem nasceu', formatar: function (p) { return p.crias.length ? h('span', null, p.crias.map(function (c, i) { var r = 'animal/' + c.animal_id + '/resumo'; return h('span', null, i ? ', ' : '', h('a', { class: 'botao botao-texto', href: Roteador.href(r), dataset: { rota: r } }, c.brinco || c.codigo_interno || 'cria')); })) : '—'; } },
+        { id: 'intervalo_dias', rotulo: 'Dias desde o anterior', num: true, formatar: function (p) { return p.intervalo_dias === null ? '—' : String(p.intervalo_dias); } },
+      ] }).el : h('p', { class: 'suave', text: 'Nenhum parto registrado.' }));
+    if (g.pendente) caixa.appendChild(UI.nota(g.pendente.mensagem, 'info'));
+    return caixa;
   }
   function blocoEventos(f) {
     var itens = (f.eventos && f.eventos.itens) || [];
@@ -503,6 +532,7 @@ var TelaRebanho = (function () {
       if (aba === 'resumo') corpo.appendChild(blocoResumo(f, linha));
       else if (aba === 'genealogia') corpo.appendChild(blocoGenealogia(f, abrirEdicao));
       else if (aba === 'pastos') corpo.appendChild(UI.secao('Histórico de pastos', blocoPastos(f)));
+      else if (aba === 'reproducao') corpo.appendChild(UI.secao('Reprodução', blocoReproducao(f), { dado: 'reproducao' }));
       else if (aba === 'eventos') corpo.appendChild(UI.secao('Linha do tempo', blocoEventos(f), { dado: 'linha-tempo' }));
       else if (aba === 'anexos') corpo.appendChild(UI.secao('Fotos e documentos', blocoAnexos(f, linha)));
       else if (BLOCO_DA_ABA[aba]) {

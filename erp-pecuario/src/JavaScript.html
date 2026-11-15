@@ -161,6 +161,8 @@ var Fmt = (function () {
     PAPEL: { SUJEITO: 'Animal', CRIA: 'Cria', MATRIZ: 'Matriz', TOURO: 'Touro' },
     MOTIVO: { DADOS_INSUFICIENTES: 'dados insuficientes', ANTERIOR_AO_MARCO_ZERO: 'data anterior ao marco zero', FILTRO_NAO_APLICAVEL: 'o filtro não se aplica', SEM_VALOR_DE_REFERENCIA: 'sem valor de referência' },
     FONTE: { APP: 'Lançado no app', IMPORTACAO: 'Importação', SISTEMA: 'Sistema' },
+    SITUACAO_NASCIMENTO: { VIVO: 'Vivo', NATIMORTO: 'Natimorto (nasceu morto)' },
+    TIPO_BAIXA: { MORTE: 'Morte', DESCARTE: 'Descarte', DIVERGENCIA_CONTAGEM: 'Não encontrado na contagem' },
     CAMPO_CORRIGIVEL: {
       sexo: 'Sexo', data_nascimento: 'Data de nascimento', data_nascimento_confianca: 'Certeza do nascimento', mae_id: 'Mãe', mae_confianca: 'Certeza da mãe',
       pai_id: 'Pai', pai_confianca: 'Certeza do pai', castrado: 'Castrado', reprodutor: 'Reprodutor (touro)', partos_previos: 'Partos anteriores',
@@ -171,6 +173,7 @@ var Fmt = (function () {
     sexo: 'SEXO', data_nascimento_confianca: 'CONFIANCA', mae_confianca: 'CONFIANCA', pai_confianca: 'CONFIANCA', data_entrada_confianca: 'CONFIANCA',
     origem: 'ORIGEM', situacao_reprodutiva: 'SITUACAO_REPRODUTIVA', metodo_pesagem: 'METODO_PESAGEM', campo: 'CAMPO_CORRIGIVEL', situacao_cadastral: 'SITUACAO_CADASTRAL',
     tipos: 'TIPO_PARCEIRO', posse: 'POSSE', status: 'STATUS', sexo_aplicavel: 'SEXO_APLICAVEL', condicao: 'CONDICAO', tipo_anexo: 'TIPO_ANEXO', politica: 'POLITICA_AVISO',
+    situacao_nascimento: 'SITUACAO_NASCIMENTO', pai_confianca_parto: 'CONFIANCA',
   };
 
   function configurar(o) { Object.keys(o || {}).forEach(function (k) { if (o[k] !== undefined && o[k] !== null) cfg[k] = o[k]; }); cache = {}; }

@@ -10,7 +10,7 @@
  */
 var TelaEventos = (function () {
   var h = Util.h;
-  var CORRIGIVEIS = ['ENTRADA_INICIAL', 'OUTRA_ENTRADA'];
+  var CORRIGIVEIS = ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'NASCIMENTO', 'TRANSFERENCIA', 'MORTE', 'DESCARTE'];
   var filtros = { tipo: '', de: '', ate: '', vigentes: false, pagina: 1 };
   function situacao(e) {
     if (e.event_type === 'ESTORNO') return 'Estorno';
@@ -87,11 +87,56 @@ var TelaEventos = (function () {
   // ------------------------------------------------------------------ correção ----
   function texto_(v) { return v === null || v === undefined || v === '' ? null : v; }
   function boolDe(v) { return v === 'S' || v === true ? true : v === 'N' || v === false ? false : null; }
+  function pesoTexto_(v) { return v === null || v === undefined ? null : Fmt.numero(v, 1).replace(/\./g, ''); }
+  function limpo_(v) { Object.keys(v).forEach(function (k) { if (v[k] === null || v[k] === undefined) delete v[k]; }); return v; }
+  /**
+   * Correção de transferência, parto, morte e descarte: o cabeçalho vem do evento, dos pastos da linha, do detalhe
+   * (BAIXAS, REPRODUCAO) e do payload; as crias do parto vêm como linhas do grupo, com o animal reaproveitado.
+   */
+  function previaMovimento_(o, def, origem) {
+    var ev = o.evento, det = o.detalhes || {}, linhasEv = o.linhas || [];
+    var tipo = ev.event_type;
+    var payload = ev.payload || {};
+    var campos = {};
+    var antes = { campos: {}, linhas: {} };
+    var linhas = [];
+    var grupos = {};
+    if (tipo === 'TRANSFERENCIA') {
+      var l0 = linhasEv[0] || {};
+      origem.pasto_origem_id = l0.pasto_origem_id; origem.pasto_destino_id = l0.pasto_destino_id; origem.gta_numero = payload.gta_numero;
+      linhasEv.forEach(function (l) { linhas.push({ animal_id: l.animal_id, valores: {} }); antes.linhas[l.animal_id] = {}; });
+    } else if (tipo === 'MORTE' || tipo === 'DESCARTE') {
+      var b0 = (det.BAIXAS || [])[0] || {};
+      origem.causa = b0.causa; origem.diagnostico = b0.diagnostico; origem.destino = b0.destino; origem.motivo = b0.motivo;
+      linhasEv.forEach(function (l) { var v = limpo_({ observacoes: l.observacoes }); linhas.push({ animal_id: l.animal_id, valores: v }); antes.linhas[l.animal_id] = Util.clonar(v); });
+    } else if (tipo === 'NASCIMENTO') {
+      var rep = (det.REPRODUCAO || [])[0] || {};
+      var pesos = Utils_agrupar(det.PESAGENS || []);
+      var idents = Utils_agrupar(det.IDENTIFICACOES || []);
+      var crias = linhasEv.filter(function (l) { return l.papel === 'CRIA'; });
+      var at0 = (crias[0] && crias[0].atributos_iniciais_json) || {};
+      origem.pasto_destino_id = crias[0] ? crias[0].pasto_destino_id : null; origem.pai_id = rep.touro_id || at0.pai_id; origem.pai_confianca = at0.pai_confianca; origem.tipo_parto = rep.tipo_parto;
+      linhasEv.filter(function (l) { return l.papel === 'MATRIZ'; }).forEach(function (l) { linhas.push({ animal_id: l.animal_id, valores: {} }); antes.linhas[l.animal_id] = {}; });
+      grupos.crias = crias.map(function (l) {
+        var at = l.atributos_iniciais_json || {};
+        var a = Store.animal(l.animal_id);
+        var br = (idents[l.animal_id] || []).filter(function (x) { return x.tipo === 'BRINCO'; })[0];
+        var ps = (pesos[l.animal_id] || [])[0];
+        return { animal_id: l.animal_id, valores: limpo_({ situacao_nascimento: 'VIVO', sexo: at.sexo, brinco: br ? br.codigo : null, nome: a ? a.nome : null, raca: at.raca, peso: pesoTexto_(l.peso), metodo_pesagem: ps ? ps.metodo : null, observacoes: l.observacoes }) };
+      });
+      for (var k = 0; k < (rep.qtd_natimortos || 0); k++) grupos.crias.push({ valores: { situacao_nascimento: 'NATIMORTO' } });
+      antes.grupos = Util.clonar(grupos);
+    }
+    (def.campos || []).forEach(function (d) { if (texto_(origem[d.id]) !== null) campos[d.id] = origem[d.id]; });
+    antes.campos = Util.clonar(campos);
+    return { campos: campos, linhas: linhas, grupos: grupos, origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotuloEvento(ev), antes: antes } };
+  }
   /** Pré-preenche o evento substituto com o que o original gravou (valores como digitados no formulário). */
   function previaCorrecao(o) {
     var ev = o.evento, det = o.detalhes || {};
     var def = Store.tipoEvento(ev.event_type);
     var origem = { event_date: ev.event_date, property_id: ev.property_id, description: ev.description, responsible: ev.responsible, notes: ev.notes };
+    if (['NASCIMENTO', 'TRANSFERENCIA', 'MORTE', 'DESCARTE'].indexOf(ev.event_type) >= 0) return previaMovimento_(o, def, origem);
     var campos = {};
     (def.campos || []).forEach(function (d) { if (texto_(origem[d.id]) !== null) campos[d.id] = origem[d.id]; });
     var idents = Utils_agrupar(det.IDENTIFICACOES || []);
@@ -178,6 +223,15 @@ var TelaEventos = (function () {
       if ((det.AJUSTES || []).length) corpo.appendChild(UI.secao('Correções', h('ul', { class: 'lista-simples' }, det.AJUSTES.map(function (x) { return h('li', { text: quem(x) + ': ' + Fmt.rotuloOpcao('campo', x.campo) + ' de ' + (x.valor_anterior || '—') + ' para ' + (x.valor_novo || '—') + (x.justificativa ? ' · ' + x.justificativa : '') }); })), { dado: 'ajustes' }));
       if ((det.IDENTIFICACOES || []).length) corpo.appendChild(UI.secao('Identificações', h('ul', { class: 'lista-simples' }, det.IDENTIFICACOES.map(function (x) { return h('li', { text: quem(x) + ': ' + (x.tipo === 'BRINCO' ? 'Brinco' : Fmt.rotulo('IDENTIFICACAO', x.tipo)) + ' ' + x.codigo + ' desde ' + Fmt.data(x.data_inicio) + (x.data_fim ? ' até ' + Fmt.data(x.data_fim) : '') }); }))));
       if ((det.PESAGENS || []).length) corpo.appendChild(UI.secao('Pesagens', h('ul', { class: 'lista-simples' }, det.PESAGENS.map(function (x) { return h('li', { text: quem(x) + ': ' + Fmt.peso(x.peso_kg) + ' · ' + Fmt.rotulo('METODO_PESAGEM', x.metodo) }); }))));
+      if ((det.BAIXAS || []).length) corpo.appendChild(UI.secao('Saída do rebanho', h('ul', { class: 'lista-simples' }, det.BAIXAS.map(function (x) {
+        var partes = x.tipo === 'MORTE' ? ['causa: ' + Store.rotuloLista('CAUSA_MORTE', x.causa), x.diagnostico ? 'diagnóstico: ' + x.diagnostico : null] : ['destino: ' + Store.rotuloLista('DESTINO_DESCARTE', x.destino), 'motivo: ' + Store.rotuloLista('MOTIVO_DESCARTE', x.motivo)];
+        return h('li', { text: quem(x) + ': ' + Fmt.rotulo('TIPO_BAIXA', x.tipo).toLowerCase() + ' · ' + partes.filter(Boolean).join(' · ') + (x.observacoes ? ' · ' + x.observacoes : '') });
+      })), { dado: 'baixas' }));
+      var partos = (det.REPRODUCAO || []).filter(function (x) { return x.tipo_evento === 'PARTO'; });
+      if (partos.length) corpo.appendChild(UI.secao('Parto', UI.pares(partos.map(function (x) {
+        return ['Mãe ' + quem(x), (x.qtd_nascidos_vivos === 1 ? '1 nascido vivo' : x.qtd_nascidos_vivos + ' nascidos vivos') + (x.qtd_natimortos ? ' · ' + x.qtd_natimortos + (x.qtd_natimortos === 1 ? ' natimorto' : ' natimortos') : '') + (x.tipo_parto ? ' · ' + Store.rotuloLista('TIPO_PARTO', x.tipo_parto) : '')];
+      })), { dado: 'parto' }));
+      if (payload.gta_numero) corpo.appendChild(UI.secao('Trânsito', UI.pares([['GTA', payload.gta_numero]])));
       if ((det.FINANCEIRO || []).length) corpo.appendChild(UI.secao('Lançamentos financeiros', h('ul', { class: 'lista-simples' }, det.FINANCEIRO.map(function (x) { return h('li', { text: (x.descricao || 'lançamento') + ': ' + Fmt.dinheiro(x.valor) + (x.status === 'CANCELADO' ? ' (cancelado)' : '') }); }))));
       if (ev.vigente && ev.event_type !== 'ESTORNO' && Store.tipoEvento('ESTORNO')) {
         acoes.appendChild(UI.botao('Estornar', { tipo: 'perigo', aoClicar: function () {
