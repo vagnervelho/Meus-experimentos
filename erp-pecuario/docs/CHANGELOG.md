@@ -187,6 +187,7 @@ repositório; "a verificar na conta do dono" significa que só o roteiro de diag
   aba Financeiro da ficha (custo de aquisição e lançamentos do animal).
 - Base de demonstração: as 8 entradas ao longo dos três anos passam a ser compras (valor por animal, frete e duas
   parcelas). Correção de compra entra como modelo na varredura de quedas (`tests/unitofwork.adversarial.test.js`).
-- Verificado em Node (`npm test`) e no navegador com o backend real (`npm run ui:check`): CT-03 completo, CT-13 na parte
-  da compra, o exemplo de 03b, seção 15.1, linha a linha, as invariantes de 03b, seção 14, depois de cada comando de
-  todos os testes do motor. Nada validado na conta do dono.
+- Verificado em Node (`npm test`: 379 testes, 379 aprovados) e no navegador com o backend real (`npm run ui:check`: 40
+  testes, 40 aprovados): CT-03 completo, CT-13 na parte da compra, o exemplo de 03b, seção 15.1, linha a linha, as
+  invariantes de 03b, seção 14, depois de cada comando de todos os testes do motor. A varredura de quedas com a correção
+  de compra levou o `npm test` a cerca de 3 minutos. Nada validado na conta do dono.
