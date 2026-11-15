@@ -740,7 +740,10 @@ a conferência final do ESTADO RESULTANTE.
   `INTEGRIDADE_GENEALOGIA`);
 - a troca do sexo de uma categoria escolhida à mão (`INTEGRIDADE_LINHA_DO_TEMPO`);
 - ligar "ignorar zeros à esquerda" com 012 e 12 em dois animais (`INTEGRIDADE_BRINCO`, `INTEGRIDADE_IDENTIFICACOES_ATIVAS`);
-- mudar o marco zero depois de um histórico importado (`INTEGRIDADE_COPIAS`).
+- mudar o marco zero depois de um histórico importado (`INTEGRIDADE_COPIAS`);
+- (teste aleatório, seção 36) a troca de brinco levada por correção para antes de um "brinco lançado errado", ou estornada,
+  ou o brinco de criação corrigido, quando a correção de brinco passaria a trocar um número que o animal não tinha naquela
+  posição (`INTEGRIDADE_LINHA_DO_TEMPO`, achado do brinco corrigido; seção 11).
 
 **Desempenho** (`npm run trava:medir`; base de demonstração do TestRunner, 391 comandos; CPU do Node sobre a planilha
 falsa; mediana de três execuções alternadas com a cópia do projeto de antes da trava):
@@ -787,7 +790,9 @@ tempo — períodos `[data_inicio, data_fim)` que se cruzam, fora o número corr
 (ATIVO ⇔ soma dos efeitos = 1), `LINHA_DO_TEMPO` (`Timeline.validar` sobre o histórico inteiro de cada animal, com a
 ordem das identificações e das marcações: `Timeline.validarIdentificacoes`/`validarMarcacoes`; revisão 4: a chegada
 declarada no rebanho inicial não fica antes do nascimento, e a categoria escolhida à mão de cada reclassificação vigente
-serve ao sexo do animal pela reconstrução), `BAIXADO_SEM_POSTERIOR`
+serve ao sexo do animal pela reconstrução; teste aleatório, seção 36: o "brinco lançado errado" — AJUSTES IDENTIFICACAO_INCORRETA —
+troca o número que estava em uso na posição dele, pela data, pela posição na cadeia de substituição e pela sequência, um
+achado por ajuste, "Estorne antes a correção do brinco lançado errado, ou deixe a troca de brinco depois dela"), `BAIXADO_SEM_POSTERIOR`
 (Fase 2: na ordem canônica, linha vigente que não seja correção de cadastro depois de uma saída e antes da volta — depois
 da morte, qualquer uma, volta inclusive —, e detalhe com data de IDENTIFICACOES, PESAGENS ou REPRODUCAO que cita o animal
 fora do rebanho num evento em que ele não tem linha; um achado por evento, "Estorne um dos dois"), `PARTOS` (Fase 2: cada
@@ -1063,7 +1068,9 @@ PERIODO_BLOQUEADO)}`. Item por tipo:
   `receita_valor` (OUTRAS_RECEITAS_OPERACIONAIS): um lançamento com um título (vencimento vazio = data do evento) e rateio
   CABECAS entre os animais (DIRETO com um); `total_value` = o valor; no descarte, EVENTOS.partner_id = quem pagou.
 - AJUSTE_INVENTARIO: CORRECAO_CADASTRO `{animal_id, campo, valor_novo}` (um item por campo; texto canônico, `''` =
-  desconhecido; apagar mãe, pai ou nascimento apaga a confiança); IDENTIFICACAO_INCORRETA `{animal_id, brinco}`;
+  desconhecido; apagar mãe, pai ou nascimento apaga a confiança); IDENTIFICACAO_INCORRETA `{animal_id, brinco}` (corrige o
+  brinco que está no cadastro; a correção vem depois do lançamento desse brinco na ordem canônica — no mesmo dia, pela
+  posição, com o substituto no lugar do original —, senão `ANTES_DA_IDENTIFICACAO`; teste aleatório, seção 36);
   CORRECAO_LOCALIZACAO `{animal_id, pasto_destino_id, pasto_origem_id?}` (a origem é a da linha do tempo na POSIÇÃO do lançamento
   no dia: depois das entradas e dos movimentos do dia que vêm antes dele — na correção, o substituto fica no lugar do
   original, antes de uma transferência posterior do mesmo dia —; as saídas do dia vêm depois: no dia de uma venda, o

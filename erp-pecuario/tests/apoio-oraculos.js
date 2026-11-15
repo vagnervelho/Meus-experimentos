@@ -127,8 +127,10 @@ function invariantesCruas(r) {
       if (ev.import_id && V.importacao(ev.import_id) !== 'IMPORTADO' && V.importacao(ev.import_id) !== 'CANCELADO') return;
       // 20: lançamento de evento anulado fica CANCELADO, apontando quem o anulou, sem animal direto. O pagamento fica
       // CANCELADO; sem parcela, continua SEM_CAIXA ("lançamento sem parcela, vigente ou não": 03b, seção 10.4).
+      // A importação desfeita decide antes do estorno: o evento fica CANCELADO, sem anulador (02, seção 5.1).
       const pagamento = (parcelas.get(id) || []).length ? 'CANCELADO' : 'SEM_CAIXA';
-      if (f.status !== 'CANCELADO' || f.status_pagamento !== pagamento || f.cancelado_por_event_id !== (V.anuladoPor.get(f.event_id) || null) || f.animal_id) out.push('20: lançamento de evento anulado não está CANCELADO por quem o anulou: ' + id);
+      const anulador = ev.import_id && V.importacao(ev.import_id) === 'CANCELADO' ? null : V.anuladoPor.get(f.event_id) || null;
+      if (f.status !== 'CANCELADO' || f.status_pagamento !== pagamento || f.cancelado_por_event_id !== anulador || f.animal_id) out.push('20: lançamento de evento anulado não está CANCELADO por quem o anulou: ' + id);
       return;
     }
     const ps = (parcelas.get(id) || []).filter((p) => p.status !== 'CANCELADA');

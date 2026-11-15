@@ -126,6 +126,14 @@ function montar(opcoes) {
       ],
     });
   }
+  // Nomes estáveis do que a montagem cria, para a sequência gravada ficar legível e repetível.
+  const nomear0 = (id, nome) => { sis.sim.set(id, nome); sis.uuid.set(nome, id); };
+  Object.keys(sis.pastos).forEach((k) => nomear0(sis.pastos[k], '@p:' + k));
+  Object.keys(sis.parceiros).forEach((k) => nomear0(sis.parceiros[k], '@f:' + k));
+  nomear0(sis.externo, '@x');
+  nomear0(sis.custeio, '@conta');
+  sis.categorias.forEach((c) => nomear0(c.id, '@c:' + c.codigo));
+  tabelas(sis).ANIMAIS.forEach((a) => { if (a.brinco && a.situacao_cadastral !== 'EXTERNO') nomear0(a.animal_id, '@b:' + a.brinco); });
   return sis;
 }
 
@@ -226,7 +234,7 @@ function simbolizar(sis, v) {
 }
 /** Resolve os símbolos; símbolo sem dono (o passo que o criou ficou fora) → null. */
 function resolver(sis, v, faltou) {
-  if (typeof v === 'string' && /^@\d+\.[aei]\d+$/.test(v)) { if (!sis.uuid.has(v)) { faltou.push(v); return v; } return sis.uuid.get(v); }
+  if (typeof v === 'string' && /^@(\d+\.[aei]\d+|[bpfc]:\w+|x|conta)$/.test(v)) { if (!sis.uuid.has(v)) { faltou.push(v); return v; } return sis.uuid.get(v); }
   if (Array.isArray(v)) return v.map((x) => resolver(sis, x, faltou));
   if (v && typeof v === 'object') { const o = {}; Object.keys(v).forEach((k) => { o[k] = resolver(sis, v[k], faltou); }); return o; }
   return v;
@@ -297,8 +305,9 @@ function oraculoGlobal(sis, S, datas) {
     if (a.situacao_cadastral === 'EXTERNO') { if (S.porAnimal.has(id) && S.porAnimal.get(id).length) out.push(falha('REPLAY:EXTERNO', 'animal de referência ' + a.codigo_interno + ' com linha de evento')); return; }
     const todas = S.porAnimal.get(id) || [];
     const ls = S.linhasDe(id);
-    if (!ls.length) {
-      const ok = todas.length ? ['HISTORICO', 'VENDIDO', 'MORTO', 'DESCARTADO'] : ['ANULADO', 'PENDENTE'];
+    if (!ls.some((l) => !DE_FATO(l))) {
+      // Sem entrada no rebanho: o histórico anterior ao marco zero decide (HISTORICO ou a saída antiga); sem ele, anulado.
+      const ok = todas.some((l) => l.pre) ? ['HISTORICO', 'VENDIDO', 'MORTO', 'DESCARTADO'] : ['ANULADO', 'PENDENTE'];
       if (ok.indexOf(a.situacao_cadastral) < 0) out.push(falha('REPLAY:SITUACAO', a.codigo_interno + ' está ' + a.situacao_cadastral + ' sem linha no rebanho (esperado ' + ok.join('/') + ')'));
       return;
     }
@@ -328,6 +337,14 @@ function oraculoGlobal(sis, S, datas) {
       if (!per.some((x) => l.data >= x.ini && (x.fim === null || l.data <= x.fim))) out.push(falha('REPLAY:FATO', a.codigo_interno + ' ' + l.tipo + ' de ' + l.data + ' fora da permanência'));
     });
   });
+  // Brinco lançado errado: o número corrigido é o que estava em uso na posição do lançamento, em qualquer caminho
+  // (registro, correção dele, correção ou estorno das identificações em volta).
+  S.t.AJUSTES.forEach((z) => {
+    if (z.tipo_ajuste !== 'IDENTIFICACAO_INCORRETA' || !S.vig.get(z.event_id)) return;
+    const E = S.ev.get(z.event_id);
+    const naPosicao = codigoNaPosicao(S, z.animal_id, { data: E.event_date, raiz: S.raiz(E), seq: E.event_seq }, z.event_id);
+    if (norm(z.valor_anterior) !== norm(naPosicao)) out.push(falha('REPLAY:BRINCO_CORRIGIDO', (S.animais.get(z.animal_id) || {}).codigo_interno + ': o brinco lançado errado de ' + E.event_date + ' corrige ' + z.valor_anterior + ', mas o brinco em uso nessa posição é ' + naPosicao));
+  });
   // Inventário: o sistema (inventario.posicao) = o replay, em hoje e em datas do passo.
   (datas || []).concat([HOJE]).forEach((D) => {
     if (!S.marco || D < S.marco || D > HOJE) return;
@@ -336,6 +353,23 @@ function oraculoGlobal(sis, S, datas) {
     const r = sis.api('inventario.posicao', { data: D });
     if (!r.ok) out.push(falha('INVENTARIO:FALHOU', D + ': ' + JSON.stringify(r.error).slice(0, 400)));
     else if (r.data.cabecas !== total) out.push(falha('INVENTARIO', 'inventário em ' + D + ': sistema ' + r.data.cabecas + ', replay ' + total));
+  });
+  // Elegíveis numa data do passo: a transferência pelo fim do dia (com o pasto), o parto pela presença no dia (RN-017).
+  (datas || []).slice(0, 1).forEach((D) => {
+    if (!S.marco || D < S.marco || D > HOJE) return;
+    const esperado = { TRANSFERENCIA: [], NASCIMENTO: [] };
+    S.animais.forEach((a, id) => {
+      if (a.situacao_cadastral === 'EXTERNO') return;
+      const p = presenca(S, id, D);
+      if (p.fim) esperado.TRANSFERENCIA.push(id + '@' + p.pasto);
+      if (p.dia && a.sexo === 'F') esperado.NASCIMENTO.push(id);
+    });
+    Object.keys(esperado).forEach((tipo) => {
+      const r = sis.api('inventario.elegiveis', { tipo, data: D });
+      if (!r.ok) { out.push(falha('ELEGIVEIS:FALHOU', tipo + ' ' + D + ': ' + JSON.stringify(r.error).slice(0, 400))); return; }
+      const obtido = (r.data.itens || []).map((x) => (tipo === 'TRANSFERENCIA' ? x.animal_id + '@' + x.pasture_id : x.animal_id)).sort();
+      if (JSON.stringify(obtido) !== JSON.stringify(esperado[tipo].sort())) out.push(falha('ELEGIVEIS', 'elegíveis à ' + tipo + ' em ' + D + ': sistema ' + obtido.length + ', replay ' + esperado[tipo].length + ' (' + JSON.stringify(obtido.filter((x) => esperado[tipo].indexOf(x) < 0).concat(['×'], esperado[tipo].filter((x) => obtido.indexOf(x) < 0))).slice(0, 400) + ')'));
+    });
   });
   return out;
 }
@@ -386,6 +420,12 @@ function oraculoEfeito(sis, cmd, resp, A, S) {
     return out;
   }
   if (!eid) { erro('resposta sem event_id: ' + JSON.stringify(resp).slice(0, 300)); return out; }
+  // A resposta traz os animais já com as projeções gravadas (o valor definitivo vem do servidor, P5).
+  (resp.animais || []).forEach((x) => {
+    const a = S.animais.get(x.animal_id);
+    if (!a) { erro('a resposta cita um animal que não existe'); return; }
+    if (x.situacao_cadastral !== a.situacao_cadastral || (x.pasto_atual_id || null) !== (a.pasto_atual_id || null) || norm(x.brinco) !== norm(a.brinco) || x.sexo !== a.sexo) erro('resposta × gravado em ' + a.codigo_interno + ': ' + JSON.stringify([x.situacao_cadastral, x.pasto_atual_id, x.brinco, x.sexo]) + ' × ' + JSON.stringify([a.situacao_cadastral, a.pasto_atual_id, a.brinco, a.sexo]));
+  });
   const E = S.ev.get(eid);
   if (!E) { erro('evento ' + eid + ' não gravado'); return out; }
   if (!S.vig.get(eid)) erro('evento gravado não vale');
@@ -491,7 +531,7 @@ function oraculoEfeito(sis, cmd, resp, A, S) {
       const a = S.animais.get(l.animal_id);
       if (a.mae_id !== mae || a.data_nascimento !== E.event_date || a.origem !== 'NASCIDO') erro(a.codigo_interno + ': mãe ' + a.mae_id + ', nascimento ' + a.data_nascimento + ', origem ' + a.origem);
       if (!pre && !S.linhasDe(l.animal_id).some((x) => x.ev !== eid) && a.situacao_cadastral !== 'ATIVO') erro('cria ' + a.codigo_interno + ' nasceu e está ' + a.situacao_cadastral);
-      if (pre && ['HISTORICO', 'VENDIDO', 'MORTO'].indexOf(a.situacao_cadastral) < 0) erro('cria do parto antigo ' + a.codigo_interno + ' está ' + a.situacao_cadastral);
+      if (pre && !S.linhasDe(l.animal_id).some((x) => !DE_FATO(x)) && ['HISTORICO', 'VENDIDO', 'MORTO'].indexOf(a.situacao_cadastral) < 0) erro('cria do parto antigo ' + a.codigo_interno + ' está ' + a.situacao_cadastral);
     });
     const rep = S.t.REPRODUCAO.filter((x) => x.event_id === eid && x.tipo_evento === 'PARTO');
     const nati = (d.crias || []).length - vivas.length;
@@ -534,6 +574,10 @@ function oraculoEfeito(sis, cmd, resp, A, S) {
     if (d.subtipo === 'IDENTIFICACAO_INCORRETA') {
       d.animais.forEach((x) => {
         const a = S.animais.get(x.animal_id);
+        // O número corrigido é o que estava em uso na posição do lançamento (o substituto no lugar do original).
+        const aj = S.t.AJUSTES.find((z) => z.event_id === eid && z.animal_id === x.animal_id && z.tipo_ajuste === 'IDENTIFICACAO_INCORRETA');
+        const naPosicao = codigoNaPosicao(S, x.animal_id, { data: E.event_date, raiz: S.raiz(E), seq: E.event_seq }, eid);
+        if (!aj || norm(aj.valor_anterior) !== norm(naPosicao)) erro(a.codigo_interno + ': corrigiu o brinco ' + (aj && aj.valor_anterior) + ', mas na posição do lançamento o brinco em uso era ' + naPosicao);
         const depois = S.t.IDENTIFICACOES.some((y) => y.animal_id === x.animal_id && y.tipo === 'BRINCO' && S.vig.get(y.event_id) && y.event_id !== eid && (y.data_inicio > E.event_date || (y.data_inicio === E.event_date && (S.raiz(S.ev.get(y.event_id)) > S.raiz(E) || (S.raiz(S.ev.get(y.event_id)) === S.raiz(E) && S.ev.get(y.event_id).event_seq > E.event_seq)))));
         const outra = S.t.AJUSTES.some((z) => z.animal_id === x.animal_id && z.tipo_ajuste === 'IDENTIFICACAO_INCORRETA' && S.vig.get(z.event_id) && z.event_id !== eid);
         if (!depois && !outra && a.situacao_cadastral !== 'ANULADO' && norm(a.brinco) !== norm(x.brinco)) erro(a.codigo_interno + ': brinco ' + a.brinco + ', corrigido para ' + x.brinco);
@@ -548,6 +592,16 @@ function oraculoEfeito(sis, cmd, resp, A, S) {
     }
   }
   return out;
+}
+/** Brinco em uso logo antes de uma posição (data, cadeia, sequência), pelas linhas cruas de IDENTIFICACOES. */
+function codigoNaPosicao(S, animal, pos, exceto) {
+  let aberto = null;
+  S.t.IDENTIFICACOES.filter((y) => y.animal_id === animal && y.tipo === 'BRINCO' && y.event_id !== exceto && S.vig.get(y.event_id))
+    .map((y) => { const e = S.ev.get(y.event_id); return { y, e, data: y.data_inicio, raiz: S.raiz(e), seq: e.event_seq }; })
+    .filter((x) => x.data < pos.data || (x.data === pos.data && (x.raiz < pos.raiz || (x.raiz === pos.raiz && x.seq < pos.seq))))
+    .sort((a, b) => cmp(a.data, b.data) || a.raiz - b.raiz || a.seq - b.seq)
+    .forEach((x) => { aberto = x.e.event_type === 'IDENTIFICACAO' && x.e.event_subtype === 'REMOCAO' ? null : x.y.codigo; });
+  return aberto;
 }
 const CAMPOS_CONFERIDOS = ['sexo', 'data_nascimento', 'mae_id', 'pai_id', 'origem'];
 /** Correção de cadastro: a última de cada campo (na ordem de registro, com o substituto no lugar do original) vale. */
@@ -591,17 +645,20 @@ function brinco(rnd, S) {
   if (x < 0.06) return null;
   // Números repetidos de propósito: o reaproveitamento (ligado e desligado), o zero à esquerda, o do vizinho.
   const usados = Array.from(S.animais.values()).map((a) => a.brinco).filter(Boolean);
-  if (x < 0.3 && usados.length) return sorteio(rnd, usados);
-  if (x < 0.36 && usados.length) return '0' + sorteio(rnd, usados);
-  return String(1 + Math.floor(rnd() * 70));
+  if (x < 0.18 && usados.length) return sorteio(rnd, usados);
+  if (x < 0.22 && usados.length) return '0' + sorteio(rnd, usados);
+  return String(1 + Math.floor(rnd() * 120));
 }
 const MOVEIS = (S) => Array.from(S.animais.values()).filter((a) => a.situacao_cadastral !== 'EXTERNO').map((a) => a.animal_id);
 function animaisPara(S, rnd, D, max, filtro) {
   const todos = MOVEIS(S);
   const x = rnd();
   let base;
-  if (x < 0.75) base = todos.filter((id) => filtro(id, presenca(S, id, D)));
-  else if (x < 0.95) base = todos;
+  // Foco: os animais dos últimos comandos aceitos, para encadear correções e estornos sobre o mesmo animal.
+  const foco = (S.foco || []).filter((id) => todos.indexOf(id) >= 0 && filtro(id, presenca(S, id, D)));
+  if (foco.length && rnd() < 0.35) base = foco;
+  else if (x < 0.85) base = todos.filter((id) => filtro(id, presenca(S, id, D)));
+  else if (x < 0.97) base = todos;
   else {
     const externos = Array.from(S.animais.values()).filter((a) => a.situacao_cadastral === 'EXTERNO').map((a) => a.animal_id);
     base = todos.concat([sorteio(rnd, externos.concat(['00000000-0000-4000-8000-00000000ffff']))]);
@@ -626,7 +683,14 @@ function montarDados(sis, spec) {
   if (s.tipo === 'CORRECAO_LOCALIZACAO') return { tipo: 'AJUSTE_INVENTARIO', subtipo: 'CORRECAO_LOCALIZACAO', campos: { event_date: s.data, justificativa: 'Achado em outro pasto' }, animais: [Object.assign({ animal_id: s.id, pasto_destino_id: s.destino }, s.origem ? { pasto_origem_id: s.origem } : {})] };
   if (s.tipo === 'RECLASSIFICACAO') return { tipo: 'AJUSTE_INVENTARIO', subtipo: 'RECLASSIFICACAO', campos: { event_date: s.data, justificativa: 'Categoria conferida no curral' }, animais: [{ animal_id: s.id, categoria_manual_id: s.cat }] };
   if (s.tipo === 'IDENTIFICACAO_INCORRETA') return { tipo: 'AJUSTE_INVENTARIO', subtipo: 'IDENTIFICACAO_INCORRETA', campos: { event_date: s.data, justificativa: 'Brinco digitado errado' }, animais: [{ animal_id: s.id, brinco: s.brinco }] };
-  if (s.tipo === 'CORRECAO_CADASTRO') return { tipo: 'AJUSTE_INVENTARIO', subtipo: 'CORRECAO_CADASTRO', campos: { event_date: s.data, justificativa: 'Conferido na ficha' }, animais: s.itens.map((x) => ({ animal_id: x.id, campo: x.campo, valor_novo: x.valor })) };
+  if (s.tipo === 'CORRECAO_CADASTRO') {
+    const animais = [];
+    s.itens.forEach((x) => {
+      animais.push({ animal_id: x.id, campo: x.campo, valor_novo: x.valor });
+      Object.keys(x.junto || {}).forEach((c) => animais.push({ animal_id: x.id, campo: c, valor_novo: x.junto[c] }));
+    });
+    return { tipo: 'AJUSTE_INVENTARIO', subtipo: 'CORRECAO_CADASTRO', campos: { event_date: s.data, justificativa: 'Conferido na ficha' }, animais };
+  }
   if (s.tipo === 'IDENTIFICACAO') {
     return {
       tipo: s.tipo, subtipo: s.sub, campos: { event_date: s.data, tipo_identificacao: s.tipoIdent || 'BRINCO' },
@@ -658,16 +722,10 @@ function montarDados(sis, spec) {
     const itens = s.novos.map((n) => Object.assign(novoAnimal(n, false, true), n.brinco_origem ? { brinco_origem: n.brinco_origem } : {})).concat(s.voltas.map((id) => ({ animal_id: id })));
     const g = s.neg;
     const n = itens.length;
-    itens.forEach((it, i) => {
-      if (g.mod === 'KG_VIVO') it.peso = g.pesos[i];
-      if (g.mod === 'VALOR') it.valor_individual = g.valores[i];
-      if (g.mod === 'ARROBA') it.peso_carcaca_kg = g.carcacas[i];
-    });
-    const conta = g.mod === 'CABECA' ? n * g.preco : g.mod === 'VALOR' ? g.valores.slice(0, n).reduce((a, b) => a + b, 0) : g.mod === 'KG_VIVO' ? Math.round(g.pesos.slice(0, n).reduce((a, b) => a + Math.round(b * 10), 0) * g.preco / 10) : Math.round(g.carcacas.slice(0, n).reduce((a, b) => a + Math.round(b * 10), 0) * g.preco / 150);
-    const valor = Math.max(1, conta + (g.desvio || 0));
-    const campos = { event_date: s.data, partner_id: P.fornecedor, modalidade: g.mod === 'VALOR' ? 'CABECA' : g.mod, valor_animais: valor, pasto_destino_id: s.pasto };
-    if (g.mod !== 'VALOR') campos.preco_unitario = g.preco;
-    if (g.mod === 'ARROBA') campos.base_peso = 'CARCACA';
+    itens.forEach((it, i) => Object.assign(it, itemNegocio(g, i)));
+    const valor = Math.max(1, contaNegocio(g, n) + (g.desvio || 0));
+    const campos = { event_date: s.data, partner_id: P.fornecedor, valor_animais: valor, pasto_destino_id: s.pasto };
+    cabecalhoNegocio(g, campos);
     const custos = [];
     if (g.frete) custos.push({ tipo: 'FRETE', valor: g.frete, partner_id: P.transportador });
     if (g.outros) custos.push(Object.assign({ tipo: 'OUTRO', valor: g.outros, partner_id: P.corretor }, g.vezes ? { parcelas_qtd: g.vezes } : {}));
@@ -676,19 +734,47 @@ function montarDados(sis, spec) {
   if (s.tipo === 'VENDA') {
     const g = s.neg;
     const n = s.ids.length;
-    const bruto0 = g.mod === 'CABECA' ? n * g.preco : g.mod === 'KG_VIVO' ? Math.round(g.pesos.slice(0, n).reduce((a, b) => a + Math.round(b * 10), 0) * g.preco / 10) : Math.round(g.carcacas.slice(0, n).reduce((a, b) => a + Math.round(b * 10), 0) * g.preco / 150);
-    const bruto = Math.max(1, bruto0 + (g.desvio || 0));
-    const campos = { event_date: s.data, partner_id: P.comprador, finalidade: g.finalidade || 'RECRIA_ENGORDA', modalidade: g.mod, preco_unitario: g.preco, valor_bruto: bruto };
-    if (g.mod === 'ARROBA') campos.base_peso = 'CARCACA';
+    // Com o valor de cada animal, os valores somam a receita (bruto − desconto).
+    const porValor = g.mod === 'VALOR' || (g.mod === 'LOTE' && g.criterio === 'VALOR_INDIVIDUAL');
+    const bruto = Math.max(1, contaNegocio(g, n) + (porValor ? g.desconto || 0 : g.desvio || 0));
+    const campos = { event_date: s.data, partner_id: P.comprador, finalidade: g.finalidade || 'RECRIA_ENGORDA', valor_bruto: bruto };
+    cabecalhoNegocio(g, campos);
     if (g.desconto) campos.desconto_comercial = g.desconto;
     if (s.origem) campos.pasto_origem_id = s.origem;
     if (g.loteKg) campos.peso_vivo_total_kg = g.loteKg;
-    const animais = s.ids.map((id, i) => Object.assign({ animal_id: id }, g.mod === 'KG_VIVO' && !g.loteKg ? { peso: g.pesos[i] } : {}, g.mod === 'ARROBA' ? { peso_carcaca_kg: g.carcacas[i] } : {}));
+    const animais = s.ids.map((id, i) => { const it = Object.assign({ animal_id: id }, itemNegocio(g, i)); if (g.loteKg) delete it.peso; return it; });
     const receita = bruto - (g.desconto || 0);
     const deducoes = (g.deducoes || []).map((x) => Object.assign({ tipo: x.tipo, valor: x.valor }, x.retida ? { retida_pelo_comprador: true } : { partner_id: P.corretor }));
     return { tipo: s.tipo, campos, animais, parcelas: parcelas(Math.max(1, receita), g.parcelas, s.data), deducoes };
   }
   throw new Error('tipo sem montagem: ' + s.tipo);
+}
+/** A conta do negócio pela modalidade (conferência; no lote, o valor da nota, ou a soma pelo valor de cada animal). */
+function contaNegocio(g, n) {
+  const somar = (l, f) => l.slice(0, n).reduce((a, b) => a + f(b), 0);
+  const kg10 = somar(g.pesos, (p) => Math.round(p * 10));
+  if (g.mod === 'CABECA') return n * g.preco;
+  if (g.mod === 'VALOR') return somar(g.valores, (v) => v);
+  if (g.mod === 'KG_VIVO') return Math.round(kg10 * g.preco / 10);
+  if (g.mod === 'ARROBA') return Math.round(somar(g.carcacas, (p) => Math.round(p * 10)) * g.preco / 150);
+  if (g.mod === 'ARROBA_VIVO') return Math.round(kg10 * g.rend / 100 * g.preco / 150);
+  return g.criterio === 'VALOR_INDIVIDUAL' ? somar(g.valores, (v) => v) : g.lote;
+}
+function itemNegocio(g, i) {
+  const it = {};
+  const lote = (c) => g.mod === 'LOTE' && g.criterio === c;
+  if (g.mod === 'KG_VIVO' || g.mod === 'ARROBA_VIVO' || lote('PESO_VIVO')) it.peso = g.pesos[i];
+  if (g.mod === 'VALOR' || lote('VALOR_INDIVIDUAL')) it.valor_individual = g.valores[i];
+  if (g.mod === 'ARROBA' || lote('PESO_CARCACA')) it.peso_carcaca_kg = g.carcacas[i];
+  if (lote('MANUAL')) it.base_manual = g.manual[i];
+  return it;
+}
+function cabecalhoNegocio(g, campos) {
+  campos.modalidade = g.mod === 'VALOR' ? 'CABECA' : g.mod === 'ARROBA_VIVO' ? 'ARROBA' : g.mod;
+  if (g.mod !== 'VALOR' && g.mod !== 'LOTE') campos.preco_unitario = g.preco;
+  if (g.mod === 'ARROBA') campos.base_peso = 'CARCACA';
+  if (g.mod === 'ARROBA_VIVO') { campos.base_peso = 'VIVO'; campos.rendimento_carcaca_pct = g.rend; campos.rendimento_tipo = 'NEGOCIADO'; }
+  if (g.mod === 'LOTE') { campos.criterio_rateio = g.criterio; if (g.criterio === 'MANUAL') campos.justificativa_rateio = 'Combinado na negociação'; }
 }
 function novoAnimal(n, inicial, compra) {
   const a = { sexo: n.sexo, pasto_destino_id: n.pasto };
@@ -740,14 +826,17 @@ function negocio(rnd, n, venda) {
   const x = rnd();
   const pr = { n: 1 + Math.floor(rnd() * 3), modo: pesado(rnd, [['vazias', 4], ['explicitas', 4], ['erro', 1], ['nenhuma', 0.5]]) };
   const g = { parcelas: pr, pesos: Array.from({ length: n + 3 }, () => 150 + Math.floor(rnd() * 4000) / 10), carcacas: Array.from({ length: n + 3 }, () => 120 + Math.floor(rnd() * 2000) / 10), valores: Array.from({ length: n + 3 }, () => sorteio(rnd, [1, 2, 99999, 250000 + Math.floor(rnd() * 100) * 1000])) };
-  if (x < 0.4) Object.assign(g, { mod: 'CABECA', preco: sorteio(rnd, [1, 333333, 250000, 199999]) });
-  else if (x < 0.7) Object.assign(g, { mod: 'KG_VIVO', preco: 900 + Math.floor(rnd() * 600) });
-  else if (x < 0.85) Object.assign(g, { mod: 'ARROBA', preco: 28000 + Math.floor(rnd() * 5000) });
-  else Object.assign(g, venda ? { mod: 'CABECA', preco: 280000 } : { mod: 'VALOR' });
+  g.manual = Array.from({ length: n + 3 }, () => sorteio(rnd, [0.0001, 1, 2.5, 33.3333]));
+  if (x < 0.32) Object.assign(g, { mod: 'CABECA', preco: sorteio(rnd, [1, 333333, 250000, 199999]) });
+  else if (x < 0.56) Object.assign(g, { mod: 'KG_VIVO', preco: 900 + Math.floor(rnd() * 600) });
+  else if (x < 0.68) Object.assign(g, { mod: 'ARROBA', preco: 28000 + Math.floor(rnd() * 5000) });
+  else if (x < 0.76) Object.assign(g, { mod: 'ARROBA_VIVO', preco: 28000 + Math.floor(rnd() * 5000), rend: 48 + Math.floor(rnd() * 80) / 10 });
+  else if (x < 0.9) Object.assign(g, { mod: 'LOTE', criterio: sorteio(rnd, ['CABECAS', 'PESO_VIVO', 'PESO_CARCACA', 'VALOR_INDIVIDUAL', 'MANUAL']), lote: sorteio(rnd, [1, 2, 100000 + Math.floor(rnd() * 5000000)]) });
+  else Object.assign(g, { mod: 'VALOR' });
   if (rnd() < 0.15) g.desvio = sorteio(rnd, [1, -1, 5000, -5000]);
   if (venda) {
-    if (rnd() < 0.15) g.desconto = sorteio(rnd, [1, 5000, 99999999]);
-    if (rnd() < 0.5) g.deducoes = [{ tipo: sorteio(rnd, ['COMISSAO', 'FRETE', 'TAXA_FRIGORIFICO']), valor: sorteio(rnd, [1, 2, 4500]) }].concat(rnd() < 0.5 ? [{ tipo: 'FUNRURAL', valor: sorteio(rnd, [1, 1500, 99999999]), retida: true }] : []);
+    if (rnd() < 0.15) g.desconto = sorteio(rnd, [1, 5000, 5000, 99999999]);
+    if (rnd() < 0.5) g.deducoes = [{ tipo: sorteio(rnd, ['COMISSAO', 'FRETE', 'TAXA_FRIGORIFICO']), valor: sorteio(rnd, [1, 2, 4500]) }].concat(rnd() < 0.5 ? [{ tipo: 'FUNRURAL', valor: sorteio(rnd, [1, 1500, 1500, 99999999]), retida: true }] : []);
     if (g.mod === 'KG_VIVO' && rnd() < 0.2) g.loteKg = Math.round(g.pesos.slice(0, n).reduce((a, b) => a + b, 0) * 10) / 10;
     if (rnd() < 0.15) g.finalidade = 'ABATE';
   } else {
@@ -819,7 +908,8 @@ function propor(sis, S, rnd, tipo) {
     const ids = animaisPara(S, rnd, D, 2, (id, p) => p.dia);
     if (!ids.length) return null;
     const sub = sorteio(rnd, ['DESCARTE', 'NAO_LOCALIZADO']);
-    const acao = rnd() < 0.6 ? 'MARCAR' : 'DESMARCAR';
+    const marcado = (S.animais.get(ids[0]) || {})[sub === 'DESCARTE' ? 'marcado_descarte' : 'nao_localizado'] === true;
+    const acao = rnd() < 0.8 ? (marcado ? 'DESMARCAR' : 'MARCAR') : (marcado ? 'MARCAR' : 'DESMARCAR');
     return { tipo, sub, acao, data: rnd() < 0.4 ? dataPara(S, rnd, ids) : D, ids, motivo: sub === 'DESCARTE' && acao === 'MARCAR' && rnd() < 0.5 ? 'IDADE' : null };
   }
   if (tipo === 'CORRECAO_LOCALIZACAO') {
@@ -850,6 +940,14 @@ function propor(sis, S, rnd, tipo) {
 }
 /** Uma correção de cadastro escolhida para provocar: sexo de mãe ou touro, nascimento depois do filho ou na véspera do primeiro registro, mãe macho, ciclo. */
 function correcaoAleatoria(sis, S, rnd, id) {
+  const c = correcaoSo(sis, S, rnd, id);
+  // A confiança vai junto com a data, a mãe e o pai (o formulário pede as duas); às vezes falta, de propósito.
+  const conf = { data_nascimento: 'data_nascimento_confianca', data_entrada: 'data_entrada_confianca', mae_id: 'mae_confianca', pai_id: 'pai_confianca' }[c.campo];
+  if (conf && c.valor && rnd() < 0.9) c.junto = { [conf]: c.campo === 'mae_id' || c.campo === 'pai_id' ? 'CONFIRMADA' : 'ESTIMADA' };
+  if (c.campo === 'castrado' && c.valor === 'S' && rnd() < 0.9) c.junto = { reprodutor: 'N' };
+  return c;
+}
+function correcaoSo(sis, S, rnd, id) {
   const a = S.animais.get(id) || {};
   const campo = pesado(rnd, [['sexo', 3], ['data_nascimento', 4], ['mae_id', 3], ['pai_id', 2], ['data_entrada', 2], ['castrado', 1], ['origem', 1], ['data_nascimento_confianca', 0.5]]);
   const todos = MOVEIS(S);
@@ -1009,6 +1107,8 @@ function gerar(sis, S, rnd, k) {
       }
       if (imp.status === 'VALIDADO') {
         const c = est.contadores;
+        if (!c.validas && rnd() < 0.9) return Object.assign(base, { rota: 'importacao.desfazer', dados: { import_id: imp.import_id, justificativa: 'Nada a importar' }, rotulo: 'desfazer sem linha válida' });
+        if (rnd() < 0.25 || memo.revalidar) return Object.assign(base, { rota: 'importacao.validarBloco', dados: { import_id: imp.import_id, bloco: 1, mapeamento: memo.mapa }, rotulo: 'validar de novo' });
         const fora = c.erro + c.duplicadas;
         const dados = { import_id: imp.import_id, bloco: 1, modo: fora && rnd() < 0.9 ? 'PARCIAL_APROVADO' : 'TOTAL' };
         if (dados.modo === 'PARCIAL_APROVADO') dados.aprovacao = { importar: c.validas, ignorar: fora + (rnd() < 0.05 ? 1 : 0) };
@@ -1035,10 +1135,11 @@ function gerar(sis, S, rnd, k) {
   if (acao === 'corrigir' || acao === 'estornar') {
     const evs = S.t.EVENTOS.filter((e) => S.op.get(e.op_id) === 'CONFIRMADA');
     const vig = evs.filter((e) => S.vig.get(e.event_id));
-    let alvo = rnd() < 0.9 ? sorteio(rnd, vig) : sorteio(rnd, evs);
+    const recentes = vig.slice(-4);
+    let alvo = rnd() < 0.4 && recentes.length ? sorteio(rnd, recentes) : rnd() < 0.9 ? sorteio(rnd, vig) : sorteio(rnd, evs);
     if (acao === 'corrigir') {
       const comSpec = (rnd() < 0.9 ? vig : evs).filter((e) => sis.specs.has(e.event_id));
-      alvo = sorteio(rnd, comSpec);
+      alvo = rnd() < 0.4 ? sorteio(rnd, comSpec.slice(-3)) : sorteio(rnd, comSpec);
       if (!alvo) return null;
       const memo = sis.specs.get(alvo.event_id);
       const spec = rnd() < 0.15 ? js(memo.spec) : mutar(sis, S, rnd, memo.spec);
@@ -1052,7 +1153,7 @@ function gerar(sis, S, rnd, k) {
     const id = sorteio(rnd, MOVEIS(S).concat(sis.externo ? [sis.externo] : []));
     if (!id) return null;
     const c = correcaoAleatoria(sis, S, rnd, id);
-    const campos = { [c.campo]: c.valor };
+    const campos = Object.assign({ [c.campo]: c.valor }, c.junto || {});
     if (rnd() < 0.3) campos.nome = sorteio(rnd, ['Mimosa', 'Estrela', 'Valente']);
     return Object.assign(base, { rota: 'animal.editar', dados: Object.assign({ animal_id: id, campos }, rnd() < 0.95 ? { justificativa: 'Conferido na ficha' } : {}), rotulo: 'editar ' + c.campo });
   }
@@ -1133,7 +1234,8 @@ function executar(sis, k, cmd, antesT, opcoes) {
     } else if (r.meta && r.meta.duplicado) falhas.push(falha('REENVIO', 'comando novo tratado como duplicado'));
     else if (!r.meta || !r.meta.semAlteracao) falhas.push(...oraculoEfeito(sis, cmd, r.data, A, S));
   }
-  if (sim) {
+  // A simulação é consulta: corre com a importação em curso, que só recusa o comando (desenho-base 16.8).
+  if (sim && !(r.ok === false && r.error.code === 'CONFLICT' && A.emCurso.length)) {
     const real = r.ok ? 'OK' : r.error.code;
     const simulado = sim.ok ? (sim.data.avisos && sim.data.avisos.length && !(cmd.avisos || []).length ? 'AVISOS' : 'OK') : sim.error.code;
     const compativel = simulado === real || (simulado === 'AVISOS' && (real === 'NEEDS_CONFIRMATION' || real === 'OK')) || (simulado === 'OK' && real === 'NEEDS_CONFIRMATION') || real === 'IDEMPOTENCY_MISMATCH';
@@ -1148,10 +1250,14 @@ function executar(sis, k, cmd, antesT, opcoes) {
 
 /** Atualiza a memória do gerador depois de um passo aceito (especificação do lançamento, importação, último aceito). */
 function memorizar(sis, k, cmd, r, A, S) {
+  // "Valide de novo": a confirmação recusou porque o resultado da validação mudou.
+  if (r && !r.ok && cmd.rota === 'importacao.importarBloco' && r.error.code === 'CONFLICT' && sis.imps.has(cmd.dados.import_id)) sis.imps.get(cmd.dados.import_id).revalidar = true;
   if (!r || !r.ok) return;
-  if (!cmd.reenvio) sis.ultimoAceito = { k, cmd };
+  // Sem alteração não há operação nem chave gravada: o reenvio dele seria um comando novo.
+  if (!cmd.reenvio && !(r.meta && r.meta.semAlteracao)) sis.ultimoAceito = { k, cmd };
+  if (r.data && Array.isArray(r.data.animais)) sis.foco = r.data.animais.map((a) => a.animal_id).concat(sis.foco || []).slice(0, 4);
   if (cmd.rota === 'importacao.criar') sis.imps.set(r.data.import_id, { mapa: cmd.mapa, validado: 0 });
-  if (cmd.rota === 'importacao.validarBloco') { const m = sis.imps.get(cmd.dados.import_id); if (m) m.validado = Math.max(m.validado, cmd.dados.bloco); }
+  if (cmd.rota === 'importacao.validarBloco') { const m = sis.imps.get(cmd.dados.import_id); if (m) { m.validado = cmd.dados.bloco; m.revalidar = false; } }
   if (cmd.spec && r.data && r.data.event_id && /^evento\.(registrar|corrigir)$/.test(cmd.rota)) {
     // Os animais que o lançamento criou vão com o mesmo animal_id na correção: o item novo recebe o animal criado, na
     // ordem do código interno (a ordem de criação, que é a dos itens).
@@ -1183,13 +1289,19 @@ function rodar(semente, passos) {
   if (inicial.length) return { semente, opcoes, comandos: [], falha: inicial[0], falhas: inicial, k: -1, stats };
   for (let k = 0; k < passos; k++) {
     const S = estado(t);
+    S.foco = sis.foco;
     const cmd = gerar(sis, S, rnd, k);
     if (!cmd) continue;
     log.push(Object.assign({ k }, gravavel(sis, cmd)));
     const ex = executar(sis, k, cmd, t);
     const rot = cmd.rotulo || cmd.rota;
     stats.porRotulo[rot] = stats.porRotulo[rot] || { ok: 0, recusa: {} };
-    if (ex.r && ex.r.ok) { stats.aceitos++; stats.porRotulo[rot].ok++; } else if (ex.r) { stats.recusados++; const c = ex.r.error.code; stats.porRotulo[rot].recusa[c] = (stats.porRotulo[rot].recusa[c] || 0) + 1; }
+    if (ex.r && ex.r.ok) { stats.aceitos++; stats.porRotulo[rot].ok++; } else if (ex.r) {
+      stats.recusados++;
+      const det = (ex.r.error.details || [])[0];
+      const c = ex.r.error.code + (det ? ':' + det.codigo : '');
+      stats.porRotulo[rot].recusa[c] = (stats.porRotulo[rot].recusa[c] || 0) + 1;
+    }
     if (ex.falhas.length) return { semente, opcoes, comandos: log, falha: ex.falhas[0], falhas: ex.falhas, k, stats };
     nomear(sis, k, t, ex.depoisT);
     memorizar(sis, k, cmd, ex.r, estado(t), ex.S);
@@ -1211,7 +1323,7 @@ function gravavel(sis, cmd) {
  */
 function reproduzir(opcoes, comandos, sisFora) {
   const sis = montar(opcoes);
-  if (sisFora) sisFora.sis = sis;
+  if (sisFora) { sisFora.sis = sis; sisFora.resultados = {}; }
   let t = tabelas(sis);
   const inicial = oraculoGlobal(sis, estado(t), []);
   if (inicial.length) return Object.assign({ k: -1 }, inicial[0]);
@@ -1221,6 +1333,7 @@ function reproduzir(opcoes, comandos, sisFora) {
     if (faltou.length) continue;
     const cmd = Object.assign({}, c, { dados });
     const ex = executar(sis, c.k, cmd, t);
+    if (sisFora && ex.r) sisFora.resultados[c.k] = ex.r.ok ? 'OK' : ex.r.error.code + ':' + (ex.r.error.details || []).map((d) => d.codigo).join(',');
     if (ex.falhas.length) return Object.assign({ k: c.k }, ex.falhas[0]);
     nomear(sis, c.k, t, ex.depoisT);
     t = ex.depoisT;

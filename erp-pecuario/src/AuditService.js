@@ -806,9 +806,11 @@ var AuditService = (function () {
           col.achado('LINHA_DO_TEMPO', { tabela: 'ANIMAIS', id: id, campo: 'data_entrada', mensagem: rotuloAnimal_(a, id) + ': a chegada na fazenda (' + br_(chegou) + ') está antes do nascimento (' + br_(calc.data_nascimento) + '). Corrija uma das datas por correção de cadastro.', chaves: 'CHEGADA|' + id, event_id: pr.meta.criacao.event_id, resolver: 'A chegada na fazenda não pode ficar antes do nascimento: confira as duas datas.' });
         }
         // A ordem das identificações (primeira, troca, retirada) e das marcações (marcar, desmarcar) do animal.
-        Timeline.validarIdentificacoes(Timeline.identificacoes(f, id)).concat(Timeline.validarMarcacoes(linhas)).forEach(function (p) {
+        var idents = Timeline.identificacoes(f, id);
+        Timeline.validarIdentificacoes(idents).concat(Timeline.validarMarcacoes(linhas)).forEach(function (p) {
           col.achado('LINHA_DO_TEMPO', { tabela: 'ANIMAIS', id: id, mensagem: rotuloAnimal_(a, id) + ': ' + Timeline.descrever(p) + ' (evento de ' + br_(p.event_date) + ').', chaves: 'SEQUENCIA|' + id + '|' + p.codigo + '|' + p.event_id, event_id: p.event_id, resolver: 'Confira a ordem das identificações e das marcações do animal: mude a data deste lançamento ou estorne antes o registro que conflita.' });
         });
+        conferirBrincoCorrigido_(f, col, a, id, idents);
       }
       if (a.situacao_cadastral === 'ATIVO') {
         var soma = linhas.filter(function (l) { return !l.pre_marco_zero; }).reduce(function (s, l) { return s + (l.efeito || 0); }, 0);
@@ -818,6 +820,32 @@ var AuditService = (function () {
         if (soma !== 1) col.achado('ENTRADA_ABERTA', { tabela: 'ANIMAIS', id: id, mensagem: rotuloAnimal_(a, id) + ' está ativo, mas os eventos somam ' + soma + ' entrada(s) em aberto.', chaves: atomos });
       }
       if (porAnimal) porAnimal(a, id, linhas);
+    });
+  }
+  /**
+   * O brinco lançado errado (AJUSTE_INVENTARIO/IDENTIFICACAO_INCORRETA) corrige o número que estava em uso na posição
+   * dele (data, posição na cadeia de substituição, sequência): é esse número que deixa de contar para o reuso
+   * (desenho-base 16.2). Vale em todo caminho: o registro, a correção dele e a correção ou o estorno das identificações
+   * em volta (a troca levada para antes dele, a primeira identificação estornada).
+   */
+  function conferirBrincoCorrigido_(f, col, a, id, idents) {
+    f.ajustes(id).forEach(function (x) {
+      if (x.tipo_ajuste !== 'IDENTIFICACAO_INCORRETA' || x.campo !== 'brinco') return;
+      var evx = f.evento(x.event_id);
+      if (!evx) return;
+      var pos = { data: evx.event_date, ordem_seq: f.ordemSeq(x.event_id), event_seq: evx.event_seq };
+      var emUso = null;
+      idents.forEach(function (r) {
+        if (r.tipo !== 'BRINCO' || r.event_id === x.event_id) return;
+        var antes = r.data_inicio < pos.data || (r.data_inicio === pos.data && (r.ordem_seq < pos.ordem_seq || (r.ordem_seq === pos.ordem_seq && r.event_seq < pos.event_seq)));
+        if (antes) emUso = r.remocao ? null : r;
+      });
+      if (Utils.normalizarBrinco(emUso ? String(emUso.codigo) : '') === Utils.normalizarBrinco(vazio_(x.valor_anterior) ? '' : String(x.valor_anterior))) return;
+      col.achado('LINHA_DO_TEMPO', {
+        tabela: 'AJUSTES', id: x.ajuste_id, campo: 'valor_anterior', animal_id: id, event_id: x.event_id, chaves: 'BRINCO_CORRIGIDO|' + x.ajuste_id,
+        mensagem: rotuloAnimal_(a, id) + ': a correção de brinco lançado errado de ' + br_(evx.event_date) + ' troca o brinco ' + x.valor_anterior + ', mas nessa data o animal estava ' + (emUso ? 'com o brinco ' + emUso.codigo : 'sem brinco') + '.',
+        resolver: 'Estorne antes a correção do brinco lançado errado, ou deixe a troca de brinco depois dela.',
+      });
     });
   }
   /**
