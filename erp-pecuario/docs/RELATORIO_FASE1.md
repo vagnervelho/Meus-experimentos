@@ -53,22 +53,50 @@ código desta fase.
 
 ### 2.1 Nível 1 — `npm test` (`node --test tests/*.test.js`)
 
-Saída: `# tests 327 · # pass 327 · # fail 0 · # cancelled 0 · # skipped 0 · # todo 0` (duração TOTAL_NPM_TEST).
+Saída: `# tests 327 · # pass 327 · # fail 0 · # cancelled 0 · # skipped 0 · # todo 0` (duração 76.1 s).
 Contagem por arquivo (cada arquivo rodado sozinho com `node --test <arquivo>`):
 
 | Arquivo | Testes | Aprovados | Falhas | O que cobre |
 |---|---:|---:|---:|---|
-CONTAGEM_POR_ARQUIVO
+| `tests/acceptance.test.js` | 5 | 5 | 0 | Os cenários do `runAcceptanceTests` no fake (CT-09, CT-10, CT-11, CT-12, CT-18, CT-20, restauração, isolamento), retomada, falha relatada, base de demonstração, `runDiagnostics` |
+| `tests/animals.test.js` | 10 | 10 | 0 | Lista, ficha A a J, árvore genealógica, edição com auditoria e ajuste, animal externo |
+| `tests/api.test.js` | 14 | 14 | 0 | Envelope, guarda de dono, roteador, avisos com aceite, duplicado, LOCKED, carga condicional, ambiente TESTE, rascunho, fuso, páginas |
+| `tests/config.test.js` | 8 | 8 | 0 | Parâmetros tipados, `config.salvar`, listas, categorias com cobertura, parceiros |
+| `tests/database.test.js` | 21 | 21 | 0 | Codec de tipos, corpus nas três formas de gravação, fake que denuncia o tipo esquecido, portas reais |
+| `tests/events.test.js` | 21 | 21 | 0 | Catálogo, entradas, CT-09, CT-10, CT-18, estorno e correção, ajustes; projeção = reconstrução depois de cada comando |
+| `tests/files.test.js` | 5 | 5 | 0 | Drive v3 (pastas, planilha, cópia, lixeira, listagem, bytes, codificações, sonda) e anexos |
+| `tests/harness.test.js` | 25 | 25 | 0 | Fidelidade dos fakes: coerção Geral, buffer e morte, falha injetada, lock com intercalação, Properties, Drive, UrlFetch |
+| `tests/import.test.js` | 9 | 9 | 0 | Importação de ANIMAIS: CT-12 da Fase 1, lotes, queda em cada fronteira, retomar, concluir, desfazer |
+| `tests/integrity.test.js` | 7 | 7 | 0 | Cada checagem de integridade disparada por adulteração à mão |
+| `tests/interface.test.js` | 7 | 7 | 0 | Página do doGet, sintaxe do cliente, contraste, alvos de toque, regras estáticas da interface |
+| `tests/inventory.test.js` | 4 | 4 | 0 | Posição do rebanho hoje e em data, Visão geral, alertas |
+| `tests/jornada.fase1.test.js` | 1 | 1 | 0 | Jornada inteira só pela `api()`: setup, cadastros, importação de 120 animais, correções, estorno, backup, adulteração, restauração |
+| `tests/maintenance.test.js` | 5 | 5 | 0 | Backup com o banco parado, retenção 30 + 12, ensaio completo de restauração, rotina diária |
+| `tests/pastures.test.js` | 7 | 7 | 0 | Propriedades, pastos com posse e arrendador, painel, UA/ha sem transformar ausente em zero |
+| `tests/regras.fase1.test.js` | 13 | 13 | 0 | Regras RN da Fase 1 sem teste próprio (com o mapa RN → teste) |
+| `tests/repository.test.js` | 10 | 10 | 0 | Vigência, leitura memoizada, índices, contadores, órfãs, plano de escrita |
+| `tests/schema.test.js` | 13 | 13 | 0 | 34 abas × dicionários de dados; gerador idempotente |
+| `tests/setup.test.js` | 5 | 5 | 0 | CT-11: setup repetido, sementes, gatilhos, proteção, esquema da fase seguinte, falha da forma de gravação |
+| `tests/static.test.js` | 19 | 19 | 0 | Lint de camadas, superfície pública, regra do `drive.file`, relógio, manifesto, rotas, includes |
+| `tests/telas.test.js` | 6 | 6 | 0 | Rotas acrescentadas pelas telas e regras puras do cliente (CSV, rótulos) |
+| `tests/timeline.test.js` | 12 | 12 | 0 | Ordem canônica, validador da linha do tempo, marco zero, projetor, inventário em data |
+| `tests/unitofwork.adversarial.test.js` | 37 | 37 | 0 | Morte depois de cada escrita, intercalações, dois bancos, resposta perdida, células hostis |
+| `tests/unitofwork.test.js` | 32 | 32 | 0 | Três fases, todas as quedas de 06 (5.1 e 5.2), reentrância, intercalações, idempotência |
+| `tests/utils.test.js` | 17 | 17 | 0 | Datas, dinheiro, rateio pelo maior resto (R$ 100,00 ÷ 3), brinco, JSON canônico, hash |
+| `tests/validation.test.js` | 14 | 14 | 0 | Erros do app, validadores por tipo, registro contra a aba, coletor |
+| **Total** | **327** | **327** | **0** | |
 
 ### 2.2 Nível 3 — `npm run ui:check`
 
 Parte estática: `ui:check — 10 arquivo(s) .html conferidos (e a página montada pelo doGet), sem recurso externo e
 dentro do orçamento.` Parte Playwright: `# tests 29 · # pass 29 · # fail 0 · # cancelled 0 · # skipped 0 · # todo 0`
-(duração TOTAL_UI_CHECK).
+(duração 71.0 s).
 
 | Arquivo | Testes | Aprovados | Falhas | O que cobre |
 |---|---:|---:|---:|---|
-CONTAGEM_UI
+| `tests/ui/interface.test.js` | 17 | 17 | 0 | Carga, navegação (desktop e celular), formulário do catálogo, "hoje" no fuso da fazenda, avisos, erro por animal, rascunho, LOCKED, sem resposta, faixas, leiaute 360 e 1280 px, foco e acessibilidade, componentes |
+| `tests/ui/telas.test.js` | 12 | 12 | 0 | Cadastrar, editar, importar (30 animais, total recusado, parcial aprovado, desfazer), estornar e corrigir, exportar CSV, a 1280 e a 360 px; pastos, configurações e sistema a 360 px; fotos e documentos |
+| **Total** | **29** | **29** | **0** | |
 
 ### 2.3 Cenários da Fase 1 por nível
 
