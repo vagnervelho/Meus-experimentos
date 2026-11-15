@@ -563,6 +563,18 @@ var ImportService = (function () {
     return Utils.unicos(l.concat(['IMPORTACOES', 'IMPORTACAO_LINHAS', 'ANEXOS', 'PASTOS', 'LISTAS', 'CONFIGURACOES', 'PROPRIEDADES']));
   }
   var LEITURAS_VALIDACAO = Object.freeze(['IMPORTACOES', 'IMPORTACAO_LINHAS', 'ANEXOS', 'ANIMAIS', 'PASTOS', 'LISTAS', 'CONFIGURACOES']);
+  /**
+   * Uma importação em curso por vez (05, RN-032; desenho-base 16.8): a exceção das rotas `importacao.*` vale para
+   * retomar, concluir e desfazer a que está em IMPORTANDO, não para começar outra (os animais e eventos PENDENTE de
+   * uma não entram na unicidade da outra).
+   */
+  function exigirNenhumaEmCurso_(tx, imp) {
+    var outra = tx.repo.vigentes('IMPORTACOES').filter(function (i) { return i.import_id !== imp.import_id && i.status === 'IMPORTANDO'; })[0];
+    if (!outra) return;
+    throw Validation.erro('CONFLICT', 'A importação do arquivo "' + (outra.arquivo_nome || 'sem nome') + '" ainda está em andamento: conclua ou desfaça essa antes de começar outra.', [
+      det_('import_id', 'IMPORTACAO_EM_CURSO', 'Importação em andamento: ' + (outra.arquivo_nome || 'sem nome') + '.'),
+    ]);
+  }
   function exigirImportacao_(tx, id) {
     var imp = vazio_(id) ? null : tx.repo.porId('IMPORTACOES', id);
     if (!imp) throw Validation.erro('NOT_FOUND', 'A importação não foi encontrada. Atualize a tela.');
@@ -875,6 +887,7 @@ var ImportService = (function () {
       throw Validation.erro('CONFLICT', imp.status === 'RASCUNHO' ? 'Termine a validação do arquivo antes de importar.' : 'Esta importação está ' + imp.status.toLowerCase() + '.');
     }
     if (bloco > 1 && imp.status !== 'IMPORTANDO') throw Validation.erro('CONFLICT', 'Esta importação está ' + imp.status.toLowerCase() + ': não há blocos a importar.');
+    if (bloco === 1) exigirNenhumaEmCurso_(tx, imp);
     if (TIPOS_EVENTO[imp.tipo]) return planejarBlocoEventos_(tx, bloco, imp);
     var cv = contextoValidacao_(tx);
     var gravadas = linhasGravadas_(tx, imp.import_id);
@@ -1045,8 +1058,9 @@ var ImportService = (function () {
     Object.keys(tocados).forEach(function (id) {
       if (criados[id]) return;
       var a = tx.repo.porId('ANIMAIS', id) || {};
-      var opc = { nascimento: a.data_nascimento, dataEntrada: a.data_entrada };
-      Timeline.problemasNovos(Timeline.validar(com.linhas(id), opc).problemas, Timeline.validar(sem.linhas(id), opc).problemas).forEach(function (p) {
+      var opcCom = { nascimento: a.data_nascimento, dataEntrada: Timeline.chegadaDeclarada(com, id).data };
+      var opcSem = { nascimento: a.data_nascimento, dataEntrada: Timeline.chegadaDeclarada(sem, id).data };
+      Timeline.problemasNovos(Timeline.validar(com.linhas(id), opcCom).problemas, Timeline.validar(sem.linhas(id), opcSem).problemas).forEach(function (p) {
         out.push(Validation.detalhe({
           codigo: 'DEPENDENTE', animal_id: id, brinco: a.brinco || null,
           mensagem: (a.codigo_interno || id) + (vazio_(a.brinco) ? '' : ' (brinco ' + a.brinco + ')') + ': sem os eventos desta importação, ' + Timeline.descrever(p, nomePasto) + ' Estorne esse registro antes.',
@@ -1449,7 +1463,8 @@ var ImportService = (function () {
   /**
    * Linhas do arquivo → {res: [{linha_num, status, erros, lidos, chave}] na ordem do arquivo, grupos: [{chave, data,
    * primeira, linhas, cab}] em ordem cronológica (data, primeira linha)}. Os campos do lançamento precisam concordar
-   * dentro do grupo (CONFLITO_NO_GRUPO); linha idêntica a outra do arquivo fica DUPLICADA.
+   * dentro do grupo (CONFLITO_NO_GRUPO); linha idêntica a outra do arquivo fica DUPLICADA (em NASCIMENTOS, só a que
+   * traz brinco da cria: as demais iguais são gêmeos do mesmo parto).
    */
   function agruparLinhas_(linhas, modelo, map, formato, cv) {
     var res = linhas.map(function (l) {
@@ -1458,6 +1473,10 @@ var ImportService = (function () {
     });
     var vistas = {};
     res.forEach(function (r) {
+      // Em partos, uma linha por cria: linhas iguais da mesma mãe e data sem brinco da cria são gêmeos (dois
+      // natimortos, dois bezerros ainda sem brinco), não repetição; a duplicidade do parto é pega pelo lançamento
+      // já registrado e pelo aviso de intervalo entre partos (RN-062, RN-063). Com brinco, dois iguais é repetição.
+      if (modelo.evento === 'NASCIMENTO' && vazio_(r.lidos.brinco)) return;
       var k = Utils.jsonCanonico(r.original);
       if (vistas[k]) { r.status = 'DUPLICADA'; r.erros.unshift(det_(null, 'LINHA_REPETIDA_NO_ARQUIVO', 'a linha repete a linha ' + vistas[k].linha_num + ' do arquivo')); return; }
       vistas[k] = r;

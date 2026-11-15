@@ -369,9 +369,12 @@ var Timeline = (function () {
     });
     var situacao;
     var saidaHist = null;
+    // Ordem 2 e 3 da tabela de 03a, 4.3.4: só linha de inventário (efeito ≠ 0 ou com pasto) decide. Fato NEUTRO depois
+    // do marco zero (correção de cadastro, troca de brinco lançado errado) não tira o animal do histórico (ordem 4).
+    var deInventario = replay.some(function (l) { return (l.efeito || 0) !== 0 || !vazio_(l.pasto_destino_id); });
     if (!vig.length) {
       situacao = cruas.some(function (l) { return f.statusEvento(l.event_id) === 'PENDENTE'; }) ? 'PENDENTE' : 'ANULADO';
-    } else if (replay.length) {
+    } else if (deInventario || !pre.length) {
       if (soma >= 1) situacao = 'ATIVO';
       else if (ultimaSaida) situacao = SAIDA_SITUACAO[ultimaSaida.event_type] || 'ANULADO';
       else situacao = 'ANULADO';
@@ -462,7 +465,22 @@ var Timeline = (function () {
       custo_(f, id, entrada, campos);
     }
     if (femea) campos.situacao_reprodutiva = situacaoReprodutiva_(f, id, fora, at, criacao);
-    return { campos: campos, meta: { situacao: situacao, entrada: entrada, criacao: criacao } };
+    return { campos: campos, meta: { situacao: situacao, entrada: entrada, criacao: criacao, chegada: chegada_(criacao, base) } };
+  }
+  /**
+   * Chegada declarada na fazenda (04, seção 6: os registros anteriores ao marco zero são validados contra ela, não
+   * contra a volta mais recente): no rebanho inicial, a `data_entrada` informada com as correções vigentes; no animal
+   * criado por compra ou outra entrada (mesmo antiga), a data desse lançamento; nascido na fazenda, nenhuma.
+   */
+  function chegada_(criacao, base) {
+    if (!criacao) return { data: null, confianca: null };
+    if (criacao.event_type === 'ENTRADA_INICIAL') return { data: base.data_entrada, confianca: base.data_entrada_confianca };
+    if (criacao.event_type === 'COMPRA' || criacao.event_type === 'OUTRA_ENTRADA') return { data: criacao.event_date, confianca: criacao.confiabilidade || null };
+    return { data: null, confianca: null };
+  }
+  /** {data, confianca} da chegada declarada do animal na fonte f (ver chegada_). */
+  function chegadaDeclarada(f, id) {
+    return projetarAnimal(f, id).meta.chegada || { data: null, confianca: null };
   }
   function marcacao_(vig, subtipo) {
     var ultima = ultimoPor_(vig.filter(function (l) { return l.event_type === 'MARCACAO' && l.event_subtype === subtipo; }), function (a, b) { return comparar_(a.event_date, b.event_date) || a.ordem_seq - b.ordem_seq; });
@@ -917,6 +935,7 @@ var Timeline = (function () {
     descrever: descrever,
     fonte: fonte,
     projetarAnimal: projetarAnimal,
+    chegadaDeclarada: chegadaDeclarada,
     projetar: projetar,
     reconstruir: reconstruir,
     porta: porta,

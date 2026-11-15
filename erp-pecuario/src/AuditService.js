@@ -572,11 +572,12 @@ var AuditService = (function () {
       var id = a.animal_id;
       var linhas = f.linhas(id);
       if (linhas.length) {
-        var calc = projetados[id] = Timeline.projetarAnimal(f, id).campos;
+        var proj = Timeline.projetarAnimal(f, id);
+        var calc = projetados[id] = proj.campos;
         posterioresASaida_(f, id, linhas).forEach(function (x) {
           col.achado('BAIXADO_SEM_POSTERIOR', { tabela: 'ANIMAIS', id: id, mensagem: rotuloAnimal_(a, id) + ': "' + rotuloEvento_(x.evento) + '" vale depois da saída do rebanho ("' + rotuloEvento_(x.saida) + '")' + (x.detalhe ? ' (registro na aba ' + x.detalhe + ')' : '') + '. Estorne um dos dois.' });
         });
-        Timeline.validar(linhas, { nascimento: calc.data_nascimento, dataEntrada: calc.data_entrada }).problemas.forEach(function (p) {
+        Timeline.validar(linhas, { nascimento: calc.data_nascimento, dataEntrada: proj.meta.chegada ? proj.meta.chegada.data : null }).problemas.forEach(function (p) {
           col.achado('LINHA_DO_TEMPO', { tabela: 'ANIMAIS', id: id, mensagem: rotuloAnimal_(a, id) + ': ' + Timeline.descrever(p, nomePasto) + ' (evento de ' + br_(p.event_date) + ').' });
         });
         // A ordem das identificações (primeira, troca, retirada) e das marcações (marcar, desmarcar) do animal.

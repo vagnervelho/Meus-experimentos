@@ -479,8 +479,11 @@ var EventService = (function () {
     // Compra histórica (antes do marco zero) de animal já cadastrado: registro informativo, validado só contra o
     // nascimento e a chegada declarada (04, seção 6); a situação de hoje não conta.
     var hist = ctxEv.ev.pre_marco_zero === true;
-    if (e.situacao_cadastral === 'ATIVO' && !hist) { erroItem_(m, it, 'animal_id', 'JA_NO_REBANHO', 'o animal já está no rebanho.'); return; }
-    if (e.situacao_cadastral === 'MORTO' && !hist) { erroItem_(m, it, 'animal_id', 'ANIMAL_MORTO', 'o animal morreu em ' + br_(e.data_saida) + ' e não pode voltar ao rebanho.'); return; }
+    // Na correção de uma volta, a situação de hoje sem o original não diz nada (a morte ou a venda posterior viram a
+    // "última saída"): a linha do tempo final, com o substituto no lugar do original, decide (RN-045).
+    var doOriginal = !!ctxEv.original && !!m.afetados[d.animal_id];
+    if (e.situacao_cadastral === 'ATIVO' && !hist && !doOriginal) { erroItem_(m, it, 'animal_id', 'JA_NO_REBANHO', 'o animal já está no rebanho.'); return; }
+    if (e.situacao_cadastral === 'MORTO' && !hist && !doOriginal) { erroItem_(m, it, 'animal_id', 'ANIMAL_MORTO', 'o animal morreu em ' + br_(e.data_saida) + ' e não pode voltar ao rebanho.'); return; }
     if (e.situacao_cadastral === 'EXTERNO') { erroItem_(m, it, 'animal_id', 'ANIMAL_EXTERNO', 'animal de referência (touro de sêmen, progenitor de outra fazenda) não entra no rebanho: ele é só um cadastro de referência. Se ele chegou à fazenda, lance a entrada como animal novo.'); return; }
     it.final = { sexo: e.sexo, data_nascimento: e.data_nascimento };
     if (!vazio_(d.pasto_destino_id)) pastoAtivo_(m, it, 'pasto_destino_id', d.pasto_destino_id, hist);
@@ -951,11 +954,19 @@ var EventService = (function () {
     var grupo = ctxEv.porAnimal = ctxEv.porAnimal || {};
     var g = grupo[it.animal_id];
     if (!g) {
+      // A data de chegada que se corrige é a declarada no rebanho inicial, mesmo depois de uma volta ao rebanho.
+      var chegada = Timeline.chegadaDeclarada(m.f, it.animal_id);
+      var estado = {};
+      Object.keys(e).forEach(function (k) { estado[k] = e[k]; });
+      estado.data_entrada = chegada.data;
+      estado.data_entrada_confianca = chegada.confianca;
+      e = estado;
       g = grupo[it.animal_id] = { it: it, campos: {}, estado: e };
-      it.final = { sexo: e.sexo, data_nascimento: e.data_nascimento, data_entrada: e.data_entrada, mudouSexo: false, mudouNascimento: false };
+      it.final = { sexo: e.sexo, data_nascimento: e.data_nascimento, data_entrada: e.data_entrada, mudouSexo: false, mudouNascimento: false, mudouEntrada: false };
       it.parentesco = null;
       linhaEA_(m, ctxEv, it, { efeito_inventario: 0 });
     } else it.ignorarNaLinhaDoTempo = true;
+    e = g.estado;
     if (g.campos[campo] !== undefined) { erroItem_(m, it, 'campo', 'CAMPO_REPETIDO', 'o campo "' + campo + '" aparece duas vezes para o mesmo animal.'); return; }
     var texto = vazio_(it.dados.valor_novo) ? null : Utils.aparar(String(it.dados.valor_novo));
     var valor = valorCorrigido_(m, it, campo, def, texto);
@@ -967,7 +978,7 @@ var EventService = (function () {
     var princ = g.it;
     if (campo === 'sexo') { princ.final.sexo = valor; princ.final.mudouSexo = true; }
     if (campo === 'data_nascimento') { princ.final.data_nascimento = valor; princ.final.mudouNascimento = true; }
-    if (campo === 'data_entrada') princ.final.data_entrada = valor;
+    if (campo === 'data_entrada') { princ.final.data_entrada = valor; princ.final.mudouEntrada = true; }
     if (campo === 'mae_id' || campo === 'pai_id') {
       princ.parentesco = princ.parentesco || { mae_id: e.mae_id, pai_id: e.pai_id, mudouMae: false, mudouPai: false };
       princ.parentesco[campo] = valor;
@@ -1017,7 +1028,7 @@ var EventService = (function () {
         if (vazio_(fim[par[0]]) && !vazio_(g.campos[par[1]])) erroItem_(m, it, par[1], 'CAMPO_SEM_VINCULO', '"' + par[1] + '" precisa de "' + par[0] + '" preenchido.');
       });
       if (g.campos.data_entrada !== undefined || g.campos.data_entrada_confianca !== undefined) {
-        var entrada = Timeline.ordenar(m.f.linhas(id).filter(function (l) { return l.efeito === 1 && !l.pre_marco_zero; })).pop();
+        var entrada = Timeline.ordenar(m.f.linhas(id).filter(function (l) { return l.efeito === 1 && !l.pre_marco_zero; }))[0];
         if (!entrada || entrada.event_type !== 'ENTRADA_INICIAL') erroItem_(m, it, 'campo', 'NAO_SE_APLICA', 'a data de chegada só se corrige em animal do rebanho inicial; nos demais ela é a data do lançamento de entrada.');
         else if (!vazio_(fim.data_entrada) && fim.data_entrada > m.D0) erroItem_(m, it, 'valor_novo', 'ENTRADA_DEPOIS_DO_MARCO_ZERO', 'a chegada na fazenda não pode ser depois do marco zero (' + br_(m.D0) + ').');
       }
@@ -1244,17 +1255,27 @@ var EventService = (function () {
     itens.forEach(function (it) {
       if (it.novo || !it.final || (!it.final.mudouSexo && !it.final.mudouNascimento)) return;
       var filhos = Utils.unicos(m.repo.por('ANIMAIS', 'mae_id', it.animal_id).concat(m.repo.por('ANIMAIS', 'pai_id', it.animal_id)).map(function (a) { return a.animal_id; }));
+      var maeRecusada = false;
       filhos.forEach(function (fid) {
         var comoMae = maeDe(fid) === it.animal_id;
         var comoPai = paiDe(fid) === it.animal_id;
         if (!comoMae && !comoPai) return;
         var sexo = sexoDe(it.animal_id);
+        if (comoMae && sexo !== 'F') maeRecusada = true;
         if ((comoMae && sexo !== 'F') || (comoPai && sexo !== 'M')) erroItem_(m, it, 'valor_novo', 'SEXO_DO_PROGENITOR', 'o animal é ' + (comoMae ? 'mãe' : 'pai') + ' de ' + nomeDe(fid) + ' e não pode ter o sexo trocado.');
         var nf = nascDe(fid);
         var np = nascDe(it.animal_id);
         if (!vazio_(nf) && !vazio_(np) && np >= nf) erroItem_(m, it, 'valor_novo', 'NASCIMENTO_DO_PROGENITOR', 'o animal é ' + (comoMae ? 'mãe' : 'pai') + ' de ' + nomeDe(fid) + ', nascido em ' + br_(nf) + ', e precisa ter nascido antes.');
       });
+      // A mãe de um parto vigente (mesmo só de natimorto, sem cria cadastrada) é fêmea (RN-012, RN-060).
+      var parto = sexoDe(it.animal_id) !== 'F' && !maeRecusada ? partoDaMatriz_(m.f, it.animal_id) : null;
+      if (parto) erroItem_(m, it, 'valor_novo', 'SEXO_DA_MATRIZ', 'o animal é a mãe do parto de ' + br_(parto.event_date) + ' e não pode deixar de ser fêmea. Se o parto foi lançado na vaca errada, corrija o parto antes.');
     });
+  }
+  /** Primeira linha MATRIZ vigente (parto) do animal na fonte f, ou null. */
+  function partoDaMatriz_(f, id) {
+    var partos = Timeline.ordenar(f.linhas(id).filter(function (l) { return l.papel === 'MATRIZ' && l.event_type === 'NASCIMENTO'; }));
+    return partos.length ? partos[0] : null;
   }
   /**
    * Linha do tempo de cada animal (04, seção 5.1): problema em linha do comando → VALIDATION; problema que a
@@ -1267,11 +1288,14 @@ var EventService = (function () {
       feitos[it.animal_id] = true;
       var e = it.novo ? null : estado_(m, it.animal_id);
       var nasc = it.final && it.final.data_nascimento !== undefined ? it.final.data_nascimento : e && e.data_nascimento;
-      var entrada = it.final && it.final.data_entrada !== undefined ? it.final.data_entrada : e && e.data_entrada;
+      // Registro anterior ao marco zero se confere com a chegada DECLARADA (04, seção 6), não com a volta mais recente.
+      var chegadaAntes = it.novo ? null : Timeline.chegadaDeclarada(m.real, it.animal_id).data;
+      var entrada = it.novo ? (it.final ? nulo_(it.final.data_entrada) : null)
+        : it.final && it.final.mudouEntrada ? it.final.data_entrada : Timeline.chegadaDeclarada(m.f, it.animal_id).data;
       var antes = it.novo ? [] : m.real.linhas(it.animal_id);
       var depois = (it.novo ? [] : m.f.linhas(it.animal_id)).concat(it.linhas);
       var opc = { nascimento: nasc, dataEntrada: entrada };
-      var opcAntes = { nascimento: e && e.data_nascimento, dataEntrada: e && e.data_entrada };
+      var opcAntes = { nascimento: e && e.data_nascimento, dataEntrada: chegadaAntes };
       var novos = Timeline.problemasNovos(Timeline.validar(antes, opcAntes).problemas, Timeline.validar(depois, opc).problemas);
       novos.forEach(function (p) {
         // Nascimento × a própria entrada já foi conferido nos atributos (mensagem mais clara).
@@ -1351,28 +1375,55 @@ var EventService = (function () {
     var donos = null;
     var conjunto = {};
     ids.forEach(function (id) { conjunto[id] = true; });
+    var identPorAnimal = ctxEv ? Utils.agruparPor(ctxEv.plano.IDENTIFICACOES.filter(function (r) { return r.tipo === 'BRINCO'; }), 'animal_id') : {};
+    var donoDe = function (codigo) {
+      if (!donos) {
+        donos = {};
+        m.repo.vigentes('ANIMAIS').forEach(function (a) {
+          if (conjunto[a.animal_id] || vazio_(a.brinco) || a.situacao_cadastral === 'ANULADO' || a.situacao_cadastral === 'PENDENTE') return;
+          donos[chave(a.brinco)] = a;
+        });
+      }
+      return donos[chave(codigo)] || null;
+    };
     ids.forEach(function (id) {
       var gravado = m.f.animal(id);
       var depois = estado_(m, id);
       if (!gravado || !depois || depois.situacao_cadastral === 'ANULADO' || depois.situacao_cadastral === 'PENDENTE') return;
       var item = ctxEv && itensPorAnimal_(ctxEv)[id] ? itensPorAnimal_(ctxEv)[id][0] : null;
       var it = itemDoAnimal_(m, ctxEv, id);
-      if (!(item && item.brincoProposto) && !vazio_(depois.brinco) && chave(depois.brinco) !== chave(gravado.brinco || '')) {
-        if (!donos) {
-          donos = {};
-          m.repo.vigentes('ANIMAIS').forEach(function (a) {
-            if (conjunto[a.animal_id] || vazio_(a.brinco) || a.situacao_cadastral === 'ANULADO' || a.situacao_cadastral === 'PENDENTE') return;
-            donos[chave(a.brinco)] = a;
-          });
-        }
-        var dono = donos[chave(depois.brinco)];
+      // O brinco do conjunto FINAL (RN-045): sem o original e com as linhas de brinco do substituto no lugar dele.
+      var brincoFinal = depois.brinco;
+      var retirada = null;
+      if (identPorAnimal[id]) {
+        var seq = Timeline.identificacoes(m.f, id).filter(function (x) { return x.tipo === 'BRINCO'; })
+          .concat(identPorAnimal[id].map(function (r) { return Timeline.linhaIdentificacao(r, ctxEv.ev, ctxEv.ev.ordem_seq); }))
+          .sort(function (a, b) { return (a.data_inicio < b.data_inicio ? -1 : a.data_inicio > b.data_inicio ? 1 : 0) || (a.ordem_seq - b.ordem_seq) || (a.event_seq - b.event_seq); });
+        var ultima = seq.length ? seq[seq.length - 1] : null;
+        brincoFinal = ultima && !ultima.remocao ? ultima.codigo : null;
+        if (ultima && ultima.remocao && ultima.event_id === ctxEv.ev.event_id) retirada = ultima;
+      }
+      if (!(item && item.brincoProposto) && !vazio_(brincoFinal) && chave(brincoFinal) !== chave(gravado.brinco || '')) {
+        var dono = donoDe(brincoFinal);
         if (dono) {
           var p = eventoDoBrinco_(m, dono.animal_id) || { codigo: 'BRINCO_DUPLICADO', event_id: null, event_type: null, event_date: null };
-          conflito_(m, it, p, verbo + ' devolveria ao animal o brinco ' + depois.brinco + ', que hoje é do animal ' + nomeAnimal_(dono) + ' (' + dono.codigo_interno + '). Troque o brinco de um dos dois antes.');
+          conflito_(m, it, p, verbo + ' devolveria ao animal o brinco ' + brincoFinal + ', que hoje é do animal ' + nomeAnimal_(dono) + ' (' + dono.codigo_interno + '). Troque o brinco de um dos dois antes.');
+        }
+      }
+      // Retirada que a correção põe numa data depois de o número ter ido para outro animal: o brinco ficaria em dois.
+      if (retirada) {
+        var outro = donoDe(retirada.codigo);
+        var desde = outro && outro.animal_id !== id ? eventoDoBrinco_(m, outro.animal_id) : null;
+        if (desde && desde.event_date && desde.event_date < retirada.data_inicio) {
+          conflito_(m, it, desde, verbo + ' deixaria o brinco ' + retirada.codigo + ' no animal até ' + br_(retirada.data_inicio) + ', mas desde ' + br_(desde.event_date) + ' ele é do animal ' + nomeAnimal_(outro) + ' (' + outro.codigo_interno + '). Mantenha a data da retirada ou troque o brinco do outro animal antes.');
         }
       }
       // Sexo ou nascimento que voltam (estorno de uma correção de cadastro) e o animal já é mãe ou pai (RN-012).
-      var corrigeNoComando = item && ctxEv.tipo === 'AJUSTE_INVENTARIO' && ctxEv.subtipo === 'CORRECAO_CADASTRO';
+      var corrigeNoComando = item && ctxEv.tipo === 'AJUSTE_INVENTARIO' && ctxEv.subtipo === 'CORRECAO_CADASTRO' && !!item.final && (item.final.mudouSexo || item.final.mudouNascimento);
+      if (!corrigeNoComando && depois.sexo !== 'F' && gravado.sexo === 'F') {
+        var parto = partoDaMatriz_(m.f, id);
+        if (parto) conflito_(m, it, { codigo: 'PARTO_DA_MATRIZ', event_id: parto.event_id, event_type: parto.event_type, event_subtype: parto.event_subtype, event_date: parto.event_date }, verbo + ' voltaria o sexo do animal para macho, mas ele é a mãe do parto de ' + br_(parto.event_date) + '. Corrija ou estorne o parto antes.');
+      }
       if (!corrigeNoComando && (depois.sexo !== gravado.sexo || nulo_(depois.data_nascimento) !== nulo_(gravado.data_nascimento))) {
         Utils.unicos(m.repo.por('ANIMAIS', 'mae_id', id).concat(m.repo.por('ANIMAIS', 'pai_id', id)).map(function (a) { return a.animal_id; })).forEach(function (fid) {
           var filho = estado_(m, fid);

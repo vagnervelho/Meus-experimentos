@@ -37,7 +37,7 @@ var ReproductionService = (function () {
   /**
    * Número de partos da matriz. `partos_previos` é o que se declarou na entrada sobre os partos ANTERIORES a ela;
    * partos registrados antes da entrada descrevem o mesmo passado, por isso vale o maior dos dois; os registrados
-   * da entrada em diante somam. dataEntrada = data do evento de entrada vigente (marco zero no rebanho inicial).
+   * da entrada em diante somam. dataEntrada = data da primeira entrada vigente no sistema (marco zero no rebanho inicial).
    */
   function contarPartos(partosPrevios, lista, dataEntrada) {
     var antes = 0;
@@ -78,10 +78,14 @@ var ReproductionService = (function () {
     return out;
   }
 
-  /** Data do evento de entrada vigente mais recente do animal (a partir do marco zero), ou null. */
+  /**
+   * Data da PRIMEIRA entrada vigente do animal no sistema (a partir do marco zero), ou null: `partos_previos` fala dos
+   * partos anteriores à entrada no sistema (03a, 4.3.1); uma volta ao rebanho não transforma os partos registrados
+   * no sistema em "anteriores".
+   */
   function dataDaEntrada_(f, animalId) {
     var entradas = Timeline.ordenar(f.linhas(animalId).filter(function (l) { return l.efeito === 1 && !l.pre_marco_zero; }));
-    return entradas.length ? entradas[entradas.length - 1].event_date : null;
+    return entradas.length ? entradas[0].event_date : null;
   }
   function cria_(f, id) {
     var a = f.animal(id);
