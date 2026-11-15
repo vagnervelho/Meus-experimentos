@@ -212,7 +212,8 @@ repositório; "a verificar na conta do dono" significa que só o roteiro de diag
   quebrou). `FinancialService`: contas das deduções, totais da venda, negociação com romaneio total, bruto como conferência
   e base estimada; invariantes 15 e 16 da venda completas (por conta, valor do evento, quantidade).
 - Aceitação de nível 2: o CT-09 roda inteiro (venda de animal vendido, transferência de animal morto, compra de animal
-  vendido antes e depois da saída). Varredura de quedas com a venda do CT-04 como modelo (9 abas).
+  vendido antes e depois da saída). Varredura de quedas com a venda do CT-04 como modelo (9 abas). Base de demonstração:
+  venda de 6 garrotes por kg vivo, com comissão, ao comprador `seed:comprador` (308 ativos).
 - Telas: formulário da venda (atalho "Vender" da ficha), revisão pelo servidor com bruto, deduções, resultado da negociação,
   depósito esperado, preços médios e arrobas sempre com a base; correção pelo detalhe (os animais baixados são carregados
   antes; os do original não aparecem como inelegíveis); detalhe com a seção "Venda"; a diferença da correção ignora campo

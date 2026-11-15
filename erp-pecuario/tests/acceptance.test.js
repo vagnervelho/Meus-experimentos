@@ -1,7 +1,7 @@
 'use strict';
 /**
  * Aceitação (E1.12): roda no Node, sobre os fakes do harness, os MESMOS cenários que runAcceptanceTests roda na conta do
- * dono (09, seção 8: CT-09 de brinco e mãe, CT-10, CT-11, CT-12, CT-18 de entradas, CT-20 e o ensaio de restauração),
+ * dono (09, seção 8: CT-09 inteiro — saídas, brinco, mãe, pasto, data, reentrada —, CT-10, CT-11, CT-12, CT-18 de entradas, CT-20 e o ensaio de restauração),
  * com a nota do "cenário que usa peça de fase posterior" (passos NAO_SE_APLICA). O lock disputado, que uma execução
  * real não consegue provocar sozinha, entra por `injetar`. Também: a base real não muda, o teste é retomável, falha de
  * cenário aparece no relatório, a base de demonstração (308 ativos, só por comandos) e o diagnóstico do spike.
@@ -136,7 +136,11 @@ test('base de demonstração (TEST_PLAN = DEMO): 308 ativos só por comandos, pl
   assert.ok(s.tabela('ANIMAIS', demo).filter((a) => a.mae_id).length >= 48, 'bezerros ao pé com a mãe');
   // As 8 compras gravam o financeiro completo (P11): 2 lançamentos, 3 títulos e 16 alocações cada.
   assert.equal(s.tabela('COMPRAS', demo).length, 8);
-  assert.equal(s.tabela('PARCELAS', demo).length, 8 * 3);
+  assert.equal(s.tabela('PARCELAS', demo).length, 8 * 3 + 2, 'os títulos das compras, da receita da venda e da comissão');
+  // A venda de 6 garrotes por kg vivo: VENDAS, receita rateada pelo peso, comissão, os animais VENDIDO.
+  const vendas = s.tabela('VENDAS', demo);
+  assert.deepEqual(vendas.map((v) => [v.qtd_animais, v.modalidade, v.criterio_rateio, v.comissao > 0]), [[6, 'KG_VIVO', 'PESO_VIVO', true]]);
+  assert.equal(s.tabela('ANIMAIS', demo).filter((a) => a.situacao_cadastral === 'VENDIDO').length, 6);
   const comprados = s.tabela('ANIMAIS', demo).filter((a) => a.origem === 'COMPRADO');
   assert.equal(comprados.reduce((t, a) => t + a.custo_aquisicao, 0), s.tabela('COMPRAS', demo).reduce((t, c) => t + c.valor_total, 0), 'custo de aquisição = soma das alocações = custo total das compras');
   assert.ok(comprados.every((a) => a.custo_aquisicao > (a.sexo === 'M' ? 280000 : 260000)), 'o frete entra no custo de cada animal');
