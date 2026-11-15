@@ -153,6 +153,51 @@ function desfechoMotor(amb, e, confirmado, msg, pasto) {
     animais: animais.map((a) => ({ animal_id: a.animal_id, codigo_interno: a.codigo_interno, brinco: a.brinco || null, sexo: a.sexo, situacao_cadastral: a.situacao_cadastral, pasto_atual_id: a.pasto_atual_id })),
   };
 }
+// Correção de compra (09, seção 8: modelo da Fase 2): 3 garrotes por cabeça, 2 parcelas e frete; a correção troca o
+// brinco de um animal e o frete de R$ 30,00 por R$ 300,00 (04, 5.2 iv), com os mesmos animal_id.
+const DATA_COMPRA = '2026-11-05';
+const FORNECEDOR = 'ffffffff-0000-4000-8000-00000000f0f0';
+function dadosCompra(pasto, brincos, frete, extra) {
+  return Object.assign({
+    tipo: 'COMPRA', campos: { event_date: DATA_COMPRA, partner_id: FORNECEDOR, pasto_destino_id: pasto, modalidade: 'CABECA', preco_unitario: 300000, valor_animais: 900000 },
+    animais: brincos.map((b) => ({ brinco: b, sexo: 'M', castrado: false, reprodutor: false, idade_meses: 14 })),
+    parcelas: [{ data_vencimento: '2026-12-05', valor: 450000 }, { data_vencimento: '2027-01-05', valor: 450000 }], custos: [{ tipo: 'FRETE', valor: frete }],
+  }, extra || {});
+}
+function prepararCompra(amb) {
+  const G = amb.G;
+  const s = sementes(G);
+  const parceiro = { partner_id: FORNECEDOR, nome: 'Fornecedor do lote', tipos: 'FORNECEDOR', ativo: true, created_at: '2026-11-01T12:00:00.000Z', updated_at: '2026-11-01T12:00:00.000Z' };
+  amb.gas.exec(() => G.Database.abrir(amb.banco, { primitiva: amb.primitiva }).anexar({ CONFIGURACOES: s.CONFIGURACOES, PROPRIEDADES: s.PROPRIEDADES, PLANO_CONTAS: s.PLANO_CONTAS, LISTAS: s.LISTAS, CATEGORIAS: s.CATEGORIAS, PARCEIROS: [parceiro] }));
+  const pasto = amb.run(cmdPasto(G, { chave: 'cria-retiro-compra', dados: { campos: { nome: 'Retiro' } } })).dados.pasture_id;
+  const r = amb.run(G.EventService.comando('registrar', { idempotencyKey: 'prep-compra', dados: dadosCompra(pasto, ['0801', '0802', '0803'], 3000) }));
+  amb.gas.clock.now += 60000;
+  return { pasto, eventId: r.dados.event_id, ids: r.dados.animais.map((a) => a.animal_id) };
+}
+function desfechoCorrecaoCompra(amb, e, confirmado, msg, prep) {
+  const G = amb.G;
+  const r = amb.read({ rota: 'teste.compra', reads: G.FinancialService.leituras(), acessoCru: true, tratador: (tx) => ({
+    proj: G.Timeline.conferir(tx), fin: G.FinancialService.conferir(tx),
+    animais: prep.ids.map((id) => tx.cru.cruPorId('ANIMAIS', id)), original: tx.cru.avaliar(prep.eventId).status,
+    ativos: tx.repo.vigentes('FINANCEIRO').map((f) => f.valor).sort((a, b) => a - b),
+  }) }).dados;
+  assert.deepEqual(r.proj, [], msg + ': (2) projeção = reconstrução');
+  assert.deepEqual(r.fin, [], msg + ': (2) invariantes financeiras (03b, 14)');
+  const op = e.OPERACOES.find((o) => o.idempotency_key === 'k-corr-compra' && o.status === 'CONFIRMADA');
+  assert.equal(!!op, confirmado, msg + ': (1) a correção vale exatamente quando o commit chegou');
+  assert.ok(r.animais.every((a) => a.situacao_cadastral === 'ATIVO'), msg + ': (1) os três seguem ATIVOS (mesmos animal_id)');
+  if (!confirmado) {
+    assert.deepEqual([r.original, r.animais.map((a) => [a.brinco, a.custo_aquisicao]), r.ativos], ['CONFIRMADO', [['0801', 301000], ['0802', 301000], ['0803', 301000]], [3000, 900000]], msg + ': (1) tudo como antes');
+    return null;
+  }
+  assert.deepEqual([r.original, r.animais.map((a) => [a.brinco, a.custo_aquisicao, a.evento_origem_id]), r.ativos],
+    ['ESTORNADO', [['0801', 310000, op.resumo_json.event_id], ['0812', 310000, op.resumo_json.event_id], ['0803', 310000, op.resumo_json.event_id]], [30000, 900000]], msg + ': (1) a correção inteira');
+  return {
+    acao: 'corrigir', event_id: op.resumo_json.event_id, event_type: 'COMPRA', event_subtype: null, event_date: DATA_COMPRA, status: 'CONFIRMADO',
+    total_value: 930000, substitui: prep.eventId, estorna: null,
+    animais: r.animais.map((a) => ({ animal_id: a.animal_id, codigo_interno: a.codigo_interno, brinco: a.brinco, sexo: a.sexo, situacao_cadastral: a.situacao_cadastral, pasto_atual_id: a.pasto_atual_id })),
+  };
+}
 const CENARIOS = {
   evento: {
     chave: 'chave-evento-1',
@@ -205,6 +250,18 @@ const CENARIOS = {
       },
     }),
     desfecho: desfechoMotor,
+  },
+  correcaoCompra: {
+    chave: 'k-corr-compra',
+    ambiente: { projecoes: (G) => G.Timeline.porta() },
+    preparar: prepararCompra,
+    comando: (amb, prep) => amb.G.EventService.comando('corrigir', {
+      idempotencyKey: 'k-corr-compra',
+      dados: Object.assign(dadosCompra(prep.pasto, ['0801', '0812', '0803'], 30000), { event_id: prep.eventId, justificativa: 'Brinco e frete digitados errado' }, {
+        animais: ['0801', '0812', '0803'].map((b, i) => ({ animal_id: prep.ids[i], brinco: b, sexo: 'M', castrado: false, reprodutor: false, idade_meses: 14 })),
+      }),
+    }),
+    desfecho: desfechoCorrecaoCompra,
   },
 };
 /** Ambiente do cenário: o do motor usa o projetor real (Timeline) e o banco semeado. */
