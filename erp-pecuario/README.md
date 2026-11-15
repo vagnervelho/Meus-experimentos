@@ -10,10 +10,11 @@ O desenho técnico (Fase 0) está em [`docs/fase-0/`](docs/fase-0/README.md); o 
 
 ## Estado atual (15/11/2026)
 
-**Fase 1 — Fundação: código entregue neste repositório, testado em Node e no navegador do ambiente de
-desenvolvimento. Ainda não foi implantado nem executado na conta Google do dono.** A fase só fecha depois que o dono
-rodar `runDiagnostics` e `runAcceptanceTests` na conta dele (detalhes em
-[`docs/RELATORIO_FASE1.md`](docs/RELATORIO_FASE1.md)).
+**Fases 1 (Fundação) e 2 (Motor de eventos): código entregue neste repositório, testado em Node e no navegador do
+ambiente de desenvolvimento. Nada foi implantado nem executado na conta Google do dono.** As duas fases só fecham
+depois que o dono rodar `runDiagnostics` e `runAcceptanceTests` na conta dele e, na Fase 2, validar as contas de compra
+e venda com um caso real e confirmar a forma de venda (PR-09). Detalhes em
+[`docs/RELATORIO_FASE1.md`](docs/RELATORIO_FASE1.md) e [`docs/RELATORIO_FASE2.md`](docs/RELATORIO_FASE2.md).
 
 O que a Fase 1 faz:
 
@@ -27,23 +28,35 @@ O que a Fase 1 faz:
 - Rebanho (lista com filtros, exportação CSV), ficha do animal, árvore genealógica, fotos e documentos.
 - Propriedades, pastos próprios e arrendados com painel, categorias, listas e parâmetros.
 - Visão geral com números reais; backup diário e sob demanda, restauração pelo sistema, verificação de integridade.
-- Testes de aceitação e base de demonstração (cerca de 300 animais) que rodam na conta do dono, sem tocar a base real.
+- Testes de aceitação e base de demonstração que rodam na conta do dono, sem tocar a base real.
 
-Fase 2 (motor de eventos), em andamento: nascimento, compra (com o financeiro completo do evento: lançamentos,
-parcelas a pagar, rateio do custo entre os animais ao centavo e custo de aquisição na ficha), transferência, morte e
-descarte (com custo ou receita opcional), cada um com estorno e correção. Venda, identificação, marcação e o restante
-da Fase 2, e pesagens, sanidade, reprodução e o módulo Financeiro chegam nas etapas e fases seguintes
-([`docs/fase-0/10-plano-de-implementacao.md`](docs/fase-0/10-plano-de-implementacao.md)). O menu mostra só o que já
-foi entregue.
+O que a Fase 2 acrescenta (o inventário só se movimenta por eventos e pode ser refeito em qualquer data desde o marco
+zero):
+
+- Parto (simples, gêmeos, natimorto, peso ao nascer, histórico da vaca), transferência entre pastos, morte e descarte,
+  identificação (pôr, trocar e tirar brinco), marcação (para descarte, não localizado), mudança de categoria e baixa na
+  contagem; cada um com estorno e correção, inclusive retroativos e com lançamento posterior que dependa deles.
+- Compra e venda completas, com o financeiro do próprio lançamento: por cabeça, kg vivo, arroba de peso vivo ou de
+  carcaça e lote; frete, comissão, Funrural e outras deduções (inclusive a descontada pelo comprador); parcelas a pagar
+  e a receber; rateio entre os animais ao centavo; custo de aquisição e resultado na ficha; aviso de carência na venda.
+- Rebanho e pastos numa data passada (quem estava, desde quando, UA, UA/ha e ocupação); Visão geral com o movimento do
+  período; documentos e fotos em qualquer lançamento (nota fiscal, GTA, boleto).
+- Importação do histórico (compras, vendas, transferências, nascimentos e mortes, também de antes do marco zero) com a
+  conferência contra o marco zero; verificação de integridade com 26 conferências.
+
+Ficam para as fases seguintes ([`docs/fase-0/10-plano-de-implementacao.md`](docs/fase-0/10-plano-de-implementacao.md)):
+pesagem, sanidade, reprodução e o modo curral (Fase 3); baixa de parcelas, rateio de custos compartilhados, fluxo de
+caixa e resultado (Fase 4); dashboard completo, relatórios, XLSX e PDF (Fase 5). O menu mostra só o que já foi
+entregue.
 
 ## Estrutura
 
 | Pasta | Conteúdo |
 |---|---|
-| `src/` | O que vai para o Apps Script: 22 arquivos `.js` (viram `.gs`), 10 `.html` e o manifesto `appsscript.json` |
+| `src/` | O que vai para o Apps Script: 23 arquivos `.js` (viram `.gs`), 10 `.html` e o manifesto `appsscript.json` |
 | `tests/` | Testes em Node (`*.test.js`), harness `vm` com fakes fiéis das APIs do Google (`harness.js`, `fakes/`) e testes de interface com Playwright (`ui/`) |
 | `scripts/` | `push-gas.js` (envio com clasp), `gen-schema.js` (gera `src/Schema.js` dos dicionários de dados), `ui-check.js` |
-| `docs/` | Desenho (`fase-0/`), contratos entre módulos (`CONTRATOS.md`), guia de implantação, relatório da Fase 1, registro de alterações |
+| `docs/` | Desenho (`fase-0/`), contratos entre módulos (`CONTRATOS.md`), guia de implantação, relatórios das Fases 1 e 2, registro de alterações |
 
 ## Como rodar os testes
 
@@ -72,7 +85,7 @@ O passo a passo completo, para quem não é especialista em Apps Script, está e
 
 1. Criar um projeto vazio em script.google.com e ativar a Google Apps Script API nas configurações do usuário.
 2. Enviar o código: `npm run gas:push -- <ID do script>` (clasp em versão fixa, pelo Cloud Shell ou por um terminal
-   com Node 22+), ou copiar os 33 arquivos à mão.
+   com Node 22+), ou copiar os 34 arquivos à mão.
 3. No editor: executar `setup`, autorizar, depois `runDiagnostics` e `runAcceptanceTests`, e guardar os relatórios.
 4. Abrir o app pela URL de desenvolvimento (`/dev`) ou pela publicada (`/exec`), cadastrar propriedade e pastos,
    informar a data do marco zero e importar o rebanho.
@@ -82,8 +95,8 @@ navegador (o envio substitui tudo); a planilha-banco não é editada à mão (o 
 
 ## Documentos
 
-- [`docs/GUIA_DE_IMPLANTACAO.md`](docs/GUIA_DE_IMPLANTACAO.md) — implantação, diagnóstico, aceitação, rotina de backup e restauração.
-- [`docs/RELATORIO_FASE1.md`](docs/RELATORIO_FASE1.md) — o que foi entregue, resultados dos testes, pendências, decisões e limitações.
+- [`docs/GUIA_DE_IMPLANTACAO.md`](docs/GUIA_DE_IMPLANTACAO.md) — implantação, atualização para a Fase 2, diagnóstico, aceitação, rotina de backup e restauração.
+- [`docs/RELATORIO_FASE1.md`](docs/RELATORIO_FASE1.md) e [`docs/RELATORIO_FASE2.md`](docs/RELATORIO_FASE2.md) — o que foi entregue, resultados dos testes, pendências, decisões, limitações e (na Fase 2) a revisão adversarial.
 - [`docs/CONTRATOS.md`](docs/CONTRATOS.md) — interfaces de cada módulo de `src/`.
 - [`docs/CHANGELOG.md`](docs/CHANGELOG.md) — registro de alterações.
 - [`docs/ESPECIFICACAO_MESTRE.md`](docs/ESPECIFICACAO_MESTRE.md) — a especificação original.

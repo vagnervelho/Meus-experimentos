@@ -567,3 +567,6 @@ depois o conserto da causa.
   `tests/integrity.fase2.test.js` (25 → 26, com GENEALOGIA no contrato), a mensagem de possível duplicidade em
   `tests/events.test.js` ("Já existe a entrada de…", com o `conflito` conferido) e `cancelados` com receita e despesa em
   `tests/telas.fase2.test.js`.
+- Verificado em Node (`npm test`: 555 testes, 555 aprovados, 0 falhas, cerca de 7 minutos neste ambiente) e no navegador
+  com o backend real (`npm run ui:check`: 77 testes, 77 aprovados, 0 falhas; página montada com 437 KB de 450 KB). Nada
+  validado na conta do dono.

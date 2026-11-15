@@ -168,9 +168,11 @@ Uma tela: no alto, os tipos marcados `frequente` (4 a 6); abaixo, os cinco grupo
 
 | Grupo | Tipos, com o rótulo de tela |
 |---|---|
-| Movimentação | Nascimento · Compra · Venda · Transferência · Morte · Descarte · Já estava no rebanho (ENTRADA_INICIAL) · Outra entrada |
+| Movimentação | Compra · Venda · Transferência · Morte · Descarte · Já estava no rebanho (ENTRADA_INICIAL) · Outra entrada |
 | Manejo | Pesagem · Sanidade · Desmama · Castração · Pôr ou trocar brinco (IDENTIFICACAO) · Marcar para descarte ou como não localizado (MARCACAO) · Ocorrência |
-| Reprodução | Exposição, cobertura, inseminação, diagnóstico de gestação, aborto (REPRODUCAO) |
+| Reprodução | Nascimento (parto) · Exposição, cobertura, inseminação, diagnóstico de gestação, aborto (REPRODUCAO) |
+
+Na Fase 2, o `EventCatalog` pôs o Nascimento no grupo Reprodução, ao lado dos demais registros da matriz; o atalho "Registrar parto" fica na ficha da vaca.
 | Financeiro | Receita ou despesa (LANCAMENTO_FINANCEIRO) · Entrada de insumo (ESTOQUE) · Rateio, a partir de um lançamento |
 | Correções | Ajuste de inventário |
 

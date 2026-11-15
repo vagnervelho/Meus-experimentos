@@ -195,10 +195,11 @@ Chaves próprias por tipo:
 | CASTRACAO | `metodo` | TEXTO | N | Método usado (cirúrgica, burdizzo, elástico). Texto livre |
 | MARCACAO | `acao` | ENUM: MARCAR · DESMARCAR | S | Sentido da marcação. O que é marcado vem do subtipo |
 | MARCACAO | `motivo_descarte` | código `LISTAS.MOTIVO_DESCARTE` | N | Só com subtipo DESCARTE e ação MARCAR |
+| AJUSTE_INVENTARIO | `motivo_ajuste` | TEXTO | S: subtipo DIVERGENCIA_CONTAGEM | A justificativa obrigatória do lançamento. Os outros subtipos a guardam em `AJUSTES.motivo`; a baixa por divergência não grava AJUSTES, e `BAIXAS.observacoes` guarda em que contagem o animal faltou (acrescentada na Fase 2) |
 | OCORRENCIA | `tipo_ocorrencia` | código `LISTAS.TIPO_OCORRENCIA` | S | Classificação da ocorrência |
 | ESTOQUE | `qtd_apresentacao` | número | N | Só em ENTRADA: quantidade comprada na apresentação comercial (ex.: 2 frascos) |
 | ESTOQUE | `fator_conversao` | número | S: há `qtd_apresentacao` | Cópia congelada de `PRODUTOS.fator_conversao` no dia da entrada. Torna auditável a conta 2 frascos × 50 doses = 100 doses |
-| OUTRA_ENTRADA · NASCIMENTO · COMPRA · MORTE · DESCARTE · REPRODUCAO · DESMAMA · IDENTIFICACAO · AJUSTE_INVENTARIO · LANCAMENTO_FINANCEIRO · RATEIO · ESTORNO | — | — | — | Nenhuma chave própria: todos os campos têm coluna em EVENTOS ou na tabela de detalhe. Só as chaves comuns |
+| OUTRA_ENTRADA · NASCIMENTO · COMPRA · MORTE · DESCARTE · REPRODUCAO · DESMAMA · IDENTIFICACAO · AJUSTE_INVENTARIO (fora a divergência de contagem) · LANCAMENTO_FINANCEIRO · RATEIO · ESTORNO | — | — | — | Nenhuma chave própria: todos os campos têm coluna em EVENTOS ou na tabela de detalhe. Só as chaves comuns |
 
 Exemplos de célula:
 
@@ -994,19 +995,19 @@ Setas cheias são FKs; setas tracejadas são projeções. Todas as igualdades ab
 | 7 | Um rateio vigente por lançamento: o do evento vigente de maior `event_seq` | `Repository`; integridade | Somar o rateio antigo e o novo |
 | 8 | Por rateio: Σ `valor_alocado` = `RATEIOS.total_alocado` e Σ `base_valor` = `RATEIOS.base_total` | Fase A; integridade | Centavo perdido ou criado no rateio |
 | 9 | `RATEIOS.total_alocado` ≤ `FINANCEIRO.valor`. "Não alocado" = valor − total alocado, sempre exibido | Validação; integridade | Atribuir a animais mais do que o lançamento vale |
-| 10 | `total_alocado` = `FINANCEIRO.valor` (100%) em todo lançamento criado por COMPRA ou VENDA, principal e acessórios | Validação; integridade | Animal comprado ou vendido sem custo ou receita completos |
+| 10 | `total_alocado` = `FINANCEIRO.valor` (100%) em todo lançamento criado por COMPRA ou VENDA, principal e acessórios, e nos que o próprio evento rateia ao gravar: valor de abertura da ENTRADA_INICIAL, custo da MORTE e receita do DESCARTE (seção 10.3; estendida na Fase 2) | Validação; integridade | Animal comprado ou vendido sem custo ou receita completos |
 | 11 | No máximo uma alocação por (`rateio_id`, `animal_id`); `ALOCACOES_FINANCEIRAS.financial_id` = `RATEIOS.financial_id` | Fase A; integridade | Dupla contagem dentro do mesmo rateio |
 | 12 | `FINANCEIRO.animal_id*` preenchido ⇔ rateio vigente DIRETO, com uma alocação, do mesmo animal e de valor igual ao do lançamento | Fase C; integridade | Somar `FINANCEIRO.animal_id` e a alocação como se fossem dois custos |
 | 13 | Rateio com um único animal tem `criterio` = DIRETO | Plano de escrita | Duas formas de representar a mesma coisa |
 | 14 | Nenhum rateio aponta para lançamento de natureza ESTOQUE_INSUMOS ou NAO_OPERACIONAL | Validação | Insumo custeado duas vezes: na compra e no consumo |
 | 15 | Σ `EVENTO_ANIMAIS.valor_individual` do evento = `COMPRAS.valor_animais`, ou `VENDAS.valor_bruto` − `desconto_comercial`, = Σ alocações do lançamento principal | Fase A; integridade | Base de rateio que não fecha com o cabeçalho |
-| 16 | `COMPRAS.valor_total` = Σ `FINANCEIRO.valor` do evento; `VENDAS.frete` + `comissao` + `outras_deducoes` = Σ lançamentos DESPESA_VENDA do evento | Fase A; integridade | Cabeçalho comercial divergente do financeiro |
+| 16 | `COMPRAS.valor_total` = Σ `FINANCEIRO.valor` do evento; `VENDAS.frete` + `comissao` + `outras_deducoes` = Σ lançamentos DESPESA_VENDA do evento (e cada um = Σ da sua conta). Nos demais tipos, `EVENTOS.total_value` = Σ `FINANCEIRO.valor` vigentes do evento, vazio quando não há lançamento (seção 2.5; estendida na Fase 2) | Fase A; integridade | Cabeçalho comercial divergente do financeiro |
 | 17 | Σ `SANIDADE.custo` do evento = Σ alocações do rateio que o próprio evento gravou | Fase A; integridade | Cópia de custo divergente da fonte |
 | 18 | `ANIMAIS.custo_aquisicao*` = Σ alocações vigentes de natureza AQUISICAO_ANIMAIS do animal (em reentrada, só as do período de permanência mais recente; regra em `03a`, seção 4.3.3) | Fase C (`Projector`); integridade (projeção × replay) | Ficha do animal com custo diferente do relatório |
 | 19 | Evento com parcela LIQUIDADA não pode ser estornado | Validação do estorno | Dinheiro já movimentado sumindo do caixa |
 | 20 | Lançamento CANCELADO não tem parcela, rateio nem alocação vigente | Predicado de vigência | Resíduo de evento anulado nos relatórios |
 
-O que não é invariante, de propósito: a soma das alocações **não** precisa igualar o valor do lançamento fora de COMPRA e VENDA. Uma despesa de contabilidade de R$ 500,00 sem rateio é válida e aparece como "custeio não alocado". Exigir 100% forçaria rateios artificiais (§11.2 "não atribuir automaticamente custos... sem apresentar o método").
+O que não é invariante, de propósito: a soma das alocações **não** precisa igualar o valor do lançamento fora de COMPRA, VENDA e dos lançamentos que o próprio evento rateia ao gravar (invariante 10). Uma despesa de contabilidade de R$ 500,00 sem rateio é válida e aparece como "custeio não alocado". Exigir 100% forçaria rateios artificiais (§11.2 "não atribuir automaticamente custos... sem apresentar o método").
 
 ## 15. Exemplos completos, linha a linha
 

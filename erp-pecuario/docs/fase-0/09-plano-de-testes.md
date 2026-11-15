@@ -323,6 +323,8 @@
 
 **Oráculo.** Dois retratos das linhas vigentes: "antes" e "depois" de uma execução limpa. Após qualquer queda seguida de recuperação, o banco tem de ser igual a exatamente um deles. Comandos-modelo: venda do CT-04 (9 abas), estorno do CT-07, correção do CT-18 e `parcela.baixar`. Em cada ponto, todos os subconjuntos das escritas pendentes até 10 escritas (1.024 combinações); acima disso, 500 sorteados com semente fixa.
 
+Como foi executado nas Fases 1 e 2 (`tests/unitofwork.adversarial.test.js`), por tempo de suíte: depois de cada escrita, chegam nenhuma, todas, cada prefixo e subconjuntos sorteados com semente fixa das pendentes; nos pontos de buffer cheio (antes de cada flush, na primitiva SpreadsheetApp), todos os subconjuntos até 5 escritas e, acima disso, 24 sorteados com densidades de chegada de 10%, 50% e 90%. Com isso o arquivo já leva mais de 5 minutos. O critério de 1.024 e 500 segue como meta para uma execução longa fora da suíte; `parcela.baixar` entra como comando-modelo na Fase 4.
+
 |Ponto de queda (casos de `06-persistencia-e-integridade.md`, 5.1 a 5.3)|Esperado após a recuperação|
 |---|---|
 |1: só o marcador|"Antes"; marcador removido; `operacao.status` INEXISTENTE|

@@ -98,7 +98,7 @@ Saída do spike: um relatório curto em `docs/` com o resultado de cada item, a 
 | E2.10 | Importadores de compras, vendas, transferências, nascimentos e mortes; relatório de reconciliação | G |
 | E2.11 | Verificação de integridade completa (linha do tempo, financeiro) | M |
 
-- **Arquivos:** `EventCatalog`, `EventService`, `Timeline`, `FinancialService`, `InventoryService`, `ReproductionService`, `PastureService`, `ImportService`; `Events.html`, `Pastures.html`.
+- **Arquivos:** `EventCatalog`, `EventService`, `Timeline`, `FinancialService`, `InventoryService`, `ReproductionService`, `PastureService`, `ImportService`; `Events.html`, `Pastures.html`. Na implementação entraram também `HealthService` (só a regra de carência da venda, RN-072, antecipada da Fase 3), `AuditService` (integridade), `FileService` (anexos de evento), `TestRunner` (aceitação e demonstração) e as telas `Components`, `Animals`, `Dashboard`, `Import` e `Settings`.
 - **Testes para fechar:** CT-01, CT-02, CT-03, CT-04, CT-07, CT-08, CT-09 (completo), CT-13 (rateio de compra), CT-14, CT-17, CT-18.
 - **O dono faz:** validar as fórmulas de compra e venda com um caso real; confirmar PR-09.
 - **Riscos da fase:** R-11, R-12, R-13.
@@ -281,9 +281,23 @@ O caminho crítico é spike → persistência → UnitOfWork → motor → anima
 - [x] E1.11 Backup e integridade
 - [x] E1.12 Aceitação, guia de implantação e relatório — `runAcceptanceTests` executado em Node; execução na conta do dono pendente (`docs/RELATORIO_FASE1.md`)
 
-### Fases 2 a 5
+### Fase 2 — Motor de eventos
 
-- [ ] Fase 2: E2.1 a E2.11
+- [x] E2.1 NASCIMENTO — parto simples, gemelar e natimorto, peso ao nascer, histórico reprodutivo da matriz, parto anterior ao marco zero como histórico
+- [x] E2.2 TRANSFERENCIA — coletiva, tudo ou nada, origem pela linha do tempo na data, GTA opcional
+- [x] E2.3 PARCEIROS e COMPRA — modalidades × base de peso, grade de animais novos, rateio ao centavo, lançamentos, parcelas, alocações; fórmulas a validar pelo dono com um caso real
+- [x] E2.4 VENDA — modalidades × base de peso, deduções (inclusive retida pelo comprador), parcelas, rateio, aviso de carência; fórmulas a validar pelo dono com um caso real e PR-09 a confirmar
+- [x] E2.5 MORTE e DESCARTE — com custo ou receita opcional, em uma ou mais parcelas
+- [x] E2.6 IDENTIFICACAO, MARCACAO, AJUSTE_INVENTARIO (reclassificação, divergência de contagem) — o modo curral da identificação chega com a pesagem (E3.1)
+- [x] E2.7 Estorno e substituição de qualquer evento; histórico e detalhe; tela de auditoria com a trilha completa
+- [x] E2.8 Inventário em data passada; composição do pasto em data histórica; UA, UA/ha e ocupação — os filtros da Visão geral estão no servidor; na tela, só o período (o resto com o dashboard da Fase 5)
+- [x] E2.9 Anexos de evento — testados sobre o fake do Drive; o Drive real fica para a conta do dono
+- [x] E2.10 Importadores de compras, vendas, transferências, nascimentos e mortes; relatório de reconciliação — tempo com arquivos grandes a medir na conta do dono
+- [x] E2.11 Verificação de integridade completa (26 checagens: linha do tempo, partos, genealogia, financeiro)
+- [ ] Validação da Fase 2 na conta do dono — `runAcceptanceTests` com os cenários da Fase 2, fórmulas de compra e venda com um caso real, PR-09 (`docs/RELATORIO_FASE2.md`, seção 3)
+
+### Fases 3 a 5
+
 - [ ] Fase 3: E3.1 a E3.7
 - [ ] Fase 4: E4.1 a E4.7
 - [ ] Fase 5: E5.1 a E5.5

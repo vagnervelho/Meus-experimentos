@@ -50,7 +50,14 @@ e a reconciliação em tabela no assistente de importação, e os documentos esc
 etapa ACEITAÇÃO (nível 2 e jornada): os cenários da Fase 2 e a reconciliação do CT-12 em `runAcceptanceTests`, a base de
 demonstração completa de 09, seção 7 (seção 21), a jornada e o mapa RN → teste (seção 21, testes), e as correções que eles
 acharam: valor inválido com um erro só, em português, no lançamento (seção 26), e o erro de campo do animal já
-cadastrado com `animal_id` e brinco, sem repetir no cabeçalho da negociação (seção 14).
+cadastrado com `animal_id` e brinco, sem repetir no cabeçalho da negociação (seção 14). Fase 2, conserto da revisão
+independente (rodadas 1 e 2): o contrato do conflito `{event_id, tipo, subtipo, data, nome}` e `EventCatalog.nomeEvento`
+(seções 12 e 14), a chegada declarada (`Timeline.chegadaDeclarada`, seção 13), `EventService.conferirRestauracao` e a
+genealogia devolvida pelo estorno (seção 14), a checagem GENEALOGIA (26 checagens, seção 11), `evento.obter` com `papeis`
+e `totais_venda`, o estorno simulado com `corrige` e `cancelados` (receitas e despesas), as parcelas mensais dos custos
+(`FinancialService.parcelasMensais`, seção 26) e uma importação em curso por vez (`IMPORTACAO_EM_CURSO`, seção 18).
+Fase 2, DOCUMENTAÇÃO DE ENTREGA: este arquivo conferido com o código por amostra (a superfície pública de cada módulo
+contra as seções e as 63 rotas de `Api.rotas()`: 51 canônicas, 12 extras), sem mudança de contrato.
 
 ## 1. Regras que valem para todo arquivo de `src/`
 
@@ -760,6 +767,7 @@ Tipos desta etapa (cabeçalho · por animal):
 | `tipo(nome)` | Resumo + definição (`rotulo, grupo_ui, ordem, fase, frequente, selecao_animais, filtro_elegiveis, modo_entrada, revisao, critico, reads, campos, campos_animal, componentes, grupos_repetiveis, subtipos`). Tipo inexistente → `INTERNAL` |
 | `ativo(tipo, subtipo?, fase?)` | Entregue na fase (padrão: a corrente) e com campos; tipo com subtipos exige subtipo ativo |
 | `tiposAtivos(fase?)`, `modulosAtivos(fase?)` | Listas por fase. Módulos: os 10 itens do menu (§15) + IMPORTACAO (`menu: false`), cada um com `fase` |
+| `subtipos(tipo)` | Códigos dos subtipos do tipo, na ordem do catálogo, ativos ou não (`[]` em tipo sem subtipos ou desconhecido) |
 | `camposEvento(tipo, subtipo?)`, `camposAnimal(tipo, subtipo?)`, `camposGrupo(tipo, grupo)`, `leituras(tipo)` | Definições e abas que o comando lê (o motor lê também BAIXAS); `camposEvento` com subtipo acrescenta `subtipos[S].campos`; `leituras(tipo desconhecido)` = a união das de todos os tipos (correção que não diz o tipo) |
 | `serializar(fase?)` | `{fase, modulos, tipos}` só dados (vai ao cliente no bootstrap), só tipos e subtipos ativos; cada tipo e cada subtipo leva `nome` (`nomeEvento`) |
 | `validarCampos(definicoes, valores, {listas, desativados}?)` | Formato, obrigatório, `obrigatorio_se`, `visivel_se` (preenchido e não visível → `CAMPO_NAO_SE_APLICA`; `false` passa), lista, faixa (`dinheiro` em centavos, `min`/`max` em reais) e chave desconhecida não vazia (`CAMPO_DESCONHECIDO`). `desativados` = `{LISTA: {código: rótulo}}`: o item desativado é recusado (`VALOR_FORA_DA_LISTA`) com o nome dele na mensagem. Devolve `[{codigo, campo, mensagem}]` |
@@ -799,6 +807,7 @@ substituição (desenho-base 16.1).
 | `pastoEm(linhasDoAnimal, D, marcoZero)` | `{presente, pasture_id, motivo}` ao fim do dia D |
 | `pastoAntesDaSaida(linhasDoAnimal, D, marcoZero)` | Onde o animal estava no dia D depois das entradas e movimentos de D e antes das saídas de D: a origem de uma saída lançada em D e o pasto padrão das crias de um parto em D |
 | `consultaInventario({data, animal_id?})` | Consulta pronta para `UnitOfWork.read` (rota `inventario.posicao`) |
+| `dataBr(d)` | `yyyy-MM-dd` → `dd/mm/aaaa` nas mensagens ao pecuarista; vazio → `''` |
 
 Regras do projetor que valem como contrato: atributo = criação (`atributos_iniciais_json`, booleanos `S`/`N`) + correção
 CORRECAO_CADASTRO vigente de maior `event_seq`; ANULADO/PENDENTE conservam os atributos declarados na linha de criação
@@ -1075,6 +1084,7 @@ dados, {chave, avisos})` (confere a projeção depois de cada comando), `ler(con
 | `consultaPosicao({data?, property_id?, pasture_id?, sexo?, category_id?, animal_id?})` — `inventario.posicao` | `posicao` na data; com `animal_id` (filtros ignorados): `{data, animal_id, presente, pasture_id, situacao, no_rebanho_desde, no_pasto_desde, entrada, saida, sexo, idade_meses, categoria: {category_id, codigo, nome, manual}, peso (pesoVigente), motivo}` — categoria, idade e peso só se presente em D. Futura/inválida, sexo fora de M/F → `VALIDATION`; animal, pasto, propriedade ou categoria inexistente → `NOT_FOUND` |
 | `consultaVisaoGeral({data_inicio?, data_fim?, property_id?, pasture_id?, sexo?, category_id?})` — `dashboard.obter` | 07, seção 9, no recorte da Fase 2 (itens 1 a 10, 12, 15 e 16; G1, G6 e G7). Período: Df padrão hoje; Di padrão o primeiro dia do mês 11 meses antes do de Df (os últimos 12 meses); `periodo: {inicio, fim, inicio_efetivo, parcial, motivo}` (Df antes do marco zero → `ANTERIOR_AO_MARCO_ZERO` em tudo; começa antes → fluxos dele em diante, `parcial`). Devolve `posicao(Df, filtros)` + `geradoEm`, `periodo`, `pendencias: {sem_pasto, sem_brinco, sem_categoria}`, `titulos` (de hoje, sem filtros: `etiquetas.titulos`), `movimento: {nascimentos, compras, vendas, mortes, descartes, baixas_contagem: {cabecas, eventos, valor? (compras: valor dos animais; vendas: receita — o que coube a cada animal no lançamento principal, COMPRA_ANIMAIS ou VENDA_ANIMAIS, pelas alocações do rateio vigente; nunca `valor_individual`, que é só base de rateio: desenho-base §7), motivo}}` (linhas vigentes de D0 em diante; filtros pelo animal no dia do evento: destino na entrada, origem na saída), `receita_vendas: {valor, motivo, n, nao_atribuida, base: LANCAMENTOS\|ALOCACOES}` (Σ RECEITA_VENDA_ANIMAIS por competência; Pr pelo lançamento; com Pa, S ou C só a parte alocada a animais do filtro — tratamento A; lançamento com `pasture_id` conta inteiro para o seu pasto), `series: {rebanho: [{mes, data, cabecas, motivo}], nascimentos_mortes: [{mes, inicio, fim, parcial, nascimentos, mortes, motivo}], compras_vendas: [{mes, inicio, fim, parcial, compras, valor_compras, vendas, valor_vendas, motivo}]}` (mês todo antes do marco zero: null com o motivo). Nos fluxos, zero é informação. Erros: `VALIDATION` (`FORMATO_INVALIDO`, `DATA_FUTURA` em `data_fim`, `FAIXA_INVALIDA`, sexo), `NOT_FOUND` (filtro inexistente) |
 | `consultaElegiveis({tipo, subtipo?, data?, pasture_id?})` — `inventario.elegiveis` | Animais elegíveis a um tipo ativo cujo `filtro_elegiveis.situacao` é ATIVO (transferência, nascimento, venda, morte, descarte, identificação, marcação), pela linha do tempo na data: movimento e saída (transferência, venda, morte, descarte; `MOVIMENTO_OU_SAIDA`) = no rebanho ao fim de D; fato (parto, identificação, marcação e os das fases seguintes) = no rebanho em algum momento de D, o dia da saída contando como na validação (RN-017: a vaca que morre no parto é elegível ao parto desse dia), no pasto em que estava antes das saídas do dia (`presentesNoDia`); no pasto pedido, com o `sexo` do filtro. `{data, tipo, pasture_id, motivo, n, itens: [{animal_id, codigo_interno, brinco, sexo, pasture_id}]}`; antes do marco zero (ou sem ele) `n`/`itens` null com o motivo. `VALIDATION` (`TIPO_SEM_ELEGIVEIS`, data inválida ou futura), `NOT_FOUND` (pasto) |
+| `posicaoEm(ctx, dados)`, `elegiveis(ctx, dados)`, `visaoGeral(ctx, dados)`, `listarAlertas(ctx, estado)` | As formas `x(ctx, dados)` (= `UnitOfWork.read`) de `consultaPosicao`, `consultaElegiveis`, `consultaVisaoGeral` e `consultaAlertas` |
 | `consultaAlertas(estado)` — `alerta.listar` | `estado = {backup: {ultimo_em: ISO\|null}, integridade: {verificado_em, erros}\|null}` vem de quem chama (Maintenance/Api; fora da planilha). Devolve `{data, geradoEm, alertas: [{codigo, nivel AVISO\|ERRO, mensagem, n, ids, entidade}], nao_avaliados: [{codigo, motivo, mensagem}]}`; códigos `ALERTAS`: ATIVO_SEM_PASTO, SEM_BRINCO, SEM_CATEGORIA, NAO_LOCALIZADO (ATIVO com `nao_localizado`, marcado por MARCACAO/NAO_LOCALIZADO; some com a baixa na contagem ou a desmarcação), BACKUP_ATRASADO (`alerta_backup_atrasado_dias`; nenhum backup = alerta), INTEGRIDADE_COM_ERRO, IMPORTACAO_INCOMPLETA (IMPORTACOES `IMPORTANDO`). Parte do `estado` ausente vai para `nao_avaliados` |
 
 ## 16. `FileService` (plataforma: Drive v3 e UrlFetchApp)
@@ -1198,7 +1208,7 @@ Códigos de linha — DUPLICADA: `BRINCO_JA_CADASTRADO`, `BRINCO_REPETIDO_NO_ARQ
 
 ### 18.2 Importação de eventos históricos (E2.10): COMPRAS, VENDAS, TRANSFERENCIAS, NASCIMENTOS, MORTES
 
-`TIPOS_SUPORTADOS` = ANIMAIS + os cinco; os de manejo (PESAGENS, SANIDADE, REPRODUCAO, OCORRENCIAS) → `VALIDATION`
+`TIPOS_SUPORTADOS` = ANIMAIS + os cinco (`TIPOS_EVENTO`: tipo de importação → `event_type`, COMPRAS → COMPRA etc.); os de manejo (PESAGENS, SANIDADE, REPRODUCAO, OCORRENCIAS) → `VALIDATION`
 `TIPO_INDISPONIVEL` (fase 3). Mesmas rotas, chaves, estados e regras da seção 18 (TOTAL/PARCIAL_APROVADO, aprovação em
 AUDITORIA, backup antes de concluir, IMPORTADO como commit, CANCELADO no desfazer); o que muda:
 
@@ -1443,6 +1453,7 @@ VALOR_INDIVIDUAL, kg em PESO_VIVO e PESO_CARCACA, 1 em CABECAS, peso relativo em
 
 | Função | Contrato |
 |---|---|
+| `MODALIDADES`, `CRITERIOS_LOTE`, `SEM_RATEIO` | Constantes: CABECA, KG_VIVO, ARROBA, LOTE; os critérios aceitos no lote (CABECAS, PESO_VIVO, PESO_CARCACA, VALOR_INDIVIDUAL, MANUAL); as naturezas que nunca recebem rateio (ESTOQUE_INSUMOS, NAO_OPERACIONAL; invariante 14) |
 | `CONTAS` | Códigos das contas do sistema: `COMPRA` (COMPRA_ANIMAIS), `FRETE_COMPRA` (FRETE_DESPESAS_COMPRA), `ABERTURA`, `RECEITA_DESCARTE` (OUTRAS_RECEITAS_OPERACIONAIS), `VENDA` (VENDA_ANIMAIS), `FRETE_VENDA`, `COMISSAO_VENDA`, `TAXAS_VENDA` (TAXAS_RETENCOES_VENDA) |
 | `contaDeducao(tipo)` | Código da conta de uma dedução de venda pelo tipo de LISTAS.TIPO_DEDUCAO_VENDA: FRETE → FRETE_VENDA, COMISSAO → COMISSAO_VENDA, qualquer outro → TAXAS_RETENCOES_VENDA (03b, 2.6) |
 | `totaisVenda({valor_bruto, desconto_comercial, deducoes: [{tipo, valor, retida}]})` | Puro, em centavos: `{valor_bruto, desconto_comercial, receita (bruto − desconto), frete, comissao, outras_deducoes (pelo tipo), deducoes, retidas, resultado_negociacao (receita − deduções), deposito_esperado (receita − retidas)}` (03b, 4.2; 07, 4.2) |

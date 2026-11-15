@@ -203,12 +203,17 @@ Roda sob demanda (`sistema.integridade`), no fim do `setup()` e uma vez por sema
 | Brinco único entre os preenchidos | Erro | Evento de identificação ou ajuste |
 | Chaves estrangeiras apontam para registro existente e não anulado | Erro | Ajuste; investigar edição manual |
 | Cada animal ATIVO tem exatamente uma entrada vigente em aberto | Erro | Estorno ou ajuste |
-| Linha do tempo de todos os animais (estado e continuidade de pasto) | Erro | Estornar o evento conflitante |
+| Linha do tempo de todos os animais (estado e continuidade de pasto; ordem das identificações e das marcações) | Erro | Estornar o evento conflitante |
+| Nenhum evento vigente depois da saída do rebanho, até a volta (depois da morte, nenhum); nenhum detalhe de identificação, pesagem ou reprodução fora do rebanho (Fase 2) | Erro | Estornar o evento posterior ou a saída |
+| Partos: nascimento × registro de parto da mãe × crias (mãe fêmea nascida antes do parto, data e nascidos vivos, mãe, pai, data e origem de cada cria, também no cadastro reconstruído) (Fase 2) | Erro | Corrigir o parto |
+| Genealogia: mãe fêmea, pai macho, progenitores nascidos antes do filho, nenhum ciclo (RN-008 a RN-010; Fase 2) | Erro | Correção de cadastro |
+| Nenhum brinco ativo repetido nas identificações (Fase 2) | Erro | Evento de identificação ou ajuste |
 | Projeção × reconstrução pelos eventos (inclui atributos sensíveis, custo de aquisição e estoque) | Erro, com reparo automático oferecido | Reconstruir projeções |
 | `EVENTOS.status` × predicado de vigência | Erro, com reparo | Reconstruir |
 | Inventário: soma dos efeitos dos eventos vigentes = contagem de animais ATIVOS, no total e por pasto | Erro | Ver abaixo |
-| Soma das alocações ≤ valor do lançamento; igual ao total do rateio; 100% nos lançamentos de compra e venda | Erro | Novo rateio |
-| Soma das parcelas = valor do lançamento | Erro | Evento substituto |
+| Soma das alocações ≤ valor do lançamento; igual ao total do rateio; 100% nos lançamentos de compra e venda e nos que o próprio evento rateia (abertura, custo da morte, receita do descarte) | Erro | Novo rateio |
+| Soma das parcelas não canceladas = valor do lançamento | Erro | Evento substituto |
+| Demais invariantes de `03b`, seção 14 (cabeçalho comercial × lançamentos, `EVENTOS.total_value`, custo de aquisição pelas alocações), pela mesma conferência do `FinancialService` que os testes usam (Fase 2) | Erro, com reparo quando é projeção | Reconstruir; investigar edição manual |
 | `FINANCEIRO.animal_id` preenchido ⇔ uma única alocação direta | Erro, com reparo | Reconstruir |
 | Rateio com base diferente da recalculada hoje | Alerta | Re-ratear, por decisão do dono; nunca recálculo silencioso |
 | Cópia × fonte (data do detalhe = data do evento; subtipo = tipo do detalhe) | Erro | Investigar edição manual |

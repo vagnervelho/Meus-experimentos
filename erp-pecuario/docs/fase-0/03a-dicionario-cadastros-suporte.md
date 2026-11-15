@@ -904,10 +904,12 @@ A coluna é projeção: o valor é recalculado a cada rebuild pela primeira cond
 |---|---|---|
 | 1 | O animal tem linhas em EVENTO_ANIMAIS, nenhuma de evento vigente, e alguma de operação INICIADA ou de importação ainda não concluída | PENDENTE |
 | 2 | A partir do marco zero, a soma de `efeito_inventario` das linhas vigentes é 1 | ATIVO |
-| 3 | Há linhas vigentes a partir do marco zero, a soma é 0 e a última saída é VENDA / MORTE / DESCARTE / AJUSTE_INVENTARIO de divergência de contagem | VENDIDO / MORTO / DESCARTADO / BAIXADO_AJUSTE |
+| 3 | Há linhas vigentes **de inventário** a partir do marco zero, a soma é 0 e a última saída é VENDA / MORTE / DESCARTE / AJUSTE_INVENTARIO de divergência de contagem | VENDIDO / MORTO / DESCARTADO / BAIXADO_AJUSTE |
 | 4 | Só há linhas vigentes anteriores ao marco zero | VENDIDO ou MORTO, se a saída histórica é conhecida; senão HISTORICO |
 | 5 | Não há linha em EVENTO_ANIMAIS e o animal foi criado por `animal.cadastrarExterno` | EXTERNO |
 | 6 | Nenhuma das anteriores (todas as linhas são de eventos estornados, falhos ou de importação cancelada) | ANULADO |
+
+Nas ordens 2 e 3, "linha de inventário" é a que tem `efeito_inventario` diferente de 0 ou pasto preenchido. Fato neutro (correção de cadastro, identificação, marcação) datado depois do marco zero não decide a situação: o animal que só tem registros anteriores ao marco zero e fatos neutros depois dele continua HISTORICO, VENDIDO ou MORTO pela ordem 4, com as correções aplicadas e o brinco ocupado. (Decisão de implementação da Fase 2: lida ao pé da letra, a tabela levava esse animal a ANULADO.)
 
 | Valor | Conta no inventário | Listas e seletores | Ocupa o brinco | Eventos que aceita |
 |---|---|---|---|---|
@@ -918,7 +920,7 @@ A coluna é projeção: o valor é recalculado a cada rebuild pela primeira cond
 | DESCARTADO | Não | Sob demanda | Sim | Como VENDIDO |
 | BAIXADO_AJUSTE | Não | Sob demanda | Sim | Como VENDIDO. Reaparecimento do animal = estorno da baixa |
 | HISTORICO | Não | Sob demanda; aparece como mãe ou pai na genealogia | Sim | Registros informativos anteriores ao marco zero; reentrada |
-| EXTERNO | Não | Seletores de pai, mãe e touro | Não (não tem identificações) | Nenhum como sujeito. Figura como `pai_id`, `mae_id` e `touro_id`; entra no rebanho por COMPRA |
+| EXTERNO | Não | Seletores de pai, mãe e touro | Não (não tem identificações) | Nenhum como sujeito. Figura como `pai_id`, `mae_id` e `touro_id`. Não entra no rebanho: se o animal chegar à fazenda, a COMPRA ou a OUTRA_ENTRADA o lança como animal novo, e o cadastro de referência continua como está (estornar a entrada de um EXTERNO o deixaria ANULADO, sem volta a EXTERNO; decisão de implementação da Fase 2) |
 | ANULADO | Não | Invisível | Não | Nenhum. FK apontando para ele é erro de integridade |
 
 Caminhos típicos (como a coluna é projeção, estornar qualquer evento recalcula o valor; o diagrama mostra o uso normal):
@@ -1365,9 +1367,9 @@ Não guardam fatos do negócio: guardam arquivos, trilhas, o journal das operaç
 | Coluna | Tipo | Obrig. | Marca | Domínio / FK | Descrição |
 |---|---|---|---|---|---|
 | `anexo_id` | ID | sim | imutável | PK | Identificador; alvo de `ANIMAIS.foto_anexo_id` e `IMPORTACOES.arquivo_anexo_id` |
-| `entidade` | TEXTO | sim | imutável | Nome de aba: ANIMAIS, EVENTOS ou IMPORTACOES no MVP | Tabela do registro a que o arquivo pertence |
+| `entidade` | TEXTO | sim | imutável | Nome de aba: ANIMAIS, EVENTOS, FINANCEIRO (lançamento gerado por um evento, desde a Fase 2) ou IMPORTACOES no MVP | Tabela do registro a que o arquivo pertence |
 | `entity_id` | ID | sim | imutável | PK na aba indicada em `entidade` | Registro a que o arquivo pertence |
-| `event_id` | ID | não | imutável | → `EVENTOS.event_id` | Preenchido quando o anexo foi gravado dentro de um evento: a linha só vale se o evento for vigente. Vazio quando veio de comando próprio |
+| `event_id` | ID | não | imutável | → `EVENTOS.event_id` | Preenchido quando o anexo pertence a um evento: a linha só vale se o evento for vigente. Vale também para o anexo enviado depois, por `anexo.adicionar`: em EVENTOS é o próprio `entity_id`; em FINANCEIRO, o evento que criou o lançamento (decisão de implementação da Fase 2: o anexo de evento é filho dele, e o do evento estornado ou corrigido fica como histórico). Vazio em ANIMAIS e IMPORTACOES |
 | `drive_file_id` | TEXTO | sim | imutável | Identificador do arquivo no Drive | Arquivo principal (imagem de cerca de 300 KB, reduzida no cliente, ou documento) |
 | `thumb_drive_file_id` | TEXTO | não | imutável | Identificador do arquivo no Drive | Miniatura de cerca de 15 KB, gerada no cliente; só para imagens. Evita trafegar a imagem inteira nas listagens |
 | `nome_arquivo` | TEXTO | sim | imutável | — | Nome original do arquivo |
