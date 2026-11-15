@@ -111,3 +111,18 @@ repositório; "a verificar na conta do dono" significa que só o roteiro de diag
   saneamento), abas e indicadores; rota literal vale antes de rota com parâmetro; "+ Novo" parceiro pede o tipo.
 - Verificado em Node (`npm test`) e em navegador com o backend do harness (`npm run ui:check`). A abertura dos
   arquivos baixados dentro do quadro do HtmlService no celular é item do spike (SP-07), a verificar na conta do dono.
+
+## 15/11/2026 — Fase 1, REVISÃO ADVERSARIAL
+
+- Jornada de ponta a ponta só pela `api()` (`tests/jornada.fase1.test.js`) e regras RN da Fase 1 sem teste próprio
+  (`tests/regras.fase1.test.js`, com o mapa RN → teste).
+- Backups: passam a levar `erp_ambiente`; a lista, a retenção, o último backup e o alerta BACKUP_ATRASADO enxergam os
+  backups dos bancos anteriores do mesmo ambiente (antes, depois de uma restauração a lista ficava vazia e o alerta
+  acendia); restaurar exige o motivo (a tela já exigia) e recusa backup de outra base (teste ou demonstração).
+- Integridade: toda verificação completa atualiza `INTEGRIDADE:<banco>` (antes, só a semanal: depois de um reparo o
+  alerta INTEGRIDADE_COM_ERRO ficava até uma semana aceso).
+- Importação: progenitor sem brinco (animal de referência, ex.: touro de sêmen) é achado pelo nome ou pelo código
+  interno, como pede a saída "cadastrar como animal de referência" do RN-094.
+- Categorias: idade máxima < 1 mês e prioridade negativa são recusadas no servidor, como na tela. Formulários de pasto,
+  propriedade e categoria recusam 0 onde o servidor exige "maior que 0" (`min_exclusivo`).
+- Falhas tratadas que eram silenciosas (pastas do Drive ilegíveis, conferência de posições) vão para o log.

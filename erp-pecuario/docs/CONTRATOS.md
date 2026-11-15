@@ -795,7 +795,8 @@ Script Properties: `SPREADSHEET_ID`, `TEST_SPREADSHEET_ID`, `DEMO_SPREADSHEET_ID
 {PRODUCAO, TESTE, DEMO}`), `OWNER_EMAIL`, `DRIVE_FOLDERS`, `IO_PRIMITIVE` (forma de gravação da produção),
 `IO_PRIMITIVE:<id>` (a de um banco de teste ou de demonstração; nunca mexe na de produção), `IO_PRIMITIVE_RELATORIO`
 (resumo do corpus da produção), `DATA_VERSION:<id>`, `PENDING_OP:<id>`, `INTEGRIDADE:<id>` (resumo da última verificação
-semanal `{gerado_em, ok, erros, alertas}`). Backup = arquivo na pasta Backups com appProperties
+completa `{gerado_em, ok, erros, alertas}`, gravado pelo próprio `AuditService.verificarIntegridade`: semanal, sob
+demanda, fim do setup, restauração e confirmação do reparo). Backup = arquivo na pasta Backups com appProperties
 `erp_tipo = BACKUP`, `erp_banco`, `erp_ambiente` (PRODUCAO, TESTE ou DEMO: a "linhagem" do banco, que sobrevive à
 troca de ID na restauração), `erp_data` (yyyy-MM-dd no fuso), `erp_motivo`, `erp_instante`. A guarda
 `assertOwner_` das funções públicas é do Code.js; os handlers dos gatilhos montam o contexto com `contexto()`.

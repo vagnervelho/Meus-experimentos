@@ -289,3 +289,25 @@ test('RN-094: progenitor fora do rebanho cadastrado como animal de referência �
   assert.deepEqual([filho.situacao_cadastral, filho.pai_id, filho.pai_confianca], ['ATIVO', touro.animal_id, 'ESTIMADA']);
   s.conferirProjecoes('importação com pai de referência');
 });
+
+test('RN-107 e RN-112: integridade com erro gera alerta; o reparo explícito (e qualquer verificação nova) atualiza o alerta na hora', () => {
+  const s = S.sistema();
+  const { G } = s;
+  const ent = s.evento('registrar', S.entradaInicial([S.bicho({ brinco: '1' }), S.bicho({ brinco: '2' })]), 'ent-107');
+  const alertas = () => {
+    const est = s.exec((ctx) => G.Maintenance.estado(ctx));
+    return s.read(G.InventoryService.consultaAlertas(est.alertas_estado)).alertas.map((a) => a.codigo);
+  };
+  s.editar('ANIMAIS', ent.dados.animais[0].animal_id, 'pasto_atual_id', S.PASTOS.B);
+  const semanal = s.exec((ctx) => G.Maintenance.integridadeSemanal(ctx));
+  assert.equal(semanal.ok, false);
+  assert.ok(alertas().includes('INTEGRIDADE_COM_ERRO'));
+  assert.equal(s.tabela('ANIMAIS')[0].pasto_atual_id, S.PASTOS.B, 'a verificação só relata');
+  const rep = s.exec((ctx) => G.AuditService.repararIntegridade(ctx, 'Pasto editado à mão na planilha'));
+  assert.equal(rep.integridade.ok, true);
+  assert.equal(s.tabela('ANIMAIS')[0].pasto_atual_id, S.PASTOS.A, 'o reparo reconstrói pela linha do tempo');
+  assert.ok(!alertas().includes('INTEGRIDADE_COM_ERRO'), 'depois do reparo o alerta sai sem esperar a semana');
+  s.editar('ANIMAIS', ent.dados.animais[1].animal_id, 'pasto_atual_id', S.PASTOS.B);
+  assert.equal(s.integridade().ok, false, 'verificação sob demanda');
+  assert.ok(alertas().includes('INTEGRIDADE_COM_ERRO'), 'a verificação sob demanda também acende o alerta');
+});
