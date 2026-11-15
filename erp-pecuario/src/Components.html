@@ -1890,7 +1890,7 @@ var Registro = (function () {
     if (ref && ref[1] === 'PARCEIROS') { var pa = Store.parceiro(v); return pa ? pa.nome : 'parceiro'; }
     if (ref && ref[1] === 'PLANO_CONTAS') { var co = Store.conta(v); return co ? co.nome : 'conta'; }
     if (ref && ref[1] === 'PROPRIEDADES') { var pr = Store.propriedade(v); return pr ? pr.nome : String(v); }
-    if (def.tipo === 'dinheiro') return typeof v === 'number' ? Fmt.dinheiro(v) : 'R$ ' + v;
+    if (def.tipo === 'dinheiro') { var c = typeof v === 'number' ? v : Fmt.lerDinheiro(String(v)).valor; return typeof c === 'number' ? Fmt.dinheiro(c) : 'R$ ' + v; }
     if (def.tipo === 'data') return Fmt.data(v);
     if (def.tipo === 'lista') { var op = Campos.opcoesDe(def).filter(function (x) { return x.valor === v; })[0]; return op ? op.rotulo : String(v); }
     if (Array.isArray(v)) return v.map(function (x) { return x.codigo; }).join(', ');
@@ -1901,7 +1901,11 @@ var Registro = (function () {
     if (!s.corrige || !s.corrige.antes) return [];
     var out = [], antes = s.corrige.antes, vistos = {};
     var igual = function (a, b) { return JSON.stringify(Util.vazio(a) ? null : a) === JSON.stringify(Util.vazio(b) ? null : b); };
-    camposEvento(s).forEach(function (d) { if (!igual((antes.campos || {})[d.id], s.campos[d.id])) out.push(Campos.rotuloDe(d) + ': de ' + textoValor_(d, (antes.campos || {})[d.id]) + ' para ' + textoValor_(d, s.campos[d.id])); });
+    // Campo oculto (visivel_se falso) não vai ao servidor: o padrão que ele carrega não é uma alteração.
+    camposEvento(s).forEach(function (d) {
+      if (!Campos.visivel(d, s.campos) && !Campos.visivel(d, antes.campos || {})) return;
+      if (!igual((antes.campos || {})[d.id], s.campos[d.id])) out.push(Campos.rotuloDe(d) + ': de ' + textoValor_(d, (antes.campos || {})[d.id]) + ' para ' + textoValor_(d, s.campos[d.id]));
+    });
     s.linhas.forEach(function (l, i) {
       var quem = l.animal_id && Store.animal(l.animal_id) ? Store.rotuloAnimal(Store.animal(l.animal_id)) : (l.valores.brinco || 'Animal ' + (i + 1));
       if (!l.animal_id || !antes.linhas[l.animal_id]) { out.push(quem + ': animal novo neste lançamento'); return; }

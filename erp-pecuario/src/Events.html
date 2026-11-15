@@ -211,8 +211,11 @@ var TelaEventos = (function () {
       parcelas: parcelasDe(receita.financial_id).map(function (x, k, todas) { return { valores: limpo_({ data_vencimento: x.data_vencimento, valor: todas.length === 1 ? null : dinheiroTexto_(x.valor), forma_pagamento: x.forma_pagamento, documento: x.documento }) }; }),
       deducoes: fins.filter(function (f) { return f !== receita; }).map(function (f) {
         var t = parcelasDe(f.financial_id)[0] || {};
-        return { valores: limpo_({ tipo: tipoDe[f.financial_id] || 'OUTRA', valor: dinheiroTexto_(f.valor), retida_pelo_comprador: f.retida_pelo_comprador === true || f.retida_pelo_comprador === 'S' ? true : null,
-          partner_id: f.partner_id, data_vencimento: t.data_vencimento, forma_pagamento: t.forma_pagamento, documento: f.documento, descricao: f.descricao }) };
+        var tipo = tipoDe[f.financial_id] || 'OUTRA';
+        // A descrição que o servidor propôs ("Comissão da venda de 20/08/2026") não é do usuário: fica vazia, para seguir o tipo.
+        var proposta = Store.rotuloLista('TIPO_DEDUCAO_VENDA', tipo) + ' da venda de ' + Fmt.data(ev.event_date);
+        return { valores: limpo_({ tipo: tipo, valor: dinheiroTexto_(f.valor), retida_pelo_comprador: f.retida_pelo_comprador === true || f.retida_pelo_comprador === 'S',
+          partner_id: f.partner_id, data_vencimento: t.data_vencimento, forma_pagamento: t.forma_pagamento, documento: f.documento, descricao: f.descricao === proposta ? null : f.descricao }) };
       }),
     };
     var campos = {};

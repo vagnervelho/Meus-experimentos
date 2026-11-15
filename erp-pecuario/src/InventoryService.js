@@ -273,7 +273,7 @@ var InventoryService = (function () {
         var def = !vazio_(tipo) && EventCatalog.existe(tipo) && EventCatalog.ativo(tipo, d.subtipo || null) ? EventCatalog.tipo(tipo) : null;
         var filtro = def ? def.filtro_elegiveis : null;
         if (!def || !filtro || filtro.situacao !== 'ATIVO') {
-          throw Validation.erro('VALIDATION', 'Escolha um tipo de lançamento de animais que estão no rebanho (transferência, nascimento, morte, descarte).', [Validation.detalhe({ codigo: 'TIPO_SEM_ELEGIVEIS', campo: 'tipo', mensagem: 'Tipo sem lista de elegíveis por data.' })]);
+          throw Validation.erro('VALIDATION', 'Escolha um tipo de lançamento de animais que estão no rebanho (transferência, nascimento, venda, morte, descarte).', [Validation.detalhe({ codigo: 'TIPO_SEM_ELEGIVEIS', campo: 'tipo', mensagem: 'Tipo sem lista de elegíveis por data.' })]);
         }
         var L = AnimalService.leitor(tx);
         var data = conferirData_(L, d.data);

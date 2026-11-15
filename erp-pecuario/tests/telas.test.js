@@ -41,6 +41,8 @@ function storeDe(s) {
     pasto: (id) => b.pastos.filter((p) => p.pasture_id === id)[0] || null,
     categoria: (id) => b.categorias.filter((c) => c.category_id === id)[0] || null,
     rotuloLista: (n, c) => (b.listas.filter((l) => l.lista === n && l.codigo === c)[0] || { rotulo: c }).rotulo,
+    conta: (id) => b.contas.filter((x) => x.conta_id === id)[0] || null,
+    parceiro: (id) => b.parceiros.filter((x) => x.partner_id === id)[0] || null,
     normalizarBrinco: (t, z) => { let v = String(t == null ? '' : t).trim().toUpperCase().replace(/\s+/g, ''); if (!z && /^\d+$/.test(v)) v = v.replace(/^0+(?=\d)/, ''); return v; },
   };
 }
@@ -227,4 +229,51 @@ test('correção de entrada: o pré-preenchimento, convertido como o formulário
   const sim3 = api(s, { rota: 'evento.simular', dados: { acao: 'corrigir', dados: sem3 } });
   assert.equal(sim3.ok, false, 'anular a mãe que é referência de outro animal é recusado');
   assert.ok(['VALIDATION', 'CONFLICT'].includes(sim3.error.code), sim3.error.code);
+});
+
+test('correção de venda: o pré-preenchimento (VENDAS, receita, deduções pelo payload, linhas de saída) convertido como o formulário converte é aceito pelo servidor e reproduz o original', () => {
+  const s = S.sistema();
+  const sem = s.exec((ctx) => s.G.EventService.registrar(ctx, { idempotencyKey: 'ent-venda', dados: S.entradaInicial([
+    S.bicho({ brinco: '0201', sexo: 'M', castrado: true, reprodutor: false, data_nascimento: '2023-05-01', data_nascimento_confianca: 'ESTIMADA' }),
+    S.bicho({ brinco: '0202', sexo: 'M', castrado: true, reprodutor: false, data_nascimento: '2023-05-01', data_nascimento_confianca: 'ESTIMADA' }),
+  ]) })).dados;
+  const comp = api(s, { rota: 'parceiro.salvar', idempotencyKey: 'pc', dados: { campos: { nome: 'Frigorífico', tipos: ['COMPRADOR'] } } }).data.partner_id;
+  const transp = api(s, { rota: 'parceiro.salvar', idempotencyKey: 'pt', dados: { campos: { nome: 'Transportadora', tipos: ['TRANSPORTADOR'] } } }).data.partner_id;
+  const ids = sem.animais.map((a) => a.animal_id);
+  const venda = api(s, { rota: 'evento.registrar', idempotencyKey: 'venda-previa', dados: {
+    tipo: 'VENDA', campos: { event_date: '2026-06-10', partner_id: comp, finalidade: 'ABATE', modalidade: 'ARROBA', base_peso: 'CARCACA', preco_unitario: 32000, valor_bruto: 1184000, desconto_comercial: 4000, nota_fiscal: 'NF-9', condicoes: 'Embarque na fazenda' },
+    animais: [{ animal_id: ids[0], peso: 540, peso_carcaca_kg: 285, motivo_saida: 'IDADE' }, { animal_id: ids[1], peso: 520, peso_carcaca_kg: 270, metodo_pesagem: 'FITA' }],
+    parcelas: [{ data_vencimento: '2026-07-10', valor: 500000, forma_pagamento: 'TRANSFERENCIA' }, { data_vencimento: '2026-08-10' }],
+    deducoes: [{ tipo: 'FRETE', valor: 30000, partner_id: transp, data_vencimento: '2026-06-15' }, { tipo: 'FUNRURAL', valor: 17760, retida_pelo_comprador: true, data_vencimento: '2026-08-10', descricao: 'Retenção da nota' }],
+  } });
+  assert.equal(venda.ok, true, JSON.stringify(venda.error));
+  const st = storeDe(s);
+  const c = cliente(s);
+  c.Store = st;
+  const obter = api(s, { rota: 'evento.obter', dados: { event_id: venda.data.event_id } }).data;
+  const previa = js(c.TelaEventos.previaCorrecao(obter));
+  assert.equal(previa.corrige.event_id, venda.data.event_id);
+  assert.deepEqual([previa.campos.modalidade, previa.campos.base_peso, previa.campos.preco_unitario, previa.campos.valor_bruto, previa.campos.desconto_comercial, previa.campos.peso_carcaca_total_kg, previa.campos.condicoes],
+    ['ARROBA', 'CARCACA', '320,00', '11840,00', '40,00', undefined, 'Embarque na fazenda'], 'carcaça de cada animal: o total fica vazio');
+  assert.deepEqual(previa.linhas.map((l) => [l.valores.peso, l.valores.peso_carcaca_kg, l.valores.metodo_pesagem, l.valores.motivo_saida]), [['540,0', '285,0', undefined, 'IDADE'], ['520,0', '270,0', 'FITA', undefined]]);
+  assert.deepEqual(previa.grupos.deducoes.map((g) => [g.valores.tipo, g.valores.retida_pelo_comprador, g.valores.descricao]), [['FRETE', false, undefined], ['FUNRURAL', true, 'Retenção da nota']], 'o tipo vem do payload; a descrição proposta pelo servidor fica vazia');
+  const t = st.tipoEvento('VENDA');
+  const conv = (defs, v, ctx) => { const r = js(c.Formulario.converterValores(defs, JSON.parse(JSON.stringify(v)), ctx ? JSON.parse(JSON.stringify(ctx)) : undefined)); assert.deepEqual(r.erros, []); return r.valores; };
+  const campos = conv(t.campos, previa.campos);
+  const dados = {
+    tipo: 'VENDA', campos, event_id: venda.data.event_id, justificativa: 'Conferência',
+    animais: previa.linhas.map((l) => Object.assign({ animal_id: l.animal_id }, conv(t.campos_animal, l.valores, Object.assign({}, previa.campos, l.valores)))),
+    parcelas: previa.grupos.parcelas.map((g) => conv(t.grupos_repetiveis.parcelas, g.valores)),
+    deducoes: previa.grupos.deducoes.map((g) => conv(t.grupos_repetiveis.deducoes, g.valores)),
+  };
+  const antesV = s.tabela('VENDAS')[0];
+  const antesF = s.tabela('FINANCEIRO').map((f) => [f.natureza, f.valor, f.partner_id, f.retida_pelo_comprador, f.descricao]);
+  const corr = api(s, { rota: 'evento.corrigir', idempotencyKey: 'corr-venda', dados });
+  assert.equal(corr.ok, true, JSON.stringify(corr.error));
+  const novaV = s.tabela('VENDAS').filter((v) => v.event_id === corr.data.event_id)[0];
+  const sem_ = (v) => Object.assign({}, v, { sale_id: null, event_id: null });
+  assert.deepEqual(sem_(novaV), sem_(antesV), 'o substituto sem mudança reproduz o cabeçalho da venda');
+  const novosF = s.tabela('FINANCEIRO').filter((f) => f.event_id === corr.data.event_id).map((f) => [f.natureza, f.valor, f.partner_id, f.retida_pelo_comprador, f.descricao]);
+  assert.deepEqual(novosF, antesF, 'e os lançamentos (receita, frete do transportador, retenção do comprador)');
+  s.conferirProjecoes('depois da correção da venda');
 });

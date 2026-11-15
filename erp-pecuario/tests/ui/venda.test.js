@@ -123,10 +123,14 @@ test('corrigir a venda pelo detalhe do evento: preço de 10,00 para 10,50 por kg
   assert.equal(await page.locator('.marca-inelegivel').count(), 0, 'os animais da venda corrigida não aparecem como inelegíveis');
   await page.fill('[data-campo="justificativa_correcao"] textarea', 'Preço do romaneio e frete descontado');
   await page.click('.form-evento button[type=submit]');
-  await page.waitForSelector(dialogo + ' [data-diferencas="1"]');
+  await page.waitForSelector(dialogo + ' [data-diferencas="5"]');
   const dif = await textoTela(page, dialogo + ' [data-diferencas]');
   assert.match(dif, /Preço: de R\$ 10,00 para R\$ 10,50/);
+  assert.match(dif, /Valor bruto da venda \(nota ou romaneio\): de R\$ 9\.000,00 para R\$ 9\.450,00/);
   assert.match(dif, /Dedução 1: dedução de Comissão para Frete/);
+  assert.match(dif, /Dedução 1: descontada pelo comprador no pagamento de não para sim/);
+  assert.doesNotMatch(dif, /Rendimento/, 'o rendimento padrão de um campo oculto não é alteração');
+  assert.match(await textoTela(page, dialogo), /Frete da venda de 20\/08\/2026\s*R\$ 180,00 · Frigorífico Rondônia · vence 19\/09\/2026/);
   const rev = await textoTela(page, dialogo);
   assert.match(rev, /Depósito esperado do comprador\s*R\$ 9\.270,00 \(já sem R\$ 180,00 descontados por ele\)/);
   await principal(page);
