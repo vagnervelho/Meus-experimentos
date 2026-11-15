@@ -604,6 +604,18 @@ var FinancialService = (function () {
       var r = fin ? rateioDe[fin.financial_id] : null;
       return r ? soma_(repo.por('ALOCACOES_FINANCEIRAS', 'rateio_id', r.rateio_id), 'valor_alocado') : 0;
     }
+    // Cabeçalho comercial obrigatório (03b, seção 14, invariantes 15 e 16; 06, seção 12): toda compra e toda venda
+    // vigentes têm exatamente uma linha de COMPRAS ou VENDAS (apagada à mão, as conferências abaixo não teriam o que
+    // comparar e a falta passaria calada).
+    [['COMPRA', 'COMPRAS', 'A compra'], ['VENDA', 'VENDAS', 'A venda']].forEach(function (cfg) {
+      if (!repo.carregada(cfg[1])) return;
+      var linhas = {};
+      repo.vigentes(cfg[1]).forEach(function (x) { linhas[x.event_id] = (linhas[x.event_id] || 0) + 1; });
+      repo.vigentes('EVENTOS').forEach(function (ev) {
+        if (ev.event_type !== cfg[0] || linhas[ev.event_id] === 1) return;
+        achado(15, 'EVENTOS', ev.event_id, cfg[2] + ' de ' + br_(ev.event_date) + (linhas[ev.event_id] ? ' tem ' + linhas[ev.event_id] + ' linhas de ' + cfg[1] + '; precisa ter uma só.' : ' está sem a linha de ' + cfg[1] + ' (a negociação do evento). Restaure o backup ou investigue a edição manual.'));
+      });
+    });
     if (repo.carregada('COMPRAS')) {
       repo.vigentes('COMPRAS').forEach(function (c) {
         var ea = repo.por('EVENTO_ANIMAIS', 'event_id', c.event_id);

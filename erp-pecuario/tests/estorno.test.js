@@ -117,8 +117,9 @@ const CASOS = [
   { tipo: 'AJUSTE_INVENTARIO', subtipo: 'CORRECAO_CADASTRO',
     registrar: (x) => ajuste('CORRECAO_CADASTRO', '2026-03-01', [{ animal_id: x.ids.m3, campo: 'sexo', valor_novo: 'F' }]),
     corrigir: (x) => ajuste('CORRECAO_CADASTRO', '2026-03-01', [{ animal_id: x.ids.f1, campo: 'partos_previos', valor_novo: '4' }]),
-    // A correção de sexo fez do 0103 uma fêmea que pariu: estorná-la deixaria um "macho" mãe (RN-012).
-    dependente: (x) => [{ tipo: 'NASCIMENTO', campos: { event_date: '2026-04-01' }, animais: [{ animal_id: x.ids.m3 }], crias: [{ situacao_nascimento: 'VIVO', sexo: 'F' }] }, 'REFERENCIA_GENEALOGICA'] },
+    // A correção de sexo fez do 0103 uma fêmea que pariu: estorná-la deixaria um "macho" mãe (RN-012). O parto entra uma
+    // vez só, como o parto da matriz (a cria dele é o mesmo lançamento; CONTRATOS, seção 30).
+    dependente: (x) => [{ tipo: 'NASCIMENTO', campos: { event_date: '2026-04-01' }, animais: [{ animal_id: x.ids.m3 }], crias: [{ situacao_nascimento: 'VIVO', sexo: 'F' }] }, 'PARTO_DA_MATRIZ'] },
   { tipo: 'AJUSTE_INVENTARIO', subtipo: 'IDENTIFICACAO_INCORRETA',
     registrar: (x) => ajuste('IDENTIFICACAO_INCORRETA', '2026-03-01', [{ animal_id: x.ids.f1, brinco: '0111' }]),
     corrigir: (x) => ajuste('IDENTIFICACAO_INCORRETA', '2026-03-01', [{ animal_id: x.ids.f1, brinco: '0112' }]),

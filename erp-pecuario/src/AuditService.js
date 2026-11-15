@@ -338,13 +338,13 @@ var AuditService = (function () {
   var CHECAGENS = Object.freeze([
     { codigo: 'PK', rotulo: 'Chaves primárias únicas e preenchidas', severidade: 'ERRO', correcao: 'Restaurar backup ou corrigir a linha.' },
     { codigo: 'BRINCO', rotulo: 'Brinco único entre os preenchidos', severidade: 'ERRO', correcao: 'Evento de identificação ou ajuste.' },
-    { codigo: 'IDENTIFICACOES_ATIVAS', rotulo: 'Nenhum brinco ativo repetido nas identificações', severidade: 'ERRO', correcao: 'Evento de identificação ou ajuste; investigar edição manual.' },
+    { codigo: 'IDENTIFICACOES_ATIVAS', rotulo: 'Nenhum brinco ativo repetido nas identificações, nem em dois animais ao mesmo tempo', severidade: 'ERRO', correcao: 'Evento de identificação ou ajuste; investigar edição manual.' },
     { codigo: 'FK', rotulo: 'Referências apontam para registro existente e não anulado', severidade: 'ERRO', correcao: 'Ajuste; investigar edição manual.' },
     { codigo: 'ENTRADA_ABERTA', rotulo: 'Cada animal ativo tem exatamente uma entrada em aberto', severidade: 'ERRO', correcao: 'Estorno ou ajuste.' },
     { codigo: 'LINHA_DO_TEMPO', rotulo: 'Linha do tempo de todos os animais (com a ordem das identificações e das marcações)', severidade: 'ERRO', correcao: 'Estornar o evento conflitante.' },
     { codigo: 'BAIXADO_SEM_POSTERIOR', rotulo: 'Animal que saiu do rebanho sem evento valendo depois da saída', severidade: 'ERRO', correcao: 'Estornar o evento posterior ou a saída.' },
     { codigo: 'PARTOS', rotulo: 'Partos coerentes com a reprodução e com as crias', severidade: 'ERRO', correcao: 'Corrigir o nascimento por evento substituto; investigar edição manual.' },
-    { codigo: 'GENEALOGIA', rotulo: 'Genealogia coerente: mãe fêmea, pai macho, nascidos antes do filho, sem ciclo', severidade: 'ERRO', correcao: 'Corrigir a mãe, o pai, o sexo ou o nascimento por correção de cadastro; investigar edição manual.' },
+    { codigo: 'GENEALOGIA', rotulo: 'Genealogia coerente: mãe fêmea, pai macho (também o pai do parto), nascidos antes do filho, sem ciclo', severidade: 'ERRO', correcao: 'Corrigir a mãe, o pai, o sexo ou o nascimento por correção de cadastro; investigar edição manual.' },
     { codigo: 'PROJECAO', rotulo: 'Situação gravada × reconstrução pelos eventos', severidade: 'ERRO', correcao: 'Reconstruir projeções.', reparo: 'RECONSTRUIR' },
     { codigo: 'STATUS_EVENTOS', rotulo: 'Situação dos eventos × regra de vigência', severidade: 'ERRO', correcao: 'Reconstruir.', reparo: 'RECONSTRUIR' },
     { codigo: 'INVENTARIO', rotulo: 'Inventário pelos eventos = animais ativos (total e por pasto)', severidade: 'ERRO', correcao: 'Reconstruir projeções; investigar edição manual.' },
@@ -354,7 +354,7 @@ var AuditService = (function () {
     { codigo: 'ALOCACAO_DIRETA', rotulo: 'Animal do lançamento ⇔ uma única alocação direta', severidade: 'ERRO', correcao: 'Reconstruir.', reparo: 'RECONSTRUIR' },
     { codigo: 'CUSTO_AQUISICAO', rotulo: 'Custo de aquisição de cada animal = soma das alocações de aquisição da permanência atual', severidade: 'ERRO', correcao: 'Reconstruir projeções; se a alocação foi mexida, corrigir pelo sistema.', reparo: 'RECONSTRUIR' },
     { codigo: 'BASE_RATEIO', rotulo: 'Rateio com base igual à recalculada hoje', severidade: 'ALERTA', correcao: 'Re-ratear, por decisão do dono.' },
-    { codigo: 'COPIAS', rotulo: 'Cópias × fonte (data do detalhe = data do evento; subtipo = tipo do detalhe)', severidade: 'ERRO', correcao: 'Investigar edição manual.' },
+    { codigo: 'COPIAS', rotulo: 'Cópias × fonte (data do detalhe = data do evento; subtipo = tipo do detalhe; o detalhe que o tipo grava existe)', severidade: 'ERRO', correcao: 'Investigar edição manual.' },
     { codigo: 'CELULAS', rotulo: 'Células fora do formato do tipo', severidade: 'ERRO', correcao: 'Corrigir a célula; rever a forma de gravação.' },
     { codigo: 'OPERACOES_ORFAS', rotulo: 'Operações interrompidas', severidade: 'ERRO', correcao: 'Recuperação.' },
     { codigo: 'FILHAS_SEM_PAI', rotulo: 'Linhas sem o registro de que dependem', severidade: 'ALERTA', correcao: 'Limpeza auditada; investigar edição manual.' },
@@ -744,6 +744,21 @@ var AuditService = (function () {
         }
       });
       if (noCiclo[id]) return;
+      cicloDe(id);
+    });
+    // O touro de um registro reprodutivo (o pai do parto, mesmo só de natimorto): macho e nascido antes dele (RN-060).
+    if (tx.repo.carregada('REPRODUCAO')) {
+      tx.repo.vigentes('REPRODUCAO').forEach(function (r) {
+        var t = vazio_(r.touro_id) ? null : vale[r.touro_id];
+        if (!t) return;
+        var oque = (r.tipo_evento === 'PARTO' ? 'O parto de ' : 'O registro reprodutivo de ') + br_(r.data) + ' (mãe ' + nome(r.animal_id) + ')';
+        if (t.sexo !== 'M') col.achado('GENEALOGIA', { tabela: 'REPRODUCAO', id: r.reproduction_id, campo: 'touro_id', mensagem: oque + ' tem como pai ' + nome(t.animal_id) + ', que não é macho pelo cadastro.' });
+        else if (Utils.dataValida(t.data_nascimento) && Utils.dataValida(r.data) && t.data_nascimento >= r.data) {
+          col.achado('GENEALOGIA', { tabela: 'REPRODUCAO', id: r.reproduction_id, campo: 'touro_id', mensagem: oque + ' tem como pai ' + nome(t.animal_id) + ', que nasceu em ' + br_(t.data_nascimento) + ', não antes dele.' });
+        }
+      });
+    }
+    function cicloDe(id) {
       var fila = [[id]];
       var vistos = {};
       while (fila.length) {
@@ -761,7 +776,7 @@ var AuditService = (function () {
           break;
         }
       }
-    });
+    }
   }
   /**
    * Identificações (06, seção 9, Fase 2): nenhum brinco ativo (`data_fim` vazio) repetido entre as linhas vigentes de
@@ -777,6 +792,36 @@ var AuditService = (function () {
     Object.keys(dup).forEach(function (k) {
       var quem = dup[k].map(function (r) { return rotuloAnimal_(tx.cru.cruPorId('ANIMAIS', r.animal_id), r.animal_id) + ' desde ' + br_(r.data_inicio); });
       col.achado('IDENTIFICACOES_ATIVAS', { tabela: 'IDENTIFICACOES', id: dup[k][dup[k].length - 1].ident_id, campo: 'codigo', mensagem: 'O brinco ' + dup[k][0].codigo + ' está ativo em ' + dup[k].length + ' identificações: ' + quem.join('; ') + '.' });
+    });
+    // Um número em dois animais ao mesmo tempo (RN-002; RN-004: com o reuso ligado, só de período já encerrado): os
+    // períodos [data_inicio, data_fim) do mesmo brinco em animais diferentes não se cruzam. O número corrigido por
+    // IDENTIFICACAO_INCORRETA não conta (desenho-base 16.2); os dois ainda em uso já estão no achado acima.
+    var errados = {};
+    if (tx.repo.carregada('AJUSTES')) {
+      tx.repo.vigentes('AJUSTES').forEach(function (x) {
+        if (x.tipo_ajuste === 'IDENTIFICACAO_INCORRETA' && x.campo === 'brinco' && !vazio_(x.valor_anterior)) errados[x.animal_id + '|' + Utils.normalizarBrinco(String(x.valor_anterior), !semZeros)] = true;
+      });
+    }
+    var porNumero = {};
+    tx.repo.vigentes('IDENTIFICACOES').forEach(function (r) {
+      if (r.tipo !== 'BRINCO' || vazio_(r.codigo) || (!vazio_(r.data_fim) && r.data_fim <= r.data_inicio)) return;
+      var k = Utils.normalizarBrinco(String(r.codigo), !semZeros);
+      if (errados[r.animal_id + '|' + k]) return;
+      (porNumero[k] = porNumero[k] || []).push(r);
+    });
+    Object.keys(porNumero).forEach(function (k) {
+      var lista = porNumero[k];
+      for (var i = 0; i < lista.length; i++) {
+        for (var j = i + 1; j < lista.length; j++) {
+          var a = lista[i];
+          var b = lista[j];
+          if (a.animal_id === b.animal_id || (vazio_(a.data_fim) && vazio_(b.data_fim))) continue;
+          if ((vazio_(b.data_fim) || a.data_inicio < b.data_fim) && (vazio_(a.data_fim) || b.data_inicio < a.data_fim)) {
+            var periodo = function (r) { return rotuloAnimal_(tx.cru.cruPorId('ANIMAIS', r.animal_id), r.animal_id) + (vazio_(r.data_fim) ? ' desde ' + br_(r.data_inicio) : ' de ' + br_(r.data_inicio) + ' até ' + br_(r.data_fim)); };
+            col.achado('IDENTIFICACOES_ATIVAS', { tabela: 'IDENTIFICACOES', id: b.ident_id, campo: 'codigo', mensagem: 'O brinco ' + a.codigo + ' ficou em dois animais ao mesmo tempo: ' + periodo(a) + '; ' + periodo(b) + '.' });
+          }
+        }
+      }
     });
   }
   function conferirProjecoes_(tx, col) {
@@ -860,9 +905,38 @@ var AuditService = (function () {
       return null;
     } },
   });
+  /**
+   * Detalhe que o tipo do evento grava por animal (03b, seção 2.4; 06, seção 12: linha apagada à mão é acusada): uma
+   * BAIXAS por animal na morte, no descarte e na baixa por divergência; ao menos um AJUSTES por animal nas correções;
+   * uma IDENTIFICACOES por animal na identificação. `quantos`: 'UM' (exatamente um) ou 'ALGUM' (pelo menos um).
+   */
+  var DETALHE_OBRIGATORIO = Object.freeze([
+    { tabela: 'BAIXAS', quantos: 'UM', aplica: function (ev) { return ev.event_type === 'MORTE' || ev.event_type === 'DESCARTE' || (ev.event_type === 'AJUSTE_INVENTARIO' && ev.event_subtype === 'DIVERGENCIA_CONTAGEM'); } },
+    { tabela: 'AJUSTES', quantos: 'ALGUM', aplica: function (ev) { return ev.event_type === 'AJUSTE_INVENTARIO' && ev.event_subtype !== 'DIVERGENCIA_CONTAGEM'; } },
+    { tabela: 'IDENTIFICACOES', quantos: 'UM', aplica: function (ev) { return ev.event_type === 'IDENTIFICACAO'; } },
+  ]);
+  function conferirDetalhes_(tx, col) {
+    var repo = tx.repo;
+    if (!repo.carregada('EVENTO_ANIMAIS')) return;
+    DETALHE_OBRIGATORIO.forEach(function (d) {
+      if (!repo.carregada(d.tabela)) return;
+      repo.vigentes('EVENTOS').forEach(function (ev) {
+        if (!d.aplica(ev)) return;
+        var porAnimal = {};
+        repo.por(d.tabela, 'event_id', ev.event_id).forEach(function (r) { porAnimal[r.animal_id] = (porAnimal[r.animal_id] || 0) + 1; });
+        Utils.unicos(repo.por('EVENTO_ANIMAIS', 'event_id', ev.event_id).map(function (l) { return l.animal_id; })).forEach(function (id) {
+          var n = porAnimal[id] || 0;
+          if (n === 1 || (n > 1 && d.quantos === 'ALGUM')) return;
+          var quem = rotuloAnimal_(tx.cru.cruPorId('ANIMAIS', id), id);
+          col.achado('COPIAS', { tabela: 'EVENTOS', id: ev.event_id, campo: d.tabela, mensagem: '"' + rotuloEvento_(ev) + '" de ' + br_(ev.event_date) + ', ' + quem + ': ' + (n ? 'tem ' + n + ' linhas de ' + d.tabela + '; precisa ter uma só.' : 'está sem a linha de ' + d.tabela + ' que o lançamento grava. Restaure o backup ou investigue a edição manual.') });
+        });
+      });
+    });
+  }
   function conferirCopias_(tx, col) {
     col.aplicar('COPIAS');
     if (!tx.repo.carregada('EVENTOS')) return;
+    conferirDetalhes_(tx, col);
     Object.keys(TIPO_DO_DETALHE).forEach(function (t) {
       if (!tx.repo.carregada(t)) return;
       var def = TIPO_DO_DETALHE[t];

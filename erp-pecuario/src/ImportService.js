@@ -377,7 +377,25 @@ var ImportService = (function () {
       if (vazio_(a.brinco)) return;
       base[Utils.normalizarBrinco(a.brinco, !semZeros)] = a;
     });
-    return { params: params, D0: params.data_marco_zero, pastos: pastos, pastosPorId: pastosPorId, racas: racas, listas: listas, base: base, externos: externos, codigos: codigos, semZeros: semZeros };
+    // Número que outro animal usava no marco zero ou depois dele (período fechado depois de D0): o animal do rebanho
+    // inicial com ele o teria em dois animais ao mesmo tempo (RN-002; RN-004: reuso só de período já encerrado). O
+    // número corrigido por IDENTIFICACAO_INCORRETA não conta (desenho-base 16.2).
+    var noMarco = {};
+    var D0 = params.data_marco_zero;
+    if (!vazio_(D0) && tx.repo.carregada('IDENTIFICACOES')) {
+      var errados = {};
+      (tx.repo.carregada('AJUSTES') ? tx.repo.vigentes('AJUSTES') : []).forEach(function (x) {
+        if (x.tipo_ajuste === 'IDENTIFICACAO_INCORRETA' && x.campo === 'brinco' && !vazio_(x.valor_anterior)) errados[x.animal_id + '|' + Utils.normalizarBrinco(String(x.valor_anterior), !semZeros)] = true;
+      });
+      tx.repo.vigentes('IDENTIFICACOES').forEach(function (r) {
+        if (r.tipo !== 'BRINCO' || vazio_(r.codigo) || vazio_(r.data_fim) || r.data_fim <= D0 || r.data_fim <= r.data_inicio) return;
+        var a = tx.repo.porId('ANIMAIS', r.animal_id);
+        var k = Utils.normalizarBrinco(String(r.codigo), !semZeros);
+        if (!a || a.situacao_cadastral === 'ANULADO' || a.situacao_cadastral === 'PENDENTE' || errados[r.animal_id + '|' + k]) return;
+        if (!noMarco[k] || r.data_fim > noMarco[k].ate) noMarco[k] = { animal: a, ate: r.data_fim };
+      });
+    }
+    return { params: params, D0: params.data_marco_zero, pastos: pastos, pastosPorId: pastosPorId, racas: racas, listas: listas, base: base, noMarco: noMarco, externos: externos, codigos: codigos, semZeros: semZeros };
   }
   var AMBIGUO = Object.freeze({ ambiguo: true });
   /** Progenitor no rebanho pela referência do arquivo: brinco; senão código interno; senão nome de animal de referência. */
@@ -468,6 +486,8 @@ var ImportService = (function () {
       if (!r.chave) return;
       var naBase = cv.base[r.chave];
       if (naBase) { r.dup = det_('brinco', 'BRINCO_JA_CADASTRADO', 'o brinco ' + r.item.brinco + ' já é do animal ' + naBase.codigo_interno + ' no rebanho'); return; }
+      var usado = cv.noMarco && cv.noMarco[r.chave];
+      if (usado) { r.dup = det_('brinco', 'BRINCO_JA_CADASTRADO', 'o brinco ' + r.item.brinco + ' era do animal ' + usado.animal.codigo_interno + ' no marco zero (até ' + br_(usado.ate) + '): um número fica em um animal por vez'); return; }
       if (noArquivo[r.chave]) { r.dup = det_('brinco', 'BRINCO_REPETIDO_NO_ARQUIVO', 'o brinco ' + r.item.brinco + ' já aparece na linha ' + noArquivo[r.chave].linha_num); return; }
       noArquivo[r.chave] = r;
     });
@@ -562,16 +582,16 @@ var ImportService = (function () {
     Object.keys(TIPOS_EVENTO).forEach(function (t) { l = l.concat(EventService.leiturasEvento(TIPOS_EVENTO[t])); });
     return Utils.unicos(l.concat(['IMPORTACOES', 'IMPORTACAO_LINHAS', 'ANEXOS', 'PASTOS', 'LISTAS', 'CONFIGURACOES', 'PROPRIEDADES']));
   }
-  var LEITURAS_VALIDACAO = Object.freeze(['IMPORTACOES', 'IMPORTACAO_LINHAS', 'ANEXOS', 'ANIMAIS', 'PASTOS', 'LISTAS', 'CONFIGURACOES']);
+  var LEITURAS_VALIDACAO = Object.freeze(['IMPORTACOES', 'IMPORTACAO_LINHAS', 'ANEXOS', 'ANIMAIS', 'PASTOS', 'LISTAS', 'CONFIGURACOES', 'IDENTIFICACOES', 'AJUSTES']);
   /**
    * Uma importação em curso por vez (05, RN-032; desenho-base 16.8): a exceção das rotas `importacao.*` vale para
    * retomar, concluir e desfazer a que está em IMPORTANDO, não para começar outra (os animais e eventos PENDENTE de
    * uma não entram na unicidade da outra).
    */
-  function exigirNenhumaEmCurso_(tx, imp) {
+  function exigirNenhumaEmCurso_(tx, imp, oque) {
     var outra = tx.repo.vigentes('IMPORTACOES').filter(function (i) { return i.import_id !== imp.import_id && i.status === 'IMPORTANDO'; })[0];
     if (!outra) return;
-    throw Validation.erro('CONFLICT', 'A importação do arquivo "' + (outra.arquivo_nome || 'sem nome') + '" ainda está em andamento: conclua ou desfaça essa antes de começar outra.', [
+    throw Validation.erro('CONFLICT', 'A importação do arquivo "' + (outra.arquivo_nome || 'sem nome') + '" ainda está em andamento: conclua ou desfaça essa antes de ' + (oque || 'começar outra') + '.', [
       det_('import_id', 'IMPORTACAO_EM_CURSO', 'Importação em andamento: ' + (outra.arquivo_nome || 'sem nome') + '.'),
     ]);
   }
@@ -1059,6 +1079,25 @@ var ImportService = (function () {
         if (animais[f.animal_id]) return;
         out.push(Validation.detalhe({ codigo: 'DEPENDENTE', animal_id: id, brinco: a.brinco || null, mensagem: quem + ' é mãe ou pai do animal ' + f.codigo_interno + ', cadastrado fora da importação.' }));
       });
+      // O touro de um registro reprodutivo de fora (o pai do parto, mesmo só de natimorto) e o valor que outro evento
+      // alocou ao animal: as mesmas referências que impedem o estorno da entrada (05, RN-041).
+      tx.repo.por('REPRODUCAO', 'touro_id', id).forEach(function (r) {
+        if (eventos[r.event_id]) return;
+        var ev = tx.repo.porId('EVENTOS', r.event_id) || {};
+        var nome = ev.event_type ? EventCatalog.nomeEvento(ev.event_type, ev.event_subtype) : 'um lançamento';
+        out.push(Validation.detalhe({ codigo: 'DEPENDENTE', animal_id: id, brinco: a.brinco || null, mensagem: quem + ' é o touro ' + (r.tipo_evento === 'PARTO' ? 'do parto' : 'do registro reprodutivo') + ' de ' + br_(r.data) + ', lançado fora da importação. Estorne ou corrija esse lançamento antes.', conflito: { event_id: r.event_id, tipo: ev.event_type || null, subtipo: ev.event_subtype || null, data: ev.event_date || null, nome: ev.event_type ? nome : null } }));
+      });
+      var porRateio = {};
+      (tx.repo.carregada('ALOCACOES_FINANCEIRAS') ? tx.repo.por('ALOCACOES_FINANCEIRAS', 'animal_id', id) : []).forEach(function (al) {
+        var rat = tx.repo.porId('RATEIOS', al.rateio_id);
+        if (rat && !eventos[rat.event_id]) porRateio[rat.event_id] = true;
+      });
+      Object.keys(porRateio).forEach(function (evId) {
+        if (tx.repo.por('EVENTO_ANIMAIS', 'animal_id', id).some(function (l) { return l.event_id === evId; })) return;
+        var ev = tx.repo.porId('EVENTOS', evId) || {};
+        var nome = ev.event_type ? EventCatalog.nomeEvento(ev.event_type, ev.event_subtype) : 'um lançamento';
+        out.push(Validation.detalhe({ codigo: 'DEPENDENTE', animal_id: id, brinco: a.brinco || null, mensagem: quem + ' recebeu valor do financeiro de ' + nome + ' de ' + br_(ev.event_date) + ', lançado fora da importação. Estorne ou corrija esse lançamento antes.', conflito: { event_id: evId, tipo: ev.event_type || null, subtipo: ev.event_subtype || null, data: ev.event_date || null, nome: ev.event_type ? nome : null } }));
+      });
       tx.repo.por('ANEXOS', 'entity_id', id).forEach(function (x) {
         if (x.entidade === 'ANIMAIS' && x.status !== 'REMOVIDO') out.push(Validation.detalhe({ codigo: 'DEPENDENTE', animal_id: id, brinco: a.brinco || null, mensagem: quem + ' tem o arquivo anexado "' + x.nome_arquivo + '". Remova-o antes.' }));
       });
@@ -1127,6 +1166,9 @@ var ImportService = (function () {
         if (vazio_(tx.dados.justificativa)) return { erros: [det_('justificativa', 'CAMPO_OBRIGATORIO', 'Diga por que a importação está sendo desfeita.')] };
         var gravadas = linhasGravadas_(tx, imp.import_id);
         if (imp.status === 'IMPORTADO') {
+          // Uma importação em curso por vez (RN-032; desenho-base 16.8): os animais e eventos pendentes da outra não
+          // entram nas conferências do desfazer, e a conclusão dela não confere de novo o que este desfazer devolveria.
+          exigirNenhumaEmCurso_(tx, imp, 'desfazer outra');
           var dep = dependentes_(tx, imp, gravadas);
           if (dep.length) throw Validation.erro('CONFLICT', 'Não dá para desfazer: ' + (dep.length === 1 ? dep[0].mensagem : dep.length + ' lançamentos ou cadastros feitos depois dependem dos animais importados. Estorne-os antes.'), dep);
         }
@@ -1635,12 +1677,19 @@ var ImportService = (function () {
     });
     return cv;
   }
-  /** Animais do ensaio por brinco e por código interno (os criados pelos eventos anteriores do arquivo inclusos). */
+  /**
+   * Animais do ensaio por brinco e por código interno (os criados pelos eventos anteriores do arquivo inclusos) e os
+   * períodos de cada brinco (IDENTIFICACOES do tipo BRINCO: de data_inicio até data_fim, exclusiva), para achar o dono
+   * do número NA DATA do evento (05, seção 4.1 e RN-002/RN-004: o número tem dono por período).
+   */
   function indiceDoEnsaio_(ens, cv) {
     var porBrinco = {};
     var porCodigo = {};
+    var porId = {};
     var externos = {};
+    var periodos = {};
     ens.rep.vigentes('ANIMAIS').forEach(function (a) {
+      porId[a.animal_id] = a;
       if (!vazio_(a.codigo_interno)) porCodigo[String(a.codigo_interno).toUpperCase()] = a;
       if (!vazio_(a.brinco)) porBrinco[Utils.normalizarBrinco(a.brinco, !cv.semZeros)] = a;
       if (a.situacao_cadastral === 'EXTERNO' && !vazio_(a.nome)) {
@@ -1648,16 +1697,49 @@ var ImportService = (function () {
         externos[n] = externos[n] ? AMBIGUO : a;
       }
     });
-    return { porBrinco: porBrinco, porCodigo: porCodigo, externos: externos };
+    ens.rep.vigentes('IDENTIFICACOES').forEach(function (r) {
+      if (r.tipo !== 'BRINCO' || vazio_(r.codigo) || !porId[r.animal_id] || porId[r.animal_id].situacao_cadastral === 'ANULADO') return;
+      var k = Utils.normalizarBrinco(String(r.codigo), !cv.semZeros);
+      (periodos[k] = periodos[k] || []).push({ animal: porId[r.animal_id], inicio: r.data_inicio, fim: nulo_(r.data_fim) });
+    });
+    return { porBrinco: porBrinco, porCodigo: porCodigo, externos: externos, periodos: periodos };
   }
-  /** Animal da linha pelo brinco ou pelo código interno: {animal} | {nenhum: true} | {erro}. */
-  function acharAnimal_(idx, cv, brinco, codigo, rotulo) {
-    var b = vazio_(brinco) ? null : idx.porBrinco[Utils.normalizarBrinco(String(brinco), !cv.semZeros)] || null;
+  /**
+   * Dono do brinco na data D: o animal com o número em uso em D (início ≤ D < fim); em data anterior a todo uso do
+   * número (o histórico antes do marco zero, citado pelo brinco da fotografia), o primeiro animal que o recebeu; sem
+   * data, quem o usa hoje. {animal} | {ambiguo} | {semUso: {animal, ate}} | {}.
+   */
+  function donoDoBrinco_(idx, cv, brinco, data) {
+    var k = Utils.normalizarBrinco(String(brinco), !cv.semZeros);
+    var ps = idx.periodos[k] || [];
+    if (!Utils.dataValida(data) || !ps.length) return idx.porBrinco[k] ? { animal: idx.porBrinco[k] } : {};
+    var unicos = function (lista) { var v = {}; return lista.filter(function (p) { if (v[p.animal.animal_id]) return false; v[p.animal.animal_id] = true; return true; }); };
+    var em = unicos(ps.filter(function (p) { return p.inicio <= data && (p.fim === null || data < p.fim); }));
+    if (em.length === 1) return { animal: em[0].animal };
+    if (em.length > 1) return { ambiguo: true };
+    var primeiro = ps.reduce(function (a, p) { return !a || p.inicio < a.inicio ? p : a; }, null);
+    if (primeiro.inicio > data) {
+      var antes = unicos(ps.filter(function (p) { return p.inicio === primeiro.inicio; }));
+      return antes.length === 1 ? { animal: primeiro.animal } : { ambiguo: true };
+    }
+    var ultimo = ps.filter(function (p) { return p.fim !== null && p.fim <= data; }).reduce(function (a, p) { return !a || p.fim > a.fim ? p : a; }, null);
+    return { semUso: ultimo ? { animal: ultimo.animal, ate: ultimo.fim } : null };
+  }
+  /** Animal da linha pelo brinco (em uso na data do evento) ou pelo código interno: {animal} | {nenhum: true} | {erro}. */
+  function acharAnimal_(idx, cv, brinco, codigo, rotulo, data) {
+    var dono = vazio_(brinco) ? {} : donoDoBrinco_(idx, cv, brinco, data);
+    var b = dono.animal || null;
     var c = vazio_(codigo) ? null : idx.porCodigo[Utils.aparar(String(codigo)).toUpperCase()] || null;
     if (!vazio_(codigo) && !c) return { erro: det_('codigo', 'ANIMAL_NAO_ENCONTRADO', 'não há animal com o código ' + codigo + ' no rebanho nem no histórico') };
-    if (b && c && b.animal_id !== c.animal_id) return { erro: det_('codigo', 'CONFLITO_DE_CAMPOS', 'o brinco ' + brinco + ' é do animal ' + b.codigo_interno + ', não do ' + c.codigo_interno) };
-    if (c || b) return { animal: c || b };
+    if (b && c && b.animal_id !== c.animal_id) return { erro: det_('codigo', 'CONFLITO_DE_CAMPOS', 'o brinco ' + brinco + ' é do animal ' + b.codigo_interno + (Utils.dataValida(data) ? ' em ' + br_(data) : '') + ', não do ' + c.codigo_interno) };
+    if (c) return { animal: c };
+    if (b) return { animal: b };
     if (vazio_(brinco)) return { nenhum: true };
+    if (dono.ambiguo) return { erro: det_('brinco', 'CONFLITO_DE_CAMPOS', 'o brinco ' + brinco + ' estava em mais de um animal em ' + br_(data) + ': informe o código do animal (A-000…)') };
+    if (dono.semUso !== undefined) {
+      var ate = dono.semUso ? ' (saiu do animal ' + dono.semUso.animal.codigo_interno + ' em ' + br_(dono.semUso.ate) + ')' : '';
+      return { nenhum: true, erro: det_('brinco', 'ANIMAL_NAO_ENCONTRADO', 'o brinco ' + brinco + ' não estava em uso em ' + br_(data) + ate + ': informe o código do animal (A-000…) ou corrija o brinco') };
+    }
     return { nenhum: true, erro: det_('brinco', 'ANIMAL_NAO_ENCONTRADO', (rotulo || 'o animal') + ' de brinco ' + brinco + ' não está no rebanho nem no histórico. Importe antes a entrada dele (rebanho inicial, compra ou nascimento) ou corrija o brinco') };
   }
   /** Os campos do lançamento (escopo EVENTO, com destino) do grupo, na forma do formulário. */
@@ -1694,12 +1776,12 @@ var ImportService = (function () {
       return true;
     };
     if (evento === 'NASCIMENTO') {
-      var mae = acharAnimal_(idx, cv, g.cab.mae, null, 'a mãe');
+      var mae = acharAnimal_(idx, cv, g.cab.mae, null, 'a mãe', g.data);
       if (mae.erro || !mae.animal) g.linhas.forEach(function (r) { erro(r, mae.erro || det_('mae', 'ANIMAL_NAO_ENCONTRADO', 'informe o brinco da mãe')); });
       else dados.animais.push({ animal_id: mae.animal.animal_id });
       if (!vazio_(g.cab.pai)) {
         var t = String(g.cab.pai);
-        var pai = idx.porBrinco[Utils.normalizarBrinco(t, !cv.semZeros)] || idx.porCodigo[Utils.aparar(t).toUpperCase()] || idx.externos[Utils.normalizarTexto(t)] || null;
+        var pai = donoDoBrinco_(idx, cv, t, g.data).animal || idx.porCodigo[Utils.aparar(t).toUpperCase()] || idx.externos[Utils.normalizarTexto(t)] || null;
         if (pai === AMBIGUO) g.linhas.forEach(function (r) { erro(r, det_('pai', 'PAI_NAO_ENCONTRADO', 'há mais de um animal de referência chamado "' + t + '": use o código interno dele (A-000…)')); });
         else if (!pai) g.linhas.forEach(function (r) { erro(r, det_('pai', 'PAI_NAO_ENCONTRADO', 'o pai "' + t + '" não está no rebanho nem entre os animais de referência. Deixe em branco (desconhecido), cadastre o touro como animal de referência ou corrija')); });
         else { campos.pai_id = pai.animal_id; campos.pai_confianca = g.cab.pai_confianca || null; }
@@ -1714,7 +1796,7 @@ var ImportService = (function () {
     }
     g.linhas.forEach(function (r) {
       var l = r.lidos;
-      var achado = acharAnimal_(idx, cv, l.brinco, l.codigo);
+      var achado = acharAnimal_(idx, cv, l.brinco, l.codigo, null, g.data);
       var it = {};
       Object.keys(l).forEach(function (k) {
         var d = modelo.campos[k];
@@ -2038,8 +2120,8 @@ var ImportService = (function () {
   }
   var NOME_EVENTO = { COMPRA: 'compra', VENDA: 'venda', TRANSFERENCIA: 'transferência', NASCIMENTO: 'parto', MORTE: 'morte', OUTRA_ENTRADA: 'entrada', DESCARTE: 'descarte' };
   var ACOES_RECONCILIACAO = Object.freeze({
-    SAIDA_HISTORICA_NA_FOTOGRAFIA: 'Se a fotografia está certa, nada a fazer: o animal fica no rebanho e a saída antiga vale só como histórico. Se a saída aconteceu, o animal não deveria estar no marco zero: corrija com "Corrigir inventário" (baixa na contagem) ou estorne a saída antiga se ela foi lançada por engano.',
-    PASTO_DIVERGENTE: 'Se a fotografia está certa, nada a fazer: vale o pasto do marco zero. Se o histórico está certo, corrija o pasto do marco zero com "Corrigir localização".',
+    SAIDA_HISTORICA_NA_FOTOGRAFIA: 'Se a fotografia está certa, nada a fazer: o animal fica no rebanho e a saída antiga vale só como histórico. Se a saída aconteceu, o animal não deveria estar no marco zero: corrija com "Corrigir inventário" (baixa na contagem) datado do marco zero ou estorne a saída antiga se ela foi lançada por engano.',
+    PASTO_DIVERGENTE: 'Se a fotografia está certa, nada a fazer: vale o pasto do marco zero. Se o histórico está certo, corrija o pasto do marco zero com "Corrigir localização" datado do marco zero.',
     FORA_DA_FOTOGRAFIA: 'Pelo histórico o animal estava na fazenda no marco zero, mas ele não está na fotografia: falta no histórico a saída dele (importe ou lance a venda, a morte ou o descarte antigo) ou falta o animal no rebanho inicial.',
   });
   /**
@@ -2056,17 +2138,28 @@ var ImportService = (function () {
     var nomePasto = function (id) { var p = vazio_(id) ? null : tx.repo.porId('PASTOS', id); return p ? p.nome : null; };
     var foto = {};
     var hist = {};
+    var noMarco = {};
     tx.repo.vigentes('EVENTO_ANIMAIS').forEach(function (l) {
       var ev = tx.repo.porId('EVENTOS', l.event_id);
       if (!ev) return;
       if (ev.event_type === 'ENTRADA_INICIAL' && l.efeito_inventario === 1) foto[l.animal_id] = { pasto: nulo_(l.pasto_destino_id), event_id: ev.event_id };
       else if (ev.pre_marco_zero === true) (hist[l.animal_id] = hist[l.animal_id] || []).push({ l: l, ev: ev });
+      // A decisão do dono sobre a fotografia, pelos próprios lançamentos (04, seção 6; RN-095): a correção de
+      // localização e a baixa na contagem datadas do marco zero corrigem o que a fotografia declara.
+      else if (ev.event_date === D0 && ev.event_type === 'AJUSTE_INVENTARIO' && (ev.event_subtype === 'CORRECAO_LOCALIZACAO' || ev.event_subtype === 'DIVERGENCIA_CONTAGEM')) (noMarco[l.animal_id] = noMarco[l.animal_id] || []).push({ l: l, ev: ev });
+    });
+    Object.keys(noMarco).forEach(function (id) {
+      if (!foto[id]) return;
+      noMarco[id].sort(function (a, b) { return (posicao_(a.ev) - posicao_(b.ev)) || (a.ev.event_seq || 0) - (b.ev.event_seq || 0); }).forEach(function (x) {
+        if (x.ev.event_subtype === 'DIVERGENCIA_CONTAGEM') foto[id].fora = true;
+        else if (!foto[id].fora) foto[id].pasto = nulo_(x.l.pasto_destino_id);
+      });
     });
     var animais = [];
     var posicao = {};
     var ids = Utils.unicos(Object.keys(foto).concat(Object.keys(hist)));
     ids.forEach(function (id) {
-      var declarado = foto[id] ? { no_rebanho: true, pasture_id: foto[id].pasto } : { no_rebanho: false, pasture_id: null };
+      var declarado = foto[id] && !foto[id].fora ? { no_rebanho: true, pasture_id: foto[id].pasto } : { no_rebanho: false, pasture_id: null };
       if (!hist[id]) { posicao[id] = { declarado: declarado, recalculado: declarado }; return; }
       var dentro = null;
       var pasto = null;
