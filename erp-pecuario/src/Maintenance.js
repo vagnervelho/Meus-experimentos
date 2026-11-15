@@ -99,14 +99,28 @@ var Maintenance = (function () {
     return Utilities.formatDate(new Date(Date.parse(instante)), fuso, "HH'h'mm");
   }
   /** Cópia da planilha para Backups, marcada nas appProperties (banco, data, motivo, instante). Sem lock próprio. */
-  function copiar_(files, banco, motivo, agora, fuso) {
+  function copiar_(files, banco, motivo, agora, fuso, ambiente) {
     var data = Utils.hoje(agora, fuso);
     var nome = 'ERP Pecuário — backup ' + data + ' ' + horaLocal_(agora, fuso) + ' (' + MOTIVOS_BACKUP[motivo] + ')';
+    var marcas = { erp_tipo: 'BACKUP', erp_banco: banco, erp_data: data, erp_motivo: motivo, erp_instante: agora };
+    if (ambiente) marcas.erp_ambiente = ambiente;
     var c = files.copiar(banco, {
       nome: nome, pasta: 'backups', descricao: 'Backup ' + MOTIVOS_BACKUP[motivo] + ' do ERP Pecuário. Restaure só pelo sistema (Sistema → Restaurar backup).',
-      appProperties: { erp_tipo: 'BACKUP', erp_banco: banco, erp_data: data, erp_motivo: motivo, erp_instante: agora },
+      appProperties: marcas,
     });
     return { id: c.id, nome: nome, data: data, instante: agora, motivo: motivo };
+  }
+  /**
+   * Ambiente (PRODUCAO, TESTE, DEMO) cujo banco em uso é `banco`, pela chave de Script Properties que o aponta; null se
+   * nenhuma aponta. É a "linhagem" dos backups: depois de uma restauração o banco muda de ID, mas os backups do banco
+   * anterior continuam sendo do mesmo ambiente (listar, reter e restaurar enxergam todos eles).
+   */
+  function ambienteDoBanco_(props, banco) {
+    var achado = null;
+    Object.keys(AMBIENTES).forEach(function (a) {
+      if (!achado && !vazio_(banco) && props[AMBIENTES[a]] === banco) achado = a;
+    });
+    return achado;
   }
   /**
    * Backup (sistema.backup; antes do setup e de concluir importação; rotina diária). Com o banco parado: lock,
@@ -124,7 +138,7 @@ var Maintenance = (function () {
         var fuso = Timeline.parametros(tx.repo).fuso || ctx.fuso || FUSO_PADRAO;
         var feito;
         try {
-          feito = copiar_(ctx.files, ctx.banco, motivo, tx.agora, fuso);
+          feito = copiar_(ctx.files, ctx.banco, motivo, tx.agora, fuso, ambienteDoBanco_(ctx.props.ler(), ctx.banco));
         } catch (e) {
           if (Validation.ehAppError(e)) throw e;
           var erro = Validation.erro('CONFIG', 'Não foi possível copiar a planilha para a pasta de backups. Se a planilha foi copiada à mão ou criada fora do sistema, restaure um backup pelo sistema; se o erro continuar, autorize o acesso completo ao Drive conforme o guia.');
@@ -137,13 +151,27 @@ var Maintenance = (function () {
     var retencao = motivo === 'DIARIO' ? aplicarRetencao(ctx) : null;
     return { backup: r.backup, retencao: retencao };
   }
-  /** Backups deste banco no Drive, do mais novo para o mais antigo: [{id, nome, data, instante, motivo, banco}]. */
+  /**
+   * Backups deste banco e dos bancos anteriores do mesmo ambiente (os de antes de uma restauração), do mais novo para o
+   * mais antigo: [{id, nome, data, instante, motivo, banco, ambiente}]. `{todos: true}`: os de todos os ambientes.
+   */
   function listarBackups(ctx, opcoes) {
     var todos = opcoes && opcoes.todos;
-    var filtro = { appProperties: todos ? { erp_tipo: 'BACKUP' } : { erp_tipo: 'BACKUP', erp_banco: ctx.banco } };
-    var lista = ctx.files.listar('backups', filtro).map(function (f) {
-      var a = f.appProperties || {};
-      return { id: f.id, nome: f.name, data: a.erp_data || null, instante: a.erp_instante || f.createdTime, motivo: a.erp_motivo || null, banco: a.erp_banco || null };
+    var filtros = [{ erp_tipo: 'BACKUP' }];
+    if (!todos) {
+      filtros = [{ erp_tipo: 'BACKUP', erp_banco: ctx.banco }];
+      var ambiente = ambienteDoBanco_(ctx.props.ler(), ctx.banco);
+      if (ambiente) filtros.push({ erp_tipo: 'BACKUP', erp_ambiente: ambiente });
+    }
+    var vistos = {};
+    var lista = [];
+    filtros.forEach(function (ap) {
+      ctx.files.listar('backups', { appProperties: ap }).forEach(function (f) {
+        if (vistos[f.id]) return;
+        vistos[f.id] = true;
+        var a = f.appProperties || {};
+        lista.push({ id: f.id, nome: f.name, data: a.erp_data || null, instante: a.erp_instante || f.createdTime, motivo: a.erp_motivo || null, banco: a.erp_banco || null, ambiente: a.erp_ambiente || null });
+      });
     });
     return Utils.ordenarPor(lista, [{ campo: 'instante', desc: true }]);
   }
@@ -199,6 +227,10 @@ var Maintenance = (function () {
     var props = ctx.props.ler();
     var chave = CHAVES_BANCO.filter(function (k) { return props[k] === ctx.banco; })[0];
     if (!chave) throw Validation.erro('CONFIG', 'O banco em uso não está registrado nas propriedades do sistema. Execute a configuração inicial (setup).');
+    // Backup de outra base (a de teste ou a de demonstração no lugar da real, ou o contrário) nunca é restaurado.
+    var ambiente = ambienteDoBanco_(props, ctx.banco);
+    var deOutra = !vazio_(ap.erp_ambiente) ? ap.erp_ambiente !== ambiente : CHAVES_BANCO.some(function (k) { return k !== chave && !vazio_(props[k]) && props[k] === ap.erp_banco; });
+    if (deOutra) throw Validation.erro('VALIDATION', 'Este backup é de outra base (' + (ap.erp_ambiente === 'PRODUCAO' ? 'a base real' : 'uma base de teste ou de demonstração') + '), não da que está aberta. Escolha um backup desta base na lista.', [Validation.detalhe({ codigo: 'BACKUP_DE_OUTRA_BASE', campo: 'backup_id', mensagem: 'Escolha um backup desta base.' })]);
     if (!ctx.lock.tentar(ESPERA_LOCK_MS)) throw Validation.erro('LOCKED', 'O sistema está ocupado gravando outra operação. Aguarde alguns segundos e tente de novo.');
     var novo;
     var rec;
@@ -500,7 +532,7 @@ var Maintenance = (function () {
         if (!arq || arq.trashed === true) {
           throw Validation.erro('CONFIG', 'A planilha-banco registrada (' + banco + ') não foi encontrada: foi apagada, está na lixeira ou foi criada fora do sistema. Tire-a da lixeira do Drive ou restaure um backup pelo sistema. Para começar do zero, apague a propriedade SPREADSHEET_ID e rode a configuração de novo.');
         }
-        rel.backup = copiar_(files, banco, 'SETUP', clock.agora(), fusoSessao);
+        rel.backup = copiar_(files, banco, 'SETUP', clock.agora(), fusoSessao, vazio_(o.ambiente) ? 'PRODUCAO' : String(o.ambiente));
       }
       var escolha = escolherPrimitiva_(files);
       rel.primitiva = escolha;
