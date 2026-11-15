@@ -388,6 +388,517 @@ var TestRunner = (function () {
           igual_([r.event_type, r.animais.length, r.animais[0].animal_id, r.animais[0].situacao_cadastral], ['COMPRA', 1, ids['0901'], 'ATIVO'], 'reentrada do mesmo animal');
           return 'recusada em D0+29 (ENTRADA_JA_DENTRO); aceita em D0+45 com o mesmo animal_id';
         });
+        t.passo('fim', 'Projeção = reconstrução e financeiro sem divergência', function () { return t.integra('CT-09'); });
+      },
+    },
+    // ---------------------------------------------------------------- cenários da Fase 2 (09, seções 3, 4 e 8) ----
+    // As datas do 09 (marco zero em 01/01/2026) viram dias contados do marco zero desta base (D0+n). Cada cenário
+    // tem os seus pastos: na base compartilhada, a contagem por pasto em cada data fica exata.
+    {
+      id: 'CT-01', titulo: 'Nascimento: o parto cria a cria no pasto da mãe e atualiza a matriz',
+      executar: function (t) {
+        var P = t.pastos('CT-01', ['Pasto 1', 'Pasto 2']);
+        var ids;
+        var ev;
+        var cria;
+        t.passo('massa', 'Matriz 0102 (nascida 1.753 dias antes do marco zero, sem parto) no Pasto 1 e a vaca 0103 (dois partos) no Pasto 2', function () {
+          ids = ids_(t.cmd('evento.registrar', entrada_([
+            bicho_(t, { brinco: '0102', raca: 'NELORE', data_nascimento: t.dia(-1753), pasto_destino_id: P['Pasto 1'] }),
+            bicho_(t, { brinco: '0103', data_nascimento: t.dia(-2500), partos_previos: 2, pasto_destino_id: P['Pasto 2'] }),
+          ]), 'ct01-massa'));
+        });
+        t.passo('1', 'Parto em D0+254: cria macho de 32,0 kg, sem brinco; tabelas, inventário nas datas, cria e matriz', function () {
+          var r = t.cmd('evento.registrar', nascimento_(t.dia(254), ids['0102'], [{ situacao_nascimento: 'VIVO', sexo: 'M', peso: 32, metodo_pesagem: 'BALANCA' }]), 'ct01-parto');
+          ev = r.event_id;
+          var e = t.evento(ev);
+          igual_([e.event_type, e.event_date, e.registration_date, e.status], ['NASCIMENTO', t.dia(254), t.hoje(), 'CONFIRMADO'], 'EVENTOS');
+          var ea = t.doEvento('EVENTO_ANIMAIS', ev);
+          var linhaCria = ea.filter(function (l) { return l.papel === 'CRIA'; })[0];
+          var linhaMae = ea.filter(function (l) { return l.papel === 'MATRIZ'; })[0];
+          igual_([ea.length, linhaCria.efeito_inventario, linhaCria.pasto_destino_id, linhaMae.animal_id, linhaMae.efeito_inventario], [2, 1, P['Pasto 1'], ids['0102'], 0], 'EVENTO_ANIMAIS: CRIA +1 e MATRIZ 0');
+          cria = linhaCria.animal_id;
+          igual_(t.doEvento('PESAGENS', ev).map(function (p) { return [p.animal_id, p.tipo, p.peso_kg]; }), [[cria, 'NASCIMENTO', 32]], 'PESAGENS');
+          igual_(t.doEvento('REPRODUCAO', ev).map(function (p) { return [p.animal_id, p.tipo_evento, p.qtd_nascidos_vivos, p.qtd_natimortos]; }), [[ids['0102'], 'PARTO', 1, 0]], 'REPRODUCAO');
+          igual_(t.doEvento('FINANCEIRO', ev).length, 0, 'FINANCEIRO: nascido não tem custo de aquisição');
+          igual_([t.noPasto(P['Pasto 1'], t.dia(253)), t.noPasto(P['Pasto 1'], t.dia(254))], [1, 2], 'Pasto 1 com 1 cabeça na véspera e 2 no dia do parto');
+          var a = t.animal(cria);
+          igual_([a.situacao_cadastral, a.origem, a.mae_id, a.pasto_atual_id, a.peso_atual, a.custo_aquisicao, a.brinco], ['ATIVO', 'NASCIDO', ids['0102'], P['Pasto 1'], 32, 0, null], 'cria');
+          igual_(t.ficha(cria).geral.categoria.codigo, 'BEZERRO', 'categoria da cria');
+          var semBrinco = t.ok(t.api('alerta.listar', {}), 'alertas').alertas.filter(function (x) { return x.codigo === 'SEM_BRINCO'; })[0];
+          verificar_(semBrinco && semBrinco.ids.indexOf(cria) >= 0, 'a cria aparece na pendência "sem brinco"');
+          var mae = t.animal(ids['0102']);
+          igual_([mae.situacao_reprodutiva, mae.cria_ao_pe, t.ficha(ids['0102']).reprodutivo.n_partos], ['VAZIA', true, 1], 'matriz: 1 parto, vazia, com cria ao pé');
+          var cat = function (d) { return t.ok(t.api('inventario.posicao', { data: d, animal_id: ids['0102'] }), 'posição do animal').categoria.codigo; };
+          igual_([cat(t.dia(253)), cat(t.dia(254))], ['NOVILHA_24_MAIS', 'VACA'], 'a matriz passa de novilha a vaca no dia do parto');
+        });
+        t.passo('2', 'Nome da matriz pelo cadastro (AUDITORIA) e sexo da cria por correção (AJUSTES); o valor de criação segue M', function () {
+          var aud0 = t.tabela('AUDITORIA').length;
+          var aj0 = t.tabela('AJUSTES').length;
+          t.cmd('animal.editar', { animal_id: ids['0102'], campos: { nome: 'Mimosa' } }, 'ct01-nome');
+          t.cmd('animal.editar', { animal_id: cria, campos: { sexo: 'F' }, justificativa: 'Sexo conferido no curral' }, 'ct01-sexo');
+          igual_(t.tabela('AUDITORIA').slice(aud0).map(function (x) { return [x.entity_id, x.campo, x.valor_novo]; }), [[ids['0102'], 'nome', 'Mimosa']], 'AUDITORIA');
+          igual_(t.tabela('AJUSTES').slice(aj0).map(function (x) { return [x.animal_id, x.campo, x.valor_anterior, x.valor_novo]; }), [[cria, 'sexo', 'M', 'F']], 'AJUSTES');
+          var linha = t.doEvento('EVENTO_ANIMAIS', ev).filter(function (l) { return l.papel === 'CRIA'; })[0];
+          igual_([linha.atributos_iniciais_json.sexo, t.animal(cria).sexo, t.ficha(cria).geral.categoria.codigo], ['M', 'F', 'BEZERRA'], 'criação imutável, sexo corrigido, categoria refeita');
+        });
+        t.passo('3', 'Variante: um vivo e um natimorto → +1 cabeça; uma linha de parto com 1 vivo e 1 natimorto', function () {
+          var antes = t.noPasto(P['Pasto 2']);
+          var r = t.cmd('evento.registrar', nascimento_(t.dia(273), ids['0103'], [{ situacao_nascimento: 'VIVO', sexo: 'F' }, { situacao_nascimento: 'NATIMORTO' }], { tipo_parto: 'ASSISTIDO' }), 'ct01-gemelar');
+          igual_(t.noPasto(P['Pasto 2']), antes + 1, 'só o vivo entra no rebanho');
+          igual_(t.doEvento('REPRODUCAO', r.event_id).map(function (p) { return [p.qtd_nascidos_vivos, p.qtd_natimortos, p.tipo_parto]; }), [[1, 1, 'ASSISTIDO']], 'REPRODUCAO');
+          igual_(t.doEvento('EVENTO_ANIMAIS', r.event_id).filter(function (l) { return l.papel === 'CRIA'; }).length, 1, 'natimorto não cria animal');
+        });
+        t.passo('fim', 'Projeção = reconstrução e financeiro sem divergência', function () { return t.integra('CT-01'); });
+      },
+    },
+    {
+      id: 'CT-02', titulo: 'Transferência coletiva: tudo ou nada, reenvio com a mesma chave, inventário nas datas',
+      executar: function (t) {
+        var P = t.pastos('CT-02', ['Pasto 1', 'Pasto 2']);
+        var ids;
+        var brincos = ['0201', '0202', '0203', '0204', '0205', '0206', '0207', '0208', '0209', '0210'];
+        var chave = t.chave('ct02-transferencia');
+        var ev;
+        t.passo('massa', '0201 a 0210 no Pasto 1 e 0211 no Pasto 2 em D0', function () {
+          ids = ids_(t.cmd('evento.registrar', entrada_(brincos.map(function (b) { return bicho_(t, { brinco: b, pasto_destino_id: P['Pasto 1'] }); })
+            .concat([bicho_(t, { brinco: '0211', pasto_destino_id: P['Pasto 2'] })])), 'ct02-massa'));
+        });
+        t.passo('1', 'Transferência em D0+59 do Pasto 1 para o Pasto 2 com 0211 por engano: VALIDATION com um detalhe; nada gravado, nem em OPERACOES', function () {
+          var antes = t.retrato();
+          var v0 = t.versao();
+          var e = t.erro(t.api('evento.registrar', transf_(t.dia(59), P['Pasto 1'], P['Pasto 2'], brincos.concat(['0211']).map(function (b) { return ids[b]; })), { chave: chave }), 'VALIDATION', 'com o 0211');
+          igual_(e.details.map(function (d) { return [d.codigo, d.animal_id]; }), [['ORIGEM_DIVERGENTE', ids['0211']]], 'um detalhe: o 0211 estava no Pasto 2');
+          var depois = t.retrato();
+          Object.keys(antes).forEach(function (aba) { verificar_(antes[aba] === depois[aba], 'a aba ' + aba + ' mudou depois da recusa'); });
+          igual_(t.versao(), v0, 'a versão dos dados não muda');
+          igual_(t.ok(t.api('operacao.status', { chave: chave }), 'status').situacao, 'INEXISTENTE', 'a chave não foi consumida');
+        });
+        t.passo('2', 'Reenvio sem o 0211 com a mesma chave: grava; hoje Pasto 1 = 0 e Pasto 2 = 11; em D0+58, 10 e 1; 10 linhas de efeito 0', function () {
+          var env = t.api('evento.registrar', transf_(t.dia(59), P['Pasto 1'], P['Pasto 2'], brincos.map(function (b) { return ids[b]; })), { chave: chave });
+          ev = t.ok(env, 'reenvio').event_id;
+          verificar_(env.meta.duplicado === false, 'o reenvio corrigido é gravação nova (a recusa não consumiu a chave)');
+          igual_([t.noPasto(P['Pasto 1']), t.noPasto(P['Pasto 2'])], [0, 11], 'hoje');
+          igual_([t.noPasto(P['Pasto 1'], t.dia(58)), t.noPasto(P['Pasto 2'], t.dia(58))], [10, 1], 'na véspera');
+          var ea = t.doEvento('EVENTO_ANIMAIS', ev);
+          verificar_(ea.length === 10 && ea.every(function (l) { return l.efeito_inventario === 0 && l.pasto_origem_id === P['Pasto 1'] && l.pasto_destino_id === P['Pasto 2']; }), '10 linhas, efeito 0, do Pasto 1 para o Pasto 2');
+        });
+        t.passo('3', 'Histórico do 0201: entrada em D0 e transferência em D0+59; 59 dias no Pasto 1 (o dia da saída não conta)', function () {
+          var f = t.ficha(ids['0201']);
+          var per = f.pastos.periodos;
+          igual_(per.map(function (p) { return [p.pasture_id, p.inicio, p.fim, p.entrada.event_type, p.saida ? p.saida.event_type : null]; }),
+            [[P['Pasto 1'], t.estado.d0, t.dia(59), 'ENTRADA_INICIAL', 'TRANSFERENCIA'], [P['Pasto 2'], t.dia(59), null, 'TRANSFERENCIA', null]], 'períodos');
+          igual_(f.pastos.por_pasto.filter(function (x) { return x.pasture_id === P['Pasto 1']; })[0].dias, 59, 'dias no Pasto 1');
+        });
+        t.passo('fim', 'Projeção = reconstrução', function () { return t.integra('CT-02'); });
+      },
+    },
+    {
+      id: 'CT-03', titulo: 'Compra: cadastro individual e o financeiro completo do evento (lançamentos, parcelas, alocações)',
+      executar: function (t) {
+        var P = t.pastos('CT-03', ['Pasto 2']);
+        var f1 = t.parceiro('Fornecedor F1 (CT-03)', ['FORNECEDOR'], 'ct03-f1');
+        var t1 = t.parceiro('Transportes T1 (CT-03)', ['TRANSPORTADOR'], 'ct03-t1');
+        var animais = [];
+        for (var i = 1; i <= 20; i++) animais.push(garrote_('03' + (i < 10 ? '0' : '') + i, { peso: 240 }));
+        var dados = {
+          tipo: 'COMPRA', campos: { event_date: t.dia(35), partner_id: f1, pasto_destino_id: P['Pasto 2'], finalidade: 'RECRIA_ENGORDA', modalidade: 'CABECA', preco_unitario: 250000, valor_animais: 5000000 },
+          animais: animais,
+          parcelas: [{ data_vencimento: t.dia(65), valor: 2500000, forma_pagamento: 'BOLETO' }, { data_vencimento: t.dia(95), valor: 2500000, forma_pagamento: 'BOLETO' }],
+          custos: [{ tipo: 'FRETE', valor: 120000, partner_id: t1, data_vencimento: t.dia(40), forma_pagamento: 'PIX' }],
+        };
+        var chave = 'ct03-compra';
+        t.passo('1', 'Parcelas de 25.000,00 e 24.000,00 para 50.000,00: VALIDATION, nada gravado', function () {
+          var errado = JSON.parse(JSON.stringify(dados));
+          errado.parcelas[1].valor = 2400000;
+          var e = t.recusa('evento.registrar', errado, 'VALIDATION', chave);
+          igual_(e.details.map(function (d) { return d.codigo; }), ['PARCELAS_NAO_SOMAM'], 'código');
+        });
+        t.passo('2', 'Compra certa (mesma chave): 20 animais COMPRADO no Pasto 2, custo 2.560,00; 2 lançamentos, 3 parcelas, 40 alocações (100%); a pagar +51.200,00', function () {
+          var antes = t.titulos();
+          var r = t.cmd('evento.registrar', dados, chave);
+          var ev = r.event_id;
+          var criados = r.animais.map(function (a) { return a.animal_id; });
+          var linhas = t.tabela('ANIMAIS').filter(function (a) { return criados.indexOf(a.animal_id) >= 0; });
+          verificar_(linhas.length === 20 && linhas.every(function (a) { return a.situacao_cadastral === 'ATIVO' && a.origem === 'COMPRADO' && a.pasto_atual_id === P['Pasto 2'] && a.custo_aquisicao === 256000 && a.peso_atual === 240; }), '20 animais ATIVO, COMPRADO, no Pasto 2, custo 2.560,00, 240,0 kg');
+          igual_([t.doEvento('IDENTIFICACOES', ev).length, t.doEvento('PESAGENS', ev).filter(function (p) { return p.tipo === 'COMPRA' && p.peso_kg === 240; }).length], [20, 20], 'IDENTIFICACOES e PESAGENS (COMPRA)');
+          var cp = t.doEvento('COMPRAS', ev);
+          igual_(cp.map(function (c) { return [c.qtd_animais, c.valor_animais, c.frete, c.valor_total, c.criterio_rateio]; }), [[20, 5000000, 120000, 5120000, 'CABECAS']], 'COMPRAS');
+          igual_(t.evento(ev).partner_id, f1, 'fornecedor do evento');
+          var fin = t.doEvento('FINANCEIRO', ev);
+          igual_(fin.map(function (f) { return [f.natureza, f.valor, f.partner_id, f.status, f.status_pagamento]; }), [['AQUISICAO_ANIMAIS', 5000000, f1, 'ATIVO', 'ABERTO'], ['AQUISICAO_ANIMAIS', 120000, t1, 'ATIVO', 'ABERTO']], 'FINANCEIRO');
+          var fids = fin.map(function (f) { return f.financial_id; });
+          var parcelas = t.tabela('PARCELAS').filter(function (p) { return fids.indexOf(p.financial_id) >= 0; });
+          igual_(parcelas.map(function (p) { return [p.valor, p.status, p.data_vencimento]; }), [[2500000, 'ABERTA', t.dia(65)], [2500000, 'ABERTA', t.dia(95)], [120000, 'ABERTA', t.dia(40)]], 'PARCELAS');
+          var aloc = t.tabela('ALOCACOES_FINANCEIRAS').filter(function (x) { return fids.indexOf(x.financial_id) >= 0; });
+          igual_([aloc.length, soma_(aloc.filter(function (x) { return x.financial_id === fids[0]; }), 'valor_alocado'), soma_(aloc.filter(function (x) { return x.financial_id === fids[1]; }), 'valor_alocado')], [40, 5000000, 120000], '40 alocações, 100% de cada lançamento');
+          verificar_(aloc.every(function (x) { return x.valor_alocado === (x.financial_id === fids[0] ? 250000 : 6000); }), '2.500,00 e 60,00 por animal');
+          var depois = t.titulos();
+          igual_([depois.a_pagar - antes.a_pagar, depois.a_receber - antes.a_receber], [5120000, 0], 'a pagar +51.200,00');
+        });
+        t.passo('3', 'Inventário do Pasto 2: 0 em D0+34 e 20 em D0+35', function () {
+          igual_([t.noPasto(P['Pasto 2'], t.dia(34)), t.noPasto(P['Pasto 2'], t.dia(35))], [0, 20], 'Pasto 2');
+        });
+        t.naoSeAplica('4', 'Resultado gerencial do mês da compra: 0,00 (compra não é custeio)', 'O resultado gerencial chega com o módulo Financeiro (Fase 4); a compra já grava os lançamentos com a natureza que ele usa.');
+        t.passo('fim', 'Projeção = reconstrução e financeiro sem divergência', function () { return t.integra('CT-03'); });
+      },
+    },
+    {
+      id: 'CT-04', titulo: 'Venda por kg vivo: baixa, receita e comissão rateadas pelo peso, histórico preservado',
+      executar: function (t) {
+        var P = t.pastos('CT-04', ['Pasto 1']);
+        var c1 = t.parceiro('Comprador C1 (CT-04)', ['COMPRADOR'], 'ct04-c1');
+        var brincos = ['0401', '0402', '0403', '0404', '0405'];
+        var pesos = [450, 462, 438, 471, 455];
+        var ids;
+        t.passo('massa', '0401 a 0405 no Pasto 1 em D0, sem valor de abertura', function () {
+          ids = ids_(t.cmd('evento.registrar', entrada_(brincos.map(function (b) { return bicho_(t, { brinco: b, sexo: 'M', castrado: true, data_nascimento: t.dia(-900), pasto_destino_id: P['Pasto 1'] }); })), 'ct04-massa'));
+        });
+        t.passo('1', 'Venda em D0+231 a R$ 10,00/kg (2.276,0 kg), comissão de 455,20, recebimento em D0+261: revisão pelo servidor e gravação', function () {
+          var dados = {
+            tipo: 'VENDA', campos: { event_date: t.dia(231), partner_id: c1, finalidade: 'RECRIA_ENGORDA', modalidade: 'KG_VIVO', preco_unitario: 1000, valor_bruto: 2276000 },
+            animais: brincos.map(function (b, i) { return { animal_id: ids[b], peso: pesos[i] }; }),
+            parcelas: [{ data_vencimento: t.dia(261), forma_pagamento: 'TRANSFERENCIA' }], deducoes: [{ tipo: 'COMISSAO', valor: 45520 }],
+          };
+          var sim = t.api('evento.simular', { acao: 'registrar', dados: dados });
+          var v = t.ok(sim, 'revisão').impactos.venda;
+          igual_([v.receita, v.comissao, v.resultado_negociacao, v.criterio], [2276000, 45520, 2230480, 'PESO_VIVO'], 'a revisão mostra receita, comissão e resultado da negociação (22.304,80)');
+          var antes = t.titulos();
+          var r = t.cmd('evento.registrar', dados, 'ct04-venda', { versao: sim.meta.dataVersion });
+          var ev = r.event_id;
+          igual_([t.noPasto(P['Pasto 1'], t.dia(230)), t.noPasto(P['Pasto 1'], t.dia(231))], [5, 0], 'Pasto 1 com 5 na véspera e 0 no dia');
+          verificar_(brincos.every(function (b) { var a = t.animal(ids[b]); return a.situacao_cadastral === 'VENDIDO' && a.data_saida === t.dia(231) && a.pasto_atual_id === null; }), 'VENDIDO, com a data de saída e sem pasto');
+          var vd = t.doEvento('VENDAS', ev);
+          igual_(vd.map(function (x) { return [x.qtd_animais, x.peso_vivo_total_kg, x.valor_bruto, x.comissao, x.criterio_rateio]; }), [[5, 2276, 2276000, 45520, 'PESO_VIVO']], 'VENDAS');
+          var ea = t.doEvento('EVENTO_ANIMAIS', ev);
+          verificar_(ea.length === 5 && ea.every(function (l) { return l.efeito_inventario === -1 && l.pasto_origem_id === P['Pasto 1']; }), '5 saídas (−1) do Pasto 1');
+          igual_(mapa_(t.doEvento('PESAGENS', ev), 'animal_id', function (p) { return p.tipo + ' ' + p.peso_kg; }), mapa_(brincos.map(function (b, i) { return { id: ids[b], p: 'VENDA ' + pesos[i] }; }), 'id', 'p'), 'PESAGENS (VENDA)');
+          igual_(t.evento(ev).partner_id, c1, 'comprador do evento');
+          var fin = t.doEvento('FINANCEIRO', ev);
+          igual_(fin.map(function (f) { return [f.natureza, f.valor]; }), [['RECEITA_VENDA_ANIMAIS', 2276000], ['DESPESA_VENDA', 45520]], 'receita e comissão');
+          igual_(t.tabela('PARCELAS').filter(function (p) { return p.financial_id === fin[0].financial_id; }).map(function (p) { return [p.data_vencimento, p.valor, p.status]; }), [[t.dia(261), 2276000, 'ABERTA']], 'parcela da receita');
+          var porAnimal = function (f) { return mapa_(t.tabela('ALOCACOES_FINANCEIRAS').filter(function (x) { return x.financial_id === f.financial_id; }), 'animal_id', 'valor_alocado'); };
+          var esperado = function (vals) { var o = {}; brincos.forEach(function (b, i) { o[ids[b]] = vals[i]; }); return o; };
+          igual_(porAnimal(fin[0]), esperado([450000, 462000, 438000, 471000, 455000]), 'receita alocada pelo peso');
+          igual_(porAnimal(fin[1]), esperado([9000, 9240, 8760, 9420, 9100]), 'comissão alocada pelo peso (87,60 a 94,20)');
+          var depois = t.titulos();
+          igual_([depois.a_receber - antes.a_receber, depois.a_pagar - antes.a_pagar], [2276000, 45520], 'a receber +22.760,00 e a pagar +455,20');
+        });
+        t.passo('2', 'Ficha do 0401: a entrada e a venda continuam no histórico', function () {
+          var f = t.ficha(ids['0401']);
+          igual_([f.geral.situacao_cadastral, f.eventos.itens.map(function (x) { return [x.event_type, x.vigente]; })], ['VENDIDO', [['ENTRADA_INICIAL', true], ['VENDA', true]]], 'ficha');
+        });
+        t.passo('fim', 'Projeção = reconstrução e financeiro sem divergência', function () { return t.integra('CT-04'); });
+      },
+    },
+    {
+      id: 'CT-07', titulo: 'Estorno anula sem apagar: original preservado, auditoria, bloqueios e anulação do animal',
+      executar: function (t) {
+        var P = t.pastos('CT-07', ['Pasto 1', 'Baixada', 'Pasto 3']);
+        var ids;
+        var e1;
+        var e2;
+        var antesEv;
+        var antesEa;
+        t.passo('massa', '0701 a 0703 no Pasto 1 em D0; transferência E1 para a Baixada em D0+99', function () {
+          ids = ids_(t.cmd('evento.registrar', entrada_(['0701', '0702', '0703'].map(function (b) { return bicho_(t, { brinco: b, pasto_destino_id: P['Pasto 1'] }); })), 'ct07-massa'));
+          e1 = t.cmd('evento.registrar', transf_(t.dia(99), P['Pasto 1'], P.Baixada, [ids['0701'], ids['0702'], ids['0703']]), 'ct07-e1').event_id;
+          igual_(t.noPasto(P.Baixada, t.dia(104)), 3, 'Baixada com 3 em D0+104');
+          antesEv = t.tabela('EVENTOS').filter(function (e) { return e.event_id === e1; })[0];
+          antesEa = JSON.stringify(t.doEvento('EVENTO_ANIMAIS', e1));
+        });
+        t.passo('1', 'Estorno de E1 ("pasto errado"): os 3 voltam ao Pasto 1, também na posição de D0+104', function () {
+          e2 = t.cmd('evento.estornar', { event_id: e1, justificativa: 'pasto errado' }, 'ct07-e2').event_id;
+          verificar_(['0701', '0702', '0703'].every(function (b) { return t.animal(ids[b]).pasto_atual_id === P['Pasto 1']; }), 'os 3 de volta ao Pasto 1');
+          igual_([t.noPasto(P['Pasto 1'], t.dia(104)), t.noPasto(P.Baixada, t.dia(104))], [3, 0], 'posição em D0+104');
+        });
+        t.passo('2', 'E1 e as 3 linhas dele idênticos, salvo os caches status e reversed_by_event_id; E2 aponta E1, datado de hoje, sem linha filha', function () {
+          var depois = t.tabela('EVENTOS').filter(function (e) { return e.event_id === e1; })[0];
+          Object.keys(antesEv).forEach(function (k) {
+            if (k === 'status') igual_([antesEv[k], depois[k]], ['CONFIRMADO', 'ESTORNADO'], 'status');
+            else if (k === 'reversed_by_event_id') igual_([antesEv[k], depois[k]], [null, e2], 'reversed_by_event_id');
+            else igual_(depois[k], antesEv[k], 'EVENTOS.' + k + ' não muda');
+          });
+          igual_(JSON.stringify(t.doEvento('EVENTO_ANIMAIS', e1)), antesEa, 'linhas de EVENTO_ANIMAIS idênticas');
+          var est = t.tabela('EVENTOS').filter(function (e) { return e.event_id === e2; })[0];
+          igual_([est.event_type, est.reversal_of_event_id, est.event_date, t.doEvento('EVENTO_ANIMAIS', e2).length], ['ESTORNO', e1, t.hoje(), 0], 'o estorno');
+        });
+        t.passo('3', 'auditoria.listar mostra o estorno com quem, quando e o motivo', function () {
+          var aud = t.ok(t.api('auditoria.listar', { entity_id: e1, por_pagina: 50 }), 'auditoria');
+          var item = aud.itens.filter(function (a) { return a.event_id === e2; })[0];
+          verificar_(item, 'o estorno na trilha');
+          igual_([item.acao, item.usuario, item.registration_date, item.justificativa], ['ESTORNAR', t.usuario, t.hoje(), 'pasto errado'], 'trilha do estorno');
+        });
+        t.passo('4', 'Estornar E1 de novo e estornar o estorno: VALIDATION', function () {
+          igual_(t.recusa('evento.estornar', { event_id: e1, justificativa: 'de novo' }, 'VALIDATION', 'ct07-de-novo').details.map(function (d) { return d.codigo; }), ['JA_ANULADO'], 'estornar de novo');
+          igual_(t.recusa('evento.estornar', { event_id: e2, justificativa: 'estorno do estorno' }, 'VALIDATION', 'ct07-estorno-do-estorno').details.map(function (d) { return d.codigo; }), ['ESTORNO_NAO_SE_ESTORNA'], 'estorno do estorno');
+        });
+        t.passo('5', 'Com transferência posterior do 0701: o estorno é CONFLICT e cita a posterior', function () {
+          var e1b = t.cmd('evento.registrar', transf_(t.dia(99), P['Pasto 1'], P.Baixada, [ids['0701'], ids['0702'], ids['0703']]), 'ct07-e1b').event_id;
+          var posterior = t.cmd('evento.registrar', transf_(t.dia(120), P.Baixada, P['Pasto 3'], [ids['0701']]), 'ct07-posterior').event_id;
+          var e = t.recusa('evento.estornar', { event_id: e1b, justificativa: 'teste' }, 'CONFLICT', 'ct07-conflito');
+          igual_(e.details.map(function (d) { return [d.codigo, d.animal_id, d.conflito && d.conflito.event_id, d.conflito && d.conflito.data]; }), [['ORIGEM_DIVERGENTE', ids['0701'], posterior, t.dia(120)]], 'o evento que impede');
+        });
+        t.passo('6', 'Estorno da entrada de um animal sem outros eventos: ANULADO, com o brinco liberado', function () {
+          var so = t.cmd('evento.registrar', outra_(t.dia(31), [bicho_(t, { brinco: '0709', pasto_destino_id: P['Pasto 1'] })]), 'ct07-so');
+          t.cmd('evento.estornar', { event_id: so.event_id, justificativa: 'Lançado por engano' }, 'ct07-so-estorno');
+          var a = t.animal(so.animais[0].animal_id);
+          igual_([a.situacao_cadastral, a.brinco], ['ANULADO', null], 'animal anulado, sem brinco');
+          igual_(t.cmd('evento.registrar', outra_(t.dia(32), [bicho_(t, { brinco: '0709', pasto_destino_id: P['Pasto 1'] })]), 'ct07-reuso').animais[0].brinco, '0709', 'o brinco serve a outro animal');
+        });
+        t.passo('fim', 'Projeção = reconstrução', function () { return t.integra('CT-07'); });
+      },
+    },
+    {
+      id: 'CT-08', titulo: 'Inventário em qualquer data pelo replay; estorno recalcula o passado',
+      executar: function (t) {
+        var P = t.pastos('CT-08', ['Pasto 1', 'Pasto 2']);
+        var datas = [t.dia(30), t.dia(45), t.dia(89)];
+        var base = {};
+        var venda;
+        var ultimo;
+        t.passo('massa', 'D0 com 100 (60 no Pasto 1, 40 no Pasto 2); D0+14 dois partos no Pasto 1; D0+31 dez para o Pasto 2; D0+50 venda de 5 do Pasto 2; D0+68 uma morte no Pasto 1', function () {
+          datas.forEach(function (d) { base[d] = t.posicao(d).cabecas; });
+          var animais = [];
+          for (var i = 1; i <= 100; i++) animais.push(bicho_(t, { brinco: String(8000 + i), sexo: i % 2 ? 'F' : 'M', data_nascimento: t.dia(-1500), pasto_destino_id: i <= 60 ? P['Pasto 1'] : P['Pasto 2'] }));
+          var ent = t.cmd('evento.registrar', entrada_(animais), 'ct08-massa').animais;
+          var noA = ent.filter(function (a, i) { return i < 60; }).map(function (a) { return a.animal_id; });
+          var noB = ent.filter(function (a, i) { return i >= 60; }).map(function (a) { return a.animal_id; });
+          t.cmd('evento.registrar', nascimento_(t.dia(14), noA[0], [{ situacao_nascimento: 'VIVO', sexo: 'F' }]), 'ct08-parto-1');
+          t.cmd('evento.registrar', nascimento_(t.dia(14), noA[2], [{ situacao_nascimento: 'VIVO', sexo: 'M' }]), 'ct08-parto-2');
+          t.cmd('evento.registrar', transf_(t.dia(31), P['Pasto 1'], P['Pasto 2'], noA.slice(10, 20)), 'ct08-transferencia');
+          var comp = t.parceiro('Comprador (CT-08)', ['COMPRADOR'], 'ct08-comprador');
+          venda = t.cmd('evento.registrar', venda_(t.dia(50), comp, noB.slice(0, 5)), 'ct08-venda').event_id;
+          t.cmd('evento.registrar', { tipo: 'MORTE', campos: { event_date: t.dia(68), causa: 'DOENCA' }, animais: [{ animal_id: noA[30] }] }, 'ct08-morte');
+        });
+        var resumo = function (d) { return [t.posicao(d).cabecas - base[d], t.noPasto(P['Pasto 1'], d), t.noPasto(P['Pasto 2'], d)]; };
+        t.passo('1', 'Véspera do marco zero: sem número, com o motivo ANTERIOR_AO_MARCO_ZERO', function () {
+          var p = t.posicao(t.dia(-1));
+          igual_([p.cabecas, p.motivo], [null, 'ANTERIOR_AO_MARCO_ZERO'], 'antes do marco zero');
+        });
+        t.passo('2', 'D0+30: 102 (62 e 40); D0+45: 102 (52 e 50); D0+89: 96 (51 e 45)', function () {
+          igual_(resumo(datas[0]), [102, 62, 40], 'D0+30 (100 + 2)');
+          igual_(resumo(datas[1]), [102, 52, 50], 'D0+45 (transferência não muda o total)');
+          igual_(resumo(datas[2]), [96, 51, 45], 'D0+89 (100 + 2 − 5 − 1)');
+        });
+        t.passo('3', 'Estornada a venda, D0+89 passa a 101 (51 e 50); o resto do passado não muda', function () {
+          ultimo = t.cmd('evento.estornar', { event_id: venda, justificativa: 'Venda desfeita' }, 'ct08-estorno');
+          igual_(resumo(datas[2]), [101, 51, 50], 'D0+89 depois do estorno');
+          igual_(resumo(datas[0]), [102, 62, 40], 'D0+30 depois do estorno');
+          return ultimo.event_id ? 'estorno gravado' : null;
+        });
+        t.passo('fim', 'A reconstrução total produz ANIMAIS idêntico ao gravado', function () { return t.integra('CT-08'); });
+      },
+    },
+    {
+      id: 'CT-13', titulo: 'Rateio com centavos na compra: maior resto, desempate pelo código, mesma saída com a entrada embaralhada',
+      executar: function (t) {
+        var P = t.pastos('CT-13', ['Pasto']);
+        var f = t.parceiro('Vizinho (CT-13)', ['FORNECEDOR'], 'ct13-f');
+        var compra = function (data, animais, campos, frete) {
+          var c = { event_date: data, partner_id: f, pasto_destino_id: P.Pasto };
+          Object.keys(campos).forEach(function (k) { c[k] = campos[k]; });
+          return { tipo: 'COMPRA', campos: c, animais: animais, parcelas: [{ data_vencimento: Utils.somaDias(data, 30) }], custos: [{ tipo: 'FRETE', valor: frete }] };
+        };
+        var freteDe = function (ev) { return t.doEvento('FINANCEIRO', ev)[1]; };
+        var b;
+        t.passo('a', 'R$ 100,00 de frete por CABECAS entre 3: 33,34; 33,33; 33,33 (o centavo para o menor código interno)', function () {
+          var r = t.cmd('evento.registrar', compra(t.dia(59), [garrote_('1301'), garrote_('1302'), garrote_('1303')], { modalidade: 'CABECA', preco_unitario: 300000, valor_animais: 900000 }, 10000), 'ct13-a');
+          var fr = freteDe(r.event_id);
+          var cod = mapa_(r.animais, 'animal_id', 'codigo_interno');
+          var aloc = t.tabela('ALOCACOES_FINANCEIRAS').filter(function (x) { return x.financial_id === fr.financial_id; });
+          var ordem = aloc.map(function (x) { return [cod[x.animal_id], x.valor_alocado]; }).sort(function (x, y) { return x[0] < y[0] ? -1 : 1; });
+          igual_(ordem.map(function (x) { return x[1]; }), [3334, 3333, 3333], 'centavo para o menor código');
+          var rat = t.tabela('RATEIOS').filter(function (x) { return x.financial_id === fr.financial_id; })[0];
+          igual_([rat.criterio, rat.base_total, rat.total_alocado], ['CABECAS', 3, 10000], 'RATEIOS');
+        });
+        t.passo('b', 'R$ 1.500,00 de frete por PESO_VIVO com 200,0, 250,0 e 310,0 kg: 394,74; 493,42; 611,84', function () {
+          b = t.cmd('evento.registrar', compra(t.dia(60), [garrote_('1304', { peso: 200 }), garrote_('1305', { peso: 250 }), garrote_('1306', { peso: 310 })], { modalidade: 'KG_VIVO', preco_unitario: 1200, valor_animais: 912000 }, 150000), 'ct13-b');
+          var fr = freteDe(b.event_id);
+          var br = mapa_(b.animais, 'animal_id', 'brinco');
+          igual_(mapa_(t.tabela('ALOCACOES_FINANCEIRAS').filter(function (x) { return x.financial_id === fr.financial_id; }), function (x) { return br[x.animal_id]; }, 'valor_alocado'), { 1304: 39474, 1305: 49342, 1306: 61184 }, 'frete por peso');
+          var rat = t.tabela('RATEIOS').filter(function (x) { return x.financial_id === fr.financial_id; })[0];
+          igual_([rat.criterio, rat.base_total, rat.total_alocado], ['PESO_VIVO', 760, 150000], 'RATEIOS');
+          t.doEvento('FINANCEIRO', b.event_id).forEach(function (l) {
+            igual_(soma_(t.tabela('ALOCACOES_FINANCEIRAS').filter(function (x) { return x.financial_id === l.financial_id; }), 'valor_alocado'), l.valor, 'Σ alocado = valor do lançamento');
+          });
+        });
+        t.passo('emb', 'A mesma compra com os animais em outra ordem (revisão pelo servidor) dá a cada peso o mesmo valor', function () {
+          var sim = t.ok(t.api('evento.simular', { acao: 'registrar', dados: compra(t.dia(61), [garrote_('1316', { peso: 310 }), garrote_('1314', { peso: 200 }), garrote_('1315', { peso: 250 })], { modalidade: 'KG_VIVO', preco_unitario: 1200, valor_animais: 912000 }, 150000) }), 'revisão');
+          var custo = mapa_(b.animais, 'brinco', function (a) { return t.animal(a.animal_id).custo_aquisicao; });
+          igual_(mapa_(sim.impactos.financeiro.por_animal, 'brinco', 'valor'), { 1314: custo['1304'], 1315: custo['1305'], 1316: custo['1306'] }, 'valor por animal igual com a entrada embaralhada');
+        });
+        ['c', 'd', 'e', 'f'].forEach(function (k, i) {
+          t.naoSeAplica(k, ['Rateio por dias de permanência', 'Rateio com base zero', 'Rateio MANUAL somando 99,99 de 100,00', 'Re-rateio por evento RATEIO'][i],
+            'O rateio de custo compartilhado (evento RATEIO) chega com o módulo Financeiro (Fase 4); a regra do maior resto já é conferida no nível 1 (tests/financeiro.test.js).');
+        });
+        t.passo('fim', 'Projeção = reconstrução e financeiro sem divergência', function () { return t.integra('CT-13'); });
+      },
+    },
+    {
+      id: 'CT-14', titulo: 'Venda por arroba: peso vivo e carcaça não se confundem',
+      executar: function (t) {
+        var P = t.pastos('CT-14', ['Pasto']);
+        var frig = t.parceiro('Frigorífico (CT-14)', ['COMPRADOR'], 'ct14-frig');
+        var ids;
+        var boi = function (b) { return bicho_(t, { brinco: b, sexo: 'M', castrado: true, data_nascimento: t.dia(-1000), pasto_destino_id: P.Pasto }); };
+        t.passo('massa', 'Bois 1401 a 1404 no pasto em D0', function () { ids = ids_(t.cmd('evento.registrar', entrada_(['1401', '1402', '1403', '1404'].map(boi)), 'ct14-massa')); });
+        var vivoEstimado = function (comBase) {
+          var c = { event_date: t.dia(313), partner_id: frig, finalidade: 'ABATE', modalidade: 'ARROBA', preco_unitario: 31000, valor_bruto: 1128400 };
+          if (comBase) { c.base_peso = 'VIVO'; c.rendimento_carcaca_pct = 52; c.rendimento_tipo = 'ESTIMADO'; }
+          return { tipo: 'VENDA', campos: c, animais: [{ animal_id: ids['1403'], peso: 540 }, { animal_id: ids['1404'], peso: 510 }], parcelas: [{ data_vencimento: t.dia(343) }] };
+        };
+        t.passo('c', 'ARROBA sem base de peso: VALIDATION no campo base_peso, nada gravado', function () {
+          var e = t.recusa('evento.registrar', vivoEstimado(false), 'VALIDATION', 'ct14-c');
+          igual_(e.details.map(function (d) { return [d.codigo, d.campo]; }), [['CAMPO_OBRIGATORIO', 'base_peso']], 'detalhe');
+        });
+        t.passo('a', 'Carcaça apurada (285,0 e 270,0 kg) a R$ 320,00/@: 37,00 @, bruto 11.840,00 por PESO_CARCACA, retenção 177,60, depósito 11.662,40, rendimento 52,4 apurado; pesagens só do peso vivo', function () {
+          var dados = {
+            tipo: 'VENDA', campos: { event_date: t.dia(313), partner_id: frig, finalidade: 'ABATE', modalidade: 'ARROBA', base_peso: 'CARCACA', preco_unitario: 32000, valor_bruto: 1184000 },
+            animais: [{ animal_id: ids['1401'], peso: 540, peso_carcaca_kg: 285 }, { animal_id: ids['1402'], peso: 520, peso_carcaca_kg: 270 }],
+            parcelas: [{ data_vencimento: t.dia(343) }], deducoes: [{ tipo: 'FUNRURAL', valor: 17760, retida_pelo_comprador: true }],
+          };
+          var sim = t.api('evento.simular', { acao: 'registrar', dados: dados });
+          var v = t.ok(sim, 'revisão').impactos.venda;
+          igual_([v.arrobas, v.arroba_base, v.receita, v.retidas, v.deposito_esperado, v.rendimento_pct, v.rendimento_tipo], [37, 'CARCACA', 1184000, 17760, 1166240, 52.4, 'APURADO'], 'a revisão, com a base da arroba ao lado');
+          var ev = t.cmd('evento.registrar', dados, 'ct14-a', { versao: sim.meta.dataVersion }).event_id;
+          var vd = t.doEvento('VENDAS', ev)[0];
+          igual_([vd.base_peso, vd.rendimento_carcaca_pct, vd.rendimento_tipo, vd.peso_vivo_total_kg, vd.peso_carcaca_total_kg, vd.criterio_rateio], ['CARCACA', 52.4, 'APURADO', 1060, 555, 'PESO_CARCACA'], 'VENDAS');
+          var fin = t.doEvento('FINANCEIRO', ev);
+          igual_(mapa_(t.tabela('ALOCACOES_FINANCEIRAS').filter(function (x) { return x.financial_id === fin[0].financial_id; }), 'animal_id', 'valor_alocado'), mapa_([{ a: ids['1401'], v: 608000 }, { a: ids['1402'], v: 576000 }], 'a', 'v'), '6.080,00 e 5.760,00');
+          igual_([fin[1].natureza, fin[1].valor, fin[1].retida_pelo_comprador], ['DESPESA_VENDA', 17760, true], 'retenção do comprador');
+          igual_(mapa_(t.doEvento('PESAGENS', ev), 'animal_id', 'peso_kg'), mapa_([{ a: ids['1401'], v: 540 }, { a: ids['1402'], v: 520 }], 'a', 'v'), 'PESAGENS com o peso vivo, nenhuma com a carcaça');
+        });
+        t.passo('b', 'Rendimento estimado de 52% (540,0 e 510,0 kg vivos) a R$ 310,00/@: 36,40 @ estimadas, bruto 11.284,00 (5.803,20 e 5.480,80)', function () {
+          var sim = t.api('evento.simular', { acao: 'registrar', dados: vivoEstimado(true) });
+          var v = t.ok(sim, 'revisão').impactos.venda;
+          igual_([v.arrobas, v.arroba_base], [36.4, 'ESTIMADA'], 'arrobas estimadas');
+          var ev = t.cmd('evento.registrar', vivoEstimado(true), 'ct14-b', { versao: sim.meta.dataVersion }).event_id;
+          var vd = t.doEvento('VENDAS', ev)[0];
+          igual_([vd.rendimento_tipo, vd.peso_carcaca_total_kg, vd.criterio_rateio], ['ESTIMADO', null, 'PESO_VIVO'], 'carcaça estimada não é gravada');
+          var fin = t.doEvento('FINANCEIRO', ev);
+          igual_(mapa_(t.tabela('ALOCACOES_FINANCEIRAS').filter(function (x) { return x.financial_id === fin[0].financial_id; }), 'animal_id', 'valor_alocado'), mapa_([{ a: ids['1403'], v: 580320 }, { a: ids['1404'], v: 548080 }], 'a', 'v'), 'alocação pelo peso vivo');
+          igual_(t.doEvento('PESAGENS', ev).length, 2, '2 PESAGENS (VENDA)');
+        });
+        t.passo('fim', 'Projeção = reconstrução e financeiro sem divergência', function () { return t.integra('CT-14'); });
+      },
+    },
+    {
+      id: 'CT-17', titulo: 'Retroativo e mesmo dia: data passada não quebra a cadeia gravada (identificação no lugar da pesagem, Fase 2)',
+      executar: function (t) {
+        var P = t.pastos('CT-17', ['Pasto 1', 'Pasto 2', 'Baixada']);
+        var comp = t.parceiro('Comprador (CT-17)', ['COMPRADOR'], 'ct17-comp');
+        var ids;
+        var venda;
+        t.passo('massa', '0457, 1701 e 1702 no Pasto 1 em D0; 0457 vai para a Baixada em D0+68', function () {
+          ids = ids_(t.cmd('evento.registrar', entrada_(['0457', '1701', '1702'].map(function (b) { return bicho_(t, { brinco: b, sexo: 'M', castrado: true, data_nascimento: t.dia(-800), pasto_destino_id: P['Pasto 1'] }); })), 'ct17-massa'));
+          ids.t68 = t.cmd('evento.registrar', transf_(t.dia(68), P['Pasto 1'], P.Baixada, [ids['0457']]), 'ct17-t68').event_id;
+        });
+        t.passo('a', 'Transferência do 0457 do Pasto 1 para o Pasto 2 em D0+59: CONFLICT citando a de D0+68', function () {
+          var e = t.recusa('evento.registrar', transf_(t.dia(59), P['Pasto 1'], P['Pasto 2'], [ids['0457']]), 'CONFLICT', 'ct17-retro');
+          igual_(e.details.map(function (d) { return [d.codigo, d.animal_id, d.conflito.event_id, d.conflito.tipo, d.conflito.data]; }), [['ORIGEM_DIVERGENTE', ids['0457'], ids.t68, 'TRANSFERENCIA', t.dia(68)]], 'o evento que impede');
+        });
+        t.passo('a2', 'Mesmo dia: dois movimentos do 1701 em D0+80 valem na ordem de registro (o segundo pede confirmação de duplicidade)', function () {
+          t.cmd('evento.registrar', transf_(t.dia(80), P['Pasto 1'], P['Pasto 2'], [ids['1701']]), 'ct17-m1');
+          var dup = t.api('evento.registrar', transf_(t.dia(80), P['Pasto 2'], P.Baixada, [ids['1701']]), { chave: t.chave('ct17-m2') });
+          igual_([t.erro(dup, 'NEEDS_CONFIRMATION', 'segundo movimento').details.map(function (d) { return d.codigo; })], [['POSSIVEL_DUPLICIDADE']], 'aviso de duplicidade');
+          t.cmd('evento.registrar', transf_(t.dia(80), P['Pasto 2'], P.Baixada, [ids['1701']]), 'ct17-m2', { avisos: ['POSSIVEL_DUPLICIDADE'] });
+          igual_(t.ok(t.api('inventario.posicao', { data: t.dia(80), animal_id: ids['1701'] }), 'posição').pasture_id, P.Baixada, 'no fim do dia, na Baixada');
+        });
+        t.passo('b', 'Lote vendido em D0+170: identificação do dia aceita, a do dia seguinte VALIDATION, transferência do dia CONFLICT com a venda', function () {
+          venda = t.cmd('evento.registrar', venda_(t.dia(170), comp, [ids['1701'], ids['1702']]), 'ct17-venda').event_id;
+          var ok = t.cmd('evento.registrar', ident_('PRIMEIRA_IDENTIFICACAO', t.dia(170), 'SISBOV', [{ animal_id: ids['1701'], codigo: 'SB-1701' }, { animal_id: ids['1702'], codigo: 'SB-1702' }]), 'ct17-ident');
+          igual_(ok.animais.length, 2, 'identificação no dia da venda (o dia da saída conta)');
+          var e = t.recusa('evento.registrar', ident_('PRIMEIRA_IDENTIFICACAO', t.dia(171), 'RFID', [{ animal_id: ids['1702'], codigo: '777' }]), 'VALIDATION', 'ct17-ident-depois');
+          igual_(e.details.map(function (d) { return [d.codigo, d.animal_id]; }), [['FORA_DA_PERMANENCIA', ids['1702']]], 'fora da permanência');
+          var c = t.recusa('evento.registrar', transf_(t.dia(170), P['Pasto 1'], P['Pasto 2'], [ids['1702']]), 'CONFLICT', 'ct17-transf-dia');
+          igual_(c.details.map(function (d) { return [d.codigo, d.conflito.event_id, d.conflito.tipo]; }), [['ORIGEM_DIVERGENTE', venda, 'VENDA']], 'a venda do dia impede');
+        });
+        t.passo('fim', 'Projeção = reconstrução e financeiro sem divergência', function () { return t.integra('CT-17'); });
+      },
+    },
+    {
+      id: 'CT-18', titulo: 'Substituição de evento que cria animais: compra com identificação e transferência (Fase 2) e entrada inicial com correção de localização (Fase 1)',
+      executar: function (t) {
+        var P = t.pastos('CT-18', ['Pasto 1', 'Pasto 2']);
+        var forn = t.parceiro('Fornecedor (CT-18)', ['FORNECEDOR'], 'ct18-forn');
+        var r;
+        var ids;
+        var iden;
+        var tr;
+        var k;
+        var compra = function (brincos, animalIds, valor) {
+          return {
+            tipo: 'COMPRA', campos: { event_date: t.dia(35), partner_id: forn, pasto_destino_id: P['Pasto 1'], modalidade: 'CABECA', preco_unitario: 300000, valor_animais: valor },
+            animais: brincos.map(function (b, i) { var a = garrote_(b); if (animalIds) a.animal_id = animalIds[i]; return a; }),
+            parcelas: [{ data_vencimento: t.dia(65), valor: valor / 2 }, { data_vencimento: t.dia(95), valor: valor / 2 }], custos: [{ tipo: 'FRETE', valor: 3000, data_vencimento: t.dia(35) }],
+          };
+        };
+        t.passo('massa', 'Compra de 0801 a 0803 por 9.000,00 em 2 parcelas e frete de 30,00 (D0+35); identificação SISBOV em D0+42; transferência para o Pasto 2 em D0+59', function () {
+          r = t.cmd('evento.registrar', compra(['0801', '0802', '0803'], null, 900000), 'ct18-compra');
+          ids = r.animais.map(function (a) { return a.animal_id; });
+          iden = t.cmd('evento.registrar', ident_('PRIMEIRA_IDENTIFICACAO', t.dia(42), 'SISBOV', ids.map(function (id, i) { return { animal_id: id, codigo: 'SB-080' + (i + 1) }; })), 'ct18-ident').event_id;
+          tr = t.cmd('evento.registrar', transf_(t.dia(59), P['Pasto 1'], P['Pasto 2'], ids), 'ct18-transf').event_id;
+        });
+        t.passo('1', 'Corrigir trocando o brinco 0802 por 0812: um commit; mesmos animal_id e codigo_interno; origem no substituto; posteriores válidos; lançamentos antigos cancelados', function () {
+          var codigos = ids.map(function (id) { return t.animal(id).codigo_interno; });
+          var dados = compra(['0801', '0812', '0803'], ids, 900000);
+          dados.event_id = r.event_id;
+          dados.justificativa = 'Brinco 0802 digitado errado';
+          var sim = t.api('evento.simular', { acao: 'corrigir', dados: dados });
+          verificar_(t.ok(sim, 'revisão').simulacao === true, 'a revisão não grava');
+          var ops = t.tabela('OPERACOES').length;
+          k = t.cmd('evento.corrigir', dados, 'ct18-corrigir', { versao: sim.meta.dataVersion });
+          igual_([t.tabela('OPERACOES').length - ops, k.substitui, t.evento(r.event_id).status], [1, r.event_id, 'ESTORNADO'], 'um só commit; original ESTORNADO');
+          igual_(ids.map(function (id) { var a = t.animal(id); return [a.codigo_interno, a.evento_origem_id, a.brinco, a.pasto_atual_id]; }),
+            ids.map(function (id, i) { return [codigos[i], k.event_id, ['0801', '0812', '0803'][i], P['Pasto 2']]; }), 'mesmos animais, brinco trocado, ainda no Pasto 2');
+          igual_([t.evento(iden).status, t.evento(tr).status], ['CONFIRMADO', 'CONFIRMADO'], 'identificação e transferência seguem válidas');
+          verificar_(t.doEvento('FINANCEIRO', r.event_id).every(function (f) { return f.status === 'CANCELADO'; }), 'lançamentos do original CANCELADO');
+          verificar_(t.doEvento('FINANCEIRO', k.event_id).every(function (f) { return f.status === 'ATIVO'; }), 'lançamentos do substituto valendo');
+        });
+        t.passo('1b', 'A unicidade do brinco é conferida no estado final: trocar 0812 pelo número de outro animal do rebanho é recusado', function () {
+          var dados = compra(['0801', '0703', '0803'], ids, 900000);
+          dados.event_id = k.event_id;
+          dados.justificativa = 'Teste de brinco repetido';
+          var e = t.recusa('evento.corrigir', dados, 'VALIDATION', 'ct18-brinco-repetido');
+          verificar_(e.details.some(function (d) { return d.codigo === 'BRINCO_DUPLICADO'; }), 'esperava BRINCO_DUPLICADO; veio ' + e.details.map(function (d) { return d.codigo; }).join(', '));
+        });
+        t.passo('2', 'Corrigir retirando o 0803 (com identificação e transferência posteriores): CONFLICT com os dois', function () {
+          var dados = compra(['0801', '0812'], ids.slice(0, 2), 600000);
+          dados.event_id = k.event_id;
+          dados.justificativa = 'Tirar o 0803';
+          var e = t.recusa('evento.corrigir', dados, 'CONFLICT', 'ct18-tirar');
+          var achados = e.details.filter(function (d) { return d.animal_id === ids[2] && d.conflito; }).map(function (d) { return d.conflito.event_id; }).sort();
+          igual_(achados, [iden, tr].sort(), 'a identificação e a transferência do 0803 impedem');
+        });
+        // Variante da Fase 1 (09, seção 8): substituição de ENTRADA_INICIAL com correção de localização posterior.
+        var orig;
+        var loc;
+        var sub;
+        var item = function (a, brinco) { return bicho_(t, { animal_id: a.animal_id, brinco: brinco, data_nascimento: Utils.somaDias(t.estado.d0, -800) }); };
+        t.passo('E-massa', '1801, 1802 e 1803 em D0 no Pasto A; correção de localização dos 3 para o Pasto B em D0+30', function () {
+          orig = t.cmd('evento.registrar', entrada_(['1801', '1802', '1803'].map(function (b) { return bicho_(t, { brinco: b, data_nascimento: Utils.somaDias(t.estado.d0, -800) }); })), 'ct18-orig');
+          loc = t.cmd('evento.registrar', ajuste_('CORRECAO_LOCALIZACAO', t.dia(30), orig.animais.map(function (a) { return { animal_id: a.animal_id, pasto_destino_id: t.estado.pastos.B }; })), 'ct18-loc');
+        });
+        t.passo('E1', 'Corrigir a entrada trocando o brinco 1802 por 1812: mesmos animal_id e codigo_interno; original ESTORNADO', function () {
+          var m = porBrinco_(orig);
+          var dados = { tipo: 'ENTRADA_INICIAL', campos: {}, event_id: orig.event_id, justificativa: 'Brinco 1802 lançado errado', animais: [item(m['1801'], '1801'), item(m['1802'], '1812'), item(m['1803'], '1803')] };
+          var sim = t.api('evento.simular', { acao: 'corrigir', dados: dados });
+          verificar_(t.ok(sim, 'prévia').simulacao === true, 'a prévia não grava');
+          sub = t.cmd('evento.corrigir', dados, 'ct18-corrigir-entrada', { versao: sim.meta.dataVersion });
+          igual_(sub.substitui, orig.event_id, 'o substituto aponta o original');
+          igual_(sub.animais.map(function (a) { return a.animal_id; }).sort(), orig.animais.map(function (a) { return a.animal_id; }).sort(), 'mesmos animal_id');
+          igual_(sub.animais.map(function (a) { return a.codigo_interno; }).sort(), orig.animais.map(function (a) { return a.codigo_interno; }).sort(), 'mesmos codigo_interno');
+          igual_(t.evento(orig.event_id).status, 'ESTORNADO', 'original');
+          igual_(t.evento(loc.event_id).status, 'CONFIRMADO', 'a correção de localização segue valendo');
+          var animais = t.tabela('ANIMAIS').filter(function (a) { return ['1801', '1812', '1803', '1802'].indexOf(a.brinco) >= 0; });
+          igual_(animais.map(function (a) { return a.brinco; }).sort(), ['1801', '1803', '1812'], 'três linhas, brinco trocado');
+          verificar_(animais.every(function (a) { return a.evento_origem_id === sub.event_id && a.pasto_atual_id === t.estado.pastos.B; }), 'origem no substituto e pasto da correção posterior');
+        });
+        t.passo('E2', 'Corrigir a entrada retirando 1803 (que tem evento posterior): CONFLICT', function () {
+          var m = porBrinco_(sub);
+          t.recusa('evento.corrigir', { tipo: 'ENTRADA_INICIAL', campos: {}, event_id: sub.event_id, justificativa: 'Tirar o 1803', animais: [item(m['1801'], '1801'), item(m['1812'], '1812')] }, 'CONFLICT', 'ct18-tirar-entrada');
+        });
+        t.passo('fim', 'Projeção = reconstrução e financeiro sem divergência', function () { return t.integra('CT-18'); });
       },
     },
     {
