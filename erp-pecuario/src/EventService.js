@@ -993,7 +993,7 @@ var EventService = (function () {
     var vistos = {};
     ctxEv.itens.forEach(function (it) {
       if (!it.publico || ctxEv.subtipo === 'CORRECAO_CADASTRO') return;
-      if (vistos[it.animal_id]) erroItem_(m, it, 'animal_id', 'ANIMAL_REPETIDO', 'o animal aparece mais de uma vez neste lançamento.');
+      if (vistos[it.animal_id]) { erroItem_(m, it, 'animal_id', 'ANIMAL_REPETIDO', 'o animal aparece mais de uma vez neste lançamento.'); ctxEv.repetidos = ctxEv.repetidos || {}; ctxEv.repetidos[it.animal_id] = true; }
       vistos[it.animal_id] = true;
     });
     if (ctxEv.subtipo === 'CORRECAO_CADASTRO') fecharCorrecoes_(m, ctxEv);
@@ -1222,6 +1222,8 @@ var EventService = (function () {
    */
   function conferirSequencias_(m, ctxEv, ids, proprio) {
     ids.forEach(function (id) {
+      // Animal repetido no lançamento: o erro ANIMAL_REPETIDO já explica; as linhas duplicadas não têm sequência a conferir.
+      if (ctxEv && ctxEv.repetidos && ctxEv.repetidos[id]) return;
       var it = itemDoAnimal_(m, ctxEv, id);
       var novasIdent = ctxEv ? ctxEv.plano.IDENTIFICACOES.filter(function (r) { return r.animal_id === id; }).map(function (r) { return Timeline.linhaIdentificacao(r, ctxEv.ev, ctxEv.ev.ordem_seq); }) : [];
       var novasLinhas = [];
@@ -1244,8 +1246,9 @@ var EventService = (function () {
   /**
    * O que um estorno ou uma correção DEVOLVE a um animal que fica no rebanho (a projeção sem o evento anulado): o
    * brinco anterior (que outro animal pode ter recebido depois, com o reuso ligado ou pela exceção da correção de
-   * brinco) e a categoria manual anterior (que pode ter sido desativada). Nos dois casos, CONFLICT com o registro que
-   * impede. Animal que recebe brinco ou categoria nova no próprio comando é conferido pelas regras do comando.
+   * brinco), o sexo ou o nascimento anterior (que pode não caber mais com os filhos dele: RN-012) e a categoria manual
+   * anterior (que pode ter sido desativada). Em todos, CONFLICT com o registro que impede. Animal que recebe brinco,
+   * correção de cadastro ou categoria nova no próprio comando é conferido pelas regras do comando.
    */
   function conferirEstadoRestaurado_(m, ids, verbo, ctxEv) {
     var semZeros = m.params.brinco_ignora_zeros_esquerda !== false;
@@ -1272,6 +1275,20 @@ var EventService = (function () {
           var p = eventoDoBrinco_(m, dono.animal_id) || { codigo: 'BRINCO_DUPLICADO', event_id: null, event_type: null, event_date: null };
           conflito_(m, it, p, verbo + ' devolveria ao animal o brinco ' + depois.brinco + ', que hoje é do animal ' + nomeAnimal_(dono) + ' (' + dono.codigo_interno + '). Troque o brinco de um dos dois antes.');
         }
+      }
+      // Sexo ou nascimento que voltam (estorno de uma correção de cadastro) e o animal já é mãe ou pai (RN-012).
+      var corrigeNoComando = item && ctxEv.tipo === 'AJUSTE_INVENTARIO' && ctxEv.subtipo === 'CORRECAO_CADASTRO';
+      if (!corrigeNoComando && (depois.sexo !== gravado.sexo || nulo_(depois.data_nascimento) !== nulo_(gravado.data_nascimento))) {
+        Utils.unicos(m.repo.por('ANIMAIS', 'mae_id', id).concat(m.repo.por('ANIMAIS', 'pai_id', id)).map(function (a) { return a.animal_id; })).forEach(function (fid) {
+          var filho = estado_(m, fid);
+          if (!filho || filho.situacao_cadastral === 'ANULADO' || filho.situacao_cadastral === 'PENDENTE') return;
+          var comoMae = filho.mae_id === id;
+          var comoPai = filho.pai_id === id;
+          if (!comoMae && !comoPai) return;
+          var ref = { codigo: 'REFERENCIA_GENEALOGICA', event_id: filho.evento_origem_id, event_type: 'GENEALOGIA', event_date: filho.data_nascimento };
+          if ((comoMae && depois.sexo !== 'F') || (comoPai && depois.sexo !== 'M')) conflito_(m, it, ref, verbo + ' voltaria o sexo do animal para ' + (depois.sexo === 'M' ? 'macho' : 'fêmea') + ', mas ele é ' + (comoMae ? 'mãe' : 'pai') + ' de ' + nomeAnimal_(filho) + '.');
+          else if (!vazio_(depois.data_nascimento) && !vazio_(filho.data_nascimento) && depois.data_nascimento >= filho.data_nascimento) conflito_(m, it, ref, verbo + ' voltaria o nascimento do animal para ' + br_(depois.data_nascimento) + ', mas ele é ' + (comoMae ? 'mãe' : 'pai') + ' de ' + nomeAnimal_(filho) + ', nascido em ' + br_(filho.data_nascimento) + '.');
+        });
       }
       var reclassNoComando = item && ctxEv.tipo === 'AJUSTE_INVENTARIO' && ctxEv.subtipo === 'RECLASSIFICACAO';
       if (!reclassNoComando && depois.categoria_modo === 'MANUAL' && depois.categoria_manual_id !== gravado.categoria_manual_id) {
