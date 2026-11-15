@@ -223,3 +223,31 @@ repositório; "a verificar na conta do dono" significa que só o roteiro de diag
   seção 4.4, o resultado por animal do caso de 07, seção 2.2, e as invariantes de 03b, seção 14, depois de cada comando.
   A varredura de quedas com a venda levou o `npm test` a cerca de 4,6 minutos neste ambiente. Nada validado na conta do
   dono.
+
+## 15/11/2026 — Fase 2, etapa IDENTIFICAÇÃO, MARCAÇÃO, AJUSTES E ESTORNO GERAL (E2.6 e E2.7, backend)
+
+- IDENTIFICACAO no motor (`EventCatalog`, `EventService`, `Timeline`): primeira identificação, troca (com motivo) e
+  retirada (com motivo), coletivas, de brinco, chip, SISBOV, tatuagem ou outra (o brinco do vendedor só sai). Fato
+  independente (o dia da saída conta). Cada animal ganha uma linha de IDENTIFICACOES; a projeção fecha o código anterior em
+  `data_fim`; a linha da retirada guarda o código tirado e o motivo e fecha a si mesma. A ordem das identificações é
+  conferida por tipo (`Timeline.validarIdentificacoes`): primeira só sem código em uso, troca e retirada só com. O bloqueio
+  de reuso de brinco aposentado (RN-004), que já existia, ficou alcançável e testado, com a exceção do brinco lançado
+  errado (desenho-base 16.2) e a troca de números entre dois animais no mesmo lançamento (recusada com o reuso desligado).
+- MARCACAO: marcar e desmarcar "para descarte" (motivo no payload) e "não localizado"; não mexe no inventário; marcar o
+  marcado e desmarcar o desmarcado são recusados (`Timeline.validarMarcacoes`); alerta NAO_LOCALIZADO em `alerta.listar`.
+- AJUSTE_INVENTARIO: RECLASSIFICACAO (categoria manual ativa e do sexo do animal, ou volta à automática; AJUSTES com o
+  valor que valia antes) — a regra CATEGORIA_EM_USO de `categoria.salvar` ficou testável e testada — e DIVERGENCIA_CONTAGEM
+  (baixa com BAIXAS, sem AJUSTES; BAIXADO_AJUSTE fora do inventário e dos elegíveis, mas dono do brinco; reaparecimento =
+  estorno; reentrada por outra entrada ou compra).
+- Estorno e correção de qualquer evento (E2.7): o mecanismo é o mesmo para todos os tipos e subtipos ativos, provado por um
+  caso de cada; estorno e correção revalidam também as sequências de identificação e de marcação e o que a anulação
+  devolve ao animal (brinco que hoje é de outro, sexo ou nascimento que não cabem com os filhos — RN-012 —, categoria
+  manual desativada): CONFLICT com o evento que impede. Tipo com subtipos exige o subtipo. Identificações e
+  reclassificações seguem a posição na cadeia de substituição (desenho-base 16.1).
+- Consultas: `evento.listar` com filtro de subtipo e, no histórico do animal, os estornos dos eventos dele; rótulo do
+  subtipo na lista e no detalhe. `auditoria.listar` passou a ser a trilha completa (EVENTOS + AJUSTES + AUDITORIA, 03a,
+  seção 5.2), com filtros por entidade, registro, período (data na fazenda ou instante) e operação; a tela de auditoria
+  usa a chave nova de cada item. A verificação de integridade confere a ordem das identificações e das marcações.
+- Cenários: CT-07, CT-08, CT-09 completo pela `api()` (o brinco do vendido, a identificação do morto) e na aceitação de
+  nível 2, CT-17 (b) com a identificação e CT-18 da Fase 2 (compra com a identificação e a transferência). Varredura de
+  quedas com o estorno de transferência como comando-modelo (09, seção 8).
