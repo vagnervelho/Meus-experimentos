@@ -2143,6 +2143,8 @@ var EventService = (function () {
       deducoes: ctxEv.deducoes && ctxEv.deducoes.length ? ctxEv.deducoes : null,
       acao: ctxEv.tipo === 'MARCACAO' ? ctxEv.ev.payload_json.acao : null,
       motivo_descarte: ctxEv.tipo === 'MARCACAO' ? ctxEv.ev.payload_json.motivo_descarte : null,
+      // A baixa por divergência não grava AJUSTES: o porquê do lançamento fica no evento (BAIXAS guarda em que contagem faltou).
+      motivo_ajuste: ctxEv.subtipo === 'DIVERGENCIA_CONTAGEM' ? nulo_(ctxEv.ev.justificativa) : null,
     };
     ev.payload_json = payload_(m, ctxEv, extra);
     var itensPorAnimal = {};
@@ -2177,6 +2179,17 @@ var EventService = (function () {
   }
 
   // ------------------------------------------------------------------ estorno ----
+  /**
+   * O que o estorno cancela no financeiro (para a revisão: 08, 4.4): os lançamentos do evento, o valor e os títulos em
+   * aberto, que deixam de valer pela vigência. null quando o evento não tem lançamento.
+   */
+  function canceladosDoEstorno_(m, alvo) {
+    var fins = m.repo.por('FINANCEIRO', 'event_id', alvo.event_id);
+    if (!fins.length) return null;
+    var abertos = 0;
+    fins.forEach(function (f) { abertos += m.repo.por('PARCELAS', 'financial_id', f.financial_id).filter(function (p) { return p.status === 'ABERTA'; }).length; });
+    return { lancamentos: fins.length, total: fins.reduce(function (t, f) { return t + (f.valor || 0); }, 0), parcelas_abertas: abertos };
+  }
   function planejarEstorno_(tx) {
     var d = tx.dados || {};
     var m = motor_(tx, []);
@@ -2225,7 +2238,7 @@ var EventService = (function () {
     return {
       avisos: m.avisos,
       resumo: resumo,
-      impactos: { acao: 'estornar', estorna: alvo.event_id, event_type: alvo.event_type, event_date: alvo.event_date, animais: animais.length, anulados: Object.keys(criados).length },
+      impactos: { acao: 'estornar', estorna: alvo.event_id, event_type: alvo.event_type, event_date: alvo.event_date, animais: animais.length, anulados: Object.keys(criados).length, cancelados: canceladosDoEstorno_(m, alvo) },
       derivados: { animais: animais, eventos: [alvo.event_id, id] },
       resposta: function (t) { return resposta_(t, resumo); },
     };

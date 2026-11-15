@@ -470,7 +470,7 @@ var EventCatalog = (function () {
           ],
         },
         DIVERGENCIA_CONTAGEM: {
-          rotulo: 'Animal não encontrado na contagem', fase: 2,
+          rotulo: 'Animal não encontrado na contagem', fase: 2, critico: true,
           campos_animal: [
             a_('animal_id', 'Animal', 'ref:ANIMAIS', { obrigatorio: true }),
             a_('observacoes', 'Em que contagem faltou', 'texto', { ajuda: 'Vazio = o motivo do lançamento. Se o animal reaparecer, estorne esta baixa.' }),

@@ -255,10 +255,21 @@ var TelaRebanho = (function () {
   // ------------------------------------------------------------------ ficha ----
   var ABAS = [['resumo', 'Resumo'], ['genealogia', 'Genealogia'], ['pastos', 'Pastos'], ['peso', 'Peso'], ['sanidade', 'Sanidade'], ['reproducao', 'Reprodução'], ['financeiro', 'Financeiro'], ['eventos', 'Linha do tempo'], ['anexos', 'Fotos e documentos']];
   var BLOCO_DA_ABA = { peso: 'peso', sanidade: 'sanitario', reproducao: 'reprodutivo', financeiro: 'financeiro' };
+  /** Atalhos da ficha (08, seção 4.1): os mais usados à vista; os demais em "Mais registros". Só aparece tipo ativo no catálogo. */
   var ATALHOS_FICHA = [
     { tipo: 'PESAGEM', rotulo: 'Pesar' }, { tipo: 'SANIDADE', rotulo: 'Vacinar ou tratar' }, { tipo: 'TRANSFERENCIA', rotulo: 'Transferir' },
-    { tipo: 'VENDA', rotulo: 'Vender' }, { tipo: 'MORTE', rotulo: 'Registrar morte' }, { tipo: 'DESCARTE', rotulo: 'Descartar' },
+    { tipo: 'VENDA', rotulo: 'Vender' }, { tipo: 'MORTE', rotulo: 'Registrar morte' },
     { tipo: 'NASCIMENTO', rotulo: 'Registrar parto', filtro: true }, { tipo: 'OUTRA_ENTRADA', rotulo: 'Voltar ao rebanho', volta: true },
+  ];
+  var MAIS_FICHA = [
+    { tipo: 'DESCARTE', rotulo: 'Descartar (consumo, doação, sacrifício)' },
+    { tipo: 'IDENTIFICACAO', subtipo: 'PRIMEIRA_IDENTIFICACAO', rotulo: 'Pôr brinco', se: function (a) { return !a.brinco; } },
+    { tipo: 'IDENTIFICACAO', subtipo: 'SUBSTITUICAO', rotulo: 'Trocar o brinco', se: function (a) { return !!a.brinco; } },
+    { tipo: 'IDENTIFICACAO', subtipo: 'REMOCAO', rotulo: 'Tirar o brinco sem pôr outro', se: function (a) { return !!a.brinco; } },
+    { tipo: 'MARCACAO', subtipo: 'DESCARTE', rotulo: function (a) { return a.marcado_descarte ? 'Tirar a marca de descarte' : 'Marcar para descarte'; }, campos: function (a) { return { acao: a.marcado_descarte ? 'DESMARCAR' : 'MARCAR' }; } },
+    { tipo: 'MARCACAO', subtipo: 'NAO_LOCALIZADO', rotulo: function (a) { return a.nao_localizado ? 'Foi encontrado (tirar a marca de não localizado)' : 'Marcar como não localizado'; }, campos: function (a) { return { acao: a.nao_localizado ? 'DESMARCAR' : 'MARCAR' }; } },
+    { tipo: 'AJUSTE_INVENTARIO', subtipo: 'RECLASSIFICACAO', rotulo: 'Mudar a categoria' },
+    { tipo: 'AJUSTE_INVENTARIO', subtipo: 'DIVERGENCIA_CONTAGEM', rotulo: 'Não encontrado na contagem (baixa)' },
     { tipo: 'AJUSTE_INVENTARIO', subtipo: 'IDENTIFICACAO_INCORRETA', rotulo: 'Corrigir brinco lançado errado' },
     { tipo: 'AJUSTE_INVENTARIO', subtipo: 'CORRECAO_LOCALIZACAO', rotulo: 'Corrigir o pasto' },
   ];
@@ -271,14 +282,30 @@ var TelaRebanho = (function () {
     return r.data;
   }
   function nomeNo(n) { return n ? (n.brinco || n.rotulo || n.codigo_interno || 'animal') : '—'; }
+  function atalhoDisponivel_(x, a) {
+    var def = Store.tipoEvento(x.tipo);
+    if (!def || (x.subtipo && !(def.subtipos && def.subtipos[x.subtipo]))) return null;
+    if (x.volta || x.filtro ? Seletor.motivoInelegivel(a, def.filtro_elegiveis) !== null : a.situacao_cadastral !== 'ATIVO') return null;
+    if (x.se && !x.se(a)) return null;
+    return def;
+  }
+  function abrirAtalho_(x, a, id) {
+    Registro.abrir(x.tipo, { subtipo: x.subtipo || null, campos: x.campos ? x.campos(a) : {}, linhas: [{ animal_id: id }], origem: 'animal/' + id + '/resumo' });
+  }
   function atalhosFicha(a, id) {
     var out = [];
     ATALHOS_FICHA.forEach(function (x) {
-      var def = Store.tipoEvento(x.tipo);
-      if (!def || (x.subtipo && !(def.subtipos && def.subtipos[x.subtipo]))) return;
-      if (x.volta || x.filtro ? Seletor.motivoInelegivel(a, def.filtro_elegiveis) !== null : a.situacao_cadastral !== 'ATIVO') return;
-      out.push(UI.botao(x.rotulo, { atributos: { 'data-atalho-ficha': x.subtipo || x.tipo }, aoClicar: function () { Registro.abrir(x.tipo, { subtipo: x.subtipo || null, linhas: [{ animal_id: id }], origem: 'animal/' + id + '/resumo' }); } }));
+      if (!atalhoDisponivel_(x, a)) return;
+      out.push(UI.botao(x.rotulo, { atributos: { 'data-atalho-ficha': x.subtipo || x.tipo }, aoClicar: function () { abrirAtalho_(x, a, id); } }));
     });
+    var mais = MAIS_FICHA.filter(function (x) { return atalhoDisponivel_(x, a); });
+    if (mais.length) out.push(UI.botao('Mais registros', { atributos: { 'data-atalho-ficha': 'MAIS' }, aoClicar: function (ev) {
+      var lista = h('ul', { class: 'lista-simples' });
+      var f = UI.folha({ titulo: 'Registrar para ' + Store.rotuloAnimal(a), conteudo: lista, origem: ev.currentTarget });
+      mais.forEach(function (x) {
+        lista.appendChild(h('li', null, UI.botao(typeof x.rotulo === 'function' ? x.rotulo(a) : x.rotulo, { bloco: true, atributos: { 'data-atalho-ficha': x.subtipo ? x.tipo + '.' + x.subtipo : x.tipo }, aoClicar: function () { f.fechar({ forcar: true }); abrirAtalho_(x, a, id); } })));
+      });
+    } }));
     return out;
   }
   /** Edição num formulário só (DV-07): cadastro direto com auditoria; campo sensível pede justificativa e vira ajuste. */

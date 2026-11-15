@@ -4,8 +4,9 @@
  * Verificação da interface (npm run ui:check), em duas partes:
  *  1. Estática, sem navegador: src/*.html contra as regras do desenho — nenhum recurso externo (<script src>,
  *     <link href>, <img src>, <iframe src>, @import/url() para http(s): a decisão SP-08 trocou a biblioteca de
- *     gráficos por SVG próprio, então nada vem de CDN) e página dentro do orçamento de 450 KB (01-arquitetura.md,
- *     seção 6.2), conferida também na página MONTADA pelo doGet real (template Index com os includes).
+ *     gráficos por SVG próprio, então nada vem de CDN), conferido no fonte inteiro (comentários incluídos), e página
+ *     dentro do orçamento de 450 KB (01-arquitetura.md, seção 6.2), medida no que vai ao aparelho: cada include como o
+ *     doGet o entrega (Api.compactar) e a página MONTADA pelo doGet real (template Index com os includes).
  *  2. Nível 3, Playwright: `node --test tests/ui/*.test.js` (a SPA do doGet real conversando com o backend real do
  *     harness por um mock de google.script.run). `--so-estatica` pula esta parte.
  * Sai com código 1 se algo falhar.
@@ -24,15 +25,19 @@ const EXTERNOS = [
   { re: /url\(\s*["']?\s*(?:https?:)?\/\//i, o_que: 'url() externa no CSS' },
 ];
 
-/** Confere um conjunto {nomeDoArquivo: conteúdo}. Devolve a lista de problemas (vazia = certo). */
-function conferirPaginas(arquivos) {
+/**
+ * Confere um conjunto {nomeDoArquivo: conteúdo}: recurso externo em `arquivos` e o orçamento sobre `medidos` (o que vai
+ * ao aparelho; padrão: os próprios arquivos). Devolve a lista de problemas (vazia = certo).
+ */
+function conferirPaginas(arquivos, medidos) {
   const problemas = [];
   let total = 0;
   Object.keys(arquivos).sort().forEach((nome) => {
     const html = arquivos[nome];
-    total += Buffer.byteLength(html, 'utf8');
     EXTERNOS.forEach((regra) => { if (regra.re.test(html)) problemas.push(nome + ': ' + regra.o_que); });
   });
+  const m = medidos || arquivos;
+  Object.keys(m).forEach((nome) => { total += Buffer.byteLength(m[nome], 'utf8'); });
   if (total > ORCAMENTO_BYTES) problemas.push('a página soma ' + Math.round(total / 1024) + ' KB; o orçamento é de ' + ORCAMENTO_BYTES / 1024 + ' KB');
   return problemas;
 }
@@ -43,6 +48,14 @@ function lerPaginas(dir) {
   return out;
 }
 
+/** Cada arquivo como vai ao aparelho: o template Index como está; os includes compactados pelo Api.compactar do doGet. */
+function servidas(paginas) {
+  const { createGas } = require('../tests/harness');
+  const G = createGas({ order: 'alpha' }).G;
+  const out = {};
+  Object.keys(paginas).forEach((n) => { out[n] = n === 'Index.html' ? paginas[n] : G.Api.compactar(paginas[n]); });
+  return out;
+}
 /** A página que o doGet devolve (template Index avaliado, com os includes), pelo harness. */
 function paginaMontada() {
   const S = require('../tests/apoio-sistema');
@@ -57,9 +70,11 @@ function main() {
     console.log('ui:check — ainda não há páginas em src/ (nenhum .html): nada a conferir.');
     return;
   }
-  const problemas = conferirPaginas(paginas);
+  const problemas = conferirPaginas(paginas, servidas(paginas));
+  let tamanho = '';
   if (paginas['Index.html']) {
     const montada = paginaMontada();
+    tamanho = ' (página montada: ' + Math.round(Buffer.byteLength(montada, 'utf8') / 1024) + ' KB de ' + ORCAMENTO_BYTES / 1024 + ' KB)';
     if (/<\?/.test(montada)) problemas.push('a página montada pelo doGet ainda tem scriptlet (<? ... ?>) sem avaliar');
     conferirPaginas({ 'página montada': montada }).forEach((p) => problemas.push(p));
   }
@@ -67,7 +82,7 @@ function main() {
     console.error('ui:check — ' + problemas.length + ' problema(s):\n  - ' + problemas.join('\n  - '));
     process.exit(1);
   }
-  console.log('ui:check — ' + nomes.length + ' arquivo(s) .html conferidos (e a página montada pelo doGet), sem recurso externo e dentro do orçamento.');
+  console.log('ui:check — ' + nomes.length + ' arquivo(s) .html conferidos (e a página montada pelo doGet), sem recurso externo e dentro do orçamento' + tamanho + '.');
   if (process.argv.indexOf('--so-estatica') >= 0) return;
   const dir = path.join(__dirname, '..', 'tests', 'ui');
   const arquivos = fs.readdirSync(dir).filter((f) => f.endsWith('.test.js')).sort().map((f) => path.join(dir, f));
@@ -77,4 +92,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { conferirPaginas, lerPaginas, ORCAMENTO_BYTES };
+module.exports = { conferirPaginas, lerPaginas, servidas, ORCAMENTO_BYTES };

@@ -11,7 +11,11 @@
  */
 var TelaEventos = (function () {
   var h = Util.h;
-  var CORRIGIVEIS = ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'NASCIMENTO', 'COMPRA', 'VENDA', 'TRANSFERENCIA', 'MORTE', 'DESCARTE'];
+  /** Corrigir (evento substituto) vale para todo tipo e subtipo ativo, menos o ESTORNO (E2.7; RN-043). */
+  function corrigivel(ev) {
+    var def = Store.tipoEvento(ev.event_type);
+    return !!def && ev.event_type !== 'ESTORNO' && (!def.subtipos || !!(ev.event_subtype && def.subtipos[ev.event_subtype]));
+  }
   var filtros = { tipo: '', de: '', ate: '', vigentes: false, pagina: 1 };
   function situacao(e) {
     if (e.event_type === 'ESTORNO') return 'Estorno';
@@ -268,12 +272,59 @@ var TelaEventos = (function () {
     antes.campos = Util.clonar(campos);
     return { campos: campos, linhas: linhas, grupos: grupos, origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotuloEvento(ev), antes: antes } };
   }
+  /** Valor de AJUSTES (texto canônico) como o formulário o mostra, pelo tipo do campo corrigível. */
+  function brutoCorrigido_(def, campo, v) {
+    if (v === null || v === undefined || v === '') return null;
+    var sub = def.subtipos && def.subtipos.CORRECAO_CADASTRO;
+    var t = ((sub && sub.campos_corrigiveis) || {})[campo] || {};
+    if (t.tipo === 'bool') return v === 'S';
+    return String(v);
+  }
+  /**
+   * Identificação, marcação e ajustes de inventário (E2.6): o subtipo do original, o cabeçalho (tipo de identificação,
+   * ação e motivo do descarte, justificativa) e, por animal, o que o lançamento gravou (código e motivo; categoria;
+   * pasto; campo e valor corrigidos, um item por campo).
+   */
+  function previaManejo_(o, def, origem) {
+    var ev = o.evento, det = o.detalhes || {}, linhasEv = o.linhas || [];
+    var sub = ev.event_subtype, payload = ev.payload || {};
+    var idents = Utils_agrupar(det.IDENTIFICACOES || []), ajustes = Utils_agrupar(det.AJUSTES || []);
+    var antes = { campos: {}, linhas: {} };
+    var linhas = [];
+    var poe = function (id, v) { v = limpo_(v); linhas.push({ animal_id: id, valores: v }); if (!antes.linhas[id]) antes.linhas[id] = Util.clonar(v); return v; };
+    if (ev.event_type === 'IDENTIFICACAO') {
+      origem.tipo_identificacao = ((det.IDENTIFICACOES || [])[0] || {}).tipo;
+      linhasEv.forEach(function (l) { var x = (idents[l.animal_id] || [])[0] || {}; poe(l.animal_id, { codigo: sub === 'REMOCAO' ? null : x.codigo, motivo: x.motivo, observacoes: l.observacoes }); });
+    } else if (ev.event_type === 'MARCACAO') {
+      origem.acao = payload.acao; origem.motivo_descarte = payload.motivo_descarte;
+      linhasEv.forEach(function (l) { poe(l.animal_id, { observacoes: l.observacoes }); });
+    } else {
+      var a0 = (det.AJUSTES || [])[0] || {};
+      origem.justificativa = a0.justificativa || payload.motivo_ajuste || (sub === 'DIVERGENCIA_CONTAGEM' && !(linhasEv[0] || {}).observacoes ? ((det.BAIXAS || [])[0] || {}).observacoes : null);
+      if (sub === 'CORRECAO_CADASTRO') {
+        antes.itens = [];
+        (det.AJUSTES || []).forEach(function (x) { var v = poe(x.animal_id, { campo: x.campo, valor_novo: brutoCorrigido_(def, x.campo, x.valor_novo) }); antes.itens.push({ animal_id: x.animal_id, valores: Util.clonar(v) }); });
+      } else linhasEv.forEach(function (l) {
+        var aj = (ajustes[l.animal_id] || [])[0] || {};
+        if (sub === 'IDENTIFICACAO_INCORRETA') poe(l.animal_id, { brinco: aj.valor_novo || ((idents[l.animal_id] || [])[0] || {}).codigo });
+        else if (sub === 'CORRECAO_LOCALIZACAO') poe(l.animal_id, { pasto_destino_id: l.pasto_destino_id });
+        else if (sub === 'RECLASSIFICACAO') poe(l.animal_id, { categoria_manual_id: aj.valor_novo });
+        else poe(l.animal_id, { observacoes: l.observacoes });
+      });
+    }
+    var campos = {};
+    var defsEv = (def.campos || []).concat((def.subtipos && def.subtipos[sub] && def.subtipos[sub].campos) || []);
+    defsEv.forEach(function (d) { if (texto_(origem[d.id]) !== null) campos[d.id] = origem[d.id]; });
+    antes.campos = Util.clonar(campos);
+    return { subtipo: sub, campos: campos, linhas: linhas, origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotuloEvento(ev), antes: antes } };
+  }
   /** Pré-preenche o evento substituto com o que o original gravou (valores como digitados no formulário). */
   function previaCorrecao(o) {
     var ev = o.evento, det = o.detalhes || {};
     var def = Store.tipoEvento(ev.event_type);
     var origem = { event_date: ev.event_date, property_id: ev.property_id, description: ev.description, responsible: ev.responsible, notes: ev.notes };
     if (['NASCIMENTO', 'TRANSFERENCIA', 'MORTE', 'DESCARTE'].indexOf(ev.event_type) >= 0) return previaMovimento_(o, def, origem);
+    if (['IDENTIFICACAO', 'MARCACAO', 'AJUSTE_INVENTARIO'].indexOf(ev.event_type) >= 0) return previaManejo_(o, def, origem);
     if (ev.event_type === 'COMPRA') return previaCompra_(o, def, origem);
     if (ev.event_type === 'VENDA') return previaVenda_(o, def, origem);
     var campos = {};
@@ -310,6 +361,17 @@ var TelaEventos = (function () {
       return { animal_id: l.animal_id, criado: !!at, valores: v };
     });
     return { campos: campos, linhas: linhas, origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotuloEvento(ev), antes: antes } };
+  }
+  var ROTULO_AJUSTE = { categoria_manual_id: 'Categoria', pasto_atual_id: 'Pasto', brinco: 'Brinco' };
+  /** Valor gravado em AJUSTES (texto canônico) em palavras: categoria, pasto, mãe ou pai pelo nome; vazio = desconhecido. */
+  function valorAjuste_(campo, v) {
+    if (v === null || v === undefined || v === '') return campo === 'categoria_manual_id' ? 'automática' : '—';
+    if (campo === 'categoria_manual_id') { var c = Store.categoria(v); return c ? c.nome : 'outra categoria'; }
+    if (campo === 'pasto_atual_id') { var p = Store.pasto(v); return p ? p.nome : 'outro pasto'; }
+    if (campo === 'mae_id' || campo === 'pai_id') { var a = Store.animal(v); return a ? Store.rotuloAnimal(a) : 'outro animal'; }
+    if (v === 'S' || v === 'N') return v === 'S' ? 'sim' : 'não';
+    if (Fmt.ehData(v)) return Fmt.data(v);
+    return Fmt.rotuloOpcao(campo, v);
   }
   function Utils_agrupar(lista) { var m = {}; lista.forEach(function (x) { (m[x.animal_id] = m[x.animal_id] || []).push(x); }); return m; }
 
@@ -388,11 +450,22 @@ var TelaEventos = (function () {
       var porId = {};
       linhas.forEach(function (l) { porId[l.animal_id] = l; });
       var quem = function (x) { return porId[x.animal_id] ? nomeAnimal(porId[x.animal_id]) : 'animal'; };
-      if ((det.AJUSTES || []).length) corpo.appendChild(UI.secao('Correções', h('ul', { class: 'lista-simples' }, det.AJUSTES.map(function (x) { return h('li', { text: quem(x) + ': ' + Fmt.rotuloOpcao('campo', x.campo) + ' de ' + (x.valor_anterior || '—') + ' para ' + (x.valor_novo || '—') + (x.justificativa ? ' · ' + x.justificativa : '') }); })), { dado: 'ajustes' }));
-      if ((det.IDENTIFICACOES || []).length) corpo.appendChild(UI.secao('Identificações', h('ul', { class: 'lista-simples' }, det.IDENTIFICACOES.map(function (x) { return h('li', { text: quem(x) + ': ' + (x.tipo === 'BRINCO' ? 'Brinco' : Fmt.rotulo('IDENTIFICACAO', x.tipo)) + ' ' + x.codigo + ' desde ' + Fmt.data(x.data_inicio) + (x.data_fim ? ' até ' + Fmt.data(x.data_fim) : '') }); }))));
+      if ((det.AJUSTES || []).length) corpo.appendChild(UI.secao('Correções', h('ul', { class: 'lista-simples' }, det.AJUSTES.map(function (x) { return h('li', { text: quem(x) + ': ' + (ROTULO_AJUSTE[x.campo] || Fmt.rotuloOpcao('campo', x.campo)) + ' de ' + valorAjuste_(x.campo, x.valor_anterior) + ' para ' + valorAjuste_(x.campo, x.valor_novo) + (x.justificativa ? ' · ' + x.justificativa : '') }); })), { dado: 'ajustes' }));
+      if (payload.motivo_ajuste) corpo.appendChild(UI.secao('Motivo do ajuste', h('p', { text: payload.motivo_ajuste }), { dado: 'motivo-ajuste' }));
+      if ((det.IDENTIFICACOES || []).length) corpo.appendChild(UI.secao('Identificações', h('ul', { class: 'lista-simples' }, det.IDENTIFICACOES.map(function (x) {
+        var nome = (x.tipo === 'BRINCO' ? 'Brinco' : Fmt.rotulo('IDENTIFICACAO', x.tipo)) + ' ' + x.codigo;
+        var motivo = x.motivo ? ' (' + Store.rotuloLista('MOTIVO_IDENTIFICACAO', x.motivo).toLowerCase() + ')' : '';
+        return h('li', { text: quem(x) + ': ' + (ev.event_subtype === 'REMOCAO' ? nome + ' retirado em ' + Fmt.data(x.data_inicio) + motivo : nome + ' desde ' + Fmt.data(x.data_inicio) + (x.data_fim ? ' até ' + Fmt.data(x.data_fim) : '') + motivo) });
+      })), { dado: 'identificacoes' }));
+      if (ev.event_type === 'MARCACAO') corpo.appendChild(UI.secao('Marcação', UI.pares([
+        ['O quê', (payload.acao === 'DESMARCAR' ? 'Desmarcar: ' : 'Marcar: ') + (ev.event_subtype === 'NAO_LOCALIZADO' ? 'não localizado' : 'para descarte')],
+        payload.motivo_descarte ? ['Motivo do descarte', Store.rotuloLista('MOTIVO_DESCARTE', payload.motivo_descarte)] : null,
+        ['No inventário', 'não muda (a marca é só um sinal no animal)'],
+      ].filter(Boolean)), { dado: 'marcacao' }));
       if ((det.PESAGENS || []).length) corpo.appendChild(UI.secao('Pesagens', h('ul', { class: 'lista-simples' }, det.PESAGENS.map(function (x) { return h('li', { text: quem(x) + ': ' + Fmt.peso(x.peso_kg) + ' · ' + Fmt.rotulo('METODO_PESAGEM', x.metodo) }); }))));
       if ((det.BAIXAS || []).length) corpo.appendChild(UI.secao('Saída do rebanho', h('ul', { class: 'lista-simples' }, det.BAIXAS.map(function (x) {
-        var partes = x.tipo === 'MORTE' ? ['causa: ' + Store.rotuloLista('CAUSA_MORTE', x.causa), x.diagnostico ? 'diagnóstico: ' + x.diagnostico : null] : ['destino: ' + Store.rotuloLista('DESTINO_DESCARTE', x.destino), 'motivo: ' + Store.rotuloLista('MOTIVO_DESCARTE', x.motivo)];
+        var partes = x.tipo === 'MORTE' ? ['causa: ' + Store.rotuloLista('CAUSA_MORTE', x.causa), x.diagnostico ? 'diagnóstico: ' + x.diagnostico : null]
+          : x.tipo === 'DIVERGENCIA_CONTAGEM' ? ['fica fora do inventário; se aparecer, estorne esta baixa'] : ['destino: ' + Store.rotuloLista('DESTINO_DESCARTE', x.destino), 'motivo: ' + Store.rotuloLista('MOTIVO_DESCARTE', x.motivo)];
         return h('li', { text: quem(x) + ': ' + Fmt.rotulo('TIPO_BAIXA', x.tipo).toLowerCase() + ' · ' + partes.filter(Boolean).join(' · ') + (x.observacoes ? ' · ' + x.observacoes : '') });
       })), { dado: 'baixas' }));
       var partos = (det.REPRODUCAO || []).filter(function (x) { return x.tipo_evento === 'PARTO'; });
@@ -458,7 +531,7 @@ var TelaEventos = (function () {
           Registro.abrir('ESTORNO', { campos: { event_id: ev.event_id }, rotulos: rot, origem: 'evento/' + ev.event_id });
         } }));
       }
-      if (ev.vigente && CORRIGIVEIS.indexOf(ev.event_type) >= 0 && Store.tipoEvento(ev.event_type)) {
+      if (ev.vigente && corrigivel(ev)) {
         acoes.appendChild(UI.botao('Corrigir', { icone: 'editar', aoClicar: async function (evt) {
           var botao = evt && evt.currentTarget;
           var destravar = botao ? UI.travar(botao, 'Abrindo…') : null;

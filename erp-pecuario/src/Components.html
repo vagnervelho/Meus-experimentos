@@ -1310,8 +1310,13 @@ var Registro = (function () {
   var VERBOS = {
     ENTRADA_INICIAL: 'Gravar o rebanho inicial', OUTRA_ENTRADA: 'Gravar a entrada', AJUSTE_INVENTARIO: 'Gravar a correção', ESTORNO: 'Estornar',
     NASCIMENTO: 'Gravar o parto', TRANSFERENCIA: 'Transferir', MORTE: 'Registrar a morte', DESCARTE: 'Registrar o descarte', COMPRA: 'Gravar a compra',
-    VENDA: 'Gravar a venda',
+    VENDA: 'Gravar a venda', IDENTIFICACAO: 'Gravar a identificação', MARCACAO: 'Gravar a marcação',
   };
+  /** O subtipo é o primeiro campo do formulário (08, 4.2): a pergunta muda com o tipo. */
+  var PERGUNTA_SUBTIPO = { IDENTIFICACAO: 'O que fazer', MARCACAO: 'Marcar como' };
+  function perguntaSubtipo(tipo) { return PERGUNTA_SUBTIPO[tipo] || 'O que corrigir'; }
+  /** Crítico (08, 4.6): o do tipo ou o do subtipo (a baixa por divergência de contagem). */
+  function critico(s) { var sub = s.subtipo && s.def.subtipos ? s.def.subtipos[s.subtipo] : null; return !!(s.def.critico || (sub && sub.critico)); }
   /** Grupos repetíveis que começam com uma linha (o parto tem ao menos uma cria). */
   var GRUPO_COM_UMA_LINHA = { crias: true, parcelas: true };
   var ROTULO_GRUPO = { crias: ['Crias', 'Cria'], parcelas: ['Parcelas do valor dos animais', 'Parcela'], deducoes: ['Deduções (frete, comissão, impostos)', 'Dedução'], custos: ['Frete e outros custos', 'Custo'] };
@@ -1328,7 +1333,8 @@ var Registro = (function () {
   function rotaDe(s) { return s.corrige ? 'evento.corrigir' : rotaComando(s.tipo); }
   /** Revisão pelo servidor: a do catálogo, e sempre na correção (a folha mostra a diferença para o original). */
   function revServidor(s) { return s.def.revisao === 'SERVIDOR' || !!s.corrige || !Util.vazio(s.campos && (s.campos.custo_valor || s.campos.receita_valor)); }
-  function verbo(s) { return s.corrige ? 'Gravar a correção' : VERBOS[s.tipo] || ('Gravar ' + s.def.rotulo.toLowerCase()); }
+  var VERBOS_SUBTIPO = { DIVERGENCIA_CONTAGEM: 'Dar baixa', RECLASSIFICACAO: 'Mudar a categoria' };
+  function verbo(s) { return s.corrige ? 'Gravar a correção' : (s.subtipo && VERBOS_SUBTIPO[s.subtipo]) || VERBOS[s.tipo] || ('Gravar ' + s.def.rotulo.toLowerCase()); }
   function plural(n, um, varios) { return n + ' ' + (n === 1 ? um : varios); }
 
   // ------------------------------------------------------------------ sessão e rascunho ----
@@ -1438,7 +1444,14 @@ var Registro = (function () {
     }
     return base;
   }
-  function camposEvento(s) { return s.def.campos || []; }
+  /** Campos de cabeçalho: os do tipo e, depois, os do subtipo escolhido (EventCatalog.camposEvento(tipo, subtipo)). */
+  function camposEvento(s) {
+    var sub = s.subtipo && s.def.subtipos ? s.def.subtipos[s.subtipo] : null;
+    return (s.def.campos || []).map(function (d) {
+      // O brinco do vendedor só se retira (o servidor recusa nos outros subtipos: TIPO_NAO_SE_APLICA).
+      return d.id === 'tipo_identificacao' && s.subtipo !== 'REMOCAO' ? Object.assign({}, d, { opcoes: d.opcoes.filter(function (o) { return o !== 'BRINCO_ORIGEM'; }) }) : d;
+    }).concat((sub && sub.campos) || []);
+  }
   function temCamposPorAnimal(s) { return s.linhas.some(function (l) { return defsLinha(s, l).length > 0; }) || (s.def.campos_animal || []).length > 0; }
   /** Pedido do contrato (CONTRATOS, 14): {tipo, subtipo, campos, animais[, grupos]}; no estorno, {event_id, justificativa}. */
   function montarDados(s) {
@@ -1446,7 +1459,7 @@ var Registro = (function () {
     var cEv = Formulario.converterValores(camposEvento(s), s.campos);
     cEv.erros.forEach(function (e) { erros.push({ campo: e.campo, mensagem: e.mensagem, nivel: 'EVENTO' }); });
     if (s.tipo === 'ESTORNO') return { dados: cEv.valores, erros: erros };
-    if (s.def.subtipos && !s.subtipo) erros.push({ campo: '__subtipo', mensagem: 'Escolha o que corrigir.', nivel: 'EVENTO' });
+    if (s.def.subtipos && !s.subtipo) erros.push({ campo: '__subtipo', mensagem: 'Escolha uma opção em "' + perguntaSubtipo(s.tipo) + '".', nivel: 'EVENTO' });
     var sub = s.subtipo && s.def.subtipos ? s.def.subtipos[s.subtipo] : null;
     var animais = [];
     s.linhas.forEach(function (l, i) {
@@ -1512,6 +1525,200 @@ var Registro = (function () {
   }
   function linhasComProblema(s) { return s.linhas.filter(function (l) { return l.erros && l.erros.length; }); }
 
+  // ------------------------------------------------------------------ grade de animais novos e parcelas ----
+  /**
+   * Brincos em sequência a partir do primeiro (0301 → 0301, 0302…; os zeros à esquerda ficam). Vazio = sem brinco.
+   * → {brincos: [texto | null]} ou {erro}. Só monta o que se digitaria; a unicidade é do servidor.
+   */
+  function serieBrincos(inicio, n) {
+    var q = Number(n);
+    if (!(q >= 1 && q <= 1000 && Math.floor(q) === q)) return { erro: 'Informe de 1 a 1.000 animais.' };
+    var t = Util.vazio(inicio) ? '' : String(inicio).trim();
+    if (!t) return { brincos: Array.apply(null, Array(q)).map(function () { return null; }) };
+    var m = /^(.*?)(\d+)$/.exec(t);
+    if (!m) return { erro: 'Para seguir a sequência, o primeiro brinco precisa terminar em número (ex.: 0301 ou L-01).' };
+    var base = Number(m[2]), largura = m[2].length, out = [];
+    for (var i = 0; i < q; i++) out.push(m[1] + String(base + i).padStart(largura, '0'));
+    return { brincos: out };
+  }
+  function lerSexo_(t) {
+    var x = String(t || '').trim().toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    return x === 'M' || x === 'MACHO' ? 'M' : x === 'F' || x === 'FEMEA' ? 'F' : null;
+  }
+  function lerData_(t) {
+    var m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(String(t).trim());
+    var d = m ? m[3] + '-' + m[2].padStart(2, '0') + '-' + m[1].padStart(2, '0') : String(t).trim();
+    return Fmt.ehData(d) ? d : null;
+  }
+  /**
+   * Linhas coladas de uma planilha (uma por animal; colunas separadas por tabulação ou ponto e vírgula, na ordem
+   * Brinco · Sexo · Idade em meses ou nascimento · Peso (kg) · Valor (R$)). Confere só o formato, como o formulário; o
+   * cabeçalho, se houver, é pulado. → {animais: [brutos {brinco, sexo, idade_meses | data_nascimento, peso, valor}],
+   * problemas: [{linha, mensagem}], cabecalho}.
+   */
+  function lerColagem(texto) {
+    var out = [], problemas = [], cabecalho = false, brincos = {};
+    String(texto || '').split(/\r?\n/).forEach(function (bruta, i) {
+      if (!bruta.trim()) return;
+      var c = bruta.split(/\t|;/).map(function (x) { return x.trim(); });
+      var n = i + 1;
+      if (!out.length && !problemas.length && !cabecalho && !lerSexo_(c[1]) && /brinco|sexo/i.test(bruta)) { cabecalho = true; return; }
+      var a = {}, erros = [];
+      if (c.slice(5).some(Boolean)) erros.push('tem mais de 5 colunas');
+      if (c[0]) {
+        var k = Store.normalizarBrinco(c[0], false);
+        if (brincos[k]) erros.push('brinco ' + c[0] + ' repetido (linha ' + brincos[k] + ')');
+        brincos[k] = n;
+        a.brinco = c[0];
+      }
+      var sexo = lerSexo_(c[1]);
+      if (!c[1]) erros.push('falta o sexo (M ou F)');
+      else if (!sexo) erros.push('sexo "' + c[1] + '" não reconhecido (use M ou F)');
+      else a.sexo = sexo;
+      if (c[2]) {
+        var d = lerData_(c[2]);
+        if (d) a.data_nascimento = d;
+        else if (/^\d{1,3}$/.test(c[2])) a.idade_meses = c[2];
+        else erros.push('idade ou nascimento "' + c[2] + '" não reconhecido (meses, ou dd/mm/aaaa)');
+      }
+      if (c[3]) { var p = Fmt.lerDecimal(c[3], 1); if (p.erro || !(p.valor > 0)) erros.push('peso "' + c[3] + '": ' + (p.erro || 'precisa ser maior que zero')); else a.peso = c[3]; }
+      if (c[4]) { var v = Fmt.lerDinheiro(c[4]); if (v.erro || !(v.valor > 0)) erros.push('valor "' + c[4] + '": ' + (v.erro || 'precisa ser maior que zero')); else a.valor = c[4]; }
+      if (erros.length) problemas.push({ linha: n, mensagem: 'Linha ' + n + ': ' + erros.join('; ') + '.' });
+      else out.push(a);
+    });
+    return { animais: out, problemas: problemas, cabecalho: cabecalho };
+  }
+  /** Vencimentos de N parcelas a partir da primeira: MES (mesmo dia, ou o último do mês), D30, D15, D7. */
+  function vencimentos(primeiro, n, intervalo) {
+    if (!Fmt.ehData(primeiro)) return [];
+    var y = Number(primeiro.slice(0, 4)), mo = Number(primeiro.slice(5, 7)) - 1, d = Number(primeiro.slice(8, 10));
+    var dias = { D30: 30, D15: 15, D7: 7 }[intervalo];
+    var out = [];
+    for (var i = 0; i < n; i++) {
+      var t;
+      if (dias) t = new Date(Date.UTC(y, mo, d + dias * i));
+      else {
+        var ultimo = new Date(Date.UTC(y, mo + i + 1, 0)).getUTCDate();
+        t = new Date(Date.UTC(y, mo + i, Math.min(d, ultimo)));
+      }
+      out.push(t.toISOString().slice(0, 10));
+    }
+    return out;
+  }
+  /** Campos que o "Preencher em série" aplica a todos (os do lote que mais se repetem), na ordem do catálogo. */
+  var SERIE = ['sexo', 'castrado', 'reprodutor', 'raca', 'data_nascimento', 'data_nascimento_confianca', 'idade_meses', 'origem', 'pasto_destino_id', 'peso', 'valor_individual', 'valor_abertura'];
+  /** Linha de animal novo ainda em branco (só com o que veio da linha anterior: pasto, origem, raça). */
+  function linhaEmBranco_(l) {
+    return !l.animal_id && Object.keys(l.valores || {}).every(function (k) { return ['pasto_destino_id', 'origem', 'raca'].indexOf(k) >= 0 || Util.vazio(l.valores[k]); });
+  }
+  function incluirNovos_(s, lista) {
+    s.linhas = s.linhas.filter(function (l) { return !linhaEmBranco_(l); }).concat(lista.map(function (v) { return { uid: uid(), animal_id: null, valores: v, erros: [] }; }));
+    tocar(s);
+    desenharAnimais(s);
+    desenharAcoes(s);
+    UI.aviso(plural(lista.length, 'animal incluído', 'animais incluídos') + ' no lançamento. Confira os cartões abaixo.', { tipo: 'ok' });
+  }
+  /** Folha "Preencher em série" (08, seção 15: grade_novos_animais): N animais com brincos em sequência e os mesmos dados. */
+  function preencherSerie(s, origem) {
+    var porId = {};
+    (s.def.campos_animal || []).forEach(function (d) { porId[d.id] = d; });
+    var defs = [
+      { id: 'quantidade', rotulo: 'Quantos animais', tipo: 'inteiro', obrigatorio: true, min: 1, max: 1000 },
+      { id: 'brinco_inicial', rotulo: 'Brinco do primeiro', tipo: 'texto', ajuda: 'Os seguintes seguem a sequência (0301, 0302…). Vazio = sem brinco.' },
+    ].concat(SERIE.filter(function (k) { return porId[k]; }).map(function (k) { return porId[k]; }));
+    var valores = {};
+    var b = Formulario.bloco(defs, valores, { idBase: 'serie' });
+    var corpo = h('div', { class: 'formulario', dataset: { folhaSerie: '1' } }, UI.nota('Cria os cartões com os mesmos dados; depois ajuste o que for diferente em cada animal. Cartões em branco são substituídos.', 'info'), b.el);
+    var f = UI.folha({ titulo: 'Preencher em série', conteudo: corpo, origem: origem });
+    var ok = UI.botao('Incluir os animais', { tipo: 'primario', aoClicar: function () {
+      var c = b.converter();
+      if (c.erros.length) { b.focarPrimeiroErro(); return; }
+      var serie = serieBrincos(valores.brinco_inicial, c.valores.quantidade);
+      if (serie.erro) { b.campo(serie.erro.indexOf('brinco') >= 0 ? 'brinco_inicial' : 'quantidade').erro(serie.erro); return; }
+      var comuns = {};
+      defs.slice(2).forEach(function (d) { if (Campos.visivel(d, valores) && !Util.vazio(valores[d.id])) comuns[d.id] = valores[d.id]; });
+      f.fechar({ forcar: true });
+      incluirNovos_(s, serie.brincos.map(function (br) { var v = Util.clonar(comuns); if (br) v.brinco = br; return v; }));
+    } });
+    ok.setAttribute('data-acao-principal', '1');
+    f.definirAcoes([UI.botao('Cancelar', { aoClicar: function () { f.fechar(); } }), ok]);
+  }
+  /** Folha "Colar da planilha": as linhas conferidas viram cartões; o que não se lê fica listado com o número da linha. */
+  function colarPlanilha(s, origem) {
+    var porId = {};
+    (s.def.campos_animal || []).forEach(function (d) { porId[d.id] = d; });
+    var campoValor = porId.valor_individual ? 'valor_individual' : porId.valor_abertura ? 'valor_abertura' : null;
+    var idc = 'colar-novos-' + Util.uuid().slice(0, 6);
+    var ta = h('textarea', { id: idc, rows: 8, placeholder: '0301\tM\t14\t240,0\n0302\tM\t14\t238,5' });
+    var machos = {};
+    var DE_LOTE = { castrado: ' (machos colados)', reprodutor: ' (machos colados)', data_nascimento_confianca: ' (datas coladas)' };
+    var bm = Formulario.bloco(Object.keys(DE_LOTE).filter(function (k) { return porId[k]; }).map(function (k) { return Object.assign({}, porId[k], { visivel_se: null, obrigatorio_se: null, default: null, rotulo: porId[k].rotulo + DE_LOTE[k] }); }), machos, { idBase: 'colar' });
+    var saida = h('div', { class: 'conferencia', role: 'status', 'aria-live': 'polite' });
+    var lidos = null;
+    var corpo = h('div', { class: 'formulario' },
+      h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo', for: idc, text: 'Cole as linhas da planilha' }), h('div', { class: 'campo-ajuda', text: 'Colunas, nesta ordem: Brinco · Sexo (M ou F) · Idade em meses ou nascimento (dd/mm/aaaa) · Peso (kg)' + (porId.peso ? '' : ' (não usado aqui)') + ' · Valor (R$)' + (campoValor ? '' : ' (não usado aqui)') + '. Coluna vazia pode ficar em branco.' }), ta),
+      bm.el, saida);
+    var f = UI.folha({ titulo: 'Colar da planilha', conteudo: corpo, origem: origem });
+    var incluir = UI.botao('Incluir', { tipo: 'primario', desabilitado: true, aoClicar: function () {
+      if (!lidos || !lidos.length) return;
+      f.fechar({ forcar: true });
+      incluirNovos_(s, lidos.map(function (a) {
+        var v = {};
+        ['brinco', 'sexo', 'data_nascimento', 'idade_meses'].forEach(function (k) { if (a[k] && porId[k]) v[k] = a[k]; });
+        if (a.peso && porId.peso) v.peso = a.peso;
+        if (a.valor && campoValor) v[campoValor] = a.valor;
+        if (a.sexo === 'M') ['castrado', 'reprodutor'].forEach(function (k) { if (porId[k] && !Util.vazio(machos[k])) v[k] = machos[k]; });
+        if (a.data_nascimento && porId.data_nascimento_confianca && !Util.vazio(machos.data_nascimento_confianca)) v.data_nascimento_confianca = machos.data_nascimento_confianca;
+        return v;
+      }));
+    } });
+    incluir.setAttribute('data-acao-principal', '1');
+    function conferir() {
+      Util.limpar(saida);
+      var r = lerColagem(ta.value);
+      var semUso = r.animais.filter(function (a) { return (a.peso && !porId.peso) || (a.valor && !campoValor); }).length;
+      lidos = r.animais;
+      saida.appendChild(h('p', { class: 'dado', text: plural(r.animais.length, 'linha lida', 'linhas lidas') + ' · ' + plural(r.problemas.length, 'com problema', 'com problema') + (r.cabecalho ? ' · cabeçalho ignorado' : '') }));
+      if (semUso) saida.appendChild(UI.nota('Este lançamento não guarda ' + (!porId.peso ? 'peso' : 'valor') + ': essa coluna será ignorada.', 'aviso'));
+      if (r.problemas.length) saida.appendChild(h('ul', { class: 'lista-simples', dataset: { problemasColagem: String(r.problemas.length) } }, r.problemas.map(function (p) { return h('li', null, UI.icone('erro', 'icone-pequeno'), ' ' + p.mensagem); })));
+      incluir.disabled = !r.animais.length || r.problemas.length > 0;
+      UI.definirTexto(incluir, r.animais.length ? 'Incluir os ' + r.animais.length + ' animais' : 'Incluir');
+      if (r.problemas.length) saida.appendChild(UI.nota('Corrija as linhas com problema (ou apague-as) e confira de novo.', 'info'));
+    }
+    var conferirB = UI.botao('Conferir as linhas', { aoClicar: conferir });
+    corpo.insertBefore(h('div', { class: 'acoes', style: 'margin-top:0' }, conferirB), saida);
+    ta.addEventListener('input', function () { incluir.disabled = true; });
+    f.definirAcoes([UI.botao('Cancelar', { aoClicar: function () { f.fechar(); } }), incluir]);
+  }
+  /** Folha "Dividir em parcelas": N linhas com os vencimentos e o valor em branco (o servidor divide e a revisão mostra). */
+  function dividirParcelas(s, g, origem) {
+    var forma = (s.def.grupos_repetiveis[g] || []).filter(function (d) { return d.id === 'forma_pagamento'; });
+    var defs = [
+      { id: 'quantas', rotulo: 'Em quantas parcelas', tipo: 'inteiro', obrigatorio: true, min: 1, max: 120 },
+      { id: 'primeiro', rotulo: 'Vencimento da primeira', tipo: 'data', obrigatorio: true },
+      { id: 'intervalo', rotulo: 'As outras vencem', tipo: 'lista', obrigatorio: true, opcoes: ['MES', 'D30', 'D15', 'D7'], rotulos_opcoes: ['Todo mês, no mesmo dia', 'A cada 30 dias', 'A cada 15 dias', 'Toda semana'], default: 'MES' },
+    ].concat(forma);
+    var valores = {};
+    var b = Formulario.bloco(defs, valores, { idBase: 'divp' });
+    var corpo = h('div', { class: 'formulario', dataset: { folhaParcelas: '1' } }, UI.nota('Substitui as parcelas já digitadas. O valor de cada uma fica em branco: o servidor divide o total em partes iguais (os centavos que sobram vão para as primeiras) e mostra cada parcela na revisão.', 'info'), b.el);
+    var f = UI.folha({ titulo: 'Dividir em parcelas', conteudo: corpo, origem: origem });
+    var ok = UI.botao('Dividir', { tipo: 'primario', aoClicar: function () {
+      var c = b.converter();
+      if (c.erros.length) { b.focarPrimeiroErro(); return; }
+      s.grupos[g] = vencimentos(c.valores.primeiro, c.valores.quantas, c.valores.intervalo).map(function (d) {
+        var v = { data_vencimento: d };
+        if (!Util.vazio(valores.forma_pagamento)) v.forma_pagamento = valores.forma_pagamento;
+        return { uid: uid(), valores: v };
+      });
+      f.fechar({ forcar: true });
+      tocar(s);
+      desenharGrupos(s);
+      UI.aviso(plural(c.valores.quantas, 'parcela', 'parcelas') + ': os valores saem na revisão.', { tipo: 'ok' });
+    } });
+    ok.setAttribute('data-acao-principal', '1');
+    f.definirAcoes([UI.botao('Cancelar', { aoClicar: function () { f.fechar(); } }), ok]);
+  }
+
   // ------------------------------------------------------------------ tela do formulário ----
   function montarFormulario(s) {
     var def = s.def;
@@ -1531,14 +1738,16 @@ var Registro = (function () {
       var opRot = {};
       ids.forEach(function (k) { opRot[k] = def.subtipos[k].rotulo; });
       var grupo = h('div', { class: 'opcoes-lista' });
-      var fs = h('fieldset', { class: 'opcoes', dataset: { campo: '__subtipo' } }, h('legend', { class: 'campo-rotulo campo-obrigatorio', text: 'O que corrigir' }), grupo);
+      var fs = h('fieldset', { class: 'opcoes', dataset: { campo: '__subtipo' } }, h('legend', { class: 'campo-rotulo campo-obrigatorio', text: perguntaSubtipo(s.tipo) }), grupo);
       ids.forEach(function (k, i) {
         var r = h('input', { type: 'radio', name: 'subtipo-' + s.chave, id: 'sub-' + i, value: k, checked: s.subtipo === k });
         r.addEventListener('change', function () {
           if (!r.checked) return;
           s.subtipo = k;
           s.linhas.forEach(function (l) { l.valores = {}; l.erros = []; });
+          if (v.subtipoErro) v.subtipoErro.hidden = true;
           tocar(s);
+          desenharMeio(s);
           desenharAnimais(s);
         });
         grupo.appendChild(h('label', { class: 'opcao', for: 'sub-' + i }, r, h('span', { text: opRot[k] })));
@@ -1549,17 +1758,18 @@ var Registro = (function () {
     var cEv = camposEvento(s);
     var primeiro = cEv.filter(function (d) { return d.id === 'event_date'; });
     var ultimo = cEv.filter(function (d) { return d.id === 'notes'; });
-    var meio = cEv.filter(function (d) { return d.id !== 'event_date' && d.id !== 'notes'; });
-    var opEv = { idBase: 'ev', rotulos: s.rotulos, aoMudar: function (id) { tocar(s); if (id === 'event_date') desenharAvisoData(s); } };
-    if (primeiro.length) { v.blocos.primeiro = Formulario.bloco(primeiro, s.campos, opEv); form.appendChild(v.blocos.primeiro.el); }
+    v.opEv = { idBase: 'ev', rotulos: s.rotulos, aoMudar: function (id) { tocar(s); if (id === 'event_date') desenharAvisoData(s); } };
+    if (primeiro.length) { v.blocos.primeiro = Formulario.bloco(primeiro, s.campos, v.opEv); form.appendChild(v.blocos.primeiro.el); }
     v.avisoData = h('div');
     form.appendChild(v.avisoData);
     v.animais = h('section', { class: 'bloco-animais', 'aria-label': 'Animais' });
     if (def.selecao_animais !== 'NENHUM') form.appendChild(v.animais);
-    if (meio.length) { v.blocos.meio = Formulario.bloco(meio, s.campos, opEv); form.appendChild(v.blocos.meio.el); }
+    v.meio = h('div');
+    form.appendChild(v.meio);
+    desenharMeio(s);
     v.grupos = h('div');
     form.appendChild(v.grupos);
-    if (ultimo.length) { v.blocos.ultimo = Formulario.bloco(ultimo, s.campos, opEv); form.appendChild(v.blocos.ultimo.el); }
+    if (ultimo.length) { v.blocos.ultimo = Formulario.bloco(ultimo, s.campos, v.opEv); form.appendChild(v.blocos.ultimo.el); }
     if (s.corrige) {
       v.justCorrecao = Campos.criar({ id: 'justificativa_correcao', rotulo: 'Por que corrigir', tipo: 'texto', obrigatorio: true, ajuda: 'Fica gravado junto da correção.' }, { valor: s.justificativaCorrecao, idBase: 'corr', aoMudar: function (t) { s.justificativaCorrecao = t || ''; v.justCorrecao.erro(null); tocar(s); } });
       v.justCorrecao.marcarObrigatorio(true);
@@ -1576,6 +1786,14 @@ var Registro = (function () {
     desenharAcoes(s);
     desenharProblemas(s);
     return raiz;
+  }
+  /** Campos do cabeçalho entre a data e as observações; com subtipo, os dele vêm junto (redesenhados ao trocar). */
+  function desenharMeio(s) {
+    var v = s.view;
+    Util.limpar(v.meio);
+    delete v.blocos.meio;
+    var meio = camposEvento(s).filter(function (d) { return d.id !== 'event_date' && d.id !== 'notes'; });
+    if (meio.length) { v.blocos.meio = Formulario.bloco(meio, s.campos, v.opEv); v.meio.appendChild(v.blocos.meio.el); }
   }
   function desenharRascunho(s) {
     var v = s.view;
@@ -1602,7 +1820,7 @@ var Registro = (function () {
     Util.limpar(v.animais);
     v.cartoes = {};
     if (def.selecao_animais === 'NENHUM') return;
-    if (def.subtipos && !s.subtipo) { v.animais.appendChild(UI.nota('Escolha acima o que corrigir para ver os campos de cada animal.', 'info')); return; }
+    if (def.subtipos && !s.subtipo) { v.animais.appendChild(UI.nota('Escolha acima uma opção em "' + perguntaSubtipo(s.tipo) + '" para ver os animais e os campos de cada um.', 'info')); return; }
     if (def.selecao_animais === 'NOVOS') {
       v.animais.appendChild(h('h2', { text: 'Animais' }));
       var lista = h('div', { class: 'bloco-animais' });
@@ -1617,6 +1835,10 @@ var Registro = (function () {
         var c = v.cartoes[nova.uid];
         if (c) { var f = c.el.querySelector('input, select'); if (f) f.focus(); }
       } }));
+      if ((def.componentes || []).indexOf('grade_novos_animais') >= 0 && !s.corrige) {
+        acoes.appendChild(UI.botao('Preencher em série', { atributos: { 'data-grade': 'serie' }, aoClicar: function (ev) { preencherSerie(s, ev.currentTarget); } }));
+        acoes.appendChild(UI.botao('Colar da planilha', { atributos: { 'data-grade': 'colar' }, aoClicar: function (ev) { colarPlanilha(s, ev.currentTarget); } }));
+      }
       if ((def.componentes || []).indexOf('seletor_animais') >= 0) acoes.appendChild(UI.botao('Incluir animal que volta ao rebanho', { aoClicar: function (ev) { escolherExistentes(s, ev.currentTarget); } }));
       v.animais.appendChild(acoes);
       return;
@@ -1674,7 +1896,7 @@ var Registro = (function () {
     var cab = h('div', { class: 'cartao-animal-cabecalho' }, h('div', null, titulo, a ? h('div', { class: 'suave', text: Store.descricaoAnimal(a) }) : null), tirar);
     el.appendChild(cab);
     if (l.erros && l.erros.length) {
-      el.appendChild(h('div', { class: 'problema-animal', role: 'alert' }, UI.icone('erro'), h('div', null, l.erros.map(function (d) { return h('div', { text: d.mensagem }); }),
+      el.appendChild(h('div', { class: 'problema-animal', role: 'alert' }, UI.icone('erro'), h('div', null, l.erros.map(function (d) { return problema_(d, 'div'); }),
         h('div', { class: 'acoes', style: 'margin-top:8px' }, UI.botao('Corrigir', { aoClicar: function () { if (!bloco.focarPrimeiroErro()) { var f = el.querySelector('input, select'); if (f) f.focus(); } } }), UI.botao('Tirar da lista', { aoClicar: function () { tirarLinha(s, l); } })))));
     }
     var corr = s.subtipo && s.def.subtipos && s.def.subtipos[s.subtipo].campos_corrigiveis;
@@ -1710,6 +1932,19 @@ var Registro = (function () {
     desenharAcoes(s);
     UI.aviso('Animal tirado da lista.', { tipo: 'info' });
   }
+  /**
+   * Um problema do servidor: a mensagem e, no CONFLICT da linha do tempo, o link para o lançamento que impede
+   * (08, seção 8: "abrir o evento conflitante"). O rascunho fica guardado ao sair.
+   */
+  function problema_(d, tag) {
+    var c = d && d.conflito;
+    var link = null;
+    if (c && c.event_id && Telas.existe('evento/' + c.event_id)) {
+      var t = Store.tipoEvento(c.tipo);
+      link = h('a', { class: 'botao botao-texto', href: Roteador.href('evento/' + c.event_id), dataset: { rota: 'evento/' + c.event_id, conflito: c.event_id } }, 'Abrir ' + (t ? t.rotulo.toLowerCase() : 'o lançamento') + (c.data ? ' de ' + Fmt.data(c.data) : ''));
+    }
+    return h(tag, { dataset: { codigo: d.codigo || null } }, h('span', { text: d.mensagem }), link ? ' ' : null, link);
+  }
   function rotuloGrupo(g, tipo) { return (ROTULO_GRUPO_TIPO[tipo] || {})[g] || ROTULO_GRUPO[g] || [Fmt.rotulo('', g), Fmt.rotulo('', g)]; }
   function desenharGrupos(s) {
     var v = s.view;
@@ -1723,12 +1958,13 @@ var Registro = (function () {
         var b = Formulario.bloco(defs, row.valores, { idBase: g + row.uid, aoMudar: function () { tocar(s); } });
         v.blocosGrupo[row.uid] = b;
         var errs = (s.errosGrupo || {})[row.uid] || [];
-        if (errs.length && !b.mostrarErros(errs)) sec.appendChild(h('div', { class: 'problema-animal', role: 'alert' }, UI.icone('erro'), h('div', null, errs.map(function (d) { return h('div', { text: d.mensagem }); }))));
+        if (errs.length && !b.mostrarErros(errs)) sec.appendChild(h('div', { class: 'problema-animal', role: 'alert' }, UI.icone('erro'), h('div', null, errs.map(function (d) { return problema_(d, 'div'); }))));
         var a = row.animal_id ? Store.animal(row.animal_id) : null;
         sec.appendChild(h('div', { class: 'cartao-animal', dataset: { linhaGrupo: row.uid } }, h('div', { class: 'cartao-animal-cabecalho' }, h('span', { class: 'cartao-animal-titulo', text: rot[1] + ' ' + (k + 1) + (a ? ' · ' + Store.rotuloAnimal(a) : '') }),
           UI.botao('Tirar', { tipo: 'texto', icone: 'remover', rotulo: 'Tirar ' + rot[1].toLowerCase() + ' ' + (k + 1), aoClicar: function () { s.grupos[g].splice(k, 1); tocar(s); desenharGrupos(s); } })), b.el));
       });
-      sec.appendChild(UI.botao('+ ' + (g === 'crias' ? 'Outra cria (gêmeos)' : g === 'parcelas' ? 'Outra parcela' : g === 'custos' ? 'Frete ou outro custo' : g === 'deducoes' ? 'Frete, comissão ou imposto' : 'Adicionar'), { aoClicar: function () { (s.grupos[g] = s.grupos[g] || []).push({ uid: uid(), valores: {} }); tocar(s); desenharGrupos(s); } }));
+      var mais = UI.botao('+ ' + (g === 'crias' ? 'Outra cria (gêmeos)' : g === 'parcelas' ? 'Outra parcela' : g === 'custos' ? 'Frete ou outro custo' : g === 'deducoes' ? 'Frete, comissão ou imposto' : 'Adicionar'), { aoClicar: function () { (s.grupos[g] = s.grupos[g] || []).push({ uid: uid(), valores: {} }); tocar(s); desenharGrupos(s); } });
+      sec.appendChild(g === 'parcelas' ? h('div', { class: 'acoes', style: 'margin-top:0' }, mais, UI.botao('Dividir em parcelas', { atributos: { 'data-dividir': g }, aoClicar: function (ev) { dividirParcelas(s, g, ev.currentTarget); } })) : mais);
       v.grupos.appendChild(sec);
     });
   }
@@ -1759,7 +1995,7 @@ var Registro = (function () {
     }
     if (s.erros.length) {
       v.problemas.appendChild(h('div', { class: 'estado estado-erro', role: 'alert' }, h('div', { class: 'estado-titulo' }, UI.icone('erro'), h('span', { text: s.erros.length === 1 ? 'Há um problema a corrigir' : 'Há ' + s.erros.length + ' problemas a corrigir' })),
-        h('ul', null, s.erros.map(function (d) { return h('li', { text: d.mensagem }); }))));
+        h('ul', null, s.erros.map(function (d) { return problema_(d, 'li'); }))));
       var blocos = Object.keys(v.blocos).map(function (k) { return v.blocos[k]; });
       blocos.forEach(function (b) { b.mostrarErros(s.erros); });
     }
@@ -1834,7 +2070,9 @@ var Registro = (function () {
     }
     if ((s.tipo === 'MORTE' || s.tipo === 'DESCARTE') && d.animais) linhas.push(['Consequência', plural(d.animais.length, 'animal sai', 'animais saem') + ' do rebanho' + (s.tipo === 'MORTE' ? ' de vez (não pode voltar)' : '')]);
     if (s.tipo === 'VENDA' && d.animais) linhas.push(['Consequência', plural(d.animais.length, 'animal sai', 'animais saem') + ' do rebanho como vendido' + (d.animais.length === 1 ? '' : 's') + '; o histórico fica']);
-    (def.campos || []).forEach(function (c) {
+    if (s.subtipo === 'DIVERGENCIA_CONTAGEM' && d.animais) linhas.push(['Consequência', plural(d.animais.length, 'animal sai', 'animais saem') + ' do rebanho como não encontrado' + (d.animais.length === 1 ? '' : 's') + ' na contagem; se aparecer, estorne esta baixa']);
+    if (s.tipo === 'MARCACAO' && d.animais && d.campos) linhas.push(['Consequência', plural(d.animais.length, 'animal fica', 'animais ficam') + (d.campos.acao === 'DESMARCAR' ? ' sem a marca' : ' marcado' + (d.animais.length === 1 ? '' : 's')) + '; o inventário não muda']);
+    camposEvento(s).forEach(function (c) {
       if (c.id === 'event_date' || !d.campos || Util.vazio(d.campos[c.id])) return;
       if (s.tipo === 'TRANSFERENCIA' && (c.id === 'pasto_origem_id' || c.id === 'pasto_destino_id')) return;
       var val = d.campos[c.id];
@@ -1845,15 +2083,28 @@ var Registro = (function () {
     });
     return linhas;
   }
+  /**
+   * Os animais na revisão: quem é e o que muda em cada um; com a simulação do servidor, o valor que coube a cada um
+   * (o rateio que ele calculou: o cliente não recalcula valor).
+   */
   function listaAnimaisRevisao(s) {
+    var fin = s.simulacao && s.simulacao.impactos ? s.simulacao.impactos.financeiro : null;
+    var porId = {}, porBrinco = {};
+    ((fin && fin.por_animal) || []).forEach(function (x) { if (x.animal_id) porId[x.animal_id] = x; if (x.brinco) porBrinco[Store.normalizarBrinco(x.brinco, false)] = x; });
+    var sub = s.subtipo && s.def.subtipos ? s.def.subtipos[s.subtipo] : null;
+    var defsSub = sub ? (sub.campos_animal || []).filter(function (d) { return ['animal_id', 'campo', 'valor_novo'].indexOf(d.id) < 0; }) : [];
     var itens = (s.dados.animais || []).slice(0, 50).map(function (a, i) {
       var x = a.animal_id ? Store.animal(a.animal_id) : null;
       var nome = x ? Store.rotuloAnimal(x) : (a.brinco ? 'Brinco ' + a.brinco : 'Animal ' + (i + 1) + ' (sem brinco)');
       var extra = [];
       if (a.sexo) extra.push(Fmt.rotulo('SEXO', a.sexo));
-      if (a.pasto_destino_id) { var p = Store.pasto(a.pasto_destino_id); extra.push(p ? p.nome : ''); }
-      if (a.campo) extra.push(Fmt.rotuloOpcao('campo', a.campo) + ' → ' + (a.valor_novo === '' ? 'desconhecido' : a.valor_novo));
-      return h('li', null, h('span', { class: 'dado', text: nome }), extra.length ? ' · ' + extra.filter(Boolean).join(' · ') : '');
+      if (a.pasto_destino_id && !sub) { var p = Store.pasto(a.pasto_destino_id); extra.push(p ? p.nome : ''); }
+      if (a.campo) extra.push(Fmt.rotuloOpcao('campo', a.campo) + ' → ' + valorCorrigido(a.campo, a.valor_novo));
+      defsSub.forEach(function (d) { if (!Util.vazio(a[d.id])) extra.push(Campos.rotuloDe(d) + ': ' + textoValor_(d, a[d.id])); });
+      if (sub && s.subtipo === 'RECLASSIFICACAO' && Util.vazio(a.categoria_manual_id)) extra.push('volta à categoria automática');
+      var v = porId[a.animal_id] || (a.brinco ? porBrinco[Store.normalizarBrinco(a.brinco, false)] : null);
+      if (v) extra.push(Fmt.dinheiro(v.valor) + (v.liquido !== undefined && v.liquido !== null && v.liquido !== v.valor ? ' (líquido ' + Fmt.dinheiro(v.liquido) + ')' : ''));
+      return h('li', { dataset: { valorAnimal: v ? String(v.valor) : null } }, h('span', { class: 'dado', text: nome }), extra.length ? ' · ' + extra.filter(Boolean).join(' · ') : '');
     });
     var resto = (s.dados.animais || []).length - 50;
     return h('ul', { class: 'lista-simples' }, itens, resto > 0 ? h('li', { class: 'suave', text: 'e mais ' + resto + '.' }) : null);
@@ -1894,6 +2145,7 @@ var Registro = (function () {
       l.push(['Será desfeito', (Store.tipoEvento(im.event_type) ? Store.tipoEvento(im.event_type).rotulo : Fmt.rotulo('', im.event_type)) + ' de ' + Fmt.data(im.event_date)]);
       if (im.animais !== undefined) l.push(['Animais do evento', String(im.animais)]);
       if (im.anulados) l.push(['Animais que deixam de existir', String(im.anulados)]);
+      if (im.cancelados) l.push(['Financeiro cancelado', plural(im.cancelados.lancamentos, 'lançamento', 'lançamentos') + ' (' + Fmt.dinheiro(im.cancelados.total) + ')' + (im.cancelados.parcelas_abertas ? ', com ' + plural(im.cancelados.parcelas_abertas, 'título em aberto', 'títulos em aberto') : '') + ' deixa' + (im.cancelados.lancamentos === 1 ? '' : 'm') + ' de valer']);
       return l;
     }
     if (im.animais !== undefined) l.push(['Animais', String(im.animais)]);
@@ -1964,6 +2216,16 @@ var Registro = (function () {
     }
     return l;
   }
+  /** Valor de um campo de cadastro corrigido (AJUSTES: texto canônico; '' = desconhecido), em palavras. */
+  function valorCorrigido(campo, v) {
+    if (Util.vazio(v)) return 'desconhecido';
+    if (campo === 'mae_id' || campo === 'pai_id') { var a = Store.animal(v); return a ? Store.rotuloAnimal(a) : 'outro animal'; }
+    if (campo === 'categoria_manual_id') { var c = Store.categoria(v); return c ? c.nome : 'categoria'; }
+    if (campo === 'pasto_atual_id') { var p = Store.pasto(v); return p ? p.nome : 'pasto'; }
+    if (v === 'S' || v === 'N' || v === true || v === false) return v === 'S' || v === true ? 'sim' : 'não';
+    if (Fmt.ehData(v)) return Fmt.data(v);
+    return Fmt.rotuloOpcao(campo, v);
+  }
   function textoValor_(def, v) {
     if (Util.vazio(v)) return 'vazio';
     if (v === true || v === false) return v ? 'sim' : 'não';
@@ -1973,6 +2235,7 @@ var Registro = (function () {
     if (ref && ref[1] === 'PARCEIROS') { var pa = Store.parceiro(v); return pa ? pa.nome : 'parceiro'; }
     if (ref && ref[1] === 'PLANO_CONTAS') { var co = Store.conta(v); return co ? co.nome : 'conta'; }
     if (ref && ref[1] === 'PROPRIEDADES') { var pr = Store.propriedade(v); return pr ? pr.nome : String(v); }
+    if (ref && ref[1] === 'CATEGORIAS') { var ca = Store.categoria(v); return ca ? ca.nome : 'categoria'; }
     if (def.tipo === 'dinheiro') { var c = typeof v === 'number' ? v : Fmt.lerDinheiro(String(v)).valor; return typeof c === 'number' ? Fmt.dinheiro(c) : 'R$ ' + v; }
     if (def.tipo === 'data') return Fmt.data(v);
     if (def.tipo === 'lista') { var op = Campos.opcoesDe(def).filter(function (x) { return x.valor === v; })[0]; return op ? op.rotulo : String(v); }
@@ -1989,16 +2252,27 @@ var Registro = (function () {
       if (!Campos.visivel(d, s.campos) && !Campos.visivel(d, antes.campos || {})) return;
       if (!igual((antes.campos || {})[d.id], s.campos[d.id])) out.push(Campos.rotuloDe(d) + ': de ' + textoValor_(d, (antes.campos || {})[d.id]) + ' para ' + textoValor_(d, s.campos[d.id]));
     });
+    // Itens do original por animal (a correção de cadastro tem um item por campo: comparados na ordem).
+    var antesPor = {}, usados = {};
+    if (antes.itens) antes.itens.forEach(function (x) { (antesPor[x.animal_id] = antesPor[x.animal_id] || []).push(x.valores); });
+    else Object.keys(antes.linhas).forEach(function (id) { antesPor[id] = [antes.linhas[id]]; });
     s.linhas.forEach(function (l, i) {
       var quem = l.animal_id && Store.animal(l.animal_id) ? Store.rotuloAnimal(Store.animal(l.animal_id)) : (l.valores.brinco || 'Animal ' + (i + 1));
-      if (!l.animal_id || !antes.linhas[l.animal_id]) { out.push(quem + ': animal novo neste lançamento'); return; }
+      if (!l.animal_id || !antesPor[l.animal_id]) { out.push(quem + ': animal novo neste lançamento'); return; }
       vistos[l.animal_id] = true;
-      var ant = antes.linhas[l.animal_id];
-      defsLinha(s, l).forEach(function (d) { if (!igual(ant[d.id], l.valores[d.id])) out.push(quem + ': ' + Campos.rotuloDe(d).toLowerCase() + ' de ' + textoValor_(d, ant[d.id]) + ' para ' + textoValor_(d, l.valores[d.id])); });
+      var k = usados[l.animal_id] = (usados[l.animal_id] || 0) + 1;
+      var ant = antesPor[l.animal_id][k - 1];
+      if (!ant) { out.push(quem + ': mais uma correção neste lançamento'); return; }
+      defsLinha(s, l).forEach(function (d) { if (!igual(ant[d.id], l.valores[d.id])) out.push(quem + ': ' + Campos.rotuloDe(d).toLowerCase() + ' de ' + (d.id === 'valor_novo' ? valorCorrigido(ant.campo, ant[d.id]) : textoValor_(d, ant[d.id])) + ' para ' + (d.id === 'valor_novo' ? valorCorrigido(l.valores.campo, l.valores[d.id]) : textoValor_(d, l.valores[d.id]))); });
     });
     // Animal do rebanho que sai de uma saída ou de um movimento volta ao que era antes dele; o criado pelo lançamento é anulado.
-    var sai = s.def.selecao_animais === 'NOVOS' ? 'sai do lançamento e o cadastro é anulado' : s.tipo === 'TRANSFERENCIA' ? 'sai do lançamento e fica no pasto de origem' : 'sai do lançamento e continua no rebanho';
-    Object.keys(antes.linhas).forEach(function (id) { if (!vistos[id]) { var a = Store.animal(id); out.push((a ? Store.rotuloAnimal(a) : 'Animal') + ': ' + sai); } });
+    var sai = s.def.selecao_animais === 'NOVOS' ? 'sai do lançamento e o cadastro é anulado' : s.tipo === 'TRANSFERENCIA' ? 'sai do lançamento e fica no pasto de origem' : s.def.subtipos ? 'sai do lançamento e fica como estava antes dele' : 'sai do lançamento e continua no rebanho';
+    Object.keys(antesPor).forEach(function (id) {
+      var a = Store.animal(id);
+      var quem = a ? Store.rotuloAnimal(a) : 'Animal';
+      if (!vistos[id]) out.push(quem + ': ' + sai);
+      else if ((usados[id] || 0) < antesPor[id].length) out.push(quem + ': ' + plural(antesPor[id].length - usados[id], 'correção a menos', 'correções a menos'));
+    });
     // Grupos repetíveis (crias do parto): linha a linha, pelo animal reaproveitado; a cria viva que sai é anulada.
     Object.keys(antes.grupos || {}).forEach(function (g) {
       var defs = s.def.grupos_repetiveis[g] || [];
@@ -2046,7 +2320,7 @@ var Registro = (function () {
     var status = h('div', { role: 'status', 'aria-live': 'polite', dataset: { statusEnvio: '1' } });
     var folha = UI.folha({ titulo: 'Confira antes de gravar', conteudo: corpo, aoFechar: function () { if (!s.enviando) sairDaRevisao(s, status); return false; }, rotuloFechar: 'Voltar e corrigir' });
     s.folha = folha;
-    var principal = UI.botao(textoVerbo(s), { tipo: s.def.critico ? 'perigo' : 'primario', aoClicar: function () { enviar(s, principal, status); } });
+    var principal = UI.botao(textoVerbo(s), { tipo: critico(s) ? 'perigo' : 'primario', aoClicar: function () { enviar(s, principal, status); } });
     principal.setAttribute('data-acao-principal', '1');
     var voltarB = UI.botao('Voltar e corrigir', { aoClicar: function () { folha.fechar(); } });
     function redesenhar() {
@@ -2200,7 +2474,7 @@ var Registro = (function () {
     await Rascunhos.remover(idRascunho(s.tipo)).catch(function (e) { Util.registrarFalha('remover rascunho', e); });
     delete sessoes[s.tipo];
     App.removerFaixa('rascunho-' + s.tipo);
-    var resultado = { tipo: s.tipo, def: s.def, data: r.data, meta: r.meta, duplicado: r.duplicado, verificado: r.verificado, n: (r.data && r.data.animais ? r.data.animais.length : 0), origem: s.origem, corrige: s.corrige };
+    var resultado = { tipo: s.tipo, def: s.def, data: r.data, meta: r.meta, duplicado: r.duplicado, verificado: r.verificado, n: (r.data && r.data.animais ? r.data.animais.length : 0), origem: s.origem, corrige: s.corrige, subtipo: s.subtipo, acao: s.dados && s.dados.campos ? s.dados.campos.acao : null };
     var nova = novaSessao(s.tipo, s.def);
     nova.alterado = false;
     nova.resultado = resultado;
@@ -2211,7 +2485,7 @@ var Registro = (function () {
     } catch (e) {
       resultado.falhaAtualizar = e.message;
     }
-    var coletivo = resultado.n > 1 || s.def.critico;
+    var coletivo = resultado.n > 1 || critico(s);
     if (!coletivo) {
       nova.resultado = null;
       UI.aviso(resumoResultado(resultado) + (r.duplicado && !r.verificado ? ' Já estava gravado; nada foi duplicado.' : ''), { tipo: 'ok' });
@@ -2225,7 +2499,11 @@ var Registro = (function () {
     if (res.tipo === 'ESTORNO') return 'Evento estornado.';
     if (res.corrige) return 'Correção gravada: o lançamento original deixou de valer e este entrou no lugar' + (n ? ' (' + plural(n, 'animal', 'animais') + ').' : '.');
     if (res.tipo === 'ENTRADA_INICIAL' || res.tipo === 'OUTRA_ENTRADA') return n === 1 ? '1 animal entrou no rebanho.' : n + ' animais entraram no rebanho.';
+    if (res.tipo === 'AJUSTE_INVENTARIO' && res.subtipo === 'DIVERGENCIA_CONTAGEM') return 'Baixa gravada: ' + plural(n, 'animal saiu', 'animais saíram') + ' do rebanho como não encontrado' + (n === 1 ? '' : 's') + ' na contagem.';
+    if (res.tipo === 'AJUSTE_INVENTARIO' && res.subtipo === 'RECLASSIFICACAO') return 'Categoria mudada em ' + plural(n, 'animal', 'animais') + '.';
     if (res.tipo === 'AJUSTE_INVENTARIO') return n === 1 ? 'Correção gravada em 1 animal.' : 'Correção gravada em ' + n + ' animais.';
+    if (res.tipo === 'IDENTIFICACAO') return (res.subtipo === 'REMOCAO' ? 'Identificação retirada de ' : res.subtipo === 'SUBSTITUICAO' ? 'Identificação trocada em ' : 'Identificação posta em ') + plural(n, 'animal', 'animais') + '.';
+    if (res.tipo === 'MARCACAO') { var oque = res.subtipo === 'NAO_LOCALIZADO' ? 'não localizado' : 'para descarte'; return res.acao === 'DESMARCAR' ? plural(n, 'animal deixou', 'animais deixaram') + ' de estar marcado' + (n === 1 ? '' : 's') + ' ' + (res.subtipo === 'NAO_LOCALIZADO' ? 'como não localizado' + (n === 1 ? '' : 's') : 'para descarte') + '.' : plural(n, 'animal marcado', 'animais marcados') + ' ' + (res.subtipo === 'NAO_LOCALIZADO' ? 'como ' + oque + (n === 1 ? '' : 's') : oque) + '.'; }
     if (res.tipo === 'NASCIMENTO') { var c = Math.max(0, n - 1); return c ? 'Parto gravado: ' + plural(c, 'cria entrou', 'crias entraram') + ' no rebanho.' : 'Parto gravado (sem cria viva).'; }
     if (res.tipo === 'TRANSFERENCIA') return n === 1 ? '1 animal transferido.' : n + ' animais transferidos.';
     if (res.tipo === 'MORTE') return n === 1 ? 'Morte registrada: 1 animal saiu do rebanho.' : 'Morte registrada: ' + n + ' animais saíram do rebanho.';

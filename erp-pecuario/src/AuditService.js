@@ -220,6 +220,12 @@ var AuditService = (function () {
     if (ate && (ate.data ? dia > ate.data : ts > ate.instante)) return false;
     return true;
   }
+  /** O porquê de um evento na trilha: o da correção ou do estorno; na baixa por divergência, o motivo do ajuste. */
+  function motivoEvento_(pj) {
+    if (!pj) return null;
+    if (!vazio_(pj.justificativa)) return pj.justificativa;
+    return vazio_(pj.motivo_ajuste) ? null : pj.motivo_ajuste;
+  }
   function rotuloEvento_(ev) {
     var def = EventCatalog.existe(ev.event_type) ? EventCatalog.tipo(ev.event_type) : null;
     var sub = def && def.subtipos && !vazio_(ev.event_subtype) ? def.subtipos[ev.event_subtype] : null;
@@ -266,7 +272,7 @@ var AuditService = (function () {
         var descricao = ev.event_type === 'ESTORNO' ? 'Estorno de: ' + (alvo ? rotuloEvento_(alvo) : 'evento') : (alvo ? 'Correção de: ' : '') + rotuloEvento_(ev) + (n ? ' (' + n + (n === 1 ? ' animal)' : ' animais)') : '');
         itens.push({
           origem: 'EVENTO', id: ev.event_id, audit_id: null, op_id: ev.op_id, entidade: 'EVENTOS', entity_id: ev.event_id, acao: acao, campo: null,
-          valor_anterior: null, valor_novo: null, usuario: ev.created_by, timestamp: ev.created_at, justificativa: ev.payload_json && !vazio_(ev.payload_json.justificativa) ? ev.payload_json.justificativa : null,
+          valor_anterior: null, valor_novo: null, usuario: ev.created_by, timestamp: ev.created_at, justificativa: motivoEvento_(ev.payload_json),
           event_id: ev.event_id, event_type: ev.event_type, event_subtype: vazio_(ev.event_subtype) ? null : ev.event_subtype, event_date: ev.event_date,
           registration_date: ev.registration_date, reversal_of_event_id: vazio_(ev.reversal_of_event_id) ? null : ev.reversal_of_event_id,
           status: a.status, vigente: a.vigente, descricao: descricao,

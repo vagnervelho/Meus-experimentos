@@ -349,20 +349,37 @@ var TelaConfig = (function () {
   }
 
   // ------------------------------------------------------------------ auditoria ----
+  /** Ações da trilha completa (auditoria.listar: eventos, ajustes de animal e cadastros), na linguagem do pecuarista. */
+  var ACOES_AUDITORIA = [['', 'Todas'], ['REGISTRAR', 'Lançamento gravado'], ['CORRIGIR', 'Lançamento corrigido'], ['ESTORNAR', 'Lançamento estornado'], ['AJUSTAR', 'Dado do animal corrigido'],
+    ['CRIAR', 'Cadastro criado'], ['ALTERAR', 'Cadastro alterado'], ['CONTROLE', 'Controle do sistema'], ['RECUPERACAO', 'Recuperação'], ['MANUTENCAO', 'Manutenção']];
+  var ROTULO_ACAO = {};
+  ACOES_AUDITORIA.forEach(function (a) { if (a[0]) ROTULO_ACAO[a[0]] = a[1]; });
+  var ROTULO_ENTIDADE = { EVENTOS: 'Lançamento', ANIMAIS: 'Animal', PASTOS: 'Pasto', PROPRIEDADES: 'Propriedade', PARCEIROS: 'Parceiro', CONFIGURACOES: 'Parâmetro', LISTAS: 'Lista', CATEGORIAS: 'Categoria', ANEXOS: 'Anexo', IMPORTACOES: 'Importação', SISTEMA: 'Sistema' };
+  /** O que a linha da trilha diz: o lançamento (com link), o campo de animal corrigido ou o campo do cadastro. */
+  function oQueAuditoria_(x) {
+    var link = function (texto) { var r = 'evento/' + x.event_id; return Telas.existe(r) ? h('a', { class: 'botao botao-texto', href: Roteador.href(r), dataset: { rota: r } }, texto) : h('span', { text: texto }); };
+    if (x.origem === 'EVENTO') return link(x.descricao + (x.vigente === false && x.acao !== 'ESTORNAR' ? ' (não vale mais)' : ''));
+    if (x.origem === 'AJUSTE') return h('span', null, Fmt.rotuloOpcao('campo', x.campo) + ' · ', link(x.descricao));
+    return h('span', { text: (ROTULO_ENTIDADE[x.entidade] || Fmt.rotulo('', x.entidade)) + (x.campo ? ' · ' + x.campo : '') });
+  }
   function secaoAuditoria(el) {
     var f = { pagina: 1 };
-    var ents = [['', 'Todas'], ['ANIMAIS', 'Animais'], ['PASTOS', 'Pastos'], ['PROPRIEDADES', 'Propriedades'], ['PARCEIROS', 'Parceiros'], ['CONFIGURACOES', 'Parâmetros'], ['LISTAS', 'Listas'], ['CATEGORIAS', 'Categorias'], ['ANEXOS', 'Anexos'], ['IMPORTACOES', 'Importações']];
+    var ents = [['', 'Todas'], ['EVENTOS', 'Lançamentos (eventos)'], ['ANIMAIS', 'Animais'], ['PASTOS', 'Pastos'], ['PROPRIEDADES', 'Propriedades'], ['PARCEIROS', 'Parceiros'], ['CONFIGURACOES', 'Parâmetros'], ['LISTAS', 'Listas'], ['CATEGORIAS', 'Categorias'], ['ANEXOS', 'Anexos'], ['IMPORTACOES', 'Importações']];
     var sel = h('select', { id: 'aud-ent' }, ents.map(function (e) { return h('option', { value: e[0], text: e[1] }); }));
+    var acao = h('select', { id: 'aud-acao' }, ACOES_AUDITORIA.map(function (e) { return h('option', { value: e[0], text: e[1] }); }));
     var de = h('input', { type: 'date', id: 'aud-de' }), ate = h('input', { type: 'date', id: 'aud-ate' });
     var campo = function (id, rot, c) { return h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo', for: id, text: rot }), c); };
     var corpo = h('div');
-    el.appendChild(h('form', { class: 'filtros', on: { submit: function (ev) { ev.preventDefault(); f.pagina = 1; carregar(); } } }, campo('aud-ent', 'O que mudou', sel), campo('aud-de', 'De', de), campo('aud-ate', 'Até', ate), UI.botao('Filtrar', { tipo: 'primario', atributos: { type: 'submit' } })));
+    el.appendChild(UI.nota('Tudo o que mudou no sistema: cada lançamento (com quem, quando e, na correção e no estorno, o motivo), cada dado de animal corrigido e cada cadastro alterado. Nada se apaga daqui.', 'info'));
+    el.appendChild(h('form', { class: 'filtros', on: { submit: function (ev) { ev.preventDefault(); f.pagina = 1; carregar(); } } }, campo('aud-ent', 'O que mudou', sel), campo('aud-acao', 'O que foi feito', acao), campo('aud-de', 'De', de), campo('aud-ate', 'Até', ate), UI.botao('Filtrar', { tipo: 'primario', atributos: { type: 'submit' } })));
     el.appendChild(corpo);
     function carregar() {
       var q = { pagina: f.pagina };
       if (sel.value) q.entidade = sel.value;
-      if (de.value) q.de = de.value + 'T00:00:00.000Z';
-      if (ate.value) q.ate = ate.value + 'T23:59:59.999Z';
+      if (acao.value) q.acao = acao.value;
+      // Período pela data na fazenda (o servidor compara a data do instante no fuso da fazenda).
+      if (de.value) q.de = de.value;
+      if (ate.value) q.ate = ate.value;
       Util.limpar(corpo);
       corpo.appendChild(UI.carregando('Buscando a auditoria…'));
       Cliente.consulta('auditoria.listar', q).then(function (r) {
@@ -370,12 +387,14 @@ var TelaConfig = (function () {
         Util.limpar(corpo);
         var paginas = Math.max(1, Math.ceil(d.total / d.por_pagina));
         corpo.appendChild(h('p', { class: 'dado', text: d.total + (d.total === 1 ? ' registro' : ' registros') + ' de alteração' }));
-        corpo.appendChild(UI.tabela({ id: 'auditoria', rotulo: 'Auditoria', linhas: d.itens, chave: function (x) { return x.id || x.audit_id; }, porPagina: d.por_pagina, semPaginacao: true, vazio: { texto: 'Nenhuma alteração com esses filtros.' },
+        var valor = function (v) { return v === null || v === undefined || v === '' ? '—' : String(v); };
+        corpo.appendChild(UI.tabela({ id: 'auditoria', rotulo: 'Auditoria', linhas: d.itens, chave: function (x) { return x.origem + ':' + (x.id || x.audit_id); }, porPagina: d.por_pagina, semPaginacao: true, vazio: { texto: 'Nada com esses filtros.' },
           colunas: [
             { id: 'timestamp', rotulo: 'Quando', formatar: function (x) { return Fmt.instante(x.timestamp); } }, { id: 'usuario', rotulo: 'Quem' },
-            { id: 'entidade', rotulo: 'O quê', valor: function (x) { return Fmt.rotulo('', x.entidade) + ' · ' + Fmt.rotulo('', x.acao).toLowerCase(); } }, { id: 'campo', rotulo: 'Campo' },
-            { id: 'mudanca', rotulo: 'De → para', valor: function (x) { return (x.valor_anterior === null || x.valor_anterior === undefined ? '—' : String(x.valor_anterior)) + ' → ' + (x.valor_novo === null || x.valor_novo === undefined ? '—' : String(x.valor_novo)); } },
-            { id: 'justificativa', rotulo: 'Justificativa' },
+            { id: 'acao', rotulo: 'O que foi feito', valor: function (x) { return ROTULO_ACAO[x.acao] || Fmt.rotulo('', x.acao); } },
+            { id: 'oque', rotulo: 'Em quê', valor: function (x) { return x.descricao || x.campo || x.entidade; }, formatar: oQueAuditoria_ },
+            { id: 'mudanca', rotulo: 'De → para', valor: function (x) { return x.origem === 'EVENTO' ? '—' : valor(x.valor_anterior) + ' → ' + valor(x.valor_novo); } },
+            { id: 'justificativa', rotulo: 'Motivo', valor: function (x) { return x.justificativa || '—'; } },
           ] }).el);
         if (paginas > 1) corpo.appendChild(h('div', { class: 'paginacao' }, h('span', { class: 'suave', text: 'Página ' + d.pagina + ' de ' + paginas }), h('div', { class: 'acoes', style: 'margin-top:0' },
           UI.botao('Anterior', { desabilitado: d.pagina <= 1, aoClicar: function () { f.pagina -= 1; carregar(); } }), UI.botao('Próxima', { desabilitado: d.pagina >= paginas, aoClicar: function () { f.pagina += 1; carregar(); } }))));

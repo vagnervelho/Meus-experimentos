@@ -519,11 +519,35 @@ var Api = (function () {
   function paginaNegada(erro) {
     return paginaAviso_('Acesso negado', erro && erro.code === 'DENIED' ? erro.message : 'Não foi possível conferir o acesso. Tente de novo.');
   }
-  /** Conteúdo de um arquivo HTML da lista branca, para `<?!= include_('Styles') ?>` nos templates. */
+  /**
+   * Conteúdo de um arquivo HTML da lista branca, para `<?!= include_('Styles') ?>` nos templates, como vai ao
+   * aparelho: compactado (`compactar`), para a página caber no orçamento de ~450 KB (01, seção 6.2).
+   */
   function incluir(nome) {
     var n = String(nome);
     if (INCLUDES.indexOf(n) < 0) throw validacao_('Arquivo de tela não permitido: ' + n + '.', 'nome');
-    return HtmlService.createHtmlOutputFromFile(n).getContent();
+    return compactar(HtmlService.createHtmlOutputFromFile(n).getContent());
+  }
+  /**
+   * Tira de um include (`<script>` ou `<style>`) o que só serve a quem lê o código: o recuo do começo das linhas, as
+   * linhas vazias e as linhas que são só comentário (`// ...` e blocos que começam e terminam numa linha `/* ... *\/`).
+   * Comentário no fim de uma linha de código fica (a linha não muda). Seguro porque os includes não têm template literal
+   * nem texto que continue de uma linha para a outra (conferido por tests/interface.test.js).
+   */
+  function compactar(texto) {
+    var out = [], bloco = false;
+    String(texto).split(/\r?\n/).forEach(function (linha) {
+      var t = linha.trim();
+      if (bloco) { if (t.indexOf('*/') >= 0) bloco = false; return; }
+      if (t === '' || t.indexOf('//') === 0) return;
+      if (t.indexOf('/*') === 0) {
+        var fim = t.indexOf('*/', 2);
+        if (fim < 0) { bloco = true; return; }
+        if (fim === t.length - 2) return;
+      }
+      out.push(t);
+    });
+    return out.join('\n');
   }
 
   // ------------------------------------------------------------------ funções do editor e gatilhos ----
@@ -557,6 +581,7 @@ var Api = (function () {
     APP_VERSION: APP_VERSION,
     TITULO: TITULO,
     INCLUDES: INCLUDES,
+    compactar: compactar,
     ROTAS_CANONICAS: ROTAS_CANONICAS,
     FAIXA_TESTE: FAIXA_TESTE,
     RASCUNHO: RASCUNHO,

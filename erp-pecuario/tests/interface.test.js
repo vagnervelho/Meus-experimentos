@@ -56,6 +56,25 @@ test('scripts do cliente: sintaxe válida em cada <script> da página montada; t
   HTMLS.filter((f) => f !== 'Index.html').forEach((f) => assert.match(index, new RegExp("include_\\('" + f.replace('.html', '') + "'\\)"), f + ' incluído'));
 });
 
+test('página compactada (Api.compactar): sem recuo, linha vazia nem linha só de comentário; código e comentário no fim da linha ficam; os includes não têm o que a compactação quebraria', () => {
+  const s = S.sistema({ semCadastro: true });
+  const c = (t) => s.G.Api.compactar(t);
+  assert.equal(c('<script>\n  /**\n   * doc\n   */\n  var a = 1; // fica\n\n  // some\n  /* uma linha */\n  /* abre */ var b = 2;\n  var x = "a // b";\n    * nao_e_comentario;\n</script>'),
+    '<script>\nvar a = 1; // fica\n/* abre */ var b = 2;\nvar x = "a // b";\n* nao_e_comentario;\n</script>');
+  assert.equal(c('<style>\r\n  /* tema */\r\n  a { color: red; }\r\n</style>'), '<style>\na { color: red; }\n</style>');
+  // O que a compactação quebraria: template literal (linhas com recuo significativo) e texto que continua na outra linha.
+  HTMLS.filter((f) => f !== 'Index.html').forEach((f) => {
+    const servido = c(ler(f));
+    assert.doesNotMatch(servido, /`/, f + ': template literal (o recuo dentro dele mudaria o texto)');
+    assert.doesNotMatch(servido, /\\\n/, f + ': linha que continua na seguinte');
+    servido.split('\n').forEach((l) => assert.equal(l, l.trim(), f + ': linha com recuo'));
+  });
+  // Página montada = includes compactados; o tamanho que vai ao aparelho cabe no orçamento de 450 KB.
+  const html = doGet(s).getContent();
+  ['Components', 'Events'].forEach((n) => assert.ok(html.includes(c(ler(n + '.html'))), n + ' entra compactado'));
+  assert.ok(Buffer.byteLength(html, 'utf8') <= 450 * 1024, 'página montada: ' + Math.round(Buffer.byteLength(html, 'utf8') / 1024) + ' KB');
+});
+
 /** Variáveis de :root em {nome: #hex}. */
 function tema() {
   const css = ler('Styles.html');

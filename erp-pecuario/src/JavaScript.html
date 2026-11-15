@@ -146,7 +146,8 @@ var Fmt = (function () {
     SITUACAO_REPRODUTIVA: { NAO_APTA: 'Não apta', SEM_INFORMACAO: 'Sem informação', VAZIA: 'Vazia', EXPOSTA: 'Exposta (com touro)', INSEMINADA: 'Inseminada', PRENHA: 'Prenha' },
     METODO_PESAGEM: { BALANCA: 'Balança', FITA: 'Fita', ESTIMATIVA_VISUAL: 'Estimativa visual', MEDIA_LOTE: 'Média do lote' },
     SITUACAO_CADASTRAL: { PENDENTE: 'Pendente', ATIVO: 'Ativo', VENDIDO: 'Vendido', MORTO: 'Morto', DESCARTADO: 'Descartado', BAIXADO_AJUSTE: 'Baixado por ajuste', HISTORICO: 'Histórico', EXTERNO: 'De fora do rebanho', ANULADO: 'Anulado' },
-    IDENTIFICACAO: { BRINCO_ORIGEM: 'Brinco de origem', RFID: 'RFID (chip)', SISBOV: 'SISBOV', TATUAGEM: 'Tatuagem', OUTRO: 'Outra' },
+    IDENTIFICACAO: { BRINCO: 'Brinco da fazenda', BRINCO_ORIGEM: 'Brinco de origem (do vendedor)', RFID: 'RFID (chip)', SISBOV: 'SISBOV', TATUAGEM: 'Tatuagem', OUTRO: 'Outra' },
+    ACAO_MARCACAO: { MARCAR: 'Marcar', DESMARCAR: 'Tirar a marca' },
     TIPO_PARCEIRO: { FORNECEDOR: 'Fornecedor', COMPRADOR: 'Comprador', VETERINARIO: 'Veterinário', TRANSPORTADOR: 'Transportador', ARRENDADOR: 'Arrendador (pasto alugado)', OUTRO: 'Outro' },
     POSSE: { PROPRIO: 'Próprio', ARRENDADO: 'Arrendado (alugado)' },
     STATUS: { ATIVO: 'Ativo', INATIVO: 'Inativo' },
@@ -183,6 +184,7 @@ var Fmt = (function () {
     tipos: 'TIPO_PARCEIRO', posse: 'POSSE', status: 'STATUS', sexo_aplicavel: 'SEXO_APLICAVEL', condicao: 'CONDICAO', tipo_anexo: 'TIPO_ANEXO', politica: 'POLITICA_AVISO',
     situacao_nascimento: 'SITUACAO_NASCIMENTO', pai_confianca_parto: 'CONFIANCA',
     modalidade: 'MODALIDADE', base_peso: 'BASE_PESO', rendimento_tipo: 'RENDIMENTO_TIPO', criterio_rateio: 'CRITERIO_RATEIO',
+    tipo_identificacao: 'IDENTIFICACAO', acao: 'ACAO_MARCACAO',
   };
 
   function configurar(o) { Object.keys(o || {}).forEach(function (k) { if (o[k] !== undefined && o[k] !== null) cfg[k] = o[k]; }); cache = {}; }

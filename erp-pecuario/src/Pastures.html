@@ -9,7 +9,8 @@
  */
 var TelaPastos = (function () {
   var h = Util.h;
-  var ATALHOS = [{ tipo: 'TRANSFERENCIA', rotulo: 'Transferir daqui', origem: true }, { tipo: 'PESAGEM', rotulo: 'Pesar' }, { tipo: 'SANIDADE', rotulo: 'Vacinar' }];
+  /** Atalhos do painel (08, seção 4.1): o pasto de origem e "todos do pasto" já marcados (tire as exceções). Só tipo ativo. */
+  var ATALHOS = [{ tipo: 'TRANSFERENCIA', rotulo: 'Transferir daqui', origem: true }, { tipo: 'VENDA', rotulo: 'Vender daqui', origem: true }, { tipo: 'PESAGEM', rotulo: 'Pesar' }, { tipo: 'SANIDADE', rotulo: 'Vacinar' }];
   function texto(ind, formatar) { var v = UI.valorInd(ind, formatar); return v.motivo ? v.texto + ' (' + v.motivo + ')' : v.texto; }
   function ocupacao(o) { if (!o) return '—'; var t = texto(o, function (v) { return Fmt.numero(v, 0) + '%'; }); return o.valor !== null && o.valor !== undefined ? t + (o.base === 'CABECAS' ? ' (por cabeças)' : ' (por UA/ha)') : t; }
   function posse(p) { return Fmt.rotulo('POSSE', p.posse) + (p.posse === 'ARRENDADO' && p.arrendador_nome ? ' · ' + p.arrendador_nome : ''); }
@@ -105,7 +106,7 @@ var TelaPastos = (function () {
       var ids = (p.animais || []).map(function (a) { return a.animal_id; });
       ATALHOS.forEach(function (x) {
         if (!Store.tipoEvento(x.tipo) || !ids.length || p.data !== Fmt.hoje()) return;
-        acoes.appendChild(UI.botao(x.rotulo, { aoClicar: function () { Registro.abrir(x.tipo, { campos: x.origem ? { pasto_origem_id: id } : {}, linhas: ids.map(function (a) { return { animal_id: a }; }), origem: 'pasto/' + id }); } }));
+        acoes.appendChild(UI.botao(x.rotulo, { atributos: { 'data-atalho-pasto': x.tipo }, aoClicar: function () { Registro.abrir(x.tipo, { campos: x.origem ? { pasto_origem_id: id } : {}, linhas: ids.map(function (a) { return { animal_id: a }; }), origem: 'pasto/' + id }); } }));
       });
       var entrada = ['ENTRADA_INICIAL', 'OUTRA_ENTRADA'].filter(function (t) { return Store.tipoEvento(t); })[0];
       corpo.appendChild(UI.secao('Dados do pasto', UI.pares([
