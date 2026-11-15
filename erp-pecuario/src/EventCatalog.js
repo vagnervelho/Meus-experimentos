@@ -281,6 +281,41 @@ var EventCatalog = (function () {
     a_('documento', 'Recibo ou nota', 'texto'),
     a_('descricao', 'Descrição', 'texto'),
   ];
+  /**
+   * IDENTIFICACAO (04, seção 4.4; 03a, seção 4.4): rotina de curral, coletiva. O tipo de identificação vale para o
+   * lançamento inteiro (cada linha de IDENTIFICACOES leva o tipo); por animal, o código novo e o motivo. O brinco do
+   * vendedor (BRINCO_ORIGEM) só nasce na compra: aqui ele só pode ser retirado.
+   */
+  var TIPOS_IDENTIFICACAO = ['BRINCO', 'RFID', 'SISBOV', 'TATUAGEM', 'OUTRO', 'BRINCO_ORIGEM'];
+  var CAMPOS_IDENTIFICACAO = [
+    c_('event_date', 'Data', 'data', { obrigatorio: true, default: 'HOJE' }),
+    c_('tipo_identificacao', 'Identificação', 'lista', { obrigatorio: true, opcoes: TIPOS_IDENTIFICACAO, default: 'BRINCO', ajuda: 'Brinco da fazenda, chip, SISBOV, tatuagem ou outra. O brinco do vendedor só pode ser retirado.' }),
+    c_('property_id', 'Propriedade', 'ref:PROPRIEDADES', { default: { de: 'CONFIGURACOES.propriedade_padrao_id' } }),
+    c_('responsible', 'Responsável', 'texto'),
+    c_('notes', 'Observações', 'texto'),
+  ];
+  function camposIdentificacao_(subtipo) {
+    var l = [a_('animal_id', 'Animal', 'ref:ANIMAIS', { obrigatorio: true })];
+    if (subtipo !== 'REMOCAO') l.push(a_('codigo', subtipo === 'SUBSTITUICAO' ? 'Número novo' : 'Número', 'texto', { obrigatorio: true, ajuda: 'No brinco, zeros à esquerda não diferenciam números (0012 = 12).' }));
+    if (subtipo !== 'PRIMEIRA_IDENTIFICACAO') l.push(a_('motivo', subtipo === 'SUBSTITUICAO' ? 'Por que trocou' : 'Por que tirou', 'lista', { obrigatorio: true, lista: 'MOTIVO_IDENTIFICACAO' }));
+    l.push(a_('observacoes', 'Observações deste animal', 'texto'));
+    return l;
+  }
+  /**
+   * MARCACAO (04, seção 4.4; 03b, seção 2.6): marca ou desmarca "para descarte" ou "não localizado". A ação vale para o
+   * lançamento inteiro e vai no payload (`acao`), com o motivo do descarte quando é marcação para descarte.
+   */
+  var CAMPOS_MARCACAO = [
+    c_('event_date', 'Data', 'data', { obrigatorio: true, default: 'HOJE' }),
+    c_('acao', 'Marcar ou desmarcar', 'lista', { obrigatorio: true, opcoes: ['MARCAR', 'DESMARCAR'], default: 'MARCAR' }),
+    c_('property_id', 'Propriedade', 'ref:PROPRIEDADES', { default: { de: 'CONFIGURACOES.propriedade_padrao_id' } }),
+    c_('responsible', 'Responsável', 'texto'),
+    c_('notes', 'Observações', 'texto'),
+  ];
+  var CAMPOS_ANIMAL_MARCACAO = [
+    a_('animal_id', 'Animal', 'ref:ANIMAIS', { obrigatorio: true }),
+    a_('observacoes', 'Observações deste animal', 'texto'),
+  ];
   /** Frete e outros custos de aquisição: cada item é um lançamento próprio, com parceiro e um título com vencimento próprio. */
   var CAMPOS_CUSTO_COMPRA = [
     a_('tipo', 'Custo', 'lista', { obrigatorio: true, opcoes: ['FRETE', 'OUTRO'], default: 'FRETE' }),
@@ -427,8 +462,48 @@ var EventCatalog = (function () {
             a_('pasto_destino_id', 'Pasto onde está de fato', 'ref:PASTOS', { obrigatorio: true }),
           ],
         },
-        RECLASSIFICACAO: { rotulo: 'Mudar a categoria', fase: 2 },
-        DIVERGENCIA_CONTAGEM: { rotulo: 'Animal não encontrado na contagem', fase: 2 },
+        RECLASSIFICACAO: {
+          rotulo: 'Mudar a categoria', fase: 2,
+          campos_animal: [
+            a_('animal_id', 'Animal', 'ref:ANIMAIS', { obrigatorio: true }),
+            a_('categoria_manual_id', 'Categoria', 'ref:CATEGORIAS', { ajuda: 'Vazio = volta à categoria automática (pela idade, sexo e condição).' }),
+          ],
+        },
+        DIVERGENCIA_CONTAGEM: {
+          rotulo: 'Animal não encontrado na contagem', fase: 2,
+          campos_animal: [
+            a_('animal_id', 'Animal', 'ref:ANIMAIS', { obrigatorio: true }),
+            a_('observacoes', 'Em que contagem faltou', 'texto', { ajuda: 'Vazio = o motivo do lançamento. Se o animal reaparecer, estorne esta baixa.' }),
+          ],
+        },
+      },
+    },
+    IDENTIFICACAO: {
+      frequente: false, selecao_animais: 'VARIOS', filtro_elegiveis: { situacao: 'ATIVO' }, modo_entrada: 'CURRAL', revisao: 'LOCAL', critico: false,
+      reads: LEITURAS_MOTOR.concat(LEITURAS_FINANCEIRO),
+      campos: CAMPOS_IDENTIFICACAO,
+      componentes: ['seletor_animais'],
+      grupos_repetiveis: {},
+      subtipos: {
+        PRIMEIRA_IDENTIFICACAO: { rotulo: 'Pôr o primeiro brinco (ou outra identificação)', fase: 2, campos_animal: camposIdentificacao_('PRIMEIRA_IDENTIFICACAO') },
+        SUBSTITUICAO: { rotulo: 'Trocar o brinco (perdido, danificado, renumeração)', fase: 2, campos_animal: camposIdentificacao_('SUBSTITUICAO') },
+        REMOCAO: { rotulo: 'Tirar o brinco sem pôr outro', fase: 2, campos_animal: camposIdentificacao_('REMOCAO') },
+      },
+    },
+    MARCACAO: {
+      frequente: false, selecao_animais: 'VARIOS', filtro_elegiveis: { situacao: 'ATIVO' }, modo_entrada: 'FORM', revisao: 'LOCAL', critico: false,
+      reads: LEITURAS_MOTOR.concat(LEITURAS_FINANCEIRO),
+      campos: CAMPOS_MARCACAO,
+      componentes: ['seletor_animais'],
+      grupos_repetiveis: {},
+      subtipos: {
+        DESCARTE: {
+          rotulo: 'Para descarte', fase: 2,
+          // Campo de cabeçalho só deste subtipo (camposEvento(tipo, subtipo)): o motivo, quando se marca.
+          campos: [c_('motivo_descarte', 'Motivo do descarte', 'lista', { lista: 'MOTIVO_DESCARTE', visivel_se: quando_('acao', ['MARCAR']) })],
+          campos_animal: CAMPOS_ANIMAL_MARCACAO,
+        },
+        NAO_LOCALIZADO: { rotulo: 'Não localizado', fase: 2, campos_animal: CAMPOS_ANIMAL_MARCACAO },
       },
     },
     ESTORNO: {
@@ -497,8 +572,12 @@ var EventCatalog = (function () {
     if (d.subtipos) return (d.subtipos[subtipo] && d.subtipos[subtipo].campos_animal) || [];
     return d.campos_animal || [];
   }
-  function camposEvento(nome) {
-    return (DEFINICOES[nome] && DEFINICOES[nome].campos) || [];
+  /** Campos de cabeçalho do tipo; com subtipo, mais os do subtipo (`subtipos[S].campos`, ex.: o motivo do descarte da marcação). */
+  function camposEvento(nome, subtipo) {
+    var d = DEFINICOES[nome];
+    var base = (d && d.campos) || [];
+    var sub = d && d.subtipos && !vazio_(subtipo) ? d.subtipos[subtipo] : null;
+    return sub && Array.isArray(sub.campos) ? base.concat(sub.campos) : base;
   }
   /** Campos de um grupo repetível do tipo (ex.: as crias do NASCIMENTO); grupo inexistente → lista vazia. */
   function camposGrupo(nome, grupo) {
