@@ -1448,7 +1448,8 @@ var EventService = (function () {
         erroGeral_(m, 'parcelas', e.codigo, 'Parcela ' + (k + 1) + ': ' + e.mensagem);
       });
     });
-    if (!itens.length || itens.length !== ctxEv.itens.length) return;
+    // Animal com erro ou repetido (ANIMAL_REPETIDO já apontado): sem conjunto de animais certo não há rateio a montar.
+    if (!itens.length || itens.length !== ctxEv.itens.length || Utils.unicos(itens.map(function (it) { return it.animal_id; })).length !== itens.length) return;
     var bruto = typeof c.valor_bruto === 'number' ? c.valor_bruto : null;
     var desconto = typeof c.desconto_comercial === 'number' ? c.desconto_comercial : 0;
     if (bruto !== null && desconto >= bruto) erroGeral_(m, 'desconto_comercial', 'VALOR_FORA_DA_FAIXA', 'O desconto (' + Utils.formatarReais(desconto) + ') precisa ser menor que o valor bruto da venda (' + Utils.formatarReais(bruto) + ').');
