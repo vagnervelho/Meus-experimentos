@@ -1236,15 +1236,18 @@ var EventService = (function () {
       arroba_kg: m.params.arroba_kg, tolerancia_pct: m.params.fin_tolerancia_conferencia_pct,
       animais: itens.map(function (it) { var n = it.negocio; return { chave: it.codigo_interno, peso: n.peso, peso_carcaca_kg: n.peso_carcaca_kg, valor_individual: n.valor_individual, base_manual: n.base_manual }; }),
     });
+    // O campo do cabeçalho que o catálogo já recusou (obrigatório, fora da lista) não leva um segundo erro da negociação.
+    var jaRecusados = {};
+    m.col.erros.forEach(function (e) { if (!e.animal_id && e.campo) jaRecusados[e.campo] = true; });
     neg.erros.forEach(function (e) {
       if (typeof e.indice === 'number') erroItem_(m, itens[e.indice], e.campo, e.codigo, e.mensagem);
-      else erroGeral_(m, e.campo, e.codigo, e.mensagem);
+      else if (!jaRecusados[e.campo]) erroGeral_(m, e.campo, e.codigo, e.mensagem);
     });
     neg.avisos.forEach(function (a) { avisoItem_(m, null, a.codigo, a.mensagem); });
     ctxEv.negociacao = neg;
     if (neg.erros.length || typeof c.valor_animais !== 'number') return;
     var contaAnimais = FinancialService.conta(m.repo, FinancialService.CONTAS.COMPRA);
-    var contaCustos = FinancialService.conta(m.repo, FinancialService.CONTAS.FRETE_COMPRA);
+    var contaCustos = custos.length ? FinancialService.conta(m.repo, FinancialService.CONTAS.FRETE_COMPRA) : null;
     var rateioItens = itens.map(function (it, i) { return { animal_id: it.animal_id, chave: it.codigo_interno, base: neg.bases[i], quem: it.quem }; });
     var rateio = { criterio: neg.criterio, itens: rateioItens, cemPorCento: true, justificativa: nulo_(c.justificativa_rateio) };
     var n = itens.length;

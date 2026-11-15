@@ -163,7 +163,8 @@ var FinancialService = (function () {
       itens.forEach(function (it) {
         if (typeof it.base !== 'number' || !isFinite(it.base) || it.base <= 0) col.erro(det_('BASE_INVALIDA', campo, (it.quem || it.chave) + ': a base do rateio precisa ser maior que zero.'));
       });
-      if (s.rateio.criterio === 'MANUAL' && vazio_(s.rateio.justificativa)) col.erro(det_('CAMPO_OBRIGATORIO', 'justificativa_rateio', 'Explique o rateio manual (por que esses pesos).'));
+      var jaPediu = col.erros.some(function (e) { return e.campo === 'justificativa_rateio'; });
+      if (s.rateio.criterio === 'MANUAL' && vazio_(s.rateio.justificativa) && !jaPediu) col.erro(det_('CAMPO_OBRIGATORIO', 'justificativa_rateio', 'Explique o rateio manual (por que esses pesos).'));
       if (col.erros.length === antes && inteiroPositivo_(s.valor)) {
         try {
           rat = ratear(s.valor, s.rateio.criterio, itens);
@@ -426,6 +427,7 @@ var FinancialService = (function () {
         if (a.financial_id !== rat.financial_id) achado(11, 'ALOCACOES_FINANCEIRAS', a.alloc_id, 'A alocação aponta para outro lançamento que o do seu rateio.');
       });
       if (allocs.length === 1 && rat.criterio !== 'DIRETO') achado(13, 'RATEIOS', rat.rateio_id, 'Rateio com um único animal precisa ser DIRETO (está ' + rat.criterio + ').');
+      if (allocs.length !== 1 && rat.criterio === 'DIRETO') achado(13, 'RATEIOS', rat.rateio_id, 'Rateio DIRETO precisa ter exatamente um animal (tem ' + allocs.length + ').');
     });
     conferirNegocios_(repo, lancs, rateioDe, achado);
     if (repo.carregada('SANIDADE')) {
