@@ -601,7 +601,7 @@ linha, campo, mensagem, reparo}] (até 300), truncado}`. Checagens (`AuditServic
 (linhas vigentes; alvo inexistente ou animal ANULADO; ANEXOS pela entidade; ERROS_LOG só alerta), `ENTRADA_ABERTA`
 (ATIVO ⇔ soma dos efeitos = 1), `LINHA_DO_TEMPO`, `PROJECAO` e `STATUS_EVENTOS` (reparo `RECONSTRUIR`), `INVENTARIO`
 (total e por pasto, hoje), `ALOCACOES` (soma = total do rateio, ≤ lançamento, 100% em COMPRA, VENDA e ENTRADA_INICIAL),
-`PARCELAS`, `ALOCACAO_DIRETA` (reparo), `BASE_RATEIO` (alerta; VALOR_INDIVIDUAL e DIRETO de escopo EVENTO), `COPIAS`
+`PARCELAS`, `ALOCACAO_DIRETA` (reparo), `BASE_RATEIO` (alerta; VALOR_INDIVIDUAL de escopo EVENTO pela base do animal, DIRETO pelo valor do lançamento), `COPIAS`
 (data de PESAGENS, REPRODUCAO e IDENTIFICACOES = data do evento), `CELULAS` (COERCIDA = alerta; ERRO = erro),
 `OPERACOES_ORFAS`, `FILHAS_SEM_PAI` (alerta: linha cujo evento, operação, importação, rateio ou lançamento não existe),
 `CABECALHOS` (aba ou coluna ausente e coluna de SCHEMA_META sumida = erro; coluna do dono = alerta), `FUSO_LOCALE`,
@@ -708,7 +708,7 @@ CONFIG (sem marco zero; conta SALDO_ABERTURA_REBANHO ausente), além dos da Unit
 | `registrar/corrigir/estornar(ctx, pedido)` | `UnitOfWork.run(ctx, comando(...))` → `{dados: resposta, duplicado, opId, dataVersion}` |
 | `simular(ctx, {acao, dados, avisosAceitos})` | Mesmo tratador em modo SIMULAR → `{dados: {simulacao, impactos, avisos, linhas}}`; erro de validação e bloqueio (CONFLICT) são lançados como no commit |
 | `consultaListar(filtros)` / `listar(ctx, filtros)` | `{total, pagina, por_pagina, itens: [evento]}`; filtros `{tipo, de, ate, animal_id, vigentes, pagina, por_pagina}`; inclui anulados e estornos; não inclui operações que falharam |
-| `consultaObter({event_id})` / `obter(ctx, dados)` | `{evento, linhas (com codigo_interno e brinco), detalhes: {IDENTIFICACOES, PESAGENS, REPRODUCAO, BAIXAS, AJUSTES, FINANCEIRO, RATEIOS, ALOCACOES_FINANCEIRAS}, anula}`; NOT_FOUND |
+| `consultaObter({event_id})` / `obter(ctx, dados)` | `{evento (com partner_id), linhas (com codigo_interno e brinco), detalhes: {IDENTIFICACOES, PESAGENS, REPRODUCAO, BAIXAS, AJUSTES, COMPRAS, FINANCEIRO (na ordem de gravação), PARCELAS (por lançamento, por número), RATEIOS, ALOCACOES_FINANCEIRAS}, anula}`; NOT_FOUND |
 | `planejarEntradaImportada(tx, {campos, animais}, {importacao: {import_id}, conhecidos, rotulos})` | O MESMO planejamento da ENTRADA_INICIAL (todas as regras do formulário) dentro do tratador de outro comando: o evento nasce com `import_id` e `source = IMPORTACAO`; `conhecidos` = `{animal_id: {sexo, data_nascimento, mae_id, pai_id, nome}}` de animais ainda pendentes da mesma importação, aceitos como mãe ou pai; `rotulos[i]` substitui o "quem" das mensagens (ex.: `Linha 12`). Devolve o resultado do tratador (`{erros}` ou `{avisos, resumo, derivados, ...}`); exige `leiturasEntrada()` e acesso cru |
 | `leiturasEntrada()` | Abas que esse planejamento lê |
 | `classificarCategoria(perfil, data, categorias)` | Perfil `{sexo, data_nascimento, castrado, reprodutor, parida, categoria_modo, categoria_manual_id}` (valores em D) → `{category_id, codigo, nome, manual}` ou `null` |
@@ -726,7 +726,25 @@ PERIODO_BLOQUEADO)}`. Item por tipo:
   mesmo lançamento. Na correção de evento criador, o item leva o `animal_id` criado pelo original (reaproveitado);
   animal do original que fica fora do substituto é anulado (com as regras do estorno).
 - OUTRA_ENTRADA de animal existente (volta ao rebanho): `{animal_id, brinco?, pasto_destino_id, observacoes?}`; só
-  VENDIDO, DESCARTADO, BAIXADO_AJUSTE ou HISTORICO.
+  VENDIDO, DESCARTADO, BAIXADO_AJUSTE ou HISTORICO (EXTERNO → `ANIMAL_EXTERNO`: cadastro de referência não entra no
+  rebanho, nem por compra).
+- COMPRA: `campos` e `animais` da seção 12 + `parcelas` e `custos`. Animal novo: como na entrada (atributos, brinco,
+  outras identificações), origem COMPRADO, pasto do item ou do lote, `brinco_origem` → IDENTIFICACOES `BRINCO_ORIGEM`
+  (sem unicidade), peso vivo → EVENTO_ANIMAIS.peso e PESAGENS (tipo COMPRA), carcaça → `peso_carcaca_kg` (nunca
+  pesagem). Animal que volta: `{animal_id, brinco?, brinco_origem?, pasto_destino_id?, peso?, metodo_pesagem?,
+  peso_carcaca_kg?, valor_individual?, base_manual?, observacoes?}`, só VENDIDO, DESCARTADO, BAIXADO_AJUSTE ou HISTORICO
+  (`ANIMAL_MORTO`, `JA_NO_REBANHO`, `ANIMAL_EXTERNO`). A negociação é `FinancialService.negociacao` (erros dela por campo
+  ou por animal; o campo que o catálogo já recusou não leva segundo erro). Grava COMPRAS (1 linha), EVENTOS.partner_id =
+  fornecedor e `total_value` = `valor_total`, o lançamento COMPRA_ANIMAIS (valor dos animais, quantidade = cabeças,
+  documento = nota fiscal, as parcelas) e um FRETE_DESPESAS_COMPRA por custo (os fretes antes dos outros custos: o tipo
+  de cada item se reconstrói pelo prefixo que soma `COMPRAS.frete`; `FinancialService.tiposDosCustos`), todos 100%
+  rateados pelo mesmo critério e bases; `EVENTO_ANIMAIS.valor_individual` = a alocação do lançamento principal. Erros:
+  `PARCEIRO_INATIVO` (aceito na correção se o original já o usava), `NAO_ENCONTRADO`, `PASTO_INATIVO`, os da negociação
+  e das parcelas (`SEM_PARCELAS`, `PARCELAS_NAO_SOMAM`, `PARCELAS_DEMAIS`...), `CONFIG` sem a conta do sistema. Avisos:
+  `VALOR_DIVERGENTE`, `RATEIO_SEM_PESO`, `PERIODO_BLOQUEADO`. Data antes do marco zero → `ANTES_DO_MARCO_ZERO`.
+- MORTE / DESCARTE com lançamento: `custo_valor` + `custo_conta_id` (CUSTEIO; outra natureza → `CONTA_INVALIDA`) ou
+  `receita_valor` (OUTRAS_RECEITAS_OPERACIONAIS): um lançamento com um título (vencimento vazio = data do evento) e rateio
+  CABECAS entre os animais (DIRETO com um); `total_value` = o valor; no descarte, EVENTOS.partner_id = quem pagou.
 - AJUSTE_INVENTARIO: CORRECAO_CADASTRO `{animal_id, campo, valor_novo}` (um item por campo; texto canônico, `''` =
   desconhecido; apagar mãe, pai ou nascimento apaga a confiança); IDENTIFICACAO_INCORRETA `{animal_id, brinco}`;
   CORRECAO_LOCALIZACAO `{animal_id, pasto_destino_id, pasto_origem_id?}` (a origem é a da linha do tempo na data).
@@ -749,7 +767,7 @@ PERIODO_BLOQUEADO)}`. Item por tipo:
   CONFLICT com o evento. Aviso `LOTACAO_ACIMA_DA_CAPACIDADE`. `payload_json.gta_numero` quando informado.
 - MORTE / DESCARTE: `animais: [{animal_id, observacoes?}]`. Linha de saída (−1) com `pasto_origem_id` tirado da linha do
   tempo (`Timeline.pastoAntesDaSaida`) e uma linha de BAIXAS por animal (`tipo`, `causa`/`diagnostico` ou
-  `motivo`/`destino`, `responsavel` = `responsible`, `observacoes`). Sem `total_value` nesta etapa.
+  `motivo`/`destino`, `responsavel` = `responsible`, `observacoes`); lançamento opcional acima.
 - Datas antes do marco zero só no NASCIMENTO; nos demais tipos, `ANTES_DO_MARCO_ZERO` sozinho (sem conferir a linha do tempo).
 - ESTORNO (`estornar`): `{event_id, justificativa}`.
 
@@ -759,9 +777,18 @@ substitui, estorna, animais: [{animal_id, codigo_interno, brinco, sexo, situacao
 (corrigir/estornar), `valor_abertura_origem` (`INFORMADO`), `gta_numero` (TRANSFERENCIA), `avisos_aceitos: [{codigo, n,
 justificativa?}]`. `impactos` da simulação: `{acao, event_type, event_subtype, event_date, animais, novos, anulados,
 substitui, total_value, abertura, pre_marco_zero, parto: {nascidos_vivos, natimortos, pasto_destino_id, historico} | null,
-transferencia: {pasto_origem_id, pasto_destino_id} | null, baixas}`. Códigos de aviso emitidos: POSSIVEL_DUPLICIDADE (a
+transferencia: {pasto_origem_id, pasto_destino_id} | null, baixas, compra: {modalidade, base_peso, criterio,
+valor_animais, frete, outros_custos, valor_total, conferencia, desvio_pct, peso_vivo_total, peso_carcaca_total, arrobas,
+rendimento_pct, rendimento_tipo, preco_unitario, unidade_preco} | null, financeiro: {lancamentos: [{financial_id,
+descricao, conta_codigo, conta_nome, natureza, tipo, valor, partner_id, criterio, papel, parcelas: [{parcela_num,
+data_vencimento, valor, forma_pagamento}]}], total, a_pagar, a_receber, por_animal: [{animal_id, codigo_interno, brinco,
+valor}]} | null}`. Estorno e correção: os lançamentos do original deixam de valer pela vigência (FINANCEIRO `status` e
+`status_pagamento` CANCELADO na fase C; parcelas não são regravadas, desenho-base 16.11); parcela LIQUIDADA do original
+→ CONFLICT `PARCELA_LIQUIDADA` (o transporte da baixa chega com `parcela.baixar`, Fase 4); cancelar lançamento com
+competência até `fin_bloqueio_ate` → aviso `PERIODO_BLOQUEADO` (um só por comando). Códigos de aviso emitidos: POSSIVEL_DUPLICIDADE (a
 matriz conta como animal do parto), BRINCO_PARECIDO, IDADE_REPRODUTIVA, INTERVALO_PARTO_CURTO, LOTACAO_ACIMA_DA_CAPACIDADE
-(em cabeças), PERIODO_BLOQUEADO; política por código em `avisos_politica` (ausente = AVISA).
+(em cabeças), VALOR_DIVERGENTE, RATEIO_SEM_PESO, PERIODO_BLOQUEADO; política por código em `avisos_politica` (ausente =
+AVISA).
 
 ## 15. Serviços de cadastro e consulta (E1.7 e E1.8): `Config`, `AnimalService`, `PastureService`, `InventoryService`
 
@@ -785,11 +812,11 @@ dados, {chave, avisos})` (confere a projeção depois de cada comando), `ler(con
 | `normalizar(chave, bruto)` | `{texto (célula), valor (tipado)}` ou `{erro: {codigo, mensagem}}`: tipo, faixa (`FAIXAS`), datas, `faixas_etarias_meses` (inteiros crescentes), `avisos_politica` (códigos de `CODIGOS_AVISO` → BLOQUEIA/AVISA/IGNORA). Vazio só em chave sem padrão |
 | `planejarParametro(tx, chave, valor, justificativa?)` | Para outro comando: normaliza e põe no plano (altera a linha ou cria a que falta). `CONFIGURACOES` nas `reads`. Inválido → `VALIDATION` |
 | `aplicarPolitica(params, avisos, coletor)` | `avisos_politica`: BLOQUEIA vira erro no coletor; IGNORA some; devolve os que ficam (AVISA) |
-| `cadastros(repo)` / `LEITURAS_CADASTROS` | Para `sistema.bootstrap`: `{configuracoes (= listar), listas, categorias (por prioridade), cobertura, parceiros}` |
+| `cadastros(repo)` / `LEITURAS_CADASTROS` | Para `sistema.bootstrap`: `{configuracoes (= listar), listas, categorias (por prioridade), cobertura, parceiros, contas (PLANO_CONTAS por ordem)}` |
 | `comandoSalvar` — `config.salvar` | `dados: {valores: {chave: valor}, justificativa?}` (várias chaves, uma operação). Códigos: `CHAVE_DESCONHECIDA`, `TIPO_INVALIDO`, `FORMATO_INVALIDO` (inclusive fuso IANA), `VALOR_FORA_DA_FAIXA`, `VALOR_FORA_DA_LISTA`, `CAMPO_OBRIGATORIO`, `NAO_ENCONTRADO`/`PROPRIEDADE_INATIVA` (propriedade padrão), `DATA_FUTURA` (marco zero), `FAIXA_INVALIDA` (GMD mín ≥ máx). Marco zero com entrada/saída vigente → `CONFLICT` `MARCO_ZERO_EM_USO` (RN-101). Mudar `idade_desmama_padrao_meses` ou `data_marco_zero` reconstrói todas as projeções na fase C. Resposta `{chaves, itens}` |
 | `comandoSalvarLista` — `lista.salvar` | `dados: {lista_id?, lista, codigo?, rotulo, ordem?, ativo?, justificativa?}`. Código MAIÚSCULAS ASCII (derivado do rótulo se vazio), único na lista; ordem padrão = última + 10. Edição só de rótulo, ordem, ativo. Códigos: `CODIGO_REPETIDO`, `CAMPO_IMUTAVEL`, `CODIGO_RESERVADO`, `FORMATO_INVALIDO`. Resposta: o item |
 | `comandoSalvarCategoria` — `categoria.salvar` | `dados: {categorias: [{category_id?, campos}]}` ou `{category_id?, campos}`. Aviso `CATEGORIAS_SEM_COBERTURA` (lacunas na mensagem; política por código). Erros: `CAMPO_IMUTAVEL` (código), `CODIGO_REPETIDO`, `FAIXA_INVALIDA` (máxima ≤ mínima, ou máxima < 1 mês: ela é exclusiva), `VALOR_FORA_DA_FAIXA` (prioridade < 0), `CONDICAO_INCOMPATIVEL`, `PRIORIDADE_REPETIDA` (entre ativas), `CATEGORIA_EM_USO` (reclassificação manual vigente), `CAMPO_OBRIGATORIO`, `CAMPO_DESCONHECIDO`. Resposta `{categorias, cobertura}` |
-| `comandoSalvarParceiro` — `parceiro.salvar` | `dados: {partner_id?, campos: {nome, tipos (lista ou "A,B"), documento, telefone, endereco, observacoes, ativo}}`. Documento repetido → aviso `POSSIVEL_DUPLICIDADE`. Resposta: o parceiro |
+| `comandoSalvarParceiro` — `parceiro.salvar` | `dados: {partner_id?, campos: {nome, tipos (lista ou "A,B": FORNECEDOR, COMPRADOR, VETERINARIO, TRANSPORTADOR, ARRENDADOR, OUTRO), documento, telefone, endereco, observacoes, ativo}}` (03a, 4.8). Documento repetido → aviso `POSSIVEL_DUPLICIDADE`. Inativo sai dos seletores e é recusado como contraparte nova de evento (`PARCEIRO_INATIVO`); o tipo só filtra a tela. Resposta: o parceiro |
 
 ### 15.2 `AnimalService` (lista, ficha, edição, externo; idade, categoria e peso na leitura)
 
@@ -802,7 +829,7 @@ dados, {chave, avisos})` (confere a projeção depois de cada comando), `ler(con
 | `linhaLeve(L, a)`, `COLUNAS_LEVE` | Linha do store. Idade/categoria na data de referência (hoje; baixado: data da saída); `categoria_id` null no EXTERNO; `peso_vencido` só em ATIVO |
 | `consultaCargaInicial()` / `cargaInicial(ctx)` | ATIVOS + EXTERNOS em colunas: `{data, n, colunas, valores: {coluna: [..]}}` (ordem de `codigo_interno`) |
 | `consultaListar({situacoes?})` — `animal.listar` | Mesmo formato; padrão = baixados (VENDIDO, MORTO, DESCARTADO, BAIXADO_AJUSTE, HISTORICO); PENDENTE/ANULADO → `VALIDATION` |
-| `consultaFicha({animal_id, geracoes?})` — `animal.ficha` | `{animal_id, data, geral (A), genealogia (B), localizacao (C), pastos (D: `periodos` [início, fim) com dias, evento de `entrada` e de `saida` — entrada, transferência, correção de localização, saída —, e `por_pasto: [{pasture_id, pasto_nome, dias, periodos, atual}]`), peso (E), sanitario (F), reprodutivo (G), financeiro (H), eventos (I: linha do tempo com status, vigente, anulado_por, ajustes; no parto aparece também na mãe, papel MATRIZ), anexos (J: ANEXOS ativos do animal)}`; todo bloco traz `entregue`; E, F e H voltam `{entregue: false, modulo, fase, mensagem, itens: []}`; G é `ReproductionService.blocoFicha` (seção 24: parte de partos, `parcial: true`). Genealogia: `{sem_genealogia, mae, pai, arvore (nós {..., confianca, confirmado, geracao, disponivel, tem_ancestrais, mae, pai}), filhos [{..., papel MAE\|PAI, confianca}]}`; `geracoes` 1–6 (padrão 3). `NOT_FOUND`; `VALIDATION` |
+| `consultaFicha({animal_id, geracoes?})` — `animal.ficha` | `{animal_id, data, geral (A), genealogia (B), localizacao (C), pastos (D: `periodos` [início, fim) com dias, evento de `entrada` e de `saida` — entrada, transferência, correção de localização, saída —, e `por_pasto: [{pasture_id, pasto_nome, dias, periodos, atual}]`), peso (E), sanitario (F), reprodutivo (G), financeiro (H), eventos (I: linha do tempo com status, vigente, anulado_por, ajustes; no parto aparece também na mãe, papel MATRIZ), anexos (J: ANEXOS ativos do animal)}`; todo bloco traz `entregue`; E e F voltam `{entregue: false, modulo, fase, mensagem, itens: []}`; G é `ReproductionService.blocoFicha` (seção 24: parte de partos, `parcial: true`); H é `FinancialService.blocoFicha` (seção 26) com `parcial: true` e `pendente: {modulo: 'FINANCEIRO', fase: 4, mensagem}`. Genealogia: `{sem_genealogia, mae, pai, arvore (nós {..., confianca, confirmado, geracao, disponivel, tem_ancestrais, mae, pai}), filhos [{..., papel MAE\|PAI, confianca}]}`; `geracoes` 1–6 (padrão 3). `NOT_FOUND`; `VALIDATION` |
 | `comandoEditar` — `animal.editar` | Um formulário só. `dados: {animal_id, campos, justificativa?, justificativa_aviso?}`; só o que muda é gravado. `nome, raca, observacoes, foto_anexo_id` → AUDITORIA; campos de `EventCatalog.CAMPOS_CORRIGIVEIS` → evento AJUSTE_INVENTARIO/CORRECAO_CADASTRO datado de hoje, com todas as regras do motor (justificativa obrigatória: `CAMPO_OBRIGATORIO`), NA MESMA operação da auditoria. EXTERNO: sexo e nascimento por AUDITORIA (`AuditService.alteracao(..., {externo: true})`), demais sensíveis `CAMPO_NAO_SE_APLICA`. `brinco`, pasto, situação, colunas calculadas → `CAMPO_NAO_EDITAVEL` (mensagem com o caminho certo); `ANEXO_INVALIDO`; `CAMPO_DESCONHECIDO`. Resposta `{animal_id, event_id, correcoes, cadastro, animal (linha leve)}`; nada muda → `semAlteracao` |
 | `comandoCadastrarExterno` — `animal.cadastrarExterno` | `dados: {campos: {nome*, sexo*, raca, data_nascimento, data_nascimento_confianca, observacoes}}`; nome repetido entre externos → aviso `POSSIVEL_DUPLICIDADE`; linha de ANIMAIS nasce na fase C (AUDITORIA CRIAR), situação EXTERNO. Resposta `{animal_id, animal}` |
 
@@ -823,7 +850,7 @@ dados, {chave, avisos})` (confere a projeção depois de cada comando), `ler(con
 | `presentes(L, data)` | `{motivo, itens: [{animal, pasture_id}]}` pelo replay até o fim de D; sem marco zero `DADOS_INSUFICIENTES`, antes dele `ANTERIOR_AO_MARCO_ZERO` (itens `null`) |
 | `compor(L, itens, data, {animais}?)` | `{cabecas, machos, femeas, por_categoria (por prioridade), sem_categoria, peso_vivo_total, ua, animais?}` |
 | `consultaPosicao({data?, animal_id?})` — `inventario.posicao` | `{data, marco_zero, motivo, cabecas, por_sexo: {M, F}, por_pasto: [{pasture_id, nome, cabecas}], sem_pasto, por_categoria, sem_categoria, peso_vivo_total, ua}`; com `animal_id`: `{data, animal_id, presente, pasture_id, motivo}`. Futura/inválida → `VALIDATION`; animal inexistente → `NOT_FOUND` |
-| `consultaVisaoGeral()` — `dashboard.obter` (Fase 1) | Posição de hoje + `geradoEm` + `pendencias: {sem_pasto, sem_brinco, sem_categoria}` |
+| `consultaVisaoGeral()` — `dashboard.obter` (Fase 1) | Posição de hoje + `geradoEm` + `pendencias: {sem_pasto, sem_brinco, sem_categoria}` + `titulos` (`FinancialService.titulos` de hoje: a pagar e a receber) |
 | `consultaElegiveis({tipo, subtipo?, data?, pasture_id?})` — `inventario.elegiveis` | Animais elegíveis a um tipo ativo cujo `filtro_elegiveis.situacao` é ATIVO (transferência, nascimento, morte, descarte), pela linha do tempo na data: no rebanho ao fim de D, no pasto pedido em D, com o `sexo` do filtro. `{data, tipo, pasture_id, motivo, n, itens: [{animal_id, codigo_interno, brinco, sexo, pasture_id}]}`; antes do marco zero (ou sem ele) `n`/`itens` null com o motivo. `VALIDATION` (`TIPO_SEM_ELEGIVEIS`, data inválida ou futura), `NOT_FOUND` (pasto) |
 | `consultaAlertas(estado)` — `alerta.listar` | `estado = {backup: {ultimo_em: ISO\|null}, integridade: {verificado_em, erros}\|null}` vem de quem chama (Maintenance/Api; fora da planilha). Devolve `{data, geradoEm, alertas: [{codigo, nivel AVISO\|ERRO, mensagem, n, ids, entidade}], nao_avaliados: [{codigo, motivo, mensagem}]}`; códigos `ALERTAS`: ATIVO_SEM_PASTO, SEM_BRINCO, SEM_CATEGORIA, BACKUP_ATRASADO (`alerta_backup_atrasado_dias`; nenhum backup = alerta), INTEGRIDADE_COM_ERRO, IMPORTACAO_INCOMPLETA (IMPORTACOES `IMPORTANDO`). Parte do `estado` ausente vai para `nao_avaliados` |
 
@@ -1005,7 +1032,7 @@ falha → exceção (a execução aparece com erro).
 |---|---|
 | `runAcceptanceTests({usuario, plano?, limiteMs?, reiniciar?, injetar?})` | `plano` = `ACEITACAO` (padrão, ou `TEST_PLAN`) ou `DEMO`. ACEITACAO: base de teste NOVA (a anterior vai para a lixeira) por `Maintenance.setup({ambiente: 'TESTE'})` e os cenários `CENARIOS` (PREPARO, CT-09, CT-10, CT-12, CT-18, RESTAURACAO, CT-20, CT-11, ISOLAMENTO), todos pela `Api` com `ambiente: 'TESTE'`. Relatório `{plano, completo: true, ok, resumo: {cenarios: {PASSOU, FALHOU}, passos: {PASSOU, FALHOU, NAO_SE_APLICA, PENDENTE_NA_CONTA_DO_DONO}}, cenarios: [{id, titulo, situacao, falha, ms, passos: [{passo, titulo, situacao, detalhe}]}], corpus, limpeza, arquivo: {nome, id}}`, gravado em JSON na pasta Testes. Pausa perto de `limiteMs` (padrão 4 min) → `{completo: false, proximo, mensagem}`; a chamada seguinte continua (cursor `TEST_CURSOR`, resultados `TEST_RESULTADO:<i>`, apagados no fim). Falha de cenário vai para o relatório (e para o log) e os demais seguem; falha no PREPARO encerra. No fim: backups e bancos antigos da rodada para a lixeira; a base de teste final fica (página de concorrência) |
 | `injetar` (só no Node) | `{ocuparLock(), liberarLock()}`: outra execução segura o lock (CT-10, passo 5). Sem ele, o passo é NAO_SE_APLICA |
-| DEMO | Base de demonstração em `DEMO_SPREADSHEET_ID` (criada pelo setup se não existe): propriedade, 6 pastos (1 arrendado), D0 = hoje − 1095 (ou o marco zero já gravado), 6 ENTRADA_INICIAL de 40 animais (110 vacas, 4 touros, 30 novilhas, 48 bezerros ao pé com a mãe, 48 garrotes), 8 OUTRA_ENTRADA de 8, 1 entrada estornada, 3 TRANSFERENCIA de garrotes (origem fixa no plano), 12 NASCIMENTO (um gemelar com natimorto), 1 MORTE e 1 DESCARTE → 314 ativos conferidos pelo inventário. Sorteio com semente fixa (`geracaoDemo(d0)`), chaves `seed:<n>`: reexecutar não grava de novo. Comando recusado para o seed: `{completo: false, ok: false, proximo, falha}` (cursor fica no passo) |
+| DEMO | Base de demonstração em `DEMO_SPREADSHEET_ID` (criada pelo setup se não existe): propriedade, 6 pastos (1 arrendado), D0 = hoje − 1095 (ou o marco zero já gravado), 6 ENTRADA_INICIAL de 40 animais (110 vacas, 4 touros, 30 novilhas, 48 bezerros ao pé com a mãe, 48 garrotes), 8 COMPRA de 8 (valor de cada animal, frete de R$ 400,00 e duas parcelas, do fornecedor `seed:parceiro`), 1 entrada estornada, 3 TRANSFERENCIA de garrotes (origem fixa no plano), 12 NASCIMENTO (um gemelar com natimorto), 1 MORTE e 1 DESCARTE → 314 ativos conferidos pelo inventário. Sorteio com semente fixa (`geracaoDemo(d0)`), chaves `seed:<n>`: reexecutar não grava de novo. Comando recusado para o seed: `{completo: false, ok: false, proximo, falha}` (cursor fica no passo) |
 | `runDiagnostics({usuario, linhas?})` | Itens SP-01 a SP-10 e RUNTIME `{id, titulo, situacao: OK \| FALHOU \| ALERTA \| NAO_SE_APLICA, medidas, observacao}`: corpus nas três formas + coerção Geral (formato do fixture) + atomicidade; sonda do Drive + abertura pelo SpreadsheetApp; lock; e-mail ativo; tempos com `linhas` (padrão 10.000) em EVENTO_ANIMAIS + custo de ler as propriedades; gatilhos; fuso do V8. Planilhas temporárias na pasta Testes (lixeira no fim); sem e-mail nem ID de arquivo no relatório; JSON também na pasta Testes |
 | `paginaConcorrencia()` | HTML autocontido (CT-10, passo 6): 5 gravações com chaves diferentes + 2 com a mesma chave, em paralelo, na base de TESTE; confere 7 respostas boas, 1 duplicada e 6 eventos com `event_seq` distintos |
 | `CENARIOS`, `SITUACAO`, `LIMITE_MS`, `geracaoDemo(d0)` | Constantes e o gerador determinístico |
@@ -1142,3 +1169,40 @@ indicadores por estação são da Fase 3.
 | `TelaRebanho` (ficha) | Atalhos "Registrar parto" (fêmea ativa, pelo `filtro_elegiveis`), "Transferir", "Registrar morte", "Descartar"; aba Pastos com o evento de entrada e de saída de cada período e "Dias em cada pasto"; aba Reprodução com situação, cria ao pé, nº de partos, partos (crias, intervalo) e o que chega na Fase 3 |
 | `Fmt` | Rótulos `SITUACAO_NASCIMENTO` (VIVO, NATIMORTO) e `TIPO_BAIXA` |
 
+## 26. `FinancialService` (puro: o financeiro de todo evento, Fase 2)
+
+Monta, dentro do tratador de um comando, as linhas de FINANCEIRO, PARCELAS, RATEIOS e ALOCACOES_FINANCEIRAS (03b, seções
+10 a 13); nada grava. Dinheiro em centavos inteiros; base de rateio na unidade do critério (R$ em DIRETO e
+VALOR_INDIVIDUAL, kg em PESO_VIVO e PESO_CARCACA, 1 em CABECAS, peso relativo em MANUAL). Testes: `tests/financeiro.test.js`
+(puro) e `tests/compra.test.js` (comandos).
+
+| Função | Contrato |
+|---|---|
+| `CONTAS` | Códigos das contas do sistema: `COMPRA` (COMPRA_ANIMAIS), `FRETE_COMPRA` (FRETE_DESPESAS_COMPRA), `ABERTURA`, `RECEITA_DESCARTE` (OUTRAS_RECEITAS_OPERACIONAIS), `VENDA` |
+| `conta(repo, codigo)` | Linha do PLANO_CONTAS pelo código; ausente ou inativa → `CONFIG` |
+| `dividirParcelas(total, n)` | Quociente para todas, sobra para as primeiras (9.400,00 em 3 → 3.133,34 + 3.133,33 + 3.133,33); total ou n que não sejam inteiros positivos → `INTERNAL` |
+| `resolverParcelas(valor, parcelas, col, {campo, rotulo, prefixo})` | `[{parcela_num, data_vencimento, valor, forma_pagamento, documento}]` ou null com erros no coletor: `SEM_PARCELAS`, `PARCELAS_DEMAIS` (`MAX_PARCELAS` = 120), `CAMPO_OBRIGATORIO`/`FORMATO_INVALIDO` (vencimento), `VALOR_FORA_DA_FAIXA`, `PARCELAS_NAO_SOMAM`. Valor vazio = divisão igual do que falta |
+| `ratear(valor, criterio, itens)` | Maior resto (`Utils.ratear`; desempate maior resto → maior base → menor `chave` = codigo_interno). `itens: [{animal_id, chave, base}]`; um item → DIRETO com base = valor do lançamento. `{criterio, baseTotal, totalAlocado, itens: [{animal_id, chave, base, valor}]}` |
+| `planejar(tx, spec, col)` | Um lançamento completo. `spec: {evento: {event_id, event_date, property_id}, conta, naturezas, valor, descricao, partner_id, documento, observacoes, quantidade, pasture_id, retida, data_competencia (padrão event_date), semCaixa, parcelas, rateio: {criterio, itens, cemPorCento, justificativa} ou null, campo, campoParcelas, rotulo, prefixo}`. Erros no coletor (`CONTA_INVALIDA`, `CONTA_INATIVA`, `VALOR_FORA_DA_FAIXA`, `BASE_INVALIDA`, `CAMPO_OBRIGATORIO` na justificativa do MANUAL, `RATEIO_INVALIDO`, `RATEIO_INCOMPLETO`, os das parcelas) → null. Recusas de programação (`INTERNAL`): sem conta, parcela em lançamento sem caixa (invariante 4), rateio de ESTOQUE_INSUMOS ou NAO_OPERACIONAL (14), rateio sem animais. Devolve `{linhas: {FINANCEIRO, PARCELAS (ABERTA), RATEIOS (escopo EVENTO, data_base = event_date), ALOCACOES_FINANCEIRAS}, financial_id, rateio, parcelas}` |
+| `juntar(plano, planejado)` | Junta as linhas ao dicionário `{aba: [linhas]}` do evento |
+| `avisoPeriodo(params, data, oque)` | `{codigo: 'PERIODO_BLOQUEADO', mensagem}` quando `data ≤ fin_bloqueio_ate`; senão null |
+| `negociacao(spec)` | Modalidade × base de peso (07, 4.1 e 4.2; 03b, 4.3 a 4.5). `spec: {modalidade, base_peso, rendimento_carcaca_pct, rendimento_tipo, preco_unitario, peso_total_kg, valor, criterio_rateio, arroba_kg, tolerancia_pct, animais: [{chave, peso, peso_carcaca_kg, valor_individual, base_manual}]}` → `{base_peso, rendimento_pct, rendimento_tipo (APURADO na carcaça com peso vivo), unidade_preco, preco_unitario, peso_vivo_total, peso_carcaca_total, arrobas, criterio, bases, conferencia (centavos), desvio_pct, erros: [{codigo, campo, mensagem, indice?}], avisos}`. Critério: DIRETO com um animal; CABECA → CABECAS (preço único) ou VALOR_INDIVIDUAL (valor por animal); KG_VIVO e ARROBA VIVO → PESO_VIVO, ou CABECAS com aviso `RATEIO_SEM_PESO` quando só há o peso do lote; ARROBA CARCACA → PESO_CARCACA; LOTE → o escolhido. Aviso `VALOR_DIVERGENTE` acima de `tolerancia_pct`. Erros: `CAMPO_OBRIGATORIO`, `BASE_PESO_INVALIDA`, `CAMPO_NAO_SE_APLICA`, `VALOR_FORA_DA_FAIXA`, `CONFLITO_DE_CAMPOS`, `VALORES_INCOMPLETOS`, `VALOR_INDIVIDUAL_NAO_SOMA`, `PESO_TOTAL_DIVERGENTE`, `PESO_OBRIGATORIO`, `PESO_INCOMPLETO`, `CARCACA_MAIOR_QUE_VIVO` |
+| `conferir(tx)` | As invariantes de 03b, seção 14, sobre as linhas vigentes (`tx.repo`; `tx.cru` para 19 e 20): `[{invariante (1 a 20), tabela, id, mensagem}]`, vazio = fecha ao centavo. A consulta declara `leituras()` com acesso cru; aba não lida desliga as invariantes que dependem dela (17 só com SANIDADE). Base da etapa de integridade |
+| `leituras()` | `Timeline.LEITURAS` + COMPRAS, VENDAS, PLANO_CONTAS, PARCEIROS |
+| `situacaoPagamento(parcelas, ativo)` | `{status_pagamento, data_pagamento}` pela ordem de 03b, 10.4 (o projetor usa esta função) |
+| `tiposDosCustos(lancamentosAcessorios, frete)` | `FRETE` ou `OUTRO` para cada lançamento, na ordem de gravação (o prefixo que soma o frete); null se nenhum prefixo fecha |
+| `titulos(repo, data?)` | `{data, a_pagar, a_receber, vencido_pagar, vencido_receber, parcelas_abertas}`: nominal das parcelas não liquidadas em D, de lançamentos vigentes com competência até D. Lê FINANCEIRO e PARCELAS |
+| `blocoFicha(repo, animal)` | Bloco H: `{entregue: true, animal_id, custo_aquisicao (a projeção = Σ alocações AQUISICAO_ANIMAIS do período atual), custo_aquisicao_origem, por_natureza, custeio, custo_acumulado, receitas, despesas_venda, resultado: {valor, motivo, mensagem?} (só com saída e custo conhecido), lancamentos: [{financial_id, event_id, event_type, event_date, data_competencia, conta_codigo, conta_nome, natureza, tipo, classe_custo_animal, descricao, valor_lancamento, valor_alocado, criterio, base_valor, base_total, partner_id}]}`, pelas alocações vigentes (todas as passagens do animal). Lê FINANCEIRO, RATEIOS, ALOCACOES_FINANCEIRAS, PLANO_CONTAS e EVENTOS |
+
+## 27. Telas da Fase 2, etapa de financeiro do evento e compra — `Components`, `Events`, `Animals`, `JavaScript`
+
+| Peça | O que existe |
+|---|---|
+| `Store` | `parceiro(id)` (inclusive inativo), `contas(naturezas?)` e `conta(id)` (plano de contas do bootstrap) |
+| `Campos` | `ref:PLANO_CONTAS` como lista das contas ativas filtradas por `def.naturezas`; dinheiro, parceiro, conta e propriedade legíveis na revisão e na diferença |
+| `Registro` (compra) | Grade de animais novos com os principais da compra (brinco, sexo, nascimento ou idade, peso, valor) e "Incluir animal que volta ao rebanho" (campos `CAMPOS_VOLTA_COMPRA`, iguais aos do servidor); grupos `parcelas` (começa com uma linha, "+ Outra parcela") e `custos` ("+ Frete ou outro custo"); linha de grupo toda em branco não vai ao servidor. Revisão pelo servidor com a negociação (valor dos animais, frete, outros custos, custo total, conferência pelo preço, arrobas, critério) e os lançamentos (títulos, a pagar ou a receber, valor por animal). Morte ou descarte com custo ou receita também revisam pelo servidor. Verbo "Gravar a compra"; resultado "Compra gravada: N animais entraram no rebanho, custo total de R$ X." |
+| `TelaEventos` | Corrigir também a COMPRA (`previaCompra_`: cabeçalho de COMPRAS e do evento, parcelas do lançamento principal, custos na ordem com o tipo pelo prefixo do frete, animais criados com os atributos e os que voltaram com os campos da volta); morte e descarte trazem o lançamento opcional. Detalhe com "Negociação" (`data-secao="compra"`) e "Lançamentos financeiros" (`data-secao="financeiro"`: natureza, parceiro, situação do pagamento, títulos e rateio) |
+| `TelaRebanho` (ficha) | Aba Financeiro (`data-bloco-financeiro`): custo de aquisição com a origem, custeio, custo acumulado, resultado (só com saída) e a tabela "Lançamentos do animal" (valor do lançamento e o que coube a ele) |
+| `Fmt` | Rótulos `MODALIDADE`, `BASE_PESO`, `RENDIMENTO_TIPO`, `CRITERIO_RATEIO`, `STATUS_LANCAMENTO`, `STATUS_PAGAMENTO`, `STATUS_PARCELA`, `NATUREZA` |
+
+Testes: `tests/ui/compra.test.js` (compra pela tela a 1280 e 360 px, correção pelo detalhe, morte com custo).
