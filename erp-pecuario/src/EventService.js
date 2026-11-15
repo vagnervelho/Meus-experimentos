@@ -1779,7 +1779,7 @@ var EventService = (function () {
     var n = itens.length;
     var rateioItens = itens.map(function (it, i) { return { animal_id: it.animal_id, chave: it.codigo_interno, base: neg.bases[i], quem: it.quem }; });
     var justificativa = neg.criterio === 'MANUAL' ? nulo_(c.justificativa_rateio)
-      : neg.estimado ? 'Base estimada: última pesagem de cada animal até ' + br_(ev.event_date) + (neg.peso_vivo_total !== null ? ', ajustada ao peso vivo do lote (' + Utils.formatarNumero(neg.peso_vivo_total) + ' kg).' : '.') : null;
+      : neg.estimado ? 'Base estimada: última pesagem de cada animal até ' + br_(ev.event_date) + (neg.peso_vivo_total !== null ? ', ajustada ao peso vivo do lote (' + String(neg.peso_vivo_total).replace('.', ',') + ' kg).' : '.') : null;
     var rateio = { criterio: neg.criterio, itens: rateioItens, cemPorCento: true, justificativa: justificativa, estimado: neg.estimado };
     var planejados = [];
     var lancs = [];

@@ -826,6 +826,11 @@ function gerarCorrecao(M, amb, rnd, evs) {
   if (alvo.tipo === 'VENDA') {
     let ids = d.animais.map((a) => a.animal_id);
     if (ids.length > 1 && rnd() < 0.4) ids = ids.slice(0, ids.length - 1);
+    else if (rnd() < 0.3) {
+      // A correção também pode pôr na venda um animal que não estava nela.
+      const mais = animaisNoDia(M, D).filter((id) => !ids.includes(id));
+      if (mais.length) ids = ids.concat([sorteio(rnd, mais)]);
+    }
     return propVenda(M, amb, D, ids, negocioVenda(rnd, ids.length), rnd, alvo);
   }
   if (alvo.tipo === 'COMPRA') {

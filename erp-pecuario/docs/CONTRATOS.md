@@ -19,7 +19,10 @@ DESCARTE no motor (seções 12 e 14), parceiros validados nos eventos, plano de 
 o bloco H (seção 15.2), títulos na visão geral (seção 15.4) e as telas (seção 27). Fase 2, etapa VENDA (E2.4): VENDA no
 motor (seções 12 e 14) com o financeiro do próprio evento (`FinancialService`, seção 26: deduções, totais da venda,
 carcaça do romaneio, base estimada), a carência na venda (`HealthService`, seção 28), o CT-09 inteiro na aceitação
-(seção 21) e as telas (seção 29). Fase 2, etapa IDENTIFICAÇÃO, MARCAÇÃO, AJUSTES E ESTORNO GERAL (E2.6 e E2.7, backend):
+(seção 21) e as telas (seção 29). Fase 2, etapa ATAQUE AO MOTOR E AO FINANCEIRO: o modelo de referência e os oráculos independentes (seções 6.6 e 31) e as
+correções que eles acharam (elegíveis de fato no dia da saída, seção 15.4; origem da correção de localização na posição,
+seção 14; consultas da linha do tempo com acesso cru, seção 13; mensagens com número brasileiro e um erro por causa na
+negociação, seções 3 e 26). Fase 2, etapa IDENTIFICAÇÃO, MARCAÇÃO, AJUSTES E ESTORNO GERAL (E2.6 e E2.7, backend):
 IDENTIFICACAO, MARCACAO e os subtipos RECLASSIFICACAO e DIVERGENCIA_CONTAGEM no motor (seções 12 a 14), as sequências de
 identificação e de marcação e a retirada de brinco no projetor (seção 13), a trilha completa de `auditoria.listar` (seção
 11), o alerta NAO_LOCALIZADO (seção 15.4) e o estorno e a correção de qualquer evento (seção 30).
@@ -119,6 +122,7 @@ dado vem do usuário, `CONFIG` no fuso. `Utils` só cita `Validation` para lanç
 | `reaisParaCentavos(reais)`, `centavosParaReais(centavos)` | Conversão do codec; vazio → `null` |
 | `CENTAVOS_MAX` | `999999999999999`: maior valor em centavos (em módulo) que vai à planilha e volta exato (15 dígitos). Acima disso a `Validation` recusa DINHEIRO (`VALOR_FORA_DA_FAIXA`) e o codec também |
 | `formatarReais(centavos)` | `'R$ 1.234,56'` para mensagens |
+| `formatarNumero(valor, casas?)` | Número nas mensagens ao usuário, no formato brasileiro: `'1.234,5'`, `'0,0001'`; `casas` fixa as casas (meio para cima), sem ela as que o número usa. Não número → `INTERNAL`. Peso, percentual e limite de faixa nas mensagens do servidor passam por aqui (nunca `0.0001`) |
 | `ratear(totalCentavos, itens)` | Ver abaixo |
 | `aparar(texto)` | Sem espaços nas pontas; vazio → `''` |
 | `normalizarBrinco(texto, manterZeros?)` | Forma canônica (`03a`, DL-04): `' 0012 '` → `'12'`; `'br 07'` → `'BR07'`; com `manterZeros`, `'0012'` |
@@ -386,7 +390,18 @@ removido, nenhuma órfã, operação terminada com `finished_at` e, se FALHOU, `
 primárias únicas; `EVENTOS.status` = predicado; projeção de ANIMAIS = reconstrução; nenhuma filha vigente órfã;
 cadastro só de operação confirmada, com o último valor auditado). Comando novo que a etapa seguinte criar (e um
 projetor real) deve entrar em `CENARIOS` desse arquivo — o cenário `motor` (OUTRA_ENTRADA real pelo `EventService`, com
-`Timeline.porta()` e `Timeline.conferir` no desfecho) é o modelo; `cen.ambiente` dá as opções do `ambiente`.
+`Timeline.porta()` e `Timeline.conferir` no desfecho) é o modelo; `cen.ambiente` dá as opções do `ambiente`. Nos cenários da
+Fase 2 (venda, correção de compra, estorno de transferência) o desfecho roda também os oráculos de `apoio-oraculos.js`
+(`oraculosIndependentes`), e o teste "subconjuntos densos" mata cada um deles ANTES de cada flush da primitiva
+SpreadsheetApp (buffer cheio: 27 escritas pendentes na fase A da venda) com todos os subconjuntos até 5 escritas ou 24
+sorteados (semente fixa; densidades de 10%, 50% e 90%).
+
+`tests/apoio-oraculos.js` (oráculos independentes, sem Timeline nem FinancialService): `cru(m | amb)` (linhas cruas de
+`ABAS_CRU`), `vigencia(r)` (P3 sobre OPERACOES e EVENTOS: `{vig, anuladoPor, confirmado, porId}`), `ordenar(linhas)`
+(data, classe, raiz da cadeia, sequência), `replayCru(r)` (`{V, linhas, porAnimal}`), `inventarioDe(linhas, D)`
+(`{total, porPasto, semPasto}` ao fim de D), `situacaoDe(linhasDoAnimal)` (`{situacao, pasto, saida, entrada}`),
+`invariantesCruas(r)` (03b, seção 14, invariantes 1 a 18 e 20 sobre as linhas cruas; linha de operação que falhou é
+inerte e fica de fora) e `maiorResto(V, [{animal, codigo, base}])` (05, seção 4.5, em inteiros).
 
 `tests/apoio-eventos.js`: `ambienteEventos({primitiva, order, marcoZero, config, categorias})` = banco semeado
 (propriedade, 5 pastos `PASTOS.A/B/C/INATIVO/PEQUENO` — o último com capacidade de 2 cabeças —, CONFIGURACOES com
@@ -713,7 +728,7 @@ substituição (desenho-base 16.1).
 | `validarMarcacoes(linhas)` | Sequência por subtipo das linhas MARCACAO de UM animal (`payload.acao`): `JA_MARCADO`, `NAO_MARCADO` |
 | `descrever(problema, nomePasto?)` | Frase para o pecuarista, sem o "quem" (inclui os códigos das duas sequências; nomes por subtipo: "a baixa na contagem", "a reclassificação", "a troca de identificação", "a retirada de identificação") |
 | `NOME_IDENTIFICACAO` | Nome de cada tipo de identificação nas mensagens (brinco, chip (RFID), SISBOV...) |
-| `fonte(tx, {excluir, parametros})` | Acesso indexado às linhas da unidade (usa `tx.cru` quando há); `excluir` = eventos tratados como anulados (validação de estorno e de substituição) |
+| `fonte(tx, {excluir, parametros})` | Acesso indexado às linhas da unidade (usa `tx.cru` quando há); `excluir` = eventos tratados como anulados (validação de estorno e de substituição). Quem reproduz a linha do tempo lê com **acesso cru**: a posição de um substituto (`ordem_seq`) é a do primeiro da cadeia, que é um evento anulado; sem `tx.cru`, `ordemSeq` de um substituto lança `INTERNAL` em vez de pôr o substituto no fim do dia em silêncio |
 | `projetarAnimal(fonte, id)` → `{campos, meta}`; `projetar(fonte, ids \| null)` | A ÚNICA rotina que calcula as projeções de ANIMAIS (03a, 4.3.3 e 4.3.4); `projetar` inclui as mães alcançadas e `cria_ao_pe` |
 | `porta()` / `reconstruir(tx, escopo)` | Porta `ctx.projecoes`. Escopo `{animais, eventos}` (o `derivados` do EventService) ou `{tudo: true}`. Grava ANIMAIS (+ `updated_at` quando algo muda), `IDENTIFICACOES.data_fim` e FINANCEIRO (`status`, `cancelado_em` = `created_at` do anulador, `cancelado_por_event_id`, `status_pagamento` e `data_pagamento` por `FinancialService.situacaoPagamento`, `animal_id` da alocação DIRETA) |
 | `conferir(tx)` | Projeção gravada × reconstrução total (precisa de `tx.cru`): `[{tabela, id, campo, gravado, calculado}]`, vazio = coincidem. Base da integridade (E1.11) |
@@ -812,7 +827,10 @@ PERIODO_BLOQUEADO)}`. Item por tipo:
   CABECAS entre os animais (DIRETO com um); `total_value` = o valor; no descarte, EVENTOS.partner_id = quem pagou.
 - AJUSTE_INVENTARIO: CORRECAO_CADASTRO `{animal_id, campo, valor_novo}` (um item por campo; texto canônico, `''` =
   desconhecido; apagar mãe, pai ou nascimento apaga a confiança); IDENTIFICACAO_INCORRETA `{animal_id, brinco}`;
-  CORRECAO_LOCALIZACAO `{animal_id, pasto_destino_id, pasto_origem_id?}` (a origem é a da linha do tempo na data).
+  CORRECAO_LOCALIZACAO `{animal_id, pasto_destino_id, pasto_origem_id?}` (a origem é a da linha do tempo na POSIÇÃO do lançamento
+  no dia: depois das entradas e dos movimentos do dia que vêm antes dele — na correção, o substituto fica no lugar do
+  original, antes de uma transferência posterior do mesmo dia —; as saídas do dia vêm depois: no dia de uma venda, o
+  que quebra é a venda, CONFLICT com ela).
 - NASCIMENTO: `animais: [{animal_id: matriz}]` (exatamente uma; `UMA_MATRIZ`) e `crias: [{situacao_nascimento, sexo,
   brinco, nome, raca, peso, metodo_pesagem, observacoes}]` (1 a 4; `SEM_CRIAS`, `CRIAS_DEMAIS`). Cada viva cria um animal
   (papel CRIA, +1) com mãe = matriz (CONFIRMADA), nascimento = data do parto (CONFIRMADA), origem NASCIDO, castrado e
@@ -921,7 +939,7 @@ dados, {chave, avisos})` (confere a projeção depois de cada comando), `ler(con
 
 | Membro | Contrato |
 |---|---|
-| `leituras()`, `leitor(tx)` | Abas do leitor e o leitor da consulta: `L = {tx, repo, f (Timeline.fonte), params, marcoZero, hoje, categorias, categoriaPorId, animais (vigentes), filhosMae, filhosPai}` |
+| `leituras()`, `leitor(tx)` | Abas do leitor e o leitor da consulta: `L = {tx, repo, f (Timeline.fonte), params, marcoZero, hoje, categorias, categoriaPorId, animais (vigentes), filhosMae, filhosPai}`. A consulta que usa o leitor declara `acessoCru: true` (seção 13, `fonte`): todas as desta seção e das seções 15.3 e 15.4 declaram |
 | `idadeEm(a, data)` | Meses completos; `null` sem nascimento ou antes dele |
 | `perfilEm(L, a, data)` / `categoriaEm(L, a, data)` | Perfil em D (castração posterior não conta; parida = partos prévios, PARTO até D ou cria nascida até D; reclassificação vigente em D) → `EventService.classificarCategoria` → `{category_id, codigo, nome, manual}` ou `null` |
 | `pesoVigente(L, a, data, categoria)` | `{kg, situacao: PESADO\|PESAGEM_VENCIDA\|SEM_PESAGEM\|SEM_PESO, estimado, data_pesagem, metodo, referencia_kg}` (desenho-base, seção 6) |
@@ -947,10 +965,11 @@ dados, {chave, avisos})` (confere a projeção depois de cada comando), `ler(con
 | Membro | Contrato |
 |---|---|
 | `presentes(L, data)` | `{motivo, itens: [{animal, pasture_id}]}` pelo replay até o fim de D; sem marco zero `DADOS_INSUFICIENTES`, antes dele `ANTERIOR_AO_MARCO_ZERO` (itens `null`) |
+| `presentesNoDia(L, data)` | A mesma forma: no rebanho em algum momento de D (entrada e saída do dia contam), com o pasto de antes das saídas do dia (`Timeline.pastoAntesDaSaida`): quem pode receber um fato datado de D |
 | `compor(L, itens, data, {animais}?)` | `{cabecas, machos, femeas, por_categoria (por prioridade), sem_categoria, peso_vivo_total, ua, animais?}` |
 | `consultaPosicao({data?, animal_id?})` — `inventario.posicao` | `{data, marco_zero, motivo, cabecas, por_sexo: {M, F}, por_pasto: [{pasture_id, nome, cabecas}], sem_pasto, por_categoria, sem_categoria, peso_vivo_total, ua}`; com `animal_id`: `{data, animal_id, presente, pasture_id, motivo}`. Futura/inválida → `VALIDATION`; animal inexistente → `NOT_FOUND` |
 | `consultaVisaoGeral()` — `dashboard.obter` (Fase 1) | Posição de hoje + `geradoEm` + `pendencias: {sem_pasto, sem_brinco, sem_categoria}` + `titulos` (`FinancialService.titulos` de hoje: a pagar e a receber) |
-| `consultaElegiveis({tipo, subtipo?, data?, pasture_id?})` — `inventario.elegiveis` | Animais elegíveis a um tipo ativo cujo `filtro_elegiveis.situacao` é ATIVO (transferência, nascimento, venda, morte, descarte, identificação, marcação), pela linha do tempo na data: no rebanho ao fim de D, no pasto pedido em D, com o `sexo` do filtro. `{data, tipo, pasture_id, motivo, n, itens: [{animal_id, codigo_interno, brinco, sexo, pasture_id}]}`; antes do marco zero (ou sem ele) `n`/`itens` null com o motivo. `VALIDATION` (`TIPO_SEM_ELEGIVEIS`, data inválida ou futura), `NOT_FOUND` (pasto) |
+| `consultaElegiveis({tipo, subtipo?, data?, pasture_id?})` — `inventario.elegiveis` | Animais elegíveis a um tipo ativo cujo `filtro_elegiveis.situacao` é ATIVO (transferência, nascimento, venda, morte, descarte, identificação, marcação), pela linha do tempo na data: movimento e saída (transferência, venda, morte, descarte; `MOVIMENTO_OU_SAIDA`) = no rebanho ao fim de D; fato (parto, identificação, marcação e os das fases seguintes) = no rebanho em algum momento de D, o dia da saída contando como na validação (RN-017: a vaca que morre no parto é elegível ao parto desse dia), no pasto em que estava antes das saídas do dia (`presentesNoDia`); no pasto pedido, com o `sexo` do filtro. `{data, tipo, pasture_id, motivo, n, itens: [{animal_id, codigo_interno, brinco, sexo, pasture_id}]}`; antes do marco zero (ou sem ele) `n`/`itens` null com o motivo. `VALIDATION` (`TIPO_SEM_ELEGIVEIS`, data inválida ou futura), `NOT_FOUND` (pasto) |
 | `consultaAlertas(estado)` — `alerta.listar` | `estado = {backup: {ultimo_em: ISO\|null}, integridade: {verificado_em, erros}\|null}` vem de quem chama (Maintenance/Api; fora da planilha). Devolve `{data, geradoEm, alertas: [{codigo, nivel AVISO\|ERRO, mensagem, n, ids, entidade}], nao_avaliados: [{codigo, motivo, mensagem}]}`; códigos `ALERTAS`: ATIVO_SEM_PASTO, SEM_BRINCO, SEM_CATEGORIA, NAO_LOCALIZADO (ATIVO com `nao_localizado`, marcado por MARCACAO/NAO_LOCALIZADO; some com a baixa na contagem ou a desmarcação), BACKUP_ATRASADO (`alerta_backup_atrasado_dias`; nenhum backup = alerta), INTEGRIDADE_COM_ERRO, IMPORTACAO_INCOMPLETA (IMPORTACOES `IMPORTANDO`). Parte do `estado` ausente vai para `nao_avaliados` |
 
 ## 16. `FileService` (plataforma: Drive v3 e UrlFetchApp)
@@ -1288,7 +1307,7 @@ VALOR_INDIVIDUAL, kg em PESO_VIVO e PESO_CARCACA, 1 em CABECAS, peso relativo em
 | `planejar(tx, spec, col)` | Um lançamento completo. `spec: {evento: {event_id, event_date, property_id}, conta, naturezas, valor, descricao, partner_id, documento, observacoes, quantidade, pasture_id, retida, data_competencia (padrão event_date), semCaixa, parcelas, pagamento (texto da falta de parcela: padrão "será pago"; a receita da venda usa "será recebida"), rateio: {criterio, itens, cemPorCento, justificativa (gravada no MANUAL e na base estimada), estimado} ou null, campo, campoParcelas, rotulo, prefixo}`. Erros no coletor (`CONTA_INVALIDA`, `CONTA_INATIVA`, `VALOR_FORA_DA_FAIXA`, `BASE_INVALIDA`, `CAMPO_OBRIGATORIO` na justificativa do MANUAL, `RATEIO_INVALIDO`, `RATEIO_INCOMPLETO`, os das parcelas) → null. Recusas de programação (`INTERNAL`): sem conta, parcela em lançamento sem caixa (invariante 4), rateio de ESTOQUE_INSUMOS ou NAO_OPERACIONAL (14), rateio sem animais. Devolve `{linhas: {FINANCEIRO, PARCELAS (ABERTA), RATEIOS (escopo EVENTO, data_base = event_date), ALOCACOES_FINANCEIRAS}, financial_id, rateio, parcelas}` |
 | `juntar(plano, planejado)` | Junta as linhas ao dicionário `{aba: [linhas]}` do evento |
 | `avisoPeriodo(params, data, oque)` | `{codigo: 'PERIODO_BLOQUEADO', mensagem}` quando `data ≤ fin_bloqueio_ate`; senão null |
-| `negociacao(spec)` | Modalidade × base de peso (07, 4.1 e 4.2; 03b, 4.3 a 4.5). `spec: {modalidade, base_peso, rendimento_carcaca_pct, rendimento_tipo, preco_unitario, peso_total_kg, valor, criterio_rateio, arroba_kg, tolerancia_pct, animais: [{chave, peso, peso_carcaca_kg, valor_individual, base_manual}]}` e, na venda, `carcacaTotal: true` (aceita `peso_carcaca_total_kg`, o total do romaneio, na arroba de carcaça; campos de erro `peso_vivo_total_kg`), `valor_conferencia` (o bruto: a conta pelo preço é conferida contra ele; `valor` é a receita distribuída e o que os valores por animal somam), `campo_valor`, `rotulo_valor` e `pesagens` (última pesagem individual de cada animal até a data, ou null) → `{base_peso, rendimento_pct, rendimento_tipo (APURADO na carcaça com peso vivo), unidade_preco, preco_unitario, peso_vivo_total, peso_carcaca_total, arrobas, criterio, bases, estimado, conferencia (centavos), desvio_pct, erros: [{codigo, campo, mensagem, indice?}], avisos}`. Na venda sem o peso de cada animal: com a pesagem anterior de todos, PESO_VIVO com bases = pesagem × peso do lote ÷ Σ pesagens (4 casas, `estimado: true`); senão CABECAS; na arroba de carcaça só com o total do romaneio, PESO_VIVO (peso de cada um) ou o mesmo recurso; `RATEIO_SEM_PESO` em todos. Critério: DIRETO com um animal; CABECA → CABECAS (preço único) ou VALOR_INDIVIDUAL (valor por animal); KG_VIVO e ARROBA VIVO → PESO_VIVO, ou CABECAS com aviso `RATEIO_SEM_PESO` quando só há o peso do lote; ARROBA CARCACA → PESO_CARCACA; LOTE → o escolhido. Aviso `VALOR_DIVERGENTE` acima de `tolerancia_pct`. Erros: `CAMPO_OBRIGATORIO`, `BASE_PESO_INVALIDA`, `CAMPO_NAO_SE_APLICA`, `VALOR_FORA_DA_FAIXA`, `CONFLITO_DE_CAMPOS`, `VALORES_INCOMPLETOS`, `VALOR_INDIVIDUAL_NAO_SOMA`, `PESO_TOTAL_DIVERGENTE`, `PESO_OBRIGATORIO`, `PESO_INCOMPLETO`, `CARCACA_MAIOR_QUE_VIVO` |
+| `negociacao(spec)` | Modalidade × base de peso (07, 4.1 e 4.2; 03b, 4.3 a 4.5). `spec: {modalidade, base_peso, rendimento_carcaca_pct, rendimento_tipo, preco_unitario, peso_total_kg, valor, criterio_rateio, arroba_kg, tolerancia_pct, animais: [{chave, peso, peso_carcaca_kg, valor_individual, base_manual}]}` e, na venda, `carcacaTotal: true` (aceita `peso_carcaca_total_kg`, o total do romaneio, na arroba de carcaça; campos de erro `peso_vivo_total_kg`), `valor_conferencia` (o bruto: a conta pelo preço é conferida contra ele; `valor` é a receita distribuída e o que os valores por animal somam), `campo_valor`, `rotulo_valor` e `pesagens` (última pesagem individual de cada animal até a data, ou null) → `{base_peso, rendimento_pct, rendimento_tipo (APURADO na carcaça com peso vivo), unidade_preco, preco_unitario, peso_vivo_total, peso_carcaca_total, arrobas, criterio, bases, estimado, conferencia (centavos), desvio_pct, erros: [{codigo, campo, mensagem, indice?}], avisos}`. Na venda sem o peso de cada animal: com a pesagem anterior de todos, PESO_VIVO com bases = pesagem × peso do lote ÷ Σ pesagens (4 casas, `estimado: true`); senão CABECAS; na arroba de carcaça só com o total do romaneio, PESO_VIVO (peso de cada um) ou o mesmo recurso; `RATEIO_SEM_PESO` em todos. Critério: DIRETO com um animal; CABECA → CABECAS (preço único) ou VALOR_INDIVIDUAL (valor por animal); KG_VIVO e ARROBA VIVO → PESO_VIVO, ou CABECAS com aviso `RATEIO_SEM_PESO` quando só há o peso do lote; ARROBA CARCACA → PESO_CARCACA; LOTE → o escolhido. Aviso `VALOR_DIVERGENTE` acima de `tolerancia_pct`. Erros: `CAMPO_OBRIGATORIO`, `BASE_PESO_INVALIDA`, `CAMPO_NAO_SE_APLICA`, `VALOR_FORA_DA_FAIXA`, `CONFLITO_DE_CAMPOS`, `VALORES_INCOMPLETOS`, `VALOR_INDIVIDUAL_NAO_SOMA`, `PESO_TOTAL_DIVERGENTE`, `PESO_OBRIGATORIO`, `PESO_INCOMPLETO`, `CARCACA_MAIOR_QUE_VIVO`; a base de cada animal no rateio (peso, carcaça ou peso manual) que não é maior que zero ou tem mais de 4 casas é erro do animal (`indice`, no campo dele: `VALOR_FORA_DA_FAIXA`, `FORMATO_INVALIDO`), e o motor não repete o erro de um campo do animal que o catálogo já recusou; rendimento apurado que arredonda para 0% ou 100% é `VALOR_FORA_DA_FAIXA` com o rendimento calculado (não "carcaça maior que o vivo"); `VALOR_DIVERGENTE` diz "mais de x%" quando o desvio arredondado empata com a tolerância |
 | `conferir(tx)` | As invariantes de 03b, seção 14, sobre as linhas vigentes (`tx.repo`; `tx.cru` para 19 e 20): `[{invariante (1 a 20), tabela, id, mensagem}]`, vazio = fecha ao centavo. Na venda: 15 (Σ valor_individual = receita = lançamento = alocado) e 16 (deduções = Σ DESPESA_VENDA; frete, comissão e outras = Σ por conta; nenhum outro lançamento; `EVENTOS.total_value` = `valor_bruto`; `qtd_animais` = saídas). A consulta declara `leituras()` com acesso cru; aba não lida desliga as invariantes que dependem dela (17 só com SANIDADE). Base da etapa de integridade |
 | `leituras()` | `Timeline.LEITURAS` + COMPRAS, VENDAS, PLANO_CONTAS, PARCEIROS |
 | `situacaoPagamento(parcelas, ativo)` | `{status_pagamento, data_pagamento}` pela ordem de 03b, 10.4 (o projetor usa esta função) |
@@ -1353,3 +1372,22 @@ Testes: `tests/estorno.test.js` (um caso por tipo e subtipo ativo, CT-07, CT-08,
 identificação, cadeia de substituição, histórico e auditoria), `tests/identificacao.test.js` (IDENTIFICACAO, MARCACAO,
 RECLASSIFICACAO, DIVERGENCIA_CONTAGEM, RN-004 e CATEGORIA_EM_USO) e a varredura de quedas com o estorno de transferência
 (`tests/unitofwork.adversarial.test.js`, cenário `estornoTransferencia`).
+
+## 31. Ataque ao motor e ao financeiro da Fase 2 — `tests/fase2.adversarial.test.js`
+
+Modelo de referência do rebanho escrito no teste (linha do tempo por animal pela regra de 05, seção 4.3, com a posição do
+substituto de 16.1; sequências de identificação e de marcação; maior resto) que prevê o desfecho de cada comando: aceito,
+VALIDATION (problema numa linha do próprio comando ou erro de entrada) ou CONFLICT — e, no CONFLICT, o conjunto exato de
+eventos que impedem (`details[].conflito.event_id`). A origem que o servidor tira da linha do tempo não vira erro próprio
+(seção 14). Propostas: `propTransferencia`, `propSaida` (MORTE, DESCARTE, DIVERGENCIA_CONTAGEM, com o lançamento opcional),
+`propCompra` (novos e volta; CABECA, valor por animal, kg vivo; frete; parcelas vazias, explícitas ou com 1 centavo de
+erro), `propVenda` (CABECA ou kg vivo; desconto; deduções retidas), `propNascimento` (gêmeos, natimorto, correção que
+anula ou cria cria), `propIdentificacao`, `propMarcacao`, `propLocalizacao`, `propVolta`, `propEstorno`; toda proposta
+aceita também como correção (`substitui`). Depois de cada comando: simulação = gravação (mesmo desfecho e mesmos
+lançamentos), resposta com as projeções do modelo, reenvio com a mesma chave (duplicado idêntico, nada gravado) ou com
+outro conteúdo (`IDEMPOTENCY_MISMATCH`), recusado sem linha gravada, e, pelo `apoio-oraculos.js`, modelo = replay cru =
+sistema no inventário (Timeline, `inventario.posicao`), nos elegíveis de cada tipo, na ficha de cada animal (situação,
+pasto, saída, brinco, marcações, custo de aquisição), nas alocações e nas invariantes de 03b, seção 14; no fim de cada
+sequência, painel e cartões dos pastos, visão geral e carga inicial. Três sementes fixas de 140 passos e casos dirigidos
+(fato no dia da saída, mesmo dia com as classes 0, 1 e 2, substituição em cadeia, estorno de compra com venda posterior,
+gêmeos com natimorto, correção de localização, centavos patológicos, arroba e carcaça, parcelas de 1 centavo, reenvio).
