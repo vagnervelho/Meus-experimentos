@@ -563,7 +563,8 @@ var Config = (function () {
   // ------------------------------------------------------------------ cadastros do bootstrap ----
   /**
    * Cadastros pequenos que vão ao cliente na carga inicial (sistema.bootstrap): parâmetros, listas, categorias
-   * (com a cobertura) e parceiros. Abas que a consulta precisa ler: `LEITURAS_CADASTROS`.
+   * (com a cobertura), parceiros e o plano de contas (os formulários escolhem a conta de um custo). Abas que a consulta
+   * precisa ler: `LEITURAS_CADASTROS`.
    */
   function cadastros(repo) {
     var cats = Utils.ordenarPor(repo.vigentes('CATEGORIAS'), 'prioridade').map(Utils.clonar);
@@ -573,6 +574,7 @@ var Config = (function () {
       categorias: cats,
       cobertura: EventService.coberturaCategorias(cats),
       parceiros: Utils.ordenarPor(repo.vigentes('PARCEIROS'), 'nome').map(Utils.clonar),
+      contas: Utils.ordenarPor(repo.vigentes('PLANO_CONTAS'), ['ordem', 'codigo']).map(Utils.clonar),
     };
   }
 
@@ -584,7 +586,7 @@ var Config = (function () {
   return {
     CODIGOS_AVISO: CODIGOS_AVISO,
     FAIXAS: FAIXAS,
-    LEITURAS_CADASTROS: ['CONFIGURACOES', 'LISTAS', 'CATEGORIAS', 'PARCEIROS'],
+    LEITURAS_CADASTROS: ['CONFIGURACOES', 'LISTAS', 'CATEGORIAS', 'PARCEIROS', 'PLANO_CONTAS'],
     parametros: parametros,
     valor: valor,
     listar: listar,

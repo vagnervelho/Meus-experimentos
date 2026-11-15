@@ -95,9 +95,15 @@ function motor(amb, linhas) {
       m.conferirProjecoes('depois da simulação');
       return { ok: r.ok, valor: r.ok ? r.valor : null, erro: erroDe(r) };
     },
+    /** Projeção gravada = reconstrução (Timeline.conferir) e as invariantes financeiras de 03b, seção 14 (FinancialService.conferir). */
     conferirProjecoes(msg) {
-      const dif = amb.read({ rota: 'teste.projecoes', reads: G.Timeline.LEITURAS, acessoCru: true, tratador: (tx) => G.Timeline.conferir(tx) }).dados;
-      assert.deepEqual(dif, [], 'projeção gravada = reconstrução pelos eventos vigentes (' + (msg || '') + ')');
+      const r = amb.read({ rota: 'teste.projecoes', reads: G.FinancialService.leituras(), acessoCru: true, tratador: (tx) => ({ proj: G.Timeline.conferir(tx), fin: G.FinancialService.conferir(tx) }) }).dados;
+      assert.deepEqual(r.proj, [], 'projeção gravada = reconstrução pelos eventos vigentes (' + (msg || '') + ')');
+      assert.deepEqual(r.fin, [], 'invariantes financeiras de 03b, seção 14 (' + (msg || '') + ')');
+    },
+    /** Só as invariantes financeiras (03b, seção 14): [{invariante, tabela, id, mensagem}]. */
+    invariantes() {
+      return amb.read({ rota: 'teste.invariantes', reads: G.FinancialService.leituras(), acessoCru: true, tratador: (tx) => G.FinancialService.conferir(tx) }).dados;
     },
     ler(consulta) {
       return amb.read(consulta).dados;

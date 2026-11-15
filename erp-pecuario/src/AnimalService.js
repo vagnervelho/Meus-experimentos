@@ -32,7 +32,7 @@ var AnimalService = (function () {
   var GERACOES_PADRAO = 3;
   var GERACOES_MAX = 6;
   /** Blocos da ficha cujo módulo ainda não foi entregue: voltam vazios, com a marca (§20: nada sem função). */
-  var BLOCOS_DE_MODULO = { peso: 'PESAGENS', sanitario: 'SANIDADE', financeiro: 'FINANCEIRO' };
+  var BLOCOS_DE_MODULO = { peso: 'PESAGENS', sanitario: 'SANIDADE' };
 
   function vazio_(v) {
     return v === null || v === undefined || v === '';
@@ -332,6 +332,17 @@ var AnimalService = (function () {
     });
     return Utils.ordenarPor(Object.keys(g).map(function (k) { return g[k]; }), [{ campo: 'dias', desc: true }, 'pasto_nome']);
   }
+  /**
+   * Bloco H (§11.2): custo de aquisição e lançamentos do animal a partir das alocações (FinancialService.blocoFicha).
+   * Parcial na Fase 2: rateio de custos compartilhados, baixa de parcelas e custos por animal chegam com o Financeiro.
+   */
+  function blocoFinanceiro_(tx, a) {
+    var b = FinancialService.blocoFicha(tx.repo, a);
+    var m = EventCatalog.modulosAtivos(99).filter(function (x) { return x.id === 'FINANCEIRO'; })[0];
+    b.parcial = true;
+    b.pendente = { modulo: 'FINANCEIRO', fase: m ? m.fase : null, mensagem: 'O rateio de custos gerais (pasto, mão de obra, insumos) e o custo completo por animal chegam com o módulo Financeiro.' };
+    return b;
+  }
   function moduloNaoEntregue_(modulo) {
     var m = EventCatalog.modulosAtivos(99).filter(function (x) { return x.id === modulo; })[0];
     return {
@@ -399,13 +410,14 @@ var AnimalService = (function () {
    * Devolve {animal_id, data, geral (A), genealogia (B), localizacao (C), pastos (D), peso (E), sanitario (F),
    * reprodutivo (G), financeiro (H), eventos (I), anexos (J)}; cada bloco traz `entregue`. Os blocos de módulos
    * ainda não entregues voltam com `entregue: false`, o módulo, a fase e `itens: []`. O bloco G já traz a parte de
-   * partos (ReproductionService.blocoFicha), com `parcial: true` e o que chega na Fase 3. NOT_FOUND se o animal não
+   * partos (ReproductionService.blocoFicha), com `parcial: true` e o que chega na Fase 3; o H, o custo de aquisição
+   * e os lançamentos pelas alocações (FinancialService.blocoFicha), também `parcial`. NOT_FOUND se o animal não
    * existe (ou foi anulado).
    */
   function consultaFicha(dados) {
     var d = dados || {};
     return {
-      rota: 'animal.ficha', dados: d, reads: Utils.unicos(leituras().concat(['PROPRIEDADES', 'LISTAS', 'ANEXOS'])), acessoCru: true,
+      rota: 'animal.ficha', dados: d, reads: Utils.unicos(leituras().concat(['PROPRIEDADES', 'LISTAS', 'ANEXOS', 'FINANCEIRO', 'PARCELAS', 'RATEIOS', 'ALOCACOES_FINANCEIRAS', 'PLANO_CONTAS'])), acessoCru: true,
       tratador: function (tx) {
         var g = d.geracoes === undefined || d.geracoes === null ? GERACOES_PADRAO : d.geracoes;
         if (typeof g !== 'number' || Math.floor(g) !== g || g < 1 || g > GERACOES_MAX) {
@@ -432,6 +444,7 @@ var AnimalService = (function () {
           },
           pastos: { entregue: true, periodos: periodos, por_pasto: diasPorPasto_(periodos) },
           reprodutivo: ReproductionService.blocoFicha(L.f, a),
+          financeiro: blocoFinanceiro_(tx, a),
           eventos: { entregue: true, itens: eventos_(tx, L, a) },
           anexos: { entregue: true, itens: anexos_(tx, a) },
         };

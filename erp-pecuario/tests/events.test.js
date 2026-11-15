@@ -24,14 +24,14 @@ function falha(m, acao, dados, op) {
 }
 
 // ------------------------------------------------------------------ catálogo ----
-test('catálogo: 21 tipos; na Fase 2 (até esta etapa) entradas, nascimento, transferência, morte, descarte, três ajustes e estorno; módulos por fase; serialização é só dado', () => {
+test('catálogo: 21 tipos; na Fase 2 (até esta etapa) entradas, nascimento, compra, transferência, morte, descarte, três ajustes e estorno; módulos por fase; serialização é só dado', () => {
   const G = createGas({ order: 'alpha' }).G;
   const C = G.EventCatalog;
   assert.equal(C.nomes().length, 21);
   assert.equal(C.FASE_ATUAL, 2);
-  assert.deepEqual(js(C.tiposAtivos()), ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'NASCIMENTO', 'TRANSFERENCIA', 'MORTE', 'DESCARTE', 'AJUSTE_INVENTARIO', 'ESTORNO']);
+  assert.deepEqual(js(C.tiposAtivos()), ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'NASCIMENTO', 'COMPRA', 'TRANSFERENCIA', 'MORTE', 'DESCARTE', 'AJUSTE_INVENTARIO', 'ESTORNO']);
   assert.deepEqual(js(C.tiposAtivos(1)), ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'AJUSTE_INVENTARIO', 'ESTORNO'], 'a Fase 1 continua a mesma');
-  for (const t of ['COMPRA', 'VENDA', 'IDENTIFICACAO', 'MARCACAO']) assert.equal(C.ativo(t), false, t + ' é da Fase 2, mas ainda sem campos: inativo');
+  for (const t of ['VENDA', 'IDENTIFICACAO', 'MARCACAO']) assert.equal(C.ativo(t), false, t + ' é da Fase 2, mas ainda sem campos: inativo');
   assert.deepEqual([C.ativo('AJUSTE_INVENTARIO', 'CORRECAO_LOCALIZACAO'), C.ativo('AJUSTE_INVENTARIO', 'RECLASSIFICACAO'), C.ativo('VENDA'), C.ativo('VENDA', null, 2)], [true, false, false, false]);
   assert.deepEqual(js(C.modulosAtivos().map((x) => x.id)), ['DASHBOARD', 'REBANHO', 'PASTOS', 'EVENTOS', 'CONFIGURACOES', 'IMPORTACAO']);
   assert.equal(C.modulosAtivos(5).filter((x) => x.menu).length, 10, 'o menu chega aos 10 itens da §15 na Fase 5');
@@ -45,6 +45,7 @@ test('catálogo: 21 tipos; na Fase 2 (até esta etapa) entradas, nascimento, tra
     for (const c of campos) {
       assert.ok(C.TIPOS_CAMPO.indexOf(c.tipo) >= 0 || /^ref:[A-Z_]+$/.test(c.tipo), t.tipo + '.' + c.id + ': tipo renderizável');
       if (/^ref:/.test(c.tipo)) assert.ok(G.Schema.temTabela(c.tipo.slice(4)), 'referência a aba existente: ' + c.tipo);
+      if (c.naturezas) for (const n of c.naturezas) assert.ok(G.Schema.enumValores('NATUREZA_CONTA').includes(n), c.id + ': natureza de conta conhecida');
       assert.ok(['EVENTO', 'POR_ANIMAL'].includes(c.escopo) && typeof c.rotulo === 'string' && c.rotulo.length > 0);
       if (c.tipo === 'lista') assert.ok(c.opcoes || G.Schema.LISTAS_SEMENTE[c.lista], c.id + ': lista com opções ou lista aberta conhecida');
     }

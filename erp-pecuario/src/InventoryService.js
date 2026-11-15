@@ -181,13 +181,14 @@ var InventoryService = (function () {
    */
   function consultaVisaoGeral() {
     return {
-      rota: 'dashboard.obter', reads: leituras(),
+      rota: 'dashboard.obter', reads: leituras().concat(['FINANCEIRO', 'PARCELAS']),
       tratador: function (tx) {
         var L = AnimalService.leitor(tx);
         var out = posicao(L, L.hoje);
         var pend = pendenciasCadastro_(L);
         out.geradoEm = tx.agora;
         out.pendencias = { sem_pasto: pend.ATIVO_SEM_PASTO.length, sem_brinco: pend.SEM_BRINCO.length, sem_categoria: pend.SEM_CATEGORIA.length };
+        out.titulos = FinancialService.titulos(tx.repo, L.hoje);
         return out;
       },
     };

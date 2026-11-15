@@ -1141,6 +1141,199 @@ var EventService = (function () {
     });
   }
 
+  // ------------------------------------------------------------------ compra e financeiro do evento ----
+  /** Parceiros que o evento original já usava: continuam aceitos na correção mesmo se foram desativados depois. */
+  function parceirosDoOriginal_(m, ctxEv) {
+    if (!ctxEv.original) return {};
+    var out = {};
+    if (!vazio_(ctxEv.original.partner_id)) out[ctxEv.original.partner_id] = true;
+    m.tx.cru.cruPor('FINANCEIRO', 'event_id', ctxEv.original.event_id).forEach(function (f) { if (!vazio_(f.partner_id)) out[f.partner_id] = true; });
+    return out;
+  }
+  /** Parceiro de um lançamento (03a, seção 4.8): existe e está ativo; o tipo só filtra a tela, não bloqueia. */
+  function parceiroValido_(m, ctxEv, campo, id, prefixo) {
+    if (vazio_(id)) return true;
+    var p = m.repo.porId('PARCEIROS', id);
+    if (!p) { erroGeral_(m, campo, 'NAO_ENCONTRADO', (prefixo || '') + 'O parceiro informado não existe. Atualize a tela e escolha de novo.'); return false; }
+    ctxEv.parceirosOriginal = ctxEv.parceirosOriginal || parceirosDoOriginal_(m, ctxEv);
+    if (p.ativo === false && !ctxEv.parceirosOriginal[id]) { erroGeral_(m, campo, 'PARCEIRO_INATIVO', (prefixo || '') + 'O parceiro ' + p.nome + ' está desativado. Reative-o nas configurações ou escolha outro.'); return false; }
+    return true;
+  }
+  /** Cabeçalho da compra: fornecedor e pasto de destino do lote. */
+  function cabecalhoCompra_(m, ctxEv) {
+    var c = ctxEv.campos;
+    parceiroValido_(m, ctxEv, 'partner_id', c.partner_id);
+    if (!vazio_(c.pasto_destino_id)) {
+      var p = m.f.pasto(c.pasto_destino_id);
+      if (!p) erroGeral_(m, 'pasto_destino_id', 'NAO_ENCONTRADO', 'O pasto de destino não existe.');
+      else if (p.status !== 'ATIVO') erroGeral_(m, 'pasto_destino_id', 'PASTO_INATIVO', 'O pasto ' + p.nome + ' está desativado e não recebe animais.');
+    }
+  }
+  function plural_(n, um, varios) {
+    return n + ' ' + (n === 1 ? um : varios);
+  }
+  /** Lançamento planejado → item do resumo financeiro (impactos da simulação). */
+  function resumoLancamento_(m, pl, conta, extra) {
+    var f = pl.linhas.FINANCEIRO[0];
+    var o = {
+      financial_id: f.financial_id, descricao: f.descricao, conta_codigo: conta.codigo, conta_nome: conta.nome, natureza: f.natureza, tipo: f.tipo,
+      valor: f.valor, partner_id: f.partner_id, criterio: pl.rateio ? pl.rateio.criterio : null,
+      parcelas: pl.parcelas.map(function (p) { return { parcela_num: p.parcela_num, data_vencimento: p.data_vencimento, valor: p.valor, forma_pagamento: p.forma_pagamento }; }),
+    };
+    Object.keys(extra || {}).forEach(function (k) { o[k] = extra[k]; });
+    return o;
+  }
+  /** Resumo financeiro do evento: os lançamentos e o valor de cada animal (soma das alocações, a fonte única). */
+  function resumoFinanceiro_(m, ctxEv, lancs, planejados) {
+    var por = {};
+    planejados.forEach(function (pl) { (pl.rateio ? pl.rateio.itens : []).forEach(function (x) { por[x.animal_id] = (por[x.animal_id] || 0) + x.valor; }); });
+    var t = { a_pagar: 0, a_receber: 0 };
+    lancs.forEach(function (l) { if (l.parcelas.length) t[l.tipo === 'RECEITA' ? 'a_receber' : 'a_pagar'] += l.valor; });
+    ctxEv.financeiro = {
+      lancamentos: lancs, total: lancs.reduce(function (s, l) { return s + l.valor; }, 0), a_pagar: t.a_pagar, a_receber: t.a_receber,
+      por_animal: ctxEv.itens.filter(function (it) { return it.animal_id && por[it.animal_id] !== undefined; }).map(function (it) {
+        return { animal_id: it.animal_id, codigo_interno: it.codigo_interno || null, brinco: it.brincoTexto || null, valor: por[it.animal_id] };
+      }),
+    };
+  }
+  /** Itens do grupo repetível `custos` da compra, validados pelo catálogo; erros com "Custo k:". */
+  function custosDaCompra_(m, ctxEv, lista) {
+    var defs = EventCatalog.camposGrupo('COMPRA', 'custos');
+    if (lista !== undefined && lista !== null && !Array.isArray(lista)) { erroGeral_(m, 'custos', 'TIPO_INVALIDO', 'O frete e os outros custos precisam vir como lista.'); return []; }
+    return (lista || []).map(function (bruto, k) {
+      var x = bruto && typeof bruto === 'object' ? bruto : {};
+      var quem = 'Custo ' + (k + 1) + ': ';
+      EventCatalog.validarCampos(defs, x, { listas: m.listas }).forEach(function (e) { erroGeral_(m, 'custos', e.codigo, quem + e.mensagem); });
+      parceiroValido_(m, ctxEv, 'custos', x.partner_id, quem);
+      return x;
+    });
+  }
+  /**
+   * Financeiro da COMPRA (03b, seções 4.5 e 10.3; P11): a negociação dá o critério e as bases; o valor dos animais é um
+   * lançamento AQUISICAO_ANIMAIS (COMPRA_ANIMAIS) com as parcelas, e cada frete ou outro custo é outro lançamento
+   * (FRETE_DESPESAS_COMPRA), com parceiro e vencimento próprios; todos 100% rateados pelas mesmas bases. O valor
+   * individual de cada animal é a alocação do lançamento principal (passo 3 da seção 4.5); o custo de aquisição é a
+   * soma das alocações (projeção), nunca gravado em outra fonte.
+   */
+  function financeiroCompra_(m, ctxEv, d) {
+    var c = ctxEv.campos;
+    var ev = ctxEv.ev;
+    var itens = ctxEv.itens.filter(function (it) { return it.linhaEA && it.negocio; });
+    var custos = custosDaCompra_(m, ctxEv, d.custos);
+    if (d.parcelas !== undefined && d.parcelas !== null && !Array.isArray(d.parcelas)) { erroGeral_(m, 'parcelas', 'TIPO_INVALIDO', 'As parcelas precisam vir como lista.'); return; }
+    var defsParcela = EventCatalog.camposGrupo('COMPRA', 'parcelas');
+    (d.parcelas || []).forEach(function (p, k) {
+      EventCatalog.validarCampos(defsParcela, p && typeof p === 'object' ? p : {}, { listas: m.listas }).forEach(function (e) {
+        if (e.campo === 'data_vencimento' || e.campo === 'valor') return; // vencimento e valor: FinancialService.resolverParcelas
+        erroGeral_(m, 'parcelas', e.codigo, 'Parcela ' + (k + 1) + ': ' + e.mensagem);
+      });
+    });
+    if (!itens.length || itens.length !== ctxEv.itens.length) return;
+    var neg = FinancialService.negociacao({
+      modalidade: c.modalidade, base_peso: nulo_(c.base_peso), rendimento_carcaca_pct: typeof c.rendimento_carcaca_pct === 'number' ? c.rendimento_carcaca_pct : null,
+      rendimento_tipo: nulo_(c.rendimento_tipo), preco_unitario: typeof c.preco_unitario === 'number' ? c.preco_unitario : null,
+      peso_total_kg: typeof c.peso_total_kg === 'number' ? c.peso_total_kg : null, valor: c.valor_animais, criterio_rateio: nulo_(c.criterio_rateio),
+      arroba_kg: m.params.arroba_kg, tolerancia_pct: m.params.fin_tolerancia_conferencia_pct,
+      animais: itens.map(function (it) { var n = it.negocio; return { chave: it.codigo_interno, peso: n.peso, peso_carcaca_kg: n.peso_carcaca_kg, valor_individual: n.valor_individual, base_manual: n.base_manual }; }),
+    });
+    neg.erros.forEach(function (e) {
+      if (typeof e.indice === 'number') erroItem_(m, itens[e.indice], e.campo, e.codigo, e.mensagem);
+      else erroGeral_(m, e.campo, e.codigo, e.mensagem);
+    });
+    neg.avisos.forEach(function (a) { avisoItem_(m, null, a.codigo, a.mensagem); });
+    ctxEv.negociacao = neg;
+    if (neg.erros.length || typeof c.valor_animais !== 'number') return;
+    var contaAnimais = FinancialService.conta(m.repo, FinancialService.CONTAS.COMPRA);
+    var contaCustos = FinancialService.conta(m.repo, FinancialService.CONTAS.FRETE_COMPRA);
+    var rateioItens = itens.map(function (it, i) { return { animal_id: it.animal_id, chave: it.codigo_interno, base: neg.bases[i], quem: it.quem }; });
+    var rateio = { criterio: neg.criterio, itens: rateioItens, cemPorCento: true, justificativa: nulo_(c.justificativa_rateio) };
+    var n = itens.length;
+    var planejados = [];
+    var lancs = [];
+    var principal = FinancialService.planejar(m.tx, {
+      evento: ev, conta: contaAnimais, naturezas: ['AQUISICAO_ANIMAIS'], valor: c.valor_animais, descricao: 'Compra de ' + plural_(n, 'animal', 'animais'),
+      partner_id: c.partner_id, documento: nulo_(c.nota_fiscal), quantidade: n, parcelas: d.parcelas, rateio: rateio,
+      campo: 'valor_animais', campoParcelas: 'parcelas', rotulo: 'a compra',
+    }, m.col);
+    if (principal) {
+      planejados.push(principal);
+      lancs.push(resumoLancamento_(m, principal, contaAnimais, { papel: 'ANIMAIS' }));
+      var porAnimal = Utils.indexarPor(principal.rateio.itens, 'animal_id');
+      itens.forEach(function (it) { it.linhaEA.valor_individual = porAnimal[it.animal_id].valor; });
+    }
+    var frete = 0;
+    var outros = 0;
+    custos.forEach(function (x, k) {
+      if (typeof x.valor !== 'number') return;
+      var eFrete = x.tipo !== 'OUTRO';
+      var pl = FinancialService.planejar(m.tx, {
+        evento: ev, conta: contaCustos, naturezas: ['AQUISICAO_ANIMAIS'], valor: x.valor,
+        descricao: nulo_(x.descricao) || (eFrete ? 'Frete' : 'Outros custos') + ' da compra de ' + br_(ev.event_date), partner_id: nulo_(x.partner_id), documento: nulo_(x.documento),
+        parcelas: [{ data_vencimento: nulo_(x.data_vencimento) || ev.event_date, valor: x.valor, forma_pagamento: nulo_(x.forma_pagamento), documento: nulo_(x.documento) }],
+        rateio: rateio, campo: 'custos', rotulo: (eFrete ? 'o frete' : 'o custo') + (custos.length > 1 ? ' ' + (k + 1) : ''),
+      }, m.col);
+      if (!pl) return;
+      if (eFrete) frete += x.valor; else outros += x.valor;
+      planejados.push(pl);
+      lancs.push(resumoLancamento_(m, pl, contaCustos, { papel: eFrete ? 'FRETE' : 'OUTRO' }));
+    });
+    if (m.col.temErros()) return;
+    planejados.forEach(function (pl) { FinancialService.juntar(ctxEv.plano, pl); });
+    var total = c.valor_animais + frete + outros;
+    ctxEv.plano.COMPRAS.push({
+      purchase_id: m.tx.novoId(), event_id: ev.event_id, finalidade: nulo_(c.finalidade), modalidade: c.modalidade, base_peso: neg.base_peso,
+      rendimento_carcaca_pct: neg.rendimento_pct, rendimento_tipo: neg.rendimento_tipo, qtd_animais: n, peso_total_kg: neg.peso_vivo_total,
+      preco_unitario: neg.unidade_preco ? neg.preco_unitario : null, unidade_preco: neg.unidade_preco, valor_animais: c.valor_animais, frete: frete,
+      outros_custos: outros, valor_total: total, criterio_rateio: neg.criterio, gta_numero: nulo_(c.gta_numero), nota_fiscal: nulo_(c.nota_fiscal),
+      observacoes: nulo_(c.condicoes),
+    });
+    ev.partner_id = c.partner_id;
+    ev.total_value = total;
+    resumoFinanceiro_(m, ctxEv, lancs, planejados);
+    ctxEv.compra = {
+      modalidade: c.modalidade, base_peso: neg.base_peso, criterio: neg.criterio, valor_animais: c.valor_animais, frete: frete, outros_custos: outros, valor_total: total,
+      conferencia: neg.conferencia, desvio_pct: neg.desvio_pct, peso_vivo_total: neg.peso_vivo_total, peso_carcaca_total: neg.peso_carcaca_total, arrobas: neg.arrobas,
+      rendimento_pct: neg.rendimento_pct, rendimento_tipo: neg.rendimento_tipo, preco_unitario: neg.preco_unitario, unidade_preco: neg.unidade_preco,
+    };
+    var a = FinancialService.avisoPeriodo(m.params, ev.event_date, 'A compra');
+    if (a) avisoItem_(m, null, a.codigo, a.mensagem);
+  }
+  /**
+   * Lançamento opcional da MORTE (custos associados, CUSTEIO na conta escolhida) e do DESCARTE (receita simples,
+   * OUTRAS_RECEITAS_OPERACIONAIS), com um título e rateio por cabeça entre os animais do evento (03b, seção 10.3).
+   */
+  function financeiroSaida_(m, ctxEv) {
+    var c = ctxEv.campos;
+    var ev = ctxEv.ev;
+    var morte = ctxEv.tipo === 'MORTE';
+    var p = morte ? 'custo_' : 'receita_';
+    if (vazio_(c[p + 'valor'])) return;
+    var conta;
+    if (morte) {
+      if (vazio_(c.custo_conta_id)) return;
+      conta = m.repo.porId('PLANO_CONTAS', c.custo_conta_id);
+      if (!conta) { erroGeral_(m, 'custo_conta_id', 'NAO_ENCONTRADO', 'A conta escolhida não existe no plano de contas.'); return; }
+    } else conta = FinancialService.conta(m.repo, FinancialService.CONTAS.RECEITA_DESCARTE);
+    parceiroValido_(m, ctxEv, p + 'partner_id', c[p + 'partner_id']);
+    var itens = ctxEv.itens.filter(function (it) { return it.linhaEA; });
+    if (!itens.length || itens.length !== ctxEv.itens.length || typeof c[p + 'valor'] !== 'number') return;
+    var pl = FinancialService.planejar(m.tx, {
+      evento: ev, conta: conta, naturezas: morte ? ['CUSTEIO'] : ['OUTRA_RECEITA'], valor: c[p + 'valor'],
+      descricao: nulo_(c[p + 'descricao']) || (morte ? 'Custos da morte de ' : 'Receita do descarte de ') + br_(ev.event_date),
+      partner_id: nulo_(c[p + 'partner_id']), documento: nulo_(c[p + 'documento']),
+      parcelas: [{ data_vencimento: nulo_(c[p + 'vencimento']) || ev.event_date, valor: c[p + 'valor'], forma_pagamento: nulo_(c[p + 'forma_pagamento']), documento: nulo_(c[p + 'documento']) }],
+      rateio: { criterio: 'CABECAS', itens: itens.map(function (it) { return { animal_id: it.animal_id, chave: it.codigo_interno, base: 1, quem: it.quem }; }), cemPorCento: true },
+      campo: morte ? 'custo_conta_id' : 'receita_valor', rotulo: morte ? 'o custo da morte' : 'a receita do descarte',
+    }, m.col);
+    if (!pl) return;
+    FinancialService.juntar(ctxEv.plano, pl);
+    ev.total_value = c[p + 'valor'];
+    if (!morte) ev.partner_id = nulo_(c.receita_partner_id);
+    resumoFinanceiro_(m, ctxEv, [resumoLancamento_(m, pl, conta, { papel: morte ? 'CUSTO' : 'RECEITA' })], [pl]);
+    var a = FinancialService.avisoPeriodo(m.params, ev.event_date, morte ? 'O custo da morte' : 'A receita do descarte');
+    if (a) avisoItem_(m, null, a.codigo, a.mensagem);
+  }
+
   // ------------------------------------------------------------------ valor de abertura ----
   /**
    * Valor de abertura (03b, seções 10.3 e 13): um lançamento AQUISICAO_ANIMAIS na conta SALDO_ABERTURA_REBANHO,
@@ -1174,9 +1367,8 @@ var EventService = (function () {
     });
     ev.total_value = total;
     ctxEv.abertura = { total: total, animais: com.length, data: ev.event_date };
-    if (!vazio_(m.params.fin_bloqueio_ate) && ev.event_date <= m.params.fin_bloqueio_ate) {
-      avisoItem_(m, null, 'PERIODO_BLOQUEADO', 'O valor de abertura cai em ' + br_(ev.event_date) + ', dentro do período financeiro fechado (até ' + br_(m.params.fin_bloqueio_ate) + '). Confirme com uma justificativa.');
-    }
+    var aviso = FinancialService.avisoPeriodo(m.params, ev.event_date, 'O valor de abertura');
+    if (aviso) avisoItem_(m, null, aviso.codigo, aviso.mensagem);
   }
 
   // ------------------------------------------------------------------ avisos, plano e resposta ----
@@ -1184,7 +1376,10 @@ var EventService = (function () {
   function aplicarPolitica_(m) {
     var pol = m.params.avisos_politica || {};
     var ficam = [];
+    var periodo = false;
     m.avisos.forEach(function (a) {
+      // Período bloqueado: um aviso só por comando (a justificativa é uma), mesmo com vários lançamentos no período.
+      if (a.codigo === 'PERIODO_BLOQUEADO') { if (periodo) return; periodo = true; }
       var p = pol[a.codigo] || 'AVISA';
       if (p === 'IGNORA') return;
       if (p === 'BLOQUEIA') m.col.erro(a);
@@ -1249,6 +1444,7 @@ var EventService = (function () {
         animais: animais.length, novos: ctxEv.plano.ANIMAIS.length, anulados: (ctxEv.removidos || []).length, substitui: resumo.substitui,
         total_value: ev.total_value, abertura: ctxEv.abertura || null, pre_marco_zero: ev.pre_marco_zero === true,
         parto: ctxEv.parto || null, transferencia: ctxEv.transf || null, baixas: ctxEv.plano.BAIXAS.length,
+        compra: ctxEv.compra || null, financeiro: ctxEv.financeiro || null,
       },
       derivados: { animais: animais, eventos: [ev.event_id].concat(ctxEv.original ? [ctxEv.original.event_id] : []) },
       resposta: function (t) { return resposta_(t, resumo); },
@@ -1326,7 +1522,7 @@ var EventService = (function () {
     };
   }
   function leiturasConsulta_() {
-    return Timeline.LEITURAS.concat(['PROPRIEDADES', 'BAIXAS']);
+    return Timeline.LEITURAS.concat(['PROPRIEDADES', 'BAIXAS', 'COMPRAS']);
   }
   function eventoPublico_(tx, ev) {
     var a = tx.cru.avaliar(ev.event_id);
@@ -1377,8 +1573,12 @@ var EventService = (function () {
         var st = ev ? tx.cru.avaliar(ev.event_id).status : null;
         if (!ev || st === 'FALHOU' || st === 'PENDENTE') throw Validation.erro('NOT_FOUND', 'Evento não encontrado.');
         var detalhes = {};
-        ['IDENTIFICACOES', 'PESAGENS', 'REPRODUCAO', 'BAIXAS', 'AJUSTES', 'FINANCEIRO', 'RATEIOS'].forEach(function (t) {
+        ['IDENTIFICACOES', 'PESAGENS', 'REPRODUCAO', 'BAIXAS', 'AJUSTES', 'COMPRAS', 'FINANCEIRO', 'RATEIOS'].forEach(function (t) {
           detalhes[t] = tx.cru.cruPor(t, 'event_id', ev.event_id).map(Utils.clonar);
+        });
+        detalhes.PARCELAS = [];
+        detalhes.FINANCEIRO.forEach(function (f) {
+          detalhes.PARCELAS = detalhes.PARCELAS.concat(Utils.ordenarPor(tx.cru.cruPor('PARCELAS', 'financial_id', f.financial_id), 'parcela_num').map(Utils.clonar));
         });
         detalhes.ALOCACOES_FINANCEIRAS = [];
         detalhes.RATEIOS.forEach(function (r) { detalhes.ALOCACOES_FINANCEIRAS = detalhes.ALOCACOES_FINANCEIRAS.concat(tx.cru.cruPor('ALOCACOES_FINANCEIRAS', 'rateio_id', r.rateio_id).map(Utils.clonar)); });

@@ -505,7 +505,12 @@ var AuditService = (function () {
       porLancamento[r.financial_id] = soma;
       if ((r.criterio === 'VALOR_INDIVIDUAL' || r.criterio === 'DIRETO') && r.escopo_tipo === 'EVENTO' && !vazio_(r.escopo_ref)) {
         var bases = {};
-        repo.por('EVENTO_ANIMAIS', 'event_id', r.escopo_ref).forEach(function (l) { if (typeof l.valor_individual === 'number') bases[l.animal_id] = l.valor_individual / 100; });
+        // VALOR_INDIVIDUAL: a base é o valor do animal no evento; DIRETO: o valor do próprio lançamento (03b, seção 12.3).
+        var lanc = r.criterio === 'DIRETO' ? repo.porId('FINANCEIRO', r.financial_id) : null;
+        repo.por('EVENTO_ANIMAIS', 'event_id', r.escopo_ref).forEach(function (l) {
+          if (lanc) bases[l.animal_id] = lanc.valor / 100;
+          else if (typeof l.valor_individual === 'number') bases[l.animal_id] = l.valor_individual / 100;
+        });
         allocs.forEach(function (a) {
           if (bases[a.animal_id] !== undefined && Math.abs(bases[a.animal_id] - (a.base_valor || 0)) > 1e-9) {
             col.achado('BASE_RATEIO', { tabela: 'ALOCACOES_FINANCEIRAS', id: a.alloc_id, mensagem: 'A base do rateio do animal ' + a.animal_id + ' (' + a.base_valor + ') difere da recalculada hoje (' + bases[a.animal_id] + ').' });
