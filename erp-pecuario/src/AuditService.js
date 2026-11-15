@@ -6,7 +6,8 @@
  * fase B confirma a operação e a fase C aplica `valor_novo`. Uma linha só vale se a operação dela está
  * CONFIRMADA. Puro: usa as portas do contexto.
  *
- * Parte 2: listagem paginada da trilha (auditoria.listar) e a VERIFICAÇÃO DE INTEGRIDADE (06, seção 9), sob demanda,
+ * Parte 2: listagem paginada da trilha completa (auditoria.listar: EVENTOS + AJUSTES + AUDITORIA) e a VERIFICAÇÃO
+ * DE INTEGRIDADE (06, seção 9), sob demanda,
  * no fim do setup e semanal: entra pela UnitOfWork (lock, depois da recuperação), lê tudo com acesso cru e confere
  * cada invariante, com severidade (ERRO | ALERTA) e o reparo oferecido. Nunca corrige em silêncio: o reparo
  * (reconstruir projeções e o cache de status dos eventos) é um comando à parte, auditado.
@@ -196,18 +197,126 @@ var AuditService = (function () {
 
 
   // ------------------------------------------------------------------ listagem (auditoria.listar) ----
+  /** Abas da trilha completa (`trilha`): a consulta lê com acesso cru (eventos anulados também contam a história). */
+  var LEITURAS_TRILHA = Object.freeze(['AUDITORIA', 'EVENTOS', 'EVENTO_ANIMAIS', 'AJUSTES']);
+  var ORIGENS = Object.freeze(['EVENTO', 'AJUSTE', 'AUDITORIA']);
+  var ACOES_EVENTO = Object.freeze({ REGISTRAR: 'REGISTRAR', CORRIGIR: 'CORRIGIR', ESTORNAR: 'ESTORNAR', AJUSTAR: 'AJUSTAR' });
+  function ehData_(v) {
+    return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && Utils.dataValida(v);
+  }
+  /** Limite de período: data (yyyy-MM-dd, comparada pela data do instante no fuso da fazenda) ou instante ISO. */
+  function limite_(v, campo) {
+    if (vazio_(v)) return null;
+    if (ehData_(v)) return { data: v };
+    if (typeof v === 'string' && Utils.instanteValido(v)) return { instante: v };
+    throw Validation.erro('VALIDATION', 'Período inválido: use uma data (aaaa-mm-dd).', [Validation.detalhe({ codigo: 'FORMATO_INVALIDO', campo: campo, mensagem: 'Período inválido: use uma data (aaaa-mm-dd).' })]);
+  }
+  function noPeriodo_(ts, de, ate, fuso) {
+    if (!de && !ate) return true;
+    var dia = (de && de.data) || (ate && ate.data) ? Utils.hoje(ts, fuso) : null;
+    if (de && (de.data ? dia < de.data : ts < de.instante)) return false;
+    if (ate && (ate.data ? dia > ate.data : ts > ate.instante)) return false;
+    return true;
+  }
+  function rotuloEvento_(ev) {
+    var def = EventCatalog.existe(ev.event_type) ? EventCatalog.tipo(ev.event_type) : null;
+    var sub = def && def.subtipos && !vazio_(ev.event_subtype) ? def.subtipos[ev.event_subtype] : null;
+    return (def ? def.rotulo : ev.event_type) + (sub ? ' · ' + sub.rotulo : '') + ' de ' + Timeline.dataBr(ev.event_date);
+  }
   /**
-   * Consulta pronta para UnitOfWork.read (rota auditoria.listar). filtros: os de `listar` + {pagina, por_pagina}
-   * (padrão 1 e 50, teto 500). Devolve {total, pagina, por_pagina, itens}.
+   * Trilha completa (03a, seção 5.2; 05, seção 2.16): a união de EVENTOS (o evento registra quem, quando, o quê e com
+   * quais animais; estorno e correção são eventos), AJUSTES (valor anterior e novo de cada correção de animal) e
+   * AUDITORIA (o que não é evento), só de operações confirmadas, da mais recente para a mais antiga. Cada item tem a
+   * forma da linha de AUDITORIA mais `origem` (EVENTO | AJUSTE | AUDITORIA), `id` e, nos de evento, `event_id`,
+   * `event_type`, `event_subtype`, `event_date`, `registration_date`, `reversal_of_event_id`, `status`, `vigente` e
+   * `descricao`. Ações dos itens de evento: REGISTRAR, CORRIGIR (substituto), ESTORNAR; dos ajustes: AJUSTAR.
+   * filtros: {entidade, entity_id (registro), op_id (operação), acao, origem, de, ate (período: data ou instante)}.
+   * `entity_id` de um animal traz também os eventos dele e os estornos e correções desses eventos; `entity_id` de um
+   * evento traz o evento, quem o estornou ou corrigiu e os ajustes dele. Precisa de `tx.cru` (LEITURAS_TRILHA).
+   */
+  function trilha(tx, filtros) {
+    var f = filtros || {};
+    if (!tx.cru) throw interno_('A trilha de auditoria precisa de acesso cru (eventos anulados também contam a história).');
+    if (!vazio_(f.origem) && ORIGENS.indexOf(f.origem) < 0) throw Validation.erro('VALIDATION', 'Origem desconhecida: ' + f.origem + '.', [Validation.detalhe({ codigo: 'VALOR_FORA_DA_LISTA', campo: 'origem', mensagem: 'Use EVENTO, AJUSTE ou AUDITORIA.' })]);
+    var de = limite_(f.de, 'de');
+    var ate = limite_(f.ate, 'ate');
+    var fuso = tx.ctx && tx.ctx.fuso ? tx.ctx.fuso : 'UTC';
+    var cru = tx.cru;
+    var itens = [];
+    var registro = vazio_(f.entity_id) ? null : String(f.entity_id);
+    var confirmado = function (id) { var a = cru.avaliar(id); return a && a.status !== 'FALHOU' && a.status !== 'PENDENTE' ? a : null; };
+    // Eventos do registro pedido: o próprio evento, os do animal, e quem anulou qualquer um deles.
+    var doRegistro = null;
+    if (registro) {
+      doRegistro = {};
+      doRegistro[registro] = true;
+      cru.cruPor('EVENTO_ANIMAIS', 'animal_id', registro).forEach(function (l) { doRegistro[l.event_id] = true; });
+      Object.keys(doRegistro).forEach(function (id) { cru.cruPor('EVENTOS', 'reversal_of_event_id', id).forEach(function (x) { doRegistro[x.event_id] = true; }); });
+    }
+    var querEventos = vazio_(f.entidade) || f.entidade === 'EVENTOS' || (f.entidade === 'ANIMAIS' && registro);
+    if (querEventos && (vazio_(f.origem) || f.origem === 'EVENTO')) {
+      cru.cru('EVENTOS').forEach(function (ev) {
+        var a = confirmado(ev.event_id);
+        if (!a || (doRegistro && !doRegistro[ev.event_id])) return;
+        var alvo = vazio_(ev.reversal_of_event_id) ? null : cru.cruPorId('EVENTOS', ev.reversal_of_event_id);
+        var acao = ev.event_type === 'ESTORNO' ? ACOES_EVENTO.ESTORNAR : alvo ? ACOES_EVENTO.CORRIGIR : ACOES_EVENTO.REGISTRAR;
+        var n = Utils.unicos(cru.cruPor('EVENTO_ANIMAIS', 'event_id', ev.event_id).map(function (l) { return l.animal_id; })).length;
+        var descricao = ev.event_type === 'ESTORNO' ? 'Estorno de: ' + (alvo ? rotuloEvento_(alvo) : 'evento') : (alvo ? 'Correção de: ' : '') + rotuloEvento_(ev) + (n ? ' (' + n + (n === 1 ? ' animal)' : ' animais)') : '');
+        itens.push({
+          origem: 'EVENTO', id: ev.event_id, audit_id: null, op_id: ev.op_id, entidade: 'EVENTOS', entity_id: ev.event_id, acao: acao, campo: null,
+          valor_anterior: null, valor_novo: null, usuario: ev.created_by, timestamp: ev.created_at, justificativa: ev.payload_json && !vazio_(ev.payload_json.justificativa) ? ev.payload_json.justificativa : null,
+          event_id: ev.event_id, event_type: ev.event_type, event_subtype: vazio_(ev.event_subtype) ? null : ev.event_subtype, event_date: ev.event_date,
+          registration_date: ev.registration_date, reversal_of_event_id: vazio_(ev.reversal_of_event_id) ? null : ev.reversal_of_event_id,
+          status: a.status, vigente: a.vigente, descricao: descricao,
+        });
+      });
+    }
+    if ((vazio_(f.entidade) || f.entidade === 'ANIMAIS') && (vazio_(f.origem) || f.origem === 'AJUSTE')) {
+      cru.cru('AJUSTES').forEach(function (x) {
+        var a = confirmado(x.event_id);
+        if (!a || (!vazio_(f.entidade) && x.entidade !== f.entidade)) return;
+        if (registro && x.entity_id !== registro && x.event_id !== registro) return;
+        var ev = cru.cruPorId('EVENTOS', x.event_id);
+        itens.push({
+          origem: 'AJUSTE', id: x.ajuste_id, audit_id: null, op_id: ev.op_id, entidade: x.entidade, entity_id: x.entity_id, acao: ACOES_EVENTO.AJUSTAR,
+          campo: x.campo, valor_anterior: vazio_(x.valor_anterior) ? null : x.valor_anterior, valor_novo: vazio_(x.valor_novo) ? null : x.valor_novo,
+          usuario: ev.created_by, timestamp: ev.created_at, justificativa: vazio_(x.justificativa) ? null : x.justificativa,
+          event_id: x.event_id, event_type: ev.event_type, event_subtype: x.tipo_ajuste, event_date: ev.event_date, registration_date: ev.registration_date,
+          reversal_of_event_id: null, status: a.status, vigente: a.vigente, descricao: rotuloEvento_(ev),
+        });
+      });
+    }
+    if ((vazio_(f.origem) || f.origem === 'AUDITORIA') && f.entidade !== 'EVENTOS') {
+      listar(tx, { entidade: f.entidade, entity_id: registro }).forEach(function (l) {
+        var o = Utils.clonar(l);
+        o.origem = 'AUDITORIA';
+        o.id = l.audit_id;
+        o.event_id = null;
+        itens.push(o);
+      });
+    }
+    var lista = itens.filter(function (x) {
+      if (!vazio_(f.op_id) && x.op_id !== f.op_id) return false;
+      if (!vazio_(f.acao) && x.acao !== f.acao) return false;
+      return noPeriodo_(x.timestamp, de, ate, fuso);
+    });
+    lista.forEach(function (x) { x.ordem_origem_ = ORIGENS.indexOf(x.origem); });
+    lista = Utils.ordenarPor(lista, [{ campo: 'timestamp', desc: true }, 'ordem_origem_', 'id']);
+    lista.forEach(function (x) { delete x.ordem_origem_; });
+    return lista;
+  }
+  /**
+   * Consulta pronta para UnitOfWork.read (rota auditoria.listar): a trilha completa (`trilha`) com os filtros dela +
+   * {pagina, por_pagina} (padrão 1 e 50, teto 500). Devolve {total, pagina, por_pagina, itens}.
    */
   function consultaListar(filtros) {
     var f = filtros || {};
     var pagina = Math.max(1, Math.floor(Number(f.pagina) || 1));
     var porPagina = Math.min(500, Math.max(1, Math.floor(Number(f.por_pagina) || 50)));
     return {
-      rota: 'auditoria.listar', reads: LEITURAS, dados: f,
+      rota: 'auditoria.listar', reads: LEITURAS_TRILHA, dados: f, acessoCru: true,
       tratador: function (tx) {
-        var todos = listar(tx, f);
+        var todos = trilha(tx, f);
         return { total: todos.length, pagina: pagina, por_pagina: porPagina, itens: todos.slice((pagina - 1) * porPagina, pagina * porPagina) };
       },
     };
@@ -637,6 +746,8 @@ var AuditService = (function () {
     linhaErro: linhaErro,
     consultaListar: consultaListar,
     listarAuditoria: listarAuditoria,
+    trilha: trilha,
+    LEITURAS_TRILHA: LEITURAS_TRILHA,
     CHECAGENS: CHECAGENS,
     verificarIntegridade: verificarIntegridade,
     repararIntegridade: repararIntegridade,

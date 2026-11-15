@@ -369,7 +369,7 @@ var TelaConfig = (function () {
         Util.limpar(corpo);
         var paginas = Math.max(1, Math.ceil(d.total / d.por_pagina));
         corpo.appendChild(h('p', { class: 'dado', text: d.total + (d.total === 1 ? ' registro' : ' registros') + ' de alteração' }));
-        corpo.appendChild(UI.tabela({ id: 'auditoria', rotulo: 'Auditoria', linhas: d.itens, chave: function (x) { return x.audit_id; }, porPagina: d.por_pagina, semPaginacao: true, vazio: { texto: 'Nenhuma alteração com esses filtros.' },
+        corpo.appendChild(UI.tabela({ id: 'auditoria', rotulo: 'Auditoria', linhas: d.itens, chave: function (x) { return x.id || x.audit_id; }, porPagina: d.por_pagina, semPaginacao: true, vazio: { texto: 'Nenhuma alteração com esses filtros.' },
           colunas: [
             { id: 'timestamp', rotulo: 'Quando', formatar: function (x) { return Fmt.instante(x.timestamp); } }, { id: 'usuario', rotulo: 'Quem' },
             { id: 'entidade', rotulo: 'O quê', valor: function (x) { return Fmt.rotulo('', x.entidade) + ' · ' + Fmt.rotulo('', x.acao).toLowerCase(); } }, { id: 'campo', rotulo: 'Campo' },
