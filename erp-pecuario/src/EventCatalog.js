@@ -665,14 +665,18 @@ var EventCatalog = (function () {
       return { codigo: 'TIPO_INVALIDO', mensagem: '"' + d.rotulo + '" precisa ser um número inteiro' + (t === 'dinheiro' ? ' de centavos.' : '.') };
     }
     if (t === 'decimal' && d.casas !== undefined && Utils.casasDecimais(x) > d.casas) {
-      return { codigo: 'FORMATO_INVALIDO', mensagem: '"' + d.rotulo + '" aceita no máximo ' + d.casas + ' casa decimal.' };
+      return { codigo: 'FORMATO_INVALIDO', mensagem: '"' + d.rotulo + '" aceita ' + (d.casas === 0 ? 'só número inteiro.' : 'no máximo ' + d.casas + (d.casas === 1 ? ' casa decimal.' : ' casas decimais.')) };
     }
     var n = t === 'dinheiro' ? x / 100 : x;
     if ((d.min !== undefined && n < d.min) || (d.max !== undefined && n > d.max)) {
-      var faixa = d.max !== undefined ? 'entre ' + d.min + ' e ' + d.max : 'a partir de ' + d.min;
-      return { codigo: 'VALOR_FORA_DA_FAIXA', mensagem: '"' + d.rotulo + '" precisa estar ' + faixa + (d.unidade ? ' ' + d.unidade : '') + '.' };
+      var faixa = d.max !== undefined ? 'entre ' + limite_(d, d.min) + ' e ' + limite_(d, d.max) : 'a partir de ' + limite_(d, d.min);
+      return { codigo: 'VALOR_FORA_DA_FAIXA', mensagem: '"' + d.rotulo + '" precisa estar ' + faixa + (d.unidade && t !== 'dinheiro' ? ' ' + d.unidade : '') + '.' };
     }
     return null;
+  }
+  /** Limite da faixa na mensagem, no formato brasileiro: dinheiro em reais (R$ 0,01), número com vírgula (0,1). */
+  function limite_(d, v) {
+    return d.tipo === 'dinheiro' ? Utils.formatarReais(Math.round(v * 100)) : Utils.formatarNumero(v);
   }
 
   return {

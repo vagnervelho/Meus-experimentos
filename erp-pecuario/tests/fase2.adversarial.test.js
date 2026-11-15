@@ -1010,4 +1010,147 @@ test('sequências aleatórias (semente fixa): cada comando aceito ou recusado co
   assert.ok(conflitos >= 20 && recusas >= 40, 'conflitos ' + conflitos + ', recusas ' + recusas + ': ' + JSON.stringify(total));
 });
 
-module.exports = { ambiente, criarModelo, rebanhoInicial, executar, conferirTudo, propTransferencia, propSaida, propCompra, propVenda, propNascimento, propIdentificacao, propMarcacao, propVolta, propEstorno, depoisDoComando, maiorResto, invariantesCruas, cru, D0, HOJE, AVISOS, js, codigos, PASTOS };
+// ------------------------------------------------------------------ casos dirigidos ----
+/** Roda a proposta pelo oráculo do modelo, confere o desfecho que o caso espera e o estado inteiro depois. */
+function passo(amb, M, p, esperado, rotulo) {
+  const ex = executar(amb, M, p, rotulo);
+  assert.equal(ex.prev.cat, esperado, rotulo + ': o modelo concorda com o caso');
+  depoisDoComando(M, p, !!ex.ev);
+  const data = p.novo ? p.novo.data : p.alvo.data;
+  conferirTudo(amb, M, rotulo, [data, somaDias(data, -1)]);
+  return ex;
+}
+function preparar() {
+  const amb = ambiente();
+  const M = criarModelo();
+  const ids = rebanhoInicial(amb, M);
+  return { amb, M, ids, m: amb.m, G: amb.G };
+}
+const CABECA = (preco, parcelas) => ({ modalidade: 'CABECA', preco, parcelas: parcelas || { n: 1, modo: 'vazias' } });
+const novosAnimais = (M, n, sexo) => Array.from({ length: n }, () => ({ brinco: 'R' + (++M.brinco), sexo: sexo || 'M' }));
+const elegiveis = (amb, tipo, data, pasto) => amb.m.ler(amb.G.InventoryService.consultaElegiveis({ tipo, data, pasture_id: pasto || null })).itens.map((x) => x.animal_id);
+
+test('fato no dia da saída (RN-017): a vaca que morre no parto tem o parto aceito no dia da morte e aparece entre os elegíveis ao parto nessa data; o vendido no dia pode ser identificado e marcado nesse dia — e os elegíveis dizem o mesmo; movimento e saída continuam pelo fim do dia', () => {
+  const { amb, M, ids } = preparar();
+  const vaca = ids.I10; // Pasto A
+  const D = '2026-06-10';
+  passo(amb, M, propSaida(M, amb, 'MORTE', D, [vaca], {}), 'OK', 'morte da vaca no parto');
+  assert.ok(elegiveis(amb, 'NASCIMENTO', D).includes(vaca), 'a vaca que morreu no dia do parto é elegível ao parto desse dia');
+  assert.ok(!elegiveis(amb, 'NASCIMENTO', somaDias(D, 1)).includes(vaca), 'no dia seguinte, não');
+  assert.ok(!elegiveis(amb, 'TRANSFERENCIA', D).includes(vaca) && !elegiveis(amb, 'MORTE', D).includes(vaca), 'transferência e morte: quem saiu no dia já não é elegível');
+  const parto = passo(amb, M, propNascimento(M, D, vaca, [{ situacao: 'VIVO', sexo: 'F', brinco: 'R900' }], null), 'OK', 'parto no dia da morte');
+  const cria = M.animais.get(parto.ev.criados[0]);
+  assert.equal(amb.m.animal(cria.id).pasto_atual_id, PASTOS.A, 'a cria nasce no pasto em que a mãe estava antes de morrer');
+  // O vendido no dia: identificação e marcação nesse dia são aceitas e os elegíveis (no pasto do dia) o mostram.
+  const boi = ids.I16; // Pasto A
+  passo(amb, M, propVenda(M, amb, D, [boi], CABECA(300000), null), 'OK', 'venda do boi');
+  assert.ok(elegiveis(amb, 'IDENTIFICACAO', D, PASTOS.A).includes(boi) && elegiveis(amb, 'MARCACAO', D).includes(boi), 'o vendido no dia é elegível à identificação e à marcação desse dia');
+  assert.ok(!elegiveis(amb, 'VENDA', D, PASTOS.A).includes(boi), 'mas não a outra venda');
+  passo(amb, M, propIdentificacao(M, 'SUBSTITUICAO', D, boi, 'R901'), 'OK', 'troca de brinco no dia da venda');
+  passo(amb, M, propMarcacao(M, 'DESCARTE', true, D, boi), 'OK', 'marcação no dia da venda');
+  passo(amb, M, propIdentificacao(M, 'REMOCAO', somaDias(D, 1), boi, null), 'VALIDATION', 'retirada no dia seguinte');
+});
+
+test('mesmo dia com as classes 0, 1 e 2: compra, transferência, parto, venda e morte no mesmo dia; o que entra depois na ordem canônica quebra quem já estava gravado (CONFLICT) e venda com recompra no mesmo dia não cabe', () => {
+  const { amb, M, ids } = preparar();
+  const D = '2026-05-10';
+  const [n1] = novosAnimais(M, 1);
+  const c = passo(amb, M, propCompra(M, amb, D, PASTOS.A, [n1], [], CABECA(250000), null), 'OK', 'compra (classe 0)');
+  const boi = ids.I16; // Pasto A
+  const t = passo(amb, M, propTransferencia(M, D, PASTOS.A, PASTOS.B, [n1.id, boi]), 'OK', 'transferência A → B no dia (classe 1)');
+  const v = passo(amb, M, propVenda(M, amb, D, [n1.id], CABECA(260000), null), 'OK', 'venda no dia (classe 2), da origem B');
+  assert.equal(amb.m.tabela('EVENTO_ANIMAIS').find((l) => l.event_id === v.ev.id).pasto_origem_id, PASTOS.B, 'a origem da venda é o pasto depois da transferência do dia');
+  const vaca = ids.I10;
+  passo(amb, M, propNascimento(M, D, vaca, [{ situacao: 'VIVO', sexo: 'M', brinco: 'R910' }, { situacao: 'NATIMORTO' }], null), 'OK', 'parto no dia');
+  const mt = passo(amb, M, propSaida(M, amb, 'MORTE', D, [vaca], {}), 'OK', 'morte da vaca no dia, depois do parto');
+  // Inventário do dia: o novilho entrou e saiu; o boi está em B; a vaca saiu; a cria entrou em A.
+  const inv = amb.m.inventario(D);
+  const antes = amb.m.inventario(somaDias(D, -1));
+  assert.deepEqual([inv.total - antes.total, inv.porPasto[PASTOS.B] - (antes.porPasto[PASTOS.B] || 0)], [0, 1], 'entra a cria, sai a vaca; o novilho entra e sai no mesmo dia');
+  // Transferência da vaca no dia, lançada depois da morte: classe 1, antes da saída → a morte perde a origem → CONFLICT com ela.
+  const tx = passo(amb, M, propTransferencia(M, D, PASTOS.A, PASTOS.C, [vaca]), 'CONFLICT', 'transferência da morta no mesmo dia');
+  assert.deepEqual(Array.from(tx.prev.outros), [mt.ev.id]);
+  // Recompra no dia da venda: a entrada vem antes da saída no mesmo dia (sem hora) → ENTRADA_JA_DENTRO na própria linha.
+  const rc = passo(amb, M, propCompra(M, amb, D, PASTOS.A, [], [n1.id], CABECA(260000), null), 'VALIDATION', 'recompra no dia da venda');
+  assert.deepEqual(codigos(rc.r.erro), ['ENTRADA_JA_DENTRO']);
+  const rc2 = passo(amb, M, propCompra(M, amb, somaDias(D, 1), PASTOS.A, [], [n1.id], CABECA(260000), null), 'OK', 'recompra no dia seguinte');
+  // Estornos na ordem errada: cada um diz qual evento impede.
+  assert.deepEqual(Array.from(passo(amb, M, propEstorno(M, t.ev), 'CONFLICT', 'estorno da transferência com a venda de B').prev.outros), [v.ev.id]);
+  const ec = passo(amb, M, propEstorno(M, c.ev), 'CONFLICT', 'estorno da compra com transferência e venda');
+  assert.deepEqual(Array.from(ec.prev.outros).sort(), [t.ev.id, v.ev.id, rc2.ev.id].sort(), 'a transferência, a venda e a recompra dependem da compra');
+  passo(amb, M, propEstorno(M, v.ev), 'CONFLICT', 'estorno da venda com a recompra posterior');
+});
+
+test('substituição em cadeia: duas transferências do mesmo animal no mesmo dia; a correção da primeira fica no lugar dela (antes da segunda, desenho-base 16.1) em toda a cadeia; estornar o último da cadeia não ressuscita os anteriores; compra corrigida duas vezes cancela cada lançamento por quem o substituiu', () => {
+  const { amb, M, ids } = preparar();
+  const x = ids.I16; // Pasto A
+  const D = '2026-04-20';
+  const t1 = passo(amb, M, propTransferencia(M, D, PASTOS.A, PASTOS.B, [x]), 'OK', 'T1 A → B');
+  const t2 = passo(amb, M, propTransferencia(M, D, PASTOS.B, PASTOS.C, [x]), 'OK', 'T2 B → C no mesmo dia');
+  // Corrigir T1 para A → C: no lugar de T1, deixa T2 partindo de B sem o animal lá → CONFLICT com T2.
+  assert.deepEqual(Array.from(passo(amb, M, propTransferencia(M, D, PASTOS.A, PASTOS.C, [x], t1.ev), 'CONFLICT', 'T1 corrigida para A → C').prev.outros), [t2.ev.id]);
+  const t1b = passo(amb, M, propTransferencia(M, somaDias(D, -5), PASTOS.A, PASTOS.B, [x], t1.ev), 'OK', 'T1 corrigida para 5 dias antes');
+  const t1c = passo(amb, M, propTransferencia(M, D, PASTOS.A, PASTOS.B, [x], t1b.ev), 'OK', 'T1 corrigida de novo para o dia D');
+  assert.equal(t1c.ev.raiz, t1.ev.raiz, 'a cadeia guarda a posição do primeiro');
+  assert.deepEqual(Array.from(passo(amb, M, propEstorno(M, t1c.ev), 'CONFLICT', 'estorno do fim da cadeia com T2 dependente').prev.outros), [t2.ev.id]);
+  passo(amb, M, propEstorno(M, t2.ev), 'OK', 'estorno de T2');
+  passo(amb, M, propEstorno(M, t1c.ev), 'OK', 'estorno do fim da cadeia');
+  assert.equal(amb.m.animal(x).pasto_atual_id, PASTOS.A, 'sem ressurreição: nenhuma das versões de T1 vale');
+  passo(amb, M, propEstorno(M, t1b.ev), 'VALIDATION', 'estornar um elo do meio');
+  // Compra corrigida duas vezes (valor e frete), com os mesmos animal_id.
+  const nv = novosAnimais(M, 3);
+  const c1 = passo(amb, M, propCompra(M, amb, '2026-03-01', PASTOS.C, nv, [], Object.assign(CABECA(100000), { frete: 3000 }), null), 'OK', 'C1');
+  const mesmos = () => nv.map((n) => ({ brinco: n.brinco, sexo: n.sexo, id: n.id }));
+  const c2 = passo(amb, M, propCompra(M, amb, '2026-03-01', PASTOS.C, mesmos(), [], Object.assign(CABECA(110000), { frete: 3000 }), null, c1.ev), 'OK', 'C2 corrige o preço');
+  const c3 = passo(amb, M, propCompra(M, amb, '2026-03-01', PASTOS.C, mesmos(), [], Object.assign(CABECA(110000), { frete: 1 }), null, c2.ev), 'OK', 'C3 corrige o frete para 1 centavo');
+  assert.deepEqual(nv.map((n) => amb.m.animal(n.id).custo_aquisicao), [330000 / 3 + 1, 330000 / 3, 330000 / 3], 'custo = 1.100,00 + o centavo do frete para o menor código');
+  const por = (ev) => amb.m.tabela('FINANCEIRO').filter((f) => f.event_id === ev.id).map((f) => [f.status, f.cancelado_por_event_id]);
+  assert.deepEqual([por(c1.ev), por(c2.ev), por(c3.ev)], [[['CANCELADO', c2.ev.id], ['CANCELADO', c2.ev.id]], [['CANCELADO', c3.ev.id], ['CANCELADO', c3.ev.id]], [['ATIVO', null], ['ATIVO', null]]]);
+  const e3 = passo(amb, M, propEstorno(M, c3.ev), 'OK', 'estorno de C3');
+  assert.deepEqual(nv.map((n) => amb.m.animal(n.id).situacao_cadastral), ['ANULADO', 'ANULADO', 'ANULADO']);
+  assert.deepEqual(por(c3.ev), [['CANCELADO', e3.ev.id], ['CANCELADO', e3.ev.id]]);
+});
+
+test('estorno de compra com venda posterior: CONFLICT com a venda; a correção de valor passa (não é estrutural) e muda o custo dos vendidos; tirar da compra um animal vendido é CONFLICT, tirar o que ficou o anula; depois da venda estornada a compra se estorna', () => {
+  const { amb, M } = preparar();
+  const nv = novosAnimais(M, 3);
+  const c = passo(amb, M, propCompra(M, amb, '2026-02-10', PASTOS.B, nv, [], CABECA(200000, { n: 2, modo: 'vazias' }), null), 'OK', 'compra de 3');
+  const v = passo(amb, M, propVenda(M, amb, '2026-08-01', [nv[0].id, nv[1].id], CABECA(310000, { n: 1, modo: 'explicitas' }), null), 'OK', 'venda de 2');
+  assert.deepEqual(Array.from(passo(amb, M, propEstorno(M, c.ev), 'CONFLICT', 'estorno da compra').prev.outros), [v.ev.id]);
+  const mesmos = (lista) => lista.map((n) => ({ brinco: n.brinco, sexo: n.sexo, id: n.id }));
+  const c2 = passo(amb, M, propCompra(M, amb, '2026-02-10', PASTOS.B, mesmos(nv), [], CABECA(210000, { n: 3, modo: 'vazias' }), null, c.ev), 'OK', 'correção do preço');
+  assert.deepEqual(nv.map((n) => amb.m.animal(n.id).custo_aquisicao), [210000, 210000, 210000], 'o custo dos vendidos acompanha a correção');
+  assert.deepEqual(Array.from(passo(amb, M, propCompra(M, amb, '2026-02-10', PASTOS.B, mesmos(nv.slice(1)), [], CABECA(210000), null, c2.ev), 'CONFLICT', 'tirar da compra um vendido').prev.outros), [v.ev.id]);
+  const c3 = passo(amb, M, propCompra(M, amb, '2026-02-10', PASTOS.B, mesmos(nv.slice(0, 2)), [], CABECA(210000), null, c2.ev), 'OK', 'tirar da compra o que ficou');
+  assert.equal(amb.m.animal(nv[2].id).situacao_cadastral, 'ANULADO');
+  passo(amb, M, propCompra(M, amb, '2026-09-01', PASTOS.B, mesmos(nv.slice(0, 2)), [], CABECA(210000), null, c3.ev), 'CONFLICT', 'a compra corrigida para depois da venda');
+  passo(amb, M, propEstorno(M, v.ev), 'OK', 'estorno da venda');
+  passo(amb, M, propEstorno(M, c3.ev), 'OK', 'estorno da compra');
+  assert.deepEqual(amb.m.tabela('FINANCEIRO').filter((f) => f.status === 'ATIVO').length, 0, 'nenhum lançamento vale');
+});
+
+test('gêmeos com um natimorto: o parto grava 1 vivo e 1 natimorto; a correção faz nascer o segundo; a cria que morreu não pode virar natimorta nem o parto ser estornado; estornada a morte, o parto se estorna e a mãe volta ao que era', () => {
+  const { amb, M, ids, m } = preparar();
+  const vaca = ids.I11; // Pasto B
+  const antes = m.animal(vaca);
+  const crias = [{ situacao: 'VIVO', sexo: 'F', brinco: 'R920' }, { situacao: 'NATIMORTO' }];
+  const p1 = passo(amb, M, propNascimento(M, '2026-07-01', vaca, crias, null), 'OK', 'parto de gêmeos, um natimorto');
+  const rep = m.tabela('REPRODUCAO').find((r) => r.event_id === p1.ev.id);
+  assert.deepEqual([rep.tipo_evento, rep.qtd_nascidos_vivos, rep.qtd_natimortos], ['PARTO', 1, 1]);
+  assert.deepEqual([m.animal(vaca).cria_ao_pe, m.animal(vaca).situacao_reprodutiva], [true, 'VAZIA']);
+  const segunda = { situacao: 'VIVO', sexo: 'M', brinco: 'R921' };
+  const p2 = passo(amb, M, propNascimento(M, '2026-07-01', vaca, [Object.assign({}, p1.ev.crias[0]), segunda], null, p1.ev), 'OK', 'correção: o segundo nasceu vivo');
+  const [f1, f2] = p2.ev.crias.map((x) => x.id);
+  assert.equal(f1, p1.ev.crias[0].id, 'a cria viva do original é a mesma');
+  assert.equal(m.tabela('REPRODUCAO').find((r) => r.event_id === p2.ev.id).qtd_nascidos_vivos, 2);
+  const morte = passo(amb, M, propSaida(M, amb, 'MORTE', '2026-07-03', [f2], {}), 'OK', 'morte do segundo');
+  assert.deepEqual(Array.from(passo(amb, M, propNascimento(M, '2026-07-01', vaca, [Object.assign({}, p2.ev.crias[0]), { situacao: 'NATIMORTO' }], null, p2.ev), 'CONFLICT', 'a cria que morreu vira natimorta').prev.outros), [morte.ev.id]);
+  assert.deepEqual(Array.from(passo(amb, M, propEstorno(M, p2.ev), 'CONFLICT', 'estorno do parto com a morte da cria').prev.outros), [morte.ev.id]);
+  passo(amb, M, propEstorno(M, morte.ev), 'OK', 'estorno da morte');
+  passo(amb, M, propEstorno(M, p2.ev), 'OK', 'estorno do parto');
+  assert.deepEqual([f1, f2].map((id) => m.animal(id).situacao_cadastral), ['ANULADO', 'ANULADO']);
+  assert.deepEqual([m.animal(vaca).cria_ao_pe, m.animal(vaca).situacao_reprodutiva, m.animal(vaca).partos_previos], [antes.cria_ao_pe, antes.situacao_reprodutiva, antes.partos_previos], 'a mãe volta ao que era');
+  assert.equal(m.tabela('REPRODUCAO').filter((r) => r.animal_id === vaca).length, 2, 'nada se apaga: as linhas dos dois partos ficam, anuladas');
+});
+
+module.exports = { ambiente, criarModelo, rebanhoInicial, executar, conferirTudo, propTransferencia, propSaida, propCompra, propVenda, propNascimento, propIdentificacao, propMarcacao, propVolta, propEstorno, depoisDoComando, maiorResto, invariantesCruas, cru, passo, preparar, D0, HOJE, AVISOS };

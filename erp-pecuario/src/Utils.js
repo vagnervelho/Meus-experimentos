@@ -196,6 +196,18 @@ var Utils = (function () {
     var inteiro = String(Math.floor(abs / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
     return (centavos < 0 ? '-' : '') + 'R$ ' + inteiro + ',' + dois_(abs % 100);
   }
+  /**
+   * Número para mensagens ao usuário, no formato brasileiro: '1.234,5' (milhar com ponto, decimal com vírgula).
+   * `casas` fixa as casas (arredondando meio para cima); sem ela, as que o número realmente usa (casasDecimais).
+   */
+  function formatarNumero(valor, casas) {
+    if (typeof valor !== 'number' || !isFinite(valor)) throw falha_('INTERNAL', 'formatarNumero espera um número.');
+    var c = typeof casas === 'number' ? casas : casasDecimais(valor);
+    var v = arredondar(valor, c);
+    var partes = Math.abs(v).toFixed(c).split('.');
+    var inteiro = partes[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    return (v < 0 ? '-' : '') + inteiro + (partes[1] ? ',' + partes[1] : '');
+  }
   /** a × b ÷ d em inteiros exatos, sem estourar 2^53: devolve {q, r} com a × b = q × d + r. Exige d < 2^52. */
   function mulDivMod_(a, b, d) {
     var aq = Math.floor(a / d);
@@ -447,6 +459,7 @@ var Utils = (function () {
     reaisParaCentavos: reaisParaCentavos,
     centavosParaReais: centavosParaReais,
     formatarReais: formatarReais,
+    formatarNumero: formatarNumero,
     ratear: ratear,
     aparar: aparar,
     normalizarBrinco: normalizarBrinco,
