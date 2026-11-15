@@ -438,3 +438,25 @@ Testes novos: `tests/integrity.fase2.test.js`.
   com o backend real (`npm run ui:check`: 59 testes, 59 aprovados, 0 falhas; página montada com 411 KB de 450 KB). O modo
   curral (identificação no brete) chega com a pesagem, na Fase 3 (E3.1); nesta fase a identificação usa o seletor e o
   cartão de cada animal. Nada validado na conta do dono.
+
+## 15/11/2026 — Fase 2, etapa INTERFACE DE PASTOS, IMPORTAÇÃO E ANEXOS (E2.8 a E2.10 na tela)
+
+- Pastos: a lista ganhou a "Posição em [data]" (do marco zero a hoje): numa data passada, `pasto.listar` com a data
+  (novo parâmetro, a mesma regra do painel: replay das linhas que valem hoje; antes do marco zero, os nulos com o motivo;
+  data futura ou inválida recusada) devolve todos os pastos naquele dia. Cartões com cabeças, UA, UA/ha, ocupação e a
+  marca "acima da capacidade". A data escolhida vale também para o painel (memória da tela, nunca na rota). Indicador sem
+  valor aparece como "Sem dado" e o motivo em palavras: sem área, sem capacidade informada (nunca deduzida da área),
+  nenhum animal com peso, pasto vazio, data anterior ao marco zero; o painel sugere informar área e capacidade.
+- Importação: o título acompanha o tipo; "Como o sistema entendeu" mostra cada campo do modelo do tipo em palavras e as
+  linhas do mesmo lançamento (`importacao.linhas` passou a devolver `lancamento`, pela chave de agrupamento da
+  validação). "Deixar de fora" em linha válida (a pendência `ignorar_linhas` da Fase 1, que o servidor aceitava e a tela
+  não oferecia): marca o lançamento inteiro, resume as linhas escolhidas e leva à confirmação parcial com os números
+  certos (`TelaImportacao.planoConfirmacao`). Reconciliação com o marco zero em tabela (o que diz a fotografia, o que diz
+  o histórico, o que fazer, o registro que explica, com links), no relatório final e, sem gravar, na lista de importações.
+- Anexos no formulário de evento (08, seção 4.3): "Documentos e fotos" depois das observações, em todo tipo menos o
+  estorno; nota fiscal na compra e na venda, GTA na transferência como tipo sugerido (também no detalhe). Os arquivos ficam
+  na memória do formulário e vão por `anexo.adicionar` ao lançamento gravado, um por um, com a chave de cada arquivo; a
+  tela de resultado mostra o estado de cada envio e "Tentar de novo" sem duplicar.
+- Testes novos: `tests/telas.pastos-importacao.test.js` e `tests/ui/pastos-importacao.test.js` (a 1280 e a 360 px).
+- Verificado em Node (`npm test`: 508 testes, 508 aprovados, 0 falhas) e no navegador com o backend real (`npm run
+  ui:check`: 65 testes, 65 aprovados, 0 falhas; página montada com 427 KB de 450 KB). Nada validado na conta do dono.

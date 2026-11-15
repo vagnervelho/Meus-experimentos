@@ -24,7 +24,7 @@ var TelaPastos = (function () {
   function motivoSemDado(campo, ind, p) {
     var m = ind && typeof ind === 'object' ? ind.motivo : null;
     var d0 = Store.param('data_marco_zero');
-    if (m === 'ANTERIOR_AO_MARCO_ZERO') return 'a data é anterior ao marco zero' + (d0 ? ' (' + Fmt.data(d0) + ')' : '');
+    if (m === 'ANTERIOR_AO_MARCO_ZERO') return 'a data é anterior ao marco zero' + (d0 ? ', ' + Fmt.data(d0) : '');
     if (m === 'FILTRO_NAO_APLICAVEL') return Fmt.rotulo('MOTIVO', m);
     var semCapacidade = (p.capacidade_estimada_ua_ha === null || p.capacidade_estimada_ua_ha === undefined) && (p.capacidade_estimada_cabecas === null || p.capacidade_estimada_cabecas === undefined);
     if (campo === 'ocupacao' && semCapacidade) return 'o pasto não tem capacidade informada';
@@ -40,8 +40,8 @@ var TelaPastos = (function () {
   }
   function ocupacao(p) {
     var o = p.ocupacao_pct;
-    var t = valor('ocupacao', o, p, function (v) { return Fmt.numero(v, 0) + '%'; });
-    return o && o.valor !== null && o.valor !== undefined ? t + (o.base === 'CABECAS' ? ' (por cabeças)' : ' (por UA/ha)') : t;
+    if (!o || o.valor === null || o.valor === undefined) return valor('ocupacao', o, p, String);
+    return Fmt.numero(o.valor, 0) + '% (' + (o.base === 'CABECAS' ? 'por cabeças' : 'por UA/ha') + (o.estimado ? ', estimado' : '') + ')';
   }
   function uaHa(p) { return valor('ua_ha', p.ua_ha, p, function (v) { return Fmt.numero(v, 2); }); }
   function ua(p) { return valor('ua', p.ua, p, function (v) { return Fmt.numero(v, 2); }); }
@@ -97,7 +97,7 @@ var TelaPastos = (function () {
     el.appendChild(cab);
     el.appendChild(campoPosicao('pst-lista-data', function () { carregar(); }).el);
     var cx = h('input', { type: 'checkbox', id: 'pst-inativos' });
-    el.appendChild(h('label', { class: 'marca', for: 'pst-inativos' }, cx, h('span', { text: 'Mostrar pastos inativos' })));
+    el.appendChild(h('div', { style: 'margin-top:8px' }, h('label', { class: 'marca', for: 'pst-inativos' }, cx, h('span', { text: 'Mostrar pastos inativos' }))));
     var titulo = h('p', { class: 'suave', dataset: { posicaoEm: '1' } });
     el.appendChild(titulo);
     var lista = h('ul', { class: 'lista-cartoes', 'aria-label': 'Pastos' });

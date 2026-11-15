@@ -158,6 +158,46 @@ var TestRunner = (function () {
     };
     t.naoSeAplica = function (id, titulo, motivo) { t.passos.push({ passo: id, titulo: titulo, situacao: SITUACAO.NAO_SE_APLICA, detalhe: motivo }); };
     t.pendente = function (id, titulo, motivo) { t.passos.push({ passo: id, titulo: titulo, situacao: SITUACAO.PENDENTE, detalhe: motivo }); };
+    // Apoio dos cenários da Fase 2: datas contadas do marco zero, pastos e parceiros próprios de cada cenário (as
+    // contagens por pasto ficam exatas na base compartilhada), consultas pela Api e a integridade no fim.
+    t.dia = function (n) { return Utils.somaDias(t.estado.d0, n); };
+    t.pastos = function (cenario, nomes) {
+      var out = {};
+      nomes.forEach(function (n, i) {
+        out[n] = t.cmd('pasto.salvar', { campos: { property_id: t.estado.prop, nome: n + ' (' + cenario + ')', posse: 'PROPRIO', status: 'ATIVO' } }, cenario + '-pasto-' + i).pasture_id;
+      });
+      return out;
+    };
+    t.parceiro = function (nome, tipos, nomeChave) { return t.cmd('parceiro.salvar', { campos: { nome: nome, tipos: tipos } }, nomeChave).partner_id; };
+    t.posicao = function (data) { return t.ok(t.api('inventario.posicao', vazio_(data) ? {} : { data: data }), 'inventario.posicao'); };
+    t.noPasto = function (pasto, data) {
+      var n = 0;
+      (t.posicao(data).por_pasto || []).forEach(function (x) { if (x.pasture_id === pasto) n = x.cabecas; });
+      return n;
+    };
+    t.doEvento = function (aba, eventId) { return t.tabela(aba).filter(function (r) { return r.event_id === eventId; }); };
+    t.titulos = function () { return t.ok(t.api('dashboard.obter', {}), 'dashboard.obter').titulos; };
+    t.ficha = function (id) { return t.ok(t.api('animal.ficha', { animal_id: id }), 'animal.ficha'); };
+    t.evento = function (id) { return t.ok(t.api('evento.obter', { event_id: id }), 'evento.obter').evento; };
+    t.animal = function (id) { return t.tabela('ANIMAIS').filter(function (a) { return a.animal_id === id; })[0] || null; };
+    /** Recusa que não grava nada: código esperado, abas idênticas, versão igual e chave livre. */
+    t.recusa = function (rota, dados, code, nome) {
+      var antes = t.contagens();
+      var v0 = t.versao();
+      var chave = t.chave(nome);
+      var e = t.erro(t.api(rota, dados, { chave: chave }), code, nome);
+      igual_(t.contagens(), antes, nome + ': nenhuma linha gravada');
+      igual_(t.versao(), v0, nome + ': a versão dos dados não muda');
+      igual_(t.ok(t.api('operacao.status', { chave: chave }), 'status').situacao, 'INEXISTENTE', nome + ': a chave não foi consumida');
+      return e;
+    };
+    /** Projeção gravada = reconstrução e as invariantes do financeiro: a verificação de integridade sem erro. */
+    t.integra = function (onde) {
+      var rel = t.ok(t.api('sistema.integridade', {}), 'integridade');
+      var erros = (rel.checagens || []).filter(function (c) { return c.situacao === 'ERRO'; }).map(function (c) { return c.codigo; });
+      verificar_(rel.ok === true, 'integridade com erro depois de ' + onde + ': ' + erros.join(', ') + ' ' + curto_((rel.achados || []).slice(0, 2), 200));
+      return 'integridade sem erro (projeção = reconstrução)';
+    };
     return t;
   }
   function bicho_(t, extra) {
@@ -204,6 +244,38 @@ var TestRunner = (function () {
     rel.checagens.forEach(function (c) { out[c.codigo] = c.situacao; });
     return out;
   }
+  function transf_(data, origem, destino, ids) {
+    return { tipo: 'TRANSFERENCIA', campos: { event_date: data, pasto_origem_id: origem, pasto_destino_id: destino }, animais: ids.map(function (id) { return { animal_id: id }; }) };
+  }
+  function ident_(subtipo, data, tipoIdent, itens) {
+    return { tipo: 'IDENTIFICACAO', subtipo: subtipo, campos: { event_date: data, tipo_identificacao: tipoIdent }, animais: itens };
+  }
+  function nascimento_(data, matriz, crias, campos) {
+    var c = { event_date: data };
+    Object.keys(campos || {}).forEach(function (k) { c[k] = campos[k]; });
+    return { tipo: 'NASCIMENTO', campos: c, animais: [{ animal_id: matriz }], crias: crias };
+  }
+  /** Garrote comprado (animal novo na compra): macho inteiro de 14 meses. */
+  function garrote_(brinco, extra) {
+    var a = { brinco: brinco, sexo: 'M', castrado: false, reprodutor: false, idade_meses: 14 };
+    Object.keys(extra || {}).forEach(function (k) { a[k] = extra[k]; });
+    return a;
+  }
+  function ids_(resposta) {
+    var out = {};
+    resposta.animais.forEach(function (a) { out[a.brinco] = a.animal_id; });
+    return out;
+  }
+  /** {chave: valor} de uma lista de linhas: o mapa compara sem depender da ordem das linhas. */
+  function mapa_(linhas, chave, valor) {
+    var out = {};
+    linhas.forEach(function (l) { out[typeof chave === 'function' ? chave(l) : l[chave]] = typeof valor === 'function' ? valor(l) : l[valor]; });
+    return out;
+  }
+  function soma_(linhas, campo) {
+    return linhas.reduce(function (s, l) { return s + (l[campo] || 0); }, 0);
+  }
+  var FORMATO_CSV = { delimitador: ';', codificacao: 'UTF-8', formato_data: 'dd/MM/yyyy', decimal: ',' };
 
   // ------------------------------------------------------------------ cenários de aceitação (Fase 1) ----
   /**
