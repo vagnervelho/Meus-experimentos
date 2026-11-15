@@ -218,6 +218,31 @@ var EventService = (function () {
   function erroGeral_(m, campo, codigo, mensagem) {
     m.col.erro({ codigo: codigo, campo: campo, mensagem: mensagem });
   }
+  /** Campos do cabeçalho que a negociação calcula com os do animal (o rendimento apurado vai para o peso vivo total). */
+  var DERIVADOS_NEGOCIO = { peso: ['peso_total_kg', 'peso_vivo_total_kg'], peso_carcaca_kg: ['peso_carcaca_total_kg', 'peso_vivo_total_kg'], valor_individual: ['valor_animais', 'valor_bruto'] };
+  /**
+   * Campos do cabeçalho que já têm erro (o catálogo recusou) ou que a negociação só calcularia com um valor de animal já
+   * recusado: nenhum deles leva um segundo erro da negociação (uma causa, um erro).
+   */
+  function recusadosNegocio_(m, itens) {
+    var out = {};
+    m.col.erros.forEach(function (e) { if (!e.animal_id && e.campo) out[e.campo] = true; });
+    itens.forEach(function (it) { Object.keys(it.camposComErro || {}).forEach(function (c) { (DERIVADOS_NEGOCIO[c] || []).forEach(function (h) { out[h] = true; }); }); });
+    return out;
+  }
+  /**
+   * Item que cita um animal já cadastrado (sujeito do evento): o erro de campo do catálogo já aponta o animal (animal_id
+   * e brinco), como as regras do sujeito que vêm depois (contrato da Api: detalhes por animal e campo).
+   */
+  function apontarExistente_(m, it) {
+    var id = it.dados && it.dados.animal_id;
+    if (it.publico || vazio_(id)) return;
+    var e = existente_(m, id);
+    if (!e) return;
+    it.animal_id = id;
+    it.publico = true;
+    if (vazio_(it.brincoTexto)) it.brincoTexto = nulo_(e.brinco);
+  }
   /** Erros de campo do catálogo, com o "quem" do item. */
   function camposDoItem_(m, it, definicoes, valores) {
     EventCatalog.validarCampos(definicoes, valores, { listas: m.listas }).forEach(function (d) { erroItem_(m, it, d.campo, d.codigo, d.mensagem); });
@@ -442,6 +467,7 @@ var EventService = (function () {
     var compra = ctxEv.tipo === 'COMPRA';
     var aceitos = CAMPOS_REENTRADA[ctxEv.tipo];
     var outros = Object.keys(d).filter(function (k) { return aceitos.indexOf(k) < 0 && !vazio_(d[k]); });
+    apontarExistente_(m, it);
     camposDoItem_(m, it, defs, Object.keys(d).reduce(function (o, k) { if (aceitos.indexOf(k) >= 0) o[k] = d[k]; return o; }, {}));
     outros.forEach(function (k) { erroItem_(m, it, k, 'CAMPO_NAO_SE_APLICA', 'na volta de um animal já cadastrado não se informa "' + k + '": corrija o cadastro por "Corrigir dados do animal".'); });
     var e = existente_(m, d.animal_id);
@@ -602,6 +628,7 @@ var EventService = (function () {
    * conferida pela linha do tempo na data (ORIGEM_DIVERGENTE por animal, RN-018); tudo ou nada (RN-028).
    */
   function itemTransferencia_(m, ctxEv, it) {
+    apontarExistente_(m, it);
     camposDoItem_(m, it, EventCatalog.camposAnimal('TRANSFERENCIA'), semAnimalId_(it.dados));
     if (!sujeito_(m, it, 'transfere') || !ctxEv.transf) return;
     linhaEA_(m, ctxEv, it, { efeito_inventario: 0, pasto_origem_id: ctxEv.transf.pasto_origem_id, pasto_destino_id: ctxEv.transf.pasto_destino_id });
@@ -615,6 +642,7 @@ var EventService = (function () {
     var d = it.dados;
     var c = ctxEv.campos;
     var ev = ctxEv.ev;
+    apontarExistente_(m, it);
     camposDoItem_(m, it, EventCatalog.camposAnimal(ctxEv.tipo), semAnimalId_(d));
     if (!sujeito_(m, it, ctxEv.tipo === 'MORTE' ? 'registra como morto' : 'descarta')) return;
     // Morte anterior ao marco zero (importação): registro histórico, sem efeito no inventário nem pasto de origem.
@@ -661,6 +689,7 @@ var EventService = (function () {
     var d = it.dados;
     var ev = ctxEv.ev;
     var sub = ctxEv.subtipo;
+    apontarExistente_(m, it);
     camposDoItem_(m, it, EventCatalog.camposAnimal('IDENTIFICACAO', sub), d);
     if (vazio_(d.animal_id)) return;
     var e = sujeito_(m, it, 'identifica');
@@ -705,6 +734,7 @@ var EventService = (function () {
    */
   function itemMarcacao_(m, ctxEv, it) {
     var d = it.dados;
+    apontarExistente_(m, it);
     camposDoItem_(m, it, EventCatalog.camposAnimal('MARCACAO', ctxEv.subtipo), d);
     if (vazio_(d.animal_id)) return;
     if (!sujeito_(m, it, 'marca')) return;
@@ -714,6 +744,7 @@ var EventService = (function () {
   // ------------------------------------------------------------------ nascimento ----
   /** A matriz do parto (papel MATRIZ, efeito 0): fêmea do rebanho; a presença na data é conferida como fato (RN-017). */
   function itemMatriz_(m, ctxEv, it) {
+    apontarExistente_(m, it);
     camposDoItem_(m, it, EventCatalog.camposAnimal('NASCIMENTO'), semAnimalId_(it.dados));
     var e = sujeito_(m, it, 'registra como mãe');
     if (!e) return;
@@ -823,6 +854,7 @@ var EventService = (function () {
   // ------------------------------------------------------------------ ajustes ----
   function itemAjuste_(m, ctxEv, it) {
     var d = it.dados;
+    apontarExistente_(m, it);
     camposDoItem_(m, it, EventCatalog.camposAnimal('AJUSTE_INVENTARIO', ctxEv.subtipo), d);
     if (vazio_(d.animal_id)) return;
     var e = existente_(m, d.animal_id);
@@ -1652,8 +1684,7 @@ var EventService = (function () {
       animais: itens.map(function (it) { var n = it.negocio; return { chave: it.codigo_interno, peso: n.peso, peso_carcaca_kg: n.peso_carcaca_kg, valor_individual: n.valor_individual, base_manual: n.base_manual }; }),
     });
     // O campo do cabeçalho que o catálogo já recusou (obrigatório, fora da lista) não leva um segundo erro da negociação.
-    var jaRecusados = {};
-    m.col.erros.forEach(function (e) { if (!e.animal_id && e.campo) jaRecusados[e.campo] = true; });
+    var jaRecusados = recusadosNegocio_(m, itens);
     neg.erros.forEach(function (e) {
       // O campo do animal que o catálogo já recusou (fora da faixa, casas demais) também não leva um segundo erro.
       if (typeof e.indice === 'number') { if (!(itens[e.indice].camposComErro || {})[e.campo]) erroItem_(m, itens[e.indice], e.campo, e.codigo, e.mensagem); }
@@ -1788,6 +1819,7 @@ var EventService = (function () {
   function itemVenda_(m, ctxEv, it) {
     var d = it.dados;
     var ev = ctxEv.ev;
+    apontarExistente_(m, it);
     camposDoItem_(m, it, EventCatalog.camposAnimal('VENDA'), semAnimalId_(d));
     if (!sujeito_(m, it, 'vende')) return;
     // Venda anterior ao marco zero (importação): registro histórico, efeito 0, origem só a informada.
@@ -1870,7 +1902,8 @@ var EventService = (function () {
     if (!itens.length || itens.length !== ctxEv.itens.length || Utils.unicos(itens.map(function (it) { return it.animal_id; })).length !== itens.length) return;
     var bruto = typeof c.valor_bruto === 'number' ? c.valor_bruto : null;
     var desconto = typeof c.desconto_comercial === 'number' ? c.desconto_comercial : 0;
-    if (bruto !== null && desconto >= bruto) erroGeral_(m, 'desconto_comercial', 'VALOR_FORA_DA_FAIXA', 'O desconto (' + Utils.formatarReais(desconto) + ') precisa ser menor que o valor bruto da venda (' + Utils.formatarReais(bruto) + ').');
+    // Bruto zero ou negativo o catálogo já recusou: comparar o desconto com ele só repetiria a causa.
+    if (bruto !== null && bruto > 0 && desconto >= bruto) erroGeral_(m, 'desconto_comercial', 'VALOR_FORA_DA_FAIXA', 'O desconto (' + Utils.formatarReais(desconto) + ') precisa ser menor que o valor bruto da venda (' + Utils.formatarReais(bruto) + ').');
     var receita = bruto !== null && desconto < bruto ? bruto - desconto : null;
     var neg = FinancialService.negociacao({
       modalidade: c.modalidade, base_peso: nulo_(c.base_peso), rendimento_carcaca_pct: typeof c.rendimento_carcaca_pct === 'number' ? c.rendimento_carcaca_pct : null,
@@ -1882,8 +1915,7 @@ var EventService = (function () {
       animais: itens.map(function (it) { var n = it.negocio; return { chave: it.codigo_interno, peso: n.peso, peso_carcaca_kg: n.peso_carcaca_kg, valor_individual: n.valor_individual, base_manual: n.base_manual }; }),
       pesagens: itens.map(function (it) { return it.ultimaPesagem ? it.ultimaPesagem.peso_kg : null; }),
     });
-    var jaRecusados = {};
-    m.col.erros.forEach(function (e) { if (!e.animal_id && e.campo) jaRecusados[e.campo] = true; });
+    var jaRecusados = recusadosNegocio_(m, itens);
     neg.erros.forEach(function (e) {
       // O campo do animal que o catálogo já recusou (fora da faixa, casas demais) também não leva um segundo erro.
       if (typeof e.indice === 'number') { if (!(itens[e.indice].camposComErro || {})[e.campo]) erroItem_(m, itens[e.indice], e.campo, e.codigo, e.mensagem); }

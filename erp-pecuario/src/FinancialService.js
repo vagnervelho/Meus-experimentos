@@ -60,6 +60,11 @@ var FinancialService = (function () {
   function inteiroPositivo_(v) {
     return typeof v === 'number' && isFinite(v) && Math.floor(v) === v && v > 0;
   }
+  /** "de" contraído com o artigo do rótulo: "a compra" → "da compra", "o frete" → "do frete". */
+  function de_(rotulo) {
+    var m = /^(as|os|a|o) (.*)$/.exec(rotulo || '');
+    return m ? 'd' + m[1] + ' ' + m[2] : 'de ' + rotulo;
+  }
   function det_(codigo, campo, mensagem, extra) {
     var d = { codigo: codigo, campo: campo || null, mensagem: mensagem };
     Object.keys(extra || {}).forEach(function (k) { d[k] = extra[k]; });
@@ -102,7 +107,7 @@ var FinancialService = (function () {
     var campo = o.campo;
     var rotulo = o.rotulo;
     var lista = Array.isArray(parcelas) ? parcelas : [];
-    if (!lista.length) { col.erro(det_('SEM_PARCELAS', campo, 'Informe como ' + rotulo + ' ' + (o.pagamento || 'será pago') + ': ao menos uma parcela, com o vencimento.')); return null; }
+    if (!lista.length) { col.erro(det_('SEM_PARCELAS', campo, 'Informe como ' + rotulo + ' ' + (o.pagamento || (/^as? /.test(rotulo || '') ? 'será paga' : 'será pago')) + ': ao menos uma parcela, com o vencimento.')); return null; }
     if (lista.length > MAX_PARCELAS) { col.erro(det_('PARCELAS_DEMAIS', campo, 'Um lançamento aceita até ' + MAX_PARCELAS + ' parcelas.')); return null; }
     var ok = true;
     var informado = 0;
@@ -168,10 +173,16 @@ var FinancialService = (function () {
     var campo = s.campo || 'valor';
     var rotulo = s.rotulo || 'o lançamento';
     var antes = col.erros.length;
+    var campoJaRecusado = col.erros.some(function (e) { return e.campo === campo; });
     if (!c) throw Validation.erro('INTERNAL', 'planejar: conta ausente.');
     if (s.naturezas && s.naturezas.indexOf(c.natureza) < 0) col.erro(det_('CONTA_INVALIDA', campo, 'A conta "' + c.nome + '" não serve para ' + rotulo + ': escolha uma conta de ' + s.naturezas.map(function (n) { return NOME_NATUREZA[n] || n; }).join(' ou ') + '.'));
     if (c.ativo === false) col.erro(det_('CONTA_INATIVA', campo, 'A conta "' + c.nome + '" está desativada.'));
-    if (!inteiroPositivo_(s.valor)) col.erro(det_('VALOR_FORA_DA_FAIXA', campo, 'O valor de ' + rotulo + ' precisa ser maior que zero.'));
+    if (!inteiroPositivo_(s.valor)) {
+      // Valor zero, negativo ou com fração de centavo: o catálogo já recusa o campo, com o rótulo dele. Uma causa, um
+      // erro: aqui só quando nada apontou o campo, e sem seguir para as parcelas e o rateio, que repetiriam a causa.
+      if (!campoJaRecusado) col.erro(det_('VALOR_FORA_DA_FAIXA', campo, 'O valor ' + de_(rotulo) + ' precisa ser maior que zero.'));
+      return null;
+    }
     var parcelas = [];
     if (s.semCaixa) {
       if (Array.isArray(s.parcelas) && s.parcelas.length) throw Validation.erro('INTERNAL', 'Lançamento sem efeito de caixa não tem parcela (invariante 4).');

@@ -1,10 +1,13 @@
 'use strict';
 /**
- * Aceitação (E1.12): roda no Node, sobre os fakes do harness, os MESMOS cenários que runAcceptanceTests roda na conta do
- * dono (09, seção 8: CT-09 inteiro — saídas, brinco, mãe, pasto, data, reentrada —, CT-10, CT-11, CT-12, CT-18 de entradas, CT-20 e o ensaio de restauração),
- * com a nota do "cenário que usa peça de fase posterior" (passos NAO_SE_APLICA). O lock disputado, que uma execução
- * real não consegue provocar sozinha, entra por `injetar`. Também: a base real não muda, o teste é retomável, falha de
- * cenário aparece no relatório, a base de demonstração (308 ativos, só por comandos) e o diagnóstico do spike.
+ * Aceitação (E1.12 e Fase 2): roda no Node, sobre os fakes do harness, os MESMOS cenários que runAcceptanceTests roda na
+ * conta do dono (09, seção 8): CT-09 inteiro (saídas, brinco, mãe, pasto, data, reentrada), os da Fase 2 (CT-01, CT-02,
+ * CT-03, CT-04, CT-07, CT-08, CT-13 na compra, CT-14, CT-17 e CT-18 com a compra), CT-10, CT-11, CT-12 com a
+ * reconciliação, CT-20 e o ensaio de restauração, com a nota do "cenário que usa peça de fase posterior" (passos
+ * NAO_SE_APLICA). O lock disputado, que uma execução real não consegue provocar sozinha, entra por `injetar`. Também: a
+ * base real não muda, o teste é retomável, falha de cenário aparece no relatório (e uma conta errada do servidor faz o
+ * cenário falhar), a base de demonstração (só por comandos, sem recusa) e o diagnóstico do spike. No fim da rodada,
+ * projeção = reconstrução e as invariantes do financeiro na base de teste.
  */
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -13,9 +16,15 @@ const S = require('./apoio-sistema');
 const FIXTURE = require('./fixtures/coercao.json');
 
 const { js, USUARIO } = S;
-const CENARIOS = ['PREPARO', 'CT-09', 'CT-10', 'CT-12', 'CT-18', 'RESTAURACAO', 'CT-20', 'CT-11', 'ISOLAMENTO'];
-/** Passos que ainda não rodam (peça de fase posterior ou só na conta do dono), com a situação esperada. O CT-09 roda inteiro desde a venda (Fase 2). */
+const CENARIOS = ['PREPARO', 'CT-09', 'CT-01', 'CT-02', 'CT-03', 'CT-04', 'CT-07', 'CT-08', 'CT-13', 'CT-14', 'CT-17', 'CT-18', 'CT-10', 'CT-12', 'RESTAURACAO', 'CT-20', 'CT-11', 'ISOLAMENTO'];
+/**
+ * Passos que ainda não rodam (peça de fase posterior ou só na conta do dono), com a situação esperada. O CT-09 roda
+ * inteiro desde a venda e o CT-12 com a reconciliação (Fase 2); ficam o resultado gerencial (CT-03, Fase 4), o rateio
+ * por evento RATEIO (CT-13 c a f, Fase 4), a pesagem (CT-10 passo 3, Fase 3) e o que só a conta do dono prova.
+ */
 const FORA = {
+  'CT-03': { 4: 'NAO_SE_APLICA' },
+  'CT-13': { c: 'NAO_SE_APLICA', d: 'NAO_SE_APLICA', e: 'NAO_SE_APLICA', f: 'NAO_SE_APLICA' },
   'CT-10': { 3: 'NAO_SE_APLICA', 6: 'PENDENTE_NA_CONTA_DO_DONO' },
   'CT-20': { 2: 'NAO_SE_APLICA' },
 };
@@ -38,7 +47,7 @@ function situacoes(rel) {
   return Object.fromEntries(rel.cenarios.map((c) => [c.id, c.situacao]));
 }
 
-test('aceitação da Fase 1 no fake: todos os cenários passam; só ficam de fora os passos de fase posterior; a base real não muda', () => {
+test('aceitação das Fases 1 e 2 no fake: todos os cenários passam; só ficam de fora os passos de fase posterior; a base real não muda; no fim, projeção = reconstrução na base de teste', () => {
   const s = S.sistema({ order: 'reverse' });
   s.evento('registrar', S.entradaInicial([S.bicho({ brinco: '1' }), S.bicho({ brinco: '2' })]), 'prod-1');
   const antes = retratoProducao(s);
@@ -54,6 +63,17 @@ test('aceitação da Fase 1 no fake: todos os cenários passam; só ficam de for
   }
   assert.deepEqual(rel.resumo.cenarios, { PASSOU: CENARIOS.length, FALHOU: 0 });
   assert.deepEqual(rel.corpus.map((c) => [c.primitiva, c.ok]), [['SHEETS_TYPED', true], ['SHEETS_RAW', true], ['SPREADSHEET_APP', true]], 'no fake as três formas preservam o corpus');
+  // Na base de teste que ficou: projeção gravada = reconstrução (Timeline.conferir) e as invariantes do financeiro.
+  const ctxTeste = () => s.G.Api.contexto({ ambiente: 'TESTE', usuario: USUARIO });
+  const conferencia = js(s.gas.exec(() => s.G.UnitOfWork.read(ctxTeste(), {
+    rota: 'teste.projecoes', reads: s.G.FinancialService.leituras(), acessoCru: true, tratador: (tx) => ({ proj: s.G.Timeline.conferir(tx), fin: s.G.FinancialService.conferir(tx) }),
+  }).dados));
+  assert.deepEqual(conferencia, { proj: [], fin: [] });
+  // Os cenários da Fase 2 gravaram de fato o que conferem: compras, vendas, partos, transferências, estornos e correções.
+  const evTeste = js(s.gas.exec(() => { const p = s.props(); return s.G.Database.abrir(p.TEST_SPREADSHEET_ID, { primitiva: s.G.Maintenance.primitivaDoBanco(p, p.TEST_SPREADSHEET_ID) }).ler(['EVENTOS']).EVENTOS.registros; }));
+  const tipos = new Set(evTeste.filter((e) => e.status === 'CONFIRMADO').map((e) => e.event_type));
+  ['COMPRA', 'VENDA', 'NASCIMENTO', 'TRANSFERENCIA', 'MORTE', 'IDENTIFICACAO', 'ESTORNO', 'AJUSTE_INVENTARIO'].forEach((x) => assert.ok(tipos.has(x), 'evento ' + x + ' na base de teste'));
+  assert.ok(evTeste.some((e) => e.event_type === 'COMPRA' && e.reversal_of_event_id), 'a correção da compra (CT-18)');
   // Nunca tocou a base real (abas, versão, marcador, forma de gravação).
   assert.deepEqual(retratoProducao(s), antes);
   const p = s.props();
@@ -108,8 +128,17 @@ test('falha de cenário aparece no relatório (não é engolida) e não impede o
   assert.equal(ct10.passos.find((p) => p.passo === '4').situacao, 'FALHOU');
   assert.deepEqual(rel.cenarios.filter((c) => c.situacao === 'FALHOU').map((c) => c.id), ['CT-10'], 'os outros seguiram');
   assert.ok(s.gas.logs.some((l) => l[0] === 'error' && /aceitação CT-10/.test(String(l[1][0]))));
-  // Preparo que falha: só ele no relatório.
+  // Uma conta errada do servidor (uma cabeça a mais em cada pasto, em toda data) derruba os cenários que conferem o
+  // inventário, com a conta no relatório.
   s.G.UnitOfWork.status = status;
+  const posicaoEm = s.G.InventoryService.posicaoEm;
+  s.G.InventoryService.posicaoEm = (ctx, d) => { const r = posicaoEm(ctx, d); (r.dados.por_pasto || []).forEach((x) => { x.cabecas += 1; }); return r; };
+  const errado = aceitar(s, { reiniciar: true });
+  s.G.InventoryService.posicaoEm = posicaoEm;
+  const caidos = errado.cenarios.filter((c) => c.situacao === 'FALHOU').map((c) => c.id);
+  ['CT-01', 'CT-02', 'CT-03', 'CT-04', 'CT-07', 'CT-08'].forEach((c) => assert.ok(caidos.includes(c), c + ' devia falhar com a conta errada; caíram ' + caidos));
+  assert.match(errado.cenarios.find((c) => c.id === 'CT-08').falha, /D0\+30 \(100 \+ 2\) \(esperado \[102,62,40\]; obtido \[102,63,41\]\)/);
+  // Preparo que falha: só ele no relatório.
   const setup = s.G.Maintenance.setup;
   s.G.Maintenance.setup = (o) => { if (o.ambiente === 'TESTE') throw s.G.Validation.erro('CONFIG', 'Drive recusou (teste).'); return setup(o); };
   const r2 = aceitar(s, { reiniciar: true });
@@ -118,43 +147,97 @@ test('falha de cenário aparece no relatório (não é engolida) e não impede o
   assert.equal(r2.resumo.cenarios.FALHOU, 1);
 });
 
-test('base de demonstração (TEST_PLAN = DEMO): 308 ativos só por comandos, planilha DEMO com faixa BASE DE TESTE, idempotente e sem tocar a base real', () => {
+test('base de demonstração (TEST_PLAN = DEMO): a composição de 09, seção 7 (240 + 255 − 240 … = 304 ativos), só por comandos e sem recusa, planilha DEMO com faixa BASE DE TESTE, idempotente e sem tocar a base real', () => {
   const s = S.sistema();
   const antes = retratoProducao(s);
   s.gas.props.script.setProperty('TEST_PLAN', 'DEMO');
   const rel = js(s.gas.exec(() => s.G.runAcceptanceTests()));
-  assert.deepEqual([rel.plano, rel.completo, rel.ok, rel.demonstracao, rel.faixa], ['DEMO', true, true, { cabecas: 308, por_pasto: 6 }, 'BASE DE TESTE']);
+  assert.deepEqual([rel.plano, rel.completo, rel.ok, rel.faixa], ['DEMO', true, true, 'BASE DE TESTE'], JSON.stringify(rel).slice(0, 600));
+  const d = rel.demonstracao;
+  assert.deepEqual([d.cabecas, d.por_pasto, d.integridade], [304, 6, 'sem erro']);
+  assert.deepEqual(d.totais, { d0: 240, nascimentos: 255, partos: d.totais.partos, natimortos: d.totais.natimortos, compras: 70, vendas: 240, mortes: 15, descartes: 5, divergencias: 1, ativos: 304 });
+  assert.ok(d.totais.natimortos > 0 && d.totais.partos >= 250, 'partos com natimortos e gêmeos');
+  assert.deepEqual(d.saidas, { VENDIDO: 240, MORTO: 15, DESCARTADO: 5, BAIXADO_AJUSTE: 1 }, 'as saídas conferidas no cadastro pelo servidor');
+  assert.deepEqual(d.fora_desta_fase.map((x) => x.fase), [3, 3, 4, 4], 'o que da seção 7 chega nas fases 3 e 4 fica listado');
   const demo = s.props().DEMO_SPREADSHEET_ID;
   assert.ok(demo && demo !== s.banco());
   assert.match(s.gas.drive.arquivo(demo).name, /BASE DE TESTE/);
   const boot = js(s.gas.exec(() => s.G.api({ rota: 'sistema.bootstrap', ambiente: 'DEMO', dados: {} })));
-  assert.deepEqual([boot.data.ambiente.faixa, boot.data.animais.n, boot.data.pastos.length], ['BASE DE TESTE', 308, 6]);
+  assert.deepEqual([boot.data.ambiente.faixa, boot.data.animais.n, boot.data.pastos.length], ['BASE DE TESTE', 304, 6]);
   assert.equal(boot.data.pastos.filter((p) => p.posse === 'ARRENDADO').length, 1, 'um pasto arrendado');
+  // Tudo pelos comandos do app, nenhum falhou; um comando por passo do plano.
   const eventos = s.tabela('EVENTOS', demo);
   assert.ok(eventos.every((e) => e.source === 'APP' && e.status !== 'FALHOU'), 'tudo pelos comandos do app');
-  assert.equal(eventos.filter((e) => e.event_type === 'ESTORNO').length, 1);
-  assert.ok(s.tabela('ANIMAIS', demo).filter((a) => a.mae_id).length >= 48, 'bezerros ao pé com a mãe');
-  // As 8 compras gravam o financeiro completo (P11): 2 lançamentos, 3 títulos e 16 alocações cada.
-  assert.equal(s.tabela('COMPRAS', demo).length, 8);
-  assert.equal(s.tabela('PARCELAS', demo).length, 8 * 3 + 2, 'os títulos das compras, da receita da venda e da comissão');
-  // A venda de 6 garrotes por kg vivo: VENDAS, receita rateada pelo peso, comissão, os animais VENDIDO.
-  const vendas = s.tabela('VENDAS', demo);
-  assert.deepEqual(vendas.map((v) => [v.qtd_animais, v.modalidade, v.criterio_rateio, v.comissao > 0]), [[6, 'KG_VIVO', 'PESO_VIVO', true]]);
-  assert.equal(s.tabela('ANIMAIS', demo).filter((a) => a.situacao_cadastral === 'VENDIDO').length, 6);
-  const comprados = s.tabela('ANIMAIS', demo).filter((a) => a.origem === 'COMPRADO');
-  assert.equal(comprados.reduce((t, a) => t + a.custo_aquisicao, 0), s.tabela('COMPRAS', demo).reduce((t, c) => t + c.valor_total, 0), 'custo de aquisição = soma das alocações = custo total das compras');
-  assert.ok(comprados.every((a) => a.custo_aquisicao > (a.sexo === 'M' ? 280000 : 260000)), 'o frete entra no custo de cada animal');
+  const vig = eventos.filter((e) => e.status === 'CONFIRMADO');
+  const conta = (tipo) => vig.filter((e) => e.event_type === tipo).length;
+  assert.deepEqual([conta('ENTRADA_INICIAL'), conta('COMPRA'), conta('NASCIMENTO'), conta('MORTE'), conta('DESCARTE'), conta('ESTORNO')], [6, 10, d.totais.partos, 15, 5, 2]);
+  assert.ok(conta('TRANSFERENCIA') >= 20 && conta('VENDA') >= 20 && conta('IDENTIFICACAO') >= 10, 'transferências, vendas e identificações ao longo dos três anos');
+  assert.equal(eventos.filter((e) => e.reversal_of_event_id && e.event_type !== 'ESTORNO').length, 2, 'uma compra e uma venda corrigidas (substitutos)');
+  assert.deepEqual(eventos.filter((e) => e.event_type === 'ESTORNO').map((e) => eventos.find((x) => x.event_id === e.reversal_of_event_id).event_type).sort(), ['OUTRA_ENTRADA', 'TRANSFERENCIA']);
+  // Vendas nas três formas de preço, com as bases de peso; descarte com receita; baixa na contagem depois de não localizado.
+  const vendas = s.tabela('VENDAS', demo).filter((v) => vig.some((e) => e.event_id === v.event_id));
+  const formas = new Set(vendas.map((v) => v.modalidade + (v.base_peso ? '/' + v.base_peso : '')));
+  ['CABECA/', 'KG_VIVO/VIVO', 'ARROBA/CARCACA', 'ARROBA/VIVO'].forEach((f) => assert.ok(formas.has(f.replace(/\/$/, '')) || formas.has(f), 'venda ' + f + ' em ' + [...formas]));
+  assert.equal(vendas.reduce((n, v) => n + v.qtd_animais, 0), 240);
+  assert.deepEqual(s.tabela('BAIXAS', demo).filter((b) => vig.some((e) => e.event_id === b.event_id)).map((b) => b.tipo).sort().filter((x, i, a) => a.indexOf(x) === i), ['DESCARTE', 'DIVERGENCIA_CONTAGEM', 'MORTE']);
+  // Identificações: as crias recebem o brinco nas campanhas (e uma troca por perda); as últimas crias ficam sem brinco (pendência).
+  const idents = s.tabela('IDENTIFICACOES', demo).filter((x) => vig.some((e) => e.event_id === x.event_id && e.event_type === 'IDENTIFICACAO'));
+  assert.ok(idents.length >= 100, idents.length + ' brincos postos por identificação');
+  assert.ok(vig.some((e) => e.event_type === 'IDENTIFICACAO' && e.event_subtype === 'SUBSTITUICAO'), 'uma troca de brinco');
+  const animais = s.tabela('ANIMAIS', demo);
+  assert.equal(animais.filter((a) => a.origem === 'NASCIDO').length, 255);
+  assert.ok(animais.filter((a) => a.situacao_cadastral === 'ATIVO' && !a.brinco).length > 0, 'crias novas ainda sem brinco');
+  // Financeiro do próprio evento (P11): o custo dos comprados é o custo total das compras vigentes (frete incluído).
+  const compras = s.tabela('COMPRAS', demo).filter((c) => vig.some((e) => e.event_id === c.event_id));
+  const comprados = animais.filter((a) => a.origem === 'COMPRADO');
+  assert.equal(comprados.length, 70);
+  assert.equal(comprados.reduce((t, a) => t + a.custo_aquisicao, 0), compras.reduce((t, c) => t + c.valor_total, 0), 'custo de aquisição = soma das alocações = custo total das compras');
   // Determinismo: rodar de novo não grava nada novo (mesmas chaves seed:<n>, mesmo conteúdo).
   const rel2 = js(s.gas.exec(() => s.G.runAcceptanceTests()));
-  assert.deepEqual([rel2.ok, rel2.demonstracao.cabecas], [true, 308]);
+  assert.deepEqual([rel2.ok, rel2.demonstracao.cabecas], [true, 304]);
   assert.equal(s.tabela('EVENTOS', demo).length, eventos.length);
   assert.deepEqual(retratoProducao(s), antes);
-  // Mesmo sorteio a cada execução.
+  // Mesmo sorteio a cada execução e nas duas ordens de carga.
   const g1 = js(s.gas.exec(() => s.G.TestRunner.geracaoDemo('2023-11-14')));
   const gas2 = createGas({ order: 'reverse' });
   const g2 = js(gas2.exec(() => gas2.G.TestRunner.geracaoDemo('2023-11-14')));
   assert.deepEqual(g1, g2);
   assert.equal(g1.lotes.reduce((n, l) => n + l.length, 0), 240);
+  assert.equal(g1.comandos.length + 1, rel.demonstracao.comandos + 1, 'um passo por comando, mais a conferência');
+});
+
+test('base de demonstração retomável: comando recusado para o seed (cursor no passo); corrigida a causa, continua dali numa execução nova, achando pela base os animais já gravados (a cria pela mãe e pelo nascimento)', () => {
+  const s = S.sistema({ semCadastro: true });
+  s.gas.props.script.setProperty('TEST_PLAN', 'DEMO');
+  // A primeira campanha de identificação das crias é recusada (o motor fica sem aceitar IDENTIFICACAO por um tempo).
+  const gen = js(s.gas.exec(() => s.G.TestRunner.geracaoDemo(s.G.Utils.somaDias('2026-11-13', -1095))));
+  const n = gen.comandos.findIndex((c) => /^identificacao-/.test(c.nome));
+  assert.ok(n > 20 && gen.comandos[n].dados.animais.length > 1, 'a campanha cita crias nascidas antes (sem brinco)');
+  const registrar = s.G.EventService.registrar;
+  let recusar = true;
+  s.G.EventService.registrar = (ctx, pedido) => {
+    if (recusar && pedido.idempotencyKey === 'seed:' + n) throw s.G.Validation.erro('VALIDATION', 'Recusa de teste.');
+    return registrar(ctx, pedido);
+  };
+  const parou = js(s.gas.exec(() => s.G.runAcceptanceTests()));
+  assert.deepEqual([parou.completo, parou.ok, parou.proximo], [false, false, gen.comandos[n].nome]);
+  assert.match(parou.falha, /Recusa de teste/);
+  const cursor = JSON.parse(s.props().TEST_CURSOR);
+  assert.deepEqual([cursor.plano, cursor.proximo, cursor.estado.d0], ['DEMO', n + 1, gen.d0], 'o cursor fica no passo recusado');
+  // Corrigida a causa, cada chamada (pausa pelo tempo a cada passo) retoma sem a memória da anterior: a campanha acha
+  // as crias pela mãe e pelo nascimento, na base.
+  recusar = false;
+  for (let i = 0; i < 3; i++) {
+    const r = js(s.gas.exec(() => s.G.TestRunner.runAcceptanceTests({ usuario: USUARIO, limiteMs: -1 })));
+    assert.deepEqual([r.completo, r.proximo], [false, gen.comandos[n + 1 + i].nome]);
+  }
+  const ident = s.tabela('IDENTIFICACOES', s.props().DEMO_SPREADSHEET_ID).filter((x) => gen.comandos[n].dados.animais.some((a) => a.codigo === x.codigo));
+  assert.equal(ident.length, gen.comandos[n].dados.animais.length, 'a campanha retomada gravou o brinco de cada cria');
+  const fim = js(s.gas.exec(() => s.G.runAcceptanceTests()));
+  assert.deepEqual([fim.ok, fim.demonstracao.cabecas, fim.demonstracao.saidas.VENDIDO], [true, 304, 240]);
+  assert.equal(s.props().TEST_CURSOR, undefined);
+  const opsDemo = s.tabela('OPERACOES', s.props().DEMO_SPREADSHEET_ID).filter((o) => /^seed:\d+$/.test(o.idempotency_key));
+  assert.equal(opsDemo.length, gen.comandos.length, 'cada comando do plano gravado uma vez');
 });
 
 test('diagnóstico do spike (runDiagnostics): itens SP-01 a SP-10, coerção no formato do fixture, temporárias na lixeira, sem dado sensível', () => {

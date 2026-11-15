@@ -376,13 +376,13 @@ test('projeção × reconstrução cobre cada campo de projeção do esquema (AN
   assert.equal(s.integridade().ok, true, 'tudo desfeito');
 });
 
-test('tempo da verificação completa no fake sobre a base de demonstração (308 ativos, só por comandos): sem erro, todas as checagens executadas', (t) => {
+test('tempo da verificação completa no fake sobre a base de demonstração (304 ativos e três anos de eventos, só por comandos): sem erro, todas as checagens executadas', (t) => {
   const s = S.sistema();
   s.gas.props.script.setProperty('TEST_PLAN', 'DEMO');
   const demo = js(s.gas.exec(() => s.G.runAcceptanceTests()));
-  assert.deepEqual([demo.ok, demo.demonstracao.cabecas], [true, 308]);
+  assert.deepEqual([demo.ok, demo.demonstracao.cabecas], [true, 304]);
   const banco = s.props().DEMO_SPREADSHEET_ID;
-  const tamanho = Object.fromEntries(['ANIMAIS', 'EVENTOS', 'EVENTO_ANIMAIS', 'FINANCEIRO', 'ALOCACOES_FINANCEIRAS', 'IDENTIFICACOES', 'REPRODUCAO'].map((a) => [a, s.tabela(a, banco).length]));
+  const tamanho = Object.fromEntries(['ANIMAIS', 'EVENTOS', 'EVENTO_ANIMAIS', 'FINANCEIRO', 'PARCELAS', 'ALOCACOES_FINANCEIRAS', 'IDENTIFICACOES', 'REPRODUCAO', 'BAIXAS'].map((a) => [a, s.tabela(a, banco).length]));
   const tempos = [];
   let rel = null;
   for (let i = 0; i < 3; i++) {

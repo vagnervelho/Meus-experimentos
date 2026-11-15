@@ -221,8 +221,10 @@ completo ao Drive (escopo "drive")..." ou o SP-02 sai `FALHOU`. O que fazer:
 
 ## 6. Executar `runAcceptanceTests` (testes de aceitação)
 
-Os testes de aceitação rodam os cenários da Fase 1 com os serviços reais do Google, numa base de teste nova
-(`ERP Pecuário — BASE DE TESTE`, na pasta `Testes`). A base real não é tocada; o último cenário confere isso.
+Os testes de aceitação rodam os cenários das Fases 1 e 2 (nascimento, transferência, compra, venda, estorno, inventário em
+data, integridade, rateio na compra, venda por arroba, lançamento retroativo, correção de compra, importação com a
+reconciliação, concorrência, `setup` repetido, corpus de tipos e restauração) com os serviços reais do Google, numa base de
+teste nova (`ERP Pecuário — BASE DE TESTE`, na pasta `Testes`). A base real não é tocada; o último cenário confere isso.
 
 1. Função **`runAcceptanceTests`** → **Executar**.
 2. O Apps Script limita cada execução a 6 minutos. Perto de 4 minutos o teste pausa e devolve `"completo": false` com
@@ -237,10 +239,14 @@ Os testes de aceitação rodam os cenários da Fase 1 com os serviços reais do 
 5. Cenário que FALHOU: o relatório traz o passo e o detalhe. Envie o arquivo; não use o sistema com dados reais até
    entender a falha.
 
-**Base de demonstração (opcional).** Para ver o sistema com cerca de 300 animais e 3 anos de eventos sem tocar a base
-real: em **Configurações do projeto → Propriedades do script**, crie `TEST_PLAN` com o valor `DEMO`; rode
-`runAcceptanceTests` (de novo até `completo: true`); abra a URL do app com `?ambiente=DEMO` no fim (aparece a faixa
-"BASE DE TESTE"). Depois apague a propriedade `TEST_PLAN` para voltar aos testes de aceitação.
+**Base de demonstração (opcional).** Para ver o sistema com 304 animais e 3 anos de eventos (cerca de 380 lançamentos:
+partos, compras, vendas, transferências, mortes, descartes, identificações, correções e estornos) sem tocar a base real:
+em **Configurações do projeto → Propriedades do script**, crie `TEST_PLAN` com o valor `DEMO`; rode `runAcceptanceTests`
+de novo até `completo: true` (são várias execuções: cada uma grava o que cabe em uns 4 minutos e a seguinte continua do
+lançamento em que parou); abra a URL do app com `?ambiente=DEMO` no fim (aparece a faixa "BASE DE TESTE"). Depois apague
+a propriedade `TEST_PLAN` para voltar aos testes de aceitação. Se uma execução parar com `"ok": false`, o campo `falha`
+diz o lançamento recusado: envie o relatório. Se você já tinha uma base de demonstração de uma versão anterior, apague a
+propriedade `DEMO_SPREADSHEET_ID` antes (o plano mudou e a base antiga não continua).
 
 ## 7. Abrir o aplicativo
 
