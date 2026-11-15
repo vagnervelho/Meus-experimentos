@@ -347,3 +347,58 @@ venda e morte, retroativa e em cadeia; limites e tipos; queda na fase A da corre
   coluna "No pasto desde" e os dias de permanência num período.
 
 Testes novos: `tests/lotacao.test.js` e `tests/ui/lotacao.test.js`.
+
+## 15/11/2026 — Fase 2, etapa VERIFICAÇÃO DE INTEGRIDADE COMPLETA (E2.11)
+
+- `AuditService`: 25 checagens (eram 20). Novas: `BAIXADO_SEM_POSTERIOR` (evento vigente depois da saída do rebanho, até a
+  volta; depois da morte, qualquer um; também o detalhe de identificação, pesagem ou reprodução que cita o animal fora do
+  rebanho), `PARTOS` (NASCIMENTO × REPRODUCAO PARTO × crias: uma mãe fêmea nascida antes do parto, um registro de parto
+  na mãe com a data e os nascidos vivos certos, cada cria com a mãe, o pai, a data e a origem do parto; parto fora de um
+  nascimento), `IDENTIFICACOES_ATIVAS` (nenhum brinco ativo repetido nas identificações), `FINANCEIRO` e `CUSTO_AQUISICAO`
+  (reparo: reconstruir).
+- As invariantes de 03b, seção 14, vêm agora da conferência do próprio `FinancialService.conferir` (a integridade não
+  reescreve a regra): cada invariante na sua checagem (`ALOCACOES`, `PARCELAS`, `FINANCEIRO`, `ALOCACAO_DIRETA`,
+  `CUSTO_AQUISICAO`), sem contar duas vezes a divergência que a reconstrução também vê.
+- `FinancialService`: o 100% alocado vale também no custo da morte e na receita do descarte (o rateio CABECAS que o
+  próprio evento grava; 03b, seção 10.3); a soma das parcelas ignora a parcela CANCELADA (desenho-base 16.11); mensagens
+  das invariantes 3, 8 e 10 na linguagem do pecuarista (o evento pelo nome e data, os valores alocados).
+- O relatório traz `duracao_ms` (leitura, recuperação e conferência); a tela de sistema mostra o tempo da verificação.
+- A reconstrução cobre cada campo de projeção do esquema (teste que adultera um por um), menos `PRODUTOS.estoque_atual`
+  (Fase 3) e `EVENTOS.confirmed_at` (instante da fase C).
+- Tempo medido no fake, base de demonstração (317 animais, 34 eventos, 367 linhas de EVENTO_ANIMAIS, 380 alocações):
+  cerca de 55 ms por verificação completa pela `api()` (só CPU do Node; a leitura real das abas no Sheets fica para o
+  diagnóstico na conta do dono).
+
+Testes novos: `tests/integrity.fase2.test.js`.
+- Verificado em Node (`npm test`: 498 testes, 498 aprovados, com os da etapa de importadores que corria em paralelo) e no
+  navegador (`npm run ui:check`: 48 testes, 48 aprovados).
+  Nada validado na conta do dono: o tempo real da verificação no Sheets aparece em `duracao_ms` na tela de sistema.
+
+## 15/11/2026 — Fase 2, etapa IMPORTADORES DE EVENTOS HISTÓRICOS (E2.10)
+
+- `ImportService`: importação de COMPRAS, VENDAS, TRANSFERENCIAS, NASCIMENTOS e MORTES nos 10 passos da §14, com modelo
+  de colunas por tipo (`importacao.modelo` com `tipo`), mapeamento com obrigatórios e valores padrão, agrupamento das
+  linhas num evento (número do lançamento explícito; sem ele, a chave natural do tipo), referência ao animal pelo brinco
+  ou pelo código interno, ordem cronológica e lotes de eventos inteiros com a chave `imp:<import_id>:<n>`. Cada evento
+  passa pelo planejamento do formulário (`EventService.planejarEventoImportado`; RN-090) num ensaio em memória em que os
+  eventos anteriores do arquivo (e os lotes já gravados) valem: a validação e cada lote enxergam as dependências (a
+  segunda transferência parte do destino da primeira) sem gravar nada fora do plano. Duplicidade no arquivo e na base,
+  `DEPENDE_DE_LINHA_IGNORADA` ao deixar de fora um lançamento de que outro depende, desfazer bloqueado por registro de
+  fora que dependa dos eventos importados.
+- Relatório de reconciliação (RN-095; 04, seção 6): posição no marco zero recalculada pelo histórico × declarada na
+  fotografia, divergências por animal (saída antiga de animal que está no marco zero, pasto diferente, animal do histórico
+  fora do marco zero) e por pasto, brincos citados em evento sem animal, cada um com a explicação e o que fazer; no
+  relatório final de toda importação e na rota extra `importacao.reconciliacao`. Não bloqueia nada.
+- `EventService`: data anterior ao marco zero em COMPRA, VENDA, TRANSFERENCIA e MORTE entra pela importação (e na correção
+  de um registro já histórico) como registro informativo: `pre_marco_zero`, efeito 0, sem lotação, financeiro do próprio
+  evento sem caixa (sem parcela: o pagamento é anterior ao controle; parcela informada → `PARCELA_ANTES_DO_MARCO_ZERO`).
+  No formulário, como antes, só o parto aceita data antiga. `FinancialService`: a quantidade de animais da compra e da
+  venda histórica confere com as linhas de efeito 0.
+- Interface: a importação escolhe o tipo, baixa o modelo dele, mapeia as colunas do tipo (confianças e valores padrão do
+  modelo) e o relatório final mostra a reconciliação.
+- Testes: `tests/import.eventos.test.js` (os cinco tipos, histórico, financeiro, lotes, estorno e correção com dependente e
+  retroativo, desfazer, reconciliação, recusas, rotas; integridade limpa e projeção = reconstrução depois de cada comando);
+  `tests/unitofwork.adversarial.test.js` ganhou a varredura de quedas do lote de importação (animais e compras) nas três
+  primitivas, com o invariante (2) aceitando o animal PENDENTE do lote confirmado; `tests/ui/importacao.test.js` (importação
+  de transferências na tela, a 1280 e a 360 px, com a reconciliação no relatório final).
+

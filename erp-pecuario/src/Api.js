@@ -142,7 +142,8 @@ var Api = (function () {
     'importacao.linhas': consulta_(function (ctx, p) { return UnitOfWork.read(ctx, ImportService.consultaLinhas(p.dados)); }),
     'importacao.relatorio': consulta_(function (ctx, p) { return UnitOfWork.read(ctx, ImportService.consultaRelatorio(p.dados)); }),
     'importacao.listar': consulta_(function (ctx) { return UnitOfWork.read(ctx, ImportService.consultaListar()); }),
-    'importacao.modelo': consulta_(function () { return semDados_(ImportService.modelo()); }),
+    'importacao.modelo': consulta_(function (ctx, p) { return semDados_(ImportService.modelo((p.dados || {}).tipo)); }),
+    'importacao.reconciliacao': consulta_(function (ctx) { return UnitOfWork.read(ctx, ImportService.consultaReconciliacao()); }),
     // Anexos e auditoria
     'anexo.adicionar': comando_(function (ctx, p) { return FileService.adicionarAnexo(ctx, p); }),
     'anexo.remover': comando_(function (ctx, p) { return FileService.removerAnexo(ctx, p); }),

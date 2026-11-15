@@ -10,7 +10,9 @@
  * DE INTEGRIDADE (06, seção 9), sob demanda,
  * no fim do setup e semanal: entra pela UnitOfWork (lock, depois da recuperação), lê tudo com acesso cru e confere
  * cada invariante, com severidade (ERRO | ALERTA) e o reparo oferecido. Nunca corrige em silêncio: o reparo
- * (reconstruir projeções e o cache de status dos eventos) é um comando à parte, auditado.
+ * (reconstruir projeções e o cache de status dos eventos) é um comando à parte, auditado. Fase 2 (E2.11): saída com
+ * evento posterior, partos × reprodução × crias, brinco ativo repetido nas identificações, custo de aquisição e as
+ * invariantes do financeiro de 03b, seção 14, pela conferência do próprio FinancialService (uma regra, um lugar).
  */
 var AuditService = (function () {
   /** Tabelas que `listar` precisa nas leituras (reads) da consulta. */
@@ -858,7 +860,7 @@ var AuditService = (function () {
    */
   function guardarResumo_(ctx, r) {
     var rel = r.dados;
-    ctx.props.gravar(CHAVE_RESUMO + ctx.banco, JSON.stringify({ gerado_em: rel.gerado_em, ok: rel.ok, erros: rel.erros, alertas: rel.alertas, duracao_ms: rel.duracao_ms }));
+    ctx.props.gravar(CHAVE_RESUMO + ctx.banco, JSON.stringify({ gerado_em: rel.gerado_em, ok: rel.ok, erros: rel.erros, alertas: rel.alertas }));
     return r;
   }
   /**

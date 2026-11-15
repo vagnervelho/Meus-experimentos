@@ -90,7 +90,9 @@ function conferirInvariantes(amb, msg) {
     assert.equal(!!ev.confirmed_at, ev.status === 'CONFIRMADO' || ev.status === 'ESTORNADO', msg + ': (2) confirmed_at do evento ' + ev.event_id);
   }
   const filhasVigentes = e.EVENTO_ANIMAIS.filter((l) => !l.event_id || (av[l.event_id] && av[l.event_id].vigente));
-  // Situação pela soma dos efeitos vigentes: dentro (≥ 1) → ATIVO; com a saída vigente → a situação da saída; sem entrada → ANULADO.
+  // Situação pela soma dos efeitos vigentes: dentro (≥ 1) → ATIVO; com a saída vigente → a situação da saída; sem entrada →
+  // ANULADO, salvo o animal de um lote de importação já confirmado com a importação ainda em andamento: PENDENTE até
+  // concluir ou desfazer (o evento dele está PENDENTE pelo predicado de vigência, não FALHOU).
   const SAIDA = { VENDA: 'VENDIDO', MORTE: 'MORTO', DESCARTE: 'DESCARTADO' };
   for (const a of e.ANIMAIS) {
     const ls = filhasVigentes.filter((l) => l.animal_id === a.animal_id);
@@ -98,7 +100,11 @@ function conferirInvariantes(amb, msg) {
     const soma = ls.reduce((t, l) => t + (l.efeito_inventario || 0), 0);
     const saida = ls.find((l) => l.efeito_inventario === -1);
     const tipoSaida = saida ? (e.EVENTOS.find((x) => x.event_id === saida.event_id) || {}).event_type : null;
-    const esperado = !entrada ? 'ANULADO' : soma >= 1 ? 'ATIVO' : SAIDA[tipoSaida];
+    const pendente = e.EVENTO_ANIMAIS.some((l) => {
+      const ev = e.EVENTOS.find((x) => x.event_id === l.event_id);
+      return l.animal_id === a.animal_id && !!ev && !!ev.import_id && av[ev.event_id].status === 'PENDENTE' && confirmada(ev.op_id);
+    });
+    const esperado = !entrada ? (pendente ? 'PENDENTE' : 'ANULADO') : soma >= 1 ? 'ATIVO' : SAIDA[tipoSaida];
     assert.equal(a.situacao_cadastral, esperado, msg + ': (2) projeção do animal ' + a.codigo_interno);
   }
   // (3) nenhuma linha vigente órfã: filha vigente aponta para evento de operação confirmada e para animal existente;
@@ -432,8 +438,10 @@ function combinacoes(p, semente) {
  * Depois da queda: o desfecho é decidido pela célula de commit DURÁVEL; recupera pelo modo dado e confere os
  * invariantes, o tudo-ou-nada, o estado por chave e o reenvio (6). Devolve o estado final.
  */
-function conferirQueda(amb, cen, prep, modo, msg) {
-  const chave = cen.chave;
+function conferirQueda(amb, cen, prep, modoPedido, msg) {
+  const chave = typeof cen.chave === 'function' ? cen.chave(amb, prep) : cen.chave;
+  // Com a importação em andamento os outros comandos de negócio são recusados: o cenário diz os modos que valem.
+  const modo = cen.modos && cen.modos.indexOf(modoPedido) < 0 ? cen.modos[msg.length % cen.modos.length] : modoPedido;
   const mortas = estado(amb).OPERACOES.filter((o) => o.idempotency_key === chave);
   const confirmado = mortas.some((o) => o.status === 'CONFIRMADA');
   const r = recuperarPor(amb, modo, chave);
@@ -1150,3 +1158,115 @@ test('backup restaurado no meio de uma operação (sem as Script Properties): le
     }
   }
 });
+
+// ------------------------------------------------------------------ importação: quedas nas três primitivas ----
+/**
+ * Um lote de importação (de animais e de compras: vários eventos numa operação) morto depois de cada escrita e depois
+ * de cada chamada de porta, nas três primitivas. Tudo ou nada por lote: confirmado → linhas IMPORTADA, eventos e
+ * animais inertes (PENDENTE) até concluir; senão → nada do lote, a importação continua VALIDADO. O invariante (2)
+ * aceita o animal PENDENTE do lote confirmado. Com a importação em andamento, outros comandos são recusados: a
+ * recuperação é pela própria recuperação, pela leitura ou pelo estado da chave.
+ */
+const FORMATO_IMP = { delimitador: ';', codificacao: 'UTF-8', formato_data: 'dd/MM/yyyy', decimal: ',' };
+const IMPORTACOES_TESTE = {
+  ANIMAIS: {
+    csv: 'Brinco;Sexo;Pasto\n0901;F;Retiro\n0902;M;Retiro\n0903;F;Retiro',
+    mapa: { colunas: { Brinco: 'brinco', Sexo: 'sexo', Pasto: 'pasto' }, confiancas: {}, padroes: { castrado: false, reprodutor: false } },
+    linhas: 3, eventos: 1, novos: 3,
+  },
+  COMPRAS: {
+    csv: 'Nº da compra;Data da compra;Fornecedor;Como foi o preço;Preço (R$);Valor dos animais (R$);Frete (R$);Primeiro vencimento;Brinco;Sexo;Pasto\n'
+      + 'K1;05/11/2026;Fornecedor do lote;cabeça;3.000,00;6.000,00;300,00;05/12/2026;0911;M;Retiro\nK1;;;;;;;;0912;F;Retiro\n'
+      + 'K2;06/11/2026;Fornecedor do lote;cabeça;3.000,00;3.000,00;;;0913;M;Retiro',
+    mapa: {
+      colunas: { 'Nº da compra': 'grupo', 'Data da compra': 'data', Fornecedor: 'fornecedor', 'Como foi o preço': 'modalidade', 'Preço (R$)': 'preco', 'Valor dos animais (R$)': 'valor_animais', 'Frete (R$)': 'frete', 'Primeiro vencimento': 'vencimento', Brinco: 'brinco', Sexo: 'sexo', Pasto: 'pasto' },
+      confiancas: {}, padroes: { castrado: false, reprodutor: false },
+    },
+    linhas: 3, eventos: 2, novos: 3,
+  },
+};
+function prepararImportacao(amb, tipo) {
+  const G = amb.G;
+  const t = IMPORTACOES_TESTE[tipo];
+  const s = sementes(G);
+  const parceiro = { partner_id: FORNECEDOR, nome: 'Fornecedor do lote', tipos: 'FORNECEDOR', ativo: true, created_at: '2026-11-01T12:00:00.000Z', updated_at: '2026-11-01T12:00:00.000Z' };
+  amb.gas.exec(() => G.Database.abrir(amb.banco, { primitiva: amb.primitiva }).anexar({ CONFIGURACOES: s.CONFIGURACOES, PROPRIEDADES: s.PROPRIEDADES, PLANO_CONTAS: s.PLANO_CONTAS, LISTAS: s.LISTAS, CATEGORIAS: s.CATEGORIAS, PARCEIROS: [parceiro] }));
+  amb.run(cmdPasto(G, { chave: 'cria-retiro-imp', dados: { campos: { nome: 'Retiro' } } }));
+  const comArquivos = () => amb.ctx({ files: G.FileService.porta() });
+  const c = js(amb.gas.exec(() => G.ImportService.criar(comArquivos(), { idempotencyKey: 'imp-criar', dados: { tipo, arquivo_nome: tipo + '.csv', texto: t.csv, formato: FORMATO_IMP } }))).dados;
+  const v = js(amb.gas.exec(() => G.ImportService.validarBloco(comArquivos(), { idempotencyKey: 'imp-val', dados: { import_id: c.import_id, bloco: 1, mapeamento: t.mapa } }))).dados;
+  assert.deepEqual([v.importacao.status, v.contadores.validas], ['VALIDADO', t.linhas], tipo + ': arquivo validado');
+  amb.gas.clock.now += 60000;
+  return { id: c.import_id, tipo, t };
+}
+function desfechoImportacao(amb, e, confirmado, msg, prep) {
+  const opOk = (id) => e.OPERACOES.some((o) => o.op_id === id && o.status === 'CONFIRMADA');
+  const imp = e.IMPORTACOES.find((i) => i.import_id === prep.id);
+  assert.equal(imp.status, confirmado ? 'IMPORTANDO' : 'VALIDADO', msg + ': (1) a importação');
+  const ls = amb.tabela('IMPORTACAO_LINHAS').filter((l) => l.import_id === prep.id);
+  assert.deepEqual(ls.map((l) => l.status), Array(prep.t.linhas).fill(confirmado ? 'IMPORTADA' : 'VALIDA'), msg + ': (1) as linhas do lote');
+  const evs = e.EVENTOS.filter((x) => x.import_id === prep.id && opOk(x.op_id));
+  assert.equal(evs.length, confirmado ? prep.t.eventos : 0, msg + ': (1) os eventos do lote');
+  evs.forEach((x) => assert.equal(x.status, 'PENDENTE', msg + ': evento importado não vale antes de concluir'));
+  assert.equal(e.ANIMAIS.filter((a) => a.situacao_cadastral === 'PENDENTE').length, confirmado ? prep.t.novos : 0, msg + ': animais do lote ficam PENDENTE');
+  assert.equal(e.ANIMAIS.filter((a) => a.situacao_cadastral === 'ATIVO').length, 0, msg + ': nada do lote vale');
+  if (prep.tipo === 'COMPRAS') {
+    const fin = amb.tabela('FINANCEIRO').filter((f) => evs.some((x) => x.event_id === f.event_id));
+    assert.equal(fin.length, confirmado ? 3 : 0, msg + ': (1) os lançamentos das compras (2 principais e o frete)');
+  }
+  return null;
+}
+const CENARIOS_IMPORTACAO = {};
+['ANIMAIS', 'COMPRAS'].forEach((tipo) => {
+  CENARIOS_IMPORTACAO['importacao' + tipo] = {
+    chave: (amb, prep) => amb.G.ImportService.chaveBloco(prep.id, 1),
+    ambiente: { projecoes: (G) => G.Timeline.porta() },
+    modos: ['recoverAll', 'leitura', 'status'],
+    preparar: (amb) => prepararImportacao(amb, tipo),
+    comando: (amb, prep) => amb.G.ImportService.comandoBloco({ dados: { import_id: prep.id, bloco: 1, modo: 'TOTAL' } }),
+    desfecho: desfechoImportacao,
+  };
+});
+/** Chegadas reduzidas (a importação é cara de montar): nenhuma, todas, a metade e um subconjunto sorteado. */
+function combinacoesImportacao(p, semente) {
+  const lista = [{ nome: 'nenhuma', chegam: 'nenhuma' }];
+  if (!p) return lista;
+  lista.push({ nome: 'todas', chegam: 'todas' });
+  if (p >= 2) lista.push({ nome: 'prefixo ' + Math.floor(p / 2), chegam: Math.floor(p / 2) });
+  const rnd = A.aleatorio(semente);
+  const b = Array.from({ length: p }, () => rnd() < 0.5);
+  lista.push({ nome: 'subconjunto ' + b.map((x) => (x ? 1 : 0)).join(''), chegam: b });
+  return lista;
+}
+for (const primitiva of PRIMITIVAS) {
+  for (const nome of Object.keys(CENARIOS_IMPORTACAO)) {
+    test('varredura da importação (' + primitiva + ', ' + nome + '): morte DEPOIS de cada escrita do lote, e de cada chamada de porta; tudo ou nada por lote, invariantes com o animal PENDENTE e reenvio pela chave do bloco', () => {
+      const cen = CENARIOS_IMPORTACAO[nome];
+      const n = escritasDoComando(primitiva, cen);
+      assert.ok(n >= (primitiva === 'SPREADSHEET_APP' ? 10 : 4), 'o lote faz várias escritas: ' + n);
+      let casos = 0;
+      for (let w = 1; w <= n; w++) {
+        let combos = null;
+        for (let c = 0; combos === null || c < combos.length; c++) {
+          const amb = ambiente(ambienteDo(primitiva, cen));
+          const prep = cen.preparar(amb);
+          amb.gas.falhas.matarNaEscrita(w, { incluiAtual: true, chegam: combos ? combos[c].chegam : 'nenhuma' });
+          const r = amb.tentarRun(cen.comando(amb, prep));
+          assert.equal(r.morta, true, nome + ' w=' + w + ': a execução morreu');
+          if (!combos) combos = combinacoesImportacao(r.pendentes.length, w * 13 + 5);
+          conferirQueda(amb, cen, prep, MODOS[casos++ % MODOS.length], primitiva + ' ' + nome + ' depois da escrita ' + w + '/' + n + ' chegam=' + combos[c].nome);
+        }
+      }
+      const ref = ambiente(ambienteDo(primitiva, cen));
+      const passos = rodarInstrumentado(ref, cen.comando(ref, cen.preparar(ref)), {}).chamadas;
+      for (let k = 1; k <= passos.length; k++) {
+        const amb = ambiente(ambienteDo(primitiva, cen));
+        const prep = cen.preparar(amb);
+        const { r } = rodarInstrumentado(amb, cen.comando(amb, prep), { depois: k, chegam: k % 2 ? 'nenhuma' : 'todas' });
+        assert.equal(r.morta, true);
+        conferirQueda(amb, cen, prep, MODOS[casos++ % MODOS.length], primitiva + ' ' + nome + ' depois de ' + k + ' (' + passos[k - 1] + ')');
+      }
+      assert.ok(casos >= n + passos.length);
+    });
+  }
+}

@@ -52,9 +52,9 @@ var FinancialService = (function () {
   function br_(d) {
     return vazio_(d) ? '' : String(d).slice(8, 10) + '/' + String(d).slice(5, 7) + '/' + String(d).slice(0, 4);
   }
-  /** "compra de 05/02/2026": o evento na linguagem do pecuarista, para as mensagens da conferência. */
+  /** "compra de 05/02/2026": o evento na linguagem do pecuarista (o nome do tipo sem o complemento entre parênteses). */
   function rotuloEvento_(ev) {
-    var nome = EventCatalog.existe(ev.event_type) ? EventCatalog.tipo(ev.event_type).rotulo.toLowerCase() : String(ev.event_type).toLowerCase();
+    var nome = EventCatalog.existe(ev.event_type) ? EventCatalog.tipo(ev.event_type).rotulo.replace(/\s*\(.*\)\s*$/, '').toLowerCase() : String(ev.event_type).toLowerCase();
     return nome + ' de ' + br_(ev.event_date);
   }
   function inteiroPositivo_(v) {
@@ -593,7 +593,9 @@ var FinancialService = (function () {
         // Fretes primeiro, depois os outros custos (EventService): o frete é um prefixo dos lançamentos acessórios.
         var acess = (porEvento[c.event_id] || []).filter(function (f) { return f !== fin; });
         if (tiposDosCustos(acess, c.frete) === null || soma_(acess, 'valor') - c.frete !== c.outros_custos) achado(16, 'COMPRAS', c.purchase_id, 'O frete (' + reais_(c.frete) + ') e os outros custos (' + reais_(c.outros_custos) + ') da compra não conferem com os lançamentos de cada item.');
-        if (c.qtd_animais !== ea.filter(function (l) { return l.efeito_inventario === 1; }).length) achado(16, 'COMPRAS', c.purchase_id, 'A quantidade de animais da compra não confere com os animais do evento.');
+        // Compra anterior ao marco zero (importação): os animais entram com efeito 0 (registro histórico).
+        var efeitoCompra = ev && ev.pre_marco_zero === true ? 0 : 1;
+        if (c.qtd_animais !== ea.filter(function (l) { return l.efeito_inventario === efeitoCompra; }).length) achado(16, 'COMPRAS', c.purchase_id, 'A quantidade de animais da compra não confere com os animais do evento.');
       });
     }
     if (repo.carregada('VENDAS')) {
@@ -615,7 +617,9 @@ var FinancialService = (function () {
         }
         var evv = repo.porId('EVENTOS', v.event_id);
         if (evv && evv.total_value !== v.valor_bruto) achado(16, 'EVENTOS', v.event_id, 'O valor do evento de venda (' + reais_(evv.total_value) + ') difere do valor bruto (' + reais_(v.valor_bruto) + ').');
-        if (v.qtd_animais !== ea.filter(function (l) { return l.efeito_inventario === -1; }).length) achado(16, 'VENDAS', v.sale_id, 'A quantidade de animais da venda não confere com os animais do evento.');
+        var evVenda = repo.porId('EVENTOS', v.event_id);
+        var efeitoVenda = evVenda && evVenda.pre_marco_zero === true ? 0 : -1;
+        if (v.qtd_animais !== ea.filter(function (l) { return l.efeito_inventario === efeitoVenda; }).length) achado(16, 'VENDAS', v.sale_id, 'A quantidade de animais da venda não confere com os animais do evento.');
       });
     }
   }

@@ -269,7 +269,8 @@ var TelaConfig = (function () {
   }
   function nomeGatilho(f) { return f === 'trgManutencaoDiaria' ? 'Backup e limpeza diários' : f === 'trgIntegridadeSemanal' ? 'Verificação semanal' : f; }
   function relatorioIntegridade(saida, d) {
-    saida.appendChild(UI.nota(d.ok ? 'Tudo certo: nenhum erro de integridade (' + d.alertas + ' alertas).' : d.erros + (d.erros === 1 ? ' erro' : ' erros') + ' e ' + d.alertas + ' alertas encontrados.', d.ok ? 'ok' : 'erro'));
+    var tempo = typeof d.duracao_ms === 'number' ? ' Verificação feita em ' + Fmt.numero(d.duracao_ms / 1000, 1) + ' s.' : '';
+    saida.appendChild(UI.nota((d.ok ? 'Tudo certo: nenhum erro de integridade (' + d.alertas + ' alertas).' : d.erros + (d.erros === 1 ? ' erro' : ' erros') + ' e ' + d.alertas + ' alertas encontrados.') + tempo, d.ok ? 'ok' : 'erro'));
     saida.appendChild(UI.tabela({ id: 'integridade', rotulo: 'Conferências', linhas: d.checagens || [], chave: function (c) { return c.codigo; }, porPagina: 50,
       colunas: [{ id: 'rotulo', rotulo: 'Conferência' }, { id: 'situacao', rotulo: 'Resultado', valor: function (c) { return { OK: 'ok', ERRO: 'erro', ALERTA: 'alerta', NAO_EXECUTADA: 'não executada' }[c.situacao] || c.situacao; } }, { id: 'achados', rotulo: 'Achados', num: true }, { id: 'correcao', rotulo: 'Como corrigir' }] }).el);
     if ((d.achados || []).length) saida.appendChild(h('details', { class: 'detalhe' }, h('summary', { text: 'Ver os achados (' + d.achados.length + (d.truncado ? '+' : '') + ')' }), h('ul', { class: 'lista-simples' }, d.achados.slice(0, 100).map(function (a) { return h('li', { text: a.tabela + (a.linha ? ' linha ' + a.linha : '') + ': ' + a.mensagem }); }))));

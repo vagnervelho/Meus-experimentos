@@ -481,19 +481,7 @@ var Timeline = (function () {
   }
   function custo_(f, id, entrada, campos) {
     if (!entrada) return;
-    var todas = f.aquisicoes(id);
-    var alocs = todas.filter(function (a) { return a.data_competencia >= entrada.event_date; });
-    // Rebanho inicial sem valor de abertura: vale o custo da última compra histórica do animal (anterior ao marco zero,
-    // trazida pela importação; 04, seção 6).
-    var historica = null;
-    if (entrada.event_type === 'ENTRADA_INICIAL' && !alocs.some(function (a) { return a.event_id === entrada.event_id; })) {
-      todas.forEach(function (a) {
-        var ev = f.evento(a.event_id);
-        if (!ev || ev.event_type !== 'COMPRA' || ev.pre_marco_zero !== true) return;
-        if (!historica || ev.event_date > historica.event_date || (ev.event_date === historica.event_date && ev.event_seq > historica.event_seq)) historica = ev;
-      });
-      if (historica) alocs = alocs.concat(todas.filter(function (a) { return a.event_id === historica.event_id; }));
-    }
+    var alocs = f.aquisicoes(id).filter(function (a) { return a.data_competencia >= entrada.event_date; });
     var tem = alocs.length > 0;
     campos.custo_aquisicao = tem ? alocs.reduce(function (s, a) { return s + a.valor; }, 0) : entrada.event_type === 'NASCIMENTO' ? 0 : null;
     var t = entrada.event_type;
@@ -501,7 +489,7 @@ var Timeline = (function () {
     else if (t === 'NASCIMENTO') campos.custo_aquisicao_origem = 'NAO_SE_APLICA';
     else if (t === 'ENTRADA_INICIAL' && alocs.some(function (a) { return a.event_id === entrada.event_id; })) {
       campos.custo_aquisicao_origem = entrada.payload && entrada.payload.valor_abertura_origem === 'TABELA_PRECOS' ? 'ABERTURA_ESTIMADA' : 'ABERTURA_INFORMADA';
-    } else campos.custo_aquisicao_origem = historica ? 'NEGOCIADO' : 'DESCONHECIDO';
+    } else campos.custo_aquisicao_origem = 'DESCONHECIDO';
   }
   /** Linha de IDENTIFICACOES com o cabeçalho do evento que a gravou (forma de `validarIdentificacoes`). */
   function linhaIdentificacao(r, evento, ordemSeq) {
