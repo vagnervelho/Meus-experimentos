@@ -232,8 +232,12 @@ var EventService = (function () {
     var subtipo = vazio_(d.subtipo) ? (original ? nulo_(original.event_subtype) : null) : d.subtipo;
     if (vazio_(tipo) || !EventCatalog.existe(tipo)) return { erros: [Validation.detalhe({ codigo: 'TIPO_DESCONHECIDO', campo: 'tipo', mensagem: 'Escolha o tipo de evento.' })] };
     if (tipo === 'ESTORNO') return { erros: [Validation.detalhe({ codigo: 'TIPO_INVALIDO', campo: 'tipo', mensagem: 'Para estornar, use "Estornar evento".' })] };
+    // Tipo com subtipos (correções, identificação, marcação): o subtipo diz o que se lança e é obrigatório.
+    if (EventCatalog.ativo(tipo) && EventCatalog.subtipos(tipo).length && vazio_(subtipo)) {
+      return { erros: [Validation.detalhe({ codigo: 'CAMPO_OBRIGATORIO', campo: 'subtipo', mensagem: tipo === 'AJUSTE_INVENTARIO' ? 'Escolha o tipo de correção.' : 'Escolha o que lançar em "' + EventCatalog.tipo(tipo).rotulo + '".' })] };
+    }
     if (!EventCatalog.ativo(tipo, subtipo)) {
-      return { erros: [Validation.detalhe({ codigo: 'TIPO_INDISPONIVEL', campo: vazio_(subtipo) ? 'tipo' : 'subtipo', mensagem: EventCatalog.subtipos(tipo).length && vazio_(subtipo) ? 'Escolha o tipo de correção.' : 'Este tipo de lançamento ainda não está disponível.' })] };
+      return { erros: [Validation.detalhe({ codigo: 'TIPO_INDISPONIVEL', campo: vazio_(subtipo) ? 'tipo' : 'subtipo', mensagem: 'Este tipo de lançamento ainda não está disponível.' })] };
     }
     if (original && (original.event_type !== tipo || nulo_(original.event_subtype) !== subtipo)) {
       return { erros: [Validation.detalhe({ codigo: 'TIPO_DIFERENTE', campo: 'tipo', mensagem: 'A correção precisa ser do mesmo tipo do evento original. Para trocar o tipo, estorne e lance de novo.' })] };
@@ -590,6 +594,86 @@ var EventService = (function () {
     });
   }
 
+  // ------------------------------------------------------------------ identificação e marcação ----
+  /** Tipo de identificação do lançamento (03a, 4.4): o brinco do vendedor só nasce na compra; aqui ele só sai. */
+  function cabecalhoIdentificacao_(m, ctxEv) {
+    var t = ctxEv.campos.tipo_identificacao;
+    ctxEv.identTipo = null;
+    if (EventCatalog.TIPOS_IDENTIFICACAO.indexOf(t) < 0) return;
+    if (t === 'BRINCO_ORIGEM' && ctxEv.subtipo !== 'REMOCAO') { erroGeral_(m, 'tipo_identificacao', 'TIPO_NAO_SE_APLICA', 'O brinco do vendedor é registrado na compra; aqui ele só pode ser retirado.'); return; }
+    ctxEv.identTipo = t;
+  }
+  /** Código em uso de um tipo de identificação logo antes da posição do comando (sem os eventos excluídos), ou null. */
+  function identificacaoAntes_(m, animalId, tipo, pos) {
+    var emUso = null;
+    Timeline.identificacoes(m.f, animalId).forEach(function (x) {
+      if (x.tipo !== tipo || !antesDe_({ data: x.data_inicio, ordem_seq: x.ordem_seq, event_seq: x.event_seq }, pos)) return;
+      emUso = x.remocao ? null : x;
+    });
+    return emUso;
+  }
+  /**
+   * IDENTIFICACAO (04, seção 4.4; 03a, seção 4.4): primeira identificação, troca (com motivo) ou retirada (com motivo)
+   * de um tipo de identificação, coletiva. Fato independente: o animal precisa estar no rebanho na data (o dia da saída
+   * conta). Cada animal ganha uma linha de EVENTO_ANIMAIS (efeito 0) e uma de IDENTIFICACOES com o tipo do lançamento:
+   * o código novo (a projeção fecha o anterior em `data_fim`) ou, na retirada, o código tirado (a linha fecha o código
+   * e a si mesma). A ordem das identificações (primeira sem código em uso; troca e retirada com) é conferida por
+   * `Timeline.validarIdentificacoes`; o brinco novo passa pela unicidade e pelo bloqueio de reuso (conferirBrincos_).
+   */
+  function itemIdentificacao_(m, ctxEv, it) {
+    var d = it.dados;
+    var ev = ctxEv.ev;
+    var sub = ctxEv.subtipo;
+    camposDoItem_(m, it, EventCatalog.camposAnimal('IDENTIFICACAO', sub), d);
+    if (vazio_(d.animal_id)) return;
+    var e = sujeito_(m, it, 'identifica');
+    if (!e || !ctxEv.identTipo || !Utils.dataValida(ev.event_date)) return;
+    var tipo = ctxEv.identTipo;
+    var nomeTipo = Timeline.NOME_IDENTIFICACAO[tipo];
+    var semZeros = m.params.brinco_ignora_zeros_esquerda !== false;
+    var chave = function (c) { return Utils.normalizarBrinco(c, tipo === 'BRINCO' && !semZeros); };
+    var emUso = identificacaoAntes_(m, it.animal_id, tipo, posicao_(ev));
+    var row = { ident_id: m.tx.novoId(), animal_id: it.animal_id, event_id: ev.event_id, tipo: tipo, data_inicio: ev.event_date, motivo: sub === 'PRIMEIRA_IDENTIFICACAO' ? null : nulo_(d.motivo), created_at: m.tx.agora };
+    if (sub === 'REMOCAO') {
+      if (!emUso) { erroItem_(m, it, 'animal_id', 'SEM_IDENTIFICACAO', 'em ' + br_(ev.event_date) + ' o animal não tinha ' + nomeTipo + ' para tirar.'); return; }
+      row.codigo = emUso.codigo;
+      row.codigo_norm = emUso.codigo_norm;
+      it.quem = nomeAnimal_(e) + ' (tira o ' + nomeTipo + ' ' + emUso.codigo + ')';
+    } else {
+      var codigo = typeof d.codigo === 'string' ? Utils.aparar(d.codigo) : '';
+      if (!codigo) return;
+      if (emUso && chave(emUso.codigo) === chave(codigo)) { erroItem_(m, it, 'codigo', 'VALOR_IGUAL', 'o ' + nomeTipo + ' ' + codigo + ' já é o que o animal usa.'); return; }
+      row.codigo = codigo;
+      row.codigo_norm = Utils.normalizarBrinco(codigo);
+      if (tipo === 'BRINCO') {
+        it.brincoProposto = { codigo: codigo, norm: row.codigo_norm };
+        it.quem = nomeAnimal_(e) + ' (novo brinco ' + codigo + ')';
+      }
+    }
+    linhaEA_(m, ctxEv, it, { efeito_inventario: 0, observacoes: typeof d.observacoes === 'string' ? nulo_(Utils.aparar(d.observacoes)) : null });
+    ctxEv.plano.IDENTIFICACOES.push(row);
+  }
+  /**
+   * Ação da marcação (03b, seção 2.6): `acao` no payload, com o motivo do descarte (só na marcação para descarte). O
+   * payload nasce aqui para que as linhas da linha do tempo do comando já levem a ação (validarMarcacoes).
+   */
+  function cabecalhoMarcacao_(m, ctxEv) {
+    var c = ctxEv.campos;
+    ctxEv.ev.payload_json = { acao: nulo_(c.acao), motivo_descarte: ctxEv.subtipo === 'DESCARTE' && c.acao === 'MARCAR' ? nulo_(c.motivo_descarte) : null };
+  }
+  /**
+   * MARCACAO (04, seção 4.4): marca ou desmarca o animal "para descarte" ou "não localizado". Não mexe no inventário;
+   * o animal precisa estar no rebanho na data; marcar o já marcado (ou desmarcar o desmarcado) é recusado pela
+   * sequência das marcações (`Timeline.validarMarcacoes`). A projeção é `marcado_descarte` / `nao_localizado`.
+   */
+  function itemMarcacao_(m, ctxEv, it) {
+    var d = it.dados;
+    camposDoItem_(m, it, EventCatalog.camposAnimal('MARCACAO', ctxEv.subtipo), d);
+    if (vazio_(d.animal_id)) return;
+    if (!sujeito_(m, it, 'marca')) return;
+    linhaEA_(m, ctxEv, it, { efeito_inventario: 0, observacoes: typeof d.observacoes === 'string' ? nulo_(Utils.aparar(d.observacoes)) : null });
+  }
+
   // ------------------------------------------------------------------ nascimento ----
   /** A matriz do parto (papel MATRIZ, efeito 0): fêmea do rebanho; a presença na data é conferida como fato (RN-017). */
   function itemMatriz_(m, ctxEv, it) {
@@ -936,6 +1020,15 @@ var EventService = (function () {
       ocupados[chave(e.brinco)] = e;
       parecidos[e.brinco_norm || Utils.normalizarBrinco(e.brinco)] = e;
     });
+    // Brinco que um animal deixa neste mesmo lançamento (troca de brinco, volta com brinco novo): com o reuso desligado,
+    // outro animal do lançamento não pode recebê-lo (seria o reuso de um número aposentado). A correção de brinco
+    // lançado errado não aposenta o número (desenho-base 16.2).
+    var saem = {};
+    ctxEv.itens.forEach(function (it) {
+      if (!it.publico || !it.brincoProposto || it.brincoLibera) return;
+      var e = estado_(m, it.animal_id);
+      if (e && !vazio_(e.brinco) && chave(e.brinco) !== chave(it.brincoProposto.codigo)) saem[chave(e.brinco)] = it;
+    });
     var noEvento = {};
     propostos.forEach(function (it) {
       var b = it.brincoProposto;
@@ -950,6 +1043,11 @@ var EventService = (function () {
       if (dono) {
         var sit = dono.situacao_cadastral === 'ATIVO' ? '' : ', ' + (SITUACAO_ROTULO[dono.situacao_cadastral] || '') + (vazio_(dono.data_saida) ? '' : ' em ' + br_(dono.data_saida));
         erroItem_(m, it, 'brinco', 'BRINCO_DUPLICADO', 'o brinco ' + b.codigo + ' já é do animal ' + dono.codigo_interno + sit + '. Escolha outro número.');
+        return;
+      }
+      var sai = saem[k];
+      if (sai && sai.animal_id !== it.animal_id && m.params.brinco_permite_reuso !== true) {
+        erroItem_(m, it, 'brinco', 'BRINCO_APOSENTADO', 'o brinco ' + b.codigo + ' sai do animal ' + (sai.codigo_interno || '') + ' neste mesmo lançamento e o reuso de brinco está desligado nas configurações.');
         return;
       }
       if (!semZeros && parecidos[b.norm]) {
@@ -1103,6 +1201,90 @@ var EventService = (function () {
       });
     });
   }
+  /** Animais já cadastrados que o comando toca (itens que não são animal novo) e os do original, na correção. */
+  function animaisConferidos_(m, ctxEv) {
+    var ids = ctxEv.itens.filter(function (it) { return it.animal_id && !it.novo; }).map(function (it) { return it.animal_id; });
+    Object.keys(m.afetados).forEach(function (id) { if (!ctxEv.criadosOriginal[id] || ctxEv.itens.some(function (it) { return it.animal_id === id; })) ids.push(id); });
+    return Utils.unicos(ids);
+  }
+  function itemDoAnimal_(m, ctxEv, id) {
+    var it = ctxEv ? ctxEv.itens.filter(function (x) { return x.animal_id === id; })[0] : null;
+    if (it) return it;
+    var e = m.f.animal(id) || {};
+    return { animal_id: id, publico: true, brincoTexto: e.brinco || null, quem: nomeAnimal_(e), linhas: [] };
+  }
+  /**
+   * Sequências que não são de entrada e saída (04, seção 5.1, aplicada aos fatos com ordem própria): identificações
+   * por tipo (`Timeline.validarIdentificacoes`) e marcações por subtipo (`Timeline.validarMarcacoes`), antes e depois
+   * da mudança, para cada animal. Problema em linha do comando → VALIDATION; o que a mudança quebra num evento gravado
+   * (uma troca de brinco que ficou sem brinco para trocar, uma desmarcação que ficou sem marcação) → CONFLICT com ele.
+   * ctxEv null = estorno (só as linhas gravadas, sem as do evento estornado).
+   */
+  function conferirSequencias_(m, ctxEv, ids, proprio) {
+    ids.forEach(function (id) {
+      var it = itemDoAnimal_(m, ctxEv, id);
+      var novasIdent = ctxEv ? ctxEv.plano.IDENTIFICACOES.filter(function (r) { return r.animal_id === id; }).map(function (r) { return Timeline.linhaIdentificacao(r, ctxEv.ev, ctxEv.ev.ordem_seq); }) : [];
+      var novasLinhas = [];
+      if (ctxEv) ctxEv.itens.forEach(function (x) { if (x.animal_id === id) novasLinhas = novasLinhas.concat(x.linhas); });
+      var antes = Timeline.validarIdentificacoes(Timeline.identificacoes(m.real, id)).concat(Timeline.validarMarcacoes(m.real.linhas(id)));
+      var depois = Timeline.validarIdentificacoes(Timeline.identificacoes(m.f, id).concat(novasIdent)).concat(Timeline.validarMarcacoes(m.f.linhas(id).concat(novasLinhas)));
+      Timeline.problemasNovos(antes, depois).forEach(function (p) {
+        var texto = Timeline.descrever(p);
+        if (proprio && p.event_id === proprio) erroItem_(m, it, p.event_type === 'MARCACAO' ? 'animal_id' : 'codigo', p.codigo, texto);
+        else conflito_(m, it, p, texto + (proprio ? ' Estorne ou corrija esse registro antes, ou mude este lançamento.' : ' Estorne esse registro antes.'));
+      });
+    });
+  }
+  /** Evento que deu ao animal o brinco que ele usa hoje (a linha aberta de IDENTIFICACOES). */
+  function eventoDoBrinco_(m, id) {
+    var lista = Timeline.identificacoes(m.f, id).filter(function (x) { return x.tipo === 'BRINCO'; });
+    var x = lista.length ? lista[lista.length - 1] : null;
+    return x && !x.remocao ? { codigo: 'BRINCO_DUPLICADO', event_id: x.event_id, event_type: x.event_type, event_subtype: x.event_subtype, event_date: x.data_inicio } : null;
+  }
+  /**
+   * O que um estorno ou uma correção DEVOLVE a um animal que fica no rebanho (a projeção sem o evento anulado): o
+   * brinco anterior (que outro animal pode ter recebido depois, com o reuso ligado ou pela exceção da correção de
+   * brinco) e a categoria manual anterior (que pode ter sido desativada). Nos dois casos, CONFLICT com o registro que
+   * impede. Animal que recebe brinco ou categoria nova no próprio comando é conferido pelas regras do comando.
+   */
+  function conferirEstadoRestaurado_(m, ids, verbo, ctxEv) {
+    var semZeros = m.params.brinco_ignora_zeros_esquerda !== false;
+    var chave = function (c) { return Utils.normalizarBrinco(c, !semZeros); };
+    var donos = null;
+    var conjunto = {};
+    ids.forEach(function (id) { conjunto[id] = true; });
+    ids.forEach(function (id) {
+      var gravado = m.f.animal(id);
+      var depois = estado_(m, id);
+      if (!gravado || !depois || depois.situacao_cadastral === 'ANULADO' || depois.situacao_cadastral === 'PENDENTE') return;
+      var item = ctxEv ? ctxEv.itens.filter(function (x) { return x.animal_id === id; })[0] : null;
+      var it = itemDoAnimal_(m, ctxEv, id);
+      if (!(item && item.brincoProposto) && !vazio_(depois.brinco) && chave(depois.brinco) !== chave(gravado.brinco || '')) {
+        if (!donos) {
+          donos = {};
+          m.repo.vigentes('ANIMAIS').forEach(function (a) {
+            if (conjunto[a.animal_id] || vazio_(a.brinco) || a.situacao_cadastral === 'ANULADO' || a.situacao_cadastral === 'PENDENTE') return;
+            donos[chave(a.brinco)] = a;
+          });
+        }
+        var dono = donos[chave(depois.brinco)];
+        if (dono) {
+          var p = eventoDoBrinco_(m, dono.animal_id) || { codigo: 'BRINCO_DUPLICADO', event_id: null, event_type: null, event_date: null };
+          conflito_(m, it, p, verbo + ' devolveria ao animal o brinco ' + depois.brinco + ', que hoje é do animal ' + nomeAnimal_(dono) + ' (' + dono.codigo_interno + '). Troque o brinco de um dos dois antes.');
+        }
+      }
+      var reclassNoComando = item && ctxEv.tipo === 'AJUSTE_INVENTARIO' && ctxEv.subtipo === 'RECLASSIFICACAO';
+      if (!reclassNoComando && depois.categoria_modo === 'MANUAL' && depois.categoria_manual_id !== gravado.categoria_manual_id) {
+        var cat = m.repo.porId('CATEGORIAS', depois.categoria_manual_id);
+        if (cat && cat.ativo === false) {
+          var aj = m.f.ajustes(id).filter(function (a) { return a.tipo_ajuste === 'RECLASSIFICACAO' && a.valor_novo === cat.category_id; }).map(function (a) { return m.f.evento(a.event_id); }).filter(Boolean)
+            .sort(function (a, b) { return a.event_date < b.event_date ? -1 : a.event_date > b.event_date ? 1 : a.event_seq - b.event_seq; }).pop();
+          conflito_(m, it, { codigo: 'CATEGORIA_INATIVA', event_id: aj ? aj.event_id : null, event_type: 'AJUSTE_INVENTARIO', event_subtype: 'RECLASSIFICACAO', event_date: aj ? aj.event_date : null },
+            verbo + ' devolveria o animal à categoria ' + cat.nome + ', que está desativada. Reative a categoria ou reclassifique o animal antes.');
+        }
+      }
+    });
+  }
   /** Animal que deixa de ter a entrada (estorno, ou correção que o tira da lista): sem outro evento nem referência (RN-041). */
   function conferirAnulacao_(m, animalId, eventoId, anulados) {
     var e = m.f.animal(animalId) || {};
@@ -1175,7 +1357,9 @@ var EventService = (function () {
     var itens = ctxEv.itens.filter(function (it) { return it.animal_id && it.linhaEA; });
     if (!itens.length || !Utils.dataValida(ev.event_date)) return;
     var candidatos = m.repo.por('EVENTOS', 'event_date', ev.event_date).filter(function (c) {
-      return c.event_type === ev.event_type && nulo_(c.event_subtype) === nulo_(ev.event_subtype) && !m.f.excluidos[c.event_id];
+      if (c.event_type !== ev.event_type || nulo_(c.event_subtype) !== nulo_(ev.event_subtype) || m.f.excluidos[c.event_id]) return false;
+      // Marcar e desmarcar no mesmo dia não são o mesmo lançamento.
+      return ev.event_type !== 'MARCACAO' || (c.payload_json || {}).acao === (ev.payload_json || {}).acao;
     });
     candidatos.forEach(function (c) {
       var linhas = m.repo.por('EVENTO_ANIMAIS', 'event_id', c.event_id).filter(function (l) { return l.papel === 'SUJEITO' || l.papel === 'CRIA' || l.papel === 'MATRIZ'; });
@@ -1748,6 +1932,8 @@ var EventService = (function () {
       justificativa: ctxEv.original ? nulo_(m.tx.dados.justificativa) : null, valor_abertura_origem: ctxEv.abertura ? 'INFORMADO' : null,
       gta_numero: ctxEv.tipo === 'TRANSFERENCIA' && typeof ctxEv.campos.gta_numero === 'string' ? nulo_(Utils.aparar(ctxEv.campos.gta_numero)) : null,
       deducoes: ctxEv.deducoes && ctxEv.deducoes.length ? ctxEv.deducoes : null,
+      acao: ctxEv.tipo === 'MARCACAO' ? ctxEv.ev.payload_json.acao : null,
+      motivo_descarte: ctxEv.tipo === 'MARCACAO' ? ctxEv.ev.payload_json.motivo_descarte : null,
     };
     ev.payload_json = payload_(m, ctxEv, extra);
     var itensPorAnimal = {};
@@ -1770,6 +1956,8 @@ var EventService = (function () {
         animais: animais.length, novos: ctxEv.plano.ANIMAIS.length, anulados: (ctxEv.removidos || []).length, substitui: resumo.substitui,
         total_value: ev.total_value, abertura: ctxEv.abertura || null, pre_marco_zero: ev.pre_marco_zero === true,
         parto: ctxEv.parto || null, transferencia: ctxEv.transf || null, baixas: ctxEv.plano.BAIXAS.length,
+        identificacoes: ctxEv.plano.IDENTIFICACOES.length, ajustes: ctxEv.plano.AJUSTES.length,
+        marcacao: ctxEv.tipo === 'MARCACAO' ? { subtipo: ctxEv.subtipo, acao: ctxEv.ev.payload_json.acao, motivo_descarte: ctxEv.ev.payload_json.motivo_descarte } : null,
         compra: ctxEv.compra || null, venda: ctxEv.venda || null, financeiro: ctxEv.financeiro || null,
       },
       derivados: { animais: animais, eventos: [ev.event_id].concat(ctxEv.original ? [ctxEv.original.event_id] : []) },
@@ -1799,6 +1987,9 @@ var EventService = (function () {
       var novos = Timeline.problemasNovos(Timeline.validar(m.real.linhas(id), { nascimento: e.data_nascimento }).problemas, Timeline.validar(m.f.linhas(id), { nascimento: e.data_nascimento }).problemas);
       novos.forEach(function (p) { conflito_(m, it, p, Timeline.descrever(p, function (x) { return nomePasto_(m, x); }) + ' Estorne esse registro antes.'); });
     });
+    var ficam = animais.filter(function (id) { return !criados[id]; });
+    conferirSequencias_(m, null, ficam, null);
+    conferirEstadoRestaurado_(m, ficam, 'o estorno', null);
     conferirParcelasLiquidadas_(m, alvo, 'estornar');
     m.repo.por('FINANCEIRO', 'event_id', alvo.event_id).forEach(function (fin) {
       if (!vazio_(m.params.fin_bloqueio_ate) && fin.data_competencia <= m.params.fin_bloqueio_ate) {
@@ -1853,9 +2044,11 @@ var EventService = (function () {
   function eventoPublico_(tx, ev) {
     var a = tx.cru.avaliar(ev.event_id);
     var n = Utils.unicos(tx.cru.cruPor('EVENTO_ANIMAIS', 'event_id', ev.event_id).map(function (l) { return l.animal_id; })).length;
+    var def = EventCatalog.existe(ev.event_type) ? EventCatalog.tipo(ev.event_type) : null;
+    var sub = def && def.subtipos && !vazio_(ev.event_subtype) ? def.subtipos[ev.event_subtype] : null;
     return {
       event_id: ev.event_id, event_seq: ev.event_seq, event_type: ev.event_type, event_subtype: nulo_(ev.event_subtype),
-      rotulo: EventCatalog.existe(ev.event_type) ? EventCatalog.tipo(ev.event_type).rotulo : ev.event_type,
+      rotulo: def ? def.rotulo : ev.event_type, rotulo_subtipo: sub ? sub.rotulo : null,
       event_date: ev.event_date, registration_date: ev.registration_date, property_id: ev.property_id, partner_id: nulo_(ev.partner_id), status: a.status, vigente: a.vigente,
       description: nulo_(ev.description), notes: nulo_(ev.notes), responsible: nulo_(ev.responsible), total_value: nulo_(ev.total_value),
       created_by: ev.created_by, source: ev.source, pre_marco_zero: ev.pre_marco_zero === true, payload: ev.payload_json || null,
@@ -1863,7 +2056,7 @@ var EventService = (function () {
     };
   }
   /**
-   * Consulta evento.listar: filtros {tipo, de, ate, animal_id, vigentes (só os que valem), pagina, por_pagina}.
+   * Consulta evento.listar: filtros {tipo, subtipo, de, ate, animal_id, vigentes (só os que valem), pagina, por_pagina}.
    * Mostra também os anulados (histórico); operações que falharam não aparecem. Mais recentes primeiro.
    */
   function consultaListar(filtros) {
@@ -1874,11 +2067,20 @@ var EventService = (function () {
         var porPagina = typeof o.por_pagina === 'number' && o.por_pagina > 0 ? Math.min(o.por_pagina, 500) : Timeline.parametros(tx.repo).itens_por_pagina || 50;
         var pagina = typeof o.pagina === 'number' && o.pagina >= 1 ? Math.floor(o.pagina) : 1;
         var base = vazio_(o.animal_id) ? tx.cru.cru('EVENTOS') : Utils.unicos(tx.cru.cruPor('EVENTO_ANIMAIS', 'animal_id', o.animal_id).map(function (l) { return l.event_id; })).map(function (id) { return tx.cru.cruPorId('EVENTOS', id); }).filter(Boolean);
+        // No histórico de um animal entram também os estornos dos eventos dele (o ESTORNO não tem linha de animal).
+        if (!vazio_(o.animal_id)) {
+          var doAnimal = {};
+          base.forEach(function (ev) { doAnimal[ev.event_id] = true; });
+          base = base.concat(Utils.unicos(base.map(function (ev) { return ev.event_id; })).reduce(function (acc, id) {
+            return acc.concat(tx.cru.cruPor('EVENTOS', 'reversal_of_event_id', id).filter(function (x) { return x.event_type === 'ESTORNO' && !doAnimal[x.event_id]; }));
+          }, []));
+        }
         var lista = base.filter(function (ev) {
           var st = tx.cru.avaliar(ev.event_id).status;
           if (st === 'FALHOU' || st === 'PENDENTE') return false;
           if (o.vigentes === true && !tx.cru.avaliar(ev.event_id).vigente) return false;
           if (!vazio_(o.tipo) && ev.event_type !== o.tipo) return false;
+          if (!vazio_(o.subtipo) && nulo_(ev.event_subtype) !== o.subtipo) return false;
           if (!vazio_(o.de) && ev.event_date < o.de) return false;
           if (!vazio_(o.ate) && ev.event_date > o.ate) return false;
           return true;

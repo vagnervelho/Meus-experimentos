@@ -24,24 +24,30 @@ function falha(m, acao, dados, op) {
 }
 
 // ------------------------------------------------------------------ catálogo ----
-test('catálogo: 21 tipos; na Fase 2 (até esta etapa) entradas, nascimento, compra, venda, transferência, morte, descarte, três ajustes e estorno; módulos por fase; serialização é só dado', () => {
+test('catálogo: 21 tipos; na Fase 2 entradas, nascimento, compra, venda, transferência, morte, descarte, identificação, marcação, os cinco ajustes e estorno; módulos por fase; serialização é só dado', () => {
   const G = createGas({ order: 'alpha' }).G;
   const C = G.EventCatalog;
   assert.equal(C.nomes().length, 21);
   assert.equal(C.FASE_ATUAL, 2);
-  assert.deepEqual(js(C.tiposAtivos()), ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'NASCIMENTO', 'COMPRA', 'VENDA', 'TRANSFERENCIA', 'MORTE', 'DESCARTE', 'AJUSTE_INVENTARIO', 'ESTORNO']);
+  assert.deepEqual(js(C.tiposAtivos()), ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'NASCIMENTO', 'COMPRA', 'VENDA', 'TRANSFERENCIA', 'MORTE', 'DESCARTE', 'IDENTIFICACAO', 'MARCACAO', 'AJUSTE_INVENTARIO', 'ESTORNO']);
   assert.deepEqual(js(C.tiposAtivos(1)), ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'AJUSTE_INVENTARIO', 'ESTORNO'], 'a Fase 1 continua a mesma');
-  for (const t of ['IDENTIFICACAO', 'MARCACAO']) assert.equal(C.ativo(t), false, t + ' é da Fase 2, mas ainda sem campos: inativo');
-  assert.deepEqual([C.ativo('AJUSTE_INVENTARIO', 'CORRECAO_LOCALIZACAO'), C.ativo('AJUSTE_INVENTARIO', 'RECLASSIFICACAO'), C.ativo('VENDA'), C.ativo('VENDA', null, 2), C.ativo('VENDA', null, 1)], [true, false, true, true, false]);
+  for (const t of ['PESAGEM', 'SANIDADE', 'LANCAMENTO_FINANCEIRO']) assert.equal(C.ativo(t), false, t + ' é de fase posterior: inativo');
+  assert.deepEqual([C.ativo('AJUSTE_INVENTARIO', 'CORRECAO_LOCALIZACAO'), C.ativo('AJUSTE_INVENTARIO', 'RECLASSIFICACAO'), C.ativo('AJUSTE_INVENTARIO', 'DIVERGENCIA_CONTAGEM'), C.ativo('AJUSTE_INVENTARIO', 'RECLASSIFICACAO', 1), C.ativo('VENDA'), C.ativo('VENDA', null, 2), C.ativo('VENDA', null, 1)], [true, true, true, false, true, true, false]);
+  assert.deepEqual([C.ativo('IDENTIFICACAO', 'REMOCAO'), C.ativo('IDENTIFICACAO', 'REMOCAO', 1), C.ativo('MARCACAO', 'NAO_LOCALIZADO'), C.ativo('MARCACAO', 'OUTRO')], [true, false, true, false]);
+  assert.deepEqual(js(C.camposEvento('MARCACAO', 'DESCARTE').map((c) => c.id)), ['event_date', 'acao', 'property_id', 'responsible', 'notes', 'motivo_descarte'], 'campo de cabeçalho do subtipo');
+  assert.deepEqual(js(C.camposEvento('MARCACAO', 'NAO_LOCALIZADO').map((c) => c.id)), ['event_date', 'acao', 'property_id', 'responsible', 'notes']);
   assert.deepEqual(js(C.modulosAtivos().map((x) => x.id)), ['DASHBOARD', 'REBANHO', 'PASTOS', 'EVENTOS', 'CONFIGURACOES', 'IMPORTACAO']);
   assert.equal(C.modulosAtivos(5).filter((x) => x.menu).length, 10, 'o menu chega aos 10 itens da §15 na Fase 5');
   const s = C.serializar();
   const copia = JSON.parse(JSON.stringify(s));
   assert.deepEqual(js(s), copia, 'ida e volta por JSON sem perda (nada de função ou Date)');
-  assert.deepEqual(Object.keys(copia.tipos.find((t) => t.tipo === 'AJUSTE_INVENTARIO').subtipos), ['CORRECAO_CADASTRO', 'IDENTIFICACAO_INCORRETA', 'CORRECAO_LOCALIZACAO']);
+  assert.deepEqual(Object.keys(copia.tipos.find((t) => t.tipo === 'AJUSTE_INVENTARIO').subtipos), ['CORRECAO_CADASTRO', 'IDENTIFICACAO_INCORRETA', 'CORRECAO_LOCALIZACAO', 'RECLASSIFICACAO', 'DIVERGENCIA_CONTAGEM']);
+  assert.deepEqual(Object.keys(copia.tipos.find((t) => t.tipo === 'IDENTIFICACAO').subtipos), ['PRIMEIRA_IDENTIFICACAO', 'SUBSTITUICAO', 'REMOCAO']);
+  assert.deepEqual(Object.keys(copia.tipos.find((t) => t.tipo === 'MARCACAO').subtipos), ['DESCARTE', 'NAO_LOCALIZADO']);
+  assert.deepEqual(Object.keys(C.serializar(1).tipos.find((t) => t.tipo === 'AJUSTE_INVENTARIO').subtipos), ['CORRECAO_CADASTRO', 'IDENTIFICACAO_INCORRETA', 'CORRECAO_LOCALIZACAO'], 'os subtipos da Fase 2 não aparecem na Fase 1');
   for (const t of copia.tipos) {
     for (const k of ['rotulo', 'grupo_ui', 'ordem', 'selecao_animais', 'modo_entrada', 'revisao', 'critico', 'reads', 'fase']) assert.ok(k in t, t.tipo + ' sem ' + k);
-    const campos = t.campos.concat(t.campos_animal || []).concat(...Object.values(t.subtipos || {}).map((x) => x.campos_animal || [])).concat(...Object.values(t.grupos_repetiveis || {}));
+    const campos = t.campos.concat(t.campos_animal || []).concat(...Object.values(t.subtipos || {}).map((x) => (x.campos || []).concat(x.campos_animal || []))).concat(...Object.values(t.grupos_repetiveis || {}));
     for (const c of campos) {
       assert.ok(C.TIPOS_CAMPO.indexOf(c.tipo) >= 0 || /^ref:[A-Z_]+$/.test(c.tipo), t.tipo + '.' + c.id + ': tipo renderizável');
       if (/^ref:/.test(c.tipo)) assert.ok(G.Schema.temTabela(c.tipo.slice(4)), 'referência a aba existente: ' + c.tipo);
@@ -110,7 +116,10 @@ test('ENTRADA_INICIAL: só na data do marco zero; sem marco zero é CONFIG; OUTR
   assert.deepEqual(codigos(falha(m, 'registrar', outraEntrada('2026-03-01', [bicho()], { description: '' }))), ['CAMPO_OBRIGATORIO']);
   assert.deepEqual(codigos(falha(m, 'registrar', outraEntrada('2026-03-01', [bicho({ pasto_destino_id: PASTOS.INATIVO })]))), ['PASTO_INATIVO']);
   assert.deepEqual(codigos(falha(m, 'registrar', outraEntrada('2026-03-01', [bicho({ pasto_destino_id: E.id(0xdead) })]))), ['NAO_ENCONTRADO']);
-  assert.deepEqual(codigos(falha(m, 'registrar', { tipo: 'IDENTIFICACAO', campos: {}, animais: [{}] })), ['TIPO_INDISPONIVEL']);
+  assert.deepEqual(codigos(falha(m, 'registrar', { tipo: 'PESAGEM', campos: {}, animais: [{}] })), ['TIPO_INDISPONIVEL']);
+  assert.deepEqual(codigos(falha(m, 'registrar', { tipo: 'IDENTIFICACAO', subtipo: 'OUTRO', campos: {}, animais: [{}] })), ['TIPO_INDISPONIVEL']);
+  const semSub = falha(m, 'registrar', { tipo: 'IDENTIFICACAO', campos: {}, animais: [{}] });
+  assert.deepEqual(semSub.details.map((d) => [d.codigo, d.campo]), [['CAMPO_OBRIGATORIO', 'subtipo']], 'tipo com subtipos exige o subtipo');
   assert.deepEqual(codigos(falha(m, 'registrar', outraEntrada('2026-03-01', []))), ['SEM_ANIMAIS']);
   const e = falha(m, 'registrar', outraEntrada('2026-03-01', [bicho({ sexo: 'M', castrado: true, reprodutor: true, data_nascimento: '2026-04-01', data_nascimento_confianca: 'CONFIRMADA' })]));
   assert.deepEqual(codigos(e).sort(), ['CASTRADO_REPRODUTOR', 'NASCIMENTO_DEPOIS_DA_ENTRADA']);

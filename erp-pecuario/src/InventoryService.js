@@ -7,8 +7,8 @@
  * `motivo` (ANTERIOR_AO_MARCO_ZERO, DADOS_INSUFICIENTES). Puro: lê pelo leitor do AnimalService.
  */
 var InventoryService = (function () {
-  /** Alertas da Fase 1 (lista fechada do desenho-base, seção 6, no recorte desta fase). */
-  var ALERTAS = ['ATIVO_SEM_PASTO', 'SEM_BRINCO', 'SEM_CATEGORIA', 'BACKUP_ATRASADO', 'INTEGRIDADE_COM_ERRO', 'IMPORTACAO_INCOMPLETA'];
+  /** Alertas entregues até a Fase 2 (lista fechada do desenho-base, seção 6, no recorte das fases entregues). */
+  var ALERTAS = ['ATIVO_SEM_PASTO', 'SEM_BRINCO', 'SEM_CATEGORIA', 'NAO_LOCALIZADO', 'BACKUP_ATRASADO', 'INTEGRIDADE_COM_ERRO', 'IMPORTACAO_INCOMPLETA'];
   var DIA_MS = 86400000;
 
   function vazio_(v) {
@@ -225,6 +225,9 @@ var InventoryService = (function () {
     if (pend.ATIVO_SEM_PASTO.length) lista.push(alerta_('ATIVO_SEM_PASTO', 'AVISO', pend.ATIVO_SEM_PASTO.length + ' animal(is) no rebanho sem pasto informado.', pend.ATIVO_SEM_PASTO, 'ANIMAIS'));
     if (pend.SEM_BRINCO.length) lista.push(alerta_('SEM_BRINCO', 'AVISO', pend.SEM_BRINCO.length + ' animal(is) no rebanho sem brinco.', pend.SEM_BRINCO, 'ANIMAIS'));
     if (pend.SEM_CATEGORIA.length) lista.push(alerta_('SEM_CATEGORIA', 'AVISO', pend.SEM_CATEGORIA.length + ' animal(is) que nenhuma categoria cobre. Confira as categorias nas configurações.', pend.SEM_CATEGORIA, 'ANIMAIS'));
+    // Marcação "não localizado" (MARCACAO/NAO_LOCALIZADO): pendência até a baixa na contagem ou a desmarcação.
+    var naoLocalizados = L.animais.filter(function (a) { return a.situacao_cadastral === 'ATIVO' && a.nao_localizado === true; }).map(function (a) { return a.animal_id; });
+    if (naoLocalizados.length) lista.push(alerta_('NAO_LOCALIZADO', 'AVISO', naoLocalizados.length + ' animal(is) marcado(s) como não localizado(s): confirme a falta (baixa na contagem) ou desmarque quando aparecer(em).', naoLocalizados, 'ANIMAIS'));
     var limite = L.params.alerta_backup_atrasado_dias;
     if (e.backup === undefined) nao.push(naoAvaliado_('BACKUP_ATRASADO', 'A situação do backup não foi informada.'));
     else {
