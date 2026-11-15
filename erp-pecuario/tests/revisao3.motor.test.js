@@ -500,6 +500,11 @@ test('R3 achado 23: nas referências de genealogia e de touro o conflito traz o 
   assert.deepEqual([est.erro.code, S.codigos(est.erro)], ['CONFLICT', ['REFERENCIA_GENEALOGICA']]);
   assert.deepEqual([est.erro.details[0].conflito.event_id, est.erro.details[0].conflito.tipo, est.erro.details[0].conflito.data], [ent.event_id, 'OUTRA_ENTRADA', '2026-05-01']);
   // Com uma cria de parto, o parto da matriz e a cria dele são um lançamento só.
-  const fem2 = s.reg('registrar', correcao('2026-06-01', [{ animal_id: evT.animais[0].animal_id, campo: 'nome', valor_novo: null }]).animais.length ? fem : fem);
-  assert.ok(fem2);
+  const boi2 = s.reg('registrar', S.entradaInicial([S.bicho({ brinco: '401', sexo: 'M', data_nascimento: '2019-01-10', data_nascimento_confianca: 'CONFIRMADA' })])).animais[0].animal_id;
+  const fem2 = s.reg('registrar', correcao('2026-02-01', [{ animal_id: boi2, campo: 'sexo', valor_novo: 'F' }]));
+  const p2 = s.reg('registrar', parto('2026-03-01', boi2, [{ situacao_nascimento: 'VIVO', sexo: 'M', brinco: '9002' }]));
+  const est2 = s.tent('estornar', { event_id: fem2.event_id, justificativa: 'x' });
+  assert.deepEqual([est2.erro.code, S.codigos(est2.erro)], ['CONFLICT', ['PARTO_DA_MATRIZ']]);
+  assert.deepEqual([est2.erro.details[0].conflito.event_id, est2.erro.details[0].conflito.tipo], [p2.event_id, 'NASCIMENTO']);
+  assert.deepEqual(s.erros(), []);
 });
