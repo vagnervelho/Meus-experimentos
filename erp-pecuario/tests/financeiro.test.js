@@ -189,7 +189,7 @@ test('lançamento no plano: linhas de FINANCEIRO, PARCELAS, RATEIOS e ALOCACOES;
   assert.equal(F.avisoPeriodo({ fin_bloqueio_ate: '2027-03-31' }, '2027-03-10', 'A compra').codigo, 'PERIODO_BLOQUEADO');
 });
 
-test('situação de pagamento (03b, 10.4) e tipo dos custos acessórios pelo registro do evento (payload_json.custos), nunca pela ordem das linhas', () => {
+test('situação de pagamento (03b, 10.4) e tipo dos custos acessórios pela ordem do identificador (o prefixo que soma o frete), nunca pela ordem das linhas', () => {
   const sp = (parcelas, ativo) => js(F.situacaoPagamento(parcelas, ativo));
   assert.deepEqual(sp([], true), { status_pagamento: 'SEM_CAIXA', data_pagamento: null });
   assert.deepEqual(sp([], false), { status_pagamento: 'SEM_CAIXA', data_pagamento: null }, 'sem parcela, vigente ou não');
@@ -197,14 +197,14 @@ test('situação de pagamento (03b, 10.4) e tipo dos custos acessórios pelo reg
   assert.deepEqual(sp([{ status: 'ABERTA' }, { status: 'ABERTA' }], true).status_pagamento, 'ABERTO');
   assert.deepEqual(sp([{ status: 'LIQUIDADA', data_pagamento: '2027-04-14' }, { status: 'ABERTA' }], true).status_pagamento, 'PARCIAL');
   assert.deepEqual(sp([{ status: 'LIQUIDADA', data_pagamento: '2027-04-14' }, { status: 'LIQUIDADA', data_pagamento: '2027-05-10' }, { status: 'CANCELADA' }], true), { status_pagamento: 'LIQUIDADO', data_pagamento: '2027-05-10' });
-  const l = (ids) => ids.map((financial_id) => ({ financial_id, valor: 100 }));
-  const p = (tipos) => ({ custos: Object.keys(tipos).map((financial_id) => ({ financial_id, tipo: tipos[financial_id] })) });
-  assert.deepEqual(js(F.tiposDosCustos(p({ f1: 'FRETE' }), l(['f1']))), { f1: 'FRETE' });
-  // A ordem das linhas não conta: o outro custo antes do frete continua sendo outro custo.
-  assert.deepEqual(js(F.tiposDosCustos(p({ f1: 'FRETE', f2: 'FRETE', f3: 'OUTRO' }), l(['f3', 'f1', 'f2']))), { f3: 'OUTRO', f1: 'FRETE', f2: 'FRETE' });
-  assert.deepEqual(js(F.tiposDosCustos(p({ f9: 'OUTRO' }), l(['f9']))), { f9: 'OUTRO' });
-  assert.equal(F.tiposDosCustos(p({ f1: 'FRETE' }), l(['f1', 'f2'])), null, 'lançamento acessório fora do registro do evento: não confere');
-  assert.equal(F.tiposDosCustos(null, l(['f1'])), null, 'sem o registro, nenhum tipo é inventado');
+  const l = (valores) => valores.map((valor, i) => ({ financial_id: 'f' + i, valor }));
+  assert.deepEqual(js(F.tiposDosCustos(l([36000]), 36000)), ['FRETE']);
+  assert.deepEqual(js(F.tiposDosCustos(l([100, 200, 5000]), 300)), ['FRETE', 'FRETE', 'OUTRO']);
+  assert.deepEqual(js(F.tiposDosCustos(l([5000]), 0)), ['OUTRO']);
+  assert.equal(F.tiposDosCustos(l([100, 200]), 150), null, 'nenhum prefixo fecha: o cabeçalho não confere');
+  // A ordem física (a da lista) não conta: vale a do identificador. O outro custo listado antes do frete continua outro.
+  const embaralhados = [{ financial_id: 'f2', valor: 5000 }, { financial_id: 'f0', valor: 100 }, { financial_id: 'f1', valor: 200 }];
+  assert.deepEqual(js(F.tiposDosCustos(embaralhados, 300)), ['OUTRO', 'FRETE', 'FRETE']);
 });
 
 test('venda (03b, 4.2 e 4.3; 07, 4.2): totais com retenção, conta de cada dedução pelo tipo e a negociação com romaneio total, bruto conferido e base pela pesagem anterior', () => {

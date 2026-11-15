@@ -1123,6 +1123,8 @@ var Seletor = (function () {
     // Data diferente de hoje (08, seção 7): presença e pasto vêm da posição na data devolvida pelo servidor
     // (inventario.elegiveis), não da posição de hoje do aparelho.
     if (posicao && sit === 'ATIVO') {
+      // O sexo não muda com a data: o macho fica fora da lista de elegíveis do parto pelo sexo, não pela presença.
+      if (filtro.sexo && a.sexo !== filtro.sexo) return filtro.sexo === 'F' ? 'não é fêmea' : 'não é macho';
       var naData = posicao.mapa[a.animal_id];
       if (!naData) return 'fora do rebanho em ' + Fmt.data(posicao.data);
       if (filtro.pasto && typeof filtro.pasto === 'string' && filtro.pasto.charAt(0) === '$' && valorCampo) {
@@ -1941,6 +1943,9 @@ var Registro = (function () {
     Util.limpar(sec);
     sec.appendChild(h('h2', { text: 'Documentos e fotos' }));
     sec.appendChild(h('p', { class: 'suave', text: 'Nota fiscal, GTA, laudo ou foto. Os arquivos são enviados logo depois de gravar e não ficam guardados no rascunho.' }));
+    // Na correção, os do lançamento original passam a ela sozinhos: anexa-se aqui só o que for novo.
+    var doOriginal = (s.corrige && s.corrige.anexos) || [];
+    if (doOriginal.length) sec.appendChild(UI.nota((doOriginal.length === 1 ? '1 documento do lançamento original passa' : doOriginal.length + ' documentos do lançamento original passam') + ' a esta correção: ' + doOriginal.join(', ') + '. Anexe aqui só o que for novo.', 'info', null));
     if (s.anexos.length) sec.appendChild(h('ul', { class: 'lista-simples' }, s.anexos.map(function (a, k) {
       return h('li', { class: 'linha-acao', dataset: { anexoForm: a.arquivo.nome_arquivo } }, h('span', { text: Fmt.rotulo('TIPO_ANEXO', a.tipo) + ': ' + a.arquivo.nome_arquivo + (a.descricao ? ' (' + a.descricao + ')' : '') }),
         UI.botao('Tirar', { tipo: 'texto', icone: 'remover', rotulo: 'Tirar ' + a.arquivo.nome_arquivo, aoClicar: function () { s.anexos.splice(k, 1); desenharAnexos(s); } }));
@@ -2288,7 +2293,7 @@ var Registro = (function () {
       defsSub.forEach(function (d) { if (!Util.vazio(a[d.id])) extra.push(Campos.rotuloDe(d) + ': ' + textoValor_(d, a[d.id])); });
       if (sub && s.subtipo === 'RECLASSIFICACAO' && Util.vazio(a.categoria_manual_id)) extra.push('volta à categoria automática');
       var v = porId[a.animal_id] || (a.brinco ? porBrinco[Store.normalizarBrinco(a.brinco, false)] : null);
-      if (v) extra.push(Fmt.dinheiro(v.valor) + (v.liquido !== undefined && v.liquido !== null && v.liquido !== v.valor ? ' (líquido ' + Fmt.dinheiro(v.liquido) + ')' : ''));
+      if (v) extra.push((ROTULO_VALOR_ANIMAL[s.tipo] ? rotuloValorAnimal(s.tipo, 1).replace(/ do animal$/, '') + ' ' : '') + Fmt.dinheiro(v.valor) + (v.liquido !== undefined && v.liquido !== null && v.liquido !== v.valor ? ' (líquido ' + Fmt.dinheiro(v.liquido) + ')' : ''));
       return h('li', { dataset: { valorAnimal: v ? String(v.valor) : null } }, h('span', { class: 'dado', text: nome }), extra.length ? ' · ' + extra.filter(Boolean).join(' · ') : '');
     });
     var resto = (s.dados.animais || []).length - 50;
@@ -2351,8 +2356,9 @@ var Registro = (function () {
     if (im.voltam) l.push(['Tirados do lançamento', plural(im.voltam, 'animal volta', 'animais voltam') + ' ao que era' + (im.voltam === 1 ? '' : 'm') + ' antes dele']);
     if (im.anulados) l.push(['Animais que deixam de existir', String(im.anulados)]);
     if (im.substitui) l.push(['Substitui o lançamento', s.corrige ? s.corrige.rotulo : im.substitui]);
+    if (im.substitui && im.anexos) l.push(['Documentos e fotos do original', (im.anexos_nomes && im.anexos_nomes.length ? im.anexos_nomes.join(', ') : plural(im.anexos, 'documento', 'documentos')) + (im.anexos === 1 ? ' (passa' : ' (passam') + ' a esta correção)']);
     if (im.abertura && im.abertura.total !== undefined) l.push(['Valor de abertura', Fmt.dinheiro(im.abertura.total) + ' em ' + plural(im.abertura.animais, 'animal', 'animais')]);
-    return l.concat(linhasCompra(im.compra), linhasVenda(im.venda), linhasFinanceiro(im.financeiro));
+    return l.concat(linhasCompra(im.compra), linhasVenda(im.venda), linhasFinanceiro(im.financeiro, im.event_type));
   }
   /** Base de todo R$/@ exibido (07, 4.1): de carcaça (apurada no romaneio), negociada a x% ou estimada. */
   function baseArroba(base, rend) {
@@ -2397,7 +2403,13 @@ var Registro = (function () {
     return l;
   }
   /** Lançamentos do evento (simulação): cada um com os títulos e o valor que coube a cada animal (alocações). */
-  function linhasFinanceiro(f) {
+  /**
+   * O que o valor de cada animal é, pelo tipo do lançamento (08, 4.4: a folha não pode enganar): na morte é o custo que
+   * coube a ele (não o valor do boi), na venda e no descarte a receita; na compra e no rebanho inicial, o valor do animal.
+   */
+  var ROTULO_VALOR_ANIMAL = { MORTE: ['Custo do animal', 'Custo por animal'], VENDA: ['Receita do animal', 'Receita por animal'], DESCARTE: ['Receita do animal', 'Receita por animal'] };
+  function rotuloValorAnimal(tipo, n) { var r = ROTULO_VALOR_ANIMAL[tipo] || ['Valor do animal', 'Valor por animal']; return n === 1 ? r[0] : r[1]; }
+  function linhasFinanceiro(f, tipo) {
     if (!f || !f.lancamentos || !f.lancamentos.length) return [];
     var l = [];
     f.lancamentos.forEach(function (x) {
@@ -2411,7 +2423,7 @@ var Registro = (function () {
     var vals = (f.por_animal || []).map(function (x) { return x.valor; });
     if (vals.length) {
       var min = Math.min.apply(null, vals), max = Math.max.apply(null, vals);
-      l.push([vals.length === 1 ? 'Valor do animal' : 'Valor por animal', min === max ? Fmt.dinheiro(min) : 'de ' + Fmt.dinheiro(min) + ' a ' + Fmt.dinheiro(max)]);
+      l.push([rotuloValorAnimal(tipo, vals.length), min === max ? Fmt.dinheiro(min) : 'de ' + Fmt.dinheiro(min) + ' a ' + Fmt.dinheiro(max)]);
     }
     return l;
   }

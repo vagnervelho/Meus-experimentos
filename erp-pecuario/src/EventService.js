@@ -868,9 +868,6 @@ var EventService = (function () {
     } else if (mat && !hist) {
       var onde = Timeline.pastoAntesDaSaida(m.f.linhas(mat.animal_id), ev.event_date, m.D0);
       pasto = onde.presente ? nulo_(onde.pasture_id) : null;
-      // O pasto das crias que o servidor tirou da mãe fica registrado como proposto (não digitado), para a correção o
-      // deixar vazio e ele acompanhar a mãe e a data corrigidas (§20, regra 8; 03b, 10.2).
-      if (pasto) (ctxEv.propostos = ctxEv.propostos || {}).pasto_destino_id = true;
       if (onde.presente && !pasto) erroGeral_(m, 'pasto_destino_id', 'CAMPO_OBRIGATORIO', 'A mãe está sem pasto registrado em ' + br_(ev.event_date) + ': escolha o pasto das crias.');
     }
     var defs = EventCatalog.camposGrupo('NASCIMENTO', 'crias');
@@ -935,7 +932,6 @@ var EventService = (function () {
     var reuso = !vazio_(d.animal_id);
     if (reuso && !ctxEv.criadosOriginal[d.animal_id]) { erroItem_(m, it, 'animal_id', 'SO_ANIMAIS_NOVOS', 'a cria de um parto é sempre um animal novo.'); return; }
     var raca = !vazio_(d.raca) ? d.raca : mat && mat.estado ? nulo_(mat.estado.raca) : null;
-    var racaProposta = vazio_(d.raca) && !vazio_(raca);
     it.novo = !reuso;
     it.reusado = reuso;
     if (reuso) {
@@ -953,8 +949,6 @@ var EventService = (function () {
       ctxEv.plano.ANIMAIS.push({ animal_id: it.animal_id, codigo_interno: it.codigo_interno, nome: nulo_(d.nome), raca: raca });
     }
     if (vazio_(it.brincoTexto)) it.quem = it.quem + ' (' + it.codigo_interno + ')';
-    // A raça que veio da mãe (o campo veio vazio) fica registrada como proposta, como o pasto das crias.
-    if (racaProposta) { ctxEv.propostos = ctxEv.propostos || {}; (ctxEv.propostos.raca_crias = ctxEv.propostos.raca_crias || []).push(it.animal_id); }
     var at = { sexo: d.sexo, data_nascimento: ev.event_date, data_nascimento_confianca: 'CONFIRMADA', origem: 'NASCIDO' };
     if (raca) at.raca = raca;
     if (d.sexo === 'M') { at.castrado = 'N'; at.reprodutor = 'N'; }
@@ -2305,10 +2299,12 @@ var EventService = (function () {
     }
     var frete = 0;
     var outros = 0;
-    // O tipo de cada custo (frete ou outro) fica gravado no próprio evento (payload_json.custos: [{financial_id, tipo}]),
-    // como o das deduções da venda: COMPRAS guarda só os dois totais, e a ordem física das linhas não diz nada (06, seção
-    // 12: o dono pode classificar a aba). Os fretes continuam lançados primeiro, só por ordem de leitura.
-    ctxEv.custos = [];
+    // Os fretes são lançados antes dos outros custos e recebem os menores identificadores da compra: COMPRAS guarda só os
+    // dois totais (03b, seção 4.1) e o payload não tem chave para o tipo (03b, seção 2.6), então o tipo de cada item se
+    // reconstrói pelo prefixo que soma o frete na ordem do financial_id (FinancialService.tiposDosCustos), nunca na ordem
+    // física das linhas (06, seção 12: o dono pode classificar a aba).
+    var idsCustos = custos.map(function () { return m.tx.novoId(); }).sort();
+    var proximoId = 0;
     custos.map(function (x, k) { return { x: x, k: k }; }).sort(function (a, b) { return ((a.x.tipo === 'OUTRO') - (b.x.tipo === 'OUTRO')) || a.k - b.k; }).forEach(function (o) {
       var x = o.x;
       var k = o.k;
@@ -2319,10 +2315,10 @@ var EventService = (function () {
         descricao: nulo_(x.descricao) || (eFrete ? 'Frete' : 'Outros custos') + ' da compra de ' + br_(ev.event_date), partner_id: nulo_(x.partner_id), documento: nulo_(x.documento),
         parcelas: hist ? undefined : FinancialService.parcelasMensais(x.valor, nulo_(x.data_vencimento) || ev.event_date, nulo_(x.parcelas_qtd), { forma_pagamento: x.forma_pagamento, documento: x.documento }), semCaixa: hist,
         rateio: rateio, campo: 'custos', rotulo: (eFrete ? 'o frete' : 'o custo') + (custos.length > 1 ? ' ' + (k + 1) : ''),
+        financial_id: idsCustos[proximoId++],
       }, m.col);
       if (!pl) return;
       if (eFrete) frete += x.valor; else outros += x.valor;
-      ctxEv.custos.push({ financial_id: pl.financial_id, tipo: eFrete ? 'FRETE' : 'OUTRO' });
       planejados.push(pl);
       lancs.push(resumoLancamento_(m, pl, contaCustos, { papel: eFrete ? 'FRETE' : 'OUTRO' }));
     });
@@ -2717,8 +2713,9 @@ var EventService = (function () {
     var codigo = function (f) { var c = m.repo.porId('PLANO_CONTAS', f.conta_id); return c ? c.codigo : null; };
     if (ev.event_type === 'COMPRA' && fins.length) {
       var custos = fins.filter(function (f) { if (codigo(f) !== 'COMPRA_ANIMAIS') return true; out[f.financial_id] = 'ANIMAIS'; return false; });
-      var tipos = FinancialService.tiposDosCustos(ev.payload_json, custos);
-      custos.forEach(function (f) { out[f.financial_id] = tipos ? tipos[f.financial_id] : f.conta_id; });
+      var cp = m.repo.por('COMPRAS', 'event_id', ev.event_id)[0] || {};
+      var tipos = FinancialService.tiposDosCustos(custos, cp.frete || 0);
+      custos.forEach(function (f, i) { out[f.financial_id] = tipos ? tipos[i] : f.conta_id; });
     } else if (ev.event_type === 'VENDA' && fins.length) {
       var deducoes = {};
       ((ev.payload_json || {}).deducoes || []).forEach(function (x) { deducoes[x.financial_id] = x.tipo; });
@@ -2760,8 +2757,6 @@ var EventService = (function () {
       justificativa: ctxEv.original ? nulo_(m.tx.dados.justificativa) : null, valor_abertura_origem: ctxEv.abertura ? 'INFORMADO' : null,
       gta_numero: ctxEv.tipo === 'TRANSFERENCIA' && typeof ctxEv.campos.gta_numero === 'string' ? nulo_(Utils.aparar(ctxEv.campos.gta_numero)) : null,
       deducoes: ctxEv.deducoes && ctxEv.deducoes.length ? ctxEv.deducoes : null,
-      custos: ctxEv.custos && ctxEv.custos.length ? ctxEv.custos : null,
-      propostos: ctxEv.propostos || null,
       acao: ctxEv.tipo === 'MARCACAO' ? ctxEv.ev.payload_json.acao : null,
       motivo_descarte: ctxEv.tipo === 'MARCACAO' ? ctxEv.ev.payload_json.motivo_descarte : null,
       // A baixa por divergência não grava AJUSTES: o porquê do lançamento fica no evento (BAIXAS guarda em que contagem faltou).
@@ -2790,6 +2785,7 @@ var EventService = (function () {
         animais: animais.length, novos: ctxEv.plano.ANIMAIS.length, anulados: (ctxEv.anuladosCriados || []).length, voltam: (ctxEv.voltam || []).length, substitui: resumo.substitui,
         total_value: ev.total_value, abertura: ctxEv.abertura || null, pre_marco_zero: ev.pre_marco_zero === true,
         parto: ctxEv.parto || null, transferencia: ctxEv.transf || null, baixas: ctxEv.plano.BAIXAS.length, anexos: ctxEv.plano.ANEXOS.length,
+        anexos_nomes: ctxEv.plano.ANEXOS.map(function (a) { return a.nome_arquivo; }),
         identificacoes: ctxEv.plano.IDENTIFICACOES.length, ajustes: ctxEv.plano.AJUSTES.length,
         marcacao: ctxEv.tipo === 'MARCACAO' ? { subtipo: ctxEv.subtipo, acao: ctxEv.ev.payload_json.acao, motivo_descarte: ctxEv.ev.payload_json.motivo_descarte } : null,
         compra: ctxEv.compra || null, venda: ctxEv.venda || null, financeiro: ctxEv.financeiro || null,
@@ -3009,10 +3005,29 @@ var EventService = (function () {
         var papeis = papeisGravados_(leitor, ev, detalhes.FINANCEIRO);
         return {
           evento: eventoPublico_(tx, ev), linhas: linhas, detalhes: detalhes, anexos: FileService.anexosDoEvento(tx.cru, ev.event_id), anula: anula ? eventoPublico_(tx, anula) : null,
-          papeis: papeis, totais_venda: totaisDaVendaGravada_(detalhes, papeis),
+          papeis: papeis, totais_venda: totaisDaVendaGravada_(detalhes, papeis), propostas: propostasDoParto_(tx, ev, linhas),
         };
       },
     };
+  }
+  /**
+   * O que o servidor propõe num parto quando o campo vem vazio (crias_): o pasto das crias = o da mãe no dia do parto
+   * (sem o próprio parto) e a raça = a da mãe. A prévia da correção deixa vazio o valor igual à proposta, para ele
+   * acompanhar a mãe e a data corrigidas (§20, regra 8; 03b, 10.2), como faz com a descrição e o vencimento propostos.
+   * null fora do parto e no parto anterior ao marco zero (a cria do histórico não ocupa pasto).
+   */
+  function propostasDoParto_(tx, ev, linhas) {
+    if (ev.event_type !== 'NASCIMENTO') return null;
+    var mae = linhas.filter(function (l) { return l.papel === 'MATRIZ'; })[0];
+    var a = mae ? tx.cru.cruPorId('ANIMAIS', mae.animal_id) : null;
+    if (!a) return null;
+    var params = Timeline.parametros(tx.repo);
+    var pasto = null;
+    if (ev.pre_marco_zero !== true) {
+      var onde = Timeline.pastoAntesDaSaida(Timeline.fonte(tx, { excluir: [ev.event_id], parametros: params }).linhas(a.animal_id), ev.event_date, params.data_marco_zero);
+      pasto = onde.presente ? nulo_(onde.pasture_id) : null;
+    }
+    return { pasto_destino_id: pasto, raca: nulo_(a.raca) };
   }
   function listar(ctx, filtros) {
     return UnitOfWork.read(ctx, consultaListar(filtros));

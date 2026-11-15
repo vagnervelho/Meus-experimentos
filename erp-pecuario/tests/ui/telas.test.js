@@ -124,7 +124,9 @@ for (const largura of LARGURAS) {
     await page.waitForFunction(() => /Mimosa/.test((document.querySelector('[data-secao="geral"]') || {}).textContent || ''));
     await page.click('.abas a:has-text("Linha do tempo")');
     await page.waitForSelector('[data-secao="linha-tempo"] li');
-    assert.match(await textoTela(page, '[data-secao="linha-tempo"]'), /Data de nascimento: 2023-02-02 → 2023-03-03 \(Data copiada errada do caderno\)/);
+    // Revisão 4 da Fase 2 (achado 17): a linha do tempo mostra o valor em palavras (data em dd/mm/aaaa), nunca o código cru.
+    assert.match(await textoTela(page, '[data-secao="linha-tempo"]'), /Data de nascimento: 02\/02\/2023 → 03\/03\/2023 \(Data copiada errada do caderno\)/);
+    assert.doesNotMatch(await textoTela(page, '[data-secao="linha-tempo"]'), /2023-02-02/);
     assert.deepEqual(a.estado.erros, []);
     await a.fechar();
   });

@@ -22,7 +22,7 @@ var Api = (function () {
   var PROP_DONO = 'OWNER_EMAIL';
   var PROP_SEM_EMAIL = 'ALLOW_EMPTY_ACTIVE_USER';
   var CHAVE_MAX = 200;
-  /** Rascunho no servidor: abaixo dos 9 KB por valor das Properties; no máximo 40 guardados; vencem em 30 dias. */
+  /** Rascunho no servidor: até 96 KB, em partes de 8 KB (um valor das Properties tem 9 KB); no máximo 40 guardados; vencem em 30 dias. */
   // Um rascunho grande (o lote de 80 animais do 08-ux-ui, seção 9) não cabe num valor das propriedades (9 KB): vai em
   // partes de até `parteBytes`, até `maxBytes` no total; os rascunhos juntos ficam abaixo de `totalBytes` (a cota do
   // store do usuário é 500 KB).

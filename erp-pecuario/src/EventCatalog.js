@@ -124,7 +124,7 @@ var EventCatalog = (function () {
       l.push(a_('metodo_pesagem', 'Como foi pesado', 'lista', { opcoes: ['BALANCA', 'FITA', 'ESTIMATIVA_VISUAL'], visivel_se: quando_('peso', true), obrigatorio_se: quando_('peso', true) }));
       l.push(a_('valor_abertura', 'Valor de abertura', 'dinheiro', { min: 0.01, ajuda: 'Opcional. Custo de referência do animal no marco zero (não é caixa).' }));
     }
-    l.push(a_('outras_identificacoes', 'Outras identificações', 'texto', { ajuda: 'Lista de {tipo, codigo}: brinco de origem, RFID, SISBOV, tatuagem.' }));
+    l.push(a_('outras_identificacoes', 'Outras identificações', 'texto', { ajuda: 'Brinco do vendedor, chip (RFID), SISBOV ou tatuagem: escolha o tipo e digite o número.' }));
     l.push(a_('observacoes', 'Observações deste animal', 'texto'));
     return l;
   }
@@ -246,7 +246,7 @@ var EventCatalog = (function () {
     a_('peso_carcaca_kg', 'Peso de carcaça', 'decimal', { unidade: 'kg', min: 0.1, max: PESO_MAX_KG, casas: 1, ajuda: 'Só na arroba de carcaça ou no lote dividido por carcaça. Nunca vira pesagem.' }),
     a_('valor_individual', 'Valor deste animal', 'dinheiro', { min: 0.01, ajuda: 'Só quando cada animal teve o seu preço (por cabeça) ou no lote dividido pelo valor de cada um.' }),
     a_('base_manual', 'Peso na divisão manual', 'decimal', { min: 0.0001, casas: 4, ajuda: 'Só no lote com divisão manual: percentual ou proporção deste animal.' }),
-    a_('outras_identificacoes', 'Outras identificações', 'texto', { ajuda: 'Lista de {tipo, codigo}: RFID, SISBOV, tatuagem.' }),
+    a_('outras_identificacoes', 'Outras identificações', 'texto', { ajuda: 'Chip (RFID), SISBOV ou tatuagem: escolha o tipo e digite o número.' }),
     a_('observacoes', 'Observações deste animal', 'texto'),
   ];
   /** Parcelas do valor dos animais (bloco_parcelas): vencimento e valor; valor vazio = divisão igual do que falta. */

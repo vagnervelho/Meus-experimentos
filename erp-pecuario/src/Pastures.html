@@ -171,6 +171,8 @@ var TelaPastos = (function () {
      * direto, que é o marco zero e não uma entrada de hoje (RN-022).
      */
     function vazioDoPasto(p) {
+      // Pasto desativado não recebe animais (RN-019): nada de ação que o servidor sempre recusa.
+      if (p.status === 'INATIVO') return UI.vazio({ texto: 'Nenhum animal neste pasto em ' + Fmt.data(p.data) + '. O pasto está desativado e não recebe animais: reative-o em "Editar pasto" para lançar entradas ou transferências para cá.' });
       var podeTransferir = !!Store.tipoEvento('TRANSFERENCIA') && App.podeRegistrar();
       var el = UI.vazio({ texto: 'Nenhum animal neste pasto em ' + Fmt.data(p.data) + '.', acao: podeTransferir ? { texto: 'Transferir para cá', aoClicar: function () {
         Registro.abrir('TRANSFERENCIA', { campos: { pasto_destino_id: id, event_date: p.data }, origem: 'pasto/' + id });

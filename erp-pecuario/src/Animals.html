@@ -513,6 +513,8 @@ var TelaRebanho = (function () {
     });
     return ul;
   }
+  var ROTULO_CAMPO_AJUSTE = { categoria_manual_id: 'Categoria', pasto_atual_id: 'Pasto', brinco: 'Brinco' };
+  function rotuloCampoAjuste_(campo) { return ROTULO_CAMPO_AJUSTE[campo] || Fmt.rotuloOpcao('campo', campo); }
   function blocoAnexos(f) {
     var caixa = h('div');
     var itens = (f.anexos && f.anexos.itens) || [];

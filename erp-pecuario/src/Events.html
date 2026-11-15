@@ -148,7 +148,7 @@ var TelaEventos = (function () {
     var cp = (det.COMPRAS || [])[0] || {};
     var fins = det.FINANCEIRO || [];
     var principal = fins.filter(function (f) { return codigoConta_(f) === 'COMPRA_ANIMAIS'; })[0] || fins[0] || {};
-    // O tipo de cada custo (FRETE ou OUTRO) vem do servidor (evento.obter: papeis, pelo registro do evento em payload_json.custos).
+    // O tipo de cada custo (FRETE ou OUTRO) vem do servidor (evento.obter: papeis, por FinancialService.tiposDosCustos).
     var tipos = o.papeis || {};
     var parcelasDe = function (id) { return (det.PARCELAS || []).filter(function (x) { return x.financial_id === id; }); };
     var rat = (det.RATEIOS || []).filter(function (r) { return r.financial_id === principal.financial_id; })[0] || {};
@@ -294,18 +294,17 @@ var TelaEventos = (function () {
       var idents = Utils_agrupar(det.IDENTIFICACOES || []);
       var crias = linhasEv.filter(function (l) { return l.papel === 'CRIA'; });
       var at0 = (crias[0] && crias[0].atributos_iniciais_json) || {};
-      // O pasto das crias e a raça que o servidor tirou da mãe (o campo veio vazio: payload.propostos) não viram valor
-      // digitado: ficam vazios, para acompanhar a mãe e a data corrigidas (§20, regra 8; 03b, 10.2).
-      var propostos = payload.propostos || {};
-      var racaProposta = propostos.raca_crias || [];
-      origem.pasto_destino_id = crias[0] && !propostos.pasto_destino_id ? crias[0].pasto_destino_id : null; origem.pai_id = rep.touro_id || at0.pai_id; origem.pai_confianca = at0.pai_confianca; origem.tipo_parto = rep.tipo_parto;
+      // O pasto das crias e a raça que o servidor tira da mãe quando o campo vem vazio (evento.obter: propostas) não
+      // viram valor digitado: ficam vazios, para acompanhar a mãe e a data corrigidas (§20, regra 8; 03b, 10.2).
+      var propostas = o.propostas || {};
+      origem.pasto_destino_id = crias[0] ? propostoOuValor_(crias[0].pasto_destino_id, propostas.pasto_destino_id) : null; origem.pai_id = rep.touro_id || at0.pai_id; origem.pai_confianca = at0.pai_confianca; origem.tipo_parto = rep.tipo_parto;
       linhasEv.filter(function (l) { return l.papel === 'MATRIZ'; }).forEach(function (l) { linhas.push({ animal_id: l.animal_id, valores: {} }); antes.linhas[l.animal_id] = {}; });
       grupos.crias = crias.map(function (l) {
         var at = l.atributos_iniciais_json || {};
         var a = Store.animal(l.animal_id);
         var br = (idents[l.animal_id] || []).filter(function (x) { return x.tipo === 'BRINCO'; })[0];
         var ps = (pesos[l.animal_id] || [])[0];
-        return { animal_id: l.animal_id, valores: limpo_({ situacao_nascimento: 'VIVO', sexo: at.sexo, brinco: br ? br.codigo : null, nome: a ? a.nome : null, raca: racaProposta.indexOf(l.animal_id) >= 0 ? null : at.raca, peso: pesoTexto_(l.peso), metodo_pesagem: ps ? ps.metodo : null, observacoes: l.observacoes }) };
+        return { animal_id: l.animal_id, valores: limpo_({ situacao_nascimento: 'VIVO', sexo: at.sexo, brinco: br ? br.codigo : null, nome: a ? a.nome : null, raca: propostoOuValor_(at.raca, propostas.raca), peso: pesoTexto_(l.peso), metodo_pesagem: ps ? ps.metodo : null, observacoes: l.observacoes }) };
       });
       for (var k = 0; k < (rep.qtd_natimortos || 0); k++) grupos.crias.push({ valores: { situacao_nascimento: 'NATIMORTO' } });
       antes.grupos = Util.clonar(grupos);
@@ -361,7 +360,16 @@ var TelaEventos = (function () {
     return { subtipo: sub, campos: campos, linhas: linhas, origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotuloEvento(ev), historico: ev.pre_marco_zero === true, antes: antes } };
   }
   /** Pré-preenche o evento substituto com o que o original gravou (valores como digitados no formulário). */
+  /**
+   * Prévia da correção, com os documentos e fotos do original (evento.obter: anexos), que passam ao substituto: o
+   * formulário e a revisão dizem isso, para ninguém anexar de novo achando que se perderam (08, 4.4).
+   */
   function previaCorrecao(o) {
+    var r = previaCorrecaoTipo_(o);
+    if (r && r.corrige) r.corrige.anexos = (o.anexos || []).filter(function (a) { return a.status === undefined || a.status === 'ATIVO'; }).map(function (a) { return a.nome_arquivo; });
+    return r;
+  }
+  function previaCorrecaoTipo_(o) {
     var ev = o.evento, det = o.detalhes || {};
     var def = Store.tipoEvento(ev.event_type);
     var origem = { event_date: ev.event_date, property_id: ev.property_id, description: ev.description, responsible: ev.responsible, notes: ev.notes };

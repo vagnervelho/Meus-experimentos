@@ -162,7 +162,7 @@ test('R4 achado 9: o animal que só existe no histórico (comprado e vendido ant
 });
 
 // ---------------------------------------------------------------- achado 10 (MÉDIA) ----
-test('R4 achado 10: o tipo de cada custo da compra vem do registro do evento; classificar a aba FINANCEIRO não gera erro nem troca frete por outro custo na correção', () => {
+test('R4 achado 10: o tipo de cada custo da compra não depende da ordem das linhas; classificar a aba FINANCEIRO não gera erro nem troca frete por outro custo na correção', () => {
   const { s, parceiro } = montar();
   const forn = parceiro('Leilão', ['FORNECEDOR']);
   const transp = parceiro('Transportes Rio', ['TRANSPORTADOR']);
@@ -188,12 +188,17 @@ test('R4 achado 10: o tipo de cada custo da compra vem do registro do evento; cl
   const doCorretor = lancamentos(s, k.event_id).find((f) => f.partner_id === corretor);
   assert.match(doCorretor.descricao, /^Outros custos da compra/);
   assert.deepEqual(erros(s), []);
-  // O registro do tipo mexido à mão é acusado (o frete e os outros custos não conferem).
-  const e = s.tabela('EVENTOS').find((y) => y.event_id === k.event_id);
-  const pj = clone(e.payload_json);
-  pj.custos.forEach((y) => { y.tipo = 'FRETE'; });
-  s.editar('EVENTOS', e.event_id, 'payload_json', JSON.stringify(pj));
-  assert.ok(erros(s).some((y) => y[0] === 'FINANCEIRO' && /O frete \(R\$ 800,00\) e os outros custos \(R\$ 150,00\)/.test(y[1])), JSON.stringify(erros(s)));
+  // Os totais da compra trocados à mão (frete × outros custos) continuam acusados.
+  const cpk = s.tabela('COMPRAS').find((y) => y.event_id === k.event_id);
+  s.editar('COMPRAS', cpk.purchase_id, 'frete', 150);
+  s.editar('COMPRAS', cpk.purchase_id, 'outros_custos', 800);
+  assert.ok(erros(s).some((y) => y[0] === 'FINANCEIRO' && /O frete \(R\$ 150,00\) e os outros custos \(R\$ 800,00\)/.test(y[1])), JSON.stringify(erros(s)));
+  // E a ordem inversa das linhas (decrescente) também não muda nada.
+  s.editar('COMPRAS', cpk.purchase_id, 'frete', 800);
+  s.editar('COMPRAS', cpk.purchase_id, 'outros_custos', 150);
+  const mat2 = s.gas.planilhas.matriz(banco, 'FINANCEIRO');
+  s.gas.planilhas.gravar(banco, 'FINANCEIRO', 2, 1, mat2.slice(1).filter((l) => l.some((x) => x !== '')).sort((a, b) => b[iv] - a[iv]));
+  assert.deepEqual(erros(s), []);
 });
 
 // ---------------------------------------------------------------- achado 21 (BAIXA) ----

@@ -661,3 +661,41 @@ refutado nem adiado. Testes novos: `tests/revisao3.motor.test.js`, `tests/revisa
   com o backend real (`npm run ui:check`: 81 testes, 81 aprovados, 0 falhas; página montada com 443 KB de 450 KB). Os 35
   testes novos de achado falham no código anterior à rodada (o 36º, "a importação em curso ainda pode ser desfeita", é a
   guarda do que precisa continuar valendo). Nada validado na conta do dono.
+
+## 15/11/2026 — Fase 2, conserto da revisão independente (rodada 4)
+
+29 achados (6 de gravidade alta; os de brinco no estorno vieram em duas lentes e foram tratados uma vez), todos
+reproduzidos por um teste que falhava antes do conserto e corrigidos; nenhum refutado nem adiado. Testes novos:
+`tests/revisao4.motor.test.js`, `tests/revisao4.financeiro.test.js`, `tests/revisao4.interface.test.js` e
+`tests/ui/revisao4.test.js`.
+
+- Motor (conjunto final em todo caminho): a conferência dos períodos de uso do brinco vale também no estorno, na correção
+  que tira a linha de brinco do original e no desfazer da importação (CONFLICT `BRINCO_DUPLICADO` com o registro do outro
+  animal); a chegada declarada não fica antes do nascimento na correção de quem criou o animal (com as correções vigentes)
+  nem no que volta com o estorno ou o desfazer (`ENTRADA_ANTES_DO_NASCIMENTO`); a mãe e o pai do conjunto final valem na
+  correção de quem criou o filho; a mãe de parto só de natimorto nasce antes do parto (registro, correção e estorno); a
+  categoria manual que continua valendo serve ao sexo final (`CATEGORIA_INCOMPATIVEL` com a reclassificação); o parto não
+  passa a informar um pai diferente do que uma correção de cadastro pôs na cria (`PAI_DA_CRIA`); pasto, propriedade e
+  categoria desativados depois do uso valem na correção; o conflito de genealogia aponta a correção que criou o vínculo.
+- Integridade e reconciliação: COPIAS confere a fonte de cada evento vigente (linhas dos animais com o papel e o efeito do
+  tipo, pasto do movimento, `pre_marco_zero` pela data, detalhe só de animal com linha) e o achado continua depois do
+  reparo; LINHA_DO_TEMPO acusa a chegada antes do nascimento e a categoria manual de outro sexo; BASE_RATEIO refaz a base
+  estimada da venda. A reconciliação não quebra com a mãe de parto antigo baixada no marco zero, aceita a outra entrada
+  datada do marco zero como decisão do dono e dá em FORA_DA_FOTOGRAFIA só os caminhos que funcionam. Continuam 26
+  checagens.
+- Financeiro: o animal que só existe no histórico tem o custo da compra histórica e o resultado na ficha
+  (`Timeline.entradaDoCusto`, a mesma fronteira no projetor, na ficha e na invariante 18); o tipo de cada custo da compra
+  sai da ordem do `financial_id` (os fretes recebem os menores), não da ordem física das linhas: classificar a aba não muda
+  nada; a prévia do lote de um animal com carcaça e a do registro histórico se corrigem pela tela.
+- Interface: prévia do parto sem fixar o pasto e a raça propostos (`evento.obter.propostas`); revisão da correção sem
+  "anulados" falsos (`impactos.voltam`) nem "Animais" repetido, com os documentos do original (`impactos.anexos_nomes`) e o
+  custo ou a receita de cada animal pelo nome; subtipo só para leitura na correção; linha do tempo da ficha pelo nome e na
+  ordem canônica, como a lista de eventos; seletor com data passada pelo sexo; pasto desativado sem ações impossíveis;
+  ajudas e contrato do rascunho (96 KB em partes) corrigidos.
+- Testes atualizados ao contrato novo, sem afrouxar: em `tests/financeiro.test.js`, `tiposDosCustos` agora pela ordem do
+  identificador, com o caso das linhas embaralhadas; em `tests/ui/telas.test.js`, a linha do tempo da ficha mostra a data
+  corrigida em dd/mm/aaaa (antes a asserção reproduzia o código cru que o achado 17 apontou) e não mostra mais o código cru.
+- Verificado em Node (`npm test`: 619 testes, 619 aprovados, 0 falhas, cerca de 7 minutos neste ambiente) e no navegador
+  com o backend real (`npm run ui:check`: 85 testes, 85 aprovados, 0 falhas; página montada com 446 KB de 450 KB). Dos 36
+  testes novos, 35 falham no código anterior à rodada (o 36º, "sem falso positivo" na conferência das linhas dos eventos, é
+  a guarda do que precisa continuar valendo). Nada validado na conta do dono.

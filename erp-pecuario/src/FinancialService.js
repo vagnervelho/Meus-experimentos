@@ -177,8 +177,9 @@ var FinancialService = (function () {
    * property_id}, conta (linha de PLANO_CONTAS), naturezas (aceitas), valor, descricao, partner_id, documento,
    * observacoes, quantidade, pasture_id, retida, semCaixa, pagamento ('será recebida': texto da falta de parcela), parcelas: [{data_vencimento, valor?, forma_pagamento,
    * documento}], rateio: {criterio, itens: [{animal_id, chave, base}], cemPorCento, justificativa, estimado} | null, campo,
-   * rotulo, prefixo}. Erros vão para `col`; com erro devolve null. Devolve {linhas: {FINANCEIRO: [..], PARCELAS,
-   * RATEIOS, ALOCACOES_FINANCEIRAS}, financial_id, rateio (o de `ratear`), parcelas}.
+   * rotulo, prefixo, financial_id (opcional: o identificador escolhido por quem chama, como os custos da compra)}. Erros
+   * vão para `col`; com erro devolve null. Devolve {linhas: {FINANCEIRO: [..], PARCELAS, RATEIOS, ALOCACOES_FINANCEIRAS},
+   * financial_id, rateio (o de `ratear`), parcelas}.
    */
   function planejar(tx, spec, col) {
     var s = spec || {};
@@ -222,7 +223,7 @@ var FinancialService = (function () {
     }
     if (col.erros.length !== antes) return null;
     var ev = s.evento;
-    var finId = tx.novoId();
+    var finId = vazio_(s.financial_id) ? tx.novoId() : s.financial_id;
     var fin = {
       financial_id: finId, event_id: ev.event_id, ref_event_id: null, conta_id: c.conta_id, natureza: c.natureza, tipo: c.tipo,
       categoria: c.grupo, descricao: nulo_(s.descricao), data_competencia: s.data_competencia || ev.event_date, competencia_inicio: null,
@@ -632,12 +633,10 @@ var FinancialService = (function () {
         var total = soma_(porEvento[c.event_id] || [], 'valor');
         if (total !== c.valor_total || c.valor_total !== c.valor_animais + c.frete + c.outros_custos) achado(16, 'COMPRAS', c.purchase_id, 'A compra registra ' + reais_(c.valor_total) + ' no total e os lançamentos do evento somam ' + reais_(total) + '.');
         if (ev && ev.total_value !== c.valor_total) achado(16, 'EVENTOS', c.event_id, 'O valor do evento de compra (' + reais_(ev.total_value) + ') difere do total da compra (' + reais_(c.valor_total) + ').');
-        // O tipo de cada custo vem do registro do evento (payload_json.custos), nunca da ordem das linhas.
+        // Os fretes têm os menores identificadores da compra: o frete é um prefixo dos lançamentos acessórios na ordem
+        // do financial_id (nunca na ordem física das linhas, que o dono pode classificar).
         var acess = (porEvento[c.event_id] || []).filter(function (f) { return f !== fin; });
-        var tipos = tiposDosCustos(ev && ev.payload_json, acess);
-        var porTipo = { FRETE: 0, OUTRO: 0 };
-        if (tipos) acess.forEach(function (f) { porTipo[tipos[f.financial_id]] += f.valor || 0; });
-        if (tipos === null || porTipo.FRETE !== c.frete || porTipo.OUTRO !== c.outros_custos) achado(16, 'COMPRAS', c.purchase_id, 'O frete (' + reais_(c.frete) + ') e os outros custos (' + reais_(c.outros_custos) + ') da compra não conferem com os lançamentos de cada item.');
+        if (tiposDosCustos(acess, c.frete) === null || soma_(acess, 'valor') - c.frete !== c.outros_custos) achado(16, 'COMPRAS', c.purchase_id, 'O frete (' + reais_(c.frete) + ') e os outros custos (' + reais_(c.outros_custos) + ') da compra não conferem com os lançamentos de cada item.');
         // Compra anterior ao marco zero (importação): os animais entram com efeito 0 (registro histórico).
         var efeitoCompra = ev && ev.pre_marco_zero === true ? 0 : 1;
         if (c.qtd_animais !== ea.filter(function (l) { return l.efeito_inventario === efeitoCompra; }).length) achado(16, 'COMPRAS', c.purchase_id, 'A quantidade de animais da compra não confere com os animais do evento.');
@@ -691,20 +690,24 @@ var FinancialService = (function () {
     });
   }
   /**
-   * Tipo de cada custo acessório da compra (FRETE ou OUTRO), gravado no próprio evento (`payload_json.custos`:
-   * [{financial_id, tipo}], como as deduções da venda), nunca pela posição da linha na planilha (06, seção 12: classificar
-   * a aba não muda nenhum dado). {financial_id: tipo}, ou null quando algum lançamento acessório não está no registro do
-   * evento (dado mexido à mão).
+   * Tipo de cada custo acessório da compra (FRETE ou OUTRO; 03b, seção 4.1: COMPRAS guarda só os dois totais e o
+   * payload da compra não tem chave para isso, seção 2.6). Os fretes são lançados com os menores `financial_id` da
+   * compra (EventService.financeiroCompra_), e o tipo se reconstrói na ordem do identificador — o prefixo que soma o
+   * frete —, nunca na ordem física das linhas (06, seção 12: classificar a aba não muda nenhum dado). Devolve os tipos na
+   * ordem de `lancamentos` (['FRETE'|'OUTRO']), ou null quando nenhum prefixo fecha o frete (cabeçalho que não confere).
    */
-  function tiposDosCustos(payload, lancamentos) {
-    var por = {};
-    ((payload || {}).custos || []).forEach(function (x) { if (x && (x.tipo === 'FRETE' || x.tipo === 'OUTRO')) por[x.financial_id] = x.tipo; });
-    var out = {};
-    for (var i = 0; i < (lancamentos || []).length; i++) {
-      var t = por[lancamentos[i].financial_id];
-      if (!t) return null;
-      out[lancamentos[i].financial_id] = t;
+  function tiposDosCustos(lancamentos, frete) {
+    var ordenados = (lancamentos || []).map(function (f, i) { return { f: f, i: i }; })
+      .sort(function (a, b) { var x = String(a.f.financial_id || ''); var y = String(b.f.financial_id || ''); return x < y ? -1 : x > y ? 1 : a.i - b.i; });
+    var acum = 0;
+    var corte = frete === 0 ? 0 : -1;
+    for (var k = 0; k < ordenados.length && corte < 0; k++) {
+      acum += ordenados[k].f.valor || 0;
+      if (acum === frete) corte = k + 1;
     }
+    if (corte < 0) return null;
+    var out = [];
+    ordenados.forEach(function (o, k) { out[o.i] = k < corte ? 'FRETE' : 'OUTRO'; });
     return out;
   }
   /** Invariante 18: custo de aquisição do animal = Σ alocações vigentes AQUISICAO_ANIMAIS do período mais recente. */
