@@ -507,7 +507,8 @@ var TelaRebanho = (function () {
       ul.appendChild(h('li', { class: e.vigente ? null : 'riscado', dataset: { evento: e.event_id } },
         h('div', { class: 'linha-tempo-titulo dado', text: Fmt.data(e.event_date) + ' · ' + e.rotulo + (e.rotulo_subtipo ? ' · ' + e.rotulo_subtipo : '') }),
         h('div', { class: 'suave', text: [pasto ? 'pasto: ' + pasto : null, e.pre_marco_zero ? 'histórico (antes do marco zero)' : null, sit].filter(Boolean).join(' · ') }),
-        (e.ajustes || []).map(function (x) { return h('div', { text: Fmt.rotuloOpcao('campo', x.campo) + ': ' + (x.valor_anterior || '—') + ' → ' + (x.valor_novo || '—') + (x.justificativa ? ' (' + x.justificativa + ')' : '') }); }),
+        // O que mudou em palavras (Store.valorLegivel, como no detalhe do evento e na trilha): nunca o código cru nem o identificador.
+        (e.ajustes || []).map(function (x) { return h('div', { text: rotuloCampoAjuste_(x.campo) + ': ' + Store.valorLegivel(x.campo, x.valor_anterior) + ' → ' + Store.valorLegivel(x.campo, x.valor_novo) + (x.justificativa ? ' (' + x.justificativa + ')' : '') }); }),
         Telas.existe(r) ? h('a', { class: 'botao botao-texto', href: Roteador.href(r), dataset: { rota: r } }, 'Ver lançamento') : null));
     });
     return ul;

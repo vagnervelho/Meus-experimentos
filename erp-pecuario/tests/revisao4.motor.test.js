@@ -43,6 +43,21 @@ const comPai = (id) => ({ pai_id: id, pai_confianca: 'CONFIRMADA' });
 function compra(forn, data, brinco) {
   return { tipo: 'COMPRA', campos: { event_date: data, partner_id: forn, pasto_destino_id: PASTOS.A, modalidade: 'CABECA', preco_unitario: 200000, valor_animais: 200000 }, animais: [{ brinco, sexo: 'F', idade_meses: 20 }], parcelas: [{ data_vencimento: data }] };
 }
+// ---------------------------------------------------------------- importação (apoio) ----
+function criarImportacao(s, tipo, csv, chave) {
+  return s.exec((ctx) => s.G.ImportService.criar(ctx, { idempotencyKey: chave, avisosAceitos: ['POSSIVEL_DUPLICIDADE'], dados: { tipo, arquivo_nome: chave + '.csv', conteudo_base64: b64(csv), formato: FORMATO } })).dados;
+}
+function validarTudo(s, id, mapa) {
+  for (let b = 1; b < 100; b++) {
+    const e = s.exec((ctx) => s.G.ImportService.validarBloco(ctx, { idempotencyKey: 'val-' + id + '-' + b, dados: { import_id: id, bloco: b, mapeamento: mapa } })).dados;
+    if (e.importacao.status === 'VALIDADO') return e;
+  }
+  throw new Error('validação não terminou');
+}
+const importarBloco = (s, id, b, extra) => s.tentar((ctx) => s.G.ImportService.importarBloco(ctx, { avisosAceitos: [], dados: Object.assign({ import_id: id, bloco: b }, extra || {}) }));
+const concluir = (s, id) => s.tentar((ctx) => s.G.ImportService.concluir(ctx, { dados: { import_id: id } }));
+const MAPA_TRANSF = { colunas: { Data: 'data', 'Pasto de origem': 'pasto_origem', 'Pasto de destino': 'pasto_destino', Brinco: 'brinco' }, confiancas: {}, padroes: {} };
+
 /** O item do rebanho inicial do animal como foi gravado (para a correção de quem o criou), com `mudar` por cima. */
 function itemDoRebanhoInicial(s, ev, id, brinco, mudar) {
   const l = s.tabela('EVENTO_ANIMAIS').find((x) => x.event_id === ev && x.animal_id === id);

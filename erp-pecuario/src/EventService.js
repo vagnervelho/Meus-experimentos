@@ -868,6 +868,9 @@ var EventService = (function () {
     } else if (mat && !hist) {
       var onde = Timeline.pastoAntesDaSaida(m.f.linhas(mat.animal_id), ev.event_date, m.D0);
       pasto = onde.presente ? nulo_(onde.pasture_id) : null;
+      // O pasto das crias que o servidor tirou da mãe fica registrado como proposto (não digitado), para a correção o
+      // deixar vazio e ele acompanhar a mãe e a data corrigidas (§20, regra 8; 03b, 10.2).
+      if (pasto) (ctxEv.propostos = ctxEv.propostos || {}).pasto_destino_id = true;
       if (onde.presente && !pasto) erroGeral_(m, 'pasto_destino_id', 'CAMPO_OBRIGATORIO', 'A mãe está sem pasto registrado em ' + br_(ev.event_date) + ': escolha o pasto das crias.');
     }
     var defs = EventCatalog.camposGrupo('NASCIMENTO', 'crias');
@@ -932,6 +935,7 @@ var EventService = (function () {
     var reuso = !vazio_(d.animal_id);
     if (reuso && !ctxEv.criadosOriginal[d.animal_id]) { erroItem_(m, it, 'animal_id', 'SO_ANIMAIS_NOVOS', 'a cria de um parto é sempre um animal novo.'); return; }
     var raca = !vazio_(d.raca) ? d.raca : mat && mat.estado ? nulo_(mat.estado.raca) : null;
+    var racaProposta = vazio_(d.raca) && !vazio_(raca);
     it.novo = !reuso;
     it.reusado = reuso;
     if (reuso) {
@@ -949,6 +953,8 @@ var EventService = (function () {
       ctxEv.plano.ANIMAIS.push({ animal_id: it.animal_id, codigo_interno: it.codigo_interno, nome: nulo_(d.nome), raca: raca });
     }
     if (vazio_(it.brincoTexto)) it.quem = it.quem + ' (' + it.codigo_interno + ')';
+    // A raça que veio da mãe (o campo veio vazio) fica registrada como proposta, como o pasto das crias.
+    if (racaProposta) { ctxEv.propostos = ctxEv.propostos || {}; (ctxEv.propostos.raca_crias = ctxEv.propostos.raca_crias || []).push(it.animal_id); }
     var at = { sexo: d.sexo, data_nascimento: ev.event_date, data_nascimento_confianca: 'CONFIRMADA', origem: 'NASCIDO' };
     if (raca) at.raca = raca;
     if (d.sexo === 'M') { at.castrado = 'N'; at.reprodutor = 'N'; }
@@ -2011,13 +2017,17 @@ var EventService = (function () {
     var anulados = {};
     removidos.forEach(function (id) { anulados[id] = true; });
     removidos.forEach(function (id) { conferirAnulacao_(m, id, ctxEv.original.event_id, anulados); });
-    ctxEv.removidos = removidos;
+    // Só o animal criado pelo original fica ANULADO (desenho-base 4.4); o que já existia volta ao que era sem ele.
+    ctxEv.removidos = removidos.slice();
+    ctxEv.anuladosCriados = removidos;
+    ctxEv.voltam = [];
     // Animais não criados pelo original que ficaram fora do substituto: a linha do tempo deles sem o original.
     m.f.linhasDoEvento(ctxEv.original.event_id).forEach(function (l) {
       if (presentes[l.animal_id] || ctxEv.criadosOriginal[l.animal_id]) return;
       var e = m.f.animal(l.animal_id) || {};
       var it = { animal_id: l.animal_id, brincoTexto: e.brinco || null, quem: nomeAnimal_(e) };
       linhaDoTempoSem_(m, it, '');
+      if (ctxEv.voltam.indexOf(l.animal_id) < 0) ctxEv.voltam.push(l.animal_id);
       (ctxEv.removidos = ctxEv.removidos || []).push(l.animal_id);
     });
   }
@@ -2751,6 +2761,7 @@ var EventService = (function () {
       gta_numero: ctxEv.tipo === 'TRANSFERENCIA' && typeof ctxEv.campos.gta_numero === 'string' ? nulo_(Utils.aparar(ctxEv.campos.gta_numero)) : null,
       deducoes: ctxEv.deducoes && ctxEv.deducoes.length ? ctxEv.deducoes : null,
       custos: ctxEv.custos && ctxEv.custos.length ? ctxEv.custos : null,
+      propostos: ctxEv.propostos || null,
       acao: ctxEv.tipo === 'MARCACAO' ? ctxEv.ev.payload_json.acao : null,
       motivo_descarte: ctxEv.tipo === 'MARCACAO' ? ctxEv.ev.payload_json.motivo_descarte : null,
       // A baixa por divergência não grava AJUSTES: o porquê do lançamento fica no evento (BAIXAS guarda em que contagem faltou).
@@ -2776,7 +2787,7 @@ var EventService = (function () {
       resumo: resumo,
       impactos: {
         acao: resumo.acao, event_type: ev.event_type, event_subtype: ev.event_subtype, event_date: ev.event_date,
-        animais: animais.length, novos: ctxEv.plano.ANIMAIS.length, anulados: (ctxEv.removidos || []).length, substitui: resumo.substitui,
+        animais: animais.length, novos: ctxEv.plano.ANIMAIS.length, anulados: (ctxEv.anuladosCriados || []).length, voltam: (ctxEv.voltam || []).length, substitui: resumo.substitui,
         total_value: ev.total_value, abertura: ctxEv.abertura || null, pre_marco_zero: ev.pre_marco_zero === true,
         parto: ctxEv.parto || null, transferencia: ctxEv.transf || null, baixas: ctxEv.plano.BAIXAS.length, anexos: ctxEv.plano.ANEXOS.length,
         identificacoes: ctxEv.plano.IDENTIFICACOES.length, ajustes: ctxEv.plano.AJUSTES.length,

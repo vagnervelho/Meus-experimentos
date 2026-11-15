@@ -1868,7 +1868,13 @@ var Registro = (function () {
     var form = h('form', { class: 'formulario', novalidate: true });
     form.addEventListener('submit', function (ev) { ev.preventDefault(); revisar(s); });
     raiz.appendChild(form);
-    if (def.subtipos) {
+    // Na correção o substituto é do mesmo tipo e subtipo do original (TIPO_DIFERENTE): o subtipo aparece só para leitura.
+    if (def.subtipos && s.corrige && s.subtipo) {
+      form.appendChild(h('div', { class: 'campo', dataset: { campo: '__subtipo', somenteLeitura: '1' } },
+        h('span', { class: 'campo-rotulo', text: perguntaSubtipo(s.tipo) }),
+        h('p', { text: def.subtipos[s.subtipo] ? def.subtipos[s.subtipo].rotulo : s.subtipo }),
+        h('p', { class: 'campo-ajuda', text: 'Para mudar o que foi lançado, estorne este lançamento e lance de novo.' })));
+    } else if (def.subtipos) {
       var ids = Object.keys(def.subtipos);
       var opRot = {};
       ids.forEach(function (k) { opRot[k] = def.subtipos[k].rotulo; });
@@ -2339,9 +2345,11 @@ var Registro = (function () {
       if (im.cancelados) l.push(['Financeiro cancelado', textoCancelados(im.cancelados)]);
       return l;
     }
-    if (im.animais !== undefined) l.push(['Animais', String(im.animais)]);
-    if (im.novos !== undefined) l.push(['Animais novos no cadastro', String(im.novos)]);
-    if (im.anulados) l.push(['Animais anulados', String(im.anulados)]);
+    // O número de animais já está no resumo (resumoLocal): aqui só o que o servidor sabe a mais. Tirar da lista um animal
+    // que já existia não o anula: ele volta ao que era antes deste lançamento (impactos.voltam); só o criado por ele é anulado.
+    if (im.novos) l.push(['Animais novos no cadastro', String(im.novos)]);
+    if (im.voltam) l.push(['Tirados do lançamento', plural(im.voltam, 'animal volta', 'animais voltam') + ' ao que era' + (im.voltam === 1 ? '' : 'm') + ' antes dele']);
+    if (im.anulados) l.push(['Animais que deixam de existir', String(im.anulados)]);
     if (im.substitui) l.push(['Substitui o lançamento', s.corrige ? s.corrige.rotulo : im.substitui]);
     if (im.abertura && im.abertura.total !== undefined) l.push(['Valor de abertura', Fmt.dinheiro(im.abertura.total) + ' em ' + plural(im.abertura.animais, 'animal', 'animais')]);
     return l.concat(linhasCompra(im.compra), linhasVenda(im.venda), linhasFinanceiro(im.financeiro));

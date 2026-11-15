@@ -294,14 +294,18 @@ var TelaEventos = (function () {
       var idents = Utils_agrupar(det.IDENTIFICACOES || []);
       var crias = linhasEv.filter(function (l) { return l.papel === 'CRIA'; });
       var at0 = (crias[0] && crias[0].atributos_iniciais_json) || {};
-      origem.pasto_destino_id = crias[0] ? crias[0].pasto_destino_id : null; origem.pai_id = rep.touro_id || at0.pai_id; origem.pai_confianca = at0.pai_confianca; origem.tipo_parto = rep.tipo_parto;
+      // O pasto das crias e a raça que o servidor tirou da mãe (o campo veio vazio: payload.propostos) não viram valor
+      // digitado: ficam vazios, para acompanhar a mãe e a data corrigidas (§20, regra 8; 03b, 10.2).
+      var propostos = payload.propostos || {};
+      var racaProposta = propostos.raca_crias || [];
+      origem.pasto_destino_id = crias[0] && !propostos.pasto_destino_id ? crias[0].pasto_destino_id : null; origem.pai_id = rep.touro_id || at0.pai_id; origem.pai_confianca = at0.pai_confianca; origem.tipo_parto = rep.tipo_parto;
       linhasEv.filter(function (l) { return l.papel === 'MATRIZ'; }).forEach(function (l) { linhas.push({ animal_id: l.animal_id, valores: {} }); antes.linhas[l.animal_id] = {}; });
       grupos.crias = crias.map(function (l) {
         var at = l.atributos_iniciais_json || {};
         var a = Store.animal(l.animal_id);
         var br = (idents[l.animal_id] || []).filter(function (x) { return x.tipo === 'BRINCO'; })[0];
         var ps = (pesos[l.animal_id] || [])[0];
-        return { animal_id: l.animal_id, valores: limpo_({ situacao_nascimento: 'VIVO', sexo: at.sexo, brinco: br ? br.codigo : null, nome: a ? a.nome : null, raca: at.raca, peso: pesoTexto_(l.peso), metodo_pesagem: ps ? ps.metodo : null, observacoes: l.observacoes }) };
+        return { animal_id: l.animal_id, valores: limpo_({ situacao_nascimento: 'VIVO', sexo: at.sexo, brinco: br ? br.codigo : null, nome: a ? a.nome : null, raca: racaProposta.indexOf(l.animal_id) >= 0 ? null : at.raca, peso: pesoTexto_(l.peso), metodo_pesagem: ps ? ps.metodo : null, observacoes: l.observacoes }) };
       });
       for (var k = 0; k < (rep.qtd_natimortos || 0); k++) grupos.crias.push({ valores: { situacao_nascimento: 'NATIMORTO' } });
       antes.grupos = Util.clonar(grupos);
