@@ -9,7 +9,9 @@
  * correção e o evento com dependentes), corrigir o cadastro do animal (mãe, pai, sexo, nascimento, chegada), mudar a
  * categoria, identificar com o reuso de brinco ligado e desligado (o parâmetro muda no meio), importar os 5 tipos de
  * evento e ANIMAIS (validar, importar, concluir, desfazer; também uma desfeita enquanto outra está em curso) e o marco
- * zero. Datas e animais provocam as combinações raras (mesmo dia, véspera do nascimento, depois da morte, número de
+ * zero; desde a passada 2, também desativar e reativar pasto, parceiro e categoria no meio, corrigir o evento importado
+ * (montado pelas linhas gravadas), corrigir para outro tipo, a mesma chave com outro conteúdo e a versão velha em qualquer
+ * comando. Datas e animais provocam as combinações raras (mesmo dia, véspera do nascimento, depois da morte, número de
  * brinco reaproveitado).
  *
  * Oráculo depois de CADA passo: aceito → verificação de integridade sem ERRO, projeção = reconstrução, invariantes do

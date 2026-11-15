@@ -793,3 +793,35 @@ Nenhuma linha de código mudou nesta etapa: só documentos.
 - Verificado em Node: `tests/fase2.fuzz.test.js` (16 sementes fixas, cerca de 28 s) e `tests/fase2.fuzz.regressoes.test.js`
   (2 casos); `npm test` completo com 638 testes, 638 aprovados e 0 falhas (531 s); `npm run ui:check` com 85 testes, 85
   aprovados e 0 falhas (220 s), página montada com 446 KB de 450 KB.
+
+## 15/11/2026 — Teste aleatório de todos os comandos da Fase 2 (etapa 2, passada 2: gerador ampliado)
+
+- Por quê: a passada 1 ficou limpa; o gerador precisava gerar o que ainda não gerava. Lacunas achadas na leitura de
+  `tests/apoio-fuzz.js`: cadastro desativado no meio (pasto, parceiro, categoria); correção de evento importado (sem a
+  especificação do gerador); correção para outro tipo; a mesma chave com outro conteúdo; versão velha fora do registro de
+  transferência; correção de cadastro e `animal.editar` com vários campos ou animais; compra com mais de uma volta; outra
+  entrada com vários animais e a volta com um novo junto; linha repetida no arquivo importado; sequências mais longas.
+  Tudo isso entrou (`tests/apoio-fuzz.js`: Pasto D vazio na montagem, `gerarAcao`, `specDoGravado`, `outraChave`), com o
+  oráculo de cadastro desativado (nenhum animal no rebanho em pasto desativado, nenhum em categoria desativada escolhida à
+  mão) e o efeito de `pasto.salvar`, `parceiro.salvar` e `categoria.salvar` (CONTRATOS, seção 36).
+- Defeito achado e consertado na causa, por todos os caminhos: o animal voltava ao rebanho dentro de um pasto desativado
+  (semente 61101: o estorno da morte de um animal do pasto depois desativado; o mesmo pelo estorno da transferência, da
+  venda, do descarte, da baixa, pela correção e pelo desfazer da importação) e a correção que muda a ordem das
+  reclassificações devolvia o animal a uma categoria desativada (o estorno já recusava com `CATEGORIA_INATIVA`; a correção
+  não). As duas regras entraram na checagem LINHA_DO_TEMPO do `AuditService` (um achado por animal, com o lançamento que
+  o pôs lá e o "Reative…"), e a trava única fecha qualquer caminho (`CONFLICT` `INTEGRIDADE_LINHA_DO_TEMPO`). Três casos
+  novos em `tests/fase2.fuzz.regressoes.test.js` (falham no código de antes) e um de adulteração em
+  `tests/integrity.fase2.test.js`.
+- Modelo do teste corrigido (não o sistema): a mesma chave com outro conteúdo precisa mudar um campo que o comando leva (a
+  importação monta os dados dela e ignora a justificativa; as chaves de `importarBloco`, `concluir` e `desfazer` vêm do
+  `import_id`): 13 sementes de 62000 a 62159 acusavam o duplicado legítimo. `reproduzir` pula o reenvio cujo comando
+  original ficou fora (o encolhimento chegava a outra falha com a mesma assinatura). Nenhuma expectativa de teste antigo
+  mudou.
+- Sementes rodadas nesta passada: 806 sementes novas. Com o gerador da passada 1, 100 sementes (60000 a 60099) × 120
+  passos, 0 falhas. Com o gerador ampliado, 386 na triagem (61000 a 61005, 61100 a 61107, 62000 a 62159, 63000 a 63199 com
+  100 passos e 64000 a 64011 com 120). A leva final, depois dos consertos, foi de 320 sementes novas (65000 a 65319) × 100
+  passos: 16.604 comandos aceitos, 14.198 recusados, 0 falhas.
+- Verificado em Node: `npm test` completo com 642 testes, 642 aprovados e 0 falhas (529 s); `npm run ui:check` com 85
+  testes, 85 aprovados e 0 falhas (224 s), página montada com 446 KB de 450 KB. Na primeira execução do `ui:check`, um
+  tempo esgotado em `tests/ui/movimentos.test.js` ("transferência com data passada", espera de 30 s pela conferência da
+  posição na data); sozinho passou duas vezes e a execução completa seguinte passou inteira.
