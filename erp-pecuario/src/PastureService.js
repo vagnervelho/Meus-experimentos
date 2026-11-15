@@ -151,6 +151,8 @@ var PastureService = (function () {
    * Lotação de um pasto a partir da composição (07, seção 8.2): UA/ha = UA ÷ área (null sem área: SEM_VALOR_DE_
    * REFERENCIA); ocupação % = UA/ha ÷ capacidade em UA/ha; sem ela (ou sem UA/ha), cabeças ÷ capacidade em cabeças;
    * sem capacidade informada → null (SEM_VALOR_DE_REFERENCIA). Contas sobre o peso total, arredondando só no fim.
+   * `acima_da_capacidade` (RN-027, a regra do aviso LOTACAO_ACIMA_DA_CAPACIDADE): {ua_ha, cabecas} = true quando a
+   * conta exata passa da capacidade informada, false quando não passa, null quando não há como comparar.
    * comp: {cabecas, peso_vivo_total: {valor}, ua: {valor, motivo, n, estimado, ua_peso_kg}} (InventoryService.compor).
    */
   function lotacao(pasto, comp) {
@@ -172,6 +174,10 @@ var PastureService = (function () {
       ua_ha: { valor: uaHa, motivo: uaHa === null ? motivoUaHa : null, n: comp.ua.n, estimado: comp.ua.estimado, area_hectares: area },
       capacidade: { ua_ha: capUa, cabecas: capCab },
       ocupacao_pct: { valor: ocup, motivo: ocup === null ? motivoOcup : null, n: comp.cabecas, base: base, estimado: base === 'UA_HA' && comp.ua.estimado },
+      acima_da_capacidade: {
+        ua_ha: capUa === null || uaHaBruta === null ? null : uaHaBruta > capUa,
+        cabecas: capCab === null ? null : comp.cabecas > capCab,
+      },
     };
   }
   function cabecalhoPasto_(L, p) {
@@ -188,7 +194,8 @@ var PastureService = (function () {
     var ind = { valor: null, motivo: motivo, n: 0 };
     return {
       cabecas: null, machos: null, femeas: null, por_categoria: null, sem_categoria: null,
-      peso_vivo_total: ind, ua: ind, ua_ha: ind, ocupacao_pct: { valor: null, motivo: motivo, n: 0, base: null }, animais: null,
+      peso_vivo_total: ind, peso_medio: ind, ua: ind, ua_ha: ind, ocupacao_pct: { valor: null, motivo: motivo, n: 0, base: null },
+      acima_da_capacidade: { ua_ha: null, cabecas: null }, animais: null,
     };
   }
   function painel_(L, p, data, pr, comAnimais) {
@@ -204,12 +211,26 @@ var PastureService = (function () {
     var itens = pr.itens.filter(function (x) { return x.pasture_id === p.pasture_id; });
     var comp = InventoryService.compor(L, itens, data, { animais: comAnimais });
     var lot = lotacao(p, comp);
-    ['cabecas', 'machos', 'femeas', 'por_categoria', 'sem_categoria', 'peso_vivo_total', 'ua'].forEach(function (k) { out[k] = comp[k]; });
+    ['cabecas', 'machos', 'femeas', 'por_categoria', 'sem_categoria', 'peso_vivo_total', 'peso_medio', 'ua'].forEach(function (k) { out[k] = comp[k]; });
     out.ua_ha = lot.ua_ha;
     out.capacidade = lot.capacidade;
     out.ocupacao_pct = lot.ocupacao_pct;
+    out.acima_da_capacidade = lot.acima_da_capacidade;
     if (comAnimais) out.animais = comp.animais;
     return out;
+  }
+  /**
+   * Dias de permanência de cada animal no pasto num período (05, seção 4.6: a base do rateio DIAS_PERMANENCIA), pela
+   * função única da linha do tempo (Timeline.diasPermanencia, escopo PASTO). {inicio, fim, inicio_efetivo, parcial,
+   * motivo, base_total, n, itens: [{animal_id, codigo_interno, brinco, sexo, dias, intervalos}]}.
+   */
+  function permanencia_(L, p, inicio, fim) {
+    var r = Timeline.diasPermanencia(L.f.todasAsLinhas(), { inicio: inicio, fim: fim }, { tipo: 'PASTO', ref: p.pasture_id }, { marcoZero: L.marcoZero });
+    var itens = r.itens === null ? null : Utils.ordenarPor(r.itens.map(function (x) {
+      var a = L.repo.porId('ANIMAIS', x.animal_id) || {};
+      return { animal_id: x.animal_id, codigo_interno: nulo_(a.codigo_interno), brinco: nulo_(a.brinco), sexo: nulo_(a.sexo), dias: x.dias, intervalos: x.intervalos.map(function (i) { return { inicio: i.inicio, fim: i.fim, dias: i.dias }; }) };
+    }), [{ campo: 'dias', desc: true }, 'codigo_interno']);
+    return { inicio: r.inicio, fim: r.fim, inicio_efetivo: r.inicio_efetivo, parcial: r.parcial, motivo: r.motivo, base_total: r.base_total, n: r.n, itens: itens };
   }
   function leiturasConsulta_() {
     return Utils.unicos(AnimalService.leituras().concat(['PROPRIEDADES', 'PARCEIROS']));
@@ -221,11 +242,15 @@ var PastureService = (function () {
     return d;
   }
   /**
-   * Consulta `pasto.painel`. dados: {pasture_id, data? (padrão hoje; composição ao fim do dia D, a partir do marco
-   * zero)}. Devolve o cabeçalho do pasto + {data, motivo, cabecas, machos, femeas, por_categoria, sem_categoria,
-   * peso_vivo_total, ua (com partes pesada / pesagem_vencida / sem_pesagem, sem_peso e rótulo da estimativa),
-   * ua_ha, capacidade, ocupacao_pct, animais}. Indicadores na forma {valor, motivo, n}. NOT_FOUND para pasto
-   * inexistente.
+   * Consulta `pasto.painel`: a composição do pasto numa data (08, seção 3: "posição em [data]"; a data histórica é da
+   * Fase 2). dados: {pasture_id, data? (padrão hoje; composição ao fim do dia D, a partir do marco zero),
+   * periodo_inicio?, periodo_fim? (os dois juntos: dias de permanência de cada animal no pasto no período, até hoje)}.
+   * Devolve o cabeçalho do pasto + {data, motivo, cabecas, machos, femeas, por_categoria, sem_categoria,
+   * peso_vivo_total, peso_medio, ua (com partes pesada / pesagem_vencida / sem_pesagem, sem_peso e rótulo da
+   * estimativa), ua_ha, capacidade, ocupacao_pct, acima_da_capacidade, animais (quem estava: categoria, idade e peso
+   * vigente em D, `no_pasto_desde` e `no_rebanho_desde`), permanencia (só com o período), parametros}. Indicadores na
+   * forma {valor, motivo, n}. NOT_FOUND para pasto inexistente; VALIDATION para data inválida ou futura e período
+   * incompleto, invertido ou que termina depois de hoje.
    */
   function consultaPainel(dados) {
     var d = dados || {};
@@ -236,7 +261,15 @@ var PastureService = (function () {
         var data = dataConsulta_(L, d.data);
         var p = vazio_(d.pasture_id) ? null : tx.repo.porId('PASTOS', d.pasture_id);
         if (!p) throw Validation.erro('NOT_FOUND', 'Pasto não encontrado. Atualize a tela e tente de novo.');
+        var comPeriodo = !vazio_(d.periodo_inicio) || !vazio_(d.periodo_fim);
+        if (comPeriodo && (vazio_(d.periodo_inicio) || vazio_(d.periodo_fim))) {
+          throw Validation.erro('VALIDATION', 'Para os dias de permanência, informe o início e o fim do período.', [Validation.detalhe({ codigo: 'CAMPO_OBRIGATORIO', campo: vazio_(d.periodo_inicio) ? 'periodo_inicio' : 'periodo_fim', mensagem: 'Período incompleto.' })]);
+        }
+        if (comPeriodo && Utils.dataValida(d.periodo_fim) && d.periodo_fim > L.hoje) {
+          throw Validation.erro('VALIDATION', 'O período dos dias de permanência vai até hoje no máximo (' + Timeline.dataBr(L.hoje) + ').', [Validation.detalhe({ codigo: 'DATA_FUTURA', campo: 'periodo_fim', mensagem: 'Data futura.' })]);
+        }
         var out = painel_(L, p, data, InventoryService.presentes(L, data), true);
+        if (comPeriodo) out.permanencia = permanencia_(L, p, d.periodo_inicio, d.periodo_fim);
         out.parametros = { ua_peso_kg: L.params.ua_peso_kg, peso_validade_dias: L.params.peso_validade_dias };
         return out;
       },

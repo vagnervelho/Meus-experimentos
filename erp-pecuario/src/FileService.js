@@ -9,6 +9,8 @@
  * Anexos (03a, seção 5.1): o arquivo vai ao Drive ANTES do comando (o Drive não participa do commit); a linha de
  * ANEXOS nasce na fase C do comando, por auditoria. Arquivo cujo comando não confirmou fica sem linha e é levado à
  * lixeira pela limpeza diária (Maintenance). Status: TEMPORARIO (aguarda o comando dono) → ATIVO → REMOVIDO.
+ * Anexo de evento ou de lançamento financeiro de evento leva o event_id: vale enquanto o evento vale e, estornado ou
+ * corrigido o evento, continua consultável como histórico (a correção passa os anexos ao substituto).
  */
 var FileService = (function () {
   var MIME_PASTA = 'application/vnd.google-apps.folder';
@@ -21,9 +23,17 @@ var FileService = (function () {
   var CAMPOS_ARQUIVO = 'id,name,mimeType,createdTime,modifiedTime,appProperties,size,trashed,parents';
   /** Teto do arquivo de anexo (bytes): a foto chega reduzida no cliente (~300 KB); documento até este tamanho. */
   var TAMANHO_MAX_ANEXO = 5 * 1024 * 1024;
-  var ENTIDADES_ANEXO = Object.freeze(['ANIMAIS', 'EVENTOS', 'IMPORTACOES']);
+  /**
+   * Donos de anexo por comando próprio (03a, seção 5.1: basta aceitar o nome da aba). FINANCEIRO = lançamento de um
+   * evento (o boleto do frete, a nota da comissão), ligado pelo event_id do evento que o criou.
+   */
+  var ENTIDADES_ANEXO = Object.freeze(['ANIMAIS', 'EVENTOS', 'FINANCEIRO', 'IMPORTACOES']);
+  /** Tipos de arquivo aceitos em anexo de animal, evento e lançamento: a foto chega em JPEG (reduzida no aparelho); documento em PDF. */
+  var MIME_ANEXO = Object.freeze(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'application/pdf']);
+  /** Situações do evento em que o anexo ligado a ele é consultável: vale, ou já não vale mas é história. */
+  var SITUACOES_HISTORICO = Object.freeze(['CONFIRMADO', 'ESTORNADO', 'CANCELADO']);
   var CODIFICACOES = Object.freeze({ 'UTF-8': 'UTF-8', UTF8: 'UTF-8', 'ISO-8859-1': 'ISO-8859-1', LATIN1: 'ISO-8859-1', 'WINDOWS-1252': 'windows-1252', CP1252: 'windows-1252', 'US-ASCII': 'US-ASCII' });
-  var LEITURAS_ANEXO = Object.freeze(['ANEXOS', 'ANIMAIS', 'EVENTOS', 'IMPORTACOES']);
+  var LEITURAS_ANEXO = Object.freeze(['ANEXOS', 'ANIMAIS', 'EVENTOS', 'FINANCEIRO', 'IMPORTACOES']);
 
   function vazio_(v) {
     return v === null || v === undefined || v === '';
@@ -289,20 +299,69 @@ var FileService = (function () {
   function erroCampo_(campo, codigo, mensagem) {
     return Validation.detalhe({ codigo: codigo, campo: campo, mensagem: mensagem });
   }
-  /** Dono do anexo existe e vale: animal não anulado, evento vigente, importação existente. */
-  function conferirDono_(tx, entidade, id) {
-    if (entidade === 'ANIMAIS') {
-      var a = tx.repo.porId('ANIMAIS', id);
-      return !!a && a.situacao_cadastral !== 'ANULADO';
-    }
-    if (entidade === 'EVENTOS') return tx.repo.eventoVigente(id);
-    return !!tx.repo.porId(entidade, id);
+  function recusa_(campo, codigo, mensagem) {
+    return Validation.erro('VALIDATION', mensagem, [erroCampo_(campo, codigo, mensagem)]);
   }
-  function anexoPublico_(a) {
+  function ehImagem_(mime) {
+    return /^image\//i.test(String(mime || ''));
+  }
+  /** Linha de ANEXOS como está na planilha (tx com acesso cru) ou, sem ele, a vigente. */
+  function linha_(tx, id) {
+    if (vazio_(id)) return null;
+    return tx.cru ? tx.cru.cruPorId('ANEXOS', id) : tx.repo.porId('ANEXOS', id);
+  }
+  /**
+   * O anexo pode ser consultado: a linha existe, não foi removida e, se ligada a um evento (event_id), a operação do
+   * evento foi confirmada — ele vale (CONFIRMADO) ou já não vale (ESTORNADO, CANCELADO) e é história. Linha inerte de
+   * uma gravação que falhou, ou ainda pendente, não existe para ninguém. `cru`: fachada de leitura crua.
+   */
+  function consultavel_(cru, a) {
+    if (!a || a.status === 'REMOVIDO') return false;
+    return vazio_(a.event_id) || SITUACOES_HISTORICO.indexOf(cru.avaliar(a.event_id).status) >= 0;
+  }
+  /** O anexo vale hoje: não removido e, se ligado a evento, o evento é vigente (02, seção 5: linha filha). */
+  function vigente_(cru, a) {
+    return !!a && a.status !== 'REMOVIDO' && (vazio_(a.event_id) || cru.avaliar(a.event_id).vigente === true);
+  }
+  /**
+   * Dono de um anexo enviado por comando próprio (tx com acesso cru). Devolve {event_id}: o evento (EVENTOS) ou o evento
+   * que criou o lançamento (FINANCEIRO); vazio nos demais. Inexistente, de gravação que falhou ou animal anulado →
+   * NOT_FOUND; evento ou lançamento que já não vale → VALIDATION `JA_ANULADO`; estorno → `ESTORNO_SEM_ANEXO`.
+   */
+  function donoDoAnexo_(tx, entidade, id) {
+    var sumiu = function () { return Validation.erro('NOT_FOUND', 'O registro a que você quer anexar o arquivo não existe mais. Atualize a tela.'); };
+    if (entidade === 'ANIMAIS') {
+      var animal = tx.repo.porId('ANIMAIS', id);
+      if (!animal || animal.situacao_cadastral === 'ANULADO') throw sumiu();
+      return { event_id: null };
+    }
+    if (entidade === 'EVENTOS' || entidade === 'FINANCEIRO') {
+      var fin = entidade === 'FINANCEIRO' ? tx.cru.cruPorId('FINANCEIRO', id) : null;
+      var eventId = entidade === 'EVENTOS' ? id : fin ? fin.event_id : null;
+      var ev = vazio_(eventId) ? null : tx.cru.cruPorId('EVENTOS', eventId);
+      var av = ev ? tx.cru.avaliar(eventId) : null;
+      if (!ev || av.status === 'FALHOU' || av.status === 'PENDENTE') throw sumiu();
+      if (ev.event_type === 'ESTORNO') throw recusa_('entity_id', 'ESTORNO_SEM_ANEXO', 'Um estorno não recebe arquivos: anexe ao lançamento que vale.');
+      if (!av.vigente) {
+        throw recusa_('entity_id', 'JA_ANULADO', (entidade === 'FINANCEIRO' ? 'Este lançamento financeiro foi cancelado' : 'Este lançamento foi estornado ou corrigido') +
+          ' e não vale mais: os arquivos dele ficam guardados como histórico. Anexe o arquivo ao lançamento que vale.');
+      }
+      return { event_id: eventId };
+    }
+    if (!tx.repo.porId(entidade, id)) throw sumiu();
+    return { event_id: null };
+  }
+  /**
+   * Forma pública de uma linha de ANEXOS. `vigente` (opcional): o anexo vale hoje (false: é de um evento estornado
+   * ou corrigido, guardado como histórico); sem o argumento, vale o que diz o status.
+   */
+  function anexoPublico_(a, vigente) {
     return a ? {
-      anexo_id: a.anexo_id, entidade: a.entidade, entity_id: a.entity_id, event_id: a.event_id || null, nome_arquivo: a.nome_arquivo,
+      anexo_id: a.anexo_id, entidade: a.entidade, entity_id: a.entity_id, event_id: a.event_id || null,
+      financial_id: a.entidade === 'FINANCEIRO' ? a.entity_id : null, nome_arquivo: a.nome_arquivo,
       mime_type: a.mime_type, tamanho_bytes: a.tamanho_bytes, tipo: a.tipo, descricao: a.descricao || null, status: a.status,
-      tem_miniatura: !vazio_(a.thumb_drive_file_id), created_by: a.created_by, created_at: a.created_at,
+      tem_miniatura: !vazio_(a.thumb_drive_file_id), vigente: vigente === undefined ? a.status !== 'REMOVIDO' : vigente === true,
+      created_by: a.created_by, created_at: a.created_at,
     } : null;
   }
   /** Leva à lixeira, sem interromper quem chama; falha vira ERROS_LOG (a limpeza diária tenta de novo). */
@@ -316,25 +375,38 @@ var FileService = (function () {
       }
     });
   }
+  /** Problemas de forma do envio (antes de qualquer upload): [detalhe]. */
+  function problemasDoEnvio_(d) {
+    var problemas = [];
+    if (ENTIDADES_ANEXO.indexOf(d.entidade) < 0) problemas.push(erroCampo_('entidade', 'VALOR_FORA_DA_LISTA', 'Diga a que o arquivo pertence: animal, evento, lançamento financeiro ou importação.'));
+    if (vazio_(d.entity_id)) problemas.push(erroCampo_('entity_id', 'CAMPO_OBRIGATORIO', 'Diga de qual registro é o arquivo.'));
+    if (Schema.enumValores('TIPO_ANEXO').indexOf(d.tipo) < 0) problemas.push(erroCampo_('tipo', 'VALOR_FORA_DA_LISTA', 'Escolha o tipo do arquivo (foto, documento ou laudo, GTA, nota fiscal ou outro).'));
+    if (vazio_(d.nome_arquivo) || typeof d.nome_arquivo !== 'string') problemas.push(erroCampo_('nome_arquivo', 'CAMPO_OBRIGATORIO', 'O arquivo chegou sem nome.'));
+    var mimeLegivel = !vazio_(d.mime_type) && /^[\w.+-]+\/[\w.+-]+$/.test(String(d.mime_type));
+    if (!mimeLegivel) problemas.push(erroCampo_('mime_type', 'FORMATO_INVALIDO', 'Tipo de arquivo não reconhecido.'));
+    else if (d.entidade !== 'IMPORTACOES' && MIME_ANEXO.indexOf(String(d.mime_type).toLowerCase()) < 0) {
+      problemas.push(erroCampo_('mime_type', 'TIPO_ARQUIVO_INVALIDO', 'Este tipo de arquivo não é aceito: envie uma foto (JPG, PNG, WEBP ou GIF) ou um documento em PDF.'));
+    } else if (d.tipo === 'FOTO' && !ehImagem_(d.mime_type)) {
+      problemas.push(erroCampo_('tipo', 'TIPO_ARQUIVO_INVALIDO', 'Uma foto precisa ser uma imagem. Para um PDF, escolha documento ou laudo, GTA ou nota fiscal.'));
+    }
+    if (typeof d.conteudo_base64 !== 'string' || d.conteudo_base64 === '') problemas.push(erroCampo_('conteudo_base64', 'CAMPO_OBRIGATORIO', 'O arquivo chegou vazio. Envie de novo.'));
+    if (d.definir_como_foto === true && (d.entidade !== 'ANIMAIS' || d.tipo !== 'FOTO')) problemas.push(erroCampo_('definir_como_foto', 'CAMPO_NAO_SE_APLICA', 'Só uma foto de animal pode virar a foto da ficha.'));
+    return problemas;
+  }
   /**
-   * anexo.adicionar. pedido: {idempotencyKey, dados: {entidade (ANIMAIS|EVENTOS|IMPORTACOES), entity_id, tipo
+   * anexo.adicionar. pedido: {idempotencyKey, dados: {entidade (ANIMAIS|EVENTOS|FINANCEIRO|IMPORTACOES), entity_id, tipo
    * (TIPO_ANEXO), descricao, nome_arquivo, mime_type, conteudo_base64, miniatura_base64, temporario (S: aguarda o
-   * comando dono), definir_como_foto (animal)}}. O arquivo vai ao Drive antes do comando; se o comando não confirmar,
-   * o arquivo vai para a lixeira. Reenvio com a mesma chave não sobe o arquivo de novo.
+   * comando dono), definir_como_foto (animal)}}. Anexo de evento (nota fiscal, GTA, laudo, foto) leva o `event_id` do
+   * evento; anexo de lançamento financeiro (FINANCEIRO), o do evento que o criou (compra, venda...): vale enquanto o
+   * evento vale. O arquivo vai ao Drive antes do comando; se o comando não confirmar, vai para a lixeira. Reenvio com
+   * a mesma chave não sobe o arquivo de novo.
    * Devolve {dados: anexo, duplicado, opId, dataVersion}. Erros: VALIDATION, NOT_FOUND, os da UnitOfWork.
    */
   function adicionarAnexo(ctx, pedido) {
     var files = exigirFiles_(ctx);
     var p = pedido || {};
     var d = p.dados || {};
-    var problemas = [];
-    if (ENTIDADES_ANEXO.indexOf(d.entidade) < 0) problemas.push(erroCampo_('entidade', 'VALOR_FORA_DA_LISTA', 'Diga a que o arquivo pertence: animal, evento ou importação.'));
-    if (vazio_(d.entity_id)) problemas.push(erroCampo_('entity_id', 'CAMPO_OBRIGATORIO', 'Diga de qual registro é o arquivo.'));
-    if (Schema.enumValores('TIPO_ANEXO').indexOf(d.tipo) < 0) problemas.push(erroCampo_('tipo', 'VALOR_FORA_DA_LISTA', 'Escolha o tipo do arquivo (foto, documento, GTA, nota fiscal ou outro).'));
-    if (vazio_(d.nome_arquivo) || typeof d.nome_arquivo !== 'string') problemas.push(erroCampo_('nome_arquivo', 'CAMPO_OBRIGATORIO', 'O arquivo chegou sem nome.'));
-    if (vazio_(d.mime_type) || !/^[\w.+-]+\/[\w.+-]+$/.test(String(d.mime_type))) problemas.push(erroCampo_('mime_type', 'FORMATO_INVALIDO', 'Tipo de arquivo não reconhecido.'));
-    if (typeof d.conteudo_base64 !== 'string' || d.conteudo_base64 === '') problemas.push(erroCampo_('conteudo_base64', 'CAMPO_OBRIGATORIO', 'O arquivo chegou vazio. Envie de novo.'));
-    if (d.definir_como_foto === true && (d.entidade !== 'ANIMAIS' || d.tipo !== 'FOTO')) problemas.push(erroCampo_('definir_como_foto', 'CAMPO_NAO_SE_APLICA', 'Só uma foto de animal pode virar a foto da ficha.'));
+    var problemas = problemasDoEnvio_(d);
     if (problemas.length) throw Validation.erro('VALIDATION', problemas.length === 1 ? problemas[0].mensagem : 'Há ' + problemas.length + ' problemas no envio do arquivo.', problemas);
     var tamanhoAprox = Math.floor(d.conteudo_base64.length * 3 / 4);
     if (tamanhoAprox > TAMANHO_MAX_ANEXO + 3) throw Validation.erro('VALIDATION', 'O arquivo passa do limite de ' + TAMANHO_MAX_ANEXO / 1024 / 1024 + ' MB. Reduza a imagem ou divida o documento.');
@@ -345,8 +417,9 @@ var FileService = (function () {
       conteudo_sha256: ctx.hash.sha256Hex(d.conteudo_base64), miniatura_sha256: vazio_(d.miniatura_base64) ? null : ctx.hash.sha256Hex(d.miniatura_base64),
     };
     var comando = {
-      rota: 'anexo.adicionar', idempotencyKey: p.idempotencyKey, dados: dados, avisosAceitos: p.avisosAceitos, reads: LEITURAS_ANEXO,
-      reconstruir: function (tx, op) { return anexoPublico_(tx.repo.porId('ANEXOS', op.resumo.anexo_id)); },
+      // Lê só o dono (e EVENTOS, de que a vigência do anexo depende): FINANCEIRO, por exemplo, só para anexo de lançamento.
+      rota: 'anexo.adicionar', idempotencyKey: p.idempotencyKey, dados: dados, avisosAceitos: p.avisosAceitos, reads: Utils.unicos(['ANEXOS', 'EVENTOS', d.entidade]), acessoCru: true,
+      reconstruir: function (tx, op) { var a = linha_(tx, op.resumo.anexo_id); return anexoPublico_(a, a ? vigente_(tx.cru, a) : undefined); },
       tratador: null,
     };
     if (!vazio_(p.idempotencyKey) && UnitOfWork.status(ctx, p.idempotencyKey).situacao === 'CONFIRMADA') {
@@ -359,10 +432,10 @@ var FileService = (function () {
     });
     comando.tratador = function (tx) {
       var x = tx.dados;
-      if (!conferirDono_(tx, x.entidade, x.entity_id)) throw Validation.erro('NOT_FOUND', 'O registro a que você quer anexar o arquivo não existe mais. Atualize a tela.');
+      var dono = donoDoAnexo_(tx, x.entidade, x.entity_id);
       var id = tx.novoId();
       var campos = {
-        entidade: x.entidade, entity_id: x.entity_id, event_id: x.entidade === 'EVENTOS' ? x.entity_id : null, drive_file_id: arq.drive_file_id,
+        entidade: x.entidade, entity_id: x.entity_id, event_id: dono.event_id, drive_file_id: arq.drive_file_id,
         thumb_drive_file_id: arq.thumb_drive_file_id, nome_arquivo: x.nome_arquivo, mime_type: x.mime_type, tamanho_bytes: arq.tamanho_bytes,
         tipo: x.tipo, descricao: x.descricao, status: x.temporario ? 'TEMPORARIO' : 'ATIVO', created_by: tx.usuario, created_at: tx.agora,
       };
@@ -370,7 +443,10 @@ var FileService = (function () {
       if (erros.length) return { erros: erros };
       AuditService.criacao(tx, 'ANEXOS', id, campos);
       if (x.definir_como_foto) AuditService.alteracao(tx, 'ANIMAIS', x.entity_id, { foto_anexo_id: id });
-      return { resumo: { anexo_id: id, entidade: x.entidade, entity_id: x.entity_id }, resposta: function (t) { return anexoPublico_(t.repo.porId('ANEXOS', id)); } };
+      return {
+        resumo: { anexo_id: id, entidade: x.entidade, entity_id: x.entity_id, event_id: dono.event_id },
+        resposta: function (t) { var a = linha_(t, id); return anexoPublico_(a, a ? vigente_(t.cru, a) : undefined); },
+      };
     };
     var r;
     try {
@@ -407,52 +483,113 @@ var FileService = (function () {
     });
     return n;
   }
+  /** Arquivos do Drive ainda usados por alguma linha consultável de ANEXOS, fora as linhas `exceto`: {drive_file_id: true}. */
+  function arquivosEmUso_(cru, exceto) {
+    var usados = {};
+    cru.cru('ANEXOS').forEach(function (x) {
+      if ((exceto || []).indexOf(x.anexo_id) >= 0 || !consultavel_(cru, x)) return;
+      [x.drive_file_id, x.thumb_drive_file_id].forEach(function (f) { if (!vazio_(f)) usados[f] = true; });
+    });
+    return usados;
+  }
   /**
-   * anexo.remover. pedido: {idempotencyKey, dados: {anexo_id, justificativa}}. A linha fica (REMOVIDO); o arquivo vai
-   * para a lixeira do Drive depois do commit; se for a foto da ficha, a ficha fica sem foto.
+   * anexo.remover. pedido: {idempotencyKey, dados: {anexo_id, justificativa (obrigatória)}}. A linha fica (REMOVIDO,
+   * com a justificativa na auditoria); o arquivo vai para a lixeira do Drive depois do commit, salvo se outra linha
+   * ainda o usa (o histórico de um evento corrigido guarda o mesmo arquivo); se for a foto da ficha, a ficha fica sem
+   * foto. Arquivo de evento estornado ou corrigido não se remove: é histórico (`JA_ANULADO`). Já removido →
+   * `JA_REMOVIDO`; sem justificativa → `CAMPO_OBRIGATORIO`; inexistente → NOT_FOUND.
    */
   function removerAnexo(ctx, pedido) {
     exigirFiles_(ctx);
     var p = pedido || {};
     var r = UnitOfWork.run(ctx, {
-      rota: 'anexo.remover', idempotencyKey: p.idempotencyKey, dados: p.dados || {}, reads: LEITURAS_ANEXO,
+      rota: 'anexo.remover', idempotencyKey: p.idempotencyKey, dados: p.dados || {}, reads: ['ANEXOS', 'ANIMAIS', 'EVENTOS'], acessoCru: true,
       tratador: function (tx) {
-        var a = vazio_(tx.dados.anexo_id) ? null : tx.repo.porId('ANEXOS', tx.dados.anexo_id);
-        if (!a) throw Validation.erro('NOT_FOUND', 'O arquivo não foi encontrado. Atualize a tela.');
+        var a = linha_(tx, tx.dados.anexo_id);
+        if (!a || (a.status !== 'REMOVIDO' && !consultavel_(tx.cru, a))) throw Validation.erro('NOT_FOUND', 'O arquivo não foi encontrado. Atualize a tela.');
         if (a.status === 'REMOVIDO') return { erros: [erroCampo_('anexo_id', 'JA_REMOVIDO', 'Este arquivo já foi removido.')] };
-        AuditService.alteracao(tx, 'ANEXOS', a.anexo_id, { status: 'REMOVIDO' }, tx.dados.justificativa);
+        if (!vigente_(tx.cru, a)) return { erros: [erroCampo_('anexo_id', 'JA_ANULADO', 'Este arquivo é de um lançamento estornado ou corrigido: fica guardado como histórico e não pode ser removido.')] };
+        if (vazio_(tx.dados.justificativa) || !String(tx.dados.justificativa).trim()) return { erros: [erroCampo_('justificativa', 'CAMPO_OBRIGATORIO', 'Diga por que o arquivo está sendo removido.')] };
+        var motivo = String(tx.dados.justificativa).trim();
+        AuditService.alteracao(tx, 'ANEXOS', a.anexo_id, { status: 'REMOVIDO' }, motivo);
         if (a.entidade === 'ANIMAIS') {
           var animal = tx.repo.porId('ANIMAIS', a.entity_id);
-          if (animal && animal.foto_anexo_id === a.anexo_id) AuditService.alteracao(tx, 'ANIMAIS', a.entity_id, { foto_anexo_id: null }, tx.dados.justificativa);
+          if (animal && animal.foto_anexo_id === a.anexo_id) AuditService.alteracao(tx, 'ANIMAIS', a.entity_id, { foto_anexo_id: null }, motivo);
         }
-        return { resumo: { anexo_id: a.anexo_id, arquivos: [a.drive_file_id, a.thumb_drive_file_id].filter(Boolean) }, resposta: { anexo_id: a.anexo_id, status: 'REMOVIDO' } };
+        return { resumo: { anexo_id: a.anexo_id, event_id: a.event_id || null, arquivos: [a.drive_file_id, a.thumb_drive_file_id].filter(Boolean) }, resposta: { anexo_id: a.anexo_id, status: 'REMOVIDO' } };
       },
       reconstruir: function (tx, op) { return { anexo_id: op.resumo.anexo_id, status: 'REMOVIDO' }; },
     });
     if (!r.duplicado) {
-      var a = UnitOfWork.read(ctx, { rota: 'anexo.remover', reads: ['ANEXOS'], tratador: function (tx) { return Utils.clonar(tx.repo.porId('ANEXOS', r.dados.anexo_id)); } }).dados;
-      lixeiraAnotada_(ctx, a ? [a.drive_file_id, a.thumb_drive_file_id] : [], 'anexo.remover');
+      var lixo = UnitOfWork.read(ctx, {
+        rota: 'anexo.remover', reads: ['ANEXOS'], acessoCru: true,
+        tratador: function (tx) {
+          var a = tx.cru.cruPorId('ANEXOS', r.dados.anexo_id);
+          if (!a) return [];
+          var usados = arquivosEmUso_(tx.cru, [a.anexo_id]);
+          return [a.drive_file_id, a.thumb_drive_file_id].filter(function (f) { return !vazio_(f) && !usados[f]; });
+        },
+      }).dados;
+      lixeiraAnotada_(ctx, lixo, 'anexo.remover');
       UnitOfWork.descarregarErros(ctx);
     }
     return r;
   }
   /**
-   * anexo.obter. dados: {anexo_id, miniatura (true: a miniatura, se houver)}. Devolve {dados: {anexo, data_url},
-   * dataVersion}: o conteúdo vai como data URL (o arquivo é privado no Drive; nunca se expõe URL). NOT_FOUND.
+   * anexo.obter. dados: {anexo_id, miniatura (true: a miniatura, se houver)}. Devolve {dados: {anexo, miniatura,
+   * data_url}, dataVersion}: o conteúdo vai como data URL (o arquivo é privado no Drive; nunca se expõe URL). O anexo de
+   * evento estornado ou corrigido continua consultável (`anexo.vigente = false`). Removido, inexistente ou de gravação
+   * que não confirmou → NOT_FOUND.
    */
   function obterAnexo(ctx, dados) {
     var files = exigirFiles_(ctx);
     var d = dados || {};
     var lido = UnitOfWork.read(ctx, {
-      rota: 'anexo.obter', reads: ['ANEXOS'],
-      tratador: function (tx) { return vazio_(d.anexo_id) ? null : Utils.clonar(tx.repo.porId('ANEXOS', d.anexo_id)); },
+      rota: 'anexo.obter', reads: ['ANEXOS'], acessoCru: true,
+      tratador: function (tx) {
+        var a = linha_(tx, d.anexo_id);
+        if (!consultavel_(tx.cru, a)) return null;
+        return { linha: Utils.clonar(a), vigente: vigente_(tx.cru, a) };
+      },
     });
-    var a = lido.dados;
-    if (!a || a.status === 'REMOVIDO') throw Validation.erro('NOT_FOUND', 'O arquivo não foi encontrado ou foi removido.');
+    if (!lido.dados) throw Validation.erro('NOT_FOUND', 'O arquivo não foi encontrado ou foi removido.');
+    var a = lido.dados.linha;
     var usarMiniatura = d.miniatura === true && !vazio_(a.thumb_drive_file_id);
     var b = files.lerBytes(usarMiniatura ? a.thumb_drive_file_id : a.drive_file_id);
     var mime = usarMiniatura ? 'image/jpeg' : a.mime_type;
-    return { dados: { anexo: anexoPublico_(a), miniatura: usarMiniatura, data_url: 'data:' + mime + ';base64,' + b.base64 }, dataVersion: lido.dataVersion };
+    return { dados: { anexo: anexoPublico_(a, lido.dados.vigente), miniatura: usarMiniatura, data_url: 'data:' + mime + ';base64,' + b.base64 }, dataVersion: lido.dataVersion };
+  }
+  /**
+   * Anexos de um evento, para `evento.obter` (cru: fachada de leitura crua com ANEXOS, EVENTOS e FINANCEIRO): os do
+   * evento e os dos lançamentos financeiros dele (com `financial_id`), ativos, na ordem de envio. Os de evento
+   * estornado ou corrigido vêm com `vigente = false` (histórico consultável).
+   */
+  function anexosDoEvento(cru, eventId) {
+    if (vazio_(eventId)) return [];
+    var linhas = cru.cruPor('ANEXOS', 'event_id', eventId).filter(function (a) { return a.status === 'ATIVO' && consultavel_(cru, a); });
+    return Utils.ordenarPor(linhas.map(Utils.clonar), 'created_at').map(function (a) { return anexoPublico_(a, vigente_(cru, a)); });
+  }
+  /**
+   * Correção de evento (dentro do tratador de evento.corrigir, ANEXOS nas reads): os anexos ativos do original passam
+   * ao substituto, que ocupa o lugar dele. Cada um vira uma linha nova de ANEXOS, filha do substituto (gravada na
+   * fase A do próprio evento: só vale se ele valer), com o MESMO arquivo do Drive; a linha do original fica como
+   * história. O anexo de um lançamento vai para o lançamento correspondente do substituto; sem correspondente (custo
+   * retirado na correção), fica ligado ao evento.
+   * substituto: {event_id, lancamentos: {financial_id do original: financial_id do substituto}}. Devolve as linhas.
+   */
+  function anexosDoSubstituto(tx, originalId, substituto) {
+    var s = substituto || {};
+    if (vazio_(originalId) || vazio_(s.event_id)) throw interno_('anexosDoSubstituto precisa do evento original e do substituto.');
+    var correspondente = s.lancamentos || {};
+    var linhas = tx.repo.por('ANEXOS', 'event_id', originalId).filter(function (a) { return a.status === 'ATIVO'; });
+    return Utils.ordenarPor(linhas, 'created_at').map(function (a) {
+      var destino = a.entidade === 'FINANCEIRO' ? correspondente[a.entity_id] || null : null;
+      return {
+        anexo_id: tx.novoId(), entidade: destino ? 'FINANCEIRO' : 'EVENTOS', entity_id: destino || s.event_id, event_id: s.event_id,
+        drive_file_id: a.drive_file_id, thumb_drive_file_id: a.thumb_drive_file_id || null, nome_arquivo: a.nome_arquivo, mime_type: a.mime_type,
+        tamanho_bytes: a.tamanho_bytes, tipo: a.tipo, descricao: a.descricao || null, status: 'ATIVO', created_by: a.created_by, created_at: a.created_at,
+      };
+    });
   }
 
   return {
@@ -460,13 +597,17 @@ var FileService = (function () {
     MIME_PLANILHA: MIME_PLANILHA,
     PASTAS: PASTAS,
     TAMANHO_MAX_ANEXO: TAMANHO_MAX_ANEXO,
+    MIME_ANEXO: MIME_ANEXO,
     LEITURAS_ANEXO: LEITURAS_ANEXO,
+    ENTIDADES_ANEXO: ENTIDADES_ANEXO,
     porta: porta,
     adicionarAnexo: adicionarAnexo,
     promover: promover,
     removerAnexo: removerAnexo,
     obterAnexo: obterAnexo,
     anexoPublico: anexoPublico_,
-    ENTIDADES_ANEXO: ENTIDADES_ANEXO,
+    consultavel: consultavel_,
+    anexosDoEvento: anexosDoEvento,
+    anexosDoSubstituto: anexosDoSubstituto,
   };
 })();

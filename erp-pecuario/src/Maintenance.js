@@ -281,12 +281,19 @@ var Maintenance = (function () {
   /**
    * Anexos: TEMPORARIO com mais de 24 h → REMOVIDO (comando auditado) e arquivo na lixeira; arquivo deste banco na
    * pasta Anexos sem linha em ANEXOS (comando que não confirmou) e com mais de 24 h → lixeira; arquivo de anexo
-   * REMOVIDO que ainda não foi para a lixeira → lixeira. Devolve {temporarios (linhas), orfaos, arquivos_removidos}.
+   * REMOVIDO (ou de linha inerte, que nenhuma linha consultável usa) que ainda não foi para a lixeira → lixeira. Devolve
+   * {temporarios (linhas), orfaos, arquivos_removidos}.
    */
   function limparAnexos(ctx) {
     var agoraMs = ctx.clock.agoraMs();
     var limite = Utils.instanteIso(agoraMs - ANEXO_TEMPORARIO_HORAS * MS_HORA);
-    var linhas = UnitOfWork.read(ctx, { rota: 'sistema.limpeza', reads: ['ANEXOS'], acessoCru: true, tratador: function (tx) { return Utils.clonar(tx.cru.cru('ANEXOS')); } }).dados;
+    // Linha inerte (gravação que não confirmou: a cópia de um anexo na correção que falhou) não segura o arquivo.
+    var linhas = UnitOfWork.read(ctx, {
+      rota: 'sistema.limpeza', reads: ['ANEXOS'], acessoCru: true,
+      tratador: function (tx) { return tx.cru.cru('ANEXOS').map(function (a) { return { linha: Utils.clonar(a), inerte: a.status !== 'REMOVIDO' && !FileService.consultavel(tx.cru, a) }; }); },
+    }).dados;
+    var inertes = linhas.filter(function (x) { return x.inerte; }).map(function (x) { return x.linha.anexo_id; });
+    linhas = linhas.map(function (x) { return x.linha; });
     var vencidos = linhas.filter(function (a) { return a.status === 'TEMPORARIO' && a.created_at < limite; });
     if (vencidos.length) {
       UnitOfWork.run(ctx, {
@@ -304,7 +311,7 @@ var Maintenance = (function () {
     var usados = {};
     var removidos = {};
     linhas.forEach(function (a) {
-      var removido = a.status === 'REMOVIDO' || vencidos.indexOf(a) >= 0;
+      var removido = a.status === 'REMOVIDO' || vencidos.indexOf(a) >= 0 || inertes.indexOf(a.anexo_id) >= 0;
       [a.drive_file_id, a.thumb_drive_file_id].forEach(function (id) {
         if (vazio_(id)) return;
         if (removido) removidos[id] = true;

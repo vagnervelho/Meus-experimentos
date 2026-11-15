@@ -83,7 +83,8 @@ var EventService = (function () {
     return {
       rota: ROTAS[acao], idempotencyKey: p.idempotencyKey, dados: dados, avisosAceitos: p.avisosAceitos || [],
       dataVersionEsperada: p.dataVersionEsperada, modo: p.modo, acessoCru: true,
-      reads: Utils.unicos(EventCatalog.leituras(EventCatalog.existe(tipo) ? tipo : null).concat(Timeline.LEITURAS)),
+      // ANEXOS: a correção passa os anexos do original ao substituto (FileService.anexosDoSubstituto).
+      reads: Utils.unicos(EventCatalog.leituras(EventCatalog.existe(tipo) ? tipo : null).concat(Timeline.LEITURAS, ['ANEXOS'])),
       tratador: function (tx) { return acao === 'estornar' ? planejarEstorno_(tx) : planejarEvento_(tx, acao); },
       reconstruir: function (tx, op) { return resposta_(tx, op.resumo); },
     };
@@ -254,7 +255,7 @@ var EventService = (function () {
     // Data antes do marco zero num tipo sem registro histórico: a linha do tempo nem começou; só o erro da data.
     if (ev.event_date < m.D0 && ev.pre_marco_zero !== true) return { erros: m.col.erros };
 
-    var plano = { EVENTOS: [], ANIMAIS: [], EVENTO_ANIMAIS: [], IDENTIFICACOES: [], PESAGENS: [], REPRODUCAO: [], BAIXAS: [], AJUSTES: [], COMPRAS: [], VENDAS: [], FINANCEIRO: [], PARCELAS: [], RATEIOS: [], ALOCACOES_FINANCEIRAS: [] };
+    var plano = { EVENTOS: [], ANIMAIS: [], EVENTO_ANIMAIS: [], IDENTIFICACOES: [], PESAGENS: [], REPRODUCAO: [], BAIXAS: [], AJUSTES: [], COMPRAS: [], VENDAS: [], FINANCEIRO: [], PARCELAS: [], RATEIOS: [], ALOCACOES_FINANCEIRAS: [], ANEXOS: [] };
     var ctxEv = { tipo: tipo, subtipo: subtipo, ev: ev, campos: campos, original: original, plano: plano, itens: [], criadosOriginal: {}, auditorias: [] };
     if (original) {
       m.f.linhasDoEvento(original.event_id).forEach(function (l) { if (l.atributos_iniciais_json) ctxEv.criadosOriginal[l.animal_id] = true; });
@@ -1426,20 +1427,84 @@ var EventService = (function () {
       }
     });
   }
-  /** Lotação (RN-027): entrada ou correção de pasto que leva o pasto acima da capacidade em cabeças informada. */
+  /**
+   * Leitor das consultas (AnimalService.leitor) sobre a linha do tempo do motor com o lançamento em análise: as linhas,
+   * pesagens e registros reprodutivos do plano entram como se já valessem, e os eventos excluídos (a correção) ficam
+   * fora. Serve para calcular categoria e peso vigente pelas MESMAS regras das consultas (um caminho só).
+   */
+  function leitorDoLancamento_(m, ctxEv) {
+    var novas = {};
+    var pes = {};
+    var rep = {};
+    ctxEv.itens.forEach(function (it) { if (it.animal_id && it.linhas.length) novas[it.animal_id] = (novas[it.animal_id] || []).concat(it.linhas); });
+    ctxEv.plano.PESAGENS.forEach(function (x) { (pes[x.animal_id] = pes[x.animal_id] || []).push(x); });
+    ctxEv.plano.REPRODUCAO.forEach(function (x) { (rep[x.animal_id] = rep[x.animal_id] || []).push(x); });
+    var f = Object.create(m.f);
+    f.linhas = function (id) { return m.f.linhas(id).concat(novas[id] || []); };
+    f.pesagens = function (id) { return m.f.pesagens(id).concat(pes[id] || []); };
+    f.reproducao = function (id) { return m.f.reproducao(id).concat(rep[id] || []); };
+    f.evento = function (id) { return id === ctxEv.ev.event_id ? ctxEv.ev : m.f.evento(id); };
+    return AnimalService.leitor(m.tx, { fonte: f, parametros: m.params });
+  }
+  /** O animal como as regras de categoria o leem: o declarado no lançamento (animal novo) ou o estado atual. */
+  function animalParaLotacao_(m, porId, id) {
+    var it = porId[id];
+    if (it && it.atributos) {
+      var at = it.atributos;
+      return {
+        animal_id: id, codigo_interno: it.codigo_interno || null, brinco: it.brincoTexto || null, sexo: nulo_(at.sexo), data_nascimento: nulo_(at.data_nascimento),
+        castrado: at.castrado === 'S' || at.castrado === true, reprodutor: at.reprodutor === 'S' || at.reprodutor === true,
+        partos_previos: typeof at.partos_previos === 'number' ? at.partos_previos : null,
+      };
+    }
+    return estado_(m, id);
+  }
+  /**
+   * Lotação (RN-027; 07, seção 8.2): entrada, transferência ou correção de pasto que leva o pasto de destino acima da
+   * capacidade informada, em cabeças ou em UA/ha, no dia do evento. A UA é a das consultas (InventoryService.compor:
+   * peso vigente na data, com o peso do próprio lançamento; vencido ou ausente, o de referência da categoria) e a
+   * comparação, a do painel (PastureService.lotacao); sem área ou sem peso nenhum não há UA/ha a comparar. Um aviso
+   * por pasto, com as duas contas quando as duas passam.
+   */
   function conferirLotacao_(m, ctxEv) {
     var destinos = {};
     ctxEv.itens.forEach(function (it) { if (it.linhaEA && !vazio_(it.linhaEA.pasto_destino_id)) destinos[it.linhaEA.pasto_destino_id] = true; });
-    var comCapacidade = Object.keys(destinos).filter(function (id) { var p = m.f.pasto(id); return p && typeof p.capacidade_estimada_cabecas === 'number'; });
+    var comCapacidade = Object.keys(destinos).filter(function (id) {
+      var p = m.f.pasto(id);
+      return p && (typeof p.capacidade_estimada_cabecas === 'number' || typeof p.capacidade_estimada_ua_ha === 'number');
+    });
     if (!comCapacidade.length || !Utils.dataValida(ctxEv.ev.event_date)) return;
+    var data = ctxEv.ev.event_date;
     var novas = [];
-    ctxEv.itens.forEach(function (it) { novas = novas.concat(it.linhas); });
-    var linhas = m.f.todasAsLinhas().concat(novas);
-    var inv = Timeline.inventario(linhas, ctxEv.ev.event_date, m.D0);
+    var porId = {};
+    ctxEv.itens.forEach(function (it) { novas = novas.concat(it.linhas); if (it.animal_id) porId[it.animal_id] = it; });
+    var pres = Timeline.presentesEm(m.f.todasAsLinhas().concat(novas), data, m.D0);
+    if (pres.motivo) return;
+    var L = null;
     comCapacidade.forEach(function (id) {
       var p = m.f.pasto(id);
-      var n = (inv.porPasto || {})[id] || 0;
-      if (n > p.capacidade_estimada_cabecas) avisoItem_(m, null, 'LOTACAO_ACIMA_DA_CAPACIDADE', 'O pasto ' + p.nome + ' fica com ' + n + ' cabeças em ' + br_(ctxEv.ev.event_date) + ', acima da capacidade informada (' + p.capacidade_estimada_cabecas + ').');
+      var ids = pres.itens.filter(function (x) { return x.pasture_id === id; }).map(function (x) { return x.animal_id; });
+      var n = ids.length;
+      var capCab = typeof p.capacidade_estimada_cabecas === 'number' ? p.capacidade_estimada_cabecas : null;
+      var capUa = typeof p.capacidade_estimada_ua_ha === 'number' ? p.capacidade_estimada_ua_ha : null;
+      var acimaCab = capCab !== null && n > capCab;
+      var lot = null;
+      if (capUa !== null && typeof p.area_hectares === 'number' && p.area_hectares > 0 && n) {
+        L = L || leitorDoLancamento_(m, ctxEv);
+        var itens = ids.map(function (a) { return { animal: animalParaLotacao_(m, porId, a), pasture_id: id }; }).filter(function (x) { return !!x.animal; });
+        var comp = InventoryService.compor(L, itens, data);
+        lot = PastureService.lotacao(p, comp);
+        lot.ua = comp.ua;
+      }
+      var acimaUa = !!(lot && lot.acima_da_capacidade.ua_ha);
+      if (!acimaCab && !acimaUa) return;
+      var uaHa = acimaUa ? Utils.formatarNumero(lot.ua_ha.valor, 2) + ' UA/ha' : null;
+      var msg;
+      if (acimaCab && acimaUa) msg = 'O pasto ' + p.nome + ' fica com ' + n + ' cabeças e ' + uaHa + ' em ' + br_(data) + ', acima da capacidade informada (' + capCab + ' cabeças; ' + Utils.formatarNumero(capUa) + ' UA/ha).';
+      else if (acimaCab) msg = 'O pasto ' + p.nome + ' fica com ' + n + ' cabeças em ' + br_(data) + ', acima da capacidade informada (' + capCab + ').';
+      else msg = 'O pasto ' + p.nome + ' fica com ' + uaHa + ' em ' + br_(data) + ' (' + n + ' cabeças, ' + Utils.formatarNumero(lot.ua.valor, 2) + ' UA em ' + Utils.formatarNumero(p.area_hectares) + ' ha), acima da capacidade informada (' + Utils.formatarNumero(capUa) + ' UA/ha).';
+      if (acimaUa && lot.ua.estimado) msg += ' Parte da UA é estimada pelo peso de referência da categoria.';
+      avisoItem_(m, null, 'LOTACAO_ACIMA_DA_CAPACIDADE', msg);
     });
   }
 
@@ -1970,6 +2035,52 @@ var EventService = (function () {
       });
     });
   }
+  /**
+   * Papel de cada lançamento de um evento gravado, na linguagem do resumo financeiro (ANIMAIS, FRETE, OUTRO, RECEITA,
+   * DEDUCAO:<tipo>); sem papel próprio (morte, descarte, abertura), a conta. {financial_id: papel}.
+   */
+  function papeisGravados_(m, ev, fins) {
+    var out = {};
+    var codigo = function (f) { var c = m.repo.porId('PLANO_CONTAS', f.conta_id); return c ? c.codigo : null; };
+    if (ev.event_type === 'COMPRA' && fins.length) {
+      var cp = m.repo.por('COMPRAS', 'event_id', ev.event_id)[0] || {};
+      var custos = fins.filter(function (f) { if (codigo(f) !== 'COMPRA_ANIMAIS') return true; out[f.financial_id] = 'ANIMAIS'; return false; });
+      var tipos = FinancialService.tiposDosCustos(custos, cp.frete || 0);
+      custos.forEach(function (f, i) { out[f.financial_id] = tipos ? tipos[i] : f.conta_id; });
+    } else if (ev.event_type === 'VENDA' && fins.length) {
+      var deducoes = {};
+      ((ev.payload_json || {}).deducoes || []).forEach(function (x) { deducoes[x.financial_id] = x.tipo; });
+      fins.forEach(function (f) { out[f.financial_id] = codigo(f) === 'VENDA_ANIMAIS' ? 'RECEITA' : deducoes[f.financial_id] ? 'DEDUCAO:' + deducoes[f.financial_id] : f.conta_id; });
+    } else fins.forEach(function (f) { out[f.financial_id] = f.conta_id; });
+    return out;
+  }
+  /**
+   * Na correção: lançamento do original → lançamento do substituto com o mesmo papel, na mesma ordem (o frete vai para
+   * o frete, a comissão para a comissão). Lançamento sem par (custo retirado) fica de fora. {financial_id: financial_id}.
+   */
+  function lancamentosCorrespondentes_(m, ctxEv) {
+    var ordinais = function (lista, papel) {
+      var n = {};
+      var out = {};
+      lista.forEach(function (f) { var p = papel[f.financial_id] || f.conta_id; n[p] = (n[p] || 0) + 1; out[f.financial_id] = p + '#' + n[p]; });
+      return out;
+    };
+    var finsOriginal = m.repo.por('FINANCEIRO', 'event_id', ctxEv.original.event_id);
+    var finsNovos = ctxEv.plano.FINANCEIRO;
+    var out = {};
+    // Um lançamento só nos dois (morte, descarte, abertura): é o mesmo, ainda que a conta tenha mudado.
+    if (finsOriginal.length === 1 && finsNovos.length === 1) { out[finsOriginal[0].financial_id] = finsNovos[0].financial_id; return out; }
+    var papelNovo = {};
+    if (ctxEv.tipo === 'COMPRA' || ctxEv.tipo === 'VENDA') {
+      ((ctxEv.financeiro && ctxEv.financeiro.lancamentos) || []).forEach(function (l) { papelNovo[l.financial_id] = l.papel === 'DEDUCAO' ? 'DEDUCAO:' + l.tipo_deducao : l.papel; });
+    }
+    var novos = ordinais(finsNovos, papelNovo);
+    var porChave = {};
+    Object.keys(novos).forEach(function (fid) { porChave[novos[fid]] = fid; });
+    var antigos = ordinais(finsOriginal, papeisGravados_(m, ctxEv.original, finsOriginal));
+    Object.keys(antigos).forEach(function (fid) { if (porChave[antigos[fid]]) out[fid] = porChave[antigos[fid]]; });
+    return out;
+  }
   function fechar_(m, ctxEv) {
     var ev = ctxEv.ev;
     aplicarPolitica_(m);
@@ -1986,6 +2097,8 @@ var EventService = (function () {
     var linhaEv = {};
     Object.keys(ev).forEach(function (k) { if (Schema.temColuna('EVENTOS', k)) linhaEv[k] = ev[k]; });
     ctxEv.plano.EVENTOS.push(linhaEv);
+    // Correção: os anexos do original (nota fiscal, GTA, laudo, foto) passam ao substituto, que ocupa o lugar dele.
+    if (ctxEv.original) ctxEv.plano.ANEXOS = FileService.anexosDoSubstituto(m.tx, ctxEv.original.event_id, { event_id: ev.event_id, lancamentos: lancamentosCorrespondentes_(m, ctxEv) });
     if (!m.col.temErros()) validarLinhas_(m, ctxEv.plano, itensPorAnimal);
     if (m.col.temErros()) return { erros: m.col.erros };
     if (m.conflitos.length) throw Validation.erro('CONFLICT', m.conflitos.length === 1 ? m.conflitos[0].mensagem : m.conflitos.length + ' registros já gravados impedem este lançamento.', m.conflitos);
@@ -2000,7 +2113,7 @@ var EventService = (function () {
         acao: resumo.acao, event_type: ev.event_type, event_subtype: ev.event_subtype, event_date: ev.event_date,
         animais: animais.length, novos: ctxEv.plano.ANIMAIS.length, anulados: (ctxEv.removidos || []).length, substitui: resumo.substitui,
         total_value: ev.total_value, abertura: ctxEv.abertura || null, pre_marco_zero: ev.pre_marco_zero === true,
-        parto: ctxEv.parto || null, transferencia: ctxEv.transf || null, baixas: ctxEv.plano.BAIXAS.length,
+        parto: ctxEv.parto || null, transferencia: ctxEv.transf || null, baixas: ctxEv.plano.BAIXAS.length, anexos: ctxEv.plano.ANEXOS.length,
         identificacoes: ctxEv.plano.IDENTIFICACOES.length, ajustes: ctxEv.plano.AJUSTES.length,
         marcacao: ctxEv.tipo === 'MARCACAO' ? { subtipo: ctxEv.subtipo, acao: ctxEv.ev.payload_json.acao, motivo_descarte: ctxEv.ev.payload_json.motivo_descarte } : null,
         compra: ctxEv.compra || null, venda: ctxEv.venda || null, financeiro: ctxEv.financeiro || null,
@@ -2084,7 +2197,7 @@ var EventService = (function () {
     };
   }
   function leiturasConsulta_() {
-    return Timeline.LEITURAS.concat(['PROPRIEDADES', 'BAIXAS', 'COMPRAS', 'VENDAS']);
+    return Timeline.LEITURAS.concat(['PROPRIEDADES', 'BAIXAS', 'COMPRAS', 'VENDAS', 'ANEXOS']);
   }
   function eventoPublico_(tx, ev) {
     var a = tx.cru.avaliar(ev.event_id);
@@ -2136,7 +2249,10 @@ var EventService = (function () {
       },
     };
   }
-  /** Consulta evento.obter: cabeçalho, situação, animais e todas as linhas de detalhe do evento (inclusive se anulado). */
+  /**
+   * Consulta evento.obter: cabeçalho, situação, animais, todas as linhas de detalhe do evento (inclusive se anulado) e os
+   * anexos dele e dos lançamentos dele (FileService.anexosDoEvento; os de evento anulado, como histórico).
+   */
   function consultaObter(dados) {
     var o = dados || {};
     return {
@@ -2163,7 +2279,7 @@ var EventService = (function () {
           return c;
         });
         var anula = vazio_(ev.reversal_of_event_id) ? null : tx.cru.cruPorId('EVENTOS', ev.reversal_of_event_id);
-        return { evento: eventoPublico_(tx, ev), linhas: linhas, detalhes: detalhes, anula: anula ? eventoPublico_(tx, anula) : null };
+        return { evento: eventoPublico_(tx, ev), linhas: linhas, detalhes: detalhes, anexos: FileService.anexosDoEvento(tx.cru, ev.event_id), anula: anula ? eventoPublico_(tx, anula) : null };
       },
     };
   }

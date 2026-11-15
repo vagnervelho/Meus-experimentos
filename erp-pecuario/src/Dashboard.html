@@ -1,15 +1,19 @@
 <script>
 'use strict';
 /*
- * ERP Pecuário — tela Início, a "Visão geral" da Fase 1 (08-ux-ui.md, seções 3 e 11): cabeças, machos e fêmeas, por
- * pasto e por categoria, pela consulta dashboard.obter (posição de hoje calculada no servidor a partir das projeções),
- * pendências pela alerta.listar (cada uma com a sua ação), registros não concluídos (rascunhos) e a marca "dados de
- * dd/mm hh:mm" (geradoEm, no fuso da fazenda). A resposta fica guardada por dataVersion; "Atualizar" pede de novo.
- * Indicador sem dado mostra "—" com o motivo (P9), nunca zero.
+ * ERP Pecuário — tela Início, a "Visão geral" (08-ux-ui.md, seções 3 e 11; 07, seção 9, no recorte da Fase 2):
+ * período (padrão: os últimos 12 meses), a posição do rebanho no fim dele (cabeças, machos, fêmeas, peso vivo, peso
+ * médio, UA, por pasto e por categoria), o movimento do período (nascimentos, compras, vendas, mortes, com a receita
+ * de vendas), as séries mensais (evolução do rebanho; nascimentos e mortes; compras e vendas), pendências pela
+ * alerta.listar (cada uma com a sua ação), registros não concluídos (rascunhos) e a marca "dados de dd/mm hh:mm"
+ * (geradoEm, no fuso da fazenda). Tudo vem de dashboard.obter, calculado no servidor pelo replay dos eventos vigentes.
+ * A resposta fica guardada por (dataVersion, período); "Atualizar" pede de novo. Sem dado: "—" com o motivo (P9).
  */
 var TelaInicio = (function () {
   var h = Util.h;
-  var cache = { versao: null, visao: null, alertas: null };
+  var cache = { versao: null, chave: null, visao: null, alertas: null };
+  /** Período escolhido na tela ({data_inicio, data_fim}); vazio = o padrão do servidor (últimos 12 meses). */
+  var periodo = {};
   /** Ação de cada alerta (lista fechada de InventoryService.ALERTAS). */
   var ACOES = {
     ATIVO_SEM_PASTO: { texto: 'Ver os animais sem pasto', atalho: 'SEM_PASTO' },
@@ -20,10 +24,48 @@ var TelaInicio = (function () {
     IMPORTACAO_INCOMPLETA: { texto: 'Ver a importação', rota: 'importar' },
   };
   async function carregar(forcar) {
-    if (!forcar && cache.visao && cache.versao === Store.versao()) return cache;
-    var r = await Promise.all([Cliente.consulta('dashboard.obter', {}), Cliente.consulta('alerta.listar', {})]);
-    cache = { versao: Store.versao(), visao: r[0].data, alertas: r[1].data };
+    var chave = (periodo.data_inicio || '') + '|' + (periodo.data_fim || '');
+    if (!forcar && cache.visao && cache.versao === Store.versao() && cache.chave === chave) return cache;
+    var r = await Promise.all([Cliente.consulta('dashboard.obter', Util.clonar(periodo)), Cliente.consulta('alerta.listar', {})]);
+    cache = { versao: Store.versao(), chave: chave, visao: r[0].data, alertas: r[1].data };
     return cache;
+  }
+  function mes(m) { return m ? m.slice(5, 7) + '/' + m.slice(0, 4) : ''; }
+  /** Movimento do período (07, seção 9, itens 4 a 7 e 12): cartões de fluxo; zero é informação, ausência é "—". */
+  function desenharMovimento(el, v) {
+    var p = v.periodo || {};
+    var mv = v.movimento || {};
+    var nota = p.motivo ? Fmt.rotulo('MOTIVO', p.motivo) : 'de ' + Fmt.data(p.inicio_efetivo) + ' a ' + Fmt.data(p.fim);
+    var cab = function (x) { return !x || x.cabecas === null || x.cabecas === undefined ? '—' : Fmt.numero(x.cabecas); };
+    var comValor = function (x) { return !x || x.cabecas === null || x.cabecas === undefined ? '—' : Fmt.numero(x.cabecas) + ' · ' + Fmt.dinheiro(x.valor || 0); };
+    var rec = UI.valorInd(v.receita_vendas, function (x) { return Fmt.dinheiro(x); });
+    var cartoes = h('div', { class: 'grade-cartoes', role: 'list', 'aria-label': 'Movimento ' + nota },
+      UI.indicador('Nascimentos', cab(mv.nascimentos), nota, 'nascimentos'),
+      UI.indicador('Compras', comValor(mv.compras), nota, 'compras'),
+      UI.indicador('Vendas', comValor(mv.vendas), nota, 'vendas'),
+      UI.indicador('Mortes', cab(mv.mortes), nota, 'mortes'),
+      UI.indicador('Receita de vendas', rec.texto, rec.motivo || nota, 'receita-vendas'));
+    var extras = [];
+    if (mv.descartes && mv.descartes.cabecas) extras.push(Fmt.numero(mv.descartes.cabecas) + ' descartado(s)');
+    if (mv.baixas_contagem && mv.baixas_contagem.cabecas) extras.push(Fmt.numero(mv.baixas_contagem.cabecas) + ' baixado(s) na contagem');
+    var conteudo = h('div', null, cartoes,
+      p.parcial ? UI.nota('O período começa antes do marco zero (' + Fmt.data(v.marco_zero) + '): o movimento conta a partir dele.', 'info') : null,
+      extras.length ? h('p', { class: 'suave', text: 'Outras saídas no período: ' + extras.join(' e ') + '.' }) : null);
+    el.appendChild(UI.secao('Movimento no período', conteudo, { dado: 'movimento' }));
+  }
+  /** Séries mensais (G1, G6 e G7): linha para a evolução do rebanho; barras para nascimentos × mortes e compras × vendas. */
+  function desenharSeries(el, v) {
+    var sr = v.series || {};
+    if (!sr.rebanho || !sr.rebanho.length) return;
+    el.appendChild(UI.grafico({ tipo: 'linha', titulo: 'Evolução do rebanho (cabeças no fim de cada mês)', rotuloX: 'Mês', series: [{ nome: 'Cabeças', pontos: sr.rebanho.map(function (x) { return { x: mes(x.mes), y: x.cabecas }; }) }] }));
+    el.appendChild(UI.grafico({ tipo: 'barras', titulo: 'Nascimentos e mortes por mês', rotuloX: 'Mês', series: [
+      { nome: 'Nascimentos', pontos: (sr.nascimentos_mortes || []).map(function (x) { return { x: mes(x.mes), y: x.nascimentos }; }) },
+      { nome: 'Mortes', pontos: (sr.nascimentos_mortes || []).map(function (x) { return { x: mes(x.mes), y: x.mortes }; }) },
+    ] }));
+    el.appendChild(UI.grafico({ tipo: 'barras', titulo: 'Compras e vendas por mês (cabeças)', rotuloX: 'Mês', series: [
+      { nome: 'Compras', pontos: (sr.compras_vendas || []).map(function (x) { return { x: mes(x.mes), y: x.compras }; }) },
+      { nome: 'Vendas', pontos: (sr.compras_vendas || []).map(function (x) { return { x: mes(x.mes), y: x.vendas }; }) },
+    ] }));
   }
   function acaoDoAlerta(a) {
     var def = ACOES[a.codigo];
@@ -69,6 +111,7 @@ var TelaInicio = (function () {
     var nota = v.motivo ? Fmt.rotulo('MOTIVO', v.motivo) : 'em ' + dia;
     var num = function (x) { return v.motivo || x === null || x === undefined ? '—' : Fmt.numero(x); };
     var peso = UI.valorInd(v.peso_vivo_total, function (x) { return Fmt.peso(x); });
+    var medio = UI.valorInd(v.peso_medio, function (x) { return Fmt.peso(x); });
     var ua = UI.valorInd(v.ua, function (x) { return Fmt.numero(x, 1) + ' UA'; });
     var cartoes = h('div', { class: 'grade-cartoes', role: 'list', 'aria-label': 'Rebanho em ' + Fmt.data(v.data) },
       UI.indicador('Cabeças', num(v.cabecas), nota, 'cabecas'),
@@ -76,8 +119,10 @@ var TelaInicio = (function () {
       UI.indicador('Fêmeas', num(v.por_sexo ? v.por_sexo.F : null), nota, 'femeas'),
       UI.indicador('Sem pasto', num(v.sem_pasto), nota, 'sem-pasto'),
       UI.indicador('Peso vivo total', peso.texto, peso.motivo || nota, 'peso'),
+      UI.indicador('Peso médio', medio.texto, medio.motivo || nota, 'peso-medio'),
       UI.indicador('Unidades animais', ua.texto, ua.motivo || nota, 'ua'));
     el.appendChild(cartoes);
+    desenharMovimento(el, v);
     // Títulos das compras e dos lançamentos dos eventos (a baixa e o fluxo de caixa chegam com o módulo Financeiro).
     var t = v.titulos;
     if (t && (t.a_pagar || t.a_receber)) {
@@ -102,6 +147,7 @@ var TelaInicio = (function () {
     var pontosCat = (v.por_categoria || []).map(function (x) { return { x: x.nome, y: x.cabecas }; });
     if (v.sem_categoria) pontosCat.push({ x: 'Sem categoria', y: v.sem_categoria });
     el.appendChild(UI.grafico({ tipo: 'barras', titulo: 'Cabeças por categoria em ' + Fmt.data(v.data), rotuloX: 'Categoria', series: [{ nome: 'Cabeças', pontos: pontosCat }] }));
+    desenharSeries(el, v);
   }
   function montar(el) {
     var vivo = true;
@@ -116,6 +162,18 @@ var TelaInicio = (function () {
       if (Telas.existe('importar')) links.push(h('a', { class: 'botao botao-secundario', href: Roteador.href('importar'), dataset: { rota: 'importar' } }, 'Importar a planilha dos animais'));
       el.appendChild(UI.nota('Para começar: cadastre a propriedade e os pastos, defina a data do marco zero nas configurações e registre o rebanho inicial (ou importe a planilha dos animais).', 'info', links.length ? h('div', { class: 'acoes' }, links) : null));
     }
+    var hoje = Fmt.hoje();
+    var deIn = h('input', { type: 'date', id: 'ini-de', max: hoje, min: Store.param('data_marco_zero') || null, value: periodo.data_inicio || '' });
+    var ateIn = h('input', { type: 'date', id: 'ini-ate', max: hoje, value: periodo.data_fim || '' });
+    el.appendChild(h('div', { class: 'busca-linha', dataset: { periodo: '1' } },
+      h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo', for: 'ini-de', text: 'De' }), deIn),
+      h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo', for: 'ini-ate', text: 'Até' }), ateIn),
+      UI.botao('Ver', { aoClicar: function () {
+        periodo = {};
+        if (deIn.value) periodo.data_inicio = deIn.value;
+        if (ateIn.value) periodo.data_fim = ateIn.value;
+        abrir(false);
+      } })));
     el.appendChild(corpo);
     async function abrir(forcar) {
       Util.limpar(corpo);
@@ -126,6 +184,7 @@ var TelaInicio = (function () {
         if (!vivo) return;
         Util.limpar(corpo);
         marca.textContent = 'Dados de ' + Fmt.instante(c.visao.geradoEm);
+        if (c.visao.periodo) { deIn.value = c.visao.periodo.inicio; ateIn.value = c.visao.periodo.fim; }
         desenhar(corpo, c);
       } catch (e) {
         if (!vivo) return;

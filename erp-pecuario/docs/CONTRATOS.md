@@ -25,7 +25,10 @@ seção 14; consultas da linha do tempo com acesso cru, seção 13; mensagens co
 negociação, seções 3 e 26). Fase 2, etapa IDENTIFICAÇÃO, MARCAÇÃO, AJUSTES E ESTORNO GERAL (E2.6 e E2.7, backend):
 IDENTIFICACAO, MARCACAO e os subtipos RECLASSIFICACAO e DIVERGENCIA_CONTAGEM no motor (seções 12 a 14), as sequências de
 identificação e de marcação e a retirada de brinco no projetor (seção 13), a trilha completa de `auditoria.listar` (seção
-11), o alerta NAO_LOCALIZADO (seção 15.4) e o estorno e a correção de qualquer evento (seção 30).
+11), o alerta NAO_LOCALIZADO (seção 15.4) e o estorno e a correção de qualquer evento (seção 30). Fase 2, etapa ANEXOS DE
+EVENTO (E2.9): anexos de evento e de lançamento financeiro de evento no `FileService` (seção 16), `evento.obter` com os
+anexos e a correção que os passa ao substituto (seção 14), o componente `Anexos` e a seção "Documentos e fotos" do
+detalhe do evento (seção 32).
 
 ## 1. Regras que valem para todo arquivo de `src/`
 
@@ -762,7 +765,7 @@ CONFIG (sem marco zero; conta SALDO_ABERTURA_REBANHO ausente), além dos da Unit
 | `registrar/corrigir/estornar(ctx, pedido)` | `UnitOfWork.run(ctx, comando(...))` → `{dados: resposta, duplicado, opId, dataVersion}` |
 | `simular(ctx, {acao, dados, avisosAceitos})` | Mesmo tratador em modo SIMULAR → `{dados: {simulacao, impactos, avisos, linhas}}`; erro de validação e bloqueio (CONFLICT) são lançados como no commit |
 | `consultaListar(filtros)` / `listar(ctx, filtros)` | `{total, pagina, por_pagina, itens: [evento]}`; filtros `{tipo, subtipo, de, ate, animal_id, vigentes, pagina, por_pagina}`; inclui anulados e estornos (com `animal_id`, também os ESTORNO dos eventos do animal, que não têm linha de animal); não inclui operações que falharam. Evento: `{event_id, event_seq, event_type, event_subtype, rotulo, rotulo_subtipo, event_date, registration_date, property_id, partner_id, status, vigente, description, notes, responsible, total_value, created_by, source, pre_marco_zero, payload, reversal_of_event_id, anulado_por, animais (n), created_at}` |
-| `consultaObter({event_id})` / `obter(ctx, dados)` | `{evento (como na lista), linhas (com codigo_interno e brinco), detalhes: {IDENTIFICACOES, PESAGENS, REPRODUCAO, BAIXAS, AJUSTES, COMPRAS, VENDAS, FINANCEIRO (na ordem de gravação, com `status` e `cancelado_por_event_id`), PARCELAS (por lançamento, por número), RATEIOS, ALOCACOES_FINANCEIRAS}, anula}`, também de evento anulado e de ESTORNO (sem linhas); NOT_FOUND |
+| `consultaObter({event_id})` / `obter(ctx, dados)` | `{evento (como na lista), linhas (com codigo_interno e brinco), detalhes: {IDENTIFICACOES, PESAGENS, REPRODUCAO, BAIXAS, AJUSTES, COMPRAS, VENDAS, FINANCEIRO (na ordem de gravação, com `status` e `cancelado_por_event_id`), PARCELAS (por lançamento, por número), RATEIOS, ALOCACOES_FINANCEIRAS}, anexos (`FileService.anexosDoEvento`: do evento e dos lançamentos dele, com `financial_id` e `vigente`), anula}`, também de evento anulado (os anexos como histórico) e de ESTORNO (sem linhas); NOT_FOUND |
 | `planejarEntradaImportada(tx, {campos, animais}, {importacao: {import_id}, conhecidos, rotulos})` | O MESMO planejamento da ENTRADA_INICIAL (todas as regras do formulário) dentro do tratador de outro comando: o evento nasce com `import_id` e `source = IMPORTACAO`; `conhecidos` = `{animal_id: {sexo, data_nascimento, mae_id, pai_id, nome}}` de animais ainda pendentes da mesma importação, aceitos como mãe ou pai; `rotulos[i]` substitui o "quem" das mensagens (ex.: `Linha 12`). Devolve o resultado do tratador (`{erros}` ou `{avisos, resumo, derivados, ...}`); exige `leiturasEntrada()` e acesso cru |
 | `leiturasEntrada()` | Abas que esse planejamento lê |
 | `classificarCategoria(perfil, data, categorias)` | Perfil `{sexo, data_nascimento, castrado, reprodutor, parida, categoria_modo, categoria_manual_id}` (valores em D) → `{category_id, codigo, nome, manual}` ou `null` |
@@ -880,8 +883,9 @@ Resposta (e reenvio duplicado): `{acao, event_id, event_type, event_subtype, eve
 substitui, estorna, animais: [{animal_id, codigo_interno, brinco, sexo, situacao_cadastral, pasto_atual_id}]}`
 (no estorno, os animais do evento estornado). `derivados` = `{animais, eventos}`. `payload_json`: `justificativa`
 (corrigir/estornar), `valor_abertura_origem` (`INFORMADO`), `gta_numero` (TRANSFERENCIA), `deducoes` (VENDA), `acao` e
-`motivo_descarte` (MARCACAO), `avisos_aceitos: [{codigo, n, justificativa?}]`. `impactos` da simulação: `{acao, event_type, event_subtype, event_date, animais, novos, anulados,
-substitui, total_value, abertura, pre_marco_zero, identificacoes (linhas de IDENTIFICACOES), ajustes (linhas de AJUSTES),
+`motivo_descarte` (MARCACAO), `avisos_aceitos: [{codigo, n, justificativa?}]`. Os comandos de evento leem ANEXOS: a
+correção passa ao substituto os anexos ativos do original (seção 32). `impactos` da simulação: `{acao, event_type, event_subtype, event_date, animais, novos, anulados,
+substitui, total_value, abertura, pre_marco_zero, anexos (quantos passam ao substituto), identificacoes (linhas de IDENTIFICACOES), ajustes (linhas de AJUSTES),
 marcacao: {subtipo, acao, motivo_descarte} | null, parto: {nascidos_vivos, natimortos, pasto_destino_id, historico} | null,
 transferencia: {pasto_origem_id, pasto_destino_id} | null, baixas, compra: {modalidade, base_peso, criterio,
 valor_animais, frete, outros_custos, valor_total, conferencia, desvio_pct, peso_vivo_total, peso_carcaca_total, arrobas,
@@ -997,15 +1001,24 @@ dados, {chave, avisos})` (confere a projeção depois de cada comando), `ler(con
 nasce na fase C (`AuditService.criacao`). Arquivo cujo comando não vale vai para a lixeira (só quando
 `UnitOfWork.status` diz FALHOU ou INEXISTENTE; na dúvida, a limpeza diária decide pela planilha). appProperties dos
 arquivos: `erp_tipo = ANEXO`, `erp_banco`, `erp_entidade`, `erp_entity_id`. `LEITURAS_ANEXO` = ANEXOS, ANIMAIS,
-EVENTOS, IMPORTACOES.
+EVENTOS, FINANCEIRO, IMPORTACOES: tudo o que um comando de anexo pode ler (`ENTIDADES_ANEXO`, na mesma ordem sem ANEXOS);
+cada comando declara só o necessário (`anexo.adicionar`: ANEXOS, EVENTOS e a aba do dono; `anexo.remover`: ANEXOS, ANIMAIS
+e EVENTOS). `MIME_ANEXO` = `image/jpeg`, `image/png`,
+`image/webp`, `image/gif`, `application/pdf` (animal, evento e lançamento; a importação aceita qualquer tipo). Anexo de
+evento (EVENTOS) e de lançamento financeiro (FINANCEIRO) leva o `event_id` do evento (no lançamento, o evento que o
+criou): é linha filha (vale enquanto o evento vale) e, com o evento estornado ou corrigido, continua **consultável** como
+histórico (seção 32).
 
 | Função | Contrato |
 |---|---|
-| `adicionarAnexo(ctx, {idempotencyKey, dados: {entidade (ANIMAIS\|EVENTOS\|IMPORTACOES), entity_id, tipo, descricao, nome_arquivo, mime_type, conteudo_base64, miniatura_base64, temporario, definir_como_foto}})` | `{dados: anexo, duplicado, opId, dataVersion}`. Envio malformado → `VALIDATION` antes de subir; dono inexistente ou anulado → `NOT_FOUND`; reenvio de chave confirmada não sobe de novo. `definir_como_foto` (só FOTO de animal) grava `ANIMAIS.foto_anexo_id` (auditado) |
+| `adicionarAnexo(ctx, {idempotencyKey, dados: {entidade (ANIMAIS\|EVENTOS\|FINANCEIRO\|IMPORTACOES), entity_id, tipo, descricao, nome_arquivo, mime_type, conteudo_base64, miniatura_base64, temporario, definir_como_foto}})` | `{dados: anexo, duplicado, opId, dataVersion}` (comando com acesso cru). Envio malformado → `VALIDATION` antes de subir (`VALOR_FORA_DA_LISTA`, `CAMPO_OBRIGATORIO`, `FORMATO_INVALIDO`; tipo fora de `MIME_ANEXO` ou FOTO que não é imagem → `TIPO_ARQUIVO_INVALIDO`; acima de 5 MB); dono inexistente, de gravação que falhou ou animal anulado → `NOT_FOUND`; evento ou lançamento que já não vale → `VALIDATION` `JA_ANULADO`; evento ESTORNO → `ESTORNO_SEM_ANEXO` (nos três, o arquivo já subido vai para a lixeira); reenvio de chave confirmada não sobe de novo. `definir_como_foto` (só FOTO de animal) grava `ANIMAIS.foto_anexo_id` (auditado) |
 | `promover(tx, [anexo_id]) → n` | Dentro do tratador do comando dono (ANEXOS nas `reads`): TEMPORARIO → ATIVO. Inexistente ou REMOVIDO → `VALIDATION` |
-| `removerAnexo(ctx, {idempotencyKey, dados: {anexo_id, justificativa}})` | REMOVIDO (a linha fica); tira a foto da ficha se era ela; arquivo e miniatura vão para a lixeira depois do commit. Já removido → `VALIDATION` `JA_REMOVIDO` |
-| `obterAnexo(ctx, {anexo_id, miniatura})` | `{dados: {anexo, miniatura, data_url}, dataVersion}`; removido ou inexistente → `NOT_FOUND` |
-| `anexoPublico(linha)` | `{anexo_id, entidade, entity_id, event_id, nome_arquivo, mime_type, tamanho_bytes, tipo, descricao, status, tem_miniatura, created_by, created_at}` |
+| `removerAnexo(ctx, {idempotencyKey, dados: {anexo_id, justificativa}})` | REMOVIDO (a linha fica; a justificativa vai na AUDITORIA); tira a foto da ficha se era ela; arquivo e miniatura vão para a lixeira depois do commit, **salvo** se outra linha consultável ainda usa o mesmo arquivo (o histórico de um evento corrigido). Inexistente ou inerte → `NOT_FOUND`; já removido → `VALIDATION` `JA_REMOVIDO` (só ele); de evento estornado ou corrigido → `JA_ANULADO` (é histórico); sem justificativa → `CAMPO_OBRIGATORIO` |
+| `obterAnexo(ctx, {anexo_id, miniatura})` | `{dados: {anexo (com `vigente`), miniatura, data_url}, dataVersion}`; o de evento estornado ou corrigido também (`vigente = false`); removido, inexistente ou inerte (gravação que não confirmou) → `NOT_FOUND` |
+| `anexoPublico(linha, vigente?)` | `{anexo_id, entidade, entity_id, event_id, financial_id (= entity_id na entidade FINANCEIRO), nome_arquivo, mime_type, tamanho_bytes, tipo, descricao, status, tem_miniatura, vigente, created_by, created_at}`; sem `vigente`, vale o status (não REMOVIDO) |
+| `consultavel(cru, linha) → booleano` | A linha existe, não foi removida e, com `event_id`, o evento teve a operação confirmada (CONFIRMADO, ESTORNADO, CANCELADO); a inerte de gravação que falhou não é |
+| `anexosDoEvento(cru, event_id) → [anexoPublico]` | Para `evento.obter`: os ATIVOS consultáveis com o `event_id` (do evento e dos lançamentos dele), por `created_at`; `vigente` = o evento vale |
+| `anexosDoSubstituto(tx, original_id, {event_id, lancamentos: {financial_id original: financial_id substituto}}) → [linhas de ANEXOS]` | Dentro da correção: uma linha nova por anexo ATIVO do original, filha do substituto (fase A), mesmo `drive_file_id`/miniatura, `created_by`/`created_at` do envio; lançamento sem correspondente → o anexo vai para o evento |
 
 ## 17. `Maintenance` (plataforma: setup, backup, restauração, rotinas agendadas)
 
@@ -1029,7 +1042,7 @@ troca de ID na restauração), `erp_data` (yyyy-MM-dd no fuso), `erp_motivo`, `e
 | `aplicarRetencao(ctx) → {mantidos, removidos: [nome]}` | Os `backup_retencao_diarios` DIARIO mais recentes; dos mais antigos, o último de cada mês nos `backup_retencao_mensais` meses mais recentes; os demais motivos ficam o mesmo número de dias; o resto vai para a lixeira |
 | `restaurar(ctx, {dados: {backup_id, justificativa}})` | `justificativa` obrigatória (`VALIDATION` `CAMPO_OBRIGATORIO`, como na tela); backup de outro ambiente (base de teste no lugar da real e vice-versa) → `VALIDATION` `BACKUP_DE_OUTRA_BASE`. 06, seção 10: cópia do backup pelo Drive (pasta raiz, `erp_tipo = BANCO`); `DATA_VERSION` do novo = maior das duas + 1; marcador do novo ANTES de trocar a propriedade do banco em uso (`SPREADSHEET_ID`, ou `TEST_`/`DEMO_` quando é a do contexto; a `IO_PRIMITIVE:<id>` do banco de teste passa para o novo); `recoverAll`; AUDITORIA `MANUTENCAO` no novo; integridade. O anterior fica no Drive. `{banco_anterior, banco, backup, recuperacao, dataVersion, integridade}`. Erros: `NOT_FOUND` (não é backup), `LOCKED`, `CONFIG` |
 | `limparExportacoes(ctx) → {removidas}` | Exportações com mais de `EXPORTACAO_VALIDADE_DIAS` (7) |
-| `limparAnexos(ctx) → {temporarios, orfaos, arquivos_removidos}` | TEMPORARIO com mais de 24 h → REMOVIDO (comando auditado) e lixeira; arquivo deste banco na pasta Anexos sem linha em ANEXOS e com mais de 24 h → lixeira; arquivo de anexo REMOVIDO ainda fora da lixeira → lixeira |
+| `limparAnexos(ctx) → {temporarios, orfaos, arquivos_removidos}` | TEMPORARIO com mais de 24 h → REMOVIDO (comando auditado) e lixeira; arquivo deste banco na pasta Anexos sem linha em ANEXOS e com mais de 24 h → lixeira; arquivo de anexo REMOVIDO (ou só de linha inerte, de gravação que não confirmou) ainda fora da lixeira → lixeira, salvo se uma linha consultável o usa (`FileService.consultavel`) |
 | `manutencaoDiaria(ctx)` | Corpo de `trgManutencaoDiaria`: backup DIARIO com retenção → exportações → anexos. Etapa que falha não impede as seguintes; vai para ERROS_LOG (`MANUTENCAO_<ETAPA>`) e no fim lança `INTERNAL` com `erro.relatorio`. Sem falha: `{backup, retencao, exportacoes, anexos, falhas: []}` |
 | `integridadeSemanal(ctx)` | Corpo de `trgIntegridadeSemanal`: o relatório; resumo em `INTEGRIDADE:<banco>`; com erro, ERROS_LOG `INTEGRIDADE_COM_ERRO` |
 | `listarGatilhos() → [{funcao, id}]` | Gatilhos do projeto que são deste sistema (diagnóstico SP-09, aceitação CT-11) |
@@ -1391,3 +1404,35 @@ pasto, saída, brinco, marcações, custo de aquisição), nas alocações e nas
 sequência, painel e cartões dos pastos, visão geral, carga inicial e a verificação de integridade sem erro de dado. Três sementes fixas de 140 passos e casos dirigidos
 (fato no dia da saída, mesmo dia com as classes 0, 1 e 2, substituição em cadeia, estorno de compra com venda posterior,
 gêmeos com natimorto, correção de localização, centavos patológicos, arroba e carcaça, parcelas de 1 centavo, reenvio).
+
+## 32. Anexos de evento (E2.9) — `FileService`, `EventService`, `Components` (`Anexos`), `Events`, `Animals`
+
+Nota fiscal, GTA, laudo (tipo DOCUMENTO, rótulo "Documento ou laudo": o enum TIPO_ANEXO de 03a não tem LAUDO) e foto de
+qualquer evento que vale, por `anexo.adicionar` (comando próprio, auditado), com a entidade EVENTOS (o evento) ou FINANCEIRO
+(um lançamento financeiro do evento: o boleto do frete, o romaneio na receita, o recibo da comissão). Contratos das funções
+na seção 16.
+
+| Regra | Como |
+|---|---|
+| Ligação | `ANEXOS.event_id` = o evento (EVENTOS) ou o evento que criou o lançamento (FINANCEIRO); `financial_id` na forma pública. Linha filha (02, seção 5): vale enquanto o evento vale |
+| Histórico | Evento estornado ou corrigido: os anexos dele seguem em `evento.obter` e `anexo.obter` com `vigente = false`; não recebem arquivo novo nem perdem os que têm (`JA_ANULADO`); a limpeza diária não leva o arquivo à lixeira. Linha inerte (gravação que falhou) não aparece em lugar nenhum (`NOT_FOUND`) |
+| Correção | O substituto ocupa o lugar do original: cada anexo ATIVO do original vira uma linha filha do substituto na mesma operação (`impactos.anexos`), com o mesmo arquivo do Drive; o de lançamento vai para o lançamento do substituto com o mesmo papel e a mesma ordem (ANIMAIS, FRETE, OUTRO, RECEITA, DEDUCAO:<tipo>; um lançamento só nos dois → o mesmo) ou, sem par, para o evento. Remover a cópia não apaga o arquivo que o histórico usa |
+| Remoção | `anexo.remover` com justificativa obrigatória (AUDITORIA: `status` ATIVO → REMOVIDO com o motivo); só de anexo que vale |
+| Limites | Os do anexo de animal: 5 MB, `MIME_ANEXO`, FOTO só imagem; o aparelho reduz a imagem para JPEG e recusa outro tipo antes de enviar (`Campos.lerArquivo`); o servidor confere tudo de novo |
+
+Interface:
+
+| Peça | Contrato |
+|---|---|
+| `Anexos.carregarImagem(img, anexo_id, miniatura)` | Data URL de `anexo.obter` no `<img>` |
+| `Anexos.abrir(anexo, origem)` | Folha com a imagem inteira ou o link "Baixar" (data URL); `vigente = false` → nota "guardado como histórico" |
+| `Anexos.enviar({titulo, origem, entidade, entity_id, tipoPadrao, ligacoes: [[financial_id, rótulo]], fotoPrincipal, idBase, aoSalvar})` | `Cadastro.folha` de `anexo.adicionar` (arquivo, tipo, "O arquivo é de" — `EVENTO` ou um lançamento —, descrição, foto principal no animal) |
+| `Anexos.remover(anexo, origem, {aviso, aoSalvar})` | `Cadastro.folha` de `anexo.remover` com a justificativa obrigatória |
+| `Anexos.lista(itens, {podeRemover, detalhe(x), acoes(x), aviso, aoMudar})` | Cartões `.anexo` (`data-anexo`): miniatura, nome, tipo, data, descrição, Abrir, Remover |
+| Campo `lista` com `rotulos_opcoes` | Rótulos na ordem de `opcoes` (listas montadas na hora) |
+| Detalhe do evento (`#/evento/<id>`) | Seção `data-secao="anexos"` ("Documentos e fotos"), menos no ESTORNO: "Anexar nota fiscal, GTA, laudo ou foto" e Remover só no evento que vale; no anulado, a nota de histórico; cada lançamento financeiro mostra "Arquivos: …" |
+| Ficha do animal (bloco J) | A mesma peça (`Anexos.enviar` com `fotoPrincipal`, `Anexos.lista` com "Usar como foto principal") |
+
+Testes: `tests/anexos.test.js` (compra, venda, transferência, morte; estorno com e sem dependente; correção de compra, venda e
+morte, inclusive retroativa e em cadeia; limites; queda na fase A da correção; rotas pela `api()`), `tests/files.test.js`
+(anexo de animal) e `tests/ui/anexos.test.js` (detalhe da compra a 360 px).

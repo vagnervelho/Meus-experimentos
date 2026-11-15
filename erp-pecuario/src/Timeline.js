@@ -661,26 +661,211 @@ var Timeline = (function () {
     });
     return { presente: soma >= 1, pasture_id: soma >= 1 ? pasto : null };
   }
+  /** Situações possíveis de um animal na data D, depois de ter entrado no rebanho (a ordem dos contadores). */
+  var SITUACOES_NA_DATA = ['ATIVO', 'VENDIDO', 'MORTO', 'DESCARTADO', 'BAIXADO_AJUSTE'];
+  function refLinha_(l) {
+    return l ? { event_id: l.event_id, event_type: l.event_type, event_subtype: l.event_subtype, event_date: l.event_date } : null;
+  }
   /**
-   * Inventário ao fim do dia D (≥ marco zero): total = Σ efeito_inventario das linhas vigentes até D; por pasto =
-   * destino do último movimento até D. D anterior ao marco zero (ou sem marco zero) → valores nulos com motivo.
-   * Devolve {data, total, porPasto: {pasture_id: n}, semPasto, motivo}.
+   * Estadas do animal pelos movimentos vigentes a partir do marco zero (a mesma regra do bloco D da ficha e dos dias
+   * de permanência; 07, seção 3.3): [{pasture_id, inicio, fim, entrada, saida}], convenção [início, fim) — o dia da
+   * entrada conta, o da saída não; `fim` null = em andamento. Abre na entrada (+1) e em todo movimento para outro
+   * pasto; fecha no movimento seguinte e na saída (−1). Movimento para o mesmo pasto não abre estada nova; fatos e
+   * correções sem pasto não mexem nas estadas. `entrada`/`saida`: {event_id, event_type, event_subtype, event_date}.
+   */
+  function estadas(linhasDoAnimal) {
+    var out = [];
+    var atual = null;
+    function fechar(l) {
+      if (!atual) return;
+      atual.fim = l.event_date;
+      atual.saida = refLinha_(l);
+      atual = null;
+    }
+    ordenar((linhasDoAnimal || []).filter(function (l) { return !l.pre_marco_zero; })).forEach(function (l) {
+      if (l.efeito === -1) { fechar(l); return; }
+      var destino = nulo_(l.pasto_destino_id);
+      if (l.efeito !== 1 && destino === null) return;
+      if (atual && l.efeito !== 1 && atual.pasture_id === destino) return;
+      fechar(l);
+      atual = { pasture_id: destino, inicio: l.event_date, fim: null, entrada: refLinha_(l), saida: null };
+      out.push(atual);
+    });
+    return out;
+  }
+  /**
+   * Situação do animal ao fim do dia D, pela linha do tempo (04, seção 5): {presente, pasture_id, situacao,
+   * no_rebanho_desde, no_pasto_desde, entrada, saida, motivo}. `situacao`: ATIVO (no rebanho); VENDIDO, MORTO,
+   * DESCARTADO ou BAIXADO_AJUSTE (pela última saída até D); AINDA_NAO_ENTROU (nenhuma linha até D). `no_rebanho_desde`
+   * = data da entrada vigente; `no_pasto_desde` = início da estada no pasto em que está; `entrada`/`saida` = a última
+   * entrada e a última saída até D. Sem marco zero → DADOS_INSUFICIENTES; D antes dele → ANTERIOR_AO_MARCO_ZERO
+   * (tudo null): antes do marco zero não há inventário.
+   */
+  function situacaoEm(linhasDoAnimal, data, marcoZero) {
+    var vazioPor = function (motivo) {
+      return { presente: null, pasture_id: null, situacao: null, no_rebanho_desde: null, no_pasto_desde: null, entrada: null, saida: null, motivo: motivo };
+    };
+    if (vazio_(marcoZero)) return vazioPor('DADOS_INSUFICIENTES');
+    if (data < marcoZero) return vazioPor('ANTERIOR_AO_MARCO_ZERO');
+    var ate = ordenar((linhasDoAnimal || []).filter(function (l) { return !l.pre_marco_zero && l.event_date <= data; }));
+    var e = estadoEm_(ate, data);
+    var entrada = null;
+    var saida = null;
+    ate.forEach(function (l) {
+      if (l.efeito === 1) entrada = l;
+      if (l.efeito === -1) saida = l;
+    });
+    var est = estadas(ate);
+    var ultima = est.length ? est[est.length - 1] : null;
+    var situacao = e.presente ? 'ATIVO' : saida ? SAIDA_SITUACAO[saida.event_type] || 'BAIXADO_AJUSTE' : 'AINDA_NAO_ENTROU';
+    return {
+      presente: e.presente, pasture_id: e.pasture_id, situacao: situacao,
+      no_rebanho_desde: e.presente && entrada ? entrada.event_date : null,
+      no_pasto_desde: e.presente && ultima && ultima.fim === null ? ultima.inicio : null,
+      entrada: refLinha_(entrada), saida: e.presente ? null : refLinha_(saida), motivo: null,
+    };
+  }
+  /**
+   * Animais no rebanho ao fim do dia D: {motivo, itens: [{animal_id, pasture_id, no_rebanho_desde, no_pasto_desde,
+   * entrada}]} (ordem de animal_id; `entrada` = a entrada vigente, {event_id, event_type, event_subtype, event_date}).
+   * Sem marco zero / D antes dele: itens null com o motivo.
+   */
+  function presentesEm(linhas, data, marcoZero) {
+    if (vazio_(marcoZero)) return { motivo: 'DADOS_INSUFICIENTES', itens: null };
+    if (data < marcoZero) return { motivo: 'ANTERIOR_AO_MARCO_ZERO', itens: null };
+    var g = porAnimal_(linhas);
+    var itens = [];
+    Object.keys(g).sort().forEach(function (id) {
+      var s = situacaoEm(g[id], data, marcoZero);
+      if (s.presente) itens.push({ animal_id: id, pasture_id: s.pasture_id, no_rebanho_desde: s.no_rebanho_desde, no_pasto_desde: s.no_pasto_desde, entrada: s.entrada });
+    });
+    return { motivo: null, itens: itens };
+  }
+  /**
+   * Inventário ao fim do dia D (≥ marco zero; 04, seção 5.2 (v)): total = Σ efeito_inventario das linhas vigentes até
+   * D; por pasto = destino do último movimento até D; por situação = a de cada animal que já tinha entrado até D
+   * (ATIVO, VENDIDO, MORTO, DESCARTADO, BAIXADO_AJUSTE: `porSituacao.ATIVO` = total quando a linha do tempo é válida).
+   * A composição por sexo e por categoria em D precisa das categorias e fica no InventoryService (`posicao`), sobre
+   * os presentes desta mesma regra (`presentesEm`). D anterior ao marco zero (ou sem marco zero) → valores nulos com
+   * motivo. Devolve {data, total, porPasto: {pasture_id: n}, semPasto, porSituacao: {situação: n}, motivo}.
    */
   function inventario(linhas, data, marcoZero) {
-    if (vazio_(marcoZero)) return { data: data, total: null, porPasto: null, semPasto: null, motivo: 'DADOS_INSUFICIENTES' };
-    if (data < marcoZero) return { data: data, total: null, porPasto: null, semPasto: null, motivo: 'ANTERIOR_AO_MARCO_ZERO' };
+    var nulos = function (motivo) {
+      return { data: data, total: null, porPasto: null, semPasto: null, porSituacao: null, motivo: motivo };
+    };
+    if (vazio_(marcoZero)) return nulos('DADOS_INSUFICIENTES');
+    if (data < marcoZero) return nulos('ANTERIOR_AO_MARCO_ZERO');
     var total = 0;
     (linhas || []).forEach(function (l) { if (!l.pre_marco_zero && l.event_date <= data) total += l.efeito || 0; });
     var porPasto = {};
     var semPasto = 0;
+    var porSituacao = {};
+    SITUACOES_NA_DATA.forEach(function (s) { porSituacao[s] = 0; });
     var g = porAnimal_(linhas);
     Object.keys(g).forEach(function (id) {
-      var e = estadoEm_(g[id], data);
-      if (!e.presente) return;
-      if (vazio_(e.pasture_id)) semPasto++;
-      else porPasto[e.pasture_id] = (porPasto[e.pasture_id] || 0) + 1;
+      var s = situacaoEm(g[id], data, marcoZero);
+      if (s.situacao in porSituacao) porSituacao[s.situacao]++;
+      if (!s.presente) return;
+      if (vazio_(s.pasture_id)) semPasto++;
+      else porPasto[s.pasture_id] = (porPasto[s.pasture_id] || 0) + 1;
     });
-    return { data: data, total: total, porPasto: porPasto, semPasto: semPasto, motivo: null };
+    return { data: data, total: total, porPasto: porPasto, semPasto: semPasto, porSituacao: porSituacao, motivo: null };
+  }
+
+  // ------------------------------------------------------------------ dias de permanência ----
+  var ESCOPOS_PERMANENCIA = ['REBANHO', 'PASTO', 'LISTA', 'CATEGORIA'];
+  /** Chave de `por_pasto` de um item para os dias sem pasto informado (nunca colide com um pasture_id, que é UUID). */
+  var SEM_PASTO = 'SEM_PASTO';
+  function erroPeriodo_(codigo, campo, mensagem) {
+    return Validation.erro('VALIDATION', mensagem, [Validation.detalhe({ codigo: codigo, campo: campo, mensagem: mensagem })]);
+  }
+  /** Dias de [inicio, fim) (fim null = sem fim) dentro de [de, ate] inclusivos: máx(0, mín(fim, ate + 1) − máx(inicio, de)). */
+  function diasDentro_(inicio, fim, de, ate) {
+    var a = inicio > de ? inicio : de;
+    var depois = Utils.somaDias(ate, 1);
+    var b = fim === null || fim > depois ? depois : fim;
+    return a < b ? Utils.diffDias(a, b) : 0;
+  }
+  /**
+   * Dias de permanência num período (05, seção 4.6; 07, seção 3.3) — a base do rateio DIAS_PERMANENCIA. Por animal,
+   * as estadas no escopo pelos movimentos vigentes, na convenção [entrada no escopo, saída do escopo): o dia da
+   * entrada conta, o da saída não (nenhum dia cai em dois pastos; Σ dias nos pastos = dias no rebanho);
+   * dias = Σ máx(0, mín(saída, fim + 1 dia) − máx(entrada, início)); base total = Σ dias. Animal já baixado recebe os
+   * dias em que esteve presente. Antes do marco zero não há linha do tempo: o período começa nele.
+   * - linhas: linhas da linha do tempo (Timeline.linha) de quaisquer animais (as do marco zero em diante contam).
+   * - periodo: {inicio, fim} (yyyy-MM-dd, inclusivos, início ≤ fim).
+   * - escopo: {tipo: REBANHO | PASTO (ref = pasture_id) | LISTA (ref = [animal_id]) | CATEGORIA (ref = category_id)}.
+   * - opcoes: {marcoZero, categoriaEm(animal_id, data) → category_id | null} (CATEGORIA: a categoria muda com a idade,
+   *   a castração, o parto; conta dia a dia).
+   * Devolve {inicio, fim, inicio_efetivo, parcial, escopo: {tipo, ref}, motivo, base_total, n, por_pasto:
+   * [{pasture_id, dias, animais}], itens: [{animal_id, dias, por_pasto: {pasture_id | SEM_PASTO: dias}, intervalos: [{inicio, fim,
+   * dias, pasture_id}]}]} — só animais com dias > 0, em ordem de animal_id; intervalos recortados ao período, com os
+   * dois limites inclusivos. Sem marco zero (DADOS_INSUFICIENTES) ou período todo antes dele (ANTERIOR_AO_MARCO_ZERO):
+   * base_total, n e itens null. Erros: VALIDATION (datas, período invertido, escopo), INTERNAL (CATEGORIA sem categoriaEm).
+   */
+  function diasPermanencia(linhas, periodo, escopo, opcoes) {
+    var o = opcoes || {};
+    var p = periodo || {};
+    var e = escopo || {};
+    if (!Utils.dataValida(p.inicio)) throw erroPeriodo_('FORMATO_INVALIDO', 'periodo_inicio', 'Informe o início do período (aaaa-mm-dd).');
+    if (!Utils.dataValida(p.fim)) throw erroPeriodo_('FORMATO_INVALIDO', 'periodo_fim', 'Informe o fim do período (aaaa-mm-dd).');
+    if (p.inicio > p.fim) throw erroPeriodo_('FAIXA_INVALIDA', 'periodo_fim', 'O fim do período (' + dataBr(p.fim) + ') é anterior ao início (' + dataBr(p.inicio) + ').');
+    if (ESCOPOS_PERMANENCIA.indexOf(e.tipo) < 0) throw erroPeriodo_('VALOR_FORA_DA_LISTA', 'escopo', 'Escolha o escopo dos dias de permanência: rebanho, pasto, lista de animais ou categoria.');
+    if (e.tipo !== 'REBANHO' && (vazio_(e.ref) || (e.tipo === 'LISTA' && !Array.isArray(e.ref)))) {
+      throw erroPeriodo_('CAMPO_OBRIGATORIO', 'escopo', e.tipo === 'PASTO' ? 'Escolha o pasto.' : e.tipo === 'LISTA' ? 'Escolha os animais.' : 'Escolha a categoria.');
+    }
+    if (e.tipo === 'CATEGORIA' && typeof o.categoriaEm !== 'function') throw Validation.erro('INTERNAL', 'Dias de permanência por categoria precisam da função que dá a categoria do animal no dia.');
+    var out = {
+      inicio: p.inicio, fim: p.fim, inicio_efetivo: p.inicio, parcial: false, escopo: { tipo: e.tipo, ref: e.tipo === 'REBANHO' ? null : e.ref },
+      motivo: null, base_total: null, n: null, por_pasto: null, itens: null,
+    };
+    if (vazio_(o.marcoZero)) { out.motivo = 'DADOS_INSUFICIENTES'; return out; }
+    if (p.fim < o.marcoZero) { out.motivo = 'ANTERIOR_AO_MARCO_ZERO'; return out; }
+    if (p.inicio < o.marcoZero) { out.inicio_efetivo = o.marcoZero; out.parcial = true; }
+    var de = out.inicio_efetivo;
+    var lista = e.tipo === 'LISTA' ? conjunto_(e.ref) : null;
+    var g = porAnimal_(linhas);
+    var itens = [];
+    var porPasto = {};
+    Object.keys(g).sort().forEach(function (id) {
+      if (lista && !lista[id]) return;
+      var intervalos = [];
+      estadas(g[id]).forEach(function (s) {
+        if (e.tipo === 'PASTO' && s.pasture_id !== e.ref) return;
+        var dias = diasDentro_(s.inicio, s.fim, de, p.fim);
+        if (!dias) return;
+        var ini = s.inicio > de ? s.inicio : de;
+        var fimIncl = Utils.somaDias(ini, dias - 1);
+        if (e.tipo !== 'CATEGORIA') { intervalos.push({ inicio: ini, fim: fimIncl, dias: dias, pasture_id: s.pasture_id }); return; }
+        // Por categoria: os dias da estada em que o animal era da categoria, em trechos contínuos.
+        var trecho = null;
+        for (var k = 0; k < dias; k++) {
+          var dia = Utils.somaDias(ini, k);
+          if (o.categoriaEm(id, dia) === e.ref) {
+            if (trecho && Utils.somaDias(trecho.fim, 1) === dia) { trecho.fim = dia; trecho.dias++; }
+            else { trecho = { inicio: dia, fim: dia, dias: 1, pasture_id: s.pasture_id }; intervalos.push(trecho); }
+          } else trecho = null;
+        }
+      });
+      var total = intervalos.reduce(function (t, x) { return t + x.dias; }, 0);
+      if (!total) return;
+      var pp = {};
+      intervalos.forEach(function (x) {
+        var k = x.pasture_id === null ? SEM_PASTO : x.pasture_id;
+        pp[k] = (pp[k] || 0) + x.dias;
+      });
+      Object.keys(pp).forEach(function (k) {
+        var t = porPasto[k] = porPasto[k] || { pasture_id: k === SEM_PASTO ? null : k, dias: 0, animais: 0 };
+        t.dias += pp[k];
+        t.animais++;
+      });
+      itens.push({ animal_id: id, dias: total, por_pasto: pp, intervalos: intervalos });
+    });
+    out.itens = itens;
+    out.n = itens.length;
+    out.base_total = itens.reduce(function (t, x) { return t + x.dias; }, 0);
+    out.por_pasto = Object.keys(porPasto).sort().map(function (k) { return porPasto[k]; });
+    return out;
   }
   /**
    * Onde o animal estava no dia D antes das saídas desse dia (entradas e movimentos de D já aplicados): é a origem
@@ -736,7 +921,13 @@ var Timeline = (function () {
     reconstruir: reconstruir,
     porta: porta,
     conferir: conferir,
+    SITUACOES_NA_DATA: SITUACOES_NA_DATA,
+    SEM_PASTO: SEM_PASTO,
     inventario: inventario,
+    estadas: estadas,
+    situacaoEm: situacaoEm,
+    presentesEm: presentesEm,
+    diasPermanencia: diasPermanencia,
     pastoEm: pastoEm,
     pastoAntesDaSaida: pastoAntesDaSaida,
     consultaInventario: consultaInventario,

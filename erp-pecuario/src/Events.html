@@ -3,7 +3,8 @@
 /*
  * ERP Pecuário — Eventos (08-ux-ui.md, seções 3 e 4). Histórico (evento.listar, paginado no servidor, com filtros de
  * tipo, período e "só os que valem", e os registros não concluídos deste aparelho); detalhe (evento.obter: animais,
- * detalhes, avisos aceitos, justificativa, o que ele substitui ou estorna e quem o anulou); "Estornar" (ESTORNO pelo
+ * detalhes, avisos aceitos, justificativa, o que ele substitui ou estorna, quem o anulou e os documentos e fotos do
+ * lançamento e dos lançamentos financeiros dele — anexar e remover com justificativa); "Estornar" (ESTORNO pelo
  * fluxo de registro, com a simulação do servidor) e "Corrigir" (evento substituto do mesmo tipo, com os mesmos
  * animais, simulação e a diferença para o original). O registro em si (seletor, formulário, revisão, resultado) é o
  * do Registro (Components); as entradas por contexto ficam na ficha, no painel do pasto e na listagem.
@@ -317,6 +318,33 @@ var TelaEventos = (function () {
     var a = Store.animal(l.animal_id);
     return l.brinco || (a ? Store.rotuloAnimal(a) : l.codigo_interno || 'animal');
   }
+  /**
+   * Documentos e fotos do lançamento (evento.obter: anexos do evento e dos lançamentos financeiros dele): nota fiscal, GTA,
+   * laudo, foto. Evento que vale recebe e perde arquivo (com justificativa); o estornado ou corrigido guarda os seus como
+   * histórico (só abrir).
+   */
+  function blocoAnexos(ev, det, anexos) {
+    var caixa = h('div');
+    var recarregar = function () { Roteador.ir('evento/' + ev.event_id, { forcar: true, substituir: true }); };
+    var nomeLanc = {};
+    (det.FINANCEIRO || []).forEach(function (f) { nomeLanc[f.financial_id] = f.descricao || 'lançamento financeiro'; });
+    var aceita = ev.vigente && ev.event_type !== 'ESTORNO';
+    if (aceita) {
+      var negocio = ev.event_type === 'COMPRA' || ev.event_type === 'VENDA';
+      caixa.appendChild(h('div', { class: 'acoes' }, UI.botao('Anexar nota fiscal, GTA, laudo ou foto', { tipo: 'primario', icone: 'registrar', aoClicar: function (evt) {
+        Anexos.enviar({
+          titulo: 'Arquivo do lançamento', origem: evt.currentTarget, entidade: 'EVENTOS', entity_id: ev.event_id, tipoPadrao: negocio ? 'NOTA_FISCAL' : 'DOCUMENTO', idBase: 'anx-ev',
+          ligacoes: (det.FINANCEIRO || []).map(function (f) { return [f.financial_id, nomeLanc[f.financial_id] + ' (' + Fmt.dinheiro(f.valor) + ')']; }), aoSalvar: recarregar,
+        });
+      } })));
+    } else if (anexos.length) caixa.appendChild(UI.nota(ev.event_type === 'ESTORNO' ? 'Os arquivos ficam no lançamento estornado.' : 'Este lançamento não vale mais: os arquivos dele ficam guardados como histórico.', 'info'));
+    if (!anexos.length) { caixa.appendChild(UI.nota(aceita ? 'Nenhum arquivo neste lançamento.' : 'Nenhum arquivo.', 'info')); return caixa; }
+    caixa.appendChild(Anexos.lista(anexos, {
+      podeRemover: aceita, aoMudar: recarregar, aviso: 'O arquivo sai do lançamento e vai para a lixeira do Drive; o registro de que existiu fica na auditoria.',
+      detalhe: function (x) { return x.financial_id ? 'de ' + (nomeLanc[x.financial_id] || 'um lançamento financeiro') : null; },
+    }));
+    return caixa;
+  }
   function montarDetalhe(el, p) {
     var vivo = true;
     var titulo = h('h1', { text: 'Lançamento' });
@@ -408,17 +436,21 @@ var TelaEventos = (function () {
         ].filter(Boolean)), { dado: 'venda' }));
       }
       var tipoDeducao = {};
+      var anexos = o.anexos || [];
       (payload.deducoes || []).forEach(function (x) { tipoDeducao[x.financial_id] = x.tipo; });
       if ((det.FINANCEIRO || []).length) corpo.appendChild(UI.secao('Lançamentos financeiros', h('ul', { class: 'lista-simples' }, det.FINANCEIRO.map(function (x) {
         var pa = Store.parceiro(x.partner_id);
         var titulos = (det.PARCELAS || []).filter(function (p) { return p.financial_id === x.financial_id; }).map(function (p) { return Fmt.dinheiro(p.valor) + ' vence ' + Fmt.data(p.data_vencimento) + ' (' + Fmt.rotulo('STATUS_PARCELA', p.status).toLowerCase() + ')'; });
         var rat = (det.RATEIOS || []).filter(function (r) { return r.financial_id === x.financial_id; })[0];
+        var arquivos = anexos.filter(function (a) { return a.financial_id === x.financial_id; }).map(function (a) { return a.nome_arquivo; });
         return h('li', { dataset: { lancamento: x.financial_id } }, h('span', { class: 'dado', text: (x.descricao || 'lançamento') + ': ' + Fmt.dinheiro(x.valor) }),
           ' · ' + Fmt.rotulo('NATUREZA', x.natureza) + (tipoDeducao[x.financial_id] ? ' (' + Store.rotuloLista('TIPO_DEDUCAO_VENDA', tipoDeducao[x.financial_id]).toLowerCase() + ')' : '') +
           (x.retida_pelo_comprador === true || x.retida_pelo_comprador === 'S' ? ' · descontada pelo comprador' : '') + (pa ? ' · ' + pa.nome : '') + ' · ' + (x.status === 'CANCELADO' ? 'cancelado' : Fmt.rotulo('STATUS_PAGAMENTO', x.status_pagamento).toLowerCase()),
           titulos.length ? h('div', { class: 'suave', text: 'Títulos: ' + titulos.join('; ') }) : null,
-          rat ? h('div', { class: 'suave', text: 'Rateio: ' + Fmt.rotulo('CRITERIO_RATEIO', rat.criterio).toLowerCase() + ', ' + Fmt.dinheiro(rat.total_alocado) + ' distribuídos' }) : null);
+          rat ? h('div', { class: 'suave', text: 'Rateio: ' + Fmt.rotulo('CRITERIO_RATEIO', rat.criterio).toLowerCase() + ', ' + Fmt.dinheiro(rat.total_alocado) + ' distribuídos' }) : null,
+          arquivos.length ? h('div', { class: 'suave', text: 'Arquivos: ' + arquivos.join(', ') }) : null);
       })), { dado: 'financeiro' }));
+      if (ev.event_type !== 'ESTORNO') corpo.appendChild(UI.secao('Documentos e fotos', blocoAnexos(ev, det, anexos), { dado: 'anexos' }));
       if (ev.vigente && ev.event_type !== 'ESTORNO' && Store.tipoEvento('ESTORNO')) {
         acoes.appendChild(UI.botao('Estornar', { tipo: 'perigo', aoClicar: function () {
           var rot = {};

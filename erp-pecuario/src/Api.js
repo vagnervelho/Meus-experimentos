@@ -127,7 +127,7 @@ var Api = (function () {
     'sanidade.agenda': futura_(3, 'Sanidade'),
     'reproducao.indicadores': futura_(3, 'Reprodução'),
     'peso.desempenho': futura_(3, 'Pesagens'),
-    'dashboard.obter': consulta_(function (ctx) { return InventoryService.visaoGeral(ctx); }),
+    'dashboard.obter': consulta_(function (ctx, p) { return InventoryService.visaoGeral(ctx, p.dados); }),
     'alerta.listar': consulta_(function (ctx) { return InventoryService.listarAlertas(ctx, Maintenance.estado(ctx).alertas_estado); }),
     'relatorio.obter': futura_(5, 'Relatórios'),
     'relatorio.exportar': futura_(5, 'Relatórios'),

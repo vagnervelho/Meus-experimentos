@@ -281,11 +281,6 @@ var TelaRebanho = (function () {
     });
     return out;
   }
-  function carregarImagem(img, anexoId, miniatura) {
-    Cliente.consulta('anexo.obter', { anexo_id: anexoId, miniatura: !!miniatura }).then(function (r) {
-      if (r.data && r.data.data_url) img.src = r.data.data_url;
-    }, function (e) { img.alt = 'Imagem indisponível (' + e.message + ')'; });
-  }
   /** Edição num formulário só (DV-07): cadastro direto com auditoria; campo sensível pede justificativa e vira ajuste. */
   function editar(f, origem) {
     var g = f.geral, gen = f.genealogia || {};
@@ -480,55 +475,26 @@ var TelaRebanho = (function () {
     });
     return ul;
   }
-  function blocoAnexos(f, a) {
+  function blocoAnexos(f) {
     var caixa = h('div');
     var itens = (f.anexos && f.anexos.itens) || [];
     var recarregar = function () { delete fichas[f.animal_id]; Roteador.ir('animal/' + f.animal_id + '/anexos', { forcar: true, substituir: true }); };
     caixa.appendChild(h('div', { class: 'acoes' }, UI.botao('Adicionar foto ou documento', { tipo: 'primario', icone: 'registrar', aoClicar: function (ev) {
-      Cadastro.folha({
-        titulo: 'Foto ou documento', rota: 'anexo.adicionar', origem: ev.currentTarget, idBase: 'anx', verbo: 'Enviar',
-        defs: [{ id: 'arquivo', rotulo: 'Arquivo (imagem ou PDF)', tipo: 'anexo', obrigatorio: true, ajuda: 'Fotos são reduzidas neste aparelho antes de enviar.' },
-          { id: 'tipo', rotulo: 'Tipo', tipo: 'lista', opcoes: ['FOTO', 'DOCUMENTO', 'GTA', 'NOTA_FISCAL', 'OUTRO'], rotulos_de: 'tipo_anexo', obrigatorio: true, default: 'FOTO' },
-          { id: 'descricao', rotulo: 'Descrição', tipo: 'texto' },
-          { id: 'definir_como_foto', rotulo: 'Usar como foto principal', tipo: 'bool', visivel_se: { campo: 'tipo', valores: ['FOTO'] } }],
-        validar: function (c) { return c.definir_como_foto && !/^image\//.test(c.arquivo.mime_type) ? [{ campo: 'definir_como_foto', mensagem: 'Só uma imagem pode ser a foto principal.' }] : []; },
-        montar: function (c) { return { entidade: 'ANIMAIS', entity_id: f.animal_id, tipo: c.tipo, descricao: c.descricao, nome_arquivo: c.arquivo.nome_arquivo, mime_type: c.arquivo.mime_type, conteudo_base64: c.arquivo.conteudo_base64, miniatura_base64: c.arquivo.miniatura_base64, definir_como_foto: c.definir_como_foto === true }; },
-        sucesso: function () { return 'Arquivo guardado.'; }, aoSalvar: recarregar,
-      });
+      Anexos.enviar({ titulo: 'Foto ou documento', origem: ev.currentTarget, entidade: 'ANIMAIS', entity_id: f.animal_id, tipoPadrao: 'FOTO', fotoPrincipal: true, aoSalvar: recarregar });
     } })));
     if (!itens.length) { caixa.appendChild(UI.nota('Nenhuma foto ou documento.', 'info')); return caixa; }
-    var ul = h('ul', { class: 'anexos' });
-    itens.forEach(function (x) {
-      var img = /^image\//.test(x.mime_type) && x.tem_miniatura ? h('img', { alt: x.descricao || x.nome_arquivo }) : null;
-      if (img) carregarImagem(img, x.anexo_id, true);
-      var acoes = [UI.botao('Abrir', { aoClicar: function (ev) { abrirAnexo(x, ev.currentTarget); } })];
-      if (/^image\//.test(x.mime_type) && !x.principal) acoes.push(UI.botao('Usar como foto principal', { aoClicar: function (ev) { definirFoto(f.animal_id, x, ev.currentTarget, recarregar); } }));
-      acoes.push(UI.botao('Remover', { tipo: 'texto', icone: 'remover', aoClicar: function (ev) { removerAnexo(x, ev.currentTarget, recarregar); } }));
-      ul.appendChild(h('li', { class: 'anexo', dataset: { anexo: x.anexo_id } }, img, h('div', { class: 'dado', text: x.nome_arquivo }), h('div', { class: 'suave', text: Fmt.rotulo('TIPO_ANEXO', x.tipo) + (x.principal ? ' · foto principal' : '') + ' · ' + Fmt.instante(x.created_at) }), acoes));
-    });
-    caixa.appendChild(ul);
+    caixa.appendChild(Anexos.lista(itens, {
+      podeRemover: true, aoMudar: recarregar, aviso: 'O arquivo sai da ficha e vai para a lixeira do Drive; o registro de que existiu fica na auditoria.',
+      detalhe: function (x) { return x.principal ? 'foto principal' : null; },
+      acoes: function (x) { return /^image\//.test(x.mime_type) && !x.principal ? [UI.botao('Usar como foto principal', { aoClicar: function (ev) { definirFoto(f.animal_id, x, ev.currentTarget, recarregar); } })] : []; },
+    }));
     return caixa;
-  }
-  function abrirAnexo(x, origem) {
-    var corpo = h('div', null, UI.carregando('Buscando o arquivo…'));
-    UI.folha({ titulo: x.nome_arquivo, conteudo: corpo, origem: origem });
-    Cliente.consulta('anexo.obter', { anexo_id: x.anexo_id }).then(function (r) {
-      Util.limpar(corpo);
-      if (/^image\//.test(x.mime_type)) corpo.appendChild(h('img', { class: 'imagem-cheia', src: r.data.data_url, alt: x.descricao || x.nome_arquivo }));
-      else corpo.appendChild(h('a', { class: 'botao botao-primario', href: r.data.data_url, download: x.nome_arquivo }, 'Baixar ' + x.nome_arquivo));
-    }, function (e) { Util.limpar(corpo); corpo.appendChild(UI.estadoErro(e)); });
   }
   function definirFoto(animalId, x, botao, depois) {
     var status = h('div');
     botao.parentNode.appendChild(status);
     Cadastro.envio({ rota: 'animal.editar', botao: botao, rotuloBotao: 'Usar como foto principal', status: status, aoSucesso: function () { UI.aviso('Foto principal trocada.', { tipo: 'ok' }); depois(); } })
       .enviar({ animal_id: animalId, campos: { foto_anexo_id: x.anexo_id } });
-  }
-  function removerAnexo(x, origem, depois) {
-    Cadastro.folha({ titulo: 'Remover ' + x.nome_arquivo, rota: 'anexo.remover', origem: origem, verbo: 'Remover o arquivo', perigo: true, idBase: 'rmx',
-      defs: [{ id: 'justificativa', rotulo: 'Por que remover', tipo: 'texto', obrigatorio: true }],
-      extra: UI.nota('O arquivo sai da ficha e vai para a lixeira do Drive; o registro de que existiu fica na auditoria.', 'aviso'),
-      montar: function (c) { return { anexo_id: x.anexo_id, justificativa: c.justificativa }; }, sucesso: function () { return 'Arquivo removido.'; }, aoSalvar: depois });
   }
   function montarFicha(el, p) {
     var id = p.id, aba = p.aba || 'resumo';
@@ -549,7 +515,7 @@ var TelaRebanho = (function () {
       var linha = a || { animal_id: id, situacao_cadastral: g.situacao_cadastral, brinco: g.brinco, codigo_interno: g.codigo_interno };
       titulo.textContent = g.brinco || Store.rotuloAnimal(linha);
       sub.textContent = [g.categoria ? g.categoria.nome : Fmt.rotulo('SEXO', g.sexo), Fmt.rotulo('SITUACAO_CADASTRAL', g.situacao_cadastral), g.codigo_interno].join(' · ');
-      if (g.foto_anexo_id) { var img = h('img', { class: 'ficha-foto', alt: 'Foto de ' + (g.brinco || g.codigo_interno) }); foto.appendChild(img); carregarImagem(img, g.foto_anexo_id, true); }
+      if (g.foto_anexo_id) { var img = h('img', { class: 'ficha-foto', alt: 'Foto de ' + (g.brinco || g.codigo_interno) }); foto.appendChild(img); Anexos.carregarImagem(img, g.foto_anexo_id, true); }
       var abrirEdicao = g.situacao_cadastral === 'ANULADO' ? null : function (ev) { editar(f, ev && ev.currentTarget); };
       if (abrirEdicao) acoes.appendChild(UI.botao('Editar cadastro', { icone: 'editar', aoClicar: abrirEdicao }));
       atalhosFicha(linha, id).forEach(function (b) { acoes.appendChild(b); });
@@ -560,7 +526,7 @@ var TelaRebanho = (function () {
       else if (aba === 'reproducao') corpo.appendChild(UI.secao('Reprodução', blocoReproducao(f), { dado: 'reproducao' }));
       else if (aba === 'financeiro') corpo.appendChild(UI.secao('Financeiro', blocoFinanceiro(f), { dado: 'financeiro' }));
       else if (aba === 'eventos') corpo.appendChild(UI.secao('Linha do tempo', blocoEventos(f), { dado: 'linha-tempo' }));
-      else if (aba === 'anexos') corpo.appendChild(UI.secao('Fotos e documentos', blocoAnexos(f, linha)));
+      else if (aba === 'anexos') corpo.appendChild(UI.secao('Fotos e documentos', blocoAnexos(f)));
       else if (BLOCO_DA_ABA[aba]) {
         var b = f[BLOCO_DA_ABA[aba]];
         corpo.appendChild(UI.secao(ABAS.filter(function (x) { return x[0] === aba; })[0][1], b && b.entregue === false ? UI.nota(b.mensagem, 'info') : UI.nota('Sem registros.', 'info')));

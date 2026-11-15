@@ -4,7 +4,8 @@
  * ERP Pecuário — Pastos (§7; 08-ux-ui.md, seção 3). Lista em cartões (cabeças, UA/ha, ocupação %, próprio ou
  * arrendado, com o arrendador), cadastro e edição (posse e arrendador; "+ Novo" arrendador já marcado como tal) e
  * painel do pasto (pasto.painel): dados do pasto, composição por sexo e categoria, lotação com a parte estimada,
- * animais e a "posição em [data]" (a partir do marco zero). Atalhos de registro só para os tipos entregues.
+ * animais (desde quando estão no pasto) e a "posição em [data]" (a partir do marco zero), e os dias de permanência de
+ * cada animal num período (a base do rateio por dias de permanência). Atalhos de registro só para os tipos entregues.
  */
 var TelaPastos = (function () {
   var h = Util.h;
@@ -119,11 +120,11 @@ var TelaPastos = (function () {
       corpo.appendChild(UI.secao('Composição em ' + Fmt.data(p.data), h('div', null, UI.pares([
         ['Cabeças', Fmt.numero(p.cabecas)], ['Machos', Fmt.numero(p.machos)], ['Fêmeas', Fmt.numero(p.femeas)], ['Sem categoria', Fmt.numero(p.sem_categoria)],
       ].concat((p.por_categoria || []).map(function (c) { return [c.nome, Fmt.numero(c.cabecas)]; })))), { dado: 'composicao' }));
-      corpo.appendChild(UI.secao('Lotação', UI.pares([
-        ['Peso vivo total', texto(p.peso_vivo_total, function (v) { return Fmt.peso(v); })], ['UA', texto(ua, function (v) { return Fmt.numero(v, 2); })],
+      corpo.appendChild(UI.secao('Lotação', h('div', null, UI.pares([
+        ['Peso vivo total', texto(p.peso_vivo_total, function (v) { return Fmt.peso(v); })], ['Peso médio', texto(p.peso_medio, function (v) { return Fmt.peso(v); })], ['UA', texto(ua, function (v) { return Fmt.numero(v, 2); })],
         parte('pesada', 'Com pesagem em dia'), parte('pesagem_vencida', 'Pesagem vencida (estimado)'), parte('sem_pesagem', 'Sem pesagem (peso de referência)'),
         ['UA/ha', texto(p.ua_ha, function (v) { return Fmt.numero(v, 2); })], ['Ocupação', ocupacao(p.ocupacao_pct)], ua.rotulo ? ['Observação', ua.rotulo] : null,
-      ]), { dado: 'lotacao' }));
+      ]), (p.acima_da_capacidade || {}).ua_ha || (p.acima_da_capacidade || {}).cabecas ? UI.nota('Pasto acima da capacidade informada em ' + Fmt.data(p.data) + '.', 'aviso') : null), { dado: 'lotacao' }));
       var animais = p.animais || [];
       var conteudo = animais.length ? UI.tabela({
         id: 'pasto-animais', rotulo: 'Animais do pasto', linhas: animais, chave: function (a) { return a.animal_id; },
@@ -133,9 +134,51 @@ var TelaPastos = (function () {
           { id: 'sexo', rotulo: 'Sexo', valor: function (a) { return Fmt.rotulo('SEXO', a.sexo); } },
           { id: 'idade_meses', rotulo: 'Idade', num: true, formatar: function (a) { return Fmt.idade(a.idade_meses); } },
           { id: 'peso', rotulo: 'Peso', num: true, valor: function (a) { return a.peso && a.peso.kg; }, formatar: function (a) { return a.peso && a.peso.kg ? Fmt.peso(a.peso.kg) + (a.peso.estimado ? ' (estimado)' : '') : '—'; } },
+          { id: 'no_pasto_desde', rotulo: 'No pasto desde', valor: function (a) { return a.no_pasto_desde || ''; }, formatar: function (a) { return Fmt.data(a.no_pasto_desde); } },
         ],
       }).el : UI.vazio({ texto: 'Nenhum animal neste pasto em ' + Fmt.data(p.data) + '.', acao: entrada ? { texto: 'Registrar entrada aqui', aoClicar: function () { Registro.abrir(entrada, { linhas: [{ valores: { pasto_destino_id: id } }], origem: 'pasto/' + id }); } } : null });
       corpo.appendChild(UI.secao('Animais', conteudo, { dado: 'animais' }));
+      corpo.appendChild(secaoPermanencia());
+    }
+    /** Dias de permanência de cada animal no pasto num período (o dia da entrada conta, o da saída não). */
+    function secaoPermanencia() {
+      var hoje = Fmt.hoje();
+      var ini = h('input', { type: 'date', id: 'pst-perm-de', max: hoje, min: d0 || null, value: hoje.slice(0, 8) + '01' });
+      var fim = h('input', { type: 'date', id: 'pst-perm-ate', max: hoje, min: d0 || null, value: hoje });
+      var saida = h('div', { dataset: { permanencia: '1' } });
+      async function calcular() {
+        Util.limpar(saida);
+        saida.appendChild(UI.carregando('Contando os dias…'));
+        try {
+          var r = await Cliente.consulta('pasto.painel', { pasture_id: id, data: dataIn.value || hoje, periodo_inicio: ini.value, periodo_fim: fim.value });
+          if (!vivo) return;
+          Util.limpar(saida);
+          var pm = r.data.permanencia;
+          if (pm.motivo) { saida.appendChild(UI.nota('Sem dias de permanência: ' + Fmt.rotulo('MOTIVO', pm.motivo) + '.', 'info')); return; }
+          if (pm.parcial) saida.appendChild(UI.nota('O período começa antes do marco zero: os dias contam a partir dele (' + Fmt.data(pm.inicio_efetivo) + ').', 'info'));
+          saida.appendChild(UI.pares([['Animais', Fmt.numero(pm.n)], ['Total de animal-dias', Fmt.numero(pm.base_total)]]));
+          if (!pm.itens.length) { saida.appendChild(UI.vazio({ texto: 'Nenhum animal esteve neste pasto no período.' })); return; }
+          saida.appendChild(UI.tabela({
+            id: 'pasto-permanencia', rotulo: 'Dias de permanência no período', linhas: pm.itens, chave: function (a) { return a.animal_id; },
+            colunas: [
+              { id: 'brinco', rotulo: 'Brinco', valor: function (a) { return a.brinco || a.codigo_interno; } },
+              { id: 'dias', rotulo: 'Dias', num: true, formatar: function (a) { return Fmt.numero(a.dias); } },
+              { id: 'intervalos', rotulo: 'Períodos', valor: function (a) { return a.intervalos.map(function (x) { return Fmt.dataCurta(x.inicio) + ' a ' + Fmt.dataCurta(x.fim); }).join('; '); } },
+            ],
+          }).el);
+        } catch (e) {
+          if (!vivo) return;
+          Util.limpar(saida);
+          saida.appendChild(UI.estadoErro(e));
+        }
+      }
+      return UI.secao('Dias de permanência', h('div', null,
+        h('p', { class: 'suave', text: 'Quantos dias cada animal ficou neste pasto no período: o dia da entrada conta, o da saída não.' }),
+        h('div', { class: 'busca-linha' },
+          h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo', for: 'pst-perm-de', text: 'De' }), ini),
+          h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo', for: 'pst-perm-ate', text: 'Até' }), fim),
+          UI.botao('Contar', { aoClicar: calcular })),
+        saida), { dado: 'permanencia' });
     }
     carregar();
     return function () { vivo = false; };

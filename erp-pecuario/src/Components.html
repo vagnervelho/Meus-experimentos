@@ -459,7 +459,8 @@ var Campos = (function () {
     return d;
   }
   function opcoesDe(def) {
-    if (def.opcoes) return def.opcoes.map(function (c) { return { valor: c, rotulo: Fmt.rotuloOpcao(def.rotulos_de || def.id, c) }; });
+    // rotulos_opcoes: rótulos na ordem de `opcoes`, para listas montadas na hora (ex.: os lançamentos de um evento).
+    if (def.opcoes) return def.opcoes.map(function (c, i) { return { valor: c, rotulo: def.rotulos_opcoes && def.rotulos_opcoes[i] !== undefined ? def.rotulos_opcoes[i] : Fmt.rotuloOpcao(def.rotulos_de || def.id, c) }; });
     if (def.lista) return Store.lista(def.lista).map(function (l) { return { valor: l.codigo, rotulo: l.rotulo }; });
     return [];
   }
@@ -707,13 +708,14 @@ var Campos = (function () {
     }
   }
 
-  /** Lê um arquivo para anexo: imagens são reduzidas no aparelho (~300 KB e miniatura ~15 KB); outros, até 5 MB. */
+  /** Lê um arquivo para anexo: imagens são reduzidas no aparelho (~300 KB e miniatura ~15 KB); PDF até 5 MB; outro tipo é recusado. */
   function lerArquivo(arquivo) {
     if (/^image\//.test(arquivo.type)) {
       return Promise.all([reduzirImagem_(arquivo, 1600, 300 * 1024), reduzirImagem_(arquivo, 240, 15 * 1024)]).then(function (r) {
         return { nome_arquivo: arquivo.name.replace(/\.[^.]+$/, '') + '.jpg', mime_type: 'image/jpeg', tamanho_bytes: Math.floor(r[0].length * 3 / 4), conteudo_base64: r[0], miniatura_base64: r[1] };
       });
     }
+    if (arquivo.type !== 'application/pdf') return Promise.reject(new Error('Este tipo de arquivo não é aceito: escolha uma foto (imagem) ou um documento em PDF.'));
     if (arquivo.size > MAX_ANEXO_BYTES) return Promise.reject(new Error('Arquivo grande demais (' + Fmt.numero(arquivo.size / 1048576, 1) + ' MB). O limite é 5 MB.'));
     return new Promise(function (resolve, reject) {
       var fr = new FileReader();
@@ -985,6 +987,87 @@ var Cadastro = (function () {
     return { folha: f, bloco: bloco, valores: valores, salvar: salvar, status: status };
   }
   return { envio: envio, folha: folha };
+})();
+
+var Anexos = (function () {
+  var h = Util.h;
+  var TIPOS = ['FOTO', 'DOCUMENTO', 'GTA', 'NOTA_FISCAL', 'OUTRO'];
+  function ehImagem(x) { return /^image\//.test(x.mime_type || ''); }
+  /** Põe num <img> a imagem do anexo (miniatura ou inteira), como data URL (o arquivo é privado no Drive). */
+  function carregarImagem(img, anexoId, miniatura) {
+    Cliente.consulta('anexo.obter', { anexo_id: anexoId, miniatura: !!miniatura }).then(function (r) {
+      if (r.data && r.data.data_url) img.src = r.data.data_url;
+    }, function (e) { img.alt = 'Imagem indisponível (' + e.message + ')'; });
+  }
+  /** Abre o arquivo numa folha: imagem inteira ou link para baixar (documento). */
+  function abrir(x, origem) {
+    var corpo = h('div', null, UI.carregando('Buscando o arquivo…'));
+    UI.folha({ titulo: x.nome_arquivo, conteudo: corpo, origem: origem });
+    Cliente.consulta('anexo.obter', { anexo_id: x.anexo_id }).then(function (r) {
+      Util.limpar(corpo);
+      if (r.data.anexo && r.data.anexo.vigente === false) corpo.appendChild(UI.nota('Arquivo de um lançamento que não vale mais: guardado como histórico.', 'info'));
+      if (ehImagem(x)) corpo.appendChild(h('img', { class: 'imagem-cheia', src: r.data.data_url, alt: x.descricao || x.nome_arquivo }));
+      else corpo.appendChild(h('a', { class: 'botao botao-primario', href: r.data.data_url, download: x.nome_arquivo }, 'Baixar ' + x.nome_arquivo));
+    }, function (e) { Util.limpar(corpo); corpo.appendChild(UI.estadoErro(e)); });
+  }
+  /**
+   * Envio de arquivo (anexo.adicionar) numa folha. o: {titulo, origem, entidade, entity_id, tipoPadrao, ligacoes
+   * ([[financial_id, rótulo]]: o arquivo pode ir para um lançamento financeiro do evento), fotoPrincipal (animal),
+   * aoSalvar(r)}. O cliente só confere o formato; tipo de arquivo, tamanho e dono são do servidor.
+   */
+  function enviar(o) {
+    var defs = [{ id: 'arquivo', rotulo: 'Arquivo (imagem ou PDF)', tipo: 'anexo', obrigatorio: true, ajuda: 'Fotos são reduzidas neste aparelho antes de enviar. Documentos até 5 MB.' },
+      { id: 'tipo', rotulo: 'Tipo', tipo: 'lista', opcoes: TIPOS, rotulos_de: 'tipo_anexo', obrigatorio: true, default: o.tipoPadrao || 'FOTO' }];
+    if (o.ligacoes && o.ligacoes.length) {
+      defs.push({ id: 'ligar_a', rotulo: 'O arquivo é de', tipo: 'lista', obrigatorio: true, default: 'EVENTO', opcoes: ['EVENTO'].concat(o.ligacoes.map(function (l) { return l[0]; })),
+        rotulos_opcoes: ['O lançamento todo'].concat(o.ligacoes.map(function (l) { return l[1]; })), ajuda: 'Escolha o lançamento financeiro quando o arquivo for só dele (boleto do frete, recibo da comissão).' });
+    }
+    defs.push({ id: 'descricao', rotulo: 'Descrição', tipo: 'texto' });
+    if (o.fotoPrincipal) defs.push({ id: 'definir_como_foto', rotulo: 'Usar como foto principal', tipo: 'bool', visivel_se: { campo: 'tipo', valores: ['FOTO'] } });
+    return Cadastro.folha({
+      titulo: o.titulo || 'Foto ou documento', rota: 'anexo.adicionar', origem: o.origem, idBase: o.idBase || 'anx', verbo: 'Enviar', defs: defs,
+      validar: function (c) {
+        var e = [];
+        if (c.tipo === 'FOTO' && c.arquivo && !ehImagem(c.arquivo)) e.push({ campo: 'tipo', mensagem: 'Uma foto precisa ser uma imagem. Para um PDF, escolha outro tipo.' });
+        if (c.definir_como_foto && c.arquivo && !ehImagem(c.arquivo)) e.push({ campo: 'definir_como_foto', mensagem: 'Só uma imagem pode ser a foto principal.' });
+        return e;
+      },
+      montar: function (c) {
+        var fin = c.ligar_a && c.ligar_a !== 'EVENTO' ? c.ligar_a : null;
+        var d = { entidade: fin ? 'FINANCEIRO' : o.entidade, entity_id: fin || o.entity_id, tipo: c.tipo, descricao: c.descricao, nome_arquivo: c.arquivo.nome_arquivo, mime_type: c.arquivo.mime_type, conteudo_base64: c.arquivo.conteudo_base64, miniatura_base64: c.arquivo.miniatura_base64 };
+        if (o.fotoPrincipal) d.definir_como_foto = c.definir_como_foto === true;
+        return d;
+      },
+      sucesso: function () { return 'Arquivo guardado.'; }, aoSalvar: o.aoSalvar,
+    });
+  }
+  /** Remoção com justificativa (anexo.remover). o: {aviso (texto), aoSalvar(r)}. */
+  function remover(x, origem, o) {
+    return Cadastro.folha({ titulo: 'Remover ' + x.nome_arquivo, rota: 'anexo.remover', origem: origem, verbo: 'Remover o arquivo', perigo: true, idBase: 'rmx',
+      defs: [{ id: 'justificativa', rotulo: 'Por que remover', tipo: 'texto', obrigatorio: true }],
+      extra: UI.nota(o.aviso || 'O arquivo vai para a lixeira do Drive; o registro de que existiu fica na auditoria.', 'aviso'),
+      montar: function (c) { return { anexo_id: x.anexo_id, justificativa: c.justificativa }; }, sucesso: function () { return 'Arquivo removido.'; }, aoSalvar: o.aoSalvar });
+  }
+  /**
+   * Lista de anexos em cartões (miniatura das imagens, nome, tipo, data, Abrir e, se `podeRemover`, Remover).
+   * o: {podeRemover (bool), detalhe(x) → texto extra, acoes(x) → [botões], aviso (da remoção), aoMudar()}.
+   */
+  function lista(itens, o) {
+    var op = o || {};
+    var ul = h('ul', { class: 'anexos' });
+    itens.forEach(function (x) {
+      var img = ehImagem(x) && x.tem_miniatura ? h('img', { alt: x.descricao || x.nome_arquivo }) : null;
+      if (img) carregarImagem(img, x.anexo_id, true);
+      var acoes = [UI.botao('Abrir', { aoClicar: function (ev) { abrir(x, ev.currentTarget); } })].concat(op.acoes ? op.acoes(x) : []);
+      if (op.podeRemover) acoes.push(UI.botao('Remover', { tipo: 'texto', icone: 'remover', aoClicar: function (ev) { remover(x, ev.currentTarget, { aviso: op.aviso, aoSalvar: op.aoMudar }); } }));
+      var extra = op.detalhe ? op.detalhe(x) : null;
+      ul.appendChild(h('li', { class: 'anexo', dataset: { anexo: x.anexo_id } }, img, h('div', { class: 'dado', text: x.nome_arquivo }),
+        h('div', { class: 'suave', text: [Fmt.rotulo('TIPO_ANEXO', x.tipo), extra, Fmt.instante(x.created_at)].filter(Boolean).join(' · ') }),
+        x.descricao ? h('div', { text: x.descricao }) : null, acoes));
+    });
+    return ul;
+  }
+  return { TIPOS: TIPOS, carregarImagem: carregarImagem, abrir: abrir, enviar: enviar, remover: remover, lista: lista };
 })();
 
 var Seletor = (function () {

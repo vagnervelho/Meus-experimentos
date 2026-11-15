@@ -292,3 +292,32 @@ natimorto, correção de localização, centavos patológicos, arroba e carcaça
 centavo, reenvio com a mesma chave); em `tests/unitofwork.adversarial.test.js`, os oráculos independentes no desfecho dos
 três comandos-modelo da Fase 2 e os subconjuntos densos das pendentes antes de cada flush (SpreadsheetApp); em
 `tests/utils.test.js`, `formatarNumero`.
+- Verificado em Node (`npm test`: 452 testes, 452 aprovados, cerca de 6 minutos neste ambiente; o arquivo novo leva cerca de
+  40 s) e no navegador com o backend real (`npm run ui:check`: 43 testes, 43 aprovados). Fora da suíte, a mesma geração
+  aleatória rodou com mais 26 sementes de 220 passos sem divergência entre modelo e sistema. Nada validado na conta do dono.
+
+## 15/11/2026 — Fase 2, etapa ANEXOS DE EVENTO (E2.9)
+
+- Anexos de evento (FileService, `anexo.*`): nota fiscal, GTA, laudo (DOCUMENTO, rótulo "Documento ou laudo") e foto de
+  qualquer evento que vale, ligados ao `event_id` (03a, seção 5.1); nova entidade FINANCEIRO para o arquivo de um
+  lançamento financeiro do evento (boleto do frete, romaneio na receita, recibo da comissão), com o `event_id` do evento
+  que o criou. A linha é filha do evento (vale enquanto ele vale) e, com o evento estornado ou corrigido, continua
+  consultável como histórico (`vigente = false` em `anexo.obter` e `evento.obter`); o evento anulado não recebe nem perde
+  arquivo (`JA_ANULADO`); o ESTORNO não recebe (`ESTORNO_SEM_ANEXO`). Linha inerte de gravação que falhou não aparece.
+- `evento.obter` devolve `anexos` (do evento e dos lançamentos dele, com `financial_id`).
+- Correção de evento (EventService): os anexos ativos do original passam ao substituto na mesma operação (linhas filhas
+  dele, mesmo arquivo do Drive); o de lançamento vai para o lançamento correspondente pelo papel (frete → frete, comissão
+  → comissão, outros custos → outros custos) ou, sem par, para o evento; a simulação mostra quantos (`impactos.anexos`).
+- Remoção (`anexo.remover`): justificativa obrigatória no servidor (antes só na tela); o arquivo só vai para a lixeira se
+  nenhuma outra linha consultável o usa (o histórico do evento corrigido). A limpeza diária (Maintenance) também ignora a
+  linha inerte de uma gravação que não confirmou ao decidir se um arquivo ainda está em uso.
+- Tipos de arquivo: o servidor passa a aceitar só imagem (JPEG, PNG, WEBP, GIF) e PDF em anexo de animal, evento e
+  lançamento (antes, qualquer tipo com formato válido), e FOTO só imagem (`TIPO_ARQUIVO_INVALIDO`); o aparelho recusa outro
+  tipo antes de enviar. Limite de 5 MB como antes.
+- Interface: componente `Anexos` (Components) usado pela ficha do animal (bloco J, sem mudança de comportamento) e pela
+  nova seção "Documentos e fotos" do detalhe do evento (anexar ao lançamento todo ou a um lançamento financeiro, abrir,
+  remover com justificativa; no anulado, só o histórico); cada lançamento financeiro mostra os seus arquivos.
+
+Testes novos: `tests/anexos.test.js` (compra, venda, transferência, morte; estorno com e sem dependente; correção de compra,
+venda e morte, retroativa e em cadeia; limites e tipos; queda na fase A da correção; rotas pela `api()`) e
+`tests/ui/anexos.test.js` (detalhe da compra a 360 px).

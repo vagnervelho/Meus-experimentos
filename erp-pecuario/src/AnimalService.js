@@ -78,11 +78,15 @@ var AnimalService = (function () {
   }
   /**
    * Contexto de leitura de uma consulta: {tx, repo, f (Timeline.fonte), params, marcoZero, hoje, categorias,
-   * categoriaPorId, animais (vigentes), filhosMae, filhosPai}. A consulta precisa declarar `leituras()`.
+   * categoriaPorId, animais (vigentes), filhosMae, filhosPai, memo}. A consulta precisa declarar `leituras()`.
+   * opcoes: {fonte, parametros} — o motor de eventos passa a própria fonte (com os eventos excluídos da correção e as
+   * linhas do lançamento em análise) para calcular categoria e peso vigente pelas mesmas regras das consultas.
+   * `memo` guarda a categoria de cada animal em cada data durante a consulta (o leitor vale para uma leitura só).
    */
-  function leitor(tx) {
+  function leitor(tx, opcoes) {
+    var o = opcoes || {};
     if (vazio_(tx.hoje)) throw Validation.erro('INTERNAL', 'Contexto sem fuso: não há como saber a data de hoje.');
-    var params = Config.parametros(tx.repo);
+    var params = o.parametros || Config.parametros(tx.repo);
     var categorias = tx.repo.carregada('CATEGORIAS') ? tx.repo.vigentes('CATEGORIAS') : [];
     var animais = tx.repo.vigentes('ANIMAIS');
     var filhosMae = {};
@@ -92,9 +96,9 @@ var AnimalService = (function () {
       if (!vazio_(a.pai_id)) (filhosPai[a.pai_id] = filhosPai[a.pai_id] || []).push(a);
     });
     return {
-      tx: tx, repo: tx.repo, f: Timeline.fonte(tx, { parametros: params }), params: params, marcoZero: params.data_marco_zero,
+      tx: tx, repo: tx.repo, f: o.fonte || Timeline.fonte(tx, { parametros: params }), params: params, marcoZero: params.data_marco_zero,
       hoje: tx.hoje, categorias: categorias, categoriaPorId: Utils.indexarPor(categorias, 'category_id'), animais: animais,
-      filhosMae: filhosMae, filhosPai: filhosPai,
+      filhosMae: filhosMae, filhosPai: filhosPai, memo: Object.create(null),
     };
   }
   /** Idade em meses completos na data (03a, seção 4.5); null sem nascimento ou antes dele. */
@@ -158,9 +162,13 @@ var AnimalService = (function () {
       categoria_modo: manual ? 'MANUAL' : 'AUTO', categoria_manual_id: manual ? reclass.valor : null,
     };
   }
-  /** Categoria em D: {category_id, codigo, nome, manual} ou null ("sem categoria", RN-098). */
+  /** Categoria em D: {category_id, codigo, nome, manual} ou null ("sem categoria", RN-098). Memorizada no leitor. */
   function categoriaEm(L, a, data) {
-    return EventService.classificarCategoria(perfilEm(L, a, data), data, L.categorias);
+    var k = 'c|' + a.animal_id + '|' + data;
+    if (L.memo && k in L.memo) return L.memo[k];
+    var c = EventService.classificarCategoria(perfilEm(L, a, data), data, L.categorias);
+    if (L.memo) L.memo[k] = c;
+    return c;
   }
   /**
    * Peso vigente em D (desenho-base, seção 6): última pesagem até D dentro de `peso_validade_dias` → PESADO; vencida
@@ -292,28 +300,9 @@ var AnimalService = (function () {
       filhos: Utils.ordenarPor(filhos, ['data_nascimento', 'codigo_interno']), total_filhos: filhos.length,
     };
   }
-  function refEvento_(l) {
-    return { event_id: l.event_id, event_type: l.event_type, event_subtype: l.event_subtype, event_date: l.event_date };
-  }
-  /** Períodos de permanência por pasto ([início, fim), fim vazio = em andamento), a partir do marco zero. */
+  /** Períodos de permanência por pasto ([início, fim), fim vazio = em andamento), a partir do marco zero (Timeline.estadas). */
   function periodos_(L, a) {
-    var out = [];
-    var atual = null;
-    function fechar(l) {
-      if (!atual) return;
-      atual.fim = l.event_date;
-      atual.saida = refEvento_(l);
-      atual = null;
-    }
-    Timeline.ordenar(L.f.linhas(a.animal_id).filter(function (l) { return !l.pre_marco_zero; })).forEach(function (l) {
-      if (l.efeito === -1) { fechar(l); return; }
-      var destino = nulo_(l.pasto_destino_id);
-      if (l.efeito !== 1 && destino === null) return;
-      if (atual && l.efeito !== 1 && atual.pasture_id === destino) return;
-      fechar(l);
-      atual = { pasture_id: destino, inicio: l.event_date, fim: null, entrada: refEvento_(l), saida: null };
-      out.push(atual);
-    });
+    var out = Timeline.estadas(L.f.linhas(a.animal_id));
     out.forEach(function (p) {
       var pst = L.f.pasto(p.pasture_id);
       p.pasto_nome = pst ? pst.nome : null;

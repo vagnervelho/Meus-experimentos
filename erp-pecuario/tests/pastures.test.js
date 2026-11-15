@@ -17,13 +17,18 @@ function lotado() {
   const n24 = c.tabela('CATEGORIAS').find((x) => x.codigo === 'NOVILHA_24_MAIS');
   c.run('Config.comandoSalvarCategoria', { category_id: n24.category_id, campos: { peso_referencia_kg: 350 } });
   const conf = 'CONFIRMADA';
-  c.m.run('registrar', entradaInicial([
+  const entrada = entradaInicial([
     bicho({ brinco: '0001', data_nascimento: '2023-01-10', data_nascimento_confianca: conf, peso: 450, metodo_pesagem: 'BALANCA' }),
     bicho({ brinco: '0002', sexo: 'M', data_nascimento: '2025-03-20', data_nascimento_confianca: conf, peso: 300, metodo_pesagem: 'BALANCA' }),
     bicho({ brinco: '0003', data_nascimento: '2024-01-15', data_nascimento_confianca: conf }),
     bicho({ brinco: '0004', sexo: 'M', data_nascimento: '2026-05-01', data_nascimento_confianca: conf, pasto_destino_id: PASTOS.C }),
     bicho({ brinco: '0005', data_nascimento: '2022-01-01', data_nascimento_confianca: conf, peso: 500, metodo_pesagem: 'BALANCA', pasto_destino_id: PASTOS.B }),
-  ]));
+  ]);
+  // O Pasto A fica a 1,22 UA/ha com capacidade de 1,0: a entrada pede confirmação (RN-027 em UA/ha), com a UA do painel.
+  const sem = c.m.tentar('registrar', entrada);
+  assert.deepEqual([sem.erro.code, codigos(sem.erro)], ['NEEDS_CONFIRMATION', ['LOTACAO_ACIMA_DA_CAPACIDADE']]);
+  assert.equal(sem.erro.details[0].mensagem, 'O pasto Pasto A fica com 1,22 UA/ha em 01/10/2026 (3 cabeças, 2,44 UA em 2 ha), acima da capacidade informada (1 UA/ha). Parte da UA é estimada pelo peso de referência da categoria.');
+  c.m.run('registrar', entrada, { avisos: ['LOTACAO_ACIMA_DA_CAPACIDADE'] });
   return { c, n24 };
 }
 function painel(c, dados) {
@@ -72,7 +77,10 @@ test('painel: dado ausente vira null com motivo, nunca zero; pasto vazio é zero
 
 test('painel em data: composição ao fim do dia D; antes do marco zero tudo null com o motivo', () => {
   const { c } = lotado();
-  c.m.run('registrar', outraEntrada('2026-11-01', [bicho({ brinco: '0006', sexo: 'M', data_nascimento: '2026-08-01', data_nascimento_confianca: 'CONFIRMADA' })]));
+  // O bezerro sem peso nem peso de referência fica fora da UA: o pasto continua a 1,22 UA/ha (acima de 1,0), com 4 cabeças.
+  const e = c.m.tentar('registrar', outraEntrada('2026-11-01', [bicho({ brinco: '0006', sexo: 'M', data_nascimento: '2026-08-01', data_nascimento_confianca: 'CONFIRMADA' })]));
+  assert.match(e.erro.details[0].mensagem, /^O pasto Pasto A fica com 1,22 UA\/ha em 01\/11\/2026 \(4 cabeças, 2,44 UA em 2 ha\)/);
+  c.m.run('registrar', outraEntrada('2026-11-01', [bicho({ brinco: '0006', sexo: 'M', data_nascimento: '2026-08-01', data_nascimento_confianca: 'CONFIRMADA' })]), { avisos: ['LOTACAO_ACIMA_DA_CAPACIDADE'] });
   assert.equal(painel(c, { pasture_id: PASTOS.A }).cabecas, 4);
   const antes = painel(c, { pasture_id: PASTOS.A, data: '2026-10-15' });
   assert.deepEqual([antes.cabecas, antes.data, nomesCat(antes)], [3, '2026-10-15', [['GARROTE', 1], ['NOVILHA_24_MAIS', 2]]]);

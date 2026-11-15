@@ -51,7 +51,10 @@ test('posição na data D: a composição e as categorias daquele dia; antes do 
   assert.deepEqual([antes.motivo, antes.cabecas, antes.por_sexo, antes.por_pasto, antes.por_categoria, antes.sem_pasto, antes.ua.valor, antes.ua.motivo],
     ['ANTERIOR_AO_MARCO_ZERO', null, null, null, null, null, null, 'ANTERIOR_AO_MARCO_ZERO']);
   const cinco = c.m.porBrinco('5').animal_id;
-  assert.deepEqual(posicao(c, { data: '2026-03-01', animal_id: cinco }), { data: '2026-03-01', animal_id: cinco, presente: false, pasture_id: null, motivo: null });
+  assert.deepEqual(posicao(c, { data: '2026-03-01', animal_id: cinco }), {
+    data: '2026-03-01', animal_id: cinco, presente: false, pasture_id: null, situacao: 'AINDA_NAO_ENTROU', no_rebanho_desde: null, no_pasto_desde: null,
+    entrada: null, saida: null, sexo: 'M', idade_meses: null, categoria: null, peso: null, motivo: null,
+  }, 'o 5 só entrou em 01/06: em março ainda não estava no rebanho');
   assert.deepEqual(posicao(c, { animal_id: cinco }).pasture_id, PASTOS.C);
   const t = (d) => c.gas.tentar(() => c.G.UnitOfWork.read(c.amb.ctx(), c.G.InventoryService.consultaPosicao(d)));
   assert.equal(t({ data: '2026-11-14' }).erro.code, 'VALIDATION', 'data futura');
