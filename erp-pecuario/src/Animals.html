@@ -88,7 +88,7 @@ var TelaRebanho = (function () {
     if (f.categoria) p.push('categoria: ' + (f.categoria === SEM ? 'sem categoria' : (Store.categoria(f.categoria) || {}).nome));
     if (f.faixa) p.push('idade: ' + (faixas(Store.param('faixas_etarias_meses')).filter(function (x) { return x.id === f.faixa; })[0] || {}).rotulo);
     if (f.atalho) p.push((ATALHOS.filter(function (x) { return x[0] === f.atalho; })[0] || [0, f.atalho])[1].toLowerCase());
-    return p.join('; ');
+    return p.join(' · ');
   }
   function linhasCsv(linhas) {
     return Exportar.csv(COLUNAS.map(function (c) { return { rotulo: c.rotulo, valor: c.texto }; }), linhas, {

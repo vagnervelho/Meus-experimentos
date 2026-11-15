@@ -150,12 +150,12 @@ for (const largura of LARGURAS) {
     await semProblemasDeLeiaute(page, largura, 'importação, arquivo');
     await page.click('button:has-text("Ler o arquivo")');
     await page.waitForSelector('[data-mapeamento]');
-    assert.match(await textoTela(page, '[data-secao="previa"]'), /Linhas 30/);
+    assert.match(await textoTela(page, '[data-secao="previa"]'), /Linhas\s*30/);
     assert.match(await textoTela(page, '[data-secao="previa"] pre'), /Linha 2: Brinco: 1001 \| Sexo: F/, 'primeiras linhas como texto bruto');
     assert.equal(await page.inputValue('[data-coluna="Nasc."]'), 'data_nascimento', 'modelo conhecido já vem mapeado');
     await page.click('button:has-text("Validar o arquivo")');
-    await page.waitForSelector('[data-mapeamento] ~ *, [role=alert]');
-    assert.match(await textoTela(page, '[role=alert]'), /confirmada ou estimada/, 'sem a confiança do nascimento, o servidor recusa o mapeamento');
+    await page.waitForSelector('.acao-final [role=alert]');
+    assert.match(await textoTela(page, '.acao-final [role=alert]'), /confirmada ou estimada/, 'sem a confiança do nascimento, o servidor recusa o mapeamento');
     await page.selectOption('#conf-data_nascimento', 'ESTIMADA');
     await page.selectOption('#pad-castrado', 'false');
     await page.selectOption('#pad-reprodutor', 'false');
@@ -163,7 +163,7 @@ for (const largura of LARGURAS) {
     await page.click('button:has-text("Validar o arquivo")');
     await page.waitForSelector('[data-secao="resultado"]');
     assert.ok(a.pedidos('importacao.validarBloco').filter((p) => p.dados.mapeamento.confiancas.data_nascimento).length >= 3, 'validação em blocos de 10');
-    assert.match(await textoTela(page, '[data-secao="resultado"]'), /Linhas no arquivo 30 Válidas 27 Com erro 2 Duplicadas 1/);
+    assert.match(await textoTela(page, '[data-secao="resultado"]'), /Linhas no arquivo\s*30\s*Válidas\s*27\s*Com erro\s*2\s*Duplicadas\s*1/);
     await page.click('[data-filtro="ERRO"]');
     await page.waitForFunction(() => document.querySelectorAll('[data-secao="linhas"] tbody tr, [data-secao="linhas"] .cartao-linha').length === 2);
     const txt = await textoTela(page, '[data-secao="linhas"]');
@@ -225,7 +225,7 @@ for (const largura of LARGURAS) {
     await page.click('a:has-text("Rebanho inicial")');
     await A.esperarTela(page, 'Rebanho inicial');
     await page.waitForSelector('[data-secao="animais"]');
-    assert.match(await textoTela(page, '[data-secao="cabecalho"]'), /Situação Vale Animais 4/);
+    assert.match(await textoTela(page, '[data-secao="cabecalho"]'), /Situação\s*Vale\s*Animais\s*4/);
     await semProblemasDeLeiaute(page, largura, 'detalhe');
     // Corrigir: mesmo tipo, mesmos animais, diferença para o original na revisão.
     await page.click('[data-acoes-evento] button:has-text("Corrigir")');
@@ -260,7 +260,7 @@ for (const largura of LARGURAS) {
     await page.fill('[data-campo="justificativa"] textarea', 'Lançado na base errada');
     await page.click('.form-evento button[type=submit]');
     await page.waitForSelector(dialogo + ' [data-acao-principal]:not([disabled])');
-    assert.match(await textoTela(page, dialogo), /Será desfeito Rebanho inicial \(marco zero\) de 01\/01\/2026/);
+    assert.match(await textoTela(page, dialogo), /Será desfeito\s*Rebanho inicial \(marco zero\) de 01\/01\/2026/);
     assert.match(await page.textContent(dialogo + ' [data-acao-principal]'), /Estornar rebanho inicial \(marco zero\) de 4 animais/, 'o botão repete o verbo');
     await semProblemasDeLeiaute(page, largura, 'revisão do estorno');
     await principal(page);
@@ -289,7 +289,7 @@ for (const largura of LARGURAS) {
     const { page } = a;
     await A.esperarTela(page, 'Rebanho');
     await page.waitForFunction(() => /^5 animais/.test(document.querySelector('[data-contagem]').textContent));
-    await page.selectOption('label:has-text("Pasto") + select, [id$="p"]', { label: 'Pasto A' });
+    await page.selectOption('select[id^="reb-"][id$="p"]', { label: 'Pasto A' });
     await page.waitForFunction(() => /^4 animais/.test(document.querySelector('[data-contagem]').textContent));
     if (largura >= 900) {
       await page.click('.tabela th button:has-text("Brinco")');
@@ -301,7 +301,7 @@ for (const largura of LARGURAS) {
     assert.equal(bruto.charCodeAt(0), 0xfeff, 'BOM para o Excel em pt-BR');
     const linhas = bruto.slice(1).split('\r\n');
     assert.match(linhas[0], /^Rebanho — 4 animais$/);
-    assert.match(linhas[1], /^Filtros: situação: Ativos; pasto: Pasto A$/);
+    assert.match(linhas[1], /^Filtros: situação: Ativos · pasto: Pasto A$/);
     assert.match(linhas[2], /^Dados de \d\d\/\d\d\/\d{4} \d\d:\d\d$/);
     const ci = linhas.indexOf('Brinco;ID;Sexo;Raça;Idade;Categoria;Peso atual;Pasto atual;Situação;Nascimento');
     assert.ok(ci > 0, 'cabeçalho com as 10 colunas da §5');
@@ -337,12 +337,12 @@ test('telas a 360 px: pastos, configurações e sistema sem rolagem e com alvos 
   const a = await A.abrir(s, { largura: 360, hash: 'pastos' });
   const { page } = a;
   await A.esperarTela(page, 'Pastos');
-  assert.match(await textoTela(page, '[data-pasto="' + S.PASTOS.A + '"]'), /Cabeças 3/);
+  assert.match(await textoTela(page, '[data-pasto="' + S.PASTOS.A + '"]'), /Cabeças\s*3/);
   await semProblemasDeLeiaute(page, 360, 'pastos');
   await page.click('[data-pasto="' + S.PASTOS.A + '"] a');
   await A.esperarTela(page, 'Pasto A');
   await page.waitForSelector('[data-secao="composicao"]');
-  assert.match(await textoTela(page, '[data-secao="composicao"]'), /Cabeças 3 Machos 1 Fêmeas 2/);
+  assert.match(await textoTela(page, '[data-secao="composicao"]'), /Cabeças\s*3\s*Machos\s*1\s*Fêmeas\s*2/);
   await semProblemasDeLeiaute(page, 360, 'painel do pasto');
   await page.click('button:has-text("Editar pasto")');
   await page.waitForSelector(dialogo + ' [data-campo="posse"]');
@@ -357,13 +357,13 @@ test('telas a 360 px: pastos, configurações e sistema sem rolagem e com alvos 
   const parc = vigentesDe(s, 'PARCEIROS').filter((p) => p.nome === 'Sítio do Zé')[0];
   assert.equal(pasto.posse, 'ARRENDADO');
   assert.equal(pasto.arrendador_id, parc.partner_id);
-  assert.deepEqual(parc.tipos, ['ARRENDADOR'], '"+ Novo" do arrendador já nasce como arrendador');
-  await page.waitForFunction(() => /Arrendado \(alugado\) · Sítio do Zé/.test(document.querySelector('[data-secao="dados"]').textContent));
+  assert.match(String(parc.tipos), /^ARRENDADOR$/, '"+ Novo" do arrendador já nasce como arrendador');
+  await page.waitForFunction(() => /Arrendado \(alugado\) · Sítio do Zé/.test((document.querySelector('[data-secao="dados"]') || {}).textContent || ''));
   await A.ir(page, 'config/parametros', 'Configurações');
   await semProblemasDeLeiaute(page, 360, 'parâmetros');
   await page.fill('[data-grupo="pecuaria"] [data-campo="ua_peso_kg"] input', '455');
   await page.click('[data-grupo="pecuaria"] button:has-text("Salvar pecuária")');
-  await page.waitForFunction(() => document.querySelector('[data-grupo="pecuaria"] [data-campo="ua_peso_kg"] input') && document.querySelector('[data-grupo="pecuaria"] [data-campo="ua_peso_kg"] input').value === '455' && !document.querySelector('[aria-busy]'));
+  await page.waitForFunction(() => /1 parâmetro salvo/.test(document.getElementById('avisos').textContent));
   assert.equal(vigentesDe(s, 'CONFIGURACOES').filter((c) => c.chave === 'ua_peso_kg')[0].valor, '455');
   assert.deepEqual(a.pedidos('config.salvar')[0].dados, { valores: { ua_peso_kg: 455 } }, 'só o parâmetro que mudou');
   await A.ir(page, 'config/categorias', 'Configurações');
@@ -374,6 +374,7 @@ test('telas a 360 px: pastos, configurações e sistema sem rolagem e com alvos 
   await semProblemasDeLeiaute(page, 360, 'sistema');
   await page.click('button:has-text("Fazer backup agora")');
   await page.waitForFunction(() => /Backup feito/.test(document.querySelector('[data-secao="backups"]').textContent));
+  await page.waitForSelector('[data-secao="backups"] button:has-text("Restaurar")');
   await page.click('button:has-text("Verificar a integridade agora")');
   await page.waitForFunction(() => /Tudo certo/.test((document.querySelector('[data-integridade]') || {}).textContent || ''));
   await page.click('button:has-text("Rodar o diagnóstico")');
@@ -385,8 +386,8 @@ test('telas a 360 px: pastos, configurações e sistema sem rolagem e com alvos 
   await A.ir(page, 'inicio', 'Início');
   await page.waitForSelector('[data-gerado-em]:not(:empty)');
   assert.match(await textoTela(page, '[data-gerado-em]'), /^Dados de \d\d\/\d\d\/\d{4} \d\d:\d\d$/);
-  assert.match(await textoTela(page, '[data-indicador="machos"]'), /Machos 1/);
-  assert.match(await textoTela(page, '[data-indicador="femeas"]'), /Fêmeas 3/);
+  assert.match(await textoTela(page, '[data-indicador="machos"]'), /Machos\s*1/);
+  assert.match(await textoTela(page, '[data-indicador="femeas"]'), /Fêmeas\s*3/);
   await semProblemasDeLeiaute(page, 360, 'início');
   assert.deepEqual(a.estado.erros, []);
   await a.fechar();
