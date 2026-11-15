@@ -273,6 +273,9 @@ var UI = (function () {
       atualizar: function (novas) { linhas = novas || []; pagina = 1; desenhar(); },
       selecionados: function () { return Object.keys(sel); },
       pagina: function () { return pagina; },
+      /** Todas as linhas na ordem da tela (todas as páginas): a exportação sai igual ao que se vê. */
+      ordenadas: function () { return ordenadas(); },
+      limparSelecao: function () { sel = {}; mudouSel(); },
     };
   }
 
@@ -1212,7 +1215,11 @@ var Registro = (function () {
   function idRascunho(tipo) { return 'evento.' + tipo; }
   function rotaDoForm(tipo) { return 'evento/novo/' + tipo; }
   function rotaComando(tipo) { return ROTAS[tipo] || 'evento.registrar'; }
-  function verbo(s) { return VERBOS[s.tipo] || ('Gravar ' + s.def.rotulo.toLowerCase()); }
+  /** Rota do comando da sessão: a correção (evento substituto) vai por evento.corrigir. */
+  function rotaDe(s) { return s.corrige ? 'evento.corrigir' : rotaComando(s.tipo); }
+  /** Revisão pelo servidor: a do catálogo, e sempre na correção (a folha mostra a diferença para o original). */
+  function revServidor(s) { return s.def.revisao === 'SERVIDOR' || !!s.corrige; }
+  function verbo(s) { return s.corrige ? 'Gravar a correção' : VERBOS[s.tipo] || ('Gravar ' + s.def.rotulo.toLowerCase()); }
   function plural(n, um, varios) { return n + ' ' + (n === 1 ? um : varios); }
 
   // ------------------------------------------------------------------ sessão e rascunho ----
@@ -1221,9 +1228,10 @@ var Registro = (function () {
     var s = {
       tipo: tipo, def: def, chave: Util.uuid(), subtipo: p.subtipo || null, campos: Util.clonar(p.campos || {}), linhas: [], grupos: {},
       rotulos: Util.clonar(p.rotulos || {}), origem: p.origem || null, estado: 'EDITANDO', alterado: !!previa, restaurado: null,
+      corrige: p.corrige ? Util.clonar(p.corrige) : null, justificativaCorrecao: p.justificativaCorrecao || '',
       erros: [], avisos: [], aceites: {}, justificativaAviso: '', simulacao: null, dvEsperada: null, resultado: null, envio: null, view: null, removidosComProblema: 0,
     };
-    (p.linhas || []).forEach(function (l) { s.linhas.push({ uid: uid(), animal_id: l.animal_id || null, valores: Util.clonar(l.valores || {}), erros: [] }); });
+    (p.linhas || []).forEach(function (l) { s.linhas.push({ uid: uid(), animal_id: l.animal_id || null, criado: !!l.criado, valores: Util.clonar(l.valores || {}), erros: [] }); });
     if (def.selecao_animais === 'NOVOS' && !s.linhas.length) s.linhas.push(linhaNova_(s));
     Object.keys(def.grupos_repetiveis || {}).forEach(function (g) { s.grupos[g] = []; });
     s.salvarAdiado = Util.adiar(function () { salvarRascunho(s).catch(function (e) { avisarFalhaRascunho_(e); }); }, 400);
@@ -1237,12 +1245,12 @@ var Registro = (function () {
   function paraRascunho(s) {
     return {
       versao: 1, tipo: s.tipo, rotulo: s.def.rotulo, chave: s.chave, estado: s.estado, subtipo: s.subtipo, campos: s.campos, rotulos: s.rotulos, origem: s.origem,
-      linhas: s.linhas.map(function (l) { return { animal_id: l.animal_id, valores: l.valores }; }), grupos: s.grupos,
-      data: s.campos.event_date || null, n: s.linhas.length, envio: s.envio,
+      linhas: s.linhas.map(function (l) { return { animal_id: l.animal_id, criado: l.criado || undefined, valores: l.valores }; }), grupos: s.grupos,
+      data: s.campos.event_date || null, n: s.linhas.length, envio: s.envio, corrige: s.corrige || undefined, justificativaCorrecao: s.justificativaCorrecao || undefined,
     };
   }
   function deRascunho(def, r) {
-    var s = novaSessao(r.tipo, def, { subtipo: r.subtipo, campos: r.campos, rotulos: r.rotulos, origem: r.origem, linhas: r.linhas });
+    var s = novaSessao(r.tipo, def, { subtipo: r.subtipo, campos: r.campos, rotulos: r.rotulos, origem: r.origem, linhas: r.linhas, corrige: r.corrige, justificativaCorrecao: r.justificativaCorrecao });
     s.chave = r.chave;
     s.estado = r.estado || 'EDITANDO';
     s.grupos = r.grupos || s.grupos;
@@ -1305,7 +1313,7 @@ var Registro = (function () {
     var sub = s.subtipo && def.subtipos ? def.subtipos[s.subtipo] : null;
     var base = (sub && sub.campos_animal) || def.campos_animal || [];
     base = base.filter(function (d) { return d.id !== 'animal_id'; });
-    if (linha.animal_id && def.selecao_animais === 'NOVOS') base = base.filter(function (d) { return CAMPOS_VOLTA.indexOf(d.id) >= 0; });
+    if (linha.animal_id && !linha.criado && def.selecao_animais === 'NOVOS') base = base.filter(function (d) { return CAMPOS_VOLTA.indexOf(d.id) >= 0; });
     var corr = sub && sub.campos_corrigiveis;
     if (corr) {
       base = base.map(function (d) {
@@ -1351,6 +1359,11 @@ var Registro = (function () {
       });
     });
     if (s.justificativaAviso) dados.justificativa_aviso = s.justificativaAviso;
+    if (s.corrige) {
+      dados.event_id = s.corrige.event_id;
+      dados.justificativa = Util.vazio(s.justificativaCorrecao) ? null : s.justificativaCorrecao.trim();
+      if (!dados.justificativa) erros.push({ campo: '__justificativa_correcao', mensagem: 'Diga por que o lançamento está sendo corrigido.', nivel: 'EVENTO' });
+    }
     return { dados: dados, erros: erros };
   }
   /** Liga cada detalhe do servidor à linha do animal: animal_id → brinco → "Animal N da lista". O resto é do evento. */
@@ -1384,7 +1397,8 @@ var Registro = (function () {
     var def = s.def;
     var v = s.view = { blocos: {}, cartoes: {} };
     var raiz = h('div', { class: 'form-evento', dataset: { tipoEvento: s.tipo } });
-    raiz.appendChild(h('div', { class: 'tela-cabecalho' }, h('h1', { text: def.rotulo }), h('span', { class: 'selo', text: def.grupo_ui })));
+    raiz.appendChild(h('div', { class: 'tela-cabecalho' }, h('h1', { text: s.corrige ? 'Corrigir: ' + s.corrige.rotulo : def.rotulo }), h('span', { class: 'selo', text: s.corrige ? 'Correção' : def.grupo_ui })));
+    if (s.corrige) raiz.appendChild(UI.nota('O lançamento original deixa de valer e este entra no lugar dele, com os mesmos animais. Tirar um animal da lista anula o cadastro dele.', 'info'));
     v.rascunho = h('div');
     raiz.appendChild(v.rascunho);
     v.problemas = h('div', { class: 'problemas', dataset: { problemas: '1' } });
@@ -1426,6 +1440,11 @@ var Registro = (function () {
     v.grupos = h('div');
     form.appendChild(v.grupos);
     if (ultimo.length) { v.blocos.ultimo = Formulario.bloco(ultimo, s.campos, opEv); form.appendChild(v.blocos.ultimo.el); }
+    if (s.corrige) {
+      v.justCorrecao = Campos.criar({ id: 'justificativa_correcao', rotulo: 'Por que corrigir', tipo: 'texto', obrigatorio: true, ajuda: 'Fica gravado junto da correção.' }, { valor: s.justificativaCorrecao, idBase: 'corr', aoMudar: function (t) { s.justificativaCorrecao = t || ''; v.justCorrecao.erro(null); tocar(s); } });
+      v.justCorrecao.marcarObrigatorio(true);
+      form.appendChild(v.justCorrecao.el);
+    }
     v.acoes = h('div', { class: 'acao-final' });
     form.appendChild(v.acoes);
     Formulario.enterPercorre(form, function () { return v.revisar; });
@@ -1540,7 +1559,7 @@ var Registro = (function () {
     var defs = defsLinha(s, l);
     if (corr) defs = defs.map(function (d) { return d.id === 'campo' ? Object.assign({}, d, { opcoes: d.opcoes || Object.keys(corr) }) : d; });
     var bloco = Formulario.bloco(defs, l.valores, {
-      idBase: l.uid, principais: l.animal_id ? null : PRINCIPAIS_ANIMAL, tituloExtras: 'Mais dados deste animal (opcional)', extras: function () { return s.campos; },
+      idBase: l.uid, principais: l.animal_id && !l.criado ? null : PRINCIPAIS_ANIMAL, tituloExtras: 'Mais dados deste animal (opcional)', extras: function () { return s.campos; },
       aoMudar: function (id) {
         tocar(s);
         if (id === 'brinco') titulo.textContent = tituloTxt();
@@ -1621,7 +1640,8 @@ var Registro = (function () {
     var nEv = 0, porLinha = {};
     erros.forEach(function (e) {
       if (e.nivel === 'EVENTO') {
-        if (e.campo === '__subtipo' && v.subtipoErro) { Util.limpar(v.subtipoErro); v.subtipoErro.appendChild(h('span', { text: e.mensagem })); v.subtipoErro.hidden = false; }
+        if (e.campo === '__justificativa_correcao' && v.justCorrecao) v.justCorrecao.erro(e.mensagem);
+        else if (e.campo === '__subtipo' && v.subtipoErro) { Util.limpar(v.subtipoErro); v.subtipoErro.appendChild(h('span', { text: e.mensagem })); v.subtipoErro.hidden = false; }
         else if (e.campo === '__animais') v.animais.appendChild(UI.nota(e.mensagem, 'erro'));
         else Object.keys(v.blocos).forEach(function (k) { if (v.blocos[k].mostrarErros([e])) nEv += 1; });
       } else if (e.nivel === 'ANIMAL') {
@@ -1731,9 +1751,36 @@ var Registro = (function () {
     if (im.animais !== undefined) l.push(['Animais', String(im.animais)]);
     if (im.novos !== undefined) l.push(['Animais novos no cadastro', String(im.novos)]);
     if (im.anulados) l.push(['Animais anulados', String(im.anulados)]);
-    if (im.substitui) l.push(['Substitui o evento', im.substitui]);
+    if (im.substitui) l.push(['Substitui o lançamento', s.corrige ? s.corrige.rotulo : im.substitui]);
     if (im.abertura && im.abertura.total !== undefined) l.push(['Valor de abertura', Fmt.dinheiro(im.abertura.total) + ' em ' + plural(im.abertura.animais, 'animal', 'animais')]);
     return l;
+  }
+  function textoValor_(def, v) {
+    if (Util.vazio(v)) return 'vazio';
+    if (v === true || v === false) return v ? 'sim' : 'não';
+    var ref = /^ref:(\w+)$/.exec(def.tipo || '');
+    if (ref && ref[1] === 'PASTOS') { var p = Store.pasto(v); return p ? p.nome : String(v); }
+    if (ref && ref[1] === 'ANIMAIS') { var a = Store.animal(v); return a ? Store.rotuloAnimal(a) : 'outro animal'; }
+    if (def.tipo === 'data') return Fmt.data(v);
+    if (def.tipo === 'lista') { var op = Campos.opcoesDe(def).filter(function (x) { return x.valor === v; })[0]; return op ? op.rotulo : String(v); }
+    if (Array.isArray(v)) return v.map(function (x) { return x.codigo; }).join(', ');
+    return String(v) + (def.unidade ? ' ' + def.unidade : '');
+  }
+  /** Correção: o que muda em relação ao original ("0457: peso de 4500 para 450 kg"), a partir dos valores digitados. */
+  function diferencas(s) {
+    if (!s.corrige || !s.corrige.antes) return [];
+    var out = [], antes = s.corrige.antes, vistos = {};
+    var igual = function (a, b) { return JSON.stringify(Util.vazio(a) ? null : a) === JSON.stringify(Util.vazio(b) ? null : b); };
+    camposEvento(s).forEach(function (d) { if (!igual((antes.campos || {})[d.id], s.campos[d.id])) out.push(Campos.rotuloDe(d) + ': de ' + textoValor_(d, (antes.campos || {})[d.id]) + ' para ' + textoValor_(d, s.campos[d.id])); });
+    s.linhas.forEach(function (l, i) {
+      var quem = l.animal_id && Store.animal(l.animal_id) ? Store.rotuloAnimal(Store.animal(l.animal_id)) : (l.valores.brinco || 'Animal ' + (i + 1));
+      if (!l.animal_id || !antes.linhas[l.animal_id]) { out.push(quem + ': animal novo neste lançamento'); return; }
+      vistos[l.animal_id] = true;
+      var ant = antes.linhas[l.animal_id];
+      defsLinha(s, l).forEach(function (d) { if (!igual(ant[d.id], l.valores[d.id])) out.push(quem + ': ' + Campos.rotuloDe(d).toLowerCase() + ' de ' + textoValor_(d, ant[d.id]) + ' para ' + textoValor_(d, l.valores[d.id])); });
+    });
+    Object.keys(antes.linhas).forEach(function (id) { if (!vistos[id]) { var a = Store.animal(id); out.push((a ? Store.rotuloAnimal(a) : 'Animal') + ': sai do lançamento e o cadastro é anulado'); } });
+    return out;
   }
   function textoVerbo(s) {
     if (s.tipo === 'ESTORNO') {
@@ -1755,10 +1802,15 @@ var Registro = (function () {
     var voltarB = UI.botao('Voltar e corrigir', { aoClicar: function () { folha.fechar(); } });
     function redesenhar() {
       Util.limpar(corpo);
-      if (s.def.revisao === 'SERVIDOR' && s.simulacao) corpo.appendChild(UI.nota('Calculado pelo servidor com os dados de agora. Ao confirmar, ele confere de novo.', 'info'));
+      if (revServidor(s) && s.simulacao) corpo.appendChild(UI.nota('Calculado pelo servidor com os dados de agora. Ao confirmar, ele confere de novo.', 'info'));
       var dl = h('dl', { class: 'resumo-revisao' });
-      resumoLocal(s).concat(s.def.revisao === 'SERVIDOR' ? impactosServidor(s) : []).forEach(function (p) { dl.appendChild(h('dt', { text: p[0] })); dl.appendChild(h('dd', { text: p[1] })); });
+      resumoLocal(s).concat(revServidor(s) ? impactosServidor(s) : []).forEach(function (p) { dl.appendChild(h('dt', { text: p[0] })); dl.appendChild(h('dd', { text: p[1] })); });
       corpo.appendChild(dl);
+      if (s.corrige) {
+        var dif = diferencas(s);
+        corpo.appendChild(h('section', { class: 'cartao', dataset: { diferencas: String(dif.length) } }, h('h3', { text: dif.length ? (dif.length === 1 ? '1 alteração em relação ao original' : dif.length + ' alterações em relação ao original') : 'Nada mudou em relação ao original' }),
+          h('ul', { class: 'lista-simples' }, dif.map(function (t) { return h('li', { text: t }); })), h('p', null, h('span', { class: 'suave', text: 'Motivo: ' }), s.justificativaCorrecao)));
+      }
       if (s.dados.animais && s.dados.animais.length) corpo.appendChild(h('details', { class: 'detalhe', open: s.dados.animais.length <= 5 }, h('summary', { text: 'Ver os animais' }), listaAnimaisRevisao(s)));
       var av = blocoAvisos(s, function () { atualizarPrincipal(); });
       if (av) corpo.appendChild(av);
@@ -1772,11 +1824,11 @@ var Registro = (function () {
     }
     s.redesenharRevisao = redesenhar;
     folha.definirAcoes([voltarB, principal]);
-    if (s.def.revisao === 'SERVIDOR' && !s.simulacao) {
+    if (revServidor(s) && !s.simulacao) {
       corpo.appendChild(UI.carregando('Calculando o que vai acontecer…'));
       principal.disabled = true;
       try {
-        var acao = s.tipo === 'ESTORNO' ? 'estornar' : 'registrar';
+        var acao = s.tipo === 'ESTORNO' ? 'estornar' : s.corrige ? 'corrigir' : 'registrar';
         var r = await Cliente.consulta('evento.simular', { acao: acao, dados: s.dados }, { aoEstado: function (e) { if (e.estado === 'OCUPADO') { Util.limpar(corpo); corpo.appendChild(UI.carregando('Sistema ocupado, tentando de novo (' + e.tentativa + ' de ' + e.de + ')…')); } } });
         if (!folha.aberta) return;
         s.simulacao = r.data;
@@ -1834,8 +1886,8 @@ var Registro = (function () {
     if (s.enviando) return;
     s.enviando = true;
     var destravar = UI.travar(botao, 'Enviando…');
-    var rota = rotaComando(s.tipo);
-    var o = { chave: s.chave, avisosAceitos: aceitos(s), dataVersionEsperada: s.def.revisao === 'SERVIDOR' ? s.dvEsperada : null };
+    var rota = rotaDe(s);
+    var o = { chave: s.chave, avisosAceitos: aceitos(s), dataVersionEsperada: revServidor(s) ? s.dvEsperada : null };
     if (s.justificativaAviso) s.dados.justificativa_aviso = s.justificativaAviso;
     s.estado = 'ENVIANDO';
     s.envio = { rota: rota, dados: s.dados, avisosAceitos: o.avisosAceitos, dataVersionEsperada: o.dataVersionEsperada };
@@ -1898,13 +1950,13 @@ var Registro = (function () {
     await Rascunhos.remover(idRascunho(s.tipo)).catch(function (e) { Util.registrarFalha('remover rascunho', e); });
     delete sessoes[s.tipo];
     App.removerFaixa('rascunho-' + s.tipo);
-    var resultado = { tipo: s.tipo, def: s.def, data: r.data, meta: r.meta, duplicado: r.duplicado, verificado: r.verificado, n: (r.data && r.data.animais ? r.data.animais.length : 0), origem: s.origem };
+    var resultado = { tipo: s.tipo, def: s.def, data: r.data, meta: r.meta, duplicado: r.duplicado, verificado: r.verificado, n: (r.data && r.data.animais ? r.data.animais.length : 0), origem: s.origem, corrige: s.corrige };
     var nova = novaSessao(s.tipo, s.def);
     nova.alterado = false;
     nova.resultado = resultado;
     sessoes[s.tipo] = nova;
     try {
-      await Store.aplicarResultado(rotaComando(s.tipo), r.data, r.meta);
+      await Store.aplicarResultado(rotaDe(s), r.data, r.meta);
       App.recasca();
     } catch (e) {
       resultado.falhaAtualizar = e.message;
@@ -1921,6 +1973,7 @@ var Registro = (function () {
   function resumoResultado(res) {
     var n = res.n;
     if (res.tipo === 'ESTORNO') return 'Evento estornado.';
+    if (res.corrige) return 'Correção gravada: o lançamento original deixou de valer e este entrou no lugar' + (n ? ' (' + plural(n, 'animal', 'animais') + ').' : '.');
     if (res.tipo === 'ENTRADA_INICIAL' || res.tipo === 'OUTRA_ENTRADA') return n === 1 ? '1 animal entrou no rebanho.' : n + ' animais entraram no rebanho.';
     if (res.tipo === 'AJUSTE_INVENTARIO') return n === 1 ? 'Correção gravada em 1 animal.' : 'Correção gravada em ' + n + ' animais.';
     return res.def.rotulo + ' gravado' + (n ? ' com ' + plural(n, 'animal', 'animais') : '') + '.';

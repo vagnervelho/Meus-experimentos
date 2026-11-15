@@ -1,47 +1,51 @@
 <script>
 'use strict';
 /*
- * ERP Pecuário — tela Início (08-ux-ui.md, seção 3, "Visão geral" da Fase 1): cabeças, sexo, pastos e categorias
- * do rebanho de hoje, pendências (alertas do servidor) e registros não concluídos (rascunhos). Tudo vem do store
- * (carga inicial), sem ida ao servidor. A versão completa do dashboard (filtros, 16 indicadores, 9 gráficos,
- * dashboard.obter) cresce a partir desta tela.
+ * ERP Pecuário — tela Início, a "Visão geral" da Fase 1 (08-ux-ui.md, seções 3 e 11): cabeças, machos e fêmeas, por
+ * pasto e por categoria, pela consulta dashboard.obter (posição de hoje calculada no servidor a partir das projeções),
+ * pendências pela alerta.listar (cada uma com a sua ação), registros não concluídos (rascunhos) e a marca "dados de
+ * dd/mm hh:mm" (geradoEm, no fuso da fazenda). A resposta fica guardada por dataVersion; "Atualizar" pede de novo.
+ * Indicador sem dado mostra "—" com o motivo (P9), nunca zero.
  */
 var TelaInicio = (function () {
   var h = Util.h;
-  function contarPor(itens, chave) {
-    var m = {};
-    itens.forEach(function (a) { var k = chave(a); m[k] = (m[k] || 0) + 1; });
-    return m;
+  var cache = { versao: null, visao: null, alertas: null };
+  /** Ação de cada alerta (lista fechada de InventoryService.ALERTAS). */
+  var ACOES = {
+    ATIVO_SEM_PASTO: { texto: 'Ver os animais sem pasto', atalho: 'SEM_PASTO' },
+    SEM_BRINCO: { texto: 'Ver os animais sem brinco', atalho: 'SEM_BRINCO' },
+    SEM_CATEGORIA: { texto: 'Ver os animais sem categoria', atalho: 'SEM_CATEGORIA' },
+    BACKUP_ATRASADO: { texto: 'Fazer backup agora', rota: 'config/sistema' },
+    INTEGRIDADE_COM_ERRO: { texto: 'Ver a verificação', rota: 'config/sistema' },
+    IMPORTACAO_INCOMPLETA: { texto: 'Ver a importação', rota: 'importar' },
+  };
+  async function carregar(forcar) {
+    if (!forcar && cache.visao && cache.versao === Store.versao()) return cache;
+    var r = await Promise.all([Cliente.consulta('dashboard.obter', {}), Cliente.consulta('alerta.listar', {})]);
+    cache = { versao: Store.versao(), visao: r[0].data, alertas: r[1].data };
+    return cache;
   }
-  function indicador(rotulo, valor, nota) {
-    return h('div', { class: 'indicador' }, h('div', { class: 'indicador-rotulo', text: rotulo }), h('div', { class: 'indicador-valor', text: valor }), nota ? h('div', { class: 'indicador-nota', text: nota }) : null);
-  }
-  function montar(el) {
-    var ativos = Store.animais().filter(function (a) { return a.situacao_cadastral === 'ATIVO'; });
-    var hoje = Fmt.hoje();
-    var porSexo = contarPor(ativos, function (a) { return a.sexo || '?'; });
-    el.appendChild(h('div', { class: 'tela-cabecalho' }, h('h1', { text: 'Início' }),
-      h('span', { class: 'suave', text: 'Dados de ' + Fmt.instante(new Date(Store.atualizadoEm()).toISOString()) })));
-    if (!Store.param('data_marco_zero') || !Store.propriedades().length) {
-      el.appendChild(UI.nota('Para começar: cadastre a propriedade e os pastos nas configurações e registre o rebanho inicial (ou importe a planilha dos animais).', 'info'));
+  function acaoDoAlerta(a) {
+    var def = ACOES[a.codigo];
+    if (!def) return null;
+    if (def.atalho) {
+      if (typeof TelaRebanho === 'undefined' || !Telas.existe('rebanho')) return null;
+      return UI.botao(def.texto, { aoClicar: function () { TelaRebanho.abrirCom({ atalho: def.atalho }); } });
     }
-    var cartoes = h('div', { class: 'grade-cartoes', role: 'list', 'aria-label': 'Rebanho em ' + Fmt.data(hoje) },
-      indicador('Cabeças', Fmt.numero(ativos.length), 'em ' + Fmt.dataCurta(hoje)),
-      indicador('Machos', Fmt.numero(porSexo.M || 0), 'em ' + Fmt.dataCurta(hoje)),
-      indicador('Fêmeas', Fmt.numero(porSexo.F || 0), 'em ' + Fmt.dataCurta(hoje)),
-      indicador('Pastos ativos', Fmt.numero(Store.pastos().length), Store.pastos().filter(function (p) { return p.posse === 'ARRENDADO'; }).length + ' arrendados'));
-    Array.prototype.forEach.call(cartoes.children, function (c) { c.setAttribute('role', 'listitem'); });
-    el.appendChild(cartoes);
-
-    var pend = h('section', { class: 'cartao', 'aria-labelledby': 'inicio-pend' }, h('h2', { id: 'inicio-pend', text: 'Pendências' }));
-    var lista = h('ul', { class: 'lista-simples' });
-    pend.appendChild(lista);
-    el.appendChild(pend);
-    var alertas = (Store.alertas().alertas || []);
-    alertas.forEach(function (a) {
-      lista.appendChild(h('li', { class: 'linha-acao', dataset: { alerta: a.codigo } }, h('span', { class: 'campo-linha' }, UI.icone(a.nivel === 'ERRO' ? 'erro' : 'aviso'), h('span', { text: a.mensagem }))));
+    var rota = def.rota === 'importar' && a.ids && a.ids[0] ? 'importar/' + a.ids[0] : def.rota;
+    if (!Telas.existe(rota)) return null;
+    return h('a', { class: 'botao botao-secundario', href: Roteador.href(rota), dataset: { rota: rota } }, def.texto);
+  }
+  function desenharPendencias(lista, alertas) {
+    (alertas.alertas || []).forEach(function (a) {
+      lista.appendChild(h('li', { class: 'linha-acao', dataset: { alerta: a.codigo } }, h('span', { class: 'campo-linha' }, UI.icone(a.nivel === 'ERRO' ? 'erro' : 'aviso'), h('span', { text: a.mensagem })), acaoDoAlerta(a)));
     });
-    Rascunhos.listar().then(function (rs) {
+    (alertas.nao_avaliados || []).forEach(function (a) {
+      lista.appendChild(h('li', { class: 'linha-acao suave', dataset: { naoAvaliado: a.codigo } }, h('span', { class: 'campo-linha' }, UI.icone('info'), h('span', { text: 'Não avaliado: ' + a.mensagem }))));
+    });
+  }
+  function desenharRascunhos(el, lista) {
+    return Rascunhos.listar().then(function (rs) {
       if (!el.isConnected) return;
       rs.filter(function (r) { return Store.tipoEvento(r.tipo); }).forEach(function (r) {
         lista.appendChild(h('li', { class: 'linha-acao', dataset: { rascunho: r.tipo } }, h('span', { class: 'campo-linha' }, UI.icone('editar'), h('span', { text: Registro.descricaoRascunho(r) })),
@@ -55,25 +59,81 @@ var TelaInicio = (function () {
               Roteador.ir('inicio', { forcar: true, substituir: true });
             } }))));
       });
-      if (!lista.children.length) lista.appendChild(h('li', { class: 'suave', text: 'Nenhuma pendência.' }));
     }, function (e) {
       lista.appendChild(h('li', null, UI.nota('Não foi possível ler os rascunhos: ' + e.message, 'aviso')));
     });
+  }
+  function desenhar(el, c) {
+    var v = c.visao;
+    var dia = Fmt.dataCurta(v.data);
+    var nota = v.motivo ? Fmt.rotulo('MOTIVO', v.motivo) : 'em ' + dia;
+    var num = function (x) { return v.motivo || x === null || x === undefined ? '—' : Fmt.numero(x); };
+    var peso = UI.valorInd(v.peso_vivo_total, function (x) { return Fmt.peso(x); });
+    var ua = UI.valorInd(v.ua, function (x) { return Fmt.numero(x, 1) + ' UA'; });
+    var cartoes = h('div', { class: 'grade-cartoes', role: 'list', 'aria-label': 'Rebanho em ' + Fmt.data(v.data) },
+      UI.indicador('Cabeças', num(v.cabecas), nota, 'cabecas'),
+      UI.indicador('Machos', num(v.por_sexo ? v.por_sexo.M : null), nota, 'machos'),
+      UI.indicador('Fêmeas', num(v.por_sexo ? v.por_sexo.F : null), nota, 'femeas'),
+      UI.indicador('Sem pasto', num(v.sem_pasto), nota, 'sem-pasto'),
+      UI.indicador('Peso vivo total', peso.texto, peso.motivo || nota, 'peso'),
+      UI.indicador('Unidades animais', ua.texto, ua.motivo || nota, 'ua'));
+    el.appendChild(cartoes);
 
-    var pastos = Store.pastos();
-    if (pastos.length) {
-      el.appendChild(UI.grafico({ tipo: 'barras', titulo: 'Cabeças por pasto em ' + Fmt.data(hoje), rotuloX: 'Pasto', series: [{ nome: 'Cabeças', pontos: pastos.map(function (p) { return { x: p.nome, y: p.cabecas === null || p.cabecas === undefined ? null : p.cabecas }; }) }] }));
+    var lista = h('ul', { class: 'lista-simples', dataset: { pendencias: '1' } });
+    el.appendChild(UI.secao('Pendências', lista, { dado: 'pendencias' }));
+    desenharPendencias(lista, c.alertas);
+    desenharRascunhos(el, lista).then(function () { if (el.isConnected && !lista.children.length) lista.appendChild(h('li', { class: 'suave', text: 'Nenhuma pendência.' })); });
+
+    if (v.motivo) return;
+    if (!v.cabecas) {
+      var ir = App.podeRegistrar() ? { texto: 'Registrar o rebanho', aoClicar: function () { Roteador.ir('evento/novo'); } } : null;
+      el.appendChild(UI.vazio({ texto: 'Nenhum animal no rebanho ainda.', acao: ir }));
+      return;
     }
-    if (ativos.length) {
-      var porCat = contarPor(ativos, function (a) { return a.categoria_id || ''; });
-      var pontos = Store.categorias().filter(function (c) { return porCat[c.category_id]; }).map(function (c) { return { x: c.nome, y: porCat[c.category_id] }; });
-      if (porCat['']) pontos.push({ x: 'Sem categoria', y: porCat[''] });
-      el.appendChild(UI.grafico({ tipo: 'barras', titulo: 'Cabeças por categoria em ' + Fmt.data(hoje), rotuloX: 'Categoria', series: [{ nome: 'Cabeças', pontos: pontos }] }));
-    } else {
-      el.appendChild(UI.vazio({ texto: 'Nenhum animal no rebanho ainda.', acao: App.podeRegistrar() ? { texto: 'Registrar o rebanho', aoClicar: function () { Roteador.ir('evento/novo'); } } : null }));
+    var pontosPasto = (v.por_pasto || []).map(function (p) { return { x: p.nome || 'Pasto', y: p.cabecas }; });
+    if (v.sem_pasto) pontosPasto.push({ x: 'Sem pasto', y: v.sem_pasto });
+    el.appendChild(UI.grafico({ tipo: 'barras', titulo: 'Cabeças por pasto em ' + Fmt.data(v.data), rotuloX: 'Pasto', series: [{ nome: 'Cabeças', pontos: pontosPasto }] }));
+    var pontosCat = (v.por_categoria || []).map(function (x) { return { x: x.nome, y: x.cabecas }; });
+    if (v.sem_categoria) pontosCat.push({ x: 'Sem categoria', y: v.sem_categoria });
+    el.appendChild(UI.grafico({ tipo: 'barras', titulo: 'Cabeças por categoria em ' + Fmt.data(v.data), rotuloX: 'Categoria', series: [{ nome: 'Cabeças', pontos: pontosCat }] }));
+  }
+  function montar(el) {
+    var vivo = true;
+    var marca = h('span', { class: 'suave', dataset: { geradoEm: '1' }, text: 'Carregando…' });
+    var corpo = h('div');
+    var atualizar = UI.botao('Atualizar', { aoClicar: function () { abrir(true); } });
+    el.appendChild(h('div', { class: 'tela-cabecalho' }, h('h1', { text: 'Início' }), marca, atualizar));
+    el.appendChild(h('p', { class: 'suave', text: 'Visão geral do rebanho' }));
+    if (!Store.param('data_marco_zero') || !Store.propriedades().length) {
+      var links = [];
+      if (Telas.existe('config/propriedades')) links.push(h('a', { class: 'botao botao-secundario', href: Roteador.href('config/propriedades'), dataset: { rota: 'config/propriedades' } }, 'Cadastrar propriedade e marco zero'));
+      if (Telas.existe('importar')) links.push(h('a', { class: 'botao botao-secundario', href: Roteador.href('importar'), dataset: { rota: 'importar' } }, 'Importar a planilha dos animais'));
+      el.appendChild(UI.nota('Para começar: cadastre a propriedade e os pastos, defina a data do marco zero nas configurações e registre o rebanho inicial (ou importe a planilha dos animais).', 'info', links.length ? h('div', { class: 'acoes' }, links) : null));
     }
+    el.appendChild(corpo);
+    async function abrir(forcar) {
+      Util.limpar(corpo);
+      corpo.appendChild(UI.carregando('Calculando a posição do rebanho…'));
+      var destravar = UI.travar(atualizar, 'Atualizando…');
+      try {
+        var c = await carregar(forcar);
+        if (!vivo) return;
+        Util.limpar(corpo);
+        marca.textContent = 'Dados de ' + Fmt.instante(c.visao.geradoEm);
+        desenhar(corpo, c);
+      } catch (e) {
+        if (!vivo) return;
+        Util.limpar(corpo);
+        marca.textContent = '';
+        corpo.appendChild(UI.estadoErro(e, { acao: { texto: 'Tentar de novo', aoClicar: function () { abrir(true); } } }));
+      } finally {
+        destravar('Atualizar');
+      }
+    }
+    abrir(false);
+    return function () { vivo = false; };
   }
   Telas.registrar('inicio', { titulo: 'Início', modulo: 'DASHBOARD', montar: montar });
-  return { montar: montar };
+  return { montar: montar, carregar: carregar };
 })();
 </script>

@@ -339,4 +339,31 @@ body.tela-cheia .avisos { bottom: 16px; }
 .grafico-legenda li { display: inline-flex; align-items: center; gap: 6px; }
 .grafico-legenda .amostra { width: 18px; height: 4px; border-radius: 2px; display: inline-block; }
 .grafico .tabela { margin-top: 8px; }
+
+/* ------------------------------------------------------ telas da Fase 1 ---- */
+.abas { margin: 0 0 16px; overflow-x: auto; }
+.abas ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--respiro); }
+.aba { display: inline-flex; align-items: center; min-height: var(--alvo); padding: 8px 14px; border-radius: var(--raio); border: 1px solid var(--borda-suave); background: var(--superficie); color: var(--texto); font-weight: 600; text-decoration: none; }
+.aba[aria-current="page"] { background: var(--acao); border-color: var(--acao); color: var(--acao-texto); }
+.filtros { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; align-items: end; }
+.ficha-cabecalho { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+.ficha-foto { width: 96px; height: 96px; border-radius: var(--raio); object-fit: cover; border: 1px solid var(--borda-suave); background: var(--superficie-2); }
+.anexos { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+.anexo { border: 1px solid var(--borda-suave); border-radius: var(--raio); background: var(--superficie); padding: 8px; display: flex; flex-direction: column; gap: var(--respiro); }
+.anexo img { width: 100%; height: 110px; object-fit: cover; border-radius: 6px; }
+.imagem-cheia { max-width: 100%; height: auto; border-radius: var(--raio); }
+.arvore { display: flex; flex-direction: column; gap: 10px; }
+.arvore-ramo { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.no-arvore { border: 2px solid var(--borda); border-radius: var(--raio); padding: 8px 10px; background: var(--superficie); display: flex; flex-direction: column; gap: 4px; }
+.no-arvore.nao-confirmado { border-style: dashed; }
+.no-arvore.desconhecido { border-color: var(--borda-suave); color: var(--texto-suave); }
+.riscado .linha-tempo-titulo { text-decoration: line-through; }
+.linha-tempo { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--respiro); }
+.linha-tempo li { border-left: 4px solid var(--acao); padding: 6px 12px; background: var(--superficie); border-radius: 0 8px 8px 0; }
+.linha-tempo li.riscado { border-left-color: var(--borda-suave); }
+.progresso { width: 100%; height: 24px; border-radius: 12px; }
+.mapeamento { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+@media (min-width: 640px) { .mapeamento { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.pre-bruto { white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.9375rem; background: var(--superficie-2); padding: 8px; border-radius: 6px; margin: 0; max-height: 320px; overflow: auto; }
+.destaque-erro { color: var(--erro); font-weight: 700; }
 </style>
