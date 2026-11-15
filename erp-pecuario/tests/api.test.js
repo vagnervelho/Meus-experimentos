@@ -199,7 +199,7 @@ test('carga inicial condicional: completa na primeira vez; {atual: true} com a v
   assert.deepEqual(d.animais.valores.situacao_cadastral.sort(), ['ATIVO', 'EXTERNO']);
   assert.deepEqual(d.pastos.map((p) => p.pasture_id).sort(), [PASTOS.A, PASTOS.B].sort());
   assert.deepEqual(d.modulos.map((m) => m.id), ['DASHBOARD', 'REBANHO', 'PASTOS', 'EVENTOS', 'CONFIGURACOES', 'IMPORTACAO'], 'só os módulos entregues');
-  assert.deepEqual(d.catalogo.tipos.map((t) => t.tipo), ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'NASCIMENTO', 'COMPRA', 'TRANSFERENCIA', 'MORTE', 'DESCARTE', 'AJUSTE_INVENTARIO', 'ESTORNO']);
+  assert.deepEqual(d.catalogo.tipos.map((t) => t.tipo), ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'NASCIMENTO', 'COMPRA', 'VENDA', 'TRANSFERENCIA', 'MORTE', 'DESCARTE', 'AJUSTE_INVENTARIO', 'ESTORNO']);
   assert.equal(d.catalogo.fase, 2);
   assert.ok(Array.isArray(d.alertas.alertas));
   assert.equal(d.dataVersion, b1.meta.dataVersion);
