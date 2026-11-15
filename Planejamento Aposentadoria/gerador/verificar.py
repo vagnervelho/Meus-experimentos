@@ -108,10 +108,11 @@ def verify_tables(excel_file, verify_file):
     inv = {f"T{r}": k for k, r in CN.LROW.items()}
     samples = []
     for (c1, r1, c2, r2), i1, i2, two in tables:
+        leve = bool(os.environ.get("VERIF_LEVE"))
         if two:
-            picks = [(r1, c1), (r2, c2)]
+            picks = [(r2, c2)] if leve else [(r1, c1), (r2, c2)]
         else:
-            picks = [(r1, c1), ((r1 + r2) // 2, c1), (r2, c1)]
+            picks = [(r2, c1)] if leve else [(r1, c1), ((r1 + r2) // 2, c1), (r2, c1)]
         samples += [((c1, r1, c2, r2), i1, i2, two, pr) for pr in picks]
     for (c1, r1, c2, r2), i1, i2, two, (rr, cc) in samples:
         wb = load_workbook(verify_file)
