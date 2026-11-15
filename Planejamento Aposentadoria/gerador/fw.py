@@ -8,7 +8,7 @@ framework resolve os endereços na hora de gravar.
 Tokens dos templates das abas mensais
   {chave}          mesma aba, mesma linha (mês t)                 -> K8
   {Aba!chave}      outra aba mensal, mesma linha                  -> Renda!K8
-  {chave|p}        linha anterior (mês t-1); no mês 1 usa o valor inicial da coluna
+  {chave|p}        linha anterior (mês t-1); no mês 1 usa o valor inicial ('init') declarado NA COLUNA 'chave' 
   {chave|c}        coluna inteira (todos os meses)                -> $K$8:$K$823
   {Aba!chave|c}    coluna inteira de outra aba
 Premissas entram como endereços absolutos, via P('chave') (usado), PC('chave') (usado Campinas),

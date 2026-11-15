@@ -58,8 +58,8 @@ it("criterio", "Critério do veredito", "opção", "Viver de rendimentos",
    opts=["Viver de rendimentos", "Consumir até a idade-limite"],
    nt="Viver de rendimentos = perpetuidade: o patrimônio real nunca diminui. Consumir = o patrimônio vai a zero na idade-limite.")
 it("idade_lim", "Idade-limite (só no critério 'consumir')", "anos", 95, fmt="int")
-it("pat_ini", "Patrimônio financeiro atual (investimentos já acumulados)", "R$", 0, key_=True,
-   nt="NÃO INFORMADO — preencha. Somente aplicações financeiras (não incluir carro ou bens).")
+it("pat_ini", "Patrimônio financeiro atual (investimentos já acumulados)", "R$", 150000, key_=True,
+   nt="Informado: R$ 150 mil aplicados a 100% do CDI (nov/2026). Somente aplicações financeiras (não incluir carro ou bens).")
 it("reserva_meses", "Reserva de emergência mínima", "meses de gasto", 6, fmt="int",
    nt="Usada no alerta de liquidez: o patrimônio não deveria ficar abaixo de N meses dos gastos recorrentes.")
 

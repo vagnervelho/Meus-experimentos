@@ -280,10 +280,12 @@ def fluxo(X):
     X.col("g_amx", "Amortização extra e quitação (parte dela)", "R$", f"=({{Moradia!extra}}+{{Moradia!quit}})*{conj}", "brl", 11)
     X.col("sobra", "SOBRA DO MÊS (aporte + / resgate −)", "R$", "={sobra_pre}-{g_amx}", "brl", 12, bold=True)
     X.group("INVESTIMENTOS")
-    X.col("p_ini", "Saldo no início do mês", "R$", "={p_fim|p}", "brl", 12, init=P("pat_ini"))
+    X.col("p_ini", "Saldo no início do mês", "R$", "={p_fim|p}", "brl", 12,
+          "No mês 1 = patrimônio financeiro atual (aba Premissas).")
     X.col("rend", "Rendimento líquido", "R$", "=IF({p_ini}>=0,{p_ini}*{Macro!rliq},{p_ini}*{Macro!rdiv})", "brl", 10,
           "Saldo positivo rende o CDI líquido; saldo negativo (déficit) é corrigido pela taxa da coluna 'Taxa sobre saldo negativo' da aba Macro.")
-    X.col("p_fim", "PATRIMÔNIO FINANCEIRO (fim do mês)", "R$", "={p_ini}+{rend}+{sobra}", "brl", 13, bold=True)
+    X.col("p_fim", "PATRIMÔNIO FINANCEIRO (fim do mês)", "R$", "={p_ini}+{rend}+{sobra}", "brl", 13, bold=True,
+          init=P("pat_ini"))   # valor "anterior" lido por {p_fim|p} no mês 1
     X.col("p_real", "Patrimônio financeiro (R$ de hoje)", "R$ hoje", f"={{p_fim}}/{idx}", "brl", 12)
     X.group("META E LIQUIDEZ")
     X.col("k_real", "Capital necessário (R$ de hoje)", "R$ hoje",

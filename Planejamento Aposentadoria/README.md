@@ -11,7 +11,7 @@ Modelo em Excel que responde: **ela consegue se aposentar aos 65 anos com renda 
 
 1. Abra `Simulador_Aposentadoria.xlsx` no Excel (2016 ou mais recente).
 2. Na aba `Premissas`, edite somente as células amarelas com fonte azul.
-   - Preencha o patrimônio financeiro atual, que está zerado.
+   - O patrimônio financeiro atual já vem com R$ 150 mil a 100% do CDI.
    - Confira os itens marcados **VALIDAR**.
    - Escolha a cidade (Porto Velho ou Campinas) na seção 2.
 3. Leia o resultado no topo da aba `Premissas`, no `Painel` e na aba `Aposentadoria`. Os alertas ficam na aba `Checks`.
@@ -85,8 +85,9 @@ Cor das guias: amarelo = entradas, verde = saídas, cinza = motores de cálculo,
 |---|---|
 | Veredito | **NÃO ATINGE** |
 | Capital necessário aos 65 (viver de rendimentos) | R$ 9,28 milhões de hoje |
-| Patrimônio financeiro projetado aos 65 | −R$ 2,26 milhões de hoje: o plano gera déficit depois da compra da casa |
-| Aporte extra para atingir a meta | R$ 13,6 mil por mês, de hoje até os 65 |
+| Patrimônio inicial | R$ 150 mil a 100% do CDI |
+| Patrimônio financeiro projetado aos 65 | −R$ 1,65 milhão de hoje: a entrada da casa cabe, mas o caixa fica negativo depois da compra |
+| Aporte extra para atingir a meta | R$ 12,9 mil por mês, de hoje até os 65 |
 | Renda líquida do trabalho hoje | R$ 25,4 mil por mês, com carga de 16% sobre o faturamento |
 
 Leia antes de decidir: a seção 7 da aba `Instrucoes` lista as simplificações. Os itens marcados VALIDAR são estimativas que devem ser confirmadas com a realidade dela.
