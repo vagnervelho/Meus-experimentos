@@ -32,8 +32,8 @@ function marca(subtipo, acao, data, ids, campos) {
 function venda(data, comprador, ids, preco) {
   return { tipo: 'VENDA', campos: { event_date: data, partner_id: comprador, finalidade: 'RECRIA_ENGORDA', modalidade: 'CABECA', preco_unitario: preco, valor_bruto: preco * ids.length }, animais: ids.map((animal_id) => ({ animal_id })), parcelas: [{ data_vencimento: data }] };
 }
-function compra(data, fornecedor, animais, valor) {
-  return { tipo: 'COMPRA', campos: { event_date: data, partner_id: fornecedor, pasto_destino_id: PASTOS.A, modalidade: 'CABECA', preco_unitario: valor / animais.length, valor_animais: valor }, animais, parcelas: [{ data_vencimento: data }] };
+function compra(data, fornecedor, animais, valor, pasto) {
+  return { tipo: 'COMPRA', campos: { event_date: data, partner_id: fornecedor, pasto_destino_id: pasto || PASTOS.A, modalidade: 'CABECA', preco_unitario: valor / animais.length, valor_animais: valor }, animais, parcelas: [{ data_vencimento: data }] };
 }
 /** Rebanho no marco zero (Pasto A): 0101 e 0102 fêmeas adultas, 0103, 0104 e 0105 machos, um bezerro sem brinco; dois parceiros. */
 function base() {
@@ -108,7 +108,7 @@ const CASOS = [
     dependente: (x) => [ident('PRIMEIRA_IDENTIFICACAO', '2026-04-01', [{ animal_id: x.ids.f1, codigo: '1201' }]), 'IDENTIFICACAO_JA_EXISTE'] },
   { tipo: 'MARCACAO', subtipo: 'DESCARTE',
     registrar: (x) => marca('DESCARTE', 'MARCAR', '2026-03-01', [x.ids.f1], { motivo_descarte: 'IDADE' }),
-    corrigir: (x) => marca('DESCARTE', 'MARCAR', '2026-03-01', [x.ids.f1], { motivo_descarte: 'APRUMOS' }),
+    corrigir: (x) => marca('DESCARTE', 'MARCAR', '2026-03-01', [x.ids.f1], { motivo_descarte: 'DEFEITO' }),
     dependente: (x) => [marca('DESCARTE', 'DESMARCAR', '2026-04-01', [x.ids.f1]), 'NAO_MARCADO'] },
   { tipo: 'MARCACAO', subtipo: 'NAO_LOCALIZADO',
     registrar: (x) => marca('NAO_LOCALIZADO', 'MARCAR', '2026-03-01', [x.ids.f2]),
@@ -307,14 +307,14 @@ test('CT-09 completo pela api(): saídas, brinco do vendido (" 0901 " e "901"), 
     ['2', transferencia('2026-11-13', S.PASTOS.A, S.PASTOS.B, [id['0902']]), 'APOS_MORTE', id['0902']],
     ['3a', outra('2026-11-13', S.bicho({ brinco: ' 0901 ' })), 'BRINCO_DUPLICADO', null],
     ['3b', outra('2026-11-13', S.bicho({ brinco: '901' })), 'BRINCO_DUPLICADO', null],
-    ['3c', ident('PRIMEIRA_IDENTIFICACAO', '2026-11-13', [{ animal_id: id['0903'], codigo: '0901' }], { tipo_identificacao: 'BRINCO' }), 'IDENTIFICACAO_JA_EXISTE', id['0903']],
+    ['3c', ident('SUBSTITUICAO', '2026-11-13', [{ animal_id: id['0903'], codigo: '0901', motivo: 'PERDA' }]), 'BRINCO_DUPLICADO', id['0903']],
     ['4', outra('2026-11-13', S.bicho({ brinco: '0910', mae_id: id['0904'], mae_confianca: 'CONFIRMADA' })), 'SEXO_DO_PROGENITOR', null],
     ['5', outra('2026-11-13', S.bicho({ brinco: '0911', mae_id: id['0903'], mae_confianca: 'CONFIRMADA', data_nascimento: '2024-09-12', data_nascimento_confianca: 'CONFIRMADA' })), 'NASCIMENTO_DO_PROGENITOR', null],
     ['6', corr('mae_id', id['0905']), 'PROPRIO_PROGENITOR', id['0905']],
     ['7', corr('mae_id', id['0907']), 'CICLO_GENEALOGICO', id['0905']],
     ['8a', outra('2026-11-13', S.bicho({ brinco: '0912', pasto_destino_id: S.id(0xdead) })), 'NAO_ENCONTRADO', null],
     ['9', outra('2026-11-14', S.bicho({ brinco: '0914' })), 'DATA_FUTURA', null],
-    ['10a', compra('2026-10-01', comp, [{ animal_id: id['0901'] }], 400000), 'ENTRADA_JA_DENTRO', id['0901']],
+    ['10a', compra('2026-10-01', comp, [{ animal_id: id['0901'] }], 400000, S.PASTOS.A), 'ENTRADA_JA_DENTRO', id['0901']],
   ];
   for (const [n, dados, codigo, animal] of tentativas) {
     const antes = Object.fromEntries(G.Schema.nomesTabelas().map((t) => [t, JSON.stringify(s.tabela(t))]));
@@ -337,7 +337,7 @@ test('CT-09 completo pela api(): saídas, brinco do vendido (" 0901 " e "901"), 
   assert.deepEqual([r3.ok, r3.error.details.map((d) => d.codigo)], [false, ['BRINCO_DUPLICADO']]);
   assert.match(r3.error.details[0].mensagem, /vendido em 02\/10\/2026/);
   // 10b: a mesma compra datada de 13/11/2026 é reentrada, com o mesmo animal_id.
-  const volta = ok('evento.registrar', compra('2026-11-13', comp, [{ animal_id: id['0901'] }], 400000), 'ct09-10b');
+  const volta = ok('evento.registrar', compra('2026-11-13', comp, [{ animal_id: id['0901'] }], 400000, S.PASTOS.A), 'ct09-10b');
   assert.deepEqual([volta.animais[0].animal_id, volta.animais[0].situacao_cadastral, volta.animais[0].brinco], [id['0901'], 'ATIVO', '0901']);
   s.conferirProjecoes('CT-09');
 });
@@ -388,15 +388,17 @@ test('desenho-base 16.1: o substituto ocupa a posição do original no dia (dese
   const x = base();
   const { m, ids } = x;
   const t1 = m.run('registrar', transferencia('2026-03-01', PASTOS.A, PASTOS.B, [ids.m4])).dados.event_id;
-  const t2 = m.run('registrar', transferencia('2026-03-01', PASTOS.B, PASTOS.C, [ids.m4])).dados.event_id;
-  const k1 = m.run('corrigir', Object.assign(transferencia('2026-03-01', PASTOS.A, PASTOS.B, [ids.m4], { notes: 'Pela porteira de cima' }), { event_id: t1, justificativa: 'Observação' })).dados.event_id;
-  const k2 = m.run('corrigir', Object.assign(transferencia('2026-03-01', PASTOS.A, PASTOS.B, [ids.m4], { notes: 'Pela porteira de baixo', responsible: 'Zé' }), { event_id: k1, justificativa: 'Observação de novo' })).dados.event_id;
+  // Duas transferências do mesmo animal no mesmo dia: a guarda semântica pede confirmação (POSSIVEL_DUPLICIDADE).
+  const dup = { avisos: ['POSSIVEL_DUPLICIDADE'] };
+  const t2 = m.run('registrar', transferencia('2026-03-01', PASTOS.B, PASTOS.C, [ids.m4]), dup).dados.event_id;
+  const k1 = m.run('corrigir', Object.assign(transferencia('2026-03-01', PASTOS.A, PASTOS.B, [ids.m4], { notes: 'Pela porteira de cima' }), { event_id: t1, justificativa: 'Observação' }), dup).dados.event_id;
+  const k2 = m.run('corrigir', Object.assign(transferencia('2026-03-01', PASTOS.A, PASTOS.B, [ids.m4], { notes: 'Pela porteira de baixo', responsible: 'Zé' }), { event_id: k1, justificativa: 'Observação de novo' }), dup).dados.event_id;
   assert.ok(m.evento(k2).event_seq > m.evento(t2).event_seq, 'o substituto tem event_seq novo');
   assert.deepEqual([m.animal(ids.m4).pasto_atual_id, m.evento(t2).status, m.evento(k2).status], [PASTOS.C, 'CONFIRMADO', 'CONFIRMADO'], 'a de A→B continua antes da de B→C');
   const linhas = c_linhas(x, ids.m4);
   assert.deepEqual(linhas, [['ENTRADA_INICIAL', null], ['TRANSFERENCIA', k2], ['TRANSFERENCIA', t2]]);
   // Mudar a origem do substituto para quebrar a de B→C: CONFLICT com ela.
-  const e = falha(m, 'corrigir', Object.assign(transferencia('2026-03-01', PASTOS.A, PASTOS.C, [ids.m4]), { event_id: k2, justificativa: 'Destino errado' }));
+  const e = falha(m, 'corrigir', Object.assign(transferencia('2026-03-01', PASTOS.A, PASTOS.C, [ids.m4]), { event_id: k2, justificativa: 'Destino errado' }), dup);
   assert.deepEqual(e.details.map((d) => [d.codigo, d.conflito.event_id]), [['ORIGEM_DIVERGENTE', t2]]);
 });
 function c_linhas(x, animalId) {
@@ -407,9 +409,15 @@ function c_linhas(x, animalId) {
 test('histórico: evento.listar do animal inclui os estornos dos eventos dele; evento.obter traz detalhes, financeiro, parcelas, alocações e o anulado; auditoria.listar une EVENTOS, AJUSTES e AUDITORIA com filtros por entidade, registro, período e operação', () => {
   const x = base();
   const { c, m, ids, comp } = x;
+  // Um minuto entre os comandos: a trilha vem da mais recente para a mais antiga pelo instante de cada operação.
+  const passa = () => { m.gas.clock.now += 60000; };
+  passa();
   const v = m.run('registrar', venda('2026-06-01', comp, [ids.m3], 500000)).dados.event_id;
+  passa();
   const aj = m.run('registrar', ajuste('CORRECAO_LOCALIZACAO', '2026-03-01', [{ animal_id: ids.m4, pasto_destino_id: PASTOS.B }], { justificativa: 'Estava no B' })).dados.event_id;
+  passa();
   c.run('AnimalService.comandoEditar', { animal_id: ids.m4, campos: { nome: 'Bandido' } });
+  passa();
   const est = m.run('estornar', { event_id: v, justificativa: 'Comprador desistiu' }).dados.event_id;
   // evento.listar do animal: a venda (anulada) e o estorno dela.
   const doAnimal = m.listar({ animal_id: ids.m3 });
@@ -452,8 +460,11 @@ test('histórico: evento.listar do animal inclui os estornos dos eventos dele; e
 test('auditoria.listar pela api(): filtros e envelope; período inválido → VALIDATION; operação que falhou não aparece', () => {
   const s = S.sistema();
   const api = (rota, dados, chave) => js(s.gas.exec(() => s.G.api({ rota, dados, idempotencyKey: chave || 'k-' + Math.random(), avisosAceitos: [] })));
+  const passa = () => { s.gas.clock.now += 60000; };
   const r = api('evento.registrar', S.entradaInicial([S.bicho({ brinco: '1' })]));
+  passa();
   const t = api('evento.registrar', transferencia('2026-04-10', S.PASTOS.A, S.PASTOS.B, [r.data.animais[0].animal_id]));
+  passa();
   const e = api('evento.estornar', { event_id: t.data.event_id, justificativa: 'pasto errado' });
   assert.equal(e.ok, true);
   const falhou = api('evento.registrar', transferencia('2026-04-10', S.PASTOS.A, S.PASTOS.A, [r.data.animais[0].animal_id]));

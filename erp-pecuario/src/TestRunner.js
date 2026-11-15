@@ -276,8 +276,10 @@ var TestRunner = (function () {
         var tentativas = [
           ['1', 'VENDA de 0901 (vendido em D0+30) em D0+40', venda_(Utils.somaDias(d0, 40), ids.parceiro, [ids['0901']]), 'FORA_DO_REBANHO'],
           ['2', 'TRANSFERENCIA de 0902 (morto em D0+20) em D0+40', { tipo: 'TRANSFERENCIA', campos: { event_date: Utils.somaDias(d0, 40), pasto_origem_id: t.estado.pastos.A, pasto_destino_id: t.estado.pastos.B }, animais: [{ animal_id: ids['0902'] }] }, 'APOS_MORTE'],
-          ['3a', 'Novo animal com o brinco " 0903 " (já em uso)', outra_(Utils.somaDias(d0, 5), [bicho_(t, { brinco: ' 0903 ' })]), 'BRINCO_DUPLICADO'],
-          ['3b', 'Novo animal com o brinco "903" (o mesmo sem zeros à esquerda)', outra_(Utils.somaDias(d0, 5), [bicho_(t, { brinco: '903' })]), 'BRINCO_DUPLICADO'],
+          ['3a', 'Novo animal com o brinco " 0901 " (do vendido: o número continua dele)', outra_(Utils.somaDias(d0, 35), [bicho_(t, { brinco: ' 0901 ' })]), 'BRINCO_DUPLICADO'],
+          ['3b', 'Novo animal com o brinco "901" (o mesmo sem zeros à esquerda)', outra_(Utils.somaDias(d0, 35), [bicho_(t, { brinco: '901' })]), 'BRINCO_DUPLICADO'],
+          ['3c', 'Troca do brinco do 0903 pelo número do vendido (identificação)', { tipo: 'IDENTIFICACAO', subtipo: 'SUBSTITUICAO', campos: { event_date: Utils.somaDias(d0, 35), tipo_identificacao: 'BRINCO' }, animais: [{ animal_id: ids['0903'], codigo: '0901', motivo: 'PERDA' }] }, 'BRINCO_DUPLICADO'],
+          ['3d', 'Identificação do 0902 depois da morte', { tipo: 'IDENTIFICACAO', subtipo: 'PRIMEIRA_IDENTIFICACAO', campos: { event_date: Utils.somaDias(d0, 40), tipo_identificacao: 'SISBOV' }, animais: [{ animal_id: ids['0902'], codigo: 'SB-0902' }] }, 'APOS_MORTE'],
           ['4', 'Mãe = 0904 (macho)', outra_(Utils.somaDias(d0, 5), [bicho_(t, { brinco: '0910', mae_id: ids['0904'] })]), null],
           ['5', 'Mãe 0903 para bezerro nascido antes dela', outra_(Utils.somaDias(d0, 5), [bicho_(t, { brinco: '0911', data_nascimento: Utils.somaDias(d0, -130), mae_id: ids['0903'] })]), null],
           ['6', '0905 como mãe de si mesma', ajuste_('CORRECAO_CADASTRO', Utils.somaDias(d0, 6), [{ animal_id: ids['0905'], campo: 'mae_id', valor_novo: ids['0905'] }, { animal_id: ids['0905'], campo: 'mae_confianca', valor_novo: 'ESTIMADA' }]), 'PROPRIO_PROGENITOR'],

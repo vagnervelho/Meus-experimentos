@@ -3,7 +3,8 @@
  * Ataque à persistência (Database, Repository, UnitOfWork): testes que tentam quebrar o protocolo de 06.
  *
  * - Varredura exaustiva: a execução morre DEPOIS de cada escrita individual (cada chamada de serviço que escreve, e
- *   cada chamada de porta: marcador, flush, versão, lock) de um comando de evento que grava em várias abas e de
+ *   cada chamada de porta: marcador, flush, versão, lock) de um comando de evento que grava em várias abas, dos
+ *   comandos-modelo da Fase 2 (venda do CT-04, correção de compra do CT-18, estorno de transferência do CT-07) e de
  *   comandos sem evento (criação e edição de cadastro); em cada ponto, chegam nenhuma, todas, cada prefixo e
  *   subconjuntos aleatórios (semente fixa) das escritas pendentes. Depois da recuperação valem os invariantes:
  *   (1) tudo ou nada; (2) projeções = reconstrução pelos eventos vigentes; (3) nenhuma linha vigente órfã;
@@ -245,6 +246,50 @@ function desfechoVenda(amb, e, confirmado, msg, prep) {
     animais: r.animais.map((a) => ({ animal_id: a.animal_id, codigo_interno: a.codigo_interno, brinco: a.brinco, sexo: a.sexo, situacao_cadastral: a.situacao_cadastral, pasto_atual_id: a.pasto_atual_id })),
   };
 }
+// Estorno de transferência (09, seção 8: comando-modelo da Fase 2, com o estorno do CT-07): 3 animais do Retiro para o
+// Baixão em 10/04; o estorno os devolve ao Retiro sem apagar nada (a transferência fica ESTORNADA).
+const DATA_TRANSF = '2026-04-10';
+function prepararEstornoTransferencia(amb) {
+  const G = amb.G;
+  const s = sementes(G);
+  amb.gas.exec(() => G.Database.abrir(amb.banco, { primitiva: amb.primitiva }).anexar({ CONFIGURACOES: s.CONFIGURACOES, PROPRIEDADES: s.PROPRIEDADES, PLANO_CONTAS: s.PLANO_CONTAS, LISTAS: s.LISTAS, CATEGORIAS: s.CATEGORIAS }));
+  const origem = amb.run(cmdPasto(G, { chave: 'cria-retiro-transf', dados: { campos: { nome: 'Retiro' } } })).dados.pasture_id;
+  const destino = amb.run(cmdPasto(G, { chave: 'cria-baixao-transf', dados: { campos: { nome: 'Baixão' } } })).dados.pasture_id;
+  const animais = ['0701', '0702', '0703'].map((b) => ({ brinco: b, sexo: 'F', origem: 'DESCONHECIDA', pasto_destino_id: origem }));
+  const ent = amb.run(G.EventService.comando('registrar', { idempotencyKey: 'prep-transf-entrada', dados: { tipo: 'ENTRADA_INICIAL', campos: {}, animais } }));
+  const ids = ent.dados.animais.map((a) => a.animal_id);
+  const tr = amb.run(G.EventService.comando('registrar', { idempotencyKey: 'prep-transf', dados: { tipo: 'TRANSFERENCIA', campos: { event_date: DATA_TRANSF, pasto_origem_id: origem, pasto_destino_id: destino }, animais: ids.map((animal_id) => ({ animal_id })) } }));
+  amb.gas.clock.now += 60000;
+  return { origem, destino, ids, transfer: tr.dados.event_id };
+}
+function desfechoEstornoTransferencia(amb, e, confirmado, msg, prep) {
+  const G = amb.G;
+  const r = amb.read({ rota: 'teste.estorno', reads: G.FinancialService.leituras(), acessoCru: true, tratador: (tx) => ({
+    proj: G.Timeline.conferir(tx), fin: G.FinancialService.conferir(tx),
+    animais: prep.ids.map((id) => tx.cru.cruPorId('ANIMAIS', id)), transfer: tx.cru.avaliar(prep.transfer).status,
+    hoje: G.Timeline.inventario(G.Timeline.fonte(tx).todasAsLinhas(), '2026-04-15', '2026-01-01').porPasto,
+  }) }).dados;
+  assert.deepEqual(r.proj, [], msg + ': (2) projeção = reconstrução');
+  assert.deepEqual(r.fin, [], msg + ': (2) invariantes financeiras (03b, 14)');
+  const op = e.OPERACOES.find((o) => o.idempotency_key === 'k-est-transf' && o.status === 'CONFIRMADA');
+  assert.equal(!!op, confirmado, msg + ': (1) o estorno vale exatamente quando o commit chegou');
+  const estornos = e.EVENTOS.filter((x) => x.event_type === 'ESTORNO');
+  if (!confirmado) {
+    assert.deepEqual([r.transfer, r.animais.map((a) => [a.situacao_cadastral, a.pasto_atual_id]), r.hoje[prep.destino], estornos.filter((x) => x.status === 'CONFIRMADO').length],
+      ['CONFIRMADO', prep.ids.map(() => ['ATIVO', prep.destino]), 3, 0], msg + ': (1) tudo como antes');
+    return null;
+  }
+  assert.deepEqual([r.transfer, r.animais.map((a) => [a.situacao_cadastral, a.pasto_atual_id]), r.hoje[prep.origem], r.hoje[prep.destino] || 0],
+    ['ESTORNADO', prep.ids.map(() => ['ATIVO', prep.origem]), 3, 0], msg + ': (1) o estorno inteiro');
+  const est = estornos.find((x) => x.event_id === op.resumo_json.event_id);
+  assert.deepEqual([est.reversal_of_event_id, e.EVENTO_ANIMAIS.filter((l) => l.event_id === est.event_id).length, e.EVENTOS.find((x) => x.event_id === prep.transfer).reversed_by_event_id],
+    [prep.transfer, 0, est.event_id], msg + ': (1) ESTORNO sem linha filha, apontando a transferência');
+  return {
+    acao: 'estornar', event_id: est.event_id, event_type: 'ESTORNO', event_subtype: null, event_date: '2026-11-13', status: 'CONFIRMADO',
+    total_value: null, substitui: null, estorna: prep.transfer,
+    animais: r.animais.map((a) => ({ animal_id: a.animal_id, codigo_interno: a.codigo_interno, brinco: a.brinco, sexo: a.sexo, situacao_cadastral: a.situacao_cadastral, pasto_atual_id: a.pasto_atual_id })),
+  };
+}
 const CENARIOS = {
   evento: {
     chave: 'chave-evento-1',
@@ -323,6 +368,13 @@ const CENARIOS = {
       },
     }),
     desfecho: desfechoVenda,
+  },
+  estornoTransferencia: {
+    chave: 'k-est-transf',
+    ambiente: { projecoes: (G) => G.Timeline.porta() },
+    preparar: prepararEstornoTransferencia,
+    comando: (amb, prep) => amb.G.EventService.comando('estornar', { idempotencyKey: 'k-est-transf', dados: { event_id: prep.transfer, justificativa: 'pasto errado' } }),
+    desfecho: desfechoEstornoTransferencia,
   },
 };
 /** Ambiente do cenário: o do motor usa o projetor real (Timeline) e o banco semeado. */

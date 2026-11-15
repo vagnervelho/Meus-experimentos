@@ -332,7 +332,7 @@ var AuditService = (function () {
     { codigo: 'BRINCO', rotulo: 'Brinco único entre os preenchidos', severidade: 'ERRO', correcao: 'Evento de identificação ou ajuste.' },
     { codigo: 'FK', rotulo: 'Referências apontam para registro existente e não anulado', severidade: 'ERRO', correcao: 'Ajuste; investigar edição manual.' },
     { codigo: 'ENTRADA_ABERTA', rotulo: 'Cada animal ativo tem exatamente uma entrada em aberto', severidade: 'ERRO', correcao: 'Estorno ou ajuste.' },
-    { codigo: 'LINHA_DO_TEMPO', rotulo: 'Linha do tempo de todos os animais', severidade: 'ERRO', correcao: 'Estornar o evento conflitante.' },
+    { codigo: 'LINHA_DO_TEMPO', rotulo: 'Linha do tempo de todos os animais (com a ordem das identificações e das marcações)', severidade: 'ERRO', correcao: 'Estornar o evento conflitante.' },
     { codigo: 'PROJECAO', rotulo: 'Situação gravada × reconstrução pelos eventos', severidade: 'ERRO', correcao: 'Reconstruir projeções.', reparo: 'RECONSTRUIR' },
     { codigo: 'STATUS_EVENTOS', rotulo: 'Situação dos eventos × regra de vigência', severidade: 'ERRO', correcao: 'Reconstruir.', reparo: 'RECONSTRUIR' },
     { codigo: 'INVENTARIO', rotulo: 'Inventário pelos eventos = animais ativos (total e por pasto)', severidade: 'ERRO', correcao: 'Reconstruir projeções; investigar edição manual.' },
@@ -544,6 +544,10 @@ var AuditService = (function () {
         var calc = Timeline.projetarAnimal(f, id).campos;
         Timeline.validar(linhas, { nascimento: calc.data_nascimento, dataEntrada: calc.data_entrada }).problemas.forEach(function (p) {
           col.achado('LINHA_DO_TEMPO', { tabela: 'ANIMAIS', id: id, mensagem: rotuloAnimal_(a, id) + ': ' + Timeline.descrever(p, nomePasto) + ' (evento de ' + br_(p.event_date) + ').' });
+        });
+        // A ordem das identificações (primeira, troca, retirada) e das marcações (marcar, desmarcar) do animal.
+        Timeline.validarIdentificacoes(Timeline.identificacoes(f, id)).concat(Timeline.validarMarcacoes(linhas)).forEach(function (p) {
+          col.achado('LINHA_DO_TEMPO', { tabela: 'ANIMAIS', id: id, mensagem: rotuloAnimal_(a, id) + ': ' + Timeline.descrever(p) + ' (evento de ' + br_(p.event_date) + ').' });
         });
       }
       if (a.situacao_cadastral === 'ATIVO') {
