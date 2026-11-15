@@ -765,3 +765,25 @@ Nenhuma linha de código mudou nesta etapa: só documentos.
   42,9 ms por comando, com a trava 49,8 ms (+16 %).
 - Verificado em Node: `tests/trava.integridade.test.js` (16 testes); `npm test` completo com 635 testes, 635 aprovados e
   0 falhas (523 s); `npm run ui:check` com 85 testes, 85 aprovados e 0 falhas (223 s), página montada com 446 KB de 450 KB.
+
+## 15/11/2026 — Teste aleatório de todos os comandos da Fase 2 (etapa 2, passada 1)
+
+- Por quê: a trava única fecha o estado que cada caminho deixa gravado; faltava provar, comando a comando e por todos os
+  caminhos, que nenhum deixa o banco errado, sem depender da lista de casos de cada um.
+- `tests/fase2.fuzz.test.js` e `tests/apoio-fuzz.js`: teste aleatório baseado em modelo pela `api()`. O gerador escolhe a cada
+  passo um comando válido ou inválido entre todos os da Fase 2 (os 10 tipos ativos e os subtipos, corrigir, estornar,
+  `animal.editar`, reuso de brinco e zeros à esquerda, marco zero, importação de ANIMAIS e dos 5 tipos de evento com validar,
+  importar, concluir e desfazer, reenvio e versão velha). Depois de cada passo: integridade sem erro, projeção =
+  reconstrução, financeiro (do sistema e nas linhas cruas), replay independente da linha do tempo, inventário e elegíveis,
+  e o efeito pedido; a recusa não grava nada e fala português. Em falha, a sequência mínima encolhida e repetível (símbolos
+  no lugar dos identificadores). `npm test` roda 16 sementes fixas; `FUZZ_SEMENTES`/`FUZZ_INICIO` rodam sementes novas
+  (CONTRATOS, seção 36).
+- Defeito achado e consertado na causa: o "brinco lançado errado" (AJUSTE_INVENTARIO/IDENTIFICACAO_INCORRETA) corrigido
+  para antes de uma troca de brinco do mesmo dia ficava gravado trocando o número da troca, e esse número continuava no
+  animal. O registro passou a conferir a posição (`ANTES_DA_IDENTIFICACAO`); os outros caminhos (troca levada para antes,
+  identificação registrada ou estornada em volta, brinco de criação corrigido) ficaram fechados pela verificação de
+  integridade (LINHA_DO_TEMPO: todo brinco lançado errado troca o número em uso na posição dele) e, com ela, pela trava.
+  Os dois casos estão em `tests/fase2.fuzz.regressoes.test.js` e falham no código de antes.
+- Modelo do teste corrigido (não o sistema): `tests/apoio-oraculos.js` passou a aceitar eventos importados (vigência com
+  IMPORTADO), o lançamento sem parcela de evento anulado SEM_CAIXA (03b, 10.4), a importação desfeita sem anulador (02, 5.1)
+  e a quantidade de animais do registro anterior ao marco zero. Nenhuma expectativa de teste antigo mudou.

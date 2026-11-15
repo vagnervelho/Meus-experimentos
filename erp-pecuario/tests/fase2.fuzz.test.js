@@ -29,7 +29,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const F = require('./apoio-fuzz');
 
-const FIXAS = [20261115, 11, 47, 101, 2718];
+const FIXAS = [20261115, 11, 47, 101, 2718, 3001, 3107, 3213, 3318, 9001, 9055, 1009, 1111, 1234, 4242, 777];
 const PASSOS = Number(process.env.FUZZ_PASSOS || 60);
 const N = Number(process.env.FUZZ_SEMENTES || 0);
 const INICIO = process.env.FUZZ_INICIO !== undefined ? Number(process.env.FUZZ_INICIO) : Date.now() % 1000000000;

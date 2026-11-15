@@ -1299,6 +1299,7 @@ function rodar(semente, passos) {
     if (ex.r && ex.r.ok) { stats.aceitos++; stats.porRotulo[rot].ok++; } else if (ex.r) {
       stats.recusados++;
       const det = (ex.r.error.details || [])[0];
+      if (process.env.FUZZ_LOG_TRAVA && det && /^INTEGRIDADE_/.test(det.codigo)) console.log('TRAVA semente ' + semente + ' passo ' + k + ' ' + rot + ' ' + ex.r.error.code + ' ' + det.codigo + ': ' + det.mensagem);
       const c = ex.r.error.code + (det ? ':' + det.codigo : '');
       stats.porRotulo[rot].recusa[c] = (stats.porRotulo[rot].recusa[c] || 0) + 1;
     }

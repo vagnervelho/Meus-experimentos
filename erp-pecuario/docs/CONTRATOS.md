@@ -82,6 +82,9 @@ e a fase A de todo comando, também no SIMULAR (seção 10.5); o retrato em mem�
 só na aba alterada (`Repository.bifurcar`, seção 9); o financeiro conferido por escopo (`FinancialService.conferir(tx,
 escopo)`, seção 26); a fêmea de cada registro reprodutivo que não é parto conferida na GENEALOGIA (seção 11); a medição
 `npm run trava:medir` (seção 7).
+Etapa TESTE ALEATÓRIO DE TODOS OS COMANDOS (passada 1): o motor do teste aleatório baseado em modelo, a gravação simbólica
+da sequência e o encolhimento, as regressões fixas (seção 36); o brinco lançado errado conferido pela posição no registro
+(seção 14) e, em todo caminho, pela verificação de integridade e pela trava (LINHA_DO_TEMPO, seções 10.5 e 11).
 
 ## 1. Regras que valem para todo arquivo de `src/`
 
@@ -743,7 +746,9 @@ a conferência final do ESTADO RESULTANTE.
 - mudar o marco zero depois de um histórico importado (`INTEGRIDADE_COPIAS`);
 - (teste aleatório, seção 36) a troca de brinco levada por correção para antes de um "brinco lançado errado", ou estornada,
   ou o brinco de criação corrigido, quando a correção de brinco passaria a trocar um número que o animal não tinha naquela
-  posição (`INTEGRIDADE_LINHA_DO_TEMPO`, achado do brinco corrigido; seção 11).
+  posição (`INTEGRIDADE_LINHA_DO_TEMPO`, achado do brinco corrigido; seção 11);
+- (teste aleatório) a fêmea que entra prenhe (rebanho inicial, compra, outra entrada) com o nascimento no dia da entrada ou
+  depois: o diagnóstico de gestação da entrada fica antes do nascimento (`VALIDATION` `INTEGRIDADE_GENEALOGIA`).
 
 **Desempenho** (`npm run trava:medir`; base de demonstração do TestRunner, 391 comandos; CPU do Node sobre a planilha
 falsa; mediana de três execuções alternadas com a cópia do projeto de antes da trava):
@@ -1889,3 +1894,34 @@ chave) e `tests/ui/pastos-importacao.test.js` (Playwright, a 1280 e a 360 px: pa
 e antes do marco zero; importação de compras com o modelo baixado, "Deixar de fora" do lançamento inteiro, confirmação
 parcial, reconciliação em tabela no relatório e na lista; GTA no formulário da transferência com falha de envio e
 "Tentar de novo", vista no detalhe).
+
+## 36. Teste aleatório de todos os comandos da Fase 2 (fuzz baseado em modelo) — `tests/fase2.fuzz.test.js`, `tests/apoio-fuzz.js`, `tests/fase2.fuzz.regressoes.test.js`
+
+Garantia que vale para todos os caminhos, em vez da lista de conferências de cada um: depois de qualquer comando da Fase 2,
+pela `api()` (como a tela chama), o estado inteiro confere. O motor é `tests/apoio-fuzz.js` (não é arquivo de teste).
+
+| Peça | Contrato |
+|---|---|
+| Montagem (`montar(opcoes)`) | `setup()` do editor; pela `api()`: propriedade, pastos A (5 ha, 6 cabeças), B e C (sem área), fornecedor, comprador, transportador e corretor, o marco zero 01/01/2026 (`vazio`: sem marco zero e sem rebanho), `importacao_lote_linhas = 2`, o reuso de brinco (`reuso`), um touro de referência e o rebanho de base de 8 animais (mãe e cria ao pé, touro, prenhe, valor de abertura). `opcoes = {ordem (alpha \| reverse: a ordem de carga do `src/`), reuso, vazio}` vem da semente |
+| Gerador (`gerar`) | A cada passo, pelo estado lido cru da planilha (sem `Timeline`): registrar os 10 tipos ativos e os subtipos (rebanho inicial, outra entrada nova e volta, compra por cabeça, kg vivo, arroba de carcaça e de peso vivo, lote com cada critério e valor de cada animal, com frete, outros custos e parcelas vazias, explícitas, com 1 centavo de erro ou nenhuma; venda com as mesmas modalidades, desconto, deduções e dedução retida; transferência; morte e descarte com o lançamento; parto com gêmeos, natimorto, pai e data antiga; identificação nos três subtipos e em outros tipos; marcação; correção de cadastro, brinco lançado errado, correção de localização, reclassificação, baixa na contagem), corrigir (a especificação do lançamento gravado mudada: data, animal a mais ou a menos, valores, atributos de quem ele criou; também o substituto de um substituto), estornar (também o ESTORNO e o já anulado), `animal.editar` (mãe, pai, sexo, nascimento, chegada, castrado, origem, nome), `config.salvar` (reuso de brinco, zeros à esquerda, marco zero), importação de ANIMAIS e dos 5 tipos de evento (criar, validar cada bloco, validar de novo, importar com TOTAL ou PARCIAL_APROVADO, concluir, desfazer; também com outra em curso e o comando de negócio no meio), reenvio com a mesma chave e `dataVersionEsperada` velha. Datas: as do animal (nascimento e véspera, cada lançamento dele, saída e dia seguinte), o marco zero, hoje, amanhã, antes do marco zero. Animais: os presentes na data (85%), qualquer um, o de referência e um inexistente; 35% dos passos usam os animais dos últimos comandos aceitos; brincos repetidos de propósito (o de outro animal, com zero à esquerda). Metade dos comandos vai sem aceite de aviso: com `NEEDS_CONFIRMATION`, a recusa é conferida e o pedido volta com os códigos aceitos, como a tela faz; 25% passam antes pelo `evento.simular` |
+| Oráculo de cada passo (`executar`) | Aceito: o efeito que o pedido manda (`oraculoEfeito`: o evento vale, do tipo e da data pedidos, o original anulado na correção; o animal que sai está fora do rebanho no fim do dia e, sem lançamento posterior, com a situação e a data de saída; a transferência e a correção de localização com o pasto; o animal novo com o sexo, o brinco, o pasto e a origem pedidos; o parto com as crias vivas, a mãe, o nascimento e a linha PARTO; a identificação com o código; a marcação, a reclassificação e a correção de cadastro valendo quando são as últimas; o brinco lançado errado trocando o número em uso NA POSIÇÃO dele; venda, compra, morte e descarte com os valores pedidos; a importação no estado do passo e os eventos dela valendo ou não; a configuração gravada; a resposta com os animais como gravados). Recusado: código conhecido, mensagem e detalhes em português, `data_version` e linhas iguais, a chave livre (`operacao.status` INEXISTENTE). Simulação = comando (o mesmo desfecho; com a importação em curso, só o comando é recusado, desenho-base 16.8). Depois de todo passo (`oraculoGlobal`): `sistema.integridade` sem ERRO; `Timeline.conferir` e `FinancialService.conferir` vazios; as invariantes de 03b, seção 14, nas linhas cruas (`apoio-oraculos.invariantesCruas`, agora com a vigência da importação); um replay independente de cada animal (situação, pasto e saída gravados = replay; entradas e saídas alternadas, origem de cada movimento = pasto de antes, nada depois da morte, fato dentro da permanência); o brinco lançado errado de cada AJUSTES vigente; `inventario.posicao` e `inventario.elegiveis` (transferência e parto) = replay numa data do passo e hoje |
+| Sequência gravada e encolhimento | Cada comando é gravado com símbolos no lugar dos identificadores (`@k.aN`, `@k.eN`, `@k.iN`: o N-ésimo animal, evento e importação que o passo k criou; `@b:<brinco>` do rebanho de base, `@p:A`, `@f:fornecedor`, `@x`, `@c:<categoria>`, `@conta`). `reproduzir(opcoes, comandos)` repete num sistema novo (o comando cujo símbolo ficou sem dono é pulado) e devolve a primeira falha; `encolher` (ddmin) chega à menor sequência com a mesma assinatura (`INTEGRIDADE:<CHECAGEM>`, `EFEITO:<tipo>`, `RECUSA:MUDOU`, `REPLAY:...`, `SIMULACAO`...) |
+| Execução | `npm test` roda 16 sementes fixas de 60 passos (o arquivo em cerca de 30 s) e confere que cada tipo foi aceito, com correções, estornos e recusas. `FUZZ_SEMENTES=N` roda N sementes novas a partir de `FUZZ_INICIO` (padrão: o relógio); `FUZZ_PASSOS` (padrão 60), `FUZZ_SAIDA=<pasta>` (cada falha encolhida em JSON), `FUZZ_ENCOLHER=0`, `FUZZ_LOG_TRAVA=1` (lista as recusas da trava). Em falha, imprime a semente e a sequência mínima, pronta para `tests/fase2.fuzz.regressoes.test.js`, que repete cada caso com o mesmo oráculo e confere o desfecho de cada passo |
+
+Achados desta etapa (cada um com o caso em `tests/fase2.fuzz.regressoes.test.js`, que falha no código de antes):
+- O brinco lançado errado corrigido para antes de uma troca de brinco do mesmo dia: o substituto ocupa a posição do
+  original e corrigia um número que ainda não estava no animal (o número da troca ficava gravado como "lançado errado" e
+  continuava no animal). `EventService.identificacaoIncorreta_` passou a conferir a posição, não só a data
+  (`ANTES_DA_IDENTIFICACAO`, seção 14).
+- O mesmo defeito por outros caminhos (a troca levada para antes por correção, a troca ou a primeira identificação
+  registradas ou estornadas em volta, o brinco de criação corrigido): a verificação de integridade confere, em
+  LINHA_DO_TEMPO, que todo brinco lançado errado vigente troca o número em uso na posição dele (seção 11), e a trava
+  recusa todo caminho que o quebre (seção 10.5).
+- No modelo do teste (não no sistema), as invariantes cruas de `apoio-oraculos.js`: o lançamento sem parcela de evento
+  anulado fica SEM_CAIXA (03b, seção 10.4: "vigente ou não"), o evento de importação desfeita fica CANCELADO sem anulador
+  (o predicado de 02, seção 5.1), e o registro anterior ao marco zero conta os animais com efeito 0 em `qtd_animais`.
+
+Medidas de que o oráculo enxerga: com a trava desligada numa cópia do projeto, 10 de cerca de 120 sementes falham (brinco
+repetido, a fêmea prenhe com o sexo ou o nascimento corrigidos, o brinco lançado errado); com o projetor errado de
+propósito (a marcação de não localizado esquecida depois de junho), 3 de 30 sementes falham pelo efeito pedido, que a
+verificação de integridade sozinha não vê (o projetor erra igual na gravação e na reconstrução).
