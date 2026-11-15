@@ -190,8 +190,10 @@ var UnitOfWork = (function () {
    * Derivados de operações CONFIRMADAS — repetível: (1) refaz a auditoria de cada operação (aplica valor_novo;
    * cria o cadastro que ainda não existe); (2) cache de status dos eventos; (3) projeções pela porta
    * ctx.projecoes (`tudo` na recuperação, `escopo` do tratador no caminho normal). Só grava o que difere.
-   * o: {operacoes: [{op, linhas}], escopo, tudo, agora, fecho}. `fecho` (ex.: OPERACOES.finished_at) vai na mesma
-   * gravação dos derivados: fica durável no flush que precede aplicada_em, nunca depois dela.
+   * o: {operacoes: [{op, linhas}], escopo, tudo, agora, fecho, projecoes}. `fecho` (ex.: OPERACOES.finished_at) vai na
+   * mesma gravação dos derivados: fica durável no flush que precede aplicada_em, nunca depois dela. `projecoes` = as
+   * atualizações que o projetor já deu no retrato da trava de integridade (o mesmo estado: as linhas lidas + as da
+   * operação, confirmada, + a auditoria refeita); com elas a porta não roda de novo.
    */
   function derivar_(est, o) {
     var ctx = est.ctx;
@@ -204,7 +206,8 @@ var UnitOfWork = (function () {
       gravar_(est, r.atualizar);
     });
     var derivados = statusDosEventos_(est, o.agora);
-    if (ctx.projecoes && (o.tudo || (o.escopo !== null && o.escopo !== undefined))) {
+    if (o.projecoes) derivados = derivados.concat(o.projecoes); // as do retrato da trava: o mesmo projetor sobre o mesmo estado
+    else if (ctx.projecoes && (o.tudo || (o.escopo !== null && o.escopo !== undefined))) {
       var tx = novoTx_(est, false, true);
       ctx.projecoes.reconstruir(tx, o.tudo ? { tudo: true } : o.escopo);
       derivados = derivados.concat(tx.plano.atualizacoes());
@@ -402,6 +405,75 @@ var UnitOfWork = (function () {
     if (erroDaRecuperacao) e.recuperacao = String(erroDaRecuperacao.message || erroDaRecuperacao);
     return e;
   }
+  // ------------------------------------------------------------------ trava de integridade ----
+  /** tx de leitura (com acesso cru) sobre um repositório interno: o estado lido (antes) ou o retrato (depois). */
+  function txDoRepo_(est, repo, simulacao) {
+    var t = novoTx_(est, simulacao, true);
+    t.repo = repo.publico();
+    t.cru = repo.leituraCrua();
+    return t;
+  }
+  /**
+   * Retrato DEPOIS (CONTRATOS, seção 10.5): as linhas lidas + o plano como se a operação estivesse confirmada (as linhas
+   * carimbadas como na fase A e a operação CONFIRMADA) + a auditoria refeita (o que a fase C aplica) + as projeções que a
+   * fase C grava, pelo mesmo projetor (ctx.projecoes) com o escopo do tratador. É um repositório em memória que
+   * compartilha as linhas lidas e copia as que muda (`bifurcar`): nada é gravado. Devolve {repo, projecoes}.
+   */
+  function retratoDepois_(est, op, plano, derivados) {
+    var ctx = est.ctx;
+    var v = est.repo.bifurcar();
+    var confirmada = {};
+    Object.keys(op).forEach(function (k) { confirmada[k] = op[k]; });
+    confirmada.status = 'CONFIRMADA';
+    confirmada.aplicada_em = est.agora;
+    v.incluir('OPERACOES', [confirmada]);
+    Object.keys(plano.lote).forEach(function (t) { v.incluir(t, plano.lote[t]); });
+    if (plano.auditoria.length && v.carregada('AUDITORIA')) v.incluir('AUDITORIA', plano.auditoria);
+    var r = AuditService.refazer(v, ctx.io, op, plano.auditoria);
+    Object.keys(r.criar).forEach(function (t) { if (v.carregada(t)) v.incluir(t, r.criar[t]); });
+    r.atualizar.forEach(function (u) { v.alterar(u.tabela, u.id, u.campos); });
+    var projecoes = [];
+    if (ctx.projecoes && derivados !== null && derivados !== undefined) {
+      var tx = txDoRepo_(est, v, false);
+      ctx.projecoes.reconstruir(tx, derivados);
+      projecoes = tx.plano.atualizacoes();
+      projecoes.forEach(function (u) { v.alterar(u.tabela, u.id, u.campos); });
+    }
+    return { repo: v, projecoes: projecoes };
+  }
+  /** O que o plano grava (para a trava dizer se o problema é do próprio lançamento): {eventos, linhas: {ABA\u0000id: true}}. */
+  function propriosDoPlano_(plano) {
+    var out = { eventos: {}, linhas: {} };
+    Object.keys(plano.lote).forEach(function (t) {
+      var pk = Schema.pk(t);
+      plano.lote[t].forEach(function (r) {
+        out.linhas[t + '\u0000' + r[pk]] = true;
+        if (t === 'EVENTOS') out.eventos[r.event_id] = true;
+      });
+    });
+    return out;
+  }
+  /**
+   * Trava única de integridade (CONTRATOS, seção 10.5): depois do tratador e antes da fase A (e no SIMULAR, no mesmo
+   * ponto), o retrato do que ficaria gravado passa pelas checagens de domínio da verificação de integridade
+   * (AuditService.travar) no escopo que o comando toca; achado de ERRO novo recusa o comando (VALIDATION ou CONFLICT
+   * INTEGRIDADE_<CHECAGEM>, nada gravado, chave livre). Devolve o retrato ({repo, projecoes}), cujas projeções a fase C
+   * grava, ou null quando o plano não toca registro nenhum.
+   */
+  function travar_(est, tx, op, plano, res) {
+    var ctx = est.ctx;
+    var sementes = AuditService.sementesDaTrava(plano.lote, tx.plano.mudancas(), res.derivados);
+    if (!sementes.dominio && !sementes.linhas.length) return null;
+    var inicio = ctx.clock.agoraMs();
+    if (sementes.dominio) est.repo.carregar(AuditService.leiturasTrava().concat(leiturasDasProjecoes_(ctx)));
+    var retrato = retratoDepois_(est, op, plano, res.derivados);
+    var r = AuditService.travar({
+      antes: txDoRepo_(est, est.repo, tx.simulacao), depois: txDoRepo_(est, retrato.repo, tx.simulacao), sementes: sementes,
+      projecoes: retrato.projecoes, derivados: res.derivados, projetor: ctx.projecoes || null, proprios: propriosDoPlano_(plano),
+    });
+    if (ctx.medirTrava) ctx.medirTrava({ rota: est.cmd.rota, ms: ctx.clock.agoraMs() - inicio, escopo: r.escopo, achados_depois: r.achados_depois, achados_antes: r.achados_antes });
+    return retrato;
+  }
   function executar_(est) {
     var ctx = est.ctx;
     var cmd = est.cmd;
@@ -446,6 +518,8 @@ var UnitOfWork = (function () {
     if (plano.entidades.indexOf('IMPORTACOES') >= 0) extras.push('EVENTOS');
     if (res.derivados !== null && res.derivados !== undefined) extras = extras.concat(leiturasDasProjecoes_(ctx));
     est.repo.carregar(extras);
+    // Trava de integridade: o estado que ficaria gravado passa pelas checagens de domínio antes de qualquer escrita.
+    var retrato = travar_(est, tx, op, plano, res);
 
     // Fase A — só anexa: marcador, OPERACOES INICIADA, linhas inertes, auditoria.
     est.fase = 'A';
@@ -468,7 +542,7 @@ var UnitOfWork = (function () {
     var fim = ctx.clock.agora();
     derivar_(est, {
       operacoes: plano.auditoria.length ? [{ op: op, linhas: plano.auditoria }] : [],
-      escopo: res.derivados, agora: fim,
+      escopo: res.derivados, agora: fim, projecoes: retrato ? retrato.projecoes : null,
       fecho: [{ tabela: 'OPERACOES', id: est.opId, campos: { finished_at: fim } }],
     });
     io.flush();
@@ -536,18 +610,31 @@ var UnitOfWork = (function () {
       liberar_(ctx, falhou);
     }
   }
+  /** A operação que a simulação usaria (a trava confere o retrato como se ela estivesse confirmada). */
+  function operacaoSimulada_(est, cmd, res) {
+    return {
+      op_id: est.opId, idempotency_key: est.cmd.chave, payload_hash: null, comando: cmd.rota, status: 'INICIADA', aplicada_em: null,
+      resumo_json: res.resumo === undefined ? null : res.resumo, erro: null, usuario: est.ctx.usuario || 'simulacao', started_at: est.agora, finished_at: null,
+    };
+  }
   /**
    * Modo SIMULAR: roda o MESMO tratador e fecha o MESMO plano do comando, como consulta (leitura validada, sem
-   * lock de escrita, sem gravar). Erro de validação é lançado como no comando; avisos voltam na resposta.
+   * lock de escrita, sem gravar), e passa pela MESMA trava de integridade. Erro de validação é lançado como no
+   * comando; avisos voltam na resposta.
    */
   function simular_(ctx, cmd) {
-    return lerValidado_(ctx, cmd, cmd.reads, function (est) {
+    // As abas da trava de integridade entram na mesma leitura validada (a simulação recusa o que o comando recusaria).
+    return lerValidado_(ctx, cmd, cmd.reads.concat(['OPERACOES', 'IMPORTACOES'], AuditService.leiturasTrava(), leiturasDasProjecoes_(ctx)), function (est) {
       est.opId = ctx.idGen.uuid();
       if (!est.cmd.chave) est.cmd.chave = 'simulacao';
       var tx = novoTx_(est, true);
       var res = cmd.tratador(tx) || {};
       var pendentes = conferirValidacoes_(res, []);
       var plano = fecharPlano_(est, tx);
+      if (!plano.vazio) {
+        est.repo.carregar(Object.keys(plano.lote).concat(plano.entidades));
+        travar_(est, tx, operacaoSimulada_(est, cmd, res), plano, res);
+      }
       var linhas = tx.plano.contagem();
       if (plano.auditoria.length) linhas.AUDITORIA = plano.auditoria.length;
       return {

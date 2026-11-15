@@ -98,10 +98,20 @@ var Repository = (function () {
    * ctx.io é a porta de E/S (Database.abrir). Ver docs/CONTRATOS.md, seção Repository.
    */
   function abrir(ctx) {
+    return abrir_(ctx, null);
+  }
+  /**
+   * `base` (só de `bifurcar`): as abas já lidas de outro repositório, compartilhadas linha a linha, com CÓPIA NA ESCRITA —
+   * o retrato em memória da trava de integridade (UnitOfWork) muda as suas linhas sem tocar nas do repositório de origem
+   * e não lê a planilha (aba que faltava antes do retrato é erro de programação).
+   */
+  function abrir_(ctx, base) {
     if (!ctx || !ctx.io) throw interno_('Repository.abrir precisa da porta de E/S no contexto.');
     var io = ctx.io;
-    var dados = {}; // tabela → {registros, linhas, cabecalho, coercidas: {linha: {coluna: true}}}
-    var alertas = [];
+    var dados = base ? base.dados : {}; // tabela → {registros, linhas, cabecalho, coercidas: {linha: {coluna: true}}}
+    var alertas = base ? base.alertas : [];
+    var retrato = !!base;
+    var proprias = {}; // retrato: tabela → {índice: true} das linhas já copiadas (as demais são do repositório de origem)
     var memo = {}; // derivados das linhas: vigentes, índices, avaliações — refeitos quando algo muda
     var contadores = {};
 
@@ -115,6 +125,7 @@ var Repository = (function () {
     function carregar(tabelas) {
       var faltam = dependencias(tabelas).filter(function (t) { return !carregada(t); });
       if (!faltam.length) return;
+      if (retrato) throw interno_('O retrato em memória só tem as abas lidas antes dele; faltaram ' + faltam.join(', ') + '.');
       var lido = io.ler(faltam);
       faltam.forEach(function (t) {
         var coercidas = {};
@@ -298,26 +309,53 @@ var Repository = (function () {
       });
       return saida;
     }
-    /** Espelha na memória as linhas que acabaram de ser anexadas a partir de `primeiraLinha` (só UnitOfWork). */
+    /**
+     * Espelha na memória as linhas que acabaram de ser anexadas a partir de `primeiraLinha` (só UnitOfWork). No retrato,
+     * sem `primeiraLinha`, as linhas entram depois da última (não há linha de planilha: nada dali é gravado).
+     */
     function incluir(tabela, registros, primeiraLinha) {
       var t = tabela_(tabela);
-      if (typeof primeiraLinha !== 'number') throw interno_('incluir precisa da linha em que os registros de ' + tabela + ' foram gravados.');
+      var inicio = primeiraLinha;
+      if (typeof inicio !== 'number') {
+        if (!retrato) throw interno_('incluir precisa da linha em que os registros de ' + tabela + ' foram gravados.');
+        inicio = 2;
+        t.linhas.forEach(function (n) { if (n >= inicio) inicio = n + 1; });
+      }
       (registros || []).forEach(function (r, i) {
         t.registros.push(io.normalizar(tabela, r));
-        t.linhas.push(primeiraLinha + i);
+        t.linhas.push(inicio + i);
       });
       invalidar_();
     }
-    /** Espelha na memória células que acabaram de ser gravadas (só UnitOfWork). */
+    /** Espelha na memória células que acabaram de ser gravadas (só UnitOfWork). No retrato, a linha é copiada antes da 1ª mudança. */
     function alterar(tabela, id, campos) {
-      var reg = cruPorId(tabela, id);
-      if (!reg) throw interno_('Não existe ' + tabela + ' com a chave ' + id + ' para alterar na memória.');
-      var coercidas = tabela_(tabela).coercidas[linhaDe(tabela, id)];
+      var i = vazio_(id) ? undefined : posicoes_(tabela)[id];
+      if (i === undefined) throw interno_('Não existe ' + tabela + ' com a chave ' + id + ' para alterar na memória.');
+      var t = tabela_(tabela);
+      var reg = t.registros[i];
+      if (retrato && !(proprias[tabela] && proprias[tabela][i])) {
+        var copia = {};
+        Object.keys(reg).forEach(function (k) { copia[k] = reg[k]; });
+        t.registros[i] = reg = copia;
+        (proprias[tabela] = proprias[tabela] || {})[i] = true;
+      }
+      var coercidas = t.coercidas[t.linhas[i]];
       Object.keys(campos).forEach(function (c) {
         reg[c] = io.normalizarValor(tabela, c, campos[c]);
         if (coercidas) delete coercidas[c];
       });
       invalidar_();
+    }
+    /**
+     * Retrato em memória (trava de integridade): um repositório novo com as abas JÁ lidas, que compartilha as linhas com
+     * este e as copia antes de mudar (`incluir`/`alterar` no retrato não tocam neste). Não lê a planilha nem grava nada.
+     */
+    function bifurcar() {
+      var copia = {};
+      Object.keys(dados).forEach(function (t) {
+        copia[t] = { registros: dados[t].registros.slice(), linhas: dados[t].linhas.slice(), cabecalho: dados[t].cabecalho, coercidas: {} };
+      });
+      return abrir_(ctx, { dados: copia, alertas: alertas.slice() });
     }
     /** Fachada entregue aos tratadores: só linhas vigentes, sem acesso cru e sem mutação. */
     function publico() {
@@ -352,7 +390,7 @@ var Repository = (function () {
       cabecalho: function (tabela) { return tabela_(tabela).cabecalho.slice(); },
       operacoesOrfas: operacoesOrfas, celulaCoercida: celulaCoercida,
       alertas: function () { return alertas.slice(); },
-      resolver: resolver, incluir: incluir, alterar: alterar,
+      resolver: resolver, incluir: incluir, alterar: alterar, bifurcar: bifurcar,
       publico: publico, leituraCrua: leituraCrua,
     };
   }

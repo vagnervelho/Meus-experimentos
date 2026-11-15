@@ -513,17 +513,22 @@ var FinancialService = (function () {
    * Confere as invariantes entre FINANCEIRO, PARCELAS, RATEIOS e ALOCACOES_FINANCEIRAS (03b, seção 14) sobre as linhas
    * vigentes da unidade (tx.repo; tx.cru para o que é anulado). Reutilizável pela verificação de integridade: a
    * consulta precisa ler `leituras()` com acesso cru. Aba não lida → as invariantes que dependem dela não rodam.
+   * `escopo` (trava de integridade): {lancamentos, eventos, animais: {id: true}} — só os lançamentos citados e os dos
+   * eventos citados, os rateios deles, os cabeçalhos de compra e venda e o valor desses eventos, e o custo de aquisição
+   * dos animais citados; ausente = tudo.
    * Devolve [{invariante, tabela, id, mensagem}] (vazio = tudo fecha, ao centavo e sem tolerância).
    */
-  function conferir(tx) {
+  function conferir(tx, escopo) {
     var repo = tx.repo;
     var cru = tx.cru || null;
+    var esc = escopo || null;
     var out = [];
     function achado(n, tabela, id, mensagem) { out.push({ invariante: n, tabela: tabela, id: id, mensagem: mensagem }); }
+    function doEscopo(fin) { return !esc || !!(esc.lancamentos && esc.lancamentos[fin.financial_id]) || !!(esc.eventos && esc.eventos[fin.event_id]); }
     var base = ['FINANCEIRO', 'PARCELAS', 'RATEIOS', 'ALOCACOES_FINANCEIRAS', 'EVENTOS', 'EVENTO_ANIMAIS'];
     if (!base.every(function (t) { return repo.carregada(t); })) return out;
     var temContas = repo.carregada('PLANO_CONTAS');
-    var lancs = repo.vigentes('FINANCEIRO');
+    var lancs = repo.vigentes('FINANCEIRO').filter(doEscopo);
     var rateioDe = {};
     lancs.forEach(function (fin) {
       var nome = '"' + (fin.descricao || fin.financial_id) + '"';
@@ -564,6 +569,7 @@ var FinancialService = (function () {
       if (nulo_(fin.animal_id) !== direta) achado(12, 'FINANCEIRO', fin.financial_id, 'O animal do lançamento ' + nome + ' (' + (fin.animal_id || 'vazio') + ') não corresponde à alocação direta (' + (direta || 'nenhuma') + ').');
     });
     repo.vigentes('RATEIOS').forEach(function (rat) {
+      if (esc && !doEscopo({ financial_id: rat.financial_id, event_id: rat.event_id }) && !doEscopo(repo.porId('FINANCEIRO', rat.financial_id) || {})) return;
       var allocs = repo.por('ALOCACOES_FINANCEIRAS', 'rateio_id', rat.rateio_id);
       if (soma_(allocs, 'valor_alocado') !== rat.total_alocado) achado(8, 'RATEIOS', rat.rateio_id, 'O rateio soma ' + reais_(soma_(allocs, 'valor_alocado')) + ' nas alocações, mas registra ' + reais_(rat.total_alocado) + '.');
       var bases = Utils.arredondar(allocs.reduce(function (t, a) { return t + (a.base_valor || 0); }, 0), 4);
@@ -577,18 +583,20 @@ var FinancialService = (function () {
       if (allocs.length === 1 && rat.criterio !== 'DIRETO') achado(13, 'RATEIOS', rat.rateio_id, 'Rateio com um único animal precisa ser DIRETO (está ' + rat.criterio + ').');
       if (allocs.length !== 1 && rat.criterio === 'DIRETO') achado(13, 'RATEIOS', rat.rateio_id, 'Rateio DIRETO precisa ter exatamente um animal (tem ' + allocs.length + ').');
     });
-    conferirNegocios_(repo, lancs, rateioDe, achado);
+    conferirNegocios_(repo, lancs, rateioDe, achado, esc);
     if (repo.carregada('SANIDADE')) {
       Utils.unicos(repo.vigentes('SANIDADE').map(function (x) { return x.event_id; })).forEach(function (eid) {
+        if (esc && !(esc.eventos && esc.eventos[eid])) return;
         var copias = soma_(repo.por('SANIDADE', 'event_id', eid), 'custo');
         var alocado = 0;
         repo.por('RATEIOS', 'event_id', eid).forEach(function (r) { alocado += soma_(repo.por('ALOCACOES_FINANCEIRAS', 'rateio_id', r.rateio_id), 'valor_alocado'); });
         if (copias !== alocado) achado(17, 'EVENTOS', eid, 'O custo copiado na sanidade (' + reais_(copias) + ') difere do alocado pelo evento (' + reais_(alocado) + ').');
       });
     }
-    if (repo.carregada('ANIMAIS')) conferirCustoAquisicao_(tx, achado);
+    if (repo.carregada('ANIMAIS')) conferirCustoAquisicao_(tx, achado, esc);
     if (cru) {
       cru.cru('FINANCEIRO').forEach(function (fin) {
+        if (!doEscopo(fin)) return;
         var a = cru.avaliar(fin.event_id);
         if (!a || a.vigente) return;
         var anulador = a.anulador_id ? cru.cruPorId('EVENTOS', a.anulador_id) : null;
@@ -600,9 +608,10 @@ var FinancialService = (function () {
     }
     return out;
   }
-  /** Invariantes 15 e 16: valor por animal × cabeçalho comercial × lançamentos do evento (COMPRA e VENDA). */
-  function conferirNegocios_(repo, lancs, rateioDe, achado) {
+  /** Invariantes 15 e 16: valor por animal × cabeçalho comercial × lançamentos do evento (COMPRA e VENDA). `esc`: só os eventos dele. */
+  function conferirNegocios_(repo, lancs, rateioDe, achado, esc) {
     var porEvento = Utils.agruparPor(lancs, 'event_id');
+    var doEscopo = function (eid) { return !esc || !!(esc.eventos && esc.eventos[eid]); };
     var contas = repo.carregada('PLANO_CONTAS');
     function principal(eid, codigo) {
       return (porEvento[eid] || []).filter(function (f) { var c = contas ? repo.porId('PLANO_CONTAS', f.conta_id) : null; return c && c.codigo === codigo; })[0] || null;
@@ -619,12 +628,13 @@ var FinancialService = (function () {
       var linhas = {};
       repo.vigentes(cfg[1]).forEach(function (x) { linhas[x.event_id] = (linhas[x.event_id] || 0) + 1; });
       repo.vigentes('EVENTOS').forEach(function (ev) {
-        if (ev.event_type !== cfg[0] || linhas[ev.event_id] === 1) return;
+        if (ev.event_type !== cfg[0] || linhas[ev.event_id] === 1 || !doEscopo(ev.event_id)) return;
         achado(15, 'EVENTOS', ev.event_id, cfg[2] + ' de ' + br_(ev.event_date) + (linhas[ev.event_id] ? ' tem ' + linhas[ev.event_id] + ' linhas de ' + cfg[1] + '; precisa ter uma só.' : ' está sem a linha de ' + cfg[1] + ' (a negociação do evento). Restaure o backup ou investigue a edição manual.'));
       });
     });
     if (repo.carregada('COMPRAS')) {
       repo.vigentes('COMPRAS').forEach(function (c) {
+        if (!doEscopo(c.event_id)) return;
         var ea = repo.por('EVENTO_ANIMAIS', 'event_id', c.event_id);
         var ev = repo.porId('EVENTOS', c.event_id);
         var individual = soma_(ea, 'valor_individual');
@@ -644,6 +654,7 @@ var FinancialService = (function () {
     }
     if (repo.carregada('VENDAS')) {
       repo.vigentes('VENDAS').forEach(function (v) {
+        if (!doEscopo(v.event_id)) return;
         var receita = v.valor_bruto - (v.desconto_comercial || 0);
         var ea = repo.por('EVENTO_ANIMAIS', 'event_id', v.event_id);
         var fin = principal(v.event_id, CONTAS.VENDA);
@@ -680,7 +691,7 @@ var FinancialService = (function () {
     // EVENTOS.total_value dos demais tipos é cópia gravada na fase A e conferida contra a fonte (03b, 2.5): a soma dos
     // lançamentos do evento (rebanho inicial = abertura; morte e descarte = o lançamento opcional); vazio sem lançamento.
     repo.vigentes('EVENTOS').forEach(function (ev) {
-      if (ev.event_type === 'COMPRA' || ev.event_type === 'VENDA') return;
+      if (ev.event_type === 'COMPRA' || ev.event_type === 'VENDA' || !doEscopo(ev.event_id)) return;
       var doEvento = porEvento[ev.event_id] || [];
       var esperado = doEvento.length ? soma_(doEvento, 'valor') : null;
       var gravado = vazio_(ev.total_value) ? null : ev.total_value;
@@ -710,10 +721,11 @@ var FinancialService = (function () {
     ordenados.forEach(function (o, k) { out[o.i] = k < corte ? 'FRETE' : 'OUTRO'; });
     return out;
   }
-  /** Invariante 18: custo de aquisição do animal = Σ alocações vigentes AQUISICAO_ANIMAIS do período mais recente. */
-  function conferirCustoAquisicao_(tx, achado) {
+  /** Invariante 18: custo de aquisição do animal = Σ alocações vigentes AQUISICAO_ANIMAIS do período mais recente. `esc`: só os animais dele. */
+  function conferirCustoAquisicao_(tx, achado, esc) {
     var f = Timeline.fonte(tx);
-    tx.repo.vigentes('ANIMAIS').forEach(function (a) {
+    var lista = esc ? Object.keys(esc.animais || {}).map(function (id) { return tx.repo.porId('ANIMAIS', id); }).filter(Boolean) : tx.repo.vigentes('ANIMAIS');
+    lista.forEach(function (a) {
       if (a.situacao_cadastral === 'EXTERNO') return;
       // A mesma fronteira do projetor (03a, DL-08): a entrada vigente mais recente, ou a histórica do animal que só existe no histórico.
       if (a.situacao_cadastral === 'ANULADO' || a.situacao_cadastral === 'PENDENTE') return;
