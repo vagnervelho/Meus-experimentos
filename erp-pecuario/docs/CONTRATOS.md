@@ -65,6 +65,15 @@ obrigatório, a dedução retida e a base do rateio de todo critério na integri
 uso na data, o desfazer recusado com outra importação em curso e a reconciliação com as correções do marco zero (seção
 18); o rascunho no servidor em partes e as falhas dele avisadas (seções 19 e 22); a prévia da correção sem os padrões do
 servidor e com o item desativado do original (seções 22 e 34).
+Fase 2, conserto da revisão independente (rodada 4): o conjunto final em todo caminho, com os períodos de brinco também no
+estorno, na correção que tira a linha de brinco e no desfazer, a chegada que não fica antes do nascimento, a genealogia do
+conjunto final, a categoria manual que serve ao sexo (`CATEGORIA_INCOMPATIVEL`), o pai do parto igual ao da cria
+(`PAI_DA_CRIA`), o pasto, a propriedade e a categoria desativados do original na correção e o conflito que aponta a
+correção que criou o vínculo; `evento.obter.propostas`, `impactos.voltam` e `impactos.anexos_nomes`; a ordem pela cadeia
+de substituição na lista de eventos (seção 14); a fonte de cada evento em COPIAS, a chegada e a categoria em
+LINHA_DO_TEMPO e a base estimada em BASE_RATEIO (seção 11); `Timeline.entradaDoCusto` e `ultimaPesagem` (seção 13);
+`FinancialService.tiposDosCustos` pela ordem do `financial_id` e `basesEstimadas` (seção 26); a reconciliação com a outra
+entrada do marco zero (seção 18); as telas da rodada (seção 34).
 Fase 2, DOCUMENTAÇÃO DE ENTREGA: este arquivo conferido com o código por amostra (a superfície pública de cada módulo
 contra as seções e as 63 rotas de `Api.rotas()`: 51 canônicas, 12 extras), sem mudança de contrato.
 

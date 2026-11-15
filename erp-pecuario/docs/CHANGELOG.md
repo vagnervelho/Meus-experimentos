@@ -626,9 +626,10 @@ Nenhuma linha de código mudou nesta etapa: só documentos, conferidos contra o 
 
 ## 15/11/2026 — Fase 2, conserto da revisão independente (rodada 3)
 
-23 achados (7 de gravidade alta), todos reproduzidos por um teste que falhava antes do conserto e corrigidos; nenhum
-refutado nem adiado. Testes novos: `tests/revisao3.motor.test.js`, `tests/revisao3.financeiro.test.js`,
-`tests/revisao3.interface.test.js` e `tests/ui/revisao3.test.js`.
+23 achados (8 de gravidade alta; o da descrição e do vencimento propostos na prévia da correção veio em duas lentes),
+todos reproduzidos por um teste que falhava antes do conserto e corrigidos; nenhum refutado nem adiado. Testes novos:
+`tests/revisao3.motor.test.js`, `tests/revisao3.financeiro.test.js`, `tests/revisao3.interface.test.js` e
+`tests/ui/revisao3.test.js`.
 
 - Motor: o pai do parto só de natimorto passa pela mesma conferência da cria viva (existe, não anulado, macho, nascido
   antes do parto); corrigir ou estornar o sexo ou o nascimento de quem é touro de um registro reprodutivo é recusado
@@ -699,3 +700,34 @@ reproduzidos por um teste que falhava antes do conserto e corrigidos; nenhum ref
   com o backend real (`npm run ui:check`: 85 testes, 85 aprovados, 0 falhas; página montada com 446 KB de 450 KB). Dos 36
   testes novos, 35 falham no código anterior à rodada (o 36º, "sem falso positivo" na conferência das linhas dos eventos, é
   a guarda do que precisa continuar valendo). Nada validado na conta do dono.
+
+## 15/11/2026 — Fase 2, relatório com as rodadas 3 e 4 da revisão
+
+Nenhuma linha de código mudou nesta etapa: só documentos.
+
+- `docs/RELATORIO_FASE2.md`, seção 6: as rodadas 3 (23 achados, 22 distintos) e 4 (29 achados, 28 distintos), por lente
+  e gravidade, com a decisão de cada achado (corrigido, refutado em parte com o motivo, resíduo adiado) e, na rodada 3,
+  qual conserto a rodada 4 achou incompleto; o balanço das quatro rodadas (94 achados, 91 distintos, 25 correções
+  incompletas); e a seção 6.7, que diz que a última rodada **não** terminou sem achado alto ou médio. Ela teve 6 altos,
+  todos correções incompletas, e 14 médios. A seção recomenda uma revisão curta desses consertos antes da Fase 3.
+- O mesmo relatório, números e textos: contagens refeitas (`npm test` com 619 testes, 619 aprovados, 0 falhas, em 423,9 s;
+  `npm run ui:check` com 85 testes, 85 aprovados, 0 falhas, em 223,7 s; página montada com 446 KB de 450 KB), com os 14
+  arquivos novos ou alterados desde a entrega rodados sozinhos. A soma por arquivo confere com o total. Também mudaram as
+  decisões (itens 2, 4, 6, 7, 8, 9, 11, 12 e 14), as limitações (itens 5, 6, 7, 9, 11, 12 e 13, e os novos 15 e 16)
+  e as entregas, com os testes das rodadas. Em "O que só o dono pode executar" entraram a verificação de integridade
+  logo depois de atualizar o código (bases antigas podem passar a dar ERRO) e a ratificação das duas decisões da
+  rodada 4 (custo do animal só do histórico; tipo de cada custo da compra).
+- Classificação feita nesta etapa, diferente do registro da rodada 3 ("nenhum refutado nem adiado"). O achado da dedução
+  retida conta como refutado em parte, porque a regra "parceiro = comprador" não entrou na integridade, com o motivo. O
+  do rascunho no servidor conta como resíduo adiado, porque acima de 96 KB ele continua recusado.
+- `docs/CHANGELOG.md`, rodada 3: eram 8 achados de gravidade alta, não 7.
+- `docs/CONTRATOS.md`: o estado ganhou a frase da rodada 4. O arquivo foi conferido por amostra contra o código nas funções
+  que as rodadas 3 e 4 mudaram, sem divergência: `Timeline.entradaDoCusto` e `ultimaPesagem`;
+  `FinancialService.tiposDosCustos`, `basesEstimadas` e `planejar` com o `financial_id`; `evento.obter.propostas`;
+  `impactos.voltam` e `impactos.anexos_nomes`; o rascunho em partes do `Api`; o desfazer com `IMPORTACAO_EM_CURSO`;
+  `Campos.opcoesDe`, `Registro.descartarVerificando` e `TelaImportacao.consequenciaDesfazer`; os cadastros desativados
+  do original na correção.
+- `docs/fase-0/10-plano-de-implementacao.md`, seção 8: as rodadas 3 e 4 não mudaram nenhum estado de entrega. E2.1 a
+  E2.11 continuam entregues, com 26 checagens, e a validação na conta do dono continua aberta. O arquivo não mudou.
+- Ficaram com números antigos, fora desta etapa: `README.md` (555 e 77 testes, 437 KB) e
+  `docs/fase-0/11-riscos-e-premissas.md` (R-12 com duas rodadas e 42 achados; R-31 com 437 KB).
