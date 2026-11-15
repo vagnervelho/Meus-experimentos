@@ -15,9 +15,9 @@ var ReproductionService = (function () {
   }
 
   /**
-   * Partos vigentes da matriz, do mais antigo ao mais recente (data, event_seq). f = Timeline.fonte (respeita os
+   * Partos vigentes da matriz, do mais antigo ao mais recente (data, posição na cadeia de substituição, event_seq). f = Timeline.fonte (respeita os
    * eventos excluídos da fonte: validação de estorno e de substituição). Cada item: {reproduction_id, event_id,
-   * event_seq, data, nascidos_vivos, natimortos, tipo_parto, pai_id, pre_marco_zero}.
+   * event_seq, ordem_seq, data, nascidos_vivos, natimortos, tipo_parto, pai_id, pre_marco_zero}.
    */
   function partos(f, matrizId) {
     var out = [];
@@ -25,13 +25,13 @@ var ReproductionService = (function () {
       if (r.tipo_evento !== 'PARTO') return;
       var ev = f.evento(r.event_id);
       out.push({
-        reproduction_id: r.reproduction_id, event_id: r.event_id, event_seq: ev ? ev.event_seq : 0, data: r.data,
+        reproduction_id: r.reproduction_id, event_id: r.event_id, event_seq: ev ? ev.event_seq : 0, ordem_seq: ev ? f.ordemSeq(r.event_id) || 0 : 0, data: r.data,
         nascidos_vivos: typeof r.qtd_nascidos_vivos === 'number' ? r.qtd_nascidos_vivos : 0,
         natimortos: typeof r.qtd_natimortos === 'number' ? r.qtd_natimortos : 0,
         tipo_parto: nulo_(r.tipo_parto), pai_id: nulo_(r.touro_id), pre_marco_zero: !!(ev && ev.pre_marco_zero === true),
       });
     });
-    return out.sort(function (a, b) { return a.data < b.data ? -1 : a.data > b.data ? 1 : a.event_seq - b.event_seq; });
+    return out.sort(function (a, b) { return a.data < b.data ? -1 : a.data > b.data ? 1 : (a.ordem_seq - b.ordem_seq) || (a.event_seq - b.event_seq); });
   }
 
   /**

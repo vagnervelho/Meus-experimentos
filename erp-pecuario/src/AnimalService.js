@@ -56,9 +56,13 @@ var AnimalService = (function () {
     if (!a) return 'animal';
     return !vazio_(a.brinco) ? a.brinco : !vazio_(a.nome) && a.situacao_cadastral === 'EXTERNO' ? a.nome : a.codigo_interno;
   }
-  function seqDe_(L, eventId) {
+  /** Posição do evento na ordem do dia: a do primeiro da cadeia de substituição (desenho-base 16.1), depois o event_seq. */
+  function posicaoDe_(L, eventId) {
     var ev = L.f.evento(eventId);
-    return ev ? ev.event_seq || 0 : 0;
+    return ev ? { ord: L.f.ordemSeq(eventId) || 0, seq: ev.event_seq || 0 } : { ord: 0, seq: 0 };
+  }
+  function depoisOuIgual_(a, b) {
+    return a.ord > b.ord || (a.ord === b.ord && a.seq >= b.seq);
   }
   function listasAtivas_(repo) {
     var out = {};
@@ -117,8 +121,8 @@ var AnimalService = (function () {
     var ultima = null;
     L.f.ajustes(id).forEach(function (x) {
       if (x.tipo_ajuste !== 'CORRECAO_CADASTRO' || x.campo !== campo) return;
-      var seq = seqDe_(L, x.event_id);
-      if (!ultima || seq >= ultima.seq) ultima = { seq: seq, valor: x.valor_novo };
+      var pos = posicaoDe_(L, x.event_id);
+      if (!ultima || depoisOuIgual_(pos, ultima.pos)) ultima = { pos: pos, valor: x.valor_novo };
     });
     if (ultima) v = ultima.valor;
     return v === true || v === 'S';
@@ -180,8 +184,8 @@ var AnimalService = (function () {
     var ult = null;
     L.f.pesagens(a.animal_id).forEach(function (p) {
       if (p.data_pesagem > data || typeof p.peso_kg !== 'number') return;
-      var seq = seqDe_(L, p.event_id);
-      if (!ult || p.data_pesagem > ult.data || (p.data_pesagem === ult.data && seq >= ult.seq)) ult = { data: p.data_pesagem, kg: p.peso_kg, metodo: p.metodo, seq: seq };
+      var pos = posicaoDe_(L, p.event_id);
+      if (!ult || p.data_pesagem > ult.data || (p.data_pesagem === ult.data && depoisOuIgual_(pos, ult.pos))) ult = { data: p.data_pesagem, kg: p.peso_kg, metodo: p.metodo, pos: pos };
     });
     var cat = categoria ? L.categoriaPorId[categoria.category_id] : null;
     var ref = cat && typeof cat.peso_referencia_kg === 'number' ? cat.peso_referencia_kg : null;

@@ -237,7 +237,8 @@ test('CT-10: guarda semântica — redigitar a mesma entrada (outra chave) pede 
   m.run('registrar', outraEntrada('2026-03-01', bezerros()), { chave: 'x1' });
   const e = falha(m, 'registrar', outraEntrada('2026-03-01', bezerros()), { chave: 'x2' });
   assert.deepEqual([e.code, codigos(e)], ['NEEDS_CONFIRMATION', ['POSSIVEL_DUPLICIDADE']]);
-  assert.match(e.details[0].mensagem, /^Já existe outra entrada .* de 01\/03\/2026 com 5 destes 5 animais\. Gravar mesmo assim\?$/);
+  assert.match(e.details[0].mensagem, /^Já existe a entrada de 01\/03\/2026 com 5 destes 5 animais\. Gravar mesmo assim\?$/);
+  assert.deepEqual([e.details[0].conflito.tipo, e.details[0].conflito.subtipo, e.details[0].conflito.nome], ['OUTRA_ENTRADA', null, 'a entrada']);
   assert.equal(m.contagem().EVENTOS, 1, 'aviso não aceito: nada gravado');
   const r = m.run('registrar', outraEntrada('2026-03-01', bezerros()), { chave: 'x2', avisos: ['POSSIVEL_DUPLICIDADE'] });
   assert.deepEqual(js(m.evento(r.dados.event_id).payload_json), { avisos_aceitos: [{ codigo: 'POSSIVEL_DUPLICIDADE', n: 1 }] });

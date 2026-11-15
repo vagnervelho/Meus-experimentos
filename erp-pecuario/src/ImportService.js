@@ -1097,6 +1097,10 @@ var ImportService = (function () {
         }));
       });
     });
+    // O que volta aos animais tocados (o mesmo do estorno): brinco que hoje é de outro, genealogia, categoria desativada.
+    EventService.conferirRestauracao(tx, ids, Object.keys(tocados).filter(function (id) { return !criados[id]; }), 'desfazer a importação').forEach(function (c) {
+      out.push(Validation.detalhe({ codigo: 'DEPENDENTE', animal_id: c.animal_id, brinco: c.brinco, mensagem: c.mensagem + ' Desfaça esse registro antes de desfazer a importação.', conflito: c.conflito }));
+    });
     ids.forEach(function (id) {
       tx.repo.por('FINANCEIRO', 'event_id', id).forEach(function (f) {
         if (tx.repo.por('PARCELAS', 'financial_id', f.financial_id).some(function (pc) { return pc.status === 'LIQUIDADA'; })) {
@@ -1249,6 +1253,12 @@ var ImportService = (function () {
         comissao: ev_('Comissão (R$)', 'dinheiro', ['comissao', 'corretagem'], { deducao: 'COMISSAO' }),
         funrural: ev_('Funrural (R$)', 'dinheiro', ['funrural', 'contribuicao rural'], { deducao: 'FUNRURAL' }),
         outras_deducoes: ev_('Outras deduções (R$)', 'dinheiro', ['outras deducoes', 'taxas', 'impostos'], { deducao: 'OUTRA' }),
+        // Dedução descontada pelo comprador no pagamento (03b, seção 10.2: retida_pelo_comprador), como no formulário:
+        // sim = o comprador deposita já sem ela, com ele como parceiro e o título no recebimento.
+        frete_retido: ev_('Frete descontado pelo comprador', 'bool', ['frete descontado pelo comprador', 'frete descontado', 'frete retido'], { retida_de: 'frete' }),
+        comissao_retida: ev_('Comissão descontada pelo comprador', 'bool', ['comissao descontada pelo comprador', 'comissao descontada', 'comissao retida'], { retida_de: 'comissao' }),
+        funrural_retido: ev_('Funrural descontado pelo comprador', 'bool', ['funrural descontado pelo comprador', 'funrural descontado', 'funrural retido'], { retida_de: 'funrural' }),
+        outras_retidas: ev_('Outras deduções descontadas pelo comprador', 'bool', ['outras deducoes descontadas pelo comprador', 'outras deducoes descontadas', 'outras deducoes retidas'], { retida_de: 'outras_deducoes' }),
         vencimento: C_VENC, parcelas: C_NPARC, forma_pagamento: C_FORMA, gta: C_GTA,
         nota_fiscal: ev_('Nota fiscal', 'texto', ['nota fiscal', 'nf'], { destino: 'nota_fiscal' }),
         observacoes_lancamento: C_OBS_EV,
@@ -1261,7 +1271,7 @@ var ImportService = (function () {
         observacoes: C_OBS,
       }),
       obrigatorios: ['grupo', 'data', 'comprador', 'valor_bruto', 'finalidade', 'modalidade', ['brinco', 'codigo']],
-      padroes: { modalidade: 'opcao', finalidade: 'lista', metodo_pesagem: 'metodo', forma_pagamento: 'lista' },
+      padroes: { modalidade: 'opcao', finalidade: 'lista', metodo_pesagem: 'metodo', forma_pagamento: 'lista', frete_retido: 'bool', comissao_retida: 'bool', funrural_retido: 'bool', outras_retidas: 'bool' },
       confiancas: [],
     },
     TRANSFERENCIAS: {
@@ -1741,9 +1751,10 @@ var ImportService = (function () {
     if (!dados.animais.length) return { dados: dados, porLinha: porLinha, erros: erros };
     if (evento === 'COMPRA') {
       if (!hist) dados.parcelas = parcelasDoGrupo_(g, g.data);
+      // 0,00 na planilha quer dizer "não houve" (03b, seção 4.1: frete e outros custos 0,00 se não houver): sem lançamento.
       dados.custos = [];
-      if (typeof g.cab.frete === 'number') dados.custos.push({ tipo: 'FRETE', valor: g.cab.frete });
-      if (typeof g.cab.outros_custos === 'number') dados.custos.push({ tipo: 'OUTRO', valor: g.cab.outros_custos });
+      if (typeof g.cab.frete === 'number' && g.cab.frete > 0) dados.custos.push({ tipo: 'FRETE', valor: g.cab.frete });
+      if (typeof g.cab.outros_custos === 'number' && g.cab.outros_custos > 0) dados.custos.push({ tipo: 'OUTRO', valor: g.cab.outros_custos });
       if (vazio_(campos.pasto_destino_id)) {
         var primeiro = dados.animais.filter(function (x) { return !vazio_(x.pasto_destino_id); })[0];
         if (primeiro) campos.pasto_destino_id = primeiro.pasto_destino_id;
@@ -1751,22 +1762,30 @@ var ImportService = (function () {
     }
     if (evento === 'VENDA') {
       if (!hist) dados.parcelas = parcelasDoGrupo_(g, g.data);
+      // Uma dedução por coluna com valor; 0,00 = "não houve" (sem lançamento). A marca de descontada pelo comprador
+      // vem da coluna dela (ou do valor para todas as linhas); sem ela, não descontada, como no formulário.
       dados.deducoes = [];
       Object.keys(modelo.campos).forEach(function (k) {
         var d = modelo.campos[k];
-        if (d.deducao && typeof g.cab[k] === 'number') dados.deducoes.push({ tipo: d.deducao, valor: g.cab[k] });
+        if (!d.deducao || typeof g.cab[k] !== 'number' || g.cab[k] <= 0) return;
+        var marca = Object.keys(modelo.campos).filter(function (j) { return modelo.campos[j].retida_de === k; })[0];
+        dados.deducoes.push({ tipo: d.deducao, valor: g.cab[k], retida_pelo_comprador: !!marca && g.cab[marca] === true });
       });
     }
     return { dados: dados, porLinha: porLinha, erros: erros };
   }
   /** Evento igual já registrado na base (mesmo tipo, mesma data, mesmo animal): a linha fica DUPLICADA (RN-091). */
-  function jaRegistrado_(tx, importId, evento, data, animalId) {
+  function jaRegistrado_(tx, importId, evento, data, animalId, campos) {
     if (vazio_(animalId) || vazio_(data)) return null;
+    var c = campos || {};
     var achado = null;
     tx.repo.por('EVENTO_ANIMAIS', 'animal_id', animalId).some(function (l) {
       var ev = tx.repo.porId('EVENTOS', l.event_id);
       if (!ev || ev.event_type !== evento || ev.event_date !== data || ev.import_id === importId) return false;
       if (evento === 'NASCIMENTO' && l.papel !== 'MATRIZ') return false;
+      // Outra transferência do animal no mesmo dia (a volta B → A) é outro evento: a guarda POSSIVEL_DUPLICIDADE do
+      // motor avisa, como no formulário (RN-090, RN-091). Só a mesma origem e o mesmo destino são o evento repetido.
+      if (evento === 'TRANSFERENCIA' && (nulo_(l.pasto_origem_id) !== nulo_(c.pasto_origem_id) || nulo_(l.pasto_destino_id) !== nulo_(c.pasto_destino_id))) return false;
       achado = ev;
       return true;
     });
@@ -1801,7 +1820,7 @@ var ImportService = (function () {
       // Duplicidade com a base: o mesmo animal já tem esse evento nessa data (fora desta importação).
       g.linhas.forEach(function (x) {
         var alvo = modelo.evento === 'NASCIMENTO' ? (mont.dados.animais[0] || {}).animal_id : mont.porLinha[x.linha_num];
-        var ev = jaRegistrado_(ens.tx, o.importId, modelo.evento, g.data, alvo);
+        var ev = jaRegistrado_(ens.tx, o.importId, modelo.evento, g.data, alvo, mont.dados.campos);
         if (ev) r.duplicadas[x.linha_num] = det_(null, 'EVENTO_JA_REGISTRADO', 'já existe ' + NOME_EVENTO[modelo.evento] + ' de ' + br_(ev.event_date) + ' com este animal' + (modelo.evento === 'NASCIMENTO' ? ' como mãe' : '') + ': a linha não entra de novo');
       });
       if (Object.keys(r.erros).length || Object.keys(r.duplicadas).length || !mont.dados.animais.length) return;

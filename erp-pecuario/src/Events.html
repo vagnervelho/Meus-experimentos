@@ -171,7 +171,7 @@ var TelaEventos = (function () {
     (def.campos || []).forEach(function (d) { if (texto_(origem[d.id]) !== null) campos[d.id] = origem[d.id]; });
     antes.campos = Util.clonar(campos);
     antes.grupos = Util.clonar(grupos);
-    return { campos: campos, linhas: linhas, grupos: grupos, origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotuloEvento(ev), antes: antes } };
+    return { campos: campos, linhas: linhas, grupos: grupos, origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotuloEvento(ev), historico: ev.pre_marco_zero === true, antes: antes } };
   }
   /**
    * Correção de venda: o cabeçalho vem de VENDAS e do evento; as parcelas, da receita (conta VENDA_ANIMAIS); cada
@@ -229,7 +229,7 @@ var TelaEventos = (function () {
     (def.campos || []).forEach(function (d) { if (texto_(origem[d.id]) !== null) campos[d.id] = origem[d.id]; });
     antes.campos = Util.clonar(campos);
     antes.grupos = Util.clonar(grupos);
-    return { campos: campos, linhas: linhas, grupos: grupos, origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotuloEvento(ev), antes: antes } };
+    return { campos: campos, linhas: linhas, grupos: grupos, origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotuloEvento(ev), historico: ev.pre_marco_zero === true, antes: antes } };
   }
   /**
    * Correção de transferência, parto, morte e descarte: o cabeçalho vem do evento, dos pastos da linha, do detalhe
@@ -272,7 +272,7 @@ var TelaEventos = (function () {
     }
     (def.campos || []).forEach(function (d) { if (texto_(origem[d.id]) !== null) campos[d.id] = origem[d.id]; });
     antes.campos = Util.clonar(campos);
-    return { campos: campos, linhas: linhas, grupos: grupos, origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotuloEvento(ev), antes: antes } };
+    return { campos: campos, linhas: linhas, grupos: grupos, origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotuloEvento(ev), historico: ev.pre_marco_zero === true, antes: antes } };
   }
   /** Valor de AJUSTES (texto canônico) como o formulário o mostra, pelo tipo do campo corrigível. */
   function brutoCorrigido_(def, campo, v) {
@@ -318,7 +318,7 @@ var TelaEventos = (function () {
     var defsEv = (def.campos || []).concat((def.subtipos && def.subtipos[sub] && def.subtipos[sub].campos) || []);
     defsEv.forEach(function (d) { if (texto_(origem[d.id]) !== null) campos[d.id] = origem[d.id]; });
     antes.campos = Util.clonar(campos);
-    return { subtipo: sub, campos: campos, linhas: linhas, origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotuloEvento(ev), antes: antes } };
+    return { subtipo: sub, campos: campos, linhas: linhas, origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotuloEvento(ev), historico: ev.pre_marco_zero === true, antes: antes } };
   }
   /** Pré-preenche o evento substituto com o que o original gravou (valores como digitados no formulário). */
   function previaCorrecao(o) {
@@ -362,17 +362,17 @@ var TelaEventos = (function () {
       antes.linhas[l.animal_id] = Util.clonar(v);
       return { animal_id: l.animal_id, criado: !!at, valores: v };
     });
-    return { campos: campos, linhas: linhas, origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotuloEvento(ev), antes: antes } };
+    return { campos: campos, linhas: linhas, origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotuloEvento(ev), historico: ev.pre_marco_zero === true, antes: antes } };
   }
   var ROTULO_AJUSTE = { categoria_manual_id: 'Categoria', pasto_atual_id: 'Pasto', brinco: 'Brinco' };
   /** Valor gravado em AJUSTES (texto canônico) em palavras: categoria, pasto, mãe ou pai pelo nome; vazio = desconhecido. */
   function valorAjuste_(campo, v) { return Store.valorLegivel(campo, v); }
   /** Alocações de um rateio (o que coube a cada animal), com a base quando o critério é por peso. */
-  function alocacoes_(det, rat, nome) {
+  function alocacoes_(det, rat, nome, cancelado) {
     var itens = (det.ALOCACOES_FINANCEIRAS || []).filter(function (x) { return x.rateio_id === rat.rateio_id; });
     if (!itens.length) return null;
     var porPeso = rat.criterio === 'PESO_VIVO' || rat.criterio === 'PESO_CARCACA';
-    return h('details', { class: 'detalhe', dataset: { alocacoes: String(itens.length) } }, h('summary', { text: 'Por animal (' + itens.length + ')' }),
+    return h('details', { class: 'detalhe', dataset: { alocacoes: String(itens.length) } }, h('summary', { text: (cancelado ? 'Por animal, sem efeito (' : 'Por animal (') + itens.length + ')' }),
       h('ul', { class: 'lista-simples' }, itens.map(function (x) { return h('li', { dataset: { alocacao: String(x.valor_alocado) } }, h('span', { class: 'dado', text: nome(x.animal_id) }), ': ' + Fmt.dinheiro(x.valor_alocado) + (porPeso ? ' (base ' + Fmt.peso(x.base_valor) + ')' : '')); })));
   }
   function Utils_agrupar(lista) { var m = {}; lista.forEach(function (x) { (m[x.animal_id] = m[x.animal_id] || []).push(x); }); return m; }
@@ -514,15 +514,21 @@ var TelaEventos = (function () {
       (payload.deducoes || []).forEach(function (x) { tipoDeducao[x.financial_id] = x.tipo; });
       if ((det.FINANCEIRO || []).length) corpo.appendChild(UI.secao('Lançamentos financeiros', h('ul', { class: 'lista-simples' }, det.FINANCEIRO.map(function (x) {
         var pa = Store.parceiro(x.partner_id);
-        var titulos = (det.PARCELAS || []).filter(function (p) { return p.financial_id === x.financial_id; }).map(function (p) { return Fmt.dinheiro(p.valor) + ' vence ' + Fmt.data(p.data_vencimento) + ' (' + Fmt.rotulo('STATUS_PARCELA', p.status).toLowerCase() + ')'; });
+        // Lançamento cancelado (estorno ou correção): as parcelas não são regravadas e deixam de valer pelo lançamento
+        // (03b, seção 11; desenho-base 16.11): nada de "em aberto" nem de valor "distribuído" (03b, seção 14, inv. 20).
+        var cancelado = x.status === 'CANCELADO';
+        var titulos = (det.PARCELAS || []).filter(function (p) { return p.financial_id === x.financial_id; }).map(function (p) {
+          return cancelado ? Fmt.dinheiro(p.valor) + ' com vencimento em ' + Fmt.data(p.data_vencimento) : Fmt.dinheiro(p.valor) + ' vence ' + Fmt.data(p.data_vencimento) + ' (' + Fmt.rotulo('STATUS_PARCELA', p.status).toLowerCase() + ')';
+        });
         var rat = (det.RATEIOS || []).filter(function (r) { return r.financial_id === x.financial_id; })[0];
         var arquivos = anexos.filter(function (a) { return a.financial_id === x.financial_id; }).map(function (a) { return a.nome_arquivo; });
         return h('li', { dataset: { lancamento: x.financial_id } }, h('span', { class: 'dado', text: (x.descricao || 'lançamento') + ': ' + Fmt.dinheiro(x.valor) }),
           ' · ' + Fmt.rotulo('NATUREZA', x.natureza) + (tipoDeducao[x.financial_id] ? ' (' + Store.rotuloLista('TIPO_DEDUCAO_VENDA', tipoDeducao[x.financial_id]).toLowerCase() + ')' : '') +
           (x.retida_pelo_comprador === true || x.retida_pelo_comprador === 'S' ? ' · descontada pelo comprador' : '') + (pa ? ' · ' + pa.nome : '') + ' · ' + (x.status === 'CANCELADO' ? 'cancelado' : Fmt.rotulo('STATUS_PAGAMENTO', x.status_pagamento).toLowerCase()),
-          titulos.length ? h('div', { class: 'suave', text: 'Títulos: ' + titulos.join('; ') }) : null,
-          rat ? h('div', { class: 'suave', text: 'Rateio: ' + Fmt.rotulo('CRITERIO_RATEIO', rat.criterio).toLowerCase() + ', ' + Fmt.dinheiro(rat.total_alocado) + ' distribuídos' }) : null,
-          rat ? alocacoes_(det, rat, nomeDoAnimal) : null,
+          titulos.length ? h('div', { class: 'suave', dataset: { titulos: cancelado ? 'sem-efeito' : 'vigentes' }, text: (cancelado ? 'Títulos sem efeito (lançamento cancelado): ' : 'Títulos: ') + titulos.join('; ') }) : null,
+          rat ? h('div', { class: 'suave', text: cancelado ? 'Rateio sem efeito (lançamento cancelado): ' + Fmt.rotulo('CRITERIO_RATEIO', rat.criterio).toLowerCase() + ', ' + Fmt.dinheiro(rat.total_alocado) + ' não vale mais por animal'
+            : 'Rateio: ' + Fmt.rotulo('CRITERIO_RATEIO', rat.criterio).toLowerCase() + ', ' + Fmt.dinheiro(rat.total_alocado) + ' distribuídos' }) : null,
+          rat ? alocacoes_(det, rat, nomeDoAnimal, cancelado) : null,
           arquivos.length ? h('div', { class: 'suave', text: 'Arquivos: ' + arquivos.join(', ') }) : null);
       })), { dado: 'financeiro' }));
       if (ev.event_type !== 'ESTORNO') corpo.appendChild(UI.secao('Documentos e fotos', blocoAnexos(ev, det, anexos), { dado: 'anexos' }));
@@ -540,7 +546,7 @@ var TelaEventos = (function () {
           try {
             // Os animais de uma saída (venda, morte, descarte) já não estão na carga do aparelho: busca-os antes de abrir.
             if ((o.linhas || []).some(function (l) { return Number(l.efeito_inventario) === -1; })) await Store.carregarBaixados();
-            Registro.abrir(ev.event_type, previaCorrecao(o));
+            await Registro.abrir(ev.event_type, previaCorrecao(o));
           } catch (e) {
             UI.aviso('Não foi possível abrir a correção: ' + e.message, { tipo: 'erro' });
           } finally {

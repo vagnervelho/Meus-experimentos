@@ -30,10 +30,14 @@ var EventCatalog = (function () {
   ];
 
   /** Os 21 tipos (desenho-base 4.1), com fase. `subtipos` só onde há subtipo; cada subtipo tem a sua fase. */
+  /**
+   * Resumo de cada tipo. `aceita_historico`: o formulário aceita data anterior ao marco zero como registro histórico
+   * (04, seção 6; só o NASCIMENTO): o motor e a tela leem daqui, uma regra só (§20, regra 8).
+   */
   var RESUMO = {
     ENTRADA_INICIAL: { rotulo: 'Rebanho inicial (marco zero)', grupo_ui: 'Movimentação', ordem: 10, fase: 1 },
     OUTRA_ENTRADA: { rotulo: 'Outra entrada (doação, permuta, achado)', grupo_ui: 'Movimentação', ordem: 20, fase: 1 },
-    NASCIMENTO: { rotulo: 'Nascimento', grupo_ui: 'Reprodução', ordem: 30, fase: 2 },
+    NASCIMENTO: { rotulo: 'Nascimento', grupo_ui: 'Reprodução', ordem: 30, fase: 2, aceita_historico: true },
     COMPRA: { rotulo: 'Comprar animais', grupo_ui: 'Movimentação', ordem: 40, fase: 2 },
     VENDA: { rotulo: 'Vender animais', grupo_ui: 'Movimentação', ordem: 50, fase: 2 },
     TRANSFERENCIA: { rotulo: 'Transferir de pasto', grupo_ui: 'Movimentação', ordem: 60, fase: 2 },
@@ -272,7 +276,7 @@ var EventCatalog = (function () {
     c_('peso_vivo_total_kg', 'Peso vivo total do lote', 'decimal', { unidade: 'kg', min: 0.1, casas: 1, ajuda: 'Vazio = a soma dos pesos dos animais.' }),
     c_('peso_carcaca_total_kg', 'Carcaça total (romaneio)', 'decimal', { unidade: 'kg', min: 0.1, casas: 1, visivel_se: quando_('base_peso', ['CARCACA']), ajuda: 'Vazio = a soma das carcaças dos animais.' }),
     c_('valor_bruto', 'Valor bruto da venda (nota ou romaneio)', 'dinheiro', { obrigatorio: true, min: 0.01, ajuda: 'Antes do desconto e das deduções. Vale o valor da nota; a conta pelo preço é só conferência.' }),
-    c_('desconto_comercial', 'Desconto no preço', 'dinheiro', { min: 0.01, ajuda: 'Abatimento dado ao comprador; reduz a receita. Frete, comissão e impostos vão nas deduções.' }),
+    c_('desconto_comercial', 'Desconto no preço', 'dinheiro', { min: 0, ajuda: 'Abatimento dado ao comprador; reduz a receita. Frete, comissão e impostos vão nas deduções.' }),
     c_('criterio_rateio', 'Como dividir o valor entre os animais', 'lista', { opcoes: ['CABECAS', 'PESO_VIVO', 'PESO_CARCACA', 'VALOR_INDIVIDUAL', 'MANUAL'], visivel_se: MOD(['LOTE']), obrigatorio_se: MOD(['LOTE']) }),
     c_('justificativa_rateio', 'Por que essa divisão', 'texto', { visivel_se: quando_('criterio_rateio', ['MANUAL']), obrigatorio_se: quando_('criterio_rateio', ['MANUAL']) }),
     c_('gta_numero', 'Número da GTA', 'texto'),
@@ -650,7 +654,7 @@ var EventCatalog = (function () {
   }
   /**
    * Confere `valores` contra as definições de campo (só formato, obrigatoriedade, lista e faixa; existência de
-   * referência e regras de negócio são do EventService). opcoes: {listas: {LISTA: [códigos ativos]}, rotuloQuem}.
+   * referência e regras de negócio são do EventService). opcoes: {listas: {LISTA: [códigos ativos]}, desativados: {LISTA: {código: rótulo}}, rotuloQuem}.
    * Devolve detalhes {codigo, campo, mensagem}; chave sem definição → CAMPO_DESCONHECIDO.
    */
   function validarCampos(definicoes, valores, opcoes) {
@@ -690,7 +694,10 @@ var EventCatalog = (function () {
     if (t === 'data') return typeof x === 'string' && Utils.dataValida(x) ? null : { codigo: 'FORMATO_INVALIDO', mensagem: '"' + d.rotulo + '" não é uma data válida.' };
     if (t === 'lista') {
       var ok = d.opcoes ? d.opcoes.indexOf(x) >= 0 : (o.listas && o.listas[d.lista] ? o.listas[d.lista].indexOf(x) >= 0 : typeof x === 'string');
-      return ok ? null : { codigo: 'VALOR_FORA_DA_LISTA', mensagem: '"' + x + '" não é uma opção de "' + d.rotulo + '".' };
+      if (ok) return null;
+      // Item desativado: a mensagem diz o nome dele (o código é interno).
+      var desativado = d.lista && o.desativados && o.desativados[d.lista] ? o.desativados[d.lista][x] : null;
+      return { codigo: 'VALOR_FORA_DA_LISTA', mensagem: desativado ? '"' + desativado + '" foi desativado nas listas e não pode ser escolhido em "' + d.rotulo + '".' : '"' + x + '" não é uma opção de "' + d.rotulo + '".' };
     }
     if (typeof x !== 'number' || !isFinite(x)) return { codigo: 'TIPO_INVALIDO', mensagem: '"' + d.rotulo + '" precisa ser um número.' };
     if ((t === 'inteiro' || t === 'dinheiro') && Math.floor(x) !== x) {

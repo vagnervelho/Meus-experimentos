@@ -165,6 +165,19 @@ var TelaPastos = (function () {
         corpo.appendChild(UI.estadoErro(e, { acao: { texto: 'Voltar aos pastos', aoClicar: function () { Roteador.ir('pastos'); } } }));
       }
     }
+    /**
+     * Pasto vazio (08, seção 8, "Vazio": "Transferir para cá"): a transferência com este pasto de destino e, para animal
+     * que chega, a mesma folha "Como o animal entrou?" do rebanho, com o pasto já escolhido — nunca o rebanho inicial
+     * direto, que é o marco zero e não uma entrada de hoje (RN-022).
+     */
+    function vazioDoPasto(p) {
+      var podeTransferir = !!Store.tipoEvento('TRANSFERENCIA') && App.podeRegistrar();
+      var el = UI.vazio({ texto: 'Nenhum animal neste pasto em ' + Fmt.data(p.data) + '.', acao: podeTransferir ? { texto: 'Transferir para cá', aoClicar: function () {
+        Registro.abrir('TRANSFERENCIA', { campos: { pasto_destino_id: id, event_date: p.data }, origem: 'pasto/' + id });
+      } } : null });
+      if (App.podeRegistrar()) el.appendChild(UI.botao('Registrar a chegada de um animal', { tipo: 'texto', atributos: { 'data-entrada-pasto': id }, aoClicar: function (ev) { TelaRebanho.comoEntrou(ev.currentTarget, id); } }));
+      return el;
+    }
     function desenhar(p) {
       Util.limpar(corpo);
       Util.limpar(acoes);
@@ -175,7 +188,6 @@ var TelaPastos = (function () {
         if (!Store.tipoEvento(x.tipo) || !ids.length || p.data !== Fmt.hoje()) return;
         acoes.appendChild(UI.botao(x.rotulo, { atributos: { 'data-atalho-pasto': x.tipo }, aoClicar: function () { Registro.abrir(x.tipo, { campos: x.origem ? { pasto_origem_id: id } : {}, linhas: ids.map(function (a) { return { animal_id: a }; }), origem: 'pasto/' + id }); } }));
       });
-      var entrada = ['ENTRADA_INICIAL', 'OUTRA_ENTRADA'].filter(function (t) { return Store.tipoEvento(t); })[0];
       corpo.appendChild(UI.secao('Dados do pasto', UI.pares([
         ['Identificação', p.identificacao], ['Propriedade', p.propriedade_nome], ['Área', p.area_hectares === null ? null : Fmt.numero(p.area_hectares, 2) + ' ha'], ['Capim', p.tipo_capim],
         ['Capacidade estimada', p.capacidade_estimada_ua_ha === null ? null : Fmt.numero(p.capacidade_estimada_ua_ha, 2) + ' UA/ha'], ['Capacidade em cabeças', p.capacidade_estimada_cabecas === null ? null : Fmt.numero(p.capacidade_estimada_cabecas)],
@@ -205,7 +217,7 @@ var TelaPastos = (function () {
           { id: 'peso', rotulo: 'Peso', num: true, valor: function (a) { return a.peso && a.peso.kg; }, formatar: function (a) { return a.peso && a.peso.kg ? Fmt.peso(a.peso.kg) + (a.peso.estimado ? ' (estimado)' : '') : '—'; } },
           { id: 'no_pasto_desde', rotulo: 'No pasto desde', valor: function (a) { return a.no_pasto_desde || ''; }, formatar: function (a) { return Fmt.data(a.no_pasto_desde); } },
         ],
-      }).el : UI.vazio({ texto: 'Nenhum animal neste pasto em ' + Fmt.data(p.data) + '.', acao: entrada ? { texto: 'Registrar entrada aqui', aoClicar: function () { Registro.abrir(entrada, { linhas: [{ valores: { pasto_destino_id: id } }], origem: 'pasto/' + id }); } } : null });
+      }).el : vazioDoPasto(p);
       corpo.appendChild(UI.secao('Animais', conteudo, { dado: 'animais' }));
       corpo.appendChild(secaoPermanencia());
     }

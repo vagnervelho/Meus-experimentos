@@ -534,3 +534,36 @@ depois o conserto da causa.
 - Verificado em Node (`npm test`: 538 testes, 538 aprovados, 0 falhas, cerca de 7 minutos neste ambiente) e no navegador
   com o backend real (`npm run ui:check`: 71 testes, 71 aprovados, 0 falhas; página montada com 433 KB de 450 KB). Nada
   validado na conta do dono.
+
+## 15/11/2026 — Fase 2, conserto da revisão independente (rodada 2)
+
+- Motor: o estorno e a correção conferem também a mãe e o pai que a anulação devolve (progenitor anulado, mãe macho, pai
+  fêmea, nascido depois do filho, ciclo: `REFERENCIA_GENEALOGICA`, CONFLICT com a correção que impede); o brinco devolvido
+  não esbarra no de um animal que o próprio comando anula; o desfazer de uma importação de eventos concluída faz as mesmas
+  conferências sobre os animais que ela só tocou (`EventService.conferirRestauracao`): dois animais não ficam mais com o
+  mesmo brinco. Fatos do mesmo dia (peso atual, situação reprodutiva, partos, correções de cadastro, base estimada da
+  venda) seguem a posição do substituto na cadeia (desenho-base 16.1): corrigir só um valor não troca mais o peso nem a
+  situação reprodutiva. Correção de cadastro de cria nascida na fazenda não muda mais mãe, nascimento, origem nem o pai do
+  parto (`NAO_SE_APLICA`: corrija o parto). Retroativo que deixa a origem de uma saída posterior errada continua em
+  CONFLICT (03b: origem imutável; 04, 5.2 ii), agora com o caminho que funciona (estornar, lançar, registrar de novo). O
+  aviso de possível duplicidade usa o nome do lançamento ("Já existe a transferência de 01/04/2026 com este animal") e
+  `conflito` com tipo, subtipo e nome. A regra de data antes do marco zero passou ao catálogo (`aceita_historico`).
+- Integridade: checagem nova `GENEALOGIA` (26 checagens); `COPIAS` confere o tipo da linha de detalhe com o tipo e o
+  subtipo do evento (BAIXAS, AJUSTES, REPRODUCAO); `PARTOS` confere também o cadastro reconstruído da cria.
+- Financeiro: a revisão do estorno separa receita e deduções (`cancelados.receitas`/`despesas`; `total` só numa natureza);
+  a correção aceita o item de lista desativado que o original já usava (desativado novo é recusado pelo nome);
+  `desconto_comercial` aceita 0,00. Importação: frete, outros custos, desconto e deduções 0,00 = "não houve"; VENDAS
+  ganhou a marca "descontado pelo comprador" por dedução (coluna ou valor para todas as linhas), gravada como no
+  formulário (retida, comprador como parceiro, título no recebimento); TRANSFERENCIAS só fica DUPLICADA com a mesma origem
+  e o mesmo destino.
+- Interface: `Registro.abrir` trata as próprias falhas (sem conexão, rascunho no servidor ilegível): todo atalho avisa em
+  vez de não fazer nada; a nota da correção diz o que acontece com o animal tirado pelo tipo de linha; a nota de data
+  antes do marco zero segue o catálogo; o aviso de duplicidade ganhou o link para o lançamento existente; o pasto vazio
+  oferece "Transferir para cá" e a folha "Como o animal entrou?" com o pasto escolhido (nunca o rebanho inicial direto);
+  o parto histórico diz que a cria fica no histórico; o detalhe de um lançamento cancelado mostra títulos e rateio "sem
+  efeito".
+- Testes novos: `tests/revisao2.motor.test.js`, `tests/revisao2.financeiro.test.js`, `tests/ui/revisao2.test.js` e casos
+  em `tests/telas.fase2.test.js`; atualizados ao contrato novo, sem afrouxar: a contagem de checagens em
+  `tests/integrity.fase2.test.js` (25 → 26, com GENEALOGIA no contrato), a mensagem de possível duplicidade em
+  `tests/events.test.js` ("Já existe a entrada de…", com o `conflito` conferido) e `cancelados` com receita e despesa em
+  `tests/telas.fase2.test.js`.

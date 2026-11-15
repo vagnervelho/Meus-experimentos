@@ -153,8 +153,11 @@ var TelaRebanho = (function () {
       aoSalvar: function (r) { Roteador.ir('animal/' + r.data.animal_id + '/resumo'); },
     });
   }
-  /** "Cadastrar animal": como entrou? Só as opções cujo evento já foi entregue (08, seção 3). */
-  function comoEntrou(origem) {
+  /**
+   * "Cadastrar animal": como entrou? Só as opções cujo evento já foi entregue (08, seção 3). `pastoId` (o painel do
+   * pasto vazio): o formulário escolhido já vem com o pasto de destino.
+   */
+  function comoEntrou(origem, pastoId) {
     var opcoes = [
       { tipo: 'NASCIMENTO', rotulo: 'Nasceu aqui', ajuda: 'Parto de uma vaca do rebanho.' },
       { tipo: 'COMPRA', rotulo: 'Foi comprado', ajuda: 'Compra com valor e vendedor.' },
@@ -165,7 +168,13 @@ var TelaRebanho = (function () {
     var f = UI.folha({ titulo: 'Como o animal entrou?', conteudo: lista, origem: origem });
     opcoes.forEach(function (o) {
       lista.appendChild(h('li', { class: 'linha-acao' }, h('div', null, h('div', { class: 'dado', text: o.rotulo }), h('div', { class: 'suave', text: o.ajuda })),
-        UI.botao('Escolher', { rotulo: o.rotulo, atributos: { 'data-entrada': o.tipo }, aoClicar: function () { f.fechar({ forcar: true }); Roteador.ir('evento/novo/' + o.tipo); } })));
+        UI.botao('Escolher', { rotulo: o.rotulo, atributos: { 'data-entrada': o.tipo }, aoClicar: function () {
+          f.fechar({ forcar: true });
+          if (!pastoId) { Roteador.ir('evento/novo/' + o.tipo); return; }
+          // Compra e parto levam o pasto no cabeçalho; o rebanho inicial e a outra entrada, em cada animal.
+          var noCabecalho = o.tipo === 'COMPRA' || o.tipo === 'NASCIMENTO';
+          Registro.abrir(o.tipo, noCabecalho ? { campos: { pasto_destino_id: pastoId }, origem: 'pasto/' + pastoId } : { linhas: [{ valores: { pasto_destino_id: pastoId } }], origem: 'pasto/' + pastoId });
+        } })));
     });
     lista.appendChild(h('li', { class: 'linha-acao' }, h('div', null, h('div', { class: 'dado', text: 'É de fora do rebanho' }), h('div', { class: 'suave', text: 'Touro de sêmen ou progenitor de outra fazenda.' })),
       UI.botao('Escolher', { rotulo: 'É de fora do rebanho', atributos: { 'data-entrada': 'EXTERNO' }, aoClicar: function () { f.fechar({ forcar: true }); cadastrarExterno(origem); } })));
@@ -574,6 +583,6 @@ var TelaRebanho = (function () {
   }
   Telas.registrar('rebanho', { titulo: 'Rebanho', modulo: 'REBANHO', montar: montarLista });
   Telas.registrar('animal/:id/:aba?', { titulo: 'Ficha do animal', modulo: 'REBANHO', montar: montarFicha });
-  return { filtrar: filtrar, faixas: faixas, COLUNAS: COLUNAS, linhasCsv: linhasCsv, abrirCom: abrirCom, filtros: function () { return Util.clonar(filtros); }, editar: editar, ficha: ficha };
+  return { filtrar: filtrar, faixas: faixas, COLUNAS: COLUNAS, linhasCsv: linhasCsv, abrirCom: abrirCom, filtros: function () { return Util.clonar(filtros); }, editar: editar, ficha: ficha, comoEntrou: comoEntrou };
 })();
 </script>

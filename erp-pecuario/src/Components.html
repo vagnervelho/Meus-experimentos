@@ -1491,7 +1491,20 @@ var Registro = (function () {
    * previa: {subtipo, campos (brutos), linhas: [{animal_id, valores}], rotulos: {event_id: texto}, origem (rota de volta)}.
    * Se já houver rascunho desse tipo, pergunta antes de substituí-lo.
    */
+  /**
+   * Abre o formulário de um tipo (atalhos da ficha, do pasto e do rebanho; Estornar e Corrigir no detalhe; Desfazer).
+   * Trata as próprias falhas (rascunho guardado no servidor que não pôde ser lido ou apagado, sem conexão): nunca deixa
+   * o toque sem resposta (§20, regras 3 e 9; 08, seção 8, "Sem conexão"). Devolve true se o formulário abriu.
+   */
   async function abrir(tipo, previa) {
+    try {
+      return await abrirSessao_(tipo, previa);
+    } catch (e) {
+      UI.aviso('Não foi possível abrir o registro: ' + ((e && e.message) || 'sem resposta do servidor. Toque de novo em instantes.'), { tipo: 'erro', duracaoMs: 12000 });
+      return false;
+    }
+  }
+  async function abrirSessao_(tipo, previa) {
     var def = Store.tipoEvento(tipo);
     if (!def) { UI.aviso('Este registro não está disponível nesta fase.', { tipo: 'erro' }); return false; }
     var existente = sessoes[tipo] || await Rascunhos.obter(idRascunho(tipo));
@@ -1824,7 +1837,7 @@ var Registro = (function () {
     var v = s.view = { blocos: {}, cartoes: {} };
     var raiz = h('div', { class: 'form-evento', dataset: { tipoEvento: s.tipo } });
     raiz.appendChild(h('div', { class: 'tela-cabecalho' }, h('h1', { text: s.corrige ? 'Corrigir: ' + s.corrige.rotulo : def.rotulo }), h('span', { class: 'selo', text: s.corrige ? 'Correção' : def.grupo_ui })));
-    if (s.corrige) raiz.appendChild(UI.nota('O lançamento original deixa de valer e este entra no lugar dele, com os mesmos animais. Tirar um animal da lista anula o cadastro dele.', 'info'));
+    if (s.corrige) raiz.appendChild(UI.nota(notaCorrecao(s), 'info', null));
     v.rascunho = h('div');
     raiz.appendChild(v.rascunho);
     v.problemas = h('div', { class: 'problemas', dataset: { problemas: '1' } });
@@ -1933,7 +1946,13 @@ var Registro = (function () {
     var v = s.view;
     Util.limpar(v.avisoData);
     var d = s.campos.event_date, d0 = Store.param('data_marco_zero');
-    if (d && d0 && d < d0 && s.tipo !== 'ENTRADA_INICIAL') v.avisoData.appendChild(UI.nota('Data anterior ao marco zero (' + Fmt.data(d0) + '): entra como histórico informativo, sem efeito no inventário.', 'aviso'));
+    if (!d || !d0 || d >= d0 || s.tipo === 'ENTRADA_INICIAL') return;
+    // O catálogo diz quais tipos aceitam registro histórico (aceita_historico; a correção de um registro que já é
+    // histórico também): a tela não tem regra própria e a nota diz o que o servidor vai fazer (§20, regras 8 e 9).
+    var aceita = s.def.aceita_historico === true || !!(s.corrige && s.corrige.historico);
+    v.avisoData.appendChild(aceita
+      ? UI.nota('Data anterior ao marco zero (' + Fmt.data(d0) + '): entra como histórico informativo, sem efeito no inventário.', 'aviso')
+      : UI.nota('Data anterior ao marco zero (' + Fmt.data(d0) + '): o rebanho só é controlado a partir dele, e este lançamento não pode ter data antes disso. Use uma data a partir de ' + Fmt.data(d0) + '.', 'erro'));
   }
   function desenharAnimais(s) {
     var v = s.view, def = s.def;
@@ -2150,6 +2169,19 @@ var Registro = (function () {
   }
 
   // ------------------------------------------------------------------ revisão e envio ----
+  /**
+   * O que acontece com o animal tirado da lista na correção (CONTRATOS, seção 29): só o animal que o próprio lançamento
+   * cadastrou é anulado; o que já existia fica como estava antes deste lançamento (§20, regra 9: a consequência real).
+   */
+  function notaCorrecao(s) {
+    var base = 'O lançamento original deixa de valer e este entra no lugar dele, com os mesmos animais. ';
+    if (s.tipo === 'NASCIMENTO') return base + 'Tirar uma cria do parto, ou marcá-la como natimorta, anula o cadastro dela.';
+    var criados = s.linhas.some(function (l) { return l.criado; });
+    var existentes = s.linhas.some(function (l) { return l.animal_id && !l.criado; });
+    if (criados && existentes) return base + 'Tirar da lista um animal que este lançamento cadastrou anula o cadastro dele; o animal que já existia fica como estava antes deste lançamento.';
+    if (criados) return base + 'Tirar um animal da lista anula o cadastro dele: ele só existe por este lançamento.';
+    return base + 'O animal tirado da lista fica como estava antes deste lançamento.';
+  }
   function revisar(s) {
     var r = montarDados(s);
     if (r.erros.length) { mostrarErrosLocais(s, r.erros); return; }
@@ -2182,7 +2214,9 @@ var Registro = (function () {
       linhas.push(['Crias', plural(vivas.length, 'viva', 'vivas') + (mortas ? ' · ' + plural(mortas, 'natimorta', 'natimortas') : '') + (d.crias.length > 1 ? ' (gemelar)' : '')]);
       var sx = vivas.map(function (c) { return Fmt.rotulo('SEXO', c.sexo); });
       if (sx.length) linhas.push(['Sexo das crias', sx.join(' · ')]);
-      if (Util.vazio(d.campos.pasto_destino_id)) linhas.push(['Pasto das crias', 'o pasto em que a mãe está no dia']);
+      var d0n = Store.param('data_marco_zero');
+      if (s.def.aceita_historico && d0n && d.campos.event_date && d.campos.event_date < d0n) linhas.push(['Registro histórico', 'parto anterior ao marco zero (' + Fmt.data(d0n) + '): ' + (vivas.length ? 'a cria fica no histórico, fora do inventário e sem pasto' : 'só o histórico da mãe') + '.']);
+      else if (Util.vazio(d.campos.pasto_destino_id)) linhas.push(['Pasto das crias', 'o pasto em que a mãe está no dia']);
     }
     if (s.tipo === 'TRANSFERENCIA' && d.campos) {
       var po = Store.pasto(d.campos.pasto_origem_id), pd = Store.pasto(d.campos.pasto_destino_id);
@@ -2192,9 +2226,11 @@ var Registro = (function () {
     if (s.tipo === 'VENDA' && d.animais) linhas.push(['Consequência', plural(d.animais.length, 'animal sai', 'animais saem') + ' do rebanho como vendido' + (d.animais.length === 1 ? '' : 's') + '; o histórico fica']);
     if (s.subtipo === 'DIVERGENCIA_CONTAGEM' && d.animais) linhas.push(['Consequência', plural(d.animais.length, 'animal sai', 'animais saem') + ' do rebanho como não encontrado' + (d.animais.length === 1 ? '' : 's') + ' na contagem; se aparecer, estorne esta baixa']);
     if (s.tipo === 'MARCACAO' && d.animais && d.campos) linhas.push(['Consequência', plural(d.animais.length, 'animal fica', 'animais ficam') + (d.campos.acao === 'DESMARCAR' ? ' sem a marca' : ' marcado' + (d.animais.length === 1 ? '' : 's')) + '; o inventário não muda']);
+    var historico = s.def.aceita_historico && d.campos && d.campos.event_date && Store.param('data_marco_zero') && d.campos.event_date < Store.param('data_marco_zero');
     camposEvento(s).forEach(function (c) {
       if (c.id === 'event_date' || !d.campos || Util.vazio(d.campos[c.id])) return;
       if (s.tipo === 'TRANSFERENCIA' && (c.id === 'pasto_origem_id' || c.id === 'pasto_destino_id')) return;
+      if (historico && c.id === 'pasto_destino_id') return; // registro histórico: a cria não ocupa pasto
       var val = d.campos[c.id];
       if (c.tipo === 'ref:PROPRIEDADES') { var p = Store.propriedade(val); val = p ? p.nome : val; }
       else if (c.tipo === 'ref:EVENTOS') val = s.rotulos[val] || 'evento escolhido';
@@ -2237,7 +2273,8 @@ var Registro = (function () {
       var k = a.codigo + '|' + (a.animal_id || '') + '|' + i;
       var cx = h('input', { type: 'checkbox', id: 'aceite-' + i, checked: !!s.aceites[k] });
       cx.addEventListener('change', function () { if (cx.checked) s.aceites[k] = a; else delete s.aceites[k]; aoMudar(); });
-      ul.appendChild(h('li', { dataset: { aviso: a.codigo } }, h('div', { class: 'campo-linha' }, UI.icone('aviso'), h('span', { text: a.mensagem })), h('label', { class: 'marca', for: 'aceite-' + i }, cx, h('span', { text: 'Vi e confirmo' }))));
+      // Aviso que aponta um lançamento (a possível duplicidade): o link para ver o existente (08, seção 8).
+      ul.appendChild(h('li', { dataset: { aviso: a.codigo } }, h('div', { class: 'campo-linha' }, UI.icone('aviso'), a.conflito && a.conflito.event_id ? problema_(a, 'span') : h('span', { text: a.mensagem })), h('label', { class: 'marca', for: 'aceite-' + i }, cx, h('span', { text: 'Vi e confirmo' }))));
     });
     var caixa = h('div', { class: 'formulario' }, h('h3', { text: s.avisos.length === 1 ? 'Confira o aviso antes de gravar' : 'Confira os ' + s.avisos.length + ' avisos antes de gravar' }), ul);
     if (precisaJust) {
@@ -2258,6 +2295,16 @@ var Registro = (function () {
     Object.keys(s.aceites).forEach(function (k) { var c = s.aceites[k].codigo; if (cods.indexOf(c) < 0) cods.push(c); });
     return cods;
   }
+  /**
+   * O financeiro que o estorno cancela, como o servidor o separa: receita e despesa nunca somadas (na venda, a receita
+   * e as deduções à parte; 03b, seção 2.5).
+   */
+  function textoCancelados(c) {
+    var valor = c.receitas && c.despesas
+      ? 'receita de ' + Fmt.dinheiro(c.receitas) + ' e deduções de ' + Fmt.dinheiro(c.despesas)
+      : c.receitas ? 'receita de ' + Fmt.dinheiro(c.receitas) : Fmt.dinheiro(c.despesas || c.total || 0);
+    return plural(c.lancamentos, 'lançamento', 'lançamentos') + ' (' + valor + ')' + (c.parcelas_abertas ? ', com ' + plural(c.parcelas_abertas, 'título em aberto', 'títulos em aberto') : '') + ' deixa' + (c.lancamentos === 1 ? '' : 'm') + ' de valer';
+  }
   function impactosServidor(s) {
     var im = (s.simulacao && s.simulacao.impactos) || {};
     var l = [];
@@ -2266,7 +2313,7 @@ var Registro = (function () {
       if (im.corrige) l.push(['Atenção', 'Este lançamento corrigiu ' + (im.corrige.nome || 'outro lançamento') + (im.corrige.event_date ? ' de ' + Fmt.data(im.corrige.event_date) : '') + '. Estornar apaga o lançamento inteiro: o original não volta a valer. Para mudar só um dado, use "Corrigir".']);
       if (im.animais !== undefined) l.push(['Animais do evento', String(im.animais)]);
       if (im.anulados) l.push(['Animais que deixam de existir', String(im.anulados)]);
-      if (im.cancelados) l.push(['Financeiro cancelado', plural(im.cancelados.lancamentos, 'lançamento', 'lançamentos') + ' (' + Fmt.dinheiro(im.cancelados.total) + ')' + (im.cancelados.parcelas_abertas ? ', com ' + plural(im.cancelados.parcelas_abertas, 'título em aberto', 'títulos em aberto') : '') + ' deixa' + (im.cancelados.lancamentos === 1 ? '' : 'm') + ' de valer']);
+      if (im.cancelados) l.push(['Financeiro cancelado', textoCancelados(im.cancelados)]);
       return l;
     }
     if (im.animais !== undefined) l.push(['Animais', String(im.animais)]);
@@ -2597,6 +2644,7 @@ var Registro = (function () {
     delete sessoes[s.tipo];
     App.removerFaixa('rascunho-' + s.tipo);
     var resultado = { tipo: s.tipo, def: s.def, data: r.data, meta: r.meta, duplicado: r.duplicado, verificado: r.verificado, n: (r.data && r.data.animais ? r.data.animais.length : 0), origem: s.origem, corrige: s.corrige, subtipo: s.subtipo, acao: s.dados && s.dados.campos ? s.dados.campos.acao : null,
+      matriz: s.tipo === 'NASCIMENTO' && s.dados && s.dados.animais && s.dados.animais[0] ? s.dados.animais[0].animal_id : null,
       anexos: r.data && r.data.event_id ? (s.anexos || []).map(function (a) { return { a: a, estado: 'PENDENTE', mensagem: null }; }) : [] };
     var nova = novaSessao(s.tipo, s.def);
     nova.alterado = false;
@@ -2665,7 +2713,15 @@ var Registro = (function () {
     if (res.tipo === 'AJUSTE_INVENTARIO') return n === 1 ? 'Correção gravada em 1 animal.' : 'Correção gravada em ' + n + ' animais.';
     if (res.tipo === 'IDENTIFICACAO') return (res.subtipo === 'REMOCAO' ? 'Identificação retirada de ' : res.subtipo === 'SUBSTITUICAO' ? 'Identificação trocada em ' : 'Identificação posta em ') + plural(n, 'animal', 'animais') + '.';
     if (res.tipo === 'MARCACAO') { var oque = res.subtipo === 'NAO_LOCALIZADO' ? 'não localizado' : 'para descarte'; return res.acao === 'DESMARCAR' ? plural(n, 'animal deixou', 'animais deixaram') + ' de estar marcado' + (n === 1 ? '' : 's') + ' ' + (res.subtipo === 'NAO_LOCALIZADO' ? 'como não localizado' + (n === 1 ? '' : 's') : 'para descarte') + '.' : plural(n, 'animal marcado', 'animais marcados') + ' ' + (res.subtipo === 'NAO_LOCALIZADO' ? 'como ' + oque + (n === 1 ? '' : 's') : oque) + '.'; }
-    if (res.tipo === 'NASCIMENTO') { var c = Math.max(0, n - 1); return c ? 'Parto gravado: ' + plural(c, 'cria entrou', 'crias entraram') + ' no rebanho.' : 'Parto gravado (sem cria viva).'; }
+    if (res.tipo === 'NASCIMENTO') {
+      // Pela situação que o servidor devolveu de cada cria: a do parto anterior ao marco zero fica no histórico (RN-022).
+      var crias = ((res.data && res.data.animais) || []).filter(function (a) { return a.animal_id !== res.matriz; });
+      var ativas = crias.filter(function (a) { return a.situacao_cadastral === 'ATIVO'; }).length;
+      var historicas = crias.filter(function (a) { return a.situacao_cadastral === 'HISTORICO'; }).length;
+      var d0 = Store.param('data_marco_zero');
+      if (historicas || (res.data && d0 && res.data.event_date < d0)) return 'Parto histórico gravado (antes do marco zero): ' + (historicas ? (historicas === 1 ? 'a cria fica no histórico e não entra no inventário.' : 'as ' + historicas + ' crias ficam no histórico e não entram no inventário.') : 'sem cria viva.');
+      return ativas ? 'Parto gravado: ' + plural(ativas, 'cria entrou', 'crias entraram') + ' no rebanho.' : 'Parto gravado (sem cria viva).';
+    }
     if (res.tipo === 'TRANSFERENCIA') return n === 1 ? '1 animal transferido.' : n + ' animais transferidos.';
     if (res.tipo === 'MORTE') return n === 1 ? 'Morte registrada: 1 animal saiu do rebanho.' : 'Morte registrada: ' + n + ' animais saíram do rebanho.';
     if (res.tipo === 'DESCARTE') return n === 1 ? 'Descarte registrado: 1 animal saiu do rebanho.' : 'Descarte registrado: ' + n + ' animais saíram do rebanho.';
@@ -2852,7 +2908,7 @@ var Registro = (function () {
 
   return {
     abrir: abrir, conferirPendentes: conferirPendentes, descartar: descartar, montarDados: montarDados, mapearErros: mapearErros,
-    serieBrincos: serieBrincos, lerColagem: lerColagem, vencimentos: vencimentos, diferencas: diferencas, impactosServidor: impactosServidor,
+    serieBrincos: serieBrincos, lerColagem: lerColagem, vencimentos: vencimentos, diferencas: diferencas, impactosServidor: impactosServidor, notaCorrecao: notaCorrecao,
     sessao: function (tipo) { return sessoes[tipo] || null; }, descricaoRascunho: descricaoRascunho,
     PRINCIPAIS_ANIMAL: PRINCIPAIS_ANIMAL, PRINCIPAIS_COMPRA: PRINCIPAIS_COMPRA, CAMPOS_VOLTA: CAMPOS_VOLTA, CAMPOS_VOLTA_COMPRA: CAMPOS_VOLTA_COMPRA,
   };

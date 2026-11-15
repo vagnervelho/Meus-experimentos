@@ -93,13 +93,13 @@ function celula(s, aba, idReg, coluna) {
 const achadosDe = (r, codigo) => r.achados.filter((a) => a.checagem === codigo);
 const doEvento = (s, aba, eventId) => s.tabela(aba).filter((x) => x.event_id === eventId);
 
-test('banco com todos os tipos da Fase 2: as 25 checagens executadas e OK; as novas estão no contrato, com severidade e reparo', () => {
+test('banco com todos os tipos da Fase 2: as 26 checagens executadas e OK; as novas estão no contrato, com severidade e reparo', () => {
   const { s, G } = base();
   const r = s.integridade();
-  assert.equal(r.checagens.length, 25);
+  assert.equal(r.checagens.length, 26);
   const def = Object.fromEntries(G.AuditService.CHECAGENS.map((c) => [c.codigo, [c.severidade, c.reparo || null]]));
-  assert.deepEqual(['FINANCEIRO', 'CUSTO_AQUISICAO', 'BAIXADO_SEM_POSTERIOR', 'PARTOS', 'IDENTIFICACOES_ATIVAS'].map((c) => def[c]),
-    [['ERRO', null], ['ERRO', 'RECONSTRUIR'], ['ERRO', null], ['ERRO', null], ['ERRO', null]]);
+  assert.deepEqual(['FINANCEIRO', 'CUSTO_AQUISICAO', 'BAIXADO_SEM_POSTERIOR', 'PARTOS', 'IDENTIFICACOES_ATIVAS', 'GENEALOGIA'].map((c) => def[c]),
+    [['ERRO', null], ['ERRO', 'RECONSTRUIR'], ['ERRO', null], ['ERRO', null], ['ERRO', null], ['ERRO', null]]);
   assert.equal(r.reparavel, false);
 });
 

@@ -198,7 +198,7 @@ test('revisão do estorno: o financeiro que deixa de valer (lançamentos, valor,
     animais: ['0301', '0302'].map((b) => ({ brinco: b, sexo: 'M', castrado: false, reprodutor: false })), parcelas: [{ data_vencimento: '2026-03-05' }, { data_vencimento: '2026-04-05' }], custos: [{ tipo: 'FRETE', valor: 12000 }] }, 'compra');
   const e = api(s, { rota: 'evento.simular', dados: { acao: 'estornar', dados: { event_id: compra.event_id, justificativa: 'Errada' } } });
   assert.equal(e.ok, true, JSON.stringify(e.error));
-  assert.deepEqual(e.data.impactos.cancelados, { lancamentos: 2, total: 512000, parcelas_abertas: 3 });
+  assert.deepEqual(e.data.impactos.cancelados, { lancamentos: 2, receitas: 0, despesas: 512000, total: 512000, parcelas_abertas: 3 });
   const tr = registrar(s, { tipo: 'TRANSFERENCIA', campos: { event_date: '2026-03-01', pasto_origem_id: PASTOS.A, pasto_destino_id: PASTOS.B }, animais: [{ animal_id: id('0457') }] }, 'tr');
   assert.equal(api(s, { rota: 'evento.simular', dados: { acao: 'estornar', dados: { event_id: tr.event_id, justificativa: 'x' } } }).data.impactos.cancelados, null);
   // Na tela: a revisão do estorno mostra esse resumo (e nada de financeiro quando não há).
@@ -207,6 +207,15 @@ test('revisão do estorno: o financeiro que deixa de valer (lançamentos, valor,
   const linhas = js(c.Registro.impactosServidor({ simulacao: e.data }));
   assert.deepEqual(linhas.map((l) => l[0]), ['Será desfeito', 'Animais do evento', 'Animais que deixam de existir', 'Financeiro cancelado']);
   assert.match(linhas[3][1], /^2 lançamentos \(R\$\s5\.120,00\), com 3 títulos em aberto deixam de valer$/);
+  // Venda (achado 3 da revisão 2): a receita e as deduções à parte, nunca somadas (03b, seção 2.5).
+  const comp = api(s, { rota: 'parceiro.salvar', idempotencyKey: 'c', dados: { campos: { nome: 'Frigo', tipos: ['COMPRADOR'] } } }).data.partner_id;
+  const venda = registrar(s, { tipo: 'VENDA', campos: { event_date: '2026-03-10', partner_id: comp, finalidade: 'ABATE', modalidade: 'CABECA', preco_unitario: 592000, valor_bruto: 1184000 },
+    animais: [{ animal_id: id('0457') }, { animal_id: id('0391') }], parcelas: [{ data_vencimento: '2026-04-10' }], deducoes: [{ tipo: 'FUNRURAL', valor: 17760, retida_pelo_comprador: true, data_vencimento: '2026-04-10' }] }, 'venda');
+  const ev = api(s, { rota: 'evento.simular', dados: { acao: 'estornar', dados: { event_id: venda.event_id, justificativa: 'Errada' } } });
+  assert.equal(ev.ok, true, JSON.stringify(ev.error));
+  assert.deepEqual(ev.data.impactos.cancelados, { lancamentos: 2, receitas: 1184000, despesas: 17760, total: null, parcelas_abertas: 2 });
+  const lv = js(c.Registro.impactosServidor({ simulacao: ev.data }));
+  assert.match(lv.find((l) => l[0] === 'Financeiro cancelado')[1], /^2 lançamentos \(receita de R\$\s11\.840,00 e deduções de R\$\s177,60\), com 2 títulos em aberto deixam de valer$/);
 });
 
 test('baixa por divergência: o porquê do lançamento fica no evento (não há AJUSTES) e aparece na trilha; o subtipo é crítico no catálogo', () => {
@@ -225,4 +234,16 @@ test('baixa por divergência: o porquê do lançamento fica no evento (não há 
   assert.equal(s.tabela('EVENTOS').find((x) => x.event_id === rc.event_id).payload_json, null);
   const sub = js(s.G.EventCatalog.serializar()).tipos.find((x) => x.tipo === 'AJUSTE_INVENTARIO').subtipos;
   assert.deepEqual(Object.keys(sub).filter((k) => sub[k].critico), ['DIVERGENCIA_CONTAGEM'], 'a baixa por divergência é operação crítica (08, 4.6)');
+});
+
+test('revisão 2, achado 10: a nota da correção diz o que acontece com o animal tirado da lista, pelo tipo do lançamento', () => {
+  const { s } = montar();
+  const c = cliente(s);
+  c.Store = Object.assign(storeDe(s), {});
+  const nota = (tipo, linhas) => c.Registro.notaCorrecao({ tipo, linhas });
+  assert.match(nota('VENDA', [{ animal_id: 'a1' }, { animal_id: 'a2' }]), /O animal tirado da lista fica como estava antes deste lançamento\.$/);
+  assert.doesNotMatch(nota('TRANSFERENCIA', [{ animal_id: 'a1' }]), /anula/);
+  assert.match(nota('ENTRADA_INICIAL', [{ animal_id: 'a1', criado: true }]), /anula o cadastro dele: ele só existe por este lançamento/);
+  assert.match(nota('COMPRA', [{ animal_id: 'a1', criado: true }, { animal_id: 'a2' }]), /um animal que este lançamento cadastrou anula o cadastro dele; o animal que já existia fica como estava/);
+  assert.match(nota('NASCIMENTO', [{ animal_id: 'm' }]), /Tirar uma cria do parto, ou marcá-la como natimorta, anula o cadastro dela/);
 });

@@ -344,6 +344,7 @@ var AuditService = (function () {
     { codigo: 'LINHA_DO_TEMPO', rotulo: 'Linha do tempo de todos os animais (com a ordem das identificações e das marcações)', severidade: 'ERRO', correcao: 'Estornar o evento conflitante.' },
     { codigo: 'BAIXADO_SEM_POSTERIOR', rotulo: 'Animal que saiu do rebanho sem evento valendo depois da saída', severidade: 'ERRO', correcao: 'Estornar o evento posterior ou a saída.' },
     { codigo: 'PARTOS', rotulo: 'Partos coerentes com a reprodução e com as crias', severidade: 'ERRO', correcao: 'Corrigir o nascimento por evento substituto; investigar edição manual.' },
+    { codigo: 'GENEALOGIA', rotulo: 'Genealogia coerente: mãe fêmea, pai macho, nascidos antes do filho, sem ciclo', severidade: 'ERRO', correcao: 'Corrigir a mãe, o pai, o sexo ou o nascimento por correção de cadastro; investigar edição manual.' },
     { codigo: 'PROJECAO', rotulo: 'Situação gravada × reconstrução pelos eventos', severidade: 'ERRO', correcao: 'Reconstruir projeções.', reparo: 'RECONSTRUIR' },
     { codigo: 'STATUS_EVENTOS', rotulo: 'Situação dos eventos × regra de vigência', severidade: 'ERRO', correcao: 'Reconstruir.', reparo: 'RECONSTRUIR' },
     { codigo: 'INVENTARIO', rotulo: 'Inventário pelos eventos = animais ativos (total e por pasto)', severidade: 'ERRO', correcao: 'Reconstruir projeções; investigar edição manual.' },
@@ -353,7 +354,7 @@ var AuditService = (function () {
     { codigo: 'ALOCACAO_DIRETA', rotulo: 'Animal do lançamento ⇔ uma única alocação direta', severidade: 'ERRO', correcao: 'Reconstruir.', reparo: 'RECONSTRUIR' },
     { codigo: 'CUSTO_AQUISICAO', rotulo: 'Custo de aquisição de cada animal = soma das alocações de aquisição da permanência atual', severidade: 'ERRO', correcao: 'Reconstruir projeções; se a alocação foi mexida, corrigir pelo sistema.', reparo: 'RECONSTRUIR' },
     { codigo: 'BASE_RATEIO', rotulo: 'Rateio com base igual à recalculada hoje', severidade: 'ALERTA', correcao: 'Re-ratear, por decisão do dono.' },
-    { codigo: 'COPIAS', rotulo: 'Cópias × fonte (data do detalhe = data do evento)', severidade: 'ERRO', correcao: 'Investigar edição manual.' },
+    { codigo: 'COPIAS', rotulo: 'Cópias × fonte (data do detalhe = data do evento; subtipo = tipo do detalhe)', severidade: 'ERRO', correcao: 'Investigar edição manual.' },
     { codigo: 'CELULAS', rotulo: 'Células fora do formato do tipo', severidade: 'ERRO', correcao: 'Corrigir a célula; rever a forma de gravação.' },
     { codigo: 'OPERACOES_ORFAS', rotulo: 'Operações interrompidas', severidade: 'ERRO', correcao: 'Recuperação.' },
     { codigo: 'FILHAS_SEM_PAI', rotulo: 'Linhas sem o registro de que dependem', severidade: 'ALERTA', correcao: 'Limpeza auditada; investigar edição manual.' },
@@ -598,6 +599,7 @@ var AuditService = (function () {
       }
     });
     conferirPartos_(tx, col, f, projetados);
+    conferirGenealogia_(tx, col);
     col.aplicar('INVENTARIO');
     if (vazio_(D0) || !Utils.dataValida(hoje) || hoje < D0) return;
     var inv = Timeline.inventario(f.todasAsLinhas(), hoje, D0);
@@ -701,6 +703,16 @@ var AuditService = (function () {
         if (at.origem !== 'NASCIDO') problemas.push('origem ' + (at.origem || 'vazia'));
         if (r && nulo_(at.pai_id) !== nulo_(r.touro_id)) problemas.push('outro pai');
         if (problemas.length) achado('tem a cria ' + nome(l.animal_id) + ' registrada com ' + problemas.join(', ') + '.', 'EVENTO_ANIMAIS', l.event_animal_id);
+        // O cadastro da cria (a projeção, com as correções vigentes) também é o do parto: uma correção só na cria ou a
+        // edição à mão o tiram dele.
+        var pc = projetados[l.animal_id];
+        if (!pc || problemas.length) return;
+        var noCadastro = [];
+        if (mae && pc.mae_id !== mae) noCadastro.push('outra mãe');
+        if (pc.data_nascimento !== ev.event_date) noCadastro.push('nascimento em ' + br_(pc.data_nascimento));
+        if (pc.origem !== 'NASCIDO') noCadastro.push('origem ' + (pc.origem || 'vazia'));
+        if (r && !vazio_(r.touro_id) && nulo_(pc.pai_id) !== r.touro_id) noCadastro.push('outro pai');
+        if (noCadastro.length) achado('tem a cria ' + nome(l.animal_id) + ' com ' + noCadastro.join(', ') + ' no cadastro (o parto é a fonte desses dados).', 'ANIMAIS', l.animal_id);
       });
     });
     Object.keys(restantes).forEach(function (eid) {
@@ -708,6 +720,47 @@ var AuditService = (function () {
       restantes[eid].forEach(function (r) {
         col.achado('PARTOS', { tabela: 'REPRODUCAO', id: r.reproduction_id, mensagem: 'O registro de parto de ' + nome(r.animal_id) + ' em ' + br_(r.data) + ' pertence a ' + (ev ? '"' + rotuloEvento_(ev) + '"' : 'um evento que não existe') + ', que não é um nascimento.' });
       });
+    });
+  }
+  /**
+   * Genealogia dos cadastros (05, seção 2.2: RN-008 a RN-010; algoritmo de 05, seção 4.2): de cada animal que vale, a
+   * mãe é fêmea, o pai é macho, os dois nasceram antes dele e nenhum é ancestral dele mesmo (ciclo; um achado por
+   * ciclo). A referência a registro inexistente ou anulado é da checagem FK.
+   */
+  function conferirGenealogia_(tx, col) {
+    col.aplicar('GENEALOGIA');
+    var vale = {};
+    tx.cru.cru('ANIMAIS').forEach(function (a) { if (a.situacao_cadastral !== 'ANULADO' && a.situacao_cadastral !== 'PENDENTE') vale[a.animal_id] = a; });
+    var nome = function (id) { return rotuloAnimal_(vale[id], id); };
+    var noCiclo = {};
+    Object.keys(vale).forEach(function (id) {
+      var a = vale[id];
+      [['mae_id', 'F', 'mãe', 'fêmea'], ['pai_id', 'M', 'pai', 'macho']].forEach(function (cfg) {
+        var p = vazio_(a[cfg[0]]) ? null : vale[a[cfg[0]]];
+        if (!p) return;
+        if (p.sexo !== cfg[1]) col.achado('GENEALOGIA', { tabela: 'ANIMAIS', id: id, campo: cfg[0], mensagem: nome(id) + ' tem como ' + cfg[2] + ' ' + nome(p.animal_id) + ', que não é ' + cfg[3] + ' pelo cadastro.' });
+        else if (Utils.dataValida(p.data_nascimento) && Utils.dataValida(a.data_nascimento) && p.data_nascimento >= a.data_nascimento) {
+          col.achado('GENEALOGIA', { tabela: 'ANIMAIS', id: id, campo: cfg[0], mensagem: nome(id) + ', nascido em ' + br_(a.data_nascimento) + ', tem como ' + cfg[2] + ' ' + nome(p.animal_id) + ', que nasceu em ' + br_(p.data_nascimento) + ', não antes dele.' });
+        }
+      });
+      if (noCiclo[id]) return;
+      var fila = [[id]];
+      var vistos = {};
+      while (fila.length) {
+        var c = fila.shift();
+        var x = c[c.length - 1];
+        var achou = null;
+        [vale[x] && vale[x].mae_id, vale[x] && vale[x].pai_id].forEach(function (pid) {
+          if (achou || vazio_(pid) || !vale[pid]) return;
+          if (pid === id) achou = c.concat([pid]);
+          else if (!vistos[pid]) { vistos[pid] = true; fila.push(c.concat([pid])); }
+        });
+        if (achou) {
+          achou.forEach(function (k) { noCiclo[k] = true; });
+          col.achado('GENEALOGIA', { tabela: 'ANIMAIS', id: id, campo: 'mae_id', mensagem: nome(id) + ' é ancestral de si mesmo: ' + achou.map(nome).join(' → ') + ' (ciclo na genealogia).' });
+          break;
+        }
+      }
     });
   }
   /**
@@ -790,9 +843,38 @@ var AuditService = (function () {
       });
     });
   }
+  /**
+   * Tipo da linha de detalhe esperado para o evento (03a, seção 3, SUBTIPO_EVENTO; 03b, seção 2.4): null = o evento não
+   * grava esse detalhe. AJUSTES.tipo_ajuste = o subtipo; BAIXAS.tipo = o tipo (morte, descarte) ou o subtipo
+   * (divergência de contagem); REPRODUCAO.tipo_evento = PARTO no nascimento, o diagnóstico declarado nas entradas e o
+   * subtipo nos eventos de reprodução.
+   */
+  var TIPO_DO_DETALHE = Object.freeze({
+    AJUSTES: { campo: 'tipo_ajuste', esperado: function (ev) { return ev.event_type === 'AJUSTE_INVENTARIO' && ev.event_subtype !== 'DIVERGENCIA_CONTAGEM' ? ev.event_subtype : null; } },
+    BAIXAS: { campo: 'tipo', esperado: function (ev) { return ev.event_type === 'MORTE' || ev.event_type === 'DESCARTE' ? ev.event_type : ev.event_type === 'AJUSTE_INVENTARIO' && ev.event_subtype === 'DIVERGENCIA_CONTAGEM' ? 'DIVERGENCIA_CONTAGEM' : null; } },
+    REPRODUCAO: { campo: 'tipo_evento', esperado: function (ev) {
+      if (ev.event_type === 'NASCIMENTO') return 'PARTO';
+      if (ev.event_type === 'REPRODUCAO') return ev.event_subtype;
+      if (ev.event_type === 'DESMAMA') return 'DESMAMA';
+      if (ev.event_type === 'ENTRADA_INICIAL' || ev.event_type === 'OUTRA_ENTRADA' || ev.event_type === 'COMPRA') return 'DIAGNOSTICO_GESTACAO';
+      return null;
+    } },
+  });
   function conferirCopias_(tx, col) {
     col.aplicar('COPIAS');
     if (!tx.repo.carregada('EVENTOS')) return;
+    Object.keys(TIPO_DO_DETALHE).forEach(function (t) {
+      if (!tx.repo.carregada(t)) return;
+      var def = TIPO_DO_DETALHE[t];
+      tx.repo.vigentes(t).forEach(function (r) {
+        if (vazio_(r.event_id)) return;
+        var ev = tx.repo.porId('EVENTOS', r.event_id);
+        if (!ev) return;
+        var esperado = def.esperado(ev);
+        if (r[def.campo] === esperado) return;
+        col.achado('COPIAS', { tabela: t, id: r[Schema.pk(t)], campo: def.campo, mensagem: t + ': o tipo ' + (r[def.campo] || 'vazio') + ' não corresponde a "' + rotuloEvento_(ev) + '"' + (esperado ? ' (esperado ' + esperado + ')' : ', que não grava essa linha') + '.' });
+      });
+    });
     Object.keys(COPIAS_DATA).forEach(function (t) {
       if (!tx.repo.carregada(t)) return;
       var campo = COPIAS_DATA[t];

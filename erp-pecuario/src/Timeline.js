@@ -379,7 +379,7 @@ var Timeline = (function () {
       else if (ultimaSaida) situacao = SAIDA_SITUACAO[ultimaSaida.event_type] || 'ANULADO';
       else situacao = 'ANULADO';
     } else {
-      saidaHist = ultimoPor_(pre.filter(function (l) { return l.event_type === 'VENDA' || l.event_type === 'MORTE'; }), function (a, b) { return comparar_(a.event_date, b.event_date) || (a.event_seq - b.event_seq); });
+      saidaHist = ultimoPor_(pre.filter(function (l) { return l.event_type === 'VENDA' || l.event_type === 'MORTE'; }), function (a, b) { return comparar_(a.event_date, b.event_date) || (a.ordem_seq - b.ordem_seq) || (a.event_seq - b.event_seq); });
       situacao = saidaHist ? SAIDA_SITUACAO[saidaHist.event_type] : 'HISTORICO';
     }
     var fora = situacao === 'ANULADO' || situacao === 'PENDENTE';
@@ -403,7 +403,8 @@ var Timeline = (function () {
     base.data_entrada_confianca = nulo_(at.data_entrada_confianca);
     var ajustes = f.ajustes(id).map(function (a) { var ev = f.evento(a.event_id); return { a: a, seq: ev ? ev.event_seq : 0, ord: ev ? f.ordemSeq(a.event_id) : 0, data: ev ? ev.event_date : '' }; });
     if (!fora) {
-      ajustes.filter(function (x) { return x.a.tipo_ajuste === 'CORRECAO_CADASTRO'; }).sort(function (x, y) { return x.seq - y.seq; }).forEach(function (x) {
+      // Na ordem de registro, com o substituto no lugar do original (desenho-base 16.1: corrigir não muda a ordem).
+      ajustes.filter(function (x) { return x.a.tipo_ajuste === 'CORRECAO_CADASTRO'; }).sort(function (x, y) { return x.ord - y.ord || x.seq - y.seq; }).forEach(function (x) {
         if (Object.prototype.hasOwnProperty.call(base, x.a.campo)) base[x.a.campo] = deTexto_(x.a.campo, x.a.valor_novo);
       });
     }
@@ -458,7 +459,8 @@ var Timeline = (function () {
       campos.data_saida = ultimaSaida ? ultimaSaida.event_date : saidaHist ? saidaHist.event_date : null;
     }
     if (!fora) {
-      var pes = ultimoPor_(f.pesagens(id).map(function (x) { var ev = f.evento(x.event_id); return { x: x, seq: ev ? ev.event_seq : 0 }; }), function (a, b) { return comparar_(a.x.data_pesagem, b.x.data_pesagem) || a.seq - b.seq; });
+      // Pesagens do mesmo dia: (data, posição na cadeia de substituição, event_seq) — o substituto fica no lugar do original.
+      var pes = ultimoPor_(f.pesagens(id).map(function (x) { var ev = f.evento(x.event_id); return { x: x, seq: ev ? ev.event_seq : 0, ord: ev ? f.ordemSeq(x.event_id) : 0 }; }), function (a, b) { return comparar_(a.x.data_pesagem, b.x.data_pesagem) || a.ord - b.ord || a.seq - b.seq; });
       if (pes) { campos.peso_atual = pes.x.peso_kg; campos.data_ultima_pesagem = pes.x.data_pesagem; }
       var brinco = codigoEmUso_(linhasDeIdentificacao_(f, id).BRINCO);
       if (brinco) { campos.brinco = brinco.codigo; campos.brinco_norm = brinco.codigo_norm; }
@@ -490,9 +492,9 @@ var Timeline = (function () {
     var fatos = fora ? [] : f.reproducao(id).map(function (r) {
       var ev = f.evento(r.event_id);
       var s = r.tipo_evento === 'DIAGNOSTICO_GESTACAO' ? (r.resultado === 'POSITIVO' ? 'PRENHA' : r.resultado === 'NEGATIVO' ? 'VAZIA' : null) : REPRO_SITUACAO[r.tipo_evento] || null;
-      return { s: s, data: r.data, seq: ev ? ev.event_seq : 0 };
+      return { s: s, data: r.data, seq: ev ? ev.event_seq : 0, ord: ev ? f.ordemSeq(r.event_id) : 0 };
     }).filter(function (x) { return x.s !== null; });
-    var ultimo = ultimoPor_(fatos, function (a, b) { return comparar_(a.data, b.data) || a.seq - b.seq; });
+    var ultimo = ultimoPor_(fatos, function (a, b) { return comparar_(a.data, b.data) || a.ord - b.ord || a.seq - b.seq; });
     if (ultimo) return ultimo.s;
     if (!vazio_(at.situacao_reprodutiva)) return at.situacao_reprodutiva;
     return criacao && criacao.event_type === 'NASCIMENTO' ? 'NAO_APTA' : 'SEM_INFORMACAO';
