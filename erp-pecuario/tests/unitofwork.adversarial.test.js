@@ -84,9 +84,16 @@ function conferirInvariantes(amb, msg) {
     assert.equal(!!ev.confirmed_at, ev.status === 'CONFIRMADO' || ev.status === 'ESTORNADO', msg + ': (2) confirmed_at do evento ' + ev.event_id);
   }
   const filhasVigentes = e.EVENTO_ANIMAIS.filter((l) => !l.event_id || (av[l.event_id] && av[l.event_id].vigente));
+  // Situação pela soma dos efeitos vigentes: dentro (≥ 1) → ATIVO; com a saída vigente → a situação da saída; sem entrada → ANULADO.
+  const SAIDA = { VENDA: 'VENDIDO', MORTE: 'MORTO', DESCARTE: 'DESCARTADO' };
   for (const a of e.ANIMAIS) {
-    const entrada = filhasVigentes.some((l) => l.animal_id === a.animal_id && l.efeito_inventario === 1);
-    assert.equal(a.situacao_cadastral, entrada ? 'ATIVO' : 'ANULADO', msg + ': (2) projeção do animal ' + a.codigo_interno);
+    const ls = filhasVigentes.filter((l) => l.animal_id === a.animal_id);
+    const entrada = ls.some((l) => l.efeito_inventario === 1);
+    const soma = ls.reduce((t, l) => t + (l.efeito_inventario || 0), 0);
+    const saida = ls.find((l) => l.efeito_inventario === -1);
+    const tipoSaida = saida ? (e.EVENTOS.find((x) => x.event_id === saida.event_id) || {}).event_type : null;
+    const esperado = !entrada ? 'ANULADO' : soma >= 1 ? 'ATIVO' : SAIDA[tipoSaida];
+    assert.equal(a.situacao_cadastral, esperado, msg + ': (2) projeção do animal ' + a.codigo_interno);
   }
   // (3) nenhuma linha vigente órfã: filha vigente aponta para evento de operação confirmada e para animal existente;
   // cadastro só existe se uma operação CONFIRMADA o criou, e cada campo auditado tem o último valor confirmado.
@@ -198,6 +205,46 @@ function desfechoCorrecaoCompra(amb, e, confirmado, msg, prep) {
     animais: r.animais.map((a) => ({ animal_id: a.animal_id, codigo_interno: a.codigo_interno, brinco: a.brinco, sexo: a.sexo, situacao_cadastral: a.situacao_cadastral, pasto_atual_id: a.pasto_atual_id })),
   };
 }
+// Venda do CT-04 (09, seção 8: comando-modelo com 9 abas): 5 bois por kg vivo, receita com uma parcela e a comissão.
+const DATA_VENDA = '2026-08-20';
+const COMPRADOR = 'ffffffff-0000-4000-8000-00000000c0c0';
+const PESOS_VENDA = [450, 462, 438, 471, 455];
+function prepararVenda(amb) {
+  const G = amb.G;
+  const s = sementes(G);
+  const parceiro = { partner_id: COMPRADOR, nome: 'Comprador C1', tipos: 'COMPRADOR', ativo: true, created_at: '2026-01-01T12:00:00.000Z', updated_at: '2026-01-01T12:00:00.000Z' };
+  amb.gas.exec(() => G.Database.abrir(amb.banco, { primitiva: amb.primitiva }).anexar({ CONFIGURACOES: s.CONFIGURACOES, PROPRIEDADES: s.PROPRIEDADES, PLANO_CONTAS: s.PLANO_CONTAS, LISTAS: s.LISTAS, CATEGORIAS: s.CATEGORIAS, PARCEIROS: [parceiro] }));
+  const pasto = amb.run(cmdPasto(G, { chave: 'cria-retiro-venda', dados: { campos: { nome: 'Retiro' } } })).dados.pasture_id;
+  const animais = ['0401', '0402', '0403', '0404', '0405'].map((b) => ({ brinco: b, sexo: 'M', castrado: true, reprodutor: false, origem: 'DESCONHECIDA', pasto_destino_id: pasto, data_nascimento: '2023-06-01', data_nascimento_confianca: 'ESTIMADA' }));
+  const r = amb.run(G.EventService.comando('registrar', { idempotencyKey: 'prep-venda', dados: { tipo: 'ENTRADA_INICIAL', campos: {}, animais } }));
+  amb.gas.clock.now += 60000;
+  return { pasto, ids: r.dados.animais.map((a) => a.animal_id) };
+}
+function desfechoVenda(amb, e, confirmado, msg, prep) {
+  const G = amb.G;
+  const r = amb.read({ rota: 'teste.venda', reads: G.FinancialService.leituras(), acessoCru: true, tratador: (tx) => ({
+    proj: G.Timeline.conferir(tx), fin: G.FinancialService.conferir(tx),
+    animais: prep.ids.map((id) => tx.cru.cruPorId('ANIMAIS', id)), vendas: tx.repo.vigentes('VENDAS').length,
+    ativos: tx.repo.vigentes('FINANCEIRO').map((f) => f.valor).sort((a, b) => a - b), pesagens: tx.repo.vigentes('PESAGENS').length,
+    receber: G.FinancialService.titulos(tx.repo, null).a_receber,
+  }) }).dados;
+  assert.deepEqual(r.proj, [], msg + ': (2) projeção = reconstrução');
+  assert.deepEqual(r.fin, [], msg + ': (2) invariantes financeiras (03b, 14)');
+  const op = e.OPERACOES.find((o) => o.idempotency_key === 'k-venda' && o.status === 'CONFIRMADA');
+  assert.equal(!!op, confirmado, msg + ': (1) a venda vale exatamente quando o commit chegou');
+  if (!confirmado) {
+    assert.deepEqual([r.animais.map((a) => [a.situacao_cadastral, a.pasto_atual_id, a.data_saida]), r.vendas, r.ativos, r.pesagens, r.receber],
+      [prep.ids.map(() => ['ATIVO', prep.pasto, null]), 0, [], 0, 0], msg + ': (1) tudo como antes');
+    return null;
+  }
+  assert.deepEqual([r.animais.map((a) => [a.situacao_cadastral, a.pasto_atual_id, a.data_saida, a.peso_atual]), r.vendas, r.ativos, r.pesagens, r.receber],
+    [prep.ids.map((_, i) => ['VENDIDO', null, DATA_VENDA, PESOS_VENDA[i]]), 1, [45520, 2276000], 5, 2276000], msg + ': (1) a venda inteira');
+  return {
+    acao: 'registrar', event_id: op.resumo_json.event_id, event_type: 'VENDA', event_subtype: null, event_date: DATA_VENDA, status: 'CONFIRMADO',
+    total_value: 2276000, substitui: null, estorna: null,
+    animais: r.animais.map((a) => ({ animal_id: a.animal_id, codigo_interno: a.codigo_interno, brinco: a.brinco, sexo: a.sexo, situacao_cadastral: a.situacao_cadastral, pasto_atual_id: a.pasto_atual_id })),
+  };
+}
 const CENARIOS = {
   evento: {
     chave: 'chave-evento-1',
@@ -262,6 +309,20 @@ const CENARIOS = {
       }),
     }),
     desfecho: desfechoCorrecaoCompra,
+  },
+  venda: {
+    chave: 'k-venda',
+    ambiente: { projecoes: (G) => G.Timeline.porta() },
+    preparar: prepararVenda,
+    comando: (amb, prep) => amb.G.EventService.comando('registrar', {
+      idempotencyKey: 'k-venda',
+      dados: {
+        tipo: 'VENDA', campos: { event_date: DATA_VENDA, partner_id: COMPRADOR, finalidade: 'RECRIA_ENGORDA', modalidade: 'KG_VIVO', preco_unitario: 1000, valor_bruto: 2276000 },
+        animais: prep.ids.map((id, i) => ({ animal_id: id, peso: PESOS_VENDA[i] })),
+        parcelas: [{ data_vencimento: '2026-09-19' }], deducoes: [{ tipo: 'COMISSAO', valor: 45520 }],
+      },
+    }),
+    desfecho: desfechoVenda,
   },
 };
 /** Ambiente do cenário: o do motor usa o projetor real (Timeline) e o banco semeado. */

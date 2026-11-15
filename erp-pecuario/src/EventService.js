@@ -573,6 +573,7 @@ var EventService = (function () {
     camposDoItem_(m, it, EventCatalog.camposAnimal(ctxEv.tipo), semAnimalId_(d));
     if (!sujeito_(m, it, ctxEv.tipo === 'MORTE' ? 'registra como morto' : 'descarta')) return;
     var onde = Timeline.pastoAntesDaSaida(m.f.linhas(it.animal_id), ev.event_date, m.D0);
+    it.origemDerivada = true;
     linhaEA_(m, ctxEv, it, { efeito_inventario: -1, pasto_origem_id: onde.presente ? nulo_(onde.pasture_id) : null, observacoes: nulo_(d.observacoes) });
     var morte = ctxEv.tipo === 'MORTE';
     ctxEv.plano.BAIXAS.push({
@@ -1025,6 +1026,9 @@ var EventService = (function () {
       novos.forEach(function (p) {
         // Nascimento × a própria entrada já foi conferido nos atributos (mensagem mais clara).
         if (p.codigo === 'ANTES_DO_NASCIMENTO' && it.atributos && p.event_id === ctxEv.ev.event_id) return;
+        // A origem que o servidor tirou da linha do tempo só diverge quando outro registro a quebrou: esse é o problema
+        // que se mostra (erro ou CONFLICT com o evento), não a origem derivada.
+        if (p.codigo === 'ORIGEM_DIVERGENTE' && it.origemDerivada && p.event_id === ctxEv.ev.event_id) return;
         var texto = Timeline.descrever(p, function (id) { return nomePasto_(m, id); });
         if (p.event_id === ctxEv.ev.event_id) erroItem_(m, it, null, p.codigo, texto);
         else conflito_(m, it, p, texto + ' Estorne ou corrija esse registro antes, ou mude este lançamento.');
@@ -1378,6 +1382,7 @@ var EventService = (function () {
     if (!sujeito_(m, it, 'vende')) return;
     var onde = Timeline.pastoAntesDaSaida(m.f.linhas(it.animal_id), ev.event_date, m.D0);
     var origem = ctxEv.pastoOrigem || (onde.presente ? nulo_(onde.pasture_id) : null);
+    it.origemDerivada = !ctxEv.pastoOrigem;
     var ea = { efeito_inventario: -1, pasto_origem_id: origem, motivo_saida: nulo_(d.motivo_saida), observacoes: nulo_(d.observacoes) };
     if (typeof d.peso === 'number') ea.peso = d.peso;
     if (typeof d.peso_carcaca_kg === 'number') ea.peso_carcaca_kg = d.peso_carcaca_kg;
