@@ -14,9 +14,8 @@ const FIXTURE = require('./fixtures/coercao.json');
 
 const { js, USUARIO } = S;
 const CENARIOS = ['PREPARO', 'CT-09', 'CT-10', 'CT-12', 'CT-18', 'RESTAURACAO', 'CT-20', 'CT-11', 'ISOLAMENTO'];
-/** Passos que a Fase 1 não roda (peça de fase posterior ou só na conta do dono), com a situação esperada. */
+/** Passos que ainda não rodam (peça de fase posterior ou só na conta do dono), com a situação esperada. O CT-09 roda inteiro desde a venda (Fase 2). */
 const FORA = {
-  'CT-09': { 1: 'NAO_SE_APLICA', 2: 'NAO_SE_APLICA', 10: 'NAO_SE_APLICA' },
   'CT-10': { 3: 'NAO_SE_APLICA', 6: 'PENDENTE_NA_CONTA_DO_DONO' },
   'CT-20': { 2: 'NAO_SE_APLICA' },
 };

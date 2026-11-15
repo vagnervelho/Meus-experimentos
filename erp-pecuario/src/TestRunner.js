@@ -180,6 +180,20 @@ var TestRunner = (function () {
   function ajuste_(subtipo, data, itens) {
     return { tipo: 'AJUSTE_INVENTARIO', subtipo: subtipo, campos: { event_date: data, justificativa: 'Teste de aceitação' }, animais: itens };
   }
+  /** Venda por cabeça (R$ 3.000,00 cada), recebimento na data. */
+  function venda_(data, comprador, ids) {
+    return {
+      tipo: 'VENDA', campos: { event_date: data, partner_id: comprador, finalidade: 'RECRIA_ENGORDA', modalidade: 'CABECA', preco_unitario: 300000, valor_bruto: 300000 * ids.length },
+      animais: ids.map(function (id) { return { animal_id: id }; }), parcelas: [{ data_vencimento: data }],
+    };
+  }
+  /** Compra de um animal que já foi da fazenda (volta ao rebanho), por cabeça, à vista. */
+  function compra_(data, fornecedor, pasto, animalId) {
+    return {
+      tipo: 'COMPRA', campos: { event_date: data, partner_id: fornecedor, pasto_destino_id: pasto, modalidade: 'CABECA', preco_unitario: 320000, valor_animais: 320000 },
+      animais: [{ animal_id: animalId }], parcelas: [{ data_vencimento: data }],
+    };
+  }
   function porBrinco_(resposta) {
     var out = {};
     resposta.animais.forEach(function (a) { out[a.brinco] = a; });
@@ -238,12 +252,14 @@ var TestRunner = (function () {
       },
     },
     {
-      id: 'CT-09', titulo: 'Integridade: o servidor recusa direto pela api() (brinco e mãe; Fase 1)',
+      id: 'CT-09', titulo: 'Integridade: o servidor recusa direto pela api() (saídas, brinco, mãe, pasto, data e reentrada)',
       executar: function (t) {
         var d0 = t.estado.d0;
         var ids = {};
-        t.passo('massa', '0903 fêmea jovem, 0904 macho, 0905 → 0906 → 0907 (mãe de)', function () {
+        t.passo('massa', '0901 vendido em D0+30, 0902 morto em D0+20, 0903 fêmea jovem, 0904 macho, 0905 → 0906 → 0907 (mãe de)', function () {
           var r = t.cmd('evento.registrar', entrada_([
+            bicho_(t, { brinco: '0901', sexo: 'M', castrado: true, data_nascimento: Utils.somaDias(d0, -800) }),
+            bicho_(t, { brinco: '0902', data_nascimento: Utils.somaDias(d0, -900) }),
             bicho_(t, { brinco: '0903', data_nascimento: Utils.somaDias(d0, -100) }),
             bicho_(t, { brinco: '0904', sexo: 'M', data_nascimento: Utils.somaDias(d0, -700) }),
             bicho_(t, { brinco: '0905', ref: 'm5', partos_previos: 2 }),
@@ -251,10 +267,15 @@ var TestRunner = (function () {
             bicho_(t, { brinco: '0907', mae_ref: 'm6', data_nascimento: Utils.somaDias(d0, -400) }),
           ]), 'ct09-massa');
           var m = porBrinco_(r);
-          ['0903', '0904', '0905', '0906', '0907'].forEach(function (b) { ids[b] = m[b].animal_id; });
+          ['0901', '0902', '0903', '0904', '0905', '0906', '0907'].forEach(function (b) { ids[b] = m[b].animal_id; });
+          ids.parceiro = t.cmd('parceiro.salvar', { campos: { nome: 'Vizinho do teste de aceitação', tipos: ['COMPRADOR', 'FORNECEDOR'] } }, 'ct09-parceiro').partner_id;
+          t.cmd('evento.registrar', { tipo: 'MORTE', campos: { event_date: Utils.somaDias(d0, 20), causa: 'DOENCA' }, animais: [{ animal_id: ids['0902'] }] }, 'ct09-morte');
+          t.cmd('evento.registrar', venda_(Utils.somaDias(d0, 30), ids.parceiro, [ids['0901']]), 'ct09-venda');
         });
         var amanha = Utils.somaDias(t.hoje(), 1);
         var tentativas = [
+          ['1', 'VENDA de 0901 (vendido em D0+30) em D0+40', venda_(Utils.somaDias(d0, 40), ids.parceiro, [ids['0901']]), 'FORA_DO_REBANHO'],
+          ['2', 'TRANSFERENCIA de 0902 (morto em D0+20) em D0+40', { tipo: 'TRANSFERENCIA', campos: { event_date: Utils.somaDias(d0, 40), pasto_origem_id: t.estado.pastos.A, pasto_destino_id: t.estado.pastos.B }, animais: [{ animal_id: ids['0902'] }] }, 'APOS_MORTE'],
           ['3a', 'Novo animal com o brinco " 0903 " (já em uso)', outra_(Utils.somaDias(d0, 5), [bicho_(t, { brinco: ' 0903 ' })]), 'BRINCO_DUPLICADO'],
           ['3b', 'Novo animal com o brinco "903" (o mesmo sem zeros à esquerda)', outra_(Utils.somaDias(d0, 5), [bicho_(t, { brinco: '903' })]), 'BRINCO_DUPLICADO'],
           ['4', 'Mãe = 0904 (macho)', outra_(Utils.somaDias(d0, 5), [bicho_(t, { brinco: '0910', mae_id: ids['0904'] })]), null],
@@ -265,8 +286,6 @@ var TestRunner = (function () {
           ['8b', 'Pasto de destino inativo', outra_(Utils.somaDias(d0, 5), [bicho_(t, { brinco: '0913', pasto_destino_id: t.estado.pastos.C })]), null],
           ['9', 'Evento datado de amanhã', outra_(amanha, [bicho_(t, { brinco: '0914' })]), null],
         ];
-        t.naoSeAplica('1', 'VENDA de animal vendido', 'VENDA chega na Fase 2.');
-        t.naoSeAplica('2', 'TRANSFERENCIA de animal morto', 'TRANSFERENCIA e MORTE chegam na Fase 2.');
         tentativas.forEach(function (x) {
           t.passo(x[0], x[1], function () {
             var antes = t.retrato();
@@ -285,7 +304,16 @@ var TestRunner = (function () {
             return e.details.map(function (d) { return d.codigo; }).join(', ');
           });
         });
-        t.naoSeAplica('10', 'COMPRA de animal vendido (antes e depois da saída)', 'COMPRA e VENDA chegam na Fase 2.');
+        t.passo('10', 'COMPRA de 0901 em D0+29 (antes da venda) é recusada; a mesma compra em D0+45 é reentrada com o mesmo animal_id', function () {
+          var antes = t.retrato();
+          var e = t.erro(t.api('evento.registrar', compra_(Utils.somaDias(d0, 29), ids.parceiro, t.estado.pastos.A, ids['0901']), { chave: t.chave('ct09-10a') }), 'VALIDATION', '10 antes da saída');
+          verificar_(e.details.some(function (d) { return d.codigo === 'ENTRADA_JA_DENTRO' && d.animal_id === ids['0901']; }), 'esperava ENTRADA_JA_DENTRO no 0901; veio ' + e.details.map(function (d) { return d.codigo; }).join(', '));
+          var depois = t.retrato();
+          Object.keys(antes).forEach(function (aba) { verificar_(antes[aba] === depois[aba], 'a aba ' + aba + ' mudou depois de uma recusa'); });
+          var r = t.cmd('evento.registrar', compra_(Utils.somaDias(d0, 45), ids.parceiro, t.estado.pastos.A, ids['0901']), 'ct09-10b');
+          igual_([r.event_type, r.animais.length, r.animais[0].animal_id, r.animais[0].situacao_cadastral], ['COMPRA', 1, ids['0901'], 'ATIVO'], 'reentrada do mesmo animal');
+          return 'recusada em D0+29 (ENTRADA_JA_DENTRO); aceita em D0+45 com o mesmo animal_id';
+        });
       },
     },
     {
