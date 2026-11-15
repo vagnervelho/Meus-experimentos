@@ -1274,6 +1274,7 @@ var EventService = (function () {
       }, m.col);
       if (!pl) return;
       if (eFrete) frete += x.valor; else outros += x.valor;
+      (ctxEv.custosPayload = ctxEv.custosPayload || []).push({ financial_id: pl.financial_id, tipo: eFrete ? 'FRETE' : 'OUTRO' });
       planejados.push(pl);
       lancs.push(resumoLancamento_(m, pl, contaCustos, { papel: eFrete ? 'FRETE' : 'OUTRO' }));
     });
@@ -1422,6 +1423,7 @@ var EventService = (function () {
     var extra = {
       justificativa: ctxEv.original ? nulo_(m.tx.dados.justificativa) : null, valor_abertura_origem: ctxEv.abertura ? 'INFORMADO' : null,
       gta_numero: ctxEv.tipo === 'TRANSFERENCIA' && typeof ctxEv.campos.gta_numero === 'string' ? nulo_(Utils.aparar(ctxEv.campos.gta_numero)) : null,
+      custos: ctxEv.custosPayload && ctxEv.custosPayload.length ? ctxEv.custosPayload : null,
     };
     ev.payload_json = payload_(m, ctxEv, extra);
     var itensPorAnimal = {};
@@ -1530,7 +1532,7 @@ var EventService = (function () {
     return {
       event_id: ev.event_id, event_seq: ev.event_seq, event_type: ev.event_type, event_subtype: nulo_(ev.event_subtype),
       rotulo: EventCatalog.existe(ev.event_type) ? EventCatalog.tipo(ev.event_type).rotulo : ev.event_type,
-      event_date: ev.event_date, registration_date: ev.registration_date, property_id: ev.property_id, status: a.status, vigente: a.vigente,
+      event_date: ev.event_date, registration_date: ev.registration_date, property_id: ev.property_id, partner_id: nulo_(ev.partner_id), status: a.status, vigente: a.vigente,
       description: nulo_(ev.description), notes: nulo_(ev.notes), responsible: nulo_(ev.responsible), total_value: nulo_(ev.total_value),
       created_by: ev.created_by, source: ev.source, pre_marco_zero: ev.pre_marco_zero === true, payload: ev.payload_json || null,
       reversal_of_event_id: nulo_(ev.reversal_of_event_id), anulado_por: a.anulador_id, animais: n, created_at: ev.created_at,

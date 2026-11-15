@@ -471,6 +471,11 @@ var FinancialService = (function () {
         var total = soma_(porEvento[c.event_id] || [], 'valor');
         if (total !== c.valor_total || c.valor_total !== c.valor_animais + c.frete + c.outros_custos) achado(16, 'COMPRAS', c.purchase_id, 'A compra registra ' + reais_(c.valor_total) + ' no total e os lançamentos do evento somam ' + reais_(total) + '.');
         if (ev && ev.total_value !== c.valor_total) achado(16, 'EVENTOS', c.event_id, 'O valor do evento de compra (' + reais_(ev.total_value) + ') difere do total da compra (' + reais_(c.valor_total) + ').');
+        var tipos = {};
+        ((ev && ev.payload_json && ev.payload_json.custos) || []).forEach(function (x) { tipos[x.financial_id] = x.tipo; });
+        var acess = (porEvento[c.event_id] || []).filter(function (f) { return f !== fin; });
+        var fretes = soma_(acess.filter(function (f) { return tipos[f.financial_id] !== 'OUTRO'; }), 'valor');
+        if (fretes !== c.frete || soma_(acess, 'valor') - fretes !== c.outros_custos) achado(16, 'COMPRAS', c.purchase_id, 'O frete (' + reais_(c.frete) + ') e os outros custos (' + reais_(c.outros_custos) + ') da compra não conferem com os lançamentos de cada item.');
         if (c.qtd_animais !== ea.filter(function (l) { return l.efeito_inventario === 1; }).length) achado(16, 'COMPRAS', c.purchase_id, 'A quantidade de animais da compra não confere com os animais do evento.');
       });
     }

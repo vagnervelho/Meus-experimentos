@@ -163,6 +163,14 @@ var Fmt = (function () {
     FONTE: { APP: 'Lançado no app', IMPORTACAO: 'Importação', SISTEMA: 'Sistema' },
     SITUACAO_NASCIMENTO: { VIVO: 'Vivo', NATIMORTO: 'Natimorto (nasceu morto)' },
     TIPO_BAIXA: { MORTE: 'Morte', DESCARTE: 'Descarte', DIVERGENCIA_CONTAGEM: 'Não encontrado na contagem' },
+    MODALIDADE: { CABECA: 'Por cabeça', KG_VIVO: 'Por kg vivo', ARROBA: 'Por arroba', LOTE: 'Lote fechado (valor total)' },
+    BASE_PESO: { VIVO: 'Peso vivo (com rendimento)', CARCACA: 'Carcaça (romaneio)' },
+    RENDIMENTO_TIPO: { APURADO: 'Apurado (carcaça ÷ peso vivo)', NEGOCIADO: 'Negociado entre as partes', ESTIMADO: 'Estimado' },
+    CRITERIO_RATEIO: { DIRETO: 'Direto (um animal)', VALOR_INDIVIDUAL: 'Pelo valor de cada animal', CABECAS: 'Igual por cabeça', PESO_VIVO: 'Pelo peso vivo', PESO_CARCACA: 'Pelo peso de carcaça', DIAS_PERMANENCIA: 'Pelos dias no pasto', MANUAL: 'Manual (pesos informados)' },
+    STATUS_LANCAMENTO: { ATIVO: 'Vale', CANCELADO: 'Cancelado' },
+    STATUS_PAGAMENTO: { SEM_CAIXA: 'Sem pagamento (não é caixa)', ABERTO: 'A pagar ou receber', PARCIAL: 'Pago em parte', LIQUIDADO: 'Pago', CANCELADO: 'Cancelado' },
+    STATUS_PARCELA: { ABERTA: 'Em aberto', LIQUIDADA: 'Paga', CANCELADA: 'Cancelada' },
+    NATUREZA: { RECEITA_VENDA_ANIMAIS: 'Venda de animais', OUTRA_RECEITA: 'Outra receita', AQUISICAO_ANIMAIS: 'Aquisição de animais', CUSTEIO: 'Custeio', DESPESA_VENDA: 'Despesa de venda', ESTOQUE_INSUMOS: 'Compra de insumos', NAO_OPERACIONAL: 'Não operacional' },
     CAMPO_CORRIGIVEL: {
       sexo: 'Sexo', data_nascimento: 'Data de nascimento', data_nascimento_confianca: 'Certeza do nascimento', mae_id: 'Mãe', mae_confianca: 'Certeza da mãe',
       pai_id: 'Pai', pai_confianca: 'Certeza do pai', castrado: 'Castrado', reprodutor: 'Reprodutor (touro)', partos_previos: 'Partos anteriores',
@@ -174,6 +182,7 @@ var Fmt = (function () {
     origem: 'ORIGEM', situacao_reprodutiva: 'SITUACAO_REPRODUTIVA', metodo_pesagem: 'METODO_PESAGEM', campo: 'CAMPO_CORRIGIVEL', situacao_cadastral: 'SITUACAO_CADASTRAL',
     tipos: 'TIPO_PARCEIRO', posse: 'POSSE', status: 'STATUS', sexo_aplicavel: 'SEXO_APLICAVEL', condicao: 'CONDICAO', tipo_anexo: 'TIPO_ANEXO', politica: 'POLITICA_AVISO',
     situacao_nascimento: 'SITUACAO_NASCIMENTO', pai_confianca_parto: 'CONFIANCA',
+    modalidade: 'MODALIDADE', base_peso: 'BASE_PESO', rendimento_tipo: 'RENDIMENTO_TIPO', criterio_rateio: 'CRITERIO_RATEIO',
   };
 
   function configurar(o) { Object.keys(o || {}).forEach(function (k) { if (o[k] !== undefined && o[k] !== null) cfg[k] = o[k]; }); cache = {}; }
@@ -608,6 +617,11 @@ var Store = (function () {
   function propriedades(o) { var t = (est.dados && est.dados.propriedades) || []; return o && o.todas ? t : t.filter(function (p) { return p.status !== 'INATIVO'; }); }
   function propriedade(id) { return ((est.dados && est.dados.propriedades) || []).filter(function (p) { return p.property_id === id; })[0] || null; }
   function parceiros() { return ((est.dados && est.dados.parceiros) || []).filter(function (p) { return p.ativo !== false; }); }
+  /** Nome do parceiro (inclusive inativo, para mostrar lançamentos antigos). */
+  function parceiro(id) { return ((est.dados && est.dados.parceiros) || []).filter(function (p) { return p.partner_id === id; })[0] || null; }
+  /** Contas ativas do plano de contas (bootstrap); `naturezas` filtra as que servem a um campo (ex.: CUSTEIO). */
+  function contas(naturezas) { return ((est.dados && est.dados.contas) || []).filter(function (c) { return c.ativo !== false && (!naturezas || naturezas.indexOf(c.natureza) >= 0); }); }
+  function conta(id) { return ((est.dados && est.dados.contas) || []).filter(function (c) { return c.conta_id === id; })[0] || null; }
   function categorias() { return (est.dados && est.dados.categorias) || []; }
   function categoria(id) { return categorias().filter(function (c) { return c.category_id === id; })[0] || null; }
   function animais() { garantirIndices_(); return est.animais; }
@@ -698,7 +712,7 @@ var Store = (function () {
   return {
     configurar: configurar, carregar: carregar, aplicarResultado: aplicarResultado, assinar: assinar, carregado: carregado, versao: versao,
     param: param, lista: lista, rotuloLista: rotuloLista, pastos: pastos, pasto: pasto, propriedades: propriedades, propriedade: propriedade,
-    parceiros: parceiros, categorias: categorias, categoria: categoria, animais: animais, animal: animal, filhosDe: filhosDe,
+    parceiros: parceiros, parceiro: parceiro, contas: contas, conta: conta, categorias: categorias, categoria: categoria, animais: animais, animal: animal, filhosDe: filhosDe,
     modulos: modulos, modulo: modulo, catalogo: catalogo, tipoEvento: tipoEvento, rotuloAnimal: rotuloAnimal, descricaoAnimal: descricaoAnimal,
     resolverBrinco: resolverBrinco, buscar: buscar, carregarBaixados: carregarBaixados, normalizarBrinco: normalizarBrinco,
     baixados: function () { return est.baixados; },
