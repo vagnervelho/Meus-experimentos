@@ -93,7 +93,7 @@ var FinancialService = (function () {
     var campo = o.campo;
     var rotulo = o.rotulo;
     var lista = Array.isArray(parcelas) ? parcelas : [];
-    if (!lista.length) { col.erro(det_('SEM_PARCELAS', campo, 'Informe como ' + rotulo + ' será pago: ao menos uma parcela, com o vencimento.')); return null; }
+    if (!lista.length) { col.erro(det_('SEM_PARCELAS', campo, 'Informe como ' + rotulo + ' ' + (o.pagamento || 'será pago') + ': ao menos uma parcela, com o vencimento.')); return null; }
     if (lista.length > MAX_PARCELAS) { col.erro(det_('PARCELAS_DEMAIS', campo, 'Um lançamento aceita até ' + MAX_PARCELAS + ' parcelas.')); return null; }
     var ok = true;
     var informado = 0;
@@ -148,7 +148,7 @@ var FinancialService = (function () {
    * Monta, no plano do evento, um lançamento completo: FINANCEIRO, as PARCELAS (ou nenhuma, em `semCaixa`), o RATEIOS
    * do próprio evento (escopo EVENTO) e uma ALOCACOES_FINANCEIRAS por animal. spec: {evento: {event_id, event_date,
    * property_id}, conta (linha de PLANO_CONTAS), naturezas (aceitas), valor, descricao, partner_id, documento,
-   * observacoes, quantidade, pasture_id, retida, semCaixa, parcelas: [{data_vencimento, valor?, forma_pagamento,
+   * observacoes, quantidade, pasture_id, retida, semCaixa, pagamento ('será recebida': texto da falta de parcela), parcelas: [{data_vencimento, valor?, forma_pagamento,
    * documento}], rateio: {criterio, itens: [{animal_id, chave, base}], cemPorCento, justificativa, estimado} | null, campo,
    * rotulo, prefixo}. Erros vão para `col`; com erro devolve null. Devolve {linhas: {FINANCEIRO: [..], PARCELAS,
    * RATEIOS, ALOCACOES_FINANCEIRAS}, financial_id, rateio (o de `ratear`), parcelas}.
@@ -166,7 +166,7 @@ var FinancialService = (function () {
     var parcelas = [];
     if (s.semCaixa) {
       if (Array.isArray(s.parcelas) && s.parcelas.length) throw Validation.erro('INTERNAL', 'Lançamento sem efeito de caixa não tem parcela (invariante 4).');
-    } else parcelas = resolverParcelas(s.valor, s.parcelas, col, { campo: s.campoParcelas || campo, rotulo: rotulo, prefixo: s.prefixo });
+    } else parcelas = resolverParcelas(s.valor, s.parcelas, col, { campo: s.campoParcelas || campo, rotulo: rotulo, prefixo: s.prefixo, pagamento: s.pagamento });
     var rat = null;
     if (s.rateio) {
       if (SEM_RATEIO.indexOf(c.natureza) >= 0) throw Validation.erro('INTERNAL', 'Lançamento de natureza ' + c.natureza + ' não é rateado aos animais (invariante 14).');
@@ -697,6 +697,8 @@ var FinancialService = (function () {
     juntar: juntar,
     avisoPeriodo: avisoPeriodo,
     negociacao: negociacao,
+    contaDeducao: contaDeducao,
+    totaisVenda: totaisVenda,
     conferir: conferir,
     situacaoPagamento: situacaoPagamento,
     tiposDosCustos: tiposDosCustos,

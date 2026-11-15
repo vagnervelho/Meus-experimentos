@@ -249,19 +249,21 @@ var EventService = (function () {
     // Data antes do marco zero num tipo sem registro histórico: a linha do tempo nem começou; só o erro da data.
     if (ev.event_date < m.D0 && ev.pre_marco_zero !== true) return { erros: m.col.erros };
 
-    var plano = { EVENTOS: [], ANIMAIS: [], EVENTO_ANIMAIS: [], IDENTIFICACOES: [], PESAGENS: [], REPRODUCAO: [], BAIXAS: [], AJUSTES: [], COMPRAS: [], FINANCEIRO: [], PARCELAS: [], RATEIOS: [], ALOCACOES_FINANCEIRAS: [] };
+    var plano = { EVENTOS: [], ANIMAIS: [], EVENTO_ANIMAIS: [], IDENTIFICACOES: [], PESAGENS: [], REPRODUCAO: [], BAIXAS: [], AJUSTES: [], COMPRAS: [], VENDAS: [], FINANCEIRO: [], PARCELAS: [], RATEIOS: [], ALOCACOES_FINANCEIRAS: [] };
     var ctxEv = { tipo: tipo, subtipo: subtipo, ev: ev, campos: campos, original: original, plano: plano, itens: [], criadosOriginal: {}, auditorias: [] };
     if (original) {
       m.f.linhasDoEvento(original.event_id).forEach(function (l) { if (l.atributos_iniciais_json) ctxEv.criadosOriginal[l.animal_id] = true; });
     }
     if (tipo === 'TRANSFERENCIA') cabecalhoTransferencia_(m, ctxEv);
     if (tipo === 'COMPRA') cabecalhoCompra_(m, ctxEv);
+    if (tipo === 'VENDA') cabecalhoVenda_(m, ctxEv);
     animais.forEach(function (item, i) {
       var it = novoItem_(m, item || {}, i);
       ctxEv.itens.push(it);
       if (tipo === 'AJUSTE_INVENTARIO') itemAjuste_(m, ctxEv, it);
       else if (tipo === 'TRANSFERENCIA') itemTransferencia_(m, ctxEv, it);
       else if (tipo === 'MORTE' || tipo === 'DESCARTE') itemSaida_(m, ctxEv, it);
+      else if (tipo === 'VENDA') itemVenda_(m, ctxEv, it);
       else if (tipo === 'NASCIMENTO') itemMatriz_(m, ctxEv, it);
       else itemEntrada_(m, ctxEv, it);
     });
@@ -276,6 +278,7 @@ var EventService = (function () {
     if (tipo === 'NASCIMENTO') avisosDoParto_(m, ctxEv);
     if (tipo === 'ENTRADA_INICIAL') abertura_(m, ctxEv);
     if (tipo === 'COMPRA') financeiroCompra_(m, ctxEv, d);
+    if (tipo === 'VENDA') { carenciaNaVenda_(m, ctxEv); financeiroVenda_(m, ctxEv, d); }
     if (tipo === 'MORTE' || tipo === 'DESCARTE') financeiroSaida_(m, ctxEv);
     if (original) {
       conferirParcelasLiquidadas_(m, original, 'corrigir');
@@ -1388,6 +1391,8 @@ var EventService = (function () {
       // Período bloqueado: um aviso só por comando (a justificativa é uma), mesmo com vários lançamentos no período.
       if (a.codigo === 'PERIODO_BLOQUEADO') { if (periodo) return; periodo = true; }
       var p = pol[a.codigo] || 'AVISA';
+      // Carência (RN-072; 05, seção 4.8): a política vale só na venda para ABATE; nas demais vendas é sempre aviso.
+      if (a.codigo === 'CARENCIA_ATIVA' && m.carenciaSemPolitica) p = 'AVISA';
       if (p === 'IGNORA') return;
       if (p === 'BLOQUEIA') m.col.erro(a);
       else ficam.push(a);
@@ -1429,6 +1434,7 @@ var EventService = (function () {
     var extra = {
       justificativa: ctxEv.original ? nulo_(m.tx.dados.justificativa) : null, valor_abertura_origem: ctxEv.abertura ? 'INFORMADO' : null,
       gta_numero: ctxEv.tipo === 'TRANSFERENCIA' && typeof ctxEv.campos.gta_numero === 'string' ? nulo_(Utils.aparar(ctxEv.campos.gta_numero)) : null,
+      deducoes: ctxEv.deducoes && ctxEv.deducoes.length ? ctxEv.deducoes : null,
     };
     ev.payload_json = payload_(m, ctxEv, extra);
     var itensPorAnimal = {};
@@ -1451,7 +1457,7 @@ var EventService = (function () {
         animais: animais.length, novos: ctxEv.plano.ANIMAIS.length, anulados: (ctxEv.removidos || []).length, substitui: resumo.substitui,
         total_value: ev.total_value, abertura: ctxEv.abertura || null, pre_marco_zero: ev.pre_marco_zero === true,
         parto: ctxEv.parto || null, transferencia: ctxEv.transf || null, baixas: ctxEv.plano.BAIXAS.length,
-        compra: ctxEv.compra || null, financeiro: ctxEv.financeiro || null,
+        compra: ctxEv.compra || null, venda: ctxEv.venda || null, financeiro: ctxEv.financeiro || null,
       },
       derivados: { animais: animais, eventos: [ev.event_id].concat(ctxEv.original ? [ctxEv.original.event_id] : []) },
       resposta: function (t) { return resposta_(t, resumo); },
@@ -1529,7 +1535,7 @@ var EventService = (function () {
     };
   }
   function leiturasConsulta_() {
-    return Timeline.LEITURAS.concat(['PROPRIEDADES', 'BAIXAS', 'COMPRAS']);
+    return Timeline.LEITURAS.concat(['PROPRIEDADES', 'BAIXAS', 'COMPRAS', 'VENDAS']);
   }
   function eventoPublico_(tx, ev) {
     var a = tx.cru.avaliar(ev.event_id);
@@ -1580,7 +1586,7 @@ var EventService = (function () {
         var st = ev ? tx.cru.avaliar(ev.event_id).status : null;
         if (!ev || st === 'FALHOU' || st === 'PENDENTE') throw Validation.erro('NOT_FOUND', 'Evento não encontrado.');
         var detalhes = {};
-        ['IDENTIFICACOES', 'PESAGENS', 'REPRODUCAO', 'BAIXAS', 'AJUSTES', 'COMPRAS', 'FINANCEIRO', 'RATEIOS'].forEach(function (t) {
+        ['IDENTIFICACOES', 'PESAGENS', 'REPRODUCAO', 'BAIXAS', 'AJUSTES', 'COMPRAS', 'VENDAS', 'FINANCEIRO', 'RATEIOS'].forEach(function (t) {
           detalhes[t] = tx.cru.cruPor(t, 'event_id', ev.event_id).map(Utils.clonar);
         });
         detalhes.PARCELAS = [];
