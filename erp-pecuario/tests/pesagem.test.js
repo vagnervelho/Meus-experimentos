@@ -59,7 +59,8 @@ test('registro individual e coletivo: uma linha de PESAGENS por animal (momento,
   assert.deepEqual([animal(s, ids['0501']).peso_atual, animal(s, ids['0501']).data_ultima_pesagem, animal(s, ids['0503']).peso_atual], [300, '2026-03-10', null]);
   // Segunda pesagem com jejum e o momento "saída": a resposta compara com a anterior (91 dias, 0,800 kg/dia, 24,27%).
   const r2 = ok(api(s, 'evento.registrar', pes('2026-06-09', [{ animal_id: ids['0501'], peso: 372.8 }], { jejum: true, tipo_pesagem: 'VENDA' }), 'p2'));
-  assert.deepEqual(r2.pesagem.animais[0], { animal_id: ids['0501'], peso_kg: 372.8, anterior: { data: '2026-03-10', peso_kg: 300 }, ganho_kg: 72.8, dias: 91, gmd_kg_dia: 0.8, variacao_pct: 24.27 });
+  assert.deepEqual(r2.pesagem.animais[0], { animal_id: ids['0501'], peso_kg: 372.8, anterior: { data: '2026-03-10', peso_kg: 300 }, ganho_kg: 72.8, dias: 91, gmd_kg_dia: 0.8, variacao_pct: 24.27, peso_atual: 372.8, data_ultima_pesagem: '2026-06-09', peso_vencido: false });
+  assert.equal(r1.pesagem.animais.find((x) => x.animal_id === ids['0501']).peso_vencido, true, 'a de 10/03 já passou dos 180 dias de validade em 13/11 (o peso atual que a lista do aparelho recebe)');
   assert.deepEqual(evento(s, r2.event_id).payload_json, { jejum: true });
   assert.equal(pesagensDe(s, ids['0501']).find((p) => p.event_id === r2.event_id).tipo, 'VENDA');
   assert.deepEqual([animal(s, ids['0501']).peso_atual, animal(s, ids['0501']).data_ultima_pesagem], [372.8, '2026-06-09']);
@@ -151,7 +152,7 @@ test('retroativo e fato independente (RN-017, 04 seção 5.2 ii): antes de uma p
   ok(api(s, 'evento.registrar', pes('2026-06-20', [{ animal_id: ids['0902'], peso: 470 }]), 'dia-venda'));
   const depois = recusa(api(s, 'evento.registrar', pes('2026-06-21', [{ animal_id: ids['0902'], peso: 471 }]), 'dia-seguinte'), 'VALIDATION');
   assert.deepEqual(depois.details.map((d) => [d.codigo, d.animal_id]), [['FORA_DA_PERMANENCIA', ids['0902']]]);
-  assert.equal(animal(s, ids['0902']).peso_atual, null, 'o vendido fica sem peso atual (fora do rebanho)');
+  assert.deepEqual([animal(s, ids['0902']).situacao_cadastral, animal(s, ids['0902']).peso_atual], ['VENDIDO', 470], 'o vendido guarda o último peso registrado (03a, peso_atual), o do dia da venda');
   // Venda retroativa do 0901 em 01/04, antes da pesagem de 01/05: CONFLICT com a pesagem.
   const c = recusa(api(s, 'evento.registrar', venda('2026-04-01', ids['0901']), 'venda-retro'), 'CONFLICT');
   const maio = s.tabela('PESAGENS').find((p) => p.animal_id === ids['0901'] && p.data_pesagem === '2026-05-01');
@@ -225,7 +226,7 @@ test('estorno sem dependente devolve o peso anterior; estorno ou correção da e
   assert.deepEqual([animal(s, ids['1201']).peso_atual, animal(s, ids['1201']).data_ultima_pesagem], [300, '2026-03-20']);
   // A compra tem a pesagem de 20/03 como dependente: estornar, ou corrigir a data para depois dela, é CONFLICT.
   const e = recusa(api(s, 'evento.estornar', { event_id: c.event_id, justificativa: 'Errada' }, 'est-compra'), 'CONFLICT');
-  assert.deepEqual(e.details.map((d) => [d.codigo, d.conflito.event_id, d.conflito.tipo]), [['FORA_DA_PERMANENCIA', p1.event_id, 'PESAGEM']]);
+  assert.deepEqual(e.details.map((d) => [d.codigo, d.conflito.event_id, d.conflito.tipo]), [['EVENTO_DEPENDENTE', p1.event_id, 'PESAGEM']]);
   const corr = Object.assign(compra('2026-04-01', 250), { event_id: c.event_id, justificativa: 'Data errada' });
   corr.animais[0].animal_id = novo;
   const e2 = recusa(api(s, 'evento.corrigir', corr, 'corr-compra'), 'CONFLICT');
@@ -272,7 +273,8 @@ test('verificação de integridade de PESAGENS (COPIAS, LINHA_DO_TEMPO): data �
   const lote = ok(api(s, 'evento.registrar', pes('2026-03-02', ['1403', '1404', '1405'].map((b) => ({ animal_id: ids[b] })), { peso_total_lote_kg: 960, qtd_cabecas_lote: 3 }), 'lote'));
   semErro(s, 'antes de mexer');
   const linhaDe = (ev, id) => s.tabela('PESAGENS').find((p) => p.event_id === ev && p.animal_id === id);
-  const achados = () => s.integridade().achados.filter((x) => x.severidade === 'ERRO').map((x) => [x.checagem, x.campo]);
+  const ord = (l) => l.map((x) => x.join('.')).sort();
+  const achados = () => ord(s.integridade().achados.filter((x) => x.severidade === 'ERRO').map((x) => [x.checagem, x.campo]));
   const restaurar = [];
   const mexer = (aba, idReg, col, valor) => {
     const atual = s.tabela(aba).find((x) => x[s.G.Schema.pk(aba)] === idReg)[col];
@@ -282,32 +284,32 @@ test('verificação de integridade de PESAGENS (COPIAS, LINHA_DO_TEMPO): data �
   const desfazer = () => { while (restaurar.length) { const [aba, idReg, col, v] = restaurar.pop(); s.editar(aba, idReg, col, v === null ? '' : v); } };
   const w1 = linhaDe(ind.event_id, ids['1401']);
   mexer('PESAGENS', w1.weight_id, 'data_pesagem', '2026-03-05');
-  assert.deepEqual(achados(), [['COPIAS', 'data_pesagem']]);
+  assert.deepEqual(achados(), ord([['PROJECAO', 'data_ultima_pesagem'], ['COPIAS', 'data_pesagem']]), 'a data copiada difere da do evento (e a projeção, refeita pela linha, também)');
   desfazer();
   mexer('PESAGENS', w1.weight_id, 'tipo', 'NASCIMENTO');
-  assert.deepEqual(achados(), [['COPIAS', 'tipo'], ['COPIAS', 'tipo']], 'momento fora da lista da pesagem e diferente das outras linhas');
+  assert.deepEqual(achados(), ord([['COPIAS', 'tipo'], ['COPIAS', 'tipo']]), 'momento fora da lista da pesagem e diferente das outras linhas');
   desfazer();
   mexer('PESAGENS', w1.weight_id, 'peso_kg', 2500);
-  assert.deepEqual(achados(), [['COPIAS', 'peso_kg'], ['COPIAS', 'peso_kg'], ['PROJECAO', 'peso_atual']], 'fora da faixa, diferente da linha do animal, e a projeção');
+  assert.deepEqual(achados(), ord([['COPIAS', 'peso_kg'], ['COPIAS', 'peso_kg'], ['PROJECAO', 'peso_atual']]), 'fora da faixa, diferente da linha do animal, e a projeção');
   desfazer();
   const ea = s.tabela('EVENTO_ANIMAIS').find((l) => l.event_id === ind.event_id && l.animal_id === ids['1402']);
   mexer('EVENTO_ANIMAIS', ea.event_animal_id, 'peso', 311);
-  assert.deepEqual(achados(), [['COPIAS', 'peso_kg']]);
+  assert.deepEqual(achados(), ord([['COPIAS', 'peso_kg']]));
   desfazer();
   mexer('PESAGENS', w1.weight_id, 'animal_id', ids['1405']);
   const a2 = achados();
-  assert.ok(a2.some((x) => x[0] === 'COPIAS' && x[1] === 'animal_id'), 'linha de animal sem linha no lançamento: ' + JSON.stringify(a2));
-  assert.ok(a2.some((x) => x[0] === 'COPIAS' && x[1] === 'PESAGENS'), 'e o animal do lançamento sem a pesagem: ' + JSON.stringify(a2));
+  assert.ok(a2.includes('COPIAS.animal_id'), 'linha de animal sem linha no lançamento: ' + JSON.stringify(a2));
+  assert.ok(a2.includes('COPIAS.PESAGENS'), 'e o animal do lançamento sem a pesagem: ' + JSON.stringify(a2));
   desfazer();
   const l3 = linhaDe(lote.event_id, ids['1403']);
   mexer('PESAGENS', l3.weight_id, 'peso_kg', 330);
-  assert.deepEqual(achados(), [['COPIAS', 'peso_kg'], ['COPIAS', 'peso_kg'], ['PROJECAO', 'peso_atual']], 'a média do lote (320,0) e a cópia');
+  assert.deepEqual(achados(), ord([['COPIAS', 'peso_kg'], ['COPIAS', 'peso_kg'], ['PROJECAO', 'peso_atual']]), 'a média do lote (320,0) e a cópia');
   desfazer();
   mexer('PESAGENS', linhaDe(ind.event_id, ids['1402']).weight_id, 'metodo', 'MEDIA_LOTE');
-  assert.deepEqual(achados(), [['COPIAS', 'metodo']]);
+  assert.deepEqual(achados(), ord([['COPIAS', 'metodo']]));
   desfazer();
   mexer('EVENTOS', lote.event_id, 'payload_json', JSON.stringify({ peso_total_lote_kg: 960, qtd_cabecas_lote: 4 }));
-  assert.ok(achados().some((x) => x[0] === 'COPIAS' && x[1] === 'payload_json'), 'cabeças do lote ≠ animais do lançamento');
+  assert.ok(achados().includes('COPIAS.payload_json'), 'cabeças do lote ≠ animais do lançamento');
   desfazer();
   // A linha apagada à mão: o detalhe que o tipo grava falta (fonte quebrada; o reparo não é oferecido).
   s.apagarLinha('PESAGENS', w1.weight_id);

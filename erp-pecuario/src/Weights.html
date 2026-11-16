@@ -1,0 +1,635 @@
+<script>
+'use strict';
+/*
+ * ERP Pecuário — Pesagens (Fase 3, E3.1), carregada sob demanda (01, seção 6.2): a tela de desempenho (08, seção 3; 07,
+ * seção 8.1: peso médio e GMD por pasto e por categoria, as pesagens com o GMD de lote, curvas de 2 a 5 animais com a
+ * projeção rotulada) e o modo curral (08, seção 5; premissa PR-06: celular e sinal fraco).
+ *
+ * Modo curral: o operador digita na ordem em que o gado passa — brinco (teclado numérico), Enter, peso, Enter — e a linha
+ * vai para a fila do aparelho (rascunho persistente: localStorage, ou o servidor quando ele falta, como todo rascunho). A
+ * fila sai em blocos idempotentes: cada bloco é um lançamento PESAGEM com a sua chave, guardada no rascunho antes do envio;
+ * sinal que cai no meio deixa o bloco "sem confirmação", e o reenvio com a mesma chave grava uma vez só (o servidor devolve
+ * o resultado gravado). O aparelho só confere formato e acha o animal na lista dele; o ganho, a variação e o aviso de peso
+ * fora do esperado são do servidor, que é a autoridade (P5): aparecem quando o bloco volta.
+ */
+var TelaPesagens = (function () {
+  var h = Util.h;
+  var ID_RASCUNHO = 'curral-pesagem';
+  var TIPO_RASCUNHO = 'CURRAL_PESAGEM';
+  /** Pesagens por bloco: um lançamento por bloco; o bloco cheio sai sozinho quando não há pendência. */
+  var BLOCO = 20;
+  var PESO_MAX = 2000;
+  var MOMENTOS = ['ROTINA', 'ENTRADA', 'DESMAMA', 'VENDA'];
+  var METODOS = ['BALANCA', 'FITA', 'ESTIMATIVA_VISUAL'];
+  var filtros = { de: '', ate: '', pasture_id: '', sexo: '', category_id: '', raca: '', animais: [] };
+
+  function opcoes(lista, atual, vazio) {
+    return (vazio ? [h('option', { value: '', text: vazio })] : []).concat(lista.map(function (x) { return h('option', { value: x[0], text: x[1], selected: x[0] === atual }); }));
+  }
+  function campo(id, rotulo, controle, ajuda) {
+    return h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo', for: id, text: rotulo }), controle, ajuda ? h('p', { class: 'campo-ajuda', text: ajuda }) : null);
+  }
+  function kg(v) { return v === null || v === undefined ? '—' : Fmt.peso(v); }
+  function gmdTexto(v) { return v === null || v === undefined ? '—' : Fmt.numero(v, 3) + ' kg/dia'; }
+  function semValor(ind) { return '— (' + ((ind && ind.explicacao) || Fmt.rotulo('MOTIVO', (ind && ind.motivo) || 'DADOS_INSUFICIENTES')) + ')'; }
+  function linkEvento(id, texto) { var r = 'evento/' + id; return h('a', { class: 'botao botao-texto', href: Roteador.href(r), dataset: { rota: r } }, texto); }
+  function linkAnimal(id, texto) { var r = 'animal/' + id + '/peso'; return h('a', { class: 'botao botao-texto', href: Roteador.href(r), dataset: { rota: r } }, texto); }
+  function nomeDe(id) { var a = Store.animal(id); return a ? Store.rotuloAnimal(a) : 'animal'; }
+
+  // ------------------------------------------------------------------ desempenho ----
+  function cartaoIndicadores(geral, ate) {
+    var pm = geral.peso_medio || {};
+    var g = geral.gmd || {};
+    return h('div', { class: 'indicadores', role: 'list', dataset: { indicadoresPeso: '1' } },
+      UI.indicador('Cabeças em ' + Fmt.dataCurta(ate), geral.cabecas === null || geral.cabecas === undefined ? '—' : Fmt.numero(geral.cabecas), geral.motivo ? Fmt.rotulo('MOTIVO', geral.motivo) : null, 'cabecas'),
+      UI.indicador('Peso médio', pm.valor === null || pm.valor === undefined ? '—' : Fmt.peso(pm.valor), pm.valor === null || pm.valor === undefined ? Fmt.rotulo('MOTIVO', pm.motivo || 'DADOS_INSUFICIENTES') : pm.pct_estimado ? Fmt.numero(pm.pct_estimado, 1) + '% estimado' : 'pesado', 'peso-medio'),
+      UI.indicador('Ganho médio diário', g.valor === null || g.valor === undefined ? '—' : gmdTexto(g.valor), g.valor === null || g.valor === undefined ? (g.explicacao || Fmt.rotulo('MOTIVO', g.motivo || 'DADOS_INSUFICIENTES')) : g.n + (g.n === 1 ? ' animal' : ' animais') + ', ' + Fmt.numero(g.dias) + ' dias somados', 'gmd'));
+  }
+  function tabelaGrupos(id, rotulo, linhas, nomeCol) {
+    return UI.tabela({ id: id, rotulo: rotulo, linhas: linhas, chave: function (x) { return (x.pasture_id || x.category_id || 'sem') + x.nome; },
+      colunas: [
+        { id: 'nome', rotulo: nomeCol, valor: function (x) { return x.nome || '—'; } },
+        { id: 'cabecas', rotulo: 'Cabeças', num: true, valor: function (x) { return x.cabecas === null ? null : x.cabecas; }, formatar: function (x) { return x.cabecas === null ? '—' : String(x.cabecas); } },
+        { id: 'peso_medio', rotulo: 'Peso médio', num: true, valor: function (x) { return x.peso_medio ? x.peso_medio.valor : null; }, formatar: function (x) { var p = x.peso_medio || {}; return p.valor === null || p.valor === undefined ? '—' : Fmt.peso(p.valor) + (p.pct_estimado ? ' (' + Fmt.numero(p.pct_estimado, 1) + '% estimado)' : ''); } },
+        { id: 'gmd', rotulo: 'Ganho médio diário', num: true, valor: function (x) { return x.gmd ? x.gmd.valor : null; }, formatar: function (x) { var g = x.gmd || {}; return g.valor === null || g.valor === undefined ? '— (' + (g.n || 0) + (g.n === 1 ? ' animal)' : ' animais)') : gmdTexto(g.valor) + ' (' + g.n + ')'; } },
+      ] }).el;
+  }
+  function blocoPesagens(lista) {
+    if (!lista.length) return UI.nota('Nenhuma pesagem no período.', 'info');
+    return UI.tabela({ id: 'pesagens-periodo', rotulo: 'Pesagens do período', linhas: lista, chave: function (x) { return x.event_id; },
+      colunas: [
+        { id: 'data', rotulo: 'Data', valor: function (x) { return x.data; }, formatar: function (x) { return linkEvento(x.event_id, Fmt.data(x.data)); } },
+        { id: 'n', rotulo: 'Animais', num: true },
+        { id: 'media', rotulo: 'Média', num: true, valor: function (x) { return x.media_kg; }, formatar: function (x) { return kg(x.media_kg); } },
+        { id: 'como', rotulo: 'Como', valor: function (x) { return (x.lote ? 'Lote: ' + Fmt.peso(x.lote.total_kg) + ' ÷ ' + x.lote.cabecas : Fmt.rotulo('METODO_PESAGEM', x.metodo)) + ' · ' + Fmt.rotulo('TIPO_PESAGEM', x.tipo) + (x.jejum ? ' · jejum' : ''); } },
+        { id: 'gmd_lote', rotulo: 'GMD do lote', num: true, valor: function (x) { return x.gmd_lote ? x.gmd_lote.valor : null; }, formatar: function (x) {
+          var g = x.gmd_lote || {};
+          return g.valor === null || g.valor === undefined ? semValor(g) : gmdTexto(g.valor) + ' desde ' + Fmt.dataCurta(g.comparada_com.data) + ' (' + g.n + ' em comum)';
+        } },
+      ] }).el;
+  }
+  function blocoCurvas(d, aoMudar) {
+    var caixa = h('div', { dataset: { curvas: '1' } });
+    var entrada = h('input', { type: 'search', id: 'curva-brinco', autocomplete: 'off', inputmode: 'numeric', placeholder: 'Brinco', 'aria-describedby': 'curva-ajuda' });
+    var form = h('form', { class: 'filtros', 'aria-label': 'Curvas de peso', on: { submit: function (ev) {
+      ev.preventDefault();
+      var r = Store.buscar(entrada.value, function (a) { return a.situacao_cadastral !== 'EXTERNO'; });
+      if (r.candidatos.length !== 1) { UI.aviso(r.candidatos.length ? 'Mais de um animal com "' + entrada.value + '": digite o brinco inteiro.' : 'Nenhum animal com "' + entrada.value + '".', { tipo: 'erro' }); return; }
+      if (filtros.animais.indexOf(r.candidatos[0].animal_id) < 0) filtros.animais = filtros.animais.concat([r.candidatos[0].animal_id]).slice(-5);
+      aoMudar();
+    } } }, campo('curva-brinco', 'Comparar a curva de até 5 animais', entrada), UI.botao('Mostrar', { atributos: { type: 'submit' } }));
+    caixa.appendChild(form);
+    caixa.appendChild(h('p', { class: 'campo-ajuda', id: 'curva-ajuda', text: 'A linha cheia liga os pesos medidos; a tracejada é a estimativa pelo ganho recente, nunca um peso pesado.' }));
+    if (!d.curvas.length) return caixa;
+    caixa.appendChild(h('ul', { class: 'lista-simples' }, d.curvas.map(function (c) {
+      return h('li', { class: 'linha-acao' }, linkAnimal(c.animal_id, c.brinco || c.codigo_interno), UI.botao('Tirar da comparação', { tipo: 'texto', aoClicar: function () { filtros.animais = filtros.animais.filter(function (x) { return x !== c.animal_id; }); aoMudar(); } }));
+    })));
+    caixa.appendChild(UI.curvaPeso({ titulo: 'Curvas de peso', series: d.curvas.map(function (c) {
+      return { nome: c.brinco || c.codigo_interno, pontos: c.serie.map(function (x) { return { data: x.data, peso_kg: x.peso_kg, estimado: x.estimado }; }), nascer: c.ponto_nascer_estimado, projecao: c.projecao && c.projecao.valor ? c.projecao : null };
+    }) }));
+    return caixa;
+  }
+  function tabelaAnimais(lista) {
+    if (!lista.length) return UI.nota('Nenhum animal pesado no período com estes filtros.', 'info');
+    return UI.tabela({ id: 'animais-peso', rotulo: 'Animais pesados no período', linhas: lista, chave: function (x) { return x.animal_id; },
+      colunas: [
+        { id: 'brinco', rotulo: 'Animal', valor: function (x) { return x.brinco || x.codigo_interno; }, formatar: function (x) { return linkAnimal(x.animal_id, x.brinco || x.codigo_interno); } },
+        { id: 'pesagens', rotulo: 'Pesagens', num: true },
+        { id: 'ultima', rotulo: 'Última', valor: function (x) { return x.ultima ? x.ultima.data : null; }, formatar: function (x) { return x.ultima ? Fmt.peso(x.ultima.peso_kg) + ' em ' + Fmt.data(x.ultima.data) + (x.ultima.estimado ? ' (estimado)' : '') : '—'; } },
+        { id: 'ganho', rotulo: 'Ganho', num: true, valor: function (x) { return x.ganho_kg; }, formatar: function (x) { return x.ganho_kg === null ? '—' : Fmt.numero(x.ganho_kg, 1) + ' kg em ' + x.dias + ' dias'; } },
+        { id: 'gmd', rotulo: 'Ganho médio diário', num: true, valor: function (x) { return x.gmd ? x.gmd.valor : null; }, formatar: function (x) { return x.gmd && x.gmd.valor !== null ? gmdTexto(x.gmd.valor) : '—'; } },
+      ] }).el;
+  }
+  function montarDesempenho(el) {
+    var vivo = true;
+    el.appendChild(h('div', { class: 'tela-cabecalho' }, h('h1', { text: 'Pesagens' }),
+      h('div', { class: 'acoes', style: 'margin-top:0' },
+        h('a', { class: 'botao botao-primario', href: Roteador.href('pesagens/curral'), dataset: { rota: 'pesagens/curral' } }, 'Pesar no curral'),
+        App.podeRegistrar() && Store.tipoEvento('PESAGEM') ? h('a', { class: 'botao botao-secundario', href: Roteador.href('evento/novo/PESAGEM'), dataset: { rota: 'evento/novo/PESAGEM' } }, 'Pesagem pelo formulário (lote, colar)') : null)));
+    var pend = h('div');
+    el.appendChild(pend);
+    Rascunhos.obter(ID_RASCUNHO).then(function (r) {
+      if (!vivo || !r || !r.linhas || !r.linhas.length) return;
+      pend.appendChild(UI.nota('Pesagem no curral de ' + Fmt.data(r.sessao.data) + ' não concluída (' + r.linhas.length + (r.linhas.length === 1 ? ' animal' : ' animais') + ').', 'aviso'));
+      pend.appendChild(h('a', { class: 'botao botao-secundario', href: Roteador.href('pesagens/curral'), dataset: { rota: 'pesagens/curral' } }, 'Continuar a pesagem no curral'));
+    }, function (e) { pend.appendChild(UI.nota('Não foi possível ler o rascunho do curral: ' + e.message, 'aviso')); });
+    var de = h('input', { type: 'date', id: 'pd-de', value: filtros.de });
+    var ate = h('input', { type: 'date', id: 'pd-ate', value: filtros.ate });
+    var pasto = h('select', { id: 'pd-pasto' }, opcoes(Store.pastos({ todos: true }).map(function (p) { return [p.pasture_id, p.nome]; }), filtros.pasture_id, 'Todos'));
+    var sexo = h('select', { id: 'pd-sexo' }, opcoes([['M', 'Machos'], ['F', 'Fêmeas']], filtros.sexo, 'Machos e fêmeas'));
+    var cat = h('select', { id: 'pd-cat' }, opcoes(Store.categorias().map(function (c) { return [c.category_id, c.nome]; }), filtros.category_id, 'Todas'));
+    var raca = h('select', { id: 'pd-raca' }, opcoes(Store.lista('RACA').map(function (x) { return [x.codigo, x.rotulo]; }), filtros.raca, 'Todas'));
+    el.appendChild(h('form', { class: 'filtros', role: 'search', 'aria-label': 'Filtrar o desempenho', on: { submit: function (ev) {
+      ev.preventDefault();
+      filtros.de = de.value; filtros.ate = ate.value; filtros.pasture_id = pasto.value; filtros.sexo = sexo.value; filtros.category_id = cat.value; filtros.raca = raca.value;
+      carregar();
+    } } }, campo('pd-de', 'De', de), campo('pd-ate', 'Até', ate), campo('pd-pasto', 'Pasto', pasto), campo('pd-sexo', 'Sexo', sexo), campo('pd-cat', 'Categoria', cat), campo('pd-raca', 'Raça', raca),
+      UI.botao('Atualizar', { tipo: 'primario', atributos: { type: 'submit' } })));
+    var corpo = h('div', { dataset: { desempenho: '1' } }, UI.carregando('Calculando o desempenho…'));
+    el.appendChild(corpo);
+    async function carregar() {
+      Util.limpar(corpo);
+      corpo.appendChild(UI.carregando('Calculando o desempenho…'));
+      var dados = {};
+      ['de', 'ate', 'pasture_id', 'sexo', 'category_id', 'raca'].forEach(function (k) { if (filtros[k]) dados[k] = filtros[k]; });
+      if (filtros.animais.length) dados.animais = filtros.animais.slice();
+      var d;
+      try {
+        d = (await Cliente.consulta('peso.desempenho', dados)).data;
+      } catch (e) {
+        if (!vivo) return;
+        Util.limpar(corpo);
+        corpo.appendChild(UI.estadoErro(e, { acao: { texto: 'Tentar de novo', aoClicar: carregar } }));
+        return;
+      }
+      if (!vivo) return;
+      Util.limpar(corpo);
+      corpo.appendChild(h('p', { class: 'dado', role: 'status', text: 'Período: ' + (d.periodo.de ? Fmt.data(d.periodo.de) : 'desde o início') + ' a ' + Fmt.data(d.periodo.ate) + '. Ganho médio diário só entre pesagens de balança' + (d.parametros.aceita_fita ? ' ou fita' : '') + ' com ao menos ' + d.parametros.intervalo_min_dias + ' dias, e grupos com ao menos ' + d.parametros.n_minimo + ' animais.' }));
+      corpo.appendChild(cartaoIndicadores(d.geral, d.periodo.ate));
+      corpo.appendChild(UI.secao('Por pasto', d.por_pasto.length ? tabelaGrupos('peso-pastos', 'Peso e ganho por pasto', d.por_pasto, 'Pasto') : UI.nota('Sem dados por pasto.', 'info'), { dado: 'por-pasto' }));
+      corpo.appendChild(UI.secao('Por categoria', d.por_categoria.length ? tabelaGrupos('peso-categorias', 'Peso e ganho por categoria', d.por_categoria, 'Categoria') : UI.nota('Sem dados por categoria.', 'info'), { dado: 'por-categoria' }));
+      corpo.appendChild(UI.secao('Pesagens e ganho de lote', blocoPesagens(d.pesagens), { dado: 'pesagens' }));
+      corpo.appendChild(UI.secao('Curvas de peso', blocoCurvas(d, carregar), { dado: 'curvas' }));
+      corpo.appendChild(UI.secao('Animais', tabelaAnimais(d.animais), { dado: 'animais-peso' }));
+    }
+    carregar();
+    return function () { vivo = false; };
+  }
+
+  // ------------------------------------------------------------------ modo curral ----
+  var curral = null;
+  function novaSessao() {
+    return { tipo: TIPO_RASCUNHO, rotulo: 'Pesagem no curral', estado: 'EDITANDO', data: Fmt.hoje(), n: 0, iniciada: false,
+      sessao: { data: Fmt.hoje(), metodo: 'BALANCA', momento: 'ROTINA', jejum: false, pasto_id: '' }, linhas: [], blocos: [], seq: 0 };
+  }
+  async function carregarSessao() {
+    if (curral) return curral;
+    var r = await Rascunhos.obter(ID_RASCUNHO);
+    curral = r && r.tipo === TIPO_RASCUNHO ? r : novaSessao();
+    return curral;
+  }
+  /** O rascunho a cada linha: imediato antes de um envio (a chave do bloco precisa estar guardada antes de sair). */
+  function guardar(c, o) {
+    c.n = c.linhas.length;
+    c.data = c.sessao.data;
+    c.estado = c.blocos.some(function (b) { return b.estado === 'ENVIANDO' || b.estado === 'SEM_SINAL'; }) ? 'ENVIANDO' : 'EDITANDO';
+    return Rascunhos.salvar(ID_RASCUNHO, c, o).catch(function (e) { App.faixa('rascunho-falhou', { tipo: 'aviso', texto: 'Não foi possível guardar a pesagem neste aparelho (' + e.message + '). Não feche esta tela antes de enviar.' }); });
+  }
+  function bloco(c, chave) { return c.blocos.filter(function (b) { return b.chave === chave; })[0] || null; }
+  /** Linha que ainda se mexe: na fila (fora de bloco), sem animal, ou num bloco recusado ou com aviso (que se desfaz). */
+  function editavel(c, l) {
+    if (!l.bloco) return true;
+    var b = bloco(c, l.bloco);
+    return !b || b.estado === 'AVISO' || b.estado === 'ERRO';
+  }
+  /** Desfaz o bloco com aviso ou recusado (a chave não foi consumida): as linhas voltam à fila; o próximo envio faz outro. */
+  function desfazerBloco(c, chave) {
+    c.linhas.forEach(function (l) { if (l.bloco === chave) { l.bloco = null; if (l.estado !== 'NAO_ENCONTRADO') { l.estado = 'FILA'; l.mensagem = null; } } });
+    c.blocos = c.blocos.filter(function (b) { return b.chave !== chave; });
+  }
+  function pendencias(c) { return c.linhas.filter(function (l) { return l.estado === 'NAO_ENCONTRADO' || l.estado === 'ERRO'; }); }
+  function naFila(c) { return c.linhas.filter(function (l) { return l.estado === 'FILA' && !l.bloco; }); }
+  function dadosDoBloco(c, b) {
+    var campos = { event_date: c.sessao.data, tipo_pesagem: c.sessao.momento, metodo_pesagem: c.sessao.metodo };
+    if (c.sessao.jejum) campos.jejum = true;
+    var porUid = {};
+    c.linhas.forEach(function (l) { porUid[l.uid] = l; });
+    return { tipo: 'PESAGEM', campos: campos, animais: b.uids.map(function (u) { return { animal_id: porUid[u].animal_id, peso: porUid[u].peso }; }) };
+  }
+  function textoGanho(x) {
+    if (!x || !x.anterior) return 'primeira pesagem';
+    var g = x.ganho_kg;
+    return (g > 0 ? '+' : '') + Fmt.numero(g, 1) + ' kg em ' + x.dias + (x.dias === 1 ? ' dia' : ' dias') + (x.gmd_kg_dia !== null ? ' (' + Fmt.numero(x.gmd_kg_dia, 3) + ' kg/dia)' : '');
+  }
+  /**
+   * Envia um bloco (evento.registrar com a chave dele): gravado → as linhas ficam com o resultado do servidor; aviso ou
+   * recusa → as linhas citadas mostram a mensagem; sem sinal ou sem resposta → o bloco fica "sem confirmação", com a mesma
+   * chave, e sai de novo no próximo envio (o servidor não grava duas vezes). Resolve o estado final do bloco.
+   */
+  async function enviarBloco(c, b, aoMudar) {
+    var linhas = c.linhas.filter(function (l) { return l.bloco === b.chave; });
+    b.estado = 'ENVIANDO';
+    linhas.forEach(function (l) { l.estado = 'ENVIANDO'; l.mensagem = null; });
+    await guardar(c, { imediato: true });
+    aoMudar();
+    var r;
+    try {
+      r = await Cliente.comando('evento.registrar', dadosDoBloco(c, b), { chave: b.chave, avisosAceitos: b.aceitos || [], aoEstado: function (st) { b.situacao = st.estado; aoMudar(); } });
+    } catch (e) {
+      if (e.code === 'TRANSPORTE' || e.code === 'SEM_RESPOSTA' || e.code === 'LOCKED') {
+        b.estado = 'SEM_SINAL';
+        b.mensagem = e.message;
+        linhas.forEach(function (l) { l.estado = 'SEM_SINAL'; });
+      } else if (e.code === 'NEEDS_CONFIRMATION' || e.code === 'VALIDATION' || e.code === 'CONFLICT') {
+        b.estado = e.code === 'NEEDS_CONFIRMATION' ? 'AVISO' : 'ERRO';
+        b.mensagem = e.message;
+        var porAnimal = {};
+        var gerais = [];
+        (e.details || []).forEach(function (d) { if (d.animal_id) (porAnimal[d.animal_id] = porAnimal[d.animal_id] || []).push(d); else gerais.push(d); });
+        b.gerais = gerais.map(function (d) { return { codigo: d.codigo, mensagem: d.mensagem }; });
+        linhas.forEach(function (l) {
+          var ds = porAnimal[l.animal_id] || [];
+          if (b.estado === 'AVISO') { l.estado = ds.length || gerais.length ? 'AVISO' : 'FILA'; l.avisos = ds.concat(gerais).map(function (d) { return d.codigo; }); }
+          else l.estado = ds.length ? 'ERRO' : 'FILA';
+          l.mensagem = ds.length ? ds.map(function (d) { return d.mensagem; }).join(' ') : gerais.map(function (d) { return d.mensagem; }).join(' ') || null;
+        });
+        if (b.estado === 'ERRO') desfazerBloco(c, b.chave);
+      } else {
+        b.estado = 'SEM_SINAL';
+        b.mensagem = e.message;
+        linhas.forEach(function (l) { l.estado = 'SEM_SINAL'; });
+      }
+      await guardar(c);
+      aoMudar();
+      return b.estado;
+    }
+    var res = r.data.pesagem || { animais: [] };
+    var porId = {};
+    (res.animais || []).forEach(function (x) { porId[x.animal_id] = x; });
+    b.estado = 'GRAVADO';
+    b.event_id = r.data.event_id;
+    b.media_kg = res.media_kg;
+    b.n = res.n;
+    b.duplicado = !!r.duplicado;
+    linhas.forEach(function (l) { l.estado = 'GRAVADA'; l.resultado = porId[l.animal_id] || null; l.mensagem = null; });
+    await guardar(c);
+    try { await Store.aplicarResultado('evento.registrar', r.data, r.meta); } catch (e) { Util.registrarFalha('atualizar a lista depois da pesagem', e); }
+    aoMudar();
+    return 'GRAVADO';
+  }
+  /**
+   * Envia o que falta: primeiro os blocos sem confirmação (a mesma chave), depois a fila em blocos novos de até BLOCO
+   * pesagens (chave nova, guardada no rascunho antes de sair). Sem sinal, para no primeiro bloco que não saiu.
+   */
+  var enviando = false;
+  async function enviarTudo(c, aoMudar) {
+    if (enviando) return null;
+    if (pendencias(c).length) { aoMudar(); return 'PENDENCIA'; }
+    enviando = true;
+    try {
+      var fila = naFila(c);
+      for (var i = 0; i < fila.length; i += BLOCO) {
+        var b = { chave: 'curral:' + Util.uuid(), uids: fila.slice(i, i + BLOCO).map(function (l) { return l.uid; }), estado: 'NOVO', aceitos: [] };
+        c.blocos.push(b);
+        b.uids.forEach(function (u) { c.linhas.forEach(function (l) { if (l.uid === u) l.bloco = b.chave; }); });
+      }
+      var ordem = c.blocos.filter(function (b) { return b.estado === 'NOVO' || b.estado === 'SEM_SINAL' || b.estado === 'ENVIANDO' || (b.estado === 'AVISO' && b.reenviar); });
+      for (var k = 0; k < ordem.length; k++) {
+        var st = await enviarBloco(c, ordem[k], aoMudar);
+        if (st === 'SEM_SINAL') return 'SEM_SINAL';
+      }
+      return 'OK';
+    } finally {
+      enviando = false;
+      aoMudar();
+    }
+  }
+  /** Na volta à tela (recarga, aba descartada): o bloco que saiu sem confirmação é conferido (operacao.status) e, gravado, refeito pela chave. */
+  async function conferirBlocos(c, aoMudar) {
+    var incertos = c.blocos.filter(function (b) { return b.estado === 'ENVIANDO' || b.estado === 'SEM_SINAL'; });
+    for (var i = 0; i < incertos.length; i++) {
+      var b = incertos[i];
+      var st;
+      try {
+        st = await Cliente.verificar(b.chave, {});
+      } catch (e) {
+        b.estado = 'SEM_SINAL';
+        c.linhas.forEach(function (l) { if (l.bloco === b.chave) l.estado = 'SEM_SINAL'; });
+        continue;
+      }
+      if (st.situacao === 'CONFIRMADA') await enviarBloco(c, b, aoMudar);
+      else { b.estado = 'SEM_SINAL'; c.linhas.forEach(function (l) { if (l.bloco === b.chave) l.estado = 'SEM_SINAL'; }); }
+    }
+    await guardar(c);
+    aoMudar();
+  }
+  var ROTULO_ESTADO = {
+    FILA: 'na fila (guardada no aparelho)', ENVIANDO: 'enviando…', SEM_SINAL: 'sem confirmação: sai de novo no próximo envio', GRAVADA: 'gravada',
+    AVISO: 'confira', ERRO: 'recusada', NAO_ENCONTRADO: 'brinco não encontrado',
+  };
+  var ICONE_ESTADO = { FILA: 'info', ENVIANDO: 'info', SEM_SINAL: 'aviso', GRAVADA: 'ok', AVISO: 'aviso', ERRO: 'erro', NAO_ENCONTRADO: 'erro' };
+
+  function formularioInicio(el, c, aoComecar) {
+    var s = c.sessao;
+    var data = h('input', { type: 'date', id: 'cur-data', value: s.data, required: true });
+    var metodo = h('select', { id: 'cur-metodo' }, opcoes(METODOS.map(function (m) { return [m, Fmt.rotulo('METODO_PESAGEM', m)]; }), s.metodo));
+    var momento = h('select', { id: 'cur-momento' }, opcoes(MOMENTOS.map(function (m) { return [m, Fmt.rotulo('TIPO_PESAGEM', m)]; }), s.momento));
+    var jejum = h('input', { type: 'checkbox', id: 'cur-jejum', checked: s.jejum });
+    var pasto = h('select', { id: 'cur-pasto' }, opcoes(Store.pastos().map(function (p) { return [p.pasture_id, p.nome]; }), s.pasto_id, 'Qualquer pasto'));
+    var erro = h('div', { role: 'alert' });
+    el.appendChild(h('form', { class: 'formulario', novalidate: true, dataset: { curralInicio: '1' }, on: { submit: function (ev) {
+      ev.preventDefault();
+      Util.limpar(erro);
+      if (!Fmt.ehData(data.value)) { erro.appendChild(UI.nota('Escolha a data da pesagem.', 'erro')); data.focus(); return; }
+      s.data = data.value; s.metodo = metodo.value; s.momento = momento.value; s.jejum = jejum.checked; s.pasto_id = pasto.value;
+      c.iniciada = true;
+      guardar(c).then(aoComecar);
+    } } },
+      campo('cur-data', 'Data da pesagem', data), campo('cur-metodo', 'Como foi pesado', metodo), campo('cur-momento', 'Momento da pesagem', momento, 'O peso ao nascer vai no parto.'),
+      h('label', { class: 'marca', for: 'cur-jejum' }, jejum, h('span', { text: 'Pesados em jejum' })),
+      campo('cur-pasto', 'Pasto do lote (opcional)', pasto, 'Com o pasto, a tela conta quantos faltam e avisa quem é de outro pasto.'), erro,
+      h('div', { class: 'acoes' }, UI.botao('Começar a pesar', { tipo: 'primario', atributos: { type: 'submit' } }))));
+  }
+
+  function montarCurral(el) {
+    var vivo = true;
+    var c = null;
+    var titulo = h('h1', { text: 'Pesagem no curral' });
+    el.appendChild(h('div', { class: 'tela-cabecalho' }, titulo));
+    var corpo = h('div', null, UI.carregando('Abrindo a pesagem…'));
+    el.appendChild(corpo);
+    var ui = {};
+    function animaisDoPasto() {
+      if (!c.sessao.pasto_id) return null;
+      return Store.animais().filter(function (a) { return a.situacao_cadastral === 'ATIVO' && a.pasto_atual_id === c.sessao.pasto_id; });
+    }
+    function desenharContador() {
+      if (!ui.contador) return;
+      var ids = {};
+      c.linhas.forEach(function (l) { if (l.animal_id) ids[l.animal_id] = true; });
+      var doPasto = animaisDoPasto();
+      Util.limpar(ui.contador);
+      if (!doPasto) { ui.contador.appendChild(h('span', { text: Object.keys(ids).length + (Object.keys(ids).length === 1 ? ' pesado' : ' pesados') })); return; }
+      var dele = doPasto.filter(function (a) { return ids[a.animal_id]; }).length;
+      var outros = Object.keys(ids).filter(function (id) { return !doPasto.some(function (a) { return a.animal_id === id; }); }).length;
+      var faltam = doPasto.length - dele;
+      ui.contador.appendChild(h('span', { dataset: { contador: dele + '/' + doPasto.length }, text: dele + ' de ' + doPasto.length + ' · faltam ' + faltam + (outros ? ' · +' + outros + ' de outros pastos' : '') }));
+      if (faltam) ui.contador.appendChild(UI.botao('ver', { tipo: 'texto', atributos: { 'aria-expanded': String(!!ui.mostrarFaltam), 'data-ver-faltam': '1' }, aoClicar: function () { ui.mostrarFaltam = !ui.mostrarFaltam; desenhar(); } }));
+    }
+    function desenharFaltam() {
+      Util.limpar(ui.faltam);
+      var doPasto = animaisDoPasto();
+      if (!ui.mostrarFaltam || !doPasto) return;
+      var ids = {};
+      c.linhas.forEach(function (l) { if (l.animal_id) ids[l.animal_id] = true; });
+      var falta = doPasto.filter(function (a) { return !ids[a.animal_id]; }).sort(function (a, b) { return String(a.brinco || a.codigo_interno).localeCompare(String(b.brinco || b.codigo_interno), 'pt-BR', { numeric: true }); });
+      ui.faltam.appendChild(UI.secao('Faltam ' + falta.length + ' do ' + ((Store.pasto(c.sessao.pasto_id) || {}).nome || 'pasto'), falta.length ? h('ul', { class: 'lista-simples', dataset: { faltam: String(falta.length) } }, falta.map(function (a) {
+        return h('li', { class: 'linha-acao' }, h('span', { text: Store.rotuloAnimal(a) + ' · ' + Store.descricaoAnimal(a) }), UI.botao('Pesar este', { aoClicar: function () { ui.brinco.value = a.brinco || a.codigo_interno; conferir(); ui.peso.focus(); } }));
+      })) : UI.nota('Todos os animais do pasto foram pesados.', 'ok'), { dado: 'faltam' }));
+    }
+    function desenharStatus() {
+      Util.limpar(ui.status);
+      var fila = naFila(c).length;
+      var semSinal = c.blocos.filter(function (b) { return b.estado === 'SEM_SINAL'; });
+      var gravadas = c.linhas.filter(function (l) { return l.estado === 'GRAVADA'; }).length;
+      var pend = pendencias(c);
+      var avisos = c.blocos.filter(function (b) { return b.estado === 'AVISO'; });
+      var partes = [];
+      if (gravadas) partes.push(gravadas + (gravadas === 1 ? ' gravada' : ' gravadas'));
+      if (fila) partes.push(fila + ' na fila deste aparelho');
+      if (semSinal.length) partes.push(semSinal.reduce(function (t, b) { return t + b.uids.length; }, 0) + ' sem confirmação do servidor');
+      ui.status.appendChild(h('p', { class: 'dado', text: partes.length ? partes.join(' · ') + '.' : 'Nenhuma pesagem ainda.' }));
+      if (semSinal.length) ui.status.appendChild(UI.nota('Sem sinal ou sem resposta: o que foi digitado está guardado neste aparelho. Toque em "Enviar" quando o sinal voltar; nada será gravado duas vezes.', 'aviso'));
+      if (pend.length) ui.status.appendChild(UI.nota(pend.length === 1 ? '1 pendência impede o envio: corrija o brinco ou tire a linha.' : pend.length + ' pendências impedem o envio: corrija ou tire as linhas marcadas.', 'erro'));
+      avisos.forEach(function (b) { if (b.gerais && b.gerais.length) ui.status.appendChild(UI.nota(b.gerais.map(function (g) { return g.mensagem; }).join(' '), 'aviso')); });
+      var enviar = UI.botao(fila || semSinal.length ? 'Enviar ' + (fila + semSinal.reduce(function (t, b) { return t + b.uids.length; }, 0)) + ' pesagens' : 'Enviar', { tipo: 'primario', desabilitado: enviando || !!pend.length || (!fila && !semSinal.length), atributos: { 'data-enviar': '1' }, aoClicar: function () { enviarAgora(); } });
+      var desfazer = UI.botao('Desfazer o último', { atributos: { 'data-desfazer': '1' }, aoClicar: desfazerUltimo });
+      var terminar = UI.botao('Terminar a pesagem', { tipo: 'texto', aoClicar: terminar_ });
+      ui.status.appendChild(h('div', { class: 'acoes' }, enviar, desfazer, terminar));
+    }
+    function desenharLinhas() {
+      Util.limpar(ui.lista);
+      var ordem = c.linhas.slice().reverse();
+      ordem.forEach(function (l, i) {
+        var n = c.linhas.length - i;
+        var a = l.animal_id ? Store.animal(l.animal_id) : null;
+        var nome = a ? Store.rotuloAnimal(a) : l.brinco;
+        var info = [];
+        if (l.estado === 'GRAVADA' && l.resultado) info.push(textoGanho(l.resultado));
+        if (l.fora) info.push('de outro pasto');
+        var li = h('li', { class: 'curral-linha', dataset: { linha: l.uid, estado: l.estado } },
+          h('div', { class: 'campo-linha' }, UI.icone(ICONE_ESTADO[l.estado] || 'info'),
+            h('span', { class: 'dado', text: n + ' · ' + nome + ' · ' + (typeof l.peso === 'number' ? Fmt.peso(l.peso) : '—') + ' · ' + ROTULO_ESTADO[l.estado] + (info.length ? ' · ' + info.join(' · ') : '') })),
+          l.mensagem ? h('p', { class: 'suave', text: l.mensagem }) : null);
+        var acoes = [];
+        if (l.estado === 'AVISO') {
+          acoes.push(UI.botao('Está certo', { aoClicar: function () { aceitar(l); } }));
+          acoes.push(UI.botao('Corrigir o peso', { aoClicar: function () { corrigirPeso(l); } }));
+        }
+        if (l.estado === 'ERRO') acoes.push(UI.botao('Corrigir o peso', { aoClicar: function () { corrigirPeso(l); } }));
+        if (l.estado === 'NAO_ENCONTRADO') acoes.push(UI.botao('Corrigir o brinco', { aoClicar: function () { corrigirBrinco(l); } }));
+        if (editavel(c, l) && l.estado !== 'GRAVADA' && l.estado !== 'ENVIANDO' && l.estado !== 'SEM_SINAL') acoes.push(UI.botao('Tirar', { tipo: 'texto', aoClicar: function () { tirar(l); } }));
+        if (acoes.length) li.appendChild(h('div', { class: 'acoes', style: 'margin-top:4px' }, acoes));
+        ui.lista.appendChild(li);
+      });
+    }
+    function desenhar() {
+      if (!vivo || !c || !ui.lista) return;
+      desenharContador();
+      desenharFaltam();
+      desenharStatus();
+      desenharLinhas();
+    }
+    function mudou() { guardar(c); desenhar(); }
+    /** Brinco digitado → o animal da lista do aparelho (exato, sem zeros à esquerda; mais de um → escolher). */
+    function conferir() {
+      Util.limpar(ui.conferencia);
+      Util.limpar(ui.candidatos);
+      ui.atual = null;
+      var t = ui.brinco.value.trim();
+      if (!t) return null;
+      var r = Store.resolverBrinco(t, function (a) { return a.situacao_cadastral !== 'EXTERNO' && a.situacao_cadastral !== 'ANULADO'; });
+      if (r.modo === 'VARIOS') {
+        ui.conferencia.appendChild(h('p', { class: 'aviso', text: 'Mais de um animal com "' + t + '": escolha.' }));
+        r.candidatos.forEach(function (a) { ui.candidatos.appendChild(UI.botao(Store.rotuloAnimal(a) + ' · ' + Store.descricaoAnimal(a), { bloco: true, aoClicar: function () { escolher(a); } })); });
+        return 'VARIOS';
+      }
+      if (r.modo === 'NENHUM') { ui.atual = { brinco: t, animal: null }; ui.conferencia.appendChild(h('p', { class: 'destaque-erro', dataset: { conferencia: 'NAO_ENCONTRADO' }, text: t + ': não encontrado. Confira o brinco; se seguir, a linha fica pendente.' })); return 'NENHUM'; }
+      escolher(r.candidatos[0], true);
+      return 'OK';
+    }
+    function escolher(a, semFoco) {
+      Util.limpar(ui.candidatos);
+      Util.limpar(ui.conferencia);
+      ui.atual = { brinco: a.brinco || a.codigo_interno, animal: a };
+      var inativo = a.situacao_cadastral !== 'ATIVO';
+      var fora = !inativo && c.sessao.pasto_id && a.pasto_atual_id !== c.sessao.pasto_id;
+      var ja = c.linhas.filter(function (l) { return l.animal_id === a.animal_id; });
+      var partes = [Store.rotuloAnimal(a) + ' · ' + Store.descricaoAnimal(a)];
+      ui.conferencia.appendChild(h('p', { class: 'dado', dataset: { conferencia: inativo ? 'INATIVO' : 'OK' }, text: partes.join('') }));
+      if (inativo) ui.conferencia.appendChild(h('p', { class: 'destaque-erro', text: 'Não está no rebanho (' + Fmt.rotulo('SITUACAO_CADASTRAL', a.situacao_cadastral).toLowerCase() + '): não entra na pesagem.' }));
+      if (fora) ui.conferencia.appendChild(h('p', { class: 'suave', dataset: { conferenciaFora: '1' }, text: 'Está em outro pasto (' + ((Store.pasto(a.pasto_atual_id) || {}).nome || 'sem pasto') + '): conta à parte.' }));
+      if (ja.length) ui.conferencia.appendChild(h('p', { class: 'aviso', dataset: { conferenciaRepetido: '1' }, text: 'Já pesado nesta pesagem (' + Fmt.peso(ja[ja.length - 1].peso) + ', ' + ROTULO_ESTADO[ja[ja.length - 1].estado] + ').' }));
+      if (!semFoco) ui.peso.focus();
+    }
+    function aviso(texto) { Util.limpar(ui.conferencia); ui.conferencia.appendChild(h('p', { class: 'destaque-erro', role: 'alert', text: texto })); }
+    /** Enter no peso: confere o formato (vírgula, 1 casa, maior que zero) e põe a linha no topo da fila. */
+    function lancar() {
+      if (!ui.atual) { if (conferir() !== 'OK' && (!ui.atual || ui.atual.animal)) { ui.brinco.focus(); return; } }
+      var p = Fmt.lerDecimal(ui.peso.value, 1);
+      if (p.erro || p.valor === null || !(p.valor > 0) || p.valor > PESO_MAX) { aviso(p.erro || (p.valor === null ? 'Digite o peso.' : 'O peso vai de 0,1 a 2.000 kg.')); ui.peso.focus(); return; }
+      var at = ui.atual;
+      if (at.animal && at.animal.situacao_cadastral !== 'ATIVO') { aviso('Este animal não está no rebanho: não entra na pesagem.'); ui.brinco.select(); ui.brinco.focus(); return; }
+      var ja = at.animal ? c.linhas.filter(function (l) { return l.animal_id === at.animal.animal_id; }) : [];
+      var ultimo = ja[ja.length - 1];
+      if (ultimo) {
+        Util.limpar(ui.candidatos);
+        var mudavel = editavel(c, ultimo) && ultimo.estado !== 'GRAVADA';
+        ui.candidatos.appendChild(h('p', { class: 'aviso', dataset: { decisaoRepetido: '1' }, text: Store.rotuloAnimal(at.animal) + ' já foi pesado nesta pesagem com ' + Fmt.peso(ultimo.peso) + (mudavel ? '. Substituir pelo peso novo (' + Fmt.peso(p.valor) + ')?' : ' (' + ROTULO_ESTADO[ultimo.estado] + '). Pesar de novo grava outra pesagem do mesmo dia.') }));
+        ui.candidatos.appendChild(h('div', { class: 'acoes' },
+          UI.botao(mudavel ? 'Substituir o peso' : 'Pesar de novo', { tipo: 'primario', aoClicar: function () {
+            if (mudavel) { if (ultimo.bloco) desfazerBloco(c, ultimo.bloco); ultimo.peso = p.valor; ultimo.estado = 'FILA'; ultimo.mensagem = null; c.linhas = c.linhas.filter(function (l) { return l !== ultimo; }).concat([ultimo]); }
+            else adicionar(at, p.valor);
+            limparEntrada(); mudou(); depoisDeLancar();
+          } }),
+          UI.botao('Manter o anterior', { aoClicar: function () { limparEntrada(); desenhar(); } })));
+        return;
+      }
+      adicionar(at, p.valor);
+      limparEntrada();
+      mudou();
+      depoisDeLancar();
+    }
+    function adicionar(at, peso) {
+      c.seq = (c.seq || 0) + 1;
+      var l = { uid: 'p' + c.seq + '-' + Util.uuid().slice(0, 6), brinco: at.brinco, animal_id: at.animal ? at.animal.animal_id : null, peso: peso, estado: at.animal ? 'FILA' : 'NAO_ENCONTRADO', bloco: null, mensagem: null };
+      l.fora = !!(at.animal && c.sessao.pasto_id && at.animal.pasto_atual_id !== c.sessao.pasto_id);
+      c.linhas.push(l);
+    }
+    function limparEntrada() { ui.brinco.value = ''; ui.peso.value = ''; ui.atual = null; Util.limpar(ui.conferencia); Util.limpar(ui.candidatos); ui.brinco.focus(); }
+    /** Bloco cheio sai sozinho (com sinal e sem pendência); o resto, quando o operador toca "Enviar". */
+    function depoisDeLancar() { if (naFila(c).length >= BLOCO && !pendencias(c).length && !enviando) enviarAgora(); }
+    function enviarAgora() {
+      enviarTudo(c, desenhar).then(function (st) {
+        if (st === 'SEM_SINAL') UI.aviso('Sem sinal: as pesagens ficaram guardadas neste aparelho.', { tipo: 'aviso' });
+      }, function (e) { Util.registrarFalha('envio do curral', e); UI.aviso('Não foi possível enviar: ' + e.message, { tipo: 'erro' }); desenhar(); });
+    }
+    function desfazerUltimo() {
+      for (var i = c.linhas.length - 1; i >= 0; i--) {
+        var l = c.linhas[i];
+        if (!l.bloco && (l.estado === 'FILA' || l.estado === 'NAO_ENCONTRADO')) {
+          c.linhas.splice(i, 1);
+          UI.aviso('Tirada a pesagem de ' + (l.animal_id ? nomeDe(l.animal_id) : l.brinco) + ' (' + Fmt.peso(l.peso) + ').', { tipo: 'info' });
+          mudou();
+          return;
+        }
+        if (l.estado !== 'GRAVADA') break;
+      }
+      UI.aviso('A última pesagem já foi enviada: corrija pelo lançamento gravado, em Eventos.', { tipo: 'aviso' });
+    }
+    function tirar(l) {
+      if (l.bloco) desfazerBloco(c, l.bloco);
+      c.linhas = c.linhas.filter(function (x) { return x !== l; });
+      mudou();
+    }
+    function aceitar(l) {
+      var b = bloco(c, l.bloco);
+      if (!b) return;
+      (l.avisos || []).forEach(function (cod) { if (b.aceitos.indexOf(cod) < 0) b.aceitos.push(cod); });
+      l.estado = 'FILA';
+      l.mensagem = 'Confirmado por você: sai no próximo envio.';
+      var faltam = c.linhas.filter(function (x) { return x.bloco === b.chave && x.estado === 'AVISO'; });
+      if (!faltam.length) { b.reenviar = true; mudou(); enviarAgora(); return; }
+      mudou();
+    }
+    function corrigirPeso(l) {
+      var entrada = h('input', { type: 'text', inputmode: 'decimal', id: 'cur-corrige', value: Fmt.numero(l.peso, 1).replace(/\./g, '') });
+      var f = UI.folha({ titulo: 'Peso de ' + (l.animal_id ? nomeDe(l.animal_id) : l.brinco), conteudo: campo('cur-corrige', 'Peso (kg)', entrada), acoes: [] });
+      f.definirAcoes([UI.botao('Voltar', { aoClicar: function () { f.fechar(); } }), UI.botao('Corrigir', { tipo: 'primario', aoClicar: function () {
+        var p = Fmt.lerDecimal(entrada.value, 1);
+        if (p.erro || !(p.valor > 0) || p.valor > PESO_MAX) { UI.aviso(p.erro || 'O peso vai de 0,1 a 2.000 kg.', { tipo: 'erro' }); return; }
+        if (l.bloco) desfazerBloco(c, l.bloco);
+        l.peso = p.valor;
+        l.estado = 'FILA';
+        l.mensagem = null;
+        f.fechar({ forcar: true });
+        mudou();
+      } })]);
+      entrada.focus();
+    }
+    function corrigirBrinco(l) {
+      var entrada = h('input', { type: 'text', inputmode: 'numeric', id: 'cur-corrige-brinco', value: l.brinco || '' });
+      var f = UI.folha({ titulo: 'Brinco da pesagem de ' + Fmt.peso(l.peso), conteudo: campo('cur-corrige-brinco', 'Brinco', entrada), acoes: [] });
+      f.definirAcoes([UI.botao('Voltar', { aoClicar: function () { f.fechar(); } }), UI.botao('Corrigir', { tipo: 'primario', aoClicar: function () {
+        var r = Store.resolverBrinco(entrada.value.trim(), function (a) { return a.situacao_cadastral === 'ATIVO'; });
+        if (r.modo === 'NENHUM' || r.modo === 'VARIOS') { UI.aviso(r.modo === 'NENHUM' ? 'Nenhum animal no rebanho com "' + entrada.value + '".' : 'Mais de um animal com "' + entrada.value + '": digite o brinco inteiro.', { tipo: 'erro' }); return; }
+        var a = r.candidatos[0];
+        l.brinco = a.brinco || a.codigo_interno; l.animal_id = a.animal_id; l.estado = 'FILA'; l.mensagem = null;
+        l.fora = !!(c.sessao.pasto_id && a.pasto_atual_id !== c.sessao.pasto_id);
+        f.fechar({ forcar: true });
+        mudou();
+      } })]);
+      entrada.focus();
+    }
+    async function terminar_() {
+      var naoGravadas = c.linhas.filter(function (l) { return l.estado !== 'GRAVADA'; });
+      if (naoGravadas.length) {
+        var incertas = naoGravadas.filter(function (l) { return l.estado === 'SEM_SINAL' || l.estado === 'ENVIANDO'; }).length;
+        if (incertas) { UI.aviso(incertas + (incertas === 1 ? ' pesagem ainda não teve' : ' pesagens ainda não tiveram') + ' confirmação do servidor: envie de novo com sinal antes de terminar.', { tipo: 'aviso' }); return; }
+        var ok = await UI.confirmar({ titulo: 'Terminar sem enviar tudo?', texto: naoGravadas.length + (naoGravadas.length === 1 ? ' pesagem não foi gravada e será descartada.' : ' pesagens não foram gravadas e serão descartadas.'), verbo: 'Descartar e terminar', cancelar: 'Voltar', perigo: true });
+        if (!ok) return;
+      }
+      var gravados = c.blocos.filter(function (b) { return b.estado === 'GRAVADO'; });
+      await Rascunhos.remover(ID_RASCUNHO).catch(function (e) { Util.registrarFalha('remover o rascunho do curral', e); });
+      var resumo = { gravadas: c.linhas.filter(function (l) { return l.estado === 'GRAVADA'; }).length, blocos: gravados.map(function (b) { return { event_id: b.event_id, n: b.n, media_kg: b.media_kg }; }), data: c.sessao.data };
+      curral = null;
+      mostrarResultado(resumo);
+    }
+    function mostrarResultado(r) {
+      Util.limpar(corpo);
+      titulo.textContent = 'Pesagem concluída';
+      corpo.appendChild(h('div', { class: 'estado estado-ok', dataset: { resultadoCurral: String(r.gravadas) } },
+        h('p', { class: 'resultado-numero', text: r.gravadas + (r.gravadas === 1 ? ' pesagem gravada' : ' pesagens gravadas') + ' em ' + Fmt.data(r.data) + (r.blocos.length > 1 ? ', em ' + r.blocos.length + ' lançamentos' : '') + '.' }),
+        h('ul', { class: 'lista-simples' }, r.blocos.map(function (b, i) { return h('li', null, linkEvento(b.event_id, 'Lançamento ' + (i + 1) + ': ' + b.n + (b.n === 1 ? ' animal' : ' animais') + ', média ' + Fmt.peso(b.media_kg))); })),
+        h('div', { class: 'acoes' }, h('a', { class: 'botao botao-primario', href: Roteador.href('pesagens'), dataset: { rota: 'pesagens' } }, 'Ver o desempenho'), UI.botao('Nova pesagem no curral', { aoClicar: function () { Roteador.ir('pesagens/curral', { forcar: true }); } }))));
+    }
+    function montarSessao() {
+      Util.limpar(corpo);
+      if (!c.iniciada) { formularioInicio(corpo, c, montarSessao); return; }
+      var s = c.sessao;
+      titulo.textContent = 'Pesagem no curral';
+      var podeMudar = !c.blocos.some(function (b) { return b.estado === 'GRAVADO' || b.estado === 'SEM_SINAL' || b.estado === 'ENVIANDO'; });
+      ui.contador = h('div', { class: 'curral-contador', role: 'status', 'aria-live': 'polite' });
+      var cab = h('div', { class: 'curral-cabecalho', dataset: { curralCabecalho: '1' } },
+        h('p', { class: 'dado', text: Fmt.data(s.data) + ' · ' + Fmt.rotulo('METODO_PESAGEM', s.metodo) + ' · ' + Fmt.rotulo('TIPO_PESAGEM', s.momento) + (s.jejum ? ' · jejum' : '') + (s.pasto_id ? ' · ' + ((Store.pasto(s.pasto_id) || {}).nome || '') : '') }),
+        ui.contador,
+        podeMudar ? UI.botao('Mudar data, método ou pasto', { tipo: 'texto', aoClicar: function () { c.iniciada = false; montarSessao(); } }) : null);
+      ui.brinco = h('input', { type: 'text', id: 'cur-brinco', class: 'curral-entrada', inputmode: 'numeric', autocomplete: 'off', enterkeyhint: 'next', 'aria-describedby': 'cur-conferencia' });
+      ui.peso = h('input', { type: 'text', id: 'cur-peso', class: 'curral-entrada', inputmode: 'decimal', autocomplete: 'off', enterkeyhint: 'done' });
+      ui.brinco.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); var r = conferir(); if (r === 'OK' || r === 'NENHUM') ui.peso.focus(); } });
+      ui.brinco.addEventListener('input', function () { ui.atual = null; });
+      ui.peso.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); lancar(); } });
+      var teclado = UI.botao('Brinco com letras', { tipo: 'texto', atributos: { 'aria-pressed': 'false' }, aoClicar: function (ev) {
+        var letras = ui.brinco.getAttribute('inputmode') === 'numeric';
+        ui.brinco.setAttribute('inputmode', letras ? 'text' : 'numeric');
+        ev.currentTarget.setAttribute('aria-pressed', String(letras));
+        ui.brinco.focus();
+      } });
+      ui.conferencia = h('div', { id: 'cur-conferencia', role: 'status', 'aria-live': 'polite', class: 'curral-conferencia' });
+      ui.candidatos = h('div', { class: 'curral-candidatos' });
+      ui.faltam = h('div');
+      ui.status = h('div', { class: 'curral-status', dataset: { curralStatus: '1' } });
+      ui.lista = h('ol', { class: 'curral-lista', reversed: true, 'aria-label': 'Pesagens desta sessão (a mais recente primeiro)' });
+      corpo.appendChild(cab);
+      corpo.appendChild(h('form', { class: 'curral-form', novalidate: true, on: { submit: function (ev) { ev.preventDefault(); lancar(); } } },
+        h('div', { class: 'curral-campos' }, campo('cur-brinco', 'Brinco', ui.brinco), campo('cur-peso', 'Peso (kg)', ui.peso)),
+        teclado, ui.conferencia, ui.candidatos,
+        h('div', { class: 'acoes' }, UI.botao('Próximo animal', { tipo: 'primario', atributos: { type: 'submit', 'data-proximo': '1' } }))));
+      corpo.appendChild(ui.status);
+      corpo.appendChild(ui.faltam);
+      corpo.appendChild(ui.lista);
+      desenhar();
+      ui.brinco.focus();
+      if (c.blocos.some(function (b) { return b.estado === 'ENVIANDO' || b.estado === 'SEM_SINAL'; })) conferirBlocos(c, desenhar).catch(function (e) { Util.registrarFalha('conferir os blocos do curral', e); });
+    }
+    carregarSessao().then(function (x) {
+      if (!vivo) return;
+      c = x;
+      montarSessao();
+    }, function (e) {
+      if (!vivo) return;
+      Util.limpar(corpo);
+      corpo.appendChild(UI.estadoErro(e, { acao: { texto: 'Tentar de novo', aoClicar: function () { Roteador.ir('pesagens/curral', { forcar: true, substituir: true }); } } }));
+    });
+    return function () { vivo = false; ui = {}; };
+  }
+
+  Telas.registrar('pesagens', { titulo: 'Pesagens', modulo: 'PESAGENS', montar: montarDesempenho });
+  Telas.registrar('pesagens/curral', { titulo: 'Pesagem no curral', modulo: 'PESAGENS', telaCheia: true, montar: montarCurral });
+  return {
+    BLOCO: BLOCO, ID_RASCUNHO: ID_RASCUNHO, TIPO_RASCUNHO: TIPO_RASCUNHO,
+    sessao: function () { return curral ? Util.clonar(curral) : null; },
+    esquecer: function () { curral = null; },
+  };
+})();
+</script>

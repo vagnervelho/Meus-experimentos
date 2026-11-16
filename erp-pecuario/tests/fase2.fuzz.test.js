@@ -34,7 +34,9 @@ const path = require('node:path');
 const F = require('./apoio-fuzz');
 const { createGas } = require('./harness');
 
-const FIXAS = [20261115, 11, 47, 101, 2718, 3001, 3107, 3213, 3318, 9001, 9055, 1009, 1111, 1234, 4242, 777];
+// A semente 57 entrou com a pesagem (Fase 3, E3.1): com o tipo novo no sorteio, nenhuma das 16 anteriores chegava a aceitar
+// uma primeira identificação, e o teste exige todo tipo e subtipo ativo aceito ao menos uma vez nas sementes fixas.
+const FIXAS = [20261115, 11, 47, 101, 2718, 3001, 3107, 3213, 3318, 9001, 9055, 1009, 1111, 1234, 4242, 777, 57];
 const PASSOS = Number(process.env.FUZZ_PASSOS || 60);
 const N = Number(process.env.FUZZ_SEMENTES || 0);
 const INICIO = process.env.FUZZ_INICIO !== undefined ? Number(process.env.FUZZ_INICIO) : Date.now() % 1000000000;

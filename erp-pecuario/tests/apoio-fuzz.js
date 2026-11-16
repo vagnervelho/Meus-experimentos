@@ -31,7 +31,7 @@ const D0 = '2026-01-01';
 const HOJE = '2026-11-13';
 const USUARIO = 'dono@gmail.com';
 const FORMATO = { delimitador: ';', codificacao: 'UTF-8', formato_data: 'dd/MM/yyyy', decimal: ',' };
-const AVISOS = ['POSSIVEL_DUPLICIDADE', 'LOTACAO_ACIMA_DA_CAPACIDADE', 'BRINCO_PARECIDO', 'IDADE_REPRODUTIVA', 'INTERVALO_PARTO_CURTO', 'VALOR_DIVERGENTE', 'RATEIO_SEM_PESO', 'CARENCIA_ATIVA', 'CATEGORIAS_SEM_COBERTURA'];
+const AVISOS = ['POSSIVEL_DUPLICIDADE', 'LOTACAO_ACIMA_DA_CAPACIDADE', 'BRINCO_PARECIDO', 'IDADE_REPRODUTIVA', 'INTERVALO_PARTO_CURTO', 'VALOR_DIVERGENTE', 'RATEIO_SEM_PESO', 'CARENCIA_ATIVA', 'CATEGORIAS_SEM_COBERTURA', 'PESO_IMPLAUSIVEL'];
 const RECUSAS = ['VALIDATION', 'CONFLICT', 'NEEDS_CONFIRMATION', 'NOT_FOUND', 'CONFIG', 'IDEMPOTENCY_MISMATCH'];
 const SAIDA = { VENDA: 'VENDIDO', MORTE: 'MORTO', DESCARTE: 'DESCARTADO', AJUSTE_INVENTARIO: 'BAIXADO_AJUSTE' };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -366,6 +366,17 @@ function oraculoGlobal(sis, S, datas) {
     const E = S.ev.get(z.event_id);
     const naPosicao = codigoNaPosicao(S, z.animal_id, { data: E.event_date, raiz: S.raiz(E), seq: E.event_seq }, z.event_id);
     if (norm(z.valor_anterior) !== norm(naPosicao)) out.push(falha('REPLAY:BRINCO_CORRIGIDO', (S.animais.get(z.animal_id) || {}).codigo_interno + ': o brinco lançado errado de ' + E.event_date + ' corrige ' + z.valor_anterior + ', mas o brinco em uso nessa posição é ' + naPosicao));
+  });
+  // Peso atual (03a, 4.3.3): a última pesagem vigente do animal (data, posição na cadeia, sequência), de qualquer método;
+  // sem pesagem, vazio. Replay pelas linhas cruas de PESAGENS (Fase 3).
+  const pesagensPor = new Map();
+  S.t.PESAGENS.forEach((p) => { if (S.vig.get(p.event_id)) (pesagensPor.get(p.animal_id) || pesagensPor.set(p.animal_id, []).get(p.animal_id)).push(p); });
+  S.animais.forEach((a, id) => {
+    if (a.situacao_cadastral === 'ANULADO' || a.situacao_cadastral === 'PENDENTE' || a.situacao_cadastral === 'EXTERNO') return;
+    const ps = (pesagensPor.get(id) || []).map((p) => ({ p, data: p.data_pesagem, raiz: S.raiz(S.ev.get(p.event_id)), seq: S.ev.get(p.event_id).event_seq }));
+    const u = ps.length ? ultimo(ps) : null;
+    const esperado = u ? [u.p.peso_kg, u.p.data_pesagem] : [null, null];
+    if ((a.peso_atual === undefined ? null : a.peso_atual) !== esperado[0] || (a.data_ultima_pesagem || null) !== esperado[1]) out.push(falha('REPLAY:PESO_ATUAL', a.codigo_interno + ': peso atual gravado ' + JSON.stringify([a.peso_atual, a.data_ultima_pesagem]) + ', replay ' + JSON.stringify(esperado)));
   });
   // Inventário: o sistema (inventario.posicao) = o replay, em hoje e em datas do passo.
   (datas || []).concat([HOJE]).forEach((D) => {
@@ -1152,9 +1163,11 @@ registrarTipo('IDENTIFICACAO', {
   peso: () => 6,
   propor: (c) => {
     const { S, rnd, D } = c;
-    const ids = animaisPara(S, rnd, D, 2, (id, p) => p.dia);
-    if (!ids.length) return null;
     const sub = sorteio(rnd, ['PRIMEIRA_IDENTIFICACAO', 'SUBSTITUICAO', 'SUBSTITUICAO', 'REMOCAO']);
+    // A primeira identificação procura, quase sempre, animais ainda sem brinco (a válida); às vezes qualquer um (a recusa).
+    const semBrinco = sub === 'PRIMEIRA_IDENTIFICACAO' && rnd() < 0.7;
+    const ids = animaisPara(S, rnd, D, 2, (id, p) => p.dia && (!semBrinco || !(S.animais.get(id) || {}).brinco));
+    if (!ids.length) return null;
     const data = rnd() < 0.4 ? dataPara(S, rnd, ids) : D;
     const spec = { tipo: 'IDENTIFICACAO', sub, data, tipoIdent: rnd() < 0.9 ? 'BRINCO' : sorteio(rnd, ['RFID', 'TATUAGEM', 'BRINCO_ORIGEM']), itens: ids.map((id) => ({ id, codigo: brinco(rnd, S) || String(80 + Math.floor(rnd() * 20)) })) };
     if (rnd() < 0.3) spec.motivoIdent = sorteio(rnd, ['DANIFICADO', 'RENUMERACAO']);
@@ -1397,6 +1410,81 @@ function mutarVarias(sis, S, rnd, spec) {
 }
 
 // ------------------------------------------------------------------ registro dos tipos de importação ----
+// --- PESAGEM (Fase 3, E3.1): individual, coletiva e por lote; o peso perto do último conhecido (e às vezes longe, que
+// pede o aceite de PESO_IMPLAUSIVEL), às vezes fora da faixa ou com as cabeças do lote erradas (recusas).
+function pesoPara(S, rnd, id, data) {
+  if (rnd() < 0.04) return sorteio(rnd, [0, 2000.5, 300.25]);
+  const ps = S.t.PESAGENS.filter((p) => p.animal_id === id && S.vig.get(p.event_id) && p.data_pesagem <= data).sort((a, b) => cmp(a.data_pesagem, b.data_pesagem));
+  const base = ps.length ? ps[ps.length - 1].peso_kg : 250 + Math.floor(rnd() * 150);
+  if (rnd() < 0.1) return Math.round((60 + rnd() * 600) * 10) / 10;
+  return Math.max(0.1, Math.round((base + (rnd() - 0.3) * 20) * 10) / 10);
+}
+function itensPesagem(S, rnd, ids, data) { return ids.map((id) => ({ id, peso: pesoPara(S, rnd, id, data) })); }
+registrarTipo('PESAGEM', {
+  peso: () => 6,
+  propor: (c) => {
+    const { S, rnd, D } = c;
+    const ids = animaisPara(S, rnd, D, 4, (id, p) => p.dia);
+    if (!ids.length) return null;
+    const data = rnd() < 0.4 ? dataPara(S, rnd, ids) : D;
+    const spec = { tipo: 'PESAGEM', data, momento: sorteio(rnd, ['ROTINA', 'ROTINA', 'ENTRADA', 'DESMAMA', 'VENDA']), metodo: sorteio(rnd, ['BALANCA', 'BALANCA', 'FITA', 'ESTIMATIVA_VISUAL']), jejum: rnd() < 0.2, itens: itensPesagem(S, rnd, ids, data), lote: null };
+    if (rnd() < 0.15) spec.lote = { total: Math.round(ids.length * (200 + rnd() * 250) * 10) / 10, qtd: rnd() < 0.9 ? ids.length : ids.length + 1 };
+    return spec;
+  },
+  montar: (sis, s) => {
+    const campos = { event_date: s.data, tipo_pesagem: s.momento, metodo_pesagem: s.metodo };
+    if (s.jejum) campos.jejum = true;
+    if (s.lote) { campos.peso_total_lote_kg = s.lote.total; campos.qtd_cabecas_lote = s.lote.qtd; }
+    return { tipo: 'PESAGEM', campos, animais: s.itens.map((x) => (s.lote ? { animal_id: x.id } : { animal_id: x.id, peso: x.peso })) };
+  },
+  animais: (s) => s.itens.map((x) => x.id),
+  // Tira um animal (com mais de um) ou põe outro presente no dia.
+  mutarAnimais: (c) => {
+    const { s, S, rnd } = c;
+    if (s.itens.length > 1 && rnd() < 0.5) s.itens.splice(Math.floor(rnd() * s.itens.length), 1);
+    else { const mais = MOVEIS(S).filter((id) => !s.itens.some((x) => x.id === id) && presenca(S, id, s.data).dia); if (mais.length) s.itens.push({ id: sorteio(rnd, mais), peso: 300 }); }
+    if (s.lote) s.lote.qtd = s.itens.length;
+  },
+  mutarValores: (c) => {
+    const { s, S, rnd } = c;
+    if (s.lote) s.lote.total = Math.round(s.itens.length * (200 + rnd() * 250) * 10) / 10;
+    else s.itens.forEach((x) => { x.peso = pesoPara(S, rnd, x.id, s.data); });
+  },
+  mutarOutro: (c) => {
+    const { s, rnd } = c;
+    const r = rnd();
+    if (r < 0.4) s.lote = s.lote ? null : { total: Math.round(s.itens.length * 300 * 10) / 10, qtd: s.itens.length };
+    else if (r < 0.7) s.momento = sorteio(rnd, ['ROTINA', 'ENTRADA', 'DESMAMA', 'VENDA'].filter((m) => m !== s.momento));
+    else s.jejum = !s.jejum;
+    if (!s.lote) s.itens.forEach((x) => { if (typeof x.peso !== 'number') x.peso = 300; });
+  },
+  doGravado: (c, e) => {
+    const rows = c.S.t.PESAGENS.filter((p) => p.event_id === e.event_id);
+    if (!rows.length) return null;
+    const pj = e.payload_json || {};
+    const lote = typeof pj.peso_total_lote_kg === 'number' ? { total: pj.peso_total_lote_kg, qtd: pj.qtd_cabecas_lote } : null;
+    return { tipo: 'PESAGEM', data: c.data, momento: rows[0].tipo, metodo: lote ? 'BALANCA' : rows[0].metodo, jejum: pj.jejum === true, lote, itens: rows.map((r) => ({ id: r.animal_id, peso: r.peso_kg })) };
+  },
+  efeito: (c) => {
+    const { d, S, eid, erro, linhaDe } = c;
+    const rows = S.t.PESAGENS.filter((p) => p.event_id === eid);
+    if (rows.length !== d.animais.length) erro(rows.length + ' pesagens para ' + d.animais.length + ' animais');
+    const lote = typeof d.campos.peso_total_lote_kg === 'number';
+    const media = lote ? Math.round(d.campos.peso_total_lote_kg / d.campos.qtd_cabecas_lote * 10) / 10 : null;
+    const pj = S.ev.get(eid).payload_json || {};
+    if (lote && (pj.peso_total_lote_kg !== d.campos.peso_total_lote_kg || pj.qtd_cabecas_lote !== d.animais.length)) erro('lote no evento ' + JSON.stringify(pj));
+    if (!lote && (pj.peso_total_lote_kg !== undefined || pj.qtd_cabecas_lote !== undefined)) erro('chaves de lote numa pesagem individual ' + JSON.stringify(pj));
+    if ((pj.jejum === true) !== (d.campos.jejum === true)) erro('jejum gravado ' + pj.jejum + ', pedido ' + d.campos.jejum);
+    d.animais.forEach((x) => {
+      const r = rows.find((y) => y.animal_id === x.animal_id);
+      const kg = lote ? media : x.peso;
+      if (!r || r.peso_kg !== kg || r.data_pesagem !== d.campos.event_date || r.tipo !== d.campos.tipo_pesagem || r.metodo !== (lote ? 'MEDIA_LOTE' : d.campos.metodo_pesagem)) erro('pesagem gravada ' + JSON.stringify(r) + ', pedida ' + JSON.stringify([kg, d.campos.event_date, d.campos.tipo_pesagem]));
+      const l = linhaDe(x.animal_id);
+      if (!l || l.efeito_inventario !== 0 || l.peso !== kg || l.papel !== 'SUJEITO') erro('linha da pesagem ' + JSON.stringify(l));
+    });
+  },
+});
+
 /**
  * O registro único dos arquivos de importação do teste aleatório: cada tipo de importação declara o arquivo que o gerador
  * monta (`arquivo(c)` → {texto, mapa} | null, com c = {sis, S, rnd, P (nome de cada pasto), pastoNome(), ativos, comBrinco,

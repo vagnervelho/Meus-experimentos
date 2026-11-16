@@ -496,6 +496,47 @@ var TelaRebanho = (function () {
     if (g.pendente) caixa.appendChild(UI.nota(g.pendente.mensagem, 'info'));
     return caixa;
   }
+  /**
+   * Bloco E (08, seção 3): a curva em SVG próprio (pesos medidos cheios, estimados vazios, projeção tracejada "Estimativa")
+   * e a tabela com ganho, dias, GMD e variação de cada pesagem contra a individual anterior. Tudo calculado no servidor
+   * (WeightService): a tela só mostra.
+   */
+  function blocoPeso(f) {
+    var b = f.peso || {};
+    var caixa = h('div', { dataset: { blocoPeso: '1' } });
+    if (b.entregue === false) { caixa.appendChild(UI.nota(b.mensagem, 'info')); return caixa; }
+    if (b.externo) { caixa.appendChild(UI.nota('Animal de fora do rebanho: não tem pesagens.', 'info')); return caixa; }
+    var motivo = function (ind) { return '— (' + ((ind && ind.explicacao) || Fmt.rotulo('MOTIVO', (ind && ind.motivo) || 'DADOS_INSUFICIENTES')) + ')'; };
+    var comData = function (ind) { return ind && ind.valor !== null && ind.valor !== undefined ? Fmt.peso(ind.valor) + (ind.data ? ' em ' + Fmt.data(ind.data) : '') : motivo(ind); };
+    var pa = b.peso_atual || {};
+    var p = b.projecao || {};
+    caixa.appendChild(UI.pares([
+      ['Peso atual', pa.valor !== null && pa.valor !== undefined ? Fmt.peso(pa.valor) + ' em ' + Fmt.data(pa.data) + ' (' + Fmt.rotulo('METODO_PESAGEM', pa.metodo).toLowerCase() + (pa.estimado ? ', estimado' : '') + ')' : '— (nunca pesado)'],
+      ['Peso ao nascer', comData(b.peso_ao_nascer)], ['Peso à desmama', comData(b.peso_desmama)],
+      ['Ganho no período', b.ganho_acumulado && b.ganho_acumulado.valor !== null ? Fmt.numero(b.ganho_acumulado.valor, 1) + ' kg em ' + b.ganho_acumulado.dias + ' dias' : motivo(b.ganho_acumulado)],
+      ['Ganho médio diário', b.gmd_periodo && b.gmd_periodo.valor !== null ? Fmt.numero(b.gmd_periodo.valor, 3) + ' kg/dia' : motivo(b.gmd_periodo)],
+      ['Peso estimado hoje', p.hoje ? Fmt.peso(p.hoje.peso_kg) + ' (estimativa: ' + Fmt.numero(p.gmd_referencia_kg_dia, 3) + ' kg/dia desde ' + Fmt.data(p.base.data) + ')' : '— (' + (p.explicacao_hoje || p.explicacao || 'sem estimativa') + ')'],
+    ]));
+    var serie = b.serie || [];
+    if (!serie.length) { caixa.appendChild(UI.nota('Nenhuma pesagem registrada.', 'info')); return caixa; }
+    caixa.appendChild(UI.curvaPeso({ titulo: 'Curva de peso', series: [{ nome: 'Peso', pontos: serie.map(function (x) { return { data: x.data, peso_kg: x.peso_kg, estimado: x.estimado }; }), nascer: b.ponto_nascer_estimado, projecao: p.valor ? p : null }] }));
+    var porAte = {};
+    (b.intervalos || []).forEach(function (v) { porAte[v.weight_ate] = v; });
+    caixa.appendChild(UI.tabela({ id: 'pesagens-animal', rotulo: 'Pesagens do animal', linhas: serie.slice().reverse(), chave: function (x) { return x.weight_id; },
+      colunas: [
+        { id: 'data', rotulo: 'Data', valor: function (x) { return x.data; }, formatar: function (x) { var r = 'evento/' + x.event_id; return h('a', { class: 'botao botao-texto', href: Roteador.href(r), dataset: { rota: r } }, Fmt.data(x.data)); } },
+        { id: 'peso', rotulo: 'Peso', num: true, valor: function (x) { return x.peso_kg; }, formatar: function (x) { return Fmt.peso(x.peso_kg); } },
+        { id: 'como', rotulo: 'Como', valor: function (x) { return Fmt.rotulo('METODO_PESAGEM', x.metodo) + ' · ' + Fmt.rotulo('TIPO_PESAGEM', x.tipo) + (x.jejum ? ' · jejum' : '') + (x.estimado ? ' (estimado)' : ''); } },
+        { id: 'ganho', rotulo: 'Ganho', num: true, valor: function (x) { var v = porAte[x.weight_id]; return v ? v.ganho_kg : null; }, formatar: function (x) { var v = porAte[x.weight_id]; return v ? (v.ganho_kg > 0 ? '+' : '') + Fmt.numero(v.ganho_kg, 1) + ' kg' : x.individual ? '—' : 'fora do ganho'; } },
+        { id: 'dias', rotulo: 'Dias', num: true, valor: function (x) { var v = porAte[x.weight_id]; return v ? v.dias : null; } },
+        { id: 'gmd', rotulo: 'Ganho médio diário', num: true, valor: function (x) { var v = porAte[x.weight_id]; return v ? v.gmd_kg_dia : null; }, formatar: function (x) { var v = porAte[x.weight_id]; return v && v.gmd_kg_dia !== null ? Fmt.numero(v.gmd_kg_dia, 3) + ' kg/dia' : '—'; } },
+        { id: 'variacao', rotulo: 'Variação', num: true, valor: function (x) { var v = porAte[x.weight_id]; return v ? v.variacao_pct : null; }, formatar: function (x) { var v = porAte[x.weight_id]; return v && v.variacao_pct !== null ? Fmt.numero(v.variacao_pct, 2) + '%' : '—'; } },
+      ] }).el);
+    var porque = (b.intervalos || []).filter(function (v) { return v.explicacao; });
+    if (porque.length) caixa.appendChild(h('ul', { class: 'lista-simples suave', dataset: { porqueSemGmd: String(porque.length) } }, porque.map(function (v) { return h('li', { text: 'De ' + Fmt.data(v.de) + ' a ' + Fmt.data(v.ate) + ': sem ganho médio diário. ' + v.explicacao }); })));
+    if (serie.some(function (x) { return !x.individual; })) caixa.appendChild(UI.nota('Pesos estimados (estimativa visual, média do lote' + (b.parametros && !b.parametros.aceita_fita ? ', fita' : '') + ') aparecem na curva, mas ficam fora do ganho médio diário.', 'info'));
+    return caixa;
+  }
   function blocoEventos(f) {
     var itens = (f.eventos && f.eventos.itens) || [];
     if (!itens.length) return UI.nota('Nenhum lançamento.', 'info');
@@ -563,6 +604,7 @@ var TelaRebanho = (function () {
       if (aba === 'resumo') corpo.appendChild(blocoResumo(f, linha));
       else if (aba === 'genealogia') corpo.appendChild(blocoGenealogia(f, abrirEdicao));
       else if (aba === 'pastos') corpo.appendChild(UI.secao('Histórico de pastos', blocoPastos(f)));
+      else if (aba === 'peso') corpo.appendChild(UI.secao('Peso', blocoPeso(f), { dado: 'peso' }));
       else if (aba === 'reproducao') corpo.appendChild(UI.secao('Reprodução', blocoReproducao(f), { dado: 'reproducao' }));
       else if (aba === 'financeiro') corpo.appendChild(UI.secao('Financeiro', blocoFinanceiro(f), { dado: 'financeiro' }));
       else if (aba === 'eventos') corpo.appendChild(UI.secao('Linha do tempo', blocoEventos(f), { dado: 'linha-tempo' }));

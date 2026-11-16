@@ -47,7 +47,7 @@ test('carga inicial: página do doGet, carga completa, casca com os módulos ati
   assert.deepEqual(boot[0].dados, {}, 'primeira abertura: sem versão guardada');
   assert.equal(boot[0].ambiente, undefined, 'produção não envia ambiente');
   assert.match(await page.textContent('.grade-cartoes'), /Cabeças\s*4/);
-  assert.deepEqual(await textos(page, '#menu .menu-item'), ['Visão geral', 'Rebanho', 'Pastos', 'Eventos', 'Configurações'], 'as telas da Fase 1 instaladas, cada uma com o seu módulo ativo');
+  assert.deepEqual(await textos(page, '#menu .menu-item'), ['Visão geral', 'Rebanho', 'Pastos', 'Eventos', 'Pesagens', 'Configurações'], 'as telas instaladas (as da Fase 1 e a de Pesagens, sob demanda), cada uma com o seu módulo ativo');
   assert.ok(await page.isVisible('.topo-acoes a:has-text("REGISTRAR EVENTO")'));
   assert.equal(await page.$('[data-faixa="base-teste"]'), null, 'produção sem faixa de base de teste');
   assert.match(await page.textContent('[data-alerta="SEM_BRINCO"]'), /sem brinco/);
@@ -67,7 +67,7 @@ const TELAS_TESTE = [
   { padrao: 'rebanho', modulo: 'REBANHO', titulo: 'Rebanho (tela de teste)' },
   { padrao: 'pastos', modulo: 'PASTOS', titulo: 'Pastos (tela de teste)' },
   { padrao: 'eventos', modulo: 'EVENTOS', titulo: 'Eventos (tela de teste)' },
-  { padrao: 'pesagens', modulo: 'PESAGENS', titulo: 'Pesagens (tela de teste)' },
+  { padrao: 'sanidade/agenda', modulo: 'SANIDADE', titulo: 'Sanidade (tela de teste)' },
   { padrao: 'config/parametros', modulo: 'CONFIGURACOES', titulo: 'Configurações (tela de teste)' },
 ];
 
@@ -77,7 +77,7 @@ test('navegação: menu lateral só com módulos ativos e telas instaladas; REGI
   const a = await A.abrir(s, { largura: 1280, telasDeTeste: TELAS_TESTE });
   const { page } = a;
   assert.equal(await page.evaluate(() => window.Roteador.modo()), 'GAS');
-  assert.deepEqual(await textos(page, '#menu .menu-item'), ['Visão geral', 'Rebanho', 'Pastos', 'Eventos', 'Configurações'], 'Pesagens (fase 3) não aparece mesmo com tela');
+  assert.deepEqual(await textos(page, '#menu .menu-item'), ['Visão geral', 'Rebanho', 'Pastos', 'Eventos', 'Pesagens', 'Configurações'], 'Pesagens (Fase 3, E3.1, sob demanda) aparece; Sanidade (fase 3, ainda sem tela entregue) não, mesmo com tela de teste');
   await page.click('#menu .menu-item:has-text("Rebanho")');
   await A.esperarTela(page, 'Rebanho (tela de teste)');
   assert.match(page.url(), /#\/rebanho$/);
@@ -86,18 +86,18 @@ test('navegação: menu lateral só com módulos ativos e telas instaladas; REGI
   await A.esperarTela(page, 'Registrar evento');
   assert.deepEqual(await textos(page, '[data-grupo] h2'), ['Movimentação', 'Manejo', 'Reprodução', 'Correções']);
   assert.deepEqual(await textos(page, '[data-tipo-evento]'), [
-    'Nascimento', 'Comprar animais', 'Vender animais', 'Transferir de pasto', 'Morte',
+    'Nascimento', 'Comprar animais', 'Vender animais', 'Transferir de pasto', 'Morte', 'Pesagem',
     'Rebanho inicial (marco zero)', 'Outra entrada (doação, permuta, achado)', 'Comprar animais', 'Vender animais', 'Transferir de pasto', 'Morte', 'Descarte (consumo, doação, sacrifício)',
-    'Identificação (brinco)', 'Marcar para descarte ou não localizado',
+    'Pesagem', 'Identificação (brinco)', 'Marcar para descarte ou não localizado',
     'Nascimento', 'Corrigir dados do animal',
-  ], 'os mais usados no alto; só os tipos entregues (pesagem, sanidade e os demais de manejo chegam na Fase 3); estorno não entra no seletor');
+  ], 'os mais usados no alto; só os tipos entregues (a pesagem chega na Fase 3, E3.1; sanidade e os demais de manejo, nas etapas seguintes); estorno não entra no seletor');
   await page.click('[data-tipo-evento="OUTRA_ENTRADA"]');
   await A.esperarTela(page, 'Outra entrada');
   await page.goBack();
   await A.esperarTela(page, 'Registrar evento');
   await page.goBack();
   await A.esperarTela(page, 'Rebanho (tela de teste)');
-  await A.ir(page, 'pesagens');
+  await A.ir(page, 'sanidade/agenda');
   assert.match(await page.textContent('#conteudo'), /ainda não foi entregue/, 'rota de módulo inativo não abre');
   await A.ir(page, 'nao/existe');
   assert.match(await page.textContent('#conteudo'), /não existe nesta versão/);
@@ -118,7 +118,7 @@ test('navegação no celular: barra inferior Início · Rebanho · Registrar · 
   await dlg.waitFor();
   assert.equal(await dlg.getAttribute('aria-modal'), 'true');
   assert.equal(await page.textContent('#' + await dlg.getAttribute('aria-labelledby')), 'Mais');
-  assert.deepEqual(await textos(page, '[role=dialog] .menu-item'), ['Eventos', 'Configurações']);
+  assert.deepEqual(await textos(page, '[role=dialog] .menu-item'), ['Eventos', 'Pesagens', 'Configurações']);
   assert.equal(await page.getAttribute('#app', 'aria-hidden'), 'true', 'fundo inerte enquanto a folha está aberta');
   await page.keyboard.press('Escape');
   await dlg.waitFor({ state: 'detached' });

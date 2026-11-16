@@ -394,6 +394,81 @@ var UI = (function () {
     return fig;
   }
 
+  /**
+   * Curva de peso em SVG próprio (08, seção 3, bloco E; SP-08): o tempo em dias no eixo de baixo, um traço por animal com
+   * os pesos medidos (marcador cheio; o estimado — estimativa visual, média do lote — vazio), o peso ao nascer de
+   * referência como marcador vazio e a projeção tracejada, rotulada "Estimativa". Os números vêm do servidor: a tela só
+   * desenha, e a tabela equivalente ("Ver tabela") traz os mesmos valores. o: {titulo, series: [{nome, pontos: [{data,
+   * peso_kg, estimado}], nascer: {data, peso_kg} | null, projecao: {pontos: [{data, peso_kg}]} | null}]}.
+   */
+  function curvaPeso(o) {
+    var fig = h('figure', { class: 'grafico curva-peso', dataset: { grafico: 'curva-peso' } });
+    fig.appendChild(h('figcaption', { text: o.titulo }));
+    var series = o.series || [];
+    var todos = [];
+    series.forEach(function (sr) {
+      (sr.pontos || []).forEach(function (p) { todos.push(p); });
+      if (sr.nascer) todos.push(sr.nascer);
+      ((sr.projecao && sr.projecao.pontos) || []).forEach(function (p) { todos.push(p); });
+    });
+    if (!todos.length) { fig.appendChild(nota('Sem pesagens para desenhar.', 'info')); return fig; }
+    var dia = function (d) { return Date.parse(d + 'T00:00:00Z') / 86400000; };
+    var xs = todos.map(function (p) { return dia(p.data); });
+    var ys = todos.map(function (p) { return p.peso_kg; });
+    var x0 = Math.min.apply(null, xs), x1 = Math.max.apply(null, xs);
+    var y0 = Math.min.apply(null, ys), y1 = Math.max.apply(null, ys);
+    if (x0 === x1) { x0 -= 15; x1 += 15; }
+    var folga = (y1 - y0) * 0.08 || 10;
+    y0 = Math.max(0, y0 - folga); y1 += folga;
+    var W = 600, H = 260, L = 64, R = 16, T = 12, B = 40;
+    var px = function (d) { return L + (dia(d) - x0) / (x1 - x0) * (W - L - R); };
+    var py = function (v) { return T + (H - T - B) - (v - y0) / (y1 - y0) * (H - T - B); };
+    var n = series.reduce(function (t, sr) { return t + (sr.pontos || []).length; }, 0);
+    var svg = s('svg', { viewBox: '0 0 ' + W + ' ' + H, role: 'img', 'aria-label': o.titulo + ': ' + n + (n === 1 ? ' pesagem' : ' pesagens') + '. Os valores estão na tabela abaixo.' });
+    for (var g = 0; g <= 4; g++) {
+      var gv = y0 + (y1 - y0) * g / 4;
+      svg.appendChild(s('line', { x1: L, x2: W - R, y1: py(gv), y2: py(gv), class: 'grafico-grade' }));
+      svg.appendChild(s('text', { x: L - 6, y: py(gv) + 4, 'text-anchor': 'end', class: 'grafico-rotulo' }, Fmt.numero(gv, 0)));
+    }
+    svg.appendChild(s('line', { x1: L, x2: W - R, y1: H - B, y2: H - B, class: 'grafico-eixo' }));
+    for (var k = 0; k <= 4; k++) {
+      var dk = new Date((x0 + (x1 - x0) * k / 4) * 86400000).toISOString().slice(0, 10);
+      svg.appendChild(s('text', { x: px(dk), y: H - 14, 'text-anchor': k === 0 ? 'start' : k === 4 ? 'end' : 'middle', class: 'grafico-rotulo' }, Fmt.dataCurta(dk) + '/' + dk.slice(2, 4)));
+    }
+    var linhasTabela = [];
+    series.forEach(function (sr, i) {
+      var cls = 'grafico-serie-' + (i % 4);
+      var pts = (sr.pontos || []).slice().sort(function (a, b) { return dia(a.data) - dia(b.data); });
+      if (pts.length >= 2) svg.appendChild(s('polyline', { points: pts.map(function (p) { return px(p.data) + ',' + py(p.peso_kg); }).join(' '), class: 'grafico-linha ' + cls }));
+      if (sr.projecao && sr.projecao.pontos && sr.projecao.pontos.length >= 2) {
+        var pp = sr.projecao.pontos;
+        svg.appendChild(s('polyline', { points: pp.map(function (p) { return px(p.data) + ',' + py(p.peso_kg); }).join(' '), class: 'grafico-projecao ' + cls, dataset: { marcador: 'projecao' } }));
+        var fim = pp[pp.length - 1];
+        svg.appendChild(s('text', { x: Math.min(px(fim.data), W - R) - 4, y: py(fim.peso_kg) - 8, 'text-anchor': 'end', class: 'grafico-rotulo' }, 'Estimativa'));
+        pp.slice(1).forEach(function (p) { linhasTabela.push([sr.nome, p.data, p.peso_kg, 'Projeção (estimativa)']); });
+      }
+      if (sr.nascer) {
+        svg.appendChild(s('circle', { cx: px(sr.nascer.data), cy: py(sr.nascer.peso_kg), r: 5, class: 'grafico-vazio ' + cls, dataset: { marcador: 'nascer' } }));
+        linhasTabela.push([sr.nome, sr.nascer.data, sr.nascer.peso_kg, 'Peso ao nascer de referência (estimado)']);
+      }
+      pts.forEach(function (p) {
+        svg.appendChild(s('circle', { cx: px(p.data), cy: py(p.peso_kg), r: p.estimado ? 5 : 4, class: (p.estimado ? 'grafico-vazio ' : '') + cls, dataset: { marcador: p.estimado ? 'estimado' : 'medido' } }));
+        linhasTabela.push([sr.nome, p.data, p.peso_kg, p.estimado ? 'Pesagem estimada' : 'Pesagem']);
+      });
+    });
+    fig.appendChild(svg);
+    var legenda = series.length > 1 ? series.map(function (sr, i) { return h('li', null, h('span', { class: 'amostra grafico-serie-' + (i % 4), style: 'background:currentColor', 'aria-hidden': 'true' }), sr.nome); }) : [];
+    legenda.push(h('li', { text: '● pesado · ○ estimado · - - - projeção (estimativa)' }));
+    fig.appendChild(h('ul', { class: 'grafico-legenda' }, legenda));
+    linhasTabela.sort(function (a, b) { return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : dia(a[1]) - dia(b[1]); });
+    var thead = h('tr', null, series.length > 1 ? h('th', { scope: 'col', text: 'Animal' }) : null, h('th', { scope: 'col', text: 'Data' }), h('th', { scope: 'col', class: 'num', text: 'Peso' }), h('th', { scope: 'col', text: 'O que é' }));
+    var tbody = h('tbody', null, linhasTabela.map(function (l) {
+      return h('tr', null, series.length > 1 ? h('td', { text: l[0] }) : null, h('th', { scope: 'row', text: Fmt.data(l[1]) }), h('td', { class: 'num', text: Fmt.peso(l[2]) }), h('td', { text: l[3] }));
+    }));
+    fig.appendChild(h('details', { class: 'detalhe grafico-tabela' }, h('summary', { text: 'Ver tabela' }), h('div', { class: 'tabela-rolagem' }, h('table', { class: 'tabela' }, h('caption', { class: 'oculto-visual', text: o.titulo }), h('thead', null, thead), tbody))));
+    return fig;
+  }
+
   // ------------------------------------------------------- abas, indicador, lista de definição ----
   /** Abas como links de rota (cada aba é uma entrada de histórico): itens [{rotulo, rota, atual}]. */
   function abas(rotulo, itens) {
@@ -427,7 +502,7 @@ var UI = (function () {
 
   return {
     icone: icone, botao: botao, travar: travar, definirTexto: definirTexto, faixa: faixa, nota: nota, aviso: aviso, carregando: carregando, vazio: vazio,
-    estadoErro: estadoErro, problema: problema, folha: folha, fecharTudo: fecharTudo, confirmar: confirmar, buscaBrinco: buscaBrinco, tabela: tabela, grafico: grafico,
+    estadoErro: estadoErro, problema: problema, folha: folha, fecharTudo: fecharTudo, confirmar: confirmar, buscaBrinco: buscaBrinco, tabela: tabela, grafico: grafico, curvaPeso: curvaPeso,
     comparar: comparar_, TITULOS_ERRO: TITULOS_ERRO, abas: abas, valorInd: valorInd, indicador: indicador, pares: pares, secao: secao,
   };
 })();
@@ -1452,7 +1527,7 @@ var Registro = (function () {
   var VERBOS = {
     ENTRADA_INICIAL: 'Gravar o rebanho inicial', OUTRA_ENTRADA: 'Gravar a entrada', AJUSTE_INVENTARIO: 'Gravar a correção', ESTORNO: 'Estornar',
     NASCIMENTO: 'Gravar o parto', TRANSFERENCIA: 'Transferir', MORTE: 'Registrar a morte', DESCARTE: 'Registrar o descarte', COMPRA: 'Gravar a compra',
-    VENDA: 'Gravar a venda', IDENTIFICACAO: 'Gravar a identificação', MARCACAO: 'Gravar a marcação',
+    VENDA: 'Gravar a venda', IDENTIFICACAO: 'Gravar a identificação', MARCACAO: 'Gravar a marcação', PESAGEM: 'Gravar a pesagem',
   };
   /** O subtipo é o primeiro campo do formulário (08, 4.2): a pergunta muda com o tipo. */
   var PERGUNTA_SUBTIPO = { IDENTIFICACAO: 'O que fazer', MARCACAO: 'Marcar como' };
@@ -2304,6 +2379,7 @@ var Registro = (function () {
     if ((s.tipo === 'MORTE' || s.tipo === 'DESCARTE') && d.animais) linhas.push(['Consequência', plural(d.animais.length, 'animal sai', 'animais saem') + ' do rebanho' + (s.tipo === 'MORTE' ? ' de vez (não pode voltar)' : '')]);
     if (s.tipo === 'VENDA' && d.animais) linhas.push(['Consequência', plural(d.animais.length, 'animal sai', 'animais saem') + ' do rebanho como vendido' + (d.animais.length === 1 ? '' : 's') + '; o histórico fica']);
     if (s.subtipo === 'DIVERGENCIA_CONTAGEM' && d.animais) linhas.push(['Consequência', plural(d.animais.length, 'animal sai', 'animais saem') + ' do rebanho como não encontrado' + (d.animais.length === 1 ? '' : 's') + ' na contagem; se aparecer, estorne esta baixa']);
+    if (s.tipo === 'PESAGEM' && d.animais) linhas.push(['Consequência', plural(d.animais.length, 'pesagem nova', 'pesagens novas') + '; as anteriores continuam (nenhum peso é substituído) e o peso atual de cada animal é o da pesagem mais recente' + (d.campos && !Util.vazio(d.campos.peso_total_lote_kg) ? '; na pesagem por lote, cada animal fica com a média do lote, marcada como estimada' : '')]);
     if (s.tipo === 'MARCACAO' && d.animais && d.campos) linhas.push(['Consequência', plural(d.animais.length, 'animal fica', 'animais ficam') + (d.campos.acao === 'DESMARCAR' ? ' sem a marca' : ' marcado' + (d.animais.length === 1 ? '' : 's')) + '; o inventário não muda']);
     var historico = s.def.aceita_historico && d.campos && d.campos.event_date && Store.param('data_marco_zero') && d.campos.event_date < Store.param('data_marco_zero');
     camposEvento(s).forEach(function (c) {
@@ -2811,6 +2887,10 @@ var Registro = (function () {
       var d0 = Store.param('data_marco_zero');
       if (historicas || (res.data && d0 && res.data.event_date < d0)) return 'Parto histórico gravado (antes do marco zero): ' + (historicas ? (historicas === 1 ? 'a cria fica no histórico e não entra no inventário.' : 'as ' + historicas + ' crias ficam no histórico e não entram no inventário.') : 'sem cria viva.');
       return ativas ? 'Parto gravado: ' + plural(ativas, 'cria entrou', 'crias entraram') + ' no rebanho.' : 'Parto gravado (sem cria viva).';
+    }
+    if (res.tipo === 'PESAGEM') {
+      var pg = res.data && res.data.pesagem;
+      return pg ? plural(pg.n, 'pesagem gravada', 'pesagens gravadas') + ' · média ' + Fmt.peso(pg.media_kg) + (pg.lote ? ' (lote de ' + pg.lote.cabecas + ' cabeças, ' + Fmt.peso(pg.lote.total_kg) + ' na balança)' : '') + '.' : plural(n, 'pesagem gravada', 'pesagens gravadas') + '.';
     }
     if (res.tipo === 'TRANSFERENCIA') return n === 1 ? '1 animal transferido.' : n + ' animais transferidos.';
     if (res.tipo === 'MORTE') return n === 1 ? 'Morte registrada: 1 animal saiu do rebanho.' : 'Morte registrada: ' + n + ' animais saíram do rebanho.';

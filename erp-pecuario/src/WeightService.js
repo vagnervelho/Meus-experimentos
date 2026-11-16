@@ -273,6 +273,7 @@ var WeightService = (function () {
     var ev = tx.cru ? tx.cru.cruPorId('EVENTOS', eventId) : tx.repo.porId('EVENTOS', eventId);
     if (!linhas.length || !ev) return null;
     var f = Timeline.fonte(tx);
+    var validade = Config.parametros(tx.repo).peso_validade_dias;
     var total = 0;
     var animais = linhas.map(function (r) {
       total += r.peso_kg;
@@ -281,9 +282,15 @@ var WeightService = (function () {
       s.forEach(function (x, k) { if (x.weight_id === r.weight_id) i = k; });
       var ant = i > 0 ? s[i - 1] : null;
       var v = ant ? variacao(ant, { data: r.data_pesagem, peso_kg: r.peso_kg }) : null;
+      // O peso atual do animal depois do lançamento (a projeção gravada: no retroativo continua o mais recente), para a lista
+      // do aparelho se atualizar sem recarregar o rebanho inteiro.
+      var a = tx.cru ? tx.cru.cruPorId('ANIMAIS', r.animal_id) : tx.repo.porId('ANIMAIS', r.animal_id);
+      var dataAtual = a && !vazio_(a.data_ultima_pesagem) ? a.data_ultima_pesagem : null;
       return {
         animal_id: r.animal_id, peso_kg: r.peso_kg, anterior: ant ? { data: ant.data, peso_kg: ant.peso_kg } : null,
         ganho_kg: v ? v.ganho_kg : null, dias: v ? v.dias : null, gmd_kg_dia: v ? v.gmd_kg_dia : null, variacao_pct: v ? v.variacao_pct : null,
+        peso_atual: a && typeof a.peso_atual === 'number' ? a.peso_atual : null, data_ultima_pesagem: dataAtual,
+        peso_vencido: a && a.situacao_cadastral === 'ATIVO' && dataAtual && typeof validade === 'number' && !vazio_(tx.hoje) ? Utils.diffDias(dataAtual, tx.hoje) > validade : null,
       };
     });
     var pj = ev.payload_json || {};

@@ -339,6 +339,19 @@ body.tela-cheia .avisos { bottom: 16px; }
 .grafico-legenda li { display: inline-flex; align-items: center; gap: 6px; }
 .grafico-legenda .amostra { width: 18px; height: 4px; border-radius: 2px; display: inline-block; }
 .grafico .tabela { margin-top: 8px; }
+.grafico-vazio { fill: var(--superficie); stroke-width: 2; }
+/* Modo curral (08, seção 5): cabeçalho fixo, campos grandes, a lista com a mais recente no topo. */
+.curral-cabecalho { position: sticky; top: 0; z-index: 2; background: var(--fundo, #fff); padding: 8px 0; border-bottom: 1px solid var(--borda-suave); }
+.curral-contador { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-weight: 700; margin-bottom: 8px; }
+.curral-form > .botao { margin-top: 8px; }
+.curral-campos { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.curral-entrada { font-size: 1.5rem; min-height: 56px; width: 100%; box-sizing: border-box; }
+.curral-conferencia { min-height: 24px; }
+.curral-lista { list-style: none; padding: 0; margin: 12px 0 0; }
+.curral-linha { border-bottom: 1px solid var(--borda-suave); padding: 8px 0; }
+.curral-linha[data-estado="ERRO"], .curral-linha[data-estado="NAO_ENCONTRADO"] { border-left: 4px solid #b00020; padding-left: 8px; }
+.curral-linha[data-estado="AVISO"], .curral-linha[data-estado="SEM_SINAL"] { border-left: 4px solid #8a5a00; padding-left: 8px; }
+.grafico-projecao { fill: none; stroke-width: 2; stroke-dasharray: 6 5; }
 
 /* ------------------------------------------------------ telas da Fase 1 ---- */
 .abas { margin: 12px 0 16px; overflow-x: auto; }

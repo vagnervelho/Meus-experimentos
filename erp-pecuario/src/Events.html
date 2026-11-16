@@ -359,6 +359,31 @@ var TelaEventos = (function () {
     antes.campos = Util.clonar(campos);
     return { subtipo: sub, campos: campos, linhas: linhas, origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotuloEvento(ev), historico: ev.pre_marco_zero === true, antes: antes } };
   }
+  /**
+   * Pesagem (E3.1): o momento e o método das linhas gravadas, o jejum e o lote do evento; por animal, o peso (vazio na
+   * pesagem por lote, em que cada um fica com a média).
+   */
+  function previaPesagem_(o, def, origem) {
+    var ev = o.evento, det = o.detalhes || {}, payload = ev.payload || {};
+    var pes = Utils_agrupar(det.PESAGENS || []);
+    var p0 = (det.PESAGENS || [])[0] || {};
+    var lote = typeof payload.peso_total_lote_kg === 'number';
+    origem.tipo_pesagem = p0.tipo;
+    origem.metodo_pesagem = lote ? 'BALANCA' : p0.metodo;
+    origem.jejum = payload.jejum === true ? true : null;
+    if (lote) { origem.peso_total_lote_kg = pesoTexto_(payload.peso_total_lote_kg); origem.qtd_cabecas_lote = String(payload.qtd_cabecas_lote); }
+    var antes = { campos: {}, linhas: {} };
+    var linhas = (o.linhas || []).map(function (l) {
+      var x = (pes[l.animal_id] || [])[0] || {};
+      var v = limpo_({ peso: lote ? null : pesoTexto_(x.peso_kg), observacoes: x.observacoes || l.observacoes });
+      antes.linhas[l.animal_id] = Util.clonar(v);
+      return { animal_id: l.animal_id, valores: v };
+    });
+    var campos = {};
+    (def.campos || []).forEach(function (d) { if (texto_(origem[d.id]) !== null) campos[d.id] = origem[d.id]; });
+    antes.campos = Util.clonar(campos);
+    return { campos: campos, linhas: linhas, origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotuloEvento(ev), historico: ev.pre_marco_zero === true, antes: antes } };
+  }
   /** Pré-preenche o evento substituto com o que o original gravou (valores como digitados no formulário). */
   /**
    * Prévia da correção, com os documentos e fotos do original (evento.obter: anexos), que passam ao substituto: o
@@ -376,6 +401,7 @@ var TelaEventos = (function () {
     if (['NASCIMENTO', 'TRANSFERENCIA', 'MORTE', 'DESCARTE'].indexOf(ev.event_type) >= 0) return previaMovimento_(o, def, origem);
     if (['IDENTIFICACAO', 'MARCACAO', 'AJUSTE_INVENTARIO'].indexOf(ev.event_type) >= 0) return previaManejo_(o, def, origem);
     if (ev.event_type === 'COMPRA') return previaCompra_(o, def, origem);
+    if (ev.event_type === 'PESAGEM') return previaPesagem_(o, def, origem);
     if (ev.event_type === 'VENDA') return previaVenda_(o, def, origem);
     var campos = {};
     (def.campos || []).forEach(function (d) { if (texto_(origem[d.id]) !== null) campos[d.id] = origem[d.id]; });
@@ -511,7 +537,11 @@ var TelaEventos = (function () {
         payload.motivo_descarte ? ['Motivo do descarte', Store.rotuloLista('MOTIVO_DESCARTE', payload.motivo_descarte)] : null,
         ['No inventário', 'não muda (a marca é só um sinal no animal)'],
       ].filter(Boolean)), { dado: 'marcacao' }));
-      if ((det.PESAGENS || []).length) corpo.appendChild(UI.secao('Pesagens', h('ul', { class: 'lista-simples' }, det.PESAGENS.map(function (x) { return h('li', { text: quem(x) + ': ' + Fmt.peso(x.peso_kg) + ' · ' + Fmt.rotulo('METODO_PESAGEM', x.metodo) }); }))));
+      if (ev.event_type === 'PESAGEM' && (det.PESAGENS || []).length) corpo.appendChild(UI.secao('Pesagem', UI.pares([
+        ['Momento', Fmt.rotulo('TIPO_PESAGEM', det.PESAGENS[0].tipo)], ['Como foi pesado', typeof payload.peso_total_lote_kg === 'number' ? 'por lote: ' + Fmt.peso(payload.peso_total_lote_kg) + ' na balança, ' + payload.qtd_cabecas_lote + ' cabeças (cada animal com a média, estimada)' : Fmt.rotulo('METODO_PESAGEM', det.PESAGENS[0].metodo)],
+        ['Jejum', payload.jejum === true ? 'sim' : 'não'],
+      ]), { dado: 'pesagem' }));
+      if ((det.PESAGENS || []).length) corpo.appendChild(UI.secao('Pesagens', h('ul', { class: 'lista-simples' }, det.PESAGENS.map(function (x) { return h('li', { text: quem(x) + ': ' + Fmt.peso(x.peso_kg) + ' · ' + Fmt.rotulo('METODO_PESAGEM', x.metodo) + (ev.event_type !== 'PESAGEM' ? '' : x.observacoes ? ' · ' + x.observacoes : '') }); })), { dado: 'pesagens' }));
       if ((det.BAIXAS || []).length) corpo.appendChild(UI.secao('Saída do rebanho', h('ul', { class: 'lista-simples' }, det.BAIXAS.map(function (x) {
         var partes = x.tipo === 'MORTE' ? ['causa: ' + Store.rotuloLista('CAUSA_MORTE', x.causa), x.diagnostico ? 'diagnóstico: ' + x.diagnostico : null]
           : x.tipo === 'DIVERGENCIA_CONTAGEM' ? ['fica fora do inventário; se aparecer, estorne esta baixa'] : ['destino: ' + Store.rotuloLista('DESTINO_DESCARTE', x.destino), 'motivo: ' + Store.rotuloLista('MOTIVO_DESCARTE', x.motivo)];

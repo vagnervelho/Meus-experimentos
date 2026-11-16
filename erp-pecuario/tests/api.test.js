@@ -199,7 +199,7 @@ test('carga inicial condicional: completa na primeira vez; {atual: true} com a v
   assert.deepEqual(d.animais.valores.situacao_cadastral.sort(), ['ATIVO', 'EXTERNO']);
   assert.deepEqual(d.pastos.map((p) => p.pasture_id).sort(), [PASTOS.A, PASTOS.B].sort());
   assert.deepEqual(d.modulos.map((m) => m.id), ['DASHBOARD', 'REBANHO', 'PASTOS', 'EVENTOS', 'PESAGENS', 'CONFIGURACOES', 'IMPORTACAO'], 'só os módulos entregues (Pesagens, na Fase 3)');
-  assert.deepEqual(d.catalogo.tipos.map((t) => t.tipo), ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'NASCIMENTO', 'COMPRA', 'VENDA', 'TRANSFERENCIA', 'MORTE', 'DESCARTE', 'IDENTIFICACAO', 'MARCACAO', 'AJUSTE_INVENTARIO', 'ESTORNO']);
+  assert.deepEqual(d.catalogo.tipos.map((t) => t.tipo), ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'NASCIMENTO', 'COMPRA', 'VENDA', 'TRANSFERENCIA', 'MORTE', 'DESCARTE', 'PESAGEM', 'IDENTIFICACAO', 'MARCACAO', 'AJUSTE_INVENTARIO', 'ESTORNO'], 'os da Fase 2 e a pesagem (Fase 3, E3.1)');
   assert.equal(d.catalogo.fase, 3, 'a Fase 3 começou (EventCatalog.FASE_ATUAL), com os tipos da Fase 2 até os dela terem campos');
   assert.ok(Array.isArray(d.alertas.alertas));
   assert.equal(d.dataVersion, b1.meta.dataVersion);

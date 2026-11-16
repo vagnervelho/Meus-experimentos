@@ -84,7 +84,7 @@ test('falha de rede ao abrir a importação: mensagem clara e "Tentar de novo"; 
   await a.fechar();
 });
 
-test('endereço direto da importação: a tela vem na primeira carga; os módulos da Fase 3 ainda sem tela não aparecem no menu (1280 px)', async () => {
+test('endereço direto da importação: a tela vem na primeira carga; os módulos da Fase 3 ainda sem tela não aparecem no menu, as pesagens sim (1280 px)', async () => {
   const s = A.sistema();
   A.semear(s);
   const a = await A.abrir(s, { largura: 1280, hash: 'importar' });
@@ -92,10 +92,10 @@ test('endereço direto da importação: a tela vem na primeira carga; os módulo
   await A.esperarTela(page, 'Importação');
   assert.deepEqual(telas(a).map((p) => p.dados.nome), ['Import']);
   const menu = await textoTela(page, '#menu');
-  for (const m of ['Visão geral', 'Rebanho', 'Pastos', 'Eventos', 'Configurações']) assert.ok(menu.includes(m), m + ' no menu');
-  for (const m of ['Pesagens', 'Sanidade', 'Reprodução', 'Financeiro', 'Relatórios']) assert.ok(!menu.includes(m), m + ' ainda não está pronto: fora do menu');
+  for (const m of ['Visão geral', 'Rebanho', 'Pastos', 'Eventos', 'Pesagens', 'Configurações']) assert.ok(menu.includes(m), m + ' no menu');
+  for (const m of ['Sanidade', 'Reprodução', 'Financeiro', 'Relatórios']) assert.ok(!menu.includes(m), m + ' ainda não está pronto: fora do menu');
   // Rota de um módulo que ainda não foi entregue: a tela diz que não está disponível, sem pedir nada ao servidor.
-  await A.ir(page, 'pesagens', 'Tela não encontrada');
+  await A.ir(page, 'sanidade/agenda', 'Tela não encontrada');
   assert.equal(telas(a).length, 1);
   assert.deepEqual(a.estado.erros, [], 'nenhum erro no console');
   await a.fechar();
