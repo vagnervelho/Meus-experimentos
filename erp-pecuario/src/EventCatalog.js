@@ -27,7 +27,7 @@ var EventCatalog = (function () {
     { id: 'REBANHO', rotulo: 'Rebanho', ordem: 2, fase: 1, menu: true, tela: 'Animals' },
     { id: 'PASTOS', rotulo: 'Pastos', ordem: 3, fase: 1, menu: true, tela: 'Pastures' },
     { id: 'EVENTOS', rotulo: 'Eventos', ordem: 4, fase: 1, menu: true, tela: 'Events' },
-    { id: 'PESAGENS', rotulo: 'Pesagens', ordem: 5, fase: 3, menu: true },
+    { id: 'PESAGENS', rotulo: 'Pesagens', ordem: 5, fase: 3, menu: true, tela: 'Weights', sob_demanda: true, rotas: ['pesagens'] },
     { id: 'SANIDADE', rotulo: 'Sanidade', ordem: 6, fase: 3, menu: true },
     { id: 'REPRODUCAO', rotulo: 'Reprodução', ordem: 7, fase: 3, menu: true },
     { id: 'FINANCEIRO', rotulo: 'Financeiro', ordem: 8, fase: 4, menu: true },
@@ -361,6 +361,30 @@ var EventCatalog = (function () {
     a_('descricao', 'Descrição', 'texto', { ajuda: 'Ex.: comissão do corretor, taxa da GTA.' }),
   ];
 
+  /**
+   * PESAGEM (04, seção 4.5; 03b, seções 5 e 16.11): individual, coletiva ou por lote. O cabeçalho traz o momento da
+   * pesagem (PESAGENS.tipo: rotina, chegada à fazenda, desmama ou saída — o peso ao nascer é do parto), como foi pesado e
+   * o jejum; por animal, o peso. Na pesagem por lote, o fato é o peso total na balança e o número de cabeças (payload);
+   * cada animal fica com a média do lote (MEDIA_LOTE, estimada) e o peso de cada um fica vazio.
+   */
+  var MOMENTOS_PESAGEM = ['ROTINA', 'ENTRADA', 'DESMAMA', 'VENDA'];
+  var CAMPOS_PESAGEM = [
+    c_('event_date', 'Data da pesagem', 'data', { obrigatorio: true, default: 'HOJE' }),
+    c_('tipo_pesagem', 'Momento da pesagem', 'lista', { obrigatorio: true, opcoes: MOMENTOS_PESAGEM, default: 'ROTINA', ajuda: 'Rotina, chegada à fazenda, desmama ou saída (embarque). O peso ao nascer vai no parto.' }),
+    c_('metodo_pesagem', 'Como foi pesado', 'lista', { obrigatorio: true, opcoes: METODOS_PESAGEM, default: 'BALANCA', ajuda: 'Na pesagem por lote, cada animal fica com a média do lote, marcada como estimada.' }),
+    c_('jejum', 'Pesado em jejum', 'bool', { default: false }),
+    c_('peso_total_lote_kg', 'Peso total do lote (balança coletiva)', 'decimal', { unidade: 'kg', min: 0.1, casas: 1, ajuda: 'Só na pesagem por lote: deixe vazio o peso de cada animal; cada um fica com a média.' }),
+    c_('qtd_cabecas_lote', 'Cabeças na balança', 'inteiro', { min: 1, max: 1000, visivel_se: quando_('peso_total_lote_kg', true), obrigatorio_se: quando_('peso_total_lote_kg', true) }),
+    c_('property_id', 'Propriedade', 'ref:PROPRIEDADES', { default: { de: 'CONFIGURACOES.propriedade_padrao_id' } }),
+    c_('responsible', 'Responsável', 'texto'),
+    c_('notes', 'Observações', 'texto'),
+  ];
+  var CAMPOS_ANIMAL_PESAGEM = [
+    a_('animal_id', 'Animal', 'ref:ANIMAIS', { obrigatorio: true }),
+    a_('peso', 'Peso vivo', 'decimal', { unidade: 'kg', min: 0.1, max: PESO_MAX_KG, casas: 1, ajuda: 'Na pesagem por lote, deixe vazio.' }),
+    a_('observacoes', 'Observações deste animal', 'texto'),
+  ];
+
   /** Definições completas dos tipos da Fase 1. */
   var DEFINICOES = {
     ENTRADA_INICIAL: {
@@ -539,6 +563,14 @@ var EventCatalog = (function () {
         },
         NAO_LOCALIZADO: { rotulo: 'Não localizado', fase: 2, campos_animal: CAMPOS_ANIMAL_MARCACAO },
       },
+    },
+    PESAGEM: {
+      frequente: true, selecao_animais: 'VARIOS', filtro_elegiveis: { situacao: 'ATIVO' }, modo_entrada: 'CURRAL', revisao: 'LOCAL', critico: false,
+      reads: LEITURAS_MOTOR.concat(LEITURAS_FINANCEIRO),
+      campos: CAMPOS_PESAGEM,
+      campos_animal: CAMPOS_ANIMAL_PESAGEM,
+      componentes: ['seletor_animais'],
+      grupos_repetiveis: {},
     },
     ESTORNO: {
       frequente: false, selecao_animais: 'NENHUM', filtro_elegiveis: null, modo_entrada: 'FORM', revisao: 'SERVIDOR', critico: true,
@@ -740,6 +772,7 @@ var EventCatalog = (function () {
     FASE_ATUAL: FASE_ATUAL,
     TIPOS_CAMPO: TIPOS_CAMPO,
     TIPOS_IDENTIFICACAO: TIPOS_IDENTIFICACAO,
+    MOMENTOS_PESAGEM: MOMENTOS_PESAGEM,
     PESO_MAX_KG: PESO_MAX_KG,
     CAMPOS_CORRIGIVEIS: CAMPOS_CORRIGIVEIS,
     nomes: nomes,

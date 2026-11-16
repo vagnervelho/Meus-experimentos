@@ -32,7 +32,7 @@ var AnimalService = (function () {
   var GERACOES_PADRAO = 3;
   var GERACOES_MAX = 6;
   /** Blocos da ficha cujo módulo ainda não foi entregue: voltam vazios, com a marca (§20: nada sem função). */
-  var BLOCOS_DE_MODULO = { peso: 'PESAGENS', sanitario: 'SANIDADE' };
+  var BLOCOS_DE_MODULO = { sanitario: 'SANIDADE' };
 
   function vazio_(v) {
     return v === null || v === undefined || v === '';
@@ -449,6 +449,8 @@ var AnimalService = (function () {
             sem_pasto: a.situacao_cadastral === 'ATIVO' && vazio_(a.pasto_atual_id), situacao_cadastral: a.situacao_cadastral,
           },
           pastos: { entregue: true, periodos: periodos, por_pasto: diasPorPasto_(periodos) },
+          // Bloco E (Fase 3): a curva, a tabela com ganho, dias, GMD e variação e a projeção rotulada (WeightService).
+          peso: a.situacao_cadastral === 'EXTERNO' ? { entregue: true, externo: true, serie: [], intervalos: [] } : WeightService.blocoFicha(L, a),
           reprodutivo: ReproductionService.blocoFicha(L.f, a),
           financeiro: blocoFinanceiro_(tx, L, a),
           eventos: { entregue: true, itens: eventos_(tx, L, a) },

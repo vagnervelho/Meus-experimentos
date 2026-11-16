@@ -1037,3 +1037,12 @@ Nenhuma linha de código mudou nesta etapa: só documentos.
   é aceito ao menos uma vez nas sementes fixas, que nenhuma entrada é de tipo inativo e que todo tipo importável tem
   arquivo: o tipo que ficar ativo sem a sua entrada falha no `npm test`. `FUZZ_SEMENTES` e `FUZZ_INICIO` continuam valendo.
 - `docs/CONTRATOS.md`: seções 12, 19, 22 e 36, e a nova seção 37 (telas sob demanda).
+- Execuções desta etapa, verificadas em Node e no Playwright deste repositório:
+  - antes de mudar o código, `npm test` com 673 testes, 673 aprovados e 0 falhas (518 s);
+  - no fim, `npm test` com 680 testes, 680 aprovados e 0 falhas (534 s), e `npm run ui:check` com 97 testes, 97
+    aprovados e 0 falhas (235 s), página inicial com 406 KB de 450 KB e a importação com 47 KB de 150 KB;
+  - `npm run ui:check` três vezes seguidas, sem falha (97 de 97 em cada, cerca de 230 s cada), antes de a mensagem da tela
+    desconhecida deixar de citar o nome do arquivo (a última mudança de código, coberta pela execução final acima);
+  - teste aleatório com 120 sementes novas × 100 passos (310000 a 310119): 6.227 comandos aceitos, 4.850 recusados,
+    0 falhas;
+  - a injeção da tela sob demanda no iframe do HtmlService continua a verificar na conta do dono (NV).

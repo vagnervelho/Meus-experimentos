@@ -1334,6 +1334,12 @@ var AuditService = (function () {
   var TIPO_DO_DETALHE = Object.freeze({
     AJUSTES: { campo: 'tipo_ajuste', esperado: function (ev) { return ev.event_type === 'AJUSTE_INVENTARIO' && ev.event_subtype !== 'DIVERGENCIA_CONTAGEM' ? ev.event_subtype : null; } },
     BAIXAS: { campo: 'tipo', esperado: function (ev) { return ev.event_type === 'MORTE' || ev.event_type === 'DESCARTE' ? ev.event_type : ev.event_type === 'AJUSTE_INVENTARIO' && ev.event_subtype === 'DIVERGENCIA_CONTAGEM' ? 'DIVERGENCIA_CONTAGEM' : null; } },
+    // PESAGENS.tipo = o momento fixado pelo evento (03b, seção 2.4); a PESAGEM escolhe um dos seus momentos (conferirPesagens_
+    // exige o mesmo em todas as linhas do lançamento).
+    PESAGENS: { campo: 'tipo', esperado: function (ev) {
+      if (ev.event_type === 'PESAGEM') return EventCatalog.MOMENTOS_PESAGEM;
+      return { NASCIMENTO: 'NASCIMENTO', COMPRA: 'COMPRA', VENDA: 'VENDA', ENTRADA_INICIAL: 'ENTRADA', DESMAMA: 'DESMAMA' }[ev.event_type] || null;
+    } },
     REPRODUCAO: { campo: 'tipo_evento', esperado: function (ev) {
       if (ev.event_type === 'NASCIMENTO') return 'PARTO';
       if (ev.event_type === 'REPRODUCAO') return ev.event_subtype;
@@ -1351,6 +1357,7 @@ var AuditService = (function () {
     { tabela: 'BAIXAS', quantos: 'UM', aplica: function (ev) { return ev.event_type === 'MORTE' || ev.event_type === 'DESCARTE' || (ev.event_type === 'AJUSTE_INVENTARIO' && ev.event_subtype === 'DIVERGENCIA_CONTAGEM'); } },
     { tabela: 'AJUSTES', quantos: 'ALGUM', aplica: function (ev) { return ev.event_type === 'AJUSTE_INVENTARIO' && ev.event_subtype !== 'DIVERGENCIA_CONTAGEM'; } },
     { tabela: 'IDENTIFICACOES', quantos: 'UM', aplica: function (ev) { return ev.event_type === 'IDENTIFICACAO'; } },
+    { tabela: 'PESAGENS', quantos: 'UM', aplica: function (ev) { return ev.event_type === 'PESAGEM'; } },
   ]);
   function conferirDetalhes_(tx, col, eventos) {
     var repo = tx.repo;
@@ -1384,7 +1391,7 @@ var AuditService = (function () {
     if (t === 'NASCIMENTO') return { papeis: { MATRIZ: 0, CRIA: 1 }, pasto: false, outrosPapeisEmPartos: true };
     if (t === 'VENDA' || t === 'MORTE' || t === 'DESCARTE') return { papeis: { SUJEITO: -1 }, pasto: false };
     if (t === 'TRANSFERENCIA') return { papeis: { SUJEITO: 0 }, pasto: true };
-    if (t === 'IDENTIFICACAO' || t === 'MARCACAO') return { papeis: { SUJEITO: 0 }, pasto: false };
+    if (t === 'IDENTIFICACAO' || t === 'MARCACAO' || t === 'PESAGEM') return { papeis: { SUJEITO: 0 }, pasto: false };
     if (t === 'AJUSTE_INVENTARIO') return sub === 'DIVERGENCIA_CONTAGEM' ? { papeis: { SUJEITO: -1 }, pasto: false } : { papeis: { SUJEITO: 0 }, pasto: sub === 'CORRECAO_LOCALIZACAO' };
     return null;
   }
@@ -1436,13 +1443,67 @@ var AuditService = (function () {
           col.achado('COPIAS', { tabela: ref.tabela, id: ref.id, linha: ref.linha, campo: 'pasto_destino_id', mensagem: oquePasto + aviso, oque: oquePasto, chaves: l.event_animal_id + '|PASTO', event_id: ev.event_id, animal_id: l.animal_id });
         }
       });
-      ['BAIXAS', 'AJUSTES', 'IDENTIFICACOES'].forEach(function (t) {
+      ['BAIXAS', 'AJUSTES', 'IDENTIFICACOES', 'PESAGENS'].forEach(function (t) {
         if (!repo.carregada(t)) return;
         repo.por(t, 'event_id', ev.event_id).forEach(function (r) {
           if (vazio_(r.animal_id) || comLinha[r.animal_id]) return;
           var oqueSem = nome + ': a linha de ' + t + ' cita ' + rotuloAnimal_(tx.cru.cruPorId('ANIMAIS', r.animal_id), r.animal_id) + ', que não tem linha no lançamento (EVENTO_ANIMAIS).';
           col.achado('COPIAS', { tabela: t, id: r[Schema.pk(t)], campo: 'animal_id', mensagem: oqueSem + aviso, oque: oqueSem, chaves: r[Schema.pk(t)] + '|SEM_LINHA', event_id: ev.event_id, animal_id: r.animal_id });
         });
+      });
+    });
+  }
+  /**
+   * As pesagens que cada evento grava (03b, seções 3.4 e 5; 05, seção 2.7), conferidas aqui para valerem em todo caminho
+   * (registro, correção, estorno, importação; e na trava de integridade): peso vivo de 0,1 a 2.000 kg (RN-049) e uma linha
+   * por animal no evento; na PESAGEM, o mesmo momento em todas as linhas, o peso copiado na linha do animal
+   * (EVENTO_ANIMAIS.peso) e, na pesagem por lote, as cabeças = os animais do lançamento e cada linha com a média do lote
+   * (total ÷ cabeças, 1 casa) e o método MEDIA_LOTE — sem as chaves do lote, nenhuma linha de média. Data e animal no
+   * rebanho na data: COPIAS (data) e LINHA_DO_TEMPO (a linha do animal é um fato). Achados de COPIAS (a fonte quebrada).
+   */
+  function conferirPesagens_(tx, col, eventos) {
+    var repo = tx.repo;
+    if (!repo.carregada('PESAGENS')) return;
+    var aviso = ' Restaure o backup ou investigue a edição manual; o reparo automático só refaz a situação a partir dos lançamentos.';
+    var max = EventCatalog.PESO_MAX_KG;
+    eventos.forEach(function (ev) {
+      var linhas = repo.por('PESAGENS', 'event_id', ev.event_id);
+      if (!linhas.length) return;
+      var nome = '"' + rotuloEvento_(ev) + '" de ' + br_(ev.event_date);
+      var quem = function (id) { return rotuloAnimal_(tx.cru.cruPorId('ANIMAIS', id), id); };
+      var achado = function (r, campo, oque, chave) {
+        col.achado('COPIAS', { tabela: 'PESAGENS', id: r.weight_id, campo: campo, mensagem: oque + aviso, oque: oque, chaves: r.weight_id + '|' + chave, event_id: ev.event_id, animal_id: r.animal_id });
+      };
+      var porAnimal = {};
+      linhas.forEach(function (r) {
+        if (typeof r.peso_kg !== 'number' || !(r.peso_kg > 0) || r.peso_kg > max) achado(r, 'peso_kg', nome + ', ' + quem(r.animal_id) + ': a pesagem tem ' + (typeof r.peso_kg === 'number' ? Utils.formatarNumero(r.peso_kg) + ' kg' : 'peso vazio') + ', fora da faixa de peso vivo (de 0,1 a ' + Utils.formatarNumero(max) + ' kg).', 'FAIXA');
+        if (porAnimal[r.animal_id]) achado(r, 'animal_id', nome + ', ' + quem(r.animal_id) + ': o animal tem mais de uma pesagem no mesmo lançamento.', 'REPETIDA');
+        porAnimal[r.animal_id] = r;
+      });
+      if (ev.event_type !== 'PESAGEM') return;
+      var tipos = Utils.unicos(linhas.map(function (r) { return r.tipo; }));
+      if (tipos.length > 1) linhas.slice(1).forEach(function (r) { if (r.tipo !== linhas[0].tipo) achado(r, 'tipo', nome + ', ' + quem(r.animal_id) + ': o momento da pesagem (' + r.tipo + ') difere do das outras linhas do lançamento (' + linhas[0].tipo + ').', 'MOMENTO'); });
+      var ea = {};
+      if (repo.carregada('EVENTO_ANIMAIS')) repo.por('EVENTO_ANIMAIS', 'event_id', ev.event_id).forEach(function (l) { ea[l.animal_id] = l; });
+      linhas.forEach(function (r) {
+        var l = ea[r.animal_id];
+        if (l && typeof r.peso_kg === 'number' && l.peso !== r.peso_kg) achado(r, 'peso_kg', nome + ', ' + quem(r.animal_id) + ': a pesagem tem ' + Utils.formatarNumero(r.peso_kg) + ' kg, mas a linha do animal no lançamento diz ' + (typeof l.peso === 'number' ? Utils.formatarNumero(l.peso) + ' kg' : 'peso vazio') + '.', 'COPIA');
+      });
+      var pj = ev.payload_json || {};
+      var lote = typeof pj.peso_total_lote_kg === 'number' || typeof pj.qtd_cabecas_lote === 'number';
+      if (!lote) {
+        linhas.forEach(function (r) { if (r.metodo === 'MEDIA_LOTE') achado(r, 'metodo', nome + ', ' + quem(r.animal_id) + ': a pesagem é "média do lote", mas o lançamento não tem o peso total nem as cabeças do lote.', 'SEM_LOTE'); });
+        return;
+      }
+      var cabecas = Object.keys(ea).length;
+      var media = typeof pj.peso_total_lote_kg === 'number' && typeof pj.qtd_cabecas_lote === 'number' && pj.qtd_cabecas_lote > 0 ? Utils.arredondar(pj.peso_total_lote_kg / pj.qtd_cabecas_lote, 1) : null;
+      if (pj.qtd_cabecas_lote !== cabecas || media === null) {
+        var oqueLote = nome + ': a pesagem por lote diz ' + (typeof pj.qtd_cabecas_lote === 'number' ? pj.qtd_cabecas_lote : 'sem número de') + ' cabeças' + (typeof pj.peso_total_lote_kg === 'number' ? ' e ' + Utils.formatarNumero(pj.peso_total_lote_kg) + ' kg' : ', sem o peso total') + ', mas o lançamento tem ' + cabecas + ' animais.';
+        col.achado('COPIAS', { tabela: 'EVENTOS', id: ev.event_id, campo: 'payload_json', mensagem: oqueLote + aviso, oque: oqueLote, chaves: ev.event_id + '|LOTE', event_id: ev.event_id });
+      }
+      linhas.forEach(function (r) {
+        if (typeof r.peso_kg !== 'number') return;
+        if (r.metodo !== 'MEDIA_LOTE' || (media !== null && r.peso_kg !== media)) achado(r, r.metodo !== 'MEDIA_LOTE' ? 'metodo' : 'peso_kg', nome + ', ' + quem(r.animal_id) + ': na pesagem por lote cada animal fica com a média do lote' + (media !== null ? ' (' + Utils.formatarNumero(media, 1) + ' kg)' : '') + ', mas a linha tem ' + Utils.formatarNumero(r.peso_kg) + ' kg (' + r.metodo + ').', 'MEDIA');
       });
     });
   }
@@ -1457,6 +1518,7 @@ var AuditService = (function () {
     var eventos = esc ? Utils.unicos(Object.keys(esc.eventos).concat(Object.keys(esc.fonte || {}))).map(function (id) { return repo.porId('EVENTOS', id); }).filter(Boolean) : repo.vigentes('EVENTOS');
     conferirLinhasDosEventos_(tx, col, eventos);
     conferirDetalhes_(tx, col, eventos);
+    conferirPesagens_(tx, col, eventos);
     var linhasDe = function (t) {
       if (!esc) return repo.vigentes(t);
       var out = [];
@@ -1471,8 +1533,9 @@ var AuditService = (function () {
         var ev = repo.porId('EVENTOS', r.event_id);
         if (!ev) return;
         var esperado = def.esperado(ev);
-        if (r[def.campo] === esperado) return;
-        col.achado('COPIAS', { tabela: t, id: r[Schema.pk(t)], campo: def.campo, mensagem: t + ': o tipo ' + (r[def.campo] || 'vazio') + ' não corresponde a "' + rotuloEvento_(ev) + '"' + (esperado ? ' (esperado ' + esperado + ')' : ', que não grava essa linha') + '.', chaves: r[Schema.pk(t)] + '|TIPO', event_id: ev.event_id, animal_id: r.animal_id });
+        if (Array.isArray(esperado) ? esperado.indexOf(r[def.campo]) >= 0 : r[def.campo] === esperado) return;
+        var texto = Array.isArray(esperado) ? esperado.slice(0, -1).join(', ') + ' ou ' + esperado[esperado.length - 1] : esperado;
+        col.achado('COPIAS', { tabela: t, id: r[Schema.pk(t)], campo: def.campo, mensagem: t + ': o tipo ' + (r[def.campo] || 'vazio') + ' não corresponde a "' + rotuloEvento_(ev) + '"' + (esperado ? ' (esperado ' + texto + ')' : ', que não grava essa linha') + '.', chaves: r[Schema.pk(t)] + '|TIPO', event_id: ev.event_id, animal_id: r.animal_id });
       });
     });
     Object.keys(COPIAS_DATA).forEach(function (t) {

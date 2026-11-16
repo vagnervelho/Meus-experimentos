@@ -372,6 +372,7 @@ var EventService = (function () {
     if (tipo === 'MARCACAO') cabecalhoMarcacao_(m, ctxEv);
     if (tipo === 'COMPRA') cabecalhoCompra_(m, ctxEv);
     if (tipo === 'VENDA') cabecalhoVenda_(m, ctxEv);
+    if (tipo === 'PESAGEM') cabecalhoPesagem_(m, ctxEv, animais);
     animais.forEach(function (item, i) {
       var it = novoItem_(m, item || {}, i);
       ctxEv.itens.push(it);
@@ -382,6 +383,7 @@ var EventService = (function () {
       else if (tipo === 'MORTE' || tipo === 'DESCARTE') itemSaida_(m, ctxEv, it);
       else if (tipo === 'VENDA') itemVenda_(m, ctxEv, it);
       else if (tipo === 'NASCIMENTO') itemMatriz_(m, ctxEv, it);
+      else if (tipo === 'PESAGEM') itemPesagem_(m, ctxEv, it);
       else itemEntrada_(m, ctxEv, it);
     });
     if (tipo === 'NASCIMENTO') crias_(m, ctxEv, d.crias);
@@ -398,6 +400,7 @@ var EventService = (function () {
     if (original) conferirPeriodosDeBrinco_(m, ctxEv, Object.keys(m.afetados), null);
     guardaDuplicidade_(m, ctxEv);
     conferirLotacao_(m, ctxEv);
+    if (tipo === 'PESAGEM') avisosDaPesagem_(m, ctxEv);
     if (tipo === 'NASCIMENTO') avisosDoParto_(m, ctxEv);
     if (tipo === 'ENTRADA_INICIAL') abertura_(m, ctxEv);
     if (tipo === 'COMPRA') financeiroCompra_(m, ctxEv, d);
@@ -839,6 +842,86 @@ var EventService = (function () {
     if (vazio_(d.animal_id)) return;
     if (!sujeito_(m, it, 'marca')) return;
     linhaEA_(m, ctxEv, it, { efeito_inventario: 0, observacoes: typeof d.observacoes === 'string' ? nulo_(Utils.aparar(d.observacoes)) : null });
+  }
+
+  // ------------------------------------------------------------------ pesagem ----
+  /**
+   * Cabeçalho da PESAGEM (04, seção 4.5; 03b, seções 2.6, 5 e 16.11): o momento da pesagem (PESAGENS.tipo), o método e,
+   * na pesagem por lote, o fato do lote — o peso total na balança e as cabeças, que precisam bater com os animais da lista
+   * (RN-029). Cada animal do lote fica com a média, arredondada a uma casa, e o método MEDIA_LOTE (estimada); a soma das
+   * linhas pode diferir do total em décimos. O jejum vale para o lançamento inteiro (payload).
+   */
+  function cabecalhoPesagem_(m, ctxEv, animais) {
+    var c = ctxEv.campos;
+    var porLote = !vazio_(c.peso_total_lote_kg);
+    var p = { tipo: EventCatalog.MOMENTOS_PESAGEM.indexOf(c.tipo_pesagem) >= 0 ? c.tipo_pesagem : null, metodo: porLote ? 'MEDIA_LOTE' : nulo_(c.metodo_pesagem), jejum: c.jejum === true, porLote: porLote, lote: null };
+    var numero = function (v) { return typeof v === 'number' && isFinite(v); };
+    if (porLote && numero(c.peso_total_lote_kg) && numero(c.qtd_cabecas_lote) && Math.floor(c.qtd_cabecas_lote) === c.qtd_cabecas_lote && c.peso_total_lote_kg > 0) {
+      var n = animais.length;
+      if (c.qtd_cabecas_lote !== n) {
+        erroGeral_(m, 'qtd_cabecas_lote', 'QTD_DIVERGENTE', 'A lista tem ' + n + (n === 1 ? ' animal' : ' animais') + ', mas "Cabeças na balança" diz ' + c.qtd_cabecas_lote + '. Os dois precisam bater.');
+      } else {
+        var media = Utils.arredondar(c.peso_total_lote_kg / n, 1);
+        if (media < 0.1 || media > EventCatalog.PESO_MAX_KG) erroGeral_(m, 'peso_total_lote_kg', 'VALOR_FORA_DA_FAIXA', 'A média do lote fica em ' + Utils.formatarNumero(media, 1) + ' kg por cabeça, fora da faixa de peso vivo (de 0,1 a ' + Utils.formatarNumero(EventCatalog.PESO_MAX_KG) + ' kg).');
+        else p.lote = { total_kg: c.peso_total_lote_kg, cabecas: n, media_kg: media };
+      }
+    }
+    ctxEv.pesagem = p;
+  }
+  /**
+   * PESAGEM, um animal (04, seções 4.5 e 5.1; 05, seção 2.7): fato independente — o animal precisa estar no rebanho na
+   * data (o dia da saída conta). Uma linha de EVENTO_ANIMAIS (efeito 0, com o peso copiado) e uma de PESAGENS, que nunca
+   * substitui nem altera a anterior (RN-051). Individual: o peso de cada animal, de 0,1 a 2.000 kg (RN-049); por lote: o
+   * peso de cada um fica vazio e ele recebe a média do lote.
+   */
+  function itemPesagem_(m, ctxEv, it) {
+    var d = it.dados;
+    var p = ctxEv.pesagem;
+    apontarExistente_(m, it);
+    camposDoItem_(m, it, EventCatalog.camposAnimal('PESAGEM'), d);
+    if (vazio_(d.animal_id)) return;
+    if (!sujeito_(m, it, 'pesa')) return;
+    var temPeso = !vazio_(d.peso);
+    if (p.porLote && temPeso) { erroItem_(m, it, 'peso', 'CAMPO_NAO_SE_APLICA', 'na pesagem por lote o peso de cada animal fica vazio: cada um recebe a média do lote.'); return; }
+    if (!p.porLote && !temPeso) erroItem_(m, it, 'peso', 'CAMPO_OBRIGATORIO', 'informe o peso.');
+    var kg = p.porLote ? (p.lote ? p.lote.media_kg : null) : (it.camposComErro && it.camposComErro.peso ? null : d.peso);
+    var obs = typeof d.observacoes === 'string' ? nulo_(Utils.aparar(d.observacoes)) : null;
+    linhaEA_(m, ctxEv, it, { efeito_inventario: 0, peso: typeof kg === 'number' ? kg : null, observacoes: obs });
+    if (typeof kg !== 'number' || !p.tipo || !p.metodo) return;
+    it.pesoKg = kg;
+    ctxEv.plano.PESAGENS.push({ weight_id: m.tx.novoId(), animal_id: it.animal_id, event_id: ctxEv.ev.event_id, data_pesagem: ctxEv.ev.event_date, peso_kg: kg, metodo: p.metodo, tipo: p.tipo, observacoes: obs });
+  }
+  /**
+   * Avisos da pesagem (RN-050; 04, seção 4.5): a variação por dia contra a pesagem anterior do animal (e contra a seguinte,
+   * no retroativo) fora de `gmd_plausivel_min_kg_dia` a `gmd_plausivel_max_kg_dia` pede confirmação (PESO_IMPLAUSIVEL: a
+   * digitação que perdeu um dígito); o animal já pesado no mesmo dia, por outro lançamento, também (POSSIVEL_DUPLICIDADE,
+   * quando a guarda do lançamento inteiro não o pegou). Um aviso por animal, com o animal. As contas são as do servidor
+   * (WeightService.variacao); nada bloqueia.
+   */
+  function avisosDaPesagem_(m, ctxEv) {
+    var data = ctxEv.ev.event_date;
+    var minimo = m.params.gmd_plausivel_min_kg_dia;
+    var maximo = m.params.gmd_plausivel_max_kg_dia;
+    var jaDuplicado = m.avisos.some(function (a) { return a.codigo === 'POSSIVEL_DUPLICIDADE'; });
+    var faixa = 'de ' + Utils.formatarNumero(typeof minimo === 'number' ? minimo : -1, 1) + ' a ' + Utils.formatarNumero(typeof maximo === 'number' ? maximo : 2, 1) + ' kg por dia';
+    ctxEv.itens.forEach(function (it) {
+      if (typeof it.pesoKg !== 'number' || (ctxEv.repetidos && ctxEv.repetidos[it.animal_id])) return;
+      var viz = WeightService.vizinhas(m.f, it.animal_id, data);
+      if (viz.mesmoDia.length && !jaDuplicado) {
+        var x = viz.mesmoDia[viz.mesmoDia.length - 1];
+        avisoItem_(m, it, 'POSSIVEL_DUPLICIDADE', it.quem + ' já tem pesagem em ' + br_(data) + ' (' + Utils.formatarNumero(x.peso_kg, 1) + ' kg, ' + WeightService.origemDaPesagem(m.f, x) + '). Gravar mesmo assim?',
+          conflitoCom_(x.event_id, x.event_type, x.event_subtype, data));
+      }
+      [['anterior', viz.anterior], ['seguinte', viz.seguinte]].forEach(function (par) {
+        var v = par[1];
+        if (!v) return;
+        var r = WeightService.variacao(par[0] === 'anterior' ? v : { data: data, peso_kg: it.pesoKg }, par[0] === 'anterior' ? { data: data, peso_kg: it.pesoKg } : v);
+        if (r.gmd_kg_dia === null || !WeightService.implausivel(r.gmd_kg_dia, m.params)) return;
+        var contra = par[0] === 'anterior' ? 'contra ' + Utils.formatarNumero(v.peso_kg, 1) + ' kg em ' + br_(v.data) : 'contra a pesagem seguinte, ' + Utils.formatarNumero(v.peso_kg, 1) + ' kg em ' + br_(v.data);
+        avisoItem_(m, it, 'PESO_IMPLAUSIVEL', it.quem + ': ' + Utils.formatarNumero(it.pesoKg, 1) + ' kg em ' + br_(data) + ' ' + contra + ' (' + r.dias + (r.dias === 1 ? ' dia' : ' dias') + ') dá ' +
+          Utils.formatarNumero(r.gmd_kg_dia, 2) + ' kg por dia, fora da faixa esperada (' + faixa + '). Confira a digitação.', conflitoCom_(v.event_id, v.event_type, v.event_subtype, v.data));
+      });
+    });
   }
 
   // ------------------------------------------------------------------ nascimento ----
@@ -2857,6 +2940,10 @@ var EventService = (function () {
       motivo_descarte: ctxEv.tipo === 'MARCACAO' ? ctxEv.ev.payload_json.motivo_descarte : null,
       // A baixa por divergência não grava AJUSTES: o porquê do lançamento fica no evento (BAIXAS guarda em que contagem faltou).
       motivo_ajuste: ctxEv.subtipo === 'DIVERGENCIA_CONTAGEM' ? nulo_(ctxEv.ev.justificativa) : null,
+      // Pesagem por lote (03b, seção 2.6): o peso total e as cabeças são o fato; o jejum vale para o lançamento.
+      peso_total_lote_kg: ctxEv.pesagem && ctxEv.pesagem.lote ? ctxEv.pesagem.lote.total_kg : null,
+      qtd_cabecas_lote: ctxEv.pesagem && ctxEv.pesagem.lote ? ctxEv.pesagem.lote.cabecas : null,
+      jejum: ctxEv.pesagem && ctxEv.pesagem.jejum ? true : null,
     };
     ev.payload_json = payload_(m, ctxEv, extra);
     var itensPorAnimal = {};
@@ -2890,6 +2977,7 @@ var EventService = (function () {
         identificacoes: ctxEv.plano.IDENTIFICACOES.length, ajustes: ctxEv.plano.AJUSTES.length,
         marcacao: ctxEv.tipo === 'MARCACAO' ? { subtipo: ctxEv.subtipo, acao: ctxEv.ev.payload_json.acao, motivo_descarte: ctxEv.ev.payload_json.motivo_descarte } : null,
         compra: ctxEv.compra || null, venda: ctxEv.venda || null, financeiro: ctxEv.financeiro || null,
+        pesagem: ctxEv.pesagem ? WeightService.resumoDoPlano(ctxEv.pesagem, ctxEv.plano.PESAGENS) : null,
       },
       derivados: { animais: animais, eventos: [ev.event_id].concat(ctxEv.original ? [ctxEv.original.event_id] : []) },
       resposta: function (t) { return resposta_(t, resumo); },
@@ -2999,6 +3087,8 @@ var EventService = (function () {
       event_date: ev ? ev.event_date : r.event_date, status: tx.cru ? tx.cru.avaliar(r.event_id).status : null,
       total_value: ev ? nulo_(ev.total_value) : null, substitui: r.substitui || null, estorna: r.estorna || null,
       animais: ids.map(function (id) { return animalPublico_(tx.cru ? tx.cru.cruPorId('ANIMAIS', id) : tx.repo.porId('ANIMAIS', id)); }).filter(Boolean),
+      // Pesagem: a média, o total e a comparação de cada animal com a pesagem anterior, calculados aqui (a tela só mostra).
+      pesagem: ev && ev.event_type === 'PESAGEM' && r.acao !== 'estornar' ? WeightService.resultadoDoEvento(tx, r.event_id) : null,
     };
   }
   function leiturasConsulta_() {

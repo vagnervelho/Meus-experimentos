@@ -251,6 +251,12 @@ var TestRunner = (function () {
   function ident_(subtipo, data, tipoIdent, itens) {
     return { tipo: 'IDENTIFICACAO', subtipo: subtipo, campos: { event_date: data, tipo_identificacao: tipoIdent }, animais: itens };
   }
+  /** Pesagem individual em balança (momento rotina): itens = [{animal_id, peso}]. */
+  function pesagem_(data, itens, campos) {
+    var c = { event_date: data, tipo_pesagem: 'ROTINA', metodo_pesagem: 'BALANCA' };
+    Object.keys(campos || {}).forEach(function (k) { c[k] = campos[k]; });
+    return { tipo: 'PESAGEM', campos: c, animais: itens };
+  }
   function nascimento_(data, matriz, crias, campos) {
     var c = { event_date: data };
     Object.keys(campos || {}).forEach(function (k) { c[k] = campos[k]; });
@@ -592,6 +598,46 @@ var TestRunner = (function () {
       },
     },
     {
+      id: 'CT-05', titulo: 'Pesagem: as pesagens se acumulam; ganho, GMD e variação calculados na leitura; peso 0 recusado e variação brusca com aviso',
+      executar: function (t) {
+        var P = t.pastos('CT-05', ['Pasto 1']);
+        var id;
+        var ev = [];
+        // As datas do desenho (10/03, 09/06, 19/06 e 29/06) contadas do marco zero: D0+68, +159, +169 e +179 (91 e 10 dias).
+        t.passo('massa', '0501 no Pasto 1 em D0', function () {
+          id = ids_(t.cmd('evento.registrar', entrada_([bicho_(t, { brinco: '0501', sexo: 'M', castrado: true, data_nascimento: t.dia(-500), pasto_destino_id: P['Pasto 1'] })]), 'ct05-massa'))['0501'];
+        });
+        t.passo('1-3', 'Pesagens de 300,0 kg (D0+68), 372,8 kg (D0+159) e 380,0 kg (D0+169), na balança; a resposta traz o ganho contra a anterior', function () {
+          ev.push(t.cmd('evento.registrar', pesagem_(t.dia(68), [{ animal_id: id, peso: 300.0 }]), 'ct05-p1'));
+          ev.push(t.cmd('evento.registrar', pesagem_(t.dia(159), [{ animal_id: id, peso: 372.8 }]), 'ct05-p2'));
+          ev.push(t.cmd('evento.registrar', pesagem_(t.dia(169), [{ animal_id: id, peso: 380.0 }]), 'ct05-p3'));
+          var c = ev[1].pesagem.animais[0];
+          igual_([c.anterior.peso_kg, c.ganho_kg, c.dias, c.gmd_kg_dia, c.variacao_pct], [300, 72.8, 91, 0.8, 24.27], 'segunda pesagem contra a primeira');
+        });
+        t.passo('verificacoes', 'Ficha: 91 dias, ganho 72,8 kg, GMD 0,800 kg/dia, variação 24,27%; intervalo de 10 dias com GMD vazio (DADOS_INSUFICIENTES); 3 linhas, as anteriores intactas, sem coluna de GMD; peso atual 380,0', function () {
+          var b = t.ficha(id).peso;
+          igual_(b.serie.map(function (x) { return [x.data, x.peso_kg]; }), [[t.dia(68), 300], [t.dia(159), 372.8], [t.dia(169), 380]], 'série com 3 pontos em ordem de data');
+          igual_(b.intervalos.map(function (v) { return [v.dias, v.ganho_kg, v.gmd_kg_dia, v.variacao_pct, v.motivo]; }), [[91, 72.8, 0.8, 24.27, null], [10, 7.2, null, 1.93, 'DADOS_INSUFICIENTES']], 'intervalos');
+          igual_(b.projecao.rotulo, 'Estimativa', 'a projeção é rotulada');
+          var linhas = t.tabela('PESAGENS').filter(function (r) { return r.animal_id === id; });
+          igual_(linhas.map(function (r) { return [r.data_pesagem, r.peso_kg, r.metodo, r.tipo]; }).sort(), [[t.dia(159), 372.8, 'BALANCA', 'ROTINA'], [t.dia(169), 380, 'BALANCA', 'ROTINA'], [t.dia(68), 300, 'BALANCA', 'ROTINA']].sort(), 'três linhas, as anteriores intactas');
+          verificar_(Schema.colunas('PESAGENS').every(function (c) { return !/gmd|ganho/i.test(c); }), 'nenhuma coluna de GMD em PESAGENS');
+          var a = t.animal(id);
+          igual_([a.peso_atual, a.data_ultima_pesagem], [380, t.dia(169)], 'peso atual');
+        });
+        t.passo('4', 'Peso 0: VALIDATION; 450,0 kg em D0+179 (7,0 kg/dia): aviso PESO_IMPLAUSIVEL, gravado só com o aceite', function () {
+          var e = t.recusa('evento.registrar', pesagem_(t.dia(179), [{ animal_id: id, peso: 0 }]), 'VALIDATION', 'ct05-zero');
+          igual_(e.details.map(function (d) { return [d.codigo, d.campo]; }), [['VALOR_FORA_DA_FAIXA', 'peso']], 'peso 0');
+          var av = t.recusa('evento.registrar', pesagem_(t.dia(179), [{ animal_id: id, peso: 450.0 }]), 'NEEDS_CONFIRMATION', 'ct05-brusca');
+          igual_(av.details.map(function (d) { return [d.codigo, d.animal_id]; }), [['PESO_IMPLAUSIVEL', id]], 'aviso de variação brusca');
+          verificar_(/7,00 kg por dia/.test(av.details[0].mensagem), 'a mensagem diz a variação por dia: ' + av.details[0].mensagem);
+          var ok = t.cmd('evento.registrar', pesagem_(t.dia(179), [{ animal_id: id, peso: 450.0 }]), 'ct05-brusca', { avisos: ['PESO_IMPLAUSIVEL'] });
+          igual_(t.evento(ok.event_id).payload.avisos_aceitos, [{ codigo: 'PESO_IMPLAUSIVEL', n: 1 }], 'o aceite fica no evento');
+        });
+        t.passo('fim', 'Projeção = reconstrução e financeiro sem divergência', function () { return t.integra('CT-05'); });
+      },
+    },
+    {
       id: 'CT-07', titulo: 'Estorno anula sem apagar: original preservado, auditoria, bloqueios e anulação do animal',
       executar: function (t) {
         var P = t.pastos('CT-07', ['Pasto 1', 'Baixada', 'Pasto 3']);
@@ -784,7 +830,7 @@ var TestRunner = (function () {
       },
     },
     {
-      id: 'CT-17', titulo: 'Retroativo e mesmo dia: data passada não quebra a cadeia gravada (identificação no lugar da pesagem, Fase 2)',
+      id: 'CT-17', titulo: 'Retroativo e mesmo dia: data passada não quebra a cadeia gravada (a pesagem e a identificação como fatos do dia da venda)',
       executar: function (t) {
         var P = t.pastos('CT-17', ['Pasto 1', 'Pasto 2', 'Baixada']);
         var comp = t.parceiro('Comprador (CT-17)', ['COMPRADOR'], 'ct17-comp');
@@ -809,6 +855,10 @@ var TestRunner = (function () {
           venda = t.cmd('evento.registrar', venda_(t.dia(170), comp, [ids['1701'], ids['1702']]), 'ct17-venda').event_id;
           var ok = t.cmd('evento.registrar', ident_('PRIMEIRA_IDENTIFICACAO', t.dia(170), 'SISBOV', [{ animal_id: ids['1701'], codigo: 'SB-1701' }, { animal_id: ids['1702'], codigo: 'SB-1702' }]), 'ct17-ident');
           igual_(ok.animais.length, 2, 'identificação no dia da venda (o dia da saída conta)');
+          var pes = t.cmd('evento.registrar', pesagem_(t.dia(170), [{ animal_id: ids['1701'], peso: 480.5 }, { animal_id: ids['1702'], peso: 471.0 }]), 'ct17-pesagem');
+          igual_(pes.pesagem.n, 2, 'pesagem do dia da venda aceita (limite inclusivo)');
+          var ep = t.recusa('evento.registrar', pesagem_(t.dia(171), [{ animal_id: ids['1702'], peso: 470.0 }]), 'VALIDATION', 'ct17-pesagem-depois');
+          igual_(ep.details.map(function (d) { return [d.codigo, d.animal_id]; }), [['FORA_DA_PERMANENCIA', ids['1702']]], 'pesagem do dia seguinte, fora da permanência');
           var e = t.recusa('evento.registrar', ident_('PRIMEIRA_IDENTIFICACAO', t.dia(171), 'RFID', [{ animal_id: ids['1702'], codigo: '777' }]), 'VALIDATION', 'ct17-ident-depois');
           igual_(e.details.map(function (d) { return [d.codigo, d.animal_id]; }), [['FORA_DA_PERMANENCIA', ids['1702']]], 'fora da permanência');
           var c = t.recusa('evento.registrar', transf_(t.dia(170), P['Pasto 1'], P['Pasto 2'], [ids['1702']]), 'CONFLICT', 'ct17-transf-dia');
@@ -834,9 +884,11 @@ var TestRunner = (function () {
             parcelas: [{ data_vencimento: t.dia(65), valor: valor / 2 }, { data_vencimento: t.dia(95), valor: valor / 2 }], custos: [{ tipo: 'FRETE', valor: 3000, data_vencimento: t.dia(35) }],
           };
         };
-        t.passo('massa', 'Compra de 0801 a 0803 por 9.000,00 em 2 parcelas e frete de 30,00 (D0+35); identificação SISBOV em D0+42; transferência para o Pasto 2 em D0+59', function () {
+        var pes;
+        t.passo('massa', 'Compra de 0801 a 0803 por 9.000,00 em 2 parcelas e frete de 30,00 (D0+35); pesagem dos 3 e identificação SISBOV em D0+42; transferência para o Pasto 2 em D0+59', function () {
           r = t.cmd('evento.registrar', compra(['0801', '0802', '0803'], null, 900000), 'ct18-compra');
           ids = r.animais.map(function (a) { return a.animal_id; });
+          pes = t.cmd('evento.registrar', pesagem_(t.dia(42), ids.map(function (id, i) { return { animal_id: id, peso: 280 + i * 5 }; })), 'ct18-pesagem').event_id;
           iden = t.cmd('evento.registrar', ident_('PRIMEIRA_IDENTIFICACAO', t.dia(42), 'SISBOV', ids.map(function (id, i) { return { animal_id: id, codigo: 'SB-080' + (i + 1) }; })), 'ct18-ident').event_id;
           tr = t.cmd('evento.registrar', transf_(t.dia(59), P['Pasto 1'], P['Pasto 2'], ids), 'ct18-transf').event_id;
         });
@@ -852,7 +904,7 @@ var TestRunner = (function () {
           igual_([t.tabela('OPERACOES').length - ops, k.substitui, t.evento(r.event_id).status], [1, r.event_id, 'ESTORNADO'], 'um só commit; original ESTORNADO');
           igual_(ids.map(function (id) { var a = t.animal(id); return [a.codigo_interno, a.evento_origem_id, a.brinco, a.pasto_atual_id]; }),
             ids.map(function (id, i) { return [codigos[i], k.event_id, ['0801', '0812', '0803'][i], P['Pasto 2']]; }), 'mesmos animais, brinco trocado, ainda no Pasto 2');
-          igual_([t.evento(iden).status, t.evento(tr).status], ['CONFIRMADO', 'CONFIRMADO'], 'identificação e transferência seguem válidas');
+          igual_([t.evento(pes).status, t.evento(iden).status, t.evento(tr).status], ['CONFIRMADO', 'CONFIRMADO', 'CONFIRMADO'], 'pesagem, identificação e transferência seguem válidas');
           verificar_(t.doEvento('FINANCEIRO', r.event_id).every(function (f) { return f.status === 'CANCELADO'; }), 'lançamentos do original CANCELADO');
           verificar_(t.doEvento('FINANCEIRO', k.event_id).every(function (f) { return f.status === 'ATIVO'; }), 'lançamentos do substituto valendo');
         });
@@ -863,13 +915,13 @@ var TestRunner = (function () {
           var e = t.recusa('evento.corrigir', dados, 'VALIDATION', 'ct18-brinco-repetido');
           verificar_(e.details.some(function (d) { return d.codigo === 'BRINCO_DUPLICADO'; }), 'esperava BRINCO_DUPLICADO; veio ' + e.details.map(function (d) { return d.codigo; }).join(', '));
         });
-        t.passo('2', 'Corrigir retirando o 0803 (com identificação e transferência posteriores): CONFLICT com os dois', function () {
+        t.passo('2', 'Corrigir retirando o 0803 (com pesagem, identificação e transferência posteriores): CONFLICT com os três', function () {
           var dados = compra(['0801', '0812'], ids.slice(0, 2), 600000);
           dados.event_id = k.event_id;
           dados.justificativa = 'Tirar o 0803';
           var e = t.recusa('evento.corrigir', dados, 'CONFLICT', 'ct18-tirar');
           var achados = e.details.filter(function (d) { return d.animal_id === ids[2] && d.conflito; }).map(function (d) { return d.conflito.event_id; }).sort();
-          igual_(achados, [iden, tr].sort(), 'a identificação e a transferência do 0803 impedem');
+          igual_(Utils.unicos(achados).sort(), [pes, iden, tr].sort(), 'a pesagem, a identificação e a transferência do 0803 impedem');
         });
         // Variante da Fase 1 (09, seção 8): substituição de ENTRADA_INICIAL com correção de localização posterior.
         var orig;
@@ -903,7 +955,7 @@ var TestRunner = (function () {
       },
     },
     {
-      id: 'CT-10', titulo: 'Reenvio não duplica; gravações não se intercalam (OUTRA_ENTRADA no lugar da PESAGEM, que chega na Fase 3)',
+      id: 'CT-10', titulo: 'Reenvio não duplica; gravações não se intercalam (OUTRA_ENTRADA nos passos 1, 2, 4 e 5; a pesagem no passo 3)',
       executar: function (t) {
         var d1 = Utils.somaDias(t.estado.d0, 10);
         var k1 = t.chave('ct10-k1');
@@ -923,7 +975,15 @@ var TestRunner = (function () {
         t.passo('2', 'K1 com outro conteúdo: IDEMPOTENCY_MISMATCH', function () {
           t.erro(t.api('evento.registrar', outra_(d1, [bicho_(t, { brinco: '1002' })]), { chave: k1 }), 'IDEMPOTENCY_MISMATCH', 'K1 com outro conteúdo');
         });
-        t.naoSeAplica('3', 'Mesma pesagem com chave nova: aviso POSSIVEL_DUPLICIDADE', 'PESAGEM chega na Fase 3 (o passo volta a rodar como escrito).');
+        t.passo('3', 'Mesma pesagem com chave nova: aviso POSSIVEL_DUPLICIDADE; com o aceite, grava', function () {
+          var animal = r1.dados.animais[0].animal_id;
+          var p = pesagem_(Utils.somaDias(t.estado.d0, 20), [{ animal_id: animal, peso: 410.0 }]);
+          t.cmd('evento.registrar', p, 'ct10-pesagem');
+          var e = t.recusa('evento.registrar', p, 'NEEDS_CONFIRMATION', 'ct10-pesagem-2');
+          igual_(e.details.map(function (d) { return d.codigo; }), ['POSSIVEL_DUPLICIDADE'], 'aviso de duplicidade');
+          t.cmd('evento.registrar', p, 'ct10-pesagem-2', { avisos: ['POSSIVEL_DUPLICIDADE'] });
+          igual_(t.tabela('PESAGENS').filter(function (x) { return x.animal_id === animal; }).length, 2, 'duas pesagens com o aceite');
+        });
         t.passo('4', 'Resposta perdida: operacao.status(K1) devolve CONFIRMADA', function () {
           var s = t.ok(t.api('operacao.status', { chave: k1 }), 'status');
           igual_([s.situacao, s.op_id], ['CONFIRMADA', r1.opId], 'situação e operação');
@@ -1228,7 +1288,7 @@ var TestRunner = (function () {
   var DEMO_META = { d0: 240, nascimentos: 255, compras: 70, vendas: 240, mortes: 15, descartes: 5, divergencias: 1, ativos: 304 };
   /** O que 09, seção 7, pede e chega em fase posterior (o relatório da demonstração lista, com a fase). */
   var DEMO_FORA = [
-    { item: 'Manejos coletivos (pesagens, vacinações e vermifugações)', fase: 3 },
+    { item: 'Manejos sanitários coletivos (vacinações e vermifugações)', fase: 3 },
     { item: 'Três estações de monta (exposição, cobertura, inseminação e diagnóstico)', fase: 3 },
     { item: 'Lançamentos avulsos com rateio (evento RATEIO)', fase: 4 },
     { item: 'Parcelas em todos os estados (baixa, baixa parcial, desfazer baixa)', fase: 4 },
@@ -1237,6 +1297,9 @@ var TestRunner = (function () {
   var CAMPANHA_IDENT = 60;
   var CAMPANHA_DESMAMA = 90;
   var DIAS_BOIS = [180, 360, 540, 720, 900, 1080];
+  /** Pesagens coletivas da recria, das novilhas e do pasto arrendado (a cada 120 dias, a partir de D0+60). */
+  var DIAS_PESAGEM = [60, 180, 300, 420, 540, 660, 780, 900, 1020];
+  var PASTOS_PESADOS = [3, 4, 5];
 
   /**
    * Os comandos da demonstração, sorteados com semente fixa a partir de D0 (09, seção 7, na parte que as fases entregues
@@ -1412,6 +1475,19 @@ var TestRunner = (function () {
     Object.keys(campanhas).map(Number).sort(function (a, b) { return a - b; }).forEach(function (d) { campanhas[d].forEach(function (k) { A[k].brinco = novoBrinco(); A[k].identificada = d; }); });
     var trocado = nascidos.filter(function (k) { return A[k].identificada && A[k].identificada < 600 && !A[k].saida; })[0];
     var troca = trocado ? { dia: A[trocado].identificada + 45, animal: trocado, codigo: novoBrinco() } : null;
+    // Pesagens coletivas (Fase 3): o último peso conhecido de cada animal (o do marco zero, o da compra por kg, o ao nascer) e
+    // o ganho diário de cada um, fixo e plausível (0,40 a 0,69 kg/dia, sem sorteio: a sequência do resto do plano não muda);
+    // sem peso conhecido, o primeiro vem da idade. O animal pesado no mesmo dia por outro lançamento fica de fora.
+    var pesoConhecido = {};
+    ordem.forEach(function (k) { var a = A[k]; if (a.peso) pesoConhecido[k] = { dia: a.tipo === 'NASCIDO' || a.tipo === 'COMPRADO' ? a.entrada : 0, kg: a.peso }; });
+    var ganhoDe = function (k) { var h = 0; for (var i = 0; i < k.length; i++) h = (h * 31 + k.charCodeAt(i)) % 1000; return 0.4 + (h % 30) / 100; };
+    var pesoEm = function (k, d) {
+      var c = pesoConhecido[k];
+      var kg = c ? c.kg + ganhoDe(k) * (d - c.dia) : 30 + 0.6 * (d - A[k].nasc);
+      kg = Math.round(Math.min(Math.max(kg, 30), 650) * 10) / 10;
+      pesoConhecido[k] = { dia: d, kg: kg };
+      return kg;
+    };
     // 6. Emissão: um comando por passo, dia a dia (entradas, movimentos, saídas), com a posição de cada animal.
     var cmds = [];
     var pasto = {};
@@ -1514,6 +1590,15 @@ var TestRunner = (function () {
       if (!ks.length) return;
       var e = emitir('transferencia-estornada', transf_(dia(750), '@p:4', '@p:2', ks.map(ref)));
       emitir('transferencia-estornada:estorno', { event_id: '@e:' + e.n, justificativa: 'Lançada no pasto errado (demonstração)' }, { rota: 'evento.estornar' });
+    });
+    DIAS_PESAGEM.forEach(function (d) {
+      no(d, 1, function () {
+        PASTOS_PESADOS.forEach(function (p) {
+          var ks = ordem.filter(function (k) { return ativo[k] && pasto[k] === p && !(pesoConhecido[k] && pesoConhecido[k].dia === d); });
+          if (!ks.length) return;
+          emitir('pesagem-' + d + '-' + p, { tipo: 'PESAGEM', campos: { event_date: dia(d), tipo_pesagem: 'ROTINA', metodo_pesagem: 'BALANCA' }, animais: ks.map(function (k) { return { animal_id: ref(k), peso: pesoEm(k, d) }; }) });
+        });
+      });
     });
     no(610, 1, function () { emitir('nao-localizado', { tipo: 'MARCACAO', subtipo: 'NAO_LOCALIZADO', campos: { event_date: dia(610), acao: 'MARCAR' }, animais: [{ animal_id: ref(garrotes[46]) }] }); });
     no(270, 1, function () { emitir('marcar-descarte', { tipo: 'MARCACAO', subtipo: 'DESCARTE', campos: { event_date: dia(270), acao: 'MARCAR', motivo_descarte: 'IDADE' }, animais: velhas.slice(0, 8).map(function (k) { return { animal_id: ref(k) }; }) }); });

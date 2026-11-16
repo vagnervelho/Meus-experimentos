@@ -16,16 +16,17 @@ const S = require('./apoio-sistema');
 const FIXTURE = require('./fixtures/coercao.json');
 
 const { js, USUARIO } = S;
-const CENARIOS = ['PREPARO', 'CT-09', 'CT-01', 'CT-02', 'CT-03', 'CT-04', 'CT-07', 'CT-08', 'CT-13', 'CT-14', 'CT-17', 'CT-18', 'CT-10', 'CT-12', 'RESTAURACAO', 'CT-20', 'CT-11', 'ISOLAMENTO'];
+const CENARIOS = ['PREPARO', 'CT-09', 'CT-01', 'CT-02', 'CT-03', 'CT-04', 'CT-05', 'CT-07', 'CT-08', 'CT-13', 'CT-14', 'CT-17', 'CT-18', 'CT-10', 'CT-12', 'RESTAURACAO', 'CT-20', 'CT-11', 'ISOLAMENTO'];
 /**
  * Passos que ainda não rodam (peça de fase posterior ou só na conta do dono), com a situação esperada. O CT-09 roda
  * inteiro desde a venda e o CT-12 com a reconciliação (Fase 2); ficam o resultado gerencial (CT-03, Fase 4), o rateio
- * por evento RATEIO (CT-13 c a f, Fase 4), a pesagem (CT-10 passo 3, Fase 3) e o que só a conta do dono prova.
+ * por evento RATEIO (CT-13 c a f, Fase 4) e o que só a conta do dono prova. A pesagem (Fase 3) roda: CT-05 inteiro, o passo 3
+ * do CT-10, o dia da venda do CT-17 (b) e a massa do CT-18.
  */
 const FORA = {
   'CT-03': { 4: 'NAO_SE_APLICA' },
   'CT-13': { c: 'NAO_SE_APLICA', d: 'NAO_SE_APLICA', e: 'NAO_SE_APLICA', f: 'NAO_SE_APLICA' },
-  'CT-10': { 3: 'NAO_SE_APLICA', 6: 'PENDENTE_NA_CONTA_DO_DONO' },
+  'CT-10': { 6: 'PENDENTE_NA_CONTA_DO_DONO' },
   'CT-20': { 2: 'NAO_SE_APLICA' },
 };
 
@@ -172,6 +173,11 @@ test('base de demonstração (TEST_PLAN = DEMO): a composição de 09, seção 7
   const conta = (tipo) => vig.filter((e) => e.event_type === tipo).length;
   assert.deepEqual([conta('ENTRADA_INICIAL'), conta('COMPRA'), conta('NASCIMENTO'), conta('MORTE'), conta('DESCARTE'), conta('ESTORNO')], [6, 10, d.totais.partos, 15, 5, 2]);
   assert.ok(conta('TRANSFERENCIA') >= 20 && conta('VENDA') >= 20 && conta('IDENTIFICACAO') >= 10, 'transferências, vendas e identificações ao longo dos três anos');
+  // Fase 3: as pesagens coletivas da recria, das novilhas e do pasto arrendado (a cada 120 dias), aceitas sem aviso.
+  const pesagens = s.tabela('PESAGENS', demo).filter((x) => vig.some((e) => e.event_id === x.event_id && e.event_type === 'PESAGEM'));
+  assert.ok(conta('PESAGEM') >= 20 && pesagens.length >= 1000, conta('PESAGEM') + ' pesagens com ' + pesagens.length + ' animais');
+  assert.ok(pesagens.every((x) => x.tipo === 'ROTINA' && x.metodo === 'BALANCA'), 'pesagens de rotina, na balança');
+  assert.ok(vig.filter((e) => e.event_type === 'PESAGEM').every((e) => !e.payload_json || !e.payload_json.avisos_aceitos), 'nenhum aviso aceito: o plano só pesa o plausível');
   assert.equal(eventos.filter((e) => e.reversal_of_event_id && e.event_type !== 'ESTORNO').length, 2, 'uma compra e uma venda corrigidas (substitutos)');
   assert.deepEqual(eventos.filter((e) => e.event_type === 'ESTORNO').map((e) => eventos.find((x) => x.event_id === e.reversal_of_event_id).event_type).sort(), ['OUTRA_ENTRADA', 'TRANSFERENCIA']);
   // Vendas nas três formas de preço, com as bases de peso; descarte com receita; baixa na contagem depois de não localizado.

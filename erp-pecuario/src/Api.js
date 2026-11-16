@@ -140,7 +140,7 @@ var Api = (function () {
     'financeiro.custosAnimal': futura_(4, 'Financeiro'),
     'sanidade.agenda': futura_(3, 'Sanidade'),
     'reproducao.indicadores': futura_(3, 'Reprodução'),
-    'peso.desempenho': futura_(3, 'Pesagens'),
+    'peso.desempenho': consulta_(function (ctx, p) { return WeightService.desempenho(ctx, p.dados); }),
     'dashboard.obter': consulta_(function (ctx, p) { return InventoryService.visaoGeral(ctx, p.dados); }),
     'alerta.listar': consulta_(function (ctx) { return InventoryService.listarAlertas(ctx, Maintenance.estado(ctx).alertas_estado); }),
     'relatorio.obter': futura_(5, 'Relatórios'),
