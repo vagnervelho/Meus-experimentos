@@ -90,7 +90,13 @@ test('ficha: blocos A a J, árvore genealógica até N gerações, crias, pastos
   const { c, ext, por, bezerra } = rebanho();
   const f = c.ler(c.G.AnimalService.consultaFicha({ animal_id: bezerra.animal_id }));
   assert.deepEqual(Object.keys(f).sort(), ['anexos', 'animal_id', 'data', 'eventos', 'financeiro', 'genealogia', 'geral', 'localizacao', 'pastos', 'peso', 'reprodutivo', 'sanitario'].sort());
-  for (const b of ['peso', 'sanitario']) {
+  // E (peso): entregue na Fase 3, etapa E3.1 (WeightService.blocoFicha; números em pesagem.desempenho.test). A bezerra
+  // nunca foi pesada: série e intervalos vazios, peso atual e projeção sem valor e com o motivo (nunca zero).
+  assert.equal(f.peso.entregue, true, 'peso: módulo entregue');
+  assert.deepEqual([f.peso.serie, f.peso.intervalos], [[], []]);
+  assert.deepEqual([f.peso.peso_atual.valor, f.peso.peso_atual.motivo, f.peso.peso_atual.n], [null, 'DADOS_INSUFICIENTES', 0]);
+  assert.deepEqual([f.peso.projecao.valor, f.peso.projecao.motivo, f.peso.projecao.rotulo], [null, 'DADOS_INSUFICIENTES', 'Estimativa']);
+  for (const b of ['sanitario']) {
     assert.equal(f[b].entregue, false, b + ': módulo não entregue');
     assert.deepEqual(f[b].itens, []);
     assert.ok(f[b].fase > 1 && typeof f[b].modulo === 'string' && /próxima etapa/.test(f[b].mensagem));

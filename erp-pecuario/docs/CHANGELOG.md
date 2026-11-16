@@ -1046,3 +1046,61 @@ Nenhuma linha de código mudou nesta etapa: só documentos.
   - teste aleatório com 120 sementes novas × 100 passos (310000 a 310119): 6.227 comandos aceitos, 4.850 recusados,
     0 falhas;
   - a injeção da tela sob demanda no iframe do HtmlService continua a verificar na conta do dono (NV).
+
+## 16/11/2026 — Fase 3, etapa E3.1 (pesagem e modo curral)
+
+- **PESAGEM no motor, por um tratador só.** O tipo PESAGEM e o módulo PESAGENS ficaram ativos (`EventCatalog`: momento
+  da pesagem, método, jejum, peso total e cabeças do lote; por animal, o peso e as observações). Individual, coletiva e por
+  lote passam pelo mesmo caminho do `EventService` em todo comando — registro, retroativo, mesmo dia, correção (também a
+  do substituto), estorno, importação e desfazer —: uma linha de PESAGENS por animal com a data do evento e a linha do
+  animal com efeito 0 (um fato, que precisa caber numa permanência do animal no rebanho). Por lote, cada animal fica com a
+  média (1 casa, MEDIA_LOTE) e as cabeças precisam bater com a lista. Peso fora de 0,1 a 2.000 kg ou com duas casas é
+  recusado (RN-049); variação diária contra a pesagem anterior — ou, no retroativo, contra a seguinte — fora de −1,0 a
+  2,0 kg/dia pede confirmação (PESO_IMPLAUSIVEL, RN-050), e a pesagem do animal já pesado no dia por outro lançamento
+  também (POSSIVEL_DUPLICIDADE). O peso atual e a data da última pesagem continuam projeção.
+- **Integridade.** PESAGENS conferida pela trava e pela verificação (`AuditService.conferirDominio_`): a data = a do
+  evento e dentro da permanência (LINHA_DO_TEMPO), o momento da lista e igual em todo o lançamento, uma por animal, o peso
+  na faixa e igual ao da linha do animal, a média do lote = total ÷ cabeças (COPIAS).
+- **Desempenho no servidor** (`WeightService`, novo, puro): ganho, dias, GMD (3 casas) e variação (2 casas) entre
+  pesagens, só entre métodos individuais e dentro da mesma permanência; intervalo abaixo de 28 dias sem GMD
+  (DADOS_INSUFICIENTES, nunca zero, RN-052); GMD do período, por pasto (pelos dias em cada um), por categoria (a do início
+  do intervalo) e de lote; projeção a partir da última pesagem com o GMD de referência, rotulada "Estimativa" (P10); peso
+  ao nascer de referência só como ponto estimado da curva. Rota `peso.desempenho` (antes futura). A lotação e o peso médio
+  do pasto em data já usavam a pesagem mais recente até a data, com a validade, e ganharam teste.
+- **Telas.** `Weights.html` sob demanda (41 KB de 150 KB): o desempenho (filtros, indicadores, por pasto e categoria, as
+  pesagens com o GMD de lote ou o motivo, curvas de até 5 animais) e o modo curral (brinco no teclado numérico, Enter,
+  peso, Enter; contador do pasto e os que faltam; não encontrado como pendência; repetido; desfazer o último; fila no
+  rascunho do aparelho e do servidor; envio em blocos de 20 com a chave guardada antes de sair; sem sinal, o bloco espera;
+  resposta perdida conferida pela chave; aviso do servidor aceito na linha). A ficha ganhou o bloco de peso com a curva em
+  SVG próprio (`UI.curvaPeso`: medidos, estimados, ao nascer, projeção tracejada e a tabela equivalente). O formulário, a
+  revisão, o resultado, a correção pelo detalhe e o detalhe do evento conhecem a pesagem; a visão geral lista a pesagem do
+  curral em andamento. A página inicial foi a 421 KB de 450 KB.
+- **Aceitação.** `runAcceptanceTests` com o CT-05 inteiro (91 dias, 72,8 kg, 0,800 kg/dia, 24,27%; o intervalo de 10
+  dias sem GMD; peso 0 recusado; 7,00 kg/dia com aviso) e o passo 3 do CT-10 (pesagem repetida no dia), que deixou de ser
+  NAO_SE_APLICA; CT-17 com a pesagem no dia da venda (vale) e no seguinte (recusada) e CT-18 com a pesagem dos comprados, que segue válida na correção da compra e está entre os lançamentos que impedem a retirada. A base de demonstração ganhou 22
+  pesagens coletivas de rotina (1.392 animais pesados), sem aviso: 401 comandos.
+- **Teste aleatório.** Entrada PESAGEM no registro único (`tests/apoio-fuzz.js`), PESO_IMPLAUSIVEL na lista de avisos e o
+  oráculo `REPLAY:PESO_ATUAL`. Com a PESAGEM no sorteio, a primeira identificação deixou de ser aceita nas 16 sementes
+  fixas: o gerador da identificação sorteia o subtipo antes e a semente 57 entrou nas fixas (17).
+- **A resposta dos outros tipos não mudou.** A primeira execução completa do `npm test` nesta etapa acusou 21 falhas: as
+  varreduras de queda de `tests/unitofwork.adversarial.test.js` comparam a resposta inteira do reenvio, e a resposta de
+  todo comando passara a levar `pesagem: null`. A chave `pesagem` agora só existe na resposta da PESAGEM; as outras duas
+  falhas eram de comportamento novo (abaixo).
+- **Testes que mudaram com o comportamento** (sem afrouxar): as listas de tipos e módulos ativos (`events`, `api`), os
+  menus com Pesagens (`tests/ui/interface.test.js`, `tests/ui/sobdemanda.test.js`), o CT-10 fora do NAO_SE_APLICA e a
+  ordem dos cenários (`acceptance`), o bloco de peso da ficha entregue, com o motivo de cada valor vazio
+  (`tests/animals.test.js`), e o caso da PESAGEM no estorno e na correção de todo tipo ativo (`tests/estorno.test.js`,
+  E2.7). Novos: `tests/pesagem.test.js` (12), `tests/pesagem.desempenho.test.js` (10) e
+  `tests/ui/pesagem.test.js` (8, a 360 px, com a rede cortada e o reenvio).
+- `docs/CONTRATOS.md`: seções 11, 12, 14, 15.2, 19, 21, 36 e 37, e a nova seção 38.
+- Execuções desta etapa, verificadas em Node e no Playwright deste repositório:
+  - `npm test` na primeira execução completa da etapa: 702 testes, 681 aprovados e 21 falhas (as da resposta acima e as
+    duas de comportamento novo); depois do conserto, 703 testes, 703 aprovados e 0 falhas (582 s);
+  - `npm run ui:check` com 105 testes, 105 aprovados e 0 falhas (240 s), página inicial com 421 KB de 450 KB, a
+    importação com 47 KB e as pesagens com 41 KB de 150 KB;
+  - teste aleatório com 120 sementes novas × 100 passos (330000 a 330119): 6.336 comandos aceitos, 4.733 recusados,
+    0 falhas; depois do conserto da resposta, mais 120 sementes novas × 100 passos (340000 a 340119): 6.320 aceitos,
+    4.727 recusados, 0 falhas;
+  - a verificar na conta do dono: a tela sob demanda no iframe do HtmlService (NV, desde a etapa BASE), o teclado
+    numérico e o rascunho no celular de verdade com sinal fraco, e o tempo real do Sheets com as pesagens da base de
+    demonstração.

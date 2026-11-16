@@ -3082,14 +3082,16 @@ var EventService = (function () {
     var ev = tx.cru ? tx.cru.cruPorId('EVENTOS', r.event_id) : tx.repo.porId('EVENTOS', r.event_id);
     var linhas = tx.cru ? tx.cru.cruPor('EVENTO_ANIMAIS', 'event_id', alvo) : tx.repo.por('EVENTO_ANIMAIS', 'event_id', alvo);
     var ids = Utils.unicos(linhas.map(function (l) { return l.animal_id; }));
-    return {
+    var out = {
       acao: r.acao || null, event_id: r.event_id, event_type: ev ? ev.event_type : r.event_type, event_subtype: ev ? nulo_(ev.event_subtype) : null,
       event_date: ev ? ev.event_date : r.event_date, status: tx.cru ? tx.cru.avaliar(r.event_id).status : null,
       total_value: ev ? nulo_(ev.total_value) : null, substitui: r.substitui || null, estorna: r.estorna || null,
       animais: ids.map(function (id) { return animalPublico_(tx.cru ? tx.cru.cruPorId('ANIMAIS', id) : tx.repo.porId('ANIMAIS', id)); }).filter(Boolean),
-      // Pesagem: a média, o total e a comparação de cada animal com a pesagem anterior, calculados aqui (a tela só mostra).
-      pesagem: ev && ev.event_type === 'PESAGEM' && r.acao !== 'estornar' ? WeightService.resultadoDoEvento(tx, r.event_id) : null,
     };
+    // Pesagem (só no registro e na correção de uma PESAGEM; a resposta dos outros tipos não muda): a média, o total e a
+    // comparação de cada animal com a pesagem anterior, calculados aqui (a tela só mostra).
+    if (ev && ev.event_type === 'PESAGEM' && r.acao !== 'estornar') out.pesagem = WeightService.resultadoDoEvento(tx, r.event_id);
+    return out;
   }
   function leiturasConsulta_() {
     return Timeline.LEITURAS.concat(['PROPRIEDADES', 'BAIXAS', 'COMPRAS', 'VENDAS', 'ANEXOS', 'PLANO_CONTAS']);

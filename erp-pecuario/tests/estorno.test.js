@@ -94,6 +94,12 @@ const CASOS = [
     registrar: (x) => ({ tipo: 'DESCARTE', campos: { event_date: '2026-07-01', destino: 'CONSUMO_PROPRIO', motivo: 'IDADE', receita_valor: 50000 }, animais: [{ animal_id: x.ids.m5 }] }),
     corrigir: (x) => ({ tipo: 'DESCARTE', campos: { event_date: '2026-07-01', destino: 'DOACAO', motivo: 'IDADE' }, animais: [{ animal_id: x.ids.m5 }] }),
     dependente: (x) => [outraEntrada('2026-08-01', [{ animal_id: x.ids.m5, pasto_destino_id: PASTOS.A }], { description: 'Voltou da doação' }), 'ENTRADA_JA_DENTRO'] },
+  { tipo: 'PESAGEM',
+    registrar: (x) => ({ tipo: 'PESAGEM', campos: { event_date: '2026-03-01', tipo_pesagem: 'ROTINA', metodo_pesagem: 'BALANCA' }, animais: [{ animal_id: x.ids.f1, peso: 412.5 }, { animal_id: x.ids.m4, peso: 380 }] }),
+    corrigir: (x) => ({ tipo: 'PESAGEM', campos: { event_date: '2026-03-02', tipo_pesagem: 'ROTINA', metodo_pesagem: 'BALANCA' }, animais: [{ animal_id: x.ids.f1, peso: 421.5 }, { animal_id: x.ids.m4, peso: 380 }] }),
+    // A pesagem é um fato independente: nenhum evento depende dela (a pesagem seguinte é comparada com a anterior que
+    // houver, e a do estorno de uma entrada é que impede; pesagem.test).
+    dependente: null },
   { tipo: 'IDENTIFICACAO', subtipo: 'PRIMEIRA_IDENTIFICACAO',
     registrar: (x) => ident('PRIMEIRA_IDENTIFICACAO', '2026-03-01', [{ animal_id: x.ids.bez, codigo: '0601' }]),
     corrigir: (x) => ident('PRIMEIRA_IDENTIFICACAO', '2026-03-01', [{ animal_id: x.ids.bez, codigo: '0602' }]),
