@@ -944,3 +944,35 @@ falharam). Em vez de uma conferência nova por caminho, as garantias ficaram na 
   comandos (2.184 ms na trava) contra 18.637 ms (1.754 ms) no código de antes desta etapa.
 - Verificado em Node: `npm test` com 673 testes, 673 aprovados e 0 falhas (535 s); `npm run ui:check` com 92 testes, 92
   aprovados e 0 falhas (227 s), página montada com 449 KB de 450 KB.
+
+## 16/11/2026 — Fase 2, relatório da convergência
+
+Nenhuma linha de código mudou nesta etapa: só documentos.
+- `docs/RELATORIO_FASE2.md`, seção 6.8 (nova), "Convergência":
+  - por que as quatro rodadas não convergiam (23, 19, 23, 29 achados; 0 %, 5 %, 35 % e 55 % de correções incompletas);
+  - a trava única: o que confere, onde roda, o custo medido e o que ela não garante;
+  - o teste aleatório: as sementes e os passos de cada passada, os 8 defeitos do sistema e os 14 do modelo, e as
+    levas finais;
+  - a revisão final (rodada 5): 17 achados por lente e gravidade, com a decisão de cada um;
+  - o balanço das cinco rodadas, que diz que a convergência **não** está demonstrada.
+- O mesmo relatório, outras seções: o resumo, as entregas, os números da seção 2, o que só o dono pode executar (a
+  ratificação das decisões da convergência, o custo da trava no Sheets, o desfazer com o período fechado), as decisões
+  (itens 12, 14 e o novo 15) e as limitações (itens 11, 12, 13, 15 e 16, e os novos 17 a 22).
+- Execuções desta etapa, sobre o código final: ‹CHANGELOG_EXECUCOES›
+- `docs/CONTRATOS.md`, conferido por amostra contra o código (trava: `CHECAGENS_DOMINIO`, `conferirDominio_`,
+  `sementesDaTrava`, `travar`, `avisosDaTrava`, `politicaDosAvisos`, `propriosDoLote`, `Repository.bifurcar`,
+  `UnitOfWork.retratoDepois_`, `ImportService.travarNoEnsaio_`, `Validation.bloqueado`, as mensagens da recusa e os três
+  parâmetros que conferem o banco inteiro; teste aleatório: as funções e os oráculos de `tests/apoio-fuzz.js`, as variáveis
+  `FUZZ_*`, as 16 sementes fixas de 60 passos, os 13 casos de regressão e as probabilidades do gerador). Três
+  imprecisões foram corrigidas no texto, sem mudança de contrato:
+  - FILHAS_SEM_PAI é alerta e fica fora da trava; só impede o reparo na verificação (seções 10.5 e 11);
+  - `reparo_impedido` conta qualquer achado da fonte quebrada junto de um ERRO com reparo, e não só "achado de ERRO";
+  - a quarentena refaz o retrato até 3 vezes, e a volta que pede mais quarentena não confere os achados novos.
+  ‹CHANGELOG_CUSTO_CONTRATOS›
+- `CHANGELOG`: uma entrada por etapa da convergência (a trava, as passadas 1 a 4 e a revisão final), conferidas contra
+  o registro de cada etapa.
+- `docs/fase-0/10-plano-de-implementacao.md`, seção 8: a convergência não mudou nenhum estado de entrega (E2.1 a E2.11
+  continuam entregues, a verificação continua com 26 checagens e a validação na conta do dono continua aberta). O
+  arquivo não mudou.
+- Continuam com números antigos, fora desta etapa: `README.md` (555 e 77 testes, 437 KB) e
+  `docs/fase-0/11-riscos-e-premissas.md` (R-12 e R-31).

@@ -774,13 +774,17 @@ a conferência final do ESTADO RESULTANTE.
 **Revisão final da Fase 2 (rodada 5): garantias que valem para todo caminho.**
 - **Fonte quebrada à mão** (`AuditService`, `fonte`): os achados de COPIAS e FILHAS_SEM_PAI e os do financeiro marcados
   `fonte` (lançamento com efeito de caixa sem parcela, parcela CANCELADA sem as do desdobramento, dedução retida sem
-  recebimento) dizem que a fonte da reconstrução está quebrada. Quando a trava os vê no escopo, o comando que lança para o
+  recebimento) dizem que a fonte da reconstrução está quebrada. A trava só vê os de ERRO das checagens de domínio (COPIAS e
+  os do financeiro); FILHAS_SEM_PAI é alerta e fica fora dela, e só impede o reparo na verificação (seção 11). Quando a
+  trava os vê no escopo, o comando que lança para o
   que eles citam (o animal, os animais do evento, o lançamento; também os eventos importados que a conclusão faz valer) e
   regravaria a projeção dele é recusado com `CONFLICT` `INTEGRIDADE_<CHECAGEM>` e a mensagem "a planilha tem dados
   apagados ou mexidos à mão … Restaure o backup ou investigue a edição manual antes"; o que só o alcança pela
   reconstrução (conclusão ou desfazer de importação, parâmetro) segue com esse registro em **quarentena**: `travar`
   devolve `refazer_sem` = as chaves `ABA\u0000id`, a UnitOfWork refaz o retrato sem essas projeções (`retratoDepois_(…,
-  quarentena)`), roda a trava de novo e a fase C não as grava. A vaca morta sem a linha da morte continua morta.
+  quarentena)`), roda a trava de novo (até 3 voltas; a quarentena só cresce) e a fase C não as grava. A volta que devolve
+  `refazer_sem` não confere os achados novos: quem os confere é a volta seguinte, sobre o retrato refeito. A vaca morta
+  sem a linha da morte continua morta.
   O escopo da COPIAS inclui a fonte dos animais tocados (`esc.fonte`: os eventos das linhas e dos detalhes deles).
 - **Ensaio da importação** (`ImportService.travarNoEnsaio_`): cada evento planejado na validação e no bloco passa pela
   trava, sobre um retrato bifurcado do ensaio (antes = o ensaio até o evento anterior; depois = com o evento valendo e os
@@ -888,8 +892,8 @@ evento: o reparo (RECONSTRUIR) refaria a situação a partir do dado quebrado, e
 `OPERACOES_ORFAS`, `FILHAS_SEM_PAI` (alerta: linha cujo evento, operação, importação, rateio ou lançamento não existe),
 `CABECALHOS` (aba ou coluna ausente e coluna de SCHEMA_META sumida = erro; coluna do dono = alerta), `FUSO_LOCALE`,
 `CONTADORES` (`event_seq` e `codigo_interno` repetidos), `PENDENCIAS` (alerta: ativo sem pasto, sem brinco ou sem
-categoria). Revisão final: o relatório traz `reparo_impedido` (texto ou `null`): com achado de ERRO da fonte quebrada
-(COPIAS, FILHAS_SEM_PAI, ou do financeiro marcado `fonte`: lançamento com efeito de caixa — fora o consumo de insumo, o
+categoria). Revisão final: o relatório traz `reparo_impedido` (texto ou `null`): com um ERRO que tem reparo e algum
+achado da fonte quebrada (de COPIAS, de FILHAS_SEM_PAI, que é alerta, ou do financeiro marcado `fonte`: lançamento com efeito de caixa — fora o consumo de insumo, o
 saldo de abertura e o evento anterior ao marco zero — sem parcela; parcela CANCELADA sem as do desdobramento; dedução
 descontada pelo comprador sem recebimento da venda), `reparavel` é `false`, a tela de sistema mostra o motivo e
 `repararIntegridade` recusa com `CONFLICT` (o reparo refaria a situação a partir do dado quebrado). GENEALOGIA também
