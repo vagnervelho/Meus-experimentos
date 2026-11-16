@@ -8,7 +8,7 @@
  */
 var InventoryService = (function () {
   /** Alertas entregues até a Fase 2 (lista fechada do desenho-base, seção 6, no recorte das fases entregues). */
-  var ALERTAS = ['ATIVO_SEM_PASTO', 'SEM_BRINCO', 'SEM_CATEGORIA', 'NAO_LOCALIZADO', 'BACKUP_ATRASADO', 'INTEGRIDADE_COM_ERRO', 'IMPORTACAO_INCOMPLETA'];
+  var ALERTAS = ['ATIVO_SEM_PASTO', 'SEM_BRINCO', 'SEM_CATEGORIA', 'NAO_LOCALIZADO', 'SANITARIO_VENCIDO', 'SANITARIO_PROXIMO', 'EM_CARENCIA', 'BACKUP_ATRASADO', 'INTEGRIDADE_COM_ERRO', 'IMPORTACAO_INCOMPLETA'];
   var DIA_MS = 86400000;
   /**
    * Tipos cujas linhas são movimento ou saída: o elegível em D é quem está no rebanho ao fim do dia (depois das saídas
@@ -546,6 +546,19 @@ var InventoryService = (function () {
     // Marcação "não localizado" (MARCACAO/NAO_LOCALIZADO): pendência até a baixa na contagem ou a desmarcação.
     var naoLocalizados = L.animais.filter(function (a) { return a.situacao_cadastral === 'ATIVO' && a.nao_localizado === true; }).map(function (a) { return a.animal_id; });
     if (naoLocalizados.length) lista.push(alerta_('NAO_LOCALIZADO', 'AVISO', naoLocalizados.length + ' animal(is) marcado(s) como não localizado(s): confirme a falta (baixa na contagem) ou desmarque quando aparecer(em).', naoLocalizados, 'ANIMAIS'));
+    // Sanidade (RN-059; desenho-base, seção 6, alertas): procedimento vencido ou próximo pela agenda de hoje e animais em
+    // carência (a mesma conta de `sanidade.agenda`, HealthService.agendaEm).
+    var ag = HealthService.agendaEm(L, L.hoje, null);
+    var porSit = { VENCIDA: {}, PROXIMA: {} };
+    (ag.pendencias || []).forEach(function (p) { porSit[p.situacao][p.animal_id] = true; });
+    var vencidos = Object.keys(porSit.VENCIDA);
+    var proximos = Object.keys(porSit.PROXIMA).filter(function (id) { return !porSit.VENCIDA[id]; });
+    if (vencidos.length) lista.push(alerta_('SANITARIO_VENCIDO', 'AVISO', ag.resumo.vencidas + ' procedimento(s) sanitário(s) vencido(s) em ' + vencidos.length + ' animal(is). Veja a agenda sanitária.', vencidos, 'ANIMAIS'));
+    if (proximos.length || ag.resumo.proximas) {
+      var comProxima = Object.keys(porSit.PROXIMA);
+      lista.push(alerta_('SANITARIO_PROXIMO', 'AVISO', ag.resumo.proximas + ' procedimento(s) sanitário(s) para os próximos dias em ' + comProxima.length + ' animal(is). Veja a agenda sanitária.', comProxima, 'ANIMAIS'));
+    }
+    if (ag.carencia && ag.carencia.length) lista.push(alerta_('EM_CARENCIA', 'AVISO', ag.carencia.length + ' animal(is) em carência sanitária hoje: não podem ser abatidos até o fim dela.', ag.carencia.map(function (c) { return c.animal_id; }), 'ANIMAIS'));
     var limite = L.params.alerta_backup_atrasado_dias;
     if (e.backup === undefined) nao.push(naoAvaliado_('BACKUP_ATRASADO', 'A situação do backup não foi informada.'));
     else {
@@ -571,7 +584,7 @@ var InventoryService = (function () {
   /** Consulta `alerta.listar`: `estado` como em `alertas`. */
   function consultaAlertas(estado) {
     return {
-      rota: 'alerta.listar', reads: Utils.unicos(leituras().concat(['IMPORTACOES'])), acessoCru: true,
+      rota: 'alerta.listar', reads: Utils.unicos(leituras().concat(['IMPORTACOES'], HealthService.leiturasAgenda())), acessoCru: true,
       tratador: function (tx) { return alertas(AnimalService.leitor(tx), estado); },
     };
   }

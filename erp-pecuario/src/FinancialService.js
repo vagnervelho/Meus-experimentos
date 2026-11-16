@@ -14,6 +14,7 @@ var FinancialService = (function () {
     COMPRA: 'COMPRA_ANIMAIS', FRETE_COMPRA: 'FRETE_DESPESAS_COMPRA', ABERTURA: 'SALDO_ABERTURA_REBANHO',
     RECEITA_DESCARTE: 'OUTRAS_RECEITAS_OPERACIONAIS', VENDA: 'VENDA_ANIMAIS',
     FRETE_VENDA: 'FRETE_VENDA', COMISSAO_VENDA: 'COMISSAO_VENDA', TAXAS_VENDA: 'TAXAS_RETENCOES_VENDA',
+    INSUMOS: 'COMPRA_INSUMOS',
   });
   /**
    * Conta de cada dedução da venda pelo tipo (LISTAS.TIPO_DEDUCAO_VENDA; 03b, seção 2.6): FRETE e COMISSAO são códigos
@@ -32,7 +33,7 @@ var FinancialService = (function () {
    * seção 10.3): compra e venda, principal e acessórios; a abertura (RN-070, VALOR_INDIVIDUAL dos animais com valor); o
    * custo da morte e a receita do descarte (CABECAS sobre todos os animais do evento).
    */
-  var CEM_POR_CENTO = { COMPRA: true, VENDA: true, ENTRADA_INICIAL: true, MORTE: true, DESCARTE: true };
+  var CEM_POR_CENTO = { COMPRA: true, VENDA: true, ENTRADA_INICIAL: true, MORTE: true, DESCARTE: true, SANIDADE: true };
   var MAX_PARCELAS = 120;
   var NOME_NATUREZA = {
     RECEITA_VENDA_ANIMAIS: 'venda de animais', OUTRA_RECEITA: 'outras receitas', AQUISICAO_ANIMAIS: 'aquisição de animais', CUSTEIO: 'custeio',
@@ -88,7 +89,8 @@ var FinancialService = (function () {
   }
   /** Abas que a conferência das invariantes lê (a função cita Timeline só quando chamada: carga sem ordem). */
   function leituras() {
-    return Utils.unicos(Timeline.LEITURAS.concat(['COMPRAS', 'VENDAS', 'PLANO_CONTAS', 'PARCEIROS']));
+    // As abas de insumos: a 17 (custo copiado na sanidade) e o saldo dos produtos que a reconstrução confere.
+    return Utils.unicos(Timeline.LEITURAS.concat(['COMPRAS', 'VENDAS', 'PLANO_CONTAS', 'PARCEIROS'], EventCatalog.LEITURAS_INSUMOS));
   }
 
   // ------------------------------------------------------------------ contas e parcelas ----
@@ -239,7 +241,7 @@ var FinancialService = (function () {
     var fin = {
       financial_id: finId, event_id: ev.event_id, ref_event_id: null, conta_id: c.conta_id, natureza: c.natureza, tipo: c.tipo,
       categoria: c.grupo, descricao: nulo_(s.descricao), data_competencia: s.data_competencia || ev.event_date, competencia_inicio: null,
-      competencia_fim: null, valor: s.valor, quantidade: typeof s.quantidade === 'number' ? s.quantidade : null, product_id: null,
+      competencia_fim: null, valor: s.valor, quantidade: typeof s.quantidade === 'number' ? s.quantidade : null, product_id: nulo_(s.product_id),
       pasture_id: nulo_(s.pasture_id), property_id: nulo_(ev.property_id), categoria_animal_id: null, partner_id: nulo_(s.partner_id),
       retida_pelo_comprador: s.retida === true, documento: nulo_(s.documento), observacoes: nulo_(s.observacoes),
     };

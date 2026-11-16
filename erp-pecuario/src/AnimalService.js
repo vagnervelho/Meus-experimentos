@@ -28,11 +28,11 @@ var AnimalService = (function () {
     'data_nascimento_confianca', 'idade_meses', 'categoria_id', 'categoria_manual', 'peso_atual', 'data_ultima_pesagem',
     'peso_vencido', 'pasto_atual_id', 'propriedade_atual_id', 'situacao_cadastral', 'data_entrada', 'data_saida', 'mae_id',
     'pai_id', 'castrado', 'reprodutor', 'situacao_reprodutiva', 'cria_ao_pe', 'marcado_descarte', 'nao_localizado',
-    'foto_anexo_id'];
+    'foto_anexo_id', 'carencia_ate'];
   var GERACOES_PADRAO = 3;
   var GERACOES_MAX = 6;
   /** Blocos da ficha cujo módulo ainda não foi entregue: voltam vazios, com a marca (§20: nada sem função). */
-  var BLOCOS_DE_MODULO = { sanitario: 'SANIDADE' };
+  var BLOCOS_DE_MODULO = {};
 
   function vazio_(v) {
     return v === null || v === undefined || v === '';
@@ -77,8 +77,9 @@ var AnimalService = (function () {
   // ------------------------------------------------------------------ leitor e cálculos na leitura ----
   /** Abas que toda consulta de animal lê (o leitor). */
   function leituras() {
+    // SANIDADE: a carência de hoje na lista leve (o selo "em carência até" no rebanho e na venda).
     return ['ANIMAIS', 'EVENTO_ANIMAIS', 'EVENTOS', 'IDENTIFICACOES', 'PESAGENS', 'REPRODUCAO', 'AJUSTES', 'PASTOS',
-      'CONFIGURACOES', 'CATEGORIAS'];
+      'CONFIGURACOES', 'CATEGORIAS', 'SANIDADE'];
   }
   /**
    * Contexto de leitura de uma consulta: {tx, repo, f (Timeline.fonte), params, marcoZero, hoje, categorias,
@@ -214,6 +215,8 @@ var AnimalService = (function () {
     l.categoria_id = cat ? cat.category_id : null;
     l.categoria_manual = cat ? cat.manual : false;
     l.peso_vencido = a.situacao_cadastral === 'ATIVO' && !vazio_(a.data_ultima_pesagem) && typeof validade === 'number' ? Utils.diffDias(a.data_ultima_pesagem, L.hoje) > validade : null;
+    // O último dia da carência sanitária de hoje (RN-072), calculado aqui pela mesma regra da venda; a tela só mostra.
+    l.carencia_ate = HealthService.carenciaHoje(L, a);
     return l;
   }
   function colunar_(L, animais) {
@@ -423,7 +426,7 @@ var AnimalService = (function () {
   function consultaFicha(dados) {
     var d = dados || {};
     return {
-      rota: 'animal.ficha', dados: d, reads: Utils.unicos(leituras().concat(['PROPRIEDADES', 'LISTAS', 'ANEXOS', 'FINANCEIRO', 'PARCELAS', 'RATEIOS', 'ALOCACOES_FINANCEIRAS', 'PLANO_CONTAS'])), acessoCru: true,
+      rota: 'animal.ficha', dados: d, reads: Utils.unicos(leituras().concat(['PROPRIEDADES', 'LISTAS', 'ANEXOS', 'FINANCEIRO', 'PARCELAS', 'RATEIOS', 'ALOCACOES_FINANCEIRAS', 'PLANO_CONTAS'], HealthService.LEITURAS_CADASTRO)), acessoCru: true,
       tratador: function (tx) {
         var g = d.geracoes === undefined || d.geracoes === null ? GERACOES_PADRAO : d.geracoes;
         if (typeof g !== 'number' || Math.floor(g) !== g || g < 1 || g > GERACOES_MAX) {
@@ -451,6 +454,8 @@ var AnimalService = (function () {
           pastos: { entregue: true, periodos: periodos, por_pasto: diasPorPasto_(periodos) },
           // Bloco E (Fase 3): a curva, a tabela com ganho, dias, GMD e variação e a projeção rotulada (WeightService).
           peso: a.situacao_cadastral === 'EXTERNO' ? { entregue: true, externo: true, serie: [], intervalos: [] } : WeightService.blocoFicha(L, a),
+          // Bloco F (Fase 3, E3.3): os registros sanitários, a carência e as próximas doses (HealthService).
+          sanitario: a.situacao_cadastral === 'EXTERNO' ? { entregue: true, externo: true, animal_id: a.animal_id, itens: [], carencia: null, proximas: [], custo_total: null } : HealthService.blocoFicha(L, a),
           reprodutivo: ReproductionService.blocoFicha(L.f, a),
           financeiro: blocoFinanceiro_(tx, L, a),
           eventos: { entregue: true, itens: eventos_(tx, L, a) },

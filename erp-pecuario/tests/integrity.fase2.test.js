@@ -354,10 +354,13 @@ test('custo de aquisição derivado coerente: custo mexido à mão (reconstruç�
   assert.equal(s.tabela('AUDITORIA').filter((x) => x.acao === 'MANUTENCAO' && x.justificativa === 'Custo mexido na planilha').length, 1);
 });
 
-test('projeção × reconstrução cobre cada campo de projeção do esquema (ANIMAIS, IDENTIFICACOES, FINANCEIRO, EVENTOS)', () => {
+test('projeção × reconstrução cobre cada campo de projeção do esquema (ANIMAIS, IDENTIFICACOES, FINANCEIRO, EVENTOS, PRODUTOS)', () => {
   const { s, G, ids, ev } = base();
+  // Fase 3 (E3.2): o saldo do produto com o estoque controlado é projeção dos movimentos (03a, seção 4.6).
+  const prod = s.exec((ctx) => G.HealthService.salvarProduto(ctx, { idempotencyKey: 'prod-proj', dados: { campos: { nome: 'Vacina P', categoria: 'VACINA', unidade: 'dose', custo_unitario: 2, controla_estoque: true } } })).dados.product_id;
+  s.evento('registrar', { tipo: 'ESTOQUE', subtipo: 'ENTRADA', campos: { event_date: '2026-02-01', product_id: prod, quantidade: 40, valor: 8000 } }, 'ent-proj');
+  assert.equal(s.tabela('PRODUTOS').find((p) => p.product_id === prod).estoque_atual, 40);
   const NAO_RECONSTRUIDOS = {
-    'PRODUTOS.estoque_atual': 'só a Fase 3 grava MOVIMENTOS_ESTOQUE (CONTRATOS, seção 13)',
     'EVENTOS.confirmed_at': 'instante da fase C, não derivável dos eventos',
   };
   const CHECAGEM_DO_CAMPO = { 'FINANCEIRO.animal_id': 'ALOCACAO_DIRETA', 'ANIMAIS.custo_aquisicao': 'CUSTO_AQUISICAO', 'ANIMAIS.custo_aquisicao_origem': 'CUSTO_AQUISICAO', 'EVENTOS.status': 'STATUS_EVENTOS', 'EVENTOS.reversed_by_event_id': 'STATUS_EVENTOS' };
@@ -369,6 +372,7 @@ test('projeção × reconstrução cobre cada campo de projeção do esquema (AN
     IDENTIFICACOES: s.tabela('IDENTIFICACOES').filter((x) => x.animal_id === ids['101']).map((x) => x.ident_id),
     FINANCEIRO: [finVenda.financial_id, finEstornado.financial_id],
     EVENTOS: [ev.venda, ev.transf201],
+    PRODUTOS: [prod],
   };
   /** Um valor de célula válido para o tipo e diferente do gravado. */
   function outro(tabela, c, atual) {
@@ -376,7 +380,7 @@ test('projeção × reconstrução cobre cada campo de projeção do esquema (AN
     if (c.tipo === 'BOOL') return atual === true ? 'N' : 'S';
     if (c.tipo === 'DATA') return atual === '2026-05-05' ? '2026-05-06' : '2026-05-05';
     if (c.tipo === 'TS') return '2026-05-05T10:00:00.000Z';
-    if (c.tipo === 'INT' || c.tipo === 'DEC1') return (typeof atual === 'number' ? atual : 0) + 1;
+    if (c.tipo === 'INT' || c.tipo === 'DEC1' || c.tipo === 'DEC4') return (typeof atual === 'number' ? atual : 0) + 1;
     if (c.tipo === 'DINHEIRO') return (typeof atual === 'number' ? atual / 100 : 0) + 1;
     if (c.tipo === 'ID') { const fk = c.fk ? c.fk.tabela : tabela; return atual === outroId[fk] ? (fk === 'ANIMAIS' ? ids['104'] : fk === 'EVENTOS' ? ev.morte : '') : outroId[fk]; }
     return (atual || '') + 'X';
@@ -400,7 +404,7 @@ test('projeção × reconstrução cobre cada campo de projeção do esquema (AN
     cobertos.push(nome);
   }));
   assert.ok(cobertos.length >= 40, cobertos.length + ' campos de projeção conferidos');
-  assert.ok(['ANIMAIS.situacao_reprodutiva', 'ANIMAIS.cria_ao_pe', 'ANIMAIS.marcado_descarte', 'ANIMAIS.nao_localizado', 'ANIMAIS.data_saida', 'ANIMAIS.custo_aquisicao', 'IDENTIFICACOES.data_fim', 'FINANCEIRO.status_pagamento', 'FINANCEIRO.cancelado_por_event_id'].every((n) => cobertos.indexOf(n) >= 0));
+  assert.ok(['ANIMAIS.situacao_reprodutiva', 'ANIMAIS.cria_ao_pe', 'ANIMAIS.marcado_descarte', 'ANIMAIS.nao_localizado', 'ANIMAIS.data_saida', 'ANIMAIS.custo_aquisicao', 'IDENTIFICACOES.data_fim', 'FINANCEIRO.status_pagamento', 'FINANCEIRO.cancelado_por_event_id', 'PRODUTOS.estoque_atual'].every((n) => cobertos.indexOf(n) >= 0));
   assert.equal(s.integridade().ok, true, 'tudo desfeito');
 });
 

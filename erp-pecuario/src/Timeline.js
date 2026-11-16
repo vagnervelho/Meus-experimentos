@@ -651,8 +651,23 @@ var Timeline = (function () {
     };
   }
   /**
-   * Porta de projeções (CONTRATOS, seção 10.4): escopo {animais, eventos} ou {tudo: true}. Projeta ANIMAIS (com as
-   * mães alcançadas), IDENTIFICACOES.data_fim dos animais e FINANCEIRO dos eventos. Só põe no plano o que difere.
+   * Projeção `PRODUTOS.estoque_atual*` (03a, seções 4.6 e 4.7): Σ dos movimentos vigentes do produto com o estoque
+   * controlado (ENTRADA +, SAIDA −, AJUSTE com o sinal), vazio sem controle (HealthService.estoqueAtual: a mesma regra da
+   * verificação). Só com as abas de insumos lidas (a porta as declara).
+   */
+  function projetarProdutos_(tx, f, e) {
+    if (!tx.repo.carregada('PRODUTOS') || !tx.repo.carregada('MOVIMENTOS_ESTOQUE')) return;
+    var ids = e.tudo ? (tx.cru ? tx.cru.cru('PRODUTOS') : tx.repo.vigentes('PRODUTOS')).map(function (p) { return p.product_id; }) : e.produtos || [];
+    Utils.unicos(ids).forEach(function (id) {
+      var p = tx.cru ? tx.cru.cruPorId('PRODUTOS', id) : tx.repo.porId('PRODUTOS', id);
+      if (!p) return;
+      emitir_(tx, f, 'PRODUTOS', id, { estoque_atual: HealthService.estoqueAtual(p, tx.repo.por('MOVIMENTOS_ESTOQUE', 'product_id', id)) });
+    });
+  }
+  /**
+   * Porta de projeções (CONTRATOS, seção 10.4): escopo {animais, eventos, produtos} ou {tudo: true}. Projeta ANIMAIS (com
+   * as mães alcançadas), IDENTIFICACOES.data_fim dos animais, FINANCEIRO dos eventos e o saldo dos produtos. Só põe no
+   * plano o que difere.
    */
   function reconstruir(tx, escopo) {
     var e = escopo || {};
@@ -668,6 +683,7 @@ var Timeline = (function () {
         });
       });
     });
+    projetarProdutos_(tx, f, e);
     if (!tx.cru || !tx.repo.carregada('FINANCEIRO')) return;
     var lancs = e.tudo ? tx.cru.cru('FINANCEIRO') : [];
     if (!e.tudo) (e.eventos || []).forEach(function (id) { lancs = lancs.concat(tx.cru.cruPor('FINANCEIRO', 'event_id', id)); });
@@ -676,8 +692,10 @@ var Timeline = (function () {
       if (c) emitir_(tx, f, 'FINANCEIRO', r.financial_id, c);
     });
   }
+  /** Abas do saldo de insumos (`PRODUTOS.estoque_atual*`), lidas pela porta além das da linha do tempo. */
+  var LEITURAS_INSUMOS = ['PRODUTOS', 'MOVIMENTOS_ESTOQUE'];
   function porta() {
-    return { reads: LEITURAS.slice(), reconstruir: reconstruir };
+    return { reads: LEITURAS.concat(LEITURAS_INSUMOS), reconstruir: reconstruir };
   }
   /**
    * Projeção gravada × reconstrução pelos eventos vigentes, sobre tudo (integridade e testes). Precisa de tx.cru.

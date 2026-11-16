@@ -3,7 +3,7 @@
  * VENDA (E2.4) com o financeiro completo do próprio evento (P11): CT-04 e CT-14 com os números de 09, os exemplos de
  * 07, seção 4.3 (bruto, deduções, líquido, depósito esperado, preços médios e o equivalente em arrobas), os exemplos 4
  * e 5 de 03b, seção 4.4, o resultado por animal do caso de 07, seção 2.2 (bloco H da ficha), a carência (RN-072; 05,
- * seção 4.8: SANIDADE gravada pelo harness, pois o evento chega na Fase 3), as validações por animal (fora do rebanho,
+ * seção 4.8: desde a Fase 3, pelo evento SANIDADE de verdade), as validações por animal (fora do rebanho,
  * saída posterior, pasto divergente, repetido), o estorno (o animal volta na posição certa da linha do tempo;
  * lançamentos cancelados pela vigência) e a correção, inclusive com evento posterior dependente e retroativa, e as
  * rotas pela api(). Depois de CADA comando o apoio confere projeção = reconstrução e as invariantes de 03b, seção 14.
@@ -54,24 +54,20 @@ function editar(m, aba, idReg, coluna, valor) {
   m.gas.planilhas.gravar(banco, aba, linha, cab.indexOf(coluna) + 1, [[celula]]);
 }
 /**
- * Aplicação sanitária gravada pelo harness (o evento SANIDADE chega na Fase 3): operação CONFIRMADA, evento
- * vigente com a linha do animal (fato, efeito 0) e a linha de SANIDADE com o período de carência.
+ * Aplicação sanitária pelo evento SANIDADE de verdade (Fase 3, E3.3: a carência da venda passa a ser alimentada pelo
+ * registro real): vermifugação com nome do produto (Ivermectina 1%, 5 mL por cabeça) e a carência pedida; `nome_produto:
+ * null` vira um tratamento sem produto (a mensagem diz "aplicação de ..."), e outro nome, uma medicação.
  */
-let nSanidade = 0;
 function sanidade(m, animalId, data, dias, extra) {
-  const G = m.G;
-  const k = ++nSanidade;
-  const ev = C.id(0xe000 + k);
-  const op = C.id(0xd000 + k);
-  const agora = '2026-11-13T14:00:00.000Z';
-  const linhas = {
-    OPERACOES: [{ op_id: op, idempotency_key: 'sanidade-' + k, payload_hash: 'f'.repeat(64), comando: 'teste.sanidade', status: 'CONFIRMADA', aplicada_em: agora, resumo_json: { event_id: ev }, usuario: 'dono@gmail.com', started_at: agora, finished_at: agora }],
-    EVENTOS: [{ event_id: ev, op_id: op, event_seq: 5000 + k, event_type: 'SANIDADE', event_subtype: 'VERMIFUGACAO', event_date: data, registration_date: data, property_id: PROP, status: 'CONFIRMADO', created_by: 'dono@gmail.com', source: 'SISTEMA', confiabilidade: 'CONFIRMADA', pre_marco_zero: false, idempotency_key: 'sanidade-' + k, created_at: agora, confirmed_at: agora }],
-    EVENTO_ANIMAIS: [{ event_animal_id: C.id(0xc000 + k), event_id: ev, animal_id: animalId, papel: 'SUJEITO', efeito_inventario: 0 }],
-    SANIDADE: [Object.assign({ health_id: C.id(0xb000 + k), animal_id: animalId, event_id: ev, tipo_procedimento: 'VERMIFUGO', nome_produto: 'Ivermectina 1%', dose: 5, unidade_dose: 'mL', motivo: 'Verminose', data_aplicacao: data, periodo_carencia_dias: dias }, extra || {})],
-  };
-  m.gas.exec(() => G.Database.abrir(m.amb.banco, { primitiva: m.amb.primitiva }).anexar(linhas));
-  return ev;
+  const e = extra || {};
+  const semProduto = e.nome_produto === null;
+  const sub = semProduto ? 'TRATAMENTO' : e.nome_produto ? 'MEDICACAO' : 'VERMIFUGACAO';
+  const campos = { event_date: data, periodo_carencia_dias: dias };
+  if (!semProduto) Object.assign(campos, { nome_produto: e.nome_produto || 'Ivermectina 1%', modo_dose: 'POR_CABECA', dose_referencia: 5, unidade_dose: 'mL' });
+  if (sub !== 'VERMIFUGACAO') campos.motivo = 'Verminose';
+  const r = m.run('registrar', { tipo: 'SANIDADE', subtipo: sub, campos, animais: [{ animal_id: animalId }] });
+  if (e.data_fim_carencia) assert.equal(m.G.HealthService.fimPeloPeriodo(data, dias), e.data_fim_carencia, 'o fim da carência gravado é a aplicação + dias');
+  return r.dados.event_id;
 }
 
 // ------------------------------------------------------------------ HealthService (05, seção 4.8) ----

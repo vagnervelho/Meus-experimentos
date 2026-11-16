@@ -28,7 +28,7 @@ var EventCatalog = (function () {
     { id: 'PASTOS', rotulo: 'Pastos', ordem: 3, fase: 1, menu: true, tela: 'Pastures' },
     { id: 'EVENTOS', rotulo: 'Eventos', ordem: 4, fase: 1, menu: true, tela: 'Events' },
     { id: 'PESAGENS', rotulo: 'Pesagens', ordem: 5, fase: 3, menu: true, tela: 'Weights', sob_demanda: true, rotas: ['pesagens'] },
-    { id: 'SANIDADE', rotulo: 'Sanidade', ordem: 6, fase: 3, menu: true },
+    { id: 'SANIDADE', rotulo: 'Sanidade', ordem: 6, fase: 3, menu: true, tela: 'Health', sob_demanda: true, rotas: ['sanidade'] },
     { id: 'REPRODUCAO', rotulo: 'Reprodução', ordem: 7, fase: 3, menu: true },
     { id: 'FINANCEIRO', rotulo: 'Financeiro', ordem: 8, fase: 4, menu: true },
     { id: 'RELATORIOS', rotulo: 'Relatórios', ordem: 9, fase: 5, menu: true },
@@ -82,6 +82,9 @@ var EventCatalog = (function () {
     'AJUSTE_INVENTARIO.DIVERGENCIA_CONTAGEM': 'a baixa na contagem', 'IDENTIFICACAO.PRIMEIRA_IDENTIFICACAO': 'a primeira identificação',
     'IDENTIFICACAO.SUBSTITUICAO': 'a troca de brinco', 'IDENTIFICACAO.REMOCAO': 'a retirada de brinco',
     'MARCACAO.DESCARTE': 'a marcação para descarte', 'MARCACAO.NAO_LOCALIZADO': 'a marcação de não localizado',
+    'SANIDADE.VACINACAO': 'a vacinação', 'SANIDADE.VERMIFUGACAO': 'a vermifugação', 'SANIDADE.MEDICACAO': 'a medicação',
+    'SANIDADE.TRATAMENTO': 'o tratamento', 'SANIDADE.EXAME': 'o exame', 'SANIDADE.DOENCA': 'o registro de doença',
+    'ESTOQUE.ENTRADA': 'a entrada de insumo', 'ESTOQUE.AJUSTE': 'o acerto de estoque',
   };
 
   // ------------------------------------------------------------------ campos ----
@@ -385,6 +388,106 @@ var EventCatalog = (function () {
     a_('observacoes', 'Observações deste animal', 'texto'),
   ];
 
+  /**
+   * SANIDADE (04, seção 4.5; 03b, seções 6, 15.2, 16.4 e 16.12): vacinação, vermifugação, medicação, tratamento, exame e
+   * registro de doença, individual ou coletiva. O cabeçalho traz o produto (do cadastro ou em texto livre), o lote, a
+   * validade, o modo da dose (por cabeça, por kg de peso vivo — o servidor calcula pelo peso atual de cada animal — ou só
+   * o total), a quantidade que saiu do frasco, a via, a carência, a próxima aplicação, o protocolo cumprido, o
+   * veterinário e o serviço ou produto pago no ato (opcional); por animal, a dose quando difere e o resultado do exame. O
+   * registro de doença não aplica produto. Cada subtipo tem a lista inteira de cabeçalho (o tipo não tem campos próprios).
+   */
+  var MODOS_DOSE = ['POR_CABECA', 'POR_PESO', 'TOTAL'];
+  function camposCustoPago_() {
+    var tem = quando_('custo_valor', true);
+    return [
+      c_('custo_valor', 'Serviço ou produto pago no ato (opcional)', 'dinheiro', { min: 0.01, ajuda: 'Veterinário, produto comprado na hora e não lançado no estoque: vira custo dos animais tratados, com o pagamento a seguir.' }),
+      c_('custo_conta_id', 'Conta do custo', 'ref:PLANO_CONTAS', { naturezas: ['CUSTEIO'], visivel_se: tem, obrigatorio_se: tem }),
+      c_('custo_partner_id', 'Pago a', 'ref:PARCEIROS', { visivel_se: tem }),
+      c_('custo_vencimento', 'Vencimento', 'data', { visivel_se: tem, ajuda: 'Vazio = à vista, na data da aplicação. Em mais de uma vez, é o vencimento da primeira parcela.' }),
+      c_('custo_parcelas_qtd', 'Em quantas vezes', 'inteiro', { min: 1, max: 120, visivel_se: tem, ajuda: 'Vazio = uma vez. Com mais de uma, as parcelas vencem de mês em mês, em partes iguais.' }),
+      c_('custo_forma_pagamento', 'Forma de pagamento', 'lista', { lista: 'FORMA_PAGAMENTO', visivel_se: tem }),
+      c_('custo_documento', 'Recibo ou nota', 'texto', { visivel_se: tem }),
+      c_('custo_descricao', 'Descrição do lançamento', 'texto', { visivel_se: tem }),
+    ];
+  }
+  function camposSanidade_(sub) {
+    var rotuloData = sub === 'DOENCA' ? 'Data do diagnóstico' : sub === 'EXAME' ? 'Data do exame (coleta)' : 'Data da aplicação';
+    var l = [c_('event_date', rotuloData, 'data', { obrigatorio: true, default: 'HOJE' })];
+    if (sub !== 'DOENCA') {
+      l.push(c_('protocol_id', 'Protocolo cumprido', 'ref:PROTOCOLOS_SANITARIOS', { ajuda: 'Opcional: o protocolo sanitário que esta aplicação cumpre. A agenda conta a próxima dose por ele.' }));
+      l.push(c_('produto_id', 'Produto do cadastro', 'ref:PRODUTOS', { ajuda: 'Com produto do cadastro, a aplicação dá baixa no estoque e o consumo vira custo dos animais.' }));
+      l.push(c_('nome_produto', 'Ou o nome do produto (sem cadastro)', 'texto', { ajuda: 'Só quando o produto não está no cadastro: fica registrado, sem baixa de estoque nem custo pelo consumo.' }));
+      l.push(c_('fabricante', 'Fabricante', 'texto', { ajuda: 'Vazio = o do cadastro do produto.' }));
+      l.push(c_('lote', 'Lote aplicado', 'texto'));
+      l.push(c_('validade', 'Validade do lote', 'data'));
+      l.push(c_('modo_dose', 'Como foi a dose', 'lista', { opcoes: MODOS_DOSE, ajuda: 'Por cabeça: a mesma dose para cada animal. Por peso: dose por kg de peso vivo, que o sistema calcula pelo peso atual de cada um. Total: só a quantidade que saiu do frasco.' }));
+      l.push(c_('dose_referencia', 'Dose', 'decimal', { casas: 4, min: 0.0001, visivel_se: quando_('modo_dose', ['POR_CABECA', 'POR_PESO']), ajuda: 'Por cabeça: a dose de cada animal. Por peso: a dose por kg (ex.: 0,02 mL por kg).' }));
+      l.push(c_('unidade_dose', 'Unidade da dose', 'texto', { ajuda: 'Só para produto sem cadastro (mL, dose, g). Com produto do cadastro, vale a unidade dele.' }));
+      l.push(c_('quantidade_consumida_total', 'Quantidade que saiu do frasco', 'decimal', { casas: 4, min: 0.0001, obrigatorio_se: quando_('modo_dose', ['TOTAL']), ajuda: 'Com produto do cadastro: o que saiu do estoque, inclusive a sobra descartada. Vazio = a soma das doses.' }));
+      l.push(c_('via_aplicacao', 'Via de aplicação', 'lista', { lista: 'VIA_APLICACAO' }));
+    }
+    if (sub === 'TRATAMENTO' || sub === 'MEDICACAO') l.push(c_('motivo', 'Por que foi tratado', 'texto', { obrigatorio: sub === 'TRATAMENTO' }));
+    if (sub === 'EXAME' || sub === 'DOENCA') l.push(c_('diagnostico', sub === 'EXAME' ? 'Doença ou condição pesquisada' : 'Doença identificada ou suspeita', 'texto', { obrigatorio: true }));
+    if (sub !== 'DOENCA') {
+      l.push(c_('periodo_carencia_dias', 'Carência (dias)', 'inteiro', { min: 0, max: 3650, ajuda: 'Dias em que o animal não pode ser abatido. O padrão vem do cadastro do produto; o sistema registra e alerta, não prescreve.' }));
+      l.push(c_('data_proxima_aplicacao', 'Próxima aplicação', 'data', { ajuda: 'Vazio = pelo protocolo (a cada N dias), quando houver.' }));
+    }
+    l.push(c_('veterinario', 'Veterinário', 'texto'));
+    l = l.concat(camposCustoPago_());
+    l.push(c_('property_id', 'Propriedade', 'ref:PROPRIEDADES', { default: { de: 'CONFIGURACOES.propriedade_padrao_id' } }));
+    l.push(c_('responsible', sub === 'DOENCA' || sub === 'EXAME' ? 'Responsável' : 'Quem aplicou', 'texto'));
+    l.push(c_('notes', 'Observações', 'texto'));
+    return l;
+  }
+  function camposAnimalSanidade_(sub) {
+    var l = [a_('animal_id', 'Animal', 'ref:ANIMAIS', { obrigatorio: true })];
+    if (sub !== 'DOENCA') l.push(a_('dose', 'Dose deste animal', 'decimal', { casas: 4, min: 0.0001, ajuda: 'Vazio = a dose do lançamento (por cabeça) ou a calculada pelo peso atual (por peso).' }));
+    if (sub === 'EXAME') l.push(a_('resultado_exame', 'Resultado do exame', 'texto', { ajuda: 'O resultado que chega depois entra pela correção do lançamento, que preserva a data da coleta.' }));
+    l.push(a_('observacoes', 'Observações deste animal', 'texto'));
+    return l;
+  }
+  /**
+   * ESTOQUE (04, seção 4.7; 03a, seções 4.6 e 4.7; 07, seção 5; desenho-base 16.9): entrada (compra de insumo do cadastro:
+   * sempre um lançamento de compra de insumos, com parcelas, e o movimento de entrada só com o estoque controlado) e acerto
+   * do saldo (contagem, perda ou vencimento; só com o estoque controlado). Sem animais.
+   */
+  var MOTIVOS_AJUSTE_ESTOQUE = ['CONTAGEM', 'PERDA', 'VENCIMENTO'];
+  function camposEstoque_(sub) {
+    var l;
+    if (sub === 'ENTRADA') {
+      l = [
+        c_('event_date', 'Data da compra', 'data', { obrigatorio: true, default: 'HOJE' }),
+        c_('product_id', 'Produto', 'ref:PRODUTOS', { obrigatorio: true }),
+        c_('qtd_apresentacao', 'Embalagens compradas', 'decimal', { casas: 4, min: 0.0001, ajuda: 'Ex.: 2 frascos. O sistema converte pela quantidade por embalagem do cadastro.' }),
+        c_('quantidade', 'Quantidade na unidade do produto', 'decimal', { casas: 4, min: 0.0001, ajuda: 'Doses, mL ou g. Vazio = embalagens × quantidade por embalagem.' }),
+        c_('valor', 'Valor da compra', 'dinheiro', { obrigatorio: true, min: 0.01, ajuda: 'O que foi pago pelo insumo: sai do caixa e não é custo ainda; vira custo quando o insumo é aplicado.' }),
+        c_('partner_id', 'Fornecedor', 'ref:PARCEIROS'),
+        c_('lote', 'Lote', 'texto'),
+        c_('validade', 'Validade do lote', 'data'),
+        c_('documento', 'Nota fiscal', 'texto'),
+        c_('vencimento', 'Vencimento', 'data', { ajuda: 'Vazio = à vista, na data da compra. Em mais de uma vez, é o vencimento da primeira parcela.' }),
+        c_('parcelas_qtd', 'Em quantas vezes', 'inteiro', { min: 1, max: 120, ajuda: 'Vazio = uma vez. Com mais de uma, as parcelas vencem de mês em mês, em partes iguais.' }),
+        c_('forma_pagamento', 'Forma de pagamento', 'lista', { lista: 'FORMA_PAGAMENTO' }),
+      ];
+    } else {
+      l = [
+        c_('event_date', 'Data do acerto', 'data', { obrigatorio: true, default: 'HOJE' }),
+        c_('product_id', 'Produto', 'ref:PRODUTOS', { obrigatorio: true }),
+        c_('motivo_ajuste', 'Por que acertar', 'lista', { obrigatorio: true, opcoes: MOTIVOS_AJUSTE_ESTOQUE }),
+        c_('saldo_contado', 'Quanto há de fato (contagem)', 'decimal', { casas: 4, min: 0, visivel_se: quando_('motivo_ajuste', ['CONTAGEM']), obrigatorio_se: quando_('motivo_ajuste', ['CONTAGEM']), ajuda: 'O que foi contado na data, na unidade do produto. O sistema lança a diferença para o saldo dele.' }),
+        c_('quantidade', 'Quanto se perdeu', 'decimal', { casas: 4, min: 0.0001, visivel_se: quando_('motivo_ajuste', ['PERDA', 'VENCIMENTO']), obrigatorio_se: quando_('motivo_ajuste', ['PERDA', 'VENCIMENTO']), ajuda: 'Na unidade do produto: sai do estoque.' }),
+        c_('lote', 'Lote', 'texto'),
+        c_('validade', 'Validade do lote', 'data'),
+      ];
+    }
+    l.push(c_('property_id', 'Propriedade', 'ref:PROPRIEDADES', { default: { de: 'CONFIGURACOES.propriedade_padrao_id' } }));
+    l.push(c_('responsible', 'Responsável', 'texto'));
+    l.push(c_('notes', 'Observações', 'texto'));
+    return l;
+  }
+  /** Abas de insumos e sanidade que os comandos de sanidade, de estoque, de venda e de estorno leem. */
+  var LEITURAS_INSUMOS = ['PRODUTOS', 'MOVIMENTOS_ESTOQUE', 'SANIDADE', 'PROTOCOLOS_SANITARIOS'];
+
   /** Definições completas dos tipos da Fase 1. */
   var DEFINICOES = {
     ENTRADA_INICIAL: {
@@ -445,7 +548,7 @@ var EventCatalog = (function () {
       frequente: true, selecao_animais: 'VARIOS', filtro_elegiveis: { situacao: 'ATIVO', pasto: '$pasto_origem_id' },
       modo_entrada: 'FORM', revisao: 'SERVIDOR', critico: true,
       // SANIDADE: a carência de cada animal na data (RN-072).
-      reads: LEITURAS_MOTOR.concat(LEITURAS_FINANCEIRO, ['SANIDADE']),
+      reads: LEITURAS_MOTOR.concat(LEITURAS_FINANCEIRO, LEITURAS_INSUMOS),
       campos: CAMPOS_VENDA,
       campos_animal: CAMPOS_ANIMAL_VENDA,
       componentes: ['seletor_animais', 'bloco_negociacao', 'bloco_parcelas'],
@@ -572,9 +675,35 @@ var EventCatalog = (function () {
       componentes: ['seletor_animais'],
       grupos_repetiveis: {},
     },
+    SANIDADE: {
+      frequente: true, selecao_animais: 'VARIOS', filtro_elegiveis: { situacao: 'ATIVO' }, modo_entrada: 'FORM', revisao: 'SERVIDOR', critico: false,
+      reads: LEITURAS_MOTOR.concat(LEITURAS_FINANCEIRO, LEITURAS_INSUMOS),
+      campos: [],
+      componentes: ['seletor_animais'],
+      grupos_repetiveis: {},
+      subtipos: {
+        VACINACAO: { rotulo: 'Vacinação', fase: 3, campos: camposSanidade_('VACINACAO'), campos_animal: camposAnimalSanidade_('VACINACAO') },
+        VERMIFUGACAO: { rotulo: 'Vermifugação (controle de parasitas)', fase: 3, campos: camposSanidade_('VERMIFUGACAO'), campos_animal: camposAnimalSanidade_('VERMIFUGACAO') },
+        MEDICACAO: { rotulo: 'Medicação (antibiótico, anti-inflamatório)', fase: 3, campos: camposSanidade_('MEDICACAO'), campos_animal: camposAnimalSanidade_('MEDICACAO') },
+        TRATAMENTO: { rotulo: 'Tratamento (curativo, cirurgia, casqueamento)', fase: 3, campos: camposSanidade_('TRATAMENTO'), campos_animal: camposAnimalSanidade_('TRATAMENTO') },
+        EXAME: { rotulo: 'Exame', fase: 3, campos: camposSanidade_('EXAME'), campos_animal: camposAnimalSanidade_('EXAME') },
+        DOENCA: { rotulo: 'Registro de doença', fase: 3, campos: camposSanidade_('DOENCA'), campos_animal: camposAnimalSanidade_('DOENCA') },
+      },
+    },
+    ESTOQUE: {
+      frequente: false, selecao_animais: 'NENHUM', filtro_elegiveis: null, modo_entrada: 'FORM', revisao: 'SERVIDOR', critico: false,
+      reads: LEITURAS_MOTOR.concat(LEITURAS_FINANCEIRO, LEITURAS_INSUMOS),
+      campos: [],
+      componentes: [],
+      grupos_repetiveis: {},
+      subtipos: {
+        ENTRADA: { rotulo: 'Entrada de insumo (compra)', fase: 3, campos: camposEstoque_('ENTRADA') },
+        AJUSTE: { rotulo: 'Acertar o estoque (contagem, perda, vencimento)', fase: 3, campos: camposEstoque_('AJUSTE') },
+      },
+    },
     ESTORNO: {
       frequente: false, selecao_animais: 'NENHUM', filtro_elegiveis: null, modo_entrada: 'FORM', revisao: 'SERVIDOR', critico: true,
-      reads: LEITURAS_MOTOR.concat(LEITURAS_FINANCEIRO),
+      reads: LEITURAS_MOTOR.concat(LEITURAS_FINANCEIRO, LEITURAS_INSUMOS),
       campos: [
         c_('event_id', 'Evento a estornar', 'ref:EVENTOS', { obrigatorio: true }),
         c_('justificativa', 'Motivo do estorno', 'texto', { obrigatorio: true }),
@@ -617,17 +746,20 @@ var EventCatalog = (function () {
     return d && d.subtipos ? Object.keys(d.subtipos) : [];
   }
   /** Subtipo entregue na fase e com campos (subtipo da fase sem campos ainda não passa pelo motor). */
-  function subtipoPronto_(sub, f) {
-    return !!sub && sub.fase <= f && Array.isArray(sub.campos_animal) && sub.campos_animal.length > 0;
+  function subtipoPronto_(sub, f, semAnimais) {
+    if (!sub || sub.fase > f) return false;
+    // O tipo sem animais (ESTOQUE) fica pronto com os campos de cabeçalho do subtipo; os demais, com os campos por animal.
+    return semAnimais ? Array.isArray(sub.campos) && sub.campos.length > 0 : Array.isArray(sub.campos_animal) && sub.campos_animal.length > 0;
   }
   /** Tipo (e subtipo) entregue na fase dada (padrão: a corrente) e com definição de campos. */
   function ativo(nome, subtipo, fase) {
     var f = fase === undefined || fase === null ? FASE_ATUAL : fase;
     if (!existe(nome) || RESUMO[nome].fase > f || !DEFINICOES[nome]) return false;
     var subs = DEFINICOES[nome].subtipos;
+    var semAnimais = DEFINICOES[nome].selecao_animais === 'NENHUM';
     if (!subs) return vazio_(subtipo);
-    if (vazio_(subtipo)) return Object.keys(subs).some(function (s) { return subtipoPronto_(subs[s], f); });
-    return subtipoPronto_(subs[subtipo], f);
+    if (vazio_(subtipo)) return Object.keys(subs).some(function (s) { return subtipoPronto_(subs[s], f, semAnimais); });
+    return subtipoPronto_(subs[subtipo], f, semAnimais);
   }
   function tiposAtivos(fase) {
     return nomes().filter(function (n) { return ativo(n, null, fase); });
@@ -681,7 +813,7 @@ var EventCatalog = (function () {
       if (t.subtipos) {
         var subs = {};
         Object.keys(t.subtipos).forEach(function (s) {
-          if (!subtipoPronto_(t.subtipos[s], f)) return;
+          if (!subtipoPronto_(t.subtipos[s], f, t.selecao_animais === 'NENHUM')) return;
           subs[s] = t.subtipos[s];
           subs[s].nome = nomeEvento(n, s);
         });
@@ -773,6 +905,9 @@ var EventCatalog = (function () {
     TIPOS_CAMPO: TIPOS_CAMPO,
     TIPOS_IDENTIFICACAO: TIPOS_IDENTIFICACAO,
     MOMENTOS_PESAGEM: MOMENTOS_PESAGEM,
+    MODOS_DOSE: MODOS_DOSE,
+    MOTIVOS_AJUSTE_ESTOQUE: MOTIVOS_AJUSTE_ESTOQUE,
+    LEITURAS_INSUMOS: LEITURAS_INSUMOS,
     PESO_MAX_KG: PESO_MAX_KG,
     CAMPOS_CORRIGIVEIS: CAMPOS_CORRIGIVEIS,
     nomes: nomes,

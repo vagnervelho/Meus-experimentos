@@ -54,6 +54,20 @@ function base() {
   return { c, m, G: c.G, ids, forn: parceiro('Fornecedor', 'FORNECEDOR'), comp: parceiro('Comprador', 'COMPRADOR'), cat };
 }
 const semCarimbo = (a) => { const o = Object.assign({}, a); delete o.updated_at; return o; };
+/** Sanidade e estoque (Fase 3, E3.2 e E3.3): o produto do cadastro (criado uma vez por base) e os lançamentos. */
+function produto(x, campos) {
+  const k = JSON.stringify(campos || {});
+  x.produtos = x.produtos || {};
+  if (!x.produtos[k]) x.produtos[k] = x.c.run('HealthService.comandoSalvarProduto', { campos: Object.assign({ nome: 'Vacina ' + (Object.keys(x.produtos).length + 1), categoria: 'VACINA', unidade: 'dose', custo_unitario: 1.85, controla_estoque: false }, campos || {}) }).dados.product_id;
+  return x.produtos[k];
+}
+function san(subtipo, data, animais, campos) {
+  return { tipo: 'SANIDADE', subtipo, campos: Object.assign({ event_date: data }, campos || {}), animais };
+}
+function estoque(subtipo, data, campos) {
+  return { tipo: 'ESTOQUE', subtipo, campos: Object.assign({ event_date: data }, campos || {}) };
+}
+const conta = (x, codigo) => x.m.linhas.PLANO_CONTAS.find((c) => c.codigo === codigo).conta_id;
 
 /**
  * Um caso por tipo e subtipo ativos: o registro, a correção (substituto do mesmo tipo) e, quando há, um evento
@@ -140,6 +154,41 @@ const CASOS = [
     // A categoria manual não é pré-condição de outro evento; o que o estorno dela pode impedir (categoria desativada que
     // voltaria) está em identificacao.test.
     dependente: null },
+  // Sanidade: fato independente (nenhum evento depende da aplicação; o que o estorno de uma entrada impede está em
+  // sanidade.test). Com produto do cadastro e custo, o consumo é um lançamento CUSTEIO sem parcela, cancelado no estorno.
+  { tipo: 'SANIDADE', subtipo: 'VACINACAO', financeiro: true,
+    registrar: (x) => san('VACINACAO', '2026-03-01', [{ animal_id: x.ids.f1 }, { animal_id: x.ids.m4 }], { produto_id: produto(x), modo_dose: 'POR_CABECA', dose_referencia: 1, periodo_carencia_dias: 21 }),
+    corrigir: (x) => san('VACINACAO', '2026-03-02', [{ animal_id: x.ids.f1 }, { animal_id: x.ids.m4 }], { produto_id: produto(x), modo_dose: 'POR_CABECA', dose_referencia: 2, quantidade_consumida_total: 5, periodo_carencia_dias: 21 }),
+    dependente: null },
+  { tipo: 'SANIDADE', subtipo: 'VERMIFUGACAO',
+    registrar: (x) => san('VERMIFUGACAO', '2026-03-01', [{ animal_id: x.ids.m3 }], { nome_produto: 'Ivermectina 1%', modo_dose: 'POR_CABECA', dose_referencia: 5, unidade_dose: 'mL', periodo_carencia_dias: 35 }),
+    corrigir: (x) => san('VERMIFUGACAO', '2026-03-01', [{ animal_id: x.ids.m3 }], { nome_produto: 'Ivermectina 1%', modo_dose: 'POR_CABECA', dose_referencia: 6, unidade_dose: 'mL', periodo_carencia_dias: 28 }),
+    dependente: null },
+  { tipo: 'SANIDADE', subtipo: 'MEDICACAO', financeiro: true,
+    registrar: (x) => san('MEDICACAO', '2026-04-01', [{ animal_id: x.ids.f2 }], { produto_id: produto(x, { nome: 'Antibiótico', categoria: 'MEDICAMENTO', unidade: 'mL', custo_unitario: 0.5 }), modo_dose: 'TOTAL', quantidade_consumida_total: 10, custo_valor: 8000, custo_conta_id: conta(x, 'SERVICOS_VETERINARIOS') }),
+    corrigir: (x) => san('MEDICACAO', '2026-04-01', [{ animal_id: x.ids.f2 }], { produto_id: produto(x, { nome: 'Antibiótico', categoria: 'MEDICAMENTO', unidade: 'mL', custo_unitario: 0.5 }), modo_dose: 'TOTAL', quantidade_consumida_total: 12, motivo: 'Pneumonia' }),
+    dependente: null },
+  { tipo: 'SANIDADE', subtipo: 'TRATAMENTO',
+    registrar: (x) => san('TRATAMENTO', '2026-04-01', [{ animal_id: x.ids.m5 }], { motivo: 'Casqueamento' }),
+    corrigir: (x) => san('TRATAMENTO', '2026-04-02', [{ animal_id: x.ids.m5 }], { motivo: 'Curativo' }),
+    dependente: null },
+  { tipo: 'SANIDADE', subtipo: 'EXAME',
+    registrar: (x) => san('EXAME', '2026-04-01', [{ animal_id: x.ids.f1 }, { animal_id: x.ids.f2 }], { diagnostico: 'Brucelose' }),
+    corrigir: (x) => san('EXAME', '2026-04-01', [{ animal_id: x.ids.f1, resultado_exame: 'Negativo' }, { animal_id: x.ids.f2, resultado_exame: 'Negativo' }], { diagnostico: 'Brucelose' }),
+    dependente: null },
+  { tipo: 'SANIDADE', subtipo: 'DOENCA',
+    registrar: (x) => san('DOENCA', '2026-05-01', [{ animal_id: x.ids.m4 }], { diagnostico: 'Tristeza parasitária' }),
+    corrigir: (x) => san('DOENCA', '2026-05-01', [{ animal_id: x.ids.m4 }], { diagnostico: 'Tristeza parasitária bovina' }),
+    dependente: null },
+  // Estoque: sem animais. O estorno da entrada que deixaria o saldo negativo pede confirmação (aviso, não dependente).
+  { tipo: 'ESTOQUE', subtipo: 'ENTRADA', financeiro: true,
+    registrar: (x) => estoque('ENTRADA', '2026-02-01', { product_id: produto(x, { controla_estoque: true }), quantidade: 100, valor: 18500 }),
+    corrigir: (x) => estoque('ENTRADA', '2026-02-01', { product_id: produto(x, { controla_estoque: true }), quantidade: 120, valor: 22200 }),
+    dependente: null },
+  { tipo: 'ESTOQUE', subtipo: 'AJUSTE',
+    registrar: (x) => estoque('AJUSTE', '2026-02-01', { product_id: produto(x, { controla_estoque: true }), motivo_ajuste: 'CONTAGEM', saldo_contado: 10 }),
+    corrigir: (x) => estoque('AJUSTE', '2026-02-01', { product_id: produto(x, { controla_estoque: true }), motivo_ajuste: 'CONTAGEM', saldo_contado: 12 }),
+    dependente: null },
   { tipo: 'AJUSTE_INVENTARIO', subtipo: 'DIVERGENCIA_CONTAGEM',
     registrar: (x) => ajuste('DIVERGENCIA_CONTAGEM', '2026-06-15', [{ animal_id: x.ids.m5 }]),
     corrigir: (x) => ajuste('DIVERGENCIA_CONTAGEM', '2026-06-16', [{ animal_id: x.ids.m5, observacoes: 'Contagem refeita' }]),
@@ -190,7 +239,9 @@ for (const caso of CASOS) {
     depois.filter((a) => !animais0.some((b) => b.animal_id === a.animal_id)).forEach((a) => assert.equal(a.situacao_cadastral, 'ANULADO'));
     if (caso.financeiro) {
       const fins = m.tabela('FINANCEIRO').filter((f) => f.event_id === original || f.event_id === k.event_id);
-      assert.ok(fins.length > 0 && fins.every((f) => f.status === 'CANCELADO' && f.status_pagamento === 'CANCELADO'), nome + ': lançamentos do original e do substituto cancelados');
+      // 03b, seção 10.4: o lançamento sem parcela (o consumo de insumo) fica SEM_CAIXA mesmo cancelado; com parcela, CANCELADO.
+      const comParcela = (f) => m.tabela('PARCELAS').some((p) => p.financial_id === f.financial_id);
+      assert.ok(fins.length > 0 && fins.every((f) => f.status === 'CANCELADO' && f.status_pagamento === (comParcela(f) ? 'CANCELADO' : 'SEM_CAIXA')), nome + ': lançamentos do original e do substituto cancelados');
     }
     assert.deepEqual(codigos(falha(m, 'estornar', { event_id: k.event_id, justificativa: 'de novo' })), ['JA_ANULADO']);
     assert.deepEqual(codigos(falha(m, 'estornar', { event_id: original, justificativa: 'de novo' })), ['JA_ANULADO']);

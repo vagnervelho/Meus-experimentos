@@ -170,7 +170,7 @@ var EventService = (function () {
    * original com os mesmos dados que não mudaram), como o parceiro desativado do original. Só o código desativado que
    * aparece nas linhas do original volta a ser aceito; um desativado novo continua recusado.
    */
-  var TABELAS_DO_ORIGINAL = ['EVENTO_ANIMAIS', 'COMPRAS', 'VENDAS', 'BAIXAS', 'IDENTIFICACOES', 'PESAGENS', 'REPRODUCAO', 'AJUSTES', 'FINANCEIRO'];
+  var TABELAS_DO_ORIGINAL = ['EVENTO_ANIMAIS', 'COMPRAS', 'VENDAS', 'BAIXAS', 'IDENTIFICACOES', 'PESAGENS', 'REPRODUCAO', 'AJUSTES', 'SANIDADE', 'MOVIMENTOS_ESTOQUE', 'FINANCEIRO'];
   function aceitarListasDoOriginal_(m, original) {
     var usados = {};
     var coletar = function (v) {
@@ -354,18 +354,34 @@ var EventService = (function () {
     var campos = d.campos || {};
     var animais = d.animais;
     var ev = cabecalho_(m, tipo, subtipo, campos, original);
-    if (!Array.isArray(animais) || !animais.length) erroGeral_(m, 'animais', 'SEM_ANIMAIS', tipo === 'NASCIMENTO' ? 'Escolha a mãe (a vaca que pariu).' : 'Inclua ao menos um animal.');
+    // Tipo sem animais (ESTOQUE: entrada e acerto de insumo): a lista de animais não se aplica.
+    var semAnimais = EventCatalog.tipo(tipo).selecao_animais === 'NENHUM';
+    if (semAnimais) {
+      if (Array.isArray(animais) && animais.length) erroGeral_(m, 'animais', 'CAMPO_NAO_SE_APLICA', 'Este lançamento não leva animais.');
+      animais = [];
+    } else if (!Array.isArray(animais) || !animais.length) erroGeral_(m, 'animais', 'SEM_ANIMAIS', tipo === 'NASCIMENTO' ? 'Escolha a mãe (a vaca que pariu).' : 'Inclua ao menos um animal.');
     else if (animais.length > MAX_ANIMAIS) erroGeral_(m, 'animais', 'ANIMAIS_DEMAIS', 'Um lançamento aceita até ' + MAX_ANIMAIS + ' animais; divida em partes.');
     else if (tipo === 'NASCIMENTO' && animais.length > 1) { erroGeral_(m, 'animais', 'UMA_MATRIZ', 'Um parto é de uma vaca só: escolha só a mãe. Gêmeos vão como duas crias do mesmo parto.'); return { erros: m.col.erros }; }
     // Sem data válida ou sem lista de animais não há linha do tempo a conferir; os demais erros do cabeçalho seguem juntos com os dos animais.
-    if (!Utils.dataValida(ev.event_date) || !Array.isArray(animais) || !animais.length || animais.length > MAX_ANIMAIS) return { erros: m.col.erros };
+    if (!Utils.dataValida(ev.event_date) || (!semAnimais && (!Array.isArray(animais) || !animais.length || animais.length > MAX_ANIMAIS))) return { erros: m.col.erros };
     // Data antes do marco zero num tipo sem registro histórico: a linha do tempo nem começou; só o erro da data.
     if (ev.event_date < m.D0 && ev.pre_marco_zero !== true) return { erros: m.col.erros };
 
-    var plano = { EVENTOS: [], ANIMAIS: [], EVENTO_ANIMAIS: [], IDENTIFICACOES: [], PESAGENS: [], REPRODUCAO: [], BAIXAS: [], AJUSTES: [], COMPRAS: [], VENDAS: [], FINANCEIRO: [], PARCELAS: [], RATEIOS: [], ALOCACOES_FINANCEIRAS: [], ANEXOS: [] };
+    var plano = { EVENTOS: [], ANIMAIS: [], EVENTO_ANIMAIS: [], IDENTIFICACOES: [], PESAGENS: [], REPRODUCAO: [], BAIXAS: [], AJUSTES: [], SANIDADE: [], MOVIMENTOS_ESTOQUE: [], COMPRAS: [], VENDAS: [], FINANCEIRO: [], PARCELAS: [], RATEIOS: [], ALOCACOES_FINANCEIRAS: [], ANEXOS: [] };
     var ctxEv = { tipo: tipo, subtipo: subtipo, ev: ev, campos: campos, original: original, plano: plano, itens: [], criadosOriginal: {}, auditorias: [] };
     if (original) {
       m.f.linhasDoEvento(original.event_id).forEach(function (l) { if (l.atributos_iniciais_json) ctxEv.criadosOriginal[l.animal_id] = true; });
+    }
+    if (semAnimais) {
+      estoque_(m, ctxEv);
+      if (original) {
+        conferirParcelasLiquidadas_(m, original, 'corrigir');
+        m.repo.por('FINANCEIRO', 'event_id', original.event_id).forEach(function (fin) {
+          var a0 = FinancialService.avisoPeriodo(m.params, fin.data_competencia, 'A correção cancela um lançamento que');
+          if (a0) avisoItem_(m, null, a0.codigo, a0.mensagem);
+        });
+      }
+      return fechar_(m, ctxEv);
     }
     if (tipo === 'TRANSFERENCIA') cabecalhoTransferencia_(m, ctxEv);
     if (tipo === 'IDENTIFICACAO') cabecalhoIdentificacao_(m, ctxEv);
@@ -373,6 +389,7 @@ var EventService = (function () {
     if (tipo === 'COMPRA') cabecalhoCompra_(m, ctxEv);
     if (tipo === 'VENDA') cabecalhoVenda_(m, ctxEv);
     if (tipo === 'PESAGEM') cabecalhoPesagem_(m, ctxEv, animais);
+    if (tipo === 'SANIDADE') cabecalhoSanidade_(m, ctxEv);
     animais.forEach(function (item, i) {
       var it = novoItem_(m, item || {}, i);
       ctxEv.itens.push(it);
@@ -384,6 +401,7 @@ var EventService = (function () {
       else if (tipo === 'VENDA') itemVenda_(m, ctxEv, it);
       else if (tipo === 'NASCIMENTO') itemMatriz_(m, ctxEv, it);
       else if (tipo === 'PESAGEM') itemPesagem_(m, ctxEv, it);
+      else if (tipo === 'SANIDADE') itemSanidade_(m, ctxEv, it);
       else itemEntrada_(m, ctxEv, it);
     });
     if (tipo === 'NASCIMENTO') crias_(m, ctxEv, d.crias);
@@ -406,6 +424,7 @@ var EventService = (function () {
     if (tipo === 'COMPRA') financeiroCompra_(m, ctxEv, d);
     if (tipo === 'VENDA') { carenciaNaVenda_(m, ctxEv); financeiroVenda_(m, ctxEv, d); }
     if (tipo === 'MORTE' || tipo === 'DESCARTE') financeiroSaida_(m, ctxEv);
+    if (tipo === 'SANIDADE') consumoSanidade_(m, ctxEv);
     if (original) {
       conferirParcelasLiquidadas_(m, original, 'corrigir');
       m.repo.por('FINANCEIRO', 'event_id', original.event_id).forEach(function (fin) {
@@ -922,6 +941,376 @@ var EventService = (function () {
           Utils.formatarNumero(r.gmd_kg_dia, 2) + ' kg por dia, fora da faixa esperada (' + faixa + '). Confira a digitação.', conflitoCom_(v.event_id, v.event_type, v.event_subtype, v.data));
       });
     });
+  }
+
+  // ------------------------------------------------------------------ sanidade ----
+  /** Produto do cadastro citado pelo lançamento: existe; desativado só quando o original já o usava (correção). */
+  function produtoDoCampo_(m, campo, id) {
+    if (vazio_(id)) return null;
+    var p = m.repo.porId('PRODUTOS', id);
+    if (!p) { erroGeral_(m, campo, 'NAO_ENCONTRADO', 'O produto escolhido não está no cadastro. Atualize a tela e escolha de novo.'); return null; }
+    if (p.ativo === false && !usadoNoOriginal_(m, id)) { erroGeral_(m, campo, 'PRODUTO_INATIVO', 'O produto ' + p.nome + ' está desativado. Reative-o no cadastro de produtos ou escolha outro.'); return null; }
+    return p;
+  }
+  /**
+   * Cabeçalho da SANIDADE (03b, seções 2.6, 6 e 15.2; 05, RN-055 a RN-057): o procedimento é o do subtipo; o produto vem do
+   * cadastro (o nome é a cópia congelada do cadastro, o fabricante também quando vazio) ou do texto livre; o protocolo cumprido
+   * é do mesmo procedimento e está ativo; o modo da dose decide a dose de cada animal e a quantidade consumida (o fato que
+   * gera o movimento de saída e o custo; vazia = a soma das doses); a carência dá o último dia (`data_aplicacao` +
+   * dias) e a próxima aplicação vem do protocolo a cada N dias quando não é informada. Nada aqui prescreve: o sistema
+   * registra o que foi decidido.
+   */
+  function cabecalhoSanidade_(m, ctxEv) {
+    var c = ctxEv.campos;
+    var sub = ctxEv.subtipo;
+    var data = ctxEv.ev.event_date;
+    var s = {
+      procedimento: HealthService.PROCEDIMENTO[sub] || null, produto: null, protocolo: null, nome: null, fabricante: null, unidade: null,
+      modo: null, doseRef: null, quantidadeInformada: null, quantidade: null, carenciaDias: null, fimCarencia: null, proxima: null, ok: true,
+    };
+    ctxEv.sanidade = s;
+    var produto = produtoDoCampo_(m, 'produto_id', c.produto_id);
+    if (!vazio_(c.produto_id) && !produto) s.ok = false;
+    s.produto = produto;
+    var nomeLivre = typeof c.nome_produto === 'string' ? nulo_(Utils.aparar(c.nome_produto)) : null;
+    if (produto && nomeLivre && Utils.normalizarTexto(nomeLivre) !== Utils.normalizarTexto(produto.nome)) {
+      erroGeral_(m, 'nome_produto', 'CAMPO_NAO_SE_APLICA', 'Com o produto do cadastro, o nome vem do cadastro (' + produto.nome + '): deixe o nome em branco ou escolha outro produto.');
+      s.ok = false;
+    }
+    s.nome = produto ? produto.nome : nomeLivre;
+    s.fabricante = typeof c.fabricante === 'string' && nulo_(Utils.aparar(c.fabricante)) ? Utils.aparar(c.fabricante) : produto ? nulo_(produto.fabricante) : null;
+    if (HealthService.COM_PRODUTO_OBRIGATORIO.indexOf(sub) >= 0 && !s.nome && vazio_(c.produto_id)) {
+      erroGeral_(m, 'produto_id', 'CAMPO_OBRIGATORIO', 'Escolha o produto do cadastro ou digite o nome do produto aplicado.');
+      s.ok = false;
+    }
+    if (!vazio_(c.protocol_id)) {
+      var p = m.repo.porId('PROTOCOLOS_SANITARIOS', c.protocol_id);
+      if (!p) { erroGeral_(m, 'protocol_id', 'NAO_ENCONTRADO', 'O protocolo escolhido não existe. Atualize a tela e escolha de novo.'); s.ok = false; }
+      else if (p.ativo === false && !usadoNoOriginal_(m, p.protocol_id)) { erroGeral_(m, 'protocol_id', 'PROTOCOLO_INATIVO', 'O protocolo ' + p.nome + ' está desativado. Reative-o no cadastro de protocolos ou deixe o campo em branco.'); s.ok = false; }
+      else if (p.tipo_procedimento !== s.procedimento) { erroGeral_(m, 'protocol_id', 'PROTOCOLO_DE_OUTRO_PROCEDIMENTO', 'O protocolo ' + p.nome + ' é cumprido por ' + rotuloProcedimento_(p.tipo_procedimento) + ', não por ' + rotuloProcedimento_(s.procedimento) + '.'); s.ok = false; }
+      else s.protocolo = p;
+    }
+    var temProduto = !!s.nome || !vazio_(c.produto_id);
+    // Modo da dose (03b, seção 2.6: obrigatório quando há produto).
+    s.modo = HealthService.MODOS_DOSE.indexOf(c.modo_dose) >= 0 ? c.modo_dose : null;
+    if (temProduto && vazio_(c.modo_dose)) { erroGeral_(m, 'modo_dose', 'CAMPO_OBRIGATORIO', 'Diga como foi a dose: por cabeça, por peso ou só o total que saiu do frasco.'); s.ok = false; }
+    if (!temProduto && !vazio_(c.modo_dose)) { erroGeral_(m, 'modo_dose', 'CAMPO_NAO_SE_APLICA', 'Sem produto não há dose: escolha o produto ou deixe a dose em branco.'); s.ok = false; s.modo = null; }
+    s.doseRef = typeof c.dose_referencia === 'number' ? c.dose_referencia : null;
+    // Unidade: a do cadastro (dose, estoque e custo na mesma língua); no texto livre, a informada.
+    var unidadeLivre = typeof c.unidade_dose === 'string' ? nulo_(Utils.aparar(c.unidade_dose)) : null;
+    if (produto) {
+      s.unidade = produto.unidade;
+      if (unidadeLivre && unidadeLivre !== produto.unidade) { erroGeral_(m, 'unidade_dose', 'UNIDADE_DIFERENTE', 'O produto ' + produto.nome + ' é controlado em "' + produto.unidade + '": informe a dose nessa unidade e deixe a unidade em branco.'); s.ok = false; }
+    } else s.unidade = unidadeLivre;
+    s.quantidadeInformada = typeof c.quantidade_consumida_total === 'number' ? c.quantidade_consumida_total : null;
+    if (!vazio_(c.quantidade_consumida_total) && !produto && vazio_(c.produto_id)) { erroGeral_(m, 'quantidade_consumida_total', 'CAMPO_NAO_SE_APLICA', 'A quantidade que saiu do frasco só se informa com produto do cadastro (é ela que baixa o estoque e vira custo).'); s.ok = false; }
+    // Carência e próxima aplicação.
+    s.carenciaDias = typeof c.periodo_carencia_dias === 'number' ? c.periodo_carencia_dias : null;
+    s.fimCarencia = HealthService.fimPeloPeriodo(data, s.carenciaDias);
+    if (!vazio_(c.data_proxima_aplicacao)) {
+      if (Utils.dataValida(c.data_proxima_aplicacao) && Utils.dataValida(data) && c.data_proxima_aplicacao <= data) { erroGeral_(m, 'data_proxima_aplicacao', 'DATA_INVALIDA', 'A próxima aplicação precisa ser depois de ' + br_(data) + '.'); s.ok = false; }
+      s.proxima = c.data_proxima_aplicacao;
+    } else if (s.protocolo && s.protocolo.recorrencia_tipo === 'INTERVALO_DIAS' && typeof s.protocolo.intervalo_dias === 'number' && Utils.dataValida(data)) {
+      s.proxima = Utils.somaDias(data, s.protocolo.intervalo_dias);
+    }
+    // Lote vencido (RN-056): aviso, não bloqueio.
+    if (!vazio_(c.validade) && Utils.dataValida(c.validade) && Utils.dataValida(data) && c.validade < data) {
+      avisoItem_(m, null, 'PRODUTO_VENCIDO', 'O lote ' + (vazio_(c.lote) ? '' : c.lote + ' ') + 'de ' + (s.nome || 'produto') + ' venceu em ' + br_(c.validade) + ', antes da aplicação (' + br_(data) + '). Gravar mesmo assim?');
+    }
+  }
+  function rotuloProcedimento_(p) {
+    return { VACINA: 'vacina', VERMIFUGO: 'vermífugo', MEDICAMENTO: 'medicamento', TRATAMENTO: 'tratamento', EXAME: 'exame', DOENCA: 'registro de doença' }[p] || 'outro procedimento';
+  }
+  /**
+   * SANIDADE, um animal (03b, seção 6; 04, seção 4.5): fato independente — o animal precisa estar no rebanho na data (o dia da
+   * saída conta). Uma linha de EVENTO_ANIMAIS (efeito 0) e uma de SANIDADE. A dose: a do animal, quando informada; senão,
+   * por cabeça, a do lançamento; por peso, a dose por kg × o peso atual do animal na data (a regra do peso vigente:
+   * pesagem dentro da validade, senão o peso de referência da categoria, marcado como estimado; sem peso nenhum, a dose
+   * precisa ser informada); no modo total, sem dose por animal.
+   */
+  function itemSanidade_(m, ctxEv, it) {
+    var d = it.dados;
+    var s = ctxEv.sanidade;
+    var c = ctxEv.campos;
+    apontarExistente_(m, it);
+    camposDoItem_(m, it, EventCatalog.camposAnimal('SANIDADE', ctxEv.subtipo), d);
+    if (vazio_(d.animal_id)) return;
+    if (!sujeito_(m, it, 'trata')) return;
+    var obs = typeof d.observacoes === 'string' ? nulo_(Utils.aparar(d.observacoes)) : null;
+    linhaEA_(m, ctxEv, it, { efeito_inventario: 0, observacoes: obs });
+    var dose = it.camposComErro && it.camposComErro.dose ? null : typeof d.dose === 'number' ? d.dose : null;
+    it.peso = null;
+    if (s.modo === 'TOTAL' && !vazio_(d.dose)) { erroItem_(m, it, 'dose', 'CAMPO_NAO_SE_APLICA', 'no modo "total" a dose de cada animal fica vazia: vale a quantidade que saiu do frasco.'); dose = null; }
+    else if (s.modo === 'POR_CABECA' && dose === null) {
+      if (s.doseRef === null) erroItem_(m, it, 'dose', 'CAMPO_OBRIGATORIO', 'informe a dose (a do lançamento ou a deste animal).');
+      else dose = s.doseRef;
+    } else if (s.modo === 'POR_PESO' && dose === null) {
+      if (s.doseRef === null) erroItem_(m, it, 'dose', 'CAMPO_OBRIGATORIO', 'informe a dose por kg (no lançamento) ou a dose deste animal.');
+      else {
+        var L = m.leitorSanidade || (m.leitorSanidade = AnimalService.leitor(m.tx, { fonte: m.f, parametros: m.params }));
+        var a = estado_(m, it.animal_id);
+        var pv = AnimalService.pesoVigente(L, a, ctxEv.ev.event_date, AnimalService.categoriaEm(L, a, ctxEv.ev.event_date));
+        it.peso = pv;
+        if (typeof pv.kg !== 'number') erroItem_(m, it, 'dose', 'SEM_PESO', 'não há peso para calcular a dose por kg (nenhuma pesagem nem peso de referência da categoria): informe a dose deste animal ou pese antes.');
+        else dose = Utils.arredondar(s.doseRef * pv.kg, 4);
+      }
+    } else if (!s.modo && !vazio_(d.dose) && s.ok) { erroItem_(m, it, 'dose', 'CAMPO_NAO_SE_APLICA', 'sem produto não há dose.'); dose = null; }
+    if (dose !== null && !s.unidade && s.ok) erroItem_(m, it, 'dose', 'CAMPO_OBRIGATORIO', 'informe a unidade da dose (mL, dose, g) no lançamento.');
+    it.dose = dose;
+    var r = {
+      health_id: m.tx.novoId(), animal_id: it.animal_id, event_id: ctxEv.ev.event_id, tipo_procedimento: s.procedimento,
+      protocol_id: s.protocolo ? s.protocolo.protocol_id : null, produto_id: s.produto ? s.produto.product_id : null, nome_produto: s.nome,
+      fabricante: s.fabricante, lote: typeof c.lote === 'string' ? nulo_(Utils.aparar(c.lote)) : null, validade: nulo_(c.validade), dose: dose,
+      unidade_dose: dose === null ? null : s.unidade, via_aplicacao: nulo_(c.via_aplicacao), motivo: typeof c.motivo === 'string' ? nulo_(Utils.aparar(c.motivo)) : null,
+      diagnostico: typeof c.diagnostico === 'string' ? nulo_(Utils.aparar(c.diagnostico)) : null,
+      resultado_exame: typeof d.resultado_exame === 'string' ? nulo_(Utils.aparar(d.resultado_exame)) : null,
+      data_aplicacao: ctxEv.ev.event_date, data_proxima_aplicacao: s.proxima, periodo_carencia_dias: s.carenciaDias, data_fim_carencia: s.fimCarencia,
+      custo: null, veterinario: typeof c.veterinario === 'string' ? nulo_(Utils.aparar(c.veterinario)) : null, observacoes: obs,
+    };
+    it.sanidade = r;
+    ctxEv.plano.SANIDADE.push(r);
+  }
+  /** Movimentos do produto antes do comando (os vigentes) e depois (sem os do original da correção, com os do plano). */
+  function movimentosAntesDepois_(m, ctxEv, productId) {
+    var antes = HealthService.movimentosDoProduto(m.repo, productId, null);
+    var depois = HealthService.movimentosDoProduto(m.repo, productId, m.f.excluidos).concat(ctxEv ? ctxEv.plano.MOVIMENTOS_ESTOQUE.filter(function (x) { return x.product_id === productId; }) : []);
+    return { antes: antes, depois: depois };
+  }
+  /**
+   * Estoque negativo (RN-057): o comando que deixa o saldo de um produto com o estoque controlado abaixo de zero em alguma
+   * data, mais baixo que antes, pede confirmação (ESTOQUE_INSUFICIENTE; a política por código pode fazê-lo bloquear).
+   */
+  function avisoEstoque_(m, produto, antes, depois) {
+    if (!produto || produto.controla_estoque !== true) return;
+    var a = HealthService.menorSaldo(antes);
+    var dp = HealthService.menorSaldo(depois);
+    if (!(dp.saldo < 0) || !(dp.saldo < a.saldo)) return;
+    avisoItem_(m, null, 'ESTOQUE_INSUFICIENTE', produto.nome + ': o estoque ficaria em ' + HealthService.quantidadeTexto(dp.saldo, produto.unidade) + ' em ' + br_(dp.data) +
+      ' (o saldo não cobre o que sai). Confira a quantidade ou lance antes a entrada do produto. Gravar mesmo assim?');
+  }
+  /**
+   * Consumo, custo e carência da SANIDADE (03b, seções 10.3 e 15.2; 07, seção 5; PR-11; RN-054): a quantidade consumida
+   * (informada, ou a soma das doses) gera o movimento de SAIDA do produto do cadastro, com o custo unitário congelado, em
+   * qualquer produto do cadastro (com ou sem estoque controlado); com custo unitário, o lançamento de consumo CUSTEIO sem
+   * parcela na conta da categoria do produto, 100% rateado aos animais tratados (por cabeça; por peso, pela dose de cada um);
+   * o serviço ou produto pago no ato é outro lançamento CUSTEIO, com parcelas, por cabeça. `SANIDADE.custo` = o que coube a
+   * cada animal nos rateios do evento; `total_value` = Σ lançamentos. A carência confere as vendas já gravadas do animal.
+   */
+  function consumoSanidade_(m, ctxEv) {
+    var s = ctxEv.sanidade;
+    var ev = ctxEv.ev;
+    var c = ctxEv.campos;
+    var itens = ctxEv.itens.filter(function (it) { return it.linhaEA && it.sanidade; });
+    if (!s || !itens.length || itens.length !== ctxEv.itens.length) return;
+    var lancs = [];
+    var planejados = [];
+    if (s.produto && s.modo) {
+      var soma = 0;
+      var todas = itens.every(function (it) { return typeof it.dose === 'number'; });
+      itens.forEach(function (it) { if (typeof it.dose === 'number') soma += Math.round(it.dose * 10000); });
+      s.quantidade = s.quantidadeInformada !== null ? s.quantidadeInformada : s.modo !== 'TOTAL' && todas && soma > 0 ? soma / 10000 : null;
+      if (s.quantidade === null && s.modo === 'TOTAL' && vazio_(c.quantidade_consumida_total)) return; // o catálogo já pediu a quantidade
+      if (s.quantidade === null) return;
+      var cu = typeof s.produto.custo_unitario === 'number' && s.produto.custo_unitario > 0 ? s.produto.custo_unitario : null;
+      ctxEv.plano.MOVIMENTOS_ESTOQUE.push({
+        mov_id: m.tx.novoId(), product_id: s.produto.product_id, event_id: ev.event_id, data: ev.event_date, tipo: 'SAIDA', quantidade: s.quantidade,
+        custo_unitario: cu, lote: typeof c.lote === 'string' ? nulo_(Utils.aparar(c.lote)) : null, validade: nulo_(c.validade), observacoes: null,
+      });
+      var aa = movimentosAntesDepois_(m, ctxEv, s.produto.product_id);
+      avisoEstoque_(m, s.produto, aa.antes, aa.depois);
+      s.saldo = s.produto.controla_estoque === true ? { antes: HealthService.saldo(aa.antes, null), depois: HealthService.saldo(aa.depois, null) } : null;
+      var valor = HealthService.valorConsumo(s.quantidade, cu);
+      s.consumo = { custo_unitario: cu, valor: valor };
+      if (valor > 0) {
+        var porPeso = s.modo === 'POR_PESO' && itens.length > 1 && todas;
+        var pl = FinancialService.planejar(m.tx, {
+          evento: ev, conta: FinancialService.conta(m.repo, HealthService.CONTA_DA_CATEGORIA[s.produto.categoria] || 'TRATAMENTOS'), naturezas: ['CUSTEIO'], valor: valor,
+          descricao: HealthService.descricaoConsumo(s.produto, s.quantidade), quantidade: s.quantidade, product_id: s.produto.product_id, semCaixa: true,
+          rateio: porPeso
+            ? { criterio: 'MANUAL', justificativa: 'Proporcional à dose de cada animal (dose por kg de peso vivo).', itens: itens.map(function (it) { return { animal_id: it.animal_id, chave: it.codigo_interno, base: it.dose, quem: it.quem }; }), cemPorCento: true }
+            : { criterio: 'CABECAS', itens: itens.map(function (it) { return { animal_id: it.animal_id, chave: it.codigo_interno, base: 1, quem: it.quem }; }), cemPorCento: true },
+          campo: 'produto_id', rotulo: 'o consumo do produto',
+        }, m.col);
+        if (pl) {
+          FinancialService.juntar(ctxEv.plano, pl);
+          planejados.push(pl);
+          lancs.push(resumoLancamento_(m, pl, m.repo.porId('PLANO_CONTAS', pl.linhas.FINANCEIRO[0].conta_id), { papel: 'CONSUMO' }));
+        }
+      }
+    }
+    if (!vazio_(c.custo_valor) && !vazio_(c.custo_conta_id) && typeof c.custo_valor === 'number') {
+      var conta = m.repo.porId('PLANO_CONTAS', c.custo_conta_id);
+      parceiroValido_(m, ctxEv, 'custo_partner_id', c.custo_partner_id);
+      if (!conta) erroGeral_(m, 'custo_conta_id', 'NAO_ENCONTRADO', 'A conta escolhida não existe no plano de contas.');
+      else {
+        var ps = FinancialService.planejar(m.tx, {
+          evento: ev, conta: conta, naturezas: ['CUSTEIO'], valor: c.custo_valor,
+          descricao: nulo_(c.custo_descricao) || (rotuloProcedimento_(s.procedimento).replace(/^./, function (x) { return x.toUpperCase(); }) + ' de ' + br_(ev.event_date) + ': serviço ou produto pago no ato'),
+          partner_id: nulo_(c.custo_partner_id), documento: nulo_(c.custo_documento),
+          parcelas: FinancialService.parcelasMensais(c.custo_valor, nulo_(c.custo_vencimento) || ev.event_date, nulo_(c.custo_parcelas_qtd), { forma_pagamento: c.custo_forma_pagamento, documento: c.custo_documento }),
+          rateio: { criterio: 'CABECAS', itens: itens.map(function (it) { return { animal_id: it.animal_id, chave: it.codigo_interno, base: 1, quem: it.quem }; }), cemPorCento: true },
+          campo: 'custo_conta_id', rotulo: 'o custo pago no ato',
+        }, m.col);
+        if (ps) {
+          FinancialService.juntar(ctxEv.plano, ps);
+          planejados.push(ps);
+          lancs.push(resumoLancamento_(m, ps, conta, { papel: 'SERVICO' }));
+        }
+      }
+    }
+    if (planejados.length) {
+      var por = {};
+      planejados.forEach(function (pl) { pl.rateio.itens.forEach(function (x) { por[x.animal_id] = (por[x.animal_id] || 0) + x.valor; }); });
+      itens.forEach(function (it) { it.sanidade.custo = por[it.animal_id] === undefined ? null : por[it.animal_id]; });
+      ev.total_value = lancs.reduce(function (t, l) { return t + l.valor; }, 0);
+      resumoFinanceiro_(m, ctxEv, lancs, planejados);
+      planejados.forEach(function (pl) {
+        var a = FinancialService.avisoPeriodo(m.params, ev.event_date, 'O lançamento "' + pl.linhas.FINANCEIRO[0].descricao + '"');
+        if (a) avisoItem_(m, null, a.codigo, a.mensagem);
+      });
+    }
+    carenciaContraVendas_(m, ctxEv, itens);
+  }
+  /**
+   * Carência × venda já gravada (RN-072 pelo outro caminho): a aplicação retroativa — ou a correção que estende a carência —
+   * cuja carência cobre a data de uma venda vigente do animal. Na venda para ABATE vale a política de CARENCIA_ATIVA (padrão
+   * BLOQUEIA: o animal abatido antes do fim da carência); nas demais, aviso com aceite.
+   */
+  function carenciaContraVendas_(m, ctxEv, itens) {
+    var s = ctxEv.sanidade;
+    if (!s || !s.fimCarencia) return;
+    var data = ctxEv.ev.event_date;
+    itens.forEach(function (it) {
+      m.f.linhas(it.animal_id).forEach(function (l) {
+        if (l.event_type !== 'VENDA' || l.event_date < data || l.event_date > s.fimCarencia || l.pre_marco_zero === true) return;
+        var vd = m.repo.por('VENDAS', 'event_id', l.event_id)[0] || {};
+        var abate = vd.finalidade === 'ABATE';
+        avisoItem_(m, it, 'CARENCIA_ATIVA', it.quem + ': foi vendido' + (abate ? ' para abate' : '') + ' em ' + br_(l.event_date) + ', dentro da carência desta aplicação (até ' + br_(s.fimCarencia) + ').' +
+          (abate ? ' Para o abate, a carência precisa ter terminado: confira a data e a carência.' : ' Confirme que o comprador soube da carência.'), conflitoCom_(l.event_id, l.event_type, l.event_subtype, l.event_date));
+        if (!abate) (m.carenciaAvisa = m.carenciaAvisa || []).push(m.avisos[m.avisos.length - 1]);
+      });
+    });
+  }
+  /** Resumo da sanidade para a revisão (impactos): as contas do servidor, que a tela só mostra. */
+  function resumoSanidade_(m, ctxEv) {
+    var s = ctxEv.sanidade;
+    if (!s) return null;
+    return {
+      procedimento: s.procedimento, produto_id: s.produto ? s.produto.product_id : null, nome_produto: s.nome, unidade: s.unidade, modo_dose: s.modo,
+      dose_referencia: s.doseRef, quantidade: s.quantidade, quantidade_informada: s.quantidadeInformada !== null, consumo: s.consumo || null, estoque: s.saldo || null,
+      protocol_id: s.protocolo ? s.protocolo.protocol_id : null, carencia_dias: s.carenciaDias, fim_carencia: s.fimCarencia, proxima_aplicacao: s.proxima,
+      animais: ctxEv.itens.filter(function (it) { return it.sanidade; }).map(function (it) {
+        return { animal_id: it.animal_id, codigo_interno: it.codigo_interno || null, brinco: it.brincoTexto || null, dose: it.dose, peso_kg: it.peso ? it.peso.kg : null, peso_situacao: it.peso ? it.peso.situacao : null, peso_estimado: it.peso ? it.peso.estimado : null, custo: it.sanidade.custo };
+      }),
+    };
+  }
+
+  // ------------------------------------------------------------------ estoque de insumos ----
+  /**
+   * ESTOQUE (04, seção 4.7; 03a, seções 4.6 e 4.7; 07, seção 5; desenho-base 16.9). ENTRADA: a compra do insumo do cadastro é
+   * sempre um lançamento COMPRA_INSUMOS (natureza ESTOQUE_INSUMOS: caixa, fora do resultado e sem rateio aos animais), com o
+   * produto, a quantidade e as parcelas; o movimento de ENTRADA (quantidade e custo unitário = valor ÷ quantidade) só existe
+   * com `controla_estoque = S`. A quantidade é a informada na unidade do produto ou as embalagens × a quantidade por
+   * embalagem do cadastro (congelada no payload). AJUSTE (só com o estoque controlado): pela contagem (a diferença entre o
+   * saldo contado e o do sistema na data), por perda ou por vencimento (sai a quantidade perdida). Nenhum animal.
+   */
+  function estoque_(m, ctxEv) {
+    var c = ctxEv.campos;
+    var ev = ctxEv.ev;
+    var sub = ctxEv.subtipo;
+    var e = { subtipo: sub, produto: null, quantidade: null, variacao: null, motivo: null, saldo_contado: null, qtd_apresentacao: null, fator_conversao: null, valor: null };
+    ctxEv.estoque = e;
+    var produto = produtoDoCampo_(m, 'product_id', c.product_id);
+    if (!produto) return;
+    e.produto = produto;
+    var lote = typeof c.lote === 'string' ? nulo_(Utils.aparar(c.lote)) : null;
+    var obs = typeof c.notes === 'string' ? nulo_(Utils.aparar(c.notes)) : null;
+    if (sub === 'ENTRADA') {
+      var q = typeof c.quantidade === 'number' ? c.quantidade : null;
+      if (!vazio_(c.qtd_apresentacao) && typeof c.qtd_apresentacao === 'number') {
+        if (typeof produto.fator_conversao !== 'number' || !(produto.fator_conversao > 0)) {
+          erroGeral_(m, 'qtd_apresentacao', 'SEM_FATOR', 'O produto ' + produto.nome + ' não tem no cadastro quantas unidades vêm em cada embalagem: informe a quantidade em ' + produto.unidade + ' ou complete o cadastro.');
+          return;
+        }
+        var calc = Utils.arredondar(c.qtd_apresentacao * produto.fator_conversao, 4);
+        if (q !== null && q !== calc) { erroGeral_(m, 'quantidade', 'CONFLITO_DE_CAMPOS', 'As ' + Utils.formatarNumero(c.qtd_apresentacao) + ' embalagens de ' + Utils.formatarNumero(produto.fator_conversao) + ' dão ' + HealthService.quantidadeTexto(calc, produto.unidade) + ', mas a quantidade informada é ' + HealthService.quantidadeTexto(q, produto.unidade) + '. Deixe só uma das duas.'); return; }
+        q = calc;
+        e.qtd_apresentacao = c.qtd_apresentacao;
+        e.fator_conversao = produto.fator_conversao;
+      }
+      if (q === null) { if (vazio_(c.quantidade)) erroGeral_(m, 'quantidade', 'CAMPO_OBRIGATORIO', 'Informe a quantidade comprada (na unidade do produto, ' + produto.unidade + ') ou as embalagens.'); return; }
+      if (!(q > 0)) { erroGeral_(m, 'quantidade', 'VALOR_FORA_DA_FAIXA', 'A quantidade comprada precisa ser maior que zero.'); return; }
+      e.quantidade = q;
+      e.variacao = q;
+      if (typeof c.valor !== 'number') return;
+      e.valor = c.valor;
+      parceiroValido_(m, ctxEv, 'partner_id', c.partner_id);
+      var pl = FinancialService.planejar(m.tx, {
+        evento: ev, conta: FinancialService.conta(m.repo, FinancialService.CONTAS.INSUMOS), naturezas: ['ESTOQUE_INSUMOS'], valor: c.valor,
+        descricao: 'Compra de ' + produto.nome + ': ' + HealthService.quantidadeTexto(q, produto.unidade), quantidade: q, product_id: produto.product_id,
+        partner_id: nulo_(c.partner_id), documento: nulo_(c.documento),
+        parcelas: FinancialService.parcelasMensais(c.valor, nulo_(c.vencimento) || ev.event_date, nulo_(c.parcelas_qtd), { forma_pagamento: c.forma_pagamento, documento: c.documento }),
+        rateio: null, campo: 'valor', rotulo: 'a compra do insumo',
+      }, m.col);
+      if (!pl) return;
+      FinancialService.juntar(ctxEv.plano, pl);
+      ev.total_value = c.valor;
+      ev.partner_id = nulo_(c.partner_id);
+      resumoFinanceiro_(m, ctxEv, [resumoLancamento_(m, pl, m.repo.porId('PLANO_CONTAS', pl.linhas.FINANCEIRO[0].conta_id), { papel: 'INSUMO' })], [pl]);
+      var a = FinancialService.avisoPeriodo(m.params, ev.event_date, 'A compra do insumo');
+      if (a) avisoItem_(m, null, a.codigo, a.mensagem);
+      // O movimento de entrada só com o estoque controlado (desenho-base 16.9).
+      if (produto.controla_estoque === true) {
+        ctxEv.plano.MOVIMENTOS_ESTOQUE.push({ mov_id: m.tx.novoId(), product_id: produto.product_id, event_id: ev.event_id, data: ev.event_date, tipo: 'ENTRADA', quantidade: q, custo_unitario: HealthService.custoUnitarioEntrada(c.valor, q), lote: lote, validade: nulo_(c.validade), observacoes: obs });
+      }
+    } else {
+      if (produto.controla_estoque !== true) { erroGeral_(m, 'product_id', 'PRODUTO_SEM_ESTOQUE', 'O produto ' + produto.nome + ' não controla estoque: ligue o controle de estoque no cadastro dele para acertar o saldo.'); return; }
+      e.motivo = HealthService.MOTIVOS_AJUSTE.indexOf(c.motivo_ajuste) >= 0 ? c.motivo_ajuste : null;
+      if (!e.motivo) return;
+      var mov = movimentosAntesDepois_(m, null, produto.product_id);
+      var saldoNaData = HealthService.saldo(mov.depois, ev.event_date);
+      if (e.motivo === 'CONTAGEM') {
+        if (typeof c.saldo_contado !== 'number') return;
+        e.saldo_contado = c.saldo_contado;
+        e.variacao = Math.round((c.saldo_contado - saldoNaData) * 10000) / 10000;
+        if (e.variacao === 0) { erroGeral_(m, 'saldo_contado', 'VALOR_IGUAL', 'O saldo contado é igual ao do sistema em ' + br_(ev.event_date) + ' (' + HealthService.quantidadeTexto(saldoNaData, produto.unidade) + '): não há o que acertar.'); return; }
+      } else {
+        if (typeof c.quantidade !== 'number') return;
+        e.variacao = -c.quantidade;
+      }
+      e.quantidade = e.variacao;
+      e.saldo_na_data = saldoNaData;
+      ctxEv.plano.MOVIMENTOS_ESTOQUE.push({ mov_id: m.tx.novoId(), product_id: produto.product_id, event_id: ev.event_id, data: ev.event_date, tipo: 'AJUSTE', quantidade: e.variacao, custo_unitario: null, lote: lote, validade: nulo_(c.validade), observacoes: obs });
+    }
+    var aa = movimentosAntesDepois_(m, ctxEv, produto.product_id);
+    // Na correção, o produto do original que sai do lançamento também muda de saldo.
+    avisoEstoque_(m, produto, aa.antes, aa.depois);
+    if (ctxEv.original) {
+      m.repo.por('MOVIMENTOS_ESTOQUE', 'event_id', ctxEv.original.event_id).forEach(function (x) {
+        if (x.product_id === produto.product_id) return;
+        var outro = m.repo.porId('PRODUTOS', x.product_id);
+        var ab = movimentosAntesDepois_(m, ctxEv, x.product_id);
+        avisoEstoque_(m, outro, ab.antes, ab.depois);
+      });
+    }
+    e.saldo = produto.controla_estoque === true ? { antes: HealthService.saldo(aa.antes, null), depois: HealthService.saldo(aa.depois, null) } : null;
+  }
+  /** Resumo do estoque para a revisão (impactos). */
+  function resumoEstoque_(ctxEv) {
+    var e = ctxEv.estoque;
+    if (!e || !e.produto) return null;
+    return {
+      subtipo: e.subtipo, product_id: e.produto.product_id, nome: e.produto.nome, unidade: e.produto.unidade, controla_estoque: e.produto.controla_estoque === true,
+      quantidade: e.quantidade, motivo: e.motivo, saldo_contado: e.saldo_contado, saldo_na_data: e.saldo_na_data === undefined ? null : e.saldo_na_data,
+      qtd_apresentacao: e.qtd_apresentacao, fator_conversao: e.fator_conversao, valor: e.valor, saldo: e.saldo || null,
+      custo_unitario: e.valor !== null && e.quantidade ? HealthService.custoUnitarioEntrada(e.valor, e.quantidade) : null,
+    };
+  }
+  /** Produtos cujo saldo o comando muda: os dos movimentos do plano e os do original anulado. */
+  function produtosDoComando_(m, ctxEv, anulado) {
+    var ids = (ctxEv ? ctxEv.plano.MOVIMENTOS_ESTOQUE : []).map(function (x) { return x.product_id; });
+    if (anulado && m.repo.carregada('MOVIMENTOS_ESTOQUE')) ids = ids.concat(m.repo.por('MOVIMENTOS_ESTOQUE', 'event_id', anulado).map(function (x) { return x.product_id; }));
+    return Utils.unicos(ids);
   }
 
   // ------------------------------------------------------------------ nascimento ----
@@ -2208,13 +2597,19 @@ var EventService = (function () {
    * Animal novo não tem id anterior: conta como "o mesmo" o animal sem brinco de mesma assinatura (sexo,
    * nascimento, raça, pasto) já lançado no evento candidato.
    */
+  /** O produto de um registro sanitário, para a guarda de duplicidade: o do cadastro ou o nome em texto livre. */
+  function chaveSanidade_(r) {
+    if (!r) return '';
+    return !vazio_(r.produto_id) ? 'P:' + r.produto_id : 'N:' + Utils.normalizarTexto(String(r.nome_produto || ''));
+  }
   function guardaDuplicidade_(m, ctxEv) {
     var ev = ctxEv.ev;
     var itens = ctxEv.itens.filter(function (it) { return it.animal_id && it.linhaEA; });
     if (!itens.length || !Utils.dataValida(ev.event_date)) return;
     var candidatos = m.repo.por('EVENTOS', 'event_date', ev.event_date).filter(function (c) {
       if (c.event_type !== ev.event_type || nulo_(c.event_subtype) !== nulo_(ev.event_subtype) || m.f.excluidos[c.event_id]) return false;
-      // Marcar e desmarcar no mesmo dia não são o mesmo lançamento.
+      // Marcar e desmarcar no mesmo dia não são o mesmo lançamento; duas vacinas diferentes no mesmo dia, também não.
+      if (ev.event_type === 'SANIDADE') return chaveSanidade_(m.repo.por('SANIDADE', 'event_id', c.event_id)[0]) === chaveSanidade_(ctxEv.plano.SANIDADE[0]);
       return ev.event_type !== 'MARCACAO' || (c.payload_json || {}).acao === (ev.payload_json || {}).acao;
     });
     candidatos.forEach(function (c) {
@@ -2830,7 +3225,8 @@ var EventService = (function () {
       if (a.codigo === 'PERIODO_BLOQUEADO') { if (periodo) return; periodo = true; }
       var p = pol[a.codigo] || 'AVISA';
       // Carência (RN-072; 05, seção 4.8): a política vale só na venda para ABATE; nas demais vendas é sempre aviso.
-      if (a.codigo === 'CARENCIA_ATIVA' && m.carenciaSemPolitica) p = 'AVISA';
+      // Na sanidade retroativa, a carência que cobre uma venda que não foi para abate também é só aviso.
+      if (a.codigo === 'CARENCIA_ATIVA' && (m.carenciaSemPolitica || (m.carenciaAvisa && m.carenciaAvisa.indexOf(a) >= 0))) p = 'AVISA';
       if (p === 'IGNORA') return;
       if (p === 'BLOQUEIA') m.col.erro(Validation.bloqueado(a));
       else ficam.push(a);
@@ -2882,7 +3278,11 @@ var EventService = (function () {
       var deducoes = {};
       ((ev.payload_json || {}).deducoes || []).forEach(function (x) { deducoes[x.financial_id] = x.tipo; });
       fins.forEach(function (f) { out[f.financial_id] = codigo(f) === 'VENDA_ANIMAIS' ? 'RECEITA' : deducoes[f.financial_id] ? 'DEDUCAO:' + deducoes[f.financial_id] : f.conta_id; });
-    } else fins.forEach(function (f) { out[f.financial_id] = f.conta_id; });
+    } else if (ev.event_type === 'SANIDADE') {
+      // O consumo do produto do cadastro leva o produto; o serviço ou produto pago no ato, não.
+      fins.forEach(function (f) { out[f.financial_id] = vazio_(f.product_id) ? 'SERVICO' : 'CONSUMO'; });
+    } else if (ev.event_type === 'ESTOQUE') fins.forEach(function (f) { out[f.financial_id] = 'INSUMO'; });
+    else fins.forEach(function (f) { out[f.financial_id] = f.conta_id; });
     return out;
   }
   /**
@@ -2896,7 +3296,7 @@ var EventService = (function () {
     // Um lançamento só nos dois (morte, descarte, abertura): é o mesmo, ainda que a conta tenha mudado.
     if (finsOriginal.length === 1 && finsNovos.length === 1) { out[finsOriginal[0].financial_id] = finsNovos[0].financial_id; return out; }
     var papelNovo = {};
-    if (ctxEv.tipo === 'COMPRA' || ctxEv.tipo === 'VENDA') {
+    if (ctxEv.tipo === 'COMPRA' || ctxEv.tipo === 'VENDA' || ctxEv.tipo === 'SANIDADE' || ctxEv.tipo === 'ESTOQUE') {
       ((ctxEv.financeiro && ctxEv.financeiro.lancamentos) || []).forEach(function (l) { papelNovo[l.financial_id] = l.papel === 'DEDUCAO' ? 'DEDUCAO:' + l.tipo_deducao : l.papel; });
     }
     var grupos = function (lista, papel) {
@@ -2939,11 +3339,19 @@ var EventService = (function () {
       acao: ctxEv.tipo === 'MARCACAO' ? ctxEv.ev.payload_json.acao : null,
       motivo_descarte: ctxEv.tipo === 'MARCACAO' ? ctxEv.ev.payload_json.motivo_descarte : null,
       // A baixa por divergência não grava AJUSTES: o porquê do lançamento fica no evento (BAIXAS guarda em que contagem faltou).
-      motivo_ajuste: ctxEv.subtipo === 'DIVERGENCIA_CONTAGEM' ? nulo_(ctxEv.ev.justificativa) : null,
+      motivo_ajuste: ctxEv.subtipo === 'DIVERGENCIA_CONTAGEM' ? nulo_(ctxEv.ev.justificativa) : ctxEv.estoque ? ctxEv.estoque.motivo : null,
       // Pesagem por lote (03b, seção 2.6): o peso total e as cabeças são o fato; o jejum vale para o lançamento.
       peso_total_lote_kg: ctxEv.pesagem && ctxEv.pesagem.lote ? ctxEv.pesagem.lote.total_kg : null,
       qtd_cabecas_lote: ctxEv.pesagem && ctxEv.pesagem.lote ? ctxEv.pesagem.lote.cabecas : null,
       jejum: ctxEv.pesagem && ctxEv.pesagem.jejum ? true : null,
+      // Sanidade (03b, seção 2.6): o modo da dose, a dose de referência e a quantidade que saiu do frasco (o fato do consumo).
+      modo_dose: ctxEv.sanidade ? ctxEv.sanidade.modo : null,
+      dose_referencia: ctxEv.sanidade && ctxEv.sanidade.modo && ctxEv.sanidade.modo !== 'TOTAL' ? ctxEv.sanidade.doseRef : null,
+      quantidade_consumida_total: ctxEv.sanidade ? ctxEv.sanidade.quantidade : null,
+      // Estoque (03b, seção 2.6): as embalagens e a quantidade por embalagem congelada; no acerto pela contagem, o saldo contado.
+      qtd_apresentacao: ctxEv.estoque ? ctxEv.estoque.qtd_apresentacao : null,
+      fator_conversao: ctxEv.estoque ? ctxEv.estoque.fator_conversao : null,
+      saldo_contado: ctxEv.estoque ? ctxEv.estoque.saldo_contado : null,
     };
     ev.payload_json = payload_(m, ctxEv, extra);
     var itensPorAnimal = {};
@@ -2978,8 +3386,10 @@ var EventService = (function () {
         marcacao: ctxEv.tipo === 'MARCACAO' ? { subtipo: ctxEv.subtipo, acao: ctxEv.ev.payload_json.acao, motivo_descarte: ctxEv.ev.payload_json.motivo_descarte } : null,
         compra: ctxEv.compra || null, venda: ctxEv.venda || null, financeiro: ctxEv.financeiro || null,
         pesagem: ctxEv.pesagem ? WeightService.resumoDoPlano(ctxEv.pesagem, ctxEv.plano.PESAGENS) : null,
+        sanidade: ctxEv.sanidade ? resumoSanidade_(m, ctxEv) : null,
+        estoque: ctxEv.estoque ? resumoEstoque_(ctxEv) : null,
       },
-      derivados: { animais: animais, eventos: [ev.event_id].concat(ctxEv.original ? [ctxEv.original.event_id] : []) },
+      derivados: { animais: animais, eventos: [ev.event_id].concat(ctxEv.original ? [ctxEv.original.event_id] : []), produtos: produtosDoComando_(m, ctxEv, ctxEv.original ? ctxEv.original.event_id : null) },
       resposta: function (t) { return resposta_(t, resumo); },
     };
   }
@@ -3041,6 +3451,12 @@ var EventService = (function () {
     conferirEstadoRestaurado_(m, ficam, 'o estorno', null);
     conferirPeriodosDeBrinco_(m, null, ficam, 'o estorno');
     conferirParcelasLiquidadas_(m, alvo, 'estornar');
+    // Insumo: o estorno da entrada (ou de um acerto que somou) que deixa o saldo negativo pede confirmação (RN-057).
+    var produtos = produtosDoComando_(m, null, alvo.event_id);
+    produtos.forEach(function (pid) {
+      var mv = movimentosAntesDepois_(m, null, pid);
+      avisoEstoque_(m, m.repo.porId('PRODUTOS', pid), mv.antes, mv.depois);
+    });
     m.repo.por('FINANCEIRO', 'event_id', alvo.event_id).forEach(function (fin) {
       if (!vazio_(m.params.fin_bloqueio_ate) && fin.data_competencia <= m.params.fin_bloqueio_ate) {
         avisoItem_(m, null, 'PERIODO_BLOQUEADO', 'O estorno cancela um lançamento de ' + br_(fin.data_competencia) + ', dentro do período financeiro fechado (até ' + br_(m.params.fin_bloqueio_ate) + '). Confirme com uma justificativa.');
@@ -3066,7 +3482,7 @@ var EventService = (function () {
       resumo: resumo,
       impactos: { acao: 'estornar', estorna: alvo.event_id, event_type: alvo.event_type, event_subtype: nulo_(alvo.event_subtype), nome: EventCatalog.nomeEvento(alvo.event_type, alvo.event_subtype),
         event_date: alvo.event_date, animais: animais.length, anulados: Object.keys(criados).length, cancelados: canceladosDoEstorno_(m, alvo), corrige: originalDaCorrecao_(m, alvo) },
-      derivados: { animais: animais, eventos: [alvo.event_id, id] },
+      derivados: { animais: animais, eventos: [alvo.event_id, id], produtos: produtos },
       resposta: function (t) { return resposta_(t, resumo); },
     };
   }
@@ -3091,10 +3507,17 @@ var EventService = (function () {
     // Pesagem (só no registro e na correção de uma PESAGEM; a resposta dos outros tipos não muda): a média, o total e a
     // comparação de cada animal com a pesagem anterior, calculados aqui (a tela só mostra).
     if (ev && ev.event_type === 'PESAGEM' && r.acao !== 'estornar') out.pesagem = WeightService.resultadoDoEvento(tx, r.event_id);
+    // Sanidade e estoque (só nesses tipos; a resposta dos outros não muda): o saldo de cada produto movimentado, depois da
+    // fase C, para a tela de resultado e o cadastro de produtos do aparelho (a tela só mostra).
+    var alvoEv = ev && r.acao === 'estornar' ? (tx.cru ? tx.cru.cruPorId('EVENTOS', alvo) : null) : ev;
+    if (alvoEv && (alvoEv.event_type === 'SANIDADE' || alvoEv.event_type === 'ESTOQUE')) {
+      var movs = (tx.cru ? tx.cru.cruPor('MOVIMENTOS_ESTOQUE', 'event_id', alvo) : []).concat(r.acao === 'corrigir' && r.substitui && tx.cru ? tx.cru.cruPor('MOVIMENTOS_ESTOQUE', 'event_id', r.substitui) : []);
+      out.produtos = Utils.unicos(movs.map(function (x) { return x.product_id; })).map(function (pid) { return HealthService.produtoPublico(tx.repo, tx.repo.porId('PRODUTOS', pid)); }).filter(Boolean);
+    }
     return out;
   }
   function leiturasConsulta_() {
-    return Timeline.LEITURAS.concat(['PROPRIEDADES', 'BAIXAS', 'COMPRAS', 'VENDAS', 'ANEXOS', 'PLANO_CONTAS']);
+    return Timeline.LEITURAS.concat(['PROPRIEDADES', 'BAIXAS', 'COMPRAS', 'VENDAS', 'ANEXOS', 'PLANO_CONTAS'], EventCatalog.LEITURAS_INSUMOS);
   }
   /**
    * Totais de uma venda gravada (FinancialService.totaisVenda sobre a linha de VENDAS e os lançamentos de dedução do
@@ -3176,7 +3599,7 @@ var EventService = (function () {
         var st = ev ? tx.cru.avaliar(ev.event_id).status : null;
         if (!ev || st === 'FALHOU' || st === 'PENDENTE') throw Validation.erro('NOT_FOUND', 'Evento não encontrado.');
         var detalhes = {};
-        ['IDENTIFICACOES', 'PESAGENS', 'REPRODUCAO', 'BAIXAS', 'AJUSTES', 'COMPRAS', 'VENDAS', 'FINANCEIRO', 'RATEIOS'].forEach(function (t) {
+        ['IDENTIFICACOES', 'PESAGENS', 'REPRODUCAO', 'BAIXAS', 'AJUSTES', 'SANIDADE', 'MOVIMENTOS_ESTOQUE', 'COMPRAS', 'VENDAS', 'FINANCEIRO', 'RATEIOS'].forEach(function (t) {
           detalhes[t] = tx.cru.cruPor(t, 'event_id', ev.event_id).map(Utils.clonar);
         });
         detalhes.PARCELAS = [];

@@ -96,11 +96,9 @@ test('ficha: blocos A a J, árvore genealógica até N gerações, crias, pastos
   assert.deepEqual([f.peso.serie, f.peso.intervalos], [[], []]);
   assert.deepEqual([f.peso.peso_atual.valor, f.peso.peso_atual.motivo, f.peso.peso_atual.n], [null, 'DADOS_INSUFICIENTES', 0]);
   assert.deepEqual([f.peso.projecao.valor, f.peso.projecao.motivo, f.peso.projecao.rotulo], [null, 'DADOS_INSUFICIENTES', 'Estimativa']);
-  for (const b of ['sanitario']) {
-    assert.equal(f[b].entregue, false, b + ': módulo não entregue');
-    assert.deepEqual(f[b].itens, []);
-    assert.ok(f[b].fase > 1 && typeof f[b].modulo === 'string' && /próxima etapa/.test(f[b].mensagem));
-  }
+  // F (sanidade): entregue na Fase 3, etapa E3.3 (HealthService.blocoFicha; os números em sanidade.test). Sem aplicação:
+  // nenhum registro, sem carência e sem próxima dose.
+  assert.deepEqual([f.sanitario.entregue, f.sanitario.itens, f.sanitario.carencia, f.sanitario.proximas, f.sanitario.custo_total], [true, [], null, [], null], 'sanidade: módulo entregue');
   for (const b of ['geral', 'genealogia', 'localizacao', 'pastos', 'eventos', 'anexos']) assert.equal(f[b].entregue, true, b);
   // H: entregue na Fase 2 pela compra (alocações); parcial até o Financeiro (Fase 4). Nascida: custo 0, sem lançamentos.
   assert.deepEqual([f.financeiro.entregue, f.financeiro.parcial, f.financeiro.pendente.fase, f.financeiro.lancamentos.length], [true, true, 4, 0]);

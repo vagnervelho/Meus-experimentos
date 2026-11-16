@@ -374,7 +374,7 @@ var AuditService = (function () {
    */
   var FONTE_QUEBRADA = Object.freeze({ COPIAS: true, FILHAS_SEM_PAI: true });
   var PAIS_FILHA = Object.freeze({ AUDITORIA: ['op_id', 'OPERACOES'], IMPORTACAO_LINHAS: ['import_id', 'IMPORTACOES'], ALOCACOES_FINANCEIRAS: ['rateio_id', 'RATEIOS'], PARCELAS: ['financial_id', 'FINANCEIRO'] });
-  var COPIAS_DATA = Object.freeze({ PESAGENS: 'data_pesagem', REPRODUCAO: 'data', IDENTIFICACOES: 'data_inicio' });
+  var COPIAS_DATA = Object.freeze({ PESAGENS: 'data_pesagem', REPRODUCAO: 'data', IDENTIFICACOES: 'data_inicio', SANIDADE: 'data_aplicacao', MOVIMENTOS_ESTOQUE: 'data' });
   /**
    * Checagem de cada invariante de 03b, seção 14 (FinancialService.conferir). A 6 (situação de pagamento pelas parcelas)
    * é a própria projeção de FINANCEIRO, já conferida em PROJECAO; a 12 e a 18 também são projeções e ficam nas
@@ -1204,8 +1204,10 @@ var AuditService = (function () {
       // Do evento, o projetor refaz os lançamentos (FINANCEIRO: situação e pagamento): só os eventos com lançamento contam.
       var comLancamento = function (id) { return tx.repo.carregada('FINANCEIRO') && tx.cru.cruPor('FINANCEIRO', 'event_id', id).length > 0; };
       var eventos = Object.keys(esc.eventosGravados).filter(function (id) { return !(cob.eventos && cob.eventos[id]) && comLancamento(id); });
-      if (!animais.length && !eventos.length) return;
-      alvo = { animais: animais, eventos: eventos };
+      // O saldo de cada produto movimentado (PRODUTOS.estoque_atual* = Σ dos movimentos).
+      var produtos = Object.keys(esc.produtos || {}).filter(function (id) { return !(cob.produtos && cob.produtos[id]); });
+      if (!animais.length && !eventos.length && !produtos.length) return;
+      alvo = { animais: animais, eventos: eventos, produtos: produtos };
     }
     var plano = Repository.plano();
     o.projetor.reconstruir({ repo: tx.repo, cru: tx.cru, plano: plano, agora: null, ctx: tx.ctx }, alvo);
@@ -1340,6 +1342,10 @@ var AuditService = (function () {
       if (ev.event_type === 'PESAGEM') return EventCatalog.MOMENTOS_PESAGEM;
       return { NASCIMENTO: 'NASCIMENTO', COMPRA: 'COMPRA', VENDA: 'VENDA', ENTRADA_INICIAL: 'ENTRADA', DESMAMA: 'DESMAMA' }[ev.event_type] || null;
     } },
+    // SANIDADE.tipo_procedimento = o do subtipo (VACINACAO → VACINA ...); MOVIMENTOS_ESTOQUE.tipo = o subtipo do ESTOQUE
+    // (ENTRADA, AJUSTE) ou SAIDA na sanidade (03b, seção 2.4).
+    SANIDADE: { campo: 'tipo_procedimento', esperado: function (ev) { return ev.event_type === 'SANIDADE' ? HealthService.PROCEDIMENTO[ev.event_subtype] || null : null; } },
+    MOVIMENTOS_ESTOQUE: { campo: 'tipo', esperado: function (ev) { return ev.event_type === 'ESTOQUE' ? ev.event_subtype : ev.event_type === 'SANIDADE' ? 'SAIDA' : null; } },
     REPRODUCAO: { campo: 'tipo_evento', esperado: function (ev) {
       if (ev.event_type === 'NASCIMENTO') return 'PARTO';
       if (ev.event_type === 'REPRODUCAO') return ev.event_subtype;
@@ -1358,6 +1364,7 @@ var AuditService = (function () {
     { tabela: 'AJUSTES', quantos: 'ALGUM', aplica: function (ev) { return ev.event_type === 'AJUSTE_INVENTARIO' && ev.event_subtype !== 'DIVERGENCIA_CONTAGEM'; } },
     { tabela: 'IDENTIFICACOES', quantos: 'UM', aplica: function (ev) { return ev.event_type === 'IDENTIFICACAO'; } },
     { tabela: 'PESAGENS', quantos: 'UM', aplica: function (ev) { return ev.event_type === 'PESAGEM'; } },
+    { tabela: 'SANIDADE', quantos: 'UM', aplica: function (ev) { return ev.event_type === 'SANIDADE'; } },
   ]);
   function conferirDetalhes_(tx, col, eventos) {
     var repo = tx.repo;
@@ -1391,7 +1398,9 @@ var AuditService = (function () {
     if (t === 'NASCIMENTO') return { papeis: { MATRIZ: 0, CRIA: 1 }, pasto: false, outrosPapeisEmPartos: true };
     if (t === 'VENDA' || t === 'MORTE' || t === 'DESCARTE') return { papeis: { SUJEITO: -1 }, pasto: false };
     if (t === 'TRANSFERENCIA') return { papeis: { SUJEITO: 0 }, pasto: true };
-    if (t === 'IDENTIFICACAO' || t === 'MARCACAO' || t === 'PESAGEM') return { papeis: { SUJEITO: 0 }, pasto: false };
+    if (t === 'IDENTIFICACAO' || t === 'MARCACAO' || t === 'PESAGEM' || t === 'SANIDADE') return { papeis: { SUJEITO: 0 }, pasto: false };
+    // ESTOQUE não tem animais: nenhuma linha (conferirInsumos_ acusa a que aparecer).
+    if (t === 'ESTOQUE') return null;
     if (t === 'AJUSTE_INVENTARIO') return sub === 'DIVERGENCIA_CONTAGEM' ? { papeis: { SUJEITO: -1 }, pasto: false } : { papeis: { SUJEITO: 0 }, pasto: sub === 'CORRECAO_LOCALIZACAO' };
     return null;
   }
@@ -1443,7 +1452,7 @@ var AuditService = (function () {
           col.achado('COPIAS', { tabela: ref.tabela, id: ref.id, linha: ref.linha, campo: 'pasto_destino_id', mensagem: oquePasto + aviso, oque: oquePasto, chaves: l.event_animal_id + '|PASTO', event_id: ev.event_id, animal_id: l.animal_id });
         }
       });
-      ['BAIXAS', 'AJUSTES', 'IDENTIFICACOES', 'PESAGENS'].forEach(function (t) {
+      ['BAIXAS', 'AJUSTES', 'IDENTIFICACOES', 'PESAGENS', 'SANIDADE'].forEach(function (t) {
         if (!repo.carregada(t)) return;
         repo.por(t, 'event_id', ev.event_id).forEach(function (r) {
           if (vazio_(r.animal_id) || comLinha[r.animal_id]) return;
@@ -1508,6 +1517,102 @@ var AuditService = (function () {
     });
   }
   /**
+   * Sanidade e estoque de insumos (03a, seções 4.6 e 4.7; 03b, seções 2.6, 6 e 15.2; 07, seção 5; desenho-base 16.9),
+   * conferidos aqui para valerem em todo caminho (registro, correção, estorno, importação e a trava de integridade):
+   *  - SANIDADE: uma linha por animal (DETALHE_OBRIGATORIO), o mesmo produto, nome e protocolo em todo o lançamento, o nome
+   *    do produto nas vacinas, vermífugos e medicamentos, a doença sem produto nem dose, a dose conforme o modo do payload
+   *    (por cabeça ou por peso: em todo animal; total: em nenhum), a unidade da dose = a do produto do cadastro, o último dia
+   *    de carência = aplicação + dias, a cópia do custo = o que coube ao animal nos rateios do evento; o movimento de SAIDA
+   *    do produto do cadastro = a quantidade consumida do payload (e nenhum sem produto); o consumo com custo unitário é
+   *    exatamente um lançamento CUSTEIO sem parcela, com o produto, a quantidade e o valor = quantidade × custo congelado;
+   *  - ESTOQUE: nenhuma linha de animal; na ENTRADA, um lançamento ESTOQUE_INSUMOS com o produto e a quantidade e no máximo
+   *    um movimento de ENTRADA do mesmo produto, com a mesma quantidade e o custo unitário = valor ÷ quantidade (embalagens ×
+   *    quantidade por embalagem = quantidade); no AJUSTE, exatamente um movimento de AJUSTE diferente de zero (negativo na
+   *    perda e no vencimento) e nenhum lançamento;
+   *  - nos demais tipos, nenhum movimento de estoque nem lançamento com produto.
+   * O saldo (`PRODUTOS.estoque_atual*` = Σ dos movimentos) é projeção, conferido em PROJECAO. Achados de COPIAS (fonte).
+   */
+  function conferirInsumos_(tx, col, eventos) {
+    var repo = tx.repo;
+    var temMov = repo.carregada('MOVIMENTOS_ESTOQUE');
+    var temSan = repo.carregada('SANIDADE');
+    var temFin = repo.carregada('FINANCEIRO');
+    var aviso = ' Restaure o backup ou investigue a edição manual; o reparo automático só refaz a situação a partir dos lançamentos.';
+    var produto = function (id) { return vazio_(id) || !repo.carregada('PRODUTOS') ? null : repo.porId('PRODUTOS', id); };
+    eventos.forEach(function (ev) {
+      var nome = '"' + rotuloEvento_(ev) + '" de ' + br_(ev.event_date);
+      var achado = function (tabela, id, campo, oque, chave, animal) {
+        col.achado('COPIAS', { tabela: tabela, id: id, campo: campo, mensagem: oque + aviso, oque: oque, chaves: id + '|' + chave, event_id: ev.event_id, animal_id: animal || null });
+      };
+      var movs = temMov ? repo.por('MOVIMENTOS_ESTOQUE', 'event_id', ev.event_id) : [];
+      var fins = temFin ? repo.por('FINANCEIRO', 'event_id', ev.event_id) : [];
+      var comProduto = fins.filter(function (f) { return !vazio_(f.product_id); });
+      var pj = ev.payload_json || {};
+      if (ev.event_type === 'SANIDADE') {
+        var linhas = temSan ? repo.por('SANIDADE', 'event_id', ev.event_id) : [];
+        if (!linhas.length) return;
+        var r0 = linhas[0];
+        var quem = function (r) { return rotuloAnimal_(tx.cru.cruPorId('ANIMAIS', r.animal_id), r.animal_id); };
+        linhas.forEach(function (r) {
+          ['produto_id', 'nome_produto', 'protocol_id'].forEach(function (c) {
+            if (nulo_(r[c]) !== nulo_(r0[c])) achado('SANIDADE', r.health_id, c, nome + ', ' + quem(r) + ': o produto ou o protocolo da linha difere do das outras linhas do lançamento (um lançamento é um procedimento com um produto).', 'MESMO_' + c, r.animal_id);
+          });
+          if (['VACINA', 'VERMIFUGO', 'MEDICAMENTO'].indexOf(r.tipo_procedimento) >= 0 && vazio_(r.nome_produto)) achado('SANIDADE', r.health_id, 'nome_produto', nome + ', ' + quem(r) + ': a aplicação está sem o nome do produto.', 'NOME', r.animal_id);
+          if (r.tipo_procedimento === 'DOENCA' && (!vazio_(r.produto_id) || !vazio_(r.dose))) achado('SANIDADE', r.health_id, 'produto_id', nome + ', ' + quem(r) + ': o registro de doença tem produto ou dose, que ele não grava.', 'DOENCA', r.animal_id);
+          var modo = pj.modo_dose;
+          if ((modo === 'POR_CABECA' || modo === 'POR_PESO') && !(typeof r.dose === 'number' && r.dose > 0)) achado('SANIDADE', r.health_id, 'dose', nome + ', ' + quem(r) + ': a dose está vazia, mas o lançamento é por ' + (modo === 'POR_PESO' ? 'peso' : 'cabeça') + '.', 'DOSE', r.animal_id);
+          if ((modo === 'TOTAL' || vazio_(modo)) && !vazio_(r.dose)) achado('SANIDADE', r.health_id, 'dose', nome + ', ' + quem(r) + ': a linha tem dose, mas o lançamento ' + (modo === 'TOTAL' ? 'só informa o total que saiu do frasco' : 'não tem modo de dose') + '.', 'DOSE_SEM_MODO', r.animal_id);
+          var prod = produto(r.produto_id);
+          if (prod && !vazio_(r.dose) && r.unidade_dose !== prod.unidade) achado('SANIDADE', r.health_id, 'unidade_dose', nome + ', ' + quem(r) + ': a dose está em "' + (r.unidade_dose || 'sem unidade') + '", mas o produto ' + prod.nome + ' é controlado em "' + prod.unidade + '".', 'UNIDADE', r.animal_id);
+          var fim = HealthService.fimPeloPeriodo(r.data_aplicacao, r.periodo_carencia_dias);
+          if (nulo_(r.data_fim_carencia) !== fim) achado('SANIDADE', r.health_id, 'data_fim_carencia', nome + ', ' + quem(r) + ': o fim da carência gravado (' + (vazio_(r.data_fim_carencia) ? 'vazio' : br_(r.data_fim_carencia)) + ') não é a aplicação mais os dias de carência (' + (fim ? br_(fim) : 'sem carência') + ').', 'CARENCIA', r.animal_id);
+          if (temFin && repo.carregada('RATEIOS') && repo.carregada('ALOCACOES_FINANCEIRAS')) {
+            var alocado = null;
+            fins.forEach(function (f) { repo.por('RATEIOS', 'financial_id', f.financial_id).forEach(function (rt) { repo.por('ALOCACOES_FINANCEIRAS', 'rateio_id', rt.rateio_id).forEach(function (al) { if (al.animal_id === r.animal_id) alocado = (alocado || 0) + (al.valor_alocado || 0); }); }); });
+            if (nulo_(r.custo) !== alocado) achado('SANIDADE', r.health_id, 'custo', nome + ', ' + quem(r) + ': o custo copiado na aplicação (' + (vazio_(r.custo) ? 'vazio' : Utils.formatarReais(r.custo)) + ') difere do que coube ao animal no lançamento (' + (alocado === null ? 'nada' : Utils.formatarReais(alocado)) + ').', 'CUSTO', r.animal_id);
+          }
+        });
+        if (!temMov) return;
+        var q = pj.quantidade_consumida_total;
+        if (vazio_(r0.produto_id)) {
+          if (movs.length) achado('MOVIMENTOS_ESTOQUE', movs[0].mov_id, 'product_id', nome + ': há movimento de estoque, mas a aplicação não é de produto do cadastro.', 'SEM_PRODUTO');
+        } else if (typeof q === 'number') {
+          if (movs.length !== 1 || movs[0].product_id !== r0.produto_id || movs[0].quantidade !== q) achado('EVENTOS', ev.event_id, 'MOVIMENTOS_ESTOQUE', nome + ': a saída do estoque não confere com o consumo do lançamento (' + Utils.formatarNumero(q) + ' do produto, um movimento só).', 'SAIDA');
+        } else if (movs.length) achado('MOVIMENTOS_ESTOQUE', movs[0].mov_id, 'quantidade', nome + ': há saída de estoque, mas o lançamento não tem a quantidade consumida.', 'SEM_QUANTIDADE');
+        if (!temFin) return;
+        var mv = movs.length === 1 ? movs[0] : null;
+        var valor = mv ? HealthService.valorConsumo(mv.quantidade, mv.custo_unitario) : 0;
+        if (valor > 0) {
+          var f0 = comProduto[0];
+          if (comProduto.length !== 1 || f0.product_id !== r0.produto_id || f0.natureza !== 'CUSTEIO' || f0.valor !== valor || f0.quantidade !== mv.quantidade) {
+            achado('EVENTOS', ev.event_id, 'FINANCEIRO', nome + ': o consumo do produto (' + Utils.formatarNumero(mv.quantidade) + ' × ' + Utils.formatarNumero(mv.custo_unitario) + ' = ' + Utils.formatarReais(valor) + ') não confere com o lançamento de consumo do evento.', 'CONSUMO');
+          }
+        } else if (comProduto.length) achado('FINANCEIRO', comProduto[0].financial_id, 'product_id', nome + ': há lançamento de consumo, mas a saída do estoque não tem custo.', 'CONSUMO_SEM_CUSTO');
+        return;
+      }
+      if (ev.event_type === 'ESTOQUE') {
+        if (repo.carregada('EVENTO_ANIMAIS') && repo.por('EVENTO_ANIMAIS', 'event_id', ev.event_id).length) achado('EVENTOS', ev.event_id, 'EVENTO_ANIMAIS', nome + ': o lançamento de estoque tem linhas de animais, que ele não grava.', 'ANIMAIS');
+        if (!temMov || !temFin) return;
+        if (ev.event_subtype === 'ENTRADA') {
+          var fe = fins[0];
+          if (fins.length !== 1 || fe.natureza !== 'ESTOQUE_INSUMOS' || vazio_(fe.product_id) || !(fe.quantidade > 0)) { achado('EVENTOS', ev.event_id, 'FINANCEIRO', nome + ': a entrada de insumo precisa de um lançamento de compra de insumos com o produto e a quantidade.', 'COMPRA'); return; }
+          if (typeof pj.qtd_apresentacao === 'number' && (typeof pj.fator_conversao !== 'number' || Utils.arredondar(pj.qtd_apresentacao * pj.fator_conversao, 4) !== fe.quantidade)) achado('EVENTOS', ev.event_id, 'payload_json', nome + ': as embalagens × a quantidade por embalagem não dão a quantidade comprada.', 'EMBALAGENS');
+          if (movs.length > 1) achado('EVENTOS', ev.event_id, 'MOVIMENTOS_ESTOQUE', nome + ': a entrada tem ' + movs.length + ' movimentos; precisa ter um só.', 'VARIAS');
+          movs.forEach(function (x) {
+            if (x.product_id !== fe.product_id || x.quantidade !== fe.quantidade || x.custo_unitario !== HealthService.custoUnitarioEntrada(fe.valor, fe.quantidade)) achado('MOVIMENTOS_ESTOQUE', x.mov_id, 'quantidade', nome + ': o movimento de entrada não confere com a compra (produto, quantidade e custo unitário = valor ÷ quantidade).', 'ENTRADA');
+          });
+        } else {
+          if (fins.length) achado('FINANCEIRO', fins[0].financial_id, 'event_id', nome + ': o acerto de estoque tem lançamento financeiro, que ele não grava.', 'AJUSTE_FIN');
+          if (movs.length !== 1 || !(typeof movs[0].quantidade === 'number' && movs[0].quantidade !== 0)) achado('EVENTOS', ev.event_id, 'MOVIMENTOS_ESTOQUE', nome + ': o acerto de estoque precisa de exatamente um movimento diferente de zero.', 'AJUSTE');
+          else if ((pj.motivo_ajuste === 'PERDA' || pj.motivo_ajuste === 'VENCIMENTO') && movs[0].quantidade > 0) achado('MOVIMENTOS_ESTOQUE', movs[0].mov_id, 'quantidade', nome + ': a perda ou o vencimento aumenta o estoque no movimento gravado.', 'SINAL');
+        }
+        return;
+      }
+      movs.forEach(function (x) { achado('MOVIMENTOS_ESTOQUE', x.mov_id, 'event_id', nome + ': o lançamento tem movimento de estoque, que esse tipo não grava.', 'ALHEIO'); });
+      comProduto.forEach(function (f) { achado('FINANCEIRO', f.financial_id, 'product_id', nome + ': o lançamento financeiro cita um produto, que esse tipo não grava.', 'PRODUTO_ALHEIO'); });
+    });
+  }
+  /**
    * Cópias × fonte (06, seção 9): a fonte de cada evento, o detalhe obrigatório, o tipo da linha de detalhe = o do evento e
    * a data do detalhe = a do evento. No escopo, os eventos dele.
    */
@@ -1519,6 +1624,7 @@ var AuditService = (function () {
     conferirLinhasDosEventos_(tx, col, eventos);
     conferirDetalhes_(tx, col, eventos);
     conferirPesagens_(tx, col, eventos);
+    conferirInsumos_(tx, col, eventos);
     var linhasDe = function (t) {
       if (!esc) return repo.vigentes(t);
       var out = [];
@@ -1678,7 +1784,7 @@ var AuditService = (function () {
   var DETALHES_COM_ANIMAL = Object.freeze(['IDENTIFICACOES', 'PESAGENS', 'REPRODUCAO', 'AJUSTES', 'BAIXAS', 'SANIDADE']);
   /** Abas que a trava lê (além das do comando) quando ele toca animal, evento, lançamento ou parâmetro: as das checagens de domínio. */
   function leiturasTrava() {
-    return Utils.unicos(Timeline.LEITURAS.concat(['CATEGORIAS', 'PLANO_CONTAS', 'COMPRAS', 'VENDAS', 'BAIXAS', 'PROPRIEDADES', 'PARCEIROS', 'ANEXOS', 'IMPORTACOES', 'OPERACOES']));
+    return Utils.unicos(Timeline.LEITURAS.concat(['CATEGORIAS', 'PLANO_CONTAS', 'COMPRAS', 'VENDAS', 'BAIXAS', 'PROPRIEDADES', 'PARCEIROS', 'ANEXOS', 'IMPORTACOES', 'OPERACOES'], EventCatalog.LEITURAS_INSUMOS));
   }
   /**
    * O que o comando toca, pelo plano (sem ler a planilha): linhas novas (`lote`: {ABA: [registros]}), mudanças de
@@ -1688,7 +1794,7 @@ var AuditService = (function () {
    * estrangeira delas, com o que o comando já leu).
    */
   function sementesDaTrava(lote, mudancas, derivados) {
-    var s = { animais: {}, eventos: {}, lancamentos: {}, importacoes: {}, categorias: {}, contas: {}, parcelas: {}, linhas: [], tudo: false, dominio: false };
+    var s = { animais: {}, eventos: {}, lancamentos: {}, importacoes: {}, categorias: {}, contas: {}, parcelas: {}, produtos: {}, linhas: [], tudo: false, dominio: false };
     var marcar = function (tipo, id) { if (!vazio_(id)) { s[tipo][String(id)] = true; s.dominio = true; } };
     var linha = function (tabela, id) { if (!vazio_(id)) s.linhas.push({ tabela: tabela, id: String(id) }); };
     Object.keys(lote || {}).forEach(function (t) {
@@ -1698,6 +1804,7 @@ var AuditService = (function () {
         if (t === 'ANIMAIS') { marcar('animais', r.animal_id); return; }
         if (t === 'EVENTO_ANIMAIS' || DETALHES_COM_ANIMAL.indexOf(t) >= 0) { marcar('animais', r.animal_id); marcar('eventos', r.event_id); if (t === 'REPRODUCAO') marcar('animais', r.touro_id); return; }
         if (t === 'COMPRAS' || t === 'VENDAS') { marcar('eventos', r.event_id); return; }
+        if (t === 'MOVIMENTOS_ESTOQUE') { marcar('eventos', r.event_id); marcar('produtos', r.product_id); return; }
         if (t === 'FINANCEIRO') { marcar('lancamentos', r.financial_id); marcar('eventos', r.event_id); marcar('animais', r.animal_id); return; }
         if (t === 'PARCELAS' || t === 'RATEIOS') { marcar('lancamentos', r.financial_id); return; }
         if (t === 'ALOCACOES_FINANCEIRAS') { marcar('lancamentos', r.financial_id); marcar('animais', r.animal_id); return; }
@@ -1718,12 +1825,14 @@ var AuditService = (function () {
       if (e === 'PLANO_CONTAS') { if (m.acao !== 'CRIAR') marcar('contas', m.entity_id); return; }
       if (e === 'PARCELAS') { marcar('parcelas', m.entity_id); return; }
       if (e === 'FINANCEIRO') { marcar('lancamentos', m.entity_id); return; }
+      if (e === 'PRODUTOS') { linha(e, m.entity_id); marcar('produtos', m.entity_id); return; }
       linha(e, m.entity_id);
     });
     if (derivados) {
       s.dominio = true;
       (derivados.animais || []).forEach(function (id) { marcar('animais', id); });
       (derivados.eventos || []).forEach(function (id) { marcar('eventos', id); });
+      (derivados.produtos || []).forEach(function (id) { marcar('produtos', id); });
     }
     return s;
   }
@@ -1738,7 +1847,7 @@ var AuditService = (function () {
    *  - `lancamentos` e `linhas` (as linhas citadas, para a chave estrangeira).
    */
   function escopoDaTrava_(antes, depois, s, projecoes, lote) {
-    var esc = { animais: {}, genealogia: {}, eventos: {}, eventosGravados: {}, eventosImportados: {}, lancamentos: {}, linhas: s.linhas.slice(), brincos: {}, fonte: {} };
+    var esc = { animais: {}, genealogia: {}, eventos: {}, eventosGravados: {}, eventosImportados: {}, lancamentos: {}, produtos: {}, linhas: s.linhas.slice(), brincos: {}, fonte: {} };
     esc.tocados = esc.animais;
     var cru = antes.cru;
     var carregada = function (tab) { return antes.repo.carregada(tab); };
@@ -1761,6 +1870,7 @@ var AuditService = (function () {
     Object.keys(s.animais).forEach(function (id) { esc.animais[id] = true; });
     Object.keys(s.eventos).forEach(function (id) { esc.eventos[id] = true; esc.eventosGravados[id] = true; });
     Object.keys(s.lancamentos).forEach(function (id) { esc.lancamentos[id] = true; });
+    Object.keys(s.produtos || {}).forEach(function (id) { esc.produtos[id] = true; });
     if (Object.keys(s.importacoes).length && carregada('EVENTOS')) {
       cru.cru('EVENTOS').forEach(function (e) { if (!vazio_(e.import_id) && s.importacoes[e.import_id]) { esc.eventos[e.event_id] = true; esc.eventosGravados[e.event_id] = true; esc.eventosImportados[e.event_id] = true; } });
     }
@@ -1776,6 +1886,7 @@ var AuditService = (function () {
     (projecoes || []).forEach(function (u) {
       if (u.tabela === 'ANIMAIS') esc.animais[u.id] = true;
       else if (u.tabela === 'FINANCEIRO') esc.lancamentos[u.id] = true;
+      else if (u.tabela === 'PRODUTOS') esc.produtos[u.id] = true;
       else if (u.tabela === 'IDENTIFICACOES') {
         var r = (carregada('IDENTIFICACOES') ? cru.cruPorId('IDENTIFICACOES', u.id) : null) || planoPor('IDENTIFICACOES', 'ident_id', u.id)[0];
         if (r) esc.animais[r.animal_id] = true;
@@ -1788,6 +1899,7 @@ var AuditService = (function () {
         linhasPor(tab, 'event_id', eid).forEach(function (r) { if (!vazio_(r.animal_id)) esc.animais[r.animal_id] = true; if (!vazio_(r.touro_id)) esc.genealogia[r.touro_id] = true; });
       });
       linhasPor('FINANCEIRO', 'event_id', eid).forEach(function (f) { esc.lancamentos[f.financial_id] = true; });
+      linhasPor('MOVIMENTOS_ESTOQUE', 'event_id', eid).forEach(function (x) { esc.produtos[x.product_id] = true; });
     });
     Object.keys(esc.lancamentos).forEach(function (fid) { linhasPor('ALOCACOES_FINANCEIRAS', 'financial_id', fid).forEach(function (a) { esc.animais[a.animal_id] = true; }); });
     // Os vizinhos de cada animal tocado (um nível), os partos dele e os números de brinco dele. A mãe e o pai de depois vêm do
@@ -1941,12 +2053,13 @@ var AuditService = (function () {
     // O que o próprio comando projeta (a fase C grava o que o projetor deu no retrato): o escopo dele e o que o projetor
     // regravou (a mãe alcançada pela cria, por exemplo).
     var d = t.derivados || null;
-    var cobertos = { animais: {}, eventos: {} };
+    var cobertos = { animais: {}, eventos: {}, produtos: {} };
     if (d && d.tudo) cobertos = { tudo: true };
     else {
       if (d) (d.animais || []).forEach(function (id) { cobertos.animais[id] = true; });
       if (d) (d.eventos || []).forEach(function (id) { cobertos.eventos[id] = true; });
-      (t.projecoes || []).forEach(function (u) { if (u.tabela === 'ANIMAIS') cobertos.animais[u.id] = true; });
+      if (d) (d.produtos || []).forEach(function (id) { cobertos.produtos[id] = true; });
+      (t.projecoes || []).forEach(function (u) { if (u.tabela === 'ANIMAIS') cobertos.animais[u.id] = true; if (u.tabela === 'PRODUTOS') cobertos.produtos[u.id] = true; });
     }
     var opcoes = { projetor: t.projetor || null, cobertos: cobertos };
     var rodar = function (tx) {

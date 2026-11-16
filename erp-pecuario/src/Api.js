@@ -124,8 +124,8 @@ var Api = (function () {
     'pasto.salvar': comando_(function (ctx, p) { return PastureService.salvarPasto(ctx, p); }),
     'propriedade.salvar': comando_(function (ctx, p) { return PastureService.salvarPropriedade(ctx, p); }),
     'parceiro.salvar': comando_(function (ctx, p) { return Config.salvarParceiro(ctx, p); }),
-    'produto.salvar': futura_(3, 'Sanidade'),
-    'protocolo.salvar': futura_(3, 'Sanidade'),
+    'produto.salvar': comando_(function (ctx, p) { return HealthService.salvarProduto(ctx, p); }),
+    'protocolo.salvar': comando_(function (ctx, p) { return HealthService.salvarProtocolo(ctx, p); }),
     'estacao.salvar': futura_(3, 'Reprodução'),
     'categoria.salvar': comando_(function (ctx, p) { return Config.salvarCategoria(ctx, p); }),
     'lista.salvar': comando_(function (ctx, p) { return Config.salvarLista(ctx, p); }),
@@ -138,7 +138,7 @@ var Api = (function () {
     'financeiro.fluxoCaixa': futura_(4, 'Financeiro'),
     'financeiro.resultado': futura_(4, 'Financeiro'),
     'financeiro.custosAnimal': futura_(4, 'Financeiro'),
-    'sanidade.agenda': futura_(3, 'Sanidade'),
+    'sanidade.agenda': consulta_(function (ctx, p) { return HealthService.agenda(ctx, p.dados); }),
     'reproducao.indicadores': futura_(3, 'Reprodução'),
     'peso.desempenho': consulta_(function (ctx, p) { return WeightService.desempenho(ctx, p.dados); }),
     'dashboard.obter': consulta_(function (ctx, p) { return InventoryService.visaoGeral(ctx, p.dados); }),
@@ -352,7 +352,7 @@ var Api = (function () {
       animais: AnimalService.consultaCargaInicial(),
       alertas: InventoryService.consultaAlertas(estado.alertas_estado),
     };
-    var reads = Config.LEITURAS_CADASTROS.concat(['PROPRIEDADES']);
+    var reads = Config.LEITURAS_CADASTROS.concat(['PROPRIEDADES'], HealthService.LEITURAS_CADASTRO);
     var cru = false;
     Object.keys(partes).forEach(function (k) {
       reads = reads.concat(partes[k].reads || []);
@@ -364,6 +364,10 @@ var Api = (function () {
         var out = { atual: false };
         var c = Config.cadastros(tx.repo);
         Object.keys(c).forEach(function (k) { out[k] = c[k]; });
+        // Produtos (com o saldo) e protocolos sanitários: os cadastros da sanidade que alimentam os formulários (08, seção 16).
+        var h = HealthService.cadastros(tx.repo);
+        out.produtos = h.produtos;
+        out.protocolos = h.protocolos;
         out.propriedades = Utils.ordenarPor(tx.repo.vigentes('PROPRIEDADES'), ['nome', 'property_id']).map(Utils.clonar);
         Object.keys(partes).forEach(function (k) { out[k] = partes[k].tratador(tx); });
         return out;

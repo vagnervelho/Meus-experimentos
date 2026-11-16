@@ -55,7 +55,7 @@ function sistema(opcoes) {
     evento: (acao, dados, chave, avisos) => s.exec((ctx) => G.EventService[acao](ctx, { idempotencyKey: chave || 'ev-' + Math.random(), dados, avisosAceitos: avisos || [] })),
     integridade: () => s.exec((ctx) => G.AuditService.verificarIntegridade(ctx)).dados,
     conferirProjecoes: (msg) => {
-      const dif = s.read({ rota: 'teste.projecoes', reads: G.Timeline.LEITURAS, acessoCru: true, tratador: (tx) => G.Timeline.conferir(tx) });
+      const dif = s.read({ rota: 'teste.projecoes', reads: G.Timeline.porta().reads, acessoCru: true, tratador: (tx) => G.Timeline.conferir(tx) });
       assert.deepEqual(dif, [], 'projeção gravada = reconstrução (' + (msg || '') + ')');
     },
     /** Número da linha (planilha) do registro e o índice (1) da coluna, para editar à mão. */
