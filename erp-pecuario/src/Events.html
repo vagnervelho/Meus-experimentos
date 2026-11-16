@@ -384,6 +384,85 @@ var TelaEventos = (function () {
     antes.campos = Util.clonar(campos);
     return { campos: campos, linhas: linhas, origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotuloEvento(ev), historico: ev.pre_marco_zero === true, antes: antes } };
   }
+  function decimalTexto_(v) { return v === null || v === undefined ? null : String(v).replace('.', ','); }
+  /** Os campos do subtipo (sanidade e estoque não têm campos no tipo) que o original preencheu. */
+  function camposDoSubtipo_(def, sub, origem) {
+    var campos = {};
+    ((def.subtipos && def.subtipos[sub] && def.subtipos[sub].campos) || def.campos || []).forEach(function (d) { if (texto_(origem[d.id]) !== null) campos[d.id] = origem[d.id]; });
+    return campos;
+  }
+  /**
+   * Correção da sanidade (Fase 3): o cabeçalho vem do registro de cada animal (todos iguais), do payload (modo, dose de
+   * referência e quantidade) e do serviço pago no ato. O que o servidor propôs quando veio vazio não vira valor digitado:
+   * o fabricante do cadastro, a próxima aplicação pelo intervalo do protocolo, a quantidade igual à soma das doses e, por
+   * cabeça, a dose de cada animal igual à do lançamento. Por peso, a dose de cada animal fica vazia (o servidor recalcula
+   * pelo peso atual na data).
+   */
+  function previaSanidade_(o, def, origem) {
+    var ev = o.evento, det = o.detalhes || {}, payload = ev.payload || {}, sub = ev.event_subtype;
+    var regs = det.SANIDADE || [];
+    var r0 = regs[0] || {};
+    var prod = r0.produto_id ? Store.produto(r0.produto_id) : null;
+    var prot = r0.protocol_id ? Store.protocolo(r0.protocol_id) : null;
+    var porAnimal = Utils_agrupar(regs);
+    origem.protocol_id = r0.protocol_id; origem.produto_id = r0.produto_id; origem.nome_produto = r0.produto_id ? null : r0.nome_produto;
+    origem.fabricante = prod && r0.fabricante === prod.fabricante ? null : r0.fabricante;
+    origem.lote = r0.lote; origem.validade = r0.validade; origem.via_aplicacao = r0.via_aplicacao; origem.motivo = r0.motivo; origem.diagnostico = r0.diagnostico;
+    origem.veterinario = r0.veterinario;
+    origem.modo_dose = payload.modo_dose; origem.dose_referencia = decimalTexto_(payload.dose_referencia);
+    var doses = regs.map(function (r) { return r.dose; });
+    var soma = doses.every(function (d) { return typeof d === 'number'; }) ? doses.reduce(function (t, d) { return t + Math.round(d * 10000); }, 0) / 10000 : null;
+    if (typeof payload.quantidade_consumida_total === 'number' && (payload.modo_dose === 'TOTAL' || payload.quantidade_consumida_total !== soma)) origem.quantidade_consumida_total = decimalTexto_(payload.quantidade_consumida_total);
+    if (!r0.produto_id) origem.unidade_dose = regs.map(function (r) { return r.unidade_dose; }).filter(Boolean)[0] || null;
+    origem.periodo_carencia_dias = r0.periodo_carencia_dias === null || r0.periodo_carencia_dias === undefined ? null : String(r0.periodo_carencia_dias);
+    var proposta = prot && prot.recorrencia_tipo === 'INTERVALO_DIAS' && typeof prot.intervalo_dias === 'number' ? Utils_somaDias(ev.event_date, prot.intervalo_dias) : null;
+    origem.data_proxima_aplicacao = propostoOuValor_(r0.data_proxima_aplicacao, proposta);
+    var serv = (det.FINANCEIRO || []).filter(function (f) { return !f.product_id; })[0];
+    if (serv) {
+      var ts = parcelasOrdem_((det.PARCELAS || []).filter(function (x) { return x.financial_id === serv.financial_id; }));
+      var t = ts[0] || {};
+      origem.custo_valor = dinheiroTexto_(serv.valor); origem.custo_conta_id = serv.conta_id; origem.custo_partner_id = serv.partner_id;
+      origem.custo_vencimento = propostoOuValor_(t.data_vencimento, ev.event_date); origem.custo_forma_pagamento = t.forma_pagamento;
+      origem.custo_parcelas_qtd = ts.length > 1 ? String(ts.length) : null; origem.custo_documento = serv.documento;
+      origem.custo_descricao = /: serviço ou produto pago no ato$/.test(serv.descricao || '') ? null : serv.descricao;
+    }
+    var antes = { campos: {}, linhas: {} };
+    var linhas = (o.linhas || []).map(function (l) {
+      var x = (porAnimal[l.animal_id] || [])[0] || {};
+      var dose = payload.modo_dose === 'POR_CABECA' && typeof x.dose === 'number' && x.dose !== payload.dose_referencia ? decimalTexto_(x.dose) : null;
+      var v = limpo_({ dose: dose, resultado_exame: x.resultado_exame, observacoes: x.observacoes || l.observacoes });
+      antes.linhas[l.animal_id] = Util.clonar(v);
+      return { animal_id: l.animal_id, valores: v };
+    });
+    var campos = camposDoSubtipo_(def, sub, origem);
+    antes.campos = Util.clonar(campos);
+    return { subtipo: sub, campos: campos, linhas: linhas, origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotuloEvento(ev), historico: ev.pre_marco_zero === true, antes: antes } };
+  }
+  /** Correção do estoque (Fase 3): a entrada pelo lançamento da compra e pelo movimento; o acerto pelo movimento e pelo payload. */
+  function previaEstoque_(o, def, origem) {
+    var ev = o.evento, det = o.detalhes || {}, payload = ev.payload || {}, sub = ev.event_subtype;
+    var mv = (det.MOVIMENTOS_ESTOQUE || [])[0] || {};
+    var f = (det.FINANCEIRO || [])[0];
+    origem.product_id = mv.product_id || (f && f.product_id);
+    origem.lote = mv.lote; origem.validade = mv.validade;
+    if (sub === 'ENTRADA') {
+      origem.qtd_apresentacao = decimalTexto_(payload.qtd_apresentacao);
+      origem.quantidade = typeof payload.qtd_apresentacao === 'number' ? null : decimalTexto_(f ? f.quantidade : mv.quantidade);
+      if (f) {
+        var ts = parcelasOrdem_((det.PARCELAS || []).filter(function (x) { return x.financial_id === f.financial_id; }));
+        var t = ts[0] || {};
+        origem.valor = dinheiroTexto_(f.valor); origem.partner_id = f.partner_id; origem.documento = f.documento;
+        origem.vencimento = propostoOuValor_(t.data_vencimento, ev.event_date); origem.forma_pagamento = t.forma_pagamento;
+        origem.parcelas_qtd = ts.length > 1 ? String(ts.length) : null;
+      }
+    } else {
+      origem.motivo_ajuste = payload.motivo_ajuste;
+      origem.saldo_contado = decimalTexto_(payload.saldo_contado);
+      origem.quantidade = payload.motivo_ajuste === 'CONTAGEM' || typeof mv.quantidade !== 'number' ? null : decimalTexto_(-mv.quantidade);
+    }
+    var campos = camposDoSubtipo_(def, sub, origem);
+    return { subtipo: sub, campos: campos, linhas: [], origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotuloEvento(ev), historico: ev.pre_marco_zero === true, antes: { campos: Util.clonar(campos), linhas: {} } } };
+  }
   /** Pré-preenche o evento substituto com o que o original gravou (valores como digitados no formulário). */
   /**
    * Prévia da correção, com os documentos e fotos do original (evento.obter: anexos), que passam ao substituto: o
@@ -402,6 +481,8 @@ var TelaEventos = (function () {
     if (['IDENTIFICACAO', 'MARCACAO', 'AJUSTE_INVENTARIO'].indexOf(ev.event_type) >= 0) return previaManejo_(o, def, origem);
     if (ev.event_type === 'COMPRA') return previaCompra_(o, def, origem);
     if (ev.event_type === 'PESAGEM') return previaPesagem_(o, def, origem);
+    if (ev.event_type === 'SANIDADE') return previaSanidade_(o, def, origem);
+    if (ev.event_type === 'ESTOQUE') return previaEstoque_(o, def, origem);
     if (ev.event_type === 'VENDA') return previaVenda_(o, def, origem);
     var campos = {};
     (def.campos || []).forEach(function (d) { if (texto_(origem[d.id]) !== null) campos[d.id] = origem[d.id]; });
@@ -450,6 +531,8 @@ var TelaEventos = (function () {
       h('ul', { class: 'lista-simples' }, itens.map(function (x) { return h('li', { dataset: { alocacao: String(x.valor_alocado) } }, h('span', { class: 'dado', text: nome(x.animal_id) }), ': ' + Fmt.dinheiro(x.valor_alocado) + (porPeso ? ' (base ' + Fmt.peso(x.base_valor) + ')' : '')); })));
   }
   function Utils_agrupar(lista) { var m = {}; lista.forEach(function (x) { (m[x.animal_id] = m[x.animal_id] || []).push(x); }); return m; }
+  /** Data + n dias (yyyy-MM-dd, sem fuso): a próxima aplicação que o servidor propõe pelo intervalo do protocolo. */
+  function Utils_somaDias(d, n) { return new Date(Date.parse(d + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10); }
 
   // ------------------------------------------------------------------ detalhe ----
   function nomeAnimal(l) {
@@ -551,6 +634,34 @@ var TelaEventos = (function () {
       if (partos.length) corpo.appendChild(UI.secao('Parto', UI.pares(partos.map(function (x) {
         return ['Mãe ' + quem(x), (x.qtd_nascidos_vivos === 1 ? '1 nascido vivo' : x.qtd_nascidos_vivos + ' nascidos vivos') + (x.qtd_natimortos ? ' · ' + x.qtd_natimortos + (x.qtd_natimortos === 1 ? ' natimorto' : ' natimortos') : '') + (x.tipo_parto ? ' · ' + Store.rotuloLista('TIPO_PARTO', x.tipo_parto) : '')];
       })), { dado: 'parto' }));
+      // Sanidade (Fase 3): o que foi aplicado, a dose de cada animal e o custo que coube a ele (a cópia gravada).
+      var san = det.SANIDADE || [];
+      if (san.length) {
+        var s0 = san[0];
+        var protS = s0.protocol_id ? Store.protocolo(s0.protocol_id) : null;
+        var un = function (v, u) { return v === null || v === undefined ? '—' : Fmt.numero(v, Fmt.casas(v)) + (u ? ' ' + u : ''); };
+        corpo.appendChild(UI.secao('Sanidade', UI.pares([
+          ['Procedimento', Fmt.rotulo('PROCEDIMENTO', s0.tipo_procedimento)], protS ? ['Protocolo', protS.nome] : null,
+          s0.nome_produto ? ['Produto', s0.nome_produto + (s0.fabricante ? ' (' + s0.fabricante + ')' : '')] : null,
+          payload.modo_dose ? ['Dose', Fmt.rotulo('MODO_DOSE', payload.modo_dose) + (typeof payload.dose_referencia === 'number' ? ': ' + un(payload.dose_referencia, s0.unidade_dose || (Store.produto(s0.produto_id) || {}).unidade) + (payload.modo_dose === 'POR_PESO' ? ' por kg' : '') : '')] : null,
+          typeof payload.quantidade_consumida_total === 'number' ? ['Saiu do frasco', un(payload.quantidade_consumida_total, (Store.produto(s0.produto_id) || {}).unidade)] : null,
+          s0.lote ? ['Lote', s0.lote + (s0.validade ? ', validade ' + Fmt.data(s0.validade) : '')] : null, s0.via_aplicacao ? ['Via', Store.rotuloLista('VIA_APLICACAO', s0.via_aplicacao)] : null,
+          s0.motivo ? ['Motivo', s0.motivo] : null, s0.diagnostico ? ['Diagnóstico', s0.diagnostico] : null,
+          ['Carência', s0.data_fim_carencia ? s0.periodo_carencia_dias + ' dias: até ' + Fmt.data(s0.data_fim_carencia) : 'sem carência'],
+          s0.data_proxima_aplicacao ? ['Próxima aplicação', Fmt.data(s0.data_proxima_aplicacao)] : null, s0.veterinario ? ['Veterinário', s0.veterinario] : null,
+        ].filter(Boolean)), { dado: 'sanidade' }));
+        corpo.appendChild(UI.secao('Animais tratados', h('ul', { class: 'lista-simples' }, san.map(function (x) {
+          return h('li', { text: quem(x) + ': ' + [x.dose === null ? null : 'dose ' + un(x.dose, x.unidade_dose), x.resultado_exame ? 'resultado: ' + x.resultado_exame : null, x.custo === null ? null : 'custo ' + Fmt.dinheiro(x.custo), x.observacoes].filter(Boolean).join(' · ') || 'registrado' });
+        })), { dado: 'sanidade-animais' }));
+      }
+      // Estoque (Fase 3): o movimento do produto (entrada, saída pela aplicação ou acerto).
+      var movs = det.MOVIMENTOS_ESTOQUE || [];
+      if (movs.length) corpo.appendChild(UI.secao('Estoque', h('ul', { class: 'lista-simples' }, movs.map(function (x) {
+        var pd = Store.produto(x.product_id) || {};
+        var q = Fmt.numero(Math.abs(x.quantidade), Fmt.casas(Math.abs(x.quantidade))) + ' ' + (pd.unidade || '');
+        var o2 = x.tipo === 'ENTRADA' ? 'entrou ' + q + (typeof x.custo_unitario === 'number' ? ' a R$ ' + Fmt.numero(x.custo_unitario, 4) + ' cada' : '') : x.tipo === 'SAIDA' ? 'saiu ' + q : 'acerto de ' + (x.quantidade > 0 ? '+' : '−') + q + (payload.motivo_ajuste ? ' (' + Fmt.rotulo('MOTIVO_AJUSTE_ESTOQUE', payload.motivo_ajuste).toLowerCase() + ')' : '');
+        return h('li', { text: (pd.nome || 'produto') + ': ' + o2 + (x.lote ? ' · lote ' + x.lote : '') });
+      })), { dado: 'movimentos-estoque' }));
       if (payload.gta_numero) corpo.appendChild(UI.secao('Trânsito', UI.pares([['GTA', payload.gta_numero]])));
       var cp = (det.COMPRAS || [])[0];
       if (cp) {

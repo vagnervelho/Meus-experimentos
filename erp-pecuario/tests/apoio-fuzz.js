@@ -116,15 +116,6 @@ function montar(opcoes) {
   const t = tabelas(sis);
   sis.categorias = t.CATEGORIAS.map((c) => ({ id: c.category_id, sexo: c.sexo_aplicavel, codigo: c.codigo }));
   sis.custeio = t.PLANO_CONTAS.find((c) => c.codigo === 'SERVICOS_VETERINARIOS').conta_id;
-  // Sanidade e insumos (Fase 3, E3.2 e E3.3): a vacina e o antibiótico com estoque controlado, o vermífugo sem; o protocolo
-  // da vacina a cada 180 dias.
-  const produto = (campos) => ok('produto.salvar', { campos }).product_id;
-  sis.produtos = {
-    vacina: produto({ nome: 'Vacina F', categoria: 'VACINA', unidade: 'dose', fator_conversao: 50, custo_unitario: 1.85, controla_estoque: true }),
-    vermifugo: produto({ nome: 'Vermífugo F', categoria: 'VERMIFUGO', unidade: 'mL', custo_unitario: 0.035, controla_estoque: false }),
-    antibiotico: produto({ nome: 'Antibiótico F', categoria: 'MEDICAMENTO', unidade: 'mL', custo_unitario: 0.5, controla_estoque: true }),
-  };
-  sis.protocolo = ok('protocolo.salvar', { campos: { nome: 'Vacina F semestral', tipo_procedimento: 'VACINA', product_id: sis.produtos.vacina, sexo_aplicavel: 'AMBOS', recorrencia_tipo: 'INTERVALO_DIAS', intervalo_dias: 180 } }).protocol_id;
   if (!o.vazio) {
     const P = sis.pastos;
     const f = (brinco, nasc, pasto, extra) => Object.assign({ brinco, sexo: 'F', origem: 'DESCONHECIDA', data_nascimento: nasc, data_nascimento_confianca: 'ESTIMADA', pasto_destino_id: pasto }, extra || {});
@@ -142,6 +133,16 @@ function montar(opcoes) {
       ],
     });
   }
+  // Sanidade e insumos (Fase 3, E3.2 e E3.3): a vacina e o antibiótico com estoque controlado, o vermífugo sem; o protocolo
+  // da vacina a cada 180 dias. Criados depois do rebanho de base, para os identificadores dele (que as regressões fixas
+  // citam crus) não mudarem.
+  const produto = (campos) => ok('produto.salvar', { campos }).product_id;
+  sis.produtos = {
+    vacina: produto({ nome: 'Vacina F', categoria: 'VACINA', unidade: 'dose', fator_conversao: 50, custo_unitario: 1.85, controla_estoque: true }),
+    vermifugo: produto({ nome: 'Vermífugo F', categoria: 'VERMIFUGO', unidade: 'mL', custo_unitario: 0.035, controla_estoque: false }),
+    antibiotico: produto({ nome: 'Antibiótico F', categoria: 'MEDICAMENTO', unidade: 'mL', custo_unitario: 0.5, controla_estoque: true }),
+  };
+  sis.protocolo = ok('protocolo.salvar', { campos: { nome: 'Vacina F semestral', tipo_procedimento: 'VACINA', product_id: sis.produtos.vacina, sexo_aplicavel: 'AMBOS', recorrencia_tipo: 'INTERVALO_DIAS', intervalo_dias: 180 } }).protocol_id;
   // Nomes estáveis do que a montagem cria, para a sequência gravada ficar legível e repetível.
   const nomear0 = (id, nome) => { sis.sim.set(id, nome); sis.uuid.set(nome, id); };
   Object.keys(sis.pastos).forEach((k) => nomear0(sis.pastos[k], '@p:' + k));

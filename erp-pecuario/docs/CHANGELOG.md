@@ -1104,3 +1104,62 @@ Nenhuma linha de código mudou nesta etapa: só documentos.
   - a verificar na conta do dono: a tela sob demanda no iframe do HtmlService (NV, desde a etapa BASE), o teclado
     numérico e o rascunho no celular de verdade com sinal fraco, e o tempo real do Sheets com as pesagens da base de
     demonstração.
+
+## 16/11/2026 — Fase 3, etapas E3.2 e E3.3 (insumos, protocolos e sanidade)
+
+- **Cadastros.** `produto.salvar` e `protocolo.salvar` deixaram de ser rotas futuras (`HealthService`): produto com
+  categoria, unidade de dose (que não muda depois do primeiro uso), embalagem, custo por unidade, doses e carência padrão,
+  estoque controlado só quando pedido (PR-10, padrão N) e mínimo; protocolo com procedimento, sexo, faixa de idade,
+  categoria e recorrência (uma vez, a cada N dias, campanha em meses do ano), antecedência e tolerância. O saldo
+  (`PRODUTOS.estoque_atual`) é projeção dos movimentos vigentes, refeita pelo projetor e conferida pela trava.
+- **ESTOQUE, por um tratador só.** Entrada (embalagens × quantidade por embalagem ou a quantidade na unidade; a compra é
+  sempre um lançamento COMPRA_INSUMOS com parcelas, e o movimento de entrada só existe com o controle — decisão 16.9) e
+  acerto (contagem pela diferença do saldo na data, perda, vencimento; só com o controle). Sem animais.
+- **SANIDADE, por um tratador só.** Seis subtipos (vacinação, vermifugação, medicação, tratamento, exame, doença),
+  individual e coletiva, com produto do cadastro, nome livre ou, na doença, sem produto. Dose por cabeça, por peso (pelo
+  peso atual com a validade e o peso de referência da categoria) ou só o total do frasco; a dose de um animal pode diferir.
+  O consumo e o custo nascem na aplicação (PR-11): a saída do estoque (a quantidade informada ou a soma das doses) e, com
+  custo por unidade, um CUSTEIO sem parcela rateado aos tratados (por cabeça, ou pela dose de cada um na dose por peso),
+  na conta da categoria do produto; o serviço pago no ato vira outro CUSTEIO com parcelas. Carência (fim = aplicação +
+  dias) alimenta o RN-072 a partir da SANIDADE real, também quando a aplicação retroativa cobre uma venda para abate já
+  gravada. Avisos: PRODUTO_VENCIDO, ESTOQUE_INSUFICIENTE (o menor saldo ao longo do tempo cai abaixo de zero; com a
+  política BLOQUEIA, recusa — o estoque negativo é aviso ou bloqueio por parâmetro) e a duplicidade do mesmo produto no dia.
+- **Agenda e alertas.** `sanidade.agenda`: as doses atrasadas e próximas por protocolo (e pela próxima informada sem
+  protocolo), os animais em carência, a cobertura de cada protocolo e o custo sanitário do período; alertas
+  SANITARIO_VENCIDO, SANITARIO_PROXIMO e EM_CARENCIA; `carencia_ate` na lista leve dos animais.
+- **Integridade.** `AuditService.conferirInsumos_` (COPIAS, sem reparo): SANIDADE coerente com o payload, o produto, a
+  carência e as alocações; a saída e o consumo iguais à quantidade; a entrada igual à compra; o acerto com um movimento;
+  nenhum outro tipo com movimento ou lançamento com produto. A trava refaz e confere o saldo dos produtos que o comando
+  toca.
+- **Telas.** `Health.html` sob demanda (23 KB de 150 KB): agenda (com "Aplicar em N animais", que abre o lançamento com o
+  protocolo, o produto, a dose, a carência e os animais pendentes), aplicações, produtos e estoque (cadastro pela folha,
+  entrada e acerto) e protocolos. O Registro conhece os dois tipos (produto que sugere o padrão, revisão do servidor com a
+  dose, o frasco, o estoque, o custo, a carência e a próxima); a ficha ganhou o bloco sanitário (F); o cartão da venda
+  mostra a carência; o detalhe do evento e a correção (`previaSanidade_`, `previaEstoque_`) mostram e trazem o lançamento
+  como foi digitado. A página inicial foi a 439 KB de 450 KB.
+- **Aceitação.** CT-06 e o cenário SANIDADE (lote vencido e estoque insuficiente com aceite; carência na venda para abate
+  dentro, no último dia e depois; protocolo de aplicação única) no `runAcceptanceTests`; a base de demonstração ganhou a
+  vacina, o vermífugo e o protocolo semestral: 6 entradas de estoque, 6 vacinações e 9 vermifugações, sem aviso (422
+  comandos, 3.154 aplicações), e saíram os manejos sanitários de `fora_desta_fase`.
+- **Teste aleatório.** Entradas SANIDADE e ESTOQUE no registro único, os produtos e o protocolo na montagem (depois do
+  rebanho de base, para não mudar os identificadores que as regressões fixas citam: a primeira montagem, com eles antes,
+  fez falhar a regressão "estorno no período fechado de uma morte…", que cita crua a entrada do rebanho de base), os
+  cadastros de produto e protocolo no meio da sequência, ESTOQUE_INSUFICIENTE e PRODUTO_VENCIDO nos avisos e na política e
+  o oráculo global `REPLAY:ESTOQUE`. As 17 sementes fixas aceitam os seis subtipos e os dois do estoque.
+- **Testes que mudaram com o comportamento** (sem afrouxar): listas de tipos e módulos ativos (`events`, `api`), o bloco
+  sanitário entregue (`animals`), a SANIDADE real na venda em vez de linhas escritas à mão (`venda`), os dois tipos no
+  estorno e na correção de todo tipo ativo (`estorno`), o saldo de estoque na projeção conferida (`integrity.fase2`), os
+  cenários da aceitação, a Sanidade no menu e fora da página inicial (`telas.sobdemanda`, `tests/ui/interface.test.js`,
+  `tests/ui/sobdemanda.test.js`; a rota de módulo não entregue passou a ser a da Reprodução). Novos: `tests/sanidade.test.js`
+  (9), `tests/estoque.test.js` (6), `tests/sanidade.agenda.test.js` (5) e `tests/ui/sanidade.test.js` (4).
+- `docs/CONTRATOS.md`: seções 1 (resumo), 11, 12, 14, 15.2, 19, 21, 22, 26, 28, 36 e 37, e a nova seção 39.
+- Execuções desta etapa, verificadas em Node e no Playwright deste repositório:
+  - `npm test` na primeira execução completa da etapa: 731 testes, 730 aprovados e 1 falha (a regressão do teste
+    aleatório acima); depois de mover os produtos da montagem, 731 testes, 731 aprovados e 0 falhas (616 s);
+  - `npm run ui:check` com 109 testes, 109 aprovados e 0 falhas (261 s), página inicial com 439 KB de 450 KB, a
+    importação com 47 KB, as pesagens com 41 KB e a sanidade com 23 KB de 150 KB;
+  - teste aleatório com 120 sementes novas × 100 passos (316000 a 316119): 6.404 comandos aceitos, 4.675 recusados,
+    0 falhas; depois de mover os produtos para depois do rebanho de base, mais 120 sementes novas × 100 passos (317000 a
+    317119): 6.470 aceitos, 4.640 recusados, 0 falhas;
+  - a verificar na conta do dono: a tela de sanidade no iframe do HtmlService e o tempo real do Sheets com as 3.154
+    aplicações da base de demonstração.
