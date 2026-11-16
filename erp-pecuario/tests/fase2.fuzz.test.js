@@ -32,6 +32,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const F = require('./apoio-fuzz');
+const { createGas } = require('./harness');
 
 const FIXAS = [20261115, 11, 47, 101, 2718, 3001, 3107, 3213, 3318, 9001, 9055, 1009, 1111, 1234, 4242, 777];
 const PASSOS = Number(process.env.FUZZ_PASSOS || 60);
@@ -39,7 +40,8 @@ const N = Number(process.env.FUZZ_SEMENTES || 0);
 const INICIO = process.env.FUZZ_INICIO !== undefined ? Number(process.env.FUZZ_INICIO) : Date.now() % 1000000000;
 const SEMENTES = N ? Array.from({ length: N }, (_, i) => INICIO + i) : FIXAS;
 
-function somar(total, stats) {
+function somar(total, stats, eventos) {
+  Object.keys(stats.porEvento).forEach((k) => { eventos[k] = (eventos[k] || 0) + stats.porEvento[k]; });
   Object.keys(stats.porRotulo).forEach((k) => {
     const x = (total[k] = total[k] || { ok: 0, recusa: 0 });
     x.ok += stats.porRotulo[k].ok;
@@ -50,11 +52,12 @@ function somar(total, stats) {
 test('teste aleatório de todos os comandos da Fase 2 (' + (N ? N + ' sementes novas a partir de ' + INICIO : 'sementes fixas') + ', ' + PASSOS + ' passos): depois de cada comando, integridade sem erro, projeção = reconstrução, financeiro fechado, replay independente e o efeito pedido; recusa sem gravar nada, com código e mensagem em português', () => {
   const falhas = [];
   const total = {};
+  const eventos = {};
   let aceitos = 0;
   let recusados = 0;
   SEMENTES.forEach((semente) => {
     const r = F.rodar(semente, PASSOS);
-    somar(total, r.stats);
+    somar(total, r.stats, eventos);
     aceitos += r.stats.aceitos;
     recusados += r.stats.recusados;
     if (!r.falha) return;
@@ -77,5 +80,33 @@ test('teste aleatório de todos os comandos da Fase 2 (' + (N ? N + ' sementes n
     const corrigidos = Object.keys(total).filter((k) => k.indexOf('corrigir ') === 0).reduce((s, k) => s + total[k].ok, 0);
     const estornados = Object.keys(total).filter((k) => k.indexOf('estornar ') === 0).reduce((s, k) => s + total[k].ok, 0);
     assert.ok(corrigidos >= 10 && estornados >= 10 && recusados >= 50, JSON.stringify({ corrigidos, estornados, recusados }));
+    // Todo tipo e subtipo ativo do catálogo foi registrado (ou corrigido) e aceito ao menos uma vez nas sementes fixas: o
+    // tipo que fica ativo sem a sua entrada no registro do teste aleatório (gerador e oráculo do efeito) falha aqui.
+    const G = createGas({ order: 'alpha' }).G;
+    const faltam = [];
+    G.EventCatalog.serializar().tipos.filter((t) => t.tipo !== 'ESTORNO').forEach((t) => {
+      const subs = Object.keys(t.subtipos || {});
+      const chaves = !subs.length ? [t.tipo] : t.tipo === 'AJUSTE_INVENTARIO' ? subs : subs.map((s) => t.tipo + '/' + s);
+      chaves.forEach((k) => { if (!eventos[k]) faltam.push(k); });
+    });
+    assert.deepEqual(faltam, [], 'tipos ativos sem registro aceito no teste aleatório (porEvento: ' + JSON.stringify(eventos) + ')');
   }
+});
+
+test('registro do teste aleatório: todo tipo ativo do catálogo tem a sua entrada (gerador e oráculo do efeito), e todo tipo importável tem o seu arquivo', () => {
+  const G = createGas({ order: 'alpha' }).G;
+  const ativos = [];
+  G.EventCatalog.serializar().tipos.filter((t) => t.tipo !== 'ESTORNO').forEach((t) => {
+    if (t.tipo === 'AJUSTE_INVENTARIO') Object.keys(t.subtipos || {}).forEach((s) => ativos.push(s));
+    else ativos.push(t.tipo);
+  });
+  assert.deepEqual(ativos.filter((k) => !F.TIPOS.has(k)), [], 'tipos ativos sem entrada no registro');
+  // E nada a mais: a entrada de um tipo inativo seria recusada sempre (o gerador não conferiria o efeito dele).
+  const chave = (k) => (G.EventCatalog.existe(k) ? G.EventCatalog.ativo(k) : G.EventCatalog.ativo('AJUSTE_INVENTARIO', k));
+  assert.deepEqual(Array.from(F.TIPOS.keys()).filter((k) => !chave(k)), [], 'entradas de tipo inativo no registro');
+  for (const [nome, T] of F.TIPOS) for (const k of ['peso', 'propor', 'montar', 'animais', 'efeito']) assert.equal(typeof T[k], 'function', nome + '.' + k);
+  const importaveis = JSON.parse(JSON.stringify(G.ImportService.modelo().tipos));
+  assert.deepEqual(importaveis.slice().sort(), Array.from(F.IMPORTADORES.keys()).sort(), 'tipos importáveis × registro das importações');
+  assert.throws(() => F.registrarTipo('COMPRA', F.TIPOS.get('COMPRA')), /duas vezes/);
+  assert.throws(() => F.registrarTipo('PESAGEM', { peso: () => 1 }), /sem propor/);
 });

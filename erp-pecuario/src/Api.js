@@ -17,6 +17,12 @@ var Api = (function () {
   var PAGINA = 'Index';
   /** Arquivos HTML que um template pode incluir (01-arquitetura.md, seção 6.2). Outro nome → VALIDATION. */
   var INCLUDES = Object.freeze(['Styles', 'JavaScript', 'Components', 'Dashboard', 'Animals', 'Pastures', 'Events', 'Weights', 'Health', 'Reproduction', 'Financial', 'Reports', 'Settings', 'Import']);
+  /**
+   * Telas carregadas sob demanda (01, seção 6.2; risco R-31): não entram na página inicial e vão ao aparelho pela rota
+   * `sistema.tela` quando o menu abre o módulo. Arquivo → módulo do EventCatalog (que declara `tela` e `sob_demanda`
+   * quando o módulo é entregue). As das Fases 3 a 5 e a importação.
+   */
+  var TELAS_SOB_DEMANDA = Object.freeze({ Import: 'IMPORTACAO', Weights: 'PESAGENS', Health: 'SANIDADE', Reproduction: 'REPRODUCAO', Financial: 'FINANCEIRO', Reports: 'RELATORIOS' });
   var AMBIENTES = Object.freeze(['PRODUCAO', 'TESTE', 'DEMO']);
   var FAIXA_TESTE = 'BASE DE TESTE';
   var PROP_DONO = 'OWNER_EMAIL';
@@ -67,6 +73,10 @@ var Api = (function () {
   function futura_(fase, modulo) {
     return { tipo: 'FUTURA', fase: fase, modulo: modulo, chave: false, executar: null };
   }
+  /** Consulta que não abre a planilha-banco (a tela sob demanda): sem contexto e sem versão dos dados no envelope. */
+  function semBanco_(fn) {
+    return { tipo: 'CONSULTA', fase: 1, chave: false, semBanco: true, executar: fn };
+  }
   function rascunho_(acao) {
     return { tipo: 'RASCUNHO', fase: 1, chave: false, executar: function (ctx, p, info) { return rascunho(acao, p.dados, info); } };
   }
@@ -79,6 +89,7 @@ var Api = (function () {
     'sistema.bootstrap': consulta_(function (ctx, p, info) { return bootstrap_(ctx, p, info); }),
     'sistema.estado': consulta_(function (ctx) { return semDados_(Maintenance.estado(ctx)); }),
     'sistema.diagnostico': consulta_(function (ctx) { return semDados_(diagnosticoSistema_(ctx)); }),
+    'sistema.tela': semBanco_(function (ctx, p) { return semDados_(tela(p.dados)); }),
     'sistema.backup': manutencao_(function (ctx) { return semDados_(Maintenance.backup(ctx, { motivo: 'SOB_DEMANDA' })); }),
     'sistema.restaurarBackup': manutencao_(function (ctx, p) {
       var r = Maintenance.restaurar(ctx, { dados: p.dados });
@@ -294,7 +305,7 @@ var Api = (function () {
       if (def.chave && vazio_(p.idempotencyKey)) throw validacao_('Pedido de gravação sem chave de idempotência. Recarregue o formulário e tente de novo.', 'idempotencyKey');
       var pedido = { idempotencyKey: p.idempotencyKey, dados: p.dados, avisosAceitos: p.avisosAceitos, dataVersionEsperada: p.dataVersionEsperada };
       var info = { usuario: usuario, ambiente: p.ambiente, props: props };
-      if (def.tipo !== 'RASCUNHO') ctx = contexto({ ambiente: p.ambiente, usuario: usuario, props: props });
+      if (def.tipo !== 'RASCUNHO' && !def.semBanco) ctx = contexto({ ambiente: p.ambiente, usuario: usuario, props: props });
       var r = def.executar(ctx, pedido, info) || {};
       meta.dataVersion = typeof r.dataVersion === 'number' ? r.dataVersion : ctx ? versaoDe_(ctx) : null;
       if (def.tipo === 'COMANDO') {
@@ -576,6 +587,32 @@ var Api = (function () {
     return compactar(HtmlService.createHtmlOutputFromFile(n).getContent());
   }
   /**
+   * Rota `sistema.tela` (01, seção 6.2; risco R-31): o arquivo de uma tela carregada sob demanda, compactado como o doGet
+   * entrega os includes (`incluir`). dados: {nome} (o arquivo, como o EventCatalog o declara em `tela`). Não abre a
+   * planilha-banco: a guarda de dono do `tratar` já passou e o arquivo é do projeto. → {nome, modulo, conteudo, bytes}.
+   * Erros: VALIDATION (nome que não é de tela sob demanda), NOT_FOUND (módulo ainda não entregue, com a fase; arquivo que
+   * não está no projeto do Apps Script).
+   */
+  function tela(dados) {
+    var nome = dados && typeof dados.nome === 'string' ? dados.nome : '';
+    if (!Object.prototype.hasOwnProperty.call(TELAS_SOB_DEMANDA, nome)) throw validacao_('Tela desconhecida: "' + nome + '". Recarregue a página; se continuar, a versão do app pode estar desatualizada.', 'nome');
+    var id = TELAS_SOB_DEMANDA[nome];
+    var m = EventCatalog.modulosAtivos().filter(function (x) { return x.id === id && x.tela === nome && x.sob_demanda === true; })[0];
+    if (!m) {
+      var d = EventCatalog.modulo(id);
+      throw Validation.erro('NOT_FOUND', 'Esta tela faz parte do módulo ' + d.rotulo + ', que chega na fase ' + d.fase + ' e ainda não foi entregue.');
+    }
+    var conteudo;
+    try {
+      conteudo = incluir(nome);
+    } catch (e) {
+      if (Validation.ehAppError(e)) throw e;
+      console.error('sistema.tela ' + nome + ': ' + texto_(e));
+      throw Validation.erro('NOT_FOUND', 'A tela de ' + m.rotulo + ' não está no projeto do Apps Script. Envie o projeto de novo (npm run gas:push) e recarregue a página.');
+    }
+    return { nome: nome, modulo: m.id, conteudo: conteudo, bytes: bytesUtf8_(conteudo) };
+  }
+  /**
    * Tira de um include (`<script>` ou `<style>`) o que só serve a quem lê o código: o recuo do começo das linhas, as
    * linhas vazias e as linhas que são só comentário (`// ...` e blocos que começam e terminam numa linha `/* ... *\/`).
    * Comentário no fim de uma linha de código fica (a linha não muda). Seguro porque os includes não têm template literal
@@ -628,6 +665,8 @@ var Api = (function () {
     APP_VERSION: APP_VERSION,
     TITULO: TITULO,
     INCLUDES: INCLUDES,
+    TELAS_SOB_DEMANDA: TELAS_SOB_DEMANDA,
+    tela: tela,
     compactar: compactar,
     ROTAS_CANONICAS: ROTAS_CANONICAS,
     FAIXA_TESTE: FAIXA_TESTE,

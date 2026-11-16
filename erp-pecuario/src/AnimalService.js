@@ -335,13 +335,13 @@ var AnimalService = (function () {
     // A passagem atual começa na entrada vigente mais recente (a mesma fronteira do custo de aquisição, 03a DL-08).
     var entrada = Timeline.projetarAnimal(L.f, a.animal_id).meta.entradaCusto;
     var b = FinancialService.blocoFicha(tx.repo, a, { desde: entrada ? entrada.event_date : null });
-    var m = EventCatalog.modulosAtivos(99).filter(function (x) { return x.id === 'FINANCEIRO'; })[0];
+    var m = EventCatalog.modulo('FINANCEIRO');
     b.parcial = true;
     b.pendente = { modulo: 'FINANCEIRO', fase: m ? m.fase : null, mensagem: 'O rateio de custos gerais (pasto, mão de obra, insumos) e o custo completo por animal chegam com o módulo Financeiro.' };
     return b;
   }
   function moduloNaoEntregue_(modulo) {
-    var m = EventCatalog.modulosAtivos(99).filter(function (x) { return x.id === modulo; })[0];
+    var m = EventCatalog.modulo(modulo);
     return {
       entregue: false, modulo: modulo, fase: m ? m.fase : null, itens: [],
       mensagem: (m ? m.rotulo : modulo) + ' ainda não está disponível no sistema: chega numa próxima etapa.',

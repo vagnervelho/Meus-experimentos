@@ -110,6 +110,13 @@ async function esperarTela(page, texto) {
     return !t || h1.textContent.indexOf(t) >= 0;
   }, texto || null, { timeout: 10000 });
 }
+/**
+ * Espera o servidor responder tudo o que a página pediu (mock: `__gas.emCurso` = 0): o estado, nunca um tempo fixo. Quem
+ * dispara consultas assíncronas (a mudança de data, o "Incluir todos") espera isto antes de conferir a tela.
+ */
+async function esperarServidor(page) {
+  await page.waitForFunction(() => window.__gas && window.__gas.emCurso === 0, null, { timeout: 10000 });
+}
 async function ir(page, rota, texto) {
   await page.evaluate((r) => window.Roteador.ir(r), rota);
   await esperarTela(page, texto);
@@ -170,4 +177,4 @@ async function focoVisivel(page) {
   });
 }
 
-module.exports = { ORIGEM, S, js, sistema, semear, pagina, browser, fecharBrowser, abrir, esperarTela, ir, semRolagemHorizontal, alvosDeToque, focoVisivel };
+module.exports = { ORIGEM, S, js, sistema, semear, pagina, browser, fecharBrowser, abrir, esperarTela, esperarServidor, ir, semRolagemHorizontal, alvosDeToque, focoVisivel };

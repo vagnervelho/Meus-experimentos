@@ -1,4 +1,4 @@
-# Contratos entre módulos (Fases 1 e 2)
+# Contratos entre módulos (Fases 1 a 3)
 
 Interfaces que cada etapa entrega para as seguintes. Uma seção curta por módulo: funções públicas, parâmetros,
 retorno e erros. Quem acrescenta um módulo acrescenta a seção dele aqui. O desenho está em `docs/fase-0/`; este
@@ -85,6 +85,11 @@ escopo)`, seção 26); a fêmea de cada registro reprodutivo que não é parto c
 Etapa TESTE ALEATÓRIO DE TODOS OS COMANDOS (passada 1): o motor do teste aleatório baseado em modelo, a gravação simbólica
 da sequência e o encolhimento, as regressões fixas (seção 36); o brinco lançado errado conferido pela posição no registro
 (seção 14) e, em todo caminho, pela verificação de integridade e pela trava (LINHA_DO_TEMPO, seções 10.5 e 11).
+Fase 3, etapa BASE: `EventCatalog.FASE_ATUAL = 3`, com os tipos da Fase 2 até os da Fase 3 terem campos e o módulo ativo
+só com a tela entregue (seção 12); as telas sob demanda — a rota `sistema.tela` (seção 19), o carregador `Modulos` no
+cliente e a importação fora da página inicial (seções 22 e 37), o orçamento da página inicial e de cada módulo no
+`ui:check` (seção 37) —; a corrida do seletor com data passada (seção 22) e o teste aleatório com o registro único dos tipos
+(seção 36).
 
 ## 1. Regras que valem para todo arquivo de `src/`
 
@@ -919,7 +924,8 @@ achados_antes}` ou a recusa `VALIDATION`/`CONFLICT` com `INTEGRIDADE_<CHECAGEM>`
 ## 12. `EventCatalog` (puro, só dados)
 
 Definição declarativa dos eventos (04, seção 7). Os 21 tipos estão no catálogo com `fase`; só passam pelo motor os
-entregues na fase corrente E com campos (`FASE_ATUAL = 2`): ENTRADA_INICIAL, OUTRA_ENTRADA, NASCIMENTO, COMPRA, VENDA,
+entregues na fase corrente E com campos (`FASE_ATUAL = 3`, desde a etapa BASE da Fase 3; os tipos dela — PESAGEM, SANIDADE,
+REPRODUCAO, DESMAMA, CASTRACAO, OCORRENCIA, ESTOQUE — ficam inativos até terem campos, e `tiposAtivos()` = `tiposAtivos(2)`): ENTRADA_INICIAL, OUTRA_ENTRADA, NASCIMENTO, COMPRA, VENDA,
 TRANSFERENCIA, MORTE, DESCARTE, IDENTIFICACAO (PRIMEIRA_IDENTIFICACAO, SUBSTITUICAO, REMOCAO), MARCACAO (DESCARTE,
 NAO_LOCALIZADO), AJUSTE_INVENTARIO (CORRECAO_CADASTRO, IDENTIFICACAO_INCORRETA, CORRECAO_LOCALIZACAO, RECLASSIFICACAO,
 DIVERGENCIA_CONTAGEM) e ESTORNO (subtipo só é ativo com `campos_animal`; os da fase 2 não aparecem em `serializar(1)`).
@@ -992,7 +998,8 @@ Tipos desta etapa (cabeçalho · por animal):
 | `nomeEvento(tipo, subtipo?)` | O lançamento como substantivo com artigo, para o meio da frase ("a transferência", "a marcação para descarte", "o rebanho inicial"; por subtipo quando ele diz mais que o tipo); tipo desconhecido → "o lançamento". O rótulo do tipo é um verbo ("Comprar animais") e não serve no meio da frase |
 | `tipo(nome)` | Resumo + definição (`rotulo, grupo_ui, ordem, fase, frequente, selecao_animais, filtro_elegiveis, modo_entrada, revisao, critico, reads, campos, campos_animal, componentes, grupos_repetiveis, subtipos`). Tipo inexistente → `INTERNAL` |
 | `ativo(tipo, subtipo?, fase?)` | Entregue na fase (padrão: a corrente) e com campos; tipo com subtipos exige subtipo ativo |
-| `tiposAtivos(fase?)`, `modulosAtivos(fase?)` | Listas por fase. Módulos: os 10 itens do menu (§15) + IMPORTACAO (`menu: false`), cada um com `fase` |
+| `tiposAtivos(fase?)`, `modulosAtivos(fase?)` | Listas por fase. Módulos: os 10 itens do menu (§15) + IMPORTACAO (`menu: false`), cada um com `fase`. Como o tipo só fica ativo com campos, o módulo só fica ativo com a tela entregue: `modulosAtivos` traz os da fase que têm `tela` (o arquivo HTML da tela). `sob_demanda: true` (a importação; os das Fases 3 a 5, quando entregues): a tela não entra na página inicial e vai ao aparelho pela rota `sistema.tela` (seções 19 e 37), com `rotas` = as raízes de rota dela (o primeiro trecho, ex.: `['importar']`). No começo da Fase 3, Pesagens, Sanidade e Reprodução são da fase mas sem tela: fora do menu e de `modulosAtivos` |
+| `modulos()`, `modulo(id)` | Todos os módulos do desenho (entregues ou não) e um pelo id (`null` se não existe): rótulo, ordem, fase, menu, tela. Para a mensagem de módulo não entregue (a ficha, a rota da tela) |
 | `subtipos(tipo)` | Códigos dos subtipos do tipo, na ordem do catálogo, ativos ou não (`[]` em tipo sem subtipos ou desconhecido) |
 | `camposEvento(tipo, subtipo?)`, `camposAnimal(tipo, subtipo?)`, `camposGrupo(tipo, grupo)`, `leituras(tipo)` | Definições e abas que o comando lê (o motor lê também BAIXAS); `camposEvento` com subtipo acrescenta `subtipos[S].campos`; `leituras(tipo desconhecido)` = a união das de todos os tipos (correção que não diz o tipo) |
 | `serializar(fase?)` | `{fase, modulos, tipos}` só dados (vai ao cliente no bootstrap), só tipos e subtipos ativos; cada tipo e cada subtipo leva `nome` (`nomeEvento`) |
@@ -1547,8 +1554,9 @@ banco/DENIED/rascunho), appVersion (= package.json), serverTime (ISO UTC)}`; em 
 | `contexto({ambiente, usuario, props}) → ctx` | `Maintenance.contexto` + `fuso = io.fuso()` + `session = {usuario, ambiente, base_de_teste}`. Planilha inacessível → `CONFIG` (causa em `erro.causa` e no log) |
 | `rotas() → {rota: {tipo, fase, modulo, exigeChave}}` | `tipo` ∈ CONSULTA, COMANDO, MANUTENCAO, RASCUNHO, FUTURA. `ROTAS_CANONICAS` = as 51 da seção 15.3, na ordem |
 | `pagina(e)`, `paginaNegada(erro)` | doGet: `Index` (template com `appVersion`, `ambiente` e `urlApp`) com título "ERP Pecuário" e viewport; `?ambiente=TESTE\|DEMO` abre a SPA sobre essa base (outro valor → página de aviso "Endereço do app inválido"); `urlApp` = `ScriptApp.getService().getUrl()` (+ `?ambiente=` fora da produção; falha → `''` e causa no log); sem `Index.html` no projeto, página de aviso; `?pagina=concorrencia` → `TestRunner.paginaConcorrencia()` |
-| `incluir(nome)` | Conteúdo de `src/<nome>.html` da lista branca `INCLUDES` (Styles, JavaScript, Components, Dashboard, Animals, Pastures, Events, Weights, Health, Reproduction, Financial, Reports, Settings, Import), compactado (`compactar`); outro nome → `VALIDATION`. Templates chamam `<?!= include_('Styles') ?>` |
-| `compactar(texto)` | O include como vai ao aparelho (orçamento de ~450 KB, 01, seção 6.2): sem o recuo do começo das linhas, sem linha vazia e sem linha que é só comentário (`// …`, bloco `/* … */` que começa no início da linha); comentário no fim de uma linha de código fica. Pressupõe o que `tests/interface.test.js` confere nos includes: nenhum template literal e nenhuma linha que continua na seguinte. A página montada fica em cerca de 410 KB (o fonte, com a documentação, passa de 470 KB) |
+| `incluir(nome)` | Conteúdo de `src/<nome>.html` da lista branca `INCLUDES` (Styles, JavaScript, Components, Dashboard, Animals, Pastures, Events, Weights, Health, Reproduction, Financial, Reports, Settings, Import), compactado (`compactar`); outro nome → `VALIDATION`. Templates chamam `<?!= include_('Styles') ?>`. O `Index` não inclui as telas sob demanda (`TELAS_SOB_DEMANDA`) |
+| `TELAS_SOB_DEMANDA`, `tela(dados)` | As telas que não entram na página inicial, arquivo → módulo (`Import` → IMPORTACAO; `Weights`, `Health`, `Reproduction` → PESAGENS, SANIDADE, REPRODUCAO; `Financial` → FINANCEIRO; `Reports` → RELATORIOS), e o tratador da rota `sistema.tela` (abaixo) |
+| `compactar(texto)` | O include como vai ao aparelho (orçamento de ~450 KB, 01, seção 6.2): sem o recuo do começo das linhas, sem linha vazia e sem linha que é só comentário (`// …`, bloco `/* … */` que começa no início da linha); comentário no fim de uma linha de código fica. Pressupõe o que `tests/interface.test.js` confere nos includes: nenhum template literal e nenhuma linha que continua na seguinte. A página inicial montada fica em cerca de 406 KB desde a etapa BASE da Fase 3, sem as telas sob demanda (eram 449 KB no fim da Fase 2) |
 | `rascunho(acao, dados, info)` | Ver rotas `rascunho.*` |
 | `executarNoEditor(nome, fn)` | Corpo das funções do editor e dos gatilhos: resultado em JSON simples + resumo no log; erro registrado e relançado |
 | `diagnosticoSessao()` | SP-04 sem dado sensível: `{email_ativo_preenchido, email_ativo_e_do_dono, email_efetivo_preenchido, dono_registrado, contingencia_email_vazio}` |
@@ -1564,6 +1572,7 @@ banco/DENIED/rascunho), appVersion (= package.json), serverTime (ISO UTC)}`; em 
 |---|---|
 | `sistema.bootstrap` | `dados.dataVersion` = versão em cache: igual à atual e sem marcador → `{atual: true, dataVersion, appVersion, ambiente}` (só Script Properties). Senão, numa leitura validada: `{atual: false, configuracoes, listas, categorias, cobertura, parceiros (Config.cadastros), propriedades, pastos (cartões de hoje, inclusive inativos), animais (ATIVOS + EXTERNOS em colunas), alertas, catalogo (EventCatalog.serializar), modulos, dataVersion, appVersion, ambiente: {codigo, base_de_teste, faixa: 'BASE DE TESTE' \| null}, usuario, sistema: {primitiva, ultimo_backup, integridade, gatilhos}}` |
 | `sistema.estado` | `Maintenance.estado` (backups, forma de gravação, integridade, gatilhos) — tela de sistema e lista para restaurar |
+| `sistema.tela` | Consulta extra (Fase 3, etapa BASE; 01, seção 6.2; risco R-31): `{nome}` (o arquivo, como o catálogo o declara em `tela`) → `{nome, modulo, conteudo, bytes}`, com `conteudo` = o arquivo compactado como o doGet entrega os includes (`incluir`) e `bytes` em UTF-8. Guarda de dono como toda rota; não abre a planilha-banco (`semBanco`: sem contexto, `meta.dataVersion = null`, funciona sem o banco do ambiente). Nome fora de `TELAS_SOB_DEMANDA` (inclusive as telas da página inicial) → `VALIDATION` (campo `nome`, "Tela desconhecida…"); módulo da tela ainda não entregue (sem `tela`/`sob_demanda` no catálogo) → `NOT_FOUND` "Esta tela faz parte do módulo X, que chega na fase N e ainda não foi entregue."; arquivo ausente do projeto do Apps Script → `NOT_FOUND` com a instrução de enviar o projeto de novo (causa no log) |
 | `sistema.backup` / `sistema.restaurarBackup` / `sistema.integridade` | Manutenção (sem chave): backup SOB_DEMANDA; `restaurar` com `{backup_id, justificativa}`; integridade (`{reparar: true, justificativa}` → `repararIntegridade`) |
 | `operacao.status` | `{chave}` → `UnitOfWork.status` |
 | `evento.simular` | `{acao: registrar \| corrigir \| estornar, dados}` → `EventService.simular`; outra ação → `VALIDATION` |
@@ -1619,7 +1628,7 @@ conferidas por `tests/interface.test.js`. Nada roda na carga: `App.iniciar()` é
 
 **Página.** `Index.html` inclui, em ordem, `Styles`, `JavaScript`, `Components`, `Dashboard` e o boot. **As telas da parte 2
 entram como novos includes entre `Dashboard` e o `<script>` do boot** (o arquivo precisa estar em `Api.INCLUDES`) e
-registram suas rotas na carga com `Telas.registrar` (o `JavaScript` já foi carregado). `#app` traz `data-app-version`,
+registram suas rotas na carga com `Telas.registrar` (o `JavaScript` já foi carregado). As telas sob demanda (seção 37: a importação e as das Fases 3 a 5) não entram no `Index`: chegam pela rota `sistema.tela` e registram as rotas do mesmo jeito. `#app` traz `data-app-version`,
 `data-ambiente` e `data-url-app`. Estrutura: `#topo`, `#faixas`, `#menu` (lateral, ≥ 900 px), `#conteudo` (a tela),
 `#barra` (inferior, < 900 px), `#camada` (folhas e modais), `#avisos` (`aria-live=polite`).
 
@@ -1627,8 +1636,11 @@ registram suas rotas na carga com `Telas.registrar` (o `JavaScript` já foi carr
 
 | Membro | Contrato |
 |---|---|
+| `Telas.existe(rota)` | A rota abre uma tela: registrada, ou de um módulo sob demanda ainda não carregado (`Modulos.daRota`). Depois de carregado, só valem as rotas que a tela registrou |
+| `Modulos.daRota(rota)`, `carregado(tela)`, `carregar(tela)`, `sobDemanda()`, `partes(html)` | Telas sob demanda (seção 37): o módulo entregue e `sob_demanda` do bootstrap dono da raiz da rota; `carregar` pede `sistema.tela` (pedidos simultâneos da mesma tela viram um), separa o conteúdo em `<style>` e `<script>` (`partes`, por expressão regular: nada de innerHTML), injeta cada um como nó (`style.textContent`, `script.text`, com `data-modulo`) e guarda em memória (não pede de novo nesta página). Resolve `true` (veio agora) ou `false` (já estava). Erros (`Cliente.ErroApi`): os do `Cliente.consulta` (TRANSPORTE, SEM_RESPOSTA, NOT_FOUND…); `NOVA_VERSAO` com `recarregar: true` quando `meta.appVersion` do servidor difere da página (a tela nova não é injetada na página antiga); `INTERNAL` quando o script da tela falha ao rodar (o evento `error` da janela, na mesma hora) ou não há script |
 | `Telas.registrar(padrao, def)` | `padrao` com parâmetros (`'animal/:id/:aba?'`); `def = {titulo, modulo (id do servidor: a tela só abre com o módulo ativo), telaCheia (celular sem barra inferior), montar(el, params) → função de limpeza opcional}`. Registrar de novo o mesmo padrão substitui. A tela deve ter um `h1` (o foco vai para ele na troca de rota) |
 | `Roteador.ir(rota, {substituir, forcar})`, `voltar(padrao)`, `atual()`, `href(rota)`, `modo()` | Rota = `tela/ID opaco`, nunca dado (§17). Modo `GAS` (`google.script.history`/`url`, NV), `HASH` ou `MEMORIA`. Links internos: `<a href="#/x" data-rota="x">` (o clique é tratado pelo App) |
+| App e telas sob demanda | A rota sem tela registrada de um módulo sob demanda abre o esqueleto ("Abrindo Importação…", `data-tela-sob-demanda`), carrega a tela (`Modulos.carregar`) e abre a rota de novo quando ela chega (se o usuário não foi para outra rota no meio: cada `renderizarRota_` é uma vez, e a resposta de uma vez antiga só guarda a tela). Falha: h1 "Não foi possível abrir <módulo>" e o estado de erro com "Tentar de novo" (ou "Recarregar a página" no `NOVA_VERSAO`; título "Nova versão do app" em `UI.TITULOS_ERRO`). O menu mostra o módulo sob demanda antes de a tela vir (`Telas.existe`) |
 | `App.MENU` | Os 10 itens da §15 com rota: `inicio`, `rebanho`, `pastos`, `eventos`, `pesagens`, `sanidade/agenda`, `reproducao/matrizes`, `financeiro/lancamentos`, `relatorios`, `config/parametros`. Item aparece só com módulo ativo no bootstrap **e** tela registrada. Barra inferior: Início · Rebanho · Registrar · Pastos · Mais (itens 4 a 10). A busca por brinco do topo aparece quando existir a rota `animal/:id/:aba?` (ela abre `animal/<id>/resumo`) |
 | `App.faixa(id, {tipo: info\|aviso\|erro\|ok\|teste, texto, acoes: [{texto, aoClicar \| href, alvo}]})`, `removerFaixa(id)` | Faixas fixas. Ids usados: `base-teste`, `nova-versao`, `importacao`, `sem-conexao`, `rascunho-<TIPO>`, `envio-<TIPO>`, `rascunho-falhou` |
 | `App.acaoRecarregar(texto)`, `App.recasca()`, `App.rotaInicial()`, `App.podeRegistrar()` | Recarregar = link `target=_top` para `urlApp` (senão recarrega o quadro); `recasca` redesenha menu, barra e faixas do sistema |
@@ -1661,6 +1673,7 @@ registram suas rotas na carga com `Telas.registrar` (o `JavaScript` já foi carr
 | `Campos.converter(def, bruto)` | Bruto → valor do contrato ou `{erro}`: dinheiro em centavos (min/max em reais), decimal com `casas`, data yyyy-MM-dd, `outras_identificacoes` → `[{tipo, codigo}]`; `min_exclusivo: true` recusa o próprio mínimo ("maior que 0"), espelhando `minExclusivo` do esquema (formulários de pasto, propriedade e categoria) |
 | `Formulario.bloco(defs, valores, o)` / `Formulario.converterValores(defs, valores, contexto)` | Campos com `visivel_se`, `obrigatorio_se` e `default` (`HOJE`, literal, `{de: 'CONFIGURACOES.chave'}`); oculto não vai ao servidor; vazio visível vai `null` |
 | `Seletor.criar({modo: UM\|VARIOS, filtro (filtro_elegiveis), tipo, selecionados, aoMudar, dataEvento, valorCampo})` | Busca, filtros, todos do pasto (data ≠ hoje → `inventario.elegiveis` `{tipo, data, pasture_id}`, rótulo "Posição em …"; animal que estava no pasto na data e já saiu aparece pelo código), colar lista (achados, não encontrados, repetidos). Inelegíveis só pré-marcados (situação, pasto e `sexo` do filtro). Com data ≠ hoje e filtro de animal no rebanho, a presença e o pasto de Busca, Filtros e Colar vêm da posição na data (`inventario.elegiveis` `{tipo, data}`, sem pasto: "Não elegível: fora do pasto de origem em dd/mm/aaaa", "fora do rebanho em …"); sem conexão, aviso e a posição de hoje (o servidor confere na gravação). Devolve também `dataMudou()`: a mudança de `event_date` refaz a consulta e remarca os escolhidos (marca, não tira) |
+| `Seletor.criar`: a data e as respostas (Fase 3, etapa BASE) | A posição na data é uma consulta por (tipo, data, versão), guardada como promessa (duas chamadas viram um pedido; a que falhou sai para tentar de novo), e a resposta de uma data que já mudou é descartada (a da data nova é pedida). Cada desenho do painel do modo é uma vez: a resposta de "Incluir todos", da busca, da lista colada ou dos filtros que chega depois de o painel ser redesenhado, ou de a data mudar, não entra na lista nem na tela. `dataMudou()` redesenha o painel só se ele foi desenhado noutra data (o painel aberto já na data nova não é apagado pela resposta que chega depois) |
 | `Registro.abrir(tipo, {subtipo, campos, linhas: [{animal_id, valores}], rotulos: {event_id: texto}, origem})` | Atalho com pré-preenchimento (ficha, pasto, listagem, "Desfazer"); pergunta antes de apagar um rascunho do mesmo tipo. Rascunho ou sessão do tipo em ENVIANDO (envio sem resposta): consulta `operacao.status` antes de qualquer outra coisa (08, seção 9) — CONFIRMADA → o resultado do envio anterior e aviso "já estava gravado", sem abrir o novo; sem resposta → aviso "ainda não sabemos se gravou" e o rascunho mantido; FALHOU ou INEXISTENTE → a pergunta diz que o servidor confirmou que não gravou. Devolve `true` só quando abriu o formulário novo |
 | Rotas `evento/novo` e `evento/novo/:tipo/:etapa?` (`revisao`, `resultado`) | Seletor de tipo (grupos de `grupo_ui`, sem ESTORNO) → formulário (data → animais → campos → grupos → observações; Enter percorre) → revisão LOCAL ou SERVIDOR (`evento.simular`; o commit leva `dataVersionEsperada`) → resultado (coletivo ou crítico) ou aviso + volta à origem. Pedido: o de `EventService` (seção 14); grupos repetíveis vão em `dados.<grupo>`. Erros por animal ligados à linha por `animal_id`, brinco ou "Animal N da lista" |
 | `Registro.conferirPendentes()` | Na abertura: rascunho `ENVIANDO` → `operacao.status` antes de tudo (CONFIRMADA → resultado; senão volta a editar com faixa "não foi gravado"); `EDITANDO` → faixa "… — registro não concluído (N animais) · Continuar · Descartar" |
@@ -1670,7 +1683,8 @@ Testes: `tests/interface.test.js` (Node: página do doGet, sintaxe, contraste, C
 catálogo e com as mensagens do servidor) e `tests/ui/interface.test.js` (Playwright, por `npm run ui:check`; apoio em
 `tests/ui/apoio.js` — `sistema`, `semear`, `abrir(s, {largura, historico, semLocalStorage, params, telasDeTeste, relogio,
 fuso, hash})`, `esperarTela`, `ir`, `semRolagemHorizontal`, `alvosDeToque`, `focoVisivel` — e mock em `tests/ui/mock-gas.js`,
-com `window.__gas = {atrasoMs, perder, falharTransporte, pedidos, violacoes}`).
+com `window.__gas = {atrasoMs, atrasar(pedido) → ms, emCurso, perder, falharTransporte, pedidos, violacoes}`; Fase 3, etapa BASE:
+`atrasar` força a ordem das respostas e `A.esperarServidor(page)` espera `emCurso = 0`, o estado, nunca um tempo fixo).
 
 **Acréscimos da parte 2 ao núcleo e aos componentes** (usados pelas telas da seção 23; os contratos acima continuam):
 `Telas.resolver` dá preferência ao padrão literal sobre o padrão com parâmetro, em qualquer ordem de registro
@@ -1994,6 +2008,7 @@ pela `api()` (como a tela chama), o estado inteiro confere. O motor é `tests/ap
 
 | Peça | Contrato |
 |---|---|
+| Registro único dos tipos (Fase 3, etapa BASE) | Cada tipo de evento do gerador (o subtipo do ajuste conta como tipo) é uma entrada de `registrarTipo(nome, {peso(S), propor(c), montar(sis, spec), animais(spec), mudaData, dataAntiga, mutarAnimais(c), mutarValores(c), mutarOutro(c), criados(spec, proximo), doGravado(c, e), efeito(c)})` (obrigatórios: `peso`, `propor`, `montar`, `animais`, `efeito`); cada tipo de importação, de `registrarImportador(tipo, {vezes, arquivo(c)})`. O sorteio do "registrar" (pesos na ordem de registro), a correção (`mutar` delega o que muda a cada tipo), a correção para outro tipo, a correção pelas linhas gravadas (`specDoGravado`), a memória dos animais criados e o oráculo do efeito (`oraculoEfeito` → `efeito` da entrada, com o contexto do evento gravado) só consultam os registros (`TIPOS`, `IMPORTADORES`, exportados). A reorganização foi conferida pela sequência: 24 sementes × 60 passos com os mesmos comandos e os mesmos desfechos antes e depois. `stats.porEvento`: registro ou correção aceitos por tipo e subtipo. Teste novo: todo tipo e subtipo ativo do catálogo tem entrada e é aceito ao menos uma vez nas sementes fixas, nenhuma entrada é de tipo inativo, e todo tipo importável (`ImportService.modelo().tipos`) tem arquivo — o tipo que fica ativo sem a sua entrada falha no `npm test` |
 | Montagem (`montar(opcoes)`) | `setup()` do editor; pela `api()`: propriedade, pastos A (5 ha, 6 cabeças), B e C (sem área), fornecedor, comprador, transportador e corretor, o marco zero 01/01/2026 (`vazio`: sem marco zero e sem rebanho), `importacao_lote_linhas = 2`, o reuso de brinco (`reuso`), um touro de referência e o rebanho de base de 8 animais (mãe e cria ao pé, touro, prenhe, valor de abertura). `opcoes = {ordem (alpha \| reverse: a ordem de carga do `src/`), reuso, vazio}` vem da semente |
 | Gerador (`gerar`) | A cada passo, pelo estado lido cru da planilha (sem `Timeline`): registrar os 10 tipos ativos e os subtipos (rebanho inicial, outra entrada nova e volta, compra por cabeça, kg vivo, arroba de carcaça e de peso vivo, lote com cada critério e valor de cada animal, com frete, outros custos e parcelas vazias, explícitas, com 1 centavo de erro ou nenhuma; venda com as mesmas modalidades, desconto, deduções e dedução retida; transferência; morte e descarte com o lançamento; parto com gêmeos, natimorto, pai e data antiga; identificação nos três subtipos e em outros tipos; marcação; correção de cadastro, brinco lançado errado, correção de localização, reclassificação, baixa na contagem), corrigir (a especificação do lançamento gravado mudada: data, animal a mais ou a menos, valores, atributos de quem ele criou; também o substituto de um substituto), estornar (também o ESTORNO e o já anulado), `animal.editar` (mãe, pai, sexo, nascimento, chegada, castrado, origem, nome), `config.salvar` (reuso de brinco, zeros à esquerda, marco zero), importação de ANIMAIS e dos 5 tipos de evento (criar, validar cada bloco, validar de novo, importar com TOTAL ou PARCIAL_APROVADO, concluir, desfazer; também com outra em curso e o comando de negócio no meio), reenvio com a mesma chave e `dataVersionEsperada` velha. Passada 2: desativar e reativar no meio o pasto (o Pasto D,
 vazio na montagem, e os outros), o parceiro e a categoria (`pasto.salvar`, `parceiro.salvar`, `categoria.salvar`); corrigir
@@ -2085,7 +2100,39 @@ Achados desta etapa (cada um com o caso em `tests/fase2.fuzz.regressoes.test.js`
   anulado fica SEM_CAIXA (03b, seção 10.4: "vigente ou não"), o evento de importação desfeita fica CANCELADO sem anulador
   (o predicado de 02, seção 5.1), e o registro anterior ao marco zero conta os animais com efeito 0 em `qtd_animais`.
 
+Para acrescentar um tipo (Fases 3 e 4): uma entrada `registrarTipo` em `tests/apoio-fuzz.js` (o gerador do pedido válido e
+inválido, a montagem, o que a correção muda, a especificação pelas linhas gravadas quando a correção pelo gravado servir ao
+tipo, e o oráculo do efeito: o fato novo gravado e a projeção), e, se o tipo for importável, uma `registrarImportador`.
+O peso entra na ordem de registro (as sementes fixas mudam de sequência: rodar as 16 de novo e pelo menos 100 novas).
+
 Medidas de que o oráculo enxerga: com a trava desligada numa cópia do projeto, 10 de cerca de 120 sementes falham (brinco
 repetido, a fêmea prenhe com o sexo ou o nascimento corrigidos, o brinco lançado errado); com o projetor errado de
 propósito (a marcação de não localizado esquecida depois de junho), 3 de 30 sementes falham pelo efeito pedido, que a
 verificação de integridade sozinha não vê (o projetor erra igual na gravação e na reconstrução).
+
+## 37. Telas sob demanda (Fase 3, etapa BASE) — `Api` (`sistema.tela`), `EventCatalog` (módulos), `JavaScript` (`Modulos`, `Telas`, `App`), `Index`, `scripts/ui-check.js`
+
+Risco R-31 (`11-riscos-e-premissas.md`; 01, seção 6.2; 08, seções 2 e 14): a página montada chegou a 449 KB de 450 KB na
+Fase 2. As telas das Fases 3 a 5 (Weights, Health, Reproduction, Financial, Reports) e a importação (tarefa de desktop,
+pouco usada na abertura) não entram na página inicial: cada uma é um include próprio, pedido ao servidor quando o menu
+abre o módulo.
+
+| Peça | Contrato |
+|---|---|
+| Catálogo | O módulo declara `tela` (o arquivo) quando a tela é entregue, e `sob_demanda` + `rotas` (as raízes de rota) quando ela vem sob demanda (seção 12). O bootstrap leva isso ao cliente em `modulos`. Módulo de fase futura ou ainda sem tela: fora do menu e recusado pela rota |
+| Servidor | `sistema.tela` (seção 19): guarda de dono, lista `Api.TELAS_SOB_DEMANDA`, módulo entregue, o arquivo compactado como o doGet (`Api.compactar`), sem abrir a planilha |
+| Cliente | `Modulos` (seção 22): pede uma vez, injeta como nó, guarda em memória; a rota abre quando a tela chega; falha de rede → "Tentar de novo"; outra versão do app no servidor → "Recarregar a página" |
+| Página inicial | `Index` com Styles, JavaScript, Components, Dashboard, Animals, Pastures, Events e Settings: 406 KB de 450 KB nesta etapa (eram 449 KB) |
+| Orçamento | `npm run ui:check` mede a página inicial montada pelo doGet (≤ 450 KB, sem nenhuma tela sob demanda dentro) e cada tela sob demanda que existe em `src/`, como a rota a entrega (≤ 150 KB por módulo; Import: 47 KB nesta etapa). `conferirModulos(paginas, montada)` → `{modulos: [{nome, bytes, entregue}], problemas}` acusa também a tela sob demanda posta no Index e a rota que não entrega o arquivo compactado |
+| Contingência (NV) | A injeção de `<script>` criado pelo cliente dentro do iframe do HtmlService não foi verificada na conta do dono. Se o Google a bloquear, a tela volta ao Index (`<?!= include_('Import') ?>`), tira-se `sob_demanda` do módulo e o resto funciona sem mudança: a tela já registrada não é pedida |
+
+Para entregar uma tela das Fases 3 a 5: criar `src/<Tela>.html` (um `<script>` que registra as rotas com `Telas.registrar`,
+como as demais), dar ao módulo no `EventCatalog` `tela`, `sob_demanda: true` e `rotas`, e não incluí-la no `Index`.
+
+Testes: `tests/telas.sobdemanda.test.js` (Node: a rota com a guarda de dono, sem banco, com cada recusa; a página inicial
+sem a importação e dentro do orçamento; o orçamento por módulo e o conferidor; catálogo × arquivos × Index; a importação
+injetada no cliente do vm), `tests/interface.test.js` (sintaxe das telas sob demanda; nenhuma no Index), `tests/apoio-telas.js`
+(o cliente do vm carrega as telas sob demanda pela rota, como o menu) e `tests/ui/sobdemanda.test.js` (Playwright: fora da
+página inicial, pedida uma vez pela aba de Configurações com o esqueleto enquanto vem, ir e voltar sem pedir de novo, falha
+de rede com "Tentar de novo" e a volta à tela anterior a 360 px, endereço direto, menu sem os módulos da Fase 3 ainda sem
+tela, outra versão do app no servidor).

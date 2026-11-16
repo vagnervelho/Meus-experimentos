@@ -2,7 +2,10 @@
  * Mock de google.script.run para os testes de interface (nível 3). Injetado no <head> da página montada pelo doGet
  * real, antes dos scripts do app. Toda chamada vai ao BACKEND REAL dentro do harness (window.__erpServidor, exposto
  * pelo Playwright: uma execução do Apps Script por chamada, como no servidor). Controles em window.__gas:
- *  - atrasoMs: atraso da resposta (padrão 20 ms);
+ *  - atrasoMs: atraso da resposta (padrão 20 ms); atrasar(pedido) → ms: atraso de um pedido (null = o padrão), para
+ *    forçar a ordem das respostas (a resposta velha que chega depois da nova);
+ *  - emCurso: pedidos enviados cuja resposta (ou falha) ainda não foi entregue à página (os testes esperam o zero, nunca
+ *    um tempo fixo);
  *  - perder: n — as próximas n chamadas chegam ao servidor (e gravam), mas a resposta se perde (sem resposta);
  *  - falharTransporte: n — as próximas n chamadas falham no transporte, SEM chegar ao servidor;
  *  - pedidos: o que a página enviou; violacoes: argumentos que o google.script.run real recusaria (Date, função...).
@@ -12,7 +15,7 @@
 (function () {
   'use strict';
   var cfg = window.__ERP_TESTE || {};
-  var ctl = window.__gas = { atrasoMs: 20, perder: 0, falharTransporte: 0, pedidos: [], violacoes: [] };
+  var ctl = window.__gas = { atrasoMs: 20, atrasar: null, emCurso: 0, perder: 0, falharTransporte: 0, pedidos: [], violacoes: [] };
 
   function simples(v, caminho) {
     if (v === null || typeof v === 'string' || typeof v === 'boolean' || typeof v === 'undefined') return null;
@@ -36,18 +39,21 @@
     var ruim = args.length !== 1 ? 'mais de um argumento' : simples(pedido, 'pedido');
     if (ruim) { ctl.violacoes.push(ruim); setTimeout(function () { if (falha) falha(new Error('Invalid argument: ' + ruim)); }, 0); return; }
     ctl.pedidos.push(JSON.parse(JSON.stringify(pedido)));
+    ctl.emCurso += 1;
+    var proprio = typeof ctl.atrasar === 'function' ? ctl.atrasar(JSON.parse(JSON.stringify(pedido))) : null;
+    var atraso = typeof proprio === 'number' ? proprio : ctl.atrasoMs;
     if (ctl.falharTransporte > 0) {
       ctl.falharTransporte -= 1;
-      setTimeout(function () { if (falha) falha(new Error('NetworkError: Connection failure due to HTTP 0')); }, ctl.atrasoMs);
+      setTimeout(function () { ctl.emCurso -= 1; if (falha) falha(new Error('NetworkError: Connection failure due to HTTP 0')); }, atraso);
       return;
     }
     var perder = ctl.perder > 0;
     if (perder) ctl.perder -= 1;
     window.__erpServidor(JSON.stringify(pedido)).then(function (json) {
-      if (perder) return;
-      setTimeout(function () { if (ok) ok(JSON.parse(json)); }, ctl.atrasoMs);
+      if (perder) { ctl.emCurso -= 1; return; }
+      setTimeout(function () { ctl.emCurso -= 1; if (ok) ok(JSON.parse(json)); }, atraso);
     }, function (e) {
-      setTimeout(function () { if (falha) falha(e); }, 0);
+      setTimeout(function () { ctl.emCurso -= 1; if (falha) falha(e); }, 0);
     });
   }
   function runner(ok, falha) {

@@ -1035,7 +1035,93 @@ var Telas = (function () {
     }
     return null;
   }
-  return { registrar: registrar, resolver: resolver, existe: function (rota) { return !!resolver(rota); } };
+  /** A rota abre uma tela: registrada, ou de um módulo sob demanda que ainda não veio do servidor (Modulos). */
+  function existe(rota) {
+    if (resolver(rota)) return true;
+    var m = typeof Modulos !== 'undefined' ? Modulos.daRota(rota) : null;
+    return !!m && !Modulos.carregado(m.tela);
+  }
+  return { registrar: registrar, resolver: resolver, existe: existe };
+})();
+
+/**
+ * Telas carregadas sob demanda (01, seção 6.2; risco R-31). As das Fases 3 a 5 e a importação não entram na página inicial:
+ * o módulo entregue que o servidor declara `sob_demanda` (catálogo: `tela`, `rotas`) é pedido por `sistema.tela` quando a
+ * rota dele abre, injetado (o `<script>` da tela roda e registra as rotas com Telas.registrar) e guardado em memória, sem
+ * novo pedido nesta página. O conteúdo vem compactado como o doGet entrega os includes; nada de innerHTML: o texto vira nó.
+ */
+var Modulos = (function () {
+  var MSG_FALHA = 'A tela não pôde ser aberta. Recarregue a página; se continuar, avise o suporte.';
+  var MSG_VERSAO = 'Há uma versão nova do app no servidor. Recarregue a página para abrir esta tela; o que você digitou fica guardado.';
+  var carregados = {};
+  var emCurso = {};
+  function sobDemanda() { return Store.modulos().filter(function (m) { return m.sob_demanda === true && !!m.tela; }); }
+  /** O módulo sob demanda dono da rota (pelo primeiro trecho dela), ou null. */
+  function daRota(rota) {
+    var raiz = String(rota || '').split('/')[0];
+    if (!raiz) return null;
+    return sobDemanda().filter(function (m) { return (m.rotas || []).indexOf(raiz) >= 0; })[0] || null;
+  }
+  function carregado(tela) { return carregados[tela] === true; }
+  /** O include compactado em estilos e scripts. */
+  function partes(html) {
+    var out = { estilos: [], scripts: [] };
+    var re = /<(style|script)>([\s\S]*?)<\/\1>/g;
+    var m;
+    while ((m = re.exec(String(html)))) (m[1] === 'style' ? out.estilos : out.scripts).push(m[2]);
+    return out;
+  }
+  function versaoDaPagina_() {
+    var raiz = document.getElementById('app');
+    return raiz ? raiz.getAttribute('data-app-version') : null;
+  }
+  /** Põe a tela na página. O erro de execução do script dela chega pelo evento `error` da janela, na mesma hora. */
+  function injetar_(tela, conteudo) {
+    var p = partes(conteudo);
+    if (!p.scripts.length) throw new Cliente.ErroApi('INTERNAL', MSG_FALHA, [], { causa: 'a tela ' + tela + ' veio sem script' });
+    p.estilos.forEach(function (css) {
+      var s = document.createElement('style');
+      s.setAttribute('data-modulo', tela);
+      s.textContent = css;
+      document.head.appendChild(s);
+    });
+    var falha = null;
+    function aoErro(ev) { if (!falha) falha = ev.error || new Error(ev.message); }
+    window.addEventListener('error', aoErro);
+    try {
+      p.scripts.forEach(function (js) {
+        var s = document.createElement('script');
+        s.setAttribute('data-modulo', tela);
+        s.text = js;
+        document.body.appendChild(s);
+      });
+    } finally {
+      window.removeEventListener('error', aoErro);
+    }
+    if (falha) throw new Cliente.ErroApi('INTERNAL', MSG_FALHA, [], { causa: String(falha && falha.message ? falha.message : falha) });
+  }
+  /**
+   * Pede, injeta e guarda a tela. Promise: true quando veio agora, false quando já estava. Pedidos ao mesmo tempo da mesma
+   * tela viram um só. Erro: Cliente.ErroApi (TRANSPORTE, SEM_RESPOSTA, NOT_FOUND; NOVA_VERSAO com `recarregar` quando o
+   * servidor já tem outra versão do app, cuja tela não serve à página aberta; INTERNAL quando a tela não roda).
+   */
+  function carregar(tela) {
+    if (carregados[tela]) return Promise.resolve(false);
+    if (emCurso[tela]) return emCurso[tela];
+    var p = Cliente.consulta('sistema.tela', { nome: tela }).then(function (r) {
+      var d = r.data || {};
+      if (d.nome !== tela || typeof d.conteudo !== 'string') throw new Cliente.ErroApi('INTERNAL', Cliente.MSG.RESPOSTA_ESTRANHA);
+      var versao = versaoDaPagina_();
+      if (r.meta && r.meta.appVersion && versao && r.meta.appVersion !== versao) throw new Cliente.ErroApi('NOVA_VERSAO', MSG_VERSAO, [], { recarregar: true });
+      injetar_(tela, d.conteudo);
+      carregados[tela] = true;
+      return true;
+    });
+    emCurso[tela] = p;
+    p.then(function () { delete emCurso[tela]; }, function () { delete emCurso[tela]; });
+    return p;
+  }
+  return { daRota: daRota, carregado: carregado, carregar: carregar, sobDemanda: sobDemanda, partes: partes };
 })();
 
 var App = (function () {
@@ -1054,7 +1140,7 @@ var App = (function () {
   ];
   var ROTA_REGISTRAR = 'evento/novo';
   var cfg = { appVersion: null, ambiente: 'PRODUCAO', urlApp: '' };
-  var montada = null, limpeza = null, iniciado = false, ultimaConferencia = 0;
+  var montada = null, limpeza = null, iniciado = false, ultimaConferencia = 0, vezDaRota = 0;
   var el = {};
 
   function lerPagina_() {
@@ -1140,7 +1226,11 @@ var App = (function () {
 
   function renderizarRota_(rota) {
     if (!rota) { Roteador.ir(rotaInicial_(), { substituir: true }); return; }
+    vezDaRota += 1;
     var alvo = Telas.resolver(rota);
+    // Rota de um módulo sob demanda que ainda não veio: pede a tela ao servidor e abre quando chegar.
+    var sob = alvo ? null : Modulos.daRota(rota);
+    if (sob && Modulos.carregado(sob.tela)) sob = null;
     if (typeof limpeza === 'function') {
       try { limpeza(); } catch (e) { Util.registrarFalha('ao sair da tela ' + montada, e); }
     }
@@ -1149,6 +1239,7 @@ var App = (function () {
     Util.limpar(el.conteudo);
     document.body.classList.toggle('tela-cheia', !!(alvo && alvo.def.telaCheia));
     marcarAtual_();
+    if (sob) { abrirSobDemanda_(rota, sob); return; }
     if (!alvo || (alvo.def.modulo && !Store.modulo(alvo.def.modulo))) {
       montada = null;
       el.conteudo.appendChild(Util.h('h1', { class: 'tela-titulo', text: alvo ? 'Ainda não disponível' : 'Tela não encontrada' }));
@@ -1168,6 +1259,29 @@ var App = (function () {
     var titulo = caixa.querySelector('h1');
     if (titulo && iniciado) { titulo.setAttribute('tabindex', '-1'); titulo.classList.add('tela-titulo'); titulo.focus({ preventScroll: false }); }
     window.scrollTo(0, 0);
+  }
+
+  /**
+   * A tela de um módulo sob demanda (Modulos): o esqueleto enquanto ela vem; chegando, a rota abre de novo, já com a tela
+   * registrada (se o usuário não foi para outra rota no meio: a tela que veio fica guardada para a próxima vez). Sem rede,
+   * o erro com "Tentar de novo"; com outra versão do app no servidor, "Recarregar a página".
+   */
+  function abrirSobDemanda_(rota, mod) {
+    montada = null;
+    var vez = vezDaRota;
+    var caixa = Util.h('div', { class: 'tela', dataset: { telaSobDemanda: mod.tela } }, UI.carregando('Abrindo ' + mod.rotulo + '…'));
+    el.conteudo.appendChild(caixa);
+    Modulos.carregar(mod.tela).then(function () {
+      if (vez === vezDaRota) renderizarRota_(rota);
+    }, function (e) {
+      if (vez !== vezDaRota) return;
+      if (e.code === 'INTERNAL') Util.registrarFalha('ao carregar a tela ' + mod.tela, e.causa || e);
+      Util.limpar(caixa);
+      var titulo = Util.h('h1', { class: 'tela-titulo', tabindex: '-1', text: 'Não foi possível abrir ' + mod.rotulo });
+      caixa.appendChild(titulo);
+      caixa.appendChild(UI.estadoErro(e, { acao: e.recarregar ? acaoRecarregar('Recarregar a página') : { texto: 'Tentar de novo', aoClicar: function () { renderizarRota_(rota); } } }));
+      if (iniciado) titulo.focus();
+    });
   }
 
   // ------------------------------------------------------------------ faixas ----

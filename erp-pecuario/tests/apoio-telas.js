@@ -8,12 +8,24 @@ const S = require('./apoio-sistema');
 
 const { js } = S;
 function api(s, pedido) { return js(s.gas.exec(() => s.G.api(pedido))); }
-/** Os scripts do cliente da página do doGet num contexto vm (sem o boot, que precisa do DOM). */
+/** Os scripts de um HTML no contexto vm (sem o boot, que precisa do DOM). */
+function rodarScripts(ctx, html, nome) {
+  [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]).filter((b) => b.indexOf('DOMContentLoaded') < 0).forEach((b, i) => vm.runInContext(b, ctx, { filename: nome + i }));
+}
+/**
+ * Os scripts do cliente da página do doGet num contexto vm, mais as telas sob demanda dos módulos entregues, pedidas pela
+ * rota `sistema.tela` como o cliente faz quando o menu abre o módulo (a página inicial não as traz).
+ */
 function cliente(s) {
   const html = s.gas.exec(() => s.G.doGet({ parameter: {} })).getContent();
   const ctx = vm.createContext({ console });
   ctx.window = ctx;
-  [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]).filter((b) => b.indexOf('DOMContentLoaded') < 0).forEach((b, i) => vm.runInContext(b, ctx, { filename: 'cliente' + i }));
+  rodarScripts(ctx, html, 'cliente');
+  s.G.EventCatalog.modulosAtivos().filter((m) => m.sob_demanda).forEach((m) => {
+    const r = api(s, { rota: 'sistema.tela', dados: { nome: m.tela } });
+    if (!r.ok) throw new Error('tela sob demanda ' + m.tela + ' recusada: ' + JSON.stringify(r.error));
+    rodarScripts(ctx, r.data.conteudo, m.tela);
+  });
   return ctx;
 }
 function materializar(col) {
@@ -43,4 +55,4 @@ function storeDe(s) {
   };
 }
 
-module.exports = { api, cliente, materializar, storeDe };
+module.exports = { api, cliente, rodarScripts, materializar, storeDe };

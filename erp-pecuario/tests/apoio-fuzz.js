@@ -14,6 +14,11 @@
  *   animal (situação, pasto, saída, continuidade) e o efeito que o pedido manda (animal vendido fora do rebanho, brinco
  *   trocado, categoria escolhida...); recusado → nada mudou (data_version e linhas) e a recusa tem código e mensagem em
  *   português, e a chave continua livre.
+ * - Registro único dos tipos (seção "registro dos tipos de evento"): cada tipo de evento declara o seu gerador (proposta,
+ *   montagem dos dados, o que a correção muda, a especificação pelas linhas gravadas) e o seu oráculo de efeito com
+ *   `registrarTipo`, e cada tipo de importação o seu arquivo com `registrarImportador`; o resto do motor só consulta os
+ *   registros. Um tipo novo (Fases 3 e 4) entra acrescentando a entrada, e tests/fase2.fuzz.test.js confere que todo tipo
+ *   ativo do catálogo tem a sua.
  * - Gravação simbólica dos comandos (os identificadores viram "@passo.aN" / "@passo.eN" / "@passo.iN"), para repetir uma
  *   parte da sequência num sistema novo, e encolhimento automático (ddmin) até a sequência mínima que ainda falha com a
  *   mesma assinatura.
@@ -507,139 +512,10 @@ function oraculoEfeito(sis, cmd, resp, A, S) {
     if (it.brinco && !pre && idents.length === 1 && idents[0].event_id === eid && norm(a.brinco) !== norm(it.brinco)) erro(a.codigo_interno + ': brinco ' + a.brinco + ', pedido ' + it.brinco);
     if (it.data_nascimento && a.data_nascimento !== it.data_nascimento && !S.t.AJUSTES.some((x) => x.animal_id === l.animal_id && x.campo === 'data_nascimento' && S.vig.get(x.event_id))) erro(a.codigo_interno + ': nascimento ' + a.data_nascimento + ', pedido ' + it.data_nascimento);
   };
-  const tipo = d.tipo;
-  if (tipo === 'TRANSFERENCIA') {
-    (d.animais || []).forEach((x) => {
-      const l = linhaDe(x.animal_id);
-      if (!l || l.efeito_inventario !== 0 || (!pre && (l.pasto_origem_id !== d.campos.pasto_origem_id || l.pasto_destino_id !== d.campos.pasto_destino_id))) { erro('linha da transferência errada: ' + JSON.stringify(l)); return; }
-      if (!pre && ehUltima(x.animal_id) && S.animais.get(x.animal_id).pasto_atual_id !== d.campos.pasto_destino_id) erro('transferido e o pasto atual é ' + S.animais.get(x.animal_id).pasto_atual_id);
-    });
-  } else if (tipo === 'VENDA' || tipo === 'MORTE' || tipo === 'DESCARTE' || (tipo === 'AJUSTE_INVENTARIO' && d.subtipo === 'DIVERGENCIA_CONTAGEM')) {
-    (d.animais || []).forEach((x) => {
-      const l = linhaDe(x.animal_id);
-      if (!l || l.efeito_inventario !== efeito(-1)) { erro('linha de saída errada: ' + JSON.stringify(l)); return; }
-      if (pre) return;
-      const a = S.animais.get(x.animal_id);
-      if (ehUltima(x.animal_id) && (a.situacao_cadastral !== SAIDA[tipo] || a.data_saida !== E.event_date)) erro(a.codigo_interno + ' saiu (' + tipo + ') e está ' + a.situacao_cadastral + ' desde ' + a.data_saida);
-      if (presenca(S, x.animal_id, E.event_date).fim) erro(a.codigo_interno + ' saiu e continua no rebanho no fim do dia ' + E.event_date);
-    });
-    if (tipo !== 'VENDA') {
-      const bx = S.t.BAIXAS.filter((b) => b.event_id === eid);
-      if (bx.length !== (d.animais || []).length) erro(bx.length + ' baixas para ' + d.animais.length + ' animais');
-    }
-    const fins = S.t.FINANCEIRO.filter((f) => f.event_id === eid);
-    if (tipo === 'VENDA') {
-      const v = S.t.VENDAS.filter((x) => x.event_id === eid);
-      const receita = d.campos.valor_bruto - (d.campos.desconto_comercial || 0);
-      if (v.length !== 1 || v[0].valor_bruto !== d.campos.valor_bruto) erro('VENDAS ' + JSON.stringify(v.map((x) => x.valor_bruto)));
-      if (!fins.length || fins[0].natureza !== 'RECEITA_VENDA_ANIMAIS' || fins[0].valor !== receita) erro('receita ' + JSON.stringify(fins.map((f) => [f.natureza, f.valor])) + ', esperado ' + receita);
-      const ded = fins.filter((f) => f.natureza === 'DESPESA_VENDA').map((f) => f.valor).sort((a, b) => a - b);
-      const ped = (d.deducoes || []).map((x) => x.valor).sort((a, b) => a - b);
-      if (JSON.stringify(ded) !== JSON.stringify(ped)) erro('deduções ' + JSON.stringify(ded) + ', pedidas ' + JSON.stringify(ped));
-    } else {
-      const v = d.campos.custo_valor || d.campos.receita_valor || 0;
-      if (JSON.stringify(fins.map((f) => f.valor)) !== JSON.stringify(v ? [v] : [])) erro('lançamento da saída ' + JSON.stringify(fins.map((f) => f.valor)) + ', pedido ' + v);
-    }
-  } else if (tipo === 'COMPRA') {
-    const c = S.t.COMPRAS.filter((x) => x.event_id === eid);
-    const custos = (d.custos || []).reduce((s, x) => s + x.valor, 0);
-    if (c.length !== 1 || c[0].valor_animais !== d.campos.valor_animais) erro('COMPRAS ' + JSON.stringify(c.map((x) => x.valor_animais)));
-    const fins = S.t.FINANCEIRO.filter((f) => f.event_id === eid);
-    if (fins.reduce((s, f) => s + f.valor, 0) !== d.campos.valor_animais + custos) erro('lançamentos da compra somam ' + fins.reduce((s, f) => s + f.valor, 0));
-    if (lsE.length !== d.animais.length || lsE.some((l) => l.efeito_inventario !== efeito(1))) erro('linhas da compra ' + JSON.stringify(lsE.map((l) => l.efeito_inventario)));
-    d.animais.forEach((x) => {
-      if (!x.animal_id) return;
-      const l = linhaDe(x.animal_id);
-      if (!l) erro('o animal ' + x.animal_id + ' não está na compra');
-    });
-    const ns = novosDe();
-    if (ns.length !== d.animais.filter((x) => !x.animal_id).length) erro(ns.length + ' animais novos, pedidos ' + d.animais.filter((x) => !x.animal_id).length);
-    const itensNovos = d.animais.filter((x) => !x.animal_id);
-    ns.forEach((l, i) => conferirNovo(l, itensNovos[i] || {}, d.campos.pasto_destino_id, pre ? null : 'COMPRADO'));
-    if (!pre) d.animais.forEach((x) => { if (x.animal_id && ehUltima(x.animal_id) && S.animais.get(x.animal_id).situacao_cadastral !== 'ATIVO') erro('voltou pela compra e está ' + S.animais.get(x.animal_id).situacao_cadastral); });
-  } else if (tipo === 'ENTRADA_INICIAL' || tipo === 'OUTRA_ENTRADA') {
-    if (lsE.length !== d.animais.length || lsE.some((l) => l.efeito_inventario !== 1)) erro('linhas da entrada ' + JSON.stringify(lsE.map((l) => l.efeito_inventario)));
-    const itensNovos = d.animais.filter((x) => !x.animal_id);
-    const ns = novosDe();
-    if (ns.length !== itensNovos.length) erro(ns.length + ' animais novos, pedidos ' + itensNovos.length);
-    ns.forEach((l, i) => conferirNovo(l, itensNovos[i] || {}, null, null));
-    d.animais.forEach((x) => {
-      if (!x.animal_id) return;
-      const a = S.animais.get(x.animal_id);
-      if (!linhaDe(x.animal_id)) erro('o animal ' + x.animal_id + ' não está na entrada');
-      else if (ehUltima(x.animal_id) && (a.situacao_cadastral !== 'ATIVO' || (x.pasto_destino_id && a.pasto_atual_id !== x.pasto_destino_id))) erro(a.codigo_interno + ' entrou e está ' + a.situacao_cadastral + ' em ' + a.pasto_atual_id);
-    });
-  } else if (tipo === 'NASCIMENTO') {
-    const mae = d.animais[0].animal_id;
-    const lm = linhaDe(mae);
-    if (!lm || lm.papel !== 'MATRIZ' || lm.efeito_inventario !== 0) erro('linha da matriz ' + JSON.stringify(lm));
-    const vivas = (d.crias || []).filter((c) => c.situacao_nascimento === 'VIVO');
-    const crias = lsE.filter((l) => l.papel === 'CRIA');
-    if (crias.length !== vivas.length || crias.some((l) => l.efeito_inventario !== efeito(1))) erro(crias.length + ' crias para ' + vivas.length + ' vivas');
-    crias.forEach((l) => {
-      const a = S.animais.get(l.animal_id);
-      if (a.mae_id !== mae || a.data_nascimento !== E.event_date || a.origem !== 'NASCIDO') erro(a.codigo_interno + ': mãe ' + a.mae_id + ', nascimento ' + a.data_nascimento + ', origem ' + a.origem);
-      if (!pre && !S.linhasDe(l.animal_id).some((x) => x.ev !== eid) && a.situacao_cadastral !== 'ATIVO') erro('cria ' + a.codigo_interno + ' nasceu e está ' + a.situacao_cadastral);
-      if (pre && !S.linhasDe(l.animal_id).some((x) => !DE_FATO(x)) && ['HISTORICO', 'VENDIDO', 'MORTO'].indexOf(a.situacao_cadastral) < 0) erro('cria do parto antigo ' + a.codigo_interno + ' está ' + a.situacao_cadastral);
-    });
-    const rep = S.t.REPRODUCAO.filter((x) => x.event_id === eid && x.tipo_evento === 'PARTO');
-    const nati = (d.crias || []).length - vivas.length;
-    if (rep.length !== 1 || rep[0].animal_id !== mae || rep[0].qtd_nascidos_vivos !== vivas.length || rep[0].qtd_natimortos !== nati || (rep[0].touro_id || null) !== (d.campos.pai_id || null)) erro('PARTO ' + JSON.stringify(rep.map((x) => [x.qtd_nascidos_vivos, x.qtd_natimortos, x.touro_id])));
-  } else if (tipo === 'IDENTIFICACAO') {
-    const ids = S.t.IDENTIFICACOES.filter((x) => x.event_id === eid);
-    if (ids.length !== d.animais.length) erro(ids.length + ' identificações para ' + d.animais.length + ' animais');
-    d.animais.forEach((x) => {
-      const linha = ids.find((y) => y.animal_id === x.animal_id);
-      if (!linha) { erro('sem identificação do animal'); return; }
-      if (d.subtipo !== 'REMOCAO' && linha.codigo !== x.codigo) erro('código gravado ' + linha.codigo + ', pedido ' + x.codigo);
-      if (d.campos.tipo_identificacao !== 'BRINCO') return;
-      const todas = S.t.IDENTIFICACOES.filter((y) => y.animal_id === x.animal_id && y.tipo === 'BRINCO' && S.vig.get(y.event_id)).map((y) => ({ y, data: y.data_inicio, raiz: S.raiz(S.ev.get(y.event_id)), seq: S.ev.get(y.event_id).event_seq }));
-      const u = ultimo(todas);
-      const corrigido = S.t.AJUSTES.some((z) => z.animal_id === x.animal_id && z.tipo_ajuste === 'IDENTIFICACAO_INCORRETA' && S.vig.get(z.event_id));
-      const a = S.animais.get(x.animal_id);
-      if (u && u.y.event_id === eid && !corrigido && a.situacao_cadastral !== 'ANULADO') {
-        const esperado = d.subtipo === 'REMOCAO' ? null : x.codigo;
-        if (norm(a.brinco) !== norm(esperado)) erro(a.codigo_interno + ': brinco ' + a.brinco + ', esperado ' + esperado);
-      }
-    });
-  } else if (tipo === 'MARCACAO') {
-    d.animais.forEach((x) => {
-      const ms = S.linhasDe(x.animal_id).filter((l) => l.tipo === 'MARCACAO' && l.sub === d.subtipo);
-      const u = ultimo(ms);
-      const a = S.animais.get(x.animal_id);
-      const campo = d.subtipo === 'DESCARTE' ? 'marcado_descarte' : 'nao_localizado';
-      if (u && u.ev === eid && a[campo] !== (d.campos.acao === 'MARCAR')) erro(a.codigo_interno + ': ' + campo + ' = ' + a[campo] + ' depois de ' + d.campos.acao);
-    });
-  } else if (tipo === 'AJUSTE_INVENTARIO') {
-    if (d.subtipo === 'CORRECAO_CADASTRO') conferirCorrecoes(S, eid, erro);
-    if (d.subtipo === 'RECLASSIFICACAO') {
-      d.animais.forEach((x) => {
-        const rs = S.t.AJUSTES.filter((z) => z.animal_id === x.animal_id && z.tipo_ajuste === 'RECLASSIFICACAO' && S.vig.get(z.event_id)).map((z) => ({ z, data: S.ev.get(z.event_id).event_date, raiz: S.raiz(S.ev.get(z.event_id)), seq: S.ev.get(z.event_id).event_seq }));
-        const u = ultimo(rs);
-        const a = S.animais.get(x.animal_id);
-        if (u && u.z.event_id === eid && (norm(a.categoria_manual_id) !== norm(x.categoria_manual_id) || a.categoria_modo !== (x.categoria_manual_id ? 'MANUAL' : 'AUTO'))) erro(a.codigo_interno + ': categoria ' + a.categoria_modo + ' ' + a.categoria_manual_id + ', pedida ' + x.categoria_manual_id);
-      });
-    }
-    if (d.subtipo === 'IDENTIFICACAO_INCORRETA') {
-      d.animais.forEach((x) => {
-        const a = S.animais.get(x.animal_id);
-        // O número corrigido é o que estava em uso na posição do lançamento (o substituto no lugar do original).
-        const aj = S.t.AJUSTES.find((z) => z.event_id === eid && z.animal_id === x.animal_id && z.tipo_ajuste === 'IDENTIFICACAO_INCORRETA');
-        const naPosicao = codigoNaPosicao(S, x.animal_id, { data: E.event_date, raiz: S.raiz(E), seq: E.event_seq }, eid);
-        if (!aj || norm(aj.valor_anterior) !== norm(naPosicao)) erro(a.codigo_interno + ': corrigiu o brinco ' + (aj && aj.valor_anterior) + ', mas na posição do lançamento o brinco em uso era ' + naPosicao);
-        const depois = S.t.IDENTIFICACOES.some((y) => y.animal_id === x.animal_id && y.tipo === 'BRINCO' && S.vig.get(y.event_id) && y.event_id !== eid && (y.data_inicio > E.event_date || (y.data_inicio === E.event_date && (S.raiz(S.ev.get(y.event_id)) > S.raiz(E) || (S.raiz(S.ev.get(y.event_id)) === S.raiz(E) && S.ev.get(y.event_id).event_seq > E.event_seq)))));
-        const outra = S.t.AJUSTES.some((z) => z.animal_id === x.animal_id && z.tipo_ajuste === 'IDENTIFICACAO_INCORRETA' && S.vig.get(z.event_id) && z.event_id !== eid);
-        if (!depois && !outra && a.situacao_cadastral !== 'ANULADO' && norm(a.brinco) !== norm(x.brinco)) erro(a.codigo_interno + ': brinco ' + a.brinco + ', corrigido para ' + x.brinco);
-      });
-    }
-    if (d.subtipo === 'CORRECAO_LOCALIZACAO') {
-      d.animais.forEach((x) => {
-        const l = linhaDe(x.animal_id);
-        if (!l || l.pasto_destino_id !== x.pasto_destino_id) { erro('linha da correção de localização ' + JSON.stringify(l)); return; }
-        if (ehUltima(x.animal_id) && S.animais.get(x.animal_id).pasto_atual_id !== x.pasto_destino_id) erro('pasto atual ' + S.animais.get(x.animal_id).pasto_atual_id + ' depois da correção para ' + x.pasto_destino_id);
-      });
-    }
-  }
+  // O efeito de cada tipo é da entrada dele no registro (registrarTipo, mais abaixo).
+  const T = TIPOS.get(chaveDosDados(d));
+  if (!T) { erro('tipo sem oráculo de efeito no registro do teste aleatório: ' + chaveDosDados(d)); return out; }
+  T.efeito({ sis, cmd, d, resp, A, S, E, eid, pre, lsE, linhaDe, efeitoEsperado: efeito, ehUltima, novosDe, conferirNovo, erro });
   return out;
 }
 /** Brinco em uso logo antes de uma posição (data, cadeia, sequência), pelas linhas cruas de IDENTIFICACOES. */
@@ -723,97 +599,6 @@ function animaisPara(S, rnd, D, max, filtro) {
 }
 const fem = (S, id) => (S.animais.get(id) || {}).sexo === 'F';
 
-/** Monta os dados de cada tipo a partir de uma especificação (a correção muda a especificação e monta de novo). */
-function montarDados(sis, spec) {
-  const d = montarDadosDoTipo(sis, spec);
-  // Passada 3: a propriedade do lançamento escolhida (outra, desativada), em vez da padrão.
-  if (spec.prop) d.campos.property_id = spec.prop;
-  return d;
-}
-function montarDadosDoTipo(sis, spec) {
-  const s = spec;
-  const P = sis.parceiros;
-  if (s.tipo === 'TRANSFERENCIA') return { tipo: s.tipo, campos: { event_date: s.data, pasto_origem_id: s.origem, pasto_destino_id: s.destino }, animais: s.ids.map((animal_id) => ({ animal_id })) };
-  if (s.tipo === 'MORTE' || s.tipo === 'DESCARTE') {
-    const campos = { event_date: s.data };
-    if (s.tipo === 'MORTE') { campos.causa = s.causa || 'DOENCA'; if (s.valor) { campos.custo_valor = s.valor; campos.custo_conta_id = sis.custeio; if (s.vezes) campos.custo_parcelas_qtd = s.vezes; } }
-    else { campos.destino = s.destinoDescarte || 'CONSUMO_PROPRIO'; campos.motivo = s.causa || 'IDADE'; if (s.valor) { campos.receita_valor = s.valor; if (s.vezes) campos.receita_parcelas_qtd = s.vezes; } }
-    return { tipo: s.tipo, campos, animais: s.ids.map((animal_id) => ({ animal_id })) };
-  }
-  if (s.tipo === 'DIVERGENCIA_CONTAGEM') return { tipo: 'AJUSTE_INVENTARIO', subtipo: 'DIVERGENCIA_CONTAGEM', campos: { event_date: s.data, justificativa: 'Faltou na contagem do curral' }, animais: s.ids.map((animal_id) => ({ animal_id })) };
-  // Passada 4: os ajustes de um animal por item também com vários animais no mesmo lançamento (s.mais), às vezes o mesmo
-  // animal duas vezes.
-  const itensAjuste = (f) => [f(s)].concat((s.mais || []).map(f));
-  if (s.tipo === 'CORRECAO_LOCALIZACAO') return { tipo: 'AJUSTE_INVENTARIO', subtipo: 'CORRECAO_LOCALIZACAO', campos: { event_date: s.data, justificativa: 'Achado em outro pasto' }, animais: itensAjuste((x) => Object.assign({ animal_id: x.id, pasto_destino_id: x.destino }, x.origem ? { pasto_origem_id: x.origem } : {})) };
-  if (s.tipo === 'RECLASSIFICACAO') return { tipo: 'AJUSTE_INVENTARIO', subtipo: 'RECLASSIFICACAO', campos: { event_date: s.data, justificativa: 'Categoria conferida no curral' }, animais: itensAjuste((x) => ({ animal_id: x.id, categoria_manual_id: x.cat })) };
-  if (s.tipo === 'IDENTIFICACAO_INCORRETA') return { tipo: 'AJUSTE_INVENTARIO', subtipo: 'IDENTIFICACAO_INCORRETA', campos: { event_date: s.data, justificativa: 'Brinco digitado errado' }, animais: itensAjuste((x) => ({ animal_id: x.id, brinco: x.brinco })) };
-  if (s.tipo === 'CORRECAO_CADASTRO') {
-    const animais = [];
-    s.itens.forEach((x) => {
-      animais.push({ animal_id: x.id, campo: x.campo, valor_novo: x.valor });
-      Object.keys(x.junto || {}).forEach((c) => animais.push({ animal_id: x.id, campo: c, valor_novo: x.junto[c] }));
-    });
-    return { tipo: 'AJUSTE_INVENTARIO', subtipo: 'CORRECAO_CADASTRO', campos: { event_date: s.data, justificativa: 'Conferido na ficha' }, animais };
-  }
-  if (s.tipo === 'IDENTIFICACAO') {
-    return {
-      tipo: s.tipo, subtipo: s.sub, campos: { event_date: s.data, tipo_identificacao: s.tipoIdent || 'BRINCO' },
-      animais: s.itens.map((x) => { const it = { animal_id: x.id }; if (s.sub !== 'REMOCAO') it.codigo = x.codigo; if (s.sub !== 'PRIMEIRA_IDENTIFICACAO') it.motivo = s.motivoIdent || 'PERDA'; return it; }),
-    };
-  }
-  if (s.tipo === 'MARCACAO') {
-    const campos = { event_date: s.data, acao: s.acao };
-    if (s.motivo) campos.motivo_descarte = s.motivo;
-    return { tipo: s.tipo, subtipo: s.sub, campos, animais: s.ids.map((animal_id) => ({ animal_id })) };
-  }
-  if (s.tipo === 'NASCIMENTO') {
-    const campos = { event_date: s.data };
-    if (s.pasto) campos.pasto_destino_id = s.pasto;
-    if (s.pai) { campos.pai_id = s.pai; campos.pai_confianca = 'ESTIMADA'; }
-    if (s.tipoParto) campos.tipo_parto = s.tipoParto;
-    else if (s.crias.length > 1) campos.tipo_parto = 'ASSISTIDO';
-    return {
-      tipo: s.tipo, campos, animais: [{ animal_id: s.mae }],
-      crias: s.crias.map((c) => (c.situacao === 'VIVO' ? Object.assign({ situacao_nascimento: 'VIVO', sexo: c.sexo }, c.brinco ? { brinco: c.brinco } : {}, c.id ? { animal_id: c.id } : {}, c.peso ? { peso: c.peso, metodo_pesagem: 'BALANCA' } : {}) : { situacao_nascimento: 'NATIMORTO' })),
-    };
-  }
-  if (s.tipo === 'ENTRADA_INICIAL' || s.tipo === 'OUTRA_ENTRADA') {
-    if (s.volta) return { tipo: 'OUTRA_ENTRADA', campos: { event_date: s.data, description: 'Apareceu na divisa' }, animais: [{ animal_id: s.volta, pasto_destino_id: s.pasto }].concat((s.novos || []).map((n) => novoAnimal(n, false))) };
-    const campos = { event_date: s.data };
-    if (s.tipo === 'OUTRA_ENTRADA') campos.description = 'Doação do vizinho';
-    return { tipo: s.tipo, campos, animais: s.novos.map((n) => novoAnimal(n, s.tipo === 'ENTRADA_INICIAL')) };
-  }
-  if (s.tipo === 'COMPRA') {
-    const itens = s.novos.map((n) => Object.assign(novoAnimal(n, false, true), n.brinco_origem ? { brinco_origem: n.brinco_origem } : {})).concat(s.voltas.map((id) => ({ animal_id: id })));
-    const g = s.neg;
-    const n = itens.length;
-    itens.forEach((it, i) => Object.assign(it, itemNegocio(g, i)));
-    const valor = Math.max(1, contaNegocio(g, n) + (g.desvio || 0));
-    const campos = { event_date: s.data, partner_id: s.parceiro || P.fornecedor, valor_animais: valor, pasto_destino_id: s.pasto };
-    cabecalhoNegocio(g, campos);
-    const custos = [];
-    if (g.frete) custos.push({ tipo: 'FRETE', valor: g.frete, partner_id: P.transportador });
-    if (g.outros) custos.push(Object.assign({ tipo: 'OUTRO', valor: g.outros, partner_id: P.corretor }, g.vezes ? { parcelas_qtd: g.vezes } : {}));
-    return { tipo: s.tipo, campos, animais: itens, parcelas: parcelas(valor, g.parcelas, s.data), custos };
-  }
-  if (s.tipo === 'VENDA') {
-    const g = s.neg;
-    const n = s.ids.length;
-    // Com o valor de cada animal, os valores somam a receita (bruto − desconto).
-    const porValor = g.mod === 'VALOR' || (g.mod === 'LOTE' && g.criterio === 'VALOR_INDIVIDUAL');
-    const bruto = Math.max(1, contaNegocio(g, n) + (porValor ? g.desconto || 0 : g.desvio || 0));
-    const campos = { event_date: s.data, partner_id: s.parceiro || P.comprador, finalidade: g.finalidade || 'RECRIA_ENGORDA', valor_bruto: bruto };
-    cabecalhoNegocio(g, campos);
-    if (g.desconto) campos.desconto_comercial = g.desconto;
-    if (s.origem) campos.pasto_origem_id = s.origem;
-    if (g.loteKg) campos.peso_vivo_total_kg = g.loteKg;
-    const animais = s.ids.map((id, i) => { const it = Object.assign({ animal_id: id }, itemNegocio(g, i)); if (g.loteKg) delete it.peso; return it; });
-    const receita = bruto - (g.desconto || 0);
-    const deducoes = (g.deducoes || []).map((x) => Object.assign({ tipo: x.tipo, valor: x.valor }, x.retida ? { retida_pelo_comprador: true } : { partner_id: P.corretor }));
-    return { tipo: s.tipo, campos, animais, parcelas: parcelas(Math.max(1, receita), g.parcelas, s.data), deducoes };
-  }
-  throw new Error('tipo sem montagem: ' + s.tipo);
-}
 /** A conta do negócio pela modalidade (conferência; no lote, o valor da nota, ou a soma pelo valor de cada animal). */
 function contaNegocio(g, n) {
   const somar = (l, f) => l.slice(0, n).reduce((a, b) => a + f(b), 0);
@@ -914,117 +699,634 @@ function negocio(rnd, n, venda) {
   return g;
 }
 
+// ------------------------------------------------------------------ registro dos tipos de evento ----
+/**
+ * O registro único dos tipos de evento do teste aleatório (o subtipo do ajuste conta como tipo). Cada entrada traz o
+ * gerador e o oráculo do efeito do tipo; o resto do motor (o sorteio do "registrar", a correção, a correção para outro
+ * tipo, a correção pelas linhas gravadas, a memória dos animais criados e o oráculo de cada passo) só consulta o registro.
+ * Um tipo novo entra com `registrarTipo`, sem mexer no resto. A ordem de registro é a do sorteio: mudá-la muda as
+ * sequências das sementes fixas. Campos da entrada:
+ *  - peso(S): o peso do tipo no sorteio do "registrar";
+ *  - propor(c) → especificação | null, com c = {sis, S, rnd, D (a data sorteada), P (os pastos)}; `dataAntiga`: D (e a
+ *    data da correção) pode ser anterior ao marco zero;
+ *  - montar(sis, spec) → os dados de evento.registrar e evento.corrigir (a propriedade escolhida, spec.prop, entra depois);
+ *  - animais(spec) → os animais da especificação (a correção escolhe a data por eles); `mudaData` (padrão true);
+ *  - mutarAnimais(c), mutarValores(c), mutarOutro(c): o que a correção muda, com c = {sis, S, rnd, s, P} (s muda no lugar);
+ *  - criados(spec, proximo): o animal_id que o lançamento criou em cada item novo (a correção reaproveita o animal);
+ *  - doGravado(c, e) → a especificação pelas linhas gravadas do evento e (o importado e o rebanho de base não têm a do
+ *    gerador), com c = {sis, S, rnd, ls, idents, brincoDe, data, ids};
+ *  - efeito(c): o oráculo do efeito do registro ou da correção aceitos (o contexto `c` está em oraculoEfeito).
+ */
+const TIPOS = new Map();
+function registrarTipo(nome, def) {
+  ['peso', 'propor', 'montar', 'animais', 'efeito'].forEach((k) => { if (typeof def[k] !== 'function') throw new Error('o tipo ' + nome + ' do teste aleatório está sem ' + k); });
+  if (TIPOS.has(nome)) throw new Error('o tipo ' + nome + ' foi registrado duas vezes no teste aleatório');
+  TIPOS.set(nome, Object.assign({ mudaData: true }, def));
+}
+function tipoDoRegistro(nome) {
+  const T = TIPOS.get(nome);
+  if (!T) throw new Error('tipo sem entrada no registro do teste aleatório: ' + nome);
+  return T;
+}
+/** A chave do registro pelos dados do pedido (no ajuste, o subtipo) e pelo evento gravado. */
+const chaveDosDados = (d) => (d.tipo === 'AJUSTE_INVENTARIO' ? d.subtipo : d.tipo);
+const tipoDoSpec = (e) => (e.event_type === 'AJUSTE_INVENTARIO' ? e.event_subtype : e.event_type);
+
 /** Uma proposta de registro de um tipo (especificação); null quando não há como montar. */
 function propor(sis, S, rnd, tipo) {
+  const T = tipoDoRegistro(tipo);
   const P = PASTOS_DE(S);
-  const D = dataPara(S, rnd, [], { antiga: tipo === 'NASCIMENTO' });
-  if (tipo === 'ENTRADA_INICIAL') {
-    const data = rnd() < 0.9 ? S.marco || D0 : D;
-    return { tipo, data, novos: Array.from({ length: 1 + Math.floor(rnd() * 3) }, () => novoSpecAnimal(sis, S, rnd, data, true)) };
+  const D = dataPara(S, rnd, [], { antiga: !!T.dataAntiga });
+  return T.propor({ sis, S, rnd, D, P }) || null;
+}
+/** Monta os dados de cada tipo a partir de uma especificação (a correção muda a especificação e monta de novo). */
+function montarDados(sis, spec) {
+  const d = tipoDoRegistro(spec.tipo).montar(sis, spec);
+  // Passada 3: a propriedade do lançamento escolhida (outra, desativada), em vez da padrão.
+  if (spec.prop) d.campos.property_id = spec.prop;
+  return d;
+}
+const linhasDosIds = (s) => s.ids.map((animal_id) => ({ animal_id }));
+const SAIDA_DO_REBANHO = ['VENDIDO', 'DESCARTADO', 'BAIXADO_AJUSTE', 'HISTORICO'];
+
+// --- o que a correção muda, por forma da especificação (as entradas do registro escolhem) ---
+/** Tira um dos animais (com mais de um) ou põe um que está no rebanho no fim do dia. */
+function mutarIds(c) {
+  const { s, S, rnd } = c;
+  if (s.ids.length > 1 && rnd() < 0.6) s.ids.splice(Math.floor(rnd() * s.ids.length), 1);
+  else { const mais = MOVEIS(S).filter((id) => s.ids.indexOf(id) < 0 && presenca(S, id, s.data).fim); if (mais.length) s.ids.push(sorteio(rnd, mais)); }
+}
+/** Tira um animal novo (com mais de um) ou, quando `acrescenta`, põe outro (o animal da compra que sai fica anulado). */
+function mutarNovos(c, acrescenta) {
+  const { s, S, rnd, sis } = c;
+  if (s.novos.length > 1 && rnd() < 0.6) s.novos.splice(Math.floor(rnd() * s.novos.length), 1);
+  else if (acrescenta) s.novos.push(novoSpecAnimal(sis, S, rnd, s.data, s.tipo === 'ENTRADA_INICIAL'));
+}
+/** Um atributo de um animal novo (sexo, nascimento, mãe, brinco, chegada, pasto). */
+function mutarNovoAnimal(c) {
+  const { s, S, rnd, P } = c;
+  if (!s.novos || !s.novos.length) return;
+  const n = sorteio(rnd, s.novos);
+  const campo = sorteio(rnd, ['sexo', 'nasc', 'mae', 'brinco', 'entrada', 'pasto']);
+  if (campo === 'sexo') { n.sexo = n.sexo === 'M' ? 'F' : 'M'; if (n.sexo === 'M') { n.castrado = false; n.reprodutor = false; } }
+  if (campo === 'nasc') n.nasc = somaDias(s.data, rnd() < 0.3 ? 1 : -1 - Math.floor(rnd() * 3000));
+  if (campo === 'mae') n.mae = sorteio(rnd, MOVEIS(S));
+  if (campo === 'brinco') n.brinco = brinco(rnd, S);
+  if (campo === 'entrada') n.entrada = somaDias(s.data, -1 - Math.floor(rnd() * 4000));
+  if (campo === 'pasto') n.pasto = sorteio(rnd, P);
+}
+/** Outro negócio; mantida a modalidade, vão junto os campos dela (passada 3: o lote mantido sem o critério e o valor dava NaN). */
+function mutarNegocio(c) {
+  const { s, rnd } = c;
+  s.neg = Object.assign(negocio(rnd, (s.ids || []).length + (s.novos || []).length + (s.voltas || []).length, s.tipo === 'VENDA'), rnd() < 0.5 ? Object.fromEntries(['mod', 'preco', 'criterio', 'lote', 'rend'].filter((k) => s.neg[k] !== undefined).map((k) => [k, s.neg[k]])) : {});
+}
+/** Passada 4: os outros itens dos ajustes de um animal por item (tira um, ou põe outro animal). */
+function mutarMais(c) {
+  const { s, S, rnd } = c;
+  if (s.mais && s.mais.length && rnd() < 0.5) s.mais.splice(Math.floor(rnd() * s.mais.length), 1);
+  else if (s.id) {
+    const outro = sorteio(rnd, MOVEIS(S).filter((id) => id !== s.id));
+    if (outro) (s.mais = s.mais || []).push({ id: outro, cat: s.cat, brinco: brinco(rnd, S) || '97', destino: s.destino, origem: null });
   }
-  if (tipo === 'OUTRA_ENTRADA') {
+}
+/** Os itens novos recebem os animais que o lançamento criou, na ordem dos itens. */
+function criadosNovos(spec, proximo) { (spec.novos || []).forEach((x) => { if (!x.id) x.id = proximo(); }); }
+
+// --- oráculos que mais de um tipo usa ---
+/** O animal que sai: a linha com o efeito −1 e, sem lançamento posterior, fora do rebanho com a situação e a data de saída. */
+function efeitoSaida(c) {
+  const { d, S, E, erro, linhaDe, efeitoEsperado, pre, ehUltima } = c;
+  (d.animais || []).forEach((x) => {
+    const l = linhaDe(x.animal_id);
+    if (!l || l.efeito_inventario !== efeitoEsperado(-1)) { erro('linha de saída errada: ' + JSON.stringify(l)); return; }
+    if (pre) return;
+    const a = S.animais.get(x.animal_id);
+    if (ehUltima(x.animal_id) && (a.situacao_cadastral !== SAIDA[d.tipo] || a.data_saida !== E.event_date)) erro(a.codigo_interno + ' saiu (' + d.tipo + ') e está ' + a.situacao_cadastral + ' desde ' + a.data_saida);
+    if (presenca(S, x.animal_id, E.event_date).fim) erro(a.codigo_interno + ' saiu e continua no rebanho no fim do dia ' + E.event_date);
+  });
+}
+/** Morte, descarte e baixa na contagem: uma linha de BAIXAS por animal e o lançamento pedido (custo ou receita), ou nenhum. */
+function efeitoBaixa(c) {
+  const { d, S, eid, erro } = c;
+  efeitoSaida(c);
+  const bx = S.t.BAIXAS.filter((b) => b.event_id === eid);
+  if (bx.length !== (d.animais || []).length) erro(bx.length + ' baixas para ' + d.animais.length + ' animais');
+  const fins = S.t.FINANCEIRO.filter((f) => f.event_id === eid);
+  const v = d.campos.custo_valor || d.campos.receita_valor || 0;
+  if (JSON.stringify(fins.map((f) => f.valor)) !== JSON.stringify(v ? [v] : [])) erro('lançamento da saída ' + JSON.stringify(fins.map((f) => f.valor)) + ', pedido ' + v);
+}
+/** Rebanho inicial e outra entrada: as linhas +1, os animais novos como pedidos e a volta no rebanho. */
+function efeitoEntrada(c) {
+  const { d, S, erro, lsE, linhaDe, ehUltima, novosDe, conferirNovo } = c;
+  if (lsE.length !== d.animais.length || lsE.some((l) => l.efeito_inventario !== 1)) erro('linhas da entrada ' + JSON.stringify(lsE.map((l) => l.efeito_inventario)));
+  const itensNovos = d.animais.filter((x) => !x.animal_id);
+  const ns = novosDe();
+  if (ns.length !== itensNovos.length) erro(ns.length + ' animais novos, pedidos ' + itensNovos.length);
+  ns.forEach((l, i) => conferirNovo(l, itensNovos[i] || {}, null, null));
+  d.animais.forEach((x) => {
+    if (!x.animal_id) return;
+    const a = S.animais.get(x.animal_id);
+    if (!linhaDe(x.animal_id)) erro('o animal ' + x.animal_id + ' não está na entrada');
+    else if (ehUltima(x.animal_id) && (a.situacao_cadastral !== 'ATIVO' || (x.pasto_destino_id && a.pasto_atual_id !== x.pasto_destino_id))) erro(a.codigo_interno + ' entrou e está ' + a.situacao_cadastral + ' em ' + a.pasto_atual_id);
+  });
+}
+/** A entrada gravada (o rebanho de base da montagem e a entrada da importação de ANIMAIS), com os animais que ela criou como estão hoje. */
+function entradaDoGravado(c, e) {
+  const { S, ls, brincoDe, data, ids } = c;
+  const t = e.event_type;
+  const novos = [];
+  const voltas = [];
+  ids.forEach((id) => {
+    const a = S.animais.get(id) || {};
+    const l = ls.find((x) => x.animal_id === id);
+    if (a.evento_origem_id !== e.event_id) { voltas.push({ id, pasto: l.pasto_destino_id || null }); return; }
+    const n = { id, sexo: a.sexo, pasto: l.pasto_destino_id || null, brinco: brincoDe(id), origem: a.origem || 'DESCONHECIDA' };
+    if (a.data_nascimento) n.nasc = a.data_nascimento;
+    if (a.sexo === 'M') { n.castrado = a.castrado === true; n.reprodutor = a.reprodutor === true; }
+    if (a.mae_id) n.mae = a.mae_id;
+    if (a.pai_id) n.pai = a.pai_id;
+    if (a.raca) n.raca = a.raca;
+    if (t === 'ENTRADA_INICIAL') { if (a.data_entrada && a.data_entrada < data) n.entrada = a.data_entrada; if (a.partos_previos) n.partos = a.partos_previos; }
+    if (a.sexo === 'F' && a.situacao_reprodutiva === 'PRENHA' && a.data_prevista_parto) n.prenha = a.data_prevista_parto;
+    novos.push(n);
+  });
+  if (t === 'ENTRADA_INICIAL') return voltas.length || !novos.length ? null : { tipo: t, data, novos };
+  if (voltas.length > 1) return null;
+  if (voltas.length) return { tipo: t, data, volta: voltas[0].id, pasto: voltas[0].pasto, novos };
+  return novos.length ? { tipo: t, data, novos } : null;
+}
+/** Saída de animais no rebanho no fim do dia (venda, morte, descarte, baixa na contagem). */
+function proporSaida(c, tipo) {
+  const { S, rnd, D, P } = c;
+  const ids = animaisPara(S, rnd, D, tipo === 'VENDA' ? 3 : 2, (id, p) => p.fim);
+  if (!ids.length) return null;
+  const data = rnd() < 0.4 ? dataPara(S, rnd, ids) : D;
+  const spec = { tipo, data, ids };
+  if (tipo === 'VENDA') { spec.neg = negocio(rnd, ids.length, true); if (rnd() < 0.2) spec.origem = sorteio(rnd, P); if (rnd() < 0.2 && S.t.PARCEIROS.length) spec.parceiro = sorteio(rnd, S.t.PARCEIROS).partner_id; }
+  // Passada 3: a causa, o motivo e o destino variam (os itens da lista são desativados no meio).
+  if (tipo === 'MORTE' && rnd() < 0.4) spec.causa = sorteio(rnd, ['RAIO', 'ACIDENTE', 'PICADA_COBRA']);
+  if (tipo === 'DESCARTE' && rnd() < 0.4) { spec.causa = sorteio(rnd, ['FALHA_REPRODUTIVA', 'IDADE']); spec.destinoDescarte = sorteio(rnd, ['DOACAO', 'CONSUMO_PROPRIO']); }
+  else if (tipo !== 'DIVERGENCIA_CONTAGEM' && rnd() < 0.4) { spec.valor = sorteio(rnd, [1, 2, 25000]); if (rnd() < 0.3) spec.vezes = 3; }
+  return spec;
+}
+/** Morte e descarte, com o custo ou a receita opcional. */
+function montarBaixa(sis, s) {
+  const campos = { event_date: s.data };
+  if (s.tipo === 'MORTE') { campos.causa = s.causa || 'DOENCA'; if (s.valor) { campos.custo_valor = s.valor; campos.custo_conta_id = sis.custeio; if (s.vezes) campos.custo_parcelas_qtd = s.vezes; } }
+  else { campos.destino = s.destinoDescarte || 'CONSUMO_PROPRIO'; campos.motivo = s.causa || 'IDADE'; if (s.valor) { campos.receita_valor = s.valor; if (s.vezes) campos.receita_parcelas_qtd = s.vezes; } }
+  return { tipo: s.tipo, campos, animais: linhasDosIds(s) };
+}
+/** O valor do custo ou da receita da morte e do descarte (às vezes nenhum). */
+function mutarValorDaBaixa(c) { c.s.valor = c.rnd() < 0.3 ? 0 : sorteio(c.rnd, [1, 7777]); }
+/** Os ajustes de um animal por item: o primeiro e, passada 4, às vezes outros no mesmo lançamento (o mesmo animal duas vezes). */
+const itensAjuste = (s, f) => [f(s)].concat((s.mais || []).map(f));
+const animaisDoAjuste = (s) => [s.id];
+const ESCOPO_AJUSTE = { mutarOutro: mutarMais };
+
+// --- as entradas, na ordem do sorteio ---
+registrarTipo('ENTRADA_INICIAL', {
+  peso: (S) => (S.linhas.length < 10 ? 20 : 3),
+  mudaData: false,
+  propor: (c) => {
+    const { sis, S, rnd, D } = c;
+    const data = rnd() < 0.9 ? S.marco || D0 : D;
+    return { tipo: 'ENTRADA_INICIAL', data, novos: Array.from({ length: 1 + Math.floor(rnd() * 3) }, () => novoSpecAnimal(sis, S, rnd, data, true)) };
+  },
+  montar: (sis, s) => ({ tipo: s.tipo, campos: { event_date: s.data }, animais: s.novos.map((n) => novoAnimal(n, true)) }),
+  animais: () => [],
+  mutarAnimais: (c) => mutarNovos(c, true),
+  mutarValores: mutarNovoAnimal,
+  criados: criadosNovos,
+  doGravado: entradaDoGravado,
+  efeito: efeitoEntrada,
+});
+registrarTipo('OUTRA_ENTRADA', {
+  peso: () => 4,
+  propor: (c) => {
+    const { sis, S, rnd, D, P } = c;
     if (rnd() < 0.5) {
-      const fora = MOVEIS(S).filter((id) => ['VENDIDO', 'DESCARTADO', 'BAIXADO_AJUSTE', 'HISTORICO'].indexOf(S.animais.get(id).situacao_cadastral) >= 0);
+      const fora = MOVEIS(S).filter((id) => SAIDA_DO_REBANHO.indexOf(S.animais.get(id).situacao_cadastral) >= 0);
       const id = rnd() < 0.8 && fora.length ? sorteio(rnd, fora) : sorteio(rnd, MOVEIS(S));
       if (!id) return null;
       const data = dataPara(S, rnd, [id]);
       // A volta com um animal novo no mesmo lançamento, às vezes.
-      return { tipo, data, volta: id, pasto: sorteio(rnd, P), novos: rnd() < 0.2 ? [novoSpecAnimal(sis, S, rnd, data, false)] : [] };
+      return { tipo: 'OUTRA_ENTRADA', data, volta: id, pasto: sorteio(rnd, P), novos: rnd() < 0.2 ? [novoSpecAnimal(sis, S, rnd, data, false)] : [] };
     }
-    return { tipo, data: D, novos: Array.from({ length: rnd() < 0.3 ? 2 + Math.floor(rnd() * 2) : 1 }, () => novoSpecAnimal(sis, S, rnd, D, false)) };
-  }
-  if (tipo === 'COMPRA') {
-    const fora = MOVEIS(S).filter((id) => ['VENDIDO', 'DESCARTADO', 'BAIXADO_AJUSTE', 'HISTORICO'].indexOf(S.animais.get(id).situacao_cadastral) >= 0);
+    return { tipo: 'OUTRA_ENTRADA', data: D, novos: Array.from({ length: rnd() < 0.3 ? 2 + Math.floor(rnd() * 2) : 1 }, () => novoSpecAnimal(sis, S, rnd, D, false)) };
+  },
+  montar: (sis, s) => {
+    if (s.volta) return { tipo: 'OUTRA_ENTRADA', campos: { event_date: s.data, description: 'Apareceu na divisa' }, animais: [{ animal_id: s.volta, pasto_destino_id: s.pasto }].concat((s.novos || []).map((n) => novoAnimal(n, false))) };
+    return { tipo: s.tipo, campos: { event_date: s.data, description: 'Doação do vizinho' }, animais: s.novos.map((n) => novoAnimal(n, false)) };
+  },
+  animais: (s) => (s.volta ? [s.volta] : []),
+  mutarAnimais: (c) => mutarNovos(c, false),
+  mutarValores: mutarNovoAnimal,
+  criados: criadosNovos,
+  doGravado: entradaDoGravado,
+  efeito: efeitoEntrada,
+});
+registrarTipo('COMPRA', {
+  peso: () => 9,
+  propor: (c) => {
+    const { sis, S, rnd, D, P } = c;
+    const fora = MOVEIS(S).filter((id) => SAIDA_DO_REBANHO.indexOf(S.animais.get(id).situacao_cadastral) >= 0);
     const voltas = rnd() < 0.25 && fora.length ? alguns(rnd, rnd() < 0.85 ? fora : MOVEIS(S), 2) : [];
     const data = voltas.length ? dataPara(S, rnd, voltas) : D;
     const novos = Array.from({ length: voltas.length && rnd() < 0.5 ? 0 : 1 + Math.floor(rnd() * 3) }, () => novoSpecAnimal(sis, S, rnd, data, false));
     novos.forEach((n) => { if (rnd() < 0.3) n.brinco_origem = 'V' + Math.floor(rnd() * 20); });
     if (!novos.length && !voltas.length) return null;
-    const spec = { tipo, data, pasto: sorteio(rnd, P), novos, voltas, neg: negocio(rnd, novos.length + voltas.length, false) };
+    const spec = { tipo: 'COMPRA', data, pasto: sorteio(rnd, P), novos, voltas, neg: negocio(rnd, novos.length + voltas.length, false) };
     // Passada 3: o fornecedor cadastrado no meio, desativado ou de outro tipo.
     if (rnd() < 0.2 && S.t.PARCEIROS.length) spec.parceiro = sorteio(rnd, S.t.PARCEIROS).partner_id;
     return spec;
-  }
-  if (tipo === 'NASCIMENTO') {
+  },
+  montar: (sis, s) => {
+    const P = sis.parceiros;
+    const itens = s.novos.map((n) => Object.assign(novoAnimal(n, false, true), n.brinco_origem ? { brinco_origem: n.brinco_origem } : {})).concat(s.voltas.map((id) => ({ animal_id: id })));
+    const g = s.neg;
+    itens.forEach((it, i) => Object.assign(it, itemNegocio(g, i)));
+    const valor = Math.max(1, contaNegocio(g, itens.length) + (g.desvio || 0));
+    const campos = { event_date: s.data, partner_id: s.parceiro || P.fornecedor, valor_animais: valor, pasto_destino_id: s.pasto };
+    cabecalhoNegocio(g, campos);
+    const custos = [];
+    if (g.frete) custos.push({ tipo: 'FRETE', valor: g.frete, partner_id: P.transportador });
+    if (g.outros) custos.push(Object.assign({ tipo: 'OUTRO', valor: g.outros, partner_id: P.corretor }, g.vezes ? { parcelas_qtd: g.vezes } : {}));
+    return { tipo: s.tipo, campos, animais: itens, parcelas: parcelas(valor, g.parcelas, s.data), custos };
+  },
+  animais: (s) => s.voltas || [],
+  mutarAnimais: (c) => mutarNovos(c, true),
+  mutarValores: mutarNegocio,
+  criados: criadosNovos,
+  doGravado: (c, e) => {
+    const { S, rnd, ls, brincoDe, data, ids } = c;
+    const compra = S.t.COMPRAS.find((x) => x.event_id === e.event_id);
+    if (!compra) return null;
+    const novos = [];
+    const voltas = [];
+    ids.forEach((id) => {
+      const a = S.animais.get(id) || {};
+      const l = ls.find((x) => x.animal_id === id);
+      if (a.evento_origem_id === e.event_id) novos.push({ id, sexo: a.sexo, pasto: l.pasto_destino_id || null, brinco: brincoDe(id), nasc: a.data_nascimento || undefined, castrado: a.castrado === true, reprodutor: a.reprodutor === true });
+      else voltas.push(id);
+    });
+    const g = negocio(rnd, ids.length, false);
+    Object.assign(g, { mod: 'LOTE', criterio: 'CABECAS', lote: compra.valor_animais });
+    ['desvio', 'frete', 'outros', 'vezes'].forEach((x) => delete g[x]);
+    return { tipo: 'COMPRA', data, pasto: ls[0].pasto_destino_id || null, novos, voltas, neg: g };
+  },
+  efeito: (c) => {
+    const { d, S, eid, erro, lsE, linhaDe, efeitoEsperado, pre, ehUltima, novosDe, conferirNovo } = c;
+    const compras = S.t.COMPRAS.filter((x) => x.event_id === eid);
+    const custos = (d.custos || []).reduce((s, x) => s + x.valor, 0);
+    if (compras.length !== 1 || compras[0].valor_animais !== d.campos.valor_animais) erro('COMPRAS ' + JSON.stringify(compras.map((x) => x.valor_animais)));
+    const fins = S.t.FINANCEIRO.filter((f) => f.event_id === eid);
+    if (fins.reduce((s, f) => s + f.valor, 0) !== d.campos.valor_animais + custos) erro('lançamentos da compra somam ' + fins.reduce((s, f) => s + f.valor, 0));
+    if (lsE.length !== d.animais.length || lsE.some((l) => l.efeito_inventario !== efeitoEsperado(1))) erro('linhas da compra ' + JSON.stringify(lsE.map((l) => l.efeito_inventario)));
+    d.animais.forEach((x) => {
+      if (!x.animal_id) return;
+      if (!linhaDe(x.animal_id)) erro('o animal ' + x.animal_id + ' não está na compra');
+    });
+    const ns = novosDe();
+    const itensNovos = d.animais.filter((x) => !x.animal_id);
+    if (ns.length !== itensNovos.length) erro(ns.length + ' animais novos, pedidos ' + itensNovos.length);
+    ns.forEach((l, i) => conferirNovo(l, itensNovos[i] || {}, d.campos.pasto_destino_id, pre ? null : 'COMPRADO'));
+    if (!pre) d.animais.forEach((x) => { if (x.animal_id && ehUltima(x.animal_id) && S.animais.get(x.animal_id).situacao_cadastral !== 'ATIVO') erro('voltou pela compra e está ' + S.animais.get(x.animal_id).situacao_cadastral); });
+  },
+});
+registrarTipo('VENDA', {
+  peso: () => 9,
+  propor: (c) => proporSaida(c, 'VENDA'),
+  montar: (sis, s) => {
+    const P = sis.parceiros;
+    const g = s.neg;
+    const n = s.ids.length;
+    // Com o valor de cada animal, os valores somam a receita (bruto − desconto).
+    const porValor = g.mod === 'VALOR' || (g.mod === 'LOTE' && g.criterio === 'VALOR_INDIVIDUAL');
+    const bruto = Math.max(1, contaNegocio(g, n) + (porValor ? g.desconto || 0 : g.desvio || 0));
+    const campos = { event_date: s.data, partner_id: s.parceiro || P.comprador, finalidade: g.finalidade || 'RECRIA_ENGORDA', valor_bruto: bruto };
+    cabecalhoNegocio(g, campos);
+    if (g.desconto) campos.desconto_comercial = g.desconto;
+    if (s.origem) campos.pasto_origem_id = s.origem;
+    if (g.loteKg) campos.peso_vivo_total_kg = g.loteKg;
+    const animais = s.ids.map((id, i) => { const it = Object.assign({ animal_id: id }, itemNegocio(g, i)); if (g.loteKg) delete it.peso; return it; });
+    const receita = bruto - (g.desconto || 0);
+    const deducoes = (g.deducoes || []).map((x) => Object.assign({ tipo: x.tipo, valor: x.valor }, x.retida ? { retida_pelo_comprador: true } : { partner_id: P.corretor }));
+    return { tipo: s.tipo, campos, animais, parcelas: parcelas(Math.max(1, receita), g.parcelas, s.data), deducoes };
+  },
+  animais: (s) => s.ids,
+  mutarAnimais: mutarIds,
+  mutarValores: mutarNegocio,
+  mutarOutro: (c) => { c.s.origem = c.rnd() < 0.2 ? null : sorteio(c.rnd, c.P); },
+  doGravado: (c, e) => {
+    const { S, rnd, data, ids } = c;
+    const v = S.t.VENDAS.find((x) => x.event_id === e.event_id);
+    if (!v) return null;
+    const g = negocio(rnd, ids.length, true);
+    Object.assign(g, { mod: 'LOTE', criterio: 'CABECAS', lote: v.valor_bruto, finalidade: v.finalidade || 'RECRIA_ENGORDA' });
+    ['desvio', 'desconto', 'deducoes', 'loteKg'].forEach((x) => delete g[x]);
+    return { tipo: 'VENDA', data, ids, neg: g };
+  },
+  efeito: (c) => {
+    const { d, S, eid, erro } = c;
+    efeitoSaida(c);
+    const fins = S.t.FINANCEIRO.filter((f) => f.event_id === eid);
+    const v = S.t.VENDAS.filter((x) => x.event_id === eid);
+    const receita = d.campos.valor_bruto - (d.campos.desconto_comercial || 0);
+    if (v.length !== 1 || v[0].valor_bruto !== d.campos.valor_bruto) erro('VENDAS ' + JSON.stringify(v.map((x) => x.valor_bruto)));
+    if (!fins.length || fins[0].natureza !== 'RECEITA_VENDA_ANIMAIS' || fins[0].valor !== receita) erro('receita ' + JSON.stringify(fins.map((f) => [f.natureza, f.valor])) + ', esperado ' + receita);
+    const ded = fins.filter((f) => f.natureza === 'DESPESA_VENDA').map((f) => f.valor).sort((a, b) => a - b);
+    const ped = (d.deducoes || []).map((x) => x.valor).sort((a, b) => a - b);
+    if (JSON.stringify(ded) !== JSON.stringify(ped)) erro('deduções ' + JSON.stringify(ded) + ', pedidas ' + JSON.stringify(ped));
+  },
+});
+registrarTipo('TRANSFERENCIA', {
+  peso: () => 9,
+  propor: (c) => {
+    const { S, rnd, D, P } = c;
+    const origem = sorteio(rnd, P);
+    const ids = animaisPara(S, rnd, D, 3, (id, p) => p.fim && p.pasto === origem);
+    if (!ids.length) return null;
+    const data = rnd() < 0.4 ? dataPara(S, rnd, ids) : D;
+    return { tipo: 'TRANSFERENCIA', data, origem, destino: rnd() < 0.92 ? sorteio(rnd, P.filter((p) => p !== origem)) : origem, ids };
+  },
+  montar: (sis, s) => ({ tipo: s.tipo, campos: { event_date: s.data, pasto_origem_id: s.origem, pasto_destino_id: s.destino }, animais: linhasDosIds(s) }),
+  animais: (s) => s.ids,
+  mutarAnimais: mutarIds,
+  mutarValores: (c) => { if (c.s.destino) c.s.destino = sorteio(c.rnd, c.P); },
+  mutarOutro: (c) => { c.s.origem = c.rnd() < 0.2 ? null : sorteio(c.rnd, c.P); },
+  doGravado: (c) => ({ tipo: 'TRANSFERENCIA', data: c.data, origem: c.ls[0].pasto_origem_id || null, destino: c.ls[0].pasto_destino_id || null, ids: c.ids }),
+  efeito: (c) => {
+    const { d, S, erro, linhaDe, pre, ehUltima } = c;
+    (d.animais || []).forEach((x) => {
+      const l = linhaDe(x.animal_id);
+      if (!l || l.efeito_inventario !== 0 || (!pre && (l.pasto_origem_id !== d.campos.pasto_origem_id || l.pasto_destino_id !== d.campos.pasto_destino_id))) { erro('linha da transferência errada: ' + JSON.stringify(l)); return; }
+      if (!pre && ehUltima(x.animal_id) && S.animais.get(x.animal_id).pasto_atual_id !== d.campos.pasto_destino_id) erro('transferido e o pasto atual é ' + S.animais.get(x.animal_id).pasto_atual_id);
+    });
+  },
+});
+registrarTipo('MORTE', {
+  peso: () => 5,
+  propor: (c) => proporSaida(c, 'MORTE'),
+  montar: montarBaixa,
+  animais: (s) => s.ids,
+  mutarAnimais: mutarIds,
+  mutarValores: mutarValorDaBaixa,
+  doGravado: (c) => ({ tipo: 'MORTE', data: c.data, ids: c.ids }),
+  efeito: efeitoBaixa,
+});
+registrarTipo('DESCARTE', {
+  peso: () => 3,
+  propor: (c) => proporSaida(c, 'DESCARTE'),
+  montar: montarBaixa,
+  animais: (s) => s.ids,
+  mutarAnimais: mutarIds,
+  mutarValores: mutarValorDaBaixa,
+  efeito: efeitoBaixa,
+});
+registrarTipo('NASCIMENTO', {
+  peso: () => 9,
+  dataAntiga: true,
+  propor: (c) => {
+    const { S, rnd, D, P } = c;
     const maes = animaisPara(S, rnd, D, 1, (id, p) => p.dia && fem(S, id));
     if (!maes.length) return null;
     const data = rnd() < 0.5 ? dataPara(S, rnd, maes, { antiga: true }) : D;
     const crias = [{ situacao: rnd() < 0.85 ? 'VIVO' : 'NATIMORTO', sexo: rnd() < 0.5 ? 'F' : 'M', brinco: brinco(rnd, S), peso: rnd() < 0.3 ? 30 : null }];
     if (rnd() < 0.3) crias.push(rnd() < 0.5 ? { situacao: 'NATIMORTO' } : { situacao: 'VIVO', sexo: 'M', brinco: brinco(rnd, S) });
     const machos = MOVEIS(S).filter((id) => !fem(S, id)).concat(EXTERNOS(S));
-    const spec = { tipo, data, mae: maes[0], crias, pai: rnd() < 0.4 ? sorteio(rnd, rnd() < 0.85 ? machos : MOVEIS(S)) : null, pasto: rnd() < 0.3 ? sorteio(rnd, P) : null };
+    const spec = { tipo: 'NASCIMENTO', data, mae: maes[0], crias, pai: rnd() < 0.4 ? sorteio(rnd, rnd() < 0.85 ? machos : MOVEIS(S)) : null, pasto: rnd() < 0.3 ? sorteio(rnd, P) : null };
     if (rnd() < 0.2) spec.tipoParto = sorteio(rnd, ['NORMAL', 'ASSISTIDO', 'DISTOCICO']);
     return spec;
-  }
-  if (tipo === 'TRANSFERENCIA') {
-    const origem = sorteio(rnd, P);
-    const ids = animaisPara(S, rnd, D, 3, (id, p) => p.fim && p.pasto === origem);
-    if (!ids.length) return null;
-    const data = rnd() < 0.4 ? dataPara(S, rnd, ids) : D;
-    return { tipo, data, origem, destino: rnd() < 0.92 ? sorteio(rnd, P.filter((p) => p !== origem)) : origem, ids };
-  }
-  if (tipo === 'VENDA' || tipo === 'MORTE' || tipo === 'DESCARTE' || tipo === 'DIVERGENCIA_CONTAGEM') {
-    const ids = animaisPara(S, rnd, D, tipo === 'VENDA' ? 3 : 2, (id, p) => p.fim);
-    if (!ids.length) return null;
-    const data = rnd() < 0.4 ? dataPara(S, rnd, ids) : D;
-    const spec = { tipo, data, ids };
-    if (tipo === 'VENDA') { spec.neg = negocio(rnd, ids.length, true); if (rnd() < 0.2) spec.origem = sorteio(rnd, P); if (rnd() < 0.2 && S.t.PARCEIROS.length) spec.parceiro = sorteio(rnd, S.t.PARCEIROS).partner_id; }
-    // Passada 3: a causa, o motivo e o destino variam (os itens da lista são desativados no meio).
-    if (tipo === 'MORTE' && rnd() < 0.4) spec.causa = sorteio(rnd, ['RAIO', 'ACIDENTE', 'PICADA_COBRA']);
-    if (tipo === 'DESCARTE' && rnd() < 0.4) { spec.causa = sorteio(rnd, ['FALHA_REPRODUTIVA', 'IDADE']); spec.destinoDescarte = sorteio(rnd, ['DOACAO', 'CONSUMO_PROPRIO']); }
-    else if (tipo !== 'DIVERGENCIA_CONTAGEM' && rnd() < 0.4) { spec.valor = sorteio(rnd, [1, 2, 25000]); if (rnd() < 0.3) spec.vezes = 3; }
-    return spec;
-  }
-  if (tipo === 'IDENTIFICACAO') {
+  },
+  montar: (sis, s) => {
+    const campos = { event_date: s.data };
+    if (s.pasto) campos.pasto_destino_id = s.pasto;
+    if (s.pai) { campos.pai_id = s.pai; campos.pai_confianca = 'ESTIMADA'; }
+    if (s.tipoParto) campos.tipo_parto = s.tipoParto;
+    else if (s.crias.length > 1) campos.tipo_parto = 'ASSISTIDO';
+    return {
+      tipo: s.tipo, campos, animais: [{ animal_id: s.mae }],
+      crias: s.crias.map((c) => (c.situacao === 'VIVO' ? Object.assign({ situacao_nascimento: 'VIVO', sexo: c.sexo }, c.brinco ? { brinco: c.brinco } : {}, c.id ? { animal_id: c.id } : {}, c.peso ? { peso: c.peso, metodo_pesagem: 'BALANCA' } : {}) : { situacao_nascimento: 'NATIMORTO' })),
+    };
+  },
+  animais: (s) => [s.mae],
+  // A cria que vira natimorta, ou uma cria a mais (até 4).
+  mutarAnimais: (c) => {
+    const { s, S, rnd } = c;
+    const vivas = s.crias.filter((x) => x.situacao === 'VIVO');
+    if (vivas.length && rnd() < 0.5) sorteio(rnd, vivas).situacao = 'NATIMORTO';
+    else if (s.crias.length < 4) s.crias.push({ situacao: 'VIVO', sexo: rnd() < 0.5 ? 'F' : 'M', brinco: brinco(rnd, S) });
+  },
+  mutarValores: (c) => { c.s.pai = c.rnd() < 0.5 ? null : sorteio(c.rnd, MOVEIS(c.S).concat(EXTERNOS(c.S))); },
+  criados: (spec, proximo) => (spec.crias || []).forEach((x) => { if (x.situacao !== 'VIVO') delete x.id; else if (!x.id) x.id = proximo(); }),
+  doGravado: (c, e) => {
+    const { S, ls, brincoDe, data } = c;
+    const mae = (ls.find((l) => l.papel === 'MATRIZ') || {}).animal_id;
+    if (!mae) return null;
+    const rep = S.t.REPRODUCAO.find((x) => x.event_id === e.event_id && x.tipo_evento === 'PARTO') || {};
+    const crias = ls.filter((l) => l.papel === 'CRIA').map((l) => ({ situacao: 'VIVO', sexo: (S.animais.get(l.animal_id) || {}).sexo, brinco: brincoDe(l.animal_id), id: l.animal_id }));
+    for (let i = 0; i < (rep.qtd_natimortos || 0); i++) crias.push({ situacao: 'NATIMORTO' });
+    if (!crias.length) return null;
+    return { tipo: 'NASCIMENTO', data, mae, crias, pai: rep.touro_id || null, pasto: (ls.find((l) => l.papel === 'CRIA') || {}).pasto_destino_id || null };
+  },
+  efeito: (c) => {
+    const { d, S, E, eid, erro, lsE, linhaDe, efeitoEsperado, pre } = c;
+    const mae = d.animais[0].animal_id;
+    const lm = linhaDe(mae);
+    if (!lm || lm.papel !== 'MATRIZ' || lm.efeito_inventario !== 0) erro('linha da matriz ' + JSON.stringify(lm));
+    const vivas = (d.crias || []).filter((x) => x.situacao_nascimento === 'VIVO');
+    const crias = lsE.filter((l) => l.papel === 'CRIA');
+    if (crias.length !== vivas.length || crias.some((l) => l.efeito_inventario !== efeitoEsperado(1))) erro(crias.length + ' crias para ' + vivas.length + ' vivas');
+    crias.forEach((l) => {
+      const a = S.animais.get(l.animal_id);
+      if (a.mae_id !== mae || a.data_nascimento !== E.event_date || a.origem !== 'NASCIDO') erro(a.codigo_interno + ': mãe ' + a.mae_id + ', nascimento ' + a.data_nascimento + ', origem ' + a.origem);
+      if (!pre && !S.linhasDe(l.animal_id).some((x) => x.ev !== eid) && a.situacao_cadastral !== 'ATIVO') erro('cria ' + a.codigo_interno + ' nasceu e está ' + a.situacao_cadastral);
+      if (pre && !S.linhasDe(l.animal_id).some((x) => !DE_FATO(x)) && ['HISTORICO', 'VENDIDO', 'MORTO'].indexOf(a.situacao_cadastral) < 0) erro('cria do parto antigo ' + a.codigo_interno + ' está ' + a.situacao_cadastral);
+    });
+    const rep = S.t.REPRODUCAO.filter((x) => x.event_id === eid && x.tipo_evento === 'PARTO');
+    const nati = (d.crias || []).length - vivas.length;
+    if (rep.length !== 1 || rep[0].animal_id !== mae || rep[0].qtd_nascidos_vivos !== vivas.length || rep[0].qtd_natimortos !== nati || (rep[0].touro_id || null) !== (d.campos.pai_id || null)) erro('PARTO ' + JSON.stringify(rep.map((x) => [x.qtd_nascidos_vivos, x.qtd_natimortos, x.touro_id])));
+  },
+});
+registrarTipo('IDENTIFICACAO', {
+  peso: () => 6,
+  propor: (c) => {
+    const { S, rnd, D } = c;
     const ids = animaisPara(S, rnd, D, 2, (id, p) => p.dia);
     if (!ids.length) return null;
     const sub = sorteio(rnd, ['PRIMEIRA_IDENTIFICACAO', 'SUBSTITUICAO', 'SUBSTITUICAO', 'REMOCAO']);
     const data = rnd() < 0.4 ? dataPara(S, rnd, ids) : D;
-    const spec = { tipo, sub, data, tipoIdent: rnd() < 0.9 ? 'BRINCO' : sorteio(rnd, ['RFID', 'TATUAGEM', 'BRINCO_ORIGEM']), itens: ids.map((id) => ({ id, codigo: brinco(rnd, S) || String(80 + Math.floor(rnd() * 20)) })) };
+    const spec = { tipo: 'IDENTIFICACAO', sub, data, tipoIdent: rnd() < 0.9 ? 'BRINCO' : sorteio(rnd, ['RFID', 'TATUAGEM', 'BRINCO_ORIGEM']), itens: ids.map((id) => ({ id, codigo: brinco(rnd, S) || String(80 + Math.floor(rnd() * 20)) })) };
     if (rnd() < 0.3) spec.motivoIdent = sorteio(rnd, ['DANIFICADO', 'RENUMERACAO']);
     return spec;
-  }
-  if (tipo === 'MARCACAO') {
+  },
+  montar: (sis, s) => ({
+    tipo: s.tipo, subtipo: s.sub, campos: { event_date: s.data, tipo_identificacao: s.tipoIdent || 'BRINCO' },
+    animais: s.itens.map((x) => { const it = { animal_id: x.id }; if (s.sub !== 'REMOCAO') it.codigo = x.codigo; if (s.sub !== 'PRIMEIRA_IDENTIFICACAO') it.motivo = s.motivoIdent || 'PERDA'; return it; }),
+  }),
+  animais: (s) => s.itens.map((i) => i.id),
+  mutarValores: (c) => c.s.itens.forEach((i) => { i.codigo = brinco(c.rnd, c.S) || '77'; }),
+  mutarOutro: (c) => { c.s.sub = sorteio(c.rnd, ['PRIMEIRA_IDENTIFICACAO', 'SUBSTITUICAO', 'REMOCAO'].filter((v) => v !== c.s.sub)); },
+  doGravado: (c, e) => {
+    if (!c.idents.length) return null;
+    return { tipo: 'IDENTIFICACAO', sub: e.event_subtype, data: c.data, tipoIdent: c.idents[0].tipo, itens: c.idents.map((y) => ({ id: y.animal_id, codigo: y.codigo })) };
+  },
+  efeito: (c) => {
+    const { d, S, eid, erro } = c;
+    const ids = S.t.IDENTIFICACOES.filter((x) => x.event_id === eid);
+    if (ids.length !== d.animais.length) erro(ids.length + ' identificações para ' + d.animais.length + ' animais');
+    d.animais.forEach((x) => {
+      const linha = ids.find((y) => y.animal_id === x.animal_id);
+      if (!linha) { erro('sem identificação do animal'); return; }
+      if (d.subtipo !== 'REMOCAO' && linha.codigo !== x.codigo) erro('código gravado ' + linha.codigo + ', pedido ' + x.codigo);
+      if (d.campos.tipo_identificacao !== 'BRINCO') return;
+      const todas = S.t.IDENTIFICACOES.filter((y) => y.animal_id === x.animal_id && y.tipo === 'BRINCO' && S.vig.get(y.event_id)).map((y) => ({ y, data: y.data_inicio, raiz: S.raiz(S.ev.get(y.event_id)), seq: S.ev.get(y.event_id).event_seq }));
+      const u = ultimo(todas);
+      const corrigido = S.t.AJUSTES.some((z) => z.animal_id === x.animal_id && z.tipo_ajuste === 'IDENTIFICACAO_INCORRETA' && S.vig.get(z.event_id));
+      const a = S.animais.get(x.animal_id);
+      if (u && u.y.event_id === eid && !corrigido && a.situacao_cadastral !== 'ANULADO') {
+        const esperado = d.subtipo === 'REMOCAO' ? null : x.codigo;
+        if (norm(a.brinco) !== norm(esperado)) erro(a.codigo_interno + ': brinco ' + a.brinco + ', esperado ' + esperado);
+      }
+    });
+  },
+});
+registrarTipo('MARCACAO', {
+  peso: () => 4,
+  propor: (c) => {
+    const { S, rnd, D } = c;
     const ids = animaisPara(S, rnd, D, 2, (id, p) => p.dia);
     if (!ids.length) return null;
     const sub = sorteio(rnd, ['DESCARTE', 'NAO_LOCALIZADO']);
     const marcado = (S.animais.get(ids[0]) || {})[sub === 'DESCARTE' ? 'marcado_descarte' : 'nao_localizado'] === true;
     const acao = rnd() < 0.8 ? (marcado ? 'DESMARCAR' : 'MARCAR') : (marcado ? 'MARCAR' : 'DESMARCAR');
-    return { tipo, sub, acao, data: rnd() < 0.4 ? dataPara(S, rnd, ids) : D, ids, motivo: sub === 'DESCARTE' && acao === 'MARCAR' && rnd() < 0.5 ? 'IDADE' : null };
-  }
-  if (tipo === 'CORRECAO_LOCALIZACAO') {
-    const ids = animaisPara(S, rnd, D, 1, (id, p) => p.fim);
-    if (!ids.length) return null;
-    const data = rnd() < 0.4 ? dataPara(S, rnd, ids) : D;
-    const um = (id) => { const onde = presenca(S, id, data).pasto; return { id, destino: rnd() < 0.9 ? sorteio(rnd, P.filter((p) => p !== onde)) : onde, origem: rnd() < 0.2 ? sorteio(rnd, P) : null }; };
-    return Object.assign({ tipo, data }, um(ids[0]), maisAjustes(S, rnd, D, ids[0], (id, p) => p.fim, um));
-  }
-  if (tipo === 'RECLASSIFICACAO') {
-    const ids = animaisPara(S, rnd, D, 1, (id, p) => p.dia);
-    if (!ids.length) return null;
-    const um = (id) => {
-      const sexo = (S.animais.get(id) || {}).sexo;
-      const cats = CATEGORIAS_DE(S).filter((c) => rnd() < 0.85 ? c.sexo === sexo || c.sexo === 'AMBOS' : true);
-      return { id, cat: rnd() < 0.2 ? null : (sorteio(rnd, cats) || {}).id || null };
-    };
-    return Object.assign({ tipo, data: rnd() < 0.4 ? dataPara(S, rnd, ids) : D }, um(ids[0]), maisAjustes(S, rnd, D, ids[0], (id, p) => p.dia, um));
-  }
-  if (tipo === 'IDENTIFICACAO_INCORRETA') {
-    const ids = animaisPara(S, rnd, D, 1, (id, p) => p.dia);
-    if (!ids.length) return null;
-    const um = (id) => ({ id, brinco: brinco(rnd, S) || '99' });
-    return Object.assign({ tipo, data: rnd() < 0.5 ? dataPara(S, rnd, ids) : D }, um(ids[0]), maisAjustes(S, rnd, D, ids[0], (id, p) => p.dia, um));
-  }
-  if (tipo === 'CORRECAO_CADASTRO') {
+    return { tipo: 'MARCACAO', sub, acao, data: rnd() < 0.4 ? dataPara(S, rnd, ids) : D, ids, motivo: sub === 'DESCARTE' && acao === 'MARCAR' && rnd() < 0.5 ? 'IDADE' : null };
+  },
+  montar: (sis, s) => {
+    const campos = { event_date: s.data, acao: s.acao };
+    if (s.motivo) campos.motivo_descarte = s.motivo;
+    return { tipo: s.tipo, subtipo: s.sub, campos, animais: linhasDosIds(s) };
+  },
+  animais: (s) => s.ids,
+  mutarAnimais: mutarIds,
+  mutarValores: (c) => { if (c.s.acao) c.s.acao = c.s.acao === 'MARCAR' ? 'DESMARCAR' : 'MARCAR'; },
+  mutarOutro: (c) => { c.s.sub = c.s.sub === 'DESCARTE' ? 'NAO_LOCALIZADO' : 'DESCARTE'; c.s.motivo = null; },
+  efeito: (c) => {
+    const { d, S, eid, erro } = c;
+    d.animais.forEach((x) => {
+      const ms = S.linhasDe(x.animal_id).filter((l) => l.tipo === 'MARCACAO' && l.sub === d.subtipo);
+      const u = ultimo(ms);
+      const a = S.animais.get(x.animal_id);
+      const campo = d.subtipo === 'DESCARTE' ? 'marcado_descarte' : 'nao_localizado';
+      if (u && u.ev === eid && a[campo] !== (d.campos.acao === 'MARCAR')) erro(a.codigo_interno + ': ' + campo + ' = ' + a[campo] + ' depois de ' + d.campos.acao);
+    });
+  },
+});
+registrarTipo('CORRECAO_CADASTRO', {
+  peso: () => 4,
+  propor: (c) => {
+    const { sis, S, rnd, D } = c;
     // Às vezes dois animais, ou dois campos do mesmo animal, no mesmo lançamento.
     const ids = animaisPara(S, rnd, D, rnd() < 0.25 ? 2 : 1, () => true);
     if (!ids.length) return null;
     const itens = ids.map((id) => correcaoAleatoria(sis, S, rnd, id));
     if (rnd() < 0.2) itens.push(correcaoAleatoria(sis, S, rnd, ids[0]));
-    return { tipo, data: rnd() < 0.5 ? dataPara(S, rnd, ids) : D, itens };
-  }
-  return null;
-}
+    return { tipo: 'CORRECAO_CADASTRO', data: rnd() < 0.5 ? dataPara(S, rnd, ids) : D, itens };
+  },
+  montar: (sis, s) => {
+    const animais = [];
+    s.itens.forEach((x) => {
+      animais.push({ animal_id: x.id, campo: x.campo, valor_novo: x.valor });
+      Object.keys(x.junto || {}).forEach((k) => animais.push({ animal_id: x.id, campo: k, valor_novo: x.junto[k] }));
+    });
+    return { tipo: 'AJUSTE_INVENTARIO', subtipo: 'CORRECAO_CADASTRO', campos: { event_date: s.data, justificativa: 'Conferido na ficha' }, animais };
+  },
+  animais: (s) => s.itens.map((i) => i.id),
+  mutarValores: (c) => { c.s.itens = [correcaoAleatoria(c.sis, c.S, c.rnd, c.s.itens[0].id)]; },
+  efeito: (c) => conferirCorrecoes(c.S, c.eid, c.erro),
+});
+registrarTipo('IDENTIFICACAO_INCORRETA', Object.assign({
+  peso: () => 2,
+  propor: (c) => {
+    const { S, rnd, D } = c;
+    const ids = animaisPara(S, rnd, D, 1, (id, p) => p.dia);
+    if (!ids.length) return null;
+    const um = (id) => ({ id, brinco: brinco(rnd, S) || '99' });
+    return Object.assign({ tipo: 'IDENTIFICACAO_INCORRETA', data: rnd() < 0.5 ? dataPara(S, rnd, ids) : D }, um(ids[0]), maisAjustes(S, rnd, D, ids[0], (id, p) => p.dia, um));
+  },
+  montar: (sis, s) => ({ tipo: 'AJUSTE_INVENTARIO', subtipo: 'IDENTIFICACAO_INCORRETA', campos: { event_date: s.data, justificativa: 'Brinco digitado errado' }, animais: itensAjuste(s, (x) => ({ animal_id: x.id, brinco: x.brinco })) }),
+  animais: animaisDoAjuste,
+  mutarValores: (c) => { c.s.brinco = brinco(c.rnd, c.S) || '98'; },
+  efeito: (c) => {
+    const { d, S, E, eid, erro } = c;
+    d.animais.forEach((x) => {
+      const a = S.animais.get(x.animal_id);
+      // O número corrigido é o que estava em uso na posição do lançamento (o substituto no lugar do original).
+      const aj = S.t.AJUSTES.find((z) => z.event_id === eid && z.animal_id === x.animal_id && z.tipo_ajuste === 'IDENTIFICACAO_INCORRETA');
+      const naPosicao = codigoNaPosicao(S, x.animal_id, { data: E.event_date, raiz: S.raiz(E), seq: E.event_seq }, eid);
+      if (!aj || norm(aj.valor_anterior) !== norm(naPosicao)) erro(a.codigo_interno + ': corrigiu o brinco ' + (aj && aj.valor_anterior) + ', mas na posição do lançamento o brinco em uso era ' + naPosicao);
+      const depois = S.t.IDENTIFICACOES.some((y) => y.animal_id === x.animal_id && y.tipo === 'BRINCO' && S.vig.get(y.event_id) && y.event_id !== eid && (y.data_inicio > E.event_date || (y.data_inicio === E.event_date && (S.raiz(S.ev.get(y.event_id)) > S.raiz(E) || (S.raiz(S.ev.get(y.event_id)) === S.raiz(E) && S.ev.get(y.event_id).event_seq > E.event_seq)))));
+      const outra = S.t.AJUSTES.some((z) => z.animal_id === x.animal_id && z.tipo_ajuste === 'IDENTIFICACAO_INCORRETA' && S.vig.get(z.event_id) && z.event_id !== eid);
+      if (!depois && !outra && a.situacao_cadastral !== 'ANULADO' && norm(a.brinco) !== norm(x.brinco)) erro(a.codigo_interno + ': brinco ' + a.brinco + ', corrigido para ' + x.brinco);
+    });
+  },
+}, ESCOPO_AJUSTE));
+registrarTipo('CORRECAO_LOCALIZACAO', Object.assign({
+  peso: () => 3,
+  propor: (c) => {
+    const { S, rnd, D, P } = c;
+    const ids = animaisPara(S, rnd, D, 1, (id, p) => p.fim);
+    if (!ids.length) return null;
+    const data = rnd() < 0.4 ? dataPara(S, rnd, ids) : D;
+    const um = (id) => { const onde = presenca(S, id, data).pasto; return { id, destino: rnd() < 0.9 ? sorteio(rnd, P.filter((p) => p !== onde)) : onde, origem: rnd() < 0.2 ? sorteio(rnd, P) : null }; };
+    return Object.assign({ tipo: 'CORRECAO_LOCALIZACAO', data }, um(ids[0]), maisAjustes(S, rnd, D, ids[0], (id, p) => p.fim, um));
+  },
+  montar: (sis, s) => ({ tipo: 'AJUSTE_INVENTARIO', subtipo: 'CORRECAO_LOCALIZACAO', campos: { event_date: s.data, justificativa: 'Achado em outro pasto' }, animais: itensAjuste(s, (x) => Object.assign({ animal_id: x.id, pasto_destino_id: x.destino }, x.origem ? { pasto_origem_id: x.origem } : {})) }),
+  animais: animaisDoAjuste,
+  mutarValores: (c) => { if (c.s.destino) c.s.destino = sorteio(c.rnd, c.P); },
+  efeito: (c) => {
+    const { d, S, erro, linhaDe, ehUltima } = c;
+    d.animais.forEach((x) => {
+      const l = linhaDe(x.animal_id);
+      if (!l || l.pasto_destino_id !== x.pasto_destino_id) { erro('linha da correção de localização ' + JSON.stringify(l)); return; }
+      if (ehUltima(x.animal_id) && S.animais.get(x.animal_id).pasto_atual_id !== x.pasto_destino_id) erro('pasto atual ' + S.animais.get(x.animal_id).pasto_atual_id + ' depois da correção para ' + x.pasto_destino_id);
+    });
+  },
+}, ESCOPO_AJUSTE));
+registrarTipo('RECLASSIFICACAO', Object.assign({
+  peso: () => 3,
+  propor: (c) => {
+    const { S, rnd, D } = c;
+    const ids = animaisPara(S, rnd, D, 1, (id, p) => p.dia);
+    if (!ids.length) return null;
+    const um = (id) => {
+      const sexo = (S.animais.get(id) || {}).sexo;
+      const cats = CATEGORIAS_DE(S).filter((x) => rnd() < 0.85 ? x.sexo === sexo || x.sexo === 'AMBOS' : true);
+      return { id, cat: rnd() < 0.2 ? null : (sorteio(rnd, cats) || {}).id || null };
+    };
+    return Object.assign({ tipo: 'RECLASSIFICACAO', data: rnd() < 0.4 ? dataPara(S, rnd, ids) : D }, um(ids[0]), maisAjustes(S, rnd, D, ids[0], (id, p) => p.dia, um));
+  },
+  montar: (sis, s) => ({ tipo: 'AJUSTE_INVENTARIO', subtipo: 'RECLASSIFICACAO', campos: { event_date: s.data, justificativa: 'Categoria conferida no curral' }, animais: itensAjuste(s, (x) => ({ animal_id: x.id, categoria_manual_id: x.cat })) }),
+  animais: animaisDoAjuste,
+  mutarValores: (c) => { c.s.cat = c.rnd() < 0.3 ? null : sorteio(c.rnd, CATEGORIAS_DE(c.S)).id; },
+  efeito: (c) => {
+    const { d, S, eid, erro } = c;
+    d.animais.forEach((x) => {
+      const rs = S.t.AJUSTES.filter((z) => z.animal_id === x.animal_id && z.tipo_ajuste === 'RECLASSIFICACAO' && S.vig.get(z.event_id)).map((z) => ({ z, data: S.ev.get(z.event_id).event_date, raiz: S.raiz(S.ev.get(z.event_id)), seq: S.ev.get(z.event_id).event_seq }));
+      const u = ultimo(rs);
+      const a = S.animais.get(x.animal_id);
+      if (u && u.z.event_id === eid && (norm(a.categoria_manual_id) !== norm(x.categoria_manual_id) || a.categoria_modo !== (x.categoria_manual_id ? 'MANUAL' : 'AUTO'))) erro(a.codigo_interno + ': categoria ' + a.categoria_modo + ' ' + a.categoria_manual_id + ', pedida ' + x.categoria_manual_id);
+    });
+  },
+}, ESCOPO_AJUSTE));
+registrarTipo('DIVERGENCIA_CONTAGEM', {
+  peso: () => 3,
+  propor: (c) => proporSaida(c, 'DIVERGENCIA_CONTAGEM'),
+  montar: (sis, s) => ({ tipo: 'AJUSTE_INVENTARIO', subtipo: 'DIVERGENCIA_CONTAGEM', campos: { event_date: s.data, justificativa: 'Faltou na contagem do curral' }, animais: linhasDosIds(s) }),
+  animais: (s) => s.ids,
+  mutarAnimais: mutarIds,
+  efeito: efeitoBaixa,
+});
 /** Passada 4: outros itens no mesmo ajuste (outro animal, às vezes o mesmo com outro valor); {} quando não. */
 function maisAjustes(S, rnd, D, primeiro, filtro, um) {
   if (rnd() >= 0.25) return {};
@@ -1062,60 +1364,28 @@ function correcaoSo(sis, S, rnd, id) {
   if (campo === 'origem') return { id, campo, valor: sorteio(rnd, ['NASCIDO', 'COMPRADO', 'DESCONHECIDA']) };
   return { id, campo, valor: sorteio(rnd, ['CONFIRMADA', 'ESTIMADA', 'DESCONHECIDA']) };
 }
-/** Muda a especificação de um lançamento gravado para a correção. */
+/**
+ * Muda a especificação de um lançamento gravado para a correção: a data, os animais, os valores, o pasto do lançamento,
+ * o parceiro do negócio, a propriedade ou outra coisa do tipo (o que cada uma muda é da entrada do registro).
+ */
 function mutar(sis, S, rnd, spec) {
   const s = js(spec);
+  const T = tipoDoRegistro(s.tipo);
   const P = PASTOS_DE(S);
+  const c = { sis, S, rnd, s, P };
   const x = rnd();
-  const ids = s.ids || (s.id ? [s.id] : s.itens ? s.itens.map((i) => i.id) : s.mae ? [s.mae] : s.volta ? [s.volta] : s.voltas || []);
-  if (x < 0.3 && s.tipo !== 'ENTRADA_INICIAL') s.data = dataPara(S, rnd, ids, { antiga: s.tipo === 'NASCIMENTO' });
-  else if (x < 0.5) {
-    // Tirar ou pôr animal (a cria que vira natimorta, o animal da compra que sai e fica anulado).
-    if (s.ids && s.ids.length > 1 && rnd() < 0.6) s.ids.splice(Math.floor(rnd() * s.ids.length), 1);
-    else if (s.ids) { const mais = MOVEIS(S).filter((id) => s.ids.indexOf(id) < 0 && presenca(S, id, s.data).fim); if (mais.length) s.ids.push(sorteio(rnd, mais)); }
-    else if (s.novos && s.novos.length > 1 && rnd() < 0.6) s.novos.splice(Math.floor(rnd() * s.novos.length), 1);
-    else if (s.novos && s.tipo !== 'OUTRA_ENTRADA') s.novos.push(novoSpecAnimal(sis, S, rnd, s.data, s.tipo === 'ENTRADA_INICIAL'));
-    else if (s.crias) {
-      const vivas = s.crias.filter((c) => c.situacao === 'VIVO');
-      if (vivas.length && rnd() < 0.5) sorteio(rnd, vivas).situacao = 'NATIMORTO';
-      else if (s.crias.length < 4) s.crias.push({ situacao: 'VIVO', sexo: rnd() < 0.5 ? 'F' : 'M', brinco: brinco(rnd, S) });
-    }
-  } else if (x < 0.7) {
-    // Valores e atributos (campos não estruturais, e o que o animal criado é).
-    // Mantida a modalidade, vão junto os campos dela (passada 3: o lote mantido sem o critério e o valor dava NaN).
-    if (s.neg) s.neg = Object.assign(negocio(rnd, (s.ids || []).length + (s.novos || []).length + (s.voltas || []).length, s.tipo === 'VENDA'), rnd() < 0.5 ? Object.fromEntries(['mod', 'preco', 'criterio', 'lote', 'rend'].filter((c) => s.neg[c] !== undefined).map((c) => [c, s.neg[c]])) : {});
-    else if (s.novos && s.novos.length) {
-      const n = sorteio(rnd, s.novos);
-      const c = sorteio(rnd, ['sexo', 'nasc', 'mae', 'brinco', 'entrada', 'pasto']);
-      if (c === 'sexo') { n.sexo = n.sexo === 'M' ? 'F' : 'M'; if (n.sexo === 'M') { n.castrado = false; n.reprodutor = false; } }
-      if (c === 'nasc') n.nasc = somaDias(s.data, rnd() < 0.3 ? 1 : -1 - Math.floor(rnd() * 3000));
-      if (c === 'mae') n.mae = sorteio(rnd, MOVEIS(S));
-      if (c === 'brinco') n.brinco = brinco(rnd, S);
-      if (c === 'entrada') n.entrada = somaDias(s.data, -1 - Math.floor(rnd() * 4000));
-      if (c === 'pasto') n.pasto = sorteio(rnd, P);
-    } else if (s.crias) { s.pai = rnd() < 0.5 ? null : sorteio(rnd, MOVEIS(S).concat(EXTERNOS(S))); }
-    else if (s.itens && s.tipo === 'CORRECAO_CADASTRO') s.itens = [correcaoAleatoria(sis, S, rnd, s.itens[0].id)];
-    else if (s.itens) s.itens.forEach((i) => { i.codigo = brinco(rnd, S) || '77'; });
-    else if (s.tipo === 'RECLASSIFICACAO') s.cat = rnd() < 0.3 ? null : sorteio(rnd, CATEGORIAS_DE(S)).id;
-    else if (s.tipo === 'IDENTIFICACAO_INCORRETA') s.brinco = brinco(rnd, S) || '98';
-    else if (s.destino) s.destino = sorteio(rnd, P);
-    else if (s.valor !== undefined || s.tipo === 'MORTE' || s.tipo === 'DESCARTE') s.valor = rnd() < 0.3 ? 0 : sorteio(rnd, [1, 7777]);
-    else if (s.acao) s.acao = s.acao === 'MARCAR' ? 'DESMARCAR' : 'MARCAR';
-  } else if (x < 0.8 && s.pasto) s.pasto = sorteio(rnd, P);
+  const ids = T.animais(s);
+  if (x < 0.3 && T.mudaData) s.data = dataPara(S, rnd, ids, { antiga: !!T.dataAntiga });
+  else if (x < 0.5) { if (T.mutarAnimais) T.mutarAnimais(c); }
+  else if (x < 0.7) { if (T.mutarValores) T.mutarValores(c); }
+  else if (x < 0.8 && s.pasto) s.pasto = sorteio(rnd, P);
   else if (x < 0.93) {
-    // Passada 4: o que a correção ainda não mudava: o parceiro do negócio, a propriedade do lançamento, o subtipo da
-    // identificação e da marcação, a origem da venda e da transferência, e os outros itens dos ajustes.
+    // Passada 4: o que a correção ainda não mudava: o parceiro do negócio, a propriedade do lançamento e o que é de cada
+    // tipo (o subtipo da identificação e da marcação, a origem da venda e da transferência, os outros itens dos ajustes).
     const y = rnd();
     if (s.neg && y < 0.35 && S.t.PARCEIROS.length) s.parceiro = sorteio(rnd, S.t.PARCEIROS).partner_id;
     else if (y < 0.5 && S.t.PROPRIEDADES.length) s.prop = sorteio(rnd, S.t.PROPRIEDADES).property_id;
-    else if (s.tipo === 'IDENTIFICACAO') s.sub = sorteio(rnd, ['PRIMEIRA_IDENTIFICACAO', 'SUBSTITUICAO', 'REMOCAO'].filter((v) => v !== s.sub));
-    else if (s.tipo === 'MARCACAO') { s.sub = s.sub === 'DESCARTE' ? 'NAO_LOCALIZADO' : 'DESCARTE'; s.motivo = null; }
-    else if (s.tipo === 'TRANSFERENCIA' || s.tipo === 'VENDA') s.origem = rnd() < 0.2 ? null : sorteio(rnd, P);
-    else if (s.mais && s.mais.length && rnd() < 0.5) s.mais.splice(Math.floor(rnd() * s.mais.length), 1);
-    else if (s.id && ['RECLASSIFICACAO', 'IDENTIFICACAO_INCORRETA', 'CORRECAO_LOCALIZACAO'].indexOf(s.tipo) >= 0) {
-      const outro = sorteio(rnd, MOVEIS(S).filter((id) => id !== s.id));
-      if (outro) (s.mais = s.mais || []).push({ id: outro, cat: s.cat, brinco: brinco(rnd, S) || '97', destino: s.destino, origem: null });
-    }
+    else if (T.mutarOutro) T.mutarOutro(c);
   }
   return s;
 }
@@ -1126,16 +1396,42 @@ function mutarVarias(sis, S, rnd, spec) {
   return s;
 }
 
+// ------------------------------------------------------------------ registro dos tipos de importação ----
+/**
+ * O registro único dos arquivos de importação do teste aleatório: cada tipo de importação declara o arquivo que o gerador
+ * monta (`arquivo(c)` → {texto, mapa} | null, com c = {sis, S, rnd, P (nome de cada pasto), pastoNome(), ativos, comBrinco,
+ * b(id) (o brinco), data(), qual()}) e `vezes` (o peso no sorteio). As etapas seguintes só acrescentam entradas; a ordem de
+ * registro é a do sorteio. O oráculo da importação é o do estado (rotas importacao.*, em oraculoEfeito) e o de cada
+ * evento que ela grava (o global).
+ */
+const IMPORTADORES = new Map();
+function registrarImportador(tipo, def) {
+  if (typeof def.arquivo !== 'function') throw new Error('a importação ' + tipo + ' do teste aleatório está sem arquivo');
+  if (IMPORTADORES.has(tipo)) throw new Error('a importação ' + tipo + ' foi registrada duas vezes no teste aleatório');
+  IMPORTADORES.set(tipo, Object.assign({ vezes: 1 }, def));
+}
+/** A lista do sorteio do tipo de importação (cada tipo repetido `vezes`). */
+const sorteioDeImportacao = () => Array.from(IMPORTADORES).reduce((l, [tipo, d]) => l.concat(Array.from({ length: d.vezes }, () => tipo)), []);
 /** CSV de importação de um tipo, montado com os brincos de hoje (às vezes de propósito errado). */
 function arquivoImportacao(sis, S, rnd, tipo) {
+  const I = IMPORTADORES.get(tipo);
+  if (!I) return null;
   const P = Object.fromEntries(S.t.PASTOS.map((p) => [p.pasture_id, p.nome]));
-  const pastoNome = () => sorteio(rnd, Object.values(P));
   const ativos = MOVEIS(S).filter((id) => S.animais.get(id).situacao_cadastral === 'ATIVO' && S.animais.get(id).brinco);
   const comBrinco = MOVEIS(S).filter((id) => S.animais.get(id).brinco);
-  const b = (id) => S.animais.get(id).brinco;
-  const data = () => { const d = dataPara(S, rnd, [], { antiga: true }); return d > HOJE ? HOJE : d; };
-  const qual = () => (rnd() < 0.85 && ativos.length ? sorteio(rnd, ativos) : sorteio(rnd, comBrinco));
-  if (tipo === 'ANIMAIS') {
+  const c = {
+    sis, S, rnd, P, ativos, comBrinco,
+    pastoNome: () => sorteio(rnd, Object.values(P)),
+    b: (id) => S.animais.get(id).brinco,
+    data: () => { const d = dataPara(S, rnd, [], { antiga: true }); return d > HOJE ? HOJE : d; },
+    qual: () => (rnd() < 0.85 && ativos.length ? sorteio(rnd, ativos) : sorteio(rnd, comBrinco)),
+  };
+  return I.arquivo(c);
+}
+registrarImportador('ANIMAIS', {
+  vezes: 2,
+  arquivo: (c) => {
+    const { S, rnd, b, pastoNome } = c;
     const linhas = ['brinco;sexo;nascimento;pasto;mae;castrado;reprodutor;pai;chegada;raca'];
     const pais = MOVEIS(S).filter((id) => !fem(S, id) && S.animais.get(id).brinco).map(b).concat(EXTERNOS(S).map((id) => S.animais.get(id).nome));
     const n = 1 + Math.floor(rnd() * 3);
@@ -1152,8 +1448,11 @@ function arquivoImportacao(sis, S, rnd, tipo) {
       if (sexo === 'F') noArquivo.push(bb);
     }
     return { texto: linhas.join('\n'), mapa: { colunas: { brinco: 'brinco', sexo: 'sexo', nascimento: 'data_nascimento', pasto: 'pasto', mae: 'mae', castrado: 'castrado', reprodutor: 'reprodutor', pai: 'pai', chegada: 'data_entrada', raca: 'raca' }, confiancas: { data_nascimento: 'ESTIMADA', mae: 'CONFIRMADA', pai: 'ESTIMADA', data_entrada: 'ESTIMADA' }, padroes: {} } };
-  }
-  if (tipo === 'TRANSFERENCIAS') {
+  },
+});
+registrarImportador('TRANSFERENCIAS', {
+  arquivo: (c) => {
+    const { S, rnd, P, b, pastoNome, data, qual } = c;
     const linhas = ['data;origem;destino;brinco'];
     for (let i = 0; i < 1 + Math.floor(rnd() * 3); i++) {
       const id = qual();
@@ -1165,14 +1464,20 @@ function arquivoImportacao(sis, S, rnd, tipo) {
     }
     if (rnd() < 0.1 && linhas.length > 1) linhas.push(linhas[linhas.length - 1]);
     return { texto: linhas.join('\n'), mapa: { colunas: { data: 'data', origem: 'pasto_origem', destino: 'pasto_destino', brinco: 'brinco' }, confiancas: {}, padroes: {} } };
-  }
-  if (tipo === 'MORTES') {
+  },
+});
+registrarImportador('MORTES', {
+  arquivo: (c) => {
+    const { rnd, b, data, qual } = c;
     const linhas = ['data;causa;brinco'];
     for (let i = 0; i < 1 + Math.floor(rnd() * 2); i++) { const id = qual(); if (id) linhas.push([br(data()), sorteio(rnd, ['doença', 'raio', 'picada de cobra']), b(id)].join(';')); }
     if (rnd() < 0.1 && linhas.length > 1) linhas.push(linhas[linhas.length - 1]);
     return { texto: linhas.join('\n'), mapa: { colunas: { data: 'data', causa: 'causa', brinco: 'brinco' }, confiancas: {}, padroes: {} } };
-  }
-  if (tipo === 'NASCIMENTOS') {
+  },
+});
+registrarImportador('NASCIMENTOS', {
+  arquivo: (c) => {
+    const { S, rnd, b, comBrinco, data } = c;
     const linhas = ['data;mae;situacao;sexo;cria;pai'];
     const pais = MOVEIS(S).filter((id) => !fem(S, id) && S.animais.get(id).brinco).map(b).concat(EXTERNOS(S).map((id) => S.animais.get(id).nome));
     const pai = rnd() < 0.3 ? sorteio(rnd, pais) || '' : '';
@@ -1185,9 +1490,12 @@ function arquivoImportacao(sis, S, rnd, tipo) {
       linhas.push([d, b(mae), vivo ? 'vivo' : 'natimorto', vivo ? (rnd() < 0.5 ? 'M' : 'F') : '', vivo ? brinco(rnd, S) || '' : '', pai].join(';'));
     }
     return { texto: linhas.join('\n'), mapa: { colunas: { data: 'data', mae: 'mae', situacao: 'situacao', sexo: 'sexo', cria: 'brinco', pai: 'pai' }, confiancas: { pai: 'ESTIMADA' }, padroes: {} } };
-  }
-  if (tipo === 'COMPRAS') {
-    // Passada 4: mais de uma compra no arquivo, o preço por kg com o peso de cada animal, o frete e as parcelas.
+  },
+});
+registrarImportador('COMPRAS', {
+  // Passada 4: mais de uma compra no arquivo, o preço por kg com o peso de cada animal, o frete e as parcelas.
+  arquivo: (c) => {
+    const { S, rnd, b, comBrinco, pastoNome, data } = c;
     const linhas = ['grupo;data;fornecedor;modalidade;valor;preco;brinco;sexo;pasto;peso;frete;parcelas;vencimento'];
     const grupos = rnd() < 0.3 ? 2 : 1;
     for (let gI = 0; gI < grupos; gI++) {
@@ -1208,9 +1516,12 @@ function arquivoImportacao(sis, S, rnd, tipo) {
       }
     }
     return { texto: linhas.join('\n'), mapa: { colunas: { grupo: 'grupo', data: 'data', fornecedor: 'fornecedor', modalidade: 'modalidade', valor: 'valor_animais', preco: 'preco', brinco: 'brinco', sexo: 'sexo', pasto: 'pasto', peso: 'peso', frete: 'frete', parcelas: 'parcelas', vencimento: 'vencimento' }, confiancas: {}, padroes: { castrado: false, reprodutor: false } } };
-  }
-  if (tipo === 'VENDAS') {
-    // Passada 4: mais de uma venda no arquivo (às vezes o mesmo animal nas duas) e as parcelas.
+  },
+});
+registrarImportador('VENDAS', {
+  // Passada 4: mais de uma venda no arquivo (às vezes o mesmo animal nas duas) e as parcelas.
+  arquivo: (c) => {
+    const { rnd, b, ativos, comBrinco, data } = c;
     const linhas = ['grupo;data;comprador;finalidade;modalidade;preco;bruto;brinco;parcelas'];
     const todos = alguns(rnd, ativos.length ? ativos : comBrinco, 4);
     if (!todos.length) return null;
@@ -1223,9 +1534,8 @@ function arquivoImportacao(sis, S, rnd, tipo) {
       ids.forEach((id, i) => linhas.push(['V' + (gI + 1), i === 0 ? d : '', i === 0 ? 'Frigorífico Boi Bom' : '', i === 0 ? sorteio(rnd, ['abate', 'recria e engorda']) : '', i === 0 ? 'cabeça' : '', i === 0 ? reais(preco) : '', i === 0 ? reais(preco * ids.length) : '', b(id), i === 0 ? nParc : ''].join(';')));
     });
     return { texto: linhas.join('\n'), mapa: { colunas: { grupo: 'grupo', data: 'data', comprador: 'comprador', finalidade: 'finalidade', modalidade: 'modalidade', preco: 'preco', bruto: 'valor_bruto', brinco: 'brinco', parcelas: 'parcelas' }, confiancas: {}, padroes: {} } };
-  }
-  return null;
-}
+  },
+});
 
 /**
  * O próximo comando (concreto): {rota, dados, avisos, aceitar, simular, dvVelha, chaveDe, spec, rotulo}. A importação
@@ -1274,17 +1584,11 @@ function gerar(sis, S, rnd, k) {
   ]);
   return gerarAcao(sis, S, rnd, k, acao, base);
 }
-const TIPOS_DO_SPEC = ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'COMPRA', 'VENDA', 'TRANSFERENCIA', 'MORTE', 'DESCARTE', 'NASCIMENTO', 'IDENTIFICACAO', 'MARCACAO', 'CORRECAO_CADASTRO', 'IDENTIFICACAO_INCORRETA', 'CORRECAO_LOCALIZACAO', 'RECLASSIFICACAO', 'DIVERGENCIA_CONTAGEM'];
-const tipoDoSpec = (e) => (e.event_type === 'AJUSTE_INVENTARIO' ? e.event_subtype : e.event_type);
-const DO_GRAVADO = ['TRANSFERENCIA', 'MORTE', 'NASCIMENTO', 'COMPRA', 'VENDA', 'IDENTIFICACAO', 'ENTRADA_INICIAL', 'OUTRA_ENTRADA'];
 /** Um comando da ação escolhida (null quando não há como montar). */
 function gerarAcao(sis, S, rnd, k, acao, base) {
   if (acao === 'registrar') {
-    const tipo = pesado(rnd, [
-      ['ENTRADA_INICIAL', S.linhas.length < 10 ? 20 : 3], ['OUTRA_ENTRADA', 4], ['COMPRA', 9], ['VENDA', 9], ['TRANSFERENCIA', 9], ['MORTE', 5], ['DESCARTE', 3],
-      ['NASCIMENTO', 9], ['IDENTIFICACAO', 6], ['MARCACAO', 4], ['CORRECAO_CADASTRO', 4], ['IDENTIFICACAO_INCORRETA', 2], ['CORRECAO_LOCALIZACAO', 3],
-      ['RECLASSIFICACAO', 3], ['DIVERGENCIA_CONTAGEM', 3],
-    ]);
+    // O peso de cada tipo é da entrada dele no registro, na ordem de registro.
+    const tipo = pesado(rnd, Array.from(TIPOS, ([nome, T]) => [nome, T.peso(S)]));
     const spec = propor(sis, S, rnd, tipo);
     if (!spec) return null;
     if (S.t.PROPRIEDADES.length > 1 && rnd() < 0.2) spec.prop = sorteio(rnd, S.t.PROPRIEDADES).property_id;
@@ -1298,7 +1602,7 @@ function gerarAcao(sis, S, rnd, k, acao, base) {
     if (acao === 'corrigir') {
       // A correção montada pelas linhas gravadas (o evento importado não tem a especificação do gerador).
       if (rnd() < 0.3) {
-        const daLista = (rnd() < 0.9 ? vig : evs).filter((e) => DO_GRAVADO.indexOf(e.event_type) >= 0);
+        const daLista = (rnd() < 0.9 ? vig : evs).filter((e) => !!(TIPOS.get(e.event_type) || {}).doGravado);
         const semSpec = daLista.filter((e) => !sis.specs.has(e.event_id));
         const alvo2 = sorteio(rnd, semSpec.length && rnd() < 0.7 ? semSpec : daLista);
         const spec0 = alvo2 && specDoGravado(sis, S, rnd, alvo2);
@@ -1311,7 +1615,7 @@ function gerarAcao(sis, S, rnd, k, acao, base) {
       // O substituto de outro tipo ou subtipo (TIPO_DIFERENTE).
       if (rnd() < 0.04) {
         const alvo3 = sorteio(rnd, vig);
-        const outro = alvo3 && sorteio(rnd, TIPOS_DO_SPEC.filter((t) => t !== tipoDoSpec(alvo3)));
+        const outro = alvo3 && sorteio(rnd, Array.from(TIPOS.keys()).filter((t) => t !== tipoDoSpec(alvo3)));
         const spec = outro && propor(sis, S, rnd, outro);
         if (!spec) return null;
         const dados = Object.assign(montarDados(sis, spec), { event_id: alvo3.event_id, justificativa: 'Corrigindo o lançamento' });
@@ -1422,7 +1726,7 @@ function gerarAcao(sis, S, rnd, k, acao, base) {
       const ant = sorteio(rnd, enviados).cmd;
       return Object.assign(base, { rota: 'importacao.criar', dados: Object.assign({}, ant.dados, { arquivo_nome: 'de-novo-' + k + '-' + ant.dados.arquivo_nome }), mapa: ant.mapa, rotulo: 'importar o mesmo arquivo de novo' });
     }
-    const tipo = sorteio(rnd, ['ANIMAIS', 'ANIMAIS', 'TRANSFERENCIAS', 'MORTES', 'NASCIMENTOS', 'COMPRAS', 'VENDAS']);
+    const tipo = sorteio(rnd, sorteioDeImportacao());
     const arq = arquivoImportacao(sis, S, rnd, tipo);
     if (!arq) return null;
     return Object.assign(base, { rota: 'importacao.criar', dados: { tipo, arquivo_nome: tipo.toLowerCase() + '-' + k + '.csv', texto: arq.texto, formato: FORMATO }, mapa: arq.mapa, rotulo: 'importar ' + tipo });
@@ -1585,79 +1889,16 @@ function gerarCadastro(sis, S, rnd, k, qual, base) {
   return undefined;
 }
 
-/** A especificação de um lançamento gravado, montada pelas linhas cruas (o importado e o que não tem a do gerador). */
+/** A especificação de um evento gravado, pelas linhas dele (a entrada do registro do tipo monta); null quando não há como. */
 function specDoGravado(sis, S, rnd, e) {
+  const T = TIPOS.get(e.event_type);
+  if (!T || !T.doGravado) return null;
   const ls = S.t.EVENTO_ANIMAIS.filter((l) => l.event_id === e.event_id);
   if (!ls.length) return null;
   const idents = S.t.IDENTIFICACOES.filter((y) => y.event_id === e.event_id);
   const brincoDe = (id) => (idents.find((y) => y.animal_id === id && y.tipo === 'BRINCO') || {}).codigo || null;
-  const data = e.event_date;
-  const t = e.event_type;
   const ids = ls.map((l) => l.animal_id).filter((id, i, a) => a.indexOf(id) === i);
-  if (t === 'TRANSFERENCIA') return { tipo: t, data, origem: ls[0].pasto_origem_id || null, destino: ls[0].pasto_destino_id || null, ids };
-  if (t === 'MORTE') return { tipo: t, data, ids };
-  // Passada 3: a entrada gravada (o rebanho de base da montagem e a entrada da importação de ANIMAIS não têm a
-  // especificação do gerador), com os animais que ela criou como estão hoje.
-  if (t === 'ENTRADA_INICIAL' || t === 'OUTRA_ENTRADA') {
-    const novos = [];
-    const voltas = [];
-    ids.forEach((id) => {
-      const a = S.animais.get(id) || {};
-      const l = ls.find((x) => x.animal_id === id);
-      if (a.evento_origem_id !== e.event_id) { voltas.push({ id, pasto: l.pasto_destino_id || null }); return; }
-      const n = { id, sexo: a.sexo, pasto: l.pasto_destino_id || null, brinco: brincoDe(id), origem: a.origem || 'DESCONHECIDA' };
-      if (a.data_nascimento) n.nasc = a.data_nascimento;
-      if (a.sexo === 'M') { n.castrado = a.castrado === true; n.reprodutor = a.reprodutor === true; }
-      if (a.mae_id) n.mae = a.mae_id;
-      if (a.pai_id) n.pai = a.pai_id;
-      if (a.raca) n.raca = a.raca;
-      if (t === 'ENTRADA_INICIAL') { if (a.data_entrada && a.data_entrada < data) n.entrada = a.data_entrada; if (a.partos_previos) n.partos = a.partos_previos; }
-      if (a.sexo === 'F' && a.situacao_reprodutiva === 'PRENHA' && a.data_prevista_parto) n.prenha = a.data_prevista_parto;
-      novos.push(n);
-    });
-    if (t === 'ENTRADA_INICIAL') return voltas.length || !novos.length ? null : { tipo: t, data, novos };
-    if (voltas.length > 1) return null;
-    if (voltas.length) return { tipo: t, data, volta: voltas[0].id, pasto: voltas[0].pasto, novos };
-    return novos.length ? { tipo: t, data, novos } : null;
-  }
-  if (t === 'IDENTIFICACAO') {
-    if (!idents.length) return null;
-    return { tipo: t, sub: e.event_subtype, data, tipoIdent: idents[0].tipo, itens: idents.map((y) => ({ id: y.animal_id, codigo: y.codigo })) };
-  }
-  if (t === 'NASCIMENTO') {
-    const mae = (ls.find((l) => l.papel === 'MATRIZ') || {}).animal_id;
-    if (!mae) return null;
-    const rep = S.t.REPRODUCAO.find((x) => x.event_id === e.event_id && x.tipo_evento === 'PARTO') || {};
-    const crias = ls.filter((l) => l.papel === 'CRIA').map((l) => ({ situacao: 'VIVO', sexo: (S.animais.get(l.animal_id) || {}).sexo, brinco: brincoDe(l.animal_id), id: l.animal_id }));
-    for (let i = 0; i < (rep.qtd_natimortos || 0); i++) crias.push({ situacao: 'NATIMORTO' });
-    if (!crias.length) return null;
-    return { tipo: t, data, mae, crias, pai: rep.touro_id || null, pasto: (ls.find((l) => l.papel === 'CRIA') || {}).pasto_destino_id || null };
-  }
-  if (t === 'COMPRA') {
-    const c = S.t.COMPRAS.find((x) => x.event_id === e.event_id);
-    if (!c) return null;
-    const novos = [];
-    const voltas = [];
-    ids.forEach((id) => {
-      const a = S.animais.get(id) || {};
-      const l = ls.find((x) => x.animal_id === id);
-      if (a.evento_origem_id === e.event_id) novos.push({ id, sexo: a.sexo, pasto: l.pasto_destino_id || null, brinco: brincoDe(id), nasc: a.data_nascimento || undefined, castrado: a.castrado === true, reprodutor: a.reprodutor === true });
-      else voltas.push(id);
-    });
-    const g = negocio(rnd, ids.length, false);
-    Object.assign(g, { mod: 'LOTE', criterio: 'CABECAS', lote: c.valor_animais });
-    ['desvio', 'frete', 'outros', 'vezes'].forEach((x) => delete g[x]);
-    return { tipo: t, data, pasto: ls[0].pasto_destino_id || null, novos, voltas, neg: g };
-  }
-  if (t === 'VENDA') {
-    const v = S.t.VENDAS.find((x) => x.event_id === e.event_id);
-    if (!v) return null;
-    const g = negocio(rnd, ids.length, true);
-    Object.assign(g, { mod: 'LOTE', criterio: 'CABECAS', lote: v.valor_bruto, finalidade: v.finalidade || 'RECRIA_ENGORDA' });
-    ['desvio', 'desconto', 'deducoes', 'loteKg'].forEach((x) => delete g[x]);
-    return { tipo: t, data, ids, neg: g };
-  }
-  return null;
+  return T.doGravado({ sis, S, rnd, ls, idents, brincoDe, data: e.event_date, ids }, e) || null;
 }
 
 // ------------------------------------------------------------------ execução de um passo ----
@@ -1881,8 +2122,8 @@ function memorizar(sis, k, cmd, r, A, S) {
     const novos = ls.map((l) => l.animal_id).filter((id, i, a) => a.indexOf(id) === i && !A.animais.has(id)).sort((a, b) => cmp((S.animais.get(a) || {}).codigo_interno || '', (S.animais.get(b) || {}).codigo_interno || ''));
     const spec = js(cmd.spec);
     let n = 0;
-    (spec.novos || []).forEach((x) => { if (!x.id) x.id = novos[n++] || null; });
-    (spec.crias || []).forEach((c) => { if (c.situacao !== 'VIVO') delete c.id; else if (!c.id) c.id = novos[n++] || null; });
+    const T = TIPOS.get(spec.tipo);
+    if (T && T.criados) T.criados(spec, () => novos[n++] || null);
     sis.specs.set(eid, { spec });
   }
 }
@@ -1898,7 +2139,7 @@ function rodar(semente, passos) {
   const sis = montar(opcoes);
   const rnd = aleatorio(semente);
   const log = [];
-  const stats = { aceitos: 0, recusados: 0, porRotulo: {} };
+  const stats = { aceitos: 0, recusados: 0, porRotulo: {}, porEvento: {} };
   let t = tabelas(sis);
   const inicial = oraculoGlobal(sis, estado(t), []);
   if (inicial.length) return { semente, opcoes, comandos: [], falha: inicial[0], falhas: inicial, k: -1, stats };
@@ -1911,7 +2152,7 @@ function rodar(semente, passos) {
     const ex = executar(sis, k, cmd, t);
     const rot = cmd.rotulo || cmd.rota;
     stats.porRotulo[rot] = stats.porRotulo[rot] || { ok: 0, recusa: {} };
-    if (ex.r && ex.r.ok) { stats.aceitos++; stats.porRotulo[rot].ok++; } else if (ex.r) {
+    if (ex.r && ex.r.ok) { stats.aceitos++; stats.porRotulo[rot].ok++; contarEvento(stats, cmd, ex.r); } else if (ex.r) {
       stats.recusados++;
       const det = (ex.r.error.details || [])[0];
       if (process.env.FUZZ_LOG_TRAVA && det && /^INTEGRIDADE_/.test(det.codigo)) console.log('TRAVA semente ' + semente + ' passo ' + k + ' ' + rot + ' ' + ex.r.error.code + ' ' + det.codigo + ': ' + det.mensagem);
@@ -1924,6 +2165,13 @@ function rodar(semente, passos) {
     t = ex.depoisT;
   }
   return { semente, opcoes, comandos: log, falha: null, stats };
+}
+/** Registro ou correção aceitos (sem o reenvio duplicado), por tipo do registro e subtipo: a cobertura de cada entrada. */
+function contarEvento(stats, cmd, r) {
+  if (!/^evento\.(registrar|corrigir)$/.test(cmd.rota) || (r.meta && (r.meta.duplicado || r.meta.semAlteracao))) return;
+  const d = cmd.dados || {};
+  const k = chaveDosDados(d) + (d.subtipo && d.tipo !== 'AJUSTE_INVENTARIO' ? '/' + d.subtipo : '');
+  stats.porEvento[k] = (stats.porEvento[k] || 0) + 1;
 }
 function gravavel(sis, cmd) {
   const o = { rota: cmd.rota, dados: simbolizar(sis, cmd.dados), avisos: cmd.avisos, aceitar: cmd.aceitar };
@@ -1994,4 +2242,7 @@ function relatorio(r, minimo) {
     '\nSequência mínima (' + minimo.length + ' comandos):\n' + JSON.stringify({ opcoes: r.opcoes, assinatura: r.falha.assinatura, comandos: minimo }, null, 1);
 }
 
-module.exports = { D0, HOJE, AVISOS, aleatorio, montar, tabelas, estado, presenca, oraculoGlobal, oraculoEfeito, oraculoRecusa, gerar, executar, rodar, reproduzir, encolher, relatorio, opcoesDaSemente };
+module.exports = {
+  D0, HOJE, AVISOS, aleatorio, montar, tabelas, estado, presenca, oraculoGlobal, oraculoEfeito, oraculoRecusa, gerar, executar, rodar, reproduzir, encolher, relatorio, opcoesDaSemente,
+  TIPOS, IMPORTADORES, registrarTipo, registrarImportador, chaveDosDados,
+};

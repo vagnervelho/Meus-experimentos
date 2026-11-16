@@ -187,7 +187,7 @@ test('transferência com data passada: "Todos do pasto" usa a posição na data,
   await page.click('.seletor-modos button:has-text("Todos do pasto")');
   await page.locator('.seletor-painel select').selectOption(S.PASTOS.A);
   await page.click('.seletor-painel button:has-text("Incluir todos")');
-  await page.waitForSelector('.seletor-painel .conferencia :text("Posição em 01/03/2026")');
+  await posicaoNaData(page);
   // A mudança de data já consulta a posição do rebanho inteiro na data (sem pasto); o "Incluir todos" pede a do pasto.
   assert.ok(a.pedidos('inventario.elegiveis').some((p) => p.dados.data === '2026-03-01' && !p.dados.pasture_id), 'a data passada reconsulta a posição');
   const pedido = a.pedidos('inventario.elegiveis').find((p) => p.dados.pasture_id);
@@ -195,6 +195,53 @@ test('transferência com data passada: "Todos do pasto" usa a posição na data,
   const escolhidos = await page.$$eval('.selecionados [data-animal]', (els) => els.map((e) => e.getAttribute('data-animal')));
   assert.ok(escolhidos.includes(b0457), 'em 01/03 o 0457 ainda estava no Pasto A (hoje está no B)');
   assert.equal(escolhidos.length, 3, 'os 3 que estavam no Pasto A em 01/03');
+  assert.deepEqual(a.estado.erros, []);
+  await a.fechar();
+});
+
+/**
+ * O estado esperado depois do "Incluir todos" numa data passada, sem espera fixa: os dois pedidos registrados (a posição
+ * do rebanho na data, pela mudança de data, e a do pasto), todas as respostas entregues e o resultado na tela.
+ */
+async function posicaoNaData(page) {
+  await page.waitForFunction(() => {
+    const el = window.__gas.pedidos.filter((p) => p.rota === 'inventario.elegiveis' && p.dados.data === '2026-03-01');
+    return el.some((p) => !p.dados.pasture_id) && el.some((p) => p.dados.pasture_id);
+  }, null, { timeout: 10000 });
+  await A.esperarServidor(page);
+  await page.waitForSelector('.seletor-painel .conferencia :text("Posição em 01/03/2026")');
+}
+
+test('transferência com data passada, respostas fora de ordem: a posição da data que chega depois da do pasto não apaga o resultado nem a escolha (1280 px)', async () => {
+  const s = A.sistema();
+  const sem = A.semear(s);
+  const b0457 = porBrinco(sem, '0457');
+  s.registrar({ tipo: 'TRANSFERENCIA', campos: { event_date: '2026-06-01', pasto_origem_id: S.PASTOS.A, pasto_destino_id: S.PASTOS.B }, animais: [{ animal_id: b0457 }] }, 'tr-junho');
+  const a = await A.abrir(s, { largura: 1280, hash: 'evento/novo/TRANSFERENCIA' });
+  const { page } = a;
+  await A.esperarTela(page, 'Transferir de pasto');
+  // A corrida que deixava o teste acima instável, forçada: a consulta da mudança de data (sem pasto) responde por último.
+  await page.evaluate(() => { window.__gas.atrasar = (p) => (p.rota === 'inventario.elegiveis' && !p.dados.pasture_id ? 1500 : null); });
+  await page.fill('[data-campo="event_date"] input', '2026-03-01');
+  await page.click('.seletor-modos button:has-text("Todos do pasto")');
+  await page.locator('.seletor-painel select').selectOption(S.PASTOS.A);
+  await page.click('.seletor-painel button:has-text("Incluir todos")');
+  await page.waitForSelector('.seletor-painel .conferencia :text("Posição em 01/03/2026")');
+  assert.equal(await page.evaluate(() => window.__gas.emCurso), 1, 'a resposta da posição na data ainda não chegou');
+  await posicaoNaData(page);
+  assert.equal(await page.inputValue('.seletor-painel select'), S.PASTOS.A, 'o pasto escolhido continua escolhido');
+  assert.match(await page.textContent('.seletor-painel .conferencia'), /3 de 3 animais do pasto incluídos/);
+  const escolhidos = await page.$$eval('.selecionados [data-animal]', (els) => els.map((e) => e.getAttribute('data-animal')));
+  assert.equal(escolhidos.length, 3);
+  assert.ok(escolhidos.includes(b0457));
+  // Trocar a data depois redesenha o painel: o resultado era de outra data.
+  await page.evaluate(() => { window.__gas.atrasar = null; });
+  await page.fill('[data-campo="event_date"] input', '2026-04-01');
+  await page.locator('[data-campo="event_date"] input').dispatchEvent('change');
+  await A.esperarServidor(page);
+  await page.waitForFunction(() => !/Posição em 01\/03\/2026/.test(document.querySelector('.seletor-painel').textContent));
+  assert.equal(await page.inputValue('.seletor-painel select'), '', 'painel novo para a data nova');
+  assert.equal((await page.$$('.selecionados [data-animal]')).length, 3, 'a mudança de data marca, não tira');
   assert.deepEqual(a.estado.erros, []);
   await a.fechar();
 });

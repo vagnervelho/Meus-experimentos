@@ -10,23 +10,30 @@
  * visivel_se / obrigatorio_se: {campo, valores} ou {campo, preenchido: true}.
  */
 var EventCatalog = (function () {
-  var FASE_ATUAL = 2;
+  var FASE_ATUAL = 3;
   var TIPOS_CAMPO = ['texto', 'inteiro', 'decimal', 'dinheiro', 'data', 'lista', 'bool', 'anexo'];
   var PESO_MAX_KG = 2000;
 
-  /** Os 10 itens do menu (§15) e a importação, com a fase em que cada um é entregue (08, seção 2). */
+  /**
+   * Os 10 itens do menu (§15) e a importação, com a fase em que cada um é entregue (08, seção 2). Como o tipo de evento só
+   * fica ativo com campos, o módulo só fica ativo com a tela entregue: `tela` é o arquivo HTML dela (o módulo sem `tela`
+   * ainda não foi entregue, qualquer que seja a fase). `sob_demanda`: a tela não entra na página inicial e é pedida ao
+   * servidor quando o menu abre o módulo (rota `sistema.tela`; 01, seção 6.2; risco R-31); `rotas` são as raízes de rota
+   * dela (o primeiro trecho da rota), pelas quais o cliente sabe que módulo pedir. As telas das Fases 3 a 5 entram sob
+   * demanda; a importação, tarefa de desktop pouco usada na abertura, também.
+   */
   var MODULOS = [
-    { id: 'DASHBOARD', rotulo: 'Visão geral', ordem: 1, fase: 1, menu: true },
-    { id: 'REBANHO', rotulo: 'Rebanho', ordem: 2, fase: 1, menu: true },
-    { id: 'PASTOS', rotulo: 'Pastos', ordem: 3, fase: 1, menu: true },
-    { id: 'EVENTOS', rotulo: 'Eventos', ordem: 4, fase: 1, menu: true },
+    { id: 'DASHBOARD', rotulo: 'Visão geral', ordem: 1, fase: 1, menu: true, tela: 'Dashboard' },
+    { id: 'REBANHO', rotulo: 'Rebanho', ordem: 2, fase: 1, menu: true, tela: 'Animals' },
+    { id: 'PASTOS', rotulo: 'Pastos', ordem: 3, fase: 1, menu: true, tela: 'Pastures' },
+    { id: 'EVENTOS', rotulo: 'Eventos', ordem: 4, fase: 1, menu: true, tela: 'Events' },
     { id: 'PESAGENS', rotulo: 'Pesagens', ordem: 5, fase: 3, menu: true },
     { id: 'SANIDADE', rotulo: 'Sanidade', ordem: 6, fase: 3, menu: true },
     { id: 'REPRODUCAO', rotulo: 'Reprodução', ordem: 7, fase: 3, menu: true },
     { id: 'FINANCEIRO', rotulo: 'Financeiro', ordem: 8, fase: 4, menu: true },
     { id: 'RELATORIOS', rotulo: 'Relatórios', ordem: 9, fase: 5, menu: true },
-    { id: 'CONFIGURACOES', rotulo: 'Configurações', ordem: 10, fase: 1, menu: true },
-    { id: 'IMPORTACAO', rotulo: 'Importação', ordem: 11, fase: 1, menu: false },
+    { id: 'CONFIGURACOES', rotulo: 'Configurações', ordem: 10, fase: 1, menu: true, tela: 'Settings' },
+    { id: 'IMPORTACAO', rotulo: 'Importação', ordem: 11, fase: 1, menu: false, tela: 'Import', sob_demanda: true, rotas: ['importar'] },
   ];
 
   /** Os 21 tipos (desenho-base 4.1), com fase. `subtipos` só onde há subtipo; cada subtipo tem a sua fase. */
@@ -593,9 +600,19 @@ var EventCatalog = (function () {
   function tiposAtivos(fase) {
     return nomes().filter(function (n) { return ativo(n, null, fase); });
   }
+  /** Módulos entregues até a fase dada (padrão: a corrente): da fase e com a tela entregue (`tela`). */
   function modulosAtivos(fase) {
     var f = fase === undefined || fase === null ? FASE_ATUAL : fase;
-    return MODULOS.filter(function (m) { return m.fase <= f; }).map(function (m) { return Utils.clonar(m); });
+    return MODULOS.filter(function (m) { return m.fase <= f && !!m.tela; }).map(function (m) { return Utils.clonar(m); });
+  }
+  /** Todos os módulos do desenho (os 10 do menu e a importação), entregues ou não, na ordem. */
+  function modulos() {
+    return MODULOS.map(function (m) { return Utils.clonar(m); });
+  }
+  /** Um módulo do desenho pelo id (entregue ou não), ou null: rótulo, ordem, fase, tela. */
+  function modulo(id) {
+    var m = MODULOS.filter(function (x) { return x.id === id; })[0];
+    return m ? Utils.clonar(m) : null;
   }
   /** Campos por animal do tipo/subtipo. */
   function camposAnimal(nome, subtipo) {
@@ -733,6 +750,8 @@ var EventCatalog = (function () {
     ativo: ativo,
     tiposAtivos: tiposAtivos,
     modulosAtivos: modulosAtivos,
+    modulos: modulos,
+    modulo: modulo,
     camposEvento: camposEvento,
     camposAnimal: camposAnimal,
     camposGrupo: camposGrupo,

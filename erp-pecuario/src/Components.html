@@ -80,7 +80,7 @@ var UI = (function () {
   var TITULOS_ERRO = {
     VALIDATION: 'Confira os dados', NEEDS_CONFIRMATION: 'Confira os avisos', CONFLICT: 'Os dados mudaram', IDEMPOTENCY_MISMATCH: 'Este formulário já foi gravado',
     LOCKED: 'Sistema ocupado', DENIED: 'Acesso não confirmado', NOT_FOUND: 'Não encontrado', CONFIG: 'O sistema precisa de um ajuste',
-    INTERNAL: 'Algo deu errado', TRANSPORTE: 'Sem conexão', SEM_RESPOSTA: 'Sem resposta do servidor',
+    INTERNAL: 'Algo deu errado', TRANSPORTE: 'Sem conexão', SEM_RESPOSTA: 'Sem resposta do servidor', NOVA_VERSAO: 'Nova versão do app',
   };
   /**
    * Estado de erro: título pelo código, a mensagem do servidor, os detalhes (o.detalhes, com o link para o lançamento que
@@ -1132,7 +1132,10 @@ var Anexos = (function () {
 
 var Seletor = (function () {
   var h = Util.h;
-  /** Posições do rebanho numa data já consultadas (inventario.elegiveis), por tipo, data e versão dos dados. */
+  /**
+   * Posições do rebanho numa data (inventario.elegiveis), por tipo, data e versão dos dados: a consulta em curso ou já
+   * respondida (o pedido de dois seletores ao mesmo tempo vira um só; a consulta que falhou sai, para tentar de novo).
+   */
   var POSICOES = {};
   /** Elegibilidade pelo filtro_elegiveis do catálogo: null = elegível; senão o motivo (pré-marcação; o servidor decide). */
   function motivoInelegivel(a, filtro, valorCampo, posicao) {
@@ -1192,26 +1195,37 @@ var Seletor = (function () {
     var posicao = null;
     var posicaoErro = null;
     var porData = !!(o.filtro && o.filtro.situacao === 'ATIVO' && o.tipo);
+    /** O painel do modo na tela: a vez (cada desenho é uma) e a data do lançamento quando ele foi desenhado. */
+    var painelVez = 0, painelData = null;
     function dataAtual() { return o.dataEvento ? o.dataEvento() : Fmt.hoje(); }
     function posicaoValida() { return posicao && posicao.data === dataAtual() ? posicao : null; }
+    /**
+     * A posição do rebanho na data do lançamento. A resposta de uma data que já mudou (a data foi trocada durante a
+     * consulta) é descartada, e a da data nova é pedida: a posição nunca fica com a resposta velha.
+     */
     async function garantirPosicao() {
-      var data = dataAtual();
-      posicaoErro = null;
-      if (!porData || !data || data === Fmt.hoje()) { posicao = null; return true; }
-      if (posicao && posicao.data === data) return true;
-      try {
+      for (;;) {
+        var data = dataAtual();
+        if (!porData || !data || data === Fmt.hoje()) { posicao = null; posicaoErro = null; return true; }
+        if (posicao && posicao.data === data) { posicaoErro = null; return true; }
         // A mesma posição (tipo, data, versão dos dados) serve a todo seletor redesenhado do formulário.
         var chave = o.tipo + '|' + data + '|' + Store.versao();
-        var r = POSICOES[chave] || (POSICOES[chave] = await Cliente.consulta('inventario.elegiveis', { tipo: o.tipo, data: data }));
+        var pedido = POSICOES[chave] || (POSICOES[chave] = Cliente.consulta('inventario.elegiveis', { tipo: o.tipo, data: data }));
+        var r = null, falha = null;
+        try {
+          r = await pedido;
+        } catch (e) {
+          falha = e;
+          if (POSICOES[chave] === pedido) delete POSICOES[chave];
+        }
+        if (data !== dataAtual()) continue;
+        if (falha) { posicao = null; posicaoErro = 'Não foi possível conferir a posição do rebanho em ' + Fmt.data(data) + ': ' + falha.message; return false; }
         if (r.data.motivo) { posicao = null; posicaoErro = 'Sem posição do rebanho em ' + Fmt.data(data) + ' (' + Fmt.rotulo('MOTIVO', r.data.motivo) + ').'; return false; }
         var mapa = {};
         (r.data.itens || []).forEach(function (x) { mapa[x.animal_id] = { pasture_id: x.pasture_id }; daPosicao[x.animal_id] = x; });
         posicao = { data: data, mapa: mapa };
+        posicaoErro = null;
         return true;
-      } catch (e) {
-        posicao = null;
-        posicaoErro = 'Não foi possível conferir a posição do rebanho em ' + Fmt.data(data) + ': ' + e.message;
-        return false;
       }
     }
     function pastoDe(a) { var p = posicaoValida(); return p ? (p.mapa[a.animal_id] ? p.mapa[a.animal_id].pasture_id : null) : a.pasto_atual_id; }
@@ -1239,6 +1253,8 @@ var Seletor = (function () {
     }
     function trocarModo(m) {
       modoAtual = m;
+      painelVez += 1;
+      painelData = dataAtual();
       Object.keys(botoesModo).forEach(function (k) { botoesModo[k].setAttribute('aria-pressed', k === m ? 'true' : 'false'); });
       Util.limpar(painel);
       ({ busca: painelBusca, filtros: painelFiltros, pasto: painelPasto, colar: painelColar })[m]();
@@ -1267,11 +1283,14 @@ var Seletor = (function () {
       var idc = 'sel-busca-' + Util.uuid().slice(0, 6);
       var inp = h('input', { type: 'search', id: idc, autocomplete: 'off', inputmode: Store.param('brinco_somente_numerico') === true ? 'numeric' : null, dataset: { enterProprio: '1' } });
       var saida = h('div', { class: 'conferencia', role: 'status', 'aria-live': 'polite' });
+      var vez = painelVez;
       async function buscar() {
         Util.limpar(saida);
         var t = inp.value.trim();
         if (!t) return;
         await garantirPosicao();
+        // O painel foi redesenhado durante a consulta (a data mudou): esta busca ficou para trás.
+        if (vez !== painelVez) return;
         if (posicaoErro) saida.appendChild(UI.nota(posicaoErro + ' A marcação de elegível usa a posição de hoje; o servidor confere na gravação.', 'aviso'));
         var filtro = baixados ? function (a) { return !elegivel(a); } : null;
         var r = Store.buscar(t, filtro);
@@ -1318,13 +1337,15 @@ var Seletor = (function () {
       [fp.sel, fs.sel, fc.sel, semBrinco].forEach(function (x) { x.addEventListener('change', filtrar); });
       painel.appendChild(h('div', { class: 'grade-campos' }, fp.el, fs.el, fc.el, h('label', { class: 'marca', for: base + 'b' }, semBrinco, h('span', { text: 'Só os sem brinco' }))));
       painel.appendChild(saida);
-      garantirBaixados(painel).then(function (ok) { return ok ? garantirPosicao().then(function () { return true; }) : false; }).then(function (ok) { if (ok) filtrar(); });
+      var vez = painelVez;
+      garantirBaixados(painel).then(function (ok) { return ok ? garantirPosicao().then(function () { return true; }) : false; }).then(function (ok) { if (ok && vez === painelVez) filtrar(); });
     }
     function painelPasto() {
       var base = 'sel-p-' + Util.uuid().slice(0, 6);
       var fp = selectDe('Pasto', Store.pastos().map(function (p) { return { valor: p.pasture_id, rotulo: p.nome + ' (' + (p.cabecas || 0) + ' cab.)' }; }), base);
       fp.sel.firstChild.textContent = 'Escolha o pasto…';
       var saida = h('div', { class: 'conferencia', role: 'status', 'aria-live': 'polite' });
+      var vez = painelVez;
       async function todos() {
         Util.limpar(saida);
         var p = fp.sel.value;
@@ -1334,11 +1355,13 @@ var Seletor = (function () {
         if (data && data !== Fmt.hoje()) {
           try {
             var r = await Cliente.consulta('inventario.elegiveis', { tipo: o.tipo, data: data, pasture_id: p });
+            // Resposta velha: a data mudou ou o painel foi redesenhado durante a consulta; nada dela entra na lista.
+            if (vez !== painelVez || data !== dataAtual()) return;
             if (r.data.motivo) { saida.appendChild(UI.nota('Sem posição do rebanho em ' + Fmt.data(data) + ' (' + Fmt.rotulo('MOTIVO', r.data.motivo) + ').', 'aviso')); return; }
             achados = (r.data.itens || []).map(function (x) { daPosicao[x.animal_id] = x; return x.animal_id; });
             rotuloPos = 'Posição em ' + Fmt.data(data) + ', conferida pelo servidor.';
           } catch (e) {
-            saida.appendChild(UI.estadoErro(e));
+            if (vez === painelVez) saida.appendChild(UI.estadoErro(e));
             return;
           }
         }
@@ -1354,9 +1377,11 @@ var Seletor = (function () {
       var idc = 'sel-colar-' + Util.uuid().slice(0, 6);
       var ta = h('textarea', { id: idc, rows: 5, placeholder: '0457\n0391; 0388' });
       var saida = h('div', { class: 'conferencia', role: 'status', 'aria-live': 'polite' });
+      var vez = painelVez;
       async function conferir() {
         Util.limpar(saida);
         await garantirPosicao();
+        if (vez !== painelVez) return;
         var itens = ta.value.split(/[\n,;\t]+/).map(function (x) { return x.trim(); }).filter(Boolean);
         var achados = [], nao = [], repetidos = [], varios_ = [], vistos = {};
         var filtro = function (a) { return !elegivel(a); };
@@ -1400,8 +1425,12 @@ var Seletor = (function () {
       el: el,
       selecionados: function () { return ids.slice(); },
       definir: function (novos) { ids = novos.slice(); desenharSelecionados(); },
-      /** A data do lançamento mudou: refaz a consulta da posição e remarca os escolhidos (marca, não tira). */
-      dataMudou: async function () { await garantirPosicao(); desenharSelecionados(); trocarModo(modoAtual); },
+      /**
+       * A data do lançamento mudou: refaz a consulta da posição e remarca os escolhidos (marca, não tira). O painel do modo
+       * é redesenhado só se foi desenhado noutra data: o que o usuário abriu já na data nova (escolheu o pasto, clicou em
+       * "Incluir todos") não é apagado pela resposta que chega depois.
+       */
+      dataMudou: async function () { await garantirPosicao(); desenharSelecionados(); if (painelData !== dataAtual()) trocarModo(modoAtual); },
     };
   }
   return { criar: criar, motivoInelegivel: motivoInelegivel, precisaBaixados: precisaBaixados };

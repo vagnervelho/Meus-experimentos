@@ -46,14 +46,26 @@ test('página: o doGet monta o Index com os includes, a versão, o ambiente e o 
   assert.ok(s.gas.logs.some((l) => l[0] === 'error' && /endereço do app indisponível/.test(String(l[1][0]))));
 });
 
-test('scripts do cliente: sintaxe válida em cada <script> da página montada; todo .html de src/ é incluído pelo Index', () => {
+test('scripts do cliente: sintaxe válida em cada <script> da página montada e das telas sob demanda; todo .html de src/ é incluído pelo Index ou servido sob demanda, nunca os dois', () => {
   const s = S.sistema({ semCadastro: true });
   const html = doGet(s).getContent();
   const blocos = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
   assert.ok(blocos.length >= 4);
   blocos.forEach((b, i) => assert.doesNotThrow(() => new vm.Script(b, { filename: 'script' + i }), 'script ' + i));
   const index = ler('Index.html');
-  HTMLS.filter((f) => f !== 'Index.html').forEach((f) => assert.match(index, new RegExp("include_\\('" + f.replace('.html', '') + "'\\)"), f + ' incluído'));
+  const sob = Object.keys(s.G.Api.TELAS_SOB_DEMANDA);
+  HTMLS.filter((f) => f !== 'Index.html').forEach((f) => {
+    const nome = f.replace('.html', '');
+    const incluido = new RegExp("include_\\('" + nome + "'\\)").test(index);
+    if (sob.indexOf(nome) < 0) { assert.ok(incluido, f + ' incluído na página inicial'); return; }
+    // Tela sob demanda (Fases 3 a 5 e a importação): fora da página inicial, pela rota sistema.tela, com sintaxe válida.
+    assert.ok(!incluido, f + ' é carregada sob demanda e não entra na página inicial');
+    const r = JSON.parse(JSON.stringify(s.gas.exec(() => s.G.api({ rota: 'sistema.tela', dados: { nome } }))));
+    if (!r.ok) { assert.equal(r.error.code, 'NOT_FOUND', f + ': ' + JSON.stringify(r.error)); return; }
+    const scripts = [...r.data.conteudo.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+    assert.ok(scripts.length >= 1, f + ' com script');
+    scripts.forEach((b, i) => assert.doesNotThrow(() => new vm.Script(b, { filename: nome + i }), f + ' script ' + i));
+  });
 });
 
 test('página compactada (Api.compactar): sem recuo, linha vazia nem linha só de comentário; código e comentário no fim da linha ficam; os includes não têm o que a compactação quebraria', () => {
