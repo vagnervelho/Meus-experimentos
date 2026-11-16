@@ -129,20 +129,21 @@ var EventCatalog = (function () {
     return l;
   }
 
+  /** Campos que a correção de cadastro aceita, com o rótulo da tela (o mesmo de "O que corrigir") para as mensagens. */
   var CAMPOS_CORRIGIVEIS = {
-    sexo: { tipo: 'lista', opcoes: ['M', 'F'] },
-    data_nascimento: { tipo: 'data' },
-    data_nascimento_confianca: { tipo: 'lista', opcoes: CONFIANCAS },
-    mae_id: { tipo: 'ref:ANIMAIS' },
-    mae_confianca: { tipo: 'lista', opcoes: ['CONFIRMADA', 'ESTIMADA'] },
-    pai_id: { tipo: 'ref:ANIMAIS' },
-    pai_confianca: { tipo: 'lista', opcoes: ['CONFIRMADA', 'ESTIMADA'] },
-    castrado: { tipo: 'bool' },
-    reprodutor: { tipo: 'bool' },
-    partos_previos: { tipo: 'inteiro', min: 0, max: 30 },
-    origem: { tipo: 'lista', opcoes: ['NASCIDO', 'COMPRADO', 'DESCONHECIDA'] },
-    data_entrada: { tipo: 'data' },
-    data_entrada_confianca: { tipo: 'lista', opcoes: CONFIANCAS },
+    sexo: { tipo: 'lista', opcoes: ['M', 'F'], rotulo: 'Sexo' },
+    data_nascimento: { tipo: 'data', rotulo: 'Data de nascimento' },
+    data_nascimento_confianca: { tipo: 'lista', opcoes: CONFIANCAS, rotulo: 'Certeza do nascimento' },
+    mae_id: { tipo: 'ref:ANIMAIS', rotulo: 'Mãe' },
+    mae_confianca: { tipo: 'lista', opcoes: ['CONFIRMADA', 'ESTIMADA'], rotulo: 'Certeza da mãe' },
+    pai_id: { tipo: 'ref:ANIMAIS', rotulo: 'Pai' },
+    pai_confianca: { tipo: 'lista', opcoes: ['CONFIRMADA', 'ESTIMADA'], rotulo: 'Certeza do pai' },
+    castrado: { tipo: 'bool', rotulo: 'Castrado' },
+    reprodutor: { tipo: 'bool', rotulo: 'Reprodutor (touro)' },
+    partos_previos: { tipo: 'inteiro', min: 0, max: 30, rotulo: 'Partos anteriores' },
+    origem: { tipo: 'lista', opcoes: ['NASCIDO', 'COMPRADO', 'DESCONHECIDA'], rotulo: 'Origem' },
+    data_entrada: { tipo: 'data', rotulo: 'Chegada na fazenda' },
+    data_entrada_confianca: { tipo: 'lista', opcoes: CONFIANCAS, rotulo: 'Certeza da chegada' },
   };
 
   var LEITURAS_MOTOR = ['EVENTOS', 'EVENTO_ANIMAIS', 'ANIMAIS', 'IDENTIFICACOES', 'AJUSTES', 'PESAGENS', 'REPRODUCAO',

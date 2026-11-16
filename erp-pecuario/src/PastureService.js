@@ -133,6 +133,12 @@ var PastureService = (function () {
           var igual = tx.repo.por('PASTOS', 'property_id', final.property_id).filter(function (x) { return x.pasture_id !== id && x.status === 'ATIVO' && chaveNome_(x.nome) === chaveNome_(final.nome); })[0];
           if (igual) col.erro({ codigo: 'NOME_REPETIDO', campo: 'nome', mensagem: 'Já existe um pasto ativo chamado "' + igual.nome + '" nesta propriedade.' });
         }
+        // Reativar o pasto exige a propriedade ativa, como criar (03a, seções 4.1 e 4.2: a propriedade só se desativa sem
+        // pasto ativo; um pasto ativo dentro dela voltaria a receber animais numa propriedade desativada).
+        if (atual && final.status === 'ATIVO' && atual.status !== 'ATIVO') {
+          var dona = tx.repo.porId('PROPRIEDADES', atual.property_id);
+          if (dona && dona.status !== 'ATIVO') col.erro({ codigo: 'PROPRIEDADE_INATIVA', campo: 'status', mensagem: 'O pasto ' + atual.nome + ' fica na propriedade ' + dona.nome + ', que está desativada: reative antes a propriedade (tela Pastos, propriedades).' });
+        }
         if (atual && final.status === 'INATIVO' && atual.status !== 'INATIVO') {
           var dentro = tx.repo.por('ANIMAIS', 'pasto_atual_id', id).filter(function (a) { return a.situacao_cadastral === 'ATIVO'; });
           if (dentro.length) col.erro({ codigo: 'PASTO_COM_ANIMAIS', campo: 'status', mensagem: 'O pasto ' + atual.nome + ' ainda tem ' + dentro.length + ' animal(is). Transfira-os antes de desativá-lo.' });

@@ -402,7 +402,7 @@ function copias(s) {
   return (s.integridade().achados || []).filter((x) => x.checagem === 'COPIAS' && x.severidade === 'ERRO').map((x) => x.mensagem);
 }
 function reparar(s) {
-  return s.exec((ctx) => s.G.AuditService.repararIntegridade(ctx, 'teste')).integridade;
+  return s.tentar((ctx) => s.G.AuditService.repararIntegridade(ctx, 'teste'));
 }
 test('R4 achado 3: a linha de EVENTO_ANIMAIS de uma morte apagada à mão é acusada (sem reparo) e continua acusada depois do reparo', () => {
   const s = base();
@@ -413,9 +413,13 @@ test('R4 achado 3: a linha de EVENTO_ANIMAIS de uma morte apagada à mão é acu
   const c = copias(s);
   assert.ok(c.some((x) => /"Morte de 01\/03\/2026" está sem as linhas dos animais/.test(x)), JSON.stringify(c));
   assert.ok(c.some((x) => /a linha de BAIXAS cita A-000001 \(brinco 100\), que não tem linha no lançamento/.test(x)), JSON.stringify(c));
-  const rep = reparar(s);
-  assert.equal(rep.ok, false, 'o reparo da projeção não apaga o defeito da fonte');
-  assert.ok(rep.achados.some((x) => x.checagem === 'COPIAS' && /sem as linhas dos animais/.test(x.mensagem)));
+  // Revisão final, achado 6: o reparo não é oferecido nem aceito (refaria a situação a partir da fonte quebrada e poria a
+  // vaca morta de volta no rebanho); o defeito continua acusado e a vaca continua morta.
+  const rel = s.integridade();
+  assert.equal(rel.reparavel, false);
+  assert.equal(reparar(s).erro.code, 'CONFLICT');
+  assert.equal(s.tabela('ANIMAIS').find((a) => a.animal_id === V).situacao_cadastral, 'MORTO');
+  assert.ok(s.integridade().achados.some((x) => x.checagem === 'COPIAS' && /sem as linhas dos animais/.test(x.mensagem)));
 });
 
 test('R4 achado 3: efeito da linha trocado, baixa na contagem sem a linha e pre_marco_zero errado são acusados como ERRO de cópia × fonte', () => {
@@ -439,8 +443,9 @@ test('R4 achado 3: efeito da linha trocado, baixa na contagem sem a linha e pre_
   assert.ok(c.some((x) => /02\/03\/2026" está sem as linhas dos animais/.test(x)), JSON.stringify(c));
   assert.ok(c.some((x) => /Descarte .* de 01\/03\/2026" está marcado como anterior ao marco zero \(01\/01\/2026\), mas a data é depois dele/.test(x)), JSON.stringify(c));
   assert.ok(c.some((x) => /Transferir de pasto de 01\/03\/2026" está marcado como anterior ao marco zero/.test(x)), JSON.stringify(c));
-  // O reparo não deixa a verificação limpa.
-  const rep = reparar(s);
+  // O reparo não é aceito (revisão final, achado 6) e as cópias continuam acusadas.
+  assert.equal(reparar(s).erro.code, 'CONFLICT');
+  const rep = s.integridade();
   assert.equal(rep.ok, false);
   assert.ok(rep.achados.filter((x) => x.checagem === 'COPIAS').length >= 4, JSON.stringify(rep.achados.map((x) => x.mensagem)));
 });

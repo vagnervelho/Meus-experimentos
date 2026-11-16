@@ -31,7 +31,7 @@ function base(opcoes) {
 test('integridade limpa: todas as checagens executadas, sem achados; o relatório tem a forma do contrato', () => {
   const { s } = base();
   const r = s.integridade();
-  assert.deepEqual(Object.keys(r).sort(), ['abas_ausentes', 'achados', 'alertas', 'banco', 'checagens', 'data_version', 'duracao_ms', 'erros', 'gerado_em', 'ok', 'reparavel', 'truncado']);
+  assert.deepEqual(Object.keys(r).sort(), ['abas_ausentes', 'achados', 'alertas', 'banco', 'checagens', 'data_version', 'duracao_ms', 'erros', 'gerado_em', 'ok', 'reparavel', 'reparo_impedido', 'truncado']);
   assert.equal(r.checagens.length, s.G.AuditService.CHECAGENS.length);
   assert.deepEqual(r.checagens.filter((c) => c.situacao !== 'OK').map((c) => c.codigo), [], 'todas executadas e OK');
   assert.equal(r.reparavel, false);

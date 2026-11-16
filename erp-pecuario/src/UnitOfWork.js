@@ -470,7 +470,7 @@ var UnitOfWork = (function () {
    * fase C grava, pelo mesmo projetor (ctx.projecoes) com o escopo do tratador. É um repositório em memória que
    * compartilha as linhas lidas e copia as que muda (`bifurcar`): nada é gravado. Devolve {repo, projecoes}.
    */
-  function retratoDepois_(est, op, plano, derivados) {
+  function retratoDepois_(est, op, plano, derivados, quarentena) {
     var ctx = est.ctx;
     var v = est.repo.bifurcar();
     var confirmada = {};
@@ -487,7 +487,9 @@ var UnitOfWork = (function () {
     if (ctx.projecoes && derivados !== null && derivados !== undefined) {
       var tx = txDoRepo_(est, v, false);
       ctx.projecoes.reconstruir(tx, derivados);
-      projecoes = tx.plano.atualizacoes();
+      var fora = {};
+      (quarentena || []).forEach(function (k) { fora[k] = true; });
+      projecoes = tx.plano.atualizacoes().filter(function (u) { return !fora[u.tabela + '\u0000' + u.id]; });
       projecoes.forEach(function (u) { v.alterar(u.tabela, u.id, u.campos); });
     }
     return { repo: v, projecoes: projecoes };
@@ -497,17 +499,7 @@ var UnitOfWork = (function () {
    * brincos: {id: true} (os animais novos e as identificações que ele grava, com os animais delas)}.
    */
   function propriosDoPlano_(plano) {
-    var out = { eventos: {}, linhas: {}, brincos: {} };
-    Object.keys(plano.lote).forEach(function (t) {
-      var pk = Schema.pk(t);
-      plano.lote[t].forEach(function (r) {
-        out.linhas[t + '\u0000' + r[pk]] = true;
-        if (t === 'EVENTOS') out.eventos[r.event_id] = true;
-        if (t === 'ANIMAIS') out.brincos[r.animal_id] = true;
-        if (t === 'IDENTIFICACOES') { out.brincos[r.ident_id] = true; out.brincos[r.animal_id] = true; }
-      });
-    });
-    return out;
+    return AuditService.propriosDoLote(plano.lote);
   }
   /**
    * Trava única de integridade (CONTRATOS, seção 10.5): depois do tratador e antes da fase A (e no SIMULAR, no mesmo
@@ -522,10 +514,21 @@ var UnitOfWork = (function () {
     if (!sementes.dominio && !sementes.linhas.length) return null;
     if (sementes.dominio) est.repo.carregar(AuditService.leiturasTrava().concat(leiturasDasProjecoes_(ctx)));
     var retrato = retratoDepois_(est, op, plano, res.derivados);
-    AuditService.travar({
+    var args = {
       antes: txDoRepo_(est, est.repo, tx.simulacao), depois: txDoRepo_(est, retrato.repo, tx.simulacao), sementes: sementes, lote: plano.lote,
       projecoes: retrato.projecoes, derivados: res.derivados, projetor: ctx.projecoes || null, proprios: propriosDoPlano_(plano),
-    });
+    };
+    var r = AuditService.travar(args);
+    // Quarentena (CONTRATOS, seção 10.5): a situação do que a fonte quebrada à mão cita não é regravada pela reconstrução
+    // que o comando só alcança de passagem (fica como está, e a verificação continua acusando). O retrato é refeito sem
+    // essas projeções e a trava confere de novo; a fase C grava as que sobraram.
+    for (var volta = 0; r && r.refazer_sem && volta < 3; volta++) {
+      retrato = retratoDepois_(est, op, plano, res.derivados, r.refazer_sem);
+      args.depois = txDoRepo_(est, retrato.repo, tx.simulacao);
+      args.projecoes = retrato.projecoes;
+      args.quarentena = r.refazer_sem;
+      r = AuditService.travar(args);
+    }
     return retrato;
   }
   function executar_(est) {

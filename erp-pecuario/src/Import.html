@@ -470,9 +470,7 @@ var TelaImportacao = (function () {
     } catch (e2) {
       Util.limpar(corpo);
       if (e2.code === 'NEEDS_CONFIRMATION') return avisos(corpo, id, estado, conf, e2.details || []);
-      var caixa = UI.estadoErro(e2);
-      if ((e2.details || []).length) caixa.insertBefore(h('ul', null, e2.details.map(function (d) { return h('li', { text: d.mensagem }); })), caixa.querySelector('details'));
-      corpo.appendChild(caixa);
+      corpo.appendChild(UI.estadoErro(e2, { detalhes: e2.details }));
       try {
         var atual = (await Cliente.consulta('importacao.obter', { import_id: id })).data;
         if (atual.importacao.status === 'IMPORTANDO') corpo.appendChild(h('div', { class: 'acoes' }, UI.botao('Retomar', { tipo: 'primario', aoClicar: function () { executar(corpo, id, atual, conf, aceitos); } }), UI.botao('Desfazer', { tipo: 'perigo', aoClicar: function (ev) { desfazer(id, ev.currentTarget, { tipo: atual.importacao.tipo, status: atual.importacao.status }); } })));
@@ -589,9 +587,7 @@ var TelaImportacao = (function () {
           st.appendChild(h('div', { dataset: { avisos: 'desfazer' } }, h('h3', { text: 'Confira antes de desfazer' }), conf.el));
           return;
         }
-        var caixa = UI.estadoErro(e);
-        if ((e.details || []).length) caixa.insertBefore(h('ul', null, e.details.map(function (d) { return h('li', { text: d.mensagem }); })), caixa.querySelector('details'));
-        st.appendChild(caixa);
+        st.appendChild(UI.estadoErro(e, { detalhes: e.details }));
       }
     } });
     f.definirAcoes([UI.botao('Cancelar', { aoClicar: function () { f.fechar(); } }), b]);

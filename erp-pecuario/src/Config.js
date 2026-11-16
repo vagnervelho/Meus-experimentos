@@ -262,7 +262,7 @@ var Config = (function () {
     var pol = (params && params.avisos_politica) || {};
     return (avisos || []).filter(function (a) {
       var p = pol[a.codigo] || 'AVISA';
-      if (p === 'BLOQUEIA') col.erro(a);
+      if (p === 'BLOQUEIA') col.erro(Validation.bloqueado(a));
       return p === 'AVISA';
     });
   }

@@ -75,7 +75,7 @@ for (const largura of [1280, 360]) {
     assert.match(rev, /Custo total da compra\s*R\$ 3\.060,00/);
     assert.match(rev, /Conta pelo preço \(conferência\)\s*R\$ 3\.000,00 · confere/);
     assert.match(rev, /Divisão entre os animais\s*Igual por cabeça/);
-    assert.match(rev, /Valor por animal\s*R\$ 1\.530,00/);
+    assert.match(rev, /Custo de aquisição por animal \(com frete e outros custos\)\s*R\$ 1\.530,00/); // revisão final, achado 13: era "Valor por animal"
     assert.match(rev, /A pagar\s*R\$ 3\.060,00/);
     await principal(page);
     await page.waitForSelector('[data-resultado="COMPRA"]');

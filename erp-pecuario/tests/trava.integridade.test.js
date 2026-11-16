@@ -211,12 +211,13 @@ test('GENEALOGIA pela correção do cadastro de referência: o touro externo de 
   const antes = s.retrato();
   const r = s.cmd((ctx) => s.G.AnimalService.editar(ctx, { idempotencyKey: 'ext-sexo', dados: { animal_id: ext, campos: { sexo: 'F' } } }));
   assert.deepEqual(trava(r), { code: 'CONFLICT', codigos: ['INTEGRIDADE_GENEALOGIA'] });
-  assert.match(r.erro.message, /^Não dá para gravar: os dados ficariam errados\. O parto de 10\/03\/2026 \(mãe A-000002 \(brinco 100\)\) tem como pai A-000001, que não é macho pelo cadastro\. O pai \(touro\)/);
+  // Revisão final, achado 16: o que ficaria errado no condicional, e o touro de fora pelo nome.
+  assert.match(r.erro.message, /^Não dá para gravar: os dados ficariam errados\. O parto de 10\/03\/2026 \(mãe A-000002 \(brinco 100\)\) teria como pai Touro de sêmen \(A-000001\), que passaria a ser fêmea\. O pai \(touro\)/);
   assert.deepEqual([r.erro.details[0].conflito.event_id, r.erro.details[0].conflito.tipo, r.erro.details[0].animal_id], [p.event_id, 'NASCIMENTO', ext], 'aponta o parto que impede');
   nadaGravado(s, antes, 'ext-sexo');
   const r2 = s.cmd((ctx) => s.G.AnimalService.editar(ctx, { idempotencyKey: 'ext-nasc', dados: { animal_id: ext, campos: { data_nascimento: '2026-05-01', data_nascimento_confianca: 'ESTIMADA' } } }));
   assert.deepEqual(trava(r2), { code: 'CONFLICT', codigos: ['INTEGRIDADE_GENEALOGIA'] });
-  assert.match(r2.erro.details[0].mensagem, /tem como pai A-000001, que nasceu em 01\/05\/2026, não antes dele/);
+  assert.match(r2.erro.details[0].mensagem, /teria como pai Touro de sêmen \(A-000001\), que ficaria nascido em 01\/05\/2026, não antes dele/);
   nadaGravado(s, antes, 'ext-nasc');
   // O que não quebra nada continua passando: o nome do touro.
   assert.equal(s.cmd((ctx) => s.G.AnimalService.editar(ctx, { idempotencyKey: 'ext-nome', dados: { animal_id: ext, campos: { nome: 'Touro de sêmen (lote 7)' } } })).ok, true);
@@ -229,7 +230,7 @@ test('GENEALOGIA pela correção de cadastro: a fêmea que entrou prenhe (diagn�
   const antes = s.retrato();
   const r = s.tent('registrar', correcao('2026-03-01', [{ animal_id: V, campo: 'sexo', valor_novo: 'M' }]));
   assert.deepEqual(trava(r), { code: 'CONFLICT', codigos: ['INTEGRIDADE_GENEALOGIA'] });
-  assert.match(r.erro.details[0].mensagem, /O registro reprodutivo de 01\/01\/2026 é de A-000001 \(brinco 100\), que não é fêmea pelo cadastro\. O registro reprodutivo é de uma fêmea/);
+  assert.match(r.erro.details[0].mensagem, /O registro reprodutivo de 01\/01\/2026 é de A-000001 \(brinco 100\), que passaria a ser macho\. O registro reprodutivo é de uma fêmea/);
   nadaGravado(s, antes);
   const r2 = s.tent('registrar', correcao('2026-03-01', [{ animal_id: V, campo: 'data_nascimento', valor_novo: '2026-01-01' }]));
   assert.deepEqual(trava(r2), { code: 'CONFLICT', codigos: ['INTEGRIDADE_GENEALOGIA'] });
@@ -409,7 +410,7 @@ test('PARTOS pela correção de cadastro: a mãe de um parto não vira macho —
   assert.equal(t.code, 'CONFLICT');
   assert.ok(t.codigos.indexOf('INTEGRIDADE_PARTOS') >= 0 && t.codigos.indexOf('INTEGRIDADE_GENEALOGIA') >= 0, JSON.stringify(t));
   const dp = r2.erro.details.find((d) => d.codigo === 'INTEGRIDADE_PARTOS');
-  assert.match(dp.mensagem, /O parto de 10\/03\/2026 \(mãe A-000001 \(brinco 100\)\) tem como mãe um animal que não é fêmea pelo cadastro\. A mãe, a data e as crias precisam bater com o parto/);
+  assert.match(dp.mensagem, /O parto de 10\/03\/2026 \(mãe A-000001 \(brinco 100\)\) teria como mãe um animal que passaria a ser macho\. A mãe, a data e as crias precisam bater com o parto/);
   assert.equal(dp.conflito.event_id, p.event_id);
   nadaGravado(s, antes, 'cad-cru');
   assert.deepEqual(s.erros(), []);

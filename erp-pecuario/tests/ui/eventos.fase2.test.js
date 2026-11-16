@@ -111,7 +111,7 @@ for (const largura of [1280, 360]) {
     assert.match(rev, /Frete\s*R\$ 1\.200,00/);
     assert.match(rev, /Custo total da compra\s*R\$ 51\.200,00/);
     assert.match(rev, /2 parcelas: R\$ 25\.000,00 em 05\/03\/2026; R\$ 25\.000,00 em 05\/04\/2026/, 'a divisão é do servidor');
-    assert.match(rev, /Valor por animal\s*R\$ 2\.560,00/);
+    assert.match(rev, /Custo de aquisição por animal \(com frete e outros custos\)\s*R\$ 2\.560,00/); // revisão final, achado 13: era "Valor por animal"
     assert.match(rev, /A pagar\s*R\$ 51\.200,00/);
     await page.click(dialogo + ' summary:has-text("Ver os animais")');
     assert.deepEqual(await page.$$eval(dialogo + ' [data-valor-animal]', (els) => els.map((e) => e.getAttribute('data-valor-animal'))), Array(20).fill('256000'), 'o valor de cada animal vem da simulação');

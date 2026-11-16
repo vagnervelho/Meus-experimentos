@@ -82,17 +82,37 @@ var UI = (function () {
     LOCKED: 'Sistema ocupado', DENIED: 'Acesso não confirmado', NOT_FOUND: 'Não encontrado', CONFIG: 'O sistema precisa de um ajuste',
     INTERNAL: 'Algo deu errado', TRANSPORTE: 'Sem conexão', SEM_RESPOSTA: 'Sem resposta do servidor',
   };
-  /** Estado de erro: título pelo código, a mensagem do servidor, ação e o detalhe técnico expansível. */
+  /**
+   * Estado de erro: título pelo código, a mensagem do servidor, os detalhes (o.detalhes, com o link para o lançamento que
+   * impede; o que só repete a mensagem fica de fora), ação e o detalhe técnico. "Os dados mudaram" é só o CONFLICT da
+   * versão dos dados (08, seção 8); a recusa de integridade e os demais CONFLICT dizem que não dá para gravar.
+   */
   function estadoErro(e, o) {
     o = o || {};
     var code = (e && e.code) || 'INTERNAL';
-    var titulo = TITULOS_ERRO[code] || TITULOS_ERRO.INTERNAL;
+    var msg = (e && e.message) || 'Tente de novo em instantes.';
+    var titulo = code === 'CONFLICT' && !/^Os dados mudaram/.test(msg) ? 'Não dá para gravar' : TITULOS_ERRO[code] || TITULOS_ERRO.INTERNAL;
     var tecnico = 'Código: ' + code + (e && e.causa ? '\nCausa: ' + e.causa : '') + (o.detalhe ? '\n' + o.detalhe : '');
+    var dets = (o.detalhes || []).filter(function (d) { return d.mensagem && (msg.indexOf(d.mensagem) < 0 || (d.conflito && d.conflito.event_id)); });
     return h('div', { class: 'estado estado-erro', role: 'alert', dataset: { erro: code } },
       h('div', { class: 'estado-titulo' }, icone('erro'), h('span', { text: titulo })),
-      h('p', { text: (e && e.message) || 'Tente de novo em instantes.' }),
+      h('p', { text: msg }),
+      dets.length ? h('ul', null, dets.map(function (d) { return problema(d, 'li', msg.indexOf(d.mensagem) >= 0); })) : null,
       o.acao ? acaoParaBotao_(o.acao, 'primario') : null,
       h('details', { class: 'detalhe' }, h('summary', { text: 'Detalhes técnicos' }), h('pre', { text: tecnico })));
+  }
+  /**
+   * Um problema do servidor: a mensagem (sem ela, `semTexto`, quando já está acima) e, no CONFLICT, o link para o lançamento
+   * que impede (08, seção 8: "abrir o evento conflitante").
+   */
+  function problema(d, tag, semTexto) {
+    var c = d && d.conflito;
+    var link = null;
+    if (c && c.event_id && Telas.existe('evento/' + c.event_id)) {
+      // Tipo e subtipo vêm separados, com o nome pronto do servidor ("a marcação para descarte"; CONTRATOS, seção 14).
+      link = h('a', { class: 'botao botao-texto', href: Roteador.href('evento/' + c.event_id), dataset: { rota: 'evento/' + c.event_id, conflito: c.event_id } }, 'Abrir ' + (c.tipo || c.nome ? (c.nome || Store.nomeEvento(c.tipo, c.subtipo)) : 'o lançamento') + (c.data ? ' de ' + Fmt.data(c.data) : ''));
+    }
+    return h(tag, { dataset: { codigo: d.codigo || null } }, semTexto ? null : h('span', { text: d.mensagem }), link && !semTexto ? ' ' : null, link);
   }
 
   // ------------------------------------------------------- folha e modal ----
@@ -407,7 +427,7 @@ var UI = (function () {
 
   return {
     icone: icone, botao: botao, travar: travar, definirTexto: definirTexto, faixa: faixa, nota: nota, aviso: aviso, carregando: carregando, vazio: vazio,
-    estadoErro: estadoErro, folha: folha, fecharTudo: fecharTudo, confirmar: confirmar, buscaBrinco: buscaBrinco, tabela: tabela, grafico: grafico,
+    estadoErro: estadoErro, problema: problema, folha: folha, fecharTudo: fecharTudo, confirmar: confirmar, buscaBrinco: buscaBrinco, tabela: tabela, grafico: grafico,
     comparar: comparar_, TITULOS_ERRO: TITULOS_ERRO, abas: abas, valorInd: valorInd, indicador: indicador, pares: pares, secao: secao,
   };
 })();
@@ -947,9 +967,7 @@ var Cadastro = (function () {
           soltos = soltos.filter(function (d) { return !d.campo || !o.bloco.campo(d.campo); });
           o.bloco.focarPrimeiroErro();
         }
-        var caixa = UI.estadoErro(e, e.repetida || e.code === 'DENIED' ? { acao: App.acaoRecarregar('Entrar de novo') } : null);
-        if (soltos.length) caixa.insertBefore(h('ul', null, soltos.map(function (d) { return h('li', { text: d.mensagem }); })), caixa.querySelector('details'));
-        o.status.appendChild(caixa);
+        o.status.appendChild(UI.estadoErro(e, { detalhes: soltos, acao: e.repetida || e.code === 'DENIED' ? App.acaoRecarregar('Entrar de novo') : null }));
         return null;
       }
       chave = Util.uuid(); avisos = []; aceites = {};
@@ -1461,7 +1479,7 @@ var Registro = (function () {
     return {
       versao: 1, tipo: s.tipo, rotulo: s.def.rotulo, chave: s.chave, estado: s.estado, subtipo: s.subtipo, campos: s.campos, rotulos: s.rotulos, origem: s.origem,
       linhas: s.linhas.map(function (l) { return { animal_id: l.animal_id, criado: l.criado || undefined, valores: l.valores }; }), grupos: s.grupos,
-      data: s.campos.event_date || null, n: s.linhas.length, envio: s.envio, corrige: s.corrige || undefined, justificativaCorrecao: s.justificativaCorrecao || undefined,
+      data: s.campos.event_date || null, n: nAnimais(s.linhas), envio: s.envio, corrige: s.corrige || undefined, justificativaCorrecao: s.justificativaCorrecao || undefined,
     };
   }
   function deRascunho(def, r) {
@@ -1633,6 +1651,8 @@ var Registro = (function () {
     return { dados: dados, erros: erros };
   }
   /** Liga cada detalhe do servidor à linha do animal: animal_id → brinco → "Animal N da lista". O resto é do evento. */
+  /** Animais distintos das linhas (a correção de cadastro tem uma linha por dado do mesmo animal); linha sem animal conta uma. */
+  function nAnimais(l) { var v = {}; return l.filter(function (x) { if (!x.animal_id) return true; if (v[x.animal_id]) return false; v[x.animal_id] = 1; return true; }).length; }
   function mapearErros(s, details) {
     s.linhas.forEach(function (l) { l.erros = []; });
     s.errosGrupo = {};
@@ -1642,7 +1662,11 @@ var Registro = (function () {
       var cria = /^Cria (\d+)\b/.exec(d.mensagem || '');
       var linhaCria = cria && s.grupos.crias ? s.grupos.crias[Number(cria[1]) - 1] : null;
       if (linhaCria) { (s.errosGrupo[linhaCria.uid] = s.errosGrupo[linhaCria.uid] || []).push(d); return; }
-      if (d.animal_id) alvo = s.linhas.filter(function (l) { return l.animal_id === d.animal_id; })[0] || null;
+      // Vários dados do mesmo animal (correção de cadastro): a linha do dado que a mensagem cita pelo rótulo; o repetido, a última.
+      var corr = d.animal_id && s.subtipo && s.def.subtipos ? s.def.subtipos[s.subtipo].campos_corrigiveis : null;
+      var doAnimal = d.animal_id ? s.linhas.filter(function (l) { return l.animal_id === d.animal_id; }) : [];
+      var peloCampo = doAnimal.filter(function (l) { var c = corr && corr[l.valores.campo]; return c && (d.mensagem || '').indexOf('"' + c.rotulo + '"') >= 0; });
+      if (doAnimal.length) alvo = peloCampo[d.codigo === 'CAMPO_REPETIDO' ? peloCampo.length - 1 : 0] || doAnimal[0];
       if (!alvo && d.brinco) {
         var b = Store.normalizarBrinco(d.brinco, true);
         alvo = s.linhas.filter(function (l) {
@@ -2109,15 +2133,7 @@ var Registro = (function () {
    * Um problema do servidor: a mensagem e, no CONFLICT da linha do tempo, o link para o lançamento que impede
    * (08, seção 8: "abrir o evento conflitante"). O rascunho fica guardado ao sair.
    */
-  function problema_(d, tag) {
-    var c = d && d.conflito;
-    var link = null;
-    if (c && c.event_id && Telas.existe('evento/' + c.event_id)) {
-      // Tipo e subtipo vêm separados, com o nome pronto do servidor ("a marcação para descarte"; CONTRATOS, seção 14).
-      link = h('a', { class: 'botao botao-texto', href: Roteador.href('evento/' + c.event_id), dataset: { rota: 'evento/' + c.event_id, conflito: c.event_id } }, 'Abrir ' + (c.tipo || c.nome ? (c.nome || Store.nomeEvento(c.tipo, c.subtipo)) : 'o lançamento') + (c.data ? ' de ' + Fmt.data(c.data) : ''));
-    }
-    return h(tag, { dataset: { codigo: d.codigo || null } }, h('span', { text: d.mensagem }), link ? ' ' : null, link);
-  }
+  function problema_(d, tag) { return UI.problema(d, tag); }
   function rotuloGrupo(g, tipo) { return (ROTULO_GRUPO_TIPO[tipo] || {})[g] || ROTULO_GRUPO[g] || [Fmt.rotulo('', g), Fmt.rotulo('', g)]; }
   function desenharGrupos(s) {
     var v = s.view;
@@ -2233,7 +2249,7 @@ var Registro = (function () {
     if (data) linhas.push(['Data', Fmt.data(data)]);
     if (d.animais) {
       var novos = d.animais.filter(function (a) { return !a.animal_id; });
-      linhas.push(['Animais', plural(d.animais.length, 'animal', 'animais') + (novos.length && novos.length < d.animais.length ? ' (' + novos.length + ' novos)' : '')]);
+      linhas.push(['Animais', plural(nAnimais(d.animais), 'animal', 'animais') + (novos.length && novos.length < d.animais.length ? ' (' + novos.length + ' novos)' : '')]);
       var sexos = { M: 0, F: 0 };
       novos.forEach(function (a) { if (sexos[a.sexo] !== undefined) sexos[a.sexo] += 1; });
       if (novos.length) linhas.push(['Sexo', plural(sexos.M, 'macho', 'machos') + ' · ' + plural(sexos.F, 'fêmea', 'fêmeas')]);
@@ -2357,6 +2373,7 @@ var Registro = (function () {
     if (im.anulados) l.push(['Animais que deixam de existir', String(im.anulados)]);
     if (im.substitui) l.push(['Substitui o lançamento', s.corrige ? s.corrige.rotulo : im.substitui]);
     if (im.substitui && im.anexos) l.push(['Documentos e fotos do original', (im.anexos_nomes && im.anexos_nomes.length ? im.anexos_nomes.join(', ') : plural(im.anexos, 'documento', 'documentos')) + (im.anexos === 1 ? ' (passa' : ' (passam') + ' a esta correção)']);
+    if (im.substitui && (im.anexos_soltos || []).length) l.push(['Ficam sem lançamento', im.anexos_soltos.join(', ') + ': o lançamento deles sai na correção, e eles ficam só no evento']);
     if (im.abertura && im.abertura.total !== undefined) l.push(['Valor de abertura', Fmt.dinheiro(im.abertura.total) + ' em ' + plural(im.abertura.animais, 'animal', 'animais')]);
     return l.concat(linhasCompra(im.compra), linhasVenda(im.venda), linhasFinanceiro(im.financeiro, im.event_type));
   }
@@ -2407,7 +2424,8 @@ var Registro = (function () {
    * O que o valor de cada animal é, pelo tipo do lançamento (08, 4.4: a folha não pode enganar): na morte é o custo que
    * coube a ele (não o valor do boi), na venda e no descarte a receita; na compra e no rebanho inicial, o valor do animal.
    */
-  var ROTULO_VALOR_ANIMAL = { MORTE: ['Custo do animal', 'Custo por animal'], VENDA: ['Receita do animal', 'Receita por animal'], DESCARTE: ['Receita do animal', 'Receita por animal'] };
+  // Na compra o servidor soma todos os lançamentos (07, seção 6: o custo de aquisição inclui o frete): não é o preço do animal.
+  var ROTULO_VALOR_ANIMAL = { COMPRA: ['Custo de aquisição do animal', 'Custo de aquisição por animal (com frete e outros custos)'], MORTE: ['Custo do animal', 'Custo por animal'], VENDA: ['Receita do animal', 'Receita por animal'], DESCARTE: ['Receita do animal', 'Receita por animal'] };
   function rotuloValorAnimal(tipo, n) { var r = ROTULO_VALOR_ANIMAL[tipo] || ['Valor do animal', 'Valor por animal']; return n === 1 ? r[0] : r[1]; }
   function linhasFinanceiro(f, tipo) {
     if (!f || !f.lancamentos || !f.lancamentos.length) return [];
@@ -2522,7 +2540,7 @@ var Registro = (function () {
       // 08, seção 4.6: o botão diz a consequência ("Estornar a venda de 30 animais").
       return 'Estornar ' + (im.event_type ? (im.nome || Store.nomeEvento(im.event_type, im.event_subtype)) : 'o evento') + (im.animais ? ' de ' + plural(im.animais, 'animal', 'animais') : '');
     }
-    var n = s.dados && s.dados.animais ? s.dados.animais.length : 0;
+    var n = s.dados && s.dados.animais ? nAnimais(s.dados.animais) : 0;
     if (s.tipo === 'NASCIMENTO' && !s.corrige) return verbo(s);
     return verbo(s) + (n ? ' de ' + plural(n, 'animal', 'animais') : '');
   }

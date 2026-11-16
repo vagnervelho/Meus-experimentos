@@ -389,6 +389,8 @@ var AuditService = (function () {
   var CHECAGEM_DO_CAMPO = Object.freeze({ 'FINANCEIRO.animal_id': 'ALOCACAO_DIRETA', 'ANIMAIS.custo_aquisicao': 'CUSTO_AQUISICAO', 'ANIMAIS.custo_aquisicao_origem': 'CUSTO_AQUISICAO' });
   /** Como resolver, na trava, o touro e a fêmea de um registro reprodutivo que deixariam de valer na data dele. */
   var RESOLVER_TOURO = 'O pai (touro) de um parto ou de um registro reprodutivo é macho e nasceu antes dele: confira o sexo e o nascimento do touro, ou corrija antes o registro.';
+  var RESOLVER_FONTE = 'Este lançamento refaria a situação a partir desses dados, como se estivessem certos. Restaure o backup ou investigue a edição manual da planilha antes de lançar para eles.';
+  var RESOLVER_CRIA_EM_DOBRO = 'O parto de um animal que já está no cadastro não se lança: a mãe e o nascimento dele ficam no cadastro. Se o parto antigo já foi gravado, estorne-o ou desfaça a importação dele; para pôr no rebanho inicial a cria de um parto antigo, lance "Outra entrada" dela datada do marco zero, em vez de cadastrar um animal novo.';
   var RESOLVER_FEMEA = 'O registro reprodutivo é de uma fêmea nascida antes dele: confira o sexo e o nascimento, ou corrija antes o lançamento que gravou o registro.';
   /** Detalhes com data que citam o animal sem linha em EVENTO_ANIMAIS (edição à mão): a data de cada um. */
   var DETALHES_DO_ANIMAL = Object.freeze({ IDENTIFICACOES: 'data_inicio', PESAGENS: 'data_pesagem', REPRODUCAO: 'data' });
@@ -437,6 +439,7 @@ var AuditService = (function () {
           item.brinco = nulo_(a.brinco);
           item.resolver = nulo_(a.resolver);
           item.oque = nulo_(a.oque);
+          item.fonte = a.fonte === true || !!FONTE_QUEBRADA[codigo];
         }
         lista.push(item);
       },
@@ -801,9 +804,12 @@ var AuditService = (function () {
             var evr = f.evento(x.event_id);
             if (!cat || !evr || cat.sexo_aplicavel === 'AMBOS' || cat.sexo_aplicavel === calc.sexo || vazio_(calc.sexo)) return;
             col.achado('LINHA_DO_TEMPO', {
-              tabela: 'AJUSTES', id: x.ajuste_id, campo: 'valor_novo', mensagem: rotuloAnimal_(a, id) + ': a reclassificação de ' + br_(evr.event_date) + ' põe o animal na categoria ' + cat.nome + ', que é só de ' + (cat.sexo_aplicavel === 'M' ? 'machos' : 'fêmeas') + ', mas ele é ' + (calc.sexo === 'M' ? 'macho' : 'fêmea') + ' pelo cadastro. Volte-o à categoria automática ou corrija o sexo.',
+              tabela: 'AJUSTES', id: x.ajuste_id, campo: 'valor_novo', mensagem: rotuloAnimal_(a, id) + ': a reclassificação de ' + br_(evr.event_date) + ' põe o animal na categoria ' + cat.nome + ', que é só de ' + (cat.sexo_aplicavel === 'M' ? 'machos' : 'fêmeas') + ', mas ele é ' + (calc.sexo === 'M' ? 'macho' : 'fêmea') + ' pelo cadastro. Estorne essa reclassificação (ou corrija-a para uma categoria do sexo dele), ou corrija o sexo.',
+              oque: rotuloAnimal_(a, id) + ': a reclassificação de ' + br_(evr.event_date) + ' põe o animal na categoria ' + cat.nome + ', que é só de ' + (cat.sexo_aplicavel === 'M' ? 'machos' : 'fêmeas') + ', e ele ficaria ' + (calc.sexo === 'M' ? 'macho' : 'fêmea') + '.',
               chaves: 'CATEGORIA|' + x.ajuste_id, event_id: x.event_id, animal_id: id,
-              resolver: 'Mude antes a reclassificação do animal (volte-o à categoria automática ou escolha uma do sexo dele).',
+              // Toda reclassificação que vale conta, também a que já não é a categoria de hoje: voltar o animal à categoria
+              // automática ou reclassificá-lo de novo não a tira do histórico. O caminho é estorná-la ou corrigi-la.
+              resolver: 'Estorne antes a reclassificação de ' + br_(evr.event_date) + ' (ou corrija-a para uma categoria do sexo novo): voltar à categoria automática ou reclassificar de novo não apaga a reclassificação antiga.',
             });
           });
         }
@@ -836,6 +842,16 @@ var AuditService = (function () {
             tabela: 'ANIMAIS', id: id, campo: 'pasto_atual_id', animal_id: id, event_id: poe ? poe.event_id : null, chaves: 'PASTO_INATIVO|' + id + '|' + a.pasto_atual_id,
             mensagem: rotuloAnimal_(a, id) + ' está no rebanho dentro d' + oPasto + ', que está desativado.',
             resolver: 'Reative ' + oPasto + ' na tela Pastos antes; depois transfira os animais dele e desative-o de novo, se for o caso.',
+          });
+        }
+        // A propriedade do pasto também (03a, seções 4.1 e 4.2: propriedade desativada só sem pasto ativo).
+        var prop = pastoAtual && pastoAtual.status === 'ATIVO' && tx.repo.carregada('PROPRIEDADES') ? tx.repo.porId('PROPRIEDADES', pastoAtual.property_id) : null;
+        if (prop && prop.status !== 'ATIVO') {
+          var poeP = Timeline.ordenar(linhas.filter(function (l) { return !l.pre_marco_zero && l.pasto_destino_id === a.pasto_atual_id; })).pop();
+          col.achado('LINHA_DO_TEMPO', {
+            tabela: 'ANIMAIS', id: id, campo: 'pasto_atual_id', animal_id: id, event_id: poeP ? poeP.event_id : null, chaves: 'PROPRIEDADE_INATIVA|' + id + '|' + prop.property_id,
+            mensagem: rotuloAnimal_(a, id) + ' está no rebanho no pasto ' + pastoAtual.nome + ', da propriedade ' + prop.nome + ', que está desativada.',
+            resolver: 'Reative a propriedade ' + prop.nome + ' antes, ou mantenha os animais em pastos de propriedades ativas.',
           });
         }
       }
@@ -878,7 +894,9 @@ var AuditService = (function () {
       col.achado('LINHA_DO_TEMPO', {
         tabela: 'AJUSTES', id: x.ajuste_id, campo: 'valor_anterior', animal_id: id, event_id: x.event_id, chaves: 'BRINCO_CORRIGIDO|' + x.ajuste_id,
         mensagem: rotuloAnimal_(a, id) + ': a correção de brinco lançado errado de ' + br_(evx.event_date) + ' troca o brinco ' + x.valor_anterior + ', mas nessa data o animal estava ' + (emUso ? 'com o brinco ' + emUso.codigo : 'sem brinco') + '.',
-        resolver: 'Estorne antes a correção do brinco lançado errado, ou deixe a troca de brinco depois dela.',
+        oque: rotuloAnimal_(a, id) + ': a correção de brinco lançado errado de ' + br_(evx.event_date) + ' trocaria o brinco ' + x.valor_anterior + ', mas nessa data o animal ficaria ' + (emUso ? 'com o brinco ' + emUso.codigo : 'sem brinco') + '.',
+        // O conselho serve a qualquer identificação (troca, retirada, primeira): é ela que fica antes ou depois da correção.
+        resolver: 'Estorne antes a correção do brinco lançado errado, ou dê a esta identificação uma data depois da correção (' + br_(evx.event_date) + ').',
       });
     });
   }
@@ -951,16 +969,16 @@ var AuditService = (function () {
       var crias = linhas.filter(function (l) { return l.papel === 'CRIA'; });
       var mae = maes.length === 1 ? maes[0].animal_id : null;
       var quem = 'O parto de ' + br_(ev.event_date) + (mae ? ' (mãe ' + nome(mae) + ')' : '');
-      var achado = function (mensagem, tabela, id, chave) {
-        col.achado('PARTOS', { tabela: tabela || 'EVENTOS', id: id || ev.event_id, mensagem: quem + ' ' + mensagem, chaves: ev.event_id + '|' + chave, event_id: ev.event_id, animal_id: tabela === 'ANIMAIS' ? id : null });
+      var achado = function (mensagem, tabela, id, chave, oque) {
+        col.achado('PARTOS', { tabela: tabela || 'EVENTOS', id: id || ev.event_id, mensagem: quem + ' ' + mensagem, oque: oque ? quem + ' ' + oque : null, chaves: ev.event_id + '|' + chave, event_id: ev.event_id, animal_id: tabela === 'ANIMAIS' ? id : null });
       };
       if (maes.length !== 1) achado('tem ' + maes.length + ' mães nos animais do evento; um parto é de uma vaca só.', null, null, 'MAES');
       if (reps.length !== 1) achado('tem ' + reps.length + ' registros de parto na reprodução; precisa ter exatamente um.', null, null, 'REGISTROS');
       var r = reps.length === 1 ? reps[0] : null;
       if (mae) {
         var pm = proj(mae).campos || {};
-        if (pm.sexo !== 'F') achado('tem como mãe um animal que não é fêmea pelo cadastro.', 'ANIMAIS', mae, 'MAE_SEXO|' + mae);
-        if (Utils.dataValida(pm.data_nascimento) && pm.data_nascimento >= ev.event_date) achado('tem como mãe um animal nascido em ' + br_(pm.data_nascimento) + ', não antes do parto.', 'ANIMAIS', mae, 'MAE_NASCIMENTO|' + mae);
+        if (pm.sexo !== 'F') achado('tem como mãe um animal que não é fêmea pelo cadastro.', 'ANIMAIS', mae, 'MAE_SEXO|' + mae, 'teria como mãe um animal que passaria a ser macho.');
+        if (Utils.dataValida(pm.data_nascimento) && pm.data_nascimento >= ev.event_date) achado('tem como mãe um animal nascido em ' + br_(pm.data_nascimento) + ', não antes do parto.', 'ANIMAIS', mae, 'MAE_NASCIMENTO|' + mae, 'teria como mãe um animal que ficaria nascido em ' + br_(pm.data_nascimento) + ', não antes do parto.');
       }
       if (r) {
         var vivos = typeof r.qtd_nascidos_vivos === 'number' ? r.qtd_nascidos_vivos : null;
@@ -1017,7 +1035,8 @@ var AuditService = (function () {
     col.aplicar('GENEALOGIA');
     var vale = {};
     tx.cru.cru('ANIMAIS').forEach(function (a) { if (a.situacao_cadastral !== 'ANULADO' && a.situacao_cadastral !== 'PENDENTE') vale[a.animal_id] = a; });
-    var nome = function (id) { return rotuloAnimal_(vale[id], id); };
+    // O animal de referência (de fora, como o touro do sêmen) aparece pelo nome, que é como o dono o conhece.
+    var nome = function (id) { var x = vale[id]; return x && x.situacao_cadastral === 'EXTERNO' && !vazio_(x.nome) ? x.nome + ' (' + (x.codigo_interno || id) + ')' : rotuloAnimal_(x, id); };
     var noCiclo = {};
     var alvo = esc ? Object.keys(esc.genealogia).filter(function (id) { return !!vale[id]; }) : Object.keys(vale);
     alvo.forEach(function (id) {
@@ -1025,29 +1044,39 @@ var AuditService = (function () {
       [['mae_id', 'F', 'mãe', 'fêmea'], ['pai_id', 'M', 'pai', 'macho']].forEach(function (cfg) {
         var p = vazio_(a[cfg[0]]) ? null : vale[a[cfg[0]]];
         if (!p) return;
-        if (p.sexo !== cfg[1]) col.achado('GENEALOGIA', { tabela: 'ANIMAIS', id: id, campo: cfg[0], mensagem: nome(id) + ' tem como ' + cfg[2] + ' ' + nome(p.animal_id) + ', que não é ' + cfg[3] + ' pelo cadastro.', chaves: id + '|' + cfg[0] + '|SEXO|' + p.animal_id });
-        else if (Utils.dataValida(p.data_nascimento) && Utils.dataValida(a.data_nascimento) && p.data_nascimento >= a.data_nascimento) {
-          col.achado('GENEALOGIA', { tabela: 'ANIMAIS', id: id, campo: cfg[0], mensagem: nome(id) + ', nascido em ' + br_(a.data_nascimento) + ', tem como ' + cfg[2] + ' ' + nome(p.animal_id) + ', que nasceu em ' + br_(p.data_nascimento) + ', não antes dele.', chaves: id + '|' + cfg[0] + '|NASCIMENTO|' + p.animal_id });
+        if (p.sexo !== cfg[1]) {
+          col.achado('GENEALOGIA', { tabela: 'ANIMAIS', id: id, campo: cfg[0], mensagem: nome(id) + ' tem como ' + cfg[2] + ' ' + nome(p.animal_id) + ', que não é ' + cfg[3] + ' pelo cadastro.',
+            oque: nome(id) + ' teria como ' + cfg[2] + ' ' + nome(p.animal_id) + ', que passaria a ser ' + (p.sexo === 'M' ? 'macho' : p.sexo === 'F' ? 'fêmea' : 'de sexo desconhecido') + '.', chaves: id + '|' + cfg[0] + '|SEXO|' + p.animal_id });
+        } else if (Utils.dataValida(p.data_nascimento) && Utils.dataValida(a.data_nascimento) && p.data_nascimento >= a.data_nascimento) {
+          col.achado('GENEALOGIA', { tabela: 'ANIMAIS', id: id, campo: cfg[0], mensagem: nome(id) + ', nascido em ' + br_(a.data_nascimento) + ', tem como ' + cfg[2] + ' ' + nome(p.animal_id) + ', que nasceu em ' + br_(p.data_nascimento) + ', não antes dele.',
+            oque: nome(id) + ', nascido em ' + br_(a.data_nascimento) + ', teria como ' + cfg[2] + ' ' + nome(p.animal_id) + ', que ficaria nascido em ' + br_(p.data_nascimento) + ', não antes dele.', chaves: id + '|' + cfg[0] + '|NASCIMENTO|' + p.animal_id });
         }
       });
       if (noCiclo[id]) return;
       cicloDe(id);
     });
+    conferirCriaEmDobro_(tx, col, vale, alvo, nome);
     if (tx.repo.carregada('REPRODUCAO')) {
       tx.repo.vigentes('REPRODUCAO').forEach(function (r) {
         if (esc && !esc.genealogia[r.animal_id] && !(r.touro_id && esc.genealogia[r.touro_id])) return;
         var oque = (r.tipo_evento === 'PARTO' ? 'O parto de ' : 'O registro reprodutivo de ') + br_(r.data) + ' (mãe ' + nome(r.animal_id) + ')';
         // O touro de um registro reprodutivo (o pai do parto, mesmo só de natimorto): macho e nascido antes dele (RN-060).
         var t = vazio_(r.touro_id) ? null : vale[r.touro_id];
-        if (t && t.sexo !== 'M') col.achado('GENEALOGIA', { tabela: 'REPRODUCAO', id: r.reproduction_id, campo: 'touro_id', mensagem: oque + ' tem como pai ' + nome(t.animal_id) + ', que não é macho pelo cadastro.', chaves: 'TOURO|' + r.reproduction_id + '|SEXO|' + t.animal_id, event_id: r.event_id, animal_id: t.animal_id, resolver: RESOLVER_TOURO });
-        else if (t && Utils.dataValida(t.data_nascimento) && Utils.dataValida(r.data) && t.data_nascimento >= r.data) {
-          col.achado('GENEALOGIA', { tabela: 'REPRODUCAO', id: r.reproduction_id, campo: 'touro_id', mensagem: oque + ' tem como pai ' + nome(t.animal_id) + ', que nasceu em ' + br_(t.data_nascimento) + ', não antes dele.', chaves: 'TOURO|' + r.reproduction_id + '|NASCIMENTO|' + t.animal_id, event_id: r.event_id, animal_id: t.animal_id, resolver: RESOLVER_TOURO });
+        if (t && t.sexo !== 'M') {
+          col.achado('GENEALOGIA', { tabela: 'REPRODUCAO', id: r.reproduction_id, campo: 'touro_id', mensagem: oque + ' tem como pai ' + nome(t.animal_id) + ', que não é macho pelo cadastro.',
+            oque: oque + ' teria como pai ' + nome(t.animal_id) + ', que passaria a ser ' + (t.sexo === 'F' ? 'fêmea' : 'de sexo desconhecido') + '.', chaves: 'TOURO|' + r.reproduction_id + '|SEXO|' + t.animal_id, event_id: r.event_id, animal_id: t.animal_id, resolver: RESOLVER_TOURO });
+        } else if (t && Utils.dataValida(t.data_nascimento) && Utils.dataValida(r.data) && t.data_nascimento >= r.data) {
+          col.achado('GENEALOGIA', { tabela: 'REPRODUCAO', id: r.reproduction_id, campo: 'touro_id', mensagem: oque + ' tem como pai ' + nome(t.animal_id) + ', que nasceu em ' + br_(t.data_nascimento) + ', não antes dele.',
+            oque: oque + ' teria como pai ' + nome(t.animal_id) + ', que ficaria nascido em ' + br_(t.data_nascimento) + ', não antes dele.', chaves: 'TOURO|' + r.reproduction_id + '|NASCIMENTO|' + t.animal_id, event_id: r.event_id, animal_id: t.animal_id, resolver: RESOLVER_TOURO });
         }
         // A fêmea do registro reprodutivo que não é parto (diagnóstico de gestação, cobertura...): fêmea e nascida antes dele.
         var m = r.tipo_evento === 'PARTO' ? null : vale[r.animal_id];
-        if (m && !vazio_(m.sexo) && m.sexo !== 'F') col.achado('GENEALOGIA', { tabela: 'REPRODUCAO', id: r.reproduction_id, campo: 'animal_id', mensagem: 'O registro reprodutivo de ' + br_(r.data) + ' é de ' + nome(m.animal_id) + ', que não é fêmea pelo cadastro.', chaves: 'FEMEA|' + r.reproduction_id + '|SEXO|' + m.animal_id, event_id: r.event_id, animal_id: m.animal_id, resolver: RESOLVER_FEMEA });
-        else if (m && Utils.dataValida(m.data_nascimento) && Utils.dataValida(r.data) && m.data_nascimento >= r.data) {
-          col.achado('GENEALOGIA', { tabela: 'REPRODUCAO', id: r.reproduction_id, campo: 'animal_id', mensagem: 'O registro reprodutivo de ' + br_(r.data) + ' é de ' + nome(m.animal_id) + ', que nasceu em ' + br_(m.data_nascimento) + ', não antes dele.', chaves: 'FEMEA|' + r.reproduction_id + '|NASCIMENTO|' + m.animal_id, event_id: r.event_id, animal_id: m.animal_id, resolver: RESOLVER_FEMEA });
+        if (m && !vazio_(m.sexo) && m.sexo !== 'F') {
+          col.achado('GENEALOGIA', { tabela: 'REPRODUCAO', id: r.reproduction_id, campo: 'animal_id', mensagem: 'O registro reprodutivo de ' + br_(r.data) + ' é de ' + nome(m.animal_id) + ', que não é fêmea pelo cadastro.',
+            oque: 'O registro reprodutivo de ' + br_(r.data) + ' é de ' + nome(m.animal_id) + ', que passaria a ser macho.', chaves: 'FEMEA|' + r.reproduction_id + '|SEXO|' + m.animal_id, event_id: r.event_id, animal_id: m.animal_id, resolver: RESOLVER_FEMEA });
+        } else if (m && Utils.dataValida(m.data_nascimento) && Utils.dataValida(r.data) && m.data_nascimento >= r.data) {
+          col.achado('GENEALOGIA', { tabela: 'REPRODUCAO', id: r.reproduction_id, campo: 'animal_id', mensagem: 'O registro reprodutivo de ' + br_(r.data) + ' é de ' + nome(m.animal_id) + ', que nasceu em ' + br_(m.data_nascimento) + ', não antes dele.',
+            oque: 'O registro reprodutivo de ' + br_(r.data) + ' é de ' + nome(m.animal_id) + ', que ficaria nascida em ' + br_(m.data_nascimento) + ', não antes dele.', chaves: 'FEMEA|' + r.reproduction_id + '|NASCIMENTO|' + m.animal_id, event_id: r.event_id, animal_id: m.animal_id, resolver: RESOLVER_FEMEA });
         }
       });
     }
@@ -1070,6 +1099,42 @@ var AuditService = (function () {
         }
       }
     }
+  }
+  /**
+   * A cria de um parto e outro filho da mesma mãe com o mesmo nascimento que não veio de parto (o bezerro da fotografia do
+   * marco zero, da compra ou da outra entrada): é o mesmo animal cadastrado duas vezes — a cria do parto é sempre um animal
+   * novo (04, seção 6: o inventário é exato a partir do marco zero). Gêmeos do mesmo parto são todos crias; gêmeos da
+   * fotografia, nenhum. Um achado por par; no escopo da trava, as mães que estão nele (vizinhas de cada cria tocada).
+   */
+  function conferirCriaEmDobro_(tx, col, vale, alvo, nome) {
+    if (!tx.repo.carregada('EVENTO_ANIMAIS')) return;
+    var partoDa = {};
+    tx.repo.vigentes('EVENTO_ANIMAIS').forEach(function (l) { if (l.papel === 'CRIA' && !partoDa[l.animal_id]) partoDa[l.animal_id] = l.event_id; });
+    var filhos = {};
+    Object.keys(vale).forEach(function (id) {
+      var a = vale[id];
+      if (vazio_(a.mae_id) || !Utils.dataValida(a.data_nascimento)) return;
+      (filhos[a.mae_id] = filhos[a.mae_id] || []).push(a);
+    });
+    alvo.forEach(function (maeId) {
+      var porDia = Utils.agruparPor(filhos[maeId] || [], 'data_nascimento');
+      Object.keys(porDia).sort().forEach(function (dia) {
+        var crias = porDia[dia].filter(function (a) { return partoDa[a.animal_id]; });
+        var outros = porDia[dia].filter(function (a) { return !partoDa[a.animal_id]; });
+        if (!crias.length || !outros.length) return;
+        outros.forEach(function (o) {
+          crias.forEach(function (c) {
+            var ev = tx.repo.porId('EVENTOS', partoDa[c.animal_id]);
+            col.achado('GENEALOGIA', {
+              tabela: 'ANIMAIS', id: o.animal_id, campo: 'mae_id', event_id: partoDa[c.animal_id], animal_id: o.animal_id,
+              mensagem: nome(c.animal_id) + ', a cria do parto de ' + br_(ev ? ev.event_date : dia) + ' (mãe ' + nome(maeId) + '), e ' + nome(o.animal_id) + ', que já estava no cadastro sem parto registrado, têm a mesma mãe e o mesmo nascimento: é o mesmo bezerro cadastrado duas vezes.',
+              oque: nome(o.animal_id) + ', que já está no cadastro com a mesma mãe e o mesmo nascimento (' + br_(dia) + '), ficaria duas vezes no rebanho: a cria do parto de ' + br_(ev ? ev.event_date : dia) + ' é sempre um animal novo.',
+              chaves: 'CRIA_EM_DOBRO|' + o.animal_id + '|' + c.animal_id, resolver: RESOLVER_CRIA_EM_DOBRO,
+            });
+          });
+        });
+      });
+    });
   }
   /**
    * Identificações (06, seção 9, Fase 2): nenhum brinco ativo (`data_fim` vazio) repetido entre as linhas vigentes de
@@ -1388,7 +1453,7 @@ var AuditService = (function () {
     col.aplicar('COPIAS');
     var repo = tx.repo;
     if (!repo.carregada('EVENTOS')) return;
-    var eventos = esc ? Object.keys(esc.eventos).map(function (id) { return repo.porId('EVENTOS', id); }).filter(Boolean) : repo.vigentes('EVENTOS');
+    var eventos = esc ? Utils.unicos(Object.keys(esc.eventos).concat(Object.keys(esc.fonte || {}))).map(function (id) { return repo.porId('EVENTOS', id); }).filter(Boolean) : repo.vigentes('EVENTOS');
     conferirLinhasDosEventos_(tx, col, eventos);
     conferirDetalhes_(tx, col, eventos);
     var linhasDe = function (t) {
@@ -1609,7 +1674,7 @@ var AuditService = (function () {
    *  - `lancamentos` e `linhas` (as linhas citadas, para a chave estrangeira).
    */
   function escopoDaTrava_(antes, depois, s, projecoes, lote) {
-    var esc = { animais: {}, genealogia: {}, eventos: {}, eventosGravados: {}, eventosImportados: {}, lancamentos: {}, linhas: s.linhas.slice(), brincos: {} };
+    var esc = { animais: {}, genealogia: {}, eventos: {}, eventosGravados: {}, eventosImportados: {}, lancamentos: {}, linhas: s.linhas.slice(), brincos: {}, fonte: {} };
     esc.tocados = esc.animais;
     var cru = antes.cru;
     var carregada = function (tab) { return antes.repo.carregada(tab); };
@@ -1685,8 +1750,76 @@ var AuditService = (function () {
         if (ev && ev.event_type === 'NASCIMENTO') esc.eventos[l.event_id] = true;
       });
       linhasPor('IDENTIFICACOES', 'animal_id', id).forEach(function (r) { if (r.tipo === 'BRINCO') marcarNumero(r.codigo); });
+      // A fonte dos eventos do animal tocado (COPIAS): as linhas dele e os detalhes que o citam. Com a fonte quebrada à mão,
+      // o projetor refaria a situação do animal a partir dela (a vaca morta sem a linha da morte voltaria ao rebanho).
+      linhasPor('EVENTO_ANIMAIS', 'animal_id', id).forEach(function (l) { esc.fonte[l.event_id] = true; });
+      DETALHES_COM_ANIMAL.forEach(function (tab) { linhasPor(tab, 'animal_id', id).forEach(function (r) { if (!vazio_(r.event_id)) esc.fonte[r.event_id] = true; }); });
     });
     return esc;
+  }
+  /**
+   * Fonte quebrada à mão (COPIAS, FILHAS_SEM_PAI, parcela apagada ou cancelada: os achados `fonte`): refazer a situação do
+   * que ela cita — o animal, os animais do evento, o lançamento — a partir do dado quebrado é o mesmo que o reparo
+   * RECONSTRUIR, que a verificação recusa (06, seções 9 e 12; RN-112). O comando que lança para o que a fonte quebrada
+   * cita (as linhas dele tocam o animal, o evento ou o lançamento) é recusado; o que só o alcança pela reconstrução (a
+   * conclusão de uma importação, um parâmetro) segue sem regravar a situação dele: o registro fica em quarentena, como
+   * está, e a verificação continua acusando. Devolve {diretos: [achados], quarentena: {ABA\u0000id: true}}.
+   */
+  function fonteTocada_(achados, t, esc) {
+    var out = { diretos: [], quarentena: {} };
+    var quebrados = achados.filter(function (a) { return a.severidade === 'ERRO' && a.fonte; });
+    if (!quebrados.length) return out;
+    var s = t.sementes;
+    // O que o comando lança: os animais, eventos e lançamentos das linhas dele e os eventos importados que ele faz valer.
+    var lanca = { animais: Object.assign({}, s.animais), eventos: Object.assign({}, s.eventos) };
+    var regrava = {};
+    (t.projecoes || []).forEach(function (u) { regrava[u.tabela + '\u0000' + u.id] = true; });
+    var cru = t.antes.cru;
+    var carregada = function (tab) { return t.antes.repo.carregada(tab); };
+    var animaisDoEvento = function (eid) {
+      var ids = [];
+      ['EVENTO_ANIMAIS'].concat(DETALHES_COM_ANIMAL).forEach(function (tab) { if (carregada(tab)) cru.cruPor(tab, 'event_id', eid).forEach(function (r) { if (!vazio_(r.animal_id)) ids.push(r.animal_id); }); });
+      return ids;
+    };
+    // Os eventos importados que passam a valer (a conclusão); os que deixam de valer (o desfazer) não lançam nada.
+    Object.keys((esc && esc.eventosImportados) || {}).forEach(function (eid) {
+      if (!t.depois.repo.eventoVigente(eid)) return;
+      lanca.eventos[eid] = true;
+      animaisDoEvento(eid).forEach(function (id) { lanca.animais[id] = true; });
+    });
+    quebrados.forEach(function (a) {
+      var registros = [];
+      var animais = [];
+      if (!vazio_(a.animal_id)) animais.push(a.animal_id);
+      if (!vazio_(a.event_id)) animais = animais.concat(animaisDoEvento(a.event_id));
+      animais.forEach(function (id) { registros.push('ANIMAIS\u0000' + id); });
+      var fin = a.tabela === 'FINANCEIRO' ? a.id : a.tabela === 'PARCELAS' && carregada('PARCELAS') ? (cru.cruPorId('PARCELAS', a.id) || {}).financial_id : null;
+      if (!vazio_(fin)) registros.push('FINANCEIRO\u0000' + fin);
+      var tocados = registros.filter(function (k) { return regrava[k]; });
+      if (!tocados.length) return;
+      var direto = animais.some(function (id) { return lanca.animais[id]; }) || (!vazio_(a.event_id) && lanca.eventos[a.event_id]) || (!vazio_(fin) && s.lancamentos[fin]);
+      if (direto && !s.tudo) out.diretos.push(a);
+      else tocados.forEach(function (k) { out.quarentena[k] = true; });
+    });
+    return out;
+  }
+  /**
+   * O que o lote grava (para a trava dizer se o problema é do próprio lançamento): {eventos, linhas: {ABA\u0000id: true},
+   * brincos: {id: true} (os animais novos e as identificações que ele grava, com os animais delas)}. Usado pela UnitOfWork
+   * e pelo ensaio da importação.
+   */
+  function propriosDoLote(lote) {
+    var out = { eventos: {}, linhas: {}, brincos: {} };
+    Object.keys(lote || {}).forEach(function (t) {
+      var pk = Schema.pk(t);
+      (lote[t] || []).forEach(function (r) {
+        out.linhas[t + '\u0000' + r[pk]] = true;
+        if (t === 'EVENTOS') out.eventos[r.event_id] = true;
+        if (t === 'ANIMAIS') out.brincos[r.animal_id] = true;
+        if (t === 'IDENTIFICACOES') { out.brincos[r.ident_id] = true; out.brincos[r.animal_id] = true; }
+      });
+    });
+    return out;
   }
   /** Achados do retrato de depois que não existiam no de antes: um achado é novo quando tem uma chave (átomo) que o antes não tinha. */
   function novosAchados_(antes, depois) {
@@ -1703,7 +1836,7 @@ var AuditService = (function () {
    * quando algum cai num registro já gravado (com o lançamento que impede em `conflito`). Código INTEGRIDADE_<CHECAGEM>;
    * a mensagem diz o que ficaria errado e como resolver. Nada é gravado e a chave de idempotência continua livre.
    */
-  function recusaDaTrava_(novos, depois, proprios) {
+  function recusaDaTrava_(novos, depois, proprios, fonte) {
     var cru = depois.cru;
     // Do próprio lançamento: o achado aponta um evento ou uma linha que ele grava; no brinco, o número que ele dá (um
     // átomo novo com um animal ou uma identificação dele).
@@ -1723,9 +1856,11 @@ var AuditService = (function () {
         conflito: ev ? { event_id: ev.event_id, tipo: ev.event_type, subtipo: nulo_(ev.event_subtype), data: ev.event_date, nome: EventCatalog.existe(ev.event_type) ? EventCatalog.nomeEvento(ev.event_type, ev.event_subtype) : null } : null,
       });
     });
-    var mensagem = novos.length === 1
-      ? 'Não dá para gravar: os dados ficariam errados. ' + detalhes[0].mensagem + ' Nada foi gravado.'
-      : 'Não dá para gravar: os dados ficariam errados em ' + novos.length + ' pontos (veja cada um abaixo). Nada foi gravado.';
+    var mensagem = fonte
+      ? 'Não dá para gravar: a planilha tem dados apagados ou mexidos à mão ' + (novos.length === 1 ? '(' + String(novos[0].oque).replace(/\.$/, '') + ')' : 'em ' + novos.length + ' pontos (veja cada um abaixo)') + ', e este lançamento refaria a situação a partir deles, como se estivessem certos. Restaure o backup ou investigue a edição manual antes. Nada foi gravado.'
+      : novos.length === 1
+        ? 'Não dá para gravar: os dados ficariam errados. ' + detalhes[0].mensagem + ' Nada foi gravado.'
+        : 'Não dá para gravar: os dados ficariam errados em ' + novos.length + ' pontos (veja cada um abaixo). Nada foi gravado.';
     return Validation.erro(algumConflito ? 'CONFLICT' : 'VALIDATION', mensagem, detalhes);
   }
   /**
@@ -1763,6 +1898,17 @@ var AuditService = (function () {
     if (!depois.some(function (a) { return a.severidade === 'ERRO'; })) return resumo;
     var antes = rodar(t.antes);
     resumo.achados_antes = antes.length;
+    var fonte = fonteTocada_(antes, t, esc);
+    if (fonte.diretos.length) {
+      throw recusaDaTrava_(fonte.diretos.map(function (a) {
+        return Object.assign({}, a, { resolver: RESOLVER_FONTE, oque: String(a.mensagem || '').replace(/\s*Restaure o backup ou investigue a edição manual.*$/, '') });
+      }), t.depois, { eventos: {}, linhas: {}, brincos: {} }, true);
+    }
+    // A reconstrução que o comando só alcança de passagem regravaria o que a fonte quebrada cita: quem chama refaz o retrato
+    // sem essas projeções (quarentena) e roda a trava de novo sobre ele.
+    var q = Object.keys(fonte.quarentena).filter(function (k) { return !(t.quarentena && t.quarentena.indexOf(k) >= 0); });
+    if (q.length) { resumo.refazer_sem = (t.quarentena || []).concat(q); return resumo; }
+    resumo.quarentena = (t.quarentena || []).slice();
     var novos = novosAchados_(antes, depois).filter(function (a) { return a.severidade === 'ERRO'; });
     if (novos.length) throw recusaDaTrava_(novos, t.depois, t.proprios || { eventos: {}, linhas: {} });
     return resumo;
@@ -1783,7 +1929,7 @@ var AuditService = (function () {
     var out = { avisos: [], erros: [] };
     lista.forEach(function (a) {
       var p = a.codigo === 'CARENCIA_ATIVA' ? 'AVISA' : pol[a.codigo] || 'AVISA';
-      if (p === 'BLOQUEIA') out.erros.push(a);
+      if (p === 'BLOQUEIA') out.erros.push(Validation.bloqueado(a));
       else if (p !== 'IGNORA') out.avisos.push(a);
     });
     return out;
@@ -1840,6 +1986,7 @@ var AuditService = (function () {
     leiturasTrava: leiturasTrava,
     sementesDaTrava: sementesDaTrava,
     travar: travar,
+    propriosDoLote: propriosDoLote,
     politicaDosAvisos: politicaDosAvisos,
     avisosDaTrava: avisosDaTrava,
   };

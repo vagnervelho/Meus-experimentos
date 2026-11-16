@@ -256,7 +256,32 @@ var Validation = (function () {
     };
   }
 
+  /** Nome de cada aviso na tela de Configurações › Avisos (os 13 códigos; 05, seção 1; desenho-base 16.12). */
+  var NOME_AVISO = Object.freeze({
+    CARENCIA_ATIVA: 'Animal em carência (venda para abate)', POSSIVEL_DUPLICIDADE: 'Lançamento possivelmente repetido', BRINCO_PARECIDO: 'Brinco parecido com o de outro animal',
+    LOTACAO_ACIMA_DA_CAPACIDADE: 'Pasto acima da capacidade', PESO_IMPLAUSIVEL: 'Peso fora do esperado', IDADE_REPRODUTIVA: 'Mãe abaixo da idade reprodutiva',
+    PERIODO_BLOQUEADO: 'Período financeiro fechado', VALOR_DIVERGENTE: 'Valor diferente da conta', RATEIO_SEM_PESO: 'Rateio por peso sem pesagem',
+    INTERVALO_PARTO_CURTO: 'Intervalo entre partos curto', PRODUTO_VENCIDO: 'Produto vencido', ESTOQUE_INSUFICIENTE: 'Estoque insuficiente', CATEGORIAS_SEM_COBERTURA: 'Categorias com lacuna',
+  });
+  /**
+   * O aviso que a política `avisos_politica` marca BLOQUEIA vira erro (08-ux-ui, seção 8: "chega como erro, sem caixa"):
+   * a frase deixa de pedir confirmação ("Gravar mesmo assim?", "Confirme com uma justificativa.") — não há o que
+   * confirmar — e diz o que bloqueia e o caminho. O mesmo texto em todo caminho (motor, cadastros, trava). Aplicar duas
+   * vezes dá o mesmo.
+   */
+  function bloqueado(aviso) {
+    var a = detalhe(aviso);
+    var fim = ' A configuração bloqueia este aviso ("' + (NOME_AVISO[a.codigo] || a.codigo) + '"): resolva o motivo ou mude a política dele em Configurações › Avisos.';
+    var m = String(a.mensagem || '');
+    if (m.slice(-fim.length) === fim) return a;
+    m = m.replace(/\s*(?:[^.?!]*\?|Confirme[^.?!]*\.)\s*$/, '').replace(/\s+$/, '');
+    if (m && !/[.!?]$/.test(m)) m += '.';
+    a.mensagem = m + fim;
+    return a;
+  }
   return {
+    NOME_AVISO: NOME_AVISO,
+    bloqueado: bloqueado,
     CODIGOS: CODIGOS,
     DETALHE: DETALHE,
     TETO_CELULA: TETO_CELULA,

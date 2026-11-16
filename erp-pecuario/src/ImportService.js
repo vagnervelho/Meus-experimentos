@@ -395,12 +395,36 @@ var ImportService = (function () {
         if (!noMarco[k] || r.data_fim > noMarco[k].ate) noMarco[k] = { animal: a, ate: r.data_fim };
       });
     }
-    return { params: params, D0: params.data_marco_zero, pastos: pastos, pastosPorId: pastosPorId, racas: racas, listas: listas, base: base, noMarco: noMarco, externos: externos, codigos: codigos, semZeros: semZeros };
+    // A mãe e o pai citados pelo brinco são o animal que usava o número no marco zero (a data do rebanho inicial; RN-002,
+    // RN-004), pelos períodos de IDENTIFICACOES — a mesma resolução das importações de eventos (donoDoBrinco_) —, e não
+    // quem tem o número hoje: a vaca que trocou de brinco depois continua sendo achada pelo número que tinha.
+    var periodos = {};
+    var porId = {};
+    tx.repo.vigentes('ANIMAIS').forEach(function (a) { if (a.situacao_cadastral !== 'ANULADO' && a.situacao_cadastral !== 'PENDENTE') porId[a.animal_id] = a; });
+    if (tx.repo.carregada('IDENTIFICACOES')) {
+      tx.repo.vigentes('IDENTIFICACOES').forEach(function (r) {
+        if (r.tipo !== 'BRINCO' || vazio_(r.codigo) || !porId[r.animal_id]) return;
+        var k = Utils.normalizarBrinco(String(r.codigo), !semZeros);
+        (periodos[k] = periodos[k] || []).push({ animal: porId[r.animal_id], inicio: r.data_inicio, fim: nulo_(r.data_fim) });
+      });
+    }
+    return { params: params, D0: params.data_marco_zero, pastos: pastos, pastosPorId: pastosPorId, racas: racas, listas: listas, base: base, noMarco: noMarco, externos: externos, codigos: codigos, semZeros: semZeros, brincos: { porBrinco: base, periodos: periodos } };
   }
   var AMBIGUO = Object.freeze({ ambiguo: true });
   /** Progenitor no rebanho pela referência do arquivo: brinco; senão código interno; senão nome de animal de referência. */
+  /**
+   * Progenitor do rebanho citado na linha: pelo brinco em uso no marco zero (donoDoBrinco_; sem os períodos, o de hoje),
+   * pelo código interno ou pelo nome do animal de referência. Devolve o animal, AMBIGUO (nome de externo repetido),
+   * {ambiguo_brinco: true} (o número em dois animais no marco zero), {sem_uso: {animal, ate} | null} (o número não estava
+   * em uso no marco zero) ou null.
+   */
   function progenitorNaBase_(cv, ref, chave) {
-    if (chave && cv.base[chave]) return cv.base[chave];
+    if (chave && cv.brincos) {
+      var dono = donoDoBrinco_(cv.brincos, cv, ref, cv.D0);
+      if (dono.animal) return dono.animal;
+      if (dono.ambiguo) return { ambiguo_brinco: true };
+      if (dono.semUso !== undefined && !cv.codigos[Utils.aparar(ref).toUpperCase()] && !cv.externos[Utils.normalizarTexto(Utils.aparar(ref))]) return { sem_uso: dono.semUso };
+    } else if (chave && cv.base[chave]) return cv.base[chave];
     var t = Utils.aparar(ref);
     return (cv.codigos && cv.codigos[t.toUpperCase()]) || (cv.externos && cv.externos[Utils.normalizarTexto(t)]) || null;
   }
@@ -464,6 +488,9 @@ var ImportService = (function () {
       if (!vazio_(it.data_nascimento) && it.data_entrada < it.data_nascimento) erros.push(det_('data_entrada', 'ENTRADA_ANTES_DO_NASCIMENTO', 'a chegada na fazenda (' + br_(it.data_entrada) + ') é anterior ao nascimento (' + br_(it.data_nascimento) + ')'));
     }
     if (it.situacao_reprodutiva === 'PRENHA' && !vazio_(it.data_prevista_parto) && it.data_prevista_parto <= D0) erros.push(det_('data_prevista_parto', 'PREVISAO_PASSADA', 'a previsão de parto precisa ser depois de ' + br_(D0)));
+    // A prenhez declarada vira o diagnóstico de gestação do dia da entrada: a fêmea nascida nesse dia não pode estar prenhe
+    // (a mesma regra do formulário, EventService; a trava a confere na genealogia).
+    if (it.situacao_reprodutiva === 'PRENHA' && it.data_nascimento === D0) erros.push(det_('situacao_reprodutiva', 'PRENHA_SEM_IDADE', 'a fêmea nasceu em ' + br_(it.data_nascimento) + ' e não pode estar prenhe no marco zero (' + br_(D0) + '): confira o nascimento ou a situação reprodutiva'));
     if (!vazio_(it.data_prevista_parto) && it.situacao_reprodutiva !== 'PRENHA') delete it.data_prevista_parto;
     if (it.castrado === true && it.reprodutor === true) erros.push(det_('reprodutor', 'CASTRADO_REPRODUTOR', 'animal castrado não pode ser reprodutor'));
     if (cv.params.brinco_somente_numerico === true && !vazio_(it.brinco) && !/^\d+$/.test(String(it.brinco).replace(/\s+/g, ''))) erros.push(det_('brinco', 'BRINCO_NAO_NUMERICO', 'o brinco precisa ter só números'));
@@ -506,8 +533,19 @@ var ImportService = (function () {
           r.erros.push(det_(cfg[0], cfg[0] === 'mae' ? 'MAE_NAO_ENCONTRADA' : 'PAI_NAO_ENCONTRADO', 'há mais de um animal de referência chamado "' + b + '". Use o código interno dele (A-000…) nesta coluna'));
           return;
         }
+        var codigoNF = cfg[0] === 'mae' ? 'MAE_NAO_ENCONTRADA' : 'PAI_NAO_ENCONTRADO';
+        var oProg = cfg[0] === 'mae' ? 'a mãe' : 'o pai';
+        if (naBase && naBase.ambiguo_brinco) {
+          r.erros.push(det_(cfg[0], codigoNF, 'o brinco ' + b + ' estava em mais de um animal no marco zero (' + br_(cv.D0) + '): informe o código interno ' + (cfg[0] === 'mae' ? 'da mãe' : 'do pai') + ' (A-000…) nesta coluna'));
+          return;
+        }
+        if (naBase && naBase.sem_uso !== undefined) {
+          var saiu = naBase.sem_uso ? ' (saiu do animal ' + naBase.sem_uso.animal.codigo_interno + ' em ' + br_(naBase.sem_uso.ate) + ')' : '';
+          r.erros.push(det_(cfg[0], codigoNF, 'o brinco ' + b + ' não estava em uso no marco zero (' + br_(cv.D0) + ')' + saiu + ': informe o código interno ' + (cfg[0] === 'mae' ? 'da mãe' : 'do pai') + ' (A-000…) nesta coluna ou corrija o brinco'));
+          return;
+        }
         if (!noArq && !naBase) {
-          r.erros.push(det_(cfg[0], cfg[0] === 'mae' ? 'MAE_NAO_ENCONTRADA' : 'PAI_NAO_ENCONTRADO', (cfg[0] === 'mae' ? 'a mãe' : 'o pai') + ' de brinco ' + b + ' não está no arquivo nem no rebanho. Deixe em branco (desconhecido), cadastre-' + (cfg[0] === 'mae' ? 'a' : 'o') + ' antes como animal de referência ou corrija o brinco'));
+          r.erros.push(det_(cfg[0], codigoNF, oProg + ' de brinco ' + b + ' não está no arquivo nem no rebanho. Deixe em branco (desconhecido), cadastre-' + (cfg[0] === 'mae' ? 'a' : 'o') + ' antes como animal de referência ou corrija o brinco'));
           return;
         }
         var sexo = noArq ? noArq.item.sexo : naBase.sexo;
@@ -1020,7 +1058,14 @@ var ImportService = (function () {
       if (atual.blocos.proximo !== null) throw Validation.erro('CONFLICT', 'Ainda faltam blocos a importar (próximo: ' + atual.blocos.proximo + '). Use "Retomar".');
       Maintenance.backup(ctx, { motivo: 'IMPORTACAO' });
     }
-    return UnitOfWork.run(ctx, comando);
+    try {
+      return UnitOfWork.run(ctx, comando);
+    } catch (e) {
+      // A trava recusou a conclusão (o estado mudou depois da validação): a importação continua em curso e bloqueia os
+      // demais lançamentos, então a mensagem diz o único caminho que funciona (RELATORIO_FASE2, decisão 3).
+      if (!Validation.ehAppError(e) || (e.code !== 'VALIDATION' && e.code !== 'CONFLICT') || !(e.details || []).some(function (x) { return /^INTEGRIDADE_/.test(x.codigo || ''); })) throw e;
+      throw Validation.erro(e.code, String(e.message).replace(/\s*Nada foi gravado\.$/, '') + ' A importação continua em andamento, e os outros lançamentos ficam recusados enquanto ela estiver assim: só o desfazer resolve — desfaça a importação, corrija o arquivo e importe de novo. Nada foi gravado.', e.details);
+    }
   }
   /**
    * Evento da importação que o dono corrigiu depois: o substituto (fora da importação) ocupa o lugar dele (04, seção 1)
@@ -1641,7 +1686,9 @@ var ImportService = (function () {
   function reprojetar_(ens, animais, eventos) {
     var p = Repository.plano();
     Timeline.reconstruir({ repo: ens.rep.publico(), cru: ens.rep.leituraCrua(), plano: p, agora: ens.tx.agora, ctx: ens.tx.ctx }, { animais: animais, eventos: eventos });
-    p.atualizacoes().forEach(function (u) { ens.rep.alterar(u.tabela, u.id, u.campos); });
+    var atualizacoes = p.atualizacoes();
+    atualizacoes.forEach(function (u) { ens.rep.alterar(u.tabela, u.id, u.campos); });
+    return atualizacoes;
   }
   function txDoEnsaio_(ens) {
     var tx = ens.tx;
@@ -1666,7 +1713,7 @@ var ImportService = (function () {
       ens.proxima[t] += regs.length;
     });
     var ids = Utils.unicos((linhas.EVENTO_ANIMAIS || []).map(function (l) { return l.animal_id; }));
-    reprojetar_(ens, ids, (linhas.EVENTOS || []).map(function (e) { return e.event_id; }));
+    return reprojetar_(ens, ids, (linhas.EVENTOS || []).map(function (e) { return e.event_id; }));
   }
   /** Índice de cadastros para ler as linhas: o da validação de animais + listas por código e rótulo e parceiros. */
   function contextoEventos_(tx) {
@@ -1846,8 +1893,9 @@ var ImportService = (function () {
       if (!hist) dados.parcelas = parcelasDoGrupo_(g, g.data);
       // 0,00 na planilha quer dizer "não houve" (03b, seção 4.1: frete e outros custos 0,00 se não houver): sem lançamento.
       dados.custos = [];
-      if (typeof g.cab.frete === 'number' && g.cab.frete > 0) dados.custos.push({ tipo: 'FRETE', valor: g.cab.frete });
-      if (typeof g.cab.outros_custos === 'number' && g.cab.outros_custos > 0) dados.custos.push({ tipo: 'OUTRO', valor: g.cab.outros_custos });
+      dados.colunasDosItens = { custos: [], deducoes: [] };
+      if (typeof g.cab.frete === 'number' && g.cab.frete > 0) { dados.custos.push({ tipo: 'FRETE', valor: g.cab.frete }); dados.colunasDosItens.custos.push(modelo.campos.frete.rotulo); }
+      if (typeof g.cab.outros_custos === 'number' && g.cab.outros_custos > 0) { dados.custos.push({ tipo: 'OUTRO', valor: g.cab.outros_custos }); dados.colunasDosItens.custos.push(modelo.campos.outros_custos.rotulo); }
       if (vazio_(campos.pasto_destino_id)) {
         var primeiro = dados.animais.filter(function (x) { return !vazio_(x.pasto_destino_id); })[0];
         if (primeiro) campos.pasto_destino_id = primeiro.pasto_destino_id;
@@ -1858,11 +1906,13 @@ var ImportService = (function () {
       // Uma dedução por coluna com valor; 0,00 = "não houve" (sem lançamento). A marca de descontada pelo comprador
       // vem da coluna dela (ou do valor para todas as linhas); sem ela, não descontada, como no formulário.
       dados.deducoes = [];
+      dados.colunasDosItens = { custos: [], deducoes: [] };
       Object.keys(modelo.campos).forEach(function (k) {
         var d = modelo.campos[k];
         if (!d.deducao || typeof g.cab[k] !== 'number' || g.cab[k] <= 0) return;
         var marca = Object.keys(modelo.campos).filter(function (j) { return modelo.campos[j].retida_de === k; })[0];
         dados.deducoes.push({ tipo: d.deducao, valor: g.cab[k], retida_pelo_comprador: !!marca && g.cab[marca] === true });
+        dados.colunasDosItens.deducoes.push(d.rotulo);
       });
     }
     return { dados: dados, porLinha: porLinha, erros: erros };
@@ -1920,6 +1970,9 @@ var ImportService = (function () {
       var etx = txDoEnsaio_(ens);
       var rotulos = modelo.evento === 'NASCIMENTO' ? ['Linha ' + g.linhas[0].linha_num] : g.linhas.filter(function (x) { return !r.erros[x.linha_num]; }).map(function (x) { return 'Linha ' + x.linha_num; });
       var res;
+      // As colunas de cada item (frete, funrural...) ficam aqui: o motor recebe só o pedido do formulário.
+      var colunasDosItens = mont.dados.colunasDosItens || { custos: [], deducoes: [] };
+      delete mont.dados.colunasDosItens;
       try {
         res = EventService.planejarEventoImportado(etx, mont.dados, {
           importacao: { import_id: o.importId }, rotulos: rotulos,
@@ -1933,16 +1986,29 @@ var ImportService = (function () {
           return { codigo: d.codigo || 'CONFLITO', campo: d.campo || null, animal_id: d.animal_id || null, mensagem: d.mensagem + (c && c.event_id ? ' (registro de ' + br_(c.data) + ' já gravado)' : '') };
         }) };
       }
+      // A trava única de integridade também no ensaio (CONTRATOS, seção 10.5): o evento planejado passa a valer num retrato
+      // separado, e as checagens de domínio conferem o estado que ficaria (o bloco grava os eventos ainda pendentes, que a
+      // trava do comando real não enxerga; só a conclusão os faz valer). O que só a trava recusa vira motivo da linha na
+      // validação e no bloco, nunca uma conclusão impossível.
+      var antes = ens.rep;
+      if (!res.erros) {
+        ens.rep = antes.bifurcar();
+        var projecoes = aplicarNoEnsaio_(ens, etx.plano);
+        var recusa = travarNoEnsaio_(ens, antes, etx.plano, res, projecoes);
+        if (recusa) {
+          ens.rep = antes;
+          res = { erros: (recusa.details || []).map(function (d) { return { codigo: d.codigo, campo: d.campo || null, animal_id: d.animal_id || null, mensagem: d.mensagem }; }) };
+        }
+      }
       if (res.erros) {
         res.erros.forEach(function (d) {
-          linhasDoErro_(g, d, r.porLinha).forEach(function (n) { (r.erros[n] = r.erros[n] || []).push(det_(d.campo || null, d.codigo, String(d.mensagem || '').replace(/^Linha \d+: /, ''))); });
+          linhasDoErro_(g, d, r.porLinha).forEach(function (n) { (r.erros[n] = r.erros[n] || []).push(det_(d.campo || null, d.codigo, naLinguagemDaPlanilha_(d.mensagem, colunasDosItens))); });
         });
         return;
       }
       r.ok = true;
       r.resultado = res;
       r.plano = etx.plano;
-      aplicarNoEnsaio_(ens, etx.plano);
       if (o.copiar) {
         var ls = etx.plano.linhas();
         Object.keys(ls).forEach(function (t) { ls[t].forEach(function (x) { o.copiar.anexar(t, x); }); });
@@ -1950,6 +2016,58 @@ var ImportService = (function () {
       }
     });
     return out;
+  }
+  /**
+   * A mensagem do motor na linguagem da planilha que o dono enviou (correção da rodada 2): sem o "Linha N:" (a linha já é
+   * a da mensagem) e, no frete, nos outros custos e nas deduções, a coluna de origem no lugar de "Custo k"/"Dedução k" e do
+   * campo do formulário, que a planilha não tem.
+   */
+  function naLinguagemDaPlanilha_(mensagem, colunas) {
+    return String(mensagem || '').replace(/^Linha \d+: /, '').replace(/^(Custo|Dedução) (\d+): ([\s\S]*)$/, function (tudo, qual, n, resto) {
+      var col = ((qual === 'Custo' ? colunas.custos : colunas.deducoes) || [])[Number(n) - 1];
+      if (!col) return tudo;
+      return 'coluna "' + col + '": ' + resto.replace(/ e não pode ser escolhido em "[^"]*"\./, ': reative-o em Configurações › Listas para importar esta coluna.').replace(/ em "[^"]*"/, '');
+    });
+  }
+  /**
+   * A trava de integridade sobre o ensaio: o retrato de antes (o ensaio até o evento anterior) e o de depois (com o evento
+   * valendo e os animais reprojetados), pelas mesmas checagens e o mesmo escopo do comando real. Devolve a recusa
+   * (VALIDATION/CONFLICT INTEGRIDADE_<CHECAGEM>) ou null.
+   */
+  function travarNoEnsaio_(ens, antes, plano, res, projecoes) {
+    var lote = plano.linhas();
+    var sementes = AuditService.sementesDaTrava(lote, plano.mudancas(), res.derivados);
+    if (!sementes.dominio && !sementes.linhas.length) return null;
+    var t0 = ens.tx;
+    var txDe = function (rep) { return { repo: rep.publico(), cru: rep.leituraCrua(), plano: Repository.plano(), agora: t0.agora, hoje: t0.hoje, usuario: t0.usuario, novoId: t0.novoId, ctx: t0.ctx }; };
+    var args = {
+      antes: txDe(antes), depois: txDe(ens.rep), sementes: sementes, lote: lote, projecoes: projecoes, derivados: res.derivados,
+      projetor: t0.ctx.projecoes || Timeline.porta(), proprios: AuditService.propriosDoLote(lote),
+    };
+    try {
+      var r = AuditService.travar(args);
+      // Quarentena (a fonte quebrada à mão que o evento só alcança pela reconstrução): o ensaio volta essas projeções ao
+      // que eram e confere de novo, como o comando real.
+      for (var volta = 0; r && r.refazer_sem && volta < 3; volta++) {
+        var fora = {};
+        r.refazer_sem.forEach(function (k) { fora[k] = true; });
+        args.projecoes = projecoes.filter(function (u) {
+          if (!fora[u.tabela + '\u0000' + u.id]) return true;
+          var era = antes.cruPorId(u.tabela, u.id);
+          var volta_ = {};
+          Object.keys(u.campos).forEach(function (c) { volta_[c] = era ? era[c] : null; });
+          ens.rep.alterar(u.tabela, u.id, volta_);
+          return false;
+        });
+        args.depois = txDe(ens.rep);
+        args.quarentena = r.refazer_sem;
+        r = AuditService.travar(args);
+      }
+      return null;
+    } catch (e) {
+      if (!Validation.ehAppError(e) || (e.code !== 'VALIDATION' && e.code !== 'CONFLICT')) throw e;
+      return e;
+    }
   }
   /** Resultado da validação por linha, a partir do agrupamento e do ensaio (VALIDA só com o evento inteiro válido). */
   function resultadoPorLinha_(ag, ensaio, modelo) {
@@ -2141,6 +2259,18 @@ var ImportService = (function () {
    * fotografia (ENTRADA_INICIAL); divergências por animal e por pasto, cada uma com a explicação e o que fazer; e os
    * brincos citados em linhas de importação de eventos sem animal na base. Não bloqueia nada (RN-095).
    */
+  /**
+   * O animal da fotografia que pode ser a mesma cria `a` de um parto antigo: na fotografia, nascido no mesmo dia, com a
+   * mesma mãe ou sem mãe informada, e sem parto registrado. null se não há.
+   */
+  function mesmoDaFotografia_(tx, a, foto) {
+    if (!a || !Utils.dataValida(a.data_nascimento)) return null;
+    var cria = {};
+    tx.repo.vigentes('EVENTO_ANIMAIS').forEach(function (l) { if (l.papel === 'CRIA') cria[l.animal_id] = true; });
+    return Object.keys(foto).map(function (id) { return foto[id].fora ? null : tx.repo.porId('ANIMAIS', id); }).filter(function (y) {
+      return y && y.animal_id !== a.animal_id && !cria[y.animal_id] && y.data_nascimento === a.data_nascimento && (vazio_(y.mae_id) || y.mae_id === a.mae_id);
+    })[0] || null;
+  }
   function reconciliacao_(tx) {
     var params = Timeline.parametros(tx.repo);
     var fonte = tx.cru ? Timeline.fonte(tx, { parametros: params }) : null;
@@ -2223,6 +2353,16 @@ var ImportService = (function () {
       base.codigo = dif.codigo;
       base.explicacao = dif.explicacao;
       base.acao = ACOES_RECONCILIACAO[dif.codigo];
+      // A cria de um parto antigo fora da fotografia, quando a fotografia tem um animal com o mesmo nascimento e a mesma
+      // mãe (ou sem mãe informada) que não veio de parto: é o mesmo bezerro. "Outra entrada" o poria duas vezes no
+      // rebanho; a ação aponta o animal da fotografia e o caminho que desfaz a cópia (04, seção 6).
+      var mesmo = dif.codigo === 'FORA_DA_FOTOGRAFIA' && dif.evento && dif.evento.ev.event_type === 'NASCIMENTO' && dif.evento.l.papel === 'CRIA' ? mesmoDaFotografia_(tx, a, foto) : null;
+      if (mesmo) {
+        var nomeMesmo = mesmo.codigo_interno + (vazio_(mesmo.brinco) ? '' : ' (brinco ' + mesmo.brinco + ')');
+        base.mesmo_animal = { animal_id: mesmo.animal_id, codigo_interno: mesmo.codigo_interno, brinco: nulo_(mesmo.brinco) };
+        base.explicacao += ' A fotografia tem ' + nomeMesmo + ', nascido no mesmo dia' + (vazio_(mesmo.mae_id) ? ', sem a mãe informada' : ' e da mesma mãe') + ', que não veio de parto registrado.';
+        base.acao = 'Este animal parece ser ' + nomeMesmo + ', da fotografia: o parto antigo criou uma cópia dele, porque a cria de um parto é sempre um animal novo. Não lance "Outra entrada" para ele (poria o mesmo bezerro duas vezes no rebanho): estorne o parto antigo ou desfaça a importação dele, e, se faltar, informe a mãe de ' + nomeMesmo + ' em "Corrigir dados do animal". Se são mesmo dois animais, lance a entrada deste por "Outra entrada" datada do marco zero.';
+      }
       base.evento = dif.evento ? { event_id: dif.evento.ev.event_id, tipo: dif.evento.ev.event_type, subtipo: nulo_(dif.evento.ev.event_subtype), data: dif.evento.ev.event_date, nome: EventCatalog.nomeEvento(dif.evento.ev.event_type, dif.evento.ev.event_subtype) } : null;
       animais.push(base);
     });
