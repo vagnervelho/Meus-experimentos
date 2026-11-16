@@ -2271,8 +2271,8 @@ entrou:
 | Cobertura (`COBERTURA`, exportado) | Quantas vezes cada oráculo novo conferiu algo de verdade; as sementes fixas (agora 22: entrou a 262, a primeira das pequenas em que uma venda entra na carência) exigem cada um: bloco reenviado depois de gravado, chave conferida CONFIRMADA e INEXISTENTE, estoque abaixo de zero pelo comando, venda que entrou na carência, pendências e carências da agenda, dose por kg, intervalos de GMD e estação com indicadores |
 
 Medidas de que os oráculos novos enxergam (mutações numa cópia do projeto, `src/` mudado de propósito): sem o aviso
-ESTOQUE_INSUFICIENTE, 16 de 32 sementes falham (`AVISO:ESTOQUE_SEM_AVISO`, também pelo estorno da compra consumida); com
-a dose por kg em duas casas, 3 de 32 (`EFEITO:SANIDADE`); sem a carência contra a venda gravada, 1 de 40
+ESTOQUE_INSUFICIENTE e com a dose por kg em duas casas, juntos, 20 de 32 sementes falham (17 por `AVISO:ESTOQUE_SEM_AVISO`,
+3 por `EFEITO:SANIDADE`); sem a carência contra a venda gravada, 1 de 40
 (`AVISO:CARENCIA_SEM_AVISO`); com a idade mínima do protocolo contada errado (≤ em vez de <), 2 de 24
 (`AGENDA:PENDENCIAS`). Mudar o intervalo do protocolo na conta da agenda não muda nada: a próxima de cada aplicação com
 protocolo é gravada no registro (o intervalo só vale para a aplicação sem a próxima).
