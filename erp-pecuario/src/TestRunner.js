@@ -692,14 +692,18 @@ var TestRunner = (function () {
       },
     },
     {
-      id: 'SANIDADE', titulo: 'Casos de regra da sanidade (09, seção 4.1): lote vencido, estoque insuficiente, carência na venda para abate antes, dentro e depois do prazo, agenda de aplicação única',
+      id: 'SANIDADE', titulo: 'Casos de regra da sanidade (09, seção 4.1): lote vencido, estoque insuficiente, carência na agenda e na venda para abate antes, dentro e depois do prazo (05, seção 4.8), o exemplo de 05, seção 4.7 (bezerra de 3 a 8 meses), agenda de aplicação única',
       executar: function (t) {
         var P = t.pastos('SAN', ['Pasto S']);
         var ids;
         var prod;
         var frig;
-        t.passo('massa', 'Três bois e uma bezerra no Pasto S; produto com 20 doses no estoque; frigorífico', function () {
-          ids = ids_(t.cmd('evento.registrar', entrada_(['S1', 'S2', 'S3'].map(function (b) { return bicho_(t, { brinco: b, sexo: 'M', castrado: true, data_nascimento: t.dia(-900), pasto_destino_id: P['Pasto S'] }); })), 'san-massa'));
+        var bezerra;
+        t.passo('massa', 'Três bois e uma vaca no Pasto S, com a bezerra dela nascida em D0+40; produto com 20 doses no estoque; frigorífico', function () {
+          ids = ids_(t.cmd('evento.registrar', entrada_(['S1', 'S2', 'S3'].map(function (b) { return bicho_(t, { brinco: b, sexo: 'M', castrado: true, data_nascimento: t.dia(-900), pasto_destino_id: P['Pasto S'] }); })
+            .concat([bicho_(t, { brinco: 'S4', data_nascimento: t.dia(-2000), partos_previos: 1, pasto_destino_id: P['Pasto S'] })])), 'san-massa'));
+          var parto = t.cmd('evento.registrar', nascimento_(t.dia(40), ids.S4, [{ situacao_nascimento: 'VIVO', sexo: 'F' }]), 'san-parto');
+          bezerra = parto.animais.filter(function (a) { return a.animal_id !== ids.S4; })[0].animal_id;
           prod = t.cmd('produto.salvar', { campos: { nome: 'Vacina S (aceitação)', categoria: 'VACINA', unidade: 'dose', custo_unitario: 2, controla_estoque: true } }, 'san-produto');
           t.cmd('evento.registrar', { tipo: 'ESTOQUE', subtipo: 'ENTRADA', campos: { event_date: t.dia(10), product_id: prod.product_id, quantidade: 20, valor: 4000 } }, 'san-entrada');
           frig = t.parceiro('Frigorífico (sanidade)', 'COMPRADOR', 'san-frig');
@@ -711,13 +715,36 @@ var TestRunner = (function () {
           t.cmd('evento.registrar', d, 'san-avisos', { avisos: ['ESTOQUE_INSUFICIENTE', 'PRODUTO_VENCIDO'] });
           igual_(t.tabela('PRODUTOS').filter(function (p) { return p.product_id === prod.product_id; })[0].estoque_atual, -10, 'o saldo negativo aceito fica visível');
         });
-        t.passo('072', 'Vermífugo em D0+100 com 35 dias: abate em D0+120 e no último dia (D0+135) bloqueado; em D0+136 livre; recria dentro do prazo pede aceite', function () {
-          t.cmd('evento.registrar', { tipo: 'SANIDADE', subtipo: 'VERMIFUGACAO', campos: { event_date: t.dia(100), nome_produto: 'Ivermectina 1%', modo_dose: 'POR_CABECA', dose_referencia: 5, unidade_dose: 'mL', periodo_carencia_dias: 35 }, animais: [{ animal_id: ids.S1 }, { animal_id: ids.S2 }] }, 'san-verm');
+        t.passo('072', 'Vermífugo em D0+100 com 35 dias (05, seção 4.8): carência até D0+135 na aplicação e na agenda (no dia, no último dia e livre no seguinte); abate em D0+120 e no último dia bloqueado, em D0+136 livre; a recria dentro do prazo pede o aceite e, aceita, grava com ele', function () {
+          var ev = t.cmd('evento.registrar', { tipo: 'SANIDADE', subtipo: 'VERMIFUGACAO', campos: { event_date: t.dia(100), nome_produto: 'Ivermectina 1%', modo_dose: 'POR_CABECA', dose_referencia: 5, unidade_dose: 'mL', periodo_carencia_dias: 35 }, animais: [{ animal_id: ids.S1 }, { animal_id: ids.S2 }] }, 'san-verm');
+          igual_(t.doEvento('SANIDADE', ev.event_id).map(function (l) { return l.data_fim_carencia; }), [t.dia(135), t.dia(135)], 'C = aplicação + 35 dias (o último dia de carência)');
+          var emCarencia = function (d) { return t.ok(t.api('sanidade.agenda', { data: d }), 'agenda').carencia.filter(function (c) { return c.animal_id === ids.S1 || c.animal_id === ids.S2; }).map(function (c) { return [c.animal_id, c.fim]; }).sort(); };
+          var ambos = [[ids.S1, t.dia(135)], [ids.S2, t.dia(135)]].sort();
+          igual_([emCarencia(t.dia(100)), emCarencia(t.dia(135)), emCarencia(t.dia(136))], [ambos, ambos, []], 'agenda: em carência no dia e no último dia; livres no seguinte');
           var venda = function (data, fin, id) { return { tipo: 'VENDA', campos: { event_date: data, partner_id: frig, finalidade: fin, modalidade: 'CABECA', preco_unitario: 400000, valor_bruto: 400000 }, animais: [{ animal_id: id }], parcelas: [{ data_vencimento: data }] }; };
           igual_(t.recusa('evento.registrar', venda(t.dia(120), 'ABATE', ids.S1), 'VALIDATION', 'san-abate-dentro').details.map(function (x) { return x.codigo; }), ['CARENCIA_ATIVA'], 'dentro');
           igual_(t.recusa('evento.registrar', venda(t.dia(135), 'ABATE', ids.S1), 'VALIDATION', 'san-abate-ultimo').details.map(function (x) { return x.codigo; }), ['CARENCIA_ATIVA'], 'último dia');
           t.cmd('evento.registrar', venda(t.dia(136), 'ABATE', ids.S1), 'san-abate-livre');
           igual_(t.recusa('evento.registrar', venda(t.dia(120), 'RECRIA_ENGORDA', ids.S2), 'NEEDS_CONFIRMATION', 'san-recria').details.map(function (x) { return x.codigo; }), ['CARENCIA_ATIVA'], 'recria: aviso');
+          var recria = t.cmd('evento.registrar', venda(t.dia(120), 'RECRIA_ENGORDA', ids.S2), 'san-recria', { avisos: ['CARENCIA_ATIVA'] });
+          verificar_((t.evento(recria.event_id).payload.avisos_aceitos || []).some(function (a) { return a.codigo === 'CARENCIA_ATIVA'; }), 'o aceite da carência fica gravado com a venda');
+        });
+        t.passo('058-4.7', 'O exemplo de 05, seção 4.7 (protocolo de aplicação única para fêmeas de 3 a 8 meses), com as datas contadas do nascimento da bezerra (D0+40): antes dos 3 meses fora; dos 3 meses em diante elegível e em dia; 10 dias antes dos 8 meses, próxima com o vencimento nos 8 meses; aplicada dentro da faixa, cumprida', function () {
+          var pr = t.cmd('protocolo.salvar', { campos: { nome: 'Brucelose (aceitação)', tipo_procedimento: 'VACINA', sexo_aplicavel: 'F', idade_min_meses: 3, idade_max_meses: 8, recorrencia_tipo: 'UNICA', antecedencia_alerta_dias: 15 } }, 'san-47');
+          var nasc = t.dia(40);
+          var tres = Utils.somaMeses(nasc, 3);
+          var oito = Utils.somaMeses(nasc, 8);
+          var agenda = function (d) { return t.ok(t.api('sanidade.agenda', { data: d }), 'agenda'); };
+          var dela = function (a) { return a.pendencias.filter(function (p) { return p.protocol_id === pr.protocol_id && p.animal_id === bezerra; }).map(function (p) { return [p.situacao, p.vencimento]; }); };
+          var elegiveis = function (a) { var x = a.protocolos.filter(function (p) { return p.protocol_id === pr.protocol_id; })[0]; return x ? x.elegiveis : 0; };
+          var antes = agenda(Utils.somaDias(tres, -1));
+          var aos3 = agenda(tres);
+          igual_([dela(antes), dela(aos3)], [[], []], 'antes dos 3 meses fora; aos 3 meses, em dia (o vencimento é aos 8)');
+          verificar_(elegiveis(aos3) === elegiveis(antes) + 1, 'aos 3 meses a bezerra entra entre as elegíveis (' + elegiveis(antes) + ' → ' + elegiveis(aos3) + ')');
+          igual_(dela(agenda(Utils.somaDias(oito, -10))), [['PROXIMA', oito]], '10 dias antes dos 8 meses: próxima, vencendo aos 8 meses');
+          t.cmd('evento.registrar', { tipo: 'SANIDADE', subtipo: 'VACINACAO', campos: { event_date: Utils.somaDias(oito, -5), protocol_id: pr.protocol_id, nome_produto: 'Vacina B19', modo_dose: 'POR_CABECA', dose_referencia: 2, unidade_dose: 'mL' }, animais: [{ animal_id: bezerra }] }, 'san-47-b19');
+          igual_(dela(agenda(Utils.somaDias(oito, -1))), [], 'aplicada dentro da faixa: cumprida');
+          t.cmd('protocolo.salvar', { protocol_id: pr.protocol_id, campos: { ativo: false } }, 'san-47-fim');
         });
         t.passo('058-059', 'Protocolo de aplicação única para machos a partir de 24 meses: antes do vencimento, em dia; a agenda e os alertas mostram a pendência vencida; aplicada, cumprida', function () {
           var pr = t.cmd('protocolo.salvar', { campos: { nome: 'Única (aceitação)', tipo_procedimento: 'VACINA', sexo_aplicavel: 'M', idade_min_meses: 24, recorrencia_tipo: 'UNICA' } }, 'san-unica');
@@ -733,7 +760,59 @@ var TestRunner = (function () {
       },
     },
     {
-      id: 'REPRODUCAO', titulo: 'Casos de regra da reprodução (09, seção 4.1): macho como sujeito de diagnóstico, parto de fêmea de 20 meses, segundo parto 200 dias depois; a estação de RN-066 (40 expostas: prenhez 80,0%, parição 75,0%, natalidade 77,5%; com 4 expostas, null); desmama, castração e ocorrência',
+      id: 'ESTOQUE', titulo: 'Estoque de insumos pelo exemplo de 03a, seção 4.7: entrada por embalagem, saída na vacinação, perda, contagem e estorno da aplicação; o saldo é a soma dos movimentos e o consumo vira custo sem caixa',
+      executar: function (t) {
+        var P = t.pastos('EST', ['Pasto E']);
+        var ids;
+        var prod;
+        var vac;
+        var saldo = function () { return t.tabela('PRODUTOS').filter(function (p) { return p.product_id === prod; })[0].estoque_atual; };
+        var movimentos = function () {
+          var vig = mapa_(t.tabela('EVENTOS'), 'event_id', 'status');
+          return t.tabela('MOVIMENTOS_ESTOQUE').filter(function (m) { return m.product_id === prod && vig[m.event_id] === 'CONFIRMADO'; });
+        };
+        t.passo('massa', '30 bezerros no Pasto E; "Vacina X (estoque)" em frascos de 50 doses, R$ 1,80 por dose, com o estoque controlado', function () {
+          var bs = [];
+          for (var i = 1; i <= 30; i++) bs.push('E' + (i < 10 ? '0' : '') + i);
+          var por = ids_(t.cmd('evento.registrar', entrada_(bs.map(function (b) { return bicho_(t, { brinco: b, data_nascimento: t.dia(-150), pasto_destino_id: P['Pasto E'] }); })), 'est-massa'));
+          ids = bs.map(function (b) { return por[b]; });
+          prod = t.cmd('produto.salvar', { campos: { nome: 'Vacina X (estoque)', categoria: 'VACINA', unidade: 'dose', custo_unitario: 1.8, controla_estoque: true, fator_conversao: 50 } }, 'est-produto').product_id;
+        });
+        t.passo('entrada', 'Entrada de 2 frascos (R$ 180,00): 100 doses; a compra de insumo vai para o caixa (parcela) e não é custo dos animais', function () {
+          var e = t.cmd('evento.registrar', { tipo: 'ESTOQUE', subtipo: 'ENTRADA', campos: { event_date: t.dia(60), product_id: prod, qtd_apresentacao: 2, valor: 18000, documento: 'NF 123', vencimento: t.dia(90) } }, 'est-entrada');
+          igual_(t.doEvento('MOVIMENTOS_ESTOQUE', e.event_id).map(function (m) { return [m.tipo, m.quantidade, m.custo_unitario]; }), [['ENTRADA', 100, 1.8]], 'movimento de entrada');
+          var fin = t.doEvento('FINANCEIRO', e.event_id);
+          igual_(fin.map(function (f) { return [f.natureza, f.valor, f.quantidade, f.status_pagamento]; }), [['ESTOQUE_INSUMOS', 18000, 100, 'ABERTO']], 'compra de insumos');
+          igual_(t.tabela('PARCELAS').filter(function (p) { return p.financial_id === fin[0].financial_id; }).map(function (p) { return [p.data_vencimento, p.valor]; }), [[t.dia(90), 18000]], 'caixa no vencimento');
+          igual_(t.tabela('RATEIOS').filter(function (r) { return r.financial_id === fin[0].financial_id; }).length, 0, 'sem rateio aos animais');
+          igual_(saldo(), 100, 'saldo');
+        });
+        t.passo('saida-perda', 'Vacinação dos 30 (30 doses: R$ 54,00 sem caixa, R$ 1,80 por animal) e a perda de 5 doses por frasco quebrado: 100 − 30 − 5 = 65', function () {
+          vac = t.cmd('evento.registrar', { tipo: 'SANIDADE', subtipo: 'VACINACAO', campos: { event_date: t.dia(70), produto_id: prod, modo_dose: 'POR_CABECA', dose_referencia: 1 }, animais: ids.map(function (id) { return { animal_id: id }; }) }, 'est-vacina');
+          var consumo = t.doEvento('FINANCEIRO', vac.event_id);
+          igual_(consumo.map(function (f) { return [f.natureza, f.valor, f.quantidade, f.status_pagamento]; }), [['CUSTEIO', 5400, 30, 'SEM_CAIXA']], '30 × R$ 1,80');
+          var al = t.tabela('ALOCACOES_FINANCEIRAS').filter(function (a) { return a.financial_id === consumo[0].financial_id; });
+          igual_([al.length, al.every(function (a) { return a.valor_alocado === 180; })], [30, true], 'R$ 1,80 por animal');
+          var perda = t.cmd('evento.registrar', { tipo: 'ESTOQUE', subtipo: 'AJUSTE', campos: { event_date: t.dia(80), product_id: prod, motivo_ajuste: 'PERDA', quantidade: 5, notes: 'Frasco quebrado' } }, 'est-perda');
+          igual_([t.doEvento('MOVIMENTOS_ESTOQUE', perda.event_id).map(function (m) { return [m.tipo, m.quantidade]; }), t.doEvento('FINANCEIRO', perda.event_id).length], [[['AJUSTE', -5]], 0], 'o acerto é só movimento, sem lançamento');
+          igual_(saldo(), 65, '100 − 30 − 5');
+        });
+        t.passo('contagem', 'Contagem em D0+90 achou 60 doses: o acerto lança a diferença (−5); saldo 60', function () {
+          var c = t.cmd('evento.registrar', { tipo: 'ESTOQUE', subtipo: 'AJUSTE', campos: { event_date: t.dia(90), product_id: prod, motivo_ajuste: 'CONTAGEM', saldo_contado: 60 } }, 'est-contagem');
+          igual_(t.doEvento('MOVIMENTOS_ESTOQUE', c.event_id).map(function (m) { return [m.tipo, m.quantidade]; }), [['AJUSTE', -5]], 'contado − saldo na data');
+          igual_(saldo(), 60, 'saldo');
+        });
+        t.passo('estorno', 'Estorno da vacinação: as 30 doses voltam (90), o consumo fica cancelado e o saldo continua igual à soma dos movimentos vigentes', function () {
+          t.cmd('evento.estornar', { event_id: vac.event_id, justificativa: 'Vacinação lançada no lote errado' }, 'est-estorno', { avisos: [] });
+          igual_(saldo(), 90, '60 + 30');
+          verificar_(t.doEvento('FINANCEIRO', vac.event_id).every(function (f) { return f.status === 'CANCELADO'; }), 'o consumo da aplicação estornada fica cancelado');
+          igual_(movimentos().reduce(function (x, m) { return x + (m.tipo === 'SAIDA' ? -m.quantidade : m.quantidade); }, 0), 90, 'saldo = Σ dos movimentos vigentes');
+        });
+        t.passo('fim', 'Projeção = reconstrução e financeiro sem divergência', function () { return t.integra('ESTOQUE'); });
+      },
+    },
+    {
+      id: 'REPRODUCAO', titulo: 'Casos de regra da reprodução (09, seção 4.1): macho como sujeito de diagnóstico, parto de fêmea de 20 meses, segundo parto 200 dias depois; a estação de RN-066 (40 expostas: prenhez 80,0%, parição 75,0%, natalidade 77,5%; com 4 expostas, null); desmama, castração e ocorrência; os desfechos (desmama 75,0%, mortalidade até a desmama 3,2%, perda gestacional 3,1%)',
       executar: function (t) {
         var P = t.pastos('REP', ['Pasto R']);
         var ids;
@@ -788,6 +867,21 @@ var TestRunner = (function () {
           t.cmd('evento.registrar', { tipo: 'CASTRACAO', campos: { event_date: t.hoje(), metodo: 'Burdizzo' }, animais: [{ animal_id: ids.RG }] }, 'rep-castracao');
           igual_([t.animal(ids.RG).castrado, t.animal(ids.RG).reprodutor], [true, false], 'o garrote castrado');
           t.cmd('evento.registrar', { tipo: 'OCORRENCIA', campos: { event_date: t.hoje(), tipo_ocorrencia: 'LESAO', description: 'Mancando da pata traseira' }, animais: [{ animal_id: ids.RT }] }, 'rep-ocorrencia');
+        });
+        t.passo('desfechos', 'Os desfechos da estação (07, seção 8.3): aborto de uma das duas prenhas sem parto, morte de uma cria e a desmama das outras 29 → desmama 30 ÷ 40 = 75,0%, mortalidade até a desmama 1 ÷ 31 = 3,2%, perda gestacional 1 ÷ 32 = 3,1% (parcial: a outra prenha ainda na janela)', function () {
+          t.cmd('evento.registrar', repro('ABORTO', t.dia(250), [{ animal_id: vacas[30], idade_gestacional_dias: 150 }]), 'rep-aborto');
+          var crias = t.tabela('ANIMAIS').filter(function (a) { return vacas.indexOf(a.mae_id) >= 0 && a.data_nascimento === t.dia(300); });
+          igual_(crias.length, 31, 'as 31 crias da estação');
+          var morta = crias.filter(function (a) { return a.mae_id === vacas[2]; })[0];
+          t.cmd('evento.registrar', { tipo: 'MORTE', campos: { event_date: t.dia(330), causa: 'PREDADOR' }, animais: [{ animal_id: morta.animal_id }] }, 'rep-morte-cria');
+          var aDesmamar = crias.filter(function (a) { return a.animal_id !== morta.animal_id && a.mae_id !== ids.R01; });
+          igual_(aDesmamar.length, 29, 'as 31 menos a morta e a da R01, já desmamada');
+          t.cmd('evento.registrar', { tipo: 'DESMAMA', campos: { event_date: t.hoje() }, animais: aDesmamar.map(function (a) { return { animal_id: a.animal_id }; }) }, 'rep-desmama-estacao');
+          var g = t.ok(t.api('reproducao.indicadores', { estacao_id: est.estacao_id }), 'indicadores').estacao.geral;
+          var taxa = function (x) { return [x.valor, x.numerador, x.denominador]; };
+          igual_([g.desmamados, g.mortos_antes_da_desmama, g.crias_ao_pe], [30, 1, 0], 'contagens dos desfechos');
+          igual_([taxa(g.desmama), taxa(g.mortalidade_ate_desmama), taxa(g.perda_gestacional), g.perda_gestacional.parcial], [[75, 30, 40], [3.2, 1, 31], [3.1, 1, 32], 'parcial'], 'desmama, mortalidade até a desmama e perda gestacional');
+          igual_([taxa(g.prenhez), taxa(g.paricao), taxa(g.natalidade)], [[80, 32, 40], [75, 30, 40], [77.5, 31, 40]], 'as taxas de RN-066 não mudam com os desfechos');
         });
         t.passo('fim', 'Projeção = reconstrução e financeiro sem divergência', function () { return t.integra('REPRODUCAO'); });
       },
@@ -1449,6 +1543,8 @@ var TestRunner = (function () {
   /** Início das três estações de monta da demonstração (D0+30, D0+395, D0+760; 90 dias de touro cada). */
   var DEMO_ESTACOES = [30, 395, 760];
   var DIAS_DESMAMA = 240;
+  /** Menor intervalo entre dois partos da mesma vaca no plano: 285 dias de gestação e 55 de resguardo. */
+  var INTERVALO_PARTOS = 340;
   var CAMPANHA_IDENT = 60;
   var CAMPANHA_DESMAMA = 90;
   var DIAS_BOIS = [180, 360, 540, 720, 900, 1080];
@@ -1461,6 +1557,19 @@ var TestRunner = (function () {
    * pastos da recria, no dia seguinte a cada pesagem. Sem carência: a demonstração não fica sem vender para abate.
    */
   var DIAS_VACINA = [130, 310, 490, 670, 850, 1030];
+  /** Castração dos garrotes inteiros do marco zero (Fase 3, aceitação): um mês antes da primeira pesagem da recria. */
+  var DIA_CASTRACAO_GARROTES = 30;
+  /**
+   * Ocorrências do curral da demonstração (Fase 3, aceitação): o dia, o tipo da lista TIPO_OCORRENCIA, a descrição e quem
+   * (o primeiro presente, ou os N primeiros, na ordem do plano, que casam com a condição no dia).
+   */
+  var OCORRENCIAS_DEMO = [
+    { dia: 150, tipo: 'LESAO', descricao: 'Ferida no casco, tratada no curral', n: 1, quem: function (a) { return a.tipo === 'VACA'; } },
+    { dia: 405, tipo: 'APARTACAO', descricao: 'Apartação das novilhas para a estação de monta', n: 30, quem: function (a, p) { return a.sexo === 'F' && p === 3; } },
+    { dia: 615, tipo: 'OBSERVACAO', descricao: 'Touro mancando: observar antes da próxima monta', n: 1, quem: function (a) { return a.tipo === 'TOURO'; } },
+    { dia: 835, tipo: 'DESCORNA', descricao: 'Descorna dos garrotes da recria', n: 20, quem: function (a, p) { return a.sexo === 'M' && p === 4; } },
+    { dia: 1005, tipo: 'FERRA', descricao: 'Marcação a ferro das novilhas', n: 30, quem: function (a, p) { return a.sexo === 'F' && a.tipo === 'NASCIDO' && p === 3; } },
+  ];
 
   /**
    * Os comandos da demonstração, sorteados com semente fixa a partir de D0 (09, seção 7, na parte que as fases entregues
@@ -1550,7 +1659,8 @@ var TestRunner = (function () {
     var velhas = vacas.slice().sort(function (a, b) { return A[a].nasc - A[b].nasc || (a < b ? -1 : 1); });
     venda(300, 'VACAS', velhas.slice(0, 8));
     venda(600, 'VACAS', velhas.slice(8, 16));
-    venda(900, 'VACAS', velhas.slice(16, 25));
+    venda(780, 'VACAS', velhas.slice(16, 20));
+    venda(900, 'VACAS', velhas.slice(20, 25));
     var descartes = [[250, 'CONSUMO_PROPRIO', 'IDADE'], [480, 'DOACAO', 'FALHA_REPRODUTIVA'], [700, 'CONSUMO_PROPRIO', 'IDADE'], [850, 'SACRIFICIO', 'SANITARIO'], [1000, 'PERMUTA', 'TEMPERAMENTO']].map(function (x, j) {
       sai(velhas[25 + j], x[0], 'DESCARTE');
       return { dia: x[0], animal: velhas[25 + j], destino: x[1], motivo: x[2], receita: j === 4 ? 180000 : null };
@@ -1558,7 +1668,8 @@ var TestRunner = (function () {
     var compradas = [];
     compras.forEach(function (c) { c.animais.forEach(function (k) { if (A[k].sexo === 'F') compradas.push(k); }); });
     venda(505, 'NOVILHAS', compradas.slice(0, 8));
-    venda(950, 'NOVILHAS', compradas.slice(8, 16));
+    venda(800, 'NOVILHAS', compradas.slice(8, 12));
+    venda(950, 'NOVILHAS', compradas.slice(12, 16));
     var mortes = [];
     var morte = function (k, d, causa) { sai(k, d, 'MORTE'); mortes.push({ dia: d, animal: k, causa: causa }); };
     mortes.push({ dia: 400, animal: garrotes[47], causa: 'PICADA_COBRA' });
@@ -1566,15 +1677,37 @@ var TestRunner = (function () {
     var livres = vacas.filter(function (k) { return !A[k].saida; });
     var causas = ['DOENCA', 'RAIO', 'PARTO', 'INTOXICACAO', 'PREDADOR', 'DESCONHECIDA', 'ACIDENTE'];
     for (var mo = 0; mo < 7; mo++) morte(livres[(mo * 11 + 5) % livres.length], 90 + mo * 140 + entre(0, 30), causas[mo]);
-    // 4. Partos, do mais cedo ao mais tarde, até 255 nascidos vivos; a fêmea nascida cedo também chega a parir.
+    // 4. Partos pela estação de monta (Fase 3): das vacas sem cria ao pé, 60% chegaram prenhes da estação anterior e parem
+    // nos primeiros 60 dias; em cada estação, a fêmea exposta (25 meses ou mais, no rebanho no primeiro dia) emprenha com
+    // 88% de chance, e o parto cai na janela da estação (início + 285 a + 375 dias), a pelo menos 340 dias do parto anterior
+    // (a vaca que pariu tarde não emprenha na estação seguinte). Do mais cedo ao mais tarde, até 255 nascidos vivos: a última
+    // estação fica com partos por vir (prenhas sem desfecho, janela aberta).
     var cand = [];
-    var agendar = function (k, primeiro) {
-      var a = A[k];
-      var limite = Math.min(a.saida ? a.saida.dia : DEMO_FIM, DEMO_FIM - 2);
-      for (var d = Math.max(primeiro, a.entrada + 1); d < limite; d += entre(355, 430)) if (rnd() >= 0.12) cand.push({ dia: d, mae: k });
-    };
-    vacas.forEach(function (k) { agendar(k, A[k].criaD0 !== undefined ? 365 + A[k].criaD0 + entre(0, 40) : entre(20, 330)); });
-    novilhas.concat(compradas).forEach(function (k) { agendar(k, A[k].nasc + entre(820, 1000)); });
+    var ultimoParto = {};
+    var concebeu = DEMO_ESTACOES.map(function () { return {}; });
+    var presente = function (k, d) { var a = A[k]; return a.entrada <= d && (!a.saida || a.saida.dia >= d); };
+    var podeParir = function (k, d) { var a = A[k]; return a.entrada < d && (!a.saida || a.saida.dia > d) && d <= DEMO_FIM - 2; };
+    vacas.forEach(function (k) {
+      if (A[k].criaD0 !== undefined) { ultimoParto[k] = A[k].criaD0; return; }
+      if (rnd() >= 0.6) return;
+      var d = entre(5, 60);
+      ultimoParto[k] = d;
+      if (podeParir(k, d)) cand.push({ dia: d, mae: k });
+    });
+    DEMO_ESTACOES.forEach(function (ini, y) {
+      ordem.forEach(function (k) {
+        var a = A[k];
+        if (a.sexo !== 'F' || a.tipo === 'ESTORNADA' || a.nasc > ini - 760 || !presente(k, ini)) return;
+        if (rnd() >= 0.88) return;
+        var c = ini + 285 + entre(0, 90);
+        if (ultimoParto[k] !== undefined) c = Math.max(c, ultimoParto[k] + INTERVALO_PARTOS);
+        if (c > ini + 375) return;
+        concebeu[y][k] = c;
+        if (!podeParir(k, c)) return;
+        ultimoParto[k] = c;
+        cand.push({ dia: c, mae: k });
+      });
+    });
     var partos = [];
     var nascidos = [];
     var vivos = 0;
@@ -1593,11 +1726,13 @@ var TestRunner = (function () {
         if (rnd() < 0.6) b.peso = entre(28, 38);
         if (sexo === 'M') { b.castrado = false; b.reprodutor = false; }
         nascidos.push(b.k);
-        if (sexo === 'F') agendar(b.k, c.dia + entre(820, 1000));
         return { situacao_nascimento: 'VIVO', sexo: sexo, k: b.k };
       });
       partos.push({ dia: c.dia, mae: c.mae, crias: crias, tipo_parto: forma.length > 1 ? 'ASSISTIDO' : null });
     }
+    // O limite dos 255 só corta partos da última estação (a janela dela passa do fim da demonstração): o parto cortado de
+    // uma estação encerrada viraria perda gestacional sem ter havido perda.
+    if (cand.some(function (c) { return c.dia < DEMO_ESTACOES[DEMO_ESTACOES.length - 1] + 285; })) throw Validation.erro('INTERNAL', 'O plano da demonstração cortou partos de uma estação encerrada.');
     // 5. As crias: 6 morrem pequenas; desmama aos 8 meses na campanha (machos vendidos até fechar os 240, os demais
     // para a Recria — no último ano, para o pasto arrendado — e as fêmeas para o Pasto das Novilhas).
     var candidatas = nascidos.filter(function (k) { return A[k].nasc < 900 && A[k].sexo === 'M'; });
@@ -1737,11 +1872,44 @@ var TestRunner = (function () {
       });
     });
     if (troca) no(troca.dia, 1, function () { emitir('troca-de-brinco', ident_('SUBSTITUICAO', dia(troca.dia), 'BRINCO', [{ animal_id: ref(troca.animal), codigo: troca.codigo, motivo: 'PERDA' }])); });
+    // Desmama (Fase 3, E3.4): na campanha, um lançamento DESMAMA por pasto de destino, com o peso de cada bezerro (o modelo de
+    // ganho); os vendidos no mesmo dia são desmamados no pasto em que estão, sem pesar (a pesagem deles é a da venda).
     Object.keys(desmamas).forEach(function (w) {
       no(Number(w), 1, function () {
+        var d = Number(w);
+        var vendidosNoDia = desmamas[w].filter(function (k) { return ativo[k] && A[k].saida && A[k].saida.dia === d; });
+        if (vendidosNoDia.length) emitir('desmama-' + w + '-venda', { tipo: 'DESMAMA', campos: { event_date: dia(d) }, animais: vendidosNoDia.map(function (k) { return { animal_id: ref(k) }; }) });
         [3, 4, 5].forEach(function (destino) {
-          transferir('desmama-' + w, Number(w), desmamas[w].filter(function (k) { return A[k].destinoDesmama === destino; }), destino);
+          var ks = desmamas[w].filter(function (k) { return ativo[k] && A[k].destinoDesmama === destino; });
+          if (!ks.length) return;
+          emitir('desmama-' + w + '-' + destino, { tipo: 'DESMAMA', campos: { event_date: dia(d), pasto_destino_id: '@p:' + destino, metodo_pesagem: 'BALANCA' }, animais: ks.map(function (k) { return { animal_id: ref(k), peso: pesoEm(k, d) }; }) });
+          ks.forEach(function (k) { pasto[k] = destino; });
         });
+      });
+      // Castração dos machos desmamados que ficam na recria, 30 dias depois da desmama.
+      var dc = Number(w) + 30;
+      if (dc <= DEMO_FIM) {
+        no(dc, 1, function () {
+          var ks = desmamas[w].filter(function (k) { return ativo[k] && A[k].sexo === 'M' && !A[k].castrado && (A[k].destinoDesmama === 4 || A[k].destinoDesmama === 5); });
+          if (!ks.length) return;
+          emitir('castracao-' + dc, { tipo: 'CASTRACAO', campos: { event_date: dia(dc), metodo: 'Burdizzo' }, animais: ks.map(function (k) { return { animal_id: ref(k) }; }) });
+          ks.forEach(function (k) { A[k].castrado = true; });
+        });
+      }
+    });
+    // Castração dos garrotes inteiros do marco zero (com a visita paga do veterinário, rateada por cabeça).
+    no(DIA_CASTRACAO_GARROTES, 1, function () {
+      var ks = garrotes.filter(function (k) { return ativo[k] && !A[k].castrado; });
+      if (!ks.length) return;
+      emitir('castracao-garrotes', { tipo: 'CASTRACAO', campos: { event_date: dia(DIA_CASTRACAO_GARROTES), metodo: 'Cirúrgica', custo_valor: 30000, custo_conta_id: '@m:conta_veterinario', custo_partner_id: '@f:veterinario' }, animais: ks.map(function (k) { return { animal_id: ref(k) }; }) });
+      ks.forEach(function (k) { A[k].castrado = true; });
+    });
+    // Ocorrências do curral (lista TIPO_OCORRENCIA): os animais escolhidos entre os presentes no dia, sempre na mesma ordem.
+    OCORRENCIAS_DEMO.forEach(function (oc) {
+      no(oc.dia, 1, function () {
+        var ks = ordem.filter(function (k) { return ativo[k] && oc.quem(A[k], pasto[k]); }).slice(0, oc.n);
+        if (!ks.length) return;
+        emitir('ocorrencia-' + oc.dia, { tipo: 'OCORRENCIA', campos: { event_date: dia(oc.dia), tipo_ocorrencia: oc.tipo, description: oc.descricao }, animais: ks.map(function (k) { return { animal_id: ref(k) }; }) });
       });
     });
     no(200, 1, function () { transferir('arrendado', 200, garrotes.filter(function (k) { return ativo[k] && pasto[k] === 4; }).slice(0, 20), 5); });
@@ -1774,7 +1942,7 @@ var TestRunner = (function () {
       no(d + 1, 1, function () {
         var ks = ordem.filter(function (k) { return ativo[k] && PASTOS_PESADOS.indexOf(pasto[k]) >= 0; });
         if (!ks.length) return;
-        emitir('vermifugo-' + (d + 1), { tipo: 'SANIDADE', subtipo: 'VERMIFUGACAO', campos: { event_date: dia(d + 1), produto_id: '@m:vermifugo', modo_dose: 'POR_CABECA', dose_referencia: 5, via_aplicacao: 'SUBCUTANEA' }, animais: ks.map(function (k) { return { animal_id: ref(k) }; }) });
+        emitir('vermifugo-' + (d + 1), { tipo: 'SANIDADE', subtipo: 'VERMIFUGACAO', campos: { event_date: dia(d + 1), produto_id: '@m:vermifugo', protocol_id: '@m:protocolo_vermifugo', modo_dose: 'POR_CABECA', dose_referencia: 5, via_aplicacao: 'SUBCUTANEA' }, animais: ks.map(function (k) { return { animal_id: ref(k) }; }) });
       });
     });
     no(610, 1, function () { emitir('nao-localizado', { tipo: 'MARCACAO', subtipo: 'NAO_LOCALIZADO', campos: { event_date: dia(610), acao: 'MARCAR' }, animais: [{ animal_id: ref(garrotes[46]) }] }); });
@@ -1842,8 +2010,8 @@ var TestRunner = (function () {
       pasto[garrotes[46]] = null;
     });
     // 7. Reprodução (Fase 3, E3.4): em cada estação, a exposição das fêmeas do rebanho com 25 meses ou mais, com os touros,
-    // no primeiro dia, e o diagnóstico das que ficaram 150 dias depois — positivo quando o plano tem o parto dela na
-    // janela da estação; na última estação, cuja janela passa do fim da demonstração, três em cada quatro sem parto ainda.
+    // no primeiro dia, e o diagnóstico das que ficaram 150 dias depois — positivo para a que emprenhou na estação (o plano
+    // dos partos, passo 4); na última estação, a prenha com o parto depois do fim da demonstração fica sem desfecho.
     DEMO_ESTACOES.forEach(function (ini, y) {
       var fim = ini + 90;
       var expostas = [];
@@ -1854,11 +2022,8 @@ var TestRunner = (function () {
       });
       no(ini + 150, 1, function () {
         var ficaram = expostas.filter(function (k) { return ativo[k]; });
-        var aberta = fim + 310 > DEMO_FIM;
-        emitir('estacao-' + (y + 1) + '-diagnostico', { tipo: 'REPRODUCAO', subtipo: 'DIAGNOSTICO_GESTACAO', campos: { event_date: dia(ini + 150), estacao_id: '@s:' + y, metodo: 'PALPACAO' }, animais: ficaram.map(function (k, i) {
-          var pariu = partos.some(function (p) { return p.mae === k && p.dia >= ini + 270 && p.dia <= fim + 310; });
-          var semParto = !partos.some(function (p) { return p.mae === k && p.dia > ini + 150; });
-          return { animal_id: ref(k), resultado: pariu || (aberta && semParto && i % 4 !== 3) ? 'POSITIVO' : 'NEGATIVO' };
+        emitir('estacao-' + (y + 1) + '-diagnostico', { tipo: 'REPRODUCAO', subtipo: 'DIAGNOSTICO_GESTACAO', campos: { event_date: dia(ini + 150), estacao_id: '@s:' + y, metodo: 'PALPACAO' }, animais: ficaram.map(function (k) {
+          return { animal_id: ref(k), resultado: concebeu[y][k] !== undefined ? 'POSITIVO' : 'NEGATIVO' };
         }) });
       });
     });
@@ -1974,6 +2139,7 @@ var TestRunner = (function () {
       fornecedor: parceiro('Fazenda Vizinha (demonstração)', ['FORNECEDOR'], 'seed:parceiro'),
       comprador: parceiro('Recriador da Região (demonstração)', ['COMPRADOR'], 'seed:comprador'),
       frigorifico: parceiro('Frigorífico da Região (demonstração)', ['COMPRADOR'], 'seed:frigorifico'),
+      veterinario: parceiro('Veterinária da Região (demonstração)', ['VETERINARIO'], 'seed:veterinario'),
     };
     // Sanidade (Fase 3): a vacina com estoque controlado e o protocolo dela; o vermífugo sem controle de estoque (PR-10).
     var vacina = t.ok(t.api('produto.salvar', { campos: { nome: 'Vacina (demonstração)', categoria: 'VACINA', unidade: 'dose', custo_unitario: 1.5, controla_estoque: true } }, { chave: 'seed:produto-vacina' }), 'produto vacina').product_id;
@@ -1981,7 +2147,11 @@ var TestRunner = (function () {
       vacina: vacina,
       vermifugo: t.ok(t.api('produto.salvar', { campos: { nome: 'Vermífugo (demonstração)', categoria: 'VERMIFUGO', unidade: 'mL', custo_unitario: 0.04, controla_estoque: false } }, { chave: 'seed:produto-vermifugo' }), 'produto vermífugo').product_id,
       protocolo: t.ok(t.api('protocolo.salvar', { campos: { nome: 'Vacina semestral (demonstração)', tipo_procedimento: 'VACINA', product_id: vacina, sexo_aplicavel: 'AMBOS', recorrencia_tipo: 'INTERVALO_DIAS', intervalo_dias: 180 } }, { chave: 'seed:protocolo-vacina' }), 'protocolo').protocol_id,
+      // A conta da visita do veterinário (a castração dos garrotes, paga no ato).
+      conta_veterinario: boot.contas.filter(function (c) { return c.codigo === 'SERVICOS_VETERINARIOS'; })[0].conta_id,
     };
+    // A vermifugação da recria pelo protocolo (8 a 30 meses, a cada 120 dias: o dia seguinte a cada pesagem).
+    t.estado.sanidade.protocolo_vermifugo = t.ok(t.api('protocolo.salvar', { campos: { nome: 'Vermifugação da recria (demonstração)', tipo_procedimento: 'VERMIFUGO', product_id: t.estado.sanidade.vermifugo, sexo_aplicavel: 'AMBOS', idade_min_meses: 8, idade_max_meses: 30, recorrencia_tipo: 'INTERVALO_DIAS', intervalo_dias: 120 } }, { chave: 'seed:protocolo-vermifugo' }), 'protocolo da vermifugação').protocol_id;
     // Reprodução (Fase 3, E3.4): as três estações de monta, de D0+30 a D0+120 de cada ano.
     t.estado.estacoes = DEMO_ESTACOES.map(function (ini, y) {
       return t.ok(t.api('estacao.salvar', { campos: { nome: 'Estação ' + (y + 1) + ' (demonstração)', data_inicio: Utils.somaDias(d0, ini), data_fim: Utils.somaDias(d0, ini + 90), tipo: 'MONTA_NATURAL' } }, { chave: 'seed:estacao:' + y }), 'estação ' + (y + 1)).estacao_id;

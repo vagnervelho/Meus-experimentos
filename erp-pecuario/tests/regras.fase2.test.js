@@ -88,7 +88,7 @@ const MAPA = {
   'RN-090': [['import.eventos.test.js', 'COMPRAS: linhas agrupadas']],
   'RN-091': [['import.eventos.test.js', 'COMPRAS, recusas por linha']],
   'RN-092': [['import.eventos.test.js', 'TRANSFERENCIAS: ordem cronológica']],
-  'RN-093': [['import.test.js', 'CT-12 (1)–(5)'], ['acceptance.test.js', 'aceitação das Fases 1 e 2 no fake']],
+  'RN-093': [['import.test.js', 'CT-12 (1)–(5)'], ['acceptance.test.js', 'aceitação das Fases 1 a 3 no fake']],
   'RN-094': [['regras.fase2.test.js', 'RN-094'], ['regras.fase1.test.js', 'RN-094']],
   'RN-095': [['import.eventos.test.js', 'TRANSFERENCIAS: ordem cronológica'], ['import.eventos.test.js', 'VENDAS e MORTES'], ['jornada.fase2.test.js', 'jornada da Fase 2 pela API']],
   'RN-105': [['anexos.test.js', 'compra: nota fiscal, GTA'], ['regras.fase1.test.js', 'RN-105, RN-108 e RN-110']],

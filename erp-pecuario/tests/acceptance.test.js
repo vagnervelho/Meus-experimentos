@@ -1,8 +1,11 @@
 'use strict';
 /**
- * Aceitação (E1.12 e Fase 2): roda no Node, sobre os fakes do harness, os MESMOS cenários que runAcceptanceTests roda na
- * conta do dono (09, seção 8): CT-09 inteiro (saídas, brinco, mãe, pasto, data, reentrada), os da Fase 2 (CT-01, CT-02,
- * CT-03, CT-04, CT-07, CT-08, CT-13 na compra, CT-14, CT-17 e CT-18 com a compra), CT-10, CT-11, CT-12 com a
+ * Aceitação (E1.12, Fase 2 e Fase 3): roda no Node, sobre os fakes do harness, os MESMOS cenários que runAcceptanceTests
+ * roda na conta do dono (09, seção 8): CT-09 inteiro (saídas, brinco, mãe, pasto, data, reentrada), os da Fase 2 (CT-01,
+ * CT-02, CT-03, CT-04, CT-07, CT-08, CT-13 na compra, CT-14, CT-17 e CT-18 com a compra), os da Fase 3 (CT-05, CT-06 e os
+ * casos de 09, seção 4.1: SANIDADE — lote vencido, estoque insuficiente, carência na agenda e na venda, o exemplo de 05,
+ * seção 4.7, e a aplicação única —, ESTOQUE — o exemplo de 03a, seção 4.7 — e REPRODUCAO — RN-060, 061, 064 e 066 e os
+ * desfechos da estação), CT-10, CT-11, CT-12 com a
  * reconciliação, CT-20 e o ensaio de restauração, com a nota do "cenário que usa peça de fase posterior" (passos
  * NAO_SE_APLICA). O lock disputado, que uma execução real não consegue provocar sozinha, entra por `injetar`. Também: a
  * base real não muda, o teste é retomável, falha de cenário aparece no relatório (e uma conta errada do servidor faz o
@@ -16,7 +19,7 @@ const S = require('./apoio-sistema');
 const FIXTURE = require('./fixtures/coercao.json');
 
 const { js, USUARIO } = S;
-const CENARIOS = ['PREPARO', 'CT-09', 'CT-01', 'CT-02', 'CT-03', 'CT-04', 'CT-05', 'CT-06', 'SANIDADE', 'REPRODUCAO', 'CT-07', 'CT-08', 'CT-13', 'CT-14', 'CT-17', 'CT-18', 'CT-10', 'CT-12', 'RESTAURACAO', 'CT-20', 'CT-11', 'ISOLAMENTO'];
+const CENARIOS = ['PREPARO', 'CT-09', 'CT-01', 'CT-02', 'CT-03', 'CT-04', 'CT-05', 'CT-06', 'SANIDADE', 'ESTOQUE', 'REPRODUCAO', 'CT-07', 'CT-08', 'CT-13', 'CT-14', 'CT-17', 'CT-18', 'CT-10', 'CT-12', 'RESTAURACAO', 'CT-20', 'CT-11', 'ISOLAMENTO'];
 /**
  * Passos que ainda não rodam (peça de fase posterior ou só na conta do dono), com a situação esperada. O CT-09 roda
  * inteiro desde a venda e o CT-12 com a reconciliação (Fase 2); ficam o resultado gerencial (CT-03, Fase 4), o rateio
@@ -48,7 +51,7 @@ function situacoes(rel) {
   return Object.fromEntries(rel.cenarios.map((c) => [c.id, c.situacao]));
 }
 
-test('aceitação das Fases 1 e 2 no fake: todos os cenários passam; só ficam de fora os passos de fase posterior; a base real não muda; no fim, projeção = reconstrução na base de teste', () => {
+test('aceitação das Fases 1 a 3 no fake: todos os cenários passam; só ficam de fora os passos de fase posterior; a base real não muda; no fim, projeção = reconstrução na base de teste', () => {
   const s = S.sistema({ order: 'reverse' });
   s.evento('registrar', S.entradaInicial([S.bicho({ brinco: '1' }), S.bicho({ brinco: '2' })]), 'prod-1');
   const antes = retratoProducao(s);
@@ -74,6 +77,8 @@ test('aceitação das Fases 1 e 2 no fake: todos os cenários passam; só ficam 
   const evTeste = js(s.gas.exec(() => { const p = s.props(); return s.G.Database.abrir(p.TEST_SPREADSHEET_ID, { primitiva: s.G.Maintenance.primitivaDoBanco(p, p.TEST_SPREADSHEET_ID) }).ler(['EVENTOS']).EVENTOS.registros; }));
   const tipos = new Set(evTeste.filter((e) => e.status === 'CONFIRMADO').map((e) => e.event_type));
   ['COMPRA', 'VENDA', 'NASCIMENTO', 'TRANSFERENCIA', 'MORTE', 'IDENTIFICACAO', 'ESTORNO', 'AJUSTE_INVENTARIO'].forEach((x) => assert.ok(tipos.has(x), 'evento ' + x + ' na base de teste'));
+  // E os da Fase 3: pesagem, sanidade, estoque, reprodução, desmama, castração e ocorrência.
+  ['PESAGEM', 'SANIDADE', 'ESTOQUE', 'REPRODUCAO', 'DESMAMA', 'CASTRACAO', 'OCORRENCIA'].forEach((x) => assert.ok(tipos.has(x), 'evento ' + x + ' na base de teste'));
   assert.ok(evTeste.some((e) => e.event_type === 'COMPRA' && e.reversal_of_event_id), 'a correção da compra (CT-18)');
   // Nunca tocou a base real (abas, versão, marcador, forma de gravação).
   assert.deepEqual(retratoProducao(s), antes);
@@ -148,7 +153,7 @@ test('falha de cenário aparece no relatório (não é engolida) e não impede o
   assert.equal(r2.resumo.cenarios.FALHOU, 1);
 });
 
-test('base de demonstração (TEST_PLAN = DEMO): a composição de 09, seção 7 (240 + 255 − 240 … = 304 ativos), só por comandos e sem recusa, planilha DEMO com faixa BASE DE TESTE, idempotente e sem tocar a base real', () => {
+test('base de demonstração (TEST_PLAN = DEMO): a composição de 09, seção 7 (240 + 255 − 240 … = 304 ativos) e os manejos da Fase 3 (pesagens, vacinações e vermifugações pelo protocolo, estações com diagnóstico, partos e desmama, castração, ocorrências), só por comandos e sem recusa, planilha DEMO com faixa BASE DE TESTE, idempotente e sem tocar a base real', () => {
   const s = S.sistema();
   const antes = retratoProducao(s);
   s.gas.props.script.setProperty('TEST_PLAN', 'DEMO');
@@ -172,7 +177,14 @@ test('base de demonstração (TEST_PLAN = DEMO): a composição de 09, seção 7
   const vig = eventos.filter((e) => e.status === 'CONFIRMADO');
   const conta = (tipo) => vig.filter((e) => e.event_type === tipo).length;
   assert.deepEqual([conta('ENTRADA_INICIAL'), conta('COMPRA'), conta('NASCIMENTO'), conta('MORTE'), conta('DESCARTE'), conta('ESTORNO')], [6, 10, d.totais.partos, 15, 5, 2]);
-  assert.ok(conta('TRANSFERENCIA') >= 20 && conta('VENDA') >= 20 && conta('IDENTIFICACAO') >= 10, 'transferências, vendas e identificações ao longo dos três anos');
+  assert.ok(conta('VENDA') >= 20 && conta('IDENTIFICACAO') >= 10, 'vendas e identificações ao longo dos três anos');
+  // Movimentos: a ida e a volta do pasto arrendado são transferências; a desmama leva os bezerros para a recria e para as
+  // novilhas pelo pasto de destino da própria desmama (Fase 3, aceitação: antes eram transferências no dia da desmama).
+  const linhasDe = (tipo) => { const ids = new Set(vig.filter((e) => e.event_type === tipo).map((e) => e.event_id)); return s.tabela('EVENTO_ANIMAIS', demo).filter((l) => ids.has(l.event_id)); };
+  const desmamados = linhasDe('DESMAMA').filter((l) => l.papel === 'SUJEITO');
+  assert.ok(conta('TRANSFERENCIA') >= 2 && conta('DESMAMA') >= 10, conta('TRANSFERENCIA') + ' transferências e ' + conta('DESMAMA') + ' desmamas');
+  assert.ok(desmamados.length >= 200 && desmamados.filter((l) => l.pasto_destino_id && l.pasto_destino_id !== l.pasto_origem_id).length >= 100, desmamados.length + ' bezerros desmamados, os da recria e das novilhas com o movimento');
+  assert.ok(s.tabela('PESAGENS', demo).filter((p) => p.tipo === 'DESMAMA' && vig.some((e) => e.event_id === p.event_id)).length >= 100, 'o peso à desmama dos que ficam');
   // Fase 3: as pesagens coletivas da recria, das novilhas e do pasto arrendado (a cada 120 dias), aceitas sem aviso.
   const pesagens = s.tabela('PESAGENS', demo).filter((x) => vig.some((e) => e.event_id === x.event_id && e.event_type === 'PESAGEM'));
   assert.ok(conta('PESAGEM') >= 20 && pesagens.length >= 1000, conta('PESAGEM') + ' pesagens com ' + pesagens.length + ' animais');
@@ -191,6 +203,34 @@ test('base de demonstração (TEST_PLAN = DEMO): a composição de 09, seção 7
     const g = ind.data.estacao.geral;
     assert.ok(g.expostas >= 100 && g.diagnosticadas > 0 && g.prenhez.valor !== null && g.prenhez.valor > 0, est.nome + ': ' + JSON.stringify([g.expostas, g.diagnosticadas, g.prenhez]));
   }
+  // Fase 3, aceitação: os partos caem na janela da estação (09, seção 7: estações com diagnósticos, partos e desmama). Nas duas
+  // estações encerradas, prenhez, parição, natalidade e desmama plausíveis; a última, com partos por vir, fica parcial.
+  const taxas = [];
+  for (const est of estacoes) {
+    const g = js(s.gas.exec(() => s.G.api({ rota: 'reproducao.indicadores', ambiente: 'DEMO', dados: { estacao_id: est.estacao_id } }))).data.estacao.geral;
+    taxas.push([g.prenhez.valor, g.paricao.valor, g.natalidade.valor, g.desmama.valor, g.paricao.parcial || null]);
+  }
+  taxas.slice(0, 2).forEach((x, i) => assert.ok(x[0] >= 70 && x[0] <= 98 && x[1] >= 70 && x[2] >= 65 && x[3] >= 60 && x[4] === null, 'estação ' + (i + 1) + ' encerrada: ' + JSON.stringify(x)));
+  assert.ok(taxas[2][0] >= 70 && taxas[2][4] === 'parcial', 'a estação em curso: ' + JSON.stringify(taxas[2]));
+  // Sanidade pelo protocolo: toda vacinação com o semestral e toda vermifugação com o da recria; a agenda cobre os dois.
+  const san = s.tabela('SANIDADE', demo).filter((x) => vig.some((e) => e.event_id === x.event_id));
+  const protos = Object.fromEntries(s.tabela('PROTOCOLOS_SANITARIOS', demo).map((p) => [p.nome, p.protocol_id]));
+  assert.ok(san.filter((x) => x.procedimento === 'VACINA').every((x) => x.protocol_id === protos['Vacina semestral (demonstração)']), 'vacinações pelo protocolo semestral');
+  assert.ok(san.filter((x) => x.procedimento === 'VERMIFUGO').length > 500 && san.filter((x) => x.procedimento === 'VERMIFUGO').every((x) => x.protocol_id === protos['Vermifugação da recria (demonstração)']), 'vermifugações pelo protocolo da recria');
+  const agenda = js(s.gas.exec(() => s.G.api({ rota: 'sanidade.agenda', ambiente: 'DEMO', dados: {} }))).data;
+  assert.ok(agenda.protocolos.length === 2 && agenda.protocolos.every((p) => p.cobertura.valor >= 80), 'cobertura dos protocolos: ' + JSON.stringify(agenda.protocolos.map((p) => [p.nome, p.cobertura.valor])));
+  // Pesagens periódicas com GMD plausível: o do rebanho e o de cada pasto entre 0,3 e 0,8 kg/dia; nenhum aviso aceito em lançamento nenhum.
+  const desemp = js(s.gas.exec(() => s.G.api({ rota: 'peso.desempenho', ambiente: 'DEMO', dados: {} }))).data;
+  assert.ok(desemp.geral.gmd.valor >= 0.3 && desemp.geral.gmd.valor <= 0.8 && desemp.geral.gmd.n >= 300, 'GMD do rebanho: ' + JSON.stringify(desemp.geral.gmd));
+  assert.ok(desemp.por_pasto.every((p) => p.gmd.valor === null || (p.gmd.valor >= 0.3 && p.gmd.valor <= 0.8)), 'GMD por pasto: ' + JSON.stringify(desemp.por_pasto.map((p) => p.gmd.valor)));
+  assert.deepEqual(vig.filter((e) => e.payload_json && e.payload_json.avisos_aceitos).map((e) => e.event_type), [], 'nenhum aviso aceito: o plano só lança o plausível');
+  // Castração (os garrotes inteiros do marco zero, com a visita paga e rateada, e os machos desmamados da recria) e ocorrências.
+  const castrados = linhasDe('CASTRACAO');
+  assert.ok(conta('CASTRACAO') >= 2 && castrados.length >= 30, castrados.length + ' castrados');
+  const visita = s.tabela('FINANCEIRO', demo).filter((f) => vig.some((e) => e.event_id === f.event_id && e.event_type === 'CASTRACAO'));
+  assert.deepEqual(visita.map((f) => [f.natureza, f.valor]), [['CUSTEIO', 30000]], 'a visita do veterinário na castração dos garrotes');
+  assert.ok(castrados.every((l) => s.tabela('ANIMAIS', demo).find((a) => a.animal_id === l.animal_id).castrado === true), 'castrados no cadastro');
+  assert.deepEqual(vig.filter((e) => e.event_type === 'OCORRENCIA').map((e) => e.payload_json.tipo_ocorrencia || e.event_subtype).length, 5, 'cinco ocorrências do curral');
   assert.deepEqual(eventos.filter((e) => e.event_type === 'ESTORNO').map((e) => eventos.find((x) => x.event_id === e.reversal_of_event_id).event_type).sort(), ['OUTRA_ENTRADA', 'TRANSFERENCIA']);
   // Vendas nas três formas de preço, com as bases de peso; descarte com receita; baixa na contagem depois de não localizado.
   const vendas = s.tabela('VENDAS', demo).filter((v) => vig.some((e) => e.event_id === v.event_id));
