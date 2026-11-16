@@ -1338,3 +1338,55 @@ Nenhuma linha de código mudou nesta etapa: só documentos.
   - varredura de quedas do bloco de PESAGENS e de SANIDADE nas três primitivas: 6 testes, 6 aprovados;
   - a verificar na conta do dono: a importação de planilhas grandes de pesagens (milhares de linhas) no tempo real do
     Sheets e a tela de importação no iframe do HtmlService.
+
+## 16/11/2026 — Fase 3, etapa ACEITAÇÃO (nível 2, demonstração, jornada e mapa RN)
+
+- **`runAcceptanceTests` com os cenários da Fase 3**, pela `Api` na base de teste temporária, retomáveis e no relatório JSON:
+  CT-05 e CT-06 (já entregues nas etapas E3.1 e E3.3), SANIDADE ampliado (a carência de RN-072 também na `sanidade.agenda`
+  — no dia, no último dia e livre no seguinte —, o aceite da carência gravado com a venda para recria e o exemplo de 05,
+  seção 4.7, com a bezerra nascida no cenário: fora antes dos 3 meses, elegível e em dia aos 3, próxima com o vencimento aos 8
+  meses, cumprida depois da aplicação), o cenário novo ESTOQUE (o exemplo de 03a, seção 4.7: entrada por embalagem, compra
+  de insumo no caixa e sem rateio, consumo de R$ 54,00 sem caixa rateado a R$ 1,80 por animal, perda, contagem e o estorno
+  da aplicação que devolve as doses; saldo = soma dos movimentos vigentes) e REPRODUCAO com os desfechos da estação (aborto,
+  morte de cria e desmama: desmama 75,0%, mortalidade até a desmama 3,2%, perda gestacional 3,1% parcial, sem mudar as taxas
+  de RN-066). Todos terminam em `sistema.integridade` sem erro.
+- **Base de demonstração completa da Fase 3** (semente fixa, só por comandos, nenhuma recusa nem aviso aceito; 410
+  comandos, 304 ativos): os partos saem das três estações de monta (a fêmea exposta emprenha no plano e pare na janela da
+  estação, com intervalo mínimo entre partos; o diagnóstico 150 dias depois é positivo para a que emprenhou); a desmama é o
+  evento DESMAMA com o pasto de destino e o peso de cada bezerro (16 lançamentos, 270 bezerros), no lugar das transferências
+  do dia da desmama; castração dos garrotes inteiros do marco zero com a visita paga à veterinária e rateada, e dos machos
+  desmamados que ficam na recria (41 animais); 5 ocorrências do curral; as vermifugações pelo protocolo novo da recria (8 a
+  30 meses, 120 dias) e as vacinações pelo semestral; 21 pesagens coletivas com 1.237 pesos. As vendas de vacas e novilhas
+  do terceiro ano saíram em duas levas (D0+780 e D0+900; D0+800 e D0+950), e o gerador recusa o plano que cortaria um parto
+  de estação encerrada (viraria perda gestacional sem ter havido perda). A conferência final passou a ler do servidor e conferir com a faixa do plano o GMD do
+  rebanho (0,3 a 0,8 kg/dia), a prenhez de cada estação (70% a 98%), as taxas das estações encerradas e a cobertura dos
+  protocolos (pelo menos 80%), e põe esses números no relatório (`demonstracao.manejo`): na conta do dono, a própria
+  execução mostra se o manejo da demonstração saiu plausível. Na execução desta etapa: GMD 0,437 kg/dia (n 400); estações
+  com prenhez de 93,6%, 92,2% e 90,0% (a terceira, parcial); cobertura de 91,1% (vacina) e 89,6% (vermifugação).
+- **`tests/jornada.fase3.test.js`**: um ano de manejo só pela `api()` (insumos, protocolos, estações, pesagens, sanidade,
+  estoque, reprodução, desmama, castração, ocorrências, carência na venda, pesagem importada, correções e estornos), com o
+  inventário por pasto em várias datas, o peso e o GMD de cada animal da recria, os indicadores da estação, a agenda, o
+  estoque e o custo sanitário conferidos contra um modelo independente; projeção = reconstrução e invariantes depois de cada
+  comando; integridade sem erro no fim.
+- **`tests/regras.fase3.test.js`**: o mapa RN → teste verificável de 05, seções 2.7 a 2.9 (RN-049 a RN-066) e do algoritmo
+  4.7 — cada teste citado existe; as RN que o mapa da Fase 2 deixou para a Fase 3 têm lugar; cada caso da Fase 3 de 09, seção
+  4.1, tem o passo no cenário do `TestRunner` e o teste do nível 1 — e os testes das RN sem caso próprio: RN-051 em todo
+  caminho (PESAGENS só cresce), RN-053 (projeção, média calculada e carcaça nunca viram pesagem), RN-058 pelos quatro
+  critérios da elegibilidade e RN-065 com a situação vinda dos registros da Fase 3.
+- **Conserto num teste**: a conferência das aplicações da demonstração filtrava SANIDADE por uma coluna que não existe
+  (`procedimento`; a coluna é `tipo_procedimento`): a checagem das vacinações passava sem conferir nada e a das
+  vermifugações falhava. Agora confere as duas, com a contagem mínima de cada uma. `tests/acceptance.test.js` também
+  confere que os números de `demonstracao.manejo` são os das rotas e que um GMD fora da faixa (a conta do servidor errada)
+  derruba a conferência da demonstração, que a execução seguinte refaz. `tests/regras.fase2.test.js`: o nome do teste de
+  aceitação citado no mapa (Fases 1 a 3).
+- `docs/CONTRATOS.md`: estado e seção 21 (cenários da Fase 3, composição da demonstração, `demonstracao.manejo`, testes);
+  notas nas seções 39 e 40. `docs/GUIA_DE_IMPLANTACAO.md`, seção 6: os cenários da Fase 3 e a demonstração com o manejo.
+- Nenhum tipo de evento novo nem mudança no motor nesta etapa (só `TestRunner` e testes).
+- Execuções desta etapa, verificadas em Node e no Playwright deste repositório:
+  - `npm test` (execução completa final): 784 testes, 784 aprovados e 0 falhas (650 s); na primeira execução desta
+    retomada, 784 testes, 783 aprovados e 1 falha (a da coluna, acima);
+  - `npm run ui:check`: 122 testes, 122 aprovados e 0 falhas (272 s); página inicial montada com 447 KB de 450 KB; sob
+    demanda, Import 48 KB, Weights 44 KB, Health 24 KB e Reproduction 50 KB de 150 KB;
+  - teste aleatório: 120 sementes novas × 60 passos (880000 a 880119): 3.892 comandos aceitos, 2.620 recusados, 0 falhas;
+  - a verificar na conta do dono: os cenários da Fase 3 e a base de demonstração (cerca de 410 lançamentos, em várias
+    execuções) com o tempo real do Sheets.
