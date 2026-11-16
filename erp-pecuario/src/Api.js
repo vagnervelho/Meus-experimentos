@@ -595,7 +595,7 @@ var Api = (function () {
    */
   function tela(dados) {
     var nome = dados && typeof dados.nome === 'string' ? dados.nome : '';
-    if (!Object.prototype.hasOwnProperty.call(TELAS_SOB_DEMANDA, nome)) throw validacao_('Tela desconhecida: "' + nome + '". Recarregue a página; se continuar, a versão do app pode estar desatualizada.', 'nome');
+    if (!Object.prototype.hasOwnProperty.call(TELAS_SOB_DEMANDA, nome)) throw validacao_('Tela desconhecida para esta versão do app. Recarregue a página; se continuar, a versão do app pode estar desatualizada.', 'nome');
     var id = TELAS_SOB_DEMANDA[nome];
     var m = EventCatalog.modulosAtivos().filter(function (x) { return x.id === id && x.tela === nome && x.sob_demanda === true; })[0];
     if (!m) {

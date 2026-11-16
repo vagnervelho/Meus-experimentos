@@ -985,3 +985,55 @@ Nenhuma linha de código mudou nesta etapa: só documentos.
   arquivo não mudou.
 - Continuam com números antigos, fora desta etapa: `README.md` (555 e 77 testes, 437 KB) e
   `docs/fase-0/11-riscos-e-premissas.md` (R-12 e R-31).
+
+## 16/11/2026 — Fase 3, etapa BASE
+
+- **Fase 3 aberta.** `EventCatalog.FASE_ATUAL = 3`. Os tipos da Fase 3 (PESAGEM, SANIDADE, REPRODUCAO, DESMAMA,
+  CASTRACAO, OCORRENCIA, ESTOQUE) continuam inativos até terem campos: `tiposAtivos()` = `tiposAtivos(2)`, e o catálogo que
+  vai ao cliente diz `fase: 3`. Como o tipo só fica ativo com campos, o **módulo só fica ativo com a tela entregue**: cada
+  módulo do catálogo declara `tela` (o arquivo HTML) quando ela existe, e `modulosAtivos` traz só os da fase com tela.
+  Pesagens, Sanidade e Reprodução são da Fase 3, mas ainda sem tela: fora do menu, do bootstrap e da rota da tela.
+  `EventCatalog.modulos()` e `modulo(id)` dão os dados de qualquer módulo (a ficha deixou de usar `modulosAtivos(99)`).
+  Testes da Fase 1 e 2 atualizados à fase nova sem enfraquecer: `tests/events.test.js` (`FASE_ATUAL` 3, os mesmos tipos da
+  Fase 2, os tipos da Fase 3 inativos, os 10 itens do menu no catálogo até a Fase 5, cada um ativo só com a tela) e
+  `tests/api.test.js` (`catalogo.fase` 3; os módulos do bootstrap continuam os 6 entregues).
+- **Telas sob demanda (risco R-31; 01, seção 6.2).** A página montada estava em 449 KB de 450 KB. As telas das Fases 3 a 5
+  e a importação (tarefa de desktop, pouco usada na abertura) não entram mais na página inicial:
+  - rota extra `sistema.tela` `{nome}` → `{nome, modulo, conteudo, bytes}` (`Api.tela`, `Api.TELAS_SOB_DEMANDA`): guarda de
+    dono, só as telas da lista, só de módulo entregue (o da fase futura responde `NOT_FOUND` com a fase), o arquivo
+    compactado como o doGet entrega os includes, sem abrir a planilha-banco;
+  - no catálogo, o módulo sob demanda declara `sob_demanda: true` e `rotas` (as raízes de rota); a importação é a primeira;
+  - no cliente, `Modulos` pede a tela quando a rota dela abre (uma vez; pedidos ao mesmo tempo viram um), mostra o esqueleto,
+    injeta o `<script>` como nó (sem innerHTML), guarda em memória e abre a rota; falha de rede → "Não foi possível abrir
+    Importação" com "Tentar de novo"; outra versão do app no servidor → a tela nova não entra na página antiga, e a tela pede
+    para recarregar (`NOVA_VERSAO`); `Telas.existe` conta a rota do módulo sob demanda ainda não carregado;
+  - `Index` sem a importação: a página inicial foi de 449 KB para 406 KB;
+  - `npm run ui:check` mede a página inicial montada (≤ 450 KB, sem nenhuma tela sob demanda) e cada tela sob demanda como
+    a rota a entrega (≤ 150 KB por módulo; Import, 47 KB), e acusa a tela sob demanda posta no Index;
+  - contingência (NV, a verificar na conta do dono): se o iframe do HtmlService não rodar o `<script>` injetado, a tela
+    volta ao Index e o módulo perde `sob_demanda`, sem outra mudança.
+  Testes: `tests/telas.sobdemanda.test.js` (novo), `tests/interface.test.js` (sintaxe das telas sob demanda, nenhuma no
+  Index), `tests/apoio-telas.js` (o cliente do vm carrega as telas sob demanda pela rota) e `tests/ui/sobdemanda.test.js`
+  (novo: abrir pela aba de Configurações, uma vez só, ir e voltar, falha de rede a 360 px, endereço direto, menu, versão
+  nova). Os testes de navegador da importação que já existiam passam pela carga sob demanda sem mudança.
+- **Teste instável** ("transferência com data passada: Todos do pasto…", `tests/ui/movimentos.test.js`). Causa: a corrida
+  era da tela. A mudança de data dispara `inventario.elegiveis` sem pasto; quando a resposta chegava depois do "Incluir
+  todos", `Seletor.dataMudou` redesenhava o painel do modo, e o resultado ("Posição em 01/03/2026") e o pasto escolhido
+  sumiam — a espera de 30 s esgotava. Conserto no `Seletor`: a posição na data é uma promessa por (tipo, data, versão),
+  a resposta de uma data que já mudou é descartada, cada desenho do painel é uma vez (a resposta de "Incluir todos", da
+  busca, da lista colada e dos filtros que chega depois de o painel mudar fica de fora) e `dataMudou` só redesenha o painel
+  desenhado noutra data. O teste espera o estado (os dois pedidos registrados, todas as respostas entregues e o resultado
+  na tela), nunca um tempo fixo, com a asserção de antes. Teste novo com a corrida forçada (`__gas.atrasar`: a resposta da
+  data chega 1,5 s depois da do pasto), que falha no código de antes exatamente como o instável (espera de 30 s esgotada)
+  e passa no novo. O mock conta os pedidos em curso (`__gas.emCurso`) e o apoio ganhou `esperarServidor(page)`. Os outros
+  testes de navegador foram lidos à procura do mesmo padrão (consulta assíncrona disparada e asserção logo depois): os
+  demais já esperam um estado que depende da resposta.
+- **Teste aleatório pronto para crescer.** `tests/apoio-fuzz.js` reorganizado num registro único: cada tipo de evento
+  declara gerador e oráculo do efeito em `registrarTipo` (proposta, montagem, o que a correção muda, a especificação pelas
+  linhas gravadas, os animais criados e o efeito) e cada tipo de importação o seu arquivo em `registrarImportador`; o
+  sorteio, a correção, a correção para outro tipo, a correção pelo gravado, a memória e o oráculo só consultam os
+  registros. Nada se perdeu: 24 sementes × 60 passos deram a mesma sequência de comandos e os mesmos desfechos antes e
+  depois (as 16 fixas e mais 8). `tests/fase2.fuzz.test.js` confere que todo tipo e subtipo ativo do catálogo tem entrada e
+  é aceito ao menos uma vez nas sementes fixas, que nenhuma entrada é de tipo inativo e que todo tipo importável tem
+  arquivo: o tipo que ficar ativo sem a sua entrada falha no `npm test`. `FUZZ_SEMENTES` e `FUZZ_INICIO` continuam valendo.
+- `docs/CONTRATOS.md`: seções 12, 19, 22 e 36, e a nova seção 37 (telas sob demanda).
