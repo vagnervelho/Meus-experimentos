@@ -106,8 +106,8 @@ test('fêmeas, indicadores e estações (1280 e 360 px): a situação de cada f�
     await A.esperarTela(page, 'Reprodução');
     await page.waitForSelector('[data-resumo-matrizes] ~ * .tabela-componente, .tabela-componente');
     const lista = await textoTela(page, '.tabela-componente');
-    assert.match(lista, /0457Prenha/, largura + ': a prenhe');
-    assert.match(lista, /0391Exposta \(com touro\)/, largura + ': a exposta');
+    assert.match(lista, /0457(Situação: )?Prenha/, largura + ': a prenhe (tabela ou cartão)');
+    assert.match(lista, /0391(Situação: )?Exposta \(com touro\)/, largura + ': a exposta');
     assert.doesNotMatch(lista, /\b12\b.*Exposta/, 'o touro não é fêmea');
     await semProblemasDeLeiaute(page, largura, 'fêmeas');
     if (largura === 1280) {
