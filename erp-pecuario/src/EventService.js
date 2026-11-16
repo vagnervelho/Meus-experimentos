@@ -1281,6 +1281,14 @@ var EventService = (function () {
     // outro animal do lançamento não pode recebê-lo (seria o reuso de um número aposentado). A correção de brinco
     // lançado errado não aposenta o número (desenho-base 16.2).
     var saem = {};
+    // O número que a correção de brinco lançado errado DESTE lançamento tira de um animal (no substituto, o número que o
+    // original já tinha tirado e que a projeção gravada mostra encerrado): não é reuso (passada 4 do teste aleatório).
+    var acertados = {};
+    ctxEv.itens.forEach(function (it) {
+      if (!it.publico || !it.brincoLibera) return;
+      var e = estado_(m, it.animal_id);
+      if (e && !vazio_(e.brinco)) (acertados[it.animal_id] = acertados[it.animal_id] || []).push(Utils.normalizarBrinco(e.brinco));
+    });
     ctxEv.itens.forEach(function (it) {
       if (!it.publico || !it.brincoProposto || it.brincoLibera) return;
       var e = estado_(m, it.animal_id);
@@ -1319,7 +1327,7 @@ var EventService = (function () {
       if (!semZeros && parecidos[b.norm]) {
         avisoItem_(m, it, 'BRINCO_PARECIDO', it.quem + ': o brinco ' + b.codigo + ' difere só por zeros à esquerda do brinco ' + parecidos[b.norm].brinco + ' (animal ' + parecidos[b.norm].codigo_interno + ').');
       }
-      reusoDeBrinco_(m, it, b, chave);
+      reusoDeBrinco_(m, it, b, chave, acertados);
     });
   }
   /**
@@ -1414,7 +1422,7 @@ var EventService = (function () {
   function jaCitado_(m, animalId, codigo, eventId) {
     return m.conflitos.some(function (c) { return c.animal_id === animalId && c.codigo === codigo && c.conflito && c.conflito.event_id === eventId; });
   }
-  function reusoDeBrinco_(m, it, b, chave) {
+  function reusoDeBrinco_(m, it, b, chave, acertados) {
     if (m.params.brinco_permite_reuso === true) return;
     var corrigidos = {};
     var aposentado = m.repo.por('IDENTIFICACOES', 'codigo_norm', b.norm).filter(function (r) {
@@ -1422,7 +1430,7 @@ var EventService = (function () {
       if (chave(r.codigo) !== chave(b.codigo)) return false;
       if (!(r.animal_id in corrigidos)) {
         corrigidos[r.animal_id] = m.f.ajustes(r.animal_id).filter(function (a) { return a.tipo_ajuste === 'IDENTIFICACAO_INCORRETA' && a.campo === 'brinco'; })
-          .map(function (a) { return Utils.normalizarBrinco(a.valor_anterior || ''); });
+          .map(function (a) { return Utils.normalizarBrinco(a.valor_anterior || ''); }).concat((acertados || {})[r.animal_id] || []);
       }
       return corrigidos[r.animal_id].indexOf(r.codigo_norm) < 0;
     })[0];

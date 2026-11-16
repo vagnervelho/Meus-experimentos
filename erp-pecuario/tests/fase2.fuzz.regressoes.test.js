@@ -196,6 +196,19 @@ const CASOS = [
     ],
     esperado: { 70: 'OK', 80: 'OK', 88: 'OK', 93: 'OK', 94: 'OK', 104: 'OK', 107: 'OK', 129: 'NEEDS_CONFIRMATION:PERIODO_BLOQUEADO' },
   },
+  {
+    // Passada 4 (semente 85086, leva final; assinatura CORRECAO_IDENTICA:RECUSADA): no mesmo "brinco lançado errado", o
+    // brinco 2 passa a 7 e o 7 (digitado errado) passa a B-4. O registro aceita (o número corrigido não é reuso, desenho-base
+    // 16.2), mas a correção idêntica era recusada com BRINCO_APOSENTADO: no substituto, o 7 aparecia encerrado pela projeção
+    // gravada do original, e a correção do original, que o tirava, ficava de fora.
+    nome: 'brinco lançado errado em dois animais, um recebendo o número que o outro tinha por engano: o registro e a correção idêntica são aceitos',
+    comandos: [
+      passo(0, 'evento.registrar', { tipo: 'AJUSTE_INVENTARIO', subtipo: 'IDENTIFICACAO_INCORRETA', campos: { event_date: '2026-01-01', justificativa: 'Brinco digitado errado' }, animais: [{ animal_id: '@b:2', brinco: '7' }, { animal_id: '@b:7', brinco: 'B-4' }] }),
+      Object.assign(passo(1, 'evento.corrigir', { tipo: 'AJUSTE_INVENTARIO', subtipo: 'IDENTIFICACAO_INCORRETA', campos: { event_date: '2026-01-01', justificativa: 'Brinco digitado errado' }, animais: [{ animal_id: '@b:2', brinco: '7' }, { animal_id: '@b:7', brinco: 'B-4' }], event_id: '@0.e0', justificativa: 'Conferido de novo' }), { correcaoIdentica: true }),
+    ],
+    // Antes do conserto: o passo 1 era recusado (VALIDATION BRINCO_APOSENTADO).
+    esperado: { 0: 'OK', 1: 'OK' },
+  },
 ];
 
 CASOS.forEach((caso) => {

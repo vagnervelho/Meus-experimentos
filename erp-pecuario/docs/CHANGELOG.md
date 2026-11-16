@@ -854,3 +854,42 @@ Nenhuma linha de código mudou nesta etapa: só documentos.
 - Verificado em Node: `tests/fase2.fuzz.test.js` (16 sementes fixas, 484 aceitos e 374 recusados) e
   `tests/fase2.fuzz.regressoes.test.js` (7 casos); `npm test` completo com 644 testes, 644 aprovados e 0 falhas (543 s);
   `npm run ui:check` com 85 testes, 85 aprovados e 0 falhas (221 s).
+
+## 16/11/2026 — Teste aleatório de todos os comandos da Fase 2 (etapa 2, passada 4: período fechado, política de avisos e correção composta)
+
+- Por quê: a passada 3 ficou limpa; o gerador ainda não gerava. Lacunas achadas na leitura de `tests/apoio-fuzz.js`: o
+  período financeiro fechado (`fin_bloqueio_ate`) nunca ligado; a política de avisos (`avisos_politica`) nunca mudada; os
+  parâmetros de regra e de projeção fixos (idade da desmama, idade reprodutiva, gestação, tolerância do parto, arroba,
+  rendimento, tolerância da conferência, brinco só de números); nenhum brinco com letra ou hífen; a correção mudava uma
+  coisa só, e nunca o parceiro, a propriedade, o subtipo da identificação e da marcação, a origem da venda e da
+  transferência; reclassificação, brinco lançado errado e correção de localização sempre com um animal (nunca vários, nem
+  o mesmo duas vezes); `dataVersionEsperada` só velha, nunca a atual; arquivo de compras com uma compra por cabeça, sem
+  frete nem parcelas, e de vendas com uma venda; o mesmo arquivo nunca enviado de novo.
+- Tudo isso entrou (ações `parametro`, `bloqueio`, `politica`, `versaoAtual`; `maisAjustes`, `mutarVarias`; compras e
+  vendas importadas com mais de um grupo, kg, frete e parcelas; "importar o mesmo arquivo de novo"), com três oráculos que
+  valem para todo caminho: o período fechado (`oraculoPeriodo`: quem cria ou cancela lançamento do período passou pelo
+  aviso, foi recusado pela política ou a política o ignora; o aviso só aparece quando há lançamento do período; o pedido
+  sem a justificativa é recusado), a política de avisos (`oraculoPolitica`, `oraculoPoliticaGravada`) e a versão atual
+  (CONTRATOS, seção 36).
+- Dois defeitos do sistema, consertados na causa, para todo caminho, na UnitOfWork (CONTRATOS, seção 10.5, item 6):
+  (1) o desfazer da importação cancelava os lançamentos de compras e vendas importadas dentro do período fechado sem o
+  aviso `PERIODO_BLOQUEADO` nem a justificativa (RN-082; sementes 82004, 82019, 82084, 82087, 82094, 82095, 82189, 82261,
+  82270 e 83005). Agora o retrato de antes e o de depois da trava dão o aviso a qualquer comando que crie ou cancele
+  lançamento do período (`AuditService.avisosDaTrava`), salvo quando o tratador já o pediu; aceito, exige
+  `justificativa_aviso`, que fica em `OPERACOES.resumo_json.avisos_aceitos`. (2) O aviso `POSSIVEL_DUPLICIDADE` do arquivo
+  de importação enviado de novo não seguia a política de avisos (cada caminho aplicava a sua; a importação não). Agora a
+  UnitOfWork aplica a política a todo aviso de todo tratador (`AuditService.politicaDosAvisos`; a carência fica como a
+  venda a deixa). A tela da importação mostra o "Vi e confirmo" e a justificativa do período no desfazer e no bloco
+  (`src/Import.html`; `tests/ui/importacao-periodo.test.js`, novo). `ImportService.desfazer` leva `justificativa_aviso` e
+  os avisos aceitos.
+- Um terceiro defeito do sistema, achado na primeira leva final (semente 85086, por isso a leva foi refeita): no mesmo
+  "brinco lançado errado", o brinco 2 passa a 7 e o 7 (digitado errado) passa a B-4; o registro aceitava, a correção
+  idêntica recusava com `BRINCO_APOSENTADO` (no substituto, o 7 aparecia encerrado pela projeção gravada do original, e a
+  correção do original, que o tirava, ficava de fora). `EventService.reusoDeBrinco_` passa a contar como corrigidos os
+  números que as correções de brinco do próprio lançamento tiram, como o registro já fazia.
+- Quatro defeitos do modelo do teste (não do sistema): o lançamento do bloco importado nasce sem status e o oráculo do
+  período só contava o ATIVO (semente 81101); a simulação responde pela primeira chamada e o pedido sem a justificativa é
+  recusado na segunda (sementes 82012, 82022, 82030, 82082, 82085); os oráculos metamórficos iam às vezes sem a
+  justificativa (sementes 82099, 82101, 82202, 82265); o comando pede a confirmação antes da trava e a simulação, sem
+  confirmar, chega à recusa da trava (semente 84252). Seis casos novos em `tests/fase2.fuzz.regressoes.test.js` (os três
+  do sistema falham no código de antes). Nenhuma expectativa de teste antigo mudou.

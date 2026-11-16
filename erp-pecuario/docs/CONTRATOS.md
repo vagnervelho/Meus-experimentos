@@ -1075,7 +1075,8 @@ PERIODO_BLOQUEADO)}`. Item por tipo:
   sequência (`Timeline.validarIdentificacoes`), e, no brinco, a unicidade (`BRINCO_DUPLICADO`, `BRINCO_REPETIDO`,
   `BRINCO_NAO_NUMERICO`, aviso `BRINCO_PARECIDO`) e o reuso (`BRINCO_APOSENTADO`: código já usado por outro animal, aberto ou
   fechado, com `brinco_permite_reuso = N`; o próprio animal retoma o seu; o código que é `valor_anterior` de uma
-  IDENTIFICACAO_INCORRETA vigente do mesmo animal não conta — desenho-base 16.2; com o reuso desligado, o número que um
+  IDENTIFICACAO_INCORRETA vigente do mesmo animal não conta — desenho-base 16.2 —, nem o que uma IDENTIFICACAO_INCORRETA do
+  próprio lançamento tira de outro animal, também no substituto de uma correção; com o reuso desligado, o número que um
   animal deixa no lançamento não vai para outro do mesmo lançamento). Retroativa que quebra a sequência gravada (uma
   primeira antes de outra primeira; uma troca antes de uma retirada) → CONFLICT com o evento. Demais: os do sujeito
   (`NAO_ENCONTRADO`, `ANIMAL_EXTERNO`, `ANIMAL_REPETIDO`) e da linha do tempo (`FORA_DA_PERMANENCIA`, `APOS_MORTE`).
@@ -2003,6 +2004,11 @@ Achados desta etapa (cada um com o caso em `tests/fase2.fuzz.regressoes.test.js`
   política de avisos (cada caminho aplicava a sua; a importação não). Fechados na UnitOfWork, para todo caminho: a
   política aplicada a todo aviso e o aviso da trava do período (seção 10.5, item 6); a tela da importação pede o "Vi e
   confirmo" e a justificativa no desfazer e no bloco (`tests/ui/importacao-periodo.test.js`).
+- Passada 4 (leva final, semente 85086): no mesmo "brinco lançado errado", um animal recebe o número que o outro tinha
+  por engano (2 → 7 e 7 → B-4). O registro aceitava (o número corrigido não é reuso), mas a correção idêntica era recusada
+  com `BRINCO_APOSENTADO`: no substituto, o número aparecia encerrado pela projeção gravada do original, cuja correção
+  ficava de fora. `EventService.conferirBrincos_` passa ao `reusoDeBrinco_` os números que as correções de brinco do
+  próprio lançamento tiram (seção 14).
 - Passada 4, no modelo do teste: o lançamento do bloco importado nasce sem status (vale na conclusão), e o oráculo do
   período contava só o ATIVO; a simulação responde pela primeira chamada, e o pedido sem a justificativa do período é
   recusado só na segunda; os oráculos metamórficos (estorno imediato, correção idêntica, desfazer imediato) vão sempre
