@@ -506,11 +506,15 @@ var Timeline = (function () {
     return !!ultima && !!ultima.payload && ultima.payload.acao === 'MARCAR';
   }
   function situacaoReprodutiva_(f, id, fora, at, criacao) {
+    // A situação declarada na entrada (rebanho inicial, compra, outra entrada) vale como o fato da data da entrada: o
+    // registro de antes dela (o histórico reprodutivo importado de antes do marco zero, E3.6) fica na ficha e nos
+    // indicadores, mas não desfaz o que foi declarado depois dele.
+    var desde = !vazio_(at.situacao_reprodutiva) && criacao ? criacao.event_date : null;
     var fatos = fora ? [] : f.reproducao(id).map(function (r) {
       var ev = f.evento(r.event_id);
       var s = r.tipo_evento === 'DIAGNOSTICO_GESTACAO' ? (r.resultado === 'POSITIVO' ? 'PRENHA' : r.resultado === 'NEGATIVO' ? 'VAZIA' : null) : REPRO_SITUACAO[r.tipo_evento] || null;
       return { s: s, data: r.data, seq: ev ? ev.event_seq : 0, ord: ev ? f.ordemSeq(r.event_id) : 0 };
-    }).filter(function (x) { return x.s !== null; });
+    }).filter(function (x) { return x.s !== null && (desde === null || x.data >= desde); });
     var ultimo = ultimoPor_(fatos, function (a, b) { return comparar_(a.data, b.data) || a.ord - b.ord || a.seq - b.seq; });
     if (ultimo) return ultimo.s;
     if (!vazio_(at.situacao_reprodutiva)) return at.situacao_reprodutiva;

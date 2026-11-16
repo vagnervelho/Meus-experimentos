@@ -1163,3 +1163,61 @@ Nenhuma linha de código mudou nesta etapa: só documentos.
     317119): 6.470 aceitos, 4.640 recusados, 0 falhas;
   - a verificar na conta do dono: a tela de sanidade no iframe do HtmlService e o tempo real do Sheets com as 3.154
     aplicações da base de demonstração.
+
+## 16/11/2026 — Fase 3, etapas E3.4 e E3.5 (reprodução, desmama, castração e ocorrência)
+
+- **Estação de monta.** `estacao.salvar` deixou de ser rota futura (`ReproductionService`): nome único na propriedade,
+  início, fim (no início ou depois), tipo MONTA_NATURAL, IA ou MISTA; a edição é auditada e mudar as datas não mexe nos
+  registros já lançados (cada registro fica com a estação dele).
+- **REPRODUCAO, por um tratador só.** Exposição do lote (as fêmeas e os touros na mesma lista; linha TOURO para cada touro;
+  o touro único gravado em cada fêmea, nenhum com dois), cobertura (o touro do rebanho com a linha TOURO, o de fora sem),
+  inseminação (o touro do sêmen, a partida, o tipo), diagnóstico em lote (positivo, negativo, duvidoso; a idade da gestação
+  e a previsão informada só no positivo) e aborto; a estação conferida contra a data no lançamento novo; o macho fora da
+  exposição recusado (RN-060); a fêmea jovem com aviso (RN-061); a despesa paga no ato em todos os subtipos.
+- **Situação reprodutiva e previsão de parto.** A situação é o último fato (o duvidoso e a desmama não decidem), coerente
+  com os partos da Fase 2. A previsão nos quatro níveis de 03b, seção 7.3 (informada; inseminação ou cobertura + 290;
+  diagnóstico + 290 − idade; a janela da exposição), sempre rotulada como estimativa; alertas PARTO_PREVISTO e
+  PRENHEZ_VENCIDA.
+- **DESMAMA, CASTRACAO e OCORRENCIA.** A desmama da cria (nascida na fazenda ou que entrou abaixo da idade de desmama, DL-06),
+  com o peso (a pesagem DESMAMA) e o pasto de destino (o movimento), a linha MATRIZ e o registro DESMAMA uma vez por mãe; a
+  castração do macho inteiro (castrado e não mais reprodutor); a ocorrência com o tipo da lista e a descrição. As três com a
+  despesa paga no ato (CUSTEIO rateado por cabeça).
+- **Regras de manejo e trava.** Touro castrado, castração de fêmea ou repetida, desmama repetida e parto dentro da gestação
+  de um diagnóstico positivo, numa função só (`ReproductionService.problemasDoAnimal`), conferidas antes e depois de todo
+  comando (o problema do próprio lançamento é `VALIDATION`; o que ele quebra num lançamento gravado, `CONFLICT` com ele),
+  pela verificação de integridade (`AuditService.conferirReproducao_`: colunas do registro coerentes com o tipo, cabeçalho
+  igual entre as fêmeas, touro do lote, detalhe obrigatório) e pela trava; o registro reprodutivo só de fêmea também na
+  GENEALOGIA.
+- **Indicadores (07, seção 8.3).** `reproducao.indicadores`: por estação e por categoria, com numerador, denominador, n e
+  "parcial" — prenhez (entre as diagnosticadas com a cobertura do diagnóstico abaixo de 90%), parição, natalidade, perda
+  gestacional, desmama, mortalidade até a desmama (com o corte da idade padrão), IEP e idade ao primeiro parto; a forma
+  anual sem estação (PR-07); denominador zero ou abaixo do mínimo → `null` com DADOS_INSUFICIENTES. Decisão desta etapa para
+  quem saiu no meio da estação: antes de um diagnóstico conclusivo, fora do denominador da prenhez; antes do fim da janela sem
+  desfecho, fora do da parição, da natalidade, da desmama e da perda; a vazia descartada continua. O exemplo de 07 (80
+  expostas) e o de 09, RN-066 (40 expostas), conferidos número a número.
+- **Telas.** `Reproduction.html` sob demanda (49 KB de 150 KB): fêmeas com a situação, a previsão, os alertas e os botões de
+  registro para as escolhidas (no celular, o cartão sem link colado à marca de seleção); diagnóstico no tronco a 360 px no
+  modelo do modo curral (brinco e resultado com Enter, `p90`, blocos de 20 com chave própria, rascunho no aparelho, sem
+  sinal sem duplicar); indicadores; estações pela folha. A ficha ganhou o bloco G inteiro (o do macho mostra os lançamentos
+  como touro e a castração). A rota extra `reproducao.matrizes` alimenta a lista. A página inicial ficou em 441 KB de 450 KB.
+- **Aceitação.** Cenário REPRODUCAO no `runAcceptanceTests` (RN-060, RN-061, RN-064 e RN-066 de 09, seção 4.1, mais a
+  desmama, a castração e a ocorrência); a base de demonstração ganhou as três estações de monta (exposição das fêmeas aptas
+  com os touros e o diagnóstico 150 dias depois, sem aviso) e saiu delas de `fora_desta_fase`.
+- **Teste aleatório.** Entradas REPRODUCAO (cinco subtipos), DESMAMA, CASTRACAO e OCORRENCIA no registro único, com o
+  oráculo do efeito de cada uma (registro, linhas, touro, pesagem da desmama, mães, despesa rateada); o cadastro e a edição
+  da estação no meio da sequência; os replays globais `REPLAY:SITUACAO_REPRODUTIVA` e `REPLAY:CASTRADO`. Com os tipos novos
+  no sorteio, nenhuma das 17 sementes fixas aceitava uma exposição nem um diagnóstico de doença: entraram as sementes 8 e 1.
+- **Testes que mudaram com o comportamento** (sem afrouxar): o bloco G entregue (`animals`, `nascimento`, `tests/ui/movimentos`),
+  os tipos e módulos ativos (`events`, `api`, `telas.sobdemanda`, `tests/ui/interface`, `tests/ui/sobdemanda`; a rota de módulo
+  não entregue passou a ser a do Financeiro), os tipos novos no estorno e na correção de todo tipo ativo (`estorno`), a lista
+  de cenários e a base de demonstração (`acceptance`). Novos: `tests/reproducao.test.js` (8),
+  `tests/reproducao.indicadores.test.js` (5), `tests/manejo.test.js` (4) e `tests/ui/reproducao.test.js` (2).
+- `docs/CONTRATOS.md`: estado, seções 19 e 24, e a nova seção 40.
+- Execuções desta etapa, verificadas em Node e no Playwright deste repositório:
+  - `npm test` (execução completa final): 756 testes, 756 aprovados e 0 falhas (689 s); na primeira execução completa da etapa, 756 testes, 751 aprovados e 5 falhas (as expectativas antigas do bloco G parcial, os tipos novos sem entrada no teste aleatório e a rota extra ainda sem contrato), corrigidas como descrito acima;
+  - `npm run ui:check` com 111 testes, 111 aprovados e 0 falhas (261 s), página inicial com 441 KB de 450 KB, a importação com 47 KB, as pesagens com 41 KB, a sanidade com 23 KB e a reprodução com 49 KB de 150 KB;
+  - teste aleatório: as 19 sementes fixas × 60 passos: 631 comandos aceitos, 437 recusados, 0 falhas; 60 sementes novas
+    × 60 passos (1 a 60), sem falha, para achar as sementes que cobrem os subtipos; 120 sementes novas × 60 passos (730000 a 730119): 3.850 comandos aceitos,
+    2.701 recusados, 0 falhas;
+  - a verificar na conta do dono: a tela de reprodução e o tronco no iframe do HtmlService e o tempo real do Sheets com as
+    estações da base de demonstração.

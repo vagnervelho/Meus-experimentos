@@ -66,7 +66,7 @@ var WeightService = (function () {
         weight_id: p.weight_id, event_id: p.event_id, event_type: ev ? ev.event_type : null, event_subtype: ev && !vazio_(ev.event_subtype) ? ev.event_subtype : null,
         data: p.data_pesagem, peso_kg: p.peso_kg, metodo: p.metodo, tipo: p.tipo, observacoes: vazio_(p.observacoes) ? null : p.observacoes,
         jejum: !!(ev && ev.payload_json && ev.payload_json.jejum === true), individual: individual(p.metodo, params), estimado: estimado(p.metodo),
-        ord: ev ? f.ordemSeq(p.event_id) || 0 : 0, seq: ev ? ev.event_seq || 0 : 0,
+        ord: ev ? f.ordemSeq(p.event_id) || 0 : 0, seq: ev ? ev.event_seq || 0 : 0, historico: !!(ev && ev.pre_marco_zero === true),
       };
     }).sort(ordem_);
   }
@@ -153,7 +153,8 @@ var WeightService = (function () {
       if (!v.conta) {
         v.gmd_kg_dia = null;
         v.motivo = 'DADOS_INSUFICIENTES';
-        v.explicacao = 'O animal esteve fora do rebanho entre as duas pesagens.';
+        // A pesagem anterior ao marco zero (histórico importado) fica na curva, mas fora de qualquer permanência do controle.
+        v.explicacao = a.historico || b.historico ? 'Pesagem anterior ao marco zero: o ganho médio diário só é calculado a partir do marco zero (a pesagem antiga aparece na curva).' : 'O animal esteve fora do rebanho entre as duas pesagens.';
       } else if (v.dias < min) {
         v.gmd_kg_dia = null;
         v.motivo = 'DADOS_INSUFICIENTES';

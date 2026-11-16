@@ -13,10 +13,11 @@ var EventService = (function () {
   var MAX_CRIAS = 4;
   /**
    * Tipos cujo histórico anterior ao marco zero entra pela importação de planilha (04, seção 6: compras, vendas,
-   * transferências, nascimentos e mortes antigos): no formulário só o parto aceita data antiga; a correção de um
-   * registro histórico continua histórica.
+   * transferências, nascimentos e mortes antigos; Fase 3, E3.6: pesagens, aplicações sanitárias, registros reprodutivos e
+   * ocorrências antigos, que contam para a curva de peso, o histórico sanitário e a reprodução): no formulário só o parto
+   * aceita data antiga; a correção de um registro histórico continua histórica.
    */
-  var HISTORICO_IMPORTADO = ['COMPRA', 'VENDA', 'TRANSFERENCIA', 'NASCIMENTO', 'MORTE'];
+  var HISTORICO_IMPORTADO = ['COMPRA', 'VENDA', 'TRANSFERENCIA', 'NASCIMENTO', 'MORTE', 'PESAGEM', 'SANIDADE', 'REPRODUCAO', 'OCORRENCIA'];
   var ROTAS = { registrar: 'evento.registrar', corrigir: 'evento.corrigir', estornar: 'evento.estornar' };
   var IDENT_EXTRAS = ['BRINCO_ORIGEM', 'RFID', 'SISBOV', 'TATUAGEM', 'OUTRO'];
   var SITUACAO_ROTULO = {
@@ -118,7 +119,8 @@ var EventService = (function () {
   }
   /**
    * O equivalente de planejarEntradaImportada para os eventos históricos da importação (COMPRA, VENDA, TRANSFERENCIA,
-   * NASCIMENTO, MORTE; RN-090): o MESMO planejamento do formulário, dentro do tratador de outro comando, sem abrir
+   * NASCIMENTO, MORTE e, na Fase 3, PESAGEM, SANIDADE, REPRODUCAO, OCORRENCIA; RN-090): o MESMO planejamento do formulário,
+   * dentro do tratador de outro comando, sem abrir
    * unidade. dados: {tipo, subtipo, campos, animais, crias, parcelas, custos, deducoes} como em registrar. opcoes:
    * {importacao: {import_id}, rotulos: [texto por item], rotulosCrias: [texto por cria]}. Com import_id a data anterior
    * ao marco zero vira registro histórico (pre_marco_zero, efeito 0, financeiro sem caixa). O tx precisa ter lido
@@ -1117,6 +1119,7 @@ var EventService = (function () {
     var c = ctxEv.campos;
     var itens = ctxEv.itens.filter(function (it) { return it.linhaEA && it.sanidade; });
     if (!s || !itens.length || itens.length !== ctxEv.itens.length) return;
+    var hist = ev.pre_marco_zero === true;
     var lancs = [];
     var planejados = [];
     if (s.produto && s.modo) {
@@ -1127,6 +1130,12 @@ var EventService = (function () {
       if (s.quantidade === null && s.modo === 'TOTAL' && vazio_(c.quantidade_consumida_total)) return; // o catálogo já pediu a quantidade
       if (s.quantidade === null) return;
       var cu = typeof s.produto.custo_unitario === 'number' && s.produto.custo_unitario > 0 ? s.produto.custo_unitario : null;
+    }
+    // Aplicação anterior ao marco zero (importação do histórico sanitário; 04, seção 6): efeito zero no inventário, também no
+    // de insumos — o estoque e o custo do insumo começam no marco zero (a saída de 2025 não baixa o frasco de hoje, e o custo
+    // unitário de hoje não é o da época). Fica o registro: produto, dose, quantidade, carência e próxima aplicação.
+    if (hist) s.historico = true;
+    if (s.produto && s.modo && !hist) {
       ctxEv.plano.MOVIMENTOS_ESTOQUE.push({
         mov_id: m.tx.novoId(), product_id: s.produto.product_id, event_id: ev.event_id, data: ev.event_date, tipo: 'SAIDA', quantidade: s.quantidade,
         custo_unitario: cu, lote: typeof c.lote === 'string' ? nulo_(Utils.aparar(c.lote)) : null, validade: nulo_(c.validade), observacoes: null,
@@ -1162,7 +1171,8 @@ var EventService = (function () {
           evento: ev, conta: conta, naturezas: ['CUSTEIO'], valor: c.custo_valor,
           descricao: nulo_(c.custo_descricao) || (rotuloProcedimento_(s.procedimento).replace(/^./, function (x) { return x.toUpperCase(); }) + ' de ' + br_(ev.event_date) + ': serviço ou produto pago no ato'),
           partner_id: nulo_(c.custo_partner_id), documento: nulo_(c.custo_documento),
-          parcelas: FinancialService.parcelasMensais(c.custo_valor, nulo_(c.custo_vencimento) || ev.event_date, nulo_(c.custo_parcelas_qtd), { forma_pagamento: c.custo_forma_pagamento, documento: c.custo_documento }),
+          // Antes do marco zero, o pagamento é anterior ao controle: sem caixa, como a compra e a morte históricas.
+          parcelas: hist ? undefined : FinancialService.parcelasMensais(c.custo_valor, nulo_(c.custo_vencimento) || ev.event_date, nulo_(c.custo_parcelas_qtd), { forma_pagamento: c.custo_forma_pagamento, documento: c.custo_documento }), semCaixa: hist,
           rateio: { criterio: 'CABECAS', itens: itens.map(function (it) { return { animal_id: it.animal_id, chave: it.codigo_interno, base: 1, quem: it.quem }; }), cemPorCento: true },
           campo: 'custo_conta_id', rotulo: 'o custo pago no ato',
         }, m.col);
@@ -1212,7 +1222,7 @@ var EventService = (function () {
     if (!s) return null;
     return {
       procedimento: s.procedimento, produto_id: s.produto ? s.produto.product_id : null, nome_produto: s.nome, unidade: s.unidade, modo_dose: s.modo,
-      dose_referencia: s.doseRef, quantidade: s.quantidade, quantidade_informada: s.quantidadeInformada !== null, consumo: s.consumo || null, estoque: s.saldo || null,
+      dose_referencia: s.doseRef, quantidade: s.quantidade, quantidade_informada: s.quantidadeInformada !== null, consumo: s.consumo || null, estoque: s.saldo || null, historico: !!s.historico,
       protocol_id: s.protocolo ? s.protocolo.protocol_id : null, carencia_dias: s.carenciaDias, fim_carencia: s.fimCarencia, proxima_aplicacao: s.proxima,
       animais: ctxEv.itens.filter(function (it) { return it.sanidade; }).map(function (it) {
         return { animal_id: it.animal_id, codigo_interno: it.codigo_interno || null, brinco: it.brincoTexto || null, dose: it.dose, peso_kg: it.peso ? it.peso.kg : null, peso_situacao: it.peso ? it.peso.situacao : null, peso_estimado: it.peso ? it.peso.estimado : null, custo: it.sanidade.custo };
@@ -1465,7 +1475,9 @@ var EventService = (function () {
       evento: ev, conta: conta, naturezas: ['CUSTEIO'], valor: c.custo_valor,
       descricao: nulo_(c.custo_descricao) || (nome.replace(/^(a|o) /, '').replace(/^./, function (x) { return x.toUpperCase(); }) + ' de ' + br_(ev.event_date) + ': despesa'),
       partner_id: nulo_(c.custo_partner_id), documento: nulo_(c.custo_documento),
-      parcelas: FinancialService.parcelasMensais(c.custo_valor, nulo_(c.custo_vencimento) || ev.event_date, nulo_(c.custo_parcelas_qtd), { forma_pagamento: c.custo_forma_pagamento, documento: c.custo_documento }),
+      // Registro anterior ao marco zero (importação do histórico): o pagamento é anterior ao controle, sem caixa.
+      parcelas: ev.pre_marco_zero === true ? undefined : FinancialService.parcelasMensais(c.custo_valor, nulo_(c.custo_vencimento) || ev.event_date, nulo_(c.custo_parcelas_qtd), { forma_pagamento: c.custo_forma_pagamento, documento: c.custo_documento }),
+      semCaixa: ev.pre_marco_zero === true,
       rateio: { criterio: 'CABECAS', itens: itens.map(function (it) { return { animal_id: it.animal_id, chave: it.codigo_interno, base: 1, quem: it.quem }; }), cemPorCento: true },
       campo: 'custo_conta_id', rotulo: 'a despesa',
     }, m.col);

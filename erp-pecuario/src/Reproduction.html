@@ -130,6 +130,16 @@ var TelaReproducao = (function () {
       if (!d.itens.length) { corpo.appendChild(UI.nota('Nenhuma fêmea com esses filtros.', 'info')); return; }
       var t = UI.tabela({ id: 'matrizes', rotulo: 'Fêmeas e situação reprodutiva', linhas: d.itens, chave: function (x) { return x.animal_id; }, rotuloLinha: function (x) { return x.brinco || x.codigo_interno; },
         selecao: App.podeRegistrar() ? { aoMudar: function (ids) { escolhidas = ids; desenharAcoes(); } } : null,
+        // No celular, o cartão: o brinco como título (a marca de seleção fica ao lado, sem link colado nela) e os links
+        // (ficha e último registro) numa linha de ações, com o respiro dos alvos de toque.
+        cartao: function (x) {
+          return h('div', null,
+            h('div', { class: 'cartao-linha-topo' }, h('span', { class: 'cartao-linha-titulo brinco', text: x.brinco || x.codigo_interno }), h('span', { text: sit(x.situacao_reprodutiva) + (x.apta ? '' : ' (jovem)') })),
+            h('div', { class: 'suave', text: 'Cria ao pé: ' + (x.cria_ao_pe ? 'sim' : 'não') + ' · ' + x.partos + (x.partos === 1 ? ' parto' : ' partos') + (x.idade_meses === null ? '' : ' · ' + x.idade_meses + ' meses') }),
+            h('div', { text: 'Previsão de parto: ' + textoPrevisao(x.previsao_parto) }),
+            h('div', { class: 'acoes', style: 'margin-top:4px' }, link('animal/' + x.animal_id + '/reproducao', 'Ficha reprodutiva'),
+              x.ultimo ? link('evento/' + x.ultimo.event_id, Fmt.data(x.ultimo.data) + ' · ' + Fmt.rotulo('TIPO_EVENTO_REPRODUTIVO', x.ultimo.tipo_evento)) : null));
+        },
         colunas: [
           { id: 'animal', rotulo: 'Fêmea', valor: function (x) { return x.brinco || x.codigo_interno; }, formatar: function (x) { return link('animal/' + x.animal_id + '/reproducao', x.brinco || x.codigo_interno); } },
           { id: 'situacao', rotulo: 'Situação', valor: function (x) { return sit(x.situacao_reprodutiva) + (x.apta ? '' : ' (jovem)'); } },

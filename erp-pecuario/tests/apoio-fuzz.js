@@ -403,9 +403,19 @@ function oraculoGlobal(sis, S, datas) {
     const E = S.ev.get(r.event_id);
     (reproPor.get(r.animal_id) || reproPor.set(r.animal_id, []).get(r.animal_id)).push({ st, data: r.data, raiz: S.raiz(E), seq: E.event_seq });
   });
+  // E3.6: a situação declarada na entrada que criou o animal (a linha vigente com os atributos, a última pela posição na
+  // cadeia e pela sequência) vale como o fato da data dela: os fatos de antes (o histórico importado) não a desfazem.
+  const criacaoDe = new Map();
+  S.t.EVENTO_ANIMAIS.forEach((l) => {
+    if (!l.atributos_iniciais_json || !S.vig.get(l.event_id)) return;
+    const E = S.ev.get(l.event_id);
+    const c = criacaoDe.get(l.animal_id);
+    if (!c || S.raiz(E) > c.raiz || (S.raiz(E) === c.raiz && E.event_seq > c.seq)) criacaoDe.set(l.animal_id, { raiz: S.raiz(E), seq: E.event_seq, data: E.event_date, sit: (l.atributos_iniciais_json || {}).situacao_reprodutiva || null });
+  });
   S.animais.forEach((a, id) => {
     if (a.situacao_cadastral === 'ANULADO' || a.situacao_cadastral === 'PENDENTE' || a.situacao_cadastral === 'EXTERNO') return;
-    const fatos = reproPor.get(id);
+    const cr = criacaoDe.get(id);
+    const fatos = (reproPor.get(id) || []).filter((x) => !cr || !cr.sit || x.data >= cr.data);
     if (a.sexo === 'F' && fatos && fatos.length && a.situacao_reprodutiva !== ultimo(fatos).st) out.push(falha('REPLAY:SITUACAO_REPRODUTIVA', a.codigo_interno + ': gravada ' + a.situacao_reprodutiva + ', replay ' + ultimo(fatos).st + ' (' + fatos.length + ' fatos)'));
     if (a.sexo === 'M' && S.linhasDe(id).some((l) => l.tipo === 'CASTRACAO') && (a.castrado !== true || a.reprodutor !== false)) out.push(falha('REPLAY:CASTRADO', a.codigo_interno + ' com castração vigente está castrado ' + a.castrado + ', reprodutor ' + a.reprodutor));
   });

@@ -1596,6 +1596,13 @@ var AuditService = (function () {
             if (nulo_(r.custo) !== alocado) achado('SANIDADE', r.health_id, 'custo', nome + ', ' + quem(r) + ': o custo copiado na aplicação (' + (vazio_(r.custo) ? 'vazio' : Utils.formatarReais(r.custo)) + ') difere do que coube ao animal no lançamento (' + (alocado === null ? 'nada' : Utils.formatarReais(alocado)) + ').', 'CUSTO', r.animal_id);
           }
         });
+        // Aplicação anterior ao marco zero (o histórico sanitário importado): nem saída de estoque nem consumo — o estoque e o
+        // custo do insumo começam no marco zero (EventService, consumo da sanidade).
+        if (ev.pre_marco_zero === true) {
+          movs.forEach(function (x) { achado('MOVIMENTOS_ESTOQUE', x.mov_id, 'event_id', nome + ': a aplicação é anterior ao marco zero e tem saída de estoque, que o registro histórico não grava.', 'HISTORICO_ESTOQUE'); });
+          comProduto.forEach(function (f) { achado('FINANCEIRO', f.financial_id, 'product_id', nome + ': a aplicação é anterior ao marco zero e tem lançamento de consumo do produto, que o registro histórico não grava.', 'HISTORICO_CONSUMO'); });
+          return;
+        }
         if (!temMov) return;
         var q = pj.quantidade_consumida_total;
         if (vazio_(r0.produto_id)) {

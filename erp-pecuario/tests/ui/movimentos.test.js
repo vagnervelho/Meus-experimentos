@@ -71,7 +71,8 @@ for (const largura of LARGURAS) {
     assert.match(g, /Cria ao pé\s*sim/);
     assert.match(g, /Partos\s*1/);
     assert.match(g, /12\/09\/2026/);
-    assert.match(g, /Fase 3/, 'diz o que ainda não chegou');
+    assert.match(g, /Bezerros\s*1 nascidos vivos · 0 desmamados · 1 natimortos/, 'o bloco G inteiro (Fase 3, E3.4): os bezerros da matriz');
+    assert.doesNotMatch(g, /Fase 3/, 'nada mais a esperar');
     await semProblemasDeLeiaute(page, largura, 'bloco de reprodução');
     assert.deepEqual(a.estado.erros, []);
     await a.fechar();

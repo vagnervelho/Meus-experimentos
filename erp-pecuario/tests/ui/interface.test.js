@@ -47,7 +47,7 @@ test('carga inicial: página do doGet, carga completa, casca com os módulos ati
   assert.deepEqual(boot[0].dados, {}, 'primeira abertura: sem versão guardada');
   assert.equal(boot[0].ambiente, undefined, 'produção não envia ambiente');
   assert.match(await page.textContent('.grade-cartoes'), /Cabeças\s*4/);
-  assert.deepEqual(await textos(page, '#menu .menu-item'), ['Visão geral', 'Rebanho', 'Pastos', 'Eventos', 'Pesagens', 'Sanidade', 'Configurações'], 'as telas instaladas (as da Fase 1 e as de Pesagens e Sanidade, sob demanda), cada uma com o seu módulo ativo');
+  assert.deepEqual(await textos(page, '#menu .menu-item'), ['Visão geral', 'Rebanho', 'Pastos', 'Eventos', 'Pesagens', 'Sanidade', 'Reprodução', 'Configurações'], 'as telas instaladas (as da Fase 1 e as de Pesagens, Sanidade e Reprodução, sob demanda), cada uma com o seu módulo ativo');
   assert.ok(await page.isVisible('.topo-acoes a:has-text("REGISTRAR EVENTO")'));
   assert.equal(await page.$('[data-faixa="base-teste"]'), null, 'produção sem faixa de base de teste');
   assert.match(await page.textContent('[data-alerta="SEM_BRINCO"]'), /sem brinco/);
@@ -67,7 +67,7 @@ const TELAS_TESTE = [
   { padrao: 'rebanho', modulo: 'REBANHO', titulo: 'Rebanho (tela de teste)' },
   { padrao: 'pastos', modulo: 'PASTOS', titulo: 'Pastos (tela de teste)' },
   { padrao: 'eventos', modulo: 'EVENTOS', titulo: 'Eventos (tela de teste)' },
-  { padrao: 'reproducao/matrizes', modulo: 'REPRODUCAO', titulo: 'Reprodução (tela de teste)' },
+  { padrao: 'financeiro/lancamentos', modulo: 'FINANCEIRO', titulo: 'Financeiro (tela de teste)' },
   { padrao: 'config/parametros', modulo: 'CONFIGURACOES', titulo: 'Configurações (tela de teste)' },
 ];
 
@@ -77,7 +77,7 @@ test('navegação: menu lateral só com módulos ativos e telas instaladas; REGI
   const a = await A.abrir(s, { largura: 1280, telasDeTeste: TELAS_TESTE });
   const { page } = a;
   assert.equal(await page.evaluate(() => window.Roteador.modo()), 'GAS');
-  assert.deepEqual(await textos(page, '#menu .menu-item'), ['Visão geral', 'Rebanho', 'Pastos', 'Eventos', 'Pesagens', 'Sanidade', 'Configurações'], 'Pesagens (E3.1) e Sanidade (E3.2 e E3.3), sob demanda, aparecem; Reprodução (fase 3, ainda sem tela entregue) não, mesmo com tela de teste');
+  assert.deepEqual(await textos(page, '#menu .menu-item'), ['Visão geral', 'Rebanho', 'Pastos', 'Eventos', 'Pesagens', 'Sanidade', 'Reprodução', 'Configurações'], 'Pesagens (E3.1), Sanidade (E3.2 e E3.3) e Reprodução (E3.4), sob demanda, aparecem; Financeiro (Fase 4, ainda sem tela entregue) não, mesmo com tela de teste');
   await page.click('#menu .menu-item:has-text("Rebanho")');
   await A.esperarTela(page, 'Rebanho (tela de teste)');
   assert.match(page.url(), /#\/rebanho$/);
@@ -86,18 +86,18 @@ test('navegação: menu lateral só com módulos ativos e telas instaladas; REGI
   await A.esperarTela(page, 'Registrar evento');
   assert.deepEqual(await textos(page, '[data-grupo] h2'), ['Movimentação', 'Manejo', 'Reprodução', 'Financeiro', 'Correções'], 'o estoque de insumos (Fase 3, E3.2) abre o grupo Financeiro');
   assert.deepEqual(await textos(page, '[data-tipo-evento]'), [
-    'Nascimento', 'Comprar animais', 'Vender animais', 'Transferir de pasto', 'Morte', 'Pesagem', 'Sanidade (vacina, vermífugo, tratamento)',
+    'Nascimento', 'Comprar animais', 'Vender animais', 'Transferir de pasto', 'Morte', 'Pesagem', 'Sanidade (vacina, vermífugo, tratamento)', 'Reprodução (monta, inseminação, diagnóstico)',
     'Rebanho inicial (marco zero)', 'Outra entrada (doação, permuta, achado)', 'Comprar animais', 'Vender animais', 'Transferir de pasto', 'Morte', 'Descarte (consumo, doação, sacrifício)',
-    'Pesagem', 'Sanidade (vacina, vermífugo, tratamento)', 'Identificação (brinco)', 'Marcar para descarte ou não localizado',
-    'Nascimento', 'Estoque de insumos', 'Corrigir dados do animal',
-  ], 'os mais usados no alto; só os tipos entregues (a pesagem chega na Fase 3, E3.1; a sanidade e o estoque, na E3.2 e E3.3; os demais de manejo, nas etapas seguintes); estorno não entra no seletor');
+    'Pesagem', 'Sanidade (vacina, vermífugo, tratamento)', 'Castração', 'Identificação (brinco)', 'Marcar para descarte ou não localizado', 'Ocorrência',
+    'Nascimento', 'Reprodução (monta, inseminação, diagnóstico)', 'Desmama', 'Estoque de insumos', 'Corrigir dados do animal',
+  ], 'os mais usados no alto; só os tipos entregues (a pesagem chega na Fase 3, E3.1; a sanidade e o estoque, na E3.2 e E3.3; a reprodução, a desmama, a castração e a ocorrência, na E3.4 e E3.5); estorno não entra no seletor');
   await page.click('[data-tipo-evento="OUTRA_ENTRADA"]');
   await A.esperarTela(page, 'Outra entrada');
   await page.goBack();
   await A.esperarTela(page, 'Registrar evento');
   await page.goBack();
   await A.esperarTela(page, 'Rebanho (tela de teste)');
-  await A.ir(page, 'reproducao/matrizes');
+  await A.ir(page, 'financeiro/lancamentos');
   assert.match(await page.textContent('#conteudo'), /ainda não foi entregue/, 'rota de módulo inativo não abre');
   await A.ir(page, 'nao/existe');
   assert.match(await page.textContent('#conteudo'), /não existe nesta versão/);
@@ -118,7 +118,7 @@ test('navegação no celular: barra inferior Início · Rebanho · Registrar · 
   await dlg.waitFor();
   assert.equal(await dlg.getAttribute('aria-modal'), 'true');
   assert.equal(await page.textContent('#' + await dlg.getAttribute('aria-labelledby')), 'Mais');
-  assert.deepEqual(await textos(page, '[role=dialog] .menu-item'), ['Eventos', 'Pesagens', 'Sanidade', 'Configurações']);
+  assert.deepEqual(await textos(page, '[role=dialog] .menu-item'), ['Eventos', 'Pesagens', 'Sanidade', 'Reprodução', 'Configurações']);
   assert.equal(await page.getAttribute('#app', 'aria-hidden'), 'true', 'fundo inerte enquanto a folha está aberta');
   await page.keyboard.press('Escape');
   await dlg.waitFor({ state: 'detached' });

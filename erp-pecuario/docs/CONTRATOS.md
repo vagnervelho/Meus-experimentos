@@ -106,6 +106,15 @@ tratador único dos dois tipos no `EventService` com os avisos ESTOQUE_INSUFICIE
 aceitação e as vacinações e vermifugações na base de demonstração (seção 21); as entradas SANIDADE e ESTOQUE do teste
 aleatório (seção 36) e as telas — Sanidade sob demanda (agenda, aplicações, produtos e estoque, protocolos), o bloco F da
 ficha, a carência no cartão da venda, a revisão, o detalhe e a correção dos dois tipos (seção 39).
+Fase 3, etapas E3.4 e E3.5 (REPRODUÇÃO, DESMAMA, CASTRAÇÃO E OCORRÊNCIA): os tipos REPRODUCAO (cinco subtipos), DESMAMA,
+CASTRACAO e OCORRENCIA e o módulo REPRODUCAO ativos no catálogo; o cadastro das estações de monta, a previsão de parto, os
+indicadores de 07, seção 8.3, as fêmeas e os alertas (`ReproductionService`, seção 40); o tratador único dos quatro tipos no
+`EventService` com as regras de manejo (touro castrado, castração repetida, desmama repetida, parto dentro da gestação de um
+diagnóstico) conferidas antes e depois do comando, pela verificação e pela trava (seção 40); as rotas `estacao.salvar`,
+`reproducao.indicadores` e a extra `reproducao.matrizes` (seção 19); o cenário REPRODUCAO na aceitação e as três estações
+na base de demonstração (seção 21); as entradas dos quatro tipos, o cadastro da estação e o replay da situação reprodutiva
+e da castração no teste aleatório (seção 36) e as telas — Reprodução sob demanda (fêmeas, diagnóstico no tronco,
+indicadores, estações) e o bloco G inteiro da ficha (seção 40).
 
 ## 1. Regras que valem para todo arquivo de `src/`
 
@@ -1650,8 +1659,8 @@ banco/DENIED/rascunho), appVersion (= package.json), serverTime (ISO UTC)}`; em 
 | `APP_VERSION`, `TITULO`, `FAIXA_TESTE` (`'BASE DE TESTE'`), `RASCUNHO` (`{prefixo, maxBytes: 8000, max: 40, validadeDias: 30}`) | Constantes |
 
 **Rotas.** As 51 canônicas; as de fase futura respondem `NOT_FOUND` "Esta função faz parte do módulo X, que chega na fase N"
-(`estacao.salvar`, `reproducao.indicadores` 3 — `produto.salvar`, `protocolo.salvar` e `sanidade.agenda` entraram na E3.2 e
-na E3.3; `conta.salvar`, `preco.salvar`, `parcela.*`, `financeiro.*` 4;
+(`produto.salvar`, `protocolo.salvar` e `sanidade.agenda` entraram na E3.2 e na E3.3; `estacao.salvar` e
+`reproducao.indicadores`, na E3.4; `conta.salvar`, `preco.salvar`, `parcela.*`, `financeiro.*` 4;
 `relatorio.*` 5); rota desconhecida → `NOT_FOUND`. Cada uma chama o serviço da seção correspondente com
 `pedido = {idempotencyKey, dados, avisosAceitos, dataVersionEsperada}` (comando) ou `dados` (consulta). Particularidades:
 
@@ -1663,6 +1672,8 @@ na E3.3; `conta.salvar`, `preco.salvar`, `parcela.*`, `financeiro.*` 4;
 | `peso.desempenho` | Consulta (Fase 3, E3.1; módulo PESAGENS): `WeightService.desempenho(ctx, dados)` (seção 38); `acessoCru`, nada gravado; filtros inválidos → `VALIDATION`, pasto, categoria ou animal inexistentes → `NOT_FOUND` |
 | `produto.salvar`, `protocolo.salvar` | Comandos (Fase 3, E3.2; módulo SANIDADE): `HealthService.salvarProduto` e `salvarProtocolo` (seção 39), com chave, avisos e versão esperada como todo cadastro |
 | `sanidade.agenda` | Consulta (Fase 3, E3.3): `HealthService.agenda(ctx, dados)` (seção 39); `{data?, periodo_inicio?, periodo_fim?}`; data futura ou inválida → `VALIDATION` |
+| `estacao.salvar` | Comando (Fase 3, E3.4; módulo REPRODUCAO): `ReproductionService.salvarEstacao` (seção 40) |
+| `reproducao.indicadores`, `reproducao.matrizes` | Consultas (Fase 3, E3.4): `ReproductionService.indicadores` e `matrizes` (seção 40); `reproducao.matrizes` é rota extra, não canônica (a lista de fêmeas da tela e os alertas de parto) |
 | `sistema.backup` / `sistema.restaurarBackup` / `sistema.integridade` | Manutenção (sem chave): backup SOB_DEMANDA; `restaurar` com `{backup_id, justificativa}`; integridade (`{reparar: true, justificativa}` → `repararIntegridade`) |
 | `operacao.status` | `{chave}` → `UnitOfWork.status` |
 | `evento.simular` | `{acao: registrar \| corrigir \| estornar, dados}` → `EventService.simular`; outra ação → `VALIDATION` |
@@ -1817,8 +1828,9 @@ exportar e conferir contra a tela; pastos, configurações e sistema a 360 px).
 ## 24. `ReproductionService` (puro: partos e histórico reprodutivo da matriz, Fase 2)
 
 Um parto = um NASCIMENTO = uma linha REPRODUCAO PARTO (DV-15). Recebe `f = Timeline.fonte(tx, ...)` (respeita os eventos
-excluídos da fonte: validação de estorno e de substituição). Exposição, cobertura, IA, diagnóstico, aborto, desmama e os
-indicadores por estação são da Fase 3.
+excluídos da fonte: validação de estorno e de substituição). Exposição, cobertura, IA, diagnóstico, aborto, desmama, os
+indicadores por estação e o bloco G inteiro entraram na Fase 3 (E3.4 e E3.5): seção 40, que substitui a linha
+`blocoFicha` abaixo.
 
 | Função | Contrato |
 |---|---|
@@ -2373,3 +2385,111 @@ agenda, alertas, ficha), `tests/estorno.test.js` (os seis subtipos e os dois do 
 `tests/acceptance.test.js` (CT-06, SANIDADE e a base de demonstração), `tests/fase2.fuzz.test.js` (seção 36),
 `tests/telas.sobdemanda.test.js` (Health entregue e no orçamento) e `tests/ui/sanidade.test.js` (Playwright: produtos,
 protocolo e entrada de estoque a 360 px; agenda, aplicação, ficha e venda a 1280 e 360 px; detalhe e correção a 1280 px).
+
+## 40. Reprodução, desmama, castração e ocorrência (Fase 3, E3.4 e E3.5) — `ReproductionService`, `EventService` (REPRODUCAO, DESMAMA, CASTRACAO, OCORRENCIA), `AuditService`, `Timeline`, `InventoryService`, `AnimalService`, `Api`, `TestRunner`, `Reproduction`, `Animals`, `Events`, `Components`, `JavaScript`
+
+Desenho: 03a, seção 4.10; 03b, seções 2.5, 2.6, 3.4, 7 e 16.14; 04, seções 3.3 e 4.5; 05, seção 2.9 (RN-060 a RN-066); 07,
+seção 8.3; 08, seções 3 (bloco G) e 5; 09, seção 4.1; PR-07. Datas yyyy-MM-dd; dinheiro em centavos. A situação, a previsão
+de parto e os indicadores são contas do servidor; a tela só mostra (P5).
+
+**Estação de monta.** `comandoSalvarEstacao`/`salvarEstacao` — `estacao.salvar` `{estacao_id?, campos, justificativa?}`:
+nome (único na propriedade, sem diferença de maiúsculas: `NOME_REPETIDO`), início, fim (no início ou depois:
+`FAIXA_INVALIDA`), tipo MONTA_NATURAL, IA ou MISTA, propriedade padrão; a edição é auditada. Mudar as datas não mexe nos
+registros já lançados (o registro fica com a estação dele; o motor confere a data contra a estação só no lançamento novo).
+`cadastros(repo)` leva as estações ao `sistema.bootstrap`.
+
+**Lançamentos (tratador único: registrar, simular, retroativo, mesmo dia, corrigir, corrigir o substituto, estornar,
+importação e desfazer, base de demonstração).**
+
+| Peça | Contrato |
+|---|---|
+| REPRODUCAO, cabeçalho | Estação existente; na exposição, na cobertura e na inseminação a data cai no período dela, no diagnóstico é depois do início (`FORA_DA_ESTACAO`; a estação que o original usava vale na correção). Retirada dos touros (`data_fim`, só na exposição) no início ou depois. Touro da cobertura e da inseminação: macho, não anulado, nascido antes (`SEXO_DO_PROGENITOR`, `NASCIMENTO_DO_PROGENITOR`); na cobertura, o do rebanho tem a linha TOURO (efeito 0, presença na data) e o de fora não; na inseminação, o do sêmen não tem linha |
+| REPRODUCAO, item | A fêmea do rebanho na data: linha SUJEITO (efeito 0) e uma linha REPRODUCAO do subtipo. Na exposição, o macho da lista é touro do lote (linha TOURO); o touro único fica em `touro_id` de cada fêmea (dois ou mais: nenhum). Nos demais subtipos o macho → `NAO_E_FEMEA`. Diagnóstico: `resultado` (POSITIVO, NEGATIVO, INCONCLUSIVO) obrigatório; `idade_gestacional_dias` e `data_prevista_parto` só no positivo (`CAMPO_NAO_SE_APLICA`), idade até `dias_gestacao` (`VALOR_FORA_DA_FAIXA`), previsão depois do diagnóstico (`DATA_INVALIDA`). Aborto: a idade da gestação perdida. Fêmea abaixo de `idade_min_reprodutiva_meses`: aviso `IDADE_REPRODUTIVA`. Sem fêmea: `SEM_FEMEAS` |
+| DESMAMA | A cria (nascida na fazenda, ou que entrou com menos que `idade_desmama_padrao_meses`; DL-06) ainda não desmamada (`NAO_E_CRIA`, `JA_DESMAMADO`), no rebanho na data: linha SUJEITO com o peso e, com o pasto de destino diferente do atual, o movimento; o peso vira a pesagem DESMAMA (`metodo_pesagem`, padrão BALANCA). A mãe conhecida e no rebanho na data: linha MATRIZ (efeito 0) e o registro REPRODUCAO DESMAMA, uma vez por mãe (gêmeos). A cria ao pé da mãe sai pela linha SUJEITO |
+| CASTRACAO | Macho inteiro do rebanho na data (`NAO_E_MACHO`; `JA_CASTRADO` pelo cadastro ou por castração anterior); o método no payload. Projeção: castrado e não reprodutor (a categoria segue o cadastro) |
+| OCORRENCIA | O animal do rebanho na data; `tipo_ocorrencia` (lista TIPO_OCORRENCIA) e a descrição obrigatórios; sem efeito no inventário. Duplicidade no mesmo dia só com o mesmo tipo |
+| Despesa paga no ato (`despesaDoManejo_`) | Reprodução, castração e ocorrência: os campos `custo_*` (03b, seção 2.5) viram um CUSTEIO na conta escolhida, com as parcelas mensais, rateado por cabeça entre os animais (na reprodução, as fêmeas; um animal: DIRETO), 100% alocado; `total_value` = o valor; descrição padrão "Castração de 13/11/2026: despesa" |
+| Regras de manejo (`conferirManejo_` = `ReproductionService.problemasDoAnimal`, antes e depois do comando) | `CASTRACAO_DE_FEMEA`, `CASTRACAO_REPETIDA`, `TOURO_CASTRADO` (linha TOURO na data da castração ou depois, ou de castrado de origem), `DESMAMA_REPETIDA` e `PARTO_NA_GESTACAO` (parto entre a concepção — diagnóstico positivo menos a idade — e o diagnóstico). Problema do próprio lançamento → `VALIDATION`; o que ele quebra num lançamento gravado → `CONFLICT` com ele (a castração retroativa contra a cobertura; o parto retroativo contra o diagnóstico) |
+| Resposta | `impactos.manejo` (REPRODUCAO: fêmeas, touros, touro, estação, retirada, método, sêmen, `resultados` do diagnóstico; DESMAMA: bezerros, mães, movidos, pesados, peso médio e cada bezerro com a idade; CASTRACAO e OCORRENCIA: animais e tipo) e `reproducao.animais` com a situação projetada e a previsão de cada fêmea |
+
+**Projeção.** `situacao_reprodutiva` = o último fato (data, posição na cadeia, `event_seq`): exposição e cobertura
+EXPOSTA, inseminação INSEMINADA, diagnóstico positivo PRENHA, negativo, parto e aborto VAZIA; o duvidoso e a desmama não
+decidem; sem fato, o declarado na entrada ou SEM_INFORMACAO (NAO_APTA para a nascida na fazenda). `castrado` pelo cadastro
+ou pela castração vigente; `cria_ao_pe` sai com a desmama.
+
+**Previsão de parto (`previsaoParto(regs, params, estacoes)`, 03b, seção 7.3; sempre estimativa, salvo a informada).**
+Nível 0: a informada no diagnóstico positivo; 1: inseminação ou cobertura + `dias_gestacao`; 2: diagnóstico +
+(`dias_gestacao` − idade); 3: a janela da exposição (início + dias − tolerância a fim + dias + tolerância). Janela ±
+`parto_tolerancia_dias` nos níveis 0 a 2. Depois de um parto ou aborto, só os fatos seguintes contam. Exemplos conferidos:
+inseminação em 10/11/2026 → 27/08/2027; diagnóstico em 15/01/2027 com 60 dias → 02/09/2027.
+
+**Indicadores (`reproducao.indicadores`, 07, seção 8.3).** `{estacao_id?, ano?, data? (≤ hoje)}` →
+`{data, parametros, matrizes: {ativas, prenhas, sem_informacao, sem_historico, motivo}, estacoes, estacao: {estacao, geral,
+por_categoria} | null, anual | null}`; sem estação pedida, a mais recente com expostas; sem estação nenhuma, a forma anual.
+Expostas em E = fêmeas com exposição, cobertura ou inseminação de E; o parto é da exposição mais recente cuja janela o
+contém; o diagnóstico é o último conclusivo de E (ou sem estação, dentro da janela). Cada taxa `{valor, motivo, numerador,
+denominador, n, rotulo, parcial}`: denominador zero ou abaixo de `indicador_n_minimo` → `null` com DADOS_INSUFICIENTES,
+nunca zero (RN-066). `geral` e cada categoria (na data da exposição): `expostas, diagnosticadas, prenhas, paridas,
+nascidos_vivos, desmamados, crias_ao_pe, mortos_antes_da_desmama, vendidos_ao_pe, sairam_sem_diagnostico,
+sairam_sem_desfecho, cobertura_dg, prenhez` (sobre as expostas; com a cobertura do diagnóstico abaixo de
+`prenhez_cobertura_dg_min_pct`, sobre as diagnosticadas, rótulo "Prenhez entre diagnosticadas"),
+`prenhez_entre_diagnosticadas, paricao, natalidade, perda_gestacional` (aborto ou janela encerrada sem parto; prenha sem
+desfecho nunca é perda), `desmama, mortalidade_ate_desmama` (mortos e baixados antes da desmama e do corte em
+`idade_desmama_padrao_meses` ÷ nascidos vivos; vendidos ao pé à parte), `iep_dias` e `idade_primeiro_parto_meses`
+(`{valor, motivo, n}`); "parcial" com prenha de janela aberta ou cria ao pé. Quem saiu no meio da estação (decisão desta
+etapa): antes de um diagnóstico conclusivo, sai do denominador da prenhez; antes do fim da janela sem desfecho (parto,
+aborto ou diagnóstico negativo), sai do da parição, da natalidade, da desmama e da perda; a vazia descartada continua.
+Forma anual (PR-07, sem estação): natalidade = nascidos vivos no ano ÷ matrizes ativas no início do ano (antes do marco
+zero: ANTERIOR_AO_MARCO_ZERO), IEP e idade ao primeiro parto dos partos do ano. Exemplo de 07 conferido número a número
+(80 expostas: 80,0%, 84,2% entre diagnosticadas, 75,0%, 76,3%, 6,3%, 70,0%, 6,6%) e o de 09 (40 expostas: 80,0%, 75,0%,
+77,5%).
+
+**Fêmeas e alertas.** `reproducao.matrizes` (rota extra) `{data?, estacao_id?, situacao?, pasture_id?}` → `{data, itens:
+[{animal_id, codigo_interno, brinco, pasture_id, situacao_reprodutiva, apta, cria_ao_pe, partos, idade_meses, ultimo,
+previsao_parto, sem_historico}], resumo: {por_situacao, cria_ao_pe, sem_historico, total}, alertas}`: as fêmeas no
+rebanho na data, aptas ou com algum registro. Alertas (`alertasHoje`, também em `alerta.listar`): PARTO_PREVISTO (previsão
+até `alerta_parto_previsto_dias` à frente) e PRENHEZ_VENCIDA (a prenha cuja previsão passou há mais de
+`alerta_prenhez_vencida_dias` sem parto nem aborto).
+
+**Ficha (bloco G inteiro, `blocoFicha(L, a)`).** Fêmea: `{entregue, parcial: false, aplica, situacao_reprodutiva,
+cria_ao_pe, parida, previsao_parto, n_partos, partos_registrados, partos (com crias e intervalos), bezerros {nascidos_vivos,
+natimortos, desmamados}, perdas_gestacionais {abortos, natimortos, total}, exposicoes, coberturas, inseminacoes,
+diagnosticos, abortos, intervalo_medio_dias, idade_primeiro_parto_meses, registros [{event_id, tipo_evento, data,
+resultado, idade_gestacional_dias, data_prevista_parto, estacao_nome, touro_id, semen_identificacao, metodo}],
+sem_historico}`. Macho: `{aplica: false, mensagem, como_touro: [{event_id, data, tipo_evento, femeas, estacao_id}] (um item
+por lançamento), castracao: {event_id, data, metodo} | null}`.
+
+**Integridade (`AuditService.conferirReproducao_`, COPIAS e LINHA_DO_TEMPO; a mesma função na verificação e na trava).**
+Colunas do registro coerentes com o tipo (resultado só no diagnóstico, idade só no positivo e no aborto, retirada só na
+exposição e não antes do início, previsão depois do diagnóstico), o cabeçalho igual entre as fêmeas do lançamento, o touro
+do registro = o touro único do lote, o detalhe obrigatório (uma REPRODUCAO por linha SUJEITO; na desmama, por linha MATRIZ),
+as regras de manejo acima (com a castração de origem que aparece por correção de cadastro: `INTEGRIDADE_LINHA_DO_TEMPO`) e o
+registro reprodutivo só de fêmea (GENEALOGIA). `RESOLVER_MANEJO` explica o achado na tela da trava.
+
+**Aceitação e base de demonstração (`TestRunner`, seção 21).** Cenário REPRODUCAO (09, seção 4.1): RN-060 (o touro no
+diagnóstico: `NAO_E_FEMEA`), RN-061 (parto da novilha de 20 meses: `IDADE_REPRODUTIVA`), RN-064 (segundo parto 200 dias
+depois: `INTERVALO_PARTO_CURTO`), RN-066 (40 expostas, 38 diagnosticadas, 32 prenhas, 30 paridas, 31 vivos: 80,0%, 75,0%,
+77,5%; 4 expostas numa estação de inseminação: `null`), a desmama, a castração e a ocorrência. A base de demonstração ganhou
+as três estações de monta (D0+30, D0+395, D0+760; 90 dias cada): a exposição das fêmeas com 25 meses ou mais e dos touros
+no início e o diagnóstico 150 dias depois (positivo quando o plano tem o parto na janela), sem aviso; `fora_desta_fase`
+perdeu as estações.
+
+**Interface.**
+
+| Peça | Contrato |
+|---|---|
+| `Reproduction.html` (sob demanda, seção 37; 49 KB) | `TelaReproducao`; rotas `reproducao/matrizes` (menu), `reproducao/tronco`, `reproducao/indicadores`, `reproducao/estacoes`, com abas. Fêmeas: filtros (data, estação, situação, pasto), indicadores (`[data-resumo-matrizes]`), alertas, a tabela com seleção (no celular, cartão sem link colado à marca) e os botões `[data-registrar]` de cada subtipo, que abrem o Registro com as escolhidas e a estação em curso. Indicadores: a estação (ou o ano) com cada taxa, numerador, denominador, "parcial" e o motivo do vazio; por categoria. Estações: tabela e a folha `estacao.salvar`. Diagnóstico no tronco: data, método, estação e responsável; brinco e resultado com Enter (`p`, `p90`, `v`, `d`), o brinco que não é de fêmea do rebanho como pendência, blocos de 20 enviados com chave própria (rascunho `tronco-diagnostico` no aparelho; sem sinal, o bloco fica guardado e o reenvio usa a mesma chave; a resposta perdida é conferida por `operacao.status`), o aviso do servidor com "Está certo", a previsão do servidor na linha e "Terminar" com os lançamentos gravados |
+| Ficha (`Animals`, aba Reprodução) | O bloco G vem do módulo, pedido sob demanda (`TelaReproducao.blocoFicha`): situação, cria ao pé, parida, previsão, partos, bezerros, perdas, intervalos, registros; no macho, os lançamentos como touro e a castração |
+| Registro, detalhe e correção (`Components`, `Events`) | Os quatro tipos no seletor; o diagnóstico com o resultado por fêmea e a idade e a previsão só no positivo; a desmama com o peso por bezerro; a despesa paga no ato; o detalhe com as seções do manejo; a prévia da correção (`previaCorrecao`) traz o lançamento como foi digitado |
+| Loja do cliente (`JavaScript`) | `Store.estacoes/estacao`, deltas de `estacao.salvar`; rótulos SITUACAO_REPRODUTIVA, TIPO_EVENTO_REPRODUTIVO, RESULTADO_DG e METODO_REPRODUCAO |
+
+Testes: `tests/reproducao.test.js` (estação; exposição, cobertura e inseminação; diagnóstico em lote e os quatro níveis
+da previsão; os caminhos — retroativo, mesmo dia, correção, correção do substituto, estorno da correção, estorno com e sem
+dependente —; parto dentro da gestação pelos dois lados; castração retroativa do touro; integridade por adulteração e a
+trava; importação e desfazer; ficha, fêmeas e alertas), `tests/reproducao.indicadores.test.js` (07 e 09 número a número,
+categoria, cobertura abaixo de 90%, denominador zero, saída no meio, parcial, desmama e mortalidade com o corte, IEP, forma
+anual), `tests/manejo.test.js` (desmama, castração e ocorrência por caminho, despesa, integridade, trava, importação e
+desfazer), `tests/acceptance.test.js` (cenário REPRODUCAO e as estações da demonstração), `tests/fase2.fuzz.test.js` (seção
+36: as quatro entradas, o cadastro da estação e os replays `REPLAY:SITUACAO_REPRODUTIVA` e `REPLAY:CASTRADO`; sementes fixas
+8 e 1) e `tests/ui/reproducao.test.js` (Playwright: tronco a 360 px com a rede cortada; fêmeas, indicadores, estação,
+ficha da matriz e do touro a 1280 e 360 px).
