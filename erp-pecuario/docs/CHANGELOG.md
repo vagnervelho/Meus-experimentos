@@ -893,3 +893,13 @@ Nenhuma linha de código mudou nesta etapa: só documentos.
   justificativa (sementes 82099, 82101, 82202, 82265); o comando pede a confirmação antes da trava e a simulação, sem
   confirmar, chega à recusa da trava (semente 84252). Seis casos novos em `tests/fase2.fuzz.regressoes.test.js` (os três
   do sistema falham no código de antes). Nenhuma expectativa de teste antigo mudou.
+- Sementes rodadas nesta passada (todas novas, de 80000 em diante): com o gerador da passada 3, 100 × 150 passos (80000 a
+  80099), 0 falhas. Com o gerador ampliado, 28 sementes de exploração × 150 (81000 a 81005, 81100 a 81111, 83000 a 83009);
+  a triagem de 320 × 150 (82000 a 82319), interrompida depois de 18 falhas, todas nas classes acima; 320 × 150 depois dos
+  primeiros consertos (84000 a 84319: 1 falha, do modelo); a primeira leva final, 400 × 150 (85000 a 85399: 31.783
+  aceitos, 24.416 recusados, 1 falha, a semente 85086). A leva final, depois do último conserto, foi de 400 sementes novas
+  × 150 passos (86000 a 86399): 31.540 comandos aceitos, 24.479 recusados, 0 falhas.
+- Verificado em Node: `tests/fase2.fuzz.test.js` (16 sementes fixas, 428 aceitos e 383 recusados) e
+  `tests/fase2.fuzz.regressoes.test.js` (13 casos); `npm test` completo com 650 testes, 650 aprovados e 0 falhas (734 s,
+  junto da leva final); `npm run ui:check` com 88 testes, 88 aprovados e 0 falhas (226 s), página montada com 448 KB de
+  450 KB.
