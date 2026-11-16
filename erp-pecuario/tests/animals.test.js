@@ -102,8 +102,8 @@ test('ficha: blocos A a J, árvore genealógica até N gerações, crias, pastos
   for (const b of ['geral', 'genealogia', 'localizacao', 'pastos', 'eventos', 'anexos']) assert.equal(f[b].entregue, true, b);
   // H: entregue na Fase 2 pela compra (alocações); parcial até o Financeiro (Fase 4). Nascida: custo 0, sem lançamentos.
   assert.deepEqual([f.financeiro.entregue, f.financeiro.parcial, f.financeiro.pendente.fase, f.financeiro.lancamentos.length], [true, true, 4, 0]);
-  // G: na Fase 2 só a parte de partos; o resto chega com a reprodução (Fase 3), e a ficha diz isso.
-  assert.deepEqual([f.reprodutivo.entregue, f.reprodutivo.parcial, f.reprodutivo.pendente.fase, f.reprodutivo.aplica, f.reprodutivo.partos_registrados, f.reprodutivo.n_partos], [true, true, 3, true, 0, 0]);
+  // G: inteiro desde a reprodução (Fase 3, E3.4): a bezerra sem registro reprodutivo fica "sem informação" (a projeção).
+  assert.deepEqual([f.reprodutivo.entregue, f.reprodutivo.parcial, f.reprodutivo.pendente, f.reprodutivo.aplica, f.reprodutivo.partos_registrados, f.reprodutivo.n_partos, f.reprodutivo.situacao_reprodutiva, f.reprodutivo.registros.length], [true, false, undefined, true, 0, 0, 'SEM_INFORMACAO', 0]);
   assert.deepEqual([f.geral.codigo_interno, f.geral.brinco, f.geral.idade_meses, f.geral.categoria.codigo, f.geral.sem_categoria], [bezerra.codigo_interno, null, 10, 'BEZERRA', false]);
   // B: bezerra → mãe 0310 (confirmada) → avó 0102; pai externo (estimado).
   const g = f.genealogia;

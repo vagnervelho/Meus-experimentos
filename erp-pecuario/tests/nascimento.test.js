@@ -89,7 +89,7 @@ test('CT-01 passo 1: parto cria a bezerra… o bezerro com a mãe, no pasto da m
   const mae = m.animal(matriz);
   assert.deepEqual([mae.situacao_reprodutiva, mae.cria_ao_pe, mae.pasto_atual_id, mae.data_ultimo_movimento], ['VAZIA', true, PASTOS.A, D0], 'parto não é movimento da mãe');
   const g = ficha(c, matriz).reprodutivo;
-  assert.deepEqual([g.entregue, g.parcial, g.aplica, g.n_partos, g.partos_registrados, g.ultimo_parto, g.crias_nascidas_vivas, g.natimortos, g.situacao_reprodutiva, g.cria_ao_pe], [true, true, true, 1, 1, '2026-09-12', 1, 0, 'VAZIA', true]);
+  assert.deepEqual([g.entregue, g.parcial, g.aplica, g.n_partos, g.partos_registrados, g.ultimo_parto, g.crias_nascidas_vivas, g.natimortos, g.situacao_reprodutiva, g.cria_ao_pe], [true, false, true, 1, 1, '2026-09-12', 1, 0, 'VAZIA', true], 'bloco G inteiro desde a reprodução (Fase 3)');
   assert.deepEqual(g.partos.map((p) => [p.data, p.nascidos_vivos, p.natimortos, p.intervalo_dias, p.crias.map((x) => x.animal_id)]), [['2026-09-12', 1, 0, null, [cria.animal_id]]]);
   assert.deepEqual(js(g.intervalo_medio_dias), { valor: null, motivo: 'DADOS_INSUFICIENTES', n: 0 });
   assert.deepEqual([categoriaEm(c, matriz, '2026-09-11'), categoriaEm(c, matriz, '2026-09-12'), categoriaEm(c, matriz, '2026-11-13')], ['NOVILHA_24_MAIS', 'VACA', 'VACA']);

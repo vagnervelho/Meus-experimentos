@@ -593,8 +593,17 @@ var ReproductionService = (function () {
       f.linhasDoEvento(x.parto.event_id).forEach(function (l) { if (l.papel === 'CRIA' && f.vale(l.event_id)) crias.push(l.animal_id); });
     });
     var desmamadas = crias.filter(function (id) { return f.linhas(id).some(function (l) { return l.event_type === 'DESMAMA' && l.papel === 'SUJEITO' && l.event_date <= data; }); });
+    // Sem DESMAMA registrada, a desmama se dá por encerrada na idade padrão (07, seção 8.3: "corte em
+    // `idade_desmama_padrao_meses`"): a saída depois dela não é perda até a desmama, e a cria passada dela não fica em risco.
+    var mesesDesmama = typeof p.idade_desmama_padrao_meses === 'number' ? p.idade_desmama_padrao_meses : null;
+    var corte = function (id) {
+      var a = f.animal(id);
+      return mesesDesmama === null || !a || vazio_(a.data_nascimento) ? null : Utils.somaMeses(a.data_nascimento, mesesDesmama);
+    };
     var aoPe = crias.filter(function (id) {
       if (desmamadas.indexOf(id) >= 0) return false;
+      var c = corte(id);
+      if (c !== null && c < data) return false;
       var s = Timeline.situacaoEm(f.linhas(id), data, L.marcoZero);
       return s.presente;
     });
@@ -604,6 +613,8 @@ var ReproductionService = (function () {
       if (desmamadas.indexOf(id) >= 0) return;
       var s = saidas_(f, id).filter(function (x) { return x.data <= data; })[0];
       if (!s) return;
+      var c = corte(id);
+      if (c !== null && s.data > c) return;
       if (s.tipo === 'MORTE' || s.tipo === 'DIVERGENCIA_CONTAGEM') mortas.push(id);
       else vendidasAoPe.push(id);
     });
@@ -641,6 +652,7 @@ var ReproductionService = (function () {
       vendidos_ao_pe: vendidasAoPe.length,
       cobertura_dg: cobertura,
       prenhez: prenhez,
+      prenhez_entre_diagnosticadas: taxa_(prenhas.length, diag.length, minimo, { rotulo: 'Prenhez entre diagnosticadas' }),
       paricao: taxa_(paridas.length, base.length, minimo, { rotulo: 'Taxa de parição', parcial: parcialParto }),
       natalidade: taxa_(vivos, base.length, minimo, { rotulo: 'Natalidade', parcial: parcialParto }),
       perda_gestacional: taxa_(perdas.length, prenhasPerda.length, minimo, { rotulo: 'Perda gestacional', parcial: perdaAberta ? 'parcial' : null }),

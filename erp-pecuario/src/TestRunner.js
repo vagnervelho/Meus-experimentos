@@ -733,6 +733,66 @@ var TestRunner = (function () {
       },
     },
     {
+      id: 'REPRODUCAO', titulo: 'Casos de regra da reprodução (09, seção 4.1): macho como sujeito de diagnóstico, parto de fêmea de 20 meses, segundo parto 200 dias depois; a estação de RN-066 (40 expostas: prenhez 80,0%, parição 75,0%, natalidade 77,5%; com 4 expostas, null); desmama, castração e ocorrência',
+      executar: function (t) {
+        var P = t.pastos('REP', ['Pasto R']);
+        var ids;
+        var est;
+        var vacas = [];
+        var nome = function (i) { return 'R' + (i < 10 ? '0' : '') + i; };
+        var repro = function (sub, data, animais, campos) {
+          var c = { event_date: data };
+          Object.keys(campos || {}).forEach(function (k) { c[k] = campos[k]; });
+          return { tipo: 'REPRODUCAO', subtipo: sub, campos: c, animais: animais.map(function (a) { return typeof a === 'string' ? { animal_id: a } : a; }) };
+        };
+        var parto = function (data, mae, crias) { return { tipo: 'NASCIMENTO', campos: { event_date: data }, animais: [{ animal_id: mae }], crias: crias || [{ situacao_nascimento: 'VIVO', sexo: 'F' }] }; };
+        var codigos = function (e) { return e.details.map(function (x) { return x.codigo; }); };
+        t.passo('massa', '40 vacas, uma novilha de 20 meses, o touro e um garrote no Pasto R; a estação de monta de D0+10 a D0+100', function () {
+          var bs = [];
+          for (var i = 0; i < 40; i++) bs.push(bicho_(t, { brinco: nome(i), data_nascimento: t.dia(-2000), partos_previos: 1, pasto_destino_id: P['Pasto R'] }));
+          bs.push(bicho_(t, { brinco: 'RN', data_nascimento: t.dia(-600), partos_previos: 0, pasto_destino_id: P['Pasto R'] }));
+          bs.push(bicho_(t, { brinco: 'RT', sexo: 'M', reprodutor: true, data_nascimento: t.dia(-2500), pasto_destino_id: P['Pasto R'] }));
+          bs.push(bicho_(t, { brinco: 'RG', sexo: 'M', data_nascimento: t.dia(-500), pasto_destino_id: P['Pasto R'] }));
+          ids = ids_(t.cmd('evento.registrar', entrada_(bs), 'rep-massa'));
+          for (var j = 0; j < 40; j++) vacas.push(ids[nome(j)]);
+          est = t.cmd('estacao.salvar', { campos: { nome: 'Estação (aceitação)', data_inicio: t.dia(10), data_fim: t.dia(100), tipo: 'MONTA_NATURAL' } }, 'rep-estacao');
+        });
+        t.passo('060', 'O touro como sujeito de um diagnóstico de gestação: VALIDATION (o registro reprodutivo é de uma fêmea)', function () {
+          igual_(codigos(t.recusa('evento.registrar', repro('DIAGNOSTICO_GESTACAO', t.dia(40), [{ animal_id: ids.RT, resultado: 'POSITIVO' }]), 'VALIDATION', 'rep-060')), ['NAO_E_FEMEA'], 'macho no diagnóstico');
+        });
+        t.passo('061', 'Parto da novilha de 20 meses: aviso IDADE_REPRODUTIVA, nada gravado sem o aceite', function () {
+          igual_(codigos(t.recusa('evento.registrar', parto(t.dia(10), ids.RN), 'NEEDS_CONFIRMATION', 'rep-061')), ['IDADE_REPRODUTIVA'], 'fêmea jovem');
+        });
+        t.passo('064', 'Segundo parto da R39 200 dias depois do primeiro: aviso INTERVALO_PARTO_CURTO', function () {
+          t.cmd('evento.registrar', parto(t.dia(20), ids.R39), 'rep-064-primeiro');
+          igual_(codigos(t.recusa('evento.registrar', parto(t.dia(220), ids.R39), 'NEEDS_CONFIRMATION', 'rep-064')), ['INTERVALO_PARTO_CURTO'], 'intervalo curto');
+        });
+        t.passo('066', 'Estação com 40 expostas, 38 diagnosticadas, 32 prenhas, 30 paridas e 31 nascidos vivos (um gemelar): prenhez 80,0%, parição 75,0%, natalidade 77,5%; uma estação com 4 expostas: null (DADOS_INSUFICIENTES)', function () {
+          t.cmd('evento.registrar', repro('EXPOSICAO', t.dia(10), vacas.concat([ids.RT]), { estacao_id: est.estacao_id, data_fim: t.dia(100) }), 'rep-exposicao');
+          t.cmd('evento.registrar', repro('DIAGNOSTICO_GESTACAO', t.dia(150), vacas.slice(0, 38).map(function (id, i) { return { animal_id: id, resultado: i < 32 ? 'POSITIVO' : 'NEGATIVO' }; }), { estacao_id: est.estacao_id, metodo: 'PALPACAO' }), 'rep-dg');
+          for (var i = 0; i < 30; i++) t.cmd('evento.registrar', parto(t.dia(300), vacas[i], i === 0 ? [{ situacao_nascimento: 'VIVO', sexo: 'F' }, { situacao_nascimento: 'VIVO', sexo: 'M' }] : [{ situacao_nascimento: 'VIVO', sexo: i % 2 ? 'M' : 'F' }]), 'rep-parto-' + i);
+          var g = t.ok(t.api('reproducao.indicadores', { estacao_id: est.estacao_id }), 'indicadores').estacao.geral;
+          var taxa = function (x) { return [x.valor, x.numerador, x.denominador]; };
+          igual_([g.expostas, g.diagnosticadas, g.prenhas, g.paridas, g.nascidos_vivos], [40, 38, 32, 30, 31], 'as contagens da estação');
+          igual_([taxa(g.prenhez), taxa(g.paricao), taxa(g.natalidade)], [[80, 32, 40], [75, 30, 40], [77.5, 31, 40]], 'prenhez, parição e natalidade');
+          var pequena = t.cmd('estacao.salvar', { campos: { nome: 'Estação pequena (aceitação)', data_inicio: t.dia(200), data_fim: t.dia(230), tipo: 'IA' } }, 'rep-estacao-4');
+          t.cmd('evento.registrar', repro('INSEMINACAO', t.dia(200), vacas.slice(32, 36), { estacao_id: pequena.estacao_id, metodo: 'IATF' }), 'rep-ia-4');
+          var h = t.ok(t.api('reproducao.indicadores', { estacao_id: pequena.estacao_id }), 'indicadores (4)').estacao.geral;
+          igual_([h.expostas, h.prenhez.valor, h.prenhez.motivo, h.paricao.valor, h.natalidade.valor], [4, null, 'DADOS_INSUFICIENTES', null, null], 'com 4 expostas, null');
+        });
+        t.passo('manejo', 'Desmama da cria da R01 (a mãe perde a cria ao pé), castração do garrote (castrado) e uma ocorrência no touro', function () {
+          var cria = t.tabela('ANIMAIS').filter(function (a) { return a.mae_id === ids.R01 && a.situacao_cadastral === 'ATIVO'; })[0];
+          verificar_(cria, 'a cria da R01');
+          t.cmd('evento.registrar', { tipo: 'DESMAMA', campos: { event_date: t.hoje() }, animais: [{ animal_id: cria.animal_id, peso: 95 }] }, 'rep-desmama');
+          igual_(t.animal(ids.R01).cria_ao_pe, false, 'a mãe sem cria ao pé');
+          t.cmd('evento.registrar', { tipo: 'CASTRACAO', campos: { event_date: t.hoje(), metodo: 'Burdizzo' }, animais: [{ animal_id: ids.RG }] }, 'rep-castracao');
+          igual_([t.animal(ids.RG).castrado, t.animal(ids.RG).reprodutor], [true, false], 'o garrote castrado');
+          t.cmd('evento.registrar', { tipo: 'OCORRENCIA', campos: { event_date: t.hoje(), tipo_ocorrencia: 'LESAO', description: 'Mancando da pata traseira' }, animais: [{ animal_id: ids.RT }] }, 'rep-ocorrencia');
+        });
+        t.passo('fim', 'Projeção = reconstrução e financeiro sem divergência', function () { return t.integra('REPRODUCAO'); });
+      },
+    },
+    {
       id: 'CT-07', titulo: 'Estorno anula sem apagar: original preservado, auditoria, bloqueios e anulação do animal',
       executar: function (t) {
         var P = t.pastos('CT-07', ['Pasto 1', 'Baixada', 'Pasto 3']);
@@ -1383,10 +1443,11 @@ var TestRunner = (function () {
   var DEMO_META = { d0: 240, nascimentos: 255, compras: 70, vendas: 240, mortes: 15, descartes: 5, divergencias: 1, ativos: 304 };
   /** O que 09, seção 7, pede e chega em fase posterior (o relatório da demonstração lista, com a fase). */
   var DEMO_FORA = [
-    { item: 'Três estações de monta (exposição, cobertura, inseminação e diagnóstico)', fase: 3 },
     { item: 'Lançamentos avulsos com rateio (evento RATEIO)', fase: 4 },
     { item: 'Parcelas em todos os estados (baixa, baixa parcial, desfazer baixa)', fase: 4 },
   ];
+  /** Início das três estações de monta da demonstração (D0+30, D0+395, D0+760; 90 dias de touro cada). */
+  var DEMO_ESTACOES = [30, 395, 760];
   var DIAS_DESMAMA = 240;
   var CAMPANHA_IDENT = 60;
   var CAMPANHA_DESMAMA = 90;
@@ -1780,6 +1841,27 @@ var TestRunner = (function () {
       ativo[garrotes[46]] = false;
       pasto[garrotes[46]] = null;
     });
+    // 7. Reprodução (Fase 3, E3.4): em cada estação, a exposição das fêmeas do rebanho com 25 meses ou mais, com os touros,
+    // no primeiro dia, e o diagnóstico das que ficaram 150 dias depois — positivo quando o plano tem o parto dela na
+    // janela da estação; na última estação, cuja janela passa do fim da demonstração, três em cada quatro sem parto ainda.
+    DEMO_ESTACOES.forEach(function (ini, y) {
+      var fim = ini + 90;
+      var expostas = [];
+      no(ini, 1, function () {
+        expostas = ordem.filter(function (k) { return ativo[k] && A[k].sexo === 'F' && A[k].nasc <= ini - 760; });
+        var lote = expostas.concat(touros.filter(function (k) { return ativo[k]; }));
+        emitir('estacao-' + (y + 1) + '-exposicao', { tipo: 'REPRODUCAO', subtipo: 'EXPOSICAO', campos: { event_date: dia(ini), estacao_id: '@s:' + y, data_fim: dia(fim) }, animais: lote.map(function (k) { return { animal_id: ref(k) }; }) });
+      });
+      no(ini + 150, 1, function () {
+        var ficaram = expostas.filter(function (k) { return ativo[k]; });
+        var aberta = fim + 310 > DEMO_FIM;
+        emitir('estacao-' + (y + 1) + '-diagnostico', { tipo: 'REPRODUCAO', subtipo: 'DIAGNOSTICO_GESTACAO', campos: { event_date: dia(ini + 150), estacao_id: '@s:' + y, metodo: 'PALPACAO' }, animais: ficaram.map(function (k, i) {
+          var pariu = partos.some(function (p) { return p.mae === k && p.dia >= ini + 270 && p.dia <= fim + 310; });
+          var semParto = !partos.some(function (p) { return p.mae === k && p.dia > ini + 150; });
+          return { animal_id: ref(k), resultado: pariu || (aberta && semParto && i % 4 !== 3) ? 'POSITIVO' : 'NEGATIVO' };
+        }) });
+      });
+    });
     for (var d = 1; d <= DEMO_FIM; d++) if (porDia[d]) porDia[d].forEach(function (classe) { classe.forEach(function (fn) { fn(); }); });
     // A chave de cada animal criado pelo plano, para achá-lo na base (reexecução): brinco de origem ou mãe e nascimento.
     var animais = {};
@@ -1802,6 +1884,7 @@ var TestRunner = (function () {
       if (valor.charAt(1) === 'p') return t.estado.pastos[Number(resto)];
       if (valor.charAt(1) === 'f') return t.estado.parceiros[resto];
       if (valor.charAt(1) === 'm') return t.estado.sanidade[resto];
+      if (valor.charAt(1) === 's') return t.estado.estacoes[Number(resto)];
       if (valor.charAt(1) === 'e') {
         var s = t.ok(t.api('operacao.status', { chave: 'seed:' + resto }), 'operacao.status');
         verificar_(s.situacao === 'CONFIRMADA' && s.resumo && s.resumo.event_id, 'o lançamento seed:' + resto + ' devia estar gravado');
@@ -1899,6 +1982,10 @@ var TestRunner = (function () {
       vermifugo: t.ok(t.api('produto.salvar', { campos: { nome: 'Vermífugo (demonstração)', categoria: 'VERMIFUGO', unidade: 'mL', custo_unitario: 0.04, controla_estoque: false } }, { chave: 'seed:produto-vermifugo' }), 'produto vermífugo').product_id,
       protocolo: t.ok(t.api('protocolo.salvar', { campos: { nome: 'Vacina semestral (demonstração)', tipo_procedimento: 'VACINA', product_id: vacina, sexo_aplicavel: 'AMBOS', recorrencia_tipo: 'INTERVALO_DIAS', intervalo_dias: 180 } }, { chave: 'seed:protocolo-vacina' }), 'protocolo').protocol_id,
     };
+    // Reprodução (Fase 3, E3.4): as três estações de monta, de D0+30 a D0+120 de cada ano.
+    t.estado.estacoes = DEMO_ESTACOES.map(function (ini, y) {
+      return t.ok(t.api('estacao.salvar', { campos: { nome: 'Estação ' + (y + 1) + ' (demonstração)', data_inicio: Utils.somaDias(d0, ini), data_fim: Utils.somaDias(d0, ini + 90), tipo: 'MONTA_NATURAL' } }, { chave: 'seed:estacao:' + y }), 'estação ' + (y + 1)).estacao_id;
+    });
     t.estado.d0 = d0;
     t.estado.prop = prop.property_id;
     t.estado.pastos = pastos;
