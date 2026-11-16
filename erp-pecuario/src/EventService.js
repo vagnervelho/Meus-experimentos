@@ -390,6 +390,8 @@ var EventService = (function () {
     if (tipo === 'VENDA') cabecalhoVenda_(m, ctxEv);
     if (tipo === 'PESAGEM') cabecalhoPesagem_(m, ctxEv, animais);
     if (tipo === 'SANIDADE') cabecalhoSanidade_(m, ctxEv);
+    if (tipo === 'REPRODUCAO') cabecalhoReproducao_(m, ctxEv);
+    if (tipo === 'DESMAMA') cabecalhoDesmama_(m, ctxEv);
     animais.forEach(function (item, i) {
       var it = novoItem_(m, item || {}, i);
       ctxEv.itens.push(it);
@@ -402,15 +404,22 @@ var EventService = (function () {
       else if (tipo === 'NASCIMENTO') itemMatriz_(m, ctxEv, it);
       else if (tipo === 'PESAGEM') itemPesagem_(m, ctxEv, it);
       else if (tipo === 'SANIDADE') itemSanidade_(m, ctxEv, it);
+      else if (tipo === 'REPRODUCAO') itemReproducao_(m, ctxEv, it);
+      else if (tipo === 'DESMAMA') itemDesmama_(m, ctxEv, it);
+      else if (tipo === 'CASTRACAO') itemCastracao_(m, ctxEv, it);
+      else if (tipo === 'OCORRENCIA') itemOcorrencia_(m, ctxEv, it);
       else itemEntrada_(m, ctxEv, it);
     });
     if (tipo === 'NASCIMENTO') crias_(m, ctxEv, d.crias);
+    if (tipo === 'REPRODUCAO') fecharReproducao_(m, ctxEv);
+    if (tipo === 'DESMAMA') fecharDesmama_(m, ctxEv);
     conferirRepetidos_(m, ctxEv);
     conferirBrincos_(m, ctxEv);
     conferirPeriodosDeBrinco_(m, ctxEv);
     conferirGenealogia_(m, ctxEv);
     conferirCategoriasDoSexo_(m, ctxEv);
     conferirLinhaDoTempo_(m, ctxEv);
+    conferirManejo_(m, ctxEv);
     if (original) conferirRemovidos_(m, ctxEv);
     conferirSequencias_(m, ctxEv, animaisConferidos_(m, ctxEv), ctxEv.ev.event_id);
     if (original) conferirEstadoRestaurado_(m, Object.keys(m.afetados).filter(function (id) { return !ctxEv.criadosOriginal[id]; }), 'a correção', ctxEv);
@@ -418,13 +427,15 @@ var EventService = (function () {
     if (original) conferirPeriodosDeBrinco_(m, ctxEv, Object.keys(m.afetados), null);
     guardaDuplicidade_(m, ctxEv);
     conferirLotacao_(m, ctxEv);
-    if (tipo === 'PESAGEM') avisosDaPesagem_(m, ctxEv);
+    if (tipo === 'PESAGEM' || tipo === 'DESMAMA') avisosDaPesagem_(m, ctxEv);
     if (tipo === 'NASCIMENTO') avisosDoParto_(m, ctxEv);
     if (tipo === 'ENTRADA_INICIAL') abertura_(m, ctxEv);
     if (tipo === 'COMPRA') financeiroCompra_(m, ctxEv, d);
     if (tipo === 'VENDA') { carenciaNaVenda_(m, ctxEv); financeiroVenda_(m, ctxEv, d); }
     if (tipo === 'MORTE' || tipo === 'DESCARTE') financeiroSaida_(m, ctxEv);
     if (tipo === 'SANIDADE') consumoSanidade_(m, ctxEv);
+    if (tipo === 'REPRODUCAO') despesaDoManejo_(m, ctxEv, ctxEv.itens.filter(function (it) { return it.femea && it.linhaEA; }));
+    if (tipo === 'CASTRACAO' || tipo === 'OCORRENCIA') despesaDoManejo_(m, ctxEv, ctxEv.itens.filter(function (it) { return it.linhaEA; }));
     if (original) {
       conferirParcelasLiquidadas_(m, original, 'corrigir');
       m.repo.por('FINANCEIRO', 'event_id', original.event_id).forEach(function (fin) {
@@ -1207,6 +1218,289 @@ var EventService = (function () {
         return { animal_id: it.animal_id, codigo_interno: it.codigo_interno || null, brinco: it.brincoTexto || null, dose: it.dose, peso_kg: it.peso ? it.peso.kg : null, peso_situacao: it.peso ? it.peso.situacao : null, peso_estimado: it.peso ? it.peso.estimado : null, custo: it.sanidade.custo };
       }),
     };
+  }
+
+  // ------------------------------------------------------------------ reprodução, desmama, castração e ocorrência ----
+  /**
+   * Cabeçalho da REPRODUCAO (03b, seções 7.1 e 7.2; 05, RN-060): a estação de monta (existe; na exposição, na cobertura e na
+   * inseminação a data cai no período dela, no diagnóstico é depois do início — na correção, a estação que o original já
+   * usava vale como estava: mudar as datas da estação não mexe nos registros, 03a, seção 4.10); a retirada dos touros (na
+   * exposição, no dia do início ou depois); o touro da cobertura e da inseminação (macho, não anulado, nascido antes; na
+   * cobertura, do rebanho na data — linha TOURO — ou de fora; na inseminação, o do sêmen pode já ter saído do rebanho).
+   */
+  function cabecalhoReproducao_(m, ctxEv) {
+    var c = ctxEv.campos;
+    var sub = ctxEv.subtipo;
+    var data = ctxEv.ev.event_date;
+    var r = { sub: sub, estacao: null, touro: null, touroLinha: false, touros: [], dataFim: sub === 'EXPOSICAO' ? nulo_(c.data_fim) : null, metodo: nulo_(c.metodo), semen: typeof c.semen_identificacao === 'string' ? nulo_(Utils.aparar(c.semen_identificacao)) : null };
+    if (!vazio_(c.estacao_id)) {
+      var est = m.repo.porId('ESTACOES_MONTA', c.estacao_id);
+      if (!est) erroGeral_(m, 'estacao_id', 'NAO_ENCONTRADO', 'A estação de monta escolhida não existe. Atualize a tela e escolha de novo.');
+      else {
+        r.estacao = est;
+        if (Utils.dataValida(data) && !usadoNoOriginal_(m, est.estacao_id)) {
+          var fora = sub === 'DIAGNOSTICO_GESTACAO' ? data < est.data_inicio : data < est.data_inicio || data > est.data_fim;
+          if (fora) erroGeral_(m, 'estacao_id', 'FORA_DA_ESTACAO', sub === 'DIAGNOSTICO_GESTACAO'
+            ? 'O diagnóstico de ' + br_(data) + ' é anterior ao início da estação ' + est.nome + ' (' + br_(est.data_inicio) + ').'
+            : 'A data ' + br_(data) + ' fica fora da estação ' + est.nome + ' (de ' + br_(est.data_inicio) + ' a ' + br_(est.data_fim) + '). Escolha outra estação ou deixe sem estação.');
+        }
+      }
+    }
+    if (r.dataFim && Utils.dataValida(r.dataFim) && Utils.dataValida(data) && r.dataFim < data) erroGeral_(m, 'data_fim', 'DATA_INVALIDA', 'A retirada dos touros (' + br_(r.dataFim) + ') precisa ser no dia do início da exposição ou depois (' + br_(data) + ').');
+    if ((sub === 'COBERTURA' || sub === 'INSEMINACAO') && !vazio_(c.touro_id)) {
+      var t = existente_(m, c.touro_id);
+      if (!t) erroGeral_(m, 'touro_id', 'NAO_ENCONTRADO', 'O touro informado não foi encontrado.');
+      else if (t.sexo !== 'M') erroGeral_(m, 'touro_id', 'SEXO_DO_PROGENITOR', nomeAnimal_(t) + ' não pode ser o touro: precisa ser macho.');
+      else if (!vazio_(t.data_nascimento) && Utils.dataValida(data) && t.data_nascimento >= data) erroGeral_(m, 'touro_id', 'NASCIMENTO_DO_PROGENITOR', 'O touro ' + nomeAnimal_(t) + ' nasceu em ' + br_(t.data_nascimento) + ', não antes de ' + br_(data) + '.');
+      else {
+        r.touro = t;
+        r.touroLinha = sub === 'COBERTURA' && t.situacao_cadastral !== 'EXTERNO';
+      }
+    }
+    ctxEv.reproducao = r;
+  }
+  function observacoes_(d) {
+    return typeof d.observacoes === 'string' ? nulo_(Utils.aparar(d.observacoes)) : null;
+  }
+  /**
+   * REPRODUCAO, um animal (03b, seções 3.4 e 7): a fêmea do rebanho na data (fato: o dia da saída conta) tem a linha SUJEITO
+   * (efeito 0) e uma linha REPRODUCAO do subtipo, com o que é dela (no diagnóstico, o resultado, a idade da gestação e a
+   * previsão informada; no aborto, a idade da gestação perdida). Na exposição, o macho da lista é um touro do lote (linha
+   * TOURO, efeito 0); nos demais subtipos, o registro é só de fêmea (RN-060).
+   */
+  function itemReproducao_(m, ctxEv, it) {
+    var d = it.dados;
+    var r = ctxEv.reproducao;
+    var sub = ctxEv.subtipo;
+    var ev = ctxEv.ev;
+    apontarExistente_(m, it);
+    camposDoItem_(m, it, EventCatalog.camposAnimal('REPRODUCAO', sub), d);
+    if (vazio_(d.animal_id)) return;
+    var e = sujeito_(m, it, sub === 'EXPOSICAO' ? 'expõe' : 'registra na reprodução');
+    if (!e) return;
+    var obs = observacoes_(d);
+    if (sub === 'EXPOSICAO' && e.sexo === 'M') {
+      if (!vazio_(e.data_nascimento) && Utils.dataValida(ev.event_date) && e.data_nascimento >= ev.event_date) { erroItem_(m, it, 'animal_id', 'NASCIMENTO_DO_PROGENITOR', 'o touro nasceu em ' + br_(e.data_nascimento) + ', não antes da exposição.'); return; }
+      it.touro = true;
+      linhaEA_(m, ctxEv, it, { papel: 'TOURO', efeito_inventario: 0, observacoes: obs });
+      r.touros.push(it.animal_id);
+      return;
+    }
+    if (e.sexo !== 'F') { erroItem_(m, it, 'animal_id', 'NAO_E_FEMEA', sub === 'COBERTURA' || sub === 'INSEMINACAO' ? 'o registro é da fêmea; o touro vai no campo "' + (sub === 'INSEMINACAO' ? 'Touro do sêmen' : 'Touro') + '".' : 'o registro reprodutivo é de uma fêmea.'); return; }
+    var erroCampo = function (campo) { return !!(it.camposComErro && it.camposComErro[campo]); };
+    var res = sub === 'DIAGNOSTICO_GESTACAO' && !erroCampo('resultado') ? nulo_(d.resultado) : null;
+    var idade = (sub === 'ABORTO' || res === 'POSITIVO') && typeof d.idade_gestacional_dias === 'number' && !erroCampo('idade_gestacional_dias') ? d.idade_gestacional_dias : null;
+    if (idade !== null && typeof m.params.dias_gestacao === 'number' && idade > m.params.dias_gestacao) erroItem_(m, it, 'idade_gestacional_dias', 'VALOR_FORA_DA_FAIXA', 'a idade da gestação (' + idade + ' dias) passa da duração da gestação (' + m.params.dias_gestacao + ' dias).');
+    var prevista = res === 'POSITIVO' && !erroCampo('data_prevista_parto') ? nulo_(d.data_prevista_parto) : null;
+    if (prevista && Utils.dataValida(prevista) && Utils.dataValida(ev.event_date) && prevista <= ev.event_date) erroItem_(m, it, 'data_prevista_parto', 'DATA_INVALIDA', 'a previsão de parto (' + br_(prevista) + ') precisa ser depois do diagnóstico (' + br_(ev.event_date) + ').');
+    linhaEA_(m, ctxEv, it, { efeito_inventario: 0, observacoes: obs });
+    it.femea = true;
+    it.reproducao = {
+      reproduction_id: m.tx.novoId(), animal_id: it.animal_id, event_id: ev.event_id, tipo_evento: sub, data: ev.event_date, data_fim: r.dataFim,
+      estacao_id: r.estacao ? r.estacao.estacao_id : null, touro_id: null, semen_identificacao: sub === 'INSEMINACAO' ? r.semen : null,
+      metodo: EventCatalog.METODOS_REPRODUCAO[sub] ? r.metodo : null, resultado: res, idade_gestacional_dias: idade, data_prevista_parto: prevista, observacoes: obs,
+    };
+    ctxEv.plano.REPRODUCAO.push(it.reproducao);
+  }
+  /**
+   * Depois dos animais da REPRODUCAO: ao menos uma fêmea; o touro de cada registro (na exposição, o único touro do lote;
+   * na cobertura e na inseminação, o do cabeçalho); a linha TOURO do touro do rebanho na cobertura (a presença dele na
+   * data é conferida pela linha do tempo); e o aviso de fêmea jovem (RN-061, um por fêmea).
+   */
+  function fecharReproducao_(m, ctxEv) {
+    var r = ctxEv.reproducao;
+    if (!r) return;
+    var femeas = ctxEv.itens.filter(function (it) { return it.femea && it.reproducao; });
+    var recusadas = ctxEv.itens.some(function (it) { return !it.linhaEA; });
+    if (!femeas.length && !recusadas) erroGeral_(m, 'animais', 'SEM_FEMEAS', r.sub === 'EXPOSICAO' ? 'Inclua as fêmeas do lote (os machos da lista são os touros).' : 'Inclua ao menos uma fêmea.');
+    var touro = r.sub === 'EXPOSICAO' ? (r.touros.length === 1 ? r.touros[0] : null) : r.touro ? r.touro.animal_id : null;
+    femeas.forEach(function (it) { it.reproducao.touro_id = touro; });
+    if (r.touroLinha && femeas.length) {
+      var t = r.touro;
+      var itT = { indice: ctxEv.itens.length, dados: { animal_id: t.animal_id }, animal_id: t.animal_id, publico: true, quem: 'O touro ' + nomeAnimal_(t), brincoTexto: nulo_(t.brinco), linhas: [], novo: false, final: {}, estado: t, codigo_interno: t.codigo_interno, touro: true };
+      ctxEv.itens.push(itT);
+      linhaEA_(m, ctxEv, itT, { papel: 'TOURO', efeito_inventario: 0 });
+    }
+    femeas.forEach(function (it) {
+      var msg = ReproductionService.avisoIdade(m.params, it.estado, ctxEv.ev.event_date);
+      if (msg) avisoItem_(m, it, 'IDADE_REPRODUTIVA', it.quem + ' ' + msg + ' Confirme o registro.');
+    });
+  }
+  /** Pasto de destino dos bezerros (opcional; ativo, salvo o que o original já usava) e o método das pesagens. */
+  function cabecalhoDesmama_(m, ctxEv) {
+    var c = ctxEv.campos;
+    var pasto = nulo_(c.pasto_destino_id);
+    var ok = true;
+    if (pasto) {
+      var p = m.f.pasto(pasto);
+      if (!p) { erroGeral_(m, 'pasto_destino_id', 'NAO_ENCONTRADO', 'O pasto escolhido não existe.'); ok = false; }
+      else if (p.status !== 'ATIVO' && !usadoNoOriginal_(m, pasto)) { erroGeral_(m, 'pasto_destino_id', 'PASTO_INATIVO', 'O pasto ' + p.nome + ' está desativado e não recebe animais.'); ok = false; }
+    }
+    ctxEv.desmama = { pasto: ok ? pasto : null, metodo: nulo_(c.metodo_pesagem) || 'BALANCA', maes: {} };
+  }
+  /** Presença do animal no rebanho no dia (fato: os dois limites contam), pela linha do tempo do motor. */
+  function presenteNoDia_(m, id, data) {
+    return Timeline.validar(m.f.linhas(id), {}).periodos.some(function (p) { return data >= p.inicio && (p.fim === null || data <= p.fim); });
+  }
+  /**
+   * DESMAMA, um bezerro (03b, seções 3.4, 7.2 e 16.14): a cria (nascida na fazenda, ou que entrou com menos que a idade de
+   * desmama de referência; 03a, DL-06) ainda não desmamada, no rebanho na data; a linha SUJEITO (efeito 0) leva o peso à
+   * desmama e, com o pasto de destino diferente do pasto em que o bezerro está na posição do lançamento, vale como
+   * movimento; o peso vira a pesagem DESMAMA. A mãe conhecida e no rebanho na data tem a linha MATRIZ e o registro DESMAMA
+   * (uma vez por mãe, mesmo com gêmeos).
+   */
+  function itemDesmama_(m, ctxEv, it) {
+    var d = it.dados;
+    var ev = ctxEv.ev;
+    var dz = ctxEv.desmama;
+    apontarExistente_(m, it);
+    camposDoItem_(m, it, EventCatalog.camposAnimal('DESMAMA'), d);
+    if (vazio_(d.animal_id)) return;
+    var e = sujeito_(m, it, 'desmama');
+    if (!e || !Utils.dataValida(ev.event_date)) return;
+    if (!ReproductionService.ehCria(m.f, e, m.params)) { erroItem_(m, it, 'animal_id', 'NAO_E_CRIA', 'não é cria ao pé: não nasceu na fazenda e entrou no rebanho com ' + (vazio_(e.data_nascimento) ? 'idade desconhecida' : 'idade igual ou acima da desmama de referência (' + m.params.idade_desmama_padrao_meses + ' meses)') + '.'); return; }
+    var outra = Timeline.ordenar(m.f.linhas(it.animal_id).filter(function (l) { return l.event_type === 'DESMAMA' && l.papel === 'SUJEITO'; }))[0];
+    if (outra) { erroItem_(m, it, 'animal_id', 'JA_DESMAMADO', 'já foi desmamado em ' + br_(outra.event_date) + '. Para mudar a data, corrija aquela desmama.'); return; }
+    var kg = typeof d.peso === 'number' && !(it.camposComErro && it.camposComErro.peso) ? d.peso : null;
+    var campos = { efeito_inventario: 0, peso: kg, observacoes: observacoes_(d) };
+    if (dz.pasto) {
+      var onde = pastoNaPosicao_(m, it.animal_id, ev);
+      if (onde.presente && onde.pasture_id !== dz.pasto) { campos.pasto_origem_id = nulo_(onde.pasture_id); campos.pasto_destino_id = dz.pasto; it.movido = true; }
+    }
+    if (campos.pasto_destino_id && !campos.pasto_origem_id) { delete campos.pasto_destino_id; it.movido = false; }
+    linhaEA_(m, ctxEv, it, campos);
+    if (kg !== null) {
+      it.pesoKg = kg;
+      ctxEv.plano.PESAGENS.push({ weight_id: m.tx.novoId(), animal_id: it.animal_id, event_id: ev.event_id, data_pesagem: ev.event_date, peso_kg: kg, metodo: dz.metodo, tipo: 'DESMAMA', observacoes: campos.observacoes });
+    }
+    it.cria = true;
+    var mae = nulo_(e.mae_id);
+    if (mae && !dz.maes[mae]) {
+      var em = existente_(m, mae);
+      if (em && em.sexo === 'F' && presenteNoDia_(m, mae, ev.event_date)) dz.maes[mae] = em;
+    }
+  }
+  /** As mães dos bezerros desmamados: a linha MATRIZ e o registro DESMAMA (depois de todos os bezerros: uma vez por mãe). */
+  function fecharDesmama_(m, ctxEv) {
+    var dz = ctxEv.desmama;
+    if (!dz) return;
+    Object.keys(dz.maes).forEach(function (id) {
+      var e = dz.maes[id];
+      var it = { indice: ctxEv.itens.length, dados: { animal_id: id }, animal_id: id, publico: true, quem: 'A mãe ' + nomeAnimal_(e), brincoTexto: nulo_(e.brinco), linhas: [], novo: false, final: {}, estado: e, codigo_interno: e.codigo_interno, matrizDesmama: true };
+      ctxEv.itens.push(it);
+      linhaEA_(m, ctxEv, it, { papel: 'MATRIZ', efeito_inventario: 0 });
+      ctxEv.plano.REPRODUCAO.push({ reproduction_id: m.tx.novoId(), animal_id: id, event_id: ctxEv.ev.event_id, tipo_evento: 'DESMAMA', data: ctxEv.ev.event_date });
+    });
+  }
+  /**
+   * CASTRACAO, um animal (04, seção 4.5): macho do rebanho na data, ainda inteiro (nem castrado de origem nem castrado por
+   * outra castração vigente). A castração muda a categoria automática pelo cadastro de categorias (castrado e, por isso,
+   * não reprodutor; 03a, seção 4.3.3); o touro de exposição ou cobertura posterior é conferido pelas regras de manejo.
+   */
+  function itemCastracao_(m, ctxEv, it) {
+    var d = it.dados;
+    apontarExistente_(m, it);
+    camposDoItem_(m, it, EventCatalog.camposAnimal('CASTRACAO'), d);
+    if (vazio_(d.animal_id)) return;
+    var e = sujeito_(m, it, 'castra');
+    if (!e) return;
+    if (e.sexo !== 'M') { erroItem_(m, it, 'animal_id', 'NAO_E_MACHO', 'só macho é castrado.'); return; }
+    if (ReproductionService.castradoDeOrigem(m.f, it.animal_id)) { erroItem_(m, it, 'animal_id', 'JA_CASTRADO', 'já é castrado pelo cadastro.'); return; }
+    var outra = ReproductionService.castracoes(m.f.linhas(it.animal_id))[0];
+    if (outra) { erroItem_(m, it, 'animal_id', 'JA_CASTRADO', 'já foi castrado em ' + br_(outra.event_date) + '. Para mudar a data, corrija aquela castração.'); return; }
+    linhaEA_(m, ctxEv, it, { efeito_inventario: 0, observacoes: observacoes_(d) });
+  }
+  /** OCORRENCIA, um animal: o animal do rebanho na data (fato); sem efeito no inventário. */
+  function itemOcorrencia_(m, ctxEv, it) {
+    var d = it.dados;
+    apontarExistente_(m, it);
+    camposDoItem_(m, it, EventCatalog.camposAnimal('OCORRENCIA'), d);
+    if (vazio_(d.animal_id)) return;
+    if (!sujeito_(m, it, 'registra')) return;
+    linhaEA_(m, ctxEv, it, { efeito_inventario: 0, observacoes: observacoes_(d) });
+  }
+  /**
+   * Regras de manejo de cada animal que o comando toca (ReproductionService.problemasDoAnimal: castração de fêmea ou
+   * repetida, touro castrado, desmama repetida, parto dentro da gestação de um diagnóstico positivo), antes e depois do
+   * comando, com as linhas e os registros dele no lugar: problema do próprio lançamento → VALIDATION; o que ele quebra num
+   * lançamento gravado → CONFLICT com ele. A verificação de integridade e a trava usam a mesma função.
+   */
+  function conferirManejo_(m, ctxEv) {
+    var regsPlano = Utils.agruparPor(ctxEv.plano.REPRODUCAO, 'animal_id');
+    var feitos = {};
+    ctxEv.itens.forEach(function (it) {
+      if (!it.animal_id || it.novo || feitos[it.animal_id] || (ctxEv.repetidos && ctxEv.repetidos[it.animal_id])) return;
+      feitos[it.animal_id] = true;
+      var id = it.animal_id;
+      var e = estado_(m, id);
+      if (!e) return;
+      var linhasNovas = [];
+      (itensPorAnimal_(ctxEv)[id] || []).forEach(function (x) { linhasNovas = linhasNovas.concat(x.linhas); });
+      var novos = (regsPlano[id] || []).map(function (r) { var o = Utils.clonar(r); o.ord = ctxEv.ev.ordem_seq; o.seq = ctxEv.ev.event_seq; o.event_type = ctxEv.tipo; o.event_subtype = ctxEv.subtipo; return o; });
+      var depoisRegs = ReproductionService.registros(m.f, id).concat(novos).sort(function (a, b) { return a.data < b.data ? -1 : a.data > b.data ? 1 : (a.ord - b.ord) || (a.seq - b.seq); });
+      var gravado = m.real.animal(id) || e;
+      var antes = ReproductionService.problemasDoAnimal({ linhas: m.real.linhas(id), regs: ReproductionService.registros(m.real, id), sexo: gravado.sexo, castradoOrigem: ReproductionService.castradoDeOrigem(m.real, id) });
+      var depois = ReproductionService.problemasDoAnimal({ linhas: m.f.linhas(id).concat(linhasNovas), regs: depoisRegs, sexo: it.final && it.final.sexo !== undefined ? it.final.sexo : e.sexo, castradoOrigem: ReproductionService.castradoDeOrigem(m.f, id) });
+      ReproductionService.problemasNovos(antes, depois).forEach(function (p) {
+        if (p.event_id === ctxEv.ev.event_id) erroItem_(m, it, 'animal_id', p.codigo, p.mensagem);
+        else conflito_(m, it, p, p.mensagem + ' Estorne ou corrija esse registro antes, ou mude este lançamento.');
+      });
+    });
+  }
+  /**
+   * A despesa paga no ato de um manejo (REPRODUCAO, CASTRACAO, OCORRENCIA; 03b, seção 2.5: "despesa informada no evento"):
+   * um lançamento CUSTEIO na conta escolhida, com as parcelas mensais, rateado por cabeça entre os animais do lançamento (na
+   * reprodução, as fêmeas; DIRETO com um), 100% alocado; `total_value` = o valor.
+   */
+  function despesaDoManejo_(m, ctxEv, itens) {
+    var c = ctxEv.campos;
+    var ev = ctxEv.ev;
+    if (vazio_(c.custo_valor) || vazio_(c.custo_conta_id) || typeof c.custo_valor !== 'number') return;
+    var conta = m.repo.porId('PLANO_CONTAS', c.custo_conta_id);
+    parceiroValido_(m, ctxEv, 'custo_partner_id', c.custo_partner_id);
+    if (!conta) { erroGeral_(m, 'custo_conta_id', 'NAO_ENCONTRADO', 'A conta escolhida não existe no plano de contas.'); return; }
+    if (!itens.length || m.col.temErros()) return;
+    var nome = EventCatalog.nomeEvento(ctxEv.tipo, ctxEv.subtipo);
+    var pl = FinancialService.planejar(m.tx, {
+      evento: ev, conta: conta, naturezas: ['CUSTEIO'], valor: c.custo_valor,
+      descricao: nulo_(c.custo_descricao) || (nome.replace(/^(a|o) /, '').replace(/^./, function (x) { return x.toUpperCase(); }) + ' de ' + br_(ev.event_date) + ': despesa'),
+      partner_id: nulo_(c.custo_partner_id), documento: nulo_(c.custo_documento),
+      parcelas: FinancialService.parcelasMensais(c.custo_valor, nulo_(c.custo_vencimento) || ev.event_date, nulo_(c.custo_parcelas_qtd), { forma_pagamento: c.custo_forma_pagamento, documento: c.custo_documento }),
+      rateio: { criterio: 'CABECAS', itens: itens.map(function (it) { return { animal_id: it.animal_id, chave: it.codigo_interno, base: 1, quem: it.quem }; }), cemPorCento: true },
+      campo: 'custo_conta_id', rotulo: 'a despesa',
+    }, m.col);
+    if (!pl) return;
+    FinancialService.juntar(ctxEv.plano, pl);
+    ev.total_value = c.custo_valor;
+    resumoFinanceiro_(m, ctxEv, [resumoLancamento_(m, pl, conta, { papel: 'CUSTO' })], [pl]);
+    var a = FinancialService.avisoPeriodo(m.params, ev.event_date, 'A despesa ' + nome.replace(/^a /, 'da ').replace(/^o /, 'do '));
+    if (a) avisoItem_(m, null, a.codigo, a.mensagem);
+  }
+  /** Resumo do manejo para a revisão (impactos): as contas do servidor, que a tela só mostra. */
+  function resumoManejo_(m, ctxEv) {
+    var t = ctxEv.tipo;
+    if (t === 'REPRODUCAO' && ctxEv.reproducao) {
+      var r = ctxEv.reproducao;
+      var femeas = ctxEv.itens.filter(function (it) { return it.femea && it.reproducao; });
+      var por = {};
+      femeas.forEach(function (it) { var k = it.reproducao.resultado || 'SEM'; por[k] = (por[k] || 0) + 1; });
+      var est = r.estacao ? { estacao_id: r.estacao.estacao_id, nome: r.estacao.nome } : null;
+      var touro = r.touro ? { animal_id: r.touro.animal_id, nome: nomeAnimal_(r.touro), externo: r.touro.situacao_cadastral === 'EXTERNO' } : null;
+      var touros = r.touros.map(function (id) { var e = estado_(m, id) || {}; return { animal_id: id, nome: nomeAnimal_(e) }; });
+      return { tipo: 'REPRODUCAO', subtipo: ctxEv.subtipo, femeas: femeas.length, touros: touros, touro: touro, estacao: est, data_fim: r.dataFim, metodo: r.metodo, semen: r.semen,
+        resultados: ctxEv.subtipo === 'DIAGNOSTICO_GESTACAO' ? { POSITIVO: por.POSITIVO || 0, NEGATIVO: por.NEGATIVO || 0, INCONCLUSIVO: por.INCONCLUSIVO || 0 } : null };
+    }
+    if (t === 'DESMAMA' && ctxEv.desmama) {
+      var bez = ctxEv.itens.filter(function (it) { return it.cria && it.linhaEA; });
+      var pesos = bez.filter(function (it) { return typeof it.pesoKg === 'number'; }).map(function (it) { return it.pesoKg; });
+      var idades = bez.map(function (it) { var e = it.estado || {}; return vazio_(e.data_nascimento) || !Utils.dataValida(ctxEv.ev.event_date) || e.data_nascimento > ctxEv.ev.event_date ? null : Utils.idadeMeses(e.data_nascimento, ctxEv.ev.event_date); });
+      return { tipo: 'DESMAMA', bezerros: bez.length, maes: Object.keys(ctxEv.desmama.maes).length, movidos: bez.filter(function (it) { return it.movido; }).length, pasto_destino_id: ctxEv.desmama.pasto,
+        pesados: pesos.length, peso_medio_kg: pesos.length ? Utils.arredondar(pesos.reduce(function (s, x) { return s + x; }, 0) / pesos.length, 1) : null,
+        animais: bez.map(function (it, i) { return { animal_id: it.animal_id, codigo_interno: it.codigo_interno || null, brinco: it.brincoTexto || null, peso_kg: typeof it.pesoKg === 'number' ? it.pesoKg : null, idade_meses: idades[i], mae_id: it.estado ? nulo_(it.estado.mae_id) : null }; }) };
+    }
+    if (t === 'CASTRACAO') return { tipo: 'CASTRACAO', machos: ctxEv.itens.filter(function (it) { return it.linhaEA; }).length, metodo: typeof ctxEv.campos.metodo === 'string' ? nulo_(Utils.aparar(ctxEv.campos.metodo)) : null };
+    if (t === 'OCORRENCIA') return { tipo: 'OCORRENCIA', tipo_ocorrencia: nulo_(ctxEv.campos.tipo_ocorrencia), animais: ctxEv.itens.filter(function (it) { return it.linhaEA; }).length };
+    return null;
   }
 
   // ------------------------------------------------------------------ estoque de insumos ----
@@ -2608,12 +2902,15 @@ var EventService = (function () {
   }
   function guardaDuplicidade_(m, ctxEv) {
     var ev = ctxEv.ev;
-    var itens = ctxEv.itens.filter(function (it) { return it.animal_id && it.linhaEA; });
+    // O touro do lote não conta: o lançamento é das fêmeas (a reprodução) e dos bezerros (a desmama).
+    var itens = ctxEv.itens.filter(function (it) { return it.animal_id && it.linhaEA && it.linhaEA.papel !== 'TOURO'; });
     if (!itens.length || !Utils.dataValida(ev.event_date)) return;
     var candidatos = m.repo.por('EVENTOS', 'event_date', ev.event_date).filter(function (c) {
       if (c.event_type !== ev.event_type || nulo_(c.event_subtype) !== nulo_(ev.event_subtype) || m.f.excluidos[c.event_id]) return false;
       // Marcar e desmarcar no mesmo dia não são o mesmo lançamento; duas vacinas diferentes no mesmo dia, também não.
       if (ev.event_type === 'SANIDADE') return chaveSanidade_(m.repo.por('SANIDADE', 'event_id', c.event_id)[0]) === chaveSanidade_(ctxEv.plano.SANIDADE[0]);
+      // Duas ocorrências de tipos diferentes no mesmo dia não são o mesmo lançamento.
+      if (ev.event_type === 'OCORRENCIA') return (c.payload_json || {}).tipo_ocorrencia === nulo_(ctxEv.campos.tipo_ocorrencia);
       return ev.event_type !== 'MARCACAO' || (c.payload_json || {}).acao === (ev.payload_json || {}).acao;
     });
     candidatos.forEach(function (c) {
@@ -3356,6 +3653,9 @@ var EventService = (function () {
       qtd_apresentacao: ctxEv.estoque ? ctxEv.estoque.qtd_apresentacao : null,
       fator_conversao: ctxEv.estoque ? ctxEv.estoque.fator_conversao : null,
       saldo_contado: ctxEv.estoque ? ctxEv.estoque.saldo_contado : null,
+      // Castração e ocorrência (03b, seção 2.6): o método (texto livre) e o tipo da ocorrência (LISTAS.TIPO_OCORRENCIA).
+      metodo: ctxEv.tipo === 'CASTRACAO' && typeof ctxEv.campos.metodo === 'string' ? nulo_(Utils.aparar(ctxEv.campos.metodo)) : null,
+      tipo_ocorrencia: ctxEv.tipo === 'OCORRENCIA' ? nulo_(ctxEv.campos.tipo_ocorrencia) : null,
     };
     ev.payload_json = payload_(m, ctxEv, extra);
     var itensPorAnimal = {};
@@ -3392,6 +3692,7 @@ var EventService = (function () {
         pesagem: ctxEv.pesagem ? WeightService.resumoDoPlano(ctxEv.pesagem, ctxEv.plano.PESAGENS) : null,
         sanidade: ctxEv.sanidade ? resumoSanidade_(m, ctxEv) : null,
         estoque: ctxEv.estoque ? resumoEstoque_(ctxEv) : null,
+        manejo: resumoManejo_(m, ctxEv),
       },
       derivados: { animais: animais, eventos: [ev.event_id].concat(ctxEv.original ? [ctxEv.original.event_id] : []), produtos: produtosDoComando_(m, ctxEv, ctxEv.original ? ctxEv.original.event_id : null) },
       resposta: function (t) { return resposta_(t, resumo); },
@@ -3513,6 +3814,9 @@ var EventService = (function () {
     if (ev && ev.event_type === 'PESAGEM' && r.acao !== 'estornar') out.pesagem = WeightService.resultadoDoEvento(tx, r.event_id);
     // Sanidade e estoque (só nesses tipos; a resposta dos outros não muda): o saldo de cada produto movimentado, depois da
     // fase C, para a tela de resultado e o cadastro de produtos do aparelho (a tela só mostra).
+    // Reprodução, desmama e castração (só nesses tipos; a resposta dos outros não muda): a situação reprodutiva, a cria ao pé,
+    // a categoria e a previsão de parto de cada animal depois da fase C (a tela de resultado e a loja só mostram).
+    if (ev && r.acao !== 'estornar' && (ev.event_type === 'REPRODUCAO' || ev.event_type === 'DESMAMA' || ev.event_type === 'CASTRACAO')) out.reproducao = ReproductionService.resultadoDoEvento(tx, r.event_id);
     var alvoEv = ev && r.acao === 'estornar' ? (tx.cru ? tx.cru.cruPorId('EVENTOS', alvo) : null) : ev;
     if (alvoEv && (alvoEv.event_type === 'SANIDADE' || alvoEv.event_type === 'ESTOQUE')) {
       var movs = (tx.cru ? tx.cru.cruPor('MOVIMENTOS_ESTOQUE', 'event_id', alvo) : []).concat(r.acao === 'corrigir' && r.substitui && tx.cru ? tx.cru.cruPor('MOVIMENTOS_ESTOQUE', 'event_id', r.substitui) : []);

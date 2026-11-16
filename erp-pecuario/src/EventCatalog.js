@@ -29,7 +29,7 @@ var EventCatalog = (function () {
     { id: 'EVENTOS', rotulo: 'Eventos', ordem: 4, fase: 1, menu: true, tela: 'Events' },
     { id: 'PESAGENS', rotulo: 'Pesagens', ordem: 5, fase: 3, menu: true, tela: 'Weights', sob_demanda: true, rotas: ['pesagens'] },
     { id: 'SANIDADE', rotulo: 'Sanidade', ordem: 6, fase: 3, menu: true, tela: 'Health', sob_demanda: true, rotas: ['sanidade'] },
-    { id: 'REPRODUCAO', rotulo: 'Reprodução', ordem: 7, fase: 3, menu: true },
+    { id: 'REPRODUCAO', rotulo: 'Reprodução', ordem: 7, fase: 3, menu: true, tela: 'Reproduction', sob_demanda: true, rotas: ['reproducao'] },
     { id: 'FINANCEIRO', rotulo: 'Financeiro', ordem: 8, fase: 4, menu: true },
     { id: 'RELATORIOS', rotulo: 'Relatórios', ordem: 9, fase: 5, menu: true },
     { id: 'CONFIGURACOES', rotulo: 'Configurações', ordem: 10, fase: 1, menu: true, tela: 'Settings' },
@@ -85,6 +85,8 @@ var EventCatalog = (function () {
     'SANIDADE.VACINACAO': 'a vacinação', 'SANIDADE.VERMIFUGACAO': 'a vermifugação', 'SANIDADE.MEDICACAO': 'a medicação',
     'SANIDADE.TRATAMENTO': 'o tratamento', 'SANIDADE.EXAME': 'o exame', 'SANIDADE.DOENCA': 'o registro de doença',
     'ESTOQUE.ENTRADA': 'a entrada de insumo', 'ESTOQUE.AJUSTE': 'o acerto de estoque',
+    'REPRODUCAO.EXPOSICAO': 'a exposição ao touro', 'REPRODUCAO.COBERTURA': 'a cobertura', 'REPRODUCAO.INSEMINACAO': 'a inseminação',
+    'REPRODUCAO.DIAGNOSTICO_GESTACAO': 'o diagnóstico de gestação', 'REPRODUCAO.ABORTO': 'o aborto',
   };
 
   // ------------------------------------------------------------------ campos ----
@@ -397,10 +399,14 @@ var EventCatalog = (function () {
    * registro de doença não aplica produto. Cada subtipo tem a lista inteira de cabeçalho (o tipo não tem campos próprios).
    */
   var MODOS_DOSE = ['POR_CABECA', 'POR_PESO', 'TOTAL'];
-  function camposCustoPago_() {
+  /**
+   * A despesa paga no ato de um manejo (sanidade, reprodução, castração, ocorrência; 03b, seção 2.5): um lançamento
+   * CUSTEIO com as parcelas, rateado por cabeça entre os animais do lançamento. `rotulo` e `ajuda`: o que ela é no tipo.
+   */
+  function camposCustoPago_(rotulo, ajuda) {
     var tem = quando_('custo_valor', true);
     return [
-      c_('custo_valor', 'Serviço ou produto pago no ato (opcional)', 'dinheiro', { min: 0.01, ajuda: 'Veterinário, produto comprado na hora e não lançado no estoque: vira custo dos animais tratados, com o pagamento a seguir.' }),
+      c_('custo_valor', rotulo || 'Serviço ou produto pago no ato (opcional)', 'dinheiro', { min: 0.01, ajuda: ajuda || 'Veterinário, produto comprado na hora e não lançado no estoque: vira custo dos animais tratados, com o pagamento a seguir.' }),
       c_('custo_conta_id', 'Conta do custo', 'ref:PLANO_CONTAS', { naturezas: ['CUSTEIO'], visivel_se: tem, obrigatorio_se: tem }),
       c_('custo_partner_id', 'Pago a', 'ref:PARCEIROS', { visivel_se: tem }),
       c_('custo_vencimento', 'Vencimento', 'data', { visivel_se: tem, ajuda: 'Vazio = à vista, na data da aplicação. Em mais de uma vez, é o vencimento da primeira parcela.' }),
@@ -485,6 +491,87 @@ var EventCatalog = (function () {
     l.push(c_('notes', 'Observações', 'texto'));
     return l;
   }
+  /**
+   * REPRODUCAO (04, seção 4.5; 03b, seções 7, 16.5 e 16.14; 05, seção 2.9; PR-07): exposição (o lote de fêmeas posto com
+   * os touros, a campo, com ou sem estação: os machos da lista são os touros), cobertura datada (com o touro), inseminação
+   * (com o touro do sêmen, a partida e o inseminador), diagnóstico de gestação (o resultado de cada fêmea, no tronco) e
+   * aborto. Cada fêmea tem uma linha REPRODUCAO; a situação reprodutiva é projeção, nunca pré-condição (RN-065). A
+   * despesa (sêmen, veterinário, hormônios) é opcional.
+   */
+  var RESULTADOS_DIAGNOSTICO = ['POSITIVO', 'NEGATIVO', 'INCONCLUSIVO'];
+  var METODOS_REPRODUCAO = { COBERTURA: ['MONTA_NATURAL', 'MONTA_CONTROLADA'], INSEMINACAO: ['IA', 'IATF'], DIAGNOSTICO_GESTACAO: ['PALPACAO', 'ULTRASSOM', 'OBSERVACAO', 'INFORMADO'] };
+  var GESTACAO_MAX_DIAS = 330;
+  function camposReproducao_(sub) {
+    var rotuloData = { EXPOSICAO: 'Início da exposição (touro com as fêmeas)', COBERTURA: 'Data da cobertura', INSEMINACAO: 'Data da inseminação', DIAGNOSTICO_GESTACAO: 'Data do diagnóstico', ABORTO: 'Data do aborto (ou de quando foi notado)' }[sub];
+    var l = [c_('event_date', rotuloData, 'data', { obrigatorio: true, default: 'HOJE' })];
+    if (sub === 'EXPOSICAO') l.push(c_('data_fim', 'Retirada dos touros', 'data', { ajuda: 'Vazio = até o fim da estação de monta. Os touros do lote vão na lista de animais, junto com as fêmeas.' }));
+    if (sub === 'COBERTURA' || sub === 'INSEMINACAO') {
+      l.push(c_('touro_id', sub === 'INSEMINACAO' ? 'Touro do sêmen' : 'Touro', 'ref:ANIMAIS', { ajuda: sub === 'INSEMINACAO' ? 'O touro do sêmen: cadastre-o como animal de fora do rebanho, se não for da fazenda.' : 'O touro que cobriu: do rebanho, ou de fora (cadastro de referência).' }));
+    }
+    if (sub === 'INSEMINACAO') l.push(c_('semen_identificacao', 'Partida ou palheta do sêmen', 'texto'));
+    if (METODOS_REPRODUCAO[sub]) l.push(c_('metodo', sub === 'DIAGNOSTICO_GESTACAO' ? 'Como foi o diagnóstico' : sub === 'INSEMINACAO' ? 'Tipo de inseminação' : 'Como foi a cobertura', 'lista', { opcoes: METODOS_REPRODUCAO[sub] }));
+    if (sub !== 'ABORTO') l.push(c_('estacao_id', 'Estação de monta', 'ref:ESTACOES_MONTA', { ajuda: 'A estação a que o registro pertence: é ela que define as fêmeas expostas dos indicadores. Vazio = sem estação (touro o ano todo).' }));
+    l = l.concat(camposCustoPago_('Despesa (opcional)', 'Sêmen, veterinário, hormônios: vira custo dos animais deste lançamento, com o pagamento a seguir.'));
+    l.push(c_('property_id', 'Propriedade', 'ref:PROPRIEDADES', { default: { de: 'CONFIGURACOES.propriedade_padrao_id' } }));
+    l.push(c_('responsible', sub === 'INSEMINACAO' ? 'Inseminador' : sub === 'DIAGNOSTICO_GESTACAO' ? 'Quem diagnosticou (veterinário)' : 'Responsável', 'texto'));
+    l.push(c_('notes', 'Observações', 'texto'));
+    return l;
+  }
+  function camposAnimalReproducao_(sub) {
+    var l = [a_('animal_id', sub === 'EXPOSICAO' ? 'Animal (fêmea ou touro do lote)' : 'Fêmea', 'ref:ANIMAIS', { obrigatorio: true })];
+    var positivo = quando_('resultado', ['POSITIVO']);
+    if (sub === 'DIAGNOSTICO_GESTACAO') {
+      l.push(a_('resultado', 'Resultado', 'lista', { obrigatorio: true, opcoes: RESULTADOS_DIAGNOSTICO, ajuda: 'Prenhe (positivo), vazia (negativo) ou duvidoso (inconclusivo: a situação não muda).' }));
+      l.push(a_('idade_gestacional_dias', 'Idade da gestação (dias)', 'inteiro', { min: 1, max: GESTACAO_MAX_DIAS, visivel_se: positivo, ajuda: 'Opcional: com ela, a previsão de parto fica mais precisa.' }));
+      l.push(a_('data_prevista_parto', 'Previsão de parto informada', 'data', { visivel_se: positivo, ajuda: 'Só se o veterinário informou a data. Vazio = o sistema calcula, como estimativa.' }));
+    }
+    if (sub === 'ABORTO') l.push(a_('idade_gestacional_dias', 'Idade da gestação perdida (dias)', 'inteiro', { min: 1, max: GESTACAO_MAX_DIAS }));
+    l.push(a_('observacoes', 'Observações deste animal', 'texto'));
+    return l;
+  }
+  /**
+   * DESMAMA (04, seção 4.5; 03b, seções 3.4, 7.2 e 16.14): o fim da cria ao pé. Cada bezerro é o sujeito (efeito 0; com o
+   * pasto de destino, a linha vale como movimento); a mãe, quando conhecida e no rebanho na data, tem a linha MATRIZ e o
+   * registro DESMAMA; o peso à desmama, quando informado, é uma pesagem (tipo DESMAMA). A categoria do bezerro continua
+   * automática, pelo cadastro de categorias (idade, sexo e condição).
+   */
+  var CAMPOS_DESMAMA = [
+    c_('event_date', 'Data da desmama', 'data', { obrigatorio: true, default: 'HOJE' }),
+    c_('pasto_destino_id', 'Pasto para onde vão os bezerros', 'ref:PASTOS', { ajuda: 'Vazio = os bezerros ficam no pasto em que estão.' }),
+    c_('metodo_pesagem', 'Como foram pesados', 'lista', { opcoes: METODOS_PESAGEM, default: 'BALANCA', ajuda: 'Vale para os pesos informados abaixo.' }),
+    c_('property_id', 'Propriedade', 'ref:PROPRIEDADES', { default: { de: 'CONFIGURACOES.propriedade_padrao_id' } }),
+    c_('responsible', 'Responsável', 'texto'),
+    c_('notes', 'Observações', 'texto'),
+  ];
+  var CAMPOS_ANIMAL_DESMAMA = [
+    a_('animal_id', 'Bezerro (cria ao pé)', 'ref:ANIMAIS', { obrigatorio: true }),
+    a_('peso', 'Peso à desmama', 'decimal', { unidade: 'kg', min: 0.1, max: PESO_MAX_KG, casas: 1, ajuda: 'Opcional: vira a pesagem da desmama.' }),
+    a_('observacoes', 'Observações deste animal', 'texto'),
+  ];
+  /** CASTRACAO (04, seção 4.5; 03b, seção 2.6): machos inteiros; o método vai no payload; a categoria muda pelo cadastro. */
+  var CAMPOS_CASTRACAO = [
+    c_('event_date', 'Data da castração', 'data', { obrigatorio: true, default: 'HOJE' }),
+    c_('metodo', 'Método', 'texto', { ajuda: 'Ex.: cirúrgica, burdizzo, elástico.' }),
+  ].concat(camposCustoPago_('Despesa (opcional)', 'Veterinário, material: vira custo dos animais castrados, com o pagamento a seguir.'), [
+    c_('property_id', 'Propriedade', 'ref:PROPRIEDADES', { default: { de: 'CONFIGURACOES.propriedade_padrao_id' } }),
+    c_('responsible', 'Responsável', 'texto'),
+    c_('notes', 'Observações', 'texto'),
+  ]);
+  /** OCORRENCIA (04, seção 4.5; 03b, seção 2.6): registro livre de um fato de manejo, com o tipo em lista aberta; sem efeito no inventário. */
+  var CAMPOS_OCORRENCIA = [
+    c_('event_date', 'Data', 'data', { obrigatorio: true, default: 'HOJE' }),
+    c_('tipo_ocorrencia', 'Tipo de ocorrência', 'lista', { obrigatorio: true, lista: 'TIPO_OCORRENCIA' }),
+    c_('description', 'O que aconteceu', 'texto', { obrigatorio: true }),
+  ].concat(camposCustoPago_('Despesa (opcional)', 'O que foi pago por este manejo: vira custo dos animais do lançamento, com o pagamento a seguir.'), [
+    c_('property_id', 'Propriedade', 'ref:PROPRIEDADES', { default: { de: 'CONFIGURACOES.propriedade_padrao_id' } }),
+    c_('responsible', 'Responsável', 'texto'),
+    c_('notes', 'Observações', 'texto'),
+  ]);
+  var CAMPOS_ANIMAL_SIMPLES = [
+    a_('animal_id', 'Animal', 'ref:ANIMAIS', { obrigatorio: true }),
+    a_('observacoes', 'Observações deste animal', 'texto'),
+  ];
+
   /** Abas de insumos e sanidade que os comandos de sanidade, de estoque, de venda e de estorno leem. */
   var LEITURAS_INSUMOS = ['PRODUTOS', 'MOVIMENTOS_ESTOQUE', 'SANIDADE', 'PROTOCOLOS_SANITARIOS'];
 
@@ -701,6 +788,44 @@ var EventCatalog = (function () {
         AJUSTE: { rotulo: 'Acertar o estoque (contagem, perda, vencimento)', fase: 3, campos: camposEstoque_('AJUSTE') },
       },
     },
+    REPRODUCAO: {
+      frequente: true, selecao_animais: 'VARIOS', filtro_elegiveis: { situacao: 'ATIVO' }, modo_entrada: 'FORM', revisao: 'LOCAL', critico: false,
+      reads: LEITURAS_MOTOR.concat(LEITURAS_FINANCEIRO, ['ESTACOES_MONTA']),
+      campos: [],
+      componentes: ['seletor_animais'],
+      grupos_repetiveis: {},
+      subtipos: {
+        EXPOSICAO: { rotulo: 'Exposição ao touro (monta a campo ou estação)', fase: 3, campos: camposReproducao_('EXPOSICAO'), campos_animal: camposAnimalReproducao_('EXPOSICAO') },
+        COBERTURA: { rotulo: 'Cobertura (data e touro conhecidos)', fase: 3, campos: camposReproducao_('COBERTURA'), campos_animal: camposAnimalReproducao_('COBERTURA') },
+        INSEMINACAO: { rotulo: 'Inseminação artificial', fase: 3, campos: camposReproducao_('INSEMINACAO'), campos_animal: camposAnimalReproducao_('INSEMINACAO') },
+        DIAGNOSTICO_GESTACAO: { rotulo: 'Diagnóstico de gestação', fase: 3, campos: camposReproducao_('DIAGNOSTICO_GESTACAO'), campos_animal: camposAnimalReproducao_('DIAGNOSTICO_GESTACAO') },
+        ABORTO: { rotulo: 'Aborto (perda da gestação)', fase: 3, campos: camposReproducao_('ABORTO'), campos_animal: camposAnimalReproducao_('ABORTO') },
+      },
+    },
+    DESMAMA: {
+      frequente: false, selecao_animais: 'VARIOS', filtro_elegiveis: { situacao: 'ATIVO' }, modo_entrada: 'CURRAL', revisao: 'LOCAL', critico: false,
+      reads: LEITURAS_MOTOR.concat(LEITURAS_FINANCEIRO),
+      campos: CAMPOS_DESMAMA,
+      campos_animal: CAMPOS_ANIMAL_DESMAMA,
+      componentes: ['seletor_animais'],
+      grupos_repetiveis: {},
+    },
+    CASTRACAO: {
+      frequente: false, selecao_animais: 'VARIOS', filtro_elegiveis: { situacao: 'ATIVO', sexo: 'M' }, modo_entrada: 'FORM', revisao: 'LOCAL', critico: false,
+      reads: LEITURAS_MOTOR.concat(LEITURAS_FINANCEIRO),
+      campos: CAMPOS_CASTRACAO,
+      campos_animal: CAMPOS_ANIMAL_SIMPLES,
+      componentes: ['seletor_animais'],
+      grupos_repetiveis: {},
+    },
+    OCORRENCIA: {
+      frequente: false, selecao_animais: 'VARIOS', filtro_elegiveis: { situacao: 'ATIVO' }, modo_entrada: 'FORM', revisao: 'LOCAL', critico: false,
+      reads: LEITURAS_MOTOR.concat(LEITURAS_FINANCEIRO),
+      campos: CAMPOS_OCORRENCIA,
+      campos_animal: CAMPOS_ANIMAL_SIMPLES,
+      componentes: ['seletor_animais'],
+      grupos_repetiveis: {},
+    },
     ESTORNO: {
       frequente: false, selecao_animais: 'NENHUM', filtro_elegiveis: null, modo_entrada: 'FORM', revisao: 'SERVIDOR', critico: true,
       reads: LEITURAS_MOTOR.concat(LEITURAS_FINANCEIRO, LEITURAS_INSUMOS),
@@ -907,6 +1032,8 @@ var EventCatalog = (function () {
     MOMENTOS_PESAGEM: MOMENTOS_PESAGEM,
     MODOS_DOSE: MODOS_DOSE,
     MOTIVOS_AJUSTE_ESTOQUE: MOTIVOS_AJUSTE_ESTOQUE,
+    RESULTADOS_DIAGNOSTICO: RESULTADOS_DIAGNOSTICO,
+    METODOS_REPRODUCAO: METODOS_REPRODUCAO,
     LEITURAS_INSUMOS: LEITURAS_INSUMOS,
     PESO_MAX_KG: PESO_MAX_KG,
     CAMPOS_CORRIGIVEIS: CAMPOS_CORRIGIVEIS,

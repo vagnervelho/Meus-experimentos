@@ -8,7 +8,7 @@
  */
 var InventoryService = (function () {
   /** Alertas entregues até a Fase 2 (lista fechada do desenho-base, seção 6, no recorte das fases entregues). */
-  var ALERTAS = ['ATIVO_SEM_PASTO', 'SEM_BRINCO', 'SEM_CATEGORIA', 'NAO_LOCALIZADO', 'SANITARIO_VENCIDO', 'SANITARIO_PROXIMO', 'EM_CARENCIA', 'BACKUP_ATRASADO', 'INTEGRIDADE_COM_ERRO', 'IMPORTACAO_INCOMPLETA'];
+  var ALERTAS = ['ATIVO_SEM_PASTO', 'SEM_BRINCO', 'SEM_CATEGORIA', 'NAO_LOCALIZADO', 'SANITARIO_VENCIDO', 'SANITARIO_PROXIMO', 'EM_CARENCIA', 'PARTO_PREVISTO', 'PRENHEZ_VENCIDA', 'BACKUP_ATRASADO', 'INTEGRIDADE_COM_ERRO', 'IMPORTACAO_INCOMPLETA'];
   var DIA_MS = 86400000;
   /**
    * Tipos cujas linhas são movimento ou saída: o elegível em D é quem está no rebanho ao fim do dia (depois das saídas
@@ -559,6 +559,14 @@ var InventoryService = (function () {
       lista.push(alerta_('SANITARIO_PROXIMO', 'AVISO', ag.resumo.proximas + ' procedimento(s) sanitário(s) para os próximos dias em ' + comProxima.length + ' animal(is). Veja a agenda sanitária.', comProxima, 'ANIMAIS'));
     }
     if (ag.carencia && ag.carencia.length) lista.push(alerta_('EM_CARENCIA', 'AVISO', ag.carencia.length + ' animal(is) em carência sanitária hoje: não podem ser abatidos até o fim dela.', ag.carencia.map(function (c) { return c.animal_id; }), 'ANIMAIS'));
+    // Reprodução (desenho-base, seção 6, alertas: "parto previsto; prenhez com previsão vencida"): pela previsão de parto
+    // das prenhas (ReproductionService, a mesma conta da tela de reprodução), sempre estimativa salvo a informada.
+    if (L.repo.carregada('REPRODUCAO')) {
+      var rep = ReproductionService.alertasHoje(L);
+      var ids = function (cod) { return rep.itens.filter(function (x) { return x.codigo === cod; }).map(function (x) { return x.animal_id; }); };
+      if (rep.PARTO_PREVISTO) lista.push(alerta_('PARTO_PREVISTO', 'AVISO', rep.PARTO_PREVISTO + ' parto(s) previsto(s) para os próximos ' + L.params.alerta_parto_previsto_dias + ' dias (estimativa). Veja a tela de reprodução.', ids('PARTO_PREVISTO'), 'ANIMAIS'));
+      if (rep.PRENHEZ_VENCIDA) lista.push(alerta_('PRENHEZ_VENCIDA', 'AVISO', rep.PRENHEZ_VENCIDA + ' prenhez(es) com a previsão de parto vencida, sem parto nem aborto registrado. Confira as vacas e registre o parto ou o aborto.', ids('PRENHEZ_VENCIDA'), 'ANIMAIS'));
+    }
     var limite = L.params.alerta_backup_atrasado_dias;
     if (e.backup === undefined) nao.push(naoAvaliado_('BACKUP_ATRASADO', 'A situação do backup não foi informada.'));
     else {
@@ -584,7 +592,7 @@ var InventoryService = (function () {
   /** Consulta `alerta.listar`: `estado` como em `alertas`. */
   function consultaAlertas(estado) {
     return {
-      rota: 'alerta.listar', reads: Utils.unicos(leituras().concat(['IMPORTACOES'], HealthService.leiturasAgenda())), acessoCru: true,
+      rota: 'alerta.listar', reads: Utils.unicos(leituras().concat(['IMPORTACOES', 'ESTACOES_MONTA'], HealthService.leiturasAgenda())), acessoCru: true,
       tratador: function (tx) { return alertas(AnimalService.leitor(tx), estado); },
     };
   }

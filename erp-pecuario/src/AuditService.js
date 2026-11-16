@@ -389,6 +389,14 @@ var AuditService = (function () {
   var CHECAGEM_DO_CAMPO = Object.freeze({ 'FINANCEIRO.animal_id': 'ALOCACAO_DIRETA', 'ANIMAIS.custo_aquisicao': 'CUSTO_AQUISICAO', 'ANIMAIS.custo_aquisicao_origem': 'CUSTO_AQUISICAO' });
   /** Como resolver, na trava, o touro e a fêmea de um registro reprodutivo que deixariam de valer na data dele. */
   var RESOLVER_TOURO = 'O pai (touro) de um parto ou de um registro reprodutivo é macho e nasceu antes dele: confira o sexo e o nascimento do touro, ou corrija antes o registro.';
+  /** Como resolver cada regra de manejo na mensagem da trava (a frase da regra diz o que ficaria errado). */
+  var RESOLVER_MANEJO = Object.freeze({
+    CASTRACAO_DE_FEMEA: 'Só macho é castrado: estorne a castração, ou confira o sexo do animal.',
+    CASTRACAO_REPETIDA: 'O animal já era castrado: estorne a castração repetida, ou confira o cadastro de origem.',
+    TOURO_CASTRADO: 'Um touro castrado não cobre: estorne ou corrija o registro reprodutivo, ou mude a data da castração.',
+    DESMAMA_REPETIDA: 'Cada cria é desmamada uma vez: estorne a desmama repetida (ou corrija a data da primeira).',
+    PARTO_NA_GESTACAO: 'Confira a idade da gestação do diagnóstico ou a data do parto: a gestação diagnosticada começou depois do parto.',
+  });
   var RESOLVER_FONTE = 'Este lançamento refaria a situação a partir desses dados, como se estivessem certos. Restaure o backup ou investigue a edição manual da planilha antes de lançar para eles.';
   var RESOLVER_CRIA_EM_DOBRO = 'O parto de um animal que já está no cadastro não se lança: a mãe e o nascimento dele ficam no cadastro. Se o parto antigo já foi gravado, estorne-o ou desfaça a importação dele; para pôr no rebanho inicial a cria de um parto antigo, lance "Outra entrada" dela datada do marco zero, em vez de cadastrar um animal novo.';
   var RESOLVER_FEMEA = 'O registro reprodutivo é de uma fêmea nascida antes dele: confira o sexo e o nascimento, ou corrija antes o lançamento que gravou o registro.';
@@ -826,6 +834,15 @@ var AuditService = (function () {
           col.achado('LINHA_DO_TEMPO', { tabela: 'ANIMAIS', id: id, mensagem: rotuloAnimal_(a, id) + ': ' + Timeline.descrever(p) + ' (evento de ' + br_(p.event_date) + ').', chaves: 'SEQUENCIA|' + id + '|' + p.codigo + '|' + p.event_id, event_id: p.event_id, resolver: 'Confira a ordem das identificações e das marcações do animal: mude a data deste lançamento ou estorne antes o registro que conflita.' });
         });
         conferirBrincoCorrigido_(f, col, a, id, idents);
+        // Regras de manejo do animal (a mesma função do motor): castração de fêmea ou repetida, touro castrado, desmama
+        // repetida, parto dentro da gestação de um diagnóstico positivo (ReproductionService.problemasDoAnimal).
+        ReproductionService.problemasNaFonte(f, id, calc.sexo).forEach(function (p) {
+          col.achado('LINHA_DO_TEMPO', {
+            tabela: 'ANIMAIS', id: id, mensagem: rotuloAnimal_(a, id) + ': ' + p.mensagem, oque: rotuloAnimal_(a, id) + ': ' + p.mensagem,
+            chaves: 'MANEJO|' + id + '|' + p.codigo + '|' + p.event_id + '|' + (p.parto_event_id || ''), event_id: p.event_id, animal_id: id,
+            resolver: RESOLVER_MANEJO[p.codigo] || null,
+          });
+        });
       }
       if (a.situacao_cadastral === 'ATIVO') {
         var soma = linhas.filter(function (l) { return !l.pre_marco_zero; }).reduce(function (s, l) { return s + (l.efeito || 0); }, 0);
@@ -1365,6 +1382,9 @@ var AuditService = (function () {
     { tabela: 'IDENTIFICACOES', quantos: 'UM', aplica: function (ev) { return ev.event_type === 'IDENTIFICACAO'; } },
     { tabela: 'PESAGENS', quantos: 'UM', aplica: function (ev) { return ev.event_type === 'PESAGEM'; } },
     { tabela: 'SANIDADE', quantos: 'UM', aplica: function (ev) { return ev.event_type === 'SANIDADE'; } },
+    // Reprodução: um registro por fêmea (a linha SUJEITO; o touro do lote não tem); desmama: um registro DESMAMA por mãe.
+    { tabela: 'REPRODUCAO', quantos: 'UM', papel: 'SUJEITO', aplica: function (ev) { return ev.event_type === 'REPRODUCAO'; } },
+    { tabela: 'REPRODUCAO', quantos: 'UM', papel: 'MATRIZ', aplica: function (ev) { return ev.event_type === 'DESMAMA'; } },
   ]);
   function conferirDetalhes_(tx, col, eventos) {
     var repo = tx.repo;
@@ -1375,7 +1395,7 @@ var AuditService = (function () {
         if (!d.aplica(ev)) return;
         var porAnimal = {};
         repo.por(d.tabela, 'event_id', ev.event_id).forEach(function (r) { porAnimal[r.animal_id] = (porAnimal[r.animal_id] || 0) + 1; });
-        Utils.unicos(repo.por('EVENTO_ANIMAIS', 'event_id', ev.event_id).map(function (l) { return l.animal_id; })).forEach(function (id) {
+        Utils.unicos(repo.por('EVENTO_ANIMAIS', 'event_id', ev.event_id).filter(function (l) { return !d.papel || (vazio_(l.papel) ? 'SUJEITO' : l.papel) === d.papel; }).map(function (l) { return l.animal_id; })).forEach(function (id) {
           var n = porAnimal[id] || 0;
           if (n === 1 || (n > 1 && d.quantos === 'ALGUM')) return;
           var quem = rotuloAnimal_(tx.cru.cruPorId('ANIMAIS', id), id);
@@ -1398,7 +1418,11 @@ var AuditService = (function () {
     if (t === 'NASCIMENTO') return { papeis: { MATRIZ: 0, CRIA: 1 }, pasto: false, outrosPapeisEmPartos: true };
     if (t === 'VENDA' || t === 'MORTE' || t === 'DESCARTE') return { papeis: { SUJEITO: -1 }, pasto: false };
     if (t === 'TRANSFERENCIA') return { papeis: { SUJEITO: 0 }, pasto: true };
-    if (t === 'IDENTIFICACAO' || t === 'MARCACAO' || t === 'PESAGEM' || t === 'SANIDADE') return { papeis: { SUJEITO: 0 }, pasto: false };
+    if (t === 'IDENTIFICACAO' || t === 'MARCACAO' || t === 'PESAGEM' || t === 'SANIDADE' || t === 'CASTRACAO' || t === 'OCORRENCIA') return { papeis: { SUJEITO: 0 }, pasto: false };
+    // Reprodução: a fêmea (SUJEITO) e o touro do rebanho do lote ou da cobertura (TOURO); desmama: o bezerro (SUJEITO, que
+    // com o pasto de destino vale como movimento: conferido em conferirReproducao_) e a mãe (MATRIZ). Todos com efeito 0.
+    if (t === 'REPRODUCAO') return { papeis: { SUJEITO: 0, TOURO: 0 }, pasto: false };
+    if (t === 'DESMAMA') return { papeis: { SUJEITO: 0, MATRIZ: 0 }, pasto: false };
     // ESTOQUE não tem animais: nenhuma linha (conferirInsumos_ acusa a que aparecer).
     if (t === 'ESTOQUE') return null;
     if (t === 'AJUSTE_INVENTARIO') return sub === 'DIVERGENCIA_CONTAGEM' ? { papeis: { SUJEITO: -1 }, pasto: false } : { papeis: { SUJEITO: 0 }, pasto: sub === 'CORRECAO_LOCALIZACAO' };
@@ -1452,7 +1476,7 @@ var AuditService = (function () {
           col.achado('COPIAS', { tabela: ref.tabela, id: ref.id, linha: ref.linha, campo: 'pasto_destino_id', mensagem: oquePasto + aviso, oque: oquePasto, chaves: l.event_animal_id + '|PASTO', event_id: ev.event_id, animal_id: l.animal_id });
         }
       });
-      ['BAIXAS', 'AJUSTES', 'IDENTIFICACOES', 'PESAGENS', 'SANIDADE'].forEach(function (t) {
+      ['BAIXAS', 'AJUSTES', 'IDENTIFICACOES', 'PESAGENS', 'SANIDADE', 'REPRODUCAO'].forEach(function (t) {
         if (!repo.carregada(t)) return;
         repo.por(t, 'event_id', ev.event_id).forEach(function (r) {
           if (vazio_(r.animal_id) || comLinha[r.animal_id]) return;
@@ -1613,6 +1637,85 @@ var AuditService = (function () {
     });
   }
   /**
+   * Reprodução e desmama (03b, seções 3.3, 3.4, 7.1, 7.2 e 16.14), conferidas aqui para valerem em todo caminho (registro,
+   * correção, estorno, importação e a trava de integridade):
+   *  - REPRODUCAO: cada registro com as colunas do seu tipo (matriz da seção 7.2: a retirada só na exposição e não antes
+   *    dela; o sêmen só na inseminação; o resultado só e sempre no diagnóstico; a idade da gestação só no diagnóstico
+   *    positivo e no aborto, de 1 à duração da gestação; a previsão informada só no diagnóstico positivo e depois dele; o
+   *    touro nunca no diagnóstico nem no aborto; nada do parto), o mesmo cabeçalho (retirada, estação, touro, sêmen e
+   *    método) em todos os registros do lançamento, e o touro coerente com as linhas TOURO: na exposição, o único touro do
+   *    lote (ou nenhum, com vários); na cobertura, no máximo um, que é o touro do registro; nos demais, nenhuma linha TOURO;
+   *  - DESMAMA: cada mãe (linha MATRIZ) é a mãe de um bezerro do lançamento, com o registro DESMAMA vazio (nenhuma coluna
+   *    de outro tipo); nenhum registro reprodutivo de bezerro; a linha do bezerro com o pasto de origem e o de destino
+   *    juntos ou nenhum, e a pesagem DESMAMA (no máximo uma) com o peso da linha do animal.
+   * Achados de COPIAS (a fonte quebrada: o reparo refaria a situação a partir do dado quebrado).
+   */
+  var CABECALHO_REPRODUCAO = Object.freeze(['data_fim', 'estacao_id', 'touro_id', 'semen_identificacao', 'metodo']);
+  function conferirReproducao_(tx, col, eventos) {
+    var repo = tx.repo;
+    if (!repo.carregada('REPRODUCAO') || !repo.carregada('EVENTO_ANIMAIS')) return;
+    var aviso = ' Restaure o backup ou investigue a edição manual; o reparo automático só refaz a situação a partir dos lançamentos.';
+    var dias = repo.carregada('CONFIGURACOES') ? Timeline.parametros(repo).dias_gestacao : null;
+    eventos.forEach(function (ev) {
+      if (ev.event_type !== 'REPRODUCAO' && ev.event_type !== 'DESMAMA') return;
+      var nome = '"' + rotuloEvento_(ev) + '" de ' + br_(ev.event_date);
+      var quem = function (id) { return rotuloAnimal_(tx.cru.cruPorId('ANIMAIS', id), id); };
+      var achado = function (tabela, id, campo, oque, chave, animal) {
+        col.achado('COPIAS', { tabela: tabela, id: id, campo: campo, mensagem: oque + aviso, oque: oque, chaves: id + '|' + chave, event_id: ev.event_id, animal_id: animal || null });
+      };
+      var regs = repo.por('REPRODUCAO', 'event_id', ev.event_id);
+      var linhas = repo.por('EVENTO_ANIMAIS', 'event_id', ev.event_id);
+      var papel = function (l) { return vazio_(l.papel) ? 'SUJEITO' : l.papel; };
+      if (ev.event_type === 'REPRODUCAO') {
+        var sub = ev.event_subtype;
+        var touros = linhas.filter(function (l) { return papel(l) === 'TOURO'; }).map(function (l) { return l.animal_id; });
+        regs.forEach(function (r, i) {
+          var falta = function (campo, oque) { achado('REPRODUCAO', r.reproduction_id, campo, nome + ', ' + quem(r.animal_id) + ': ' + oque, 'COLUNA_' + campo, r.animal_id); };
+          if (!vazio_(r.data_fim) && (sub !== 'EXPOSICAO' || r.data_fim < r.data)) falta('data_fim', sub !== 'EXPOSICAO' ? 'o registro tem a retirada dos touros, que só existe na exposição.' : 'a retirada dos touros (' + br_(r.data_fim) + ') é anterior ao início da exposição.');
+          if (!vazio_(r.semen_identificacao) && sub !== 'INSEMINACAO') falta('semen_identificacao', 'o registro tem a identificação do sêmen, que só existe na inseminação.');
+          if ((sub === 'DIAGNOSTICO_GESTACAO') !== !vazio_(r.resultado)) falta('resultado', sub === 'DIAGNOSTICO_GESTACAO' ? 'o diagnóstico está sem o resultado.' : 'o registro tem resultado de diagnóstico, que ele não grava.');
+          var comIdade = sub === 'ABORTO' || (sub === 'DIAGNOSTICO_GESTACAO' && r.resultado === 'POSITIVO');
+          if (!vazio_(r.idade_gestacional_dias) && (!comIdade || !(r.idade_gestacional_dias >= 1) || (typeof dias === 'number' && r.idade_gestacional_dias > dias))) falta('idade_gestacional_dias', comIdade ? 'a idade da gestação (' + r.idade_gestacional_dias + ' dias) está fora da faixa (de 1 à duração da gestação).' : 'o registro tem idade da gestação, que só existe no diagnóstico positivo e no aborto.');
+          if (!vazio_(r.data_prevista_parto) && (sub !== 'DIAGNOSTICO_GESTACAO' || r.resultado !== 'POSITIVO' || r.data_prevista_parto <= r.data)) falta('data_prevista_parto', sub === 'DIAGNOSTICO_GESTACAO' && r.resultado === 'POSITIVO' ? 'a previsão de parto informada (' + br_(r.data_prevista_parto) + ') não é depois do diagnóstico.' : 'o registro tem previsão de parto, que só o diagnóstico positivo informa.');
+          if (!vazio_(r.touro_id) && (sub === 'DIAGNOSTICO_GESTACAO' || sub === 'ABORTO')) falta('touro_id', 'o registro tem touro, que o diagnóstico e o aborto não gravam.');
+          ['qtd_nascidos_vivos', 'qtd_natimortos', 'tipo_parto', 'data_parto'].forEach(function (c) { if (!vazio_(r[c])) falta(c, 'o registro tem dado de parto, que só o nascimento grava.'); });
+          if (i > 0) CABECALHO_REPRODUCAO.forEach(function (c) {
+            if (nulo_(r[c]) !== nulo_(regs[0][c])) falta(c, 'o cabeçalho do registro (retirada, estação, touro, sêmen ou método) difere do das outras fêmeas do lançamento.');
+          });
+        });
+        var r0 = regs[0];
+        if (r0) {
+          var oqueTouro = null;
+          if (sub === 'EXPOSICAO' && nulo_(r0.touro_id) !== (touros.length === 1 ? touros[0] : null)) oqueTouro = 'o touro do registro não é o touro do lote (com um touro só, é ele; com vários, nenhum).';
+          if (sub === 'COBERTURA' && (touros.length > 1 || (touros.length === 1 && touros[0] !== r0.touro_id))) oqueTouro = 'o touro do rebanho na cobertura (linha do touro) não é o touro do registro.';
+          if (sub !== 'EXPOSICAO' && sub !== 'COBERTURA' && touros.length) oqueTouro = 'o lançamento tem linha de touro, que só a exposição e a cobertura gravam.';
+          if (oqueTouro) achado('EVENTOS', ev.event_id, 'touro_id', nome + ': ' + oqueTouro, 'TOURO');
+        }
+        return;
+      }
+      // DESMAMA
+      var bezerros = linhas.filter(function (l) { return papel(l) === 'SUJEITO'; });
+      var maes = {};
+      bezerros.forEach(function (l) {
+        var b = tx.cru.cruPorId('ANIMAIS', l.animal_id);
+        if (b && !vazio_(b.mae_id)) maes[b.mae_id] = true;
+        if (vazio_(l.pasto_origem_id) !== vazio_(l.pasto_destino_id)) achado('EVENTO_ANIMAIS', l.event_animal_id, 'pasto_destino_id', nome + ', ' + quem(l.animal_id) + ': a linha do bezerro tem só um dos pastos (origem e destino vão juntos, quando a desmama muda o pasto).', 'PASTOS', l.animal_id);
+        var ps = repo.carregada('PESAGENS') ? repo.por('PESAGENS', 'event_id', ev.event_id).filter(function (p) { return p.animal_id === l.animal_id; }) : [];
+        if (ps.length > 1 || (ps.length === 1 && ps[0].peso_kg !== l.peso) || (!ps.length && typeof l.peso === 'number')) achado('EVENTO_ANIMAIS', l.event_animal_id, 'peso', nome + ', ' + quem(l.animal_id) + ': o peso à desmama da linha do bezerro não confere com a pesagem da desmama.', 'PESO', l.animal_id);
+      });
+      linhas.filter(function (l) { return papel(l) === 'MATRIZ'; }).forEach(function (l) {
+        if (!maes[l.animal_id]) achado('EVENTO_ANIMAIS', l.event_animal_id, 'animal_id', nome + ': ' + quem(l.animal_id) + ' está como mãe, mas não é a mãe de nenhum bezerro desmamado no lançamento.', 'MAE', l.animal_id);
+      });
+      var comLinhaMae = {};
+      linhas.forEach(function (l) { if (papel(l) === 'MATRIZ') comLinhaMae[l.animal_id] = true; });
+      regs.forEach(function (r) {
+        if (!comLinhaMae[r.animal_id]) achado('REPRODUCAO', r.reproduction_id, 'animal_id', nome + ': o registro de desmama está em ' + quem(r.animal_id) + ', que não é a mãe no lançamento.', 'DESMAMA_FORA', r.animal_id);
+        var cheias = ['data_fim', 'estacao_id', 'touro_id', 'semen_identificacao', 'metodo', 'resultado', 'idade_gestacional_dias', 'qtd_nascidos_vivos', 'qtd_natimortos', 'tipo_parto', 'data_prevista_parto', 'data_parto'].filter(function (c) { return !vazio_(r[c]); });
+        if (cheias.length) achado('REPRODUCAO', r.reproduction_id, cheias[0], nome + ', ' + quem(r.animal_id) + ': o registro de desmama tem dados de outro tipo de registro reprodutivo.', 'DESMAMA_COLUNAS', r.animal_id);
+      });
+    });
+  }
+  /**
    * Cópias × fonte (06, seção 9): a fonte de cada evento, o detalhe obrigatório, o tipo da linha de detalhe = o do evento e
    * a data do detalhe = a do evento. No escopo, os eventos dele.
    */
@@ -1625,6 +1728,7 @@ var AuditService = (function () {
     conferirDetalhes_(tx, col, eventos);
     conferirPesagens_(tx, col, eventos);
     conferirInsumos_(tx, col, eventos);
+    conferirReproducao_(tx, col, eventos);
     var linhasDe = function (t) {
       if (!esc) return repo.vigentes(t);
       var out = [];
@@ -1784,7 +1888,7 @@ var AuditService = (function () {
   var DETALHES_COM_ANIMAL = Object.freeze(['IDENTIFICACOES', 'PESAGENS', 'REPRODUCAO', 'AJUSTES', 'BAIXAS', 'SANIDADE']);
   /** Abas que a trava lê (além das do comando) quando ele toca animal, evento, lançamento ou parâmetro: as das checagens de domínio. */
   function leiturasTrava() {
-    return Utils.unicos(Timeline.LEITURAS.concat(['CATEGORIAS', 'PLANO_CONTAS', 'COMPRAS', 'VENDAS', 'BAIXAS', 'PROPRIEDADES', 'PARCEIROS', 'ANEXOS', 'IMPORTACOES', 'OPERACOES'], EventCatalog.LEITURAS_INSUMOS));
+    return Utils.unicos(Timeline.LEITURAS.concat(['CATEGORIAS', 'PLANO_CONTAS', 'COMPRAS', 'VENDAS', 'BAIXAS', 'PROPRIEDADES', 'PARCEIROS', 'ANEXOS', 'IMPORTACOES', 'OPERACOES', 'ESTACOES_MONTA'], EventCatalog.LEITURAS_INSUMOS));
   }
   /**
    * O que o comando toca, pelo plano (sem ler a planilha): linhas novas (`lote`: {ABA: [registros]}), mudanças de

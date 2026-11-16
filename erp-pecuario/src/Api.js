@@ -126,7 +126,7 @@ var Api = (function () {
     'parceiro.salvar': comando_(function (ctx, p) { return Config.salvarParceiro(ctx, p); }),
     'produto.salvar': comando_(function (ctx, p) { return HealthService.salvarProduto(ctx, p); }),
     'protocolo.salvar': comando_(function (ctx, p) { return HealthService.salvarProtocolo(ctx, p); }),
-    'estacao.salvar': futura_(3, 'Reprodução'),
+    'estacao.salvar': comando_(function (ctx, p) { return ReproductionService.salvarEstacao(ctx, p); }),
     'categoria.salvar': comando_(function (ctx, p) { return Config.salvarCategoria(ctx, p); }),
     'lista.salvar': comando_(function (ctx, p) { return Config.salvarLista(ctx, p); }),
     'conta.salvar': futura_(4, 'Financeiro'),
@@ -139,7 +139,8 @@ var Api = (function () {
     'financeiro.resultado': futura_(4, 'Financeiro'),
     'financeiro.custosAnimal': futura_(4, 'Financeiro'),
     'sanidade.agenda': consulta_(function (ctx, p) { return HealthService.agenda(ctx, p.dados); }),
-    'reproducao.indicadores': futura_(3, 'Reprodução'),
+    'reproducao.indicadores': consulta_(function (ctx, p) { return ReproductionService.indicadores(ctx, p.dados); }),
+    'reproducao.matrizes': consulta_(function (ctx, p) { return ReproductionService.matrizes(ctx, p.dados); }),
     'peso.desempenho': consulta_(function (ctx, p) { return WeightService.desempenho(ctx, p.dados); }),
     'dashboard.obter': consulta_(function (ctx, p) { return InventoryService.visaoGeral(ctx, p.dados); }),
     'alerta.listar': consulta_(function (ctx) { return InventoryService.listarAlertas(ctx, Maintenance.estado(ctx).alertas_estado); }),
@@ -352,7 +353,7 @@ var Api = (function () {
       animais: AnimalService.consultaCargaInicial(),
       alertas: InventoryService.consultaAlertas(estado.alertas_estado),
     };
-    var reads = Config.LEITURAS_CADASTROS.concat(['PROPRIEDADES'], HealthService.LEITURAS_CADASTRO);
+    var reads = Config.LEITURAS_CADASTROS.concat(['PROPRIEDADES', 'ESTACOES_MONTA'], HealthService.LEITURAS_CADASTRO);
     var cru = false;
     Object.keys(partes).forEach(function (k) {
       reads = reads.concat(partes[k].reads || []);
@@ -368,6 +369,8 @@ var Api = (function () {
         var h = HealthService.cadastros(tx.repo);
         out.produtos = h.produtos;
         out.protocolos = h.protocolos;
+        // Estações de monta: o formulário de reprodução sugere a estação da data (03a, seção 4.10).
+        out.estacoes = ReproductionService.cadastros(tx.repo).estacoes;
         out.propriedades = Utils.ordenarPor(tx.repo.vigentes('PROPRIEDADES'), ['nome', 'property_id']).map(Utils.clonar);
         Object.keys(partes).forEach(function (k) { out[k] = partes[k].tratador(tx); });
         return out;

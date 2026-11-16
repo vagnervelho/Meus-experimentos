@@ -10,6 +10,7 @@
  * do Registro (Components); as entradas por contexto ficam na ficha, no painel do pasto e na listagem.
  */
 var TelaEventos = (function () {
+  var REPRODUTIVOS = ['REPRODUCAO', 'DESMAMA', 'CASTRACAO', 'OCORRENCIA'];
   var h = Util.h;
   /** Corrigir (evento substituto) vale para todo tipo e subtipo ativo, menos o ESTORNO (E2.7; RN-043). */
   function corrigivel(ev) {
@@ -484,6 +485,7 @@ var TelaEventos = (function () {
     if (ev.event_type === 'SANIDADE') return previaSanidade_(o, def, origem);
     if (ev.event_type === 'ESTOQUE') return previaEstoque_(o, def, origem);
     if (ev.event_type === 'VENDA') return previaVenda_(o, def, origem);
+    if (REPRODUTIVOS.indexOf(ev.event_type) >= 0) return TelaReproducao.previaCorrecao(o, def, origem);
     var campos = {};
     (def.campos || []).forEach(function (d) { if (texto_(origem[d.id]) !== null) campos[d.id] = origem[d.id]; });
     var idents = Utils_agrupar(det.IDENTIFICACOES || []);
@@ -630,6 +632,13 @@ var TelaEventos = (function () {
           : x.tipo === 'DIVERGENCIA_CONTAGEM' ? ['fica fora do inventário; se aparecer, estorne esta baixa'] : ['destino: ' + Store.rotuloLista('DESTINO_DESCARTE', x.destino), 'motivo: ' + Store.rotuloLista('MOTIVO_DESCARTE', x.motivo)];
         return h('li', { text: quem(x) + ': ' + Fmt.rotulo('TIPO_BAIXA', x.tipo).toLowerCase() + ' · ' + partes.filter(Boolean).join(' · ') + (x.observacoes ? ' · ' + x.observacoes : '') });
       })), { dado: 'baixas' }));
+      // Reprodução e desmama (Fase 3): cada registro como foi gravado; castração e ocorrência: o método e o tipo.
+      var regsR = (det.REPRODUCAO || []).filter(function (x) { return x.tipo_evento !== 'PARTO'; });
+      if (regsR.length) corpo.appendChild(UI.secao('Reprodução', h('ul', { class: 'lista-simples' }, regsR.map(function (x) {
+        return h('li', { text: quem(x) + ': ' + [Fmt.rotulo('TIPO_EVENTO_REPRODUTIVO', x.tipo_evento), x.resultado ? Fmt.rotulo('RESULTADO_DG', x.resultado).toLowerCase() : null, x.idade_gestacional_dias ? x.idade_gestacional_dias + ' dias de gestação' : null, x.metodo ? Fmt.rotulo('METODO_REPRODUCAO', x.metodo).toLowerCase() : null,
+          x.touro_id ? 'touro ' + (Store.nomeDeReferencia(x.touro_id) || 'informado') : null, x.semen_identificacao ? 'sêmen ' + x.semen_identificacao : null, x.data_fim ? 'até ' + Fmt.data(x.data_fim) : null, x.estacao_id ? Store.nomeDeReferencia(x.estacao_id) : null, x.data_prevista_parto ? 'previsão informada ' + Fmt.data(x.data_prevista_parto) : null].filter(Boolean).join(' · ') });
+      })), { dado: 'reproducao' }));
+      if (payload.metodo || payload.tipo_ocorrencia) corpo.appendChild(UI.secao(ev.event_type === 'OCORRENCIA' ? 'Ocorrência' : 'Castração', UI.pares([payload.tipo_ocorrencia ? ['Tipo', Store.rotuloLista('TIPO_OCORRENCIA', payload.tipo_ocorrencia)] : ['Método', payload.metodo]]), { dado: 'manejo' }));
       var partos = (det.REPRODUCAO || []).filter(function (x) { return x.tipo_evento === 'PARTO'; });
       if (partos.length) corpo.appendChild(UI.secao('Parto', UI.pares(partos.map(function (x) {
         return ['Mãe ' + quem(x), (x.qtd_nascidos_vivos === 1 ? '1 nascido vivo' : x.qtd_nascidos_vivos + ' nascidos vivos') + (x.qtd_natimortos ? ' · ' + x.qtd_natimortos + (x.qtd_natimortos === 1 ? ' natimorto' : ' natimortos') : '') + (x.tipo_parto ? ' · ' + Store.rotuloLista('TIPO_PARTO', x.tipo_parto) : '')];
@@ -735,6 +744,8 @@ var TelaEventos = (function () {
           try {
             // Os animais de uma saída (venda, morte, descarte) já não estão na carga do aparelho: busca-os antes de abrir.
             if ((o.linhas || []).some(function (l) { return Number(l.efeito_inventario) === -1; })) await Store.carregarBaixados();
+            // A prévia da reprodução, da desmama, da castração e da ocorrência vem da tela de reprodução (sob demanda).
+            if (REPRODUTIVOS.indexOf(ev.event_type) >= 0) await Modulos.carregar('Reproduction');
             await Registro.abrir(ev.event_type, previaCorrecao(o));
           } catch (e) {
             UI.aviso('Não foi possível abrir a correção: ' + e.message, { tipo: 'erro' });

@@ -418,15 +418,15 @@ var AnimalService = (function () {
    * Ficha do animal (§5.1; consulta `animal.ficha`): dados {animal_id, geracoes?} (1 a 6; padrão 3).
    * Devolve {animal_id, data, geral (A), genealogia (B), localizacao (C), pastos (D), peso (E), sanitario (F),
    * reprodutivo (G), financeiro (H), eventos (I), anexos (J)}; cada bloco traz `entregue`. Os blocos de módulos
-   * ainda não entregues voltam com `entregue: false`, o módulo, a fase e `itens: []`. O bloco G já traz a parte de
-   * partos (ReproductionService.blocoFicha), com `parcial: true` e o que chega na Fase 3; o H, o custo de aquisição
+   * ainda não entregues voltam com `entregue: false`, o módulo, a fase e `itens: []`. O bloco G é a ficha reprodutiva
+   * inteira (ReproductionService.blocoFicha, Fase 3: situação, previsão, partos, registros, bezerros, perdas, IEP); o H, o custo de aquisição
    * e os lançamentos pelas alocações (FinancialService.blocoFicha), também `parcial`. NOT_FOUND se o animal não
    * existe (ou foi anulado).
    */
   function consultaFicha(dados) {
     var d = dados || {};
     return {
-      rota: 'animal.ficha', dados: d, reads: Utils.unicos(leituras().concat(['PROPRIEDADES', 'LISTAS', 'ANEXOS', 'FINANCEIRO', 'PARCELAS', 'RATEIOS', 'ALOCACOES_FINANCEIRAS', 'PLANO_CONTAS'], HealthService.LEITURAS_CADASTRO)), acessoCru: true,
+      rota: 'animal.ficha', dados: d, reads: Utils.unicos(leituras().concat(['PROPRIEDADES', 'LISTAS', 'ANEXOS', 'FINANCEIRO', 'PARCELAS', 'RATEIOS', 'ALOCACOES_FINANCEIRAS', 'PLANO_CONTAS', 'ESTACOES_MONTA'], HealthService.LEITURAS_CADASTRO)), acessoCru: true,
       tratador: function (tx) {
         var g = d.geracoes === undefined || d.geracoes === null ? GERACOES_PADRAO : d.geracoes;
         if (typeof g !== 'number' || Math.floor(g) !== g || g < 1 || g > GERACOES_MAX) {
@@ -456,7 +456,7 @@ var AnimalService = (function () {
           peso: a.situacao_cadastral === 'EXTERNO' ? { entregue: true, externo: true, serie: [], intervalos: [] } : WeightService.blocoFicha(L, a),
           // Bloco F (Fase 3, E3.3): os registros sanitários, a carência e as próximas doses (HealthService).
           sanitario: a.situacao_cadastral === 'EXTERNO' ? { entregue: true, externo: true, animal_id: a.animal_id, itens: [], carencia: null, proximas: [], custo_total: null } : HealthService.blocoFicha(L, a),
-          reprodutivo: ReproductionService.blocoFicha(L.f, a),
+          reprodutivo: ReproductionService.blocoFicha(L, a),
           financeiro: blocoFinanceiro_(tx, L, a),
           eventos: { entregue: true, itens: eventos_(tx, L, a) },
           anexos: { entregue: true, itens: anexos_(tx, a) },

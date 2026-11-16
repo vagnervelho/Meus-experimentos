@@ -68,6 +68,10 @@ function estoque(subtipo, data, campos) {
   return { tipo: 'ESTOQUE', subtipo, campos: Object.assign({ event_date: data }, campos || {}) };
 }
 const conta = (x, codigo) => x.m.linhas.PLANO_CONTAS.find((c) => c.codigo === codigo).conta_id;
+/** Reprodução (Fase 3, E3.4): os animais por id ou por item ({animal_id, resultado...}). */
+function repro(subtipo, data, animais, campos) {
+  return { tipo: 'REPRODUCAO', subtipo, campos: Object.assign({ event_date: data }, campos || {}), animais: animais.map((a) => (typeof a === 'string' ? { animal_id: a } : a)) };
+}
 
 /**
  * Um caso por tipo e subtipo ativos: o registro, a correção (substituto do mesmo tipo) e, quando há, um evento
@@ -188,6 +192,42 @@ const CASOS = [
   { tipo: 'ESTOQUE', subtipo: 'AJUSTE',
     registrar: (x) => estoque('AJUSTE', '2026-02-01', { product_id: produto(x, { controla_estoque: true }), motivo_ajuste: 'CONTAGEM', saldo_contado: 10 }),
     corrigir: (x) => estoque('AJUSTE', '2026-02-01', { product_id: produto(x, { controla_estoque: true }), motivo_ajuste: 'CONTAGEM', saldo_contado: 12 }),
+    dependente: null },
+  // Reprodução, desmama, castração e ocorrência (Fase 3, E3.4 e E3.5): fatos independentes; a situação reprodutiva, a cria
+  // ao pé e a categoria são projeção (voltam ao que eram). Os dependentes de cada um (o touro castrado depois, a desmama
+  // repetida, o parto dentro da gestação) estão em reproducao.test e manejo.test.
+  { tipo: 'REPRODUCAO', subtipo: 'EXPOSICAO',
+    registrar: (x) => repro('EXPOSICAO', '2026-02-01', [x.ids.f1, x.ids.f2, x.ids.m3]),
+    corrigir: (x) => repro('EXPOSICAO', '2026-02-02', [x.ids.f1, x.ids.m3], { data_fim: '2026-04-30' }),
+    dependente: null },
+  { tipo: 'REPRODUCAO', subtipo: 'COBERTURA', financeiro: true,
+    registrar: (x) => repro('COBERTURA', '2026-02-10', [x.ids.f1], { touro_id: x.ids.m3, metodo: 'MONTA_CONTROLADA', custo_valor: 15000, custo_conta_id: conta(x, 'SERVICOS_VETERINARIOS') }),
+    corrigir: (x) => repro('COBERTURA', '2026-02-11', [x.ids.f1], { touro_id: x.ids.m3, metodo: 'MONTA_NATURAL' }),
+    dependente: null },
+  { tipo: 'REPRODUCAO', subtipo: 'INSEMINACAO',
+    registrar: (x) => repro('INSEMINACAO', '2026-02-10', [x.ids.f1, x.ids.f2], { metodo: 'IATF', semen_identificacao: 'Partida 77', responsible: 'Inseminador Zé' }),
+    corrigir: (x) => repro('INSEMINACAO', '2026-02-10', [x.ids.f1], { metodo: 'IA', semen_identificacao: 'Partida 78' }),
+    dependente: null },
+  { tipo: 'REPRODUCAO', subtipo: 'DIAGNOSTICO_GESTACAO',
+    registrar: (x) => repro('DIAGNOSTICO_GESTACAO', '2026-05-01', [{ animal_id: x.ids.f1, resultado: 'POSITIVO', idade_gestacional_dias: 90 }, { animal_id: x.ids.f2, resultado: 'NEGATIVO' }], { metodo: 'PALPACAO' }),
+    corrigir: (x) => repro('DIAGNOSTICO_GESTACAO', '2026-05-01', [{ animal_id: x.ids.f1, resultado: 'POSITIVO', idade_gestacional_dias: 80 }, { animal_id: x.ids.f2, resultado: 'INCONCLUSIVO' }], { metodo: 'ULTRASSOM' }),
+    dependente: null },
+  { tipo: 'REPRODUCAO', subtipo: 'ABORTO',
+    registrar: (x) => repro('ABORTO', '2026-04-01', [{ animal_id: x.ids.f2, idade_gestacional_dias: 60 }]),
+    corrigir: (x) => repro('ABORTO', '2026-04-03', [{ animal_id: x.ids.f2 }]),
+    dependente: null },
+  { tipo: 'DESMAMA',
+    registrar: (x) => ({ tipo: 'DESMAMA', campos: { event_date: '2026-04-01' }, animais: [{ animal_id: x.ids.bez, peso: 150 }] }),
+    corrigir: (x) => ({ tipo: 'DESMAMA', campos: { event_date: '2026-04-02', pasto_destino_id: PASTOS.B }, animais: [{ animal_id: x.ids.bez, peso: 155.5 }] }),
+    // Com o pasto de destino a desmama é movimento: a transferência seguinte do bezerro sai do pasto dela.
+    dependente: null },
+  { tipo: 'CASTRACAO', financeiro: true,
+    registrar: (x) => ({ tipo: 'CASTRACAO', campos: { event_date: '2026-03-01', metodo: 'Burdizzo', custo_valor: 6000, custo_conta_id: conta(x, 'SERVICOS_VETERINARIOS') }, animais: [{ animal_id: x.ids.m4 }, { animal_id: x.ids.m5 }] }),
+    corrigir: (x) => ({ tipo: 'CASTRACAO', campos: { event_date: '2026-03-02', metodo: 'Cirúrgica', custo_valor: 7000, custo_conta_id: conta(x, 'SERVICOS_VETERINARIOS') }, animais: [{ animal_id: x.ids.m4 }] }),
+    dependente: null },
+  { tipo: 'OCORRENCIA',
+    registrar: (x) => ({ tipo: 'OCORRENCIA', campos: { event_date: '2026-03-01', tipo_ocorrencia: 'LESAO', description: 'Ferida na pata' }, animais: [{ animal_id: x.ids.f1 }] }),
+    corrigir: (x) => ({ tipo: 'OCORRENCIA', campos: { event_date: '2026-03-01', tipo_ocorrencia: 'DESCORNA', description: 'Descorna' }, animais: [{ animal_id: x.ids.f1 }, { animal_id: x.ids.f2 }] }),
     dependente: null },
   { tipo: 'AJUSTE_INVENTARIO', subtipo: 'DIVERGENCIA_CONTAGEM',
     registrar: (x) => ajuste('DIVERGENCIA_CONTAGEM', '2026-06-15', [{ animal_id: x.ids.m5 }]),

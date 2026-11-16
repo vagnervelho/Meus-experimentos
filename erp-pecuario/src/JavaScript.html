@@ -179,11 +179,15 @@ var Fmt = (function () {
     RECORRENCIA: { UNICA: 'Uma vez na vida', INTERVALO_DIAS: 'A cada N dias', CAMPANHA_MESES: 'Campanha (meses do ano)' },
     MOTIVO_AJUSTE_ESTOQUE: { CONTAGEM: 'Contagem (acertar o saldo)', PERDA: 'Perda', VENCIMENTO: 'Vencimento' },
     SITUACAO_AGENDA: { VENCIDA: 'Atrasada', PROXIMA: 'Próxima', EM_DIA: 'Em dia' },
+    // Reprodução (Fase 3, E3.4 e E3.5).
+    RESULTADO_DG: { POSITIVO: 'Prenhe', NEGATIVO: 'Vazia', INCONCLUSIVO: 'Duvidoso (inconclusivo)' },
+    METODO_REPRODUCAO: { MONTA_NATURAL: 'Monta natural', MONTA_CONTROLADA: 'Monta controlada', IA: 'Inseminação artificial', IATF: 'Inseminação em tempo fixo (IATF)', PALPACAO: 'Palpação', ULTRASSOM: 'Ultrassom', OBSERVACAO: 'Observação', INFORMADO: 'Informado (sem exame)' },
+    TIPO_EVENTO_REPRODUTIVO: { EXPOSICAO: 'Exposição ao touro', COBERTURA: 'Cobertura', INSEMINACAO: 'Inseminação', DIAGNOSTICO_GESTACAO: 'Diagnóstico de gestação', PARTO: 'Parto', ABORTO: 'Aborto', DESMAMA: 'Desmama da cria' },
     NATUREZA: { RECEITA_VENDA_ANIMAIS: 'Venda de animais', OUTRA_RECEITA: 'Outra receita', AQUISICAO_ANIMAIS: 'Aquisição de animais', CUSTEIO: 'Custeio', DESPESA_VENDA: 'Despesa de venda', ESTOQUE_INSUMOS: 'Compra de insumos', NAO_OPERACIONAL: 'Não operacional' },
     /** Os 13 códigos de aviso (05, seção 1; desenho-base 16.12): configuração, detalhe do evento e revisão. */
     AVISO: {
       CARENCIA_ATIVA: 'Animal em carência (venda para abate)', POSSIVEL_DUPLICIDADE: 'Lançamento possivelmente repetido', BRINCO_PARECIDO: 'Brinco parecido com o de outro animal', LOTACAO_ACIMA_DA_CAPACIDADE: 'Pasto acima da capacidade',
-      PESO_IMPLAUSIVEL: 'Peso fora do esperado', IDADE_REPRODUTIVA: 'Mãe abaixo da idade reprodutiva', PERIODO_BLOQUEADO: 'Período financeiro fechado', VALOR_DIVERGENTE: 'Valor diferente da conta',
+      PESO_IMPLAUSIVEL: 'Peso fora do esperado', IDADE_REPRODUTIVA: 'Fêmea abaixo da idade reprodutiva', PERIODO_BLOQUEADO: 'Período financeiro fechado', VALOR_DIVERGENTE: 'Valor diferente da conta',
       RATEIO_SEM_PESO: 'Rateio por peso sem pesagem', INTERVALO_PARTO_CURTO: 'Intervalo entre partos curto', PRODUTO_VENCIDO: 'Produto vencido', ESTOQUE_INSUFICIENTE: 'Estoque insuficiente', CATEGORIAS_SEM_COBERTURA: 'Categorias com lacuna',
     },
     CAMPO_CORRIGIVEL: {
@@ -208,6 +212,7 @@ var Fmt = (function () {
     modalidade: 'MODALIDADE', base_peso: 'BASE_PESO', rendimento_tipo: 'RENDIMENTO_TIPO', criterio_rateio: 'CRITERIO_RATEIO',
     tipo_identificacao: 'IDENTIFICACAO', acao: 'ACAO_MARCACAO', tipo_pesagem: 'TIPO_PESAGEM',
     modo_dose: 'MODO_DOSE', motivo_ajuste: 'MOTIVO_AJUSTE_ESTOQUE', tipo_procedimento: 'PROCEDIMENTO', recorrencia_tipo: 'RECORRENCIA', categoria_produto: 'CATEGORIA_PRODUTO',
+    resultado: 'RESULTADO_DG', metodo: 'METODO_REPRODUCAO', tipo_evento: 'TIPO_EVENTO_REPRODUTIVO',
   };
 
   function configurar(o) { Object.keys(o || {}).forEach(function (k) { if (o[k] !== undefined && o[k] !== null) cfg[k] = o[k]; }); cache = {}; }
@@ -601,6 +606,7 @@ var Store = (function () {
     // Sanidade (Fase 3): o cadastro do produto (com o saldo, que é projeção) e do protocolo volta inteiro na resposta.
     'produto.salvar': function (d) { return d && d.product_id ? mesclarEm_('produtos', 'product_id', d) : false; },
     'protocolo.salvar': function (d) { return d && d.protocol_id ? mesclarEm_('protocolos', 'protocol_id', d) : false; },
+    'estacao.salvar': function (d) { return d && d.estacao_id ? mesclarEm_('estacoes', 'estacao_id', d) : false; },
     // Pesagem (Fase 3): o servidor devolve o peso atual de cada animal pesado (a projeção gravada); a lista do aparelho
     // se atualiza sem recarregar o rebanho inteiro (o curral manda blocos seguidos com sinal fraco).
     'evento.registrar': function (d) { return d && d.event_type === 'PESAGEM' && d.pesagem ? atualizarPesos_(d.pesagem.animais) : false; },
@@ -683,6 +689,9 @@ var Store = (function () {
   function produto(id) { return ((est.dados && est.dados.produtos) || []).filter(function (p) { return p.product_id === id; })[0] || null; }
   function protocolos(o) { var t = (est.dados && est.dados.protocolos) || []; return o && o.todos ? t : t.filter(function (p) { return p.ativo !== false; }); }
   function protocolo(id) { return ((est.dados && est.dados.protocolos) || []).filter(function (p) { return p.protocol_id === id; })[0] || null; }
+  /** Estações de monta (Fase 3), da mais recente para a mais antiga. */
+  function estacoes() { return ((est.dados && est.dados.estacoes) || []).slice().sort(function (a, b) { return a.data_inicio < b.data_inicio ? 1 : -1; }); }
+  function estacao(id) { return estacoes().filter(function (e) { return e.estacao_id === id; })[0] || null; }
   function categoria(id) { return categorias().filter(function (c) { return c.category_id === id; })[0] || null; }
   function animais() { garantirIndices_(); return est.animais; }
   function animal(id) { garantirIndices_(); return est.porId[id] || null; }
@@ -710,6 +719,7 @@ var Store = (function () {
     var ct = conta(id); if (ct) return ct.nome;
     var pd = produto(id); if (pd) return pd.nome;
     var pt = protocolo(id); if (pt) return pt.nome;
+    var es = estacao(id); if (es) return es.nome;
     var a = animal(id); if (a) return rotuloAnimal(a);
     return null;
   }
@@ -806,7 +816,7 @@ var Store = (function () {
     configurar: configurar, carregar: carregar, aplicarResultado: aplicarResultado, assinar: assinar, carregado: carregado, versao: versao,
     param: param, lista: lista, itemLista: itemLista, rotuloLista: rotuloLista, pastos: pastos, pasto: pasto, propriedades: propriedades, propriedade: propriedade,
     parceiros: parceiros, parceiro: parceiro, contas: contas, conta: conta, categorias: categorias, categoria: categoria, animais: animais, animal: animal, filhosDe: filhosDe,
-    produtos: produtos, produto: produto, protocolos: protocolos, protocolo: protocolo,
+    produtos: produtos, produto: produto, protocolos: protocolos, protocolo: protocolo, estacoes: estacoes, estacao: estacao,
     modulos: modulos, modulo: modulo, catalogo: catalogo, tipoEvento: tipoEvento, nomeEvento: nomeEvento, nomeDeReferencia: nomeDeReferencia, valorLegivel: valorLegivel, rotuloAnimal: rotuloAnimal, descricaoAnimal: descricaoAnimal,
     resolverBrinco: resolverBrinco, buscar: buscar, carregarBaixados: carregarBaixados, normalizarBrinco: normalizarBrinco,
     baixados: function () { return est.baixados; },

@@ -593,6 +593,8 @@ var Campos = (function () {
       });
     } else if (tabela === 'PROTOCOLOS_SANITARIOS') {
       itens = Store.protocolos({ todos: true }).filter(function (p) { return p.ativo !== false || p.protocol_id === atual; }).map(function (p) { return { valor: p.protocol_id, rotulo: p.nome + (p.ativo === false ? ' — desativado' : '') }; });
+    } else if (tabela === 'ESTACOES_MONTA') {
+      itens = Store.estacoes().map(function (e) { return { valor: e.estacao_id, rotulo: e.nome + ' (' + Fmt.data(e.data_inicio) + ' a ' + Fmt.data(e.data_fim) + ')' }; });
     }
     return itens.sort(function (a, b) { return UI.comparar(a.rotulo, b.rotulo); });
   }
@@ -1536,10 +1538,10 @@ var Registro = (function () {
     ENTRADA_INICIAL: 'Gravar o rebanho inicial', OUTRA_ENTRADA: 'Gravar a entrada', AJUSTE_INVENTARIO: 'Gravar a correção', ESTORNO: 'Estornar',
     NASCIMENTO: 'Gravar o parto', TRANSFERENCIA: 'Transferir', MORTE: 'Registrar a morte', DESCARTE: 'Registrar o descarte', COMPRA: 'Gravar a compra',
     VENDA: 'Gravar a venda', IDENTIFICACAO: 'Gravar a identificação', MARCACAO: 'Gravar a marcação', PESAGEM: 'Gravar a pesagem',
-    SANIDADE: 'Gravar a aplicação', ESTOQUE: 'Gravar no estoque',
+    SANIDADE: 'Gravar a aplicação', ESTOQUE: 'Gravar no estoque', REPRODUCAO: 'Gravar o registro', DESMAMA: 'Gravar a desmama', CASTRACAO: 'Gravar a castração', OCORRENCIA: 'Gravar a ocorrência',
   };
   /** O subtipo é o primeiro campo do formulário (08, 4.2): a pergunta muda com o tipo. */
-  var PERGUNTA_SUBTIPO = { IDENTIFICACAO: 'O que fazer', MARCACAO: 'Marcar como', SANIDADE: 'O que foi feito', ESTOQUE: 'O que lançar' };
+  var PERGUNTA_SUBTIPO = { IDENTIFICACAO: 'O que fazer', MARCACAO: 'Marcar como', SANIDADE: 'O que foi feito', ESTOQUE: 'O que lançar', REPRODUCAO: 'O que registrar' };
   function perguntaSubtipo(tipo) { return PERGUNTA_SUBTIPO[tipo] || 'O que corrigir'; }
   /** Crítico (08, 4.6): o do tipo ou o do subtipo (a baixa por divergência de contagem). */
   function critico(s) { var sub = s.subtipo && s.def.subtipos ? s.def.subtipos[s.subtipo] : null; return !!(s.def.critico || (sub && sub.critico)); }
@@ -2646,6 +2648,7 @@ var Registro = (function () {
     if (ref && ref[1] === 'CATEGORIAS') { var ca = Store.categoria(v); return ca ? ca.nome : 'categoria'; }
     if (ref && ref[1] === 'PRODUTOS') { var pd = Store.produto(v); return pd ? pd.nome : 'produto'; }
     if (ref && ref[1] === 'PROTOCOLOS_SANITARIOS') { var pt = Store.protocolo(v); return pt ? pt.nome : 'protocolo'; }
+    if (ref && ref[1] === 'ESTACOES_MONTA') { var es = Store.estacao(v); return es ? es.nome : 'estação'; }
     if (def.tipo === 'dinheiro') { var c = typeof v === 'number' ? v : Fmt.lerDinheiro(String(v)).valor; return typeof c === 'number' ? Fmt.dinheiro(c) : 'R$ ' + v; }
     if (def.tipo === 'data') return Fmt.data(v);
     if (def.tipo === 'lista') { var op = Campos.opcoesDe(def, v).filter(function (x) { return x.valor === v; })[0]; return op ? op.rotulo : String(v); }
@@ -2967,6 +2970,15 @@ var Registro = (function () {
     if (res.tipo === 'PESAGEM') {
       var pg = res.data && res.data.pesagem;
       return pg ? plural(pg.n, 'pesagem gravada', 'pesagens gravadas') + ' · média ' + Fmt.peso(pg.media_kg) + (pg.lote ? ' (lote de ' + pg.lote.cabecas + ' cabeças, ' + Fmt.peso(pg.lote.total_kg) + ' na balança)' : '') + '.' : plural(n, 'pesagem gravada', 'pesagens gravadas') + '.';
+    }
+    // Reprodução, desmama e castração: a situação de cada animal depois de gravar, como o servidor devolveu.
+    var rp = res.data && res.data.reproducao ? res.data.reproducao.animais : null;
+    if (rp && (res.tipo === 'REPRODUCAO' || res.tipo === 'DESMAMA' || res.tipo === 'CASTRACAO')) {
+      var cnt = {};
+      rp.forEach(function (a) { var k = res.tipo === 'CASTRACAO' ? (a.categoria ? a.categoria.nome : null) : res.tipo === 'REPRODUCAO' && a.sexo === 'F' ? Fmt.rotulo('SITUACAO_REPRODUTIVA', a.situacao_reprodutiva).toLowerCase() : null; if (k) cnt[k] = (cnt[k] || 0) + 1; });
+      var oq = Object.keys(cnt).map(function (k) { return k + ' ' + cnt[k]; }).join(', ');
+      if (res.tipo === 'DESMAMA') return 'Desmama gravada: as crias deixam de estar ao pé das mães.';
+      return (res.tipo === 'CASTRACAO' ? 'Castração gravada. Categoria agora: ' : 'Registro gravado. Situação agora: ') + (oq || '—') + '.';
     }
     if (res.tipo === 'TRANSFERENCIA') return n === 1 ? '1 animal transferido.' : n + ' animais transferidos.';
     if (res.tipo === 'MORTE') return n === 1 ? 'Morte registrada: 1 animal saiu do rebanho.' : 'Morte registrada: ' + n + ' animais saíram do rebanho.';
