@@ -132,7 +132,7 @@ test('fêmeas, indicadores e estações (1280 e 360 px): a situação de cada f�
       await page.fill(dialogo + ' [data-campo="nome"] input', 'Estação 27');
       await page.fill(dialogo + ' [data-campo="data_inicio"] input', '2027-06-01');
       await page.fill(dialogo + ' [data-campo="data_fim"] input', '2027-08-31');
-      await page.locator(dialogo + ' [data-campo="tipo"] select').selectOption('IA');
+      await page.click(dialogo + ' [data-campo="tipo"] label:has-text("Inseminação artificial")');
       await page.waitForSelector(dialogo + ' [data-acao-principal]:not([disabled])');
       await page.click(dialogo + ' [data-acao-principal]');
       await page.waitForFunction(() => /Estação 27/.test(document.querySelector('#conteudo').textContent));
