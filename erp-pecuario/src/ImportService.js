@@ -1536,6 +1536,10 @@ var ImportService = (function () {
     });
     return { lidos: lidos, erros: erros };
   }
+  /** A linha traz alguma identificação do animal (brinco, código interno ou brinco do vendedor, os que o modelo tem). */
+  function identificaAnimal_(modelo, lidos) {
+    return ['brinco', 'codigo', 'brinco_origem'].some(function (k) { return modelo.campos[k] && !vazio_(lidos[k]); });
+  }
   /** Chave do evento da linha (o agrupamento do modelo); sem chave legível, a própria linha. */
   function chaveGrupo_(modelo, r) {
     var l = r.lidos;
@@ -1558,10 +1562,13 @@ var ImportService = (function () {
     });
     var vistas = {};
     res.forEach(function (r) {
-      // Em partos, uma linha por cria: linhas iguais da mesma mãe e data sem brinco da cria são gêmeos (dois
-      // natimortos, dois bezerros ainda sem brinco), não repetição; a duplicidade do parto é pega pelo lançamento
-      // já registrado e pelo aviso de intervalo entre partos (RN-062, RN-063). Com brinco, dois iguais é repetição.
-      if (modelo.evento === 'NASCIMENTO' && vazio_(r.lidos.brinco)) return;
+      // A repetição é o mesmo evento com o mesmo animal (RN-091): só a linha que identifica o animal (brinco, código
+      // ou brinco do vendedor) pode repetir outra. Linhas iguais sem identificação são animais diferentes: gêmeos do
+      // mesmo parto (dois natimortos, dois bezerros ainda sem brinco), garrotes da mesma compra ainda sem brinco. A
+      // duplicidade do parto é pega pelo lançamento já registrado e pelo aviso de intervalo entre partos (RN-062,
+      // RN-063); a da compra, pelo lançamento já registrado com o mesmo número. Nos tipos em que o animal precisa ser
+      // achado (venda, transferência, morte), a linha sem identificação já é reprovada pelo campo obrigatório.
+      if (!identificaAnimal_(modelo, r.lidos)) return;
       var k = Utils.jsonCanonico(r.original);
       if (vistas[k]) { r.status = 'DUPLICADA'; r.erros.unshift(det_(null, 'LINHA_REPETIDA_NO_ARQUIVO', 'a linha repete a linha ' + vistas[k].linha_num + ' do arquivo')); return; }
       vistas[k] = r;

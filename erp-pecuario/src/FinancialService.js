@@ -74,6 +74,18 @@ var FinancialService = (function () {
     return lista.reduce(function (s, x) { return s + (typeof x[campo] === 'number' ? x[campo] : 0); }, 0);
   }
 
+  /**
+   * O lançamento é, pela natureza, sem efeito de caixa (03b, seção 11, "Lançamento sem parcela"; RELATORIO_FASE2, decisão
+   * 2): o consumo de insumo, o saldo de abertura e o lançamento de evento anterior ao marco zero. Sem o plano de contas
+   * lido não dá para saber a conta: conta como sem caixa (nada é acusado sem a fonte).
+   */
+  function semCaixaPorNatureza_(repo, fin, ev, temContas) {
+    if (ev && ev.pre_marco_zero === true) return true;
+    if (!vazio_(fin.product_id) && fin.natureza === 'CUSTEIO') return true;
+    if (!temContas) return true;
+    var c = repo.porId('PLANO_CONTAS', fin.conta_id);
+    return !c || c.codigo === CONTAS.ABERTURA;
+  }
   /** Abas que a conferência das invariantes lê (a função cita Timeline só quando chamada: carga sem ordem). */
   function leituras() {
     return Utils.unicos(Timeline.LEITURAS.concat(['COMPRAS', 'VENDAS', 'PLANO_CONTAS', 'PARCEIROS']));
@@ -524,6 +536,8 @@ var FinancialService = (function () {
     var esc = escopo || null;
     var out = [];
     function achado(n, tabela, id, mensagem) { out.push({ invariante: n, tabela: tabela, id: id, mensagem: mensagem }); }
+    /** Achado de fato adulterado na fonte da reconstrução (a situação de pagamento sai das parcelas): o reparo não o desfaz. */
+    function achadoFonte(n, tabela, id, mensagem) { out.push({ invariante: n, tabela: tabela, id: id, mensagem: mensagem, fonte: true }); }
     function doEscopo(fin) { return !esc || !!(esc.lancamentos && esc.lancamentos[fin.financial_id]) || !!(esc.eventos && esc.eventos[fin.event_id]); }
     var base = ['FINANCEIRO', 'PARCELAS', 'RATEIOS', 'ALOCACOES_FINANCEIRAS', 'EVENTOS', 'EVENTO_ANIMAIS'];
     if (!base.every(function (t) { return repo.carregada(t); })) return out;
@@ -551,8 +565,21 @@ var FinancialService = (function () {
           achado(5, 'PARCELAS', p.parcela_id, 'A parcela ' + p.parcela_num + ' de ' + nome + ' está em aberto mas tem dados de pagamento.');
         }
       });
+      // Parcela CANCELADA só por desdobramento (03b, seção 11; desenho-base 16.11): as parcelas que nascem da baixa
+      // parcial apontam para ela. Sem elas, a parcela foi cancelada à mão e o título sumiu do caixa.
+      (cru ? cru.cruPor('PARCELAS', 'financial_id', fin.financial_id) : []).forEach(function (p) {
+        if (p.status !== 'CANCELADA' || cru.cruPor('PARCELAS', 'parcela_origem_id', p.parcela_id).length) return;
+        achadoFonte(3, 'PARCELAS', p.parcela_id, 'A parcela ' + p.parcela_num + ' de ' + nome + ' está cancelada sem as parcelas do desdobramento (a parcela só é cancelada quando uma baixa parcial a divide em duas): o título sumiu do caixa. Restaure o backup ou investigue a edição manual.');
+      });
       var sp = situacaoPagamento(parcelas, true);
-      if (!parcelas.length && fin.status_pagamento !== 'SEM_CAIXA') achado(4, 'FINANCEIRO', fin.financial_id, 'O lançamento ' + nome + ' não tem parcela e precisa ficar "sem caixa".');
+      var ev0 = repo.porId('EVENTOS', fin.event_id);
+      // Todo lançamento com efeito de caixa tem ao menos uma parcela (03b, seções 10.3 e 11): sem parcela, só o consumo de
+      // insumo, o saldo de abertura e o evento anterior ao marco zero (pago antes do controle do sistema). A falta de
+      // parcela nos demais é linha apagada (ou cancelada) à mão: refazer o "sem caixa" pela reconstrução apagaria a dívida
+      // ou o recebível, então o achado é da fonte e continua depois do reparo (06, seções 9 e 12; RN-112).
+      if (!parcelas.length && !semCaixaPorNatureza_(repo, fin, ev0, temContas)) {
+        achadoFonte(4, 'FINANCEIRO', fin.financial_id, 'O lançamento ' + nome + (ev0 ? ', de ' + br_(ev0.event_date) + ',' : '') + ' está sem parcela: todo lançamento com efeito de caixa tem ao menos uma, e o título a pagar ou a receber sumiu. Restaure o backup ou investigue a edição manual.');
+      } else if (!parcelas.length && fin.status_pagamento !== 'SEM_CAIXA') achado(4, 'FINANCEIRO', fin.financial_id, 'O lançamento ' + nome + ' não tem parcela e precisa ficar "sem caixa".');
       else if (fin.status_pagamento !== sp.status_pagamento || nulo_(fin.data_pagamento) !== sp.data_pagamento) achado(6, 'FINANCEIRO', fin.financial_id, 'O lançamento ' + nome + ' registra pagamento ' + fin.status_pagamento + ', mas pelas parcelas seria ' + sp.status_pagamento + '.');
       var rats = repo.por('RATEIOS', 'financial_id', fin.financial_id);
       if (rats.length > 1) achado(7, 'FINANCEIRO', fin.financial_id, 'O lançamento ' + nome + ' tem ' + rats.length + ' rateios valendo ao mesmo tempo.');
@@ -583,7 +610,7 @@ var FinancialService = (function () {
       if (allocs.length === 1 && rat.criterio !== 'DIRETO') achado(13, 'RATEIOS', rat.rateio_id, 'Rateio com um único animal precisa ser DIRETO (está ' + rat.criterio + ').');
       if (allocs.length !== 1 && rat.criterio === 'DIRETO') achado(13, 'RATEIOS', rat.rateio_id, 'Rateio DIRETO precisa ter exatamente um animal (tem ' + allocs.length + ').');
     });
-    conferirNegocios_(repo, lancs, rateioDe, achado, esc);
+    conferirNegocios_(repo, lancs, rateioDe, achado, esc, achadoFonte);
     if (repo.carregada('SANIDADE')) {
       Utils.unicos(repo.vigentes('SANIDADE').map(function (x) { return x.event_id; })).forEach(function (eid) {
         if (esc && !(esc.eventos && esc.eventos[eid])) return;
@@ -609,7 +636,7 @@ var FinancialService = (function () {
     return out;
   }
   /** Invariantes 15 e 16: valor por animal × cabeçalho comercial × lançamentos do evento (COMPRA e VENDA). `esc`: só os eventos dele. */
-  function conferirNegocios_(repo, lancs, rateioDe, achado, esc) {
+  function conferirNegocios_(repo, lancs, rateioDe, achado, esc, achadoFonte) {
     var porEvento = Utils.agruparPor(lancs, 'event_id');
     var doEscopo = function (eid) { return !esc || !!(esc.eventos && esc.eventos[eid]); };
     var contas = repo.carregada('PLANO_CONTAS');
@@ -667,8 +694,15 @@ var FinancialService = (function () {
         // receita): o título dela vence num dos vencimentos da receita.
         if (fin) {
           var recebimentos = repo.por('PARCELAS', 'financial_id', fin.financial_id).map(function (p) { return p.data_vencimento; });
+          var evHist = repo.porId('EVENTOS', v.event_id);
           lancs.forEach(function (f) {
-            if (f === fin || f.retida_pelo_comprador !== true || !recebimentos.length) return;
+            if (f === fin || f.retida_pelo_comprador !== true) return;
+            if (!recebimentos.length) {
+              // Sem recebimento não há onde descontar a dedução: a parcela da receita foi apagada (o histórico, anterior ao
+              // marco zero, não tem caixa nenhum).
+              if (!(evHist && evHist.pre_marco_zero === true)) achadoFonte(16, 'FINANCEIRO', f.financial_id, 'A dedução "' + (f.descricao || f.financial_id) + '", descontada pelo comprador, não tem recebimento da venda onde ser descontada (a receita está sem parcela). Restaure o backup ou investigue a edição manual.');
+              return;
+            }
             repo.por('PARCELAS', 'financial_id', f.financial_id).forEach(function (p) {
               if (recebimentos.indexOf(p.data_vencimento) < 0) achado(16, 'FINANCEIRO', f.financial_id, 'A dedução "' + (f.descricao || f.financial_id) + '", descontada pelo comprador, vence em ' + br_(p.data_vencimento) + ', fora dos recebimentos da venda (' + recebimentos.map(br_).join(', ') + ').');
             });

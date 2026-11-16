@@ -366,6 +366,13 @@ var AuditService = (function () {
     { codigo: 'CONTADORES', rotulo: 'Numeração de eventos e animais sem repetição', severidade: 'ERRO', correcao: 'Investigar edição manual.' },
     { codigo: 'PENDENCIAS', rotulo: 'Animal ativo sem pasto, sem brinco ou sem categoria', severidade: 'ALERTA', correcao: 'Pendência visível na ficha.' },
   ]);
+  /**
+   * Checagens cujo achado é sempre a FONTE da reconstrução quebrada (linha dos animais, detalhe ou registro de que outra
+   * linha depende, apagados ou mexidos à mão). Somadas aos achados marcados `fonte` (as parcelas do lançamento), impedem o
+   * reparo RECONSTRUIR: ele refaria a situação a partir do dado quebrado (06, seções 9 e 12; RN-112) — ressuscitaria o
+   * animal morto, apagaria a dívida. O caminho é restaurar o backup ou investigar a edição manual.
+   */
+  var FONTE_QUEBRADA = Object.freeze({ COPIAS: true, FILHAS_SEM_PAI: true });
   var PAIS_FILHA = Object.freeze({ AUDITORIA: ['op_id', 'OPERACOES'], IMPORTACAO_LINHAS: ['import_id', 'IMPORTACOES'], ALOCACOES_FINANCEIRAS: ['rateio_id', 'RATEIOS'], PARCELAS: ['financial_id', 'FINANCEIRO'] });
   var COPIAS_DATA = Object.freeze({ PESAGENS: 'data_pesagem', REPRODUCAO: 'data', IDENTIFICACOES: 'data_inicio' });
   /**
@@ -405,7 +412,7 @@ var AuditService = (function () {
     var por = {};
     var lista = [];
     var truncado = false;
-    CHECAGENS.forEach(function (c) { por[c.codigo] = { n: 0, aplicada: false, severidades: {}, ids: {} }; });
+    CHECAGENS.forEach(function (c) { por[c.codigo] = { n: 0, aplicada: false, severidades: {}, ids: {}, fonte: 0 }; });
     return {
       aplicar: function (codigo) { por[codigo].aplicada = true; },
       /** Já há achado da checagem para o registro? (uma mesma divergência vista por dois caminhos conta uma vez) */
@@ -417,6 +424,7 @@ var AuditService = (function () {
         por[codigo].n += 1;
         por[codigo].severidades[sev] = true;
         if (!vazio_(a.id)) por[codigo].ids[String(a.id)] = true;
+        if (a.fonte === true || FONTE_QUEBRADA[codigo]) por[codigo].fonte += 1;
         if (!completo && lista.length >= LIMITE_ACHADOS) { truncado = true; return; }
         var item = {
           checagem: codigo, severidade: sev, tabela: nulo_(a.tabela), id: vazio_(a.id) ? null : String(a.id), linha: typeof a.linha === 'number' ? a.linha : null,
@@ -1189,7 +1197,7 @@ var AuditService = (function () {
       col.achado(codigo, {
         tabela: a.tabela, id: a.id, linha: linhaDe_(tx.cru, a.tabela, a.id), mensagem: a.mensagem,
         chaves: a.invariante + '|' + a.tabela + '|' + a.id + '|' + String(a.mensagem || '').replace(/[0-9]+/g, '#'),
-        event_id: eventoDoRegistro_(tx, a.tabela, a.id), animal_id: a.tabela === 'ANIMAIS' ? a.id : null,
+        event_id: eventoDoRegistro_(tx, a.tabela, a.id), animal_id: a.tabela === 'ANIMAIS' ? a.id : null, fonte: a.fonte === true,
       });
     });
   }
@@ -1417,13 +1425,18 @@ var AuditService = (function () {
     var erros = 0;
     var alertas = 0;
     var reparavel = false;
+    var fontes = 0;
     var checagens = CHECAGENS.map(function (c) {
       var x = r.por[c.codigo];
       var temErro = !!x.severidades.ERRO;
       var situacao = !x.aplicada ? 'NAO_EXECUTADA' : !x.n ? 'OK' : temErro ? 'ERRO' : 'ALERTA';
       if (situacao === 'ERRO' && c.reparo) reparavel = true;
+      fontes += x.fonte;
       return { codigo: c.codigo, rotulo: c.rotulo, severidade: c.severidade, situacao: situacao, achados: x.n, correcao: c.correcao, reparo: c.reparo || null };
     });
+    // O reparo refaz a situação pelos lançamentos; com a fonte deles quebrada, ele gravaria o defeito como certo.
+    var impedido = reparavel && fontes ? 'Não dá para reparar: ' + (fontes === 1 ? 'um achado mostra' : fontes + ' achados mostram') + ' linhas apagadas ou mexidas à mão na planilha (os que pedem para restaurar o backup), e o reparo refaria a situação a partir delas, como se estivessem certas. Restaure o backup ou investigue a edição manual antes.' : null;
+    if (impedido) reparavel = false;
     Object.keys(r.por).forEach(function (k) {
       var x = r.por[k];
       if (!x.n) return;
@@ -1431,7 +1444,7 @@ var AuditService = (function () {
     });
     return {
       gerado_em: tx.agora, banco: tx.ctx.banco, data_version: tx.dataVersion, ok: erros === 0, erros: erros, alertas: alertas,
-      reparavel: reparavel, abas_ausentes: estrutura.ausentes.slice(), checagens: checagens, achados: r.lista, truncado: r.truncado,
+      reparavel: reparavel, reparo_impedido: impedido, abas_ausentes: estrutura.ausentes.slice(), checagens: checagens, achados: r.lista, truncado: r.truncado,
       duracao_ms: null,
     };
   }
@@ -1485,6 +1498,7 @@ var AuditService = (function () {
    */
   function repararIntegridade(ctx, justificativa) {
     var antes = verificarIntegridade(ctx).dados;
+    if (antes.reparo_impedido) throw Validation.erro('CONFLICT', antes.reparo_impedido);
     var rec = UnitOfWork.recoverAll(ctx);
     UnitOfWork.run(ctx, {
       rota: 'sistema.reparar', idempotencyKey: 'reparo:' + ctx.idGen.uuid(), dados: {}, reads: [], permiteDuranteImportacao: true,

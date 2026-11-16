@@ -269,6 +269,7 @@ var TelaConfig = (function () {
     saida.appendChild(UI.tabela({ id: 'integridade', rotulo: 'Conferências', linhas: d.checagens || [], chave: function (c) { return c.codigo; }, porPagina: 50,
       colunas: [{ id: 'rotulo', rotulo: 'Conferência' }, { id: 'situacao', rotulo: 'Resultado', valor: function (c) { return { OK: 'ok', ERRO: 'erro', ALERTA: 'alerta', NAO_EXECUTADA: 'não executada' }[c.situacao] || c.situacao; } }, { id: 'achados', rotulo: 'Achados', num: true }, { id: 'correcao', rotulo: 'Como corrigir' }] }).el);
     if ((d.achados || []).length) saida.appendChild(h('details', { class: 'detalhe' }, h('summary', { text: 'Ver os achados (' + d.achados.length + (d.truncado ? '+' : '') + ')' }), h('ul', { class: 'lista-simples' }, d.achados.slice(0, 100).map(function (a) { return h('li', { text: a.tabela + (a.linha ? ' linha ' + a.linha : '') + ': ' + a.mensagem }); }))));
+    if (d.reparo_impedido) saida.appendChild(UI.nota(d.reparo_impedido, 'erro'));
     if (d.reparavel) saida.appendChild(UI.botao('Reparar: refazer a situação pelos lançamentos', { tipo: 'primario', aoClicar: function (ev) {
       var ta = Campos.criar({ id: 'justificativa', rotulo: 'Por que reparar', tipo: 'texto' }, { idBase: 'rep' });
       var st = h('div', { role: 'status' });
