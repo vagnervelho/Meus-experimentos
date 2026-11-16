@@ -958,7 +958,16 @@ Nenhuma linha de código mudou nesta etapa: só documentos.
 - O mesmo relatório, outras seções: o resumo, as entregas, os números da seção 2, o que só o dono pode executar (a
   ratificação das decisões da convergência, o custo da trava no Sheets, o desfazer com o período fechado), as decisões
   (itens 12, 14 e o novo 15) e as limitações (itens 11, 12, 13, 15 e 16, e os novos 17 a 22).
-- Execuções desta etapa, sobre o código final: ‹CHANGELOG_EXECUCOES›
+- Execuções desta etapa, sobre o código final:
+  - `npm test` com 673 testes, 673 aprovados e 0 falhas (508 s);
+  - `npm run ui:check` com 92 testes, 92 aprovados e 0 falhas (224 s), página montada com 449 KB de 450 KB;
+  - rodados sozinhos, todos aprovados com a contagem da tabela: os 11 arquivos do Node novos ou alterados, mais os 2
+    que leem o `CONTRATOS.md`, e os 4 de navegador;
+  - a contagem dos 74 arquivos de teste conferida sem rodar os corpos (um registrador no lugar de `node:test`);
+  - teste aleatório com 200 sementes novas × 150 passos (96000 a 96199): 15.581 comandos aceitos, 12.441 recusados,
+    0 falhas;
+  - `npm run trava:medir`, mediana de 3 pares alternados com a cópia do commit `0cb6b07`, de antes da trava: 17.168 →
+    20.779 ms nos 391 comandos (+21 %; 43,9 → 53,1 ms por comando; 2.340 ms dentro da trava).
 - `docs/CONTRATOS.md`, conferido por amostra contra o código (trava: `CHECAGENS_DOMINIO`, `conferirDominio_`,
   `sementesDaTrava`, `travar`, `avisosDaTrava`, `politicaDosAvisos`, `propriosDoLote`, `Repository.bifurcar`,
   `UnitOfWork.retratoDepois_`, `ImportService.travarNoEnsaio_`, `Validation.bloqueado`, as mensagens da recusa e os três
@@ -968,7 +977,7 @@ Nenhuma linha de código mudou nesta etapa: só documentos.
   - FILHAS_SEM_PAI é alerta e fica fora da trava; só impede o reparo na verificação (seções 10.5 e 11);
   - `reparo_impedido` conta qualquer achado da fonte quebrada junto de um ERRO com reparo, e não só "achado de ERRO";
   - a quarentena refaz o retrato até 3 vezes, e a volta que pede mais quarentena não confere os achados novos.
-  ‹CHANGELOG_CUSTO_CONTRATOS›
+  A seção 10.5 ganhou a medida de custo desta etapa.
 - `CHANGELOG`: uma entrada por etapa da convergência (a trava, as passadas 1 a 4 e a revisão final), conferidas contra
   o registro de cada etapa.
 - `docs/fase-0/10-plano-de-implementacao.md`, seção 8: a convergência não mudou nenhum estado de entrega (E2.1 a E2.11

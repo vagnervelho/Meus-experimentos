@@ -24,9 +24,9 @@ E2.11) e seção 8 (checklist). Relatório da fase anterior: `docs/RELATORIO_FAS
   19, 23, 29): nas rodadas 3 e 4, 24 dos 52 achados eram correções incompletas, o defeito consertado num caminho que
   voltava por outro. Por isso a **convergência** trocou o conserto caso a caso por duas garantias de todo caminho
   (seção 6.8). A **trava única de integridade** roda as 15 checagens de domínio da verificação de integridade sobre o
-  estado que cada comando deixaria gravado, antes de gravar, em todo caminho; custa ‹CUSTO_ATUAL› por comando no Node. O
+  estado que cada comando deixaria gravado, antes de gravar, em todo caminho; no Node, custa 21 % a mais por comando (de 43,9 para 53,1 ms na base de demonstração). O
   **teste aleatório baseado em modelo** passa todos os comandos da Fase 2 pela `api()` e confere o estado inteiro
-  depois de cada passo. Foram ‹SEMENTES_TOTAL› sementes novas em quatro passadas, na leva da revisão final e na de
+  depois de cada passo. Foram 6.239 sementes novas em quatro passadas, na leva da revisão final e na de
   confirmação desta etapa; ele achou 8 defeitos do sistema, e as levas finais ficaram limpas.
 - A **revisão final (rodada 5)**, depois da convergência, achou 17 defeitos: 4 de gravidade alta, 8 de média e 5 de
   baixa. São menos que nas rodadas 3 e 4 (23 e 29), mas 10 dos 17 ainda eram correções incompletas. Os 4 altos eram
@@ -222,7 +222,7 @@ Nada abaixo foi executado. O roteiro está em `docs/GUIA_DE_IMPLANTACAO.md` (se�
 | **Confirmar a premissa PR-09** (vendas para frigorífico por carcaça e de reposição por cabeça ou kg vivo) | Responder como vende hoje | A resposta | `PENDENTE NA CONTA DO DONO`; todas as modalidades já existem, e a resposta só define um padrão sugerido |
 | **Ratificar duas decisões da rodada 4 de revisão**: (a) o animal que só existe no histórico tem como custo de aquisição a compra histórica (`Timeline.entradaDoCusto`); (b) o tipo de cada custo da compra (frete ou outro) sai da ordem do `financial_id` | Ler `CONTRATOS.md`, seções 13 e 26 (ou a seção 4, itens 2 e 6, deste relatório), e responder se valem; aprovadas, entram em `04` (seção 6) e `03b` (2.6 e 4.1) | A resposta | `PENDENTE NA CONTA DO DONO` |
 | **Ratificar as decisões da convergência** (só em `CONTRATOS.md`, porque estas etapas não podiam mexer em `docs/fase-0/`) | Ler `CONTRATOS.md`, seções 10.5, 11 e 36 (ou a seção 4, item 15, deste relatório): a trava antes de gravar e os códigos `INTEGRIDADE_<CHECAGEM>`; as regras novas da verificação (fêmea do diagnóstico de gestação, cria em dobro, animal em pasto, categoria ou propriedade desativados, brinco lançado errado na posição, fonte quebrada do financeiro); a quarentena; o aviso do período fechado e a política de avisos em todo caminho, inclusive no desfazer da importação; `CRIA_JA_NO_CADASTRO`, `PRENHA_SEM_IDADE` e a linha repetida só com identificação | A resposta | `PENDENTE NA CONTA DO DONO` |
-| Custo da trava no Google Sheets | Registrar alguns eventos comuns (compra, parto, transferência), uma correção de categoria e uma de parâmetro, e anotar o tempo de cada um | Os tempos | `PENDENTE NA CONTA DO DONO`; no Node: +16 % na etapa da trava e ‹CUSTO_ATUAL› hoje (seção 6.8.2) |
+| Custo da trava no Google Sheets | Registrar alguns eventos comuns (compra, parto, transferência), uma correção de categoria e uma de parâmetro, e anotar o tempo de cada um | Os tempos | `PENDENTE NA CONTA DO DONO`; no Node: +16 % na etapa da trava e +21 % hoje (seção 6.8.2) |
 | Desfazer de importação com o período financeiro fechado | Com `fin_bloqueio_ate` depois da data de uma compra importada, desfazer a importação: a tela pede o "Vi e confirmo" e a justificativa | Relato | `PENDENTE NA CONTA DO DONO`; verificado só no Node e no Playwright |
 | Tempo da verificação de integridade com a base real | **Configurações → Sistema → Verificar a integridade agora** | O tempo mostrado na tela (`duracao_ms`) | `PENDENTE NA CONTA DO DONO` |
 | Anexos no Drive real (nota fiscal, GTA, arquivos de até 5 MB pelo `google.script.run`) | Anexar uma nota fiscal a uma compra, abrir e remover | Relato | `PENDENTE NA CONTA DO DONO` |
@@ -334,10 +334,9 @@ item 13.
     lançamentos datados do marco zero (correção de localização, baixa na contagem, outra entrada), e a divergência
     tratada sai do relatório.
 12. **Interface e aceitação.** A página vai compactada ao aparelho (`Api.compactar`: de 441 KB para cerca de 411 KB na
-    etapa de telas; 437 KB na entrega; 446 KB depois das rodadas 3 e 4; hoje, depois da convergência, 449 KB de 450 KB). O modo curral da
-    identificação fica para a Fase 3 (o componente é o da pesagem); nesta fase, seletor e cartão por animal, com o mesmo
-    pedido e a mesma validação. "Registrar" com rascunho
-    em envio pergunta ao servidor antes de apagar, também pelo "Descartar" da Visão geral (rodada 3). O rascunho no
+    etapa de telas; 437 KB na entrega; 446 KB depois das rodadas 3 e 4; hoje, depois da convergência, 449 KB de 450 KB).
+    O modo curral da identificação fica para a Fase 3 (o componente é o da pesagem); nesta fase, seletor e cartão por
+    animal, com o mesmo pedido e a mesma validação. "Registrar" com rascunho em envio pergunta ao servidor antes de apagar, também pelo "Descartar" da Visão geral (rodada 3). O rascunho no
     servidor (sem `localStorage`) vai em partes de 8 KB, com até 96 KB por rascunho e 400 KB no total, e a tela só diz
     "guardado" depois da confirmação (rodada 3). A prévia da correção deixa vazio o valor igual ao que o servidor propôs
     (descrição, vencimento à vista, parceiro e vencimento da retida, parcela única, pasto e raça da cria), para que ele
@@ -436,8 +435,8 @@ item 13.
     geral, verificação de integridade com a base real (no fake, com a demonstração, de 147 a 154 ms com o arquivo
     rodado sozinho nesta etapa, contra 150 a 165 ms no relatório das rodadas 3 e 4 e cerca de 55 ms antes das
     conferências novas delas) e a base de
-    demonstração inteira. SP-05 da Fase 1 continua parcial. A trava acrescenta tempo a todo comando: no Node, ‹CUSTO_ATUAL›
-    por comando na base de demonstração (seção 6.8.2). No Google Sheets não foi medida, e a correção de categoria e de
+    demonstração inteira. SP-05 da Fase 1 continua parcial. A trava acrescenta tempo a todo comando: no Node, +21 %
+    por comando na base de demonstração, de 43,9 para 53,1 ms (seção 6.8.2). No Google Sheets não foi medida, e a correção de categoria e de
     parâmetro e o cadastro de animal de referência passam a ler as abas da trava (`AuditService.leiturasTrava()`).
 12. **Orçamento da página**: 449 KB de 450 KB (eram 437 KB na entrega; as rodadas 3 e 4 somaram 9 KB, e a convergência,
     3 KB). As telas das Fases 3 a 5 vão precisar carregar sob demanda (risco R-31), e sobra cerca de 1 KB para consertos.
@@ -805,9 +804,14 @@ uma propriedade inexistente (`tests/apoio-persistencia.js`). Não houve falso po
 |---|---|---:|---:|---:|
 | Etapa da trava (15/11) | Mediana de 3 execuções alternadas com a cópia de antes da trava | 16.757 → 19.462 ms (+16 %) | 42,9 → 49,8 ms | cerca de 1,8 s |
 | Revisão final (16/11) | 1 execução de cada, com o código de antes da rodada 5 (já com a trava) | 18.637 → 19.108 ms (+3 %) | — | 1.754 → 2.184 ms |
-| Esta etapa (16/11) | ‹CUSTO_ETAPA_COMO› | ‹CUSTO_ETAPA_TOTAL› | ‹CUSTO_ETAPA_CMD› | ‹CUSTO_ETAPA_TRAVA› |
+| Esta etapa (16/11) | Mediana de 3 execuções alternadas com a cópia do commit `0cb6b07`, de antes da convergência | 17.168 → 20.779 ms (+21 %) | 43,9 → 53,1 ms | 2.340 ms |
 
-‹CUSTO_ETAPA_TEXTO›
+Nesta etapa, os três pares ficaram entre +20 % e +21 %; o p50 foi de 42,7 para 52,8 ms e o p95, de 71,3 para 93,2 ms.
+A comparação é com o código de antes da convergência inteira. Por isso a diferença (3,6 s) inclui também as outras
+mudanças das etapas seguintes à trava: 2,3 s ficam dentro de `AuditService.travar`, e o resto no retrato e nos outros
+consertos. Desde a etapa da trava, o custo subiu de +16 % para +21 %, com as regras que entraram na verificação depois
+(passadas 1 e 2 e rodada 5) e o escopo maior da COPIAS. Continua abaixo do limite de 30 % da etapa da trava, e a trava
+nunca desliga.
 
 **O que a trava não garante.**
 - Ela confere só o que as 15 checagens dizem. Um estado que respeita todas elas e mesmo assim está errado passa: a
@@ -856,7 +860,7 @@ gerador anterior.
 | 3 | 2.085 × 100 a 150 | 0 | 3 corrigidos | 440 × 120 (27.203, 21.573, 0) |
 | 4 | 1.248 × 150 | 3 corrigidos (1 ALTA, 2 MÉDIA) | 4 corrigidos | 400 × 150 (31.540, 24.479, 0) |
 | Revisão final, depois dos consertos | 200 × 60 | — | — | 200 × 60 (6.374, 4.620, 0) |
-| Esta etapa, sobre o código final | ‹FUZZ_ETAPA_SEMENTES› | ‹FUZZ_ETAPA_DEFEITOS› | — | ‹FUZZ_ETAPA_LEVA› |
+| Esta etapa, sobre o código final | 200 × 150 (96000 a 96199) | 0 | — | 200 × 150 (15.581, 12.441, 0) |
 
 Na passada 4 ficou fora da conta a triagem 82000 a 82319, que rodava sobre o código antigo e foi interrompida depois de
 juntar 18 falhas de 3 classes já entendidas. Na passada 1 também ficaram fora as cerca de 740 sementes da montagem do
@@ -892,7 +896,8 @@ expectativa de teste antigo mudou por causa do teste aleatório.
 - com o projetor errado de propósito, 3 de 30 sementes falham pelo efeito pedido, que a verificação de integridade
   sozinha não vê.
 
-**As últimas levas ficaram limpas?** Sim: as levas finais das quatro passadas, a da revisão final ‹FUZZ_ETAPA_LIMPA›.
+**As últimas levas ficaram limpas?** Sim. Terminaram com 0 falhas as levas finais das quatro passadas, a da revisão
+final e a de confirmação desta etapa, sobre o código final (200 sementes novas × 150 passos, em 4 processos, 388 s).
 Mas cada ampliação do gerador achou defeito novo (passadas 2 e 4), e a rodada 5 achou 17 defeitos depois da passada 4
 limpa. Uma leva limpa quer dizer que nada foi achado naquilo que o gerador gera, não que não há defeito.
 
@@ -998,8 +1003,8 @@ O que a convergência garante:
 1. Para as 15 checagens de domínio da verificação de integridade, todo caminho passa pela mesma conferência antes de
    gravar. Cada uma das 15 tem um teste por um caminho que não o direto (`tests/trava.integridade.test.js`), e o teste
    aleatório confere o estado inteiro depois de cada comando.
-2. O teste aleatório achou 8 defeitos do sistema sem nenhum revisor, e as últimas levas ficaram limpas
-   ‹FUZZ_ETAPA_GARANTIA›.
+2. O teste aleatório achou 8 defeitos do sistema sem nenhum revisor, e as últimas levas ficaram limpas,
+   inclusive a de confirmação desta etapa, sobre o código final (200 × 150, 0 falhas).
 
 O que ela não garante:
 - O estado coerente e errado (3 dos 4 altos da rodada 5).

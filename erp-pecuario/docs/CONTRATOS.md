@@ -805,7 +805,11 @@ a conferência final do ESTADO RESULTANTE.
 falsa; mediana de três execuções alternadas com a cópia do projeto de antes da trava):
 - sem a trava: 16.757 ms, 42,9 ms por comando (p50 42,2, p95 70,2);
 - com a trava: 19.462 ms, 49,8 ms por comando (p50 48,4, p95 85,2);
-- **+16 %** (entre +6 % e +22 % nos três pares), com cerca de 1,8 s dentro de `AuditService.travar` e o resto no retrato.
+- **+16 %** (entre +6 % e +22 % nos três pares), com cerca de 1,8 s dentro de `AuditService.travar` e o resto no retrato;
+- no relatório da convergência (16/11), contra a mesma cópia de antes da trava (commit `0cb6b07`), mediana de três pares
+  alternados: 17.168 → 20.779 ms, 43,9 → 53,1 ms por comando, **+21 %** (os pares entre +20 % e +21 %), com 2.340 ms
+  dentro de `AuditService.travar`. A diferença inclui as outras mudanças da convergência: as regras que entraram depois
+  na verificação e o escopo maior da COPIAS.
 
 A primeira versão, com as checagens de cada animal também nos vizinhos e a memória inteira refeita a cada mudança no
 retrato, ficava entre +24 % e +28 %. O escopo foi restringido pelo papel de cada checagem, e a trava nunca desliga. A
