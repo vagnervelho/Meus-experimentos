@@ -1,7 +1,7 @@
 'use strict';
 /**
- * Motor do teste aleatório de todos os comandos da Fase 2 (tests/fase2.fuzz.test.js e fase2.fuzz.regressoes.test.js).
- * Não é arquivo de teste.
+ * Motor do teste aleatório de todos os comandos das Fases 1 a 3 (tests/fase2.fuzz.test.js, fase2.fuzz.regressoes.test.js
+ * e fase3.fuzz.regressoes.test.js). Não é arquivo de teste.
  *
  * - Sistema montado pela função pública api() (como a tela chama), sobre o setup() do editor.
  * - Gerador: a cada passo, um comando VÁLIDO ou INVÁLIDO entre todos os da Fase 2 (registrar os 10 tipos ativos e
@@ -2314,21 +2314,26 @@ registrarImportador('PESAGENS', {
 registrarImportador('SANIDADE', {
   arquivo: (c) => {
     const { sis, S, rnd, b, data, qual } = c;
-    const linhas = ['data;procedimento;produto;nome;modo;dose;unidade;diagnostico;brinco'];
+    // Fuzz das Fases 1 a 3: também a carência (que pode cobrir uma venda gravada: o aviso CARENCIA_ATIVA no bloco), a
+    // próxima aplicação e a dose por kg (pelo peso de cada animal na data).
+    const linhas = ['data;procedimento;produto;nome;modo;dose;unidade;diagnostico;carencia;proxima;brinco'];
     const nomeDe = (id) => (S.t.PRODUTOS.find((x) => x.product_id === id) || {}).nome || '';
     const d = data();
     const x = rnd();
-    const cab = x < 0.45 ? ['vacinação', nomeDe(sis.produtos.vacina), '', 'por cabeça', '1', '']
-      : x < 0.65 ? ['vermifugação', rnd() < 0.5 ? nomeDe(sis.produtos.vermifugo) : '', 'Ivermectina 1%', 'por cabeça', '5', 'mL']
-        : x < 0.8 ? ['doença', '', '', '', '', '']
-          : x < 0.9 ? ['medicação', nomeDe(sis.produtos.antibiotico), '', 'total', '', '']
-            : ['vacinação', 'Vacina Inexistente', '', 'por cabeça', '1', ''];
+    const cab = x < 0.4 ? ['vacinação', nomeDe(sis.produtos.vacina), '', 'por cabeça', '1', '']
+      : x < 0.55 ? ['vermifugação', rnd() < 0.5 ? nomeDe(sis.produtos.vermifugo) : '', 'Ivermectina 1%', 'por cabeça', '5', 'mL']
+        : x < 0.65 ? ['vermifugação', nomeDe(sis.produtos.vermifugo), '', 'por kg', '0,02', '']
+          : x < 0.78 ? ['doença', '', '', '', '', '']
+            : x < 0.9 ? ['medicação', nomeDe(sis.produtos.antibiotico), '', 'total', '', '']
+              : ['vacinação', 'Vacina Inexistente', '', 'por cabeça', '1', ''];
     if (cab[0] === 'vermifugação' && cab[1]) cab[2] = '';
+    const carencia = cab[0] !== 'doença' && rnd() < 0.4 ? String(sorteio(rnd, [30, 60, 120])) : '';
+    const proxima = cab[0] !== 'doença' && rnd() < 0.2 ? br(somaDias(d, sorteio(rnd, [30, 180]))) : '';
     const ids = alguns(rnd, c.ativos.length ? c.ativos : c.comBrinco, 3);
-    ids.forEach((id) => linhas.push([br(d)].concat(cab.slice(0, 6), [cab[0] === 'doença' ? 'Tristeza parasitária' : '', b(id)]).join(';')));
-    if (!ids.length) { const id = qual(); if (!id) return null; linhas.push([br(d)].concat(cab.slice(0, 6), ['', b(id)]).join(';')); }
+    ids.forEach((id) => linhas.push([br(d)].concat(cab.slice(0, 6), [cab[0] === 'doença' ? 'Tristeza parasitária' : '', carencia, proxima, b(id)]).join(';')));
+    if (!ids.length) { const id = qual(); if (!id) return null; linhas.push([br(d)].concat(cab.slice(0, 6), ['', carencia, proxima, b(id)]).join(';')); }
     if (rnd() < 0.1 && linhas.length > 1) linhas.push(linhas[linhas.length - 1]);
-    return { texto: linhas.join('\n'), mapa: { colunas: { data: 'data', procedimento: 'procedimento', produto: 'produto', nome: 'nome_produto', modo: 'modo_dose', dose: 'dose_lancamento', unidade: 'unidade', diagnostico: 'diagnostico', brinco: 'brinco' }, confiancas: {}, padroes: {} } };
+    return { texto: linhas.join('\n'), mapa: { colunas: { data: 'data', procedimento: 'procedimento', produto: 'produto', nome: 'nome_produto', modo: 'modo_dose', dose: 'dose_lancamento', unidade: 'unidade', diagnostico: 'diagnostico', carencia: 'carencia', proxima: 'proxima', brinco: 'brinco' }, confiancas: {}, padroes: {} } };
   },
   efeito: (c) => {
     const { S, l, v, erro } = c;
@@ -2337,6 +2342,9 @@ registrarImportador('SANIDADE', {
     const proc = { 'vacinação': 'VACINA', 'vermifugação': 'VERMIFUGO', 'doença': 'DOENCA', 'medicação': 'MEDICAMENTO' }[v.procedimento];
     if (h.event_id !== l.event_id_gerado || h.data_aplicacao !== deBr(v.data) || h.tipo_procedimento !== proc) erro('aplicação gravada ' + JSON.stringify([h.data_aplicacao, h.tipo_procedimento]) + ', a linha diz ' + JSON.stringify([v.data, v.procedimento]));
     if ((h.nome_produto || '') !== (v.produto || v.nome || '')) erro('produto gravado ' + h.nome_produto + ', a linha diz ' + (v.produto || v.nome));
+    const car = v.carencia ? Number(v.carencia) : null;
+    if ((typeof h.periodo_carencia_dias === 'number' ? h.periodo_carencia_dias : null) !== car || (h.data_fim_carencia || null) !== (car ? somaDias(deBr(v.data), car) : null)) erro('carência gravada ' + JSON.stringify([h.periodo_carencia_dias, h.data_fim_carencia]) + ', a linha diz ' + v.carencia);
+    if (v.proxima && h.data_proxima_aplicacao !== deBr(v.proxima)) erro('próxima gravada ' + h.data_proxima_aplicacao + ', a linha diz ' + v.proxima);
     const e = linhaEvento(S, l);
     conferirHistorico(S, l, e, deBr(v.data), erro);
     // Antes do marco zero, nem saída de estoque nem consumo; depois, a saída do produto do cadastro.
@@ -2413,6 +2421,8 @@ registrarImportador('OCORRENCIAS', {
  */
 const COBERTURA = {};
 const contar = (k, n) => { COBERTURA[k] = (COBERTURA[k] || 0) + (n === undefined ? 1 : n); };
+/** O animal existe de fato (nem anulado nem pendente): os candidatos das interações e dos blocos (às vezes não, a recusa). */
+const existe = (S, id) => ['ANULADO', 'PENDENTE'].indexOf((S.animais.get(id) || {}).situacao_cadastral) < 0;
 const vigentesDe = (S, aba) => (S.t[aba] || []).filter((r) => S.vig.get(r.event_id));
 /** O último dia de carência de um registro de SANIDADE (o gravado ou aplicação + período inteiro positivo), ou null. */
 const fimCarenciaDe = (r) => (r.data_fim_carencia ? r.data_fim_carencia : typeof r.periodo_carencia_dias === 'number' && r.periodo_carencia_dias > 0 && Math.floor(r.periodo_carencia_dias) === r.periodo_carencia_dias ? somaDias(r.data_aplicacao, r.periodo_carencia_dias) : null);
@@ -2465,10 +2475,12 @@ function iniciarLida(sis, S, rnd, k) {
 function blocoDaLida(sis, S, rnd, lida) {
   const vistos = new Set(lida.vistos);
   const filtro = lida.tipo === 'tronco' ? (id, p) => p.dia && fem(S, id) : (id, p) => p.dia && (p.pastoDia === lida.pasto || rnd() < 0.2);
-  let ids = animaisPara(S, rnd, lida.data, 3, filtro).filter((id) => !vistos.has(id));
+  let ids = animaisPara(S, rnd, lida.data, 3, filtro).filter((id) => !vistos.has(id) && (existe(S, id) || rnd() < 0.1));
   if (lida.vistos.length && rnd() < 0.15) ids.push(sorteio(rnd, lida.vistos));
   ids = ids.filter((x, i, a) => a.indexOf(x) === i);
   if (!ids.length) return null;
+  // Às vezes o mesmo animal duas vezes no bloco (o cliente substitui na fila; o servidor recusa o repetido).
+  if (rnd() < 0.04) ids.push(ids[0]);
   let spec;
   if (lida.tipo === 'tronco') {
     // As teclas do tronco: p (positiva), p90 (positiva com 90 dias), v (vazia), d (duvidosa).
@@ -2528,13 +2540,13 @@ function gerarInteracao(sis, S, rnd, k, base) {
   const corrigir = (eid, spec, rotulo) => (spec ? Object.assign(base, { rota: 'evento.corrigir', dados: Object.assign(montarDados(sis, spec), { event_id: eid, justificativa: 'Corrigindo o lançamento' }), spec, rotulo: 'interação: ' + rotulo }) : null);
   const specDe = (e) => (sis.specs.has(e.event_id) ? js(sis.specs.get(e.event_id).spec) : specDoGravado(sis, S, rnd, e));
   const animaisDoEvento = (eid) => S.t.EVENTO_ANIMAIS.filter((l) => l.event_id === eid).map((l) => l.animal_id);
-  const qual = pesado(rnd, [['vendaCarencia', 4], ['sanidadeSobreVenda', 2.5], ['pesagemDeQuemSaiu', 2], ['saidaAntesDaPesagem', 1.5], ['diagnosticoDeQuemSaiu', 2], ['saidaAntesDoRegistro', 1.5], ['partoDaPrenhe', 2.5], ['partoCorrigido', 2], ['aborto', 1.5], ['estornoInsumoConsumido', 2], ['entradaInsumoMenor', 1], ['desmamaDasCrias', 1.5], ['castracaoDoTouro', 1.2], ['dosePorKg', 2.5], ['reproducaoNaEstacao', 3]]);
+  const qual = pesado(rnd, [['vendaCarencia', 4], ['sanidadeSobreVenda', 2.5], ['importacaoNaCarencia', 1.5], ['pesagemDeQuemSaiu', 2], ['saidaAntesDaPesagem', 1.5], ['diagnosticoDeQuemSaiu', 2], ['saidaAntesDoRegistro', 1.5], ['partoDaPrenhe', 2.5], ['partoCorrigido', 2], ['aborto', 1.5], ['estornoInsumoConsumido', 2], ['entradaInsumoMenor', 1], ['desmamaDasCrias', 1.5], ['castracaoDoTouro', 1.2], ['dosePorKg', 2.5], ['reproducaoNaEstacao', 3]]);
   if (qual === 'vendaCarencia') {
     const x = sorteio(rnd, vigentesDe(S, 'SANIDADE').map((r) => ({ r, fim: fimCarenciaDe(r) })).filter((y) => y.fim && y.r.data_aplicacao >= (S.marco || D0)));
     if (!x || rnd() < 0.25) {
       // Ainda sem aplicação com carência (ou às vezes outra): a aplicação com carência, que a venda seguinte encontra.
       const D = ateHoje(somaDias(HOJE, -Math.floor(rnd() * 90)));
-      const ids = animaisPara(S, rnd, D, 2, (id, p) => p.fim);
+      const ids = animaisPara(S, rnd, D, 2, (id, p) => p.fim).filter((id) => existe(S, id));
       if (!ids.length) return null;
       const s = propostaSanidade(sis, S, rnd, sorteio(rnd, ['VERMIFUGACAO', 'MEDICACAO']), D, ids);
       Object.assign(s, { carencia: sorteio(rnd, [30, 45, 60]), protocolo: null, custo: null });
@@ -2555,6 +2567,23 @@ function gerarInteracao(sis, S, rnd, k, base) {
     const s = propostaSanidade(sis, S, rnd, sorteio(rnd, ['VERMIFUGACAO', 'MEDICACAO', 'VACINACAO']), dApl, [l.animal]);
     s.carencia = Math.max(0, diasEntre(dApl, l.data) + sorteio(rnd, [0, 0, 1, 15, -1]));
     return registrar(s, 'aplicação retroativa sobre a venda');
+  }
+  if (qual === 'importacaoNaCarencia') {
+    // O mesmo encontro pela importação: a venda importada de um animal em carência, ou a aplicação importada com carência
+    // sobre a venda gravada (o aviso CARENCIA_ATIVA no bloco, com a política na venda para abate).
+    const b = (id) => (S.animais.get(id) || {}).brinco;
+    if (rnd() < 0.5) {
+      const x = sorteio(rnd, vigentesDe(S, 'SANIDADE').map((r) => ({ r, fim: fimCarenciaDe(r) })).filter((y) => y.fim && b(y.r.animal_id) && y.r.data_aplicacao >= (S.marco || D0)));
+      if (!x) return null;
+      const D = ateHoje(sorteio(rnd, [x.r.data_aplicacao, x.fim, somaDias(x.fim, 1)]));
+      const texto = ['grupo;data;comprador;finalidade;modalidade;preco;bruto;brinco;parcelas', ['V1', br(D), 'Frigorífico Boi Bom', rnd() < 0.5 ? 'abate' : 'recria e engorda', 'cabeça', '2.500,00', '2.500,00', b(x.r.animal_id), ''].join(';')].join('\n');
+      return Object.assign(base, { rota: 'importacao.criar', dados: { tipo: 'VENDAS', arquivo_nome: 'vendas-carencia-' + k + '.csv', texto, formato: FORMATO }, mapa: { colunas: { grupo: 'grupo', data: 'data', comprador: 'comprador', finalidade: 'finalidade', modalidade: 'modalidade', preco: 'preco', bruto: 'valor_bruto', brinco: 'brinco', parcelas: 'parcelas' }, confiancas: {}, padroes: {} }, rotulo: 'interação: importar a venda de um animal em carência' });
+    }
+    const l = sorteio(rnd, S.linhas.filter((y) => y.tipo === 'VENDA' && !y.pre && b(y.animal)));
+    if (!l) return null;
+    const dApl = somaDias(l.data, -sorteio(rnd, [0, 5, 20]));
+    const texto = ['data;procedimento;produto;nome;modo;dose;unidade;diagnostico;carencia;proxima;brinco', [br(dApl), 'vermifugação', 'Vermífugo F', '', 'por cabeça', '5', '', '', String(diasEntre(dApl, l.data) + sorteio(rnd, [0, 10, -1])), '', b(l.animal)].join(';')].join('\n');
+    return Object.assign(base, { rota: 'importacao.criar', dados: { tipo: 'SANIDADE', arquivo_nome: 'sanidade-venda-' + k + '.csv', texto, formato: FORMATO }, mapa: { colunas: { data: 'data', procedimento: 'procedimento', produto: 'produto', nome: 'nome_produto', modo: 'modo_dose', dose: 'dose_lancamento', unidade: 'unidade', diagnostico: 'diagnostico', carencia: 'carencia', proxima: 'proxima', brinco: 'brinco' }, confiancas: {}, padroes: {} }, rotulo: 'interação: importar a aplicação com carência sobre a venda' });
   }
   if (qual === 'pesagemDeQuemSaiu') {
     const id = sorteio(rnd, MOVEIS(S).filter((x) => { const a = S.animais.get(x); return a.data_saida && SAIDA_DO_REBANHO.indexOf(a.situacao_cadastral) >= 0; }));
@@ -2590,7 +2619,7 @@ function gerarInteracao(sis, S, rnd, k, base) {
     return registrar(s, 'diagnóstico de fêmea que saiu');
   }
   if (qual === 'partoDaPrenhe') {
-    const id = sorteio(rnd, MOVEIS(S).filter((x) => fem(S, x) && S.animais.get(x).situacao_reprodutiva === 'PRENHA'));
+    const id = sorteio(rnd, MOVEIS(S).filter((x) => existe(S, x) && fem(S, x) && S.animais.get(x).situacao_reprodutiva === 'PRENHA'));
     if (!id) return null;
     const dg = ultimoReg(S, id, (r) => r.tipo_evento === 'DIAGNOSTICO_GESTACAO' && r.resultado === 'POSITIVO');
     const gest = paramNum(S, 'dias_gestacao', 290);
@@ -2618,7 +2647,7 @@ function gerarInteracao(sis, S, rnd, k, base) {
     return corrigir(e.event_id, spec, 'parto corrigido depois do diagnóstico');
   }
   if (qual === 'aborto') {
-    const id = sorteio(rnd, MOVEIS(S).filter((x) => fem(S, x) && ['PRENHA', 'INSEMINADA', 'EXPOSTA'].indexOf(S.animais.get(x).situacao_reprodutiva) >= 0));
+    const id = sorteio(rnd, MOVEIS(S).filter((x) => existe(S, x) && fem(S, x) && ['PRENHA', 'INSEMINADA', 'EXPOSTA'].indexOf(S.animais.get(x).situacao_reprodutiva) >= 0));
     if (!id) return null;
     const u = ultimoReg(S, id, () => true);
     const s = { tipo: 'REPRODUCAO', sub: 'ABORTO', data: ateHoje(u ? sorteio(rnd, [somaDias(u.data, 1), somaDias(u.data, 40), u.data, somaDias(u.data, -1)]) : HOJE), itens: [{ id }], estacao: null, custo: null };
@@ -2648,7 +2677,7 @@ function gerarInteracao(sis, S, rnd, k, base) {
   }
   if (qual === 'castracaoDoTouro') {
     const l = sorteio(rnd, S.linhas.filter((y) => y.papel === 'TOURO'));
-    const id = l ? l.animal : sorteio(rnd, MOVEIS(S).filter((x) => !fem(S, x) && S.animais.get(x).castrado !== true));
+    const id = l ? l.animal : sorteio(rnd, MOVEIS(S).filter((x) => existe(S, x) && !fem(S, x) && S.animais.get(x).castrado !== true));
     if (!id) return null;
     const D = ateHoje(l ? sorteio(rnd, [l.data, somaDias(l.data, -1), somaDias(l.data, 1)]) : HOJE);
     return registrar({ tipo: 'CASTRACAO', data: D, ids: [id], metodo: 'Burdizzo', custo: null }, 'castração do touro');
@@ -2658,7 +2687,7 @@ function gerarInteracao(sis, S, rnd, k, base) {
     const p = sorteio(rnd, pes.filter((q) => !S.marco || q.data_pesagem >= S.marco));
     if (!p) return null;
     const D = ateHoje(sorteio(rnd, [p.data_pesagem, somaDias(p.data_pesagem, 1), somaDias(p.data_pesagem, 200), somaDias(p.data_pesagem, -1)]));
-    const mais = animaisPara(S, rnd, D, 2, (id, pr) => pr.dia && pes.some((q) => q.animal_id === id && q.data_pesagem <= D)).filter((id) => id !== p.animal_id);
+    const mais = animaisPara(S, rnd, D, 2, (id, pr) => pr.dia && pes.some((q) => q.animal_id === id && q.data_pesagem <= D)).filter((id) => id !== p.animal_id && existe(S, id));
     const s = propostaSanidade(sis, S, rnd, sorteio(rnd, ['VERMIFUGACAO', 'MEDICACAO']), D, [p.animal_id].concat(rnd() < 0.6 ? mais : []));
     Object.assign(s, { prod: s.sub === 'VERMIFUGACAO' ? sis.produtos.vermifugo : sis.produtos.antibiotico, nome: null, unidade: null, modo: 'POR_PESO', doseRef: sorteio(rnd, [0.02, 0.01, 0.025, 0.0333]), qtd: null, protocolo: null });
     s.itens.forEach((x) => { x.dose = null; });
@@ -2873,6 +2902,49 @@ function modeloAgenda(S, D) {
   });
   return { modelados, pend: pend.sort(), car: car.sort() };
 }
+/**
+ * O ganho médio diário de cada animal (03b, seção 5; RN-052; o indicador zootécnico da pesagem), por um modelo escrito
+ * aqui: as pesagens vigentes individuais (balança; fita só com `gmd_aceita_fita`), uma por dia (a de depois na posição),
+ * em ordem; entre duas consecutivas, ganho com uma casa, dias e GMD = ganho ÷ dias com três casas, só com as duas na
+ * mesma permanência no rebanho e com o intervalo mínimo (`gmd_intervalo_min_dias`), senão vazio. Os intervalos de
+ * `peso.desempenho` (curvas) dos animais do comando e dos mais pesados = o modelo.
+ */
+function oraculoGmd(sis, S, focos) {
+  const fita = S.config.get('gmd_aceita_fita') === 'S' || S.config.get('gmd_aceita_fita') === true;
+  const min = paramNum(S, 'gmd_intervalo_min_dias', 28);
+  const ind = (id) => (S.t.PESAGENS || []).filter((p) => p.animal_id === id && S.vig.get(p.event_id) && typeof p.peso_kg === 'number' && (p.metodo === 'BALANCA' || (fita && p.metodo === 'FITA')));
+  const cands = Array.from(S.animais.keys()).filter((id) => existe(S, id) && (S.animais.get(id) || {}).situacao_cadastral !== 'EXTERNO' && ind(id).length >= 2);
+  const ids = focos.filter((id) => cands.indexOf(id) >= 0).concat(cands.slice().sort((a, b) => ind(b).length - ind(a).length || cmp(S.animais.get(a).codigo_interno, S.animais.get(b).codigo_interno))).filter((x, i, a) => a.indexOf(x) === i).slice(0, 3);
+  if (!ids.length) return [];
+  const r = sis.api('peso.desempenho', { animais: ids });
+  if (!r.ok) return [falha('GMD:FALHOU', JSON.stringify(r.error).slice(0, 400))];
+  const out = [];
+  const r1 = (x, c) => { const f = Math.pow(10, c); const v = Math.round(Number((Math.abs(x) * f).toFixed(6))) / f; return x < 0 && v !== 0 ? -v : v; };
+  ids.forEach((id, i) => {
+    // Permanências pelas linhas do rebanho (as de antes do marco zero ficam fora).
+    const per = [];
+    S.linhasDe(id).filter((l) => !DE_FATO(l)).forEach((l) => { if (l.efeito === 1) per.push({ ini: l.data, fim: null }); else if (l.efeito === -1 && per.length) per[per.length - 1].fim = l.data; });
+    const perDe = (d) => per.findIndex((x) => d >= x.ini && (x.fim === null || d <= x.fim));
+    const serie = ind(id).map((p) => { const e = S.ev.get(p.event_id); return { p, data: p.data_pesagem, raiz: S.raiz(e), seq: e.event_seq }; })
+      .sort((a, b) => cmp(a.data, b.data) || a.raiz - b.raiz || a.seq - b.seq || cmp(a.p.weight_id, b.p.weight_id));
+    const dias = [];
+    serie.forEach((x) => { if (dias.length && dias[dias.length - 1].data === x.data) dias[dias.length - 1] = x; else dias.push(x); });
+    const modelo = [];
+    for (let j = 1; j < dias.length; j++) {
+      const a = dias[j - 1];
+      const b = dias[j];
+      const nd = diasEntre(a.data, b.data);
+      const ganho = r1(b.p.peso_kg - a.p.peso_kg, 1);
+      const conta = perDe(a.data) >= 0 && perDe(a.data) === perDe(b.data);
+      modelo.push([a.data, b.data, a.p.peso_kg, b.p.peso_kg, ganho, nd, conta && nd >= min ? r1(ganho / nd, 3) : null].join('|'));
+    }
+    contar('intervalos de GMD conferidos', modelo.length);
+    const c = (r.data.curvas || [])[i] || {};
+    const sist = (c.intervalos || []).map((v) => [v.de, v.ate, v.peso_de_kg, v.peso_ate_kg, v.ganho_kg, v.dias, v.gmd_kg_dia].join('|'));
+    if (JSON.stringify(sist) !== JSON.stringify(modelo)) out.push(falha('GMD', (S.animais.get(id) || {}).codigo_interno + ': intervalos do sistema ' + JSON.stringify(sist.filter((x) => modelo.indexOf(x) < 0).slice(0, 3)) + ', do modelo ' + JSON.stringify(modelo.filter((x) => sist.indexOf(x) < 0).slice(0, 3)) + ' (de|até|peso de|peso até|ganho|dias|GMD)'));
+  });
+  return out;
+}
 /** A agenda do sistema (`sanidade.agenda`) = o modelo, nas pendências dos protocolos modelados, nas sem protocolo e na carência. */
 function oraculoAgenda(sis, S, D) {
   if (!S.marco || D < S.marco || D > HOJE) return [];
@@ -2897,8 +2969,9 @@ function oraculoAgenda(sis, S, D) {
  * casa; as categorias somam as expostas. E as consultas de manejo respondem (`peso.desempenho`, `reproducao.matrizes`
  * com a situação reprodutiva de cada fêmea igual à projeção).
  */
-function oraculoManejo(sis, S) {
+function oraculoManejo(sis, S, focos) {
   const out = [];
+  out.push(...oraculoGmd(sis, S, focos || []));
   const minimo = paramNum(S, 'indicador_n_minimo', 5);
   const pct = (n, d) => Math.round(Number((n / d * 100 * 10).toFixed(6))) / 10;
   const ests = (S.t.ESTACOES_MONTA || []).slice(-3);
@@ -3448,8 +3521,9 @@ function executar(sis, k, cmd, antesT, opcoes) {
     const simulado = sim.ok ? (sim.data.avisos && sim.data.avisos.length && !(cmd.avisos || []).length ? 'AVISOS' : 'OK') : sim.error.code;
     // O comando pede a confirmação dos avisos antes da trava; a simulação, que não confirma nada, vai até o fim e pode dar a
     // recusa que o comando daria depois de confirmado (passada 4: o estorno no período fechado de um animal que voltaria a
-    // um pasto desativado). Sem o pedido de volta (aceitar = false), o desfecho depois da confirmação não é visto.
-    const depoisDaConfirmacao = real === 'NEEDS_CONFIRMATION' && !cmd.aceitar && (simulado === 'VALIDATION' || simulado === 'CONFLICT');
+    // um pasto desativado). Sem o pedido de volta (aceitar = false), o desfecho depois da confirmação não é visto; nem com o
+    // pedido de volta sem a justificativa do período fechado (semJustAviso), recusado antes da trava (fuzz das Fases 1 a 3).
+    const depoisDaConfirmacao = real === 'NEEDS_CONFIRMATION' && (!cmd.aceitar || semJustificativa(cmd)) && (simulado === 'VALIDATION' || simulado === 'CONFLICT');
     const compativel = simulado === real || depoisDaConfirmacao || (simulado === 'AVISOS' && (real === 'NEEDS_CONFIRMATION' || real === 'OK')) || (simulado === 'OK' && real === 'NEEDS_CONFIRMATION') || real === 'IDEMPOTENCY_MISMATCH';
     if (!compativel) falhas.push(falha('SIMULACAO', 'simulação ' + simulado + ' ' + JSON.stringify(sim.error || '').slice(0, 400) + ' × comando ' + real + ' ' + JSON.stringify(r.error || '').slice(0, 400)));
   }
@@ -3462,7 +3536,7 @@ function executar(sis, k, cmd, antesT, opcoes) {
   if (!o.semGlobal && gravou) {
     falhas.push(...oraculoAgenda(sis, S, HOJE));
     if (datas.length && datas[0] !== HOJE) falhas.push(...oraculoAgenda(sis, S, datas[0]));
-    falhas.push(...oraculoManejo(sis, S));
+    falhas.push(...oraculoManejo(sis, S, r.ok && r.data && Array.isArray(r.data.animais) ? r.data.animais.map((a) => a.animal_id) : []));
   }
   return { falhas, r, depoisT, S };
 }

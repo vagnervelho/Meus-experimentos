@@ -20,8 +20,16 @@
  * financeiro (do sistema e reescritas sobre as linhas cruas), replay independente da linha do tempo e o efeito que o
  * pedido manda; recusado → nada mudou (data_version e linhas), código e mensagem em português, chave livre.
  *
+ * Fuzz das Fases 1 a 3, passada 1: o gerador também manda o curral e o tronco em blocos com a chave própria (o bloco sem
+ * sinal, a resposta perdida e o reenvio, a conferência da chave), as interações da Fase 3 com a Fase 2 (venda na carência,
+ * aplicação retroativa sobre a venda, também pela importação; pesagem, aplicação e diagnóstico de quem saiu; saída levada
+ * para antes do fato; parto da prenhe, parto corrigido depois do diagnóstico, aborto; estorno da compra de insumo já
+ * consumido; desmama das crias; castração do touro; dose por kg; reprodução na estação), o controle de estoque ligado e
+ * desligado e os protocolos novos; os oráculos novos conferem a dose por kg, os avisos de estoque e de carência pela
+ * transição, a agenda sanitária e o GMD por modelos independentes, e os indicadores reprodutivos (tests/apoio-fuzz.js).
+ *
  * Em falha, o teste imprime a semente e a sequência mínima (encolhida automaticamente), pronta para virar um caso de
- * tests/fase2.fuzz.regressoes.test.js.
+ * tests/fase2.fuzz.regressoes.test.js (ou de tests/fase3.fuzz.regressoes.test.js).
  *
  * npm test roda as sementes fixas. FUZZ_SEMENTES=N roda N sementes novas a partir de FUZZ_INICIO (padrão: o relógio);
  * FUZZ_PASSOS muda os passos por semente (padrão 60); FUZZ_SAIDA=<pasta> grava cada falha encolhida em JSON;
@@ -41,7 +49,9 @@ const { createGas } = require('./harness');
 // As sementes 31 e 56 entraram com os importadores de manejo (Fase 3, E3.6): com os quatro tipos novos no sorteio da
 // importação, nenhuma das anteriores chegava a aceitar uma medicação nem uma primeira identificação (a 31 também importa
 // e conclui um arquivo de ocorrências).
-const FIXAS = [20261115, 11, 47, 101, 2718, 3001, 3107, 3213, 3318, 9001, 9055, 1009, 1111, 1234, 4242, 777, 57, 8, 1, 31, 56];
+// A semente 262 entrou com o fuzz das Fases 1 a 3 (passada 1): com o gerador ampliado, nenhuma das anteriores chegava a
+// uma venda que entrasse na carência de uma aplicação (o oráculo da transição da carência).
+const FIXAS = [20261115, 11, 47, 101, 2718, 3001, 3107, 3213, 3318, 9001, 9055, 1009, 1111, 1234, 4242, 777, 57, 8, 1, 31, 56, 262];
 const PASSOS = Number(process.env.FUZZ_PASSOS || 60);
 const N = Number(process.env.FUZZ_SEMENTES || 0);
 const INICIO = process.env.FUZZ_INICIO !== undefined ? Number(process.env.FUZZ_INICIO) : Date.now() % 1000000000;
@@ -97,6 +107,11 @@ test('teste aleatório de todos os comandos da Fase 2 (' + (N ? N + ' sementes n
       chaves.forEach((k) => { if (!eventos[k]) faltam.push(k); });
     });
     assert.deepEqual(faltam, [], 'tipos ativos sem registro aceito no teste aleatório (porEvento: ' + JSON.stringify(eventos) + ')');
+    // Fuzz das Fases 1 a 3: cada oráculo novo conferiu algo de verdade nas sementes fixas (o reenvio do bloco gravado, a
+    // conferência da chave gravada e da não enviada, a transição do estoque e da carência, a agenda, a dose por kg, o GMD
+    // e os indicadores da estação).
+    const semCobertura = ['bloco reenviado depois de gravado', 'chave conferida CONFIRMADA', 'chave conferida INEXISTENTE', 'estoque abaixo de zero pelo comando', 'venda que entrou na carência', 'pendências da agenda conferidas', 'carências da agenda conferidas', 'dose por kg conferida', 'intervalos de GMD conferidos', 'estação com indicadores conferidos'].filter((k) => !F.COBERTURA[k]);
+    assert.deepEqual(semCobertura, [], 'oráculos novos sem nada conferido nas sementes fixas (' + JSON.stringify(F.COBERTURA) + ')');
   }
 });
 
