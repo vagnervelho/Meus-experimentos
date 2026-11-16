@@ -696,6 +696,8 @@ function brinco(rnd, S) {
   const usados = Array.from(S.animais.values()).map((a) => a.brinco).filter(Boolean);
   if (x < 0.18 && usados.length) return sorteio(rnd, usados);
   if (x < 0.22 && usados.length) return '0' + sorteio(rnd, usados);
+  // Passada 4: o brinco com letra ou hífen (o parâmetro brinco_somente_numerico muda no meio).
+  if (x < 0.26) return sorteio(rnd, ['A', 'B-', 'V']) + (1 + Math.floor(rnd() * 30));
   return String(1 + Math.floor(rnd() * 120));
 }
 const MOVEIS = (S) => Array.from(S.animais.values()).filter((a) => a.situacao_cadastral !== 'EXTERNO').map((a) => a.animal_id);
@@ -739,9 +741,12 @@ function montarDadosDoTipo(sis, spec) {
     return { tipo: s.tipo, campos, animais: s.ids.map((animal_id) => ({ animal_id })) };
   }
   if (s.tipo === 'DIVERGENCIA_CONTAGEM') return { tipo: 'AJUSTE_INVENTARIO', subtipo: 'DIVERGENCIA_CONTAGEM', campos: { event_date: s.data, justificativa: 'Faltou na contagem do curral' }, animais: s.ids.map((animal_id) => ({ animal_id })) };
-  if (s.tipo === 'CORRECAO_LOCALIZACAO') return { tipo: 'AJUSTE_INVENTARIO', subtipo: 'CORRECAO_LOCALIZACAO', campos: { event_date: s.data, justificativa: 'Achado em outro pasto' }, animais: [Object.assign({ animal_id: s.id, pasto_destino_id: s.destino }, s.origem ? { pasto_origem_id: s.origem } : {})] };
-  if (s.tipo === 'RECLASSIFICACAO') return { tipo: 'AJUSTE_INVENTARIO', subtipo: 'RECLASSIFICACAO', campos: { event_date: s.data, justificativa: 'Categoria conferida no curral' }, animais: [{ animal_id: s.id, categoria_manual_id: s.cat }] };
-  if (s.tipo === 'IDENTIFICACAO_INCORRETA') return { tipo: 'AJUSTE_INVENTARIO', subtipo: 'IDENTIFICACAO_INCORRETA', campos: { event_date: s.data, justificativa: 'Brinco digitado errado' }, animais: [{ animal_id: s.id, brinco: s.brinco }] };
+  // Passada 4: os ajustes de um animal por item também com vários animais no mesmo lançamento (s.mais), às vezes o mesmo
+  // animal duas vezes.
+  const itensAjuste = (f) => [f(s)].concat((s.mais || []).map(f));
+  if (s.tipo === 'CORRECAO_LOCALIZACAO') return { tipo: 'AJUSTE_INVENTARIO', subtipo: 'CORRECAO_LOCALIZACAO', campos: { event_date: s.data, justificativa: 'Achado em outro pasto' }, animais: itensAjuste((x) => Object.assign({ animal_id: x.id, pasto_destino_id: x.destino }, x.origem ? { pasto_origem_id: x.origem } : {})) };
+  if (s.tipo === 'RECLASSIFICACAO') return { tipo: 'AJUSTE_INVENTARIO', subtipo: 'RECLASSIFICACAO', campos: { event_date: s.data, justificativa: 'Categoria conferida no curral' }, animais: itensAjuste((x) => ({ animal_id: x.id, categoria_manual_id: x.cat })) };
+  if (s.tipo === 'IDENTIFICACAO_INCORRETA') return { tipo: 'AJUSTE_INVENTARIO', subtipo: 'IDENTIFICACAO_INCORRETA', campos: { event_date: s.data, justificativa: 'Brinco digitado errado' }, animais: itensAjuste((x) => ({ animal_id: x.id, brinco: x.brinco })) };
   if (s.tipo === 'CORRECAO_CADASTRO') {
     const animais = [];
     s.itens.forEach((x) => {
@@ -991,20 +996,24 @@ function propor(sis, S, rnd, tipo) {
     const ids = animaisPara(S, rnd, D, 1, (id, p) => p.fim);
     if (!ids.length) return null;
     const data = rnd() < 0.4 ? dataPara(S, rnd, ids) : D;
-    const onde = presenca(S, ids[0], data).pasto;
-    return { tipo, data, id: ids[0], destino: rnd() < 0.9 ? sorteio(rnd, P.filter((p) => p !== onde)) : onde, origem: rnd() < 0.2 ? sorteio(rnd, P) : null };
+    const um = (id) => { const onde = presenca(S, id, data).pasto; return { id, destino: rnd() < 0.9 ? sorteio(rnd, P.filter((p) => p !== onde)) : onde, origem: rnd() < 0.2 ? sorteio(rnd, P) : null }; };
+    return Object.assign({ tipo, data }, um(ids[0]), maisAjustes(S, rnd, D, ids[0], (id, p) => p.fim, um));
   }
   if (tipo === 'RECLASSIFICACAO') {
     const ids = animaisPara(S, rnd, D, 1, (id, p) => p.dia);
     if (!ids.length) return null;
-    const sexo = (S.animais.get(ids[0]) || {}).sexo;
-    const cats = CATEGORIAS_DE(S).filter((c) => rnd() < 0.85 ? c.sexo === sexo || c.sexo === 'AMBOS' : true);
-    return { tipo, data: rnd() < 0.4 ? dataPara(S, rnd, ids) : D, id: ids[0], cat: rnd() < 0.2 ? null : (sorteio(rnd, cats) || {}).id || null };
+    const um = (id) => {
+      const sexo = (S.animais.get(id) || {}).sexo;
+      const cats = CATEGORIAS_DE(S).filter((c) => rnd() < 0.85 ? c.sexo === sexo || c.sexo === 'AMBOS' : true);
+      return { id, cat: rnd() < 0.2 ? null : (sorteio(rnd, cats) || {}).id || null };
+    };
+    return Object.assign({ tipo, data: rnd() < 0.4 ? dataPara(S, rnd, ids) : D }, um(ids[0]), maisAjustes(S, rnd, D, ids[0], (id, p) => p.dia, um));
   }
   if (tipo === 'IDENTIFICACAO_INCORRETA') {
     const ids = animaisPara(S, rnd, D, 1, (id, p) => p.dia);
     if (!ids.length) return null;
-    return { tipo, data: rnd() < 0.5 ? dataPara(S, rnd, ids) : D, id: ids[0], brinco: brinco(rnd, S) || '99' };
+    const um = (id) => ({ id, brinco: brinco(rnd, S) || '99' });
+    return Object.assign({ tipo, data: rnd() < 0.5 ? dataPara(S, rnd, ids) : D }, um(ids[0]), maisAjustes(S, rnd, D, ids[0], (id, p) => p.dia, um));
   }
   if (tipo === 'CORRECAO_CADASTRO') {
     // Às vezes dois animais, ou dois campos do mesmo animal, no mesmo lançamento.
@@ -1015,6 +1024,13 @@ function propor(sis, S, rnd, tipo) {
     return { tipo, data: rnd() < 0.5 ? dataPara(S, rnd, ids) : D, itens };
   }
   return null;
+}
+/** Passada 4: outros itens no mesmo ajuste (outro animal, às vezes o mesmo com outro valor); {} quando não. */
+function maisAjustes(S, rnd, D, primeiro, filtro, um) {
+  if (rnd() >= 0.25) return {};
+  const outros = animaisPara(S, rnd, D, 2, filtro).filter((id) => id !== primeiro);
+  const ids = rnd() < 0.15 ? [primeiro] : outros;
+  return ids.length ? { mais: ids.map(um) } : {};
 }
 /** Uma correção de cadastro escolhida para provocar: sexo de mãe ou touro, nascimento depois do filho ou na véspera do primeiro registro, mãe macho, ciclo. */
 function correcaoAleatoria(sis, S, rnd, id) {
@@ -1086,6 +1102,27 @@ function mutar(sis, S, rnd, spec) {
     else if (s.valor !== undefined || s.tipo === 'MORTE' || s.tipo === 'DESCARTE') s.valor = rnd() < 0.3 ? 0 : sorteio(rnd, [1, 7777]);
     else if (s.acao) s.acao = s.acao === 'MARCAR' ? 'DESMARCAR' : 'MARCAR';
   } else if (x < 0.8 && s.pasto) s.pasto = sorteio(rnd, P);
+  else if (x < 0.93) {
+    // Passada 4: o que a correção ainda não mudava: o parceiro do negócio, a propriedade do lançamento, o subtipo da
+    // identificação e da marcação, a origem da venda e da transferência, e os outros itens dos ajustes.
+    const y = rnd();
+    if (s.neg && y < 0.35 && S.t.PARCEIROS.length) s.parceiro = sorteio(rnd, S.t.PARCEIROS).partner_id;
+    else if (y < 0.5 && S.t.PROPRIEDADES.length) s.prop = sorteio(rnd, S.t.PROPRIEDADES).property_id;
+    else if (s.tipo === 'IDENTIFICACAO') s.sub = sorteio(rnd, ['PRIMEIRA_IDENTIFICACAO', 'SUBSTITUICAO', 'REMOCAO'].filter((v) => v !== s.sub));
+    else if (s.tipo === 'MARCACAO') { s.sub = s.sub === 'DESCARTE' ? 'NAO_LOCALIZADO' : 'DESCARTE'; s.motivo = null; }
+    else if (s.tipo === 'TRANSFERENCIA' || s.tipo === 'VENDA') s.origem = rnd() < 0.2 ? null : sorteio(rnd, P);
+    else if (s.mais && s.mais.length && rnd() < 0.5) s.mais.splice(Math.floor(rnd() * s.mais.length), 1);
+    else if (s.id && ['RECLASSIFICACAO', 'IDENTIFICACAO_INCORRETA', 'CORRECAO_LOCALIZACAO'].indexOf(s.tipo) >= 0) {
+      const outro = sorteio(rnd, MOVEIS(S).filter((id) => id !== s.id));
+      if (outro) (s.mais = s.mais || []).push({ id: outro, cat: s.cat, brinco: brinco(rnd, S) || '97', destino: s.destino, origem: null });
+    }
+  }
+  return s;
+}
+/** Passada 4: a correção composta (data, animais e valores mudados juntos), além da de uma mudança só. */
+function mutarVarias(sis, S, rnd, spec) {
+  let s = mutar(sis, S, rnd, spec);
+  if (rnd() < 0.35) { s = mutar(sis, S, rnd, s); if (rnd() < 0.4) s = mutar(sis, S, rnd, s); }
   return s;
 }
 
@@ -1150,24 +1187,42 @@ function arquivoImportacao(sis, S, rnd, tipo) {
     return { texto: linhas.join('\n'), mapa: { colunas: { data: 'data', mae: 'mae', situacao: 'situacao', sexo: 'sexo', cria: 'brinco', pai: 'pai' }, confiancas: { pai: 'ESTIMADA' }, padroes: {} } };
   }
   if (tipo === 'COMPRAS') {
-    const linhas = ['grupo;data;fornecedor;modalidade;valor;preco;brinco;sexo;pasto'];
-    const n = 1 + Math.floor(rnd() * 2);
-    const preco = sorteio(rnd, [200000, 1, 333333]);
-    const d = br(data());
-    for (let i = 0; i < n; i++) {
-      const volta = rnd() < 0.25 && comBrinco.length ? b(sorteio(rnd, comBrinco)) : null;
-      linhas.push([i === 0 ? 'C1' : 'C1', i === 0 ? d : '', i === 0 ? 'Fazenda Vizinha' : '', i === 0 ? 'cabeça' : '', i === 0 ? reais(preco * n) : '', i === 0 ? reais(preco) : '', volta || brinco(rnd, S) || String(200 + i), rnd() < 0.5 ? 'M' : 'F', pastoNome()].join(';'));
+    // Passada 4: mais de uma compra no arquivo, o preço por kg com o peso de cada animal, o frete e as parcelas.
+    const linhas = ['grupo;data;fornecedor;modalidade;valor;preco;brinco;sexo;pasto;peso;frete;parcelas;vencimento'];
+    const grupos = rnd() < 0.3 ? 2 : 1;
+    for (let gI = 0; gI < grupos; gI++) {
+      const n = 1 + Math.floor(rnd() * 2);
+      const kg = rnd() < 0.3;
+      const preco = kg ? 900 + Math.floor(rnd() * 600) : sorteio(rnd, [200000, 1, 333333]);
+      const pesos = Array.from({ length: n }, () => 150 + Math.floor(rnd() * 4000) / 10);
+      const valor = kg ? Math.round(pesos.reduce((a, p) => a + Math.round(p * 10), 0) * preco / 10) : preco * n;
+      const dd = data();
+      const d = br(dd);
+      const frete = rnd() < 0.3 ? reais(sorteio(rnd, [1, 12345, 0])) : '';
+      const nParc = rnd() < 0.3 ? String(1 + Math.floor(rnd() * 3)) : '';
+      const venc = nParc && rnd() < 0.8 ? br(somaDias(dd, 30)) : '';
+      for (let i = 0; i < n; i++) {
+        const volta = rnd() < 0.25 && comBrinco.length ? b(sorteio(rnd, comBrinco)) : null;
+        const p0 = i === 0;
+        linhas.push(['C' + (gI + 1), p0 ? d : '', p0 ? 'Fazenda Vizinha' : '', p0 ? (kg ? 'kg' : 'cabeça') : '', p0 ? reais(valor) : '', p0 ? reais(preco) : '', volta || brinco(rnd, S) || String(200 + 10 * gI + i), rnd() < 0.5 ? 'M' : 'F', pastoNome(), kg || rnd() < 0.2 ? dec(pesos[i]) : '', p0 ? frete : '', p0 ? nParc : '', p0 ? venc : ''].join(';'));
+      }
     }
-    return { texto: linhas.join('\n'), mapa: { colunas: { grupo: 'grupo', data: 'data', fornecedor: 'fornecedor', modalidade: 'modalidade', valor: 'valor_animais', preco: 'preco', brinco: 'brinco', sexo: 'sexo', pasto: 'pasto' }, confiancas: {}, padroes: { castrado: false, reprodutor: false } } };
+    return { texto: linhas.join('\n'), mapa: { colunas: { grupo: 'grupo', data: 'data', fornecedor: 'fornecedor', modalidade: 'modalidade', valor: 'valor_animais', preco: 'preco', brinco: 'brinco', sexo: 'sexo', pasto: 'pasto', peso: 'peso', frete: 'frete', parcelas: 'parcelas', vencimento: 'vencimento' }, confiancas: {}, padroes: { castrado: false, reprodutor: false } } };
   }
   if (tipo === 'VENDAS') {
-    const linhas = ['grupo;data;comprador;finalidade;modalidade;preco;bruto;brinco'];
-    const ids = alguns(rnd, ativos.length ? ativos : comBrinco, 2);
-    if (!ids.length) return null;
-    const preco = sorteio(rnd, [250000, 1]);
-    const d = br(data());
-    ids.forEach((id, i) => linhas.push([i === 0 ? 'V1' : 'V1', i === 0 ? d : '', i === 0 ? 'Frigorífico Boi Bom' : '', i === 0 ? sorteio(rnd, ['abate', 'recria e engorda']) : '', i === 0 ? 'cabeça' : '', i === 0 ? reais(preco) : '', i === 0 ? reais(preco * ids.length) : '', b(id)].join(';')));
-    return { texto: linhas.join('\n'), mapa: { colunas: { grupo: 'grupo', data: 'data', comprador: 'comprador', finalidade: 'finalidade', modalidade: 'modalidade', preco: 'preco', bruto: 'valor_bruto', brinco: 'brinco' }, confiancas: {}, padroes: {} } };
+    // Passada 4: mais de uma venda no arquivo (às vezes o mesmo animal nas duas) e as parcelas.
+    const linhas = ['grupo;data;comprador;finalidade;modalidade;preco;bruto;brinco;parcelas'];
+    const todos = alguns(rnd, ativos.length ? ativos : comBrinco, 4);
+    if (!todos.length) return null;
+    const grupos = todos.length > 1 && rnd() < 0.3 ? [todos.slice(0, 1), todos.slice(1)] : [todos.slice(0, 2)];
+    if (grupos.length > 1 && rnd() < 0.15) grupos[1].push(todos[0]);
+    grupos.forEach((ids, gI) => {
+      const preco = sorteio(rnd, [250000, 1]);
+      const d = br(data());
+      const nParc = rnd() < 0.3 ? String(1 + Math.floor(rnd() * 3)) : '';
+      ids.forEach((id, i) => linhas.push(['V' + (gI + 1), i === 0 ? d : '', i === 0 ? 'Frigorífico Boi Bom' : '', i === 0 ? sorteio(rnd, ['abate', 'recria e engorda']) : '', i === 0 ? 'cabeça' : '', i === 0 ? reais(preco) : '', i === 0 ? reais(preco * ids.length) : '', b(id), i === 0 ? nParc : ''].join(';')));
+    });
+    return { texto: linhas.join('\n'), mapa: { colunas: { grupo: 'grupo', data: 'data', comprador: 'comprador', finalidade: 'finalidade', modalidade: 'modalidade', preco: 'preco', bruto: 'valor_bruto', brinco: 'brinco', parcelas: 'parcelas' }, confiancas: {}, padroes: {} } };
   }
   return null;
 }
@@ -1178,7 +1233,7 @@ function arquivoImportacao(sis, S, rnd, tipo) {
  */
 function gerar(sis, S, rnd, k) {
   const em = S.t.IMPORTACOES.filter((i) => ['RASCUNHO', 'VALIDADO', 'IMPORTANDO'].indexOf(i.status) >= 0);
-  const base = { avisos: rnd() < 0.5 ? AVISOS : [], aceitar: rnd() < 0.9, simular: rnd() < 0.25 };
+  const base = { avisos: rnd() < 0.5 ? AVISOS : [], aceitar: rnd() < 0.9, simular: rnd() < 0.25, semJustAviso: rnd() < 0.08 };
   if (!S.marco && rnd() < 0.5) return Object.assign(base, { rota: 'config.salvar', dados: { valores: { data_marco_zero: sorteio(rnd, [D0, somaDias(D0, -31), somaDias(HOJE, 3)]) } }, rotulo: 'marco zero' });
   if (em.length && rnd() < 0.6) {
     const imp = sorteio(rnd, em);
@@ -1206,13 +1261,16 @@ function gerar(sis, S, rnd, k) {
   }
   if (sis.snapImp && rnd() < 0.3) {
     const imp = S.t.IMPORTACOES.find((i) => i.import_id === sis.snapImp.import_id);
-    if (imp && imp.status === 'IMPORTADO') return Object.assign(base, { rota: 'importacao.desfazer', dados: { import_id: imp.import_id, justificativa: 'Arquivo errado' }, desfazerImediato: true, rotulo: 'desfazer logo depois de importar' });
+    if (imp && imp.status === 'IMPORTADO') return Object.assign(base, { rota: 'importacao.desfazer', dados: { import_id: imp.import_id, justificativa: 'Arquivo errado' }, aceitar: true, semJustAviso: false, desfazerImediato: true, rotulo: 'desfazer logo depois de importar' });
   }
   if (sis.snap && sis.snap.dv === sis.versao() && rnd() < 0.18) { const c = gerarAcao(sis, S, rnd, k, rnd() < 0.65 ? 'estornoImediato' : 'correcaoIdentica', base); if (c) return c; }
   const acao = pesado(rnd, [
     ['registrar', 55], ['corrigir', 14], ['estornar', 11], ['editar', 5], ['reuso', 2], ['zeros', 0.6], ['marco', 1],
     ['importar', 4], ['desfazer', 1.5], ['reenvio', 1.5], ['versao', 1.5], ['cadastro', 5], ['outraChave', 1], ['lote', 0.5], ['faixas', 0.3],
     ['estornoImediato', 4], ['anexo', 2.5],
+    // Passada 4: os parâmetros que mudam regra e projeção, o período financeiro fechado, a política de avisos e a versão
+    // esperada atual (o caminho que deve passar).
+    ['parametro', 1.5], ['bloqueio', 2], ['politica', 1.2], ['versaoAtual', 1.5],
   ]);
   return gerarAcao(sis, S, rnd, k, acao, base);
 }
@@ -1245,7 +1303,7 @@ function gerarAcao(sis, S, rnd, k, acao, base) {
         const alvo2 = sorteio(rnd, semSpec.length && rnd() < 0.7 ? semSpec : daLista);
         const spec0 = alvo2 && specDoGravado(sis, S, rnd, alvo2);
         if (spec0) {
-          const spec = rnd() < 0.3 ? spec0 : mutar(sis, S, rnd, spec0);
+          const spec = rnd() < 0.3 ? spec0 : mutarVarias(sis, S, rnd, spec0);
           const dados = Object.assign(montarDados(sis, spec), { event_id: alvo2.event_id, justificativa: 'Corrigindo o lançamento' });
           return Object.assign(base, { rota: 'evento.corrigir', dados, spec, rotulo: 'corrigir ' + alvo2.event_type + (alvo2.import_id ? ' (importado)' : ' (pelas linhas)') });
         }
@@ -1263,7 +1321,7 @@ function gerarAcao(sis, S, rnd, k, acao, base) {
       alvo = rnd() < 0.4 ? sorteio(rnd, comSpec.slice(-3)) : sorteio(rnd, comSpec);
       if (!alvo) return null;
       const memo = sis.specs.get(alvo.event_id);
-      const spec = rnd() < 0.15 ? js(memo.spec) : mutar(sis, S, rnd, memo.spec);
+      const spec = rnd() < 0.15 ? js(memo.spec) : mutarVarias(sis, S, rnd, memo.spec);
       const dados = Object.assign(montarDados(sis, spec), { event_id: alvo.event_id, justificativa: 'Corrigindo o lançamento' });
       return Object.assign(base, { rota: 'evento.corrigir', dados, spec, rotulo: 'corrigir ' + alvo.event_type + (alvo.reversal_of_event_id ? ' (substituto)' : '') });
     }
@@ -1284,7 +1342,7 @@ function gerarAcao(sis, S, rnd, k, acao, base) {
   if (acao === 'estornoImediato') {
     const snap = sis.snap;
     if (!snap || snap.dv !== sis.versao()) return null;
-    return Object.assign(base, { rota: 'evento.estornar', dados: { event_id: snap.eid, justificativa: 'Lançado errado' }, aceitar: true, estornoImediato: true, rotulo: 'estorno imediato de ' + snap.tipo });
+    return Object.assign(base, { rota: 'evento.estornar', dados: { event_id: snap.eid, justificativa: 'Lançado errado' }, aceitar: true, semJustAviso: false, estornoImediato: true, rotulo: 'estorno imediato de ' + snap.tipo });
   }
   // Passada 3: a correção logo depois do registro com a mesma especificação (os mesmos animais criados) não muda nenhum
   // animal: o substituto fica na posição do original.
@@ -1292,7 +1350,7 @@ function gerarAcao(sis, S, rnd, k, acao, base) {
     const snap = sis.snap;
     if (!snap || snap.dv !== sis.versao() || !sis.specs.has(snap.eid)) return null;
     const dados = Object.assign(montarDados(sis, js(sis.specs.get(snap.eid).spec)), { event_id: snap.eid, justificativa: 'Conferido de novo' });
-    return Object.assign(base, { rota: 'evento.corrigir', dados, aceitar: true, correcaoIdentica: true, rotulo: 'correção idêntica de ' + snap.tipo });
+    return Object.assign(base, { rota: 'evento.corrigir', dados, aceitar: true, semJustAviso: false, correcaoIdentica: true, rotulo: 'correção idêntica de ' + snap.tipo });
   }
   // Passada 3: anexos (E2.9) no evento, no lançamento e no animal, e a remoção; o evento anexado é depois corrigido,
   // estornado ou desfeito pela importação como qualquer outro.
@@ -1325,7 +1383,45 @@ function gerarAcao(sis, S, rnd, k, acao, base) {
   if (acao === 'lote') return Object.assign(base, { rota: 'config.salvar', dados: { valores: { importacao_lote_linhas: sorteio(rnd, ['1', '2', '3']) } }, rotulo: 'lote da importação' });
   if (acao === 'faixas') return Object.assign(base, { rota: 'config.salvar', dados: { valores: { faixas_etarias_meses: sorteio(rnd, ['[12,24,36]', '[6,18,30]', '[24,12]']) } }, rotulo: 'faixas etárias' });
   if (acao === 'marco') return Object.assign(base, { rota: 'config.salvar', dados: { valores: { data_marco_zero: sorteio(rnd, [D0, somaDias(D0, -31), somaDias(D0, 14), somaDias(HOJE, 3)]) } }, rotulo: 'marco zero' });
+  // Passada 4: parâmetros de regra e de projeção (a idade da desmama refaz a cria ao pé; a gestação, a idade reprodutiva e
+  // a tolerância do parto mudam os avisos; a arroba, o rendimento e a tolerância da conferência mudam a conta do negócio;
+  // o brinco só de números recusa o brinco com letra).
+  if (acao === 'parametro') {
+    const [chave, op] = sorteio(rnd, [
+      ['idade_desmama_padrao_meses', ['3', '8', '12', '30']], ['idade_min_reprodutiva_meses', ['12', '24', '40']], ['dias_gestacao', ['270', '290', '300']],
+      ['parto_tolerancia_dias', ['0', '20', '60']], ['arroba_kg', ['15', '15', '14.5']], ['rendimento_carcaca_padrao_pct', ['50', '52']],
+      ['fin_tolerancia_conferencia_pct', ['0', '1', '5']], ['brinco_somente_numerico', ['S', 'N', 'N']],
+    ]);
+    return Object.assign(base, { rota: 'config.salvar', dados: { valores: { [chave]: sorteio(rnd, op) } }, rotulo: 'parâmetro ' + chave });
+  }
+  // Passada 4: o período financeiro fechado (RN-082) numa data dos lançamentos gravados, no marco, hoje, ou aberto de novo.
+  if (acao === 'bloqueio') {
+    const datas = S.t.FINANCEIRO.map((f) => f.data_competencia).filter(Boolean);
+    const x = rnd();
+    const ate = x < 0.25 ? '' : x < 0.7 && datas.length ? somaDias(sorteio(rnd, datas), sorteio(rnd, [0, 0, 1, -1])) : sorteio(rnd, [S.marco || D0, HOJE, somaDias(HOJE, -60), somaDias(D0, -10)]);
+    return Object.assign(base, { rota: 'config.salvar', dados: { valores: { fin_bloqueio_ate: ate } }, rotulo: 'período fechado' + (ate ? '' : ' aberto') });
+  }
+  // Passada 4: a política de avisos (BLOQUEIA, AVISA, IGNORA) por código, no meio da sequência.
+  if (acao === 'politica') {
+    const pol = {};
+    alguns(rnd, POLITICAVEIS, 4).forEach((c) => { pol[c] = sorteio(rnd, ['BLOQUEIA', 'AVISA', 'IGNORA', 'IGNORA']); });
+    if (rnd() < 0.5) pol.CARENCIA_ATIVA = 'BLOQUEIA';
+    const texto = '{' + Object.keys(pol).sort().map((c) => JSON.stringify(c) + ':' + JSON.stringify(pol[c])).join(',') + '}';
+    return Object.assign(base, { rota: 'config.salvar', dados: { valores: { avisos_politica: rnd() < 0.15 ? '{"CARENCIA_ATIVA":"BLOQUEIA"}' : texto } }, rotulo: 'política de avisos' });
+  }
+  if (acao === 'versaoAtual') {
+    const sub = pesado(rnd, [['registrar', 3], ['corrigir', 1], ['estornar', 1], ['editar', 0.5], ['cadastro', 0.6], ['anexo', 0.3]]);
+    const c = gerarAcao(sis, S, rnd, k, sub, base);
+    if (!c || /^importacao\./.test(c.rota)) return null;
+    return Object.assign(c, { dvAtual: true, rotulo: 'versão atual: ' + (c.rotulo || c.rota) });
+  }
   if (acao === 'importar') {
+    // Passada 4: o mesmo arquivo enviado de novo, com outra chave (o aviso POSSIVEL_DUPLICIDADE, sob a política).
+    const enviados = (sis.aceitos || []).filter((x) => x.cmd.rota === 'importacao.criar');
+    if (enviados.length && rnd() < 0.15) {
+      const ant = sorteio(rnd, enviados).cmd;
+      return Object.assign(base, { rota: 'importacao.criar', dados: Object.assign({}, ant.dados, { arquivo_nome: 'de-novo-' + k + '-' + ant.dados.arquivo_nome }), mapa: ant.mapa, rotulo: 'importar o mesmo arquivo de novo' });
+    }
     const tipo = sorteio(rnd, ['ANIMAIS', 'ANIMAIS', 'TRANSFERENCIAS', 'MORTES', 'NASCIMENTOS', 'COMPRAS', 'VENDAS']);
     const arq = arquivoImportacao(sis, S, rnd, tipo);
     if (!arq) return null;
@@ -1401,6 +1497,8 @@ function gerarAcao(sis, S, rnd, k, acao, base) {
 
 /** Itens de lista que os comandos do gerador usam (desativados e reativados no meio, passada 3). */
 const LISTAS_USADAS = [['CAUSA_MORTE', 'DOENCA'], ['CAUSA_MORTE', 'RAIO'], ['MOTIVO_DESCARTE', 'IDADE'], ['DESTINO_DESCARTE', 'CONSUMO_PROPRIO'], ['DESTINO_DESCARTE', 'DOACAO'], ['TIPO_PARTO', 'ASSISTIDO'], ['TIPO_PARTO', 'NORMAL'], ['TIPO_DEDUCAO_VENDA', 'TAXA_FRIGORIFICO'], ['TIPO_DEDUCAO_VENDA', 'FUNRURAL'], ['TIPO_DEDUCAO_VENDA', 'FRETE'], ['MOTIVO_IDENTIFICACAO', 'PERDA'], ['MOTIVO_IDENTIFICACAO', 'DANIFICADO'], ['FINALIDADE_NEGOCIO', 'RECRIA_ENGORDA'], ['RACA', 'NELORE']];
+/** Passada 4: os avisos que a política muda (05, seção 1; Config.CODIGOS_AVISO, sem os da Fase 3). */
+const POLITICAVEIS = ['POSSIVEL_DUPLICIDADE', 'BRINCO_PARECIDO', 'LOTACAO_ACIMA_DA_CAPACIDADE', 'IDADE_REPRODUTIVA', 'PERIODO_BLOQUEADO', 'VALOR_DIVERGENTE', 'RATEIO_SEM_PESO', 'INTERVALO_PARTO_CURTO', 'CATEGORIAS_SEM_COBERTURA', 'CARENCIA_ATIVA'];
 const CONDICOES = ['NENHUMA', 'CASTRADO', 'INTEIRO', 'REPRODUTOR', 'NAO_REPRODUTOR', 'PARIDA', 'NAO_PARIDA'];
 /**
  * Passada 3: cadastros criados e editados no meio (não só desativados): pasto novo e com outra área ou capacidade,
@@ -1575,6 +1673,8 @@ function executar(sis, k, cmd, antesT, opcoes) {
   const chave = cmd.chaveDe !== undefined ? chaveDo(cmd.chaveDe) : chaveDo(k);
   const extra = { idempotencyKey: chave, avisosAceitos: cmd.avisos || [] };
   if (cmd.dvVelha) extra.dataVersionEsperada = dv0 - 1;
+  if (cmd.dvAtual) extra.dataVersionEsperada = dv0;
+  let pedidos = [];
   let sim = null;
   if (cmd.simular && !cmd.dvVelha && /^evento\.(registrar|corrigir|estornar)$/.test(cmd.rota)) {
     sim = sis.api('evento.simular', { acao: cmd.rota.split('.')[1], dados: cmd.dados }, { avisosAceitos: cmd.avisos || [] });
@@ -1590,10 +1690,13 @@ function executar(sis, k, cmd, antesT, opcoes) {
   if (!r.ok && r.error && r.error.code === 'NEEDS_CONFIRMATION') {
     falhas.push(...oraculoRecusa(sis, cmd, r, A, estado(depoisT), dv0, sis.versao(), chave));
     conferida = true;
+    pedidos = Array.from(new Set((r.error.details || []).map((d) => d.codigo)));
+    falhas.push(...oraculoPolitica(A, pedidos));
     if (cmd.aceitar) {
       conferida = false;
-      const codigos = Array.from(new Set((r.error.details || []).map((d) => d.codigo)));
-      const dados = codigos.indexOf('PERIODO_BLOQUEADO') >= 0 ? Object.assign({}, cmd.dados, { justificativa_aviso: 'Conferido com o pecuarista' }) : cmd.dados;
+      const codigos = pedidos;
+      // Passada 4: às vezes sem a justificativa do período fechado (a recusa CAMPO_OBRIGATORIO é o esperado).
+      const dados = codigos.indexOf('PERIODO_BLOQUEADO') >= 0 && !semJustificativa(cmd) ? Object.assign({}, cmd.dados, { justificativa_aviso: 'Conferido com o pecuarista' }) : cmd.dados;
       r = sis.api(cmd.rota, dados, Object.assign({}, extra, { avisosAceitos: (cmd.avisos || []).concat(codigos) }));
       depoisT = tabelas(sis);
       if (!r.ok && r.error.code === 'NEEDS_CONFIRMATION') falhas.push(falha('AVISO:REPETIDO', 'aceitos os avisos, o comando pediu confirmação de novo: ' + JSON.stringify(r.error.details.map((d) => d.codigo))));
@@ -1605,6 +1708,7 @@ function executar(sis, k, cmd, antesT, opcoes) {
     if (!conferida) falhas.push(...oraculoRecusa(sis, cmd, r, A, S, dv0, dv1, chave));
     if (cmd.dvVelha && r.error.code !== 'CONFLICT') falhas.push(falha('VERSAO', 'com a versão velha, ' + r.error.code + ' ' + r.error.message));
     if (cmd.outraChave && r.error.code !== 'IDEMPOTENCY_MISMATCH') falhas.push(falha('REENVIO', 'a mesma chave com outro conteúdo foi recusada com ' + r.error.code + ', não IDEMPOTENCY_MISMATCH: ' + r.error.message));
+    if (cmd.dvAtual && r.error.code === 'CONFLICT' && /mudaram desde que/.test(r.error.message)) falhas.push(falha('VERSAO:ATUAL', 'com a dataVersionEsperada atual (' + dv0 + '), o comando foi recusado como se os dados tivessem mudado'));
   } else {
     if (cmd.dvVelha) falhas.push(falha('VERSAO', 'aceito com dataVersionEsperada velha'));
     if (cmd.outraChave) falhas.push(falha('REENVIO', 'a mesma chave com outro conteúdo foi aceita' + (r.meta && r.meta.duplicado ? ' como duplicada' : '')));
@@ -1612,7 +1716,11 @@ function executar(sis, k, cmd, antesT, opcoes) {
       if (!r.meta.duplicado) falhas.push(falha('REENVIO', 'o reenvio com a mesma chave não foi tratado como duplicado'));
       if (dv1 !== dv0 || JSON.stringify(contagens(depoisT)) !== JSON.stringify(contagens(antesT))) falhas.push(falha('REENVIO', 'o reenvio duplicado gravou'));
     } else if (r.meta && r.meta.duplicado) falhas.push(falha('REENVIO', 'comando novo tratado como duplicado'));
-    else if (!r.meta || !r.meta.semAlteracao) falhas.push(...oraculoEfeito(sis, cmd, r.data, A, S));
+    else if (!r.meta || !r.meta.semAlteracao) {
+      falhas.push(...oraculoEfeito(sis, cmd, r.data, A, S));
+      falhas.push(...oraculoPeriodo(cmd, A, S, pedidos));
+      falhas.push(...oraculoPoliticaGravada(A, S));
+    }
   }
   if (cmd.estornoImediato) falhas.push(...oraculoEstornoImediato(sis, cmd, r, S, dv0));
   if (cmd.correcaoIdentica) falhas.push(...oraculoCorrecaoIdentica(sis, cmd, r, S, dv0));
@@ -1625,9 +1733,15 @@ function executar(sis, k, cmd, antesT, opcoes) {
   if (r.ok && cmd.rota === 'evento.registrar' && !cmd.reenvio && !(r.meta && r.meta.duplicado) && r.data && r.data.event_id) sis.snap = { eid: r.data.event_id, dv: dv1, tipo: cmd.dados.tipo + (cmd.dados.subtipo ? '/' + cmd.dados.subtipo : ''), animais: antesT.ANIMAIS, depois: depoisT.ANIMAIS };
   // A simulação é consulta: corre com a importação em curso, que só recusa o comando (desenho-base 16.8).
   if (sim && !(r.ok === false && r.error.code === 'CONFLICT' && A.emCurso.length)) {
-    const real = r.ok ? 'OK' : r.error.code;
+    // Sem a justificativa do período fechado, de propósito (passada 4), a recusa vem da segunda chamada; a simulação
+    // responde pela primeira, que pediu a confirmação.
+    const real = r.ok ? 'OK' : pedidos.indexOf('PERIODO_BLOQUEADO') >= 0 && semJustificativa(cmd) && r.error.code === 'VALIDATION' ? 'NEEDS_CONFIRMATION' : r.error.code;
     const simulado = sim.ok ? (sim.data.avisos && sim.data.avisos.length && !(cmd.avisos || []).length ? 'AVISOS' : 'OK') : sim.error.code;
-    const compativel = simulado === real || (simulado === 'AVISOS' && (real === 'NEEDS_CONFIRMATION' || real === 'OK')) || (simulado === 'OK' && real === 'NEEDS_CONFIRMATION') || real === 'IDEMPOTENCY_MISMATCH';
+    // O comando pede a confirmação dos avisos antes da trava; a simulação, que não confirma nada, vai até o fim e pode dar a
+    // recusa que o comando daria depois de confirmado (passada 4: o estorno no período fechado de um animal que voltaria a
+    // um pasto desativado). Sem o pedido de volta (aceitar = false), o desfecho depois da confirmação não é visto.
+    const depoisDaConfirmacao = real === 'NEEDS_CONFIRMATION' && !cmd.aceitar && (simulado === 'VALIDATION' || simulado === 'CONFLICT');
+    const compativel = simulado === real || depoisDaConfirmacao || (simulado === 'AVISOS' && (real === 'NEEDS_CONFIRMATION' || real === 'OK')) || (simulado === 'OK' && real === 'NEEDS_CONFIRMATION') || real === 'IDEMPOTENCY_MISMATCH';
     if (!compativel) falhas.push(falha('SIMULACAO', 'simulação ' + simulado + ' ' + JSON.stringify(sim.error || '').slice(0, 400) + ' × comando ' + real + ' ' + JSON.stringify(r.error || '').slice(0, 400)));
   }
   const datas = [];
@@ -1635,6 +1749,61 @@ function executar(sis, k, cmd, antesT, opcoes) {
   if (d.campos && d.campos.event_date) datas.push(d.campos.event_date, somaDias(d.campos.event_date, -1));
   if (!o.semGlobal) falhas.push(...oraculoGlobal(sis, S, datas));
   return { falhas, r, depoisT, S };
+}
+
+/** Passada 4: a política de avisos em vigor antes do comando ({código: BLOQUEIA|AVISA|IGNORA}). */
+function politicaDe(S) {
+  const t = S.config.get('avisos_politica');
+  if (!t) return { CARENCIA_ATIVA: 'BLOQUEIA' };
+  try { return JSON.parse(t); } catch (e) { return {}; }
+}
+const semJustificativa = (cmd) => !!cmd.semJustAviso && /^(evento\.(registrar|corrigir|estornar)|animal\.editar|importacao\.(importarBloco|desfazer))$/.test(cmd.rota);
+/**
+ * Passada 4: a política de avisos vale em todo caminho. Um aviso pedido (NEEDS_CONFIRMATION) tem a política AVISA: o de
+ * IGNORA some, o de BLOQUEIA vira erro. A carência fica fora (a política dela vale só na venda para abate; 05, seção 4.8).
+ */
+function oraculoPolitica(A, pedidos) {
+  const pol = politicaDe(A);
+  return pedidos.filter((c) => c !== 'CARENCIA_ATIVA' && pol[c] && pol[c] !== 'AVISA').map((c) => falha('POLITICA:' + c, 'o comando pediu confirmação do aviso ' + c + ', que a política manda ' + (pol[c] === 'IGNORA' ? 'ignorar' : 'bloquear')));
+}
+/** O aviso aceito gravado no lançamento (EVENTOS.payload_json) também segue a política em vigor. */
+function oraculoPoliticaGravada(A, S) {
+  const pol = politicaDe(A);
+  const out = [];
+  S.t.EVENTOS.forEach((e) => {
+    if (A.ev.has(e.event_id)) return;
+    const p = typeof e.payload_json === 'string' ? (() => { try { return JSON.parse(e.payload_json); } catch (x) { return null; } })() : e.payload_json;
+    ((p && p.avisos_aceitos) || []).forEach((a) => {
+      if (a.codigo !== 'CARENCIA_ATIVA' && pol[a.codigo] && pol[a.codigo] !== 'AVISA') out.push(falha('POLITICA:GRAVADO', e.event_type + ' gravado com o aviso ' + a.codigo + ' aceito, que a política manda ' + pol[a.codigo]));
+    });
+  });
+  return out;
+}
+/**
+ * Passada 4: o período financeiro fechado (RN-082; desenho-base, seção 11.3) vale em todo caminho. O comando aceito que
+ * cria lançamento (o do bloco importado ainda sem status) ou cancela um que valia, com competência até `fin_bloqueio_ate`, passou pela confirmação do
+ * aviso PERIODO_BLOQUEADO (política AVISA) ou foi recusado (BLOQUEIA); com IGNORA, nada. E o aviso só é pedido quando o
+ * comando mexe num lançamento do período.
+ */
+function oraculoPeriodo(cmd, A, S, pedidos) {
+  const ate = A.config.get('fin_bloqueio_ate') || null;
+  const pol = politicaDe(A).PERIODO_BLOQUEADO || 'AVISA';
+  const antes = new Map(A.t.FINANCEIRO.map((f) => [f.financial_id, f]));
+  const mexidos = [];
+  S.t.FINANCEIRO.forEach((f) => {
+    const a = antes.get(f.financial_id);
+    // O lançamento do bloco importado nasce sem status (vale na conclusão), mas é criado ali: o aviso é pedido no bloco.
+    const criou = !a && f.status !== 'CANCELADO';
+    const cancelou = a && a.status === 'ATIVO' && f.status !== 'ATIVO';
+    if ((criou || cancelou) && ate && f.data_competencia && f.data_competencia <= ate) mexidos.push((criou ? 'criou ' : 'cancelou ') + (f.descricao || f.natureza) + ' de ' + f.data_competencia);
+  });
+  const pediu = pedidos.indexOf('PERIODO_BLOQUEADO') >= 0;
+  const out = [];
+  if (mexidos.length && pol === 'BLOQUEIA') out.push(falha('PERIODO:BLOQUEIA', cmd.rota + ' aceito com a política BLOQUEIA no período fechado até ' + ate + ': ' + mexidos.slice(0, 3).join('; ')));
+  if (mexidos.length && pol === 'AVISA' && !pediu) out.push(falha('PERIODO:SEM_AVISO', cmd.rota + ' mexeu no período fechado até ' + ate + ' sem pedir a confirmação PERIODO_BLOQUEADO: ' + mexidos.slice(0, 3).join('; ')));
+  if (mexidos.length && pol === 'AVISA' && pediu && semJustificativa(cmd)) out.push(falha('PERIODO:SEM_JUSTIFICATIVA', cmd.rota + ' aceito no período fechado sem a justificativa do aviso'));
+  if (!mexidos.length && pediu) out.push(falha('PERIODO:AVISO_A_TOA', cmd.rota + ' pediu a confirmação PERIODO_BLOQUEADO (até ' + ate + ') sem criar nem cancelar lançamento do período'));
+  return out;
 }
 
 /**
@@ -1760,6 +1929,8 @@ function gravavel(sis, cmd) {
   const o = { rota: cmd.rota, dados: simbolizar(sis, cmd.dados), avisos: cmd.avisos, aceitar: cmd.aceitar };
   if (cmd.simular) o.simular = true;
   if (cmd.dvVelha) o.dvVelha = true;
+  if (cmd.dvAtual) o.dvAtual = true;
+  if (cmd.semJustAviso) o.semJustAviso = true;
   if (cmd.estornoImediato) o.estornoImediato = true;
   if (cmd.correcaoIdentica) o.correcaoIdentica = true;
   if (cmd.desfazerImediato) o.desfazerImediato = true;

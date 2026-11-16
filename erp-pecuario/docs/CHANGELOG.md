@@ -851,3 +851,6 @@ Nenhuma linha de código mudou nesta etapa: só documentos.
   metamórficos (73100 a 73419), 320 × 120 com os anexos (74100 a 74419) e 320 × 120 (75100 a 75419). A leva final, depois
   dos consertos, foi de 440 sementes novas × 120 passos (76000 a 76399 e, pelo `FUZZ_SEMENTES`, 77000 a 77039): 27.203
   comandos aceitos, 21.573 recusados, 0 falhas.
+- Verificado em Node: `tests/fase2.fuzz.test.js` (16 sementes fixas, 484 aceitos e 374 recusados) e
+  `tests/fase2.fuzz.regressoes.test.js` (7 casos); `npm test` completo com 644 testes, 644 aprovados e 0 falhas (543 s);
+  `npm run ui:check` com 85 testes, 85 aprovados e 0 falhas (221 s).

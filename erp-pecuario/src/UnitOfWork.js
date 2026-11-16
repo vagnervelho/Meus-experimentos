@@ -336,6 +336,56 @@ var UnitOfWork = (function () {
       permiteDuranteImportacao: !!o.permiteDuranteImportacao,
     };
   }
+  /**
+   * A política de avisos vale em todo caminho (seção 10.5, item 6): a UnitOfWork a aplica aos avisos de qualquer
+   * tratador (AuditService.politicaDosAvisos), lendo CONFIGURACOES quando o comando ainda não a leu.
+   */
+  function aplicarPolitica_(est, res) {
+    if (!(res.avisos || []).length || (res.erros || []).length) return res;
+    est.repo.carregar(['CONFIGURACOES']);
+    var p = AuditService.politicaDosAvisos(est.repo.publico(), res.avisos);
+    var out = {};
+    Object.keys(res).forEach(function (k) { out[k] = res[k]; });
+    out.avisos = p.avisos;
+    out.erros = p.erros;
+    return out;
+  }
+  /**
+   * Avisos da trava (seção 10.5, item 6): o que o retrato de depois pede confirmar, por qualquer caminho (o período
+   * financeiro fechado), com a política aplicada. BLOQUEIA recusa (VALIDATION); o aviso que o tratador já pediu não se
+   * repete. Devolve os avisos que ficam (o comando os confere com os aceitos; o SIMULAR os devolve).
+   */
+  function avisosDaTrava_(est, tx, res, plano, retrato) {
+    if (!retrato) return [];
+    var ja = {};
+    (res.avisos || []).forEach(function (a) { ja[a.codigo] = true; });
+    var lista = AuditService.avisosDaTrava({ antes: txDoRepo_(est, est.repo, tx.simulacao), depois: txDoRepo_(est, retrato.repo, tx.simulacao), lote: plano.lote, jaPedidos: ja });
+    var p = AuditService.politicaDosAvisos(est.repo.publico(), lista);
+    conferirValidacoes_({ erros: p.erros }, []);
+    return p.avisos;
+  }
+  /**
+   * O aviso da trava aceito: o período fechado exige a justificativa (`dados.justificativa_aviso`), que fica na operação
+   * (`OPERACOES.resumo_json.avisos_aceitos`, ao lado do resumo do tratador).
+   */
+  function aceitarAvisosDaTrava_(est, tx, op, avisos) {
+    if (!avisos.length) return;
+    var pendentes = avisos.filter(function (a) { return est.cmd.avisosAceitos.indexOf(a.codigo) < 0; });
+    if (pendentes.length) throw Validation.erro('NEEDS_CONFIRMATION', 'Confira os avisos antes de confirmar.', pendentes.map(Validation.detalhe));
+    var just = tx.dados && !vazio_(tx.dados.justificativa_aviso) ? String(tx.dados.justificativa_aviso) : null;
+    if (avisos.some(function (a) { return a.codigo === 'PERIODO_BLOQUEADO'; }) && just === null) {
+      var msg = 'Para mexer num lançamento do período financeiro fechado, escreva a justificativa.';
+      throw Validation.erro('VALIDATION', msg, [Validation.detalhe({ codigo: 'CAMPO_OBRIGATORIO', campo: 'justificativa_aviso', mensagem: msg })]);
+    }
+    var resumo = {};
+    var r = op.resumo_json;
+    if (r && typeof r === 'object' && !Array.isArray(r)) Object.keys(r).forEach(function (k) { resumo[k] = r[k]; });
+    else if (r !== null && r !== undefined) resumo.resumo = r;
+    resumo.avisos_aceitos = avisos.map(function (a) { return a.codigo === 'PERIODO_BLOQUEADO' ? { codigo: a.codigo, justificativa: just } : { codigo: a.codigo }; });
+    op.resumo_json = resumo;
+    var problemas = Validation.validarRegistro('OPERACOES', op);
+    if (problemas.length) throw Validation.erro('VALIDATION', 'O resumo da operação não pôde ser gravado.', problemas);
+  }
   function conferirValidacoes_(res, aceitos) {
     var erros = res.erros || [];
     if (erros.length) throw Validation.erro('VALIDATION', erros.length === 1 && !vazio_(erros[0].mensagem) ? erros[0].mensagem : 'Há ' + erros.length + ' problemas a corrigir antes de gravar.', erros);
@@ -503,7 +553,7 @@ var UnitOfWork = (function () {
 
     est.opId = ctx.idGen.uuid();
     var tx = novoTx_(est, false);
-    var res = cmd.tratador(tx) || {};
+    var res = aplicarPolitica_(est, cmd.tratador(tx) || {});
     var pendentes = conferirValidacoes_(res, cmd.avisosAceitos);
     if (pendentes.length) throw Validation.erro('NEEDS_CONFIRMATION', 'Confira os avisos antes de confirmar.', pendentes);
     var plano = fecharPlano_(est, tx);
@@ -524,6 +574,7 @@ var UnitOfWork = (function () {
     est.repo.carregar(extras);
     // Trava de integridade: o estado que ficaria gravado passa pelas checagens de domínio antes de qualquer escrita.
     var retrato = travar_(est, tx, op, plano, res);
+    aceitarAvisosDaTrava_(est, tx, op, avisosDaTrava_(est, tx, res, plano, retrato));
 
     // Fase A — só anexa: marcador, OPERACOES INICIADA, linhas inertes, auditoria.
     est.fase = 'A';
@@ -632,12 +683,13 @@ var UnitOfWork = (function () {
       est.opId = ctx.idGen.uuid();
       if (!est.cmd.chave) est.cmd.chave = 'simulacao';
       var tx = novoTx_(est, true);
-      var res = cmd.tratador(tx) || {};
+      var res = aplicarPolitica_(est, cmd.tratador(tx) || {});
       var pendentes = conferirValidacoes_(res, []);
       var plano = fecharPlano_(est, tx);
       if (!plano.vazio) {
         est.repo.carregar(Object.keys(plano.lote).concat(plano.entidades));
-        travar_(est, tx, operacaoSimulada_(est, cmd, res), plano, res);
+        var retrato = travar_(est, tx, operacaoSimulada_(est, cmd, res), plano, res);
+        pendentes = pendentes.concat(avisosDaTrava_(est, tx, res, plano, retrato));
       }
       var linhas = tx.plano.contagem();
       if (plano.auditoria.length) linhas.AUDITORIA = plano.auditoria.length;

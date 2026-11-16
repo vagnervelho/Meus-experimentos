@@ -1150,14 +1150,18 @@ var ImportService = (function () {
     return out;
   }
   /**
-   * importacao.desfazer. pedido: {dados: {import_id, justificativa}}. Leva a importação a CANCELADO: nenhum evento dela
-   * vale, sem apagar linha (as linhas e o arquivo original ficam como prova). Importação concluída só se desfaz se
-   * nenhum lançamento posterior depende dos animais (CONFLICT listando-os). Chave `imp:<import_id>:desfazer`.
+   * importacao.desfazer. pedido: {dados: {import_id, justificativa, justificativa_aviso?}, avisosAceitos}. Leva a
+   * importação a CANCELADO: nenhum evento dela vale, sem apagar linha (as linhas e o arquivo original ficam como prova).
+   * Importação concluída só se desfaz se nenhum lançamento posterior depende dos animais (CONFLICT listando-os). Cancelar
+   * lançamento do período financeiro fechado pede o aviso PERIODO_BLOQUEADO com `justificativa_aviso` (o aviso da trava,
+   * CONTRATOS 10.5). Chave `imp:<import_id>:desfazer`.
    */
   function desfazer(ctx, pedido) {
     var d = (pedido && pedido.dados) || {};
+    var dados = { import_id: d.import_id, justificativa: d.justificativa || null };
+    if (!vazio_(d.justificativa_aviso)) dados.justificativa_aviso = d.justificativa_aviso;
     return UnitOfWork.run(ctx, {
-      rota: 'importacao.desfazer', idempotencyKey: chaveBloco(d.import_id, 'desfazer'), dados: { import_id: d.import_id, justificativa: d.justificativa || null },
+      rota: 'importacao.desfazer', idempotencyKey: chaveBloco(d.import_id, 'desfazer'), dados: dados, avisosAceitos: pedido && pedido.avisosAceitos,
       reads: leiturasImportacao_().concat(['AUDITORIA']), acessoCru: true, permiteDuranteImportacao: true,
       reconstruir: function (tx) { return relatorioFinal_(tx, d.import_id); },
       tratador: function (tx) {

@@ -736,6 +736,21 @@ a conferência final do ESTADO RESULTANTE.
      pontos (veja cada um abaixo)").
    - Nada é gravado: a operação nem começa e a chave de idempotência continua livre.
 
+6. **Avisos da trava e política de avisos em todo caminho** (teste aleatório, passada 4). A política de
+   `avisos_politica` (IGNORA some, BLOQUEIA vira `VALIDATION` com o código do aviso, AVISA pede aceite) é aplicada pela
+   UnitOfWork aos avisos de qualquer tratador (`AuditService.politicaDosAvisos`, lendo CONFIGURACOES se o comando não a
+   leu), antes dos avisos não aceitos; aplicá-la de novo onde o serviço já a aplicou dá o mesmo. A carência
+   (`CARENCIA_ATIVA`) fica como o serviço da venda a deixou (a política dela vale só na finalidade ABATE). Depois da recusa
+   de integridade, o retrato de antes e o de depois dão os **avisos da trava** (`AuditService.avisosDaTrava`): hoje o
+   período financeiro fechado (RN-082). Comando que cria lançamento (o do bloco importado nasce sem status e conta) ou
+   cancela um que valia (ATIVO → CANCELADO), com `data_competencia` até `fin_bloqueio_ate`, pede `PERIODO_BLOQUEADO` (um
+   só por comando; "O lançamento "…", que este comando cancela (e mais N), cai em …, dentro do período financeiro fechado
+   (até …). Confirme com uma justificativa."), salvo quando o tratador já o pediu (o motor de eventos, com a mensagem
+   dele). Com a política: BLOQUEIA recusa, IGNORA não pede. Não aceito → `NEEDS_CONFIRMATION` (nada gravado, chave livre);
+   aceito sem `dados.justificativa_aviso` → `VALIDATION` `CAMPO_OBRIGATORIO` (campo `justificativa_aviso`); aceito, a
+   justificativa fica em `OPERACOES.resumo_json.avisos_aceitos` = `[{codigo, justificativa}]`. O `SIMULAR` devolve esses
+   avisos junto dos do tratador. O caminho que não pedia e agora pede: o desfazer da importação (seção 18).
+
 **Caminhos sem conferência própria fechados pela trava** (achados nesta etapa; `tests/trava.integridade.test.js`):
 - a correção do cadastro de referência do touro externo de um parto só de natimorto (sexo e nascimento;
   `INTEGRIDADE_GENEALOGIA`);
@@ -1415,7 +1430,7 @@ ISO sempre aceito), decimal (',' ou '.')}`.
 | `validarBloco(ctx, {idempotencyKey, dados: {import_id, bloco, mapeamento}})` | Relê e valida o arquivo INTEIRO (duplicidade no arquivo e na base, mãe e pai em duas passadas, ciclos, confiança, regras do catálogo e do marco zero) e grava só as linhas do bloco (anexa ou atualiza por `linha_num`). O bloco 1 recomeça e grava o mapeamento; os seguintes exigem o mesmo mapeamento e o anterior validado (`CONFLICT`). Linha: VALIDA, ERRO ou DUPLICADA com `erros_json` `[{codigo, campo, mensagem}]`. Última linha → VALIDADO. Sem marco zero → `CONFIG`. Devolve o estado (`obter`) |
 | `importarBloco(ctx, {avisosAceitos, dados: {import_id, bloco, modo, aprovacao: {importar, ignorar}, ignorar_linhas, property_id, justificativa_aviso}})` | Bloco 1 = confirmação: revalida (resultado diferente do gravado → `CONFLICT` "valide de novo"); `TOTAL` só sem linha reprovada (`IMPORTACAO_TOTAL_RECUSADA`); `PARCIAL_APROVADO` exige `aprovacao` igual aos números de agora (`APROVACAO_DIVERGENTE`) e fica em AUDITORIA (justificativa com quem aprovou); `ignorar_linhas` → IGNORADA (não pode ser progenitor de linha que entra: `PROGENITOR_IGNORADO`). Ordem de importação: progenitor do arquivo antes do filho, depois a linha. Blocos em ordem (`CONFLICT`); bloco já gravado por outra chave → sem alteração. Linhas → IMPORTADA com `entity_id_gerado`/`event_id_gerado`. Avisos do motor (ex.: `IDADE_REPRODUTIVA`) → `NEEDS_CONFIRMATION` |
 | `concluir(ctx, {dados: {import_id}})` | Exige todos os lotes (`CONFLICT`); backup IMPORTACAO ANTES; IMPORTADO (commit do arquivo inteiro), `finished_at`, reconstrução total das projeções. Devolve o relatório final |
-| `desfazer(ctx, {dados: {import_id, justificativa}})` | Qualquer estado menos CANCELADO → CANCELADO (nada se apaga; reconstrução total se havia eventos). IMPORTADO com lançamento, filho ou anexo posterior sobre os animais → `CONFLICT` com os detalhes (`conflito`; mensagem com o lançamento em palavras: "tem um lançamento posterior à importação: a correção de localização de 10/11/2026") |
+| `desfazer(ctx, {dados: {import_id, justificativa, justificativa_aviso?}, avisosAceitos})` | Qualquer estado menos CANCELADO → CANCELADO (nada se apaga; reconstrução total se havia eventos). IMPORTADO com lançamento, filho ou anexo posterior sobre os animais → `CONFLICT` com os detalhes (`conflito`; mensagem com o lançamento em palavras: "tem um lançamento posterior à importação: a correção de localização de 10/11/2026"). Cancelar lançamento que valia dentro do período financeiro fechado pede o aviso `PERIODO_BLOQUEADO` com `justificativa_aviso` (aviso da trava, seção 10.5, item 6; a tela mostra o "Vi e confirmo" e o campo da justificativa no próprio quadro do desfazer) |
 | `consultaObter({import_id})` / `obter(ctx, dados)` | `{importacao, contadores: {total, conferidas, validas, erro, duplicadas, ignoradas, importadas, por_codigo}, blocos: {tamanho, total, importados, proximo}, validacao: {conferidas, completa}, pode: {validar, importar, concluir, desfazer}}` |
 | `consultaLinhas({import_id, status, pagina, por_pagina})` | Pré-visualização: `{total, pagina, por_pagina, itens: [{linha_num, status, erros, dados_originais, interpretado, entity_id_gerado, event_id_gerado}]}`; na importação de eventos, cada item traz também `lancamento` = os `linha_num` (todas as páginas, em ordem) que formam o mesmo lançamento pela chave de agrupamento da validação (`null` na linha repetida no arquivo): deixar de fora vale para o lançamento inteiro (`GRUPO_PARCIAL`) |
 | `consultaRelatorio({import_id})` | Relatório final: o estado + `aprovacao {modo, por, em, texto}`, `criados {animais, eventos, ativos}`, `reprovadas [{linha_num, status, erros, dados_originais}]`, `ignoradas`, `pendencias {sem_brinco, sem_nascimento}` |
@@ -1940,6 +1955,26 @@ do pasto em que ele está, e nenhum fora do rebanho tem propriedade atual (passa
 | Sequência gravada e encolhimento | Cada comando é gravado com símbolos no lugar dos identificadores (`@k.aN`, `@k.eN`, `@k.iN`, `@k.pN`, `@k.cN`, `@k.fN`, `@k.lN`, `@k.rN`, `@k.nN`, `@k.mN`: o N-ésimo animal, evento, importação, pasto, categoria, parceiro, item de lista, propriedade, anexo e lançamento que o passo k criou; `@r:base` a propriedade da montagem; `@l:<lista>:<código>` dos itens de lista da montagem; `@b:<brinco>` do rebanho de base, `@p:A`, `@f:fornecedor`, `@x`, `@c:<categoria>`, `@conta`). `reproduzir(opcoes, comandos)` repete num sistema novo (o comando cujo símbolo ficou sem dono é pulado, e o reenvio cujo comando original ficou fora também) e devolve a primeira falha; `encolher` (ddmin) chega à menor sequência com a mesma assinatura (`INTEGRIDADE:<CHECAGEM>`, `EFEITO:<tipo>`, `RECUSA:MUDOU`, `REPLAY:...`, `SIMULACAO`...) |
 | Execução | `npm test` roda 16 sementes fixas de 60 passos (o arquivo em cerca de 30 s) e confere que cada tipo foi aceito, com correções, estornos e recusas. `FUZZ_SEMENTES=N` roda N sementes novas a partir de `FUZZ_INICIO` (padrão: o relógio); `FUZZ_PASSOS` (padrão 60), `FUZZ_SAIDA=<pasta>` (cada falha encolhida em JSON), `FUZZ_ENCOLHER=0`, `FUZZ_LOG_TRAVA=1` (lista as recusas da trava). Em falha, imprime a semente e a sequência mínima, pronta para `tests/fase2.fuzz.regressoes.test.js`, que repete cada caso com o mesmo oráculo e confere o desfecho de cada passo |
 
+**Passada 4** (gerador ampliado; lacunas achadas na leitura de `tests/apoio-fuzz.js`): o período financeiro fechado
+(`fin_bloqueio_ate`) nunca era ligado; a política de avisos (`avisos_politica`) nunca mudava; os parâmetros que mudam regra
+e projeção (idade da desmama, idade reprodutiva, gestação, tolerância do parto, arroba, rendimento, tolerância da
+conferência, brinco só de números) ficavam fixos; o brinco com letra ou hífen não aparecia; a correção mudava uma coisa só
+(nunca data, animais e valores juntos) e nunca o parceiro, a propriedade, o subtipo da identificação e da marcação, a
+origem da venda e da transferência; os ajustes de um animal por item (reclassificação, brinco lançado errado, correção de
+localização) tinham sempre um animal (nunca vários, nem o mesmo duas vezes); a `dataVersionEsperada` só ia velha (nunca a
+atual, que deve passar); o arquivo de compras tinha uma compra só, por cabeça, sem frete nem parcelas, e o de vendas uma
+venda só; o mesmo arquivo nunca era enviado de novo. Tudo isso entrou (ações `parametro`, `bloqueio`, `politica`,
+`versaoAtual`; `maisAjustes`, `mutarVarias`; os arquivos de compras e vendas com mais de um grupo, kg, frete e parcelas;
+"importar o mesmo arquivo de novo"), com três oráculos novos que valem para todo caminho:
+- **período fechado** (`oraculoPeriodo`): o comando aceito que cria lançamento (o do bloco importado ainda sem status) ou
+  cancela um que valia, com competência até `fin_bloqueio_ate` em vigor antes dele, passou pela confirmação
+  `PERIODO_BLOQUEADO` (política AVISA), foi recusado (BLOQUEIA) ou nada (IGNORA); o aviso só é pedido quando o comando
+  mexe num lançamento do período; às vezes o pedido volta sem a justificativa (`semJustAviso`), e a recusa
+  `CAMPO_OBRIGATORIO` é o esperado;
+- **política de avisos** (`oraculoPolitica`, `oraculoPoliticaGravada`): todo aviso pedido (`NEEDS_CONFIRMATION`), por
+  qualquer rota, e todo aviso aceito gravado em `EVENTOS.payload_json` tem a política AVISA (a carência fica fora);
+- **versão atual**: com a `dataVersionEsperada` atual, o comando nunca é recusado como se os dados tivessem mudado.
+
 Achados desta etapa (cada um com o caso em `tests/fase2.fuzz.regressoes.test.js`, que falha no código de antes):
 - O brinco lançado errado corrigido para antes de uma troca de brinco do mesmo dia: o substituto ocupa a posição do
   original e corrigia um número que ainda não estava no animal (o número da troca ficava gravado como "lançado errado" e
@@ -1962,6 +1997,16 @@ Achados desta etapa (cada um com o caso em `tests/fase2.fuzz.regressoes.test.js`
   que o `anexo.adicionar` não leva (o hash é dos metadados e do resumo do arquivo: é o mesmo pedido); a correção que
   mantinha a modalidade LOTE ou ARROBA de peso vivo perdia o critério, o valor do lote ou o rendimento e mandava
   `valor_animais` NaN (recusado na leitura do pedido, antes da versão). Nenhum defeito do sistema nesta passada.
+- Passada 4: o desfazer da importação cancelava os lançamentos de compras e vendas importadas dentro do período
+  financeiro fechado sem o aviso `PERIODO_BLOQUEADO` nem a justificativa (RN-082), que o registro, a correção, o estorno e
+  o bloco importado pedem; e o aviso `POSSIVEL_DUPLICIDADE` do arquivo de importação enviado de novo não passava pela
+  política de avisos (cada caminho aplicava a sua; a importação não). Fechados na UnitOfWork, para todo caminho: a
+  política aplicada a todo aviso e o aviso da trava do período (seção 10.5, item 6); a tela da importação pede o "Vi e
+  confirmo" e a justificativa no desfazer e no bloco (`tests/ui/importacao-periodo.test.js`).
+- Passada 4, no modelo do teste: o lançamento do bloco importado nasce sem status (vale na conclusão), e o oráculo do
+  período contava só o ATIVO; a simulação responde pela primeira chamada, e o pedido sem a justificativa do período é
+  recusado só na segunda; os oráculos metamórficos (estorno imediato, correção idêntica, desfazer imediato) vão sempre
+  com o aceite e a justificativa.
 - No modelo do teste (não no sistema), as invariantes cruas de `apoio-oraculos.js`: o lançamento sem parcela de evento
   anulado fica SEM_CAIXA (03b, seção 10.4: "vigente ou não"), o evento de importação desfeita fica CANCELADO sem anulador
   (o predicado de 02, seção 5.1), e o registro anterior ao marco zero conta os animais com efeito 0 em `qtd_animais`.

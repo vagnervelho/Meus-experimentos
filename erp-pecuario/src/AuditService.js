@@ -1754,6 +1754,59 @@ var AuditService = (function () {
     return resumo;
   }
 
+  // ------------------------------------------------------------------ avisos da trava ----
+  /**
+   * A política de avisos (`avisos_politica`) aplicada pela UnitOfWork a todo aviso de todo caminho (CONTRATOS, seção
+   * 10.5, item 6): IGNORA some, BLOQUEIA vira erro com o mesmo código, AVISA pede aceite. Os serviços que já a aplicam
+   * (o motor de eventos, as categorias, os parceiros, o animal de referência) não mudam de resultado: aplicá-la de novo
+   * dá o mesmo. A carência fica como veio: a política dela vale só na venda para abate, e quem sabe a finalidade é a
+   * venda (05, seção 4.8). Devolve {avisos, erros}.
+   */
+  function politicaDosAvisos(repo, avisos) {
+    var lista = avisos || [];
+    if (!lista.length) return { avisos: [], erros: [] };
+    var pol = (repo.carregada('CONFIGURACOES') ? Timeline.parametros(repo).avisos_politica : null) || {};
+    var out = { avisos: [], erros: [] };
+    lista.forEach(function (a) {
+      var p = a.codigo === 'CARENCIA_ATIVA' ? 'AVISA' : pol[a.codigo] || 'AVISA';
+      if (p === 'BLOQUEIA') out.erros.push(a);
+      else if (p !== 'IGNORA') out.avisos.push(a);
+    });
+    return out;
+  }
+  /**
+   * Avisos da trava (CONTRATOS, seção 10.5, item 6): o que o ESTADO RESULTANTE pede confirmar, por qualquer caminho, pelo
+   * retrato de antes e o de depois do comando. Hoje, o período financeiro fechado (RN-082; desenho-base, seção 11.3): o
+   * comando que cria lançamento ou cancela um que valia com competência até `fin_bloqueio_ate` — o registro, a correção, o
+   * estorno, o bloco importado ou o desfazer da importação — pede o aviso PERIODO_BLOQUEADO, um só por comando. O caminho
+   * que já pediu o aviso (o motor de eventos, com a mensagem dele) não o recebe de novo (`jaPedidos`: {codigo: true}).
+   * t: {antes, depois (tx com acesso cru), lote, jaPedidos}. Devolve os avisos, sem a política (a UnitOfWork a aplica).
+   */
+  function avisosDaTrava(t) {
+    var antes = t.antes.repo;
+    var ja = t.jaPedidos || {};
+    if (ja.PERIODO_BLOQUEADO || !antes.carregada('CONFIGURACOES')) return [];
+    var params = Timeline.parametros(antes);
+    if (vazio_(params.fin_bloqueio_ate)) return [];
+    var velhos = {};
+    if (antes.carregada('FINANCEIRO')) t.antes.cru.cru('FINANCEIRO').forEach(function (f) { velhos[f.financial_id] = f; });
+    var lista = t.depois.repo.carregada('FINANCEIRO') ? t.depois.cru.cru('FINANCEIRO') : (t.lote && t.lote.FINANCEIRO) || [];
+    var mexidos = [];
+    lista.forEach(function (f) {
+      var v = velhos[f.financial_id];
+      // O lançamento do bloco importado nasce sem status (vale na conclusão), mas é criado ali.
+      var criou = !v && f.status !== 'CANCELADO';
+      var cancelou = !!v && v.status === 'ATIVO' && f.status === 'CANCELADO';
+      if ((criou || cancelou) && !vazio_(f.data_competencia) && FinancialService.avisoPeriodo(params, f.data_competencia, '-')) mexidos.push({ f: f, criou: criou });
+    });
+    if (!mexidos.length) return [];
+    mexidos.sort(function (a, b) { return a.f.data_competencia < b.f.data_competencia ? -1 : a.f.data_competencia > b.f.data_competencia ? 1 : 0; });
+    var m = mexidos[0];
+    var oque = 'O lançamento "' + (m.f.descricao || m.f.natureza) + '", que este comando ' + (m.criou ? 'cria' : 'cancela') + (mexidos.length > 1 ? ' (e mais ' + (mexidos.length - 1) + ')' : '') + ',';
+    var a = FinancialService.avisoPeriodo(params, m.f.data_competencia, oque);
+    return [Validation.detalhe({ codigo: a.codigo, campo: 'justificativa_aviso', mensagem: a.mensagem })];
+  }
+
   return {
     LEITURAS: LEITURAS,
     linhas: linhas,
@@ -1773,5 +1826,7 @@ var AuditService = (function () {
     leiturasTrava: leiturasTrava,
     sementesDaTrava: sementesDaTrava,
     travar: travar,
+    politicaDosAvisos: politicaDosAvisos,
+    avisosDaTrava: avisosDaTrava,
   };
 })();

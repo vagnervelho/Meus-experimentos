@@ -456,6 +456,8 @@ var TelaImportacao = (function () {
       while (b) {
         var dados = { import_id: id, bloco: b };
         if (b === 1) { dados.modo = conf.modo; dados.aprovacao = conf.aprovacao; if (conf.property_id) dados.property_id = conf.property_id; if ((conf.ignorar_linhas || []).length) dados.ignorar_linhas = conf.ignorar_linhas; }
+        // Lançamento no período financeiro fechado: a justificativa vai em todo bloco (cada bloco é um comando).
+        if (conf.justificativa_aviso) dados.justificativa_aviso = conf.justificativa_aviso;
         e = (await Cliente.comando('importacao.importarBloco', dados, { chave: 'imp-ui:' + id + ':' + b, avisosAceitos: aceitos })).data;
         mostrar(e.contadores.importadas);
         b = e.blocos.proximo;
@@ -479,17 +481,40 @@ var TelaImportacao = (function () {
     }
     return null;
   }
-  function avisos(corpo, id, estado, conf, lista) {
+  /**
+   * Avisos a confirmar (um "Vi e confirmo" por aviso). O período financeiro fechado (PERIODO_BLOQUEADO) pede também a
+   * justificativa, que segue no comando como `justificativa_aviso` (RN-082). Devolve {el, pronto(), aceitos(),
+   * justificativa()}; `aoMudar` é chamado a cada marca ou letra.
+   */
+  function caixaAvisos(lista, prefixo, aoMudar) {
     var marcas = {};
+    var just = null;
     var ul = h('ul', { class: 'lista-avisos' }, lista.map(function (a, i) {
-      var cx = h('input', { type: 'checkbox', id: 'imp-av-' + i });
-      cx.addEventListener('change', function () { marcas[i] = cx.checked; seguir.disabled = !lista.every(function (x, k) { return marcas[k]; }); });
-      return h('li', null, h('div', { class: 'campo-linha' }, UI.icone('aviso'), h('span', { text: a.mensagem })), h('label', { class: 'marca', for: 'imp-av-' + i }, cx, h('span', { text: 'Vi e confirmo' })));
+      var cx = h('input', { type: 'checkbox', id: prefixo + '-av-' + i });
+      cx.addEventListener('change', function () { marcas[i] = cx.checked; aoMudar(); });
+      return h('li', { dataset: { aviso: a.codigo } }, h('div', { class: 'campo-linha' }, UI.icone('aviso'), h('span', { text: a.mensagem })), h('label', { class: 'marca', for: prefixo + '-av-' + i }, cx, h('span', { text: 'Vi e confirmo' })));
     }));
+    var el = h('div', null, ul);
+    if (lista.some(function (a) { return a.codigo === 'PERIODO_BLOQUEADO'; })) {
+      just = h('textarea', { id: prefixo + '-just-aviso' });
+      just.addEventListener('input', aoMudar);
+      el.appendChild(h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo campo-obrigatorio', for: prefixo + '-just-aviso', text: 'Justificativa (período financeiro fechado)' }), just));
+    }
+    return {
+      el: el,
+      pronto: function () { return lista.every(function (x, k) { return marcas[k]; }) && (!just || !!just.value.trim()); },
+      aceitos: function () { return lista.map(function (a) { return a.codigo; }).filter(function (c, i, l) { return l.indexOf(c) === i; }); },
+      justificativa: function () { return just ? just.value.trim() : null; },
+    };
+  }
+  function avisos(corpo, id, estado, conf, lista) {
+    var cx = caixaAvisos(lista, 'imp', function () { seguir.disabled = !cx.pronto(); });
     var seguir = UI.botao('Confirmar mesmo assim', { tipo: 'primario', desabilitado: true, aoClicar: function () {
-      executar(corpo, id, estado, conf, lista.map(function (a) { return a.codigo; }).filter(function (c, i, l) { return l.indexOf(c) === i; }));
+      var c = Object.assign({}, conf);
+      if (cx.justificativa()) c.justificativa_aviso = cx.justificativa();
+      executar(corpo, id, estado, c, cx.aceitos());
     } });
-    corpo.appendChild(h('div', { class: 'formulario' }, h('h2', { text: 'Confira os avisos antes de seguir' }), ul, seguir));
+    corpo.appendChild(h('div', { class: 'formulario' }, h('h2', { text: 'Confira os avisos antes de seguir' }), cx.el, seguir));
   }
   function relatorio(corpo, id) {
     Util.limpar(corpo);
@@ -539,19 +564,31 @@ var TelaImportacao = (function () {
     var just = Campos.criar({ id: 'justificativa', rotulo: 'Por que desfazer', tipo: 'texto', obrigatorio: true }, { idBase: 'desf' });
     just.marcarObrigatorio(true);
     var st = h('div', { role: 'status', 'aria-live': 'polite' });
+    // Os avisos que o servidor pediu (o período financeiro fechado, por exemplo), com o aceite de cada um.
+    var conf = null;
     var f = UI.folha({ titulo: 'Desfazer a importação', origem: origem, conteudo: h('div', { class: 'formulario' }, UI.nota(consequenciaDesfazer(info), 'aviso'), just.el, st) });
     var b = UI.botao('Desfazer a importação', { tipo: 'perigo', aoClicar: async function () {
-      Util.limpar(st);
       if (Util.vazio(just.ler())) { just.erro('Diga por que desfazer.'); just.focar(); return; }
+      if (conf && !conf.pronto()) { UI.aviso('Marque "Vi e confirmo" em cada aviso' + (conf.justificativa() === '' ? ' e escreva a justificativa' : '') + '.', { tipo: 'erro' }); return; }
+      var dados = { import_id: id, justificativa: String(just.ler()).trim() };
+      if (conf && conf.justificativa()) dados.justificativa_aviso = conf.justificativa();
+      var aceitos = conf ? conf.aceitos() : [];
+      Util.limpar(st);
+      conf = null;
       var destravar = UI.travar(b, 'Desfazendo…');
       try {
-        await Cliente.comando('importacao.desfazer', { import_id: id, justificativa: String(just.ler()).trim() }, { chave: 'imp-ui:' + id + ':desfazer' });
+        await Cliente.comando('importacao.desfazer', dados, { chave: 'imp-ui:' + id + ':desfazer', avisosAceitos: aceitos });
         f.fechar({ forcar: true });
         UI.aviso('Importação desfeita.', { tipo: 'ok' });
         try { await Store.carregar({ forcar: true }); App.recasca(); } catch (e2) { Util.registrarFalha('carga depois de desfazer', e2); }
         Roteador.ir('importar/' + id + '/execucao', { forcar: true, substituir: true });
       } catch (e) {
         destravar();
+        if (e.code === 'NEEDS_CONFIRMATION') {
+          conf = caixaAvisos(e.details || [], 'desf', function () {});
+          st.appendChild(h('div', { dataset: { avisos: 'desfazer' } }, h('h3', { text: 'Confira antes de desfazer' }), conf.el));
+          return;
+        }
         var caixa = UI.estadoErro(e);
         if ((e.details || []).length) caixa.insertBefore(h('ul', null, e.details.map(function (d) { return h('li', { text: d.mensagem }); })), caixa.querySelector('details'));
         st.appendChild(caixa);
