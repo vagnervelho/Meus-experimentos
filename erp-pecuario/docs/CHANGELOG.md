@@ -1221,3 +1221,120 @@ Nenhuma linha de código mudou nesta etapa: só documentos.
     2.701 recusados, 0 falhas;
   - a verificar na conta do dono: a tela de reprodução e o tronco no iframe do HtmlService e o tempo real do Sheets com as
     estações da base de demonstração.
+
+## 16/11/2026 — Fase 3, etapa E3.7 (gráficos)
+
+- **Kit de gráficos em SVG próprio (SP-08), em `Components`.** O desenho pede os gráficos em `Components` (01, seção 6.2), e
+  a lista de includes do desenho não tem arquivo próprio para eles: o kit ficou lá, na página inicial, sem biblioteca nem
+  CDN. `UI.grafico` desenha linha, barras (horizontais, uma série ou agrupadas, com o zero no meio para valor negativo) e
+  barras empilhadas (o total do servidor na ponta); `UI.curvaPeso` passou para o mesmo quadro. Todo gráfico tem `<title>` e
+  `<desc>` ligados por `aria-labelledby`, os eixos com a unidade ("Peso (kg)", "Ganho médio diário (kg/dia)", "Taxa (%)",
+  "Custo (R$)", "Cabeças"), a escala "redonda" (`UI.escalaGrafico`), a dica e o `data-valor` em cada marca, a tabela
+  equivalente ("Ver tabela") com o mesmo texto do rótulo e o estado vazio (`data-vazio`, ícone e texto) quando não há o que
+  desenhar. Barras: o nome curto (mês, pasto de nome curto) à esquerda da barra, o longo em cima dela; contagem e centavos
+  com o eixo sem fração ("0,5 cabeça" não existe). O desenho tem a largura útil da área (o texto de 12 px sai com 12 px a 360 px; antes, a 360 px, o SVG de 600
+  unidades encolhia o texto para cerca de 6 px) e é refeito quando a tela muda de tamanho. Pizza e rosca não entraram: o
+  desenho só pede linha e barras.
+- **Consertos que o kit trouxe:** a amostra da legenda saía na cor do texto (as classes das séries só pintavam `fill` e
+  `stroke`): agora a cor é a da série; 8 cores de série (eram 4), todas com contraste de 4,5:1 com o branco; o ícone do
+  estado vazio dentro de um gráfico não é mais esticado (`.grafico-area svg`).
+- **Servidor (`peso.desempenho`).** `evolucao`: o G5 de 07, seção 9 (a média das pesagens individuais de cada mês, com o n;
+  o mês abaixo do mínimo fica null com o porquê; estimativa visual, média do lote e projeção nunca entram; pasto e categoria
+  pela data da pesagem). `por_pasto[].por_categoria` e `sem_categoria`: as cabeças de cada categoria em cada pasto no fim do
+  período (o gráfico do rebanho por categoria). Nada é gravado: é leitura.
+- **Telas.** Pesagens (desempenho): peso médio de cada mês (linha), GMD por pasto, por categoria e de cada pesagem de lote
+  (barras) e rebanho por categoria em cada pasto (empilhadas). Reprodução (indicadores): as taxas da estação e as quatro
+  taxas por categoria (barras; "(parcial)" no nome; o "—" com o motivo e o n). Sanidade (agenda): cobertura por protocolo
+  (barras) e custo sanitário por conta (empilhadas: atribuído aos animais e sem animal). Ficha: a curva com eixos, título e
+  descrição. Início: os cinco gráficos com o eixo "Cabeças". Nenhum gráfico refaz conta: os números são os do servidor.
+- **Testes.** Novos: `tests/graficos.test.js` (6: G5 número a número, as categorias de cada pasto, a escala, as regras
+  estáticas — todo SVG pelo kit, title e desc, tabela equivalente, título e unidade em cada chamada, nenhuma conta nos
+  gráficos das telas da Fase 3 — e o contraste das cores) e `tests/ui/graficos.test.js` (8: a 360 e a 1280 px, com a
+  captura de cada tela, o componente, a ficha, o desempenho, os indicadores reprodutivos e a agenda sanitária: o SVG existe,
+  tem título e descrição, os números do desenho são os da tabela e os do servidor, texto legível a 360 px, sem rolagem
+  horizontal, e o redesenho quando a tela muda). Nenhum teste anterior mudou.
+- `docs/CONTRATOS.md`: estado, seções 22, 37 e 38, e a nova seção 41.
+- Execuções desta etapa, verificadas em Node e no Playwright deste repositório:
+  - `npm test` (execução completa final): 778 testes, 778 aprovados e 0 falhas (851 s); na execução completa anterior, 776
+    testes, 773 aprovados e 3 falhas, todas da etapa paralela dos importadores (o registro do teste aleatório sem os tipos
+    importáveis novos, as recusas de `import.test.js` e o `importacao.modelo` de `telas.test.js`), que ela corrigiu; na
+    primeira execução, antes desta etapa, 756 testes e 1 falha passageira (um arquivo de `src/` lido enquanto era gravado);
+  - `npm run ui:check` com 122 testes, 122 aprovados e 0 falhas (295 s), página inicial com 447 KB de 450 KB (eram 441 KB:
+    o kit de gráficos), as pesagens com 44 KB, a sanidade com 24 KB e a reprodução com 50 KB de 150 KB;
+  - teste aleatório: nenhum tipo de evento novo nesta etapa (a mudança do servidor é só leitura); 100 sementes novas × 60
+    passos (770000 a 770099): 3.131 comandos aceitos, 2.294 recusados, 0 falhas;
+  - a verificar na conta do dono: os gráficos no iframe do HtmlService, no celular e no computador.
+
+## 16/11/2026 — Fase 3, etapa E3.6 (importadores de manejo)
+
+- **Quatro importadores novos no mesmo assistente.** PESAGENS, SANIDADE, REPRODUCAO e OCORRENCIAS entraram no
+  `ImportService` com as mesmas 5 telas, os mesmos 10 passos, as mesmas chaves, a mesma reconciliação e o mesmo desfazer
+  das importações da Fase 2: cada lançamento é planejado pelo tratador único do tipo (`planejarEventoImportado`) num
+  ensaio em memória, com a trava de integridade no ensaio, nos blocos, na conclusão e no desfazer. Agora os dez tipos do
+  enum `TIPO_IMPORTACAO` são importáveis.
+- **Modelos de planilha.** Pesagens (data, momento, método, jejum, pesagem por lote com o peso total e as cabeças, peso de
+  cada animal); sanidade (procedimento, produto do cadastro pelo nome ou nome sem cadastro, protocolo, lote, validade, modo
+  e dose, quantidade do frasco, via, motivo, diagnóstico, carência, próxima, veterinário; dose e resultado do exame por
+  animal); reprodução (registro, estação pelo nome, touro pelo brinco na data, pelo código ou pelo nome do animal de
+  referência, sêmen, método, retirada; resultado, idade da gestação e previsão por fêmea; na exposição, os touros do lote
+  nas linhas); ocorrências (tipo da lista e descrição). Leituras novas: produto, protocolo e estação pelo nome (o ativo vale
+  sobre o desativado de mesmo nome; dois iguais ficam ambíguos), com a mensagem que diz onde cadastrar.
+- **Agrupamento.** Sem o número do lançamento, a chave natural mais os campos opcionais do lançamento (`agrupamento.opcionais`
+  no modelo): a mesma data, momento e método fazem uma pesagem coletiva; a mesma data, procedimento e produto, uma
+  aplicação; a mesma data, registro, estação e touro, um lançamento reprodutivo; a mesma data, tipo e descrição, uma
+  ocorrência com vários animais.
+- **O animal pelo brinco na data** (lição da Fase 2): o dono do número em uso na data de cada lançamento, ou o código
+  interno; testado com o brinco que trocou de animal no meio do ano.
+- **Linhas idênticas e duplicidade (decisão desta etapa).** A linha repetida que identifica o animal fica DUPLICADA. O fato
+  já gravado na base fica DUPLICADA (`EVENTO_JA_REGISTRADO`): a pesagem do animal na mesma data com o mesmo peso (de
+  qualquer lançamento), a aplicação do mesmo procedimento com o mesmo produto, o mesmo registro reprodutivo, a ocorrência
+  do mesmo tipo. Duas pesagens legítimas do mesmo animal no mesmo dia são dois lançamentos (números diferentes na coluna
+  "Nº da pesagem"), e a segunda pede a confirmação de `POSSIVEL_DUPLICIDADE`, como no formulário; o mesmo animal duas vezes
+  no mesmo lançamento é recusado com a dica da coluna. No manejo, a linha duplicada pela base sai do lançamento e as outras
+  entram (cada linha é um fato); nas compras e vendas o lançamento continua entrando só inteiro.
+- **Histórico anterior ao marco zero** (04, seção 6: pesagens, vacinações e a reprodução antigas contam para a curva, o
+  histórico sanitário e a reprodução): os quatro tipos entraram em `EventService.HISTORICO_IMPORTADO`. No tratador único,
+  valendo também para a correção do registro histórico: a aplicação antiga não baixa o estoque nem gera consumo (o estoque
+  e o custo do insumo começam no marco zero), e a despesa paga no ato do manejo antigo nasce sem caixa, como a compra e a
+  morte históricas. A verificação de integridade e a trava conferem isso (`conferirInsumos_`: `HISTORICO_ESTOQUE`,
+  `HISTORICO_CONSUMO`). A pesagem antiga entra na curva e no peso atual e fica fora do GMD, com a explicação "Pesagem
+  anterior ao marco zero…" (`WeightService`). A situação reprodutiva declarada na entrada passou a valer como o fato da
+  data da entrada (`Timeline`): o diagnóstico de 2025 importado não desfaz a vaca declarada vazia no marco zero; sem
+  situação declarada, o histórico decide (o replay do teste aleatório segue a mesma regra).
+- **Registro gerado por linha** (03a, seção 5.5): a pesagem, a aplicação ou o registro reprodutivo; na ocorrência e no touro
+  da exposição, a linha do animal no evento.
+- **Desfazer.** As conferências do estorno, como nas importações da Fase 2; a correção de fora de um lançamento importado
+  bloqueia até ser estornada. O desfazer da importação de ANIMAIS com manejo importado depois manda desfazer antes a
+  importação que o trouxe (com o nome do arquivo).
+- **Tela.** `Import.html`: os dez tipos em palavras; as opções lidas e os valores para todas as linhas em palavras (momento,
+  método, procedimento e registro pelo rótulo do subtipo, modo da dose, resultado), o produto, o protocolo e a estação pelo
+  nome; o texto das obrigatórias diz como o animal é achado e que o histórico da sanidade não mexe no estoque; o relatório
+  final do manejo sem as pendências de animais criados e com o atalho para o módulo (pesagens, aplicações, fêmeas,
+  lançamentos).
+- **Testes que mudaram com o comportamento** (sem afrouxar): `import.eventos` e `import` (o tipo "de outra fase" deixou de
+  existir: as pesagens são importáveis; o tipo desconhecido continua recusado), `telas` (os dez tipos do modelo), o replay
+  da situação reprodutiva do teste aleatório (a regra da situação declarada). Novos: `tests/import.manejo.test.js`,
+  `tests/ui/importacao-manejo.test.js`, a varredura de quedas do bloco de PESAGENS e de SANIDADE nas três primitivas
+  (`unitofwork.adversarial`), os quatro importadores no teste aleatório com o oráculo do fato de cada linha importada e as
+  sementes fixas 31 e 56 (com os tipos novos no sorteio, nenhuma das anteriores aceitava uma medicação nem uma primeira
+  identificação).
+- `docs/CONTRATOS.md`: estado, seções 18.2, 38, 39 e 40 e a nova seção 42; `README.md` e `docs/GUIA_DE_IMPLANTACAO.md`
+  (os módulos de importação).
+- **O que o teste aleatório achou nesta etapa:** na leva com o peso dos importadores de manejo aumentado (só no roteiro da
+  leva), a semente 361048 corrigiu pelo formulário uma ocorrência histórica importada pondo a despesa paga no ato: o sistema
+  gravou a despesa sem caixa (a regra nova do histórico), e o oráculo do efeito ainda esperava as parcelas. O oráculo da
+  despesa do manejo e o do serviço pago na sanidade passaram a seguir a regra (o histórico sem parcela e SEM_CAIXA; a
+  aplicação histórica sem saída nem consumo), e o caminho ganhou um teste fixo em `tests/import.manejo.test.js`.
+- Execuções desta etapa, verificadas em Node e no Playwright deste repositório:
+  - `npm test` (execução completa final): 778 testes, 778 aprovados e 0 falhas (786 s); na primeira execução completa
+    depois do código, 777 testes, 777 aprovados e 0 falhas; antes de começar, 756 testes, 756 aprovados;
+  - `npm run ui:check`: 122 testes, 122 aprovados e 0 falhas; página inicial montada com 447 KB de 450 KB; sob demanda,
+    Import com 48 KB de 150 KB;
+  - teste aleatório: as 21 sementes fixas × 60 passos: 699 comandos aceitos, 479 recusados, 0 falhas; 120 sementes novas
+    × 60 passos (360000 a 360119): 3.854 aceitos, 2.650 recusados, 0 falhas; 120 sementes novas × 80 passos com os
+    importadores de manejo mais frequentes (361000 a 361059 e 362000 a 362059): 5.176 aceitos, 3.561 recusados, 1 falha (a
+    do oráculo, acima; a semente refeita depois do conserto passa), e 141 linhas de manejo importadas conferidas pelo
+    oráculo da conclusão (pesagens 38, sanidade 15, reprodução 39, ocorrências 49);
+  - varredura de quedas do bloco de PESAGENS e de SANIDADE nas três primitivas: 6 testes, 6 aprovados;
+  - a verificar na conta do dono: a importação de planilhas grandes de pesagens (milhares de linhas) no tempo real do
+    Sheets e a tela de importação no iframe do HtmlService.
