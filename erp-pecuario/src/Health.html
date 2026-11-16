@@ -96,9 +96,22 @@ var TelaSanidade = (function () {
         { id: 'aplicacao', rotulo: 'Aplicado em', valor: function (c) { return c.data_aplicacao; }, formatar: function (c) { return link('evento/' + c.event_id, Fmt.data(c.data_aplicacao)); } },
       ] }).el;
   }
+  /** Gráficos (SP-08, Components): os números do servidor, os mesmos das tabelas. */
+  function graficoCobertura(d) {
+    return UI.grafico({ tipo: 'barras', titulo: 'Cobertura por protocolo em ' + Fmt.data(d.data), rotuloX: 'Protocolo', rotuloValor: 'Animais em dia (%)', dado: 'cobertura-protocolos', formatar: function (v) { return Fmt.numero(v, 1) + '%'; },
+      vazio: 'Nenhum protocolo com animais que devem receber a dose.',
+      series: [{ nome: 'Cobertura', pontos: d.protocolos.map(function (p) { var v = UI.valorInd(p.cobertura); return { x: p.nome, y: p.cobertura.valor, nota: v.motivo }; }) }] });
+  }
+  function graficoCustos(c) {
+    var totais = {};
+    c.por_conta.forEach(function (x) { totais[x.nome] = x.total; });
+    return UI.grafico({ tipo: 'empilhadas', titulo: 'Custo sanitário por conta, de ' + Fmt.data(c.inicio) + ' a ' + Fmt.data(c.fim), rotuloX: 'Conta', rotuloValor: 'Custo (R$)', dado: 'custo-sanitario', totais: totais,
+      formatar: Fmt.dinheiro, rotuloEixo: function (v) { return Fmt.numero(v / 100, v % 100 ? 2 : 0); }, vazio: 'Nenhum custo sanitário no período.',
+      series: [['alocado', 'Atribuído aos animais'], ['nao_alocado', 'Sem animal']].map(function (s) { return { nome: s[1], pontos: c.por_conta.map(function (x) { return { x: x.nome, y: x[s[0]] }; }) }; }) });
+  }
   function blocoProtocolos(d) {
     if (!d.protocolos.length) return UI.nota('Nenhum protocolo ativo. Cadastre os protocolos da fazenda na aba Protocolos para a agenda calcular as próximas doses.', 'info');
-    return UI.tabela({ id: 'agenda-protocolos', rotulo: 'Cobertura por protocolo', linhas: d.protocolos, chave: function (p) { return p.protocol_id; },
+    return h('div', null, graficoCobertura(d), UI.tabela({ id: 'agenda-protocolos', rotulo: 'Cobertura por protocolo', linhas: d.protocolos, chave: function (p) { return p.protocol_id; },
       colunas: [
         { id: 'nome', rotulo: 'Protocolo', valor: function (p) { return p.nome; } },
         { id: 'elegiveis', rotulo: 'Animais que devem receber', num: true },
@@ -106,12 +119,13 @@ var TelaSanidade = (function () {
         { id: 'cobertura', rotulo: 'Cobertura', num: true, valor: function (p) { return p.cobertura.valor; }, formatar: function (p) { var v = UI.valorInd(p.cobertura, function (x) { return Fmt.numero(x, 1) + '%'; }); return v.motivo ? v.texto + ' (' + v.motivo + ')' : v.texto; } },
         { id: 'aplicacoes', rotulo: 'Aplicações no período', num: true },
         { id: 'animais_atendidos', rotulo: 'Animais atendidos', num: true },
-      ] }).el;
+      ] }).el);
   }
   function blocoCustos(c) {
     if (!c) return UI.nota('Sem período.', 'info');
     var caixa = h('div', { dataset: { custoSanitario: String(c.total) } });
     caixa.appendChild(UI.pares([['Período', Fmt.data(c.inicio) + ' a ' + Fmt.data(c.fim)], ['Custo sanitário', Fmt.dinheiro(c.total)], ['Atribuído aos animais', Fmt.dinheiro(c.alocado)], ['Sem animal', Fmt.dinheiro(c.nao_alocado)]]));
+    if (c.por_conta.length) caixa.appendChild(graficoCustos(c));
     if (c.por_conta.length) caixa.appendChild(UI.tabela({ id: 'custo-sanitario-contas', rotulo: 'Custo sanitário por conta', linhas: c.por_conta, chave: function (x) { return x.conta_id; },
       colunas: [
         { id: 'nome', rotulo: 'Conta' },

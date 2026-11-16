@@ -57,12 +57,12 @@ var TelaInicio = (function () {
   function desenharSeries(el, v) {
     var sr = v.series || {};
     if (!sr.rebanho || !sr.rebanho.length) return;
-    el.appendChild(UI.grafico({ tipo: 'linha', titulo: 'Evolução do rebanho (cabeças no fim de cada mês)', rotuloX: 'Mês', series: [{ nome: 'Cabeças', pontos: sr.rebanho.map(function (x) { return { x: mes(x.mes), y: x.cabecas }; }) }] }));
-    el.appendChild(UI.grafico({ tipo: 'barras', titulo: 'Nascimentos e mortes por mês', rotuloX: 'Mês', series: [
+    el.appendChild(UI.grafico({ tipo: 'linha', titulo: 'Evolução do rebanho (cabeças no fim de cada mês)', rotuloX: 'Mês', rotuloValor: 'Cabeças', series: [{ nome: 'Cabeças', pontos: sr.rebanho.map(function (x) { return { x: mes(x.mes), y: x.cabecas }; }) }] }));
+    el.appendChild(UI.grafico({ tipo: 'barras', titulo: 'Nascimentos e mortes por mês', rotuloX: 'Mês', rotuloValor: 'Cabeças', series: [
       { nome: 'Nascimentos', pontos: (sr.nascimentos_mortes || []).map(function (x) { return { x: mes(x.mes), y: x.nascimentos }; }) },
       { nome: 'Mortes', pontos: (sr.nascimentos_mortes || []).map(function (x) { return { x: mes(x.mes), y: x.mortes }; }) },
     ] }));
-    el.appendChild(UI.grafico({ tipo: 'barras', titulo: 'Compras e vendas por mês (cabeças)', rotuloX: 'Mês', series: [
+    el.appendChild(UI.grafico({ tipo: 'barras', titulo: 'Compras e vendas por mês (cabeças)', rotuloX: 'Mês', rotuloValor: 'Cabeças', series: [
       { nome: 'Compras', pontos: (sr.compras_vendas || []).map(function (x) { return { x: mes(x.mes), y: x.compras }; }) },
       { nome: 'Vendas', pontos: (sr.compras_vendas || []).map(function (x) { return { x: mes(x.mes), y: x.vendas }; }) },
     ] }));
@@ -162,10 +162,10 @@ var TelaInicio = (function () {
     }
     var pontosPasto = (v.por_pasto || []).map(function (p) { return { x: p.nome || 'Pasto', y: p.cabecas }; });
     if (v.sem_pasto) pontosPasto.push({ x: 'Sem pasto', y: v.sem_pasto });
-    el.appendChild(UI.grafico({ tipo: 'barras', titulo: 'Cabeças por pasto em ' + Fmt.data(v.data), rotuloX: 'Pasto', series: [{ nome: 'Cabeças', pontos: pontosPasto }] }));
+    el.appendChild(UI.grafico({ tipo: 'barras', titulo: 'Cabeças por pasto em ' + Fmt.data(v.data), rotuloX: 'Pasto', rotuloValor: 'Cabeças', series: [{ nome: 'Cabeças', pontos: pontosPasto }] }));
     var pontosCat = (v.por_categoria || []).map(function (x) { return { x: x.nome, y: x.cabecas }; });
     if (v.sem_categoria) pontosCat.push({ x: 'Sem categoria', y: v.sem_categoria });
-    el.appendChild(UI.grafico({ tipo: 'barras', titulo: 'Cabeças por categoria em ' + Fmt.data(v.data), rotuloX: 'Categoria', series: [{ nome: 'Cabeças', pontos: pontosCat }] }));
+    el.appendChild(UI.grafico({ tipo: 'barras', titulo: 'Cabeças por categoria em ' + Fmt.data(v.data), rotuloX: 'Categoria', rotuloValor: 'Cabeças', series: [{ nome: 'Cabeças', pontos: pontosCat }] }));
     desenharSeries(el, v);
   }
   function montar(el) {

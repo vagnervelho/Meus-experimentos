@@ -38,7 +38,10 @@ const { createGas } = require('./harness');
 // uma primeira identificação, e o teste exige todo tipo e subtipo ativo aceito ao menos uma vez nas sementes fixas.
 // As sementes 8 e 1 entraram com a reprodução, a desmama, a castração e a ocorrência (Fase 3, E3.4 e E3.5): com os tipos
 // novos no sorteio, nenhuma das anteriores chegava a aceitar uma exposição ao touro nem um diagnóstico de doença.
-const FIXAS = [20261115, 11, 47, 101, 2718, 3001, 3107, 3213, 3318, 9001, 9055, 1009, 1111, 1234, 4242, 777, 57, 8, 1];
+// As sementes 31 e 56 entraram com os importadores de manejo (Fase 3, E3.6): com os quatro tipos novos no sorteio da
+// importação, nenhuma das anteriores chegava a aceitar uma medicação nem uma primeira identificação (a 31 também importa
+// e conclui um arquivo de ocorrências).
+const FIXAS = [20261115, 11, 47, 101, 2718, 3001, 3107, 3213, 3318, 9001, 9055, 1009, 1111, 1234, 4242, 777, 57, 8, 1, 31, 56];
 const PASSOS = Number(process.env.FUZZ_PASSOS || 60);
 const N = Number(process.env.FUZZ_SEMENTES || 0);
 const INICIO = process.env.FUZZ_INICIO !== undefined ? Number(process.env.FUZZ_INICIO) : Date.now() % 1000000000;

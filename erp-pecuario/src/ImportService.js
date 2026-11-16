@@ -1,5 +1,6 @@
 /**
- * ImportService — importação de planilha de ANIMAIS (§14; 06, seção 5.3; 08, seção 12; 05, RN-088 a RN-095).
+ * ImportService — importação de planilha de ANIMAIS, de eventos históricos (compras, vendas, transferências, nascimentos,
+ * mortes) e de manejo (pesagens, sanidade, reprodução, ocorrências) (§14; 06, seção 5.3; 08, seção 12; 05, RN-088 a RN-095).
  *
  * Pipeline: criar (arquivo original no Drive + ANEXOS, com hash) → validar em blocos (formato, regras, duplicidades no
  * arquivo e contra a base, mãe e pai em duas passadas, níveis de confiança) → pré-visualizar → confirmar e importar em
@@ -16,7 +17,7 @@
  * Puro: Drive e codificação de texto pela porta `ctx.files`; backup por Maintenance.backup (sobre as portas).
  */
 var ImportService = (function () {
-  var TIPOS_SUPORTADOS = Object.freeze(['ANIMAIS', 'COMPRAS', 'VENDAS', 'TRANSFERENCIAS', 'NASCIMENTOS', 'MORTES']);
+  var TIPOS_SUPORTADOS = Object.freeze(['ANIMAIS', 'COMPRAS', 'VENDAS', 'TRANSFERENCIAS', 'NASCIMENTOS', 'MORTES', 'PESAGENS', 'SANIDADE', 'REPRODUCAO', 'OCORRENCIAS']);
   var MAX_LINHAS = 20000;
   var DELIMITADORES = Object.freeze({ ',': ',', ';': ';', '\t': '\t', TAB: '\t', '|': '|' });
   var FORMATOS_DATA = Object.freeze(['dd/MM/yyyy', 'yyyy-MM-dd', 'MM/dd/yyyy', 'dd-MM-yyyy', 'dd.MM.yyyy']);
@@ -708,7 +709,7 @@ var ImportService = (function () {
     var p = pedido || {};
     var d = p.dados || {};
     if (Schema.enumValores('TIPO_IMPORTACAO').indexOf(d.tipo) < 0) throw recusar_('Escolha o que o arquivo traz.', [det_('tipo', 'VALOR_FORA_DA_LISTA', 'Tipo de importação desconhecido.')]);
-    if (TIPOS_SUPORTADOS.indexOf(d.tipo) < 0) throw recusar_('A importação de ' + d.tipo.toLowerCase() + ' chega numa próxima fase do sistema (fase 3, com o manejo). Por enquanto, importe o rebanho, as compras, as vendas, as transferências, os nascimentos e as mortes.', [det_('tipo', 'TIPO_INDISPONIVEL', 'Ainda não disponível.')]);
+    if (TIPOS_SUPORTADOS.indexOf(d.tipo) < 0) throw recusar_('A importação de ' + d.tipo.toLowerCase() + ' ainda não está disponível.', [det_('tipo', 'TIPO_INDISPONIVEL', 'Ainda não disponível.')]);
     var colado = typeof d.texto === 'string';
     if (!colado && (typeof d.conteudo_base64 !== 'string' || d.conteudo_base64 === '')) throw recusar_('Envie o arquivo ou cole as linhas da planilha.', [det_('conteudo_base64', 'CAMPO_OBRIGATORIO', 'Arquivo vazio.')]);
     var formato = conferirFormato_(Object.assign({}, d.formato || {}, colado ? { codificacao: 'UTF-8' } : {}));
@@ -1118,7 +1119,10 @@ var ImportService = (function () {
         if (eventos[l.event_id]) return;
         var ev = tx.repo.porId('EVENTOS', l.event_id) || {};
         var nome = ev.event_type ? EventCatalog.nomeEvento(ev.event_type, ev.event_subtype) : 'um lançamento';
-        out.push(Validation.detalhe({ codigo: 'DEPENDENTE', animal_id: id, brinco: a.brinco || null, mensagem: quem + ' tem um lançamento posterior à importação: ' + nome + ' de ' + br_(ev.event_date) + '. Estorne esse lançamento antes.', conflito: { event_id: l.event_id, tipo: ev.event_type || null, subtipo: ev.event_subtype || null, data: ev.event_date || null, nome: ev.event_type ? nome : null } }));
+        // O lançamento que veio de outra importação (o histórico de pesagens dos animais importados) sai desfazendo-a.
+        var outra = !vazio_(ev.import_id) ? tx.repo.porId('IMPORTACOES', ev.import_id) : null;
+        var comoSai = outra ? 'Desfaça antes a importação do arquivo "' + (outra.arquivo_nome || 'sem nome') + '", que o trouxe.' : 'Estorne esse lançamento antes.';
+        out.push(Validation.detalhe({ codigo: 'DEPENDENTE', animal_id: id, brinco: a.brinco || null, mensagem: quem + ' tem um lançamento posterior à importação: ' + nome + ' de ' + br_(ev.event_date) + '. ' + comoSai, conflito: { event_id: l.event_id, tipo: ev.event_type || null, subtipo: ev.event_subtype || null, data: ev.event_date || null, nome: ev.event_type ? nome : null } }));
       });
       tx.repo.por('ANIMAIS', 'mae_id', id).concat(tx.repo.por('ANIMAIS', 'pai_id', id)).forEach(function (f) {
         if (animais[f.animal_id]) return;
@@ -1232,9 +1236,10 @@ var ImportService = (function () {
   }
 
 
-  // ------------------------------------------------------------------ importação de eventos históricos (Fase 2) ----
+  // ------------------------------------------------------------------ importação de eventos (Fase 2) e de manejo (Fase 3) ----
   /**
-   * COMPRAS, VENDAS, TRANSFERENCIAS, NASCIMENTOS e MORTES (§14; 04, seções 6 e 8; 08, seção 12). Uma linha por animal
+   * COMPRAS, VENDAS, TRANSFERENCIAS, NASCIMENTOS e MORTES (Fase 2, E2.10) e PESAGENS, SANIDADE, REPRODUCAO e OCORRENCIAS
+   * (Fase 3, E3.6) (§14; 04, seções 6 e 8; 08, seção 12). Uma linha por animal
    * (por cria, no nascimento); as linhas com a mesma chave de agrupamento formam UM evento, e os campos do lançamento
    * (data, parceiro, negociação, pastos) precisam concordar entre elas. Cada evento passa pelo MESMO planejamento do
    * formulário (EventService.planejarEventoImportado; RN-090), em ordem cronológica, num ensaio em memória em que os
@@ -1242,13 +1247,34 @@ var ImportService = (function () {
    * animal parte do destino da primeira) sem gravar nada. Evento anterior ao marco zero vira registro histórico
    * (pre_marco_zero, efeito 0, financeiro sem caixa). O animal é achado pelo brinco ou pelo código interno.
    */
-  var TIPOS_EVENTO = Object.freeze({ COMPRAS: 'COMPRA', VENDAS: 'VENDA', TRANSFERENCIAS: 'TRANSFERENCIA', NASCIMENTOS: 'NASCIMENTO', MORTES: 'MORTE' });
+  var TIPOS_EVENTO = Object.freeze({
+    COMPRAS: 'COMPRA', VENDAS: 'VENDA', TRANSFERENCIAS: 'TRANSFERENCIA', NASCIMENTOS: 'NASCIMENTO', MORTES: 'MORTE',
+    PESAGENS: 'PESAGEM', SANIDADE: 'SANIDADE', REPRODUCAO: 'REPRODUCAO', OCORRENCIAS: 'OCORRENCIA',
+  });
+  /** Os importadores de manejo (Fase 3, E3.6): fatos sobre animais que já existem, sem criar animal (o detalhe gerado é a linha). */
+  var MANEJO = Object.freeze({ PESAGEM: ['PESAGENS', 'weight_id'], SANIDADE: ['SANIDADE', 'health_id'], REPRODUCAO: ['REPRODUCAO', 'reproduction_id'], OCORRENCIA: null });
   var OP_ENSAIO = 'ensaio-da-importacao';
   var MODALIDADES = { cabeca: 'CABECA', 'por cabeca': 'CABECA', kg: 'KG_VIVO', 'kg vivo': 'KG_VIVO', 'por kg': 'KG_VIVO', arroba: 'ARROBA', '@': 'ARROBA', lote: 'LOTE', 'lote fechado': 'LOTE' };
   var BASES_PESO = { vivo: 'VIVO', 'peso vivo': 'VIVO', carcaca: 'CARCACA', 'peso de carcaca': 'CARCACA' };
   var RENDIMENTOS = { negociado: 'NEGOCIADO', combinado: 'NEGOCIADO', estimado: 'ESTIMADO' };
   var CRITERIOS = { cabecas: 'CABECAS', cabeca: 'CABECAS', 'peso vivo': 'PESO_VIVO', peso: 'PESO_VIVO', 'peso carcaca': 'PESO_CARCACA', carcaca: 'PESO_CARCACA', 'valor individual': 'VALOR_INDIVIDUAL', valor: 'VALOR_INDIVIDUAL', manual: 'MANUAL' };
   var NASCEU = { vivo: 'VIVO', viva: 'VIVO', v: 'VIVO', natimorto: 'NATIMORTO', natimorta: 'NATIMORTO', morto: 'NATIMORTO', morta: 'NATIMORTO' };
+  // Manejo (E3.6): o texto da planilha → o código do formulário (o código também é aceito, pela leitura de 'opcao').
+  var MOMENTOS = { rotina: 'ROTINA', entrada: 'ENTRADA', chegada: 'ENTRADA', 'chegada a fazenda': 'ENTRADA', compra: 'ENTRADA', desmama: 'DESMAMA', venda: 'VENDA', saida: 'VENDA', embarque: 'VENDA' };
+  var PROCEDIMENTOS = {
+    vacinacao: 'VACINACAO', vacina: 'VACINACAO', vermifugacao: 'VERMIFUGACAO', vermifugo: 'VERMIFUGACAO', medicacao: 'MEDICACAO', medicamento: 'MEDICACAO',
+    tratamento: 'TRATAMENTO', exame: 'EXAME', doenca: 'DOENCA', 'registro de doenca': 'DOENCA',
+  };
+  var MODOS_DOSE = { 'por cabeca': 'POR_CABECA', cabeca: 'POR_CABECA', 'por peso': 'POR_PESO', 'por kg': 'POR_PESO', peso: 'POR_PESO', total: 'TOTAL', 'so o total': 'TOTAL' };
+  var REGISTROS = {
+    exposicao: 'EXPOSICAO', 'exposicao ao touro': 'EXPOSICAO', 'monta a campo': 'EXPOSICAO', cobertura: 'COBERTURA', inseminacao: 'INSEMINACAO', ia: 'INSEMINACAO', iatf: 'INSEMINACAO',
+    diagnostico: 'DIAGNOSTICO_GESTACAO', 'diagnostico de gestacao': 'DIAGNOSTICO_GESTACAO', dg: 'DIAGNOSTICO_GESTACAO', toque: 'DIAGNOSTICO_GESTACAO', aborto: 'ABORTO',
+  };
+  var RESULTADOS = { positivo: 'POSITIVO', prenhe: 'POSITIVO', prenha: 'POSITIVO', p: 'POSITIVO', negativo: 'NEGATIVO', vazia: 'NEGATIVO', v: 'NEGATIVO', inconclusivo: 'INCONCLUSIVO', duvidoso: 'INCONCLUSIVO', d: 'INCONCLUSIVO' };
+  var METODOS_REPRO = {
+    'monta natural': 'MONTA_NATURAL', 'monta controlada': 'MONTA_CONTROLADA', ia: 'IA', 'inseminacao artificial': 'IA', iatf: 'IATF', palpacao: 'PALPACAO', toque: 'PALPACAO',
+    ultrassom: 'ULTRASSOM', ultrassonografia: 'ULTRASSOM', observacao: 'OBSERVACAO', informado: 'INFORMADO',
+  };
   function ev_(rotulo, tipo, apelidos, extra) {
     var o = { rotulo: rotulo, tipo: tipo, escopo: 'EVENTO', apelidos: apelidos || [] };
     Object.keys(extra || {}).forEach(function (k) { o[k] = extra[k]; });
@@ -1267,6 +1293,7 @@ var ImportService = (function () {
   var C_VENC = ev_('Primeiro vencimento', 'data', ['vencimento', 'primeiro vencimento', 'data de pagamento']);
   var C_NPARC = ev_('Número de parcelas', 'inteiro', ['parcelas', 'numero de parcelas', 'n parcelas']);
   var C_FORMA = ev_('Forma de pagamento', 'lista', ['forma de pagamento', 'pagamento'], { lista: 'FORMA_PAGAMENTO' });
+  var C_LANC = ev_('Nº do lançamento', 'texto', ['numero do lancamento', 'n do lancamento', 'lancamento']);
   function negociacao_() {
     return {
       modalidade: ev_('Como foi o preço', 'opcao', ['modalidade', 'forma do preco', 'como foi o preco'], { opcoes: MODALIDADES, destino: 'modalidade' }),
@@ -1421,6 +1448,104 @@ var ImportService = (function () {
       padroes: { causa: 'lista' },
       confiancas: [],
     },
+    // ---- manejo (Fase 3, E3.6): fatos sobre animais que já estão no cadastro, achados pelo brinco em uso na data ----
+    PESAGENS: {
+      evento: 'PESAGEM', rotulo: 'Pesagens',
+      // Duas pesagens legítimas do mesmo animal no mesmo dia (pela manhã e à tarde, com e sem jejum) são dois lançamentos:
+      // números diferentes na coluna do lançamento. A mesma linha repetida é a mesma pesagem (DUPLICADA).
+      agrupar: { obrigatorio: false, natural: ['data', 'momento', 'metodo'], opcionais: ['jejum', 'peso_total_lote'], ajuda: 'Sem número de pesagem, as linhas com a mesma data, o mesmo momento e o mesmo método formam uma pesagem só (coletiva). Duas pesagens do mesmo animal no mesmo dia vão com números diferentes na coluna "Nº da pesagem".' },
+      campos: {
+        grupo: ev_('Nº da pesagem', 'texto', ['numero da pesagem', 'n da pesagem', 'pesagem', 'lote da pesagem']),
+        data: ev_('Data da pesagem', 'data', ['data', 'data da pesagem'], { destino: 'event_date' }),
+        momento: ev_('Momento da pesagem', 'opcao', ['momento', 'momento da pesagem', 'tipo de pesagem'], { opcoes: MOMENTOS, destino: 'tipo_pesagem' }),
+        metodo: ev_('Como foi pesado', 'metodo', ['metodo', 'metodo de pesagem', 'como foi pesado'], { destino: 'metodo_pesagem' }),
+        jejum: ev_('Pesado em jejum', 'bool', ['jejum', 'em jejum', 'pesado em jejum'], { destino: 'jejum' }),
+        peso_total_lote: ev_('Peso total do lote (kg)', 'decimal', ['peso total do lote', 'peso do lote', 'balanca coletiva'], { destino: 'peso_total_lote_kg' }),
+        cabecas_lote: ev_('Cabeças na balança', 'inteiro', ['cabecas na balanca', 'cabecas do lote', 'cabecas'], { destino: 'qtd_cabecas_lote' }),
+        responsavel: ev_('Responsável', 'texto', ['responsavel', 'quem pesou'], { destino: 'responsible' }),
+        observacoes_lancamento: C_OBS_EV,
+        brinco: C_BRINCO, codigo: C_CODIGO,
+        peso: ln_('Peso (kg)', 'decimal', ['peso', 'peso kg', 'peso vivo', 'peso (kg)'], { destino: 'peso' }),
+        observacoes: C_OBS,
+      },
+      obrigatorios: ['data', 'momento', 'metodo', ['brinco', 'codigo']],
+      padroes: { momento: 'opcao', metodo: 'metodo', jejum: 'bool' },
+      confiancas: [],
+    },
+    SANIDADE: {
+      evento: 'SANIDADE', rotulo: 'Sanidade (vacinas, vermífugos, tratamentos, exames e doenças)',
+      agrupar: { obrigatorio: false, natural: ['data', 'procedimento'], opcionais: ['produto', 'nome_produto', 'diagnostico'], ajuda: 'Sem número de lançamento, as linhas com a mesma data, o mesmo procedimento e o mesmo produto (ou a mesma doença) formam uma aplicação só (coletiva).' },
+      campos: {
+        grupo: C_LANC,
+        data: ev_('Data', 'data', ['data', 'data da aplicacao', 'data do exame', 'data do diagnostico'], { destino: 'event_date' }),
+        procedimento: ev_('Procedimento', 'opcao', ['procedimento', 'o que foi feito', 'manejo'], { opcoes: PROCEDIMENTOS, subtipo: true }),
+        produto: ev_('Produto do cadastro', 'produto', ['produto', 'produto do cadastro'], { destino: 'produto_id' }),
+        nome_produto: ev_('Nome do produto (sem cadastro)', 'texto', ['nome do produto', 'produto sem cadastro'], { destino: 'nome_produto' }),
+        protocolo: ev_('Protocolo', 'protocolo', ['protocolo', 'protocolo cumprido'], { destino: 'protocol_id' }),
+        fabricante: ev_('Fabricante', 'texto', ['fabricante', 'laboratorio'], { destino: 'fabricante' }),
+        lote: ev_('Lote do produto', 'texto', ['lote', 'lote do produto', 'partida do produto'], { destino: 'lote' }),
+        validade: ev_('Validade do lote', 'data', ['validade', 'validade do lote'], { destino: 'validade' }),
+        modo_dose: ev_('Como foi a dose', 'opcao', ['modo da dose', 'como foi a dose', 'dose por'], { opcoes: MODOS_DOSE, destino: 'modo_dose' }),
+        dose_lancamento: ev_('Dose do lançamento (por cabeça ou por kg)', 'decimal', ['dose do lancamento', 'dose padrao', 'dose por kg'], { destino: 'dose_referencia' }),
+        unidade: ev_('Unidade da dose (sem cadastro)', 'texto', ['unidade', 'unidade da dose'], { destino: 'unidade_dose' }),
+        quantidade_total: ev_('Quantidade que saiu do frasco', 'decimal', ['quantidade que saiu do frasco', 'quantidade total', 'total aplicado'], { destino: 'quantidade_consumida_total' }),
+        via: ev_('Via de aplicação', 'lista', ['via', 'via de aplicacao'], { lista: 'VIA_APLICACAO', destino: 'via_aplicacao' }),
+        motivo: ev_('Por que foi tratado', 'texto', ['motivo', 'por que foi tratado'], { destino: 'motivo' }),
+        diagnostico: ev_('Doença ou diagnóstico', 'texto', ['diagnostico', 'doenca', 'doenca ou diagnostico'], { destino: 'diagnostico' }),
+        carencia: ev_('Carência (dias)', 'inteiro', ['carencia', 'carencia dias', 'dias de carencia', 'carencia (dias)'], { destino: 'periodo_carencia_dias' }),
+        proxima: ev_('Próxima aplicação', 'data', ['proxima', 'proxima aplicacao', 'proxima dose'], { destino: 'data_proxima_aplicacao' }),
+        veterinario: ev_('Veterinário', 'texto', ['veterinario', 'medico veterinario'], { destino: 'veterinario' }),
+        responsavel: ev_('Quem aplicou', 'texto', ['responsavel', 'quem aplicou'], { destino: 'responsible' }),
+        observacoes_lancamento: C_OBS_EV,
+        brinco: C_BRINCO, codigo: C_CODIGO,
+        dose: ln_('Dose deste animal', 'decimal', ['dose', 'dose do animal', 'dose deste animal'], { destino: 'dose' }),
+        resultado_exame: ln_('Resultado do exame', 'texto', ['resultado do exame', 'resultado'], { destino: 'resultado_exame' }),
+        observacoes: C_OBS,
+      },
+      obrigatorios: ['data', 'procedimento', ['brinco', 'codigo']],
+      padroes: { procedimento: 'opcao', modo_dose: 'opcao', via: 'lista' },
+      confiancas: [],
+    },
+    REPRODUCAO: {
+      evento: 'REPRODUCAO', rotulo: 'Reprodução (exposição, cobertura, inseminação, diagnóstico e aborto)',
+      agrupar: { obrigatorio: false, natural: ['data', 'registro'], opcionais: ['estacao', 'touro', 'semen', 'metodo', 'retirada'], ajuda: 'Sem número de lançamento, as linhas com a mesma data, o mesmo registro, a mesma estação e o mesmo touro formam um lançamento só (o diagnóstico do lote; na exposição, as fêmeas e os touros do lote, um por linha).' },
+      campos: {
+        grupo: C_LANC,
+        data: ev_('Data', 'data', ['data', 'data do registro', 'data do diagnostico', 'data da inseminacao', 'data da cobertura'], { destino: 'event_date' }),
+        registro: ev_('Registro', 'opcao', ['registro', 'o que foi feito', 'evento reprodutivo'], { opcoes: REGISTROS, subtipo: true }),
+        estacao: ev_('Estação de monta', 'estacao', ['estacao', 'estacao de monta'], { destino: 'estacao_id' }),
+        touro: ev_('Touro (brinco, código ou nome)', 'texto', ['touro', 'touro do semen', 'reprodutor']),
+        semen: ev_('Partida do sêmen', 'texto', ['semen', 'partida', 'palheta', 'partida do semen'], { destino: 'semen_identificacao' }),
+        metodo: ev_('Método', 'opcao', ['metodo', 'como foi'], { opcoes: METODOS_REPRO, destino: 'metodo' }),
+        retirada: ev_('Retirada dos touros', 'data', ['retirada', 'retirada dos touros', 'fim da exposicao'], { destino: 'data_fim' }),
+        responsavel: ev_('Responsável', 'texto', ['responsavel', 'veterinario', 'inseminador'], { destino: 'responsible' }),
+        observacoes_lancamento: C_OBS_EV,
+        brinco: C_BRINCO, codigo: C_CODIGO,
+        resultado: ln_('Resultado do diagnóstico', 'opcao', ['resultado', 'resultado do diagnostico'], { opcoes: RESULTADOS, destino: 'resultado' }),
+        idade_gestacao: ln_('Idade da gestação (dias)', 'inteiro', ['idade da gestacao', 'dias de gestacao', 'idade gestacional'], { destino: 'idade_gestacional_dias' }),
+        previsao_parto: ln_('Previsão de parto', 'data', ['previsao de parto', 'previsao', 'data prevista do parto'], { destino: 'data_prevista_parto' }),
+        observacoes: C_OBS,
+      },
+      obrigatorios: ['data', 'registro', ['brinco', 'codigo']],
+      padroes: { registro: 'opcao', metodo: 'opcao' },
+      confiancas: [],
+    },
+    OCORRENCIAS: {
+      evento: 'OCORRENCIA', rotulo: 'Ocorrências',
+      agrupar: { obrigatorio: false, natural: ['data', 'tipo_ocorrencia', 'descricao'], ajuda: 'Sem número de lançamento, as linhas com a mesma data, o mesmo tipo e a mesma descrição formam uma ocorrência só, com o animal de cada linha.' },
+      campos: {
+        grupo: C_LANC,
+        data: ev_('Data', 'data', ['data', 'data da ocorrencia'], { destino: 'event_date' }),
+        tipo_ocorrencia: ev_('Tipo de ocorrência', 'lista', ['tipo de ocorrencia', 'tipo', 'ocorrencia'], { lista: 'TIPO_OCORRENCIA', destino: 'tipo_ocorrencia' }),
+        descricao: ev_('O que aconteceu', 'texto', ['o que aconteceu', 'descricao', 'historico'], { destino: 'description' }),
+        responsavel: ev_('Responsável', 'texto', ['responsavel'], { destino: 'responsible' }),
+        observacoes_lancamento: C_OBS_EV,
+        brinco: C_BRINCO, codigo: C_CODIGO, observacoes: C_OBS,
+      },
+      obrigatorios: ['data', 'tipo_ocorrencia', 'descricao', ['brinco', 'codigo']],
+      padroes: { tipo_ocorrencia: 'lista' },
+      confiancas: [],
+    },
   });
   function modeloDe_(tipo) {
     var m = MODELOS[tipo];
@@ -1470,7 +1595,7 @@ var ImportService = (function () {
     return {
       tipo: tipo, evento: md.evento, rotulo: md.rotulo, tipos: TIPOS_SUPORTADOS.slice(), campos: campos, confiancas: conf, padroes: Utils.clonar(md.padroes),
       obrigatorios: md.obrigatorios.map(function (o) { return Array.isArray(o) ? o.slice() : [o]; }),
-      agrupamento: { campo: 'grupo', obrigatorio: md.agrupar.obrigatorio, natural: md.agrupar.natural, ajuda: md.agrupar.ajuda },
+      agrupamento: { campo: 'grupo', obrigatorio: md.agrupar.obrigatorio, natural: md.agrupar.natural, opcionais: (md.agrupar.opcionais || []).slice(), ajuda: md.agrupar.ajuda },
       formatos_data: FORMATOS_DATA.slice(), delimitadores: [';', ',', 'TAB', '|'], codificacoes: ['UTF-8', 'ISO-8859-1', 'WINDOWS-1252', 'US-ASCII'], max_linhas: MAX_LINHAS,
       cabecalho_modelo: campos.map(function (c) { return c.rotulo; }),
     };
@@ -1548,6 +1673,18 @@ var ImportService = (function () {
         var pa = cv.pastos[n];
         return pa ? { v: pa.pasture_id } : { erro: 'PASTO_NAO_ENCONTRADO', msg: 'o pasto "' + t + '" não está cadastrado' };
       }
+      // Cadastros do manejo (E3.6), pelo nome: o produto, o protocolo sanitário e a estação de monta. O desativado é achado
+      // (o histórico pode citar o que saiu de uso depois); o motor decide se ele vale para o lançamento.
+      case 'produto':
+      case 'protocolo':
+      case 'estacao': {
+        var cad = (cv[def.tipo === 'produto' ? 'produtos' : def.tipo === 'protocolo' ? 'protocolos' : 'estacoes'] || {})[n];
+        var oque = def.tipo === 'produto' ? 'o produto' : def.tipo === 'protocolo' ? 'o protocolo' : 'a estação de monta';
+        var onde = def.tipo === 'produto' ? 'Sanidade › Produtos' : def.tipo === 'protocolo' ? 'Sanidade › Protocolos' : 'Reprodução › Estações';
+        if (cad === AMBIGUO) return { erro: 'CADASTRO_AMBIGUO', msg: 'há mais de um cadastro com o nome "' + t + '" (' + oque.replace(/^(o|a) /, '') + '): dê nomes diferentes a eles em ' + onde };
+        if (!cad) return { erro: def.tipo === 'produto' ? 'PRODUTO_NAO_ENCONTRADO' : def.tipo === 'protocolo' ? 'PROTOCOLO_NAO_ENCONTRADO' : 'ESTACAO_NAO_ENCONTRADA', msg: oque + ' "' + t + '" não está cadastrad' + (def.tipo === 'estacao' ? 'a' : 'o') + '. Cadastre em ' + onde + (def.tipo === 'produto' ? ', ou use a coluna do nome do produto sem cadastro' : '') + ', ou corrija o nome' };
+        return { v: cad[def.tipo === 'produto' ? 'product_id' : def.tipo === 'protocolo' ? 'protocol_id' : 'estacao_id'] };
+      }
       default: return lerValor_(def, t, formato, cv);
     }
   }
@@ -1592,7 +1729,10 @@ var ImportService = (function () {
     var nat = modelo.agrupar.natural;
     if (!nat || nat === 'LINHA') return 'L:' + r.linha_num;
     if (nat.some(function (k) { return l[k] === undefined; })) return 'L:' + r.linha_num;
-    return 'N:' + nat.map(function (k) { return k === 'mae' ? Utils.normalizarBrinco(String(l[k])) : String(l[k]); }).join('|');
+    // Os campos opcionais do lançamento (o produto da aplicação, o touro da cobertura) separam lançamentos quando diferem;
+    // vazio é um valor (a aplicação sem produto é outra que a da vacina X).
+    var ops = (modelo.agrupar.opcionais || []).map(function (k) { return l[k] === undefined ? '' : String(l[k]); });
+    return 'N:' + nat.map(function (k) { return k === 'mae' ? Utils.normalizarBrinco(String(l[k])) : String(l[k]); }).concat(ops).join('|');
   }
   /**
    * Linhas do arquivo → {res: [{linha_num, status, erros, lidos, chave}] na ordem do arquivo, grupos: [{chave, data,
@@ -1600,7 +1740,8 @@ var ImportService = (function () {
    * dentro do grupo (CONFLITO_NO_GRUPO); linha idêntica a outra do arquivo fica DUPLICADA (em NASCIMENTOS, só a que
    * traz brinco da cria: as demais iguais são gêmeos do mesmo parto).
    */
-  function agruparLinhas_(linhas, modelo, map, formato, cv) {
+  function agruparLinhas_(linhas, modelo, map, formato, cv, opcoes) {
+    var op = opcoes || {};
     var res = linhas.map(function (l) {
       var r = lerLinhaEvento_(l, modelo, map, formato, cv);
       return { linha_num: l.linha_num, status: 'VALIDA', erros: r.erros, lidos: r.lidos, chave: null, original: l.valores };
@@ -1644,6 +1785,24 @@ var ImportService = (function () {
         g.linhas.forEach(function (r) { r.erros.push(det_(lista[0], 'CAMPO_OBRIGATORIO', 'falta ' + rotuloObrigatorio_(modelo, o) + ' do lançamento (em pelo menos uma das linhas dele)')); });
       });
     });
+    // Manejo (E3.6): cada linha é um fato próprio (a pesagem, a dose, o registro de cada animal), e o lançamento é só o
+    // agrupamento delas. A linha cujo fato já está gravado na base fica DUPLICADA e sai do lançamento, que entra com as
+    // outras (RN-091: a linha duplicada não entra; nas compras e vendas, o lançamento continua entrando só inteiro).
+    // `jaNaBase(g, r)` → detalhe ou null (na validação); `duplicadas` = {linha_num: true} (no bloco, o que a validação gravou).
+    if (op.jaNaBase || op.duplicadas) {
+      grupos.forEach(function (g) {
+        g.linhas = g.linhas.filter(function (r) {
+          if (op.duplicadas) return !op.duplicadas[r.linha_num];
+          var d = r.erros.length ? null : op.jaNaBase(g, r);
+          if (!d) return true;
+          r.status = 'DUPLICADA';
+          r.erros.unshift(d);
+          return false;
+        });
+        if (g.linhas.length) g.primeira = g.linhas[0].linha_num;
+      });
+      grupos = grupos.filter(function (g) { return g.linhas.length; });
+    }
     grupos.sort(function (a, b) { return ((a.data || '') < (b.data || '') ? -1 : (a.data || '') > (b.data || '') ? 1 : 0) || a.primeira - b.primeira; });
     return { res: res, grupos: grupos };
   }
@@ -1678,14 +1837,19 @@ var ImportService = (function () {
     var evs = rep.cru('EVENTOS').filter(function (e) { return e.import_id === importId; }).map(function (e) { return e.event_id; });
     if (evs.length) {
       var ids = [];
-      evs.forEach(function (id) { rep.cruPor('EVENTO_ANIMAIS', 'event_id', id).forEach(function (l) { ids.push(l.animal_id); }); });
-      reprojetar_(ens, Utils.unicos(ids), evs);
+      var prods = [];
+      evs.forEach(function (id) {
+        rep.cruPor('EVENTO_ANIMAIS', 'event_id', id).forEach(function (l) { ids.push(l.animal_id); });
+        if (rep.carregada('MOVIMENTOS_ESTOQUE')) rep.cruPor('MOVIMENTOS_ESTOQUE', 'event_id', id).forEach(function (x) { prods.push(x.product_id); });
+      });
+      reprojetar_(ens, Utils.unicos(ids), evs, Utils.unicos(prods));
     }
     return ens;
   }
-  function reprojetar_(ens, animais, eventos) {
+  /** Reprojeta no ensaio os animais, os eventos e o estoque dos produtos (a saída da aplicação importada muda o saldo). */
+  function reprojetar_(ens, animais, eventos, produtos) {
     var p = Repository.plano();
-    Timeline.reconstruir({ repo: ens.rep.publico(), cru: ens.rep.leituraCrua(), plano: p, agora: ens.tx.agora, ctx: ens.tx.ctx }, { animais: animais, eventos: eventos });
+    Timeline.reconstruir({ repo: ens.rep.publico(), cru: ens.rep.leituraCrua(), plano: p, agora: ens.tx.agora, ctx: ens.tx.ctx }, { animais: animais, eventos: eventos, produtos: produtos || [] });
     var atualizacoes = p.atualizacoes();
     atualizacoes.forEach(function (u) { ens.rep.alterar(u.tabela, u.id, u.campos); });
     return atualizacoes;
@@ -1713,7 +1877,8 @@ var ImportService = (function () {
       ens.proxima[t] += regs.length;
     });
     var ids = Utils.unicos((linhas.EVENTO_ANIMAIS || []).map(function (l) { return l.animal_id; }));
-    return reprojetar_(ens, ids, (linhas.EVENTOS || []).map(function (e) { return e.event_id; }));
+    var prods = Utils.unicos((linhas.MOVIMENTOS_ESTOQUE || []).map(function (x) { return x.product_id; }));
+    return reprojetar_(ens, ids, (linhas.EVENTOS || []).map(function (e) { return e.event_id; }), prods);
   }
   /** Índice de cadastros para ler as linhas: o da validação de animais + listas por código e rótulo e parceiros. */
   function contextoEventos_(tx) {
@@ -1733,6 +1898,24 @@ var ImportService = (function () {
       var doc = String(p.documento || '').replace(/\D/g, '');
       if (doc) cv.parceirosDoc[doc] = p;
     });
+    // Cadastros do manejo por nome: o ativo vale sobre o desativado de mesmo nome; dois do mesmo jeito ficam ambíguos.
+    var porNome = function (aba, ativo) {
+      var out = {};
+      (tx.repo.carregada(aba) ? tx.repo.vigentes(aba) : []).forEach(function (x) {
+        var n = Utils.normalizarTexto(x.nome);
+        if (!n) return;
+        var y = out[n];
+        if (!y) { out[n] = x; return; }
+        if (y === AMBIGUO) return;
+        var ax = ativo(x);
+        var ay = ativo(y);
+        out[n] = ax === ay ? AMBIGUO : ax ? x : y;
+      });
+      return out;
+    };
+    cv.produtos = porNome('PRODUTOS', function (x) { return x.ativo !== false; });
+    cv.protocolos = porNome('PROTOCOLOS_SANITARIOS', function (x) { return x.ativo !== false; });
+    cv.estacoes = porNome('ESTACOES_MONTA', function () { return true; });
     return cv;
   }
   /**
@@ -1800,6 +1983,13 @@ var ImportService = (function () {
     }
     return { nenhum: true, erro: det_('brinco', 'ANIMAL_NAO_ENCONTRADO', (rotulo || 'o animal') + ' de brinco ' + brinco + ' não está no rebanho nem no histórico. Importe antes a entrada dele (rebanho inicial, compra ou nascimento) ou corrija o brinco') };
   }
+  /**
+   * Animal citado por texto (o pai do parto, o touro da cobertura): o dono do brinco na data, senão o código interno, senão
+   * o nome de um animal de referência (EXTERNO). animal | AMBIGUO (nome repetido entre os de referência) | null.
+   */
+  function referencia_(idx, cv, t, data) {
+    return donoDoBrinco_(idx, cv, t, data).animal || idx.porCodigo[Utils.aparar(t).toUpperCase()] || idx.externos[Utils.normalizarTexto(t)] || null;
+  }
   /** Os campos do lançamento (escopo EVENTO, com destino) do grupo, na forma do formulário. */
   function camposDoGrupo_(modelo, g) {
     var c = {};
@@ -1829,17 +2019,28 @@ var ImportService = (function () {
     var noGrupo = {};
     var semRepetir = function (r, a) {
       if (!a) return true;
-      if (noGrupo[a.animal_id]) { erro(r, det_('brinco', 'ANIMAL_REPETIDO', 'o animal ' + (a.brinco || a.codigo_interno) + ' aparece também na linha ' + noGrupo[a.animal_id] + ' do mesmo lançamento')); return false; }
+      if (noGrupo[a.animal_id]) { erro(r, det_('brinco', 'ANIMAL_REPETIDO', 'o animal ' + (a.brinco || a.codigo_interno) + ' aparece também na linha ' + noGrupo[a.animal_id] + ' do mesmo lançamento' + (evento === 'PESAGEM' ? ' (para duas pesagens do animal no mesmo dia, use números diferentes na coluna "' + modelo.campos.grupo.rotulo + '")' : ''))); return false; }
       noGrupo[a.animal_id] = r.linha_num;
       return true;
     };
+    // O subtipo vem de uma coluna do lançamento (o procedimento da sanidade, o registro da reprodução).
+    Object.keys(modelo.campos).forEach(function (k) { if (modelo.campos[k].subtipo && g.cab[k] !== undefined) dados.subtipo = g.cab[k]; });
+    if (evento === 'REPRODUCAO' && !vazio_(g.cab.touro)) {
+      // O touro da cobertura e da inseminação: o do rebanho pelo brinco em uso na data ou pelo código; o de fora (sêmen,
+      // touro emprestado) pelo nome do animal de referência — a mesma resolução do pai no parto.
+      var tt = String(g.cab.touro);
+      var touro = referencia_(idx, cv, tt, g.data);
+      if (touro === AMBIGUO) g.linhas.forEach(function (r) { erro(r, det_('touro', 'TOURO_NAO_ENCONTRADO', 'há mais de um animal de referência chamado "' + tt + '": use o código interno dele (A-000…)')); });
+      else if (!touro) g.linhas.forEach(function (r) { erro(r, det_('touro', 'TOURO_NAO_ENCONTRADO', 'o touro "' + tt + '" não está no rebanho nem entre os animais de referência. Cadastre o touro de fora (sêmen) como animal de referência, ou corrija')); });
+      else campos.touro_id = touro.animal_id;
+    }
     if (evento === 'NASCIMENTO') {
       var mae = acharAnimal_(idx, cv, g.cab.mae, null, 'a mãe', g.data);
       if (mae.erro || !mae.animal) g.linhas.forEach(function (r) { erro(r, mae.erro || det_('mae', 'ANIMAL_NAO_ENCONTRADO', 'informe o brinco da mãe')); });
       else dados.animais.push({ animal_id: mae.animal.animal_id });
       if (!vazio_(g.cab.pai)) {
         var t = String(g.cab.pai);
-        var pai = donoDoBrinco_(idx, cv, t, g.data).animal || idx.porCodigo[Utils.aparar(t).toUpperCase()] || idx.externos[Utils.normalizarTexto(t)] || null;
+        var pai = referencia_(idx, cv, t, g.data);
         if (pai === AMBIGUO) g.linhas.forEach(function (r) { erro(r, det_('pai', 'PAI_NAO_ENCONTRADO', 'há mais de um animal de referência chamado "' + t + '": use o código interno dele (A-000…)')); });
         else if (!pai) g.linhas.forEach(function (r) { erro(r, det_('pai', 'PAI_NAO_ENCONTRADO', 'o pai "' + t + '" não está no rebanho nem entre os animais de referência. Deixe em branco (desconhecido), cadastre o touro como animal de referência ou corrija')); });
         else { campos.pai_id = pai.animal_id; campos.pai_confianca = g.cab.pai_confianca || null; }
@@ -1917,11 +2118,33 @@ var ImportService = (function () {
     }
     return { dados: dados, porLinha: porLinha, erros: erros };
   }
-  /** Evento igual já registrado na base (mesmo tipo, mesma data, mesmo animal): a linha fica DUPLICADA (RN-091). */
-  function jaRegistrado_(tx, importId, evento, data, animalId, campos) {
+  /**
+   * Evento igual já registrado na base (mesmo tipo, mesma data, mesmo animal): a linha fica DUPLICADA (RN-091). No manejo
+   * (E3.6), "igual" é o mesmo fato: a pesagem do animal nessa data com o mesmo peso (de qualquer lançamento: a da compra,
+   * a da desmama); a aplicação do mesmo procedimento com o mesmo produto (ou a mesma doença); o mesmo registro
+   * reprodutivo; a ocorrência do mesmo tipo. O fato diferente no mesmo dia (outro peso, outra vacina) é outro lançamento,
+   * com o aviso POSSIVEL_DUPLICIDADE do motor, como no formulário. `x` = {subtipo, peso}.
+   */
+  function chaveSanidade_(produtoId, nome, diag) {
+    if (!vazio_(produtoId)) return 'P:' + produtoId;
+    if (!vazio_(nome)) return 'N:' + Utils.normalizarTexto(String(nome));
+    return 'D:' + Utils.normalizarTexto(String(diag || ''));
+  }
+  function jaRegistrado_(tx, importId, evento, data, animalId, campos, x) {
     if (vazio_(animalId) || vazio_(data)) return null;
     var c = campos || {};
+    var o = x || {};
     var achado = null;
+    if (evento === 'PESAGEM') {
+      if (typeof o.peso !== 'number') return null;
+      tx.repo.por('PESAGENS', 'animal_id', animalId).some(function (p) {
+        var ev = p.data_pesagem === data && p.peso_kg === o.peso ? tx.repo.porId('EVENTOS', p.event_id) : null;
+        if (!ev || ev.import_id === importId) return false;
+        achado = ev;
+        return true;
+      });
+      return achado;
+    }
     tx.repo.por('EVENTO_ANIMAIS', 'animal_id', animalId).some(function (l) {
       var ev = tx.repo.porId('EVENTOS', l.event_id);
       if (!ev || ev.event_type !== evento || ev.event_date !== data || ev.import_id === importId) return false;
@@ -1929,10 +2152,23 @@ var ImportService = (function () {
       // Outra transferência do animal no mesmo dia (a volta B → A) é outro evento: a guarda POSSIVEL_DUPLICIDADE do
       // motor avisa, como no formulário (RN-090, RN-091). Só a mesma origem e o mesmo destino são o evento repetido.
       if (evento === 'TRANSFERENCIA' && (nulo_(l.pasto_origem_id) !== nulo_(c.pasto_origem_id) || nulo_(l.pasto_destino_id) !== nulo_(c.pasto_destino_id))) return false;
+      if ((evento === 'SANIDADE' || evento === 'REPRODUCAO') && nulo_(ev.event_subtype) !== nulo_(o.subtipo)) return false;
+      if (evento === 'SANIDADE') {
+        var r = tx.repo.por('SANIDADE', 'event_id', ev.event_id).filter(function (y) { return y.animal_id === animalId; })[0];
+        if (!r || chaveSanidade_(r.produto_id, r.nome_produto, r.diagnostico) !== chaveSanidade_(c.produto_id, c.nome_produto, c.diagnostico)) return false;
+      }
+      if (evento === 'OCORRENCIA' && (ev.payload_json || {}).tipo_ocorrencia !== nulo_(c.tipo_ocorrencia)) return false;
       achado = ev;
       return true;
     });
     return achado;
+  }
+  /** O motivo da linha DUPLICADA pelo evento já registrado. */
+  function textoJaRegistrado_(evento, ev, x) {
+    var d = br_(ev.event_date);
+    if (evento === 'PESAGEM') return 'o animal já tem uma pesagem de ' + Utils.formatarNumero(x.peso, 1) + ' kg em ' + d + ' (' + EventCatalog.nomeEvento(ev.event_type, ev.event_subtype) + '): a linha não entra de novo';
+    if (MANEJO[evento] !== undefined) return 'já existe ' + EventCatalog.nomeEvento(ev.event_type, ev.event_subtype).replace(/^(a|o) /, '') + ' de ' + d + ' com este animal' + (evento === 'SANIDADE' ? ' e o mesmo produto' : evento === 'OCORRENCIA' ? ' e o mesmo tipo' : '') + ': a linha não entra de novo';
+    return 'já existe ' + NOME_EVENTO[evento] + ' de ' + d + ' com este animal' + (evento === 'NASCIMENTO' ? ' como mãe' : '') + ': a linha não entra de novo';
   }
   /** Linha do erro do motor: o "Linha N:" que abre a mensagem (os rótulos dos itens) ou o animal; senão, todas. */
   function linhasDoErro_(g, d, porLinha) {
@@ -1963,8 +2199,11 @@ var ImportService = (function () {
       // Duplicidade com a base: o mesmo animal já tem esse evento nessa data (fora desta importação).
       g.linhas.forEach(function (x) {
         var alvo = modelo.evento === 'NASCIMENTO' ? (mont.dados.animais[0] || {}).animal_id : mont.porLinha[x.linha_num];
-        var ev = jaRegistrado_(ens.tx, o.importId, modelo.evento, g.data, alvo, mont.dados.campos);
-        if (ev) r.duplicadas[x.linha_num] = det_(null, 'EVENTO_JA_REGISTRADO', 'já existe ' + NOME_EVENTO[modelo.evento] + ' de ' + br_(ev.event_date) + ' com este animal' + (modelo.evento === 'NASCIMENTO' ? ' como mãe' : '') + ': a linha não entra de novo');
+        // O peso da linha (na pesagem por lote, a média que cada animal recebe).
+        var lote = typeof g.cab.peso_total_lote === 'number' && typeof g.cab.cabecas_lote === 'number' && g.cab.cabecas_lote > 0 ? Utils.arredondar(g.cab.peso_total_lote / g.cab.cabecas_lote, 1) : null;
+        var extra = { subtipo: mont.dados.subtipo || null, peso: lote !== null ? lote : x.lidos.peso };
+        var ev = jaRegistrado_(ens.tx, o.importId, modelo.evento, g.data, alvo, mont.dados.campos, extra);
+        if (ev) r.duplicadas[x.linha_num] = det_(null, 'EVENTO_JA_REGISTRADO', textoJaRegistrado_(modelo.evento, ev, extra));
       });
       if (Object.keys(r.erros).length || Object.keys(r.duplicadas).length || !mont.dados.animais.length) return;
       var etx = txDoEnsaio_(ens);
@@ -2096,14 +2335,32 @@ var ImportService = (function () {
   function validarEventos_(tx, imp, linhas, map, cv, opcoes) {
     var o = opcoes || {};
     var modelo = modeloDe_(imp.tipo);
-    var ag = agruparLinhas_(linhas, modelo, map, imp.formato_json || {}, cv);
     var ens = abrirEnsaio_(tx, imp.import_id);
+    var ag = agruparLinhas_(linhas, modelo, map, imp.formato_json || {}, cv, MANEJO[modelo.evento] !== undefined ? { jaNaBase: jaNaBase_(ens, cv, modelo, imp.import_id) } : null);
     var planejaveis = ag.grupos.filter(function (g) {
       return !g.linhas.some(function (r) { return r.erros.length; }) && !g.linhas.some(function (r) { return o.ignorar && o.ignorar[r.linha_num]; });
     });
     var ensaio = ensaiarGrupos_(ens, imp.tipo, planejaveis, cv, { importId: imp.import_id });
     var res = resultadoPorLinha_(ag, ensaio, modelo);
     return { res: res, grupos: ag.grupos };
+  }
+  /**
+   * Manejo (E3.6): o fato da linha já gravado na base, fora desta importação (jaRegistrado_), com o animal achado pelo
+   * brinco em uso na data do lançamento no índice da base (o manejo não cria animal: os lançamentos anteriores do arquivo
+   * não mudam quem é quem). Devolve (g, r) → detalhe EVENTO_JA_REGISTRADO ou null.
+   */
+  function jaNaBase_(ens, cv, modelo, importId) {
+    var idx = indiceDoEnsaio_(ens, cv);
+    return function (g, r) {
+      var achado = acharAnimal_(idx, cv, r.lidos.brinco, r.lidos.codigo, null, g.data);
+      if (!achado.animal) return null;
+      var sub = null;
+      Object.keys(modelo.campos).forEach(function (k) { if (modelo.campos[k].subtipo && g.cab[k] !== undefined) sub = g.cab[k]; });
+      var lote = typeof g.cab.peso_total_lote === 'number' && typeof g.cab.cabecas_lote === 'number' && g.cab.cabecas_lote > 0 ? Utils.arredondar(g.cab.peso_total_lote / g.cab.cabecas_lote, 1) : null;
+      var x = { subtipo: sub, peso: lote !== null ? lote : r.lidos.peso };
+      var ev = jaRegistrado_(ens.tx, importId, modelo.evento, g.data, achado.animal.animal_id, camposDoGrupo_(modelo, g), x);
+      return ev ? det_(null, 'EVENTO_JA_REGISTRADO', textoJaRegistrado_(modelo.evento, ev, x)) : null;
+    };
   }
   /** Blocos de importação: os eventos inteiros, em ordem cronológica, até `lote` linhas por bloco (um evento maior vai sozinho). */
   function blocosDeEventos_(grupos, lote) {
@@ -2120,7 +2377,14 @@ var ImportService = (function () {
   /** Grupos que entram (linhas VALIDA ou IMPORTADA; nenhum IGNORADA), na ordem de importação. */
   function gruposImportaveis_(tx, imp, cv) {
     var gravadas = linhasGravadas_(tx, imp.import_id);
-    var ag = agruparLinhas_(linhasDoArquivo_(gravadas), modeloDe_(imp.tipo), imp.mapeamento_json, imp.formato_json || {}, cv);
+    var modelo = modeloDe_(imp.tipo);
+    // No manejo, a linha DUPLICADA da validação (o fato já gravado) fica fora do lançamento, como na validação.
+    var dup = null;
+    if (MANEJO[modelo.evento] !== undefined) {
+      dup = {};
+      Object.keys(gravadas).forEach(function (n) { if (gravadas[n].status === 'DUPLICADA') dup[n] = true; });
+    }
+    var ag = agruparLinhas_(linhasDoArquivo_(gravadas), modelo, imp.mapeamento_json, imp.formato_json || {}, cv, dup ? { duplicadas: dup } : null);
     var grupos = ag.grupos.filter(function (g) {
       return g.linhas.every(function (r) { var s = gravadas[r.linha_num].status; return s === 'VALIDA' || s === 'IMPORTADA'; });
     });
@@ -2222,10 +2486,19 @@ var ImportService = (function () {
       var ea = e.plano.linhas().EVENTO_ANIMAIS || [];
       var crias = ea.filter(function (l) { return l.papel === 'CRIA'; });
       var k = 0;
+      var lsPlano = e.plano.linhas();
       g.linhas.forEach(function (r, i) {
         var entity = e.porLinha[r.linha_num] || null;
         if (evento === 'COMPRA') entity = ea[i] ? ea[i].animal_id : null;
         if (evento === 'NASCIMENTO') entity = r.lidos.situacao === 'NATIMORTO' ? null : (crias[k++] || {}).animal_id || null;
+        // Manejo (03a, seção 5.5: o registro principal que a linha gerou): a pesagem, a aplicação ou o registro reprodutivo
+        // do animal; sem detalhe próprio (a ocorrência, o touro da exposição), a linha do animal no evento.
+        if (MANEJO[evento] !== undefined) {
+          var aid = entity;
+          var det = MANEJO[evento] ? (lsPlano[MANEJO[evento][0]] || []).filter(function (x) { return x.animal_id === aid; })[0] : null;
+          var la = ea.filter(function (x) { return x.animal_id === aid; })[0];
+          entity = det ? det[MANEJO[evento][1]] : la ? la.event_animal_id : null;
+        }
         AuditService.alteracao(tx, 'IMPORTACAO_LINHAS', gravadas[r.linha_num].import_line_id, { status: 'IMPORTADA', entity_id_gerado: entity, event_id_gerado: eventId });
       });
     });

@@ -298,11 +298,15 @@ test('linhas coladas (tabulação), números e dinheiro no formato do arquivo, p
   assert.equal(enviados, 2, 'o arquivo do pedido que pediu confirmação não ficou como anexo');
 });
 
-test('recusas: tipo de outra fase, formato, mapeamento, blocos fora de ordem, mapeamento trocado, validação vencida, importar antes de validar', () => {
+test('recusas: tipo desconhecido, formato, mapeamento, blocos fora de ordem, mapeamento trocado, validação vencida, importar antes de validar', () => {
   const s = preparar();
   const { G } = s;
   const er = (fn) => s.tentar(fn).erro;
-  assert.match(er((ctx) => G.ImportService.criar(ctx, { idempotencyKey: 'x1', dados: { tipo: 'PESAGENS', texto: 'a', formato: FORMATO } })).message, /chega numa próxima fase/);
+  // Fase 3, E3.6: os dez tipos do enum são importáveis (as pesagens também, tests/import.manejo.test.js); o tipo que não
+  // existe continua recusado.
+  const desconhecido = er((ctx) => G.ImportService.criar(ctx, { idempotencyKey: 'x1', dados: { tipo: 'DESMAMAS', texto: 'a', formato: FORMATO } }));
+  assert.deepEqual([desconhecido.code, desconhecido.details.map((d) => d.codigo)], ['VALIDATION', ['VALOR_FORA_DA_LISTA']]);
+  assert.match(er((ctx) => G.ImportService.criar(ctx, { idempotencyKey: 'x1b', dados: { tipo: 'PESAGENS', texto: 'a', formato: FORMATO } })).message, /só tem o cabeçalho/);
   assert.equal(er((ctx) => G.ImportService.criar(ctx, { idempotencyKey: 'x2', dados: { tipo: 'ANIMAIS', texto: 'a;b\n1;2', formato: { delimitador: ';', formato_data: 'dd/MM/yy', decimal: ';' } } })).details.length, 3);
   assert.match(er((ctx) => G.ImportService.criar(ctx, { idempotencyKey: 'x3', dados: { tipo: 'ANIMAIS', texto: 'Brinco;Brinco\n1;2', formato: FORMATO } })).message, /aparece duas vezes no cabeçalho/);
   assert.match(er((ctx) => G.ImportService.criar(ctx, { idempotencyKey: 'x4', dados: { tipo: 'ANIMAIS', texto: 'Brinco;Sexo\n', formato: FORMATO } })).message, /só tem o cabeçalho/);

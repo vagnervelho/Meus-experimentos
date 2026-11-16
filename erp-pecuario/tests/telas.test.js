@@ -24,7 +24,7 @@ test('importacao.modelo: campos e rótulos do importador; o cabeçalho do modelo
   m.campos.forEach((c) => assert.equal(c.rotulo, CAMPOS[c.campo].rotulo, c.campo));
   assert.deepEqual(m.campos.filter((c) => c.obrigatorio).map((c) => c.campo), ['sexo', 'pasto']);
   assert.deepEqual(m.campos.filter((c) => c.so_femea).map((c) => c.campo), ['partos_previos', 'situacao_reprodutiva', 'data_prevista_parto']);
-  assert.deepEqual(m.tipos, ['ANIMAIS', 'COMPRAS', 'VENDAS', 'TRANSFERENCIAS', 'NASCIMENTOS', 'MORTES'], 'o rebanho do marco zero e os eventos históricos (Fase 2)');
+  assert.deepEqual(m.tipos, ['ANIMAIS', 'COMPRAS', 'VENDAS', 'TRANSFERENCIAS', 'NASCIMENTOS', 'MORTES', 'PESAGENS', 'SANIDADE', 'REPRODUCAO', 'OCORRENCIAS'], 'o rebanho do marco zero, os eventos históricos (Fase 2) e o manejo (Fase 3, E3.6)');
   assert.deepEqual(m.confiancas.mae, ['CONFIRMADA', 'ESTIMADA'], 'vínculo de parentesco não aceita "desconhecida"');
   const sug = js(s.G.ImportService.sugerirMapeamento(m.cabecalho_modelo));
   assert.equal(Object.keys(sug).length, m.campos.length, 'modelo conhecido já vem mapeado');

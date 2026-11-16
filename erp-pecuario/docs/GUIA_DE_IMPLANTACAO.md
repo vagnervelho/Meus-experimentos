@@ -120,7 +120,7 @@ todos precisam estar presentes; um que falte faz a função parar com erro.
 | `AnimalService.js` | `AnimalService` | Lista do rebanho, ficha do animal (inclusive custo de aquisição e lançamentos), árvore genealógica, edição com auditoria, animal de fora do rebanho (touro de sêmen, mãe de outra fazenda) | AuditService, Config, EventCatalog, EventService, FinancialService, ReproductionService, Schema, Timeline, UnitOfWork, Utils, Validation |
 | `PastureService.js` | `PastureService` | Propriedades, pastos (próprios e arrendados), lista e painel do pasto em qualquer data | AnimalService, AuditService, Config, InventoryService, Schema, Timeline, UnitOfWork, Utils, Validation |
 | `InventoryService.js` | `InventoryService` | Posição do rebanho hoje e numa data, quem pode receber cada lançamento, números da Visão geral (movimento do período, a pagar e a receber), alertas | AnimalService, EventCatalog, FinancialService, Timeline, UnitOfWork, Utils, Validation |
-| `ImportService.js` | `ImportService` | Importação de planilhas de animais e do histórico (compras, vendas, transferências, nascimentos e mortes): leitura, colunas, validação, duplicidades, aprovação, lotes, conclusão, desfazer, relatório e conferência com o marco zero | AuditService, EventCatalog, EventService, Maintenance, Repository, Schema, Timeline, UnitOfWork, Utils, Validation |
+| `ImportService.js` | `ImportService` | Importação de planilhas de animais, do histórico (compras, vendas, transferências, nascimentos e mortes) e do manejo (pesagens, sanidade, reprodução e ocorrências): leitura, colunas, validação, duplicidades, aprovação, lotes, conclusão, desfazer, relatório e conferência com o marco zero | AuditService, EventCatalog, EventService, Maintenance, Repository, Schema, Timeline, UnitOfWork, Utils, Validation |
 | `FileService.js` | `FileService` | Google Drive: pastas do sistema, planilhas, cópias, lixeira, leitura de arquivos; fotos e documentos do animal, do lançamento e dos lançamentos financeiros (nota fiscal, GTA, boleto) | AuditService, Schema, UnitOfWork, Utils, Validation |
 | `Maintenance.js` | `Maintenance` | Configuração inicial (`setup`), backup, retenção, restauração, rotina diária e semanal, gatilhos, estado do sistema | AuditService, Database, FileService, Schema, Timeline, UnitOfWork, Utils, Validation |
 | `TestRunner.js` | `TestRunner` | Testes de aceitação, base de demonstração, diagnóstico e página de concorrência, sempre numa base de teste separada | Api, Database, FileService, Maintenance, Schema, UnitOfWork, Utils, Validation |
@@ -140,7 +140,7 @@ todos precisam estar presentes; um que falte faz a função parar com erro.
 | `Pastures.html` | `Pastures` | Pastos e painel do pasto, também numa data passada | JavaScript, Components |
 | `Events.html` | `Events` | Histórico de eventos, detalhe (com o financeiro e os documentos), estorno e correção de qualquer lançamento | JavaScript, Components |
 | `Settings.html` | `Settings` | Configurações: parâmetros, listas, categorias, propriedades, parceiros, sistema (backup, restauração, integridade, diagnóstico) e auditoria | JavaScript, Components |
-| `Import.html` | `Import` | Assistente de importação de animais e do histórico de eventos (5 telas), com a conferência com o marco zero | JavaScript, Components |
+| `Import.html` | `Import` | Assistente de importação de animais, do histórico de eventos e do manejo (5 telas), com a conferência com o marco zero | JavaScript, Components |
 
 ## 4. Executar `setup` (configuração inicial)
 

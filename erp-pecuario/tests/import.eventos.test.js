@@ -390,7 +390,7 @@ test('COMPRAS, recusas por linha: dados do lançamento que não batem entre as l
   assert.match(l2[4].erros[0].mensagem, /já existe compra de 13\/02\/2026 com este animal/);
 });
 
-test('rotas pela api(): importacao.modelo por tipo (agrupamento e obrigatórios), importação de vendas pelos comandos da api, importacao.reconciliacao; tipo da Fase 3 recusado', () => {
+test('rotas pela api(): importacao.modelo por tipo (agrupamento e obrigatórios), importação de vendas pelos comandos da api, importacao.reconciliacao; tipo desconhecido recusado', () => {
   const s = preparar();
   const api = (p) => JSON.parse(JSON.stringify(s.gas.exec(() => s.G.api(p))));
   const m = api({ rota: 'importacao.modelo', dados: { tipo: 'VENDAS' } });
@@ -398,7 +398,10 @@ test('rotas pela api(): importacao.modelo por tipo (agrupamento e obrigatórios)
   assert.deepEqual([m.data.tipo, m.data.evento, m.data.agrupamento.campo, m.data.agrupamento.obrigatorio], ['VENDAS', 'VENDA', 'grupo', true]);
   assert.deepEqual(m.data.obrigatorios, [['grupo'], ['data'], ['comprador'], ['valor_bruto'], ['finalidade'], ['modalidade'], ['brinco', 'codigo']]);
   assert.equal(Object.keys(s.G.ImportService.sugerirMapeamento(m.data.cabecalho_modelo, 'VENDAS')).length, m.data.campos.length, 'o modelo para baixar vem mapeado inteiro');
-  assert.equal(api({ rota: 'importacao.modelo', dados: { tipo: 'PESAGENS' } }).error.code, 'VALIDATION');
+  // Fase 3, E3.6: as pesagens (e a sanidade, a reprodução e as ocorrências) entraram no assistente (tests/import.manejo.test.js);
+  // tipo que não existe continua recusado.
+  assert.equal(api({ rota: 'importacao.modelo', dados: { tipo: 'PESAGENS' } }).data.evento, 'PESAGEM');
+  assert.equal(api({ rota: 'importacao.modelo', dados: { tipo: 'DESMAMAS' } }).error.code, 'VALIDATION');
   const t = api({ rota: 'importacao.modelo', dados: { tipo: 'TRANSFERENCIAS' } }).data;
   assert.deepEqual(t.agrupamento.natural, ['data', 'pasto_origem', 'pasto_destino']);
   const c = api({ rota: 'importacao.criar', idempotencyKey: 'api-criar', dados: { tipo: 'VENDAS', arquivo_nome: 'vendas.csv', conteudo_base64: b64(VENDAS), formato: FORMATO } });

@@ -3,8 +3,8 @@
 /*
  * ERP Pecuário — componentes (08-ux-ui.md, seções 4, 7, 8 e 15).
  * UI: kit (ícones, botões, faixas, folha sobreposta e modal acessíveis, aviso temporário em aria-live, carregando,
- * vazio, erro, tabela ordenável e paginada com cartões abaixo de 900 px, gráfico SVG de linha e de barras com tabela
- * equivalente). Campos: um componente por tipo do EventCatalog. Formulario: renderizador a partir do catálogo
+ * vazio, erro, tabela ordenável e paginada com cartões abaixo de 900 px, gráficos SVG próprios — linha, barras, barras
+ * empilhadas e a curva de peso — com título e descrição no SVG e a tabela equivalente). Campos: um componente por tipo do EventCatalog. Formulario: renderizador a partir do catálogo
  * (visivel_se, obrigatorio_se, default, escopo POR_ANIMAL, grupos repetíveis). Seletor: seletor de animais.
  * Registro: o fluxo "Registrar evento" (seletor de tipo → formulário com rascunho → revisão local ou pelo servidor →
  * resultado), com avisos com aceite e erros por animal. Telas registradas aqui: inicio e evento/novo.
@@ -309,36 +309,40 @@ var UI = (function () {
    */
   var graficoSeq = 0, ouvindoJanela = false, redesenho = null;
   function larguraTexto_(t) { return String(t).length * 6.6 + 4; }
-  function maior_(lista) { return Math.max.apply(null, lista); }
-  /** Escala "redonda" do eixo dos valores: passo de 1, 2, 2,5 ou 5 × 10^k, cobrindo [min, max] em cerca de n divisões. */
-  function escalaGrafico(min, max, n, zero) {
+  function maior_(l) { return Math.max.apply(null, l); }
+  function menor_(l) { return Math.min.apply(null, l); }
+  /**
+   * Escala "redonda" do eixo dos valores: passo de 1, 2, 2,5 ou 5 × 10^k, cobrindo [min, max] em cerca de n divisões. `zero`
+   * inclui o zero (barras); `inteiro` (contagens, centavos) nunca tem passo menor que 1 (nada de "0,5 cabeça").
+   */
+  function escalaGrafico(min, max, n, zero, inteiro) {
     if (zero) { min = Math.min(0, min); max = Math.max(0, max); }
-    if (!(max > min)) { max += Math.abs(max) * 0.1 || 1; if (!zero) min -= Math.abs(min) * 0.1 || 1; }
+    var folga = inteiro ? 1 : 0;
+    if (!(max > min)) { max += Math.max(folga, Math.abs(max) * 0.1) || 1; if (!zero) min -= Math.max(folga, Math.abs(min) * 0.1) || 1; }
     var bruto = (max - min) / (n || 4);
     var mag = Math.pow(10, Math.floor(Math.log(bruto) / Math.LN10));
-    var passo = [1, 2, 2.5, 5, 10].map(function (m) { return m * mag; }).filter(function (p) { return p >= bruto * (1 - 1e-9); })[0];
+    var passo = Math.max(folga, [1, 2, 2.5, 5, 10].map(function (m) { return m * mag; }).filter(function (p) { return p >= bruto * (1 - 1e-9); })[0]);
     var marcas = [];
     for (var v = Math.floor(min / passo + 1e-9) * passo; v <= Math.ceil(max / passo - 1e-9) * passo + passo / 2; v += passo) marcas.push(Number(v.toFixed(10)));
     var casas = Math.max(0, -Math.floor(Math.log(passo) / Math.LN10 + 1e-9));
     if (Math.abs(passo * Math.pow(10, casas) - Math.round(passo * Math.pow(10, casas))) > 1e-6) casas++;
-    return { min: marcas[0], max: marcas[marcas.length - 1], passo: passo, casas: casas, marcas: marcas };
+    return { min: marcas[0], max: marcas[marcas.length - 1], casas: casas, marcas: marcas };
   }
-  function svg_(W, H, titulo, desc) {
+  function texto_(x, y, t, classe, ancora, dica) { return s('text', { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10, 'text-anchor': ancora || 'start', class: classe || 'grafico-rotulo' }, t, dica ? s('title', { text: dica }) : null); }
+  function marca_(tag, a, cls, dica) { a.class = cls; return s(tag, a, s('title', { text: dica })); }
+  function svg_(W, H, o) {
     var id = 'grafico-' + (++graficoSeq);
-    return s('svg', { viewBox: '0 0 ' + W + ' ' + H, role: 'img', 'aria-labelledby': id + '-t ' + id + '-d' }, s('title', { id: id + '-t', text: titulo }), s('desc', { id: id + '-d', text: desc }));
+    return s('svg', { viewBox: '0 0 ' + W + ' ' + H, role: 'img', 'aria-labelledby': id + '-t ' + id + '-d' }, s('title', { id: id + '-t', text: o.titulo }),
+      s('desc', { id: id + '-d', text: (o.descricao ? o.descricao + ' ' : '') + (o.rotuloValor ? 'Valores em ' + o.rotuloValor + '. ' : '') + 'Os números estão na tabela logo abaixo (Ver tabela).' }));
   }
-  function texto_(x, y, t, classe, ancora) { return s('text', { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10, 'text-anchor': ancora || 'start', class: classe || 'grafico-rotulo' }, t); }
-  function largura_(area) {
-    var w = area.isConnected ? area.clientWidth : 0;
-    if (!(w > 0)) { var vw = window.innerWidth || 760; w = vw < 900 ? vw - 88 : vw - 330; }
-    return Math.max(260, Math.min(720, Math.round(w)));
-  }
-  /** A área do desenho: desenha na largura útil e de novo quando ela muda (janela que gira ou muda de tamanho). */
+  /** A área do desenho: desenha na largura útil e de novo quando ela muda (a página montada, a janela que gira). */
   function area_(desenhar) {
     var area = h('div', { class: 'grafico-area' });
     var W = 0;
     area.redesenhar = function () {
-      var w = largura_(area);
+      var w = area.isConnected ? area.clientWidth : 0;
+      if (!(w > 0)) w = (window.innerWidth || 760) - ((window.innerWidth || 760) < 900 ? 88 : 330);
+      w = Math.max(260, Math.min(720, Math.round(w)));
       if (Math.abs(w - W) < 8) return;
       W = w;
       Util.limpar(area).appendChild(desenhar(W));
@@ -354,167 +358,143 @@ var UI = (function () {
     }
     return area;
   }
-  function semDados_(texto) {
-    return h('div', { class: 'estado estado-vazio grafico-sem-dados', role: 'status' }, h('div', { class: 'estado-titulo' }, icone('info'), h('span', { text: texto })));
+  /** Figura com título; sem nada a desenhar, o estado vazio no lugar do desenho. */
+  function figura_(tipo, titulo, vazio) {
+    var fig = h('figure', { class: 'grafico' + (tipo === 'curva-peso' ? ' curva-peso' : ''), dataset: { grafico: tipo, vazio: vazio ? 'true' : null } }, h('figcaption', { text: titulo }));
+    if (vazio) fig.appendChild(h('div', { class: 'estado estado-vazio grafico-sem-dados', role: 'status' }, h('div', { class: 'estado-titulo' }, icone('info'), h('span', { text: vazio }))));
+    return fig;
   }
   function legenda_(itens) {
     return h('ul', { class: 'grafico-legenda' }, itens.map(function (t, k) { return typeof t === 'string' ? h('li', null, h('span', { class: 'amostra grafico-serie-' + (k % 8), 'aria-hidden': 'true' }), t) : t; }));
   }
   /** A tabela equivalente: cabecalho [{texto, num}], linhas [[texto]] (a primeira célula é o cabeçalho da linha). */
-  function tabelaGrafico_(titulo, cabecalho, linhas) {
+  function tabelaGrafico_(titulo, cab, linhas) {
+    var cel = function (t, i) { return i ? h('td', { class: cab[i].num ? 'num' : null, text: t }) : h('th', { scope: 'row', text: t }); };
     return h('details', { class: 'detalhe grafico-tabela' }, h('summary', { text: 'Ver tabela' }), h('div', { class: 'tabela-rolagem' }, h('table', { class: 'tabela' }, h('caption', { class: 'oculto-visual', text: titulo }),
-      h('thead', null, h('tr', null, cabecalho.map(function (c) { return h('th', { scope: 'col', class: c.num ? 'num' : null, text: c.texto }); }))),
-      h('tbody', null, linhas.map(function (l) { return h('tr', null, l.map(function (t, i) { return i === 0 ? h('th', { scope: 'row', text: t }) : h('td', { class: cabecalho[i] && cabecalho[i].num ? 'num' : null, text: t }); })); })))));
-  }
-  /** Eixo vertical dos valores: grade, marcas e o título do eixo (com a unidade) em cima, à esquerda. */
-  function eixoY_(svg, esc, py, L, direita, rot, titulo, base) {
-    esc.marcas.forEach(function (v) {
-      svg.appendChild(s('line', { x1: L, x2: direita, y1: py(v), y2: py(v), class: 'grafico-grade' }));
-      svg.appendChild(texto_(L - 6, py(v) + 4, rot(v), null, 'end'));
-    });
-    svg.appendChild(s('line', { x1: L, x2: direita, y1: base, y2: base, class: 'grafico-eixo' }));
-    if (titulo) svg.appendChild(texto_(4, 13, titulo, 'grafico-titulo-eixo'));
-  }
-  /** Linha com o eixo X por categoria (meses, pesagens): um traço por série, cortado onde falta o valor. */
-  function linha_(o, xs, series, W, ponto, valido) {
-    var vals = [];
-    series.forEach(function (sr) { sr.pontos.forEach(function (p) { if (valido(p)) vals.push(Number(p.y)); }); });
-    var esc = escalaGrafico(Math.min.apply(null, vals), maior_(vals), 4, o.zero);
-    var rot = o.rotuloEixo || function (v) { return Fmt.numero(v, esc.casas); };
-    var L = Math.max(34, maior_(esc.marcas.map(function (v) { return larguraTexto_(rot(v)); })) + 8);
-    var R = Math.max(16, larguraTexto_(xs[xs.length - 1]) / 2);
-    var T = 24, B = 46, H = Math.round(Math.max(200, Math.min(300, W * 0.55)));
-    var pw = W - L - R, ph = H - T - B;
-    var py = function (v) { return T + ph - (v - esc.min) / (esc.max - esc.min) * ph; };
-    var px = function (i) { return xs.length > 1 ? L + pw * i / (xs.length - 1) : L + pw / 2; };
-    var svg = svg_(W, H, o.titulo, o.descricao || descricao_(o, xs, series));
-    eixoY_(svg, esc, py, L, W - R, rot, o.rotuloValor, T + ph);
-    var salto = Math.ceil(xs.length / Math.max(1, Math.floor(pw / (maior_(xs.map(larguraTexto_)) + 10) + 1)));
-    xs.forEach(function (x, i) { if (i % salto === 0) svg.appendChild(texto_(px(i), T + ph + 18, String(x), null, 'middle')); });
-    if (o.rotuloX) svg.appendChild(texto_(W - R, H - 6, o.rotuloX, 'grafico-titulo-eixo', 'end'));
-    series.forEach(function (sr, k) {
-      var cls = 'grafico-serie-' + (k % 8);
-      var trecho = [];
-      var fechar = function () { if (trecho.length >= 2) svg.appendChild(s('polyline', { points: trecho.join(' '), class: 'grafico-linha ' + cls })); trecho = []; };
-      var marcas = [];
-      xs.forEach(function (x, i) {
-        var p = ponto(sr, x);
-        if (!valido(p)) { fechar(); return; }
-        trecho.push(Math.round(px(i) * 10) / 10 + ',' + Math.round(py(p.y) * 10) / 10);
-        marcas.push(s('circle', { cx: px(i), cy: py(p.y), r: 4, class: cls, dataset: { x: String(x), valor: String(p.y) } }, s('title', { text: (series.length > 1 ? sr.nome + ', ' : '') + x + ': ' + o.formatar(p.y) })));
-      });
-      fechar();
-      marcas.forEach(function (m) { svg.appendChild(m); });
-    });
-    return svg;
+      h('thead', null, h('tr', null, cab.map(function (c) { return h('th', { scope: 'col', class: c.num ? 'num' : null, text: c.texto }); }))),
+      h('tbody', null, linhas.map(function (l) { return h('tr', null, l.map(cel)); })))));
   }
   /**
-   * Barras horizontais: o nome de cada item em cima da sua barra (legível a 360 px, sem cortar nome de pasto), o valor na
-   * ponta; várias séries ficam agrupadas, uma barra por série. Empilhadas: uma barra por item, um trecho por série, e o
-   * total vindo do servidor (`totais`) na ponta. Valor ausente: "— sem dado" no lugar da barra.
+   * Quadro dos gráficos de valor no eixo vertical (linha e curva): escala, grade, marcas, eixo e os títulos dos eixos (o
+   * dos valores, com a unidade, em cima à esquerda; o do eixo de baixo, embaixo à direita). → {svg, L, R, T, H, pw, py}.
    */
-  function barras_(o, xs, series, W, ponto, valido, empilhar) {
-    var k = series.length;
-    var vals = [];
+  function quadro_(o, W, vals, ultimoX) {
+    var esc = escalaGrafico(menor_(vals), maior_(vals), 4, o.zero, vals.every(function (v) { return v % 1 === 0; }));
+    var rot = o.rotuloEixo || function (v) { return Fmt.numero(v, esc.casas); };
+    var q = { L: Math.max(34, maior_(esc.marcas.map(function (v) { return larguraTexto_(rot(v)); })) + 8), R: Math.max(16, larguraTexto_(ultimoX) / 2), T: 24, H: Math.round(Math.max(200, Math.min(300, W * 0.55))) };
+    q.pw = W - q.L - q.R;
+    var ph = q.H - q.T - 46;
+    q.py = function (v) { return q.T + ph - (v - esc.min) / (esc.max - esc.min) * ph; };
+    q.svg = svg_(W, q.H, o);
+    esc.marcas.forEach(function (v) {
+      q.svg.appendChild(s('line', { x1: q.L, x2: W - q.R, y1: q.py(v), y2: q.py(v), class: 'grafico-grade' }));
+      q.svg.appendChild(texto_(q.L - 6, q.py(v) + 4, rot(v), null, 'end'));
+    });
+    q.svg.appendChild(s('line', { x1: q.L, x2: W - q.R, y1: q.T + ph, y2: q.T + ph, class: 'grafico-eixo' }));
+    if (o.rotuloValor) q.svg.appendChild(texto_(4, 13, o.rotuloValor, 'grafico-titulo-eixo'));
+    if (o.rotuloX) q.svg.appendChild(texto_(W - q.R, q.H - 6, o.rotuloX, 'grafico-titulo-eixo', 'end'));
+    q.base = q.T + ph + 18;
+    return q;
+  }
+  /** Linha com o eixo de baixo por item (meses): um traço por série, cortado onde falta o valor. */
+  function linha_(o, xs, series, W, ponto, vals) {
+    var q = quadro_(o, W, vals, xs[xs.length - 1]);
+    var px = function (i) { return xs.length > 1 ? q.L + q.pw * i / (xs.length - 1) : q.L + q.pw / 2; };
+    var salto = Math.ceil(xs.length / (Math.floor(q.pw / (maior_(xs.map(larguraTexto_)) + 10)) + 1));
+    xs.forEach(function (x, i) { if (i % salto === 0) q.svg.appendChild(texto_(px(i), q.base, String(x), null, 'middle')); });
+    series.forEach(function (sr, k) {
+      var cls = 'grafico-serie-' + (k % 8);
+      var trecho = [], marcas = [];
+      var fechar = function () { if (trecho.length >= 2) q.svg.appendChild(s('polyline', { points: trecho.join(' '), class: 'grafico-linha ' + cls })); trecho = []; };
+      xs.forEach(function (x, i) {
+        var p = ponto(sr, x);
+        if (!p) return fechar();
+        trecho.push(Math.round(px(i) * 10) / 10 + ',' + Math.round(q.py(p.y) * 10) / 10);
+        marcas.push(marca_('circle', { cx: px(i), cy: q.py(p.y), r: 4, dataset: { x: String(x), valor: String(p.y) } }, cls, (series.length > 1 ? sr.nome + ', ' : '') + x + ': ' + o.formatar(p.y)));
+      });
+      fechar();
+      marcas.forEach(function (m) { q.svg.appendChild(m); });
+    });
+    return q.svg;
+  }
+  /**
+   * Barras horizontais: o nome curto (mês, pasto de nome curto) à esquerda da barra; o longo em cima dela (legível a 360 px,
+   * sem cortar nome de pasto); o valor na
+   * ponta; várias séries ficam agrupadas, uma barra por série. Empilhadas (valores ≥ 0): uma barra por item, um trecho por
+   * série, e o total do servidor (`totais`) na ponta. Valor ausente: "— sem dado" no lugar da barra.
+   */
+  function barras_(o, xs, series, W, ponto, empilhar) {
+    var k = series.length, vals = [], textos = [larguraTexto_('— sem dado')];
+    var total = function (x) { var t = o.totais ? o.totais[x] : null; return typeof t === 'number' && isFinite(t) ? t : null; };
     xs.forEach(function (x) {
       var soma = 0;
-      series.forEach(function (sr) { var p = ponto(sr, x); if (!valido(p)) return; if (empilhar) soma += Math.max(0, Number(p.y)); else vals.push(Number(p.y)); });
-      if (empilhar) vals.push(soma, o.totais && valido({ y: o.totais[x] }) ? o.totais[x] : 0);
+      series.forEach(function (sr) { var p = ponto(sr, x); if (!p) return; textos.push(larguraTexto_(o.formatar(p.y))); if (empilhar) soma += Math.max(0, p.y); else vals.push(p.y); });
+      if (empilhar) vals.push(soma, total(x) || 0);
+      if (total(x) !== null) textos.push(larguraTexto_(o.formatar(total(x))));
     });
-    var esc = escalaGrafico(Math.min.apply(null, vals), maior_(vals), W < 480 ? 3 : 5, true);
+    var esc = escalaGrafico(menor_(vals), maior_(vals), W < 480 ? 3 : 5, true, vals.every(function (v) { return v % 1 === 0; }));
     var rot = o.rotuloEixo || function (v) { return Fmt.numero(v, esc.casas); };
-    var textos = [larguraTexto_('— sem dado')];
-    xs.forEach(function (x) {
-      if (empilhar) { if (o.totais && valido({ y: o.totais[x] })) textos.push(larguraTexto_(o.formatar(o.totais[x]))); return; }
-      series.forEach(function (sr) { var p = ponto(sr, x); if (valido(p)) textos.push(larguraTexto_(o.formatar(p.y))); });
-    });
-    var L = 8, R = Math.min(W * 0.4, maior_(textos) + 10), T = 4, B = 44;
-    var barra = 18, entre = 3, rotH = 19, grupoH = rotH + (empilhar ? barra : k * (barra + entre) - entre) + 14;
-    var H = T + xs.length * grupoH + B;
-    var pw = W - L - R;
+    var nomeW = maior_(xs.map(larguraTexto_)) * 1.15, rotH = nomeW <= W * 0.3 ? 0 : 19;
+    var L = rotH ? 8 : Math.ceil(nomeW) + 8, R = Math.min(W * 0.4, maior_(textos) + 10), barra = 18, grupoH = rotH + (empilhar ? 1 : k) * (barra + 3) + 11;
+    var H = 4 + xs.length * grupoH + 44, pw = W - L - R, base = H - 44;
     var px = function (v) { return L + (v - esc.min) / (esc.max - esc.min) * pw; };
-    var svg = svg_(W, H, o.titulo, o.descricao || descricao_(o, xs, series));
-    var base = H - B;
+    var svg = svg_(W, H, o);
     esc.marcas.forEach(function (v) {
-      svg.appendChild(s('line', { x1: px(v), x2: px(v), y1: T, y2: base, class: 'grafico-grade' }));
+      svg.appendChild(s('line', { x1: px(v), x2: px(v), y1: 4, y2: base, class: 'grafico-grade' }));
       svg.appendChild(texto_(px(v), base + 16, rot(v), null, px(v) - larguraTexto_(rot(v)) / 2 < 2 ? 'start' : 'middle'));
     });
-    svg.appendChild(s('line', { x1: px(0), x2: px(0), y1: T, y2: base, class: 'grafico-eixo' }));
+    svg.appendChild(s('line', { x1: px(0), x2: px(0), y1: 4, y2: base, class: 'grafico-eixo' }));
     if (o.rotuloValor) svg.appendChild(texto_(L + pw / 2, H - 6, o.rotuloValor, 'grafico-titulo-eixo', 'middle'));
     var maxCar = Math.max(8, Math.floor((W - 16) / 7.2));
     xs.forEach(function (x, i) {
-      var y0 = T + i * grupoH + rotH;
-      var nome = String(x);
-      svg.appendChild(s('text', { x: L, y: y0 - 6, class: 'grafico-categoria' }, nome.length > maxCar ? nome.slice(0, maxCar - 1) + '…' : nome, s('title', { text: nome })));
-      if (empilhar) {
-        var acc = 0;
-        series.forEach(function (sr, j) {
-          var p = ponto(sr, x);
-          if (!valido(p) || Number(p.y) <= 0) return;
-          var a = px(acc), b = px(acc + Number(p.y));
-          acc += Number(p.y);
-          var t = o.formatar(p.y);
-          svg.appendChild(s('rect', { x: a, y: y0, width: Math.max(1, b - a), height: barra, class: 'grafico-barra grafico-serie-' + (j % 8), dataset: { x: nome, serie: sr.nome, valor: String(p.y) } }, s('title', { text: nome + ', ' + sr.nome + ': ' + t })));
-          if (b - a >= larguraTexto_(t) + 4) svg.appendChild(texto_((a + b) / 2, y0 + 13, t, 'grafico-dentro', 'middle'));
-        });
-        if (o.totais && valido({ y: o.totais[x] })) svg.appendChild(texto_(px(Math.max(acc, o.totais[x])) + 6, y0 + 13, o.formatar(o.totais[x]), 'grafico-valor'));
-        return;
-      }
+      var y0 = 4 + i * grupoH + rotH, nome = String(x), acc = 0;
+      svg.appendChild(rotH ? texto_(L, y0 - 6, nome.length > maxCar ? nome.slice(0, maxCar - 1) + '…' : nome, 'grafico-categoria', null, nome) : texto_(L - 8, y0 + ((empilhar ? 1 : k) * (barra + 3) - 3) / 2 + 5, nome, 'grafico-categoria', 'end', nome));
       series.forEach(function (sr, j) {
-        var p = ponto(sr, x);
-        var yy = y0 + j * (barra + entre);
-        if (!valido(p)) { svg.appendChild(texto_(px(0) + 4, yy + 13, '— sem dado', 'grafico-rotulo')); return; }
-        var v = Number(p.y), a = px(Math.min(0, v)), b = px(Math.max(0, v));
-        var t = o.formatar(p.y);
-        svg.appendChild(s('rect', { x: a, y: yy, width: Math.max(1, b - a), height: barra, class: 'grafico-barra grafico-serie-' + (j % 8), dataset: { x: nome, serie: sr.nome, valor: String(p.y) } }, s('title', { text: nome + (k > 1 ? ', ' + sr.nome : '') + ': ' + t })));
-        svg.appendChild(texto_(Math.max(b, px(0)) + 6, yy + 13, t, 'grafico-valor'));
+        var p = ponto(sr, x), yy = y0 + (empilhar ? 0 : j * (barra + 3));
+        if (!p) { if (!empilhar) svg.appendChild(texto_(px(0) + 4, yy + 13, '— sem dado')); return; }
+        var v = p.y, t = o.formatar(v);
+        if (empilhar && v <= 0) return;
+        var a = px(empilhar ? acc : Math.min(0, v)), b = px(empilhar ? acc + v : Math.max(0, v));
+        acc += v;
+        svg.appendChild(marca_('rect', { x: a, y: yy, width: Math.max(1, b - a), height: barra, dataset: { x: nome, serie: sr.nome, valor: String(v) } }, 'grafico-barra grafico-serie-' + (j % 8), nome + (k > 1 ? ', ' + sr.nome : '') + ': ' + t));
+        if (!empilhar) svg.appendChild(texto_(Math.max(b, px(0)) + 6, yy + 13, t, 'grafico-valor'));
+        else if (b - a >= larguraTexto_(t) + 4) svg.appendChild(texto_((a + b) / 2, yy + 13, t, 'grafico-dentro', 'middle'));
       });
+      if (empilhar && total(x) !== null) svg.appendChild(texto_(px(Math.max(acc, total(x))) + 6, y0 + 13, o.formatar(total(x)), 'grafico-valor'));
     });
     return svg;
-  }
-  function descricao_(o, xs, series) {
-    var tipo = { linha: 'Gráfico de linha', barras: 'Gráfico de barras', empilhadas: 'Gráfico de barras empilhadas' }[o.tipo] || 'Gráfico';
-    return tipo + (o.rotuloX ? ' por ' + o.rotuloX.toLowerCase() : '') + ' com ' + xs.length + (xs.length === 1 ? ' item' : ' itens') + (series.length > 1 ? ' e as séries ' + series.map(function (sr) { return sr.nome; }).join(', ') : '') +
-      (o.rotuloValor ? '; valores em ' + o.rotuloValor : '') + '. Os números estão na tabela logo abaixo (Ver tabela).';
   }
   /**
    * Gráfico (08, seção 15). o: {tipo: linha|barras|empilhadas, titulo, descricao?, rotuloX (eixo dos itens e cabeçalho da
    * tabela), rotuloValor (eixo dos valores, com a unidade), series: [{nome, pontos: [{x, y, nota?}]}] (y null = sem dado;
-   * `nota` = o motivo, na tabela), formatar(y) (rótulos e tabela: o mesmo texto), rotuloEixo(v) (marcas do eixo), totais
-   * {x: valor} (empilhadas: o total do servidor), vazio (texto do estado vazio), zero (linha a partir do zero), dado
+   * `nota` = o motivo, na tabela), formatar(y) (rótulos, dicas e tabela: o mesmo texto), rotuloEixo(v) (marcas do eixo),
+   * totais {x: valor} (empilhadas: o total do servidor), vazio (texto do estado vazio), zero (linha a partir do zero), dado
    * (data-grafico-id)}. Linha com menos de 2 pontos não é desenhada: "dados insuficientes".
    */
   function grafico(o) {
     var c = Object.assign({}, o, { formatar: o.formatar || function (v) { return Fmt.numero(v, 0); } });
-    var empilhar = o.tipo === 'empilhadas';
-    var series = (o.series || []).map(function (sr) { return { nome: sr.nome, pontos: sr.pontos || [] }; });
-    var xs = [];
-    series.forEach(function (sr) { sr.pontos.forEach(function (p) { if (xs.indexOf(p.x) < 0) xs.push(p.x); }); });
-    var ponto = function (sr, x) { return sr.pontos.filter(function (q) { return q.x === x; })[0] || null; };
-    var valido = function (p) { return !!p && p.y !== null && p.y !== undefined && p.y !== '' && isFinite(p.y); };
-    var fig = h('figure', { class: 'grafico', dataset: { grafico: o.tipo, graficoId: o.dado || null } });
-    fig.appendChild(h('figcaption', { text: o.titulo }));
-    var n = 0;
-    series.forEach(function (sr) { sr.pontos.forEach(function (p) { if (valido(p)) n++; }); });
-    var notas = [];
-    if (!n) {
-      fig.setAttribute('data-vazio', 'true');
-      fig.appendChild(semDados_(o.vazio || 'Sem dados para desenhar este gráfico.'));
-    } else {
-      if (o.tipo === 'linha') series.forEach(function (sr) {
-        var v = sr.pontos.filter(valido);
-        if (v.length < 2) notas.push('Dados insuficientes para desenhar a linha de ' + sr.nome + (v.length === 1 ? ' (só um ponto, em ' + v[0].x + ')' : '') + '.');
-      });
-      fig.appendChild(area_(function (W) { return o.tipo === 'linha' ? linha_(c, xs, series, W, ponto, valido) : barras_(c, xs, series, W, ponto, valido, empilhar); }));
+    var xs = [], vals = [];
+    var series = (o.series || []).map(function (sr) {
+      var pontos = sr.pontos || [];
+      pontos.forEach(function (p) { if (xs.indexOf(p.x) < 0) xs.push(p.x); if (p.y !== null && p.y !== undefined && p.y !== '' && isFinite(p.y)) vals.push(Number(p.y)); });
+      return { nome: sr.nome, pontos: pontos };
+    });
+    var ponto = function (sr, x) { var p = sr.pontos.filter(function (q) { return q.x === x; })[0]; return p && p.y !== null && p.y !== undefined && p.y !== '' && isFinite(p.y) ? { x: x, y: Number(p.y) } : null; };
+    var fig = figura_(o.tipo, o.titulo, vals.length ? null : o.vazio || 'Sem dados para desenhar este gráfico.');
+    if (o.dado) fig.setAttribute('data-grafico-id', o.dado);
+    if (vals.length) {
+      fig.appendChild(area_(function (W) { return o.tipo === 'linha' ? linha_(c, xs, series, W, ponto, vals) : barras_(c, xs, series, W, ponto, o.tipo === 'empilhadas'); }));
       if (series.length > 1) fig.appendChild(legenda_(series.map(function (sr) { return sr.nome; })));
+      if (o.tipo === 'linha') series.forEach(function (sr) {
+        var v = xs.filter(function (x) { return ponto(sr, x); });
+        if (v.length < 2) fig.appendChild(nota('Dados insuficientes para desenhar a linha de ' + sr.nome + (v.length === 1 ? ' (só um ponto, em ' + v[0] + ')' : '') + '.', 'info'));
+      });
     }
-    notas.forEach(function (t) { fig.appendChild(nota(t, 'info')); });
     if (!xs.length) return fig;
-    var cab = [{ texto: o.rotuloX || 'Item' }].concat(series.map(function (sr) { return { texto: sr.nome, num: true }; }));
-    if (o.totais) cab.push({ texto: 'Total', num: true });
+    var cab = [{ texto: o.rotuloX || 'Item' }].concat(series.map(function (sr) { return { texto: sr.nome, num: true }; }), o.totais ? [{ texto: 'Total', num: true }] : []);
     fig.appendChild(tabelaGrafico_(o.titulo, cab, xs.map(function (x) {
-      return [String(x)].concat(series.map(function (sr) { var p = ponto(sr, x); return valido(p) ? c.formatar(p.y) : '—' + (p && p.nota ? ' (' + p.nota + ')' : ''); }),
-        o.totais ? [valido({ y: o.totais[x] }) ? c.formatar(o.totais[x]) : '—'] : []);
+      return [String(x)].concat(series.map(function (sr) { var p = ponto(sr, x), cru = sr.pontos.filter(function (q) { return q.x === x; })[0]; return p ? c.formatar(p.y) : '—' + (cru && cru.nota ? ' (' + cru.nota + ')' : ''); }),
+        o.totais ? [typeof o.totais[x] === 'number' ? c.formatar(o.totais[x]) : '—'] : []);
     })));
     return fig;
   }
@@ -527,68 +507,51 @@ var UI = (function () {
    * peso_kg, estimado}], nascer: {data, peso_kg} | null, projecao: {pontos: [{data, peso_kg}]} | null}]}.
    */
   function curvaPeso(o) {
-    var fig = h('figure', { class: 'grafico curva-peso', dataset: { grafico: 'curva-peso' } });
-    fig.appendChild(h('figcaption', { text: o.titulo }));
     var series = o.series || [];
-    var todos = [];
-    series.forEach(function (sr) {
-      (sr.pontos || []).forEach(function (p) { todos.push(p); });
-      if (sr.nascer) todos.push(sr.nascer);
-      ((sr.projecao && sr.projecao.pontos) || []).forEach(function (p) { todos.push(p); });
-    });
-    if (!todos.length) { fig.setAttribute('data-vazio', 'true'); fig.appendChild(semDados_('Sem pesagens para desenhar.')); return fig; }
-    var dia = function (d) { return Date.parse(d + 'T00:00:00Z') / 86400000; };
-    var xs = todos.map(function (p) { return dia(p.data); });
-    var x0 = Math.min.apply(null, xs), x1 = maior_(xs);
-    if (x0 === x1) { x0 -= 15; x1 += 15; }
-    var n = series.reduce(function (t, sr) { return t + (sr.pontos || []).length; }, 0);
-    var oQue = function (p, tipo) { return Fmt.data(p.data) + ': ' + Fmt.peso(p.peso_kg) + ' (' + tipo + ')'; };
-    var desc = 'Curva de peso com ' + n + (n === 1 ? ' pesagem' : ' pesagens') + ', de ' + Fmt.data(new Date(x0 * 86400000).toISOString().slice(0, 10)) + ' a ' + Fmt.data(new Date(x1 * 86400000).toISOString().slice(0, 10)) +
-      '; pesos em kg. A linha tracejada é a projeção (estimativa), nunca um peso pesado. Os números estão na tabela logo abaixo (Ver tabela).';
-    fig.appendChild(area_(function (W) {
-      var esc = escalaGrafico(Math.min.apply(null, todos.map(function (p) { return p.peso_kg; })), maior_(todos.map(function (p) { return p.peso_kg; })), 4);
-      var rot = function (v) { return Fmt.numero(v, esc.casas); };
-      var L = Math.max(34, maior_(esc.marcas.map(function (v) { return larguraTexto_(rot(v)); })) + 8), R = 16, T = 24, B = 46;
-      var H = Math.round(Math.max(200, Math.min(300, W * 0.6))), pw = W - L - R, ph = H - T - B;
-      var px = function (d) { return L + (dia(d) - x0) / (x1 - x0) * pw; };
-      var py = function (v) { return T + ph - (v - esc.min) / (esc.max - esc.min) * ph; };
-      var svg = svg_(W, H, o.titulo, desc);
-      eixoY_(svg, esc, py, L, W - R, rot, 'Peso (kg)', H - B);
-      var nx = Math.max(1, Math.min(4, Math.floor(pw / 80)));
-      for (var k = 0; k <= nx; k++) {
-        var dk = new Date((x0 + (x1 - x0) * k / nx) * 86400000).toISOString().slice(0, 10);
-        svg.appendChild(texto_(px(dk), H - B + 18, Fmt.dataCurta(dk) + '/' + dk.slice(2, 4), null, k === 0 ? 'start' : k === nx ? 'end' : 'middle'));
-      }
-      svg.appendChild(texto_(W - R, H - 6, 'Data', 'grafico-titulo-eixo', 'end'));
-      series.forEach(function (sr, i) {
-        var cls = 'grafico-serie-' + (i % 8);
-        var nome = series.length > 1 ? sr.nome + ', ' : '';
-        var pts = (sr.pontos || []).slice().sort(function (a, b) { return dia(a.data) - dia(b.data); });
-        if (pts.length >= 2) svg.appendChild(s('polyline', { points: pts.map(function (p) { return px(p.data) + ',' + py(p.peso_kg); }).join(' '), class: 'grafico-linha ' + cls }));
-        var pp = sr.projecao && sr.projecao.pontos;
-        if (pp && pp.length >= 2) {
-          svg.appendChild(s('polyline', { points: pp.map(function (p) { return px(p.data) + ',' + py(p.peso_kg); }).join(' '), class: 'grafico-projecao ' + cls, dataset: { marcador: 'projecao' } }, s('title', { text: nome + 'projeção (estimativa) até ' + oQue(pp[pp.length - 1], 'estimativa') })));
-          var fim = pp[pp.length - 1];
-          svg.appendChild(texto_(Math.min(px(fim.data), W - R) - 4, Math.max(T + 10, py(fim.peso_kg) - 8), 'Estimativa', 'grafico-rotulo', 'end'));
-        }
-        if (sr.nascer) svg.appendChild(s('circle', { cx: px(sr.nascer.data), cy: py(sr.nascer.peso_kg), r: 5, class: 'grafico-vazio ' + cls, dataset: { marcador: 'nascer', valor: String(sr.nascer.peso_kg) } }, s('title', { text: nome + oQue(sr.nascer, 'peso ao nascer de referência, estimado') })));
-        pts.forEach(function (p) {
-          svg.appendChild(s('circle', { cx: px(p.data), cy: py(p.peso_kg), r: p.estimado ? 5 : 4, class: (p.estimado ? 'grafico-vazio ' : '') + cls, dataset: { marcador: p.estimado ? 'estimado' : 'medido', valor: String(p.peso_kg) } }, s('title', { text: nome + oQue(p, p.estimado ? 'pesagem estimada' : 'pesagem') })));
-        });
-      });
-      return svg;
-    }));
     var linhas = [];
     series.forEach(function (sr) {
-      ((sr.projecao && sr.projecao.pontos) || []).slice(1).forEach(function (p) { linhas.push([sr.nome, p.data, p.peso_kg, 'Projeção (estimativa)']); });
+      ((sr.projecao && sr.projecao.pontos) || []).forEach(function (p, i) { linhas.push([sr.nome, p.data, p.peso_kg, i ? 'Projeção (estimativa)' : null]); });
       if (sr.nascer) linhas.push([sr.nome, sr.nascer.data, sr.nascer.peso_kg, 'Peso ao nascer de referência (estimado)']);
       (sr.pontos || []).forEach(function (p) { linhas.push([sr.nome, p.data, p.peso_kg, p.estimado ? 'Pesagem estimada' : 'Pesagem']); });
     });
-    var legenda = series.length > 1 ? series.map(function (sr) { return sr.nome; }) : [];
-    legenda.push(h('li', { text: '● pesado · ○ estimado · - - - projeção (estimativa)' }));
-    fig.appendChild(legenda_(legenda));
-    linhas.sort(function (a, b) { return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : dia(a[1]) - dia(b[1]); });
+    var fig = figura_('curva-peso', o.titulo, linhas.length ? null : 'Sem pesagens para desenhar.');
+    if (!linhas.length) return fig;
+    var dia = function (d) { return Date.parse(d + 'T00:00:00Z') / 86400000; };
+    var dias = linhas.map(function (l) { return dia(l[1]); });
+    var x0 = menor_(dias), x1 = maior_(dias);
+    if (x0 === x1) { x0 -= 15; x1 += 15; }
+    var n = series.reduce(function (t, sr) { return t + (sr.pontos || []).length; }, 0);
+    var desc = { titulo: o.titulo, rotuloValor: 'Peso (kg)', rotuloX: 'Data', descricao: 'Curva de peso com ' + n + (n === 1 ? ' pesagem' : ' pesagens') + '; a linha tracejada é a projeção (estimativa), nunca um peso pesado.' };
+    fig.appendChild(area_(function (W) {
+      var q = quadro_(desc, W, linhas.map(function (l) { return l[2]; }), '00/00/00');
+      var px = function (d) { return q.L + (dia(d) - x0) / (x1 - x0) * q.pw; };
+      var nx = Math.max(1, Math.min(4, Math.floor(q.pw / 80)));
+      for (var k = 0; k <= nx; k++) {
+        var dk = new Date((x0 + (x1 - x0) * k / nx) * 86400000).toISOString().slice(0, 10);
+        q.svg.appendChild(texto_(px(dk), q.base, Fmt.dataCurta(dk) + '/' + dk.slice(2, 4), null, k === 0 ? 'start' : k === nx ? 'end' : 'middle'));
+      }
+      series.forEach(function (sr, i) {
+        var cls = 'grafico-serie-' + (i % 8), nome = series.length > 1 ? sr.nome + ', ' : '';
+        var dica = function (p, t) { return nome + Fmt.data(p.data) + ': ' + Fmt.peso(p.peso_kg) + ' (' + t + ')'; };
+        var pts = (sr.pontos || []).slice().sort(function (a, b) { return dia(a.data) - dia(b.data); });
+        var traco = function (l) { return l.map(function (p) { return Math.round(px(p.data) * 10) / 10 + ',' + Math.round(q.py(p.peso_kg) * 10) / 10; }).join(' '); };
+        if (pts.length >= 2) q.svg.appendChild(s('polyline', { points: traco(pts), class: 'grafico-linha ' + cls }));
+        var pp = sr.projecao && sr.projecao.pontos;
+        if (pp && pp.length >= 2) {
+          var fim = pp[pp.length - 1];
+          q.svg.appendChild(marca_('polyline', { points: traco(pp), dataset: { marcador: 'projecao', valor: String(fim.peso_kg) } }, 'grafico-projecao ' + cls, dica(fim, 'projeção, estimativa')));
+          q.svg.appendChild(texto_(Math.min(px(fim.data), W - q.R) - 4, Math.max(q.T + 10, q.py(fim.peso_kg) - 8), 'Estimativa', null, 'end'));
+        }
+        if (sr.nascer) q.svg.appendChild(marca_('circle', { cx: px(sr.nascer.data), cy: q.py(sr.nascer.peso_kg), r: 5, dataset: { marcador: 'nascer', valor: String(sr.nascer.peso_kg) } }, 'grafico-vazio ' + cls, dica(sr.nascer, 'peso ao nascer de referência, estimado')));
+        pts.forEach(function (p) {
+          q.svg.appendChild(marca_('circle', { cx: px(p.data), cy: q.py(p.peso_kg), r: p.estimado ? 5 : 4, dataset: { marcador: p.estimado ? 'estimado' : 'medido', valor: String(p.peso_kg) } }, (p.estimado ? 'grafico-vazio ' : '') + cls, dica(p, p.estimado ? 'pesagem estimada' : 'pesagem')));
+        });
+      });
+      return q.svg;
+    }));
+    fig.appendChild(legenda_((series.length > 1 ? series.map(function (sr) { return sr.nome; }) : []).concat([h('li', { text: '● pesado · ○ estimado · - - - projeção (estimativa)' })])));
     var varios = series.length > 1;
+    linhas = linhas.filter(function (l) { return l[3]; }).sort(function (a, b) { return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : dia(a[1]) - dia(b[1]); });
     fig.appendChild(tabelaGrafico_(o.titulo, (varios ? [{ texto: 'Animal' }] : []).concat([{ texto: 'Data' }, { texto: 'Peso', num: true }, { texto: 'O que é' }]),
       linhas.map(function (l) { return (varios ? [l[0]] : []).concat([Fmt.data(l[1]), Fmt.peso(l[2]), l[3]]); })));
     return fig;

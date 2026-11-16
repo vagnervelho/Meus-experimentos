@@ -173,6 +173,25 @@ var TelaReproducao = (function () {
       g.sairam_sem_diagnostico || g.sairam_sem_desfecho ? ['Saíram no meio da estação', g.sairam_sem_diagnostico + ' antes do diagnóstico (fora da prenhez) · ' + g.sairam_sem_desfecho + ' sem parto, aborto nem diagnóstico vazio (fora da parição, da natalidade e da desmama)'] : null,
     ];
   }
+  /**
+   * Gráficos das taxas (SP-08, Components): as do servidor, as mesmas da lista; a taxa sem valor fica "—" com o motivo e
+   * o n (denominador zero ou abaixo do mínimo: nunca zero).
+   */
+  function pontoTaxa(x, ind) { return { x: x + (ind && ind.parcial ? ' (parcial)' : ''), y: ind ? ind.valor : null, nota: ind && ind.valor === null ? Fmt.rotulo('MOTIVO', ind.motivo || 'DADOS_INSUFICIENTES') + ', n = ' + (ind.denominador === undefined ? ind.n : ind.denominador) : null }; }
+  function fmtPct(v) { return Fmt.numero(v, 1) + '%'; }
+  var TAXAS = [['prenhez', null], ['paricao', 'Parição'], ['natalidade', 'Natalidade'], ['perda_gestacional', 'Perda gestacional'], ['desmama', 'Desmama'], ['mortalidade_ate_desmama', 'Mortalidade até a desmama']];
+  function graficoTaxas(e, nMin) {
+    return UI.grafico({ tipo: 'barras', titulo: 'Taxas da estação ' + e.estacao.nome, rotuloX: 'Indicador', rotuloValor: 'Taxa (%)', formatar: fmtPct, dado: 'taxas-estacao',
+      vazio: 'Nenhuma taxa da estação com ao menos ' + nMin + ' fêmeas no denominador.',
+      series: [{ nome: 'Taxa', pontos: TAXAS.map(function (t) { var r = e.geral[t[0]].rotulo; return pontoTaxa(t[1] || (r === 'Taxa de prenhez' ? 'Prenhez' : r), e.geral[t[0]]); }) }] });
+  }
+  function graficoCategorias(e, nMin) {
+    return UI.grafico({ tipo: 'barras', titulo: 'Prenhez, parição, natalidade e desmama por categoria', rotuloX: 'Categoria', rotuloValor: 'Taxa (%)', formatar: fmtPct, dado: 'taxas-categoria',
+      vazio: 'Nenhuma categoria com ao menos ' + nMin + ' fêmeas no denominador.',
+      series: [['prenhez', 'Prenhez'], ['paricao', 'Parição'], ['natalidade', 'Natalidade'], ['desmama', 'Desmama']].map(function (t) {
+        return { nome: t[1], pontos: e.por_categoria.map(function (c) { return pontoTaxa(c.nome || 'Sem categoria', c[t[0]]); }) };
+      }) });
+  }
   function montarIndicadores(el) {
     var vivo = true;
     el.appendChild(cabecalho('indicadores'));
@@ -211,8 +230,8 @@ var TelaReproducao = (function () {
         UI.indicador('Sem histórico reprodutivo', m.sem_historico === null ? '—' : String(m.sem_historico), null, 'matrizes-sem-historico')));
       if (d.estacao) {
         var e = d.estacao;
-        corpo.appendChild(UI.secao(e.estacao.nome + ' (' + Fmt.data(e.estacao.data_inicio) + ' a ' + Fmt.data(e.estacao.data_fim) + ')', UI.pares(linhasTaxas(e.geral)), { dado: 'estacao-geral' }));
-        if (e.por_categoria.length) corpo.appendChild(UI.secao('Por categoria (na exposição)', UI.tabela({ id: 'repro-categorias', rotulo: 'Indicadores por categoria', linhas: e.por_categoria, chave: function (x) { return x.category_id || 'sem'; },
+        corpo.appendChild(UI.secao(e.estacao.nome + ' (' + Fmt.data(e.estacao.data_inicio) + ' a ' + Fmt.data(e.estacao.data_fim) + ')', h('div', null, graficoTaxas(e, d.parametros.indicador_n_minimo), UI.pares(linhasTaxas(e.geral))), { dado: 'estacao-geral' }));
+        if (e.por_categoria.length) corpo.appendChild(UI.secao('Por categoria (na exposição)', h('div', null, graficoCategorias(e, d.parametros.indicador_n_minimo), UI.tabela({ id: 'repro-categorias', rotulo: 'Indicadores por categoria', linhas: e.por_categoria, chave: function (x) { return x.category_id || 'sem'; },
           colunas: [
             { id: 'nome', rotulo: 'Categoria' },
             { id: 'expostas', rotulo: 'Expostas', num: true },
@@ -220,7 +239,7 @@ var TelaReproducao = (function () {
             { id: 'paricao', rotulo: 'Parição', num: true, valor: function (x) { return x.paricao.valor; }, formatar: function (x) { return pct(x.paricao); } },
             { id: 'natalidade', rotulo: 'Natalidade', num: true, valor: function (x) { return x.natalidade.valor; }, formatar: function (x) { return pct(x.natalidade); } },
             { id: 'desmama', rotulo: 'Desmama', num: true, valor: function (x) { return x.desmama.valor; }, formatar: function (x) { return pct(x.desmama); } },
-          ] }).el, { dado: 'estacao-categorias' }));
+          ] }).el), { dado: 'estacao-categorias' }));
         corpo.appendChild(UI.nota('Com menos de ' + d.parametros.indicador_n_minimo + ' fêmeas no denominador a taxa fica "—" (dados insuficientes). Abaixo de ' + Fmt.numero(d.parametros.prenhez_cobertura_dg_min_pct, 0) + '% de diagnosticadas, a prenhez é contada entre as diagnosticadas.', 'info'));
       } else if (d.anual) {
         var a = d.anual;

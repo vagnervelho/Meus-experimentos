@@ -384,14 +384,37 @@ var WeightService = (function () {
     return mapa[chave];
   }
   /**
+   * Evolução do peso (07, seção 9, G5; 07, seção 8.1): a média das pesagens individuais (uma por animal e dia, as que
+   * entram no GMD) de cada mês do período, com o n; mês com n abaixo de `indicador_n_minimo` → null com
+   * DADOS_INSUFICIENTES. A projeção e os pesos estimados nunca entram. → [{mes, valor, motivo, n, animais, explicacao}].
+   */
+  function evolucaoMensal_(mensal, de, ate, params) {
+    var nMin = typeof params.indicador_n_minimo === 'number' ? params.indicador_n_minimo : 5;
+    var chaves = Object.keys(mensal).sort();
+    var m = vazio_(de) ? chaves[0] : de.slice(0, 7);
+    var out = [];
+    while (m && m <= ate.slice(0, 7)) {
+      var g = mensal[m] || { soma: 0, n: 0, animais: {} };
+      var valor = g.n >= nMin ? Utils.arredondar(g.soma / g.n, 1) : null;
+      out.push(indicador_(valor, 'DADOS_INSUFICIENTES', g.n, { mes: m, animais: Object.keys(g.animais).length,
+        explicacao: valor !== null ? null : g.n ? 'Só ' + g.n + (g.n === 1 ? ' pesagem' : ' pesagens') + ' no mês (mínimo ' + nMin + ').' : 'Nenhuma pesagem individual no mês.' }));
+      m = Utils.somaMeses(m + '-01', 1).slice(0, 7);
+    }
+    return out;
+  }
+  /**
    * Consulta `peso.desempenho` (07, seção 8.1; 08, seção 3, tela Pesagens). filtros: {de, ate (período; padrão: o marco
    * zero e hoje), pasture_id, sexo, category_id, raca, animais: [até 5 animal_id para as curvas]}. Devolve {periodo,
-   * filtros, parametros, geral, por_pasto, por_categoria, pesagens, animais, curvas}:
+   * filtros, parametros, geral, por_pasto, por_categoria, pesagens, evolucao, animais, curvas}:
    * - geral, por_pasto e por_categoria: cabeças e peso médio no fim do período (o peso vigente, com a validade e a parte
    *   estimada: InventoryService.compor) e o GMD do período (Σ ganho ÷ Σ dias dos animais do grupo, n mínimo);
    * - pesagens: os eventos PESAGEM do período, com o GMD de lote contra a pesagem anterior com animais em comum;
    * - animais: cada animal com pesagem no período (peso atual, GMD do período);
-   * - curvas: a série, os intervalos e a projeção de cada animal pedido.
+   * - curvas: a série, os intervalos e a projeção de cada animal pedido;
+   * - evolucao: a média mensal das pesagens individuais (G5, `evolucaoMensal_`), com os mesmos filtros (pasto e categoria
+   *   da data da pesagem);
+   * - por_pasto[].por_categoria e sem_categoria: as cabeças de cada categoria no pasto, no fim do período (o gráfico do
+   *   rebanho por categoria).
    * Antes do marco zero (ou sem ele) as composições vêm null com o motivo. VALIDATION nos filtros; NOT_FOUND no pasto ou
    * na categoria que não existe.
    */
@@ -413,6 +436,7 @@ var WeightService = (function () {
         var porPasto = {};
         var porCat = {};
         var linhasAnimais = [];
+        var mensal = {};
         var minDias = typeof params.gmd_intervalo_min_dias === 'number' ? params.gmd_intervalo_min_dias : 28;
         L.animais.forEach(function (a) {
           if (a.situacao_cadastral === 'EXTERNO' || a.situacao_cadastral === 'ANULADO' || a.situacao_cadastral === 'PENDENTE' || !casa(a)) return;
@@ -420,6 +444,12 @@ var WeightService = (function () {
           if (!s.length) return;
           var noPeriodo = s.filter(function (x) { return (vazio_(per.de) || x.data >= per.de) && x.data <= per.ate; });
           if (!noPeriodo.length) return;
+          porDia_(noPeriodo.filter(function (x) { return x.individual; })).forEach(function (x) {
+            if (!vazio_(d.pasture_id) && Timeline.situacaoEm(L.f.linhas(a.animal_id), x.data, L.marcoZero).pasture_id !== d.pasture_id) return;
+            if (!vazio_(d.category_id)) { var cx = AnimalService.categoriaEm(L, a, x.data); if (!cx || cx.category_id !== d.category_id) return; }
+            var gm = mensal[x.data.slice(0, 7)] = mensal[x.data.slice(0, 7)] || { soma: 0, n: 0, animais: {} };
+            gm.soma += x.peso_kg; gm.n++; gm.animais[a.animal_id] = true;
+          });
           var periodos = permanencias_(L.f, a.animal_id);
           var ints = intervalos(noPeriodo, periodos, params).filter(function (v) { return v.conta; });
           var soma = somaPeriodo_(ints, params);
@@ -470,7 +500,8 @@ var WeightService = (function () {
           Object.keys(catDe).forEach(function (k) { compCat[k] = InventoryService.compor(L, catDe[k], per.ate); });
         }
         var linhaGrupo = function (comp, g) {
-          return { cabecas: comp ? comp.cabecas : null, peso_medio: comp ? comp.peso_medio : indicador_(null, pres.motivo, 0), ua: comp ? comp.ua : null, gmd: ganhoDoGrupo_(g || { ganho: 0, dias: 0, animais: {} }, params) };
+          return { cabecas: comp ? comp.cabecas : null, peso_medio: comp ? comp.peso_medio : indicador_(null, pres.motivo, 0), ua: comp ? comp.ua : null, gmd: ganhoDoGrupo_(g || { ganho: 0, dias: 0, animais: {} }, params),
+            por_categoria: comp ? comp.por_categoria.map(function (c) { return { category_id: c.category_id, nome: c.nome, cabecas: c.cabecas }; }) : null, sem_categoria: comp ? comp.sem_categoria : null };
         };
         var pastosIds = Utils.unicos(Object.keys(porPasto).concat(Object.keys(compPasto)));
         var listaPastos = pastosIds.map(function (pid) {
@@ -496,6 +527,7 @@ var WeightService = (function () {
           por_pasto: Utils.ordenarPor(listaPastos, function (x) { return x.nome || ''; }),
           por_categoria: Utils.ordenarPor(listaCats, function (x) { var c = x.category_id ? L.categoriaPorId[x.category_id] : null; return c && typeof c.prioridade === 'number' ? c.prioridade : 9999; }),
           pesagens: pesagensDoPeriodo_(tx, L, per, params),
+          evolucao: evolucaoMensal_(mensal, per.de, per.ate, params),
           animais: Utils.ordenarPor(linhasAnimais, function (x) { return x.brinco || x.codigo_interno; }),
           curvas: per.animais.map(function (id) {
             var a = tx.repo.porId('ANIMAIS', id);

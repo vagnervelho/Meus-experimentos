@@ -1184,6 +1184,19 @@ const IMPORTACOES_TESTE = {
     },
     linhas: 3, eventos: 2, novos: 3,
   },
+  // Fase 3, E3.6: manejo sobre animais que já estão no rebanho (ativos = os do rebanho inicial, que não mudam). A pesagem
+  // tem a histórica (antes do marco zero) e a coletiva; a aplicação grava a saída do produto (sem controle de estoque, para
+  // não pedir o aviso de estoque insuficiente) e o consumo, que só valem ao concluir.
+  PESAGENS: {
+    csv: 'Data da pesagem;Brinco;Peso (kg)\n01/03/2026;0921;300\n01/03/2026;0922;310,5\n15/09/2025;0921;250',
+    mapa: { colunas: { 'Data da pesagem': 'data', Brinco: 'brinco', 'Peso (kg)': 'peso' }, confiancas: {}, padroes: { momento: 'ROTINA', metodo: 'BALANCA' } },
+    linhas: 3, eventos: 2, novos: 0, ativos: 2, rebanho: true,
+  },
+  SANIDADE: {
+    csv: 'Data;Procedimento;Produto do cadastro;Como foi a dose;Dose do lançamento (por cabeça ou por kg);Brinco\n01/03/2026;vacinação;Vacina K;por cabeça;1;0921\n01/03/2026;vacinação;Vacina K;por cabeça;1;0922',
+    mapa: { colunas: { Data: 'data', Procedimento: 'procedimento', 'Produto do cadastro': 'produto', 'Como foi a dose': 'modo_dose', 'Dose do lançamento (por cabeça ou por kg)': 'dose_lancamento', Brinco: 'brinco' }, confiancas: {}, padroes: {} },
+    linhas: 2, eventos: 1, novos: 0, ativos: 2, rebanho: true, produto: true,
+  },
 };
 function prepararImportacao(amb, tipo) {
   const G = amb.G;
@@ -1191,7 +1204,14 @@ function prepararImportacao(amb, tipo) {
   const s = sementes(G);
   const parceiro = { partner_id: FORNECEDOR, nome: 'Fornecedor do lote', tipos: 'FORNECEDOR', ativo: true, created_at: '2026-11-01T12:00:00.000Z', updated_at: '2026-11-01T12:00:00.000Z' };
   amb.gas.exec(() => G.Database.abrir(amb.banco, { primitiva: amb.primitiva }).anexar({ CONFIGURACOES: s.CONFIGURACOES, PROPRIEDADES: s.PROPRIEDADES, PLANO_CONTAS: s.PLANO_CONTAS, LISTAS: s.LISTAS, CATEGORIAS: s.CATEGORIAS, PARCEIROS: [parceiro] }));
-  amb.run(cmdPasto(G, { chave: 'cria-retiro-imp', dados: { campos: { nome: 'Retiro' } } }));
+  const retiro = amb.run(cmdPasto(G, { chave: 'cria-retiro-imp', dados: { campos: { nome: 'Retiro' } } })).dados.pasture_id;
+  if (t.rebanho) {
+    const animais = ['0921', '0922'].map((b) => ({ brinco: b, sexo: 'M', castrado: true, reprodutor: false, origem: 'DESCONHECIDA', pasto_destino_id: retiro, data_nascimento: '2023-06-01', data_nascimento_confianca: 'ESTIMADA' }));
+    amb.run(G.EventService.comando('registrar', { idempotencyKey: 'prep-rebanho-imp', dados: { tipo: 'ENTRADA_INICIAL', campos: {}, animais } }));
+  }
+  if (t.produto) {
+    amb.run(G.HealthService.comandoSalvarProduto({ idempotencyKey: 'prep-produto-imp', dados: { campos: { nome: 'Vacina K', categoria: 'VACINA', unidade: 'dose', controla_estoque: false, custo_unitario: 2 } } }));
+  }
   const comArquivos = () => amb.ctx({ files: G.FileService.porta() });
   const c = js(amb.gas.exec(() => G.ImportService.criar(comArquivos(), { idempotencyKey: 'imp-criar', dados: { tipo, arquivo_nome: tipo + '.csv', texto: t.csv, formato: FORMATO_IMP } }))).dados;
   const v = js(amb.gas.exec(() => G.ImportService.validarBloco(comArquivos(), { idempotencyKey: 'imp-val', dados: { import_id: c.import_id, bloco: 1, mapeamento: t.mapa } }))).dados;
@@ -1209,7 +1229,21 @@ function desfechoImportacao(amb, e, confirmado, msg, prep) {
   assert.equal(evs.length, confirmado ? prep.t.eventos : 0, msg + ': (1) os eventos do lote');
   evs.forEach((x) => assert.equal(x.status, 'PENDENTE', msg + ': evento importado não vale antes de concluir'));
   assert.equal(e.ANIMAIS.filter((a) => a.situacao_cadastral === 'PENDENTE').length, confirmado ? prep.t.novos : 0, msg + ': animais do lote ficam PENDENTE');
-  assert.equal(e.ANIMAIS.filter((a) => a.situacao_cadastral === 'ATIVO').length, 0, msg + ': nada do lote vale');
+  assert.equal(e.ANIMAIS.filter((a) => a.situacao_cadastral === 'ATIVO').length, prep.t.ativos || 0, msg + ': nada do lote vale');
+  if (prep.tipo === 'PESAGENS' || prep.tipo === 'SANIDADE') {
+    // O manejo do lote: as linhas de detalhe gravadas (inertes até concluir) e nenhuma projeção mexida.
+    const doLote = (aba) => amb.tabela(aba).filter((x) => evs.some((y) => y.event_id === x.event_id));
+    const vivos = e.ANIMAIS.filter((a) => a.situacao_cadastral === 'ATIVO');
+    if (prep.tipo === 'PESAGENS') {
+      assert.equal(doLote('PESAGENS').length, confirmado ? 3 : 0, msg + ': (1) as pesagens do lote');
+      assert.ok(vivos.every((a) => (a.peso_atual === undefined ? null : a.peso_atual) === null), msg + ': o peso atual só muda ao concluir');
+    } else {
+      assert.equal(doLote('SANIDADE').length, confirmado ? 2 : 0, msg + ': (1) as aplicações do lote');
+      assert.deepEqual(doLote('MOVIMENTOS_ESTOQUE').map((x) => [x.tipo, x.quantidade]), confirmado ? [['SAIDA', 2]] : [], msg + ': (1) a saída do estoque do lote');
+      const fin = doLote('FINANCEIRO');
+      assert.deepEqual(fin.map((f) => [f.valor, f.natureza]), confirmado ? [[400, 'CUSTEIO']] : [], msg + ': (1) o consumo do lote (2 doses × R$ 2,00)');
+    }
+  }
   if (prep.tipo === 'COMPRAS') {
     const fin = amb.tabela('FINANCEIRO').filter((f) => evs.some((x) => x.event_id === f.event_id));
     assert.equal(fin.length, confirmado ? 3 : 0, msg + ': (1) os lançamentos das compras (2 principais e o frete)');
@@ -1217,7 +1251,7 @@ function desfechoImportacao(amb, e, confirmado, msg, prep) {
   return null;
 }
 const CENARIOS_IMPORTACAO = {};
-['ANIMAIS', 'COMPRAS'].forEach((tipo) => {
+['ANIMAIS', 'COMPRAS', 'PESAGENS', 'SANIDADE'].forEach((tipo) => {
   CENARIOS_IMPORTACAO['importacao' + tipo] = {
     chave: (amb, prep) => amb.G.ImportService.chaveBloco(prep.id, 1),
     ambiente: { projecoes: (G) => G.Timeline.porta(), propriedade: false },

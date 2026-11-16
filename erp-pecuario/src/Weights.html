@@ -54,6 +54,37 @@ var TelaPesagens = (function () {
         { id: 'gmd', rotulo: 'Ganho médio diário', num: true, valor: function (x) { return x.gmd ? x.gmd.valor : null; }, formatar: function (x) { var g = x.gmd || {}; return g.valor === null || g.valor === undefined ? '— (' + (g.n || 0) + (g.n === 1 ? ' animal)' : ' animais)') : gmdTexto(g.valor) + ' (' + g.n + ')'; } },
       ] }).el;
   }
+  // Gráficos (SP-08, Components): os números são os do servidor, os mesmos das tabelas; o "—" leva o porquê do servidor.
+  function pontoGmd(x, g) { return { x: x, y: g ? g.valor : null, nota: g && g.valor === null ? g.explicacao || Fmt.rotulo('MOTIVO', g.motivo || 'DADOS_INSUFICIENTES') : null }; }
+  function graficoGmd(titulo, rotuloX, linhas, dado, nMin) {
+    return UI.grafico({ tipo: 'barras', titulo: titulo, rotuloX: rotuloX, rotuloValor: 'Ganho médio diário (kg/dia)', formatar: gmdTexto, dado: dado,
+      vazio: 'Sem ganho médio diário: é preciso ao menos ' + nMin + ' animais com duas pesagens individuais no período.',
+      series: [{ nome: 'Ganho médio diário', pontos: linhas.map(function (x) { return pontoGmd(x.nome || '—', x.gmd); }) }] });
+  }
+  /** Rebanho por categoria em cada pasto no fim do período (barras empilhadas; o total de cada pasto é o do servidor). */
+  function graficoCategorias(d) {
+    var cats = [];
+    d.por_pasto.forEach(function (p) { (p.por_categoria || []).forEach(function (c) { if (cats.indexOf(c.nome) < 0) cats.push(c.nome); }); });
+    var totais = {};
+    d.por_pasto.forEach(function (p) { totais[p.nome] = p.cabecas; });
+    var series = cats.map(function (nome) {
+      return { nome: nome, pontos: d.por_pasto.map(function (p) { var c = (p.por_categoria || []).filter(function (x) { return x.nome === nome; })[0]; return { x: p.nome, y: c ? c.cabecas : 0 }; }) };
+    });
+    if (d.por_pasto.some(function (p) { return p.sem_categoria; })) series.push({ nome: 'Sem categoria', pontos: d.por_pasto.map(function (p) { return { x: p.nome, y: p.sem_categoria || 0 }; }) });
+    return UI.grafico({ tipo: 'empilhadas', titulo: 'Rebanho por categoria em cada pasto em ' + Fmt.data(d.periodo.ate), rotuloX: 'Pasto', rotuloValor: 'Cabeças', totais: totais, series: series, dado: 'rebanho-categorias',
+      vazio: d.geral.motivo ? Fmt.rotulo('MOTIVO', d.geral.motivo) : 'Nenhum animal no rebanho no fim do período.' });
+  }
+  /** G5 (07, seção 9): a média mensal das pesagens individuais; o mês com poucas pesagens fica "—", com o porquê. */
+  function graficoEvolucao(d) {
+    return UI.grafico({ tipo: 'linha', titulo: 'Peso médio das pesagens de cada mês', rotuloX: 'Mês', rotuloValor: 'Peso médio (kg)', formatar: kg, dado: 'evolucao-peso',
+      vazio: 'Nenhum mês do período com ao menos ' + d.parametros.n_minimo + ' pesagens individuais.',
+      series: [{ nome: 'Peso médio', pontos: (d.evolucao || []).map(function (m) { return { x: m.mes.slice(5, 7) + '/' + m.mes.slice(0, 4), y: m.valor, nota: m.explicacao }; }) }] });
+  }
+  function graficoLotes(lista) {
+    return UI.grafico({ tipo: 'barras', titulo: 'Ganho médio diário de cada pesagem de lote', rotuloX: 'Pesagem', rotuloValor: 'Ganho médio diário (kg/dia)', formatar: gmdTexto, dado: 'gmd-lote',
+      vazio: 'Nenhuma pesagem do período tem uma anterior com os mesmos animais e o intervalo mínimo para o ganho de lote.',
+      series: [{ nome: 'Ganho do lote', pontos: lista.slice().reverse().map(function (x) { return pontoGmd(Fmt.data(x.data) + (lista.filter(function (y) { return y.data === x.data; }).length > 1 ? ' (' + x.n + ' animais)' : ''), x.gmd_lote); }) }] });
+  }
   function blocoPesagens(lista) {
     if (!lista.length) return UI.nota('Nenhuma pesagem no período.', 'info');
     return UI.tabela({ id: 'pesagens-periodo', rotulo: 'Pesagens do período', linhas: lista, chave: function (x) { return x.event_id; },
@@ -146,9 +177,11 @@ var TelaPesagens = (function () {
       Util.limpar(corpo);
       corpo.appendChild(h('p', { class: 'dado', role: 'status', text: 'Período: ' + (d.periodo.de ? Fmt.data(d.periodo.de) : 'desde o início') + ' a ' + Fmt.data(d.periodo.ate) + '. Ganho médio diário só entre pesagens de balança' + (d.parametros.aceita_fita ? ' ou fita' : '') + ' com ao menos ' + d.parametros.intervalo_min_dias + ' dias, e grupos com ao menos ' + d.parametros.n_minimo + ' animais.' }));
       corpo.appendChild(cartaoIndicadores(d.geral, d.periodo.ate));
-      corpo.appendChild(UI.secao('Por pasto', d.por_pasto.length ? tabelaGrupos('peso-pastos', 'Peso e ganho por pasto', d.por_pasto, 'Pasto') : UI.nota('Sem dados por pasto.', 'info'), { dado: 'por-pasto' }));
-      corpo.appendChild(UI.secao('Por categoria', d.por_categoria.length ? tabelaGrupos('peso-categorias', 'Peso e ganho por categoria', d.por_categoria, 'Categoria') : UI.nota('Sem dados por categoria.', 'info'), { dado: 'por-categoria' }));
-      corpo.appendChild(UI.secao('Pesagens e ganho de lote', blocoPesagens(d.pesagens), { dado: 'pesagens' }));
+      var nMin = d.parametros.n_minimo;
+      corpo.appendChild(UI.secao('Evolução do peso', graficoEvolucao(d), { dado: 'evolucao' }));
+      corpo.appendChild(UI.secao('Por pasto', d.por_pasto.length ? h('div', null, graficoGmd('Ganho médio diário por pasto', 'Pasto', d.por_pasto, 'gmd-pasto', nMin), graficoCategorias(d), tabelaGrupos('peso-pastos', 'Peso e ganho por pasto', d.por_pasto, 'Pasto')) : UI.nota('Sem dados por pasto.', 'info'), { dado: 'por-pasto' }));
+      corpo.appendChild(UI.secao('Por categoria', d.por_categoria.length ? h('div', null, graficoGmd('Ganho médio diário por categoria', 'Categoria', d.por_categoria, 'gmd-categoria', nMin), tabelaGrupos('peso-categorias', 'Peso e ganho por categoria', d.por_categoria, 'Categoria')) : UI.nota('Sem dados por categoria.', 'info'), { dado: 'por-categoria' }));
+      corpo.appendChild(UI.secao('Pesagens e ganho de lote', d.pesagens.length ? h('div', null, graficoLotes(d.pesagens), blocoPesagens(d.pesagens)) : blocoPesagens(d.pesagens), { dado: 'pesagens' }));
       corpo.appendChild(UI.secao('Curvas de peso', blocoCurvas(d, carregar), { dado: 'curvas' }));
       corpo.appendChild(UI.secao('Animais', tabelaAnimais(d.animais), { dado: 'animais-peso' }));
     }

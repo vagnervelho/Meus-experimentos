@@ -115,6 +115,17 @@ diagnóstico) conferidas antes e depois do comando, pela verificação e pela tr
 na base de demonstração (seção 21); as entradas dos quatro tipos, o cadastro da estação e o replay da situação reprodutiva
 e da castração no teste aleatório (seção 36) e as telas — Reprodução sob demanda (fêmeas, diagnóstico no tronco,
 indicadores, estações) e o bloco G inteiro da ficha (seção 40).
+Fase 3, etapa E3.7 (GRÁFICOS): o kit de gráficos em SVG próprio de `Components` — linha, barras, barras empilhadas e a
+curva de peso, com title e desc no SVG, eixos com a unidade, a tabela equivalente com os mesmos textos, o estado vazio e o
+desenho na largura útil da tela — e os gráficos das telas da Fase 3 com os números do servidor; em `peso.desempenho`, a
+evolução mensal do peso (G5 de 07, seção 9) e o rebanho por categoria em cada pasto (seção 41).
+Fase 3, etapa E3.6 (IMPORTADORES DE MANEJO): PESAGENS, SANIDADE, REPRODUCAO e OCORRENCIAS no `ImportService` (seção 42: modelo
+de cada tipo, leitura do produto, do protocolo e da estação pelo nome, o subtipo e o touro pela planilha, a linha DUPLICADA
+que sai do lançamento de manejo, o registro gerado por linha); o histórico anterior ao marco zero dos quatro tipos no motor
+(`HISTORICO_IMPORTADO`, seção 14: na sanidade, sem saída de estoque nem consumo, e a despesa paga no ato sem caixa), a
+conferência dele na verificação (COPIAS, seção 11), a situação declarada na entrada que vale como o fato da data dela
+(seção 40) e o GMD explicado da pesagem histórica (seção 38); a tela de importação com os tipos novos (seção 23) e as quedas,
+o teste aleatório e o Playwright dos importadores (seção 42).
 
 ## 1. Regras que valem para todo arquivo de `src/`
 
@@ -1602,8 +1613,8 @@ Códigos de linha — DUPLICADA: `BRINCO_JA_CADASTRADO` (o brinco em uso hoje; r
 
 ### 18.2 Importação de eventos históricos (E2.10): COMPRAS, VENDAS, TRANSFERENCIAS, NASCIMENTOS, MORTES
 
-`TIPOS_SUPORTADOS` = ANIMAIS + os cinco (`TIPOS_EVENTO`: tipo de importação → `event_type`, COMPRAS → COMPRA etc.); os de manejo (PESAGENS, SANIDADE, REPRODUCAO, OCORRENCIAS) → `VALIDATION`
-`TIPO_INDISPONIVEL` (fase 3). Mesmas rotas, chaves, estados e regras da seção 18 (TOTAL/PARCIAL_APROVADO, aprovação em
+`TIPOS_SUPORTADOS` = ANIMAIS + os cinco (`TIPOS_EVENTO`: tipo de importação → `event_type`, COMPRAS → COMPRA etc.) + os
+quatro de manejo da Fase 3 (PESAGENS, SANIDADE, REPRODUCAO, OCORRENCIAS; seção 42): os dez do enum `TIPO_IMPORTACAO`. Mesmas rotas, chaves, estados e regras da seção 18 (TOTAL/PARCIAL_APROVADO, aprovação em
 AUDITORIA, backup antes de concluir, IMPORTADO como commit, CANCELADO no desfazer); o que muda:
 
 | Peça | Contrato |
@@ -1769,7 +1780,7 @@ registram suas rotas na carga com `Telas.registrar` (o `JavaScript` já foi carr
 | `UI.confirmar({titulo, texto, verbo, cancelar, perigo})` | Promise booleana; o botão repete o verbo (operação crítica) |
 | `UI.aviso(texto, {tipo})`, `UI.faixa`, `UI.nota(texto, tipo)`, `UI.carregando(texto)`, `UI.vazio({texto, acao})`, `UI.estadoErro(erro, {acao, detalhe})` | Estados de 08 (seção 8): sempre ícone e texto; erro com título pelo código e detalhe técnico expansível |
 | `UI.tabela({rotulo, colunas: [{id, rotulo, valor(l), formatar(l), num, ordenavel}], linhas, chave(l), porPagina, cartao(l), ordem, selecao: {aoMudar(ids)}, vazio})` | Ordenável (cabeçalho com `aria-sort`), paginada (`itens_por_pagina`), cartões abaixo de 900 px com ordenação por seletor; seleção com "Selecionar os N filtrados". `{el, atualizar(linhas), selecionados()}` |
-| `UI.grafico({tipo: linha\|barras, titulo, series: [{nome, pontos: [{x, y}]}], formatar, rotuloX})` | SVG próprio + tabela equivalente ("Ver tabela"); `y = null` é buraco; linha com < 2 pontos não é desenhada ("dados insuficientes") |
+| `UI.grafico({tipo: linha\|barras\|empilhadas, titulo, series: [{nome, pontos: [{x, y, nota}]}], formatar, rotuloX, rotuloValor, ...})` | SVG próprio + tabela equivalente ("Ver tabela"); `y = null` é buraco; linha com < 2 pontos não é desenhada ("dados insuficientes"). Contrato completo na seção 41 (Fase 3, E3.7) |
 | `Campos.criar(def, {valor, aoMudar, idBase, rotulos, aoNovo})` | Um campo do catálogo (todos os `TIPOS_CAMPO` + `ref:TABELA`): rótulo sempre visível, ajuda, unidade, erro sob o campo; `lista`/`bool` com até 3 opções viram botões; `ref:PASTOS`/`ref:PARCEIROS` com "+ Novo" (miniformulário que grava e seleciona); `ref:ANIMAIS` com a resolução de brinco; `anexo` lê o arquivo (imagem reduzida a ~300 KB + miniatura ~15 KB) em `{nome_arquivo, mime_type, tamanho_bytes, conteudo_base64, miniatura_base64}` |
 | `Campos.converter(def, bruto)` | Bruto → valor do contrato ou `{erro}`: dinheiro em centavos (min/max em reais), decimal com `casas`, data yyyy-MM-dd, `outras_identificacoes` → `[{tipo, codigo}]`; `min_exclusivo: true` recusa o próprio mínimo ("maior que 0"), espelhando `minExclusivo` do esquema (formulários de pasto, propriedade e categoria) |
 | `Formulario.bloco(defs, valores, o)` / `Formulario.converterValores(defs, valores, contexto)` | Campos com `visivel_se`, `obrigatorio_se` e `default` (`HOJE`, literal, `{de: 'CONFIGURACOES.chave'}`); oculto não vai ao servidor; vazio visível vai `null` |
@@ -2230,7 +2241,7 @@ abre o módulo.
 | Catálogo | O módulo declara `tela` (o arquivo) quando a tela é entregue, e `sob_demanda` + `rotas` (as raízes de rota) quando ela vem sob demanda (seção 12). O bootstrap leva isso ao cliente em `modulos`. Módulo de fase futura ou ainda sem tela: fora do menu e recusado pela rota |
 | Servidor | `sistema.tela` (seção 19): guarda de dono, lista `Api.TELAS_SOB_DEMANDA`, módulo entregue, o arquivo compactado como o doGet (`Api.compactar`), sem abrir a planilha |
 | Cliente | `Modulos` (seção 22): pede uma vez, injeta como nó, guarda em memória; a rota abre quando a tela chega; falha de rede → "Tentar de novo"; outra versão do app no servidor → "Recarregar a página" |
-| Página inicial | `Index` com Styles, JavaScript, Components, Dashboard, Animals, Pastures, Events e Settings: 406 KB de 450 KB nesta etapa (eram 449 KB); 421 KB na E3.1 (a curva, o bloco de peso da ficha e a pesagem no formulário e no detalhe) |
+| Página inicial | `Index` com Styles, JavaScript, Components, Dashboard, Animals, Pastures, Events e Settings: 406 KB de 450 KB nesta etapa (eram 449 KB); 421 KB na E3.1 (a curva, o bloco de peso da ficha e a pesagem no formulário e no detalhe); 446 KB na E3.7 (o kit de gráficos de `Components`, seção 41) |
 | Orçamento | `npm run ui:check` mede a página inicial montada pelo doGet (≤ 450 KB, sem nenhuma tela sob demanda dentro) e cada tela sob demanda que existe em `src/`, como a rota a entrega (≤ 150 KB por módulo; Import: 47 KB nesta etapa; Weights: 41 KB na E3.1; Health: 23 KB na E3.2 e E3.3, com a página inicial em 439 KB). `conferirModulos(paginas, montada)` → `{modulos: [{nome, bytes, entregue}], problemas}` acusa também a tela sob demanda posta no Index e a rota que não entrega o arquivo compactado |
 | Contingência (NV) | A injeção de `<script>` criado pelo cliente dentro do iframe do HtmlService não foi verificada na conta do dono. Se o Google a bloquear, a tela volta ao Index (`<?!= include_('Import') ?>`), tira-se `sob_demanda` do módulo e o resto funciona sem mudança: a tela já registrada não é pedida |
 
@@ -2262,12 +2273,12 @@ tela não refaz conta (P5). Projeção e peso de referência nunca viram pesagem
 | `vizinhas(f, animalId, data)` | `{anterior, mesmoDia: [], seguinte}` em volta da data (os avisos da gravação) |
 | `variacao(p1, p2)` | `{de, ate, peso_de_kg, peso_ate_kg, ganho_kg (1 casa), dias, gmd_kg_dia (3 casas; null com 0 dia), variacao_pct (2 casas)}` |
 | `implausivel(gmd, params)` | Fora de `gmd_plausivel_min_kg_dia` a `gmd_plausivel_max_kg_dia` (RN-050) |
-| `intervalos(serie, periodos, params)` | Entre pesagens consecutivas: ganho, dias e variação sempre; `gmd_kg_dia` só entre individuais da mesma permanência e com `dias ≥ gmd_intervalo_min_dias`, senão null com `motivo: DADOS_INSUFICIENTES` e `explicacao` ("O animal esteve fora do rebanho entre as duas pesagens." / "Intervalo de 10 dias, menor que os 28 dias mínimos para o ganho médio diário."); nunca zero (RN-052) |
+| `intervalos(serie, periodos, params)` | Entre pesagens consecutivas: ganho, dias e variação sempre; `gmd_kg_dia` só entre individuais da mesma permanência e com `dias ≥ gmd_intervalo_min_dias`, senão null com `motivo: DADOS_INSUFICIENTES` e `explicacao` ("O animal esteve fora do rebanho entre as duas pesagens." / "Intervalo de 10 dias, menor que os 28 dias mínimos para o ganho médio diário."); nunca zero (RN-052); E3.6: a pesagem anterior ao marco zero (histórico importado; `serie` marca `historico`) fica fora de toda permanência, com "Pesagem anterior ao marco zero: o ganho médio diário só é calculado a partir do marco zero (a pesagem antiga aparece na curva)." |
 | `desempenhoAnimal(f, a, params, hoje, {de, ate}?)` | `{serie, intervalos, ganho_acumulado, gmd_periodo (Σ ganho ÷ Σ dias dos intervalos que contam), peso_atual, peso_ao_nascer (o do parto), peso_desmama, ponto_nascer_estimado (o de referência, só na curva, ou null), projecao}`; os indicadores são `{valor, motivo, n, ...}` (sem valor: `valor: null` e `motivo: DADOS_INSUFICIENTES`, nunca zero); `projecao = {valor: true, rotulo: 'Estimativa', base, referencia_de, gmd_referencia_kg_dia, horizonte_dias, ate, pontos, hoje, explicacao_hoje}` ou, sem base na permanência aberta ou sem GMD de referência, `{valor: null, motivo: 'DADOS_INSUFICIENTES', rotulo, explicacao}` |
 | `blocoFicha(L, a)` | Bloco E da ficha: o desempenho do animal + `entregue: true` + os parâmetros usados |
 | `resumoDoPlano(p, linhas)` | `impactos.pesagem` da simulação: `{n, total_kg, media_kg, tipo, metodo, jejum, lote}` |
 | `resultadoDoEvento(tx, eventId)` | `pesagem` da resposta do registro e da correção: o resumo + `animais: [{animal_id, peso_kg, anterior, ganho_kg, dias, gmd_kg_dia, variacao_pct, peso_atual, data_ultima_pesagem, peso_vencido}]` (o modo curral e a loja do cliente usam sem recalcular) |
-| `consultaDesempenho(filtros)` / `desempenho(ctx, filtros)` — `peso.desempenho` | filtros `{de, ate (padrão: marco zero e hoje), pasture_id, sexo, category_id, raca, animais (até `MAX_CURVAS` = 5)}` → `{periodo, filtros, parametros, geral, por_pasto, por_categoria, pesagens, animais, curvas}`. `geral`, `por_pasto` e `por_categoria`: cabeças e peso médio no fim do período pelo peso vigente com validade (`InventoryService.compor`: a pesagem mais recente até a data, vencida → o peso de referência, estimado) e o GMD do período como indicador `{valor, motivo, n, dias, ganho_kg, explicacao}` (o ganho de cada intervalo vai para os pastos na proporção dos dias em cada um e para a categoria do início do intervalo; n abaixo do mínimo → null). `pesagens`: os eventos PESAGEM do período com `gmd_lote` contra a pesagem anterior com ao menos n animais em comum e o intervalo mínimo ((média 2 − média 1) ÷ dias, só com os animais nas duas; senão null com "Sem pesagem anterior com ao menos 5 destes animais e 28 dias de intervalo."). Erros: `VALIDATION` (FORMATO_INVALIDO, FAIXA_INVALIDA, DATA_FUTURA, VALOR_FORA_DA_LISTA, TIPO_INVALIDO, VALOR_FORA_DA_FAIXA), `NOT_FOUND` (pasto, categoria) |
+| `consultaDesempenho(filtros)` / `desempenho(ctx, filtros)` — `peso.desempenho` | filtros `{de, ate (padrão: marco zero e hoje), pasture_id, sexo, category_id, raca, animais (até `MAX_CURVAS` = 5)}` → `{periodo, filtros, parametros, geral, por_pasto, por_categoria, pesagens, evolucao, animais, curvas}` (`evolucao` e `por_pasto[].por_categoria`: seção 41). `geral`, `por_pasto` e `por_categoria`: cabeças e peso médio no fim do período pelo peso vigente com validade (`InventoryService.compor`: a pesagem mais recente até a data, vencida → o peso de referência, estimado) e o GMD do período como indicador `{valor, motivo, n, dias, ganho_kg, explicacao}` (o ganho de cada intervalo vai para os pastos na proporção dos dias em cada um e para a categoria do início do intervalo; n abaixo do mínimo → null). `pesagens`: os eventos PESAGEM do período com `gmd_lote` contra a pesagem anterior com ao menos n animais em comum e o intervalo mínimo ((média 2 − média 1) ÷ dias, só com os animais nas duas; senão null com "Sem pesagem anterior com ao menos 5 destes animais e 28 dias de intervalo."). Erros: `VALIDATION` (FORMATO_INVALIDO, FAIXA_INVALIDA, DATA_FUTURA, VALOR_FORA_DA_LISTA, TIPO_INVALIDO, VALOR_FORA_DA_FAIXA), `NOT_FOUND` (pasto, categoria) |
 
 A lotação e o peso médio do pasto em data (seção 33) já usam o peso medido mais recente até a data, com a validade: a
 pesagem depois da data não conta e a vencida vira o peso de referência da categoria, marcado estimado.
@@ -2280,7 +2291,7 @@ Interface:
 | Modo curral (`pesagens/curral`; 08, seção 5) | Começo: data (hoje), método, momento, jejum e o pasto do lote. Depois: `#cur-brinco` (`inputmode=numeric`; sem zeros à esquerda acha o brinco pela loja) → Enter → `#cur-peso` (`inputmode=decimal`) → Enter → volta ao brinco; a conferência mostra o animal e o último peso da loja; candidatos quando o número é ambíguo; contador "N de M · faltam K (+X de outros pastos)" com a lista dos que faltam; repetido na fila → "Substituir o peso"; não encontrado → linha pendente que trava o envio; "Desfazer o último". A fila é um rascunho (`Rascunhos`, id `curral-pesagem`, tipo `CURRAL_PESAGEM`, no aparelho e no servidor; a visão geral lista o rascunho com o link) e sobrevive a recarregar a página |
 | Envio em blocos | `BLOCO = 20` linhas por bloco; cada bloco é um `evento.registrar` com chave própria `curral:<uuid>` guardada no rascunho antes de enviar; estados por bloco NOVO, ENVIANDO, SEM_SINAL, GRAVADO, AVISO, ERRO e por linha FILA, ENVIANDO, SEM_SINAL, GRAVADA, AVISO, ERRO, NAO_ENCONTRADO. Transporte que falha → SEM_SINAL (nada perdido); resposta perdida → `Cliente.comando` (45 s) confere `operacao.status` e reenvia com a mesma chave; ao retomar a fila, os blocos ENVIANDO/SEM_SINAL são conferidos por `Cliente.verificar` antes de qualquer reenvio — nada duplica. A linha gravada mostra o ganho e os dias contra a pesagem anterior vindos da resposta (`pesagem.animais`). Aviso do servidor (PESO_IMPLAUSIVEL, POSSIVEL_DUPLICIDADE) fica na linha; "Está certo" reenvia o bloco com o aceite. "Terminar a pesagem" recusa enquanto há bloco sem confirmação, pede confirmação para descartar o que não foi gravado, apaga o rascunho e mostra os lançamentos gravados com o número e a média do servidor (`[data-resultado-curral]`) |
 | Ficha, aba Peso (`Animals`, `blocoPeso`) | Peso atual, ao nascer, à desmama, ganho no período, GMD do período e peso estimado hoje; `UI.curvaPeso`; tabela das pesagens (data, peso, como, ganho, dias, GMD, variação) e o porquê de cada GMD vazio (`data-porque-sem-gmd`); nota dos estimados |
-| `UI.curvaPeso({titulo, series: [{nome, pontos: [{data, peso_kg, estimado}], nascer, projecao}]})` (`Components`) | SVG próprio, sem biblioteca: marcadores `data-marcador` = medido, estimado, nascer e projeção (linha tracejada, rótulo "Estimativa"), legenda e "Ver tabela" com as mesmas linhas ("Pesagem", "Pesagem estimada", "Peso ao nascer de referência (estimado)", "Projeção (estimativa)"); sem pontos → `.grafico-vazio` |
+| `UI.curvaPeso({titulo, series: [{nome, pontos: [{data, peso_kg, estimado}], nascer, projecao}]})` (`Components`) | SVG próprio, sem biblioteca: marcadores `data-marcador` = medido, estimado, nascer e projeção (linha tracejada, rótulo "Estimativa"), legenda e "Ver tabela" com as mesmas linhas ("Pesagem", "Pesagem estimada", "Peso ao nascer de referência (estimado)", "Projeção (estimativa)"); sem pontos → o estado vazio (`data-vazio`, `.grafico-sem-dados`). Na E3.7 (seção 41): eixos "Peso (kg)" e "Data", title e desc no SVG, `data-valor` e a dica em cada marca, a largura da tela |
 | Formulário, revisão e detalhe (`Components`, `Events`) | PESAGEM no Registro (frequente, revisão local, verbo "Gravar a pesagem", consequência e resultado "N pesagens gravadas · média X kg"); correção pelo detalhe com o momento, o método, o jejum, o lote e o peso de cada animal como gravados (`previaPesagem_`); seções "Pesagem" e "Pesagens" no detalhe |
 | Loja do cliente (`JavaScript`) | Delta de `evento.registrar` da PESAGEM: `peso_atual`, `data_ultima_pesagem` e `peso_vencido` de cada animal vindos de `pesagem.animais` (sem conta no aparelho); rótulos `TIPO_PESAGEM` |
 
@@ -2333,7 +2344,7 @@ demonstração).**
 | ESTOQUE_INSUFICIENTE (RN-057) | Em todo comando que mexe nos movimentos de um produto com controle (aplicação, entrada corrigida, acerto, estorno): o menor saldo ao longo do tempo depois do comando < 0 e menor que antes → aviso "Vacina Aftosa: o estoque ficaria em −10 doses em 13/11/2026…"; com a política BLOQUEIA (`avisos_politica`), recusa — o estoque negativo é aviso ou bloqueio por parâmetro |
 | Carência × venda (`carenciaContraVendas_`, RN-072) | A aplicação retroativa ou a correção cuja carência cobre a data de uma VENDA vigente do animal: na venda para ABATE vale a política de CARENCIA_ATIVA (padrão BLOQUEIA); nas demais, aviso com aceite. Na VENDA, a carência é conferida como antes (seção 14), agora sobre a SANIDADE real |
 | Payload e resposta | `modo_dose`, `dose_referencia` (não no TOTAL), `quantidade_consumida_total` (o que saiu); `impactos.sanidade` = `{procedimento, produto_id, nome_produto, unidade, modo_dose, dose_referencia, quantidade, quantidade_informada, consumo: {custo_unitario, valor}, estoque: {antes, depois}, protocol_id, carencia_dias, fim_carencia, proxima_aplicacao, animais: [{animal_id, codigo_interno, brinco, dose, peso_kg, peso_situacao, peso_estimado, custo}]}`; `impactos.estoque` = `{subtipo, product_id, nome, unidade, controla_estoque, quantidade, motivo, saldo_contado, saldo_na_data, qtd_apresentacao, fator_conversao, valor, saldo, custo_unitario}`; papéis dos lançamentos: CONSUMO, SERVICO, INSUMO |
-| Importação | O importador de SANIDADE fica para a etapa de importação de manejo (E3.6): a rota responde `VALIDATION` como antes; o desfazer da importação de ANIMAIS com sanidade lançada depois → `CONFLICT` com o lançamento |
+| Importação | O importador de SANIDADE (E3.6, seção 42) planeja cada aplicação por este mesmo tratador; o desfazer da importação de ANIMAIS com sanidade lançada depois → `CONFLICT` com o lançamento. Aplicação anterior ao marco zero (o histórico importado e a correção dele): registro com produto, dose, quantidade, carência e próxima, sem saída de estoque e sem consumo (o estoque e o custo do insumo começam no marco zero); o serviço pago no ato sem caixa (sem parcela), como a compra e a morte históricas; `impactos.sanidade.historico = true` |
 
 **Integridade (`AuditService.conferirInsumos_`, COPIAS — fonte quebrada, sem reparo; a trava recusa o comando que toca a
 fonte com `CONFLICT INTEGRIDADE_COPIAS`).** As regras estão na seção 11. O escopo da trava ganhou `produtos` (sementes:
@@ -2414,7 +2425,10 @@ importação e desfazer, base de demonstração).**
 
 **Projeção.** `situacao_reprodutiva` = o último fato (data, posição na cadeia, `event_seq`): exposição e cobertura
 EXPOSTA, inseminação INSEMINADA, diagnóstico positivo PRENHA, negativo, parto e aborto VAZIA; o duvidoso e a desmama não
-decidem; sem fato, o declarado na entrada ou SEM_INFORMACAO (NAO_APTA para a nascida na fazenda). `castrado` pelo cadastro
+decidem; sem fato, o declarado na entrada ou SEM_INFORMACAO (NAO_APTA para a nascida na fazenda). E3.6: a situação
+declarada na entrada (rebanho inicial, compra, outra entrada) vale como o fato da data dessa entrada — o registro de antes
+dela (o histórico reprodutivo importado de antes do marco zero) fica na ficha e nos indicadores, mas não a desfaz; sem
+situação declarada, o histórico decide (o replay do teste aleatório segue a mesma regra). `castrado` pelo cadastro
 ou pela castração vigente; `cria_ao_pe` sai com a desmama.
 
 **Previsão de parto (`previsaoParto(regs, params, estacoes)`, 03b, seção 7.3; sempre estimativa, salvo a informada).**
@@ -2493,3 +2507,85 @@ desfazer), `tests/acceptance.test.js` (cenário REPRODUCAO e as estações da de
 36: as quatro entradas, o cadastro da estação e os replays `REPLAY:SITUACAO_REPRODUTIVA` e `REPLAY:CASTRADO`; sementes fixas
 8 e 1) e `tests/ui/reproducao.test.js` (Playwright: tronco a 360 px com a rede cortada; fêmeas, indicadores, estação,
 ficha da matriz e do touro a 1280 e 360 px).
+
+## 41. Gráficos (Fase 3, E3.7) — `Components` (`UI.grafico`, `UI.curvaPeso`, `UI.escalaGrafico`), `Styles`, `WeightService` (`peso.desempenho`), `Weights`, `Reproduction`, `Health`, `Dashboard`
+
+Desenho: SP-08 (desenho-base, seção 17: SVG próprio, sem biblioteca nem CDN); 08, seções 11, 14 e 15; 07, seção 9 (G5);
+01, seção 6.2 (`Components` traz os gráficos). Os números chegam prontos do servidor; a tela só desenha (P5): nenhum
+gráfico soma, divide ou tira média (conferido por `tests/graficos.test.js`). Pizza e rosca não entram: o desenho só pede
+linha e barras (08, seções 11 e 15).
+
+**Kit (`Components`, na página inicial; 446 KB de 450 KB nesta etapa).**
+
+| Membro | Contrato |
+|---|---|
+| `UI.grafico(o)` | `o = {tipo: linha\|barras\|empilhadas, titulo, descricao?, rotuloX (eixo dos itens e 1ª coluna da tabela), rotuloValor (eixo dos valores, com a unidade: "Ganho médio diário (kg/dia)", "Taxa (%)"), series: [{nome, pontos: [{x, y, nota?}]}], formatar(y) (o texto do rótulo, da dica e da célula: o mesmo), rotuloEixo(v) (marcas do eixo; padrão: o número com as casas do passo), totais: {x: valor} (empilhadas: o total do servidor, na ponta e na coluna "Total"), vazio (texto do estado vazio), zero (linha a partir do zero), dado (→ `data-grafico-id`)}`. `<figure class="grafico" data-grafico=tipo>` com `figcaption` = título; `.grafico-area` com o `<svg role="img" aria-labelledby>` (o `<title>` = título; o `<desc>` = descrição + unidade + "Os números estão na tabela logo abaixo (Ver tabela)"); legenda com várias séries; `details.grafico-tabela` "Ver tabela" (linha = item, coluna = série; valor ausente = "—" e a `nota` entre parênteses). Linha: um traço por série, cortado onde falta o valor; série com menos de 2 pontos → nota "Dados insuficientes para desenhar a linha de …". Barras: horizontais, o nome do item à esquerda quando todos cabem em 30% da largura (meses, pastos de nome curto), senão em cima da barra (legível a 360 px, cortado com "…" e o nome inteiro na dica), o valor na ponta (`.grafico-valor`), várias séries agrupadas; ausente → "— sem dado" no lugar da barra; negativo à esquerda do zero. Empilhadas: um trecho por série (valores ≥ 0; o trecho zero não é desenhado), o rótulo dentro quando cabe e o total do servidor na ponta. Cada marca (`rect`, `circle`) traz `data-x`, `data-serie`, `data-valor` e a dica `<title>` "item, série: valor formatado". Sem nenhum valor: `data-vazio="true"` e `.grafico-sem-dados` (ícone e texto) no lugar do desenho; a tabela fica quando há itens |
+| `UI.curvaPeso(o)` | Seção 38, agora sobre o mesmo quadro: eixos "Peso (kg)" e "Data", title e desc ("Curva de peso com N pesagens; a linha tracejada é a projeção (estimativa), nunca um peso pesado."), marcas com `data-marcador` (medido, estimado, nascer, projecao), `data-valor` e a dica "dd/mm/aaaa: 380,0 kg (pesagem)"; a projeção tracejada com o rótulo "Estimativa" |
+| `UI.escalaGrafico(min, max, n, zero, inteiro)` | Escala "redonda" do eixo dos valores: passo de 1, 2, 2,5 ou 5 × 10^k cobrindo [min, max] em cerca de n divisões; `zero` inclui o zero (barras); `inteiro` (o kit liga quando todos os valores são inteiros: cabeças, centavos) nunca tem passo menor que 1; valor único ganha folga. → `{min, max, casas, marcas}` (puro; testado no Node) |
+| Largura | O SVG é desenhado na largura útil da sua área (260 a 720 px; antes de entrar na página, a da janela) e refeito quando ela muda (`resize`, com espera de 150 ms): o texto de 12 px sai com ~12 px a 360 px. O ícone do estado vazio não é esticado (`.grafico-area svg`) |
+| Estilo (`Styles`) | 8 cores de série (`.grafico-serie-0` a `7`, `--serie`; contraste ≥ 4,5:1 com o branco, para o rótulo dentro da barra); a amostra da legenda com a cor da série (`color`); rótulos com contorno da cor da superfície (legíveis sobre a grade) |
+
+**Servidor (`WeightService.consultaDesempenho`, rota `peso.desempenho`; seção 38).**
+
+| Campo | Contrato |
+|---|---|
+| `evolucao` | G5 (07, seção 9): `[{mes: 'aaaa-mm', valor, motivo, n, animais, explicacao}]`, um item por mês do período (do mês de `de`, ou da primeira pesagem sem marco zero, ao de `ate`). `valor` = média das pesagens individuais do mês (as que entram no GMD: balança, e fita com `gmd_aceita_fita`; uma por animal e dia, a de depois), com 1 casa; `n` = pesagens; n abaixo de `indicador_n_minimo` → `valor: null`, DADOS_INSUFICIENTES e "Só 2 pesagens no mês (mínimo 5)." ou "Nenhuma pesagem individual no mês.". Estimativa visual, média do lote e projeção nunca entram. Filtros de sexo e raça pelo animal; de pasto (`Timeline.situacaoEm`) e categoria pela data da pesagem |
+| `por_pasto[].por_categoria`, `por_pasto[].sem_categoria` | As cabeças de cada categoria no pasto no fim do período (`InventoryService.compor`): `[{category_id, nome, cabecas}]`; somadas a `sem_categoria`, dão `cabecas` |
+
+**Telas.** Ficha (aba Peso): a curva (seção 38). Pesagens (desempenho): "Peso médio das pesagens de cada mês" (linha,
+`evolucao-peso`), "Ganho médio diário por pasto" e "por categoria" (barras, `gmd-pasto`, `gmd-categoria`; o "—" com a
+explicação do servidor), "Rebanho por categoria em cada pasto em dd/mm/aaaa" (empilhadas, `rebanho-categorias`; o total
+= `cabecas` do servidor), "Ganho médio diário de cada pesagem de lote" (barras, `gmd-lote`), cada um ao lado da tabela da
+seção. Reprodução (indicadores): "Taxas da estação …" (barras, `taxas-estacao`: prenhez — ou "Prenhez entre
+diagnosticadas" —, parição, natalidade, perda gestacional, desmama e mortalidade até a desmama; "(parcial)" no nome; o "—"
+com o motivo e o n) e "Prenhez, parição, natalidade e desmama por categoria" (barras agrupadas, `taxas-categoria`).
+Sanidade (agenda): "Cobertura por protocolo em dd/mm/aaaa" (barras, `cobertura-protocolos`) e "Custo sanitário por conta"
+(empilhadas, `custo-sanitario`: atribuído aos animais + sem animal; o total do servidor; eixo em reais). Início: os cinco
+gráficos da Fase 1 e 2 ganharam o eixo "Cabeças".
+
+Testes: `tests/graficos.test.js` (Node: G5 número a número — média, n, mínimo, mês vazio, período, estimativa fora, mesmo
+dia, filtros de pasto, categoria e sexo —, as categorias de cada pasto somando o pasto, a escala, as regras estáticas —
+todo SVG pelo kit, title e desc, tabela equivalente, título e unidade em cada chamada, nenhuma conta nos gráficos das telas
+da Fase 3 — e o contraste das cores) e `tests/ui/graficos.test.js` (Playwright a 360 e 1280 px, com a captura de cada
+tela: o componente com barras agrupadas, valor ausente e negativo, empilhadas, linha com buraco e o estado vazio, e o
+redesenho quando a tela muda; a ficha, o desempenho, os indicadores reprodutivos e a agenda sanitária com os números do
+desenho iguais aos da tabela e aos do servidor, o texto legível a 360 px e sem rolagem horizontal).
+
+## 42. Importadores de manejo (Fase 3, E3.6) — `ImportService` (PESAGENS, SANIDADE, REPRODUCAO, OCORRENCIAS), `EventService` (histórico), `AuditService`, `Timeline`, `WeightService`, `Import`
+
+Desenho: 04, seções 6 e 8; 06, seção 5.3; 08, seção 12; 03a, seções 5.4 e 5.5; 09, CT-12; 05, RN-088 a RN-095; 03b, seções 5
+a 7 (o que cada tipo grava). O mesmo assistente de 5 telas, os mesmos 10 passos, as mesmas rotas, chaves (`imp:<id>:<n>`),
+estados, reconciliação, desfazer e o mesmo ensaio em memória da seção 18.2 (cada lançamento pelo `planejarEventoImportado`, o
+tratador único do tipo, e pela trava de integridade no ensaio, nos blocos, na conclusão e no desfazer). O que muda:
+
+| Peça | Contrato |
+|---|---|
+| Modelos (`MODELOS`, `modelo(tipo)`) | PESAGENS: `grupo` (Nº da pesagem), `data`, `momento` (rotina, chegada/entrada, desmama, venda/saída; padrão aceito), `metodo` (balança, fita, estimativa visual; padrão aceito), `jejum`, `peso_total_lote` e `cabecas_lote` (a pesagem por lote: cada animal com a média), `responsavel`, `observacoes_lancamento`; por animal `brinco`/`codigo`, `peso`, `observacoes`. SANIDADE: `procedimento` (vacinação, vermifugação, medicação, tratamento, exame, doença — o subtipo), `produto` (do cadastro, pelo nome), `nome_produto` (sem cadastro), `protocolo` (pelo nome), `fabricante`, `lote`, `validade`, `modo_dose`, `dose_lancamento` (por cabeça ou por kg), `unidade` (sem cadastro), `quantidade_total`, `via`, `motivo`, `diagnostico`, `carencia`, `proxima`, `veterinario`, `responsavel`; por animal `dose`, `resultado_exame`. REPRODUCAO: `registro` (exposição, cobertura, inseminação, diagnóstico, aborto — o subtipo), `estacao` (pelo nome), `touro` (brinco na data, código ou nome do animal de referência), `semen`, `metodo`, `retirada`; por animal `brinco`/`codigo` (na exposição, também os touros do lote, uma linha cada), `resultado` (positivo/prenhe/p, negativo/vazia/v, duvidoso/d), `idade_gestacao`, `previsao_parto`. OCORRENCIAS: `tipo_ocorrencia` (lista TIPO_OCORRENCIA), `descricao`, `responsavel`. Obrigatórios: data, o subtipo (ou momento e método na pesagem) e `brinco`/`codigo`; na ocorrência também o tipo e a descrição. A despesa paga no ato fica fora do modelo (decisão desta etapa: entra pela correção do lançamento) |
+| Agrupamento | Sem o número do lançamento, a chave natural mais os campos **opcionais** do lançamento (`agrupamento.opcionais`; vazio é um valor): PESAGENS data + momento + método (+ jejum, peso do lote); SANIDADE data + procedimento (+ produto, nome do produto, diagnóstico); REPRODUCAO data + registro (+ estação, touro, sêmen, método, retirada); OCORRENCIAS data + tipo + descrição |
+| Leitura | Tipos novos de célula: `produto`, `protocolo`, `estacao` — pelo nome (sem diferença de acento e maiúscula), o ativo sobre o desativado de mesmo nome; dois iguais → `CADASTRO_AMBIGUO`; não achado → `PRODUTO_NAO_ENCONTRADO`, `PROTOCOLO_NAO_ENCONTRADO`, `ESTACAO_NAO_ENCONTRADA`, com o lugar do cadastro na mensagem. O touro não achado → `TOURO_NAO_ENCONTRADO` (a mesma resolução do pai do parto, `referencia_`) |
+| Animal | O brinco em uso NA DATA do lançamento (seção 18.2, `donoDoBrinco_`) ou o código interno; o manejo não cria animal |
+| Duplicidade | Linha idêntica que identifica o animal → `LINHA_REPETIDA_NO_ARQUIVO` (como nos eventos). O fato já gravado na base, fora desta importação (`jaRegistrado_`) → `EVENTO_JA_REGISTRADO`: na pesagem, o animal com uma pesagem de qualquer lançamento na mesma data **com o mesmo peso** (na de lote, a média); na sanidade, o mesmo procedimento com o mesmo produto (ou o mesmo nome, ou a mesma doença); na reprodução, o mesmo registro; na ocorrência, o mesmo tipo. **Decisão desta etapa:** duas pesagens legítimas do mesmo animal no mesmo dia são dois lançamentos (números diferentes na coluna "Nº da pesagem"); a segunda recebe o aviso `POSSIVEL_DUPLICIDADE` do motor, como no formulário; o mesmo animal duas vezes no mesmo lançamento → `ANIMAL_REPETIDO`, com a dica da coluna. No manejo, a linha DUPLICADA pela base **sai do lançamento**, que entra com as outras (cada linha é um fato; nas compras e vendas o lançamento continua entrando só inteiro): `agruparLinhas_(…, {jaNaBase})` na validação e `{duplicadas}` (as gravadas) nos blocos |
+| Histórico | Data anterior ao marco zero → registro histórico (`pre_marco_zero`, efeito 0), validado só contra o nascimento e a chegada declarada (04, seção 6): a pesagem entra na curva e no peso atual e fica fora do GMD (`intervalos`: "Pesagem anterior ao marco zero…"); a aplicação entra no histórico sanitário e na agenda, sem saída de estoque e sem consumo; o registro reprodutivo entra na ficha e nos indicadores sem desfazer a situação declarada na entrada (seção 40); a ocorrência, na trilha |
+| Registro gerado (`entity_id_gerado`, 03a, seção 5.5) | Pesagem → `weight_id`; aplicação → `health_id`; registro reprodutivo → `reproduction_id`; sem detalhe próprio (a ocorrência, o touro da exposição) → o `event_animal_id` do animal no evento. `criados.animais` = 0; o relatório e a tela não mostram as pendências de animais criados |
+| Desfazer | As conferências do estorno (seção 18.2, `dependentesEventos_`): a correção de fora de um lançamento importado (`DEPENDENTE`, "Estorne a correção antes"), a parcela paga, o que voltaria e não cabe. O desfazer da importação de ANIMAIS com manejo importado depois → `DEPENDENTE` com "Desfaça antes a importação do arquivo …" |
+| Ensaio | Reprojeta também o estoque dos produtos que a aplicação movimenta (`reprojetar_(…, produtos)`), para a trava do ensaio conferir o saldo |
+
+**Integridade (a mesma função na verificação e na trava).** `conferirInsumos_` (COPIAS): a aplicação anterior ao marco zero
+não tem saída de estoque (`HISTORICO_ESTOQUE`) nem lançamento de consumo com produto (`HISTORICO_CONSUMO`). As demais
+conferências de cada tipo (seções 11, 38, 39 e 40) valem para o importado como para o do formulário.
+
+**Interface (`Import.html`, seção 23).** Os dez tipos no "O que importar", em palavras; as opções lidas e os valores para
+todas as linhas em palavras (os domínios de rótulo do aparelho; o procedimento e o registro pelo rótulo do subtipo no
+catálogo; o produto, o protocolo e a estação pelo nome do cadastro); o texto das obrigatórias diz que o animal é achado pelo
+brinco da data e, na sanidade, que o histórico não mexe no estoque; o relatório final do manejo sem "Animais ativos hoje",
+"Sem brinco" e "Sem nascimento", e com o atalho para o módulo (pesagens, aplicações, fêmeas, lançamentos).
+
+Testes: `tests/import.manejo.test.js` (as quatro importações por caminho: coletiva, lote, histórico, brinco na data e
+recusas por linha; duplicidade no arquivo e na base, a linha que sai do lançamento, o aviso do segundo peso no mesmo dia;
+correção e estorno do importado, a correção de fora que bloqueia o desfazer, o desfazer e o da importação de ANIMAIS que
+espera o de manejo; estoque, consumo e carência da sanidade, o histórico sem estoque e a correção dele sem caixa; a
+reprodução com a situação declarada; as ocorrências e as rotas pela api), `tests/unitofwork.adversarial.test.js` (a
+varredura de quedas do bloco de PESAGENS e de SANIDADE nas três primitivas: tudo ou nada por lote, as pesagens, as
+aplicações, a saída e o consumo inertes até concluir), `tests/fase2.fuzz.test.js` (os quatro importadores no registro, com o
+oráculo do fato de cada linha importada na conclusão; sementes fixas 31 e 56), `tests/import.eventos.test.js` (o modelo
+de PESAGENS entregue; tipo desconhecido recusado) e `tests/ui/importacao-manejo.test.js` (Playwright a 1280 e 360 px).

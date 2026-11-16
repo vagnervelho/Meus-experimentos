@@ -325,19 +325,27 @@ body.tela-cheia .avisos { bottom: 16px; }
 /* --------------------------------------------------------------- gráficos ---- */
 .grafico { margin: 0 0 16px; background: var(--superficie); border: 1px solid var(--borda-suave); border-radius: var(--raio); padding: 12px; }
 .grafico figcaption { font-weight: 700; margin-bottom: 8px; }
-.grafico svg { display: block; width: 100%; max-width: 720px; height: auto; }
+.grafico-area svg { display: block; width: 100%; max-width: 720px; height: auto; }
 .grafico-eixo { stroke: var(--borda); stroke-width: 1; }
 .grafico-grade { stroke: var(--borda-suave); stroke-width: 1; }
-.grafico-rotulo { fill: var(--texto-suave); font-size: 12px; font-family: inherit; }
-.grafico-valor { fill: var(--texto); font-size: 12px; font-weight: 700; font-family: inherit; }
-.grafico-serie-0 { stroke: #1f5f30; fill: #1f5f30; }
-.grafico-serie-1 { stroke: #0a4fc4; fill: #0a4fc4; }
-.grafico-serie-2 { stroke: #8a3b00; fill: #8a3b00; }
-.grafico-serie-3 { stroke: #5b2a86; fill: #5b2a86; }
+/* Texto do SVG em px do desenho: o desenho tem a largura útil da tela (Components), então 12 px saem 12 px a 360 px. */
+.grafico-rotulo, .grafico-valor, .grafico-categoria, .grafico-titulo-eixo, .grafico-dentro { font-size: 12px; font-family: inherit; }
+.grafico-rotulo { fill: var(--texto-suave); }
+.grafico-valor, .grafico-categoria { fill: var(--texto); font-weight: 700; }
+.grafico-categoria { font-size: 13px; }
+.grafico-titulo-eixo { fill: var(--texto-suave); font-weight: 700; }
+.grafico-dentro { fill: #fff; font-weight: 700; }
+.grafico-rotulo, .grafico-categoria { paint-order: stroke; stroke: var(--superficie); stroke-width: 3px; stroke-linejoin: round; }
+/* Cores das séries (8; todas com contraste de 4,5:1 com o branco, para o rótulo dentro da barra); `color` serve à amostra da legenda. */
+.grafico-serie-0 { --serie: #1f5f30; } .grafico-serie-1 { --serie: #0a4fc4; } .grafico-serie-2 { --serie: #8a3b00; } .grafico-serie-3 { --serie: #5b2a86; }
+.grafico-serie-4 { --serie: #a8201a; } .grafico-serie-5 { --serie: #00646a; } .grafico-serie-6 { --serie: #5f5000; } .grafico-serie-7 { --serie: #4a4a4a; }
+[class*="grafico-serie-"] { stroke: var(--serie); fill: var(--serie); color: var(--serie); }
+.grafico-barra { stroke: var(--superficie); stroke-width: 1; }
 .grafico-linha { fill: none; stroke-width: 3; }
 .grafico-legenda { display: flex; flex-wrap: wrap; gap: 12px; list-style: none; margin: 8px 0 0; padding: 0; font-size: 0.9375rem; }
 .grafico-legenda li { display: inline-flex; align-items: center; gap: 6px; }
-.grafico-legenda .amostra { width: 18px; height: 4px; border-radius: 2px; display: inline-block; }
+.grafico-legenda .amostra { width: 18px; height: 10px; border-radius: 2px; display: inline-block; background: currentColor; }
+.grafico-sem-dados { margin: 0; }
 .grafico .tabela { margin-top: 8px; }
 .grafico-vazio { fill: var(--superficie); stroke-width: 2; }
 /* Modo curral (08, seção 5): cabeçalho fixo, campos grandes, a lista com a mais recente no topo. */

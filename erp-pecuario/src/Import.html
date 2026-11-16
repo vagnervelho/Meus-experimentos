@@ -2,7 +2,8 @@
 'use strict';
 /*
  * ERP Pecuário — Importação de planilha (§14; 08-ux-ui.md, seção 12): o rebanho do marco zero (ANIMAIS) e os eventos
- * históricos (COMPRAS, VENDAS, TRANSFERENCIAS, NASCIMENTOS, MORTES), num assistente de 5 telas para os 10 passos; o
+ * históricos (COMPRAS, VENDAS, TRANSFERENCIAS, NASCIMENTOS, MORTES) e de manejo (PESAGENS, SANIDADE, REPRODUCAO,
+ * OCORRENCIAS; Fase 3, E3.6), num assistente de 5 telas para os 10 passos; o
  * modelo de colunas de cada tipo vem do servidor (importacao.modelo) e o relatório final traz a reconciliação.
  * 1 Tipo e arquivo (modelo para baixar, arquivo CSV ou colagem, formato; importacao.criar: leitura e primeiras linhas
  * como texto) · 2 Mapeamento (coluna → campo, confiança padrão, valores padrão; validação em blocos com progresso) ·
@@ -19,7 +20,23 @@ var TelaImportacao = (function () {
   var modelo = null;
   var modelos = {};
   var sessao = {};
-  var TIPOS = { ANIMAIS: 'Animais (rebanho atual)', COMPRAS: 'Compras de animais', VENDAS: 'Vendas de animais', TRANSFERENCIAS: 'Transferências entre pastos', NASCIMENTOS: 'Nascimentos (partos)', MORTES: 'Mortes' };
+  var TIPOS = {
+    ANIMAIS: 'Animais (rebanho atual)', COMPRAS: 'Compras de animais', VENDAS: 'Vendas de animais', TRANSFERENCIAS: 'Transferências entre pastos', NASCIMENTOS: 'Nascimentos (partos)', MORTES: 'Mortes',
+    PESAGENS: 'Pesagens', SANIDADE: 'Sanidade (vacinas, vermífugos, tratamentos, exames, doenças)', REPRODUCAO: 'Reprodução (exposição, inseminação, diagnóstico)', OCORRENCIAS: 'Ocorrências',
+  };
+  // Manejo (Fase 3, E3.6): os importadores que registram fatos sobre animais que já estão no cadastro (não criam animal).
+  var MANEJO = { PESAGENS: 'pesagens', SANIDADE: 'sanidade/aplicacoes', REPRODUCAO: 'reproducao/matrizes', OCORRENCIAS: 'eventos' };
+  // A opção lida de cada campo, em palavras: pelo domínio dos rótulos do aparelho, ou pelo subtipo do catálogo.
+  var DOMINIO_OPCAO = { momento: 'TIPO_PESAGEM', modo_dose: 'MODO_DOSE', resultado: 'RESULTADO_DG', metodo: 'METODO_REPRODUCAO', situacao: 'SITUACAO_NASCIMENTO', modalidade: 'MODALIDADE', base_peso: 'BASE_PESO', rendimento_tipo: 'RENDIMENTO_TIPO', criterio_rateio: 'CRITERIO_RATEIO' };
+  var SUBTIPO_DO_CAMPO = { procedimento: 'SANIDADE', registro: 'REPRODUCAO' };
+  function rotuloOpcao(campo, v) {
+    if (SUBTIPO_DO_CAMPO[campo]) {
+      var t = (Store.catalogo().tipos || []).filter(function (x) { return x.tipo === SUBTIPO_DO_CAMPO[campo]; })[0];
+      var sub = t && t.subtipos ? t.subtipos[v] : null;
+      if (sub && sub.rotulo) return sub.rotulo;
+    }
+    return Fmt.rotulo(DOMINIO_OPCAO[campo] || campo.toUpperCase(), v);
+  }
   var CODIGOS_RECONCILIACAO = { SAIDA_HISTORICA_NA_FOTOGRAFIA: 'Saída antiga, mas está no marco zero', PASTO_DIVERGENTE: 'Pasto diferente', FORA_DA_FOTOGRAFIA: 'No histórico, mas fora do marco zero' };
   var ETAPAS = [['arquivo', '1 Arquivo'], ['mapeamento', '2 Colunas'], ['validacao', '3 Validação'], ['confirmacao', '4 Confirmação'], ['execucao', '5 Importação']];
   var PADROES = { castrado: 'Castrado', reprodutor: 'Reprodutor', origem: 'Origem', pasto: 'Pasto', metodo_pesagem: 'Como foi pesado' };
@@ -130,7 +147,7 @@ var TelaImportacao = (function () {
       { id: 'formato_data', rotulo: 'Formato das datas', tipo: 'lista', opcoes: m.formatos_data, obrigatorio: true, default: 'dd/MM/yyyy' },
       { id: 'decimal', rotulo: 'Separador decimal', tipo: 'lista', opcoes: [',', '.'], obrigatorio: true, default: ',' },
     ];
-    var rot = { ANIMAIS: TIPOS.ANIMAIS, COMPRAS: TIPOS.COMPRAS, VENDAS: TIPOS.VENDAS, TRANSFERENCIAS: TIPOS.TRANSFERENCIAS, NASCIMENTOS: TIPOS.NASCIMENTOS, MORTES: TIPOS.MORTES, ARQUIVO: 'Arquivo CSV', COLAR: 'Colar da planilha', ';': 'Ponto e vírgula (;)', ',': 'Vírgula (,)', TAB: 'Tabulação (colado do Excel)', '|': 'Barra vertical (|)', '.': 'Ponto (.)' };
+    var rot = Object.assign({}, TIPOS, { ARQUIVO: 'Arquivo CSV', COLAR: 'Colar da planilha', ';': 'Ponto e vírgula (;)', ',': 'Vírgula (,)', TAB: 'Tabulação (colado do Excel)', '|': 'Barra vertical (|)', '.': 'Ponto (.)' });
     var valores = {};
     var arq = h('input', { type: 'file', id: 'imp-arquivo', accept: '.csv,.txt,text/csv,text/plain' });
     var campoArq = h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo', for: 'imp-arquivo', text: 'Arquivo CSV (no Excel: Salvar como › CSV)' }), arq, h('div', { class: 'campo-erro', hidden: true }));
@@ -170,7 +187,7 @@ var TelaImportacao = (function () {
     var atual = m;
     var baixarModelo = UI.botao('Baixar o modelo da planilha', { aoClicar: function () {
       Exportar.baixar('modelo-importacao-' + (atual.tipo === 'ANIMAIS' ? 'animais' : atual.tipo.toLowerCase()) + '.csv', Exportar.csv(atual.cabecalho_modelo.map(function (c) { return { rotulo: c, valor: function () { return ''; } }; }), []));
-      UI.aviso(atual.tipo === 'ANIMAIS' ? 'Modelo baixado: preencha uma linha por animal, a partir da segunda linha.' : 'Modelo baixado: uma linha por animal (no parto, por cria). ' + atual.agrupamento.ajuda, { tipo: 'ok' });
+      UI.aviso(atual.tipo === 'ANIMAIS' ? 'Modelo baixado: preencha uma linha por animal, a partir da segunda linha.' : 'Modelo baixado: uma linha por animal (no parto, por cria' + (atual.tipo === 'REPRODUCAO' ? '; na exposição, também uma por touro do lote' : '') + '). ' + atual.agrupamento.ajuda, { tipo: 'ok' });
     } });
     var listaAjuda = h('ul', { class: 'lista-simples' });
     var ajuda = h('details', { class: 'detalhe' }, h('summary', { text: 'O que cada coluna significa' }), listaAjuda);
@@ -231,13 +248,13 @@ var TelaImportacao = (function () {
       if (t === 'pasto' || t === 'pasto_id') return Store.pastos().map(function (p) { return [p.pasture_id, p.nome]; });
       if (t === 'metodo') return ['BALANCA', 'FITA', 'ESTIMATIVA_VISUAL'].map(function (v) { return [v, Fmt.rotulo('METODO_PESAGEM', v)]; });
       if (t === 'lista' && campo.lista) return Store.lista(campo.lista).map(function (l) { return [l.codigo, l.rotulo || l.codigo]; });
-      return (campo.opcoes || []).map(function (v) { return [v, Fmt.rotulo(k.toUpperCase(), v)]; });
+      return (campo.opcoes || []).map(function (v) { return [v, rotuloOpcao(k, v)]; });
     };
     var gPad = h('div', { class: 'grade-campos' }, Object.keys(m.padroes).map(function (k) {
       return selectDe('pad-' + k, (PADROES[k] || rotuloCampo(k)) + ' para todos (quando o arquivo não traz)', opcoesPadrao(k), pad[k] === undefined ? '' : pad[k], function (v) { if (v === '') delete pad[k]; else pad[k] = v === 'true' ? true : v === 'false' ? false : v; });
     }));
     var deEventos = eventos(m.tipo);
-    var obrigatorias = deEventos ? 'Obrigatórias: ' + m.obrigatorios.map(function (o) { return o.map(rotuloCampo).join(' ou '); }).join(', ') + '. ' + m.agrupamento.ajuda + ' Datas antes do marco zero entram como histórico, sem mexer no rebanho.' : 'Sexo e pasto são obrigatórios (o pasto pode ser escolhido para todos). Colunas reconhecidas pelo nome já vêm escolhidas.';
+    var obrigatorias = deEventos ? 'Obrigatórias: ' + m.obrigatorios.map(function (o) { return o.map(rotuloCampo).join(' ou '); }).join(', ') + '. ' + m.agrupamento.ajuda + ' Datas antes do marco zero entram como histórico, sem mexer no rebanho' + (m.tipo === 'SANIDADE' ? ' nem no estoque de insumos' : '') + '.' + (MANEJO[m.tipo] ? ' O animal é achado pelo brinco que ele usava na data de cada linha (ou pelo código A-000…).' : '') : 'Sexo e pasto são obrigatórios (o pasto pode ser escolhido para todos). Colunas reconhecidas pelo nome já vêm escolhidas.';
     var status = h('div', { role: 'status', 'aria-live': 'polite' });
     var validarB = UI.botao('Validar o arquivo', { tipo: 'primario', aoClicar: validar });
     el.appendChild(UI.secao('Para onde vai cada coluna', h('div', { class: 'formulario' }, h('p', { class: 'suave', text: obrigatorias }), grade), { dado: 'colunas' }));
@@ -283,7 +300,11 @@ var TelaImportacao = (function () {
     if (t === 'lista' || t === 'raca') return Store.rotuloLista(c.lista || 'RACA', v);
     if (t === 'confianca' || t === 'confianca_vinculo') return Fmt.rotulo('CONFIANCA', v);
     if (t === 'metodo') return Fmt.rotulo('METODO_PESAGEM', v);
-    return t === 'texto' || t === 'inteiro' ? String(v) : Fmt.rotulo(c.campo.toUpperCase(), v);
+    // Cadastros do manejo, pelo nome (o servidor achou pelo nome da planilha).
+    if (t === 'produto') return (Store.produto(v) || { nome: v }).nome;
+    if (t === 'protocolo') return (Store.protocolo(v) || { nome: v }).nome;
+    if (t === 'estacao') return (Store.estacao(v) || { nome: v }).nome;
+    return t === 'texto' || t === 'inteiro' ? String(v) : rotuloOpcao(c.campo, v);
   }
   function interpretado(i) {
     var x = i.interpretado;
@@ -530,13 +551,14 @@ var TelaImportacao = (function () {
       corpo.appendChild(UI.secao('Relatório final', UI.pares([
         ['Arquivo', imp.arquivo_nome], ['Linhas no arquivo', Fmt.numero(c.total)], ['Importadas', Fmt.numero(c.importadas)], ['Com erro', Fmt.numero(c.erro)], ['Duplicadas', Fmt.numero(c.duplicadas)], ['Deixadas de fora', Fmt.numero(c.ignoradas)],
         ['Modo', imp.modo === 'PARCIAL_APROVADO' ? 'parcial, aprovada' + (d.aprovacao ? ' por ' + d.aprovacao.por + ' em ' + Fmt.instante(d.aprovacao.em) : '') : imp.modo === 'TOTAL' ? 'total' : '—'],
-        ['Animais ativos hoje', Fmt.numero(d.criados.ativos)], ['Sem brinco', Fmt.numero(d.pendencias.sem_brinco)], ['Sem nascimento', Fmt.numero(d.pendencias.sem_nascimento)],
-      ]), { dado: 'relatorio' }));
+      ].concat(MANEJO[imp.tipo] ? [] : [['Animais ativos hoje', Fmt.numero(d.criados.ativos)], ['Sem brinco', Fmt.numero(d.pendencias.sem_brinco)], ['Sem nascimento', Fmt.numero(d.pendencias.sem_nascimento)]])), { dado: 'relatorio' }));
       var rec = d.reconciliacao;
       if (rec && (rec.animais.length || rec.pastos.length || rec.sem_animal.length)) corpo.appendChild(UI.secao('Reconciliação com o marco zero', blocoReconciliacao(rec), { dado: 'reconciliacao' }));
       if ((d.reprovadas || []).length) corpo.appendChild(UI.secao('Linhas que ficaram de fora', h('ul', { class: 'lista-simples' }, d.reprovadas.map(function (l) { return h('li', { text: 'Linha ' + l.linha_num + ' (' + Fmt.rotulo('STATUS_LINHA', l.status).toLowerCase() + '): ' + (l.erros || []).map(function (e) { return e.mensagem; }).join(' / ') }); })), { dado: 'reprovadas' }));
       var acoes = h('div', { class: 'acoes' });
-      if (!desfeita) acoes.appendChild(h('a', { class: 'botao botao-primario', href: Roteador.href('rebanho'), dataset: { rota: 'rebanho' } }, 'Ver o rebanho'));
+      // O manejo importado se vê no módulo dele (as pesagens, as aplicações, as fêmeas, os lançamentos).
+      var verOnde = MANEJO[imp.tipo] || 'rebanho';
+      if (!desfeita) acoes.appendChild(h('a', { class: 'botao botao-primario', href: Roteador.href(verOnde), dataset: { rota: verOnde } }, MANEJO[imp.tipo] ? 'Ver ' + { PESAGENS: 'as pesagens', SANIDADE: 'as aplicações', REPRODUCAO: 'as fêmeas', OCORRENCIAS: 'os lançamentos' }[imp.tipo] : 'Ver o rebanho'));
       if (!desfeita) acoes.appendChild(UI.botao('Desfazer importação', { tipo: 'perigo', aoClicar: function (ev) { desfazer(id, ev.currentTarget, { tipo: imp.tipo, status: imp.status, eventos: d.criados.eventos, animais: d.criados.animais }); } }));
       acoes.appendChild(h('a', { class: 'botao botao-secundario', href: Roteador.href('importar'), dataset: { rota: 'importar' } }, 'Ver as importações'));
       corpo.appendChild(acoes);

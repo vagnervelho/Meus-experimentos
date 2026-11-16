@@ -494,6 +494,11 @@ function oraculoEfeito(sis, cmd, resp, A, S) {
     if (esperado.indexOf(i.status) < 0) erro('importação ' + i.status + ' depois de ' + cmd.rota);
     const evs = S.t.EVENTOS.filter((e) => e.import_id === id);
     if (cmd.rota === 'importacao.concluir') evs.forEach((e) => { if (!S.vig.get(e.event_id) && !S.anuladoPor.has(e.event_id)) erro('evento importado ' + e.event_type + ' de ' + e.event_date + ' não vale depois de concluir'); });
+    // E3.6: o importador de manejo confere o fato de cada linha importada (o registro que a linha diz ter gerado).
+    const I = IMPORTADORES.get(i.tipo);
+    if (cmd.rota === 'importacao.concluir' && I && I.efeito) {
+      (S.t.IMPORTACAO_LINHAS || []).filter((l) => l.import_id === id && l.status === 'IMPORTADA').forEach((l) => I.efeito({ S, i, l, v: l.dados_originais_json || {}, erro: (m) => erro('linha ' + l.linha_num + ': ' + m) }));
+    }
     if (cmd.rota === 'importacao.desfazer') {
       evs.forEach((e) => { if (S.vig.get(e.event_id)) erro('evento importado ainda vale depois de desfazer'); });
       const criados = new Set(S.t.EVENTO_ANIMAIS.filter((l) => evs.some((e) => e.event_id === l.event_id) && !A.animais.has(l.animal_id)).map((l) => l.animal_id));
@@ -1695,7 +1700,10 @@ registrarTipo('SANIDADE', {
     // das doses), com estoque controlado ou não; o custo pelo consumo (quantidade × custo unitário de agora) rateado aos
     // tratados, sem parcela; o serviço pago no ato, com as parcelas pedidas; o custo de cada animal = as alocações.
     const doses = rows.map((r) => r.dose);
-    const q = prod && cp.modo_dose ? (typeof cp.quantidade_consumida_total === 'number' ? cp.quantidade_consumida_total : cp.modo_dose !== 'TOTAL' && doses.every((v) => typeof v === 'number') ? somaQtd(doses) : null) : null;
+    // E3.6: a aplicação anterior ao marco zero (o histórico importado e a correção dele) não baixa estoque nem vira consumo,
+    // e o serviço pago no ato nasce sem caixa (sem parcela).
+    const hist = (S.ev.get(eid) || {}).pre_marco_zero === true;
+    const q = prod && cp.modo_dose && !hist ? (typeof cp.quantidade_consumida_total === 'number' ? cp.quantidade_consumida_total : cp.modo_dose !== 'TOTAL' && doses.every((v) => typeof v === 'number') ? somaQtd(doses) : null) : null;
     const movs = S.t.MOVIMENTOS_ESTOQUE.filter((mv) => mv.event_id === eid);
     if (q === null ? movs.length : movs.length !== 1 || movs[0].tipo !== 'SAIDA' || movs[0].quantidade !== q || movs[0].product_id !== prod.product_id || movs[0].data !== cp.event_date) erro('movimentos ' + JSON.stringify(movs.map((mv) => [mv.tipo, mv.quantidade, mv.data])) + ', esperada a saída de ' + q);
     const fins = S.t.FINANCEIRO.filter((f) => f.event_id === eid);
@@ -1706,7 +1714,7 @@ registrarTipo('SANIDADE', {
     const conta = (f) => (S.t.PLANO_CONTAS.find((p) => p.conta_id === f.conta_id) || {}).codigo;
     if (vc > 0 ? consumo.length !== 1 || consumo[0].valor !== vc || consumo[0].product_id !== prod.product_id || consumo[0].quantidade !== q || conta(consumo[0]) !== CONTA_DA_CATEGORIA[prod.categoria] : consumo.length) erro('consumo ' + JSON.stringify(consumo.map((f) => [f.valor, f.quantidade, conta(f)])) + ', esperado ' + vc + ' (' + q + ' × ' + cu + ')');
     consumo.forEach((f) => { if (S.t.PARCELAS.some((p) => p.financial_id === f.financial_id)) erro('o consumo do produto tem parcela'); });
-    if (cp.custo_valor ? servico.length !== 1 || servico[0].valor !== cp.custo_valor || S.t.PARCELAS.filter((p) => p.financial_id === servico[0].financial_id).length !== (cp.custo_parcelas_qtd || 1) : servico.length) erro('serviço pago no ato ' + JSON.stringify(servico.map((f) => f.valor)) + ', pedido ' + cp.custo_valor);
+    if (cp.custo_valor ? servico.length !== 1 || servico[0].valor !== cp.custo_valor || S.t.PARCELAS.filter((p) => p.financial_id === servico[0].financial_id).length !== (hist ? 0 : cp.custo_parcelas_qtd || 1) : servico.length) erro('serviço pago no ato ' + JSON.stringify(servico.map((f) => f.valor)) + ', pedido ' + cp.custo_valor + (hist ? ' (histórico: sem parcela)' : ''));
     const alocs = S.t.ALOCACOES_FINANCEIRAS.filter((a) => fins.some((f) => f.financial_id === a.financial_id));
     rows.forEach((r) => {
       const v = fins.length ? alocs.filter((a) => a.animal_id === r.animal_id).reduce((t, a) => t + a.valor_alocado, 0) : null;
@@ -1832,7 +1840,10 @@ function efeitoDespesa(c, ids) {
   if (!cp.custo_valor) { if (fins.length) erro('lançamento financeiro sem despesa pedida'); return; }
   const f = fins[0];
   if (fins.length !== 1 || f.valor !== cp.custo_valor || f.natureza !== 'CUSTEIO' || f.conta_id !== cp.custo_conta_id) { erro('despesa ' + JSON.stringify(fins.map((x) => [x.valor, x.natureza])) + ', pedida ' + cp.custo_valor); return; }
-  if (S.t.PARCELAS.filter((p) => p.financial_id === f.financial_id).length !== (cp.custo_parcelas_qtd || 1)) erro('parcelas da despesa');
+  // E3.6: a despesa do manejo anterior ao marco zero (histórico importado e a correção dele) nasce sem caixa, sem parcela.
+  const hist = E.pre_marco_zero === true;
+  if (S.t.PARCELAS.filter((p) => p.financial_id === f.financial_id).length !== (hist ? 0 : cp.custo_parcelas_qtd || 1)) erro('parcelas da despesa' + (hist ? ' (histórico: sem parcela)' : ''));
+  if (hist && f.status_pagamento !== 'SEM_CAIXA') erro('despesa histórica com efeito de caixa: ' + f.status_pagamento);
   const alocs = S.t.ALOCACOES_FINANCEIRAS.filter((a) => a.financial_id === f.financial_id);
   const partes = alocs.map((a) => a.valor_alocado);
   if (alocs.length !== ids.length || ids.some((id) => !alocs.some((a) => a.animal_id === id)) || partes.reduce((t, v) => t + v, 0) !== cp.custo_valor) erro('rateio da despesa ' + JSON.stringify(alocs.map((a) => [a.animal_id, a.valor_alocado])) + ' entre ' + ids.length);
@@ -2235,6 +2246,134 @@ registrarImportador('VENDAS', {
       ids.forEach((id, i) => linhas.push(['V' + (gI + 1), i === 0 ? d : '', i === 0 ? 'Frigorífico Boi Bom' : '', i === 0 ? sorteio(rnd, ['abate', 'recria e engorda']) : '', i === 0 ? 'cabeça' : '', i === 0 ? reais(preco) : '', i === 0 ? reais(preco * ids.length) : '', b(id), i === 0 ? nParc : ''].join(';')));
     });
     return { texto: linhas.join('\n'), mapa: { colunas: { grupo: 'grupo', data: 'data', comprador: 'comprador', finalidade: 'finalidade', modalidade: 'modalidade', preco: 'preco', bruto: 'valor_bruto', brinco: 'brinco', parcelas: 'parcelas' }, confiancas: {}, padroes: {} } };
+  },
+});
+
+// --- Importadores de manejo (Fase 3, E3.6): pesagens, sanidade, reprodução e ocorrências sobre os animais do momento, às
+// vezes com a data antiga (antes do marco zero: histórico), o brinco de outro animal, a linha repetida e o valor fora do
+// lugar. O oráculo da conclusão confere o fato que cada linha IMPORTADA diz ter gerado (entity_id_gerado).
+const deBr = (t) => (/^\d{2}\/\d{2}\/\d{4}$/.test(t || '') ? t.slice(6, 10) + '-' + t.slice(3, 5) + '-' + t.slice(0, 2) : null);
+const numBr = (t) => (t === undefined || t === null || t === '' ? null : Number(String(t).replace(/\./g, '').replace(',', '.')));
+const linhaEvento = (S, l) => S.t.EVENTOS.find((e) => e.event_id === l.event_id_gerado) || null;
+/** A linha importada é histórica quando a data do lançamento dela é anterior ao marco zero. */
+function conferirHistorico(S, l, e, data, erro) {
+  if (!e) { erro('sem o evento gerado'); return; }
+  if (data && e.event_date !== data) erro('evento de ' + e.event_date + ', a linha diz ' + data);
+  if ((e.pre_marco_zero === true) !== (e.event_date < (S.marco || D0))) erro('pre_marco_zero ' + e.pre_marco_zero + ' em ' + e.event_date);
+}
+registrarImportador('PESAGENS', {
+  arquivo: (c) => {
+    const { S, rnd, b, data, qual } = c;
+    const linhas = ['grupo;data;brinco;peso'];
+    const n = 1 + Math.floor(rnd() * 3);
+    const d0 = data();
+    for (let i = 0; i < n; i++) {
+      const id = qual();
+      if (!id) break;
+      const d = rnd() < 0.7 ? d0 : data();
+      linhas.push([rnd() < 0.2 ? 'P' + (1 + Math.floor(rnd() * 2)) : '', br(d), rnd() < 0.05 ? '9' + b(id) : b(id), dec(pesoPara(S, rnd, id, d))].join(';'));
+    }
+    if (rnd() < 0.1 && linhas.length > 1) linhas.push(linhas[linhas.length - 1]);
+    return { texto: linhas.join('\n'), mapa: { colunas: { grupo: 'grupo', data: 'data', brinco: 'brinco', peso: 'peso' }, confiancas: {}, padroes: { momento: sorteio(rnd, ['ROTINA', 'ROTINA', 'ENTRADA']), metodo: sorteio(rnd, ['BALANCA', 'FITA']) } } };
+  },
+  efeito: (c) => {
+    const { S, l, v, erro } = c;
+    const p = S.t.PESAGENS.find((x) => x.weight_id === l.entity_id_gerado);
+    if (!p) { erro('sem a pesagem gerada'); return; }
+    if (p.event_id !== l.event_id_gerado || p.data_pesagem !== deBr(v.data) || p.peso_kg !== numBr(v.peso)) erro('pesagem gravada ' + JSON.stringify([p.data_pesagem, p.peso_kg]) + ', a linha diz ' + JSON.stringify([v.data, v.peso]));
+    const nb = (x) => (/^\d+$/.test(String(x)) ? String(Number(x)) : String(x).toUpperCase());
+    if (v.brinco && !S.t.IDENTIFICACOES.some((x) => x.animal_id === p.animal_id && x.tipo === 'BRINCO' && nb(x.codigo) === nb(v.brinco))) erro('a pesagem foi para um animal que nunca teve o brinco ' + v.brinco);
+    conferirHistorico(S, l, linhaEvento(S, l), deBr(v.data), erro);
+  },
+});
+registrarImportador('SANIDADE', {
+  arquivo: (c) => {
+    const { sis, S, rnd, b, data, qual } = c;
+    const linhas = ['data;procedimento;produto;nome;modo;dose;unidade;diagnostico;brinco'];
+    const nomeDe = (id) => (S.t.PRODUTOS.find((x) => x.product_id === id) || {}).nome || '';
+    const d = data();
+    const x = rnd();
+    const cab = x < 0.45 ? ['vacinação', nomeDe(sis.produtos.vacina), '', 'por cabeça', '1', '']
+      : x < 0.65 ? ['vermifugação', rnd() < 0.5 ? nomeDe(sis.produtos.vermifugo) : '', 'Ivermectina 1%', 'por cabeça', '5', 'mL']
+        : x < 0.8 ? ['doença', '', '', '', '', '']
+          : x < 0.9 ? ['medicação', nomeDe(sis.produtos.antibiotico), '', 'total', '', '']
+            : ['vacinação', 'Vacina Inexistente', '', 'por cabeça', '1', ''];
+    if (cab[0] === 'vermifugação' && cab[1]) cab[2] = '';
+    const ids = alguns(rnd, c.ativos.length ? c.ativos : c.comBrinco, 3);
+    ids.forEach((id) => linhas.push([br(d)].concat(cab.slice(0, 6), [cab[0] === 'doença' ? 'Tristeza parasitária' : '', b(id)]).join(';')));
+    if (!ids.length) { const id = qual(); if (!id) return null; linhas.push([br(d)].concat(cab.slice(0, 6), ['', b(id)]).join(';')); }
+    if (rnd() < 0.1 && linhas.length > 1) linhas.push(linhas[linhas.length - 1]);
+    return { texto: linhas.join('\n'), mapa: { colunas: { data: 'data', procedimento: 'procedimento', produto: 'produto', nome: 'nome_produto', modo: 'modo_dose', dose: 'dose_lancamento', unidade: 'unidade', diagnostico: 'diagnostico', brinco: 'brinco' }, confiancas: {}, padroes: {} } };
+  },
+  efeito: (c) => {
+    const { S, l, v, erro } = c;
+    const h = S.t.SANIDADE.find((x) => x.health_id === l.entity_id_gerado);
+    if (!h) { erro('sem a aplicação gerada'); return; }
+    const proc = { 'vacinação': 'VACINA', 'vermifugação': 'VERMIFUGO', 'doença': 'DOENCA', 'medicação': 'MEDICAMENTO' }[v.procedimento];
+    if (h.event_id !== l.event_id_gerado || h.data_aplicacao !== deBr(v.data) || h.tipo_procedimento !== proc) erro('aplicação gravada ' + JSON.stringify([h.data_aplicacao, h.tipo_procedimento]) + ', a linha diz ' + JSON.stringify([v.data, v.procedimento]));
+    if ((h.nome_produto || '') !== (v.produto || v.nome || '')) erro('produto gravado ' + h.nome_produto + ', a linha diz ' + (v.produto || v.nome));
+    const e = linhaEvento(S, l);
+    conferirHistorico(S, l, e, deBr(v.data), erro);
+    // Antes do marco zero, nem saída de estoque nem consumo; depois, a saída do produto do cadastro.
+    const movs = S.t.MOVIMENTOS_ESTOQUE.filter((m) => m.event_id === l.event_id_gerado);
+    if (e && e.pre_marco_zero === true && (movs.length || S.t.FINANCEIRO.some((f) => f.event_id === e.event_id && f.product_id))) erro('aplicação histórica com estoque ou consumo');
+    if (e && e.pre_marco_zero !== true && h.produto_id && movs.length !== 1) erro(movs.length + ' saídas de estoque na aplicação com produto do cadastro');
+  },
+});
+registrarImportador('REPRODUCAO', {
+  arquivo: (c) => {
+    const { S, rnd, b, data } = c;
+    const linhas = ['data;registro;estacao;touro;brinco;resultado'];
+    const femeas = c.comBrinco.filter((id) => fem(S, id));
+    const machos = c.comBrinco.filter((id) => !fem(S, id));
+    const d = data();
+    const est = rnd() < 0.4 ? ((sorteio(rnd, S.t.ESTACOES_MONTA || []) || {}).nome || '') : '';
+    const reg = sorteio(rnd, ['exposição', 'diagnóstico', 'diagnóstico', 'inseminação', 'cobertura', 'aborto']);
+    const touro = reg === 'inseminação' ? (rnd() < 0.8 ? 'Touro do sêmen' : 'Touro Fantasma') : reg === 'cobertura' && machos.length ? b(sorteio(rnd, machos)) : '';
+    const ids = alguns(rnd, rnd() < 0.9 && femeas.length ? femeas : c.comBrinco, 3);
+    if (!ids.length) return null;
+    ids.forEach((id) => linhas.push([br(d), reg, est, touro, b(id), reg === 'diagnóstico' ? sorteio(rnd, ['positivo', 'vazia', 'duvidoso']) : ''].join(';')));
+    if (reg === 'exposição' && machos.length && rnd() < 0.6) linhas.push([br(d), reg, est, '', b(sorteio(rnd, machos)), ''].join(';'));
+    if (rnd() < 0.1) linhas.push(linhas[linhas.length - 1]);
+    return { texto: linhas.join('\n'), mapa: { colunas: { data: 'data', registro: 'registro', estacao: 'estacao', touro: 'touro', brinco: 'brinco', resultado: 'resultado' }, confiancas: {}, padroes: {} } };
+  },
+  efeito: (c) => {
+    const { S, l, v, erro } = c;
+    const sub = { 'exposição': 'EXPOSICAO', 'diagnóstico': 'DIAGNOSTICO_GESTACAO', 'inseminação': 'INSEMINACAO', cobertura: 'COBERTURA', aborto: 'ABORTO' }[v.registro];
+    const e = linhaEvento(S, l);
+    conferirHistorico(S, l, e, deBr(v.data), erro);
+    if (e && e.event_subtype !== sub) erro('registro ' + e.event_subtype + ', a linha diz ' + v.registro);
+    const r = (S.t.REPRODUCAO || []).find((x) => x.reproduction_id === l.entity_id_gerado);
+    if (!r) {
+      // O touro da exposição: a linha dele no evento, com o papel TOURO.
+      const ea = S.t.EVENTO_ANIMAIS.find((x) => x.event_animal_id === l.entity_id_gerado);
+      if (!ea || ea.papel !== 'TOURO' || sub !== 'EXPOSICAO') erro('sem o registro reprodutivo gerado (' + JSON.stringify(ea) + ')');
+      return;
+    }
+    if (r.event_id !== l.event_id_gerado || r.tipo_evento !== sub || r.data !== deBr(v.data)) erro('registro gravado ' + JSON.stringify([r.tipo_evento, r.data]));
+    const res = { positivo: 'POSITIVO', vazia: 'NEGATIVO', duvidoso: 'INCONCLUSIVO' }[v.resultado] || null;
+    if ((r.resultado || null) !== (sub === 'DIAGNOSTICO_GESTACAO' ? res : null)) erro('resultado gravado ' + r.resultado + ', a linha diz ' + v.resultado);
+  },
+});
+registrarImportador('OCORRENCIAS', {
+  arquivo: (c) => {
+    const { rnd, b, data, qual } = c;
+    const linhas = ['data;tipo;descricao;brinco'];
+    const d = data();
+    const tipo = sorteio(rnd, ['Observação geral', 'Lesão ou ferimento', 'Descorna', 'Briga']);
+    const desc = sorteio(rnd, ['Fugiram para o vizinho', 'Corte no arame', 'Descorna do lote']);
+    for (let i = 0; i < 1 + Math.floor(rnd() * 3); i++) { const id = qual(); if (id) linhas.push([br(rnd() < 0.8 ? d : data()), tipo, desc, b(id)].join(';')); }
+    if (rnd() < 0.1 && linhas.length > 1) linhas.push(linhas[linhas.length - 1]);
+    return { texto: linhas.join('\n'), mapa: { colunas: { data: 'data', tipo: 'tipo_ocorrencia', descricao: 'descricao', brinco: 'brinco' }, confiancas: {}, padroes: {} } };
+  },
+  efeito: (c) => {
+    const { S, l, v, erro } = c;
+    const ea = S.t.EVENTO_ANIMAIS.find((x) => x.event_animal_id === l.entity_id_gerado);
+    const e = linhaEvento(S, l);
+    if (!ea || ea.event_id !== l.event_id_gerado || ea.papel !== 'SUJEITO' || ea.efeito_inventario !== 0) erro('linha do animal gravada ' + JSON.stringify(ea));
+    conferirHistorico(S, l, e, deBr(v.data), erro);
+    const tipo = { 'Observação geral': 'OBSERVACAO', 'Lesão ou ferimento': 'LESAO', Descorna: 'DESCORNA' }[v.tipo];
+    if (e && ((e.payload_json || {}).tipo_ocorrencia !== tipo || e.description !== v.descricao)) erro('ocorrência gravada ' + JSON.stringify([(e.payload_json || {}).tipo_ocorrencia, e.description]));
   },
 });
 

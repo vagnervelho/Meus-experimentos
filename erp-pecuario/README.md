@@ -42,7 +42,8 @@ zero):
 - Rebanho e pastos numa data passada (quem estava, desde quando, UA, UA/ha e ocupação); Visão geral com o movimento do
   período; documentos e fotos em qualquer lançamento (nota fiscal, GTA, boleto).
 - Importação do histórico (compras, vendas, transferências, nascimentos e mortes, também de antes do marco zero) com a
-  conferência contra o marco zero; verificação de integridade com 26 conferências.
+  conferência contra o marco zero; na Fase 3, também das pesagens, da sanidade, da reprodução e das ocorrências (o animal
+  achado pelo brinco que ele usava na data); verificação de integridade com 26 conferências.
 
 Ficam para as fases seguintes ([`docs/fase-0/10-plano-de-implementacao.md`](docs/fase-0/10-plano-de-implementacao.md)):
 pesagem, sanidade, reprodução e o modo curral (Fase 3); baixa de parcelas, rateio de custos compartilhados, fluxo de
