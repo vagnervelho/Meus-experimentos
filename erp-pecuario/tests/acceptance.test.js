@@ -212,17 +212,24 @@ test('base de demonstração (TEST_PLAN = DEMO): a composição de 09, seção 7
   }
   taxas.slice(0, 2).forEach((x, i) => assert.ok(x[0] >= 70 && x[0] <= 98 && x[1] >= 70 && x[2] >= 65 && x[3] >= 60 && x[4] === null, 'estação ' + (i + 1) + ' encerrada: ' + JSON.stringify(x)));
   assert.ok(taxas[2][0] >= 70 && taxas[2][4] === 'parcial', 'a estação em curso: ' + JSON.stringify(taxas[2]));
+  // O relatório da demonstração traz os mesmos números do servidor (a conferência final os leu pela api e os conferiu).
+  assert.deepEqual(d.manejo.estacoes.map((e) => [e.prenhez, e.paricao, e.natalidade, e.desmama, e.parcial]), taxas, 'as taxas das estações no relatório');
+  assert.deepEqual(d.manejo.estacoes.map((e) => e.nome), estacoes.map((e) => e.nome));
   // Sanidade pelo protocolo: toda vacinação com o semestral e toda vermifugação com o da recria; a agenda cobre os dois.
   const san = s.tabela('SANIDADE', demo).filter((x) => vig.some((e) => e.event_id === x.event_id));
   const protos = Object.fromEntries(s.tabela('PROTOCOLOS_SANITARIOS', demo).map((p) => [p.nome, p.protocol_id]));
-  assert.ok(san.filter((x) => x.procedimento === 'VACINA').every((x) => x.protocol_id === protos['Vacina semestral (demonstração)']), 'vacinações pelo protocolo semestral');
-  assert.ok(san.filter((x) => x.procedimento === 'VERMIFUGO').length > 500 && san.filter((x) => x.procedimento === 'VERMIFUGO').every((x) => x.protocol_id === protos['Vermifugação da recria (demonstração)']), 'vermifugações pelo protocolo da recria');
+  const doTipo = (proc) => san.filter((x) => x.tipo_procedimento === proc);
+  assert.deepEqual(san.filter((x) => x.tipo_procedimento !== 'VACINA' && x.tipo_procedimento !== 'VERMIFUGO').length, 0, 'só vacinação e vermifugação');
+  assert.ok(doTipo('VACINA').length > 1000 && doTipo('VACINA').every((x) => x.protocol_id === protos['Vacina semestral (demonstração)']), doTipo('VACINA').length + ' vacinações pelo protocolo semestral');
+  assert.ok(doTipo('VERMIFUGO').length > 500 && doTipo('VERMIFUGO').every((x) => x.protocol_id === protos['Vermifugação da recria (demonstração)']), doTipo('VERMIFUGO').length + ' vermifugações pelo protocolo da recria');
   const agenda = js(s.gas.exec(() => s.G.api({ rota: 'sanidade.agenda', ambiente: 'DEMO', dados: {} }))).data;
   assert.ok(agenda.protocolos.length === 2 && agenda.protocolos.every((p) => p.cobertura.valor >= 80), 'cobertura dos protocolos: ' + JSON.stringify(agenda.protocolos.map((p) => [p.nome, p.cobertura.valor])));
+  assert.deepEqual(d.manejo.protocolos, agenda.protocolos.map((p) => ({ nome: p.nome, elegiveis: p.elegiveis, em_dia: p.em_dia, cobertura: p.cobertura.valor })), 'a cobertura no relatório');
   // Pesagens periódicas com GMD plausível: o do rebanho e o de cada pasto entre 0,3 e 0,8 kg/dia; nenhum aviso aceito em lançamento nenhum.
   const desemp = js(s.gas.exec(() => s.G.api({ rota: 'peso.desempenho', ambiente: 'DEMO', dados: {} }))).data;
   assert.ok(desemp.geral.gmd.valor >= 0.3 && desemp.geral.gmd.valor <= 0.8 && desemp.geral.gmd.n >= 300, 'GMD do rebanho: ' + JSON.stringify(desemp.geral.gmd));
   assert.ok(desemp.por_pasto.every((p) => p.gmd.valor === null || (p.gmd.valor >= 0.3 && p.gmd.valor <= 0.8)), 'GMD por pasto: ' + JSON.stringify(desemp.por_pasto.map((p) => p.gmd.valor)));
+  assert.deepEqual(d.manejo.gmd, { valor: desemp.geral.gmd.valor, n: desemp.geral.gmd.n }, 'o GMD no relatório');
   assert.deepEqual(vig.filter((e) => e.payload_json && e.payload_json.avisos_aceitos).map((e) => e.event_type), [], 'nenhum aviso aceito: o plano só lança o plausível');
   // Castração (os garrotes inteiros do marco zero, com a visita paga e rateada, e os machos desmamados da recria) e ocorrências.
   const castrados = linhasDe('CASTRACAO');
@@ -264,7 +271,7 @@ test('base de demonstração (TEST_PLAN = DEMO): a composição de 09, seção 7
   assert.equal(g1.comandos.length + 1, rel.demonstracao.comandos + 1, 'um passo por comando, mais a conferência');
 });
 
-test('base de demonstração retomável: comando recusado para o seed (cursor no passo); corrigida a causa, continua dali numa execução nova, achando pela base os animais já gravados (a cria pela mãe e pelo nascimento)', () => {
+test('base de demonstração retomável: comando recusado para o seed (cursor no passo); corrigida a causa, continua dali numa execução nova, achando pela base os animais já gravados (a cria pela mãe e pelo nascimento); a conferência final derruba um número da Fase 3 fora da faixa do plano', () => {
   const s = S.sistema({ semCadastro: true });
   s.gas.props.script.setProperty('TEST_PLAN', 'DEMO');
   // A primeira campanha de identificação das crias é recusada (o motor fica sem aceitar IDENTIFICACAO por um tempo).
@@ -291,8 +298,17 @@ test('base de demonstração retomável: comando recusado para o seed (cursor no
   }
   const ident = s.tabela('IDENTIFICACOES', s.props().DEMO_SPREADSHEET_ID).filter((x) => gen.comandos[n].dados.animais.some((a) => a.codigo === x.codigo));
   assert.equal(ident.length, gen.comandos[n].dados.animais.length, 'a campanha retomada gravou o brinco de cada cria');
+  // A conferência final lê os números da Fase 3 do servidor e os confere com a faixa do plano: um GMD absurdo (a conta do
+  // servidor errada) derruba a demonstração no passo da conferência, que a execução seguinte refaz.
+  const desempenho = s.G.WeightService.desempenho;
+  s.G.WeightService.desempenho = (ctx, f) => { const r = desempenho(ctx, f); r.dados.geral.gmd.valor = 7; return r; };
+  const errada = js(s.gas.exec(() => s.G.runAcceptanceTests()));
+  assert.deepEqual([errada.completo, errada.ok, errada.proximo], [false, false, 'conferir']);
+  assert.match(errada.falha, /GMD do rebanho fora da faixa do plano/);
+  s.G.WeightService.desempenho = desempenho;
   const fim = js(s.gas.exec(() => s.G.runAcceptanceTests()));
   assert.deepEqual([fim.ok, fim.demonstracao.cabecas, fim.demonstracao.saidas.VENDIDO], [true, 304, 240]);
+  assert.ok(fim.demonstracao.manejo.gmd.valor >= 0.3 && fim.demonstracao.manejo.gmd.valor <= 0.8 && fim.demonstracao.manejo.estacoes.length === 3, JSON.stringify(fim.demonstracao.manejo));
   assert.equal(s.props().TEST_CURSOR, undefined);
   const opsDemo = s.tabela('OPERACOES', s.props().DEMO_SPREADSHEET_ID).filter((o) => /^seed:\d+$/.test(o.idempotency_key));
   assert.equal(opsDemo.length, gen.comandos.length, 'cada comando do plano gravado uma vez');

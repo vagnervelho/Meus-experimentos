@@ -2103,6 +2103,29 @@ var TestRunner = (function () {
     }
     return r;
   }
+  /**
+   * Os números da Fase 3 na base de demonstração, lidos do servidor (nada recalculado aqui) e conferidos contra a faixa
+   * do plano: o GMD do rebanho entre 0,3 e 0,8 kg/dia; em cada estação, a prenhez calculada (n acima do mínimo) entre 70%
+   * e 98%, e, nas encerradas (sem "parcial"), parição, natalidade e desmama calculadas; a cobertura de cada protocolo da
+   * demonstração de pelo menos 80%. Vai para o relatório (`demonstracao.manejo`).
+   */
+  function manejoDemo_(t) {
+    var gmd = t.ok(t.api('peso.desempenho', {}), 'desempenho').geral.gmd;
+    verificar_(gmd.valor !== null && gmd.valor >= 0.3 && gmd.valor <= 0.8, 'GMD do rebanho fora da faixa do plano (0,3 a 0,8 kg/dia): ' + curto_(gmd, 200));
+    var estacoes = t.estado.estacoes.map(function (id) {
+      var r = t.ok(t.api('reproducao.indicadores', { estacao_id: id }), 'indicadores da estação').estacao;
+      var x = r.geral;
+      var e = { nome: r.estacao.nome, expostas: x.expostas, diagnosticadas: x.diagnosticadas, prenhez: x.prenhez.valor, paricao: x.paricao.valor, natalidade: x.natalidade.valor, desmama: x.desmama.valor, parcial: x.paricao.parcial || null };
+      verificar_(e.prenhez !== null && e.prenhez >= 70 && e.prenhez <= 98, e.nome + ': prenhez fora da faixa do plano: ' + curto_(x.prenhez, 200));
+      if (!e.parcial) verificar_(e.paricao !== null && e.natalidade !== null && e.desmama !== null, e.nome + ' encerrada sem parição, natalidade ou desmama: ' + curto_(e, 200));
+      return e;
+    });
+    var protocolos = t.ok(t.api('sanidade.agenda', {}), 'agenda sanitária').protocolos.map(function (p) {
+      verificar_(p.cobertura.valor !== null && p.cobertura.valor >= 80, p.nome + ': cobertura abaixo de 80%: ' + curto_(p.cobertura, 200));
+      return { nome: p.nome, elegiveis: p.elegiveis, em_dia: p.em_dia, cobertura: p.cobertura.valor };
+    });
+    return { gmd: { valor: gmd.valor, n: gmd.n }, estacoes: estacoes, protocolos: protocolos };
+  }
   /** Os passos do seed: um por comando do plano (o cursor guarda o número), e a conferência no fim. */
   function passosDemo_(gen) {
     var passos = gen.comandos.map(function (c) {
@@ -2116,7 +2139,7 @@ var TestRunner = (function () {
       igual_(saidas, { VENDIDO: g.totais.vendas, MORTO: g.totais.mortes, DESCARTADO: g.totais.descartes, BAIXADO_AJUSTE: g.totais.divergencias }, 'saídas conferidas no cadastro');
       var integ = t.ok(t.api('sistema.integridade', {}), 'integridade');
       verificar_(integ.ok === true, 'integridade da base de demonstração com erro: ' + curto_((integ.achados || []).slice(0, 2), 200));
-      t.estado.resultado = { cabecas: pos.cabecas, por_pasto: pos.por_pasto.length, saidas: saidas, totais: g.totais, comandos: g.comandos.length, comandos_por_tipo: g.comandos_por_tipo, integridade: 'sem erro', fora_desta_fase: DEMO_FORA };
+      t.estado.resultado = { cabecas: pos.cabecas, por_pasto: pos.por_pasto.length, saidas: saidas, totais: g.totais, comandos: g.comandos.length, comandos_por_tipo: g.comandos_por_tipo, integridade: 'sem erro', fora_desta_fase: DEMO_FORA, manejo: manejoDemo_(t) };
     } });
     return passos;
   }
