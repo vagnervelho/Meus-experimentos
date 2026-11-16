@@ -805,11 +805,12 @@ var AuditService = (function () {
             if (!cat || !evr || cat.sexo_aplicavel === 'AMBOS' || cat.sexo_aplicavel === calc.sexo || vazio_(calc.sexo)) return;
             col.achado('LINHA_DO_TEMPO', {
               tabela: 'AJUSTES', id: x.ajuste_id, campo: 'valor_novo', mensagem: rotuloAnimal_(a, id) + ': a reclassificação de ' + br_(evr.event_date) + ' põe o animal na categoria ' + cat.nome + ', que é só de ' + (cat.sexo_aplicavel === 'M' ? 'machos' : 'fêmeas') + ', mas ele é ' + (calc.sexo === 'M' ? 'macho' : 'fêmea') + ' pelo cadastro. Estorne essa reclassificação (ou corrija-a para uma categoria do sexo dele), ou corrija o sexo.',
-              oque: rotuloAnimal_(a, id) + ': a reclassificação de ' + br_(evr.event_date) + ' põe o animal na categoria ' + cat.nome + ', que é só de ' + (cat.sexo_aplicavel === 'M' ? 'machos' : 'fêmeas') + ', e ele ficaria ' + (calc.sexo === 'M' ? 'macho' : 'fêmea') + '.',
+              // O que ficaria, sem dizer qual lado mudou: o sexo do animal (correção de cadastro) ou o da categoria (cadastro dela).
+              oque: rotuloAnimal_(a, id) + ': a reclassificação de ' + br_(evr.event_date) + ' deixaria o animal, ' + (calc.sexo === 'M' ? 'macho' : 'fêmea') + ' pelo cadastro, numa categoria só de ' + (cat.sexo_aplicavel === 'M' ? 'machos' : 'fêmeas') + ' (' + cat.nome + ').',
               chaves: 'CATEGORIA|' + x.ajuste_id, event_id: x.event_id, animal_id: id,
               // Toda reclassificação que vale conta, também a que já não é a categoria de hoje: voltar o animal à categoria
               // automática ou reclassificá-lo de novo não a tira do histórico. O caminho é estorná-la ou corrigi-la.
-              resolver: 'Estorne antes a reclassificação de ' + br_(evr.event_date) + ' (ou corrija-a para uma categoria do sexo novo): voltar à categoria automática ou reclassificar de novo não apaga a reclassificação antiga.',
+              resolver: 'Estorne antes a reclassificação de ' + br_(evr.event_date) + ' (ou corrija-a para uma categoria que sirva ao sexo do animal): voltar à categoria automática ou reclassificar de novo não apaga a reclassificação antiga.',
             });
           });
         }

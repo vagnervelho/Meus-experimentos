@@ -246,7 +246,9 @@ test('LINHA_DO_TEMPO pela correção do cadastro da categoria: a categoria escol
   const antes = s.retrato();
   const r = s.cmd((ctx) => s.G.Config.salvarCategoria(ctx, { idempotencyKey: 'cat', avisosAceitos: ['CATEGORIAS_SEM_COBERTURA'], dados: { category_id: bezerra.category_id, campos: { sexo_aplicavel: 'M' } } }));
   assert.deepEqual(trava(r), { code: 'CONFLICT', codigos: ['INTEGRIDADE_LINHA_DO_TEMPO'] });
-  assert.match(r.erro.details[0].mensagem, /a reclassificação de 01\/02\/2026 põe o animal na categoria Bezerra, que é só de machos, mas ele é fêmea pelo cadastro\. .*Mude antes a reclassificação do animal/);
+  // Revisão final, achados 11 e 16: o que ficaria (no condicional, sem dizer que a categoria já é só de machos) e o caminho
+  // que funciona (estornar ou corrigir a reclassificação; voltar à automática não a tira do histórico).
+  assert.match(r.erro.details[0].mensagem, /a reclassificação de 01\/02\/2026 deixaria o animal, fêmea pelo cadastro, numa categoria só de machos \(Bezerra\)\. Estorne antes a reclassificação de 01\/02\/2026 \(ou corrija-a para uma categoria que sirva ao sexo do animal\)/);
   assert.equal(r.erro.details[0].conflito.event_id, rc.event_id);
   nadaGravado(s, antes, 'cat');
   assert.equal(s.cmd((ctx) => s.G.Config.salvarCategoria(ctx, { idempotencyKey: 'cat-nome', avisosAceitos: ['CATEGORIAS_SEM_COBERTURA'], dados: { category_id: bezerra.category_id, campos: { nome: 'Bezerra nova' } } })).ok, true, 'mudar só o nome passa');

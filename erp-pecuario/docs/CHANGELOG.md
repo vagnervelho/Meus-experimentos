@@ -903,3 +903,44 @@ Nenhuma linha de código mudou nesta etapa: só documentos.
   `tests/fase2.fuzz.regressoes.test.js` (13 casos); `npm test` completo com 650 testes, 650 aprovados e 0 falhas (734 s,
   junto da leva final); `npm run ui:check` com 88 testes, 88 aprovados e 0 falhas (226 s), página montada com 448 KB de
   450 KB.
+
+## 16/11/2026 — Revisão final da Fase 2 (rodada 5): conserto pelas garantias de todo caminho
+
+17 achados (4 altos, 8 médios, 5 baixos), todos CORRIGIDOS, cada um com teste que falhava no código de antes
+(`tests/revisao5.motor.test.js`, `tests/revisao5.financeiro.test.js`, `tests/revisao5.interface.test.js` e
+`tests/ui/revisao5.test.js`: 27 testes, 23 no Node e 4 no navegador; rodados sobre a cópia do código de antes, os 27
+falharam). Em vez de uma conferência nova por caminho, as garantias ficaram na trava e na verificação:
+- **Fonte quebrada à mão** (achados 2 e 6): COPIAS, FILHAS_SEM_PAI e os achados novos do financeiro (lançamento com efeito
+  de caixa sem parcela, parcela CANCELADA sem desdobramento, dedução retida sem recebimento) marcam a fonte da
+  reconstrução como quebrada. A verificação não oferece o reparo (`reparo_impedido`), `repararIntegridade` recusa, a
+  trava recusa o comando que lançaria para o que a fonte cita e põe em quarentena o que só a reconstrução alcança (a vaca
+  morta sem a linha da morte continua morta; a dívida apagada não vira "sem caixa").
+- **Trava no ensaio da importação** (achado 5): cada evento da validação e do bloco passa pela trava; o que só ela recusa
+  vira motivo da linha. A conclusão recusada diz que só o desfazer resolve. Conferências próprias novas: pasto das crias
+  que vem da mãe desativado (`PASTO_INATIVO`) e fêmea prenhe nascida no dia da entrada (`PRENHA_SEM_IDADE`, também na
+  validação de ANIMAIS).
+- **Cria em dobro** (achado 3): GENEALOGIA acusa a cria de parto e o filho sem parto da mesma mãe com o mesmo nascimento;
+  o motor recusa o parto de quem já está no cadastro (`CRIA_JA_NO_CADASTRO`), pede confirmação quando o candidato não tem
+  mãe informada e a reconciliação aponta o animal da fotografia (`mesmo_animal`) em vez de "Outra entrada".
+- **Uma regra, todos os caminhos**: a duplicidade de linha na importação só com identificação (achado 1: garrotes sem
+  brinco de COMPRAS); a mãe e o pai de ANIMAIS pelo brinco no marco zero (achado 4); o reuso desligado no período que o
+  estorno devolve (achado 10); a conversão BLOQUEIA → erro numa função só, `Validation.bloqueado` (achado 8); a
+  reativação de pasto exige a propriedade ativa e LINHA_DO_TEMPO acusa a propriedade desativada (achado 17); os anexos
+  passam ao substituto pelo parceiro e pelo valor, com `impactos.anexos_soltos` (achado 12).
+- **Mensagens**: a categoria manual × sexo manda estornar ou corrigir a reclassificação (achado 11); as frases da trava no
+  condicional, o touro de fora pelo nome e o conselho do brinco corrigido para qualquer identificação (achado 16); os
+  rótulos dos campos na correção de cadastro (achado 15); a coluna da planilha no lugar de "Dedução k"/"Custo k" (achado
+  14); "Custo de aquisição por animal" na revisão da compra (achado 13); "Não dá para gravar" e o link "Abrir …" em toda
+  recusa fora do formulário de evento, por `UI.estadoErro(e, {detalhes})` (achado 7); o erro de cada dado no cartão dele
+  e a contagem por animal na correção de cadastro (achado 9).
+- Expectativas de testes antigos ajustadas porque reproduziam o comportamento que os achados apontam como errado:
+  `tests/integrity.test.js` (o relatório ganhou `reparo_impedido`), `tests/revisao4.motor.test.js` (os dois casos do
+  achado 3 da rodada 4 rodavam o reparo sobre a fonte quebrada; agora conferem que ele é recusado e a vaca continua
+  morta), `tests/trava.integridade.test.js` (quatro frases no presente — "não é macho pelo cadastro" — viraram o
+  condicional, e a da categoria escolhida à mão deixou de mandar "voltar à categoria automática", que não resolve), `tests/venda.test.js` (a carência bloqueada ganhou a frase de quem bloqueia), `tests/ui/compra.test.js` e
+  `tests/ui/eventos.fase2.test.js` ("Valor por animal" → "Custo de aquisição por animal (com frete e outros custos)").
+- Teste aleatório: 200 sementes novas × 60 passos (93000 a 93199, depois dos consertos): 6.374 comandos aceitos, 4.620
+  recusados, 0 falhas. Trava na base de demonstração (1 execução de cada, `npm run trava:medir`): 19.108 ms nos 391
+  comandos (2.184 ms na trava) contra 18.637 ms (1.754 ms) no código de antes desta etapa.
+- Verificado em Node: `npm test` com 673 testes, 673 aprovados e 0 falhas (535 s); `npm run ui:check` com 92 testes, 92
+  aprovados e 0 falhas (227 s), página montada com 449 KB de 450 KB.
