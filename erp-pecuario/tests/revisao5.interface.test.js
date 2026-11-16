@@ -41,16 +41,16 @@ test('R5 achado 8: com a política "Bloqueia", o aviso vira erro sem "Gravar mes
   s.reg('registrar', tr);
   s.reg('registrar', { tipo: 'TRANSFERENCIA', campos: { event_date: '2026-05-02', pasto_origem_id: PASTOS.B, pasto_destino_id: PASTOS.A }, animais: [{ animal_id: V }] });
   const dup = s.tent('registrar', tr);
-  assert.deepEqual([dup.ok, dup.erro && dup.erro.code, dup.erro && S.codigos(dup.erro)], [false, 'VALIDATION', ['POSSIVEL_DUPLICIDADE']]);
-  assert.match(dup.erro.details[0].mensagem, /^Já existe a transferência de 01\/05\/2026 com este animal\. A configuração bloqueia este aviso \("Lançamento possivelmente repetido"\): resolva o motivo ou mude a política dele em Configurações › Avisos\.$/);
+  assert.deepEqual([dup.ok, dup.erro && dup.erro.code], [false, 'VALIDATION']);
+  const dd = dup.erro.details.find((x) => x.codigo === 'POSSIVEL_DUPLICIDADE');
+  assert.match(dd.mensagem, /^Já existe a transferência de 01\/05\/2026 com este animal\. A configuração bloqueia este aviso \("Lançamento possivelmente repetido"\): resolva o motivo ou mude a política dele em Configurações › Avisos\.$/);
   // O período financeiro fechado (o motor da compra pede o aviso; com Bloqueia, recusa sem pedir justificativa).
   const c = s.tent('registrar', { tipo: 'COMPRA', campos: { event_date: '2026-03-10', partner_id: forn, pasto_destino_id: PASTOS.A, modalidade: 'CABECA', preco_unitario: 200000, valor_animais: 200000 }, animais: [{ brinco: '300', sexo: 'F', idade_meses: 20 }], parcelas: [{ data_vencimento: '2026-04-10' }] });
   assert.deepEqual([c.ok, c.erro && c.erro.code, c.erro && S.codigos(c.erro)], [false, 'VALIDATION', ['PERIODO_BLOQUEADO']]);
   assert.match(c.erro.details[0].mensagem, /dentro do período financeiro fechado \(até 31\/03\/2026\)\. A configuração bloqueia este aviso \("Período financeiro fechado"\)/);
   assert.doesNotMatch(c.erro.details[0].mensagem, /Confirme com uma justificativa/);
   // A mesma conversão, uma só: aplicada duas vezes dá o mesmo.
-  const d = s.G.Validation.bloqueado(dup.erro.details[0]);
-  assert.equal(d.mensagem, dup.erro.details[0].mensagem);
+  assert.equal(s.G.Validation.bloqueado(dd).mensagem, dd.mensagem);
 });
 
 // ---------------------------------------------------------------- achado 15 (BAIXA) ----
@@ -73,7 +73,7 @@ test('R5 achado 16: a trava diz o que ficaria errado no condicional e o conselho
   const s = base();
   const V = s.reg('registrar', S.entradaInicial([vaca('0457')])).animais[0].animal_id;
   s.reg('registrar', { tipo: 'AJUSTE_INVENTARIO', subtipo: 'IDENTIFICACAO_INCORRETA', campos: { event_date: '2026-05-10', justificativa: 'conferência' }, animais: [{ animal_id: V, brinco: '0458' }] });
-  const ret = s.tent('registrar', { tipo: 'IDENTIFICACAO', subtipo: 'RETIRADA', campos: { event_date: '2026-04-01', tipo_identificacao: 'BRINCO' }, animais: [{ animal_id: V, motivo: 'PERDA' }] });
+  const ret = s.tent('registrar', { tipo: 'IDENTIFICACAO', subtipo: 'REMOCAO', campos: { event_date: '2026-04-01', tipo_identificacao: 'BRINCO' }, animais: [{ animal_id: V, motivo: 'PERDA' }] });
   assert.equal(ret.ok, false);
   const msg = ret.erro.details.map((d) => d.mensagem).join(' | ');
   assert.match(msg, /trocaria o brinco 0457, mas nessa data o animal ficaria sem brinco/);

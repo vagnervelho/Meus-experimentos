@@ -334,7 +334,8 @@ test('carência na venda (RN-072): vermífugo em 01/11 com 35 dias — abate em 
   // Abate com carência: política padrão BLOQUEIA → VALIDATION, um detalhe por animal, com o fim da carência.
   const e = falha(m, 'registrar', v('2026-11-13', 'ABATE', ['C1', 'C2', 'C4']));
   assert.deepEqual([e.code, codigos(e), e.details.map((d) => d.animal_id)], ['VALIDATION', ['CARENCIA_ATIVA', 'CARENCIA_ATIVA'], [ids.C1, ids.C2]]);
-  assert.match(e.details[0].mensagem, /^C1: está em carência sanitária até 06\/12\/2026 \(Ivermectina 1%, aplicado em 01\/11\/2026\)\. Para o abate, a carência precisa ter terminado\.$/);
+  // Revisão final, achado 8: o aviso que a política bloqueia diz que é a configuração que bloqueia (uma frase a mais).
+  assert.match(e.details[0].mensagem, /^C1: está em carência sanitária até 06\/12\/2026 \(Ivermectina 1%, aplicado em 01\/11\/2026\)\. Para o abate, a carência precisa ter terminado\. A configuração bloqueia este aviso \("Animal em carência \(venda para abate\)"\): resolva o motivo ou mude a política dele em Configurações › Avisos\.$/);
   assert.match(e.details[1].mensagem, /até 06\/12\/2026 \(aplicação de 01\/11\/2026\)/);
   assert.deepEqual(codigos(falha(m, 'registrar', v('2026-12-06', 'ABATE', ['C1']))), ['CARENCIA_ATIVA'], 'o último dia ainda é carência');
   assert.deepEqual(codigos(falha(m, 'registrar', v('2026-11-19', 'ABATE', ['C1', 'C3']))), ['CARENCIA_ATIVA'], 'a aplicação de 20/11 não vale para a venda de 19/11');
