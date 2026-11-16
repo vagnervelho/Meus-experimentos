@@ -474,6 +474,35 @@ var TelaRebanho = (function () {
     if (b.parcial && b.pendente) caixa.appendChild(UI.nota(b.pendente.mensagem, 'info'));
     return caixa;
   }
+  /**
+   * Bloco F (08, seção 3): a carência de hoje, as próximas doses (atrasadas, próximas e em dia, pela agenda do servidor) e
+   * todos os registros sanitários, do mais recente ao mais antigo, com o custo que coube ao animal pelas alocações.
+   */
+  function blocoSanitario(f, a) {
+    var b = f.sanitario || {};
+    var caixa = h('div', { dataset: { blocoSanitario: '1' } });
+    if (b.entregue === false) { caixa.appendChild(UI.nota(b.mensagem, 'info')); return caixa; }
+    if (b.carencia) caixa.appendChild(UI.nota('Em carência até ' + Fmt.data(b.carencia.fim) + (b.carencia.nome_produto ? ' (' + b.carencia.nome_produto + ', aplicado em ' + Fmt.data(b.carencia.data_aplicacao) + ')' : '') + ': não pode ir para abate antes disso.', 'aviso', null));
+    var prox = b.proximas || [];
+    if (prox.length) caixa.appendChild(h('ul', { class: 'lista-simples', 'aria-label': 'Próximas doses', dataset: { proximasDoses: String(prox.length) } }, prox.map(function (p) {
+      var quando = p.situacao === 'VENCIDA' ? 'atrasada desde ' + Fmt.data(p.vencimento) : (p.situacao === 'PROXIMA' ? 'vence em ' : 'prevista para ') + Fmt.data(p.vencimento);
+      return h('li', { dataset: { situacao: p.situacao } }, h('span', { class: 'dado', text: p.nome || Fmt.rotulo('PROCEDIMENTO', p.tipo_procedimento) }), ' · ' + Fmt.rotulo('SITUACAO_AGENDA', p.situacao) + ': ' + quando);
+    })));
+    var itens = b.itens || [];
+    if (!itens.length) { caixa.appendChild(UI.nota('Nenhum registro sanitário.', 'info')); return caixa; }
+    caixa.appendChild(UI.tabela({ id: 'sanidade-animal', rotulo: 'Registros sanitários do animal', linhas: itens, chave: function (x) { return x.event_id; },
+      colunas: [
+        { id: 'data', rotulo: 'Data', valor: function (x) { return x.data; }, formatar: function (x) { var r = 'evento/' + x.event_id; return h('a', { class: 'botao botao-texto', href: Roteador.href(r), dataset: { rota: r } }, Fmt.data(x.data)); } },
+        { id: 'procedimento', rotulo: 'O que foi feito', valor: function (x) { return Fmt.rotulo('PROCEDIMENTO', x.tipo_procedimento) + (x.protocolo_nome ? ' · ' + x.protocolo_nome : ''); } },
+        { id: 'produto', rotulo: 'Produto ou diagnóstico', valor: function (x) { return [x.nome_produto, x.diagnostico, x.motivo, x.resultado_exame ? 'resultado: ' + x.resultado_exame : null].filter(Boolean).join(' · ') || '—'; } },
+        { id: 'dose', rotulo: 'Dose', num: true, valor: function (x) { return x.dose; }, formatar: function (x) { return x.dose === null ? '—' : Fmt.numero(x.dose, Fmt.casas(x.dose)) + ' ' + (x.unidade_dose || ''); } },
+        { id: 'carencia', rotulo: 'Carência até', valor: function (x) { return x.data_fim_carencia; }, formatar: function (x) { return x.data_fim_carencia ? Fmt.data(x.data_fim_carencia) : '—'; } },
+        { id: 'proxima', rotulo: 'Próxima', valor: function (x) { return x.data_proxima_aplicacao; }, formatar: function (x) { return x.data_proxima_aplicacao ? Fmt.data(x.data_proxima_aplicacao) : '—'; } },
+        { id: 'custo', rotulo: 'Custo deste animal', num: true, valor: function (x) { return x.custo; }, formatar: function (x) { return x.custo === null ? '—' : Fmt.dinheiro(x.custo); } },
+      ] }).el);
+    if (b.custo_total !== null && b.custo_total !== undefined) caixa.appendChild(UI.pares([['Custo sanitário do animal', Fmt.dinheiro(b.custo_total)]]));
+    return caixa;
+  }
   function blocoReproducao(f) {
     var g = f.reprodutivo || {};
     var caixa = h('div', { dataset: { blocoReproducao: '1' } });
@@ -605,6 +634,7 @@ var TelaRebanho = (function () {
       else if (aba === 'genealogia') corpo.appendChild(blocoGenealogia(f, abrirEdicao));
       else if (aba === 'pastos') corpo.appendChild(UI.secao('Histórico de pastos', blocoPastos(f)));
       else if (aba === 'peso') corpo.appendChild(UI.secao('Peso', blocoPeso(f), { dado: 'peso' }));
+      else if (aba === 'sanidade') corpo.appendChild(UI.secao('Sanidade', blocoSanitario(f, linha), { dado: 'sanidade' }));
       else if (aba === 'reproducao') corpo.appendChild(UI.secao('Reprodução', blocoReproducao(f), { dado: 'reproducao' }));
       else if (aba === 'financeiro') corpo.appendChild(UI.secao('Financeiro', blocoFinanceiro(f), { dado: 'financeiro' }));
       else if (aba === 'eventos') corpo.appendChild(UI.secao('Linha do tempo', blocoEventos(f), { dado: 'linha-tempo' }));

@@ -172,6 +172,13 @@ var Fmt = (function () {
     STATUS_LANCAMENTO: { ATIVO: 'Vale', CANCELADO: 'Cancelado' },
     STATUS_PAGAMENTO: { SEM_CAIXA: 'Sem pagamento (não é caixa)', ABERTO: 'A pagar ou receber', PARCIAL: 'Pago em parte', LIQUIDADO: 'Pago', CANCELADO: 'Cancelado' },
     STATUS_PARCELA: { ABERTA: 'Em aberto', LIQUIDADA: 'Paga', CANCELADA: 'Cancelada' },
+    // Sanidade e insumos (Fase 3, E3.2 e E3.3).
+    PROCEDIMENTO: { VACINA: 'Vacinação', VERMIFUGO: 'Vermifugação', MEDICAMENTO: 'Medicação', TRATAMENTO: 'Tratamento', EXAME: 'Exame', DOENCA: 'Doença' },
+    CATEGORIA_PRODUTO: { VACINA: 'Vacina', VERMIFUGO: 'Vermífugo', MEDICAMENTO: 'Medicamento', SUPLEMENTO: 'Suplemento', OUTRO: 'Outro' },
+    MODO_DOSE: { POR_CABECA: 'Por cabeça (a mesma dose)', POR_PESO: 'Por peso (dose por kg)', TOTAL: 'Só o total do frasco' },
+    RECORRENCIA: { UNICA: 'Uma vez na vida', INTERVALO_DIAS: 'A cada N dias', CAMPANHA_MESES: 'Campanha (meses do ano)' },
+    MOTIVO_AJUSTE_ESTOQUE: { CONTAGEM: 'Contagem (acertar o saldo)', PERDA: 'Perda', VENCIMENTO: 'Vencimento' },
+    SITUACAO_AGENDA: { VENCIDA: 'Atrasada', PROXIMA: 'Próxima', EM_DIA: 'Em dia' },
     NATUREZA: { RECEITA_VENDA_ANIMAIS: 'Venda de animais', OUTRA_RECEITA: 'Outra receita', AQUISICAO_ANIMAIS: 'Aquisição de animais', CUSTEIO: 'Custeio', DESPESA_VENDA: 'Despesa de venda', ESTOQUE_INSUMOS: 'Compra de insumos', NAO_OPERACIONAL: 'Não operacional' },
     /** Os 13 códigos de aviso (05, seção 1; desenho-base 16.12): configuração, detalhe do evento e revisão. */
     AVISO: {
@@ -200,6 +207,7 @@ var Fmt = (function () {
     situacao_nascimento: 'SITUACAO_NASCIMENTO', pai_confianca_parto: 'CONFIANCA',
     modalidade: 'MODALIDADE', base_peso: 'BASE_PESO', rendimento_tipo: 'RENDIMENTO_TIPO', criterio_rateio: 'CRITERIO_RATEIO',
     tipo_identificacao: 'IDENTIFICACAO', acao: 'ACAO_MARCACAO', tipo_pesagem: 'TIPO_PESAGEM',
+    modo_dose: 'MODO_DOSE', motivo_ajuste: 'MOTIVO_AJUSTE_ESTOQUE', tipo_procedimento: 'PROCEDIMENTO', recorrencia_tipo: 'RECORRENCIA', categoria_produto: 'CATEGORIA_PRODUTO',
   };
 
   function configurar(o) { Object.keys(o || {}).forEach(function (k) { if (o[k] !== undefined && o[k] !== null) cfg[k] = o[k]; }); cache = {}; }
@@ -257,6 +265,12 @@ var Fmt = (function () {
     var f = cache.brl || (cache.brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }));
     return f.format(Number(centavos) / 100);
   }
+  /** Casas decimais que o número usa (até 4): 12,5 → 1; 0,0125 → 4; 30 → 0. As quantidades de insumo têm até 4 casas. */
+  function casas(n) {
+    if (typeof n !== 'number' || !isFinite(n)) return 0;
+    for (var c = 0; c < 4; c++) if (Math.abs(Math.round(n * Math.pow(10, c)) - n * Math.pow(10, c)) < 1e-7) return c;
+    return 4;
+  }
   function idade(meses, estimada) {
     if (meses === null || meses === undefined || meses === '') return '—';
     var m = Number(meses);
@@ -310,7 +324,7 @@ var Fmt = (function () {
   }
   return {
     configurar: configurar, ajustarRelogio: ajustarRelogio, agoraMs: agoraMs, hoje: hoje, ehData: ehData, data: data, dataCurta: dataCurta,
-    instante: instante, diasEntre: diasEntre, numero: numero, peso: peso, dinheiro: dinheiro, idade: idade, rotulo: rotulo, rotuloOpcao: rotuloOpcao,
+    instante: instante, diasEntre: diasEntre, numero: numero, peso: peso, dinheiro: dinheiro, idade: idade, rotulo: rotulo, rotuloOpcao: rotuloOpcao, casas: casas,
     lerDecimal: lerDecimal, lerDinheiro: lerDinheiro, lerInteiro: lerInteiro, centavosParaTexto: centavosParaTexto, ROTULOS: ROTULOS, temDominio: temDominio,
     config: function () { return Util.clonar(cfg); },
   };
@@ -584,6 +598,9 @@ var Store = (function () {
     'propriedade.salvar': function (d) { return d && d.property_id && !Util.vazio(est.params.propriedade_padrao_id) ? mesclarEm_('propriedades', 'property_id', d) : false; },
     'lista.salvar': function (d) { return d && d.lista_id ? mesclarEm_('listas', 'lista_id', d) && (aplicarListas_(), true) : false; },
     'parceiro.salvar': function (d) { return d && d.partner_id ? mesclarEm_('parceiros', 'partner_id', d) : false; },
+    // Sanidade (Fase 3): o cadastro do produto (com o saldo, que é projeção) e do protocolo volta inteiro na resposta.
+    'produto.salvar': function (d) { return d && d.product_id ? mesclarEm_('produtos', 'product_id', d) : false; },
+    'protocolo.salvar': function (d) { return d && d.protocol_id ? mesclarEm_('protocolos', 'protocol_id', d) : false; },
     // Pesagem (Fase 3): o servidor devolve o peso atual de cada animal pesado (a projeção gravada); a lista do aparelho
     // se atualiza sem recarregar o rebanho inteiro (o curral manda blocos seguidos com sinal fraco).
     'evento.registrar': function (d) { return d && d.event_type === 'PESAGEM' && d.pesagem ? atualizarPesos_(d.pesagem.animais) : false; },
@@ -661,6 +678,11 @@ var Store = (function () {
   function contas(naturezas) { return ((est.dados && est.dados.contas) || []).filter(function (c) { return c.ativo !== false && (!naturezas || naturezas.indexOf(c.natureza) >= 0); }); }
   function conta(id) { return ((est.dados && est.dados.contas) || []).filter(function (c) { return c.conta_id === id; })[0] || null; }
   function categorias() { return (est.dados && est.dados.categorias) || []; }
+  /** Produtos e protocolos sanitários (Fase 3): os ativos; com {todos: true}, também os desativados. */
+  function produtos(o) { var t = (est.dados && est.dados.produtos) || []; return o && o.todos ? t : t.filter(function (p) { return p.ativo !== false; }); }
+  function produto(id) { return ((est.dados && est.dados.produtos) || []).filter(function (p) { return p.product_id === id; })[0] || null; }
+  function protocolos(o) { var t = (est.dados && est.dados.protocolos) || []; return o && o.todos ? t : t.filter(function (p) { return p.ativo !== false; }); }
+  function protocolo(id) { return ((est.dados && est.dados.protocolos) || []).filter(function (p) { return p.protocol_id === id; })[0] || null; }
   function categoria(id) { return categorias().filter(function (c) { return c.category_id === id; })[0] || null; }
   function animais() { garantirIndices_(); return est.animais; }
   function animal(id) { garantirIndices_(); return est.porId[id] || null; }
@@ -686,6 +708,8 @@ var Store = (function () {
     var c = categoria(id); if (c) return c.nome;
     var pa = parceiro(id); if (pa) return pa.nome;
     var ct = conta(id); if (ct) return ct.nome;
+    var pd = produto(id); if (pd) return pd.nome;
+    var pt = protocolo(id); if (pt) return pt.nome;
     var a = animal(id); if (a) return rotuloAnimal(a);
     return null;
   }
@@ -718,6 +742,8 @@ var Store = (function () {
     if (a.situacao_cadastral === 'ATIVO') p.push(ps ? ps.nome : 'sem pasto');
     else p.push(Fmt.rotulo('SITUACAO_CADASTRAL', a.situacao_cadastral));
     if (a.peso_atual) p.push(Fmt.peso(a.peso_atual) + (a.data_ultima_pesagem ? ' em ' + Fmt.dataCurta(a.data_ultima_pesagem) : ''));
+    // Carência (RN-072): o último dia em que o animal ainda não pode ser abatido, calculado no servidor (lista leve).
+    if (a.carencia_ate) p.push('em carência até ' + Fmt.data(a.carencia_ate));
     if (a.brinco && a.codigo_interno) p.push(a.codigo_interno);
     return p.join(' · ');
   }
@@ -780,6 +806,7 @@ var Store = (function () {
     configurar: configurar, carregar: carregar, aplicarResultado: aplicarResultado, assinar: assinar, carregado: carregado, versao: versao,
     param: param, lista: lista, itemLista: itemLista, rotuloLista: rotuloLista, pastos: pastos, pasto: pasto, propriedades: propriedades, propriedade: propriedade,
     parceiros: parceiros, parceiro: parceiro, contas: contas, conta: conta, categorias: categorias, categoria: categoria, animais: animais, animal: animal, filhosDe: filhosDe,
+    produtos: produtos, produto: produto, protocolos: protocolos, protocolo: protocolo,
     modulos: modulos, modulo: modulo, catalogo: catalogo, tipoEvento: tipoEvento, nomeEvento: nomeEvento, nomeDeReferencia: nomeDeReferencia, valorLegivel: valorLegivel, rotuloAnimal: rotuloAnimal, descricaoAnimal: descricaoAnimal,
     resolverBrinco: resolverBrinco, buscar: buscar, carregarBaixados: carregarBaixados, normalizarBrinco: normalizarBrinco,
     baixados: function () { return est.baixados; },

@@ -1,0 +1,340 @@
+
+<script>
+'use strict';
+/*
+ * ERP Pecuário — Sanidade e insumos (Fase 3, E3.2 e E3.3), carregada sob demanda (01, seção 6.2): a agenda sanitária
+ * (08, seção 7.4: atrasadas, próximas, animais em carência, cobertura por protocolo e o custo sanitário do período; 07,
+ * seção 8.4), as aplicações lançadas, o cadastro de produtos com o estoque (03a, seções 4.6 e 4.7) e o de protocolos
+ * (03a, seção 4.9).
+ *
+ * Tudo o que é conta vem do servidor (P5): a elegibilidade e o vencimento de cada protocolo, a carência, o saldo do
+ * estoque (projeção dos movimentos), o custo pelo consumo e o rateio. A tela só mostra, filtra e abre o formulário do
+ * lançamento (Registro) já com o protocolo, o produto e os animais pendentes escolhidos. O aparelho confere só o formato.
+ */
+var TelaSanidade = (function () {
+  var h = Util.h;
+  var ABAS = [['agenda', 'Agenda'], ['aplicacoes', 'Aplicações'], ['produtos', 'Produtos e estoque'], ['protocolos', 'Protocolos']];
+  /** O subtipo do lançamento SANIDADE de cada procedimento do protocolo. */
+  var SUBTIPO_DO_PROCEDIMENTO = { VACINA: 'VACINACAO', VERMIFUGO: 'VERMIFUGACAO', MEDICAMENTO: 'MEDICACAO', TRATAMENTO: 'TRATAMENTO', EXAME: 'EXAME' };
+  var CATEGORIAS = ['VACINA', 'VERMIFUGO', 'MEDICAMENTO', 'SUPLEMENTO', 'OUTRO'];
+  var PROCEDIMENTOS = ['VACINA', 'VERMIFUGO', 'MEDICAMENTO', 'TRATAMENTO', 'EXAME'];
+  var RECORRENCIAS = ['UNICA', 'INTERVALO_DIAS', 'CAMPANHA_MESES'];
+  var filtros = { data: '', inicio: '', fim: '' };
+
+  function campo(id, rotulo, controle, ajuda) {
+    return h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo', for: id, text: rotulo }), controle, ajuda ? h('p', { class: 'campo-ajuda', text: ajuda }) : null);
+  }
+  function link(rota, texto) { return h('a', { class: 'botao botao-texto', href: Roteador.href(rota), dataset: { rota: rota } }, texto); }
+  function nomeAnimal(x) { var a = Store.animal(x.animal_id); return a ? Store.rotuloAnimal(a) : (x.brinco || x.codigo_interno || 'animal'); }
+  function qtd(v, un) { return v === null || v === undefined ? '—' : Fmt.numero(v, Fmt.casas(v)) + (un ? ' ' + un : ''); }
+  function cabecalho(aba) {
+    var acoes = h('div', { class: 'acoes', style: 'margin-top:0' });
+    if (App.podeRegistrar() && Store.tipoEvento('SANIDADE')) acoes.appendChild(h('a', { class: 'botao botao-primario', href: Roteador.href('evento/novo/SANIDADE'), dataset: { rota: 'evento/novo/SANIDADE' } }, 'Registrar aplicação'));
+    return h('div', null, h('div', { class: 'tela-cabecalho' }, h('h1', { text: 'Sanidade' }), acoes),
+      UI.abas('Partes da sanidade', ABAS.map(function (x) { return { rotulo: x[1], rota: 'sanidade/' + x[0], atual: x[0] === aba }; })));
+  }
+  /** Os campos do lançamento a partir do produto do cadastro (a tela sugere o padrão dele; o servidor usa o que for enviado). */
+  function camposDoProduto(produtoId, extra) {
+    var c = Object.assign({}, extra || {});
+    var p = produtoId ? Store.produto(produtoId) : null;
+    if (!p) return c;
+    c.produto_id = p.product_id;
+    var txt = function (v) { return v === null || v === undefined || v === '' ? undefined : String(v).replace('.', ','); };
+    if (p.dose_padrao_por_kg || p.dose_padrao_por_cabeca) { c.modo_dose = p.dose_padrao_por_kg ? 'POR_PESO' : 'POR_CABECA'; c.dose_referencia = txt(p.dose_padrao_por_kg || p.dose_padrao_por_cabeca); }
+    if (txt(p.carencia_padrao_dias) !== undefined) c.periodo_carencia_dias = txt(p.carencia_padrao_dias);
+    if (p.lote) c.lote = p.lote;
+    if (p.validade) c.validade = p.validade;
+    Object.keys(c).forEach(function (k) { if (c[k] === undefined) delete c[k]; });
+    return c;
+  }
+  /** Abre o lançamento de sanidade com os animais pendentes de um protocolo (ou de um produto sem protocolo). */
+  function aplicarPendentes(grupo) {
+    var sub = SUBTIPO_DO_PROCEDIMENTO[grupo.tipo_procedimento] || 'VACINACAO';
+    var campos = camposDoProduto(grupo.produto_id, grupo.protocol_id ? { protocol_id: grupo.protocol_id } : {});
+    Registro.abrir('SANIDADE', { subtipo: sub, campos: campos, linhas: grupo.animais.map(function (id) { return { animal_id: id }; }), origem: 'sanidade/agenda' });
+  }
+
+  // ------------------------------------------------------------------ agenda ----
+  function agrupar(pendencias) {
+    var grupos = {};
+    var ordem = [];
+    pendencias.forEach(function (p) {
+      var k = p.protocol_id ? 'p:' + p.protocol_id : 'v:' + p.produto_id;
+      if (!grupos[k]) { grupos[k] = { chave: k, nome: p.nome, protocol_id: p.protocol_id, produto_id: p.produto_id, tipo_procedimento: p.tipo_procedimento, animais: [], vencidas: 0, proximas: 0 }; ordem.push(k); }
+      var g = grupos[k];
+      if (g.animais.indexOf(p.animal_id) < 0) g.animais.push(p.animal_id);
+      if (p.situacao === 'VENCIDA') g.vencidas += 1; else g.proximas += 1;
+    });
+    return ordem.map(function (k) { return grupos[k]; });
+  }
+  function blocoPendencias(d) {
+    var caixa = h('div', { dataset: { pendencias: String(d.pendencias.length) } });
+    if (!d.pendencias.length) { caixa.appendChild(UI.nota('Nenhuma dose atrasada ou para os próximos ' + d.parametros.antecedencia_dias + ' dias.', 'ok')); return caixa; }
+    var podeAplicar = App.podeRegistrar() && Store.tipoEvento('SANIDADE');
+    caixa.appendChild(h('ul', { class: 'lista-simples', 'aria-label': 'Aplicar por protocolo' }, agrupar(d.pendencias).map(function (g) {
+      var txt = g.nome + ': ' + [g.vencidas ? g.vencidas + (g.vencidas === 1 ? ' atrasada' : ' atrasadas') : null, g.proximas ? g.proximas + (g.proximas === 1 ? ' próxima' : ' próximas') : null].filter(Boolean).join(', ');
+      return h('li', { class: 'linha-acao', dataset: { grupoAgenda: g.chave } }, h('span', { text: txt }),
+        podeAplicar ? UI.botao('Aplicar em ' + g.animais.length + (g.animais.length === 1 ? ' animal' : ' animais'), { aoClicar: function () { aplicarPendentes(g); } }) : null);
+    })));
+    caixa.appendChild(UI.tabela({ id: 'agenda-pendencias', rotulo: 'Doses atrasadas e próximas', linhas: d.pendencias, chave: function (p) { return p.animal_id + '|' + (p.protocol_id || p.produto_id); },
+      colunas: [
+        { id: 'animal', rotulo: 'Animal', valor: function (p) { return nomeAnimal(p); }, formatar: function (p) { return link('animal/' + p.animal_id + '/sanidade', nomeAnimal(p)); } },
+        { id: 'nome', rotulo: 'O quê', valor: function (p) { return p.nome || Fmt.rotulo('PROCEDIMENTO', p.tipo_procedimento); } },
+        { id: 'situacao', rotulo: 'Situação', valor: function (p) { return Fmt.rotulo('SITUACAO_AGENDA', p.situacao); } },
+        { id: 'vencimento', rotulo: 'Vence em', valor: function (p) { return p.vencimento; }, formatar: function (p) { return Fmt.data(p.vencimento) + (p.situacao === 'VENCIDA' ? ' (' + Math.abs(p.dias) + ' dias de atraso)' : p.dias ? ' (em ' + p.dias + ' dias)' : ' (hoje)'); } },
+        { id: 'ultima', rotulo: 'Última aplicação', valor: function (p) { return p.ultima_aplicacao ? p.ultima_aplicacao.data : ''; }, formatar: function (p) { return p.ultima_aplicacao ? link('evento/' + p.ultima_aplicacao.event_id, Fmt.data(p.ultima_aplicacao.data)) : 'nunca'; } },
+      ] }).el);
+    return caixa;
+  }
+  function blocoCarencia(lista) {
+    if (!lista.length) return UI.nota('Nenhum animal em carência.', 'info');
+    return UI.tabela({ id: 'agenda-carencia', rotulo: 'Animais em carência', linhas: lista, chave: function (c) { return c.animal_id; },
+      colunas: [
+        { id: 'animal', rotulo: 'Animal', valor: function (c) { return nomeAnimal(c); }, formatar: function (c) { return link('animal/' + c.animal_id + '/sanidade', nomeAnimal(c)); } },
+        { id: 'fim', rotulo: 'Em carência até', valor: function (c) { return c.fim; }, formatar: function (c) { return Fmt.data(c.fim); } },
+        { id: 'produto', rotulo: 'Produto', valor: function (c) { return c.nome_produto || '—'; } },
+        { id: 'aplicacao', rotulo: 'Aplicado em', valor: function (c) { return c.data_aplicacao; }, formatar: function (c) { return link('evento/' + c.event_id, Fmt.data(c.data_aplicacao)); } },
+      ] }).el;
+  }
+  function blocoProtocolos(d) {
+    if (!d.protocolos.length) return UI.nota('Nenhum protocolo ativo. Cadastre os protocolos da fazenda na aba Protocolos para a agenda calcular as próximas doses.', 'info');
+    return UI.tabela({ id: 'agenda-protocolos', rotulo: 'Cobertura por protocolo', linhas: d.protocolos, chave: function (p) { return p.protocol_id; },
+      colunas: [
+        { id: 'nome', rotulo: 'Protocolo', valor: function (p) { return p.nome; } },
+        { id: 'elegiveis', rotulo: 'Animais que devem receber', num: true },
+        { id: 'em_dia', rotulo: 'Em dia', num: true },
+        { id: 'cobertura', rotulo: 'Cobertura', num: true, valor: function (p) { return p.cobertura.valor; }, formatar: function (p) { var v = UI.valorInd(p.cobertura, function (x) { return Fmt.numero(x, 1) + '%'; }); return v.motivo ? v.texto + ' (' + v.motivo + ')' : v.texto; } },
+        { id: 'aplicacoes', rotulo: 'Aplicações no período', num: true },
+        { id: 'animais_atendidos', rotulo: 'Animais atendidos', num: true },
+      ] }).el;
+  }
+  function blocoCustos(c) {
+    if (!c) return UI.nota('Sem período.', 'info');
+    var caixa = h('div', { dataset: { custoSanitario: String(c.total) } });
+    caixa.appendChild(UI.pares([['Período', Fmt.data(c.inicio) + ' a ' + Fmt.data(c.fim)], ['Custo sanitário', Fmt.dinheiro(c.total)], ['Atribuído aos animais', Fmt.dinheiro(c.alocado)], ['Sem animal', Fmt.dinheiro(c.nao_alocado)]]));
+    if (c.por_conta.length) caixa.appendChild(UI.tabela({ id: 'custo-sanitario-contas', rotulo: 'Custo sanitário por conta', linhas: c.por_conta, chave: function (x) { return x.conta_id; },
+      colunas: [
+        { id: 'nome', rotulo: 'Conta' },
+        { id: 'total', rotulo: 'Total', num: true, formatar: function (x) { return Fmt.dinheiro(x.total); } },
+        { id: 'alocado', rotulo: 'Atribuído aos animais', num: true, formatar: function (x) { return Fmt.dinheiro(x.alocado); } },
+        { id: 'nao_alocado', rotulo: 'Sem animal', num: true, formatar: function (x) { return Fmt.dinheiro(x.nao_alocado); } },
+      ] }).el);
+    return caixa;
+  }
+  function montarAgenda(el) {
+    var vivo = true;
+    el.appendChild(cabecalho('agenda'));
+    var data = h('input', { type: 'date', id: 'sa-data', value: filtros.data || Fmt.hoje() });
+    var inicio = h('input', { type: 'date', id: 'sa-inicio', value: filtros.inicio });
+    var fim = h('input', { type: 'date', id: 'sa-fim', value: filtros.fim });
+    el.appendChild(h('form', { class: 'filtros', role: 'search', 'aria-label': 'Data da agenda e período do custo', on: { submit: function (ev) {
+      ev.preventDefault();
+      filtros.data = data.value; filtros.inicio = inicio.value; filtros.fim = fim.value;
+      carregar();
+    } } }, campo('sa-data', 'Agenda em', data), campo('sa-inicio', 'Custo de', inicio, 'Vazio = os últimos 12 meses.'), campo('sa-fim', 'Até', fim),
+      UI.botao('Atualizar', { tipo: 'primario', atributos: { type: 'submit' } })));
+    var corpo = h('div', { dataset: { agenda: '1' } }, UI.carregando('Montando a agenda…'));
+    el.appendChild(corpo);
+    async function carregar() {
+      Util.limpar(corpo);
+      corpo.appendChild(UI.carregando('Montando a agenda…'));
+      var dados = {};
+      if (filtros.data) dados.data = filtros.data;
+      if (filtros.inicio) dados.periodo_inicio = filtros.inicio;
+      if (filtros.fim) dados.periodo_fim = filtros.fim;
+      var d;
+      try {
+        d = (await Cliente.consulta('sanidade.agenda', dados)).data;
+      } catch (e) {
+        if (!vivo) return;
+        Util.limpar(corpo);
+        corpo.appendChild(UI.estadoErro(e, { acao: { texto: 'Tentar de novo', aoClicar: carregar } }));
+        return;
+      }
+      if (!vivo) return;
+      Util.limpar(corpo);
+      if (d.motivo) { corpo.appendChild(UI.nota('Sem agenda em ' + Fmt.data(d.data) + ': ' + Fmt.rotulo('MOTIVO', d.motivo) + '.', 'info')); return; }
+      var r = d.resumo;
+      corpo.appendChild(h('div', { class: 'indicadores', role: 'list', dataset: { resumoAgenda: '1' } },
+        UI.indicador('Doses atrasadas', String(r.vencidas), 'em ' + Fmt.dataCurta(d.data), 'vencidas'),
+        UI.indicador('Próximas', String(r.proximas), 'nos próximos ' + d.parametros.antecedencia_dias + ' dias', 'proximas'),
+        UI.indicador('Animais com dose pendente', String(r.animais_pendentes), null, 'animais-pendentes'),
+        UI.indicador('Em carência', String(r.em_carencia), 'não abater', 'em-carencia')));
+      corpo.appendChild(UI.secao('Doses atrasadas e próximas', blocoPendencias(d), { dado: 'pendencias' }));
+      corpo.appendChild(UI.secao('Animais em carência', blocoCarencia(d.carencia), { dado: 'carencia' }));
+      corpo.appendChild(UI.secao('Protocolos', blocoProtocolos(d), { dado: 'protocolos' }));
+      corpo.appendChild(UI.secao('Custo sanitário', blocoCustos(d.custos), { dado: 'custos' }));
+    }
+    carregar();
+    return function () { vivo = false; };
+  }
+
+  // ------------------------------------------------------------------ aplicações ----
+  function montarAplicacoes(el) {
+    var vivo = true;
+    el.appendChild(cabecalho('aplicacoes'));
+    var corpo = h('div', { dataset: { aplicacoes: '1' } }, UI.carregando('Buscando as aplicações…'));
+    el.appendChild(corpo);
+    async function carregar() {
+      var r;
+      try {
+        r = (await Cliente.consulta('evento.listar', { tipo: 'SANIDADE', vigentes: true, por_pagina: 200 })).data;
+      } catch (e) {
+        if (!vivo) return;
+        Util.limpar(corpo);
+        corpo.appendChild(UI.estadoErro(e, { acao: { texto: 'Tentar de novo', aoClicar: carregar } }));
+        return;
+      }
+      if (!vivo) return;
+      Util.limpar(corpo);
+      if (!r.itens.length) { corpo.appendChild(UI.nota('Nenhuma aplicação registrada.', 'info')); return; }
+      corpo.appendChild(UI.tabela({ id: 'aplicacoes', rotulo: 'Aplicações e registros sanitários', linhas: r.itens, chave: function (x) { return x.event_id; },
+        colunas: [
+          { id: 'data', rotulo: 'Data', valor: function (x) { return x.event_date; }, formatar: function (x) { return link('evento/' + x.event_id, Fmt.data(x.event_date)); } },
+          { id: 'tipo', rotulo: 'O que foi feito', valor: function (x) { return x.rotulo_subtipo || x.rotulo; } },
+          { id: 'produto', rotulo: 'Produto', valor: function (x) { var p = x.payload || {}; return p.nome_produto || (p.produto_id && Store.produto(p.produto_id) ? Store.produto(p.produto_id).nome : '') || p.diagnostico || '—'; } },
+          { id: 'animais', rotulo: 'Animais', num: true },
+          { id: 'total_value', rotulo: 'Custo', num: true, formatar: function (x) { return x.total_value === null ? '—' : Fmt.dinheiro(x.total_value); } },
+        ] }).el);
+      if (r.total > r.itens.length) corpo.appendChild(UI.nota('Mostrando as ' + r.itens.length + ' mais recentes de ' + r.total + '. As demais estão no histórico de eventos.', 'info'));
+    }
+    carregar();
+    return function () { vivo = false; };
+  }
+
+  // ------------------------------------------------------------------ produtos e estoque ----
+  function defsProduto(novo) {
+    var d = [
+      { id: 'nome', rotulo: 'Nome', tipo: 'texto', obrigatorio: true },
+      { id: 'categoria', rotulo: 'Categoria', tipo: 'lista', obrigatorio: true, opcoes: CATEGORIAS, rotulos_opcoes: CATEGORIAS.map(function (c) { return Fmt.rotulo('CATEGORIA_PRODUTO', c); }) },
+      { id: 'unidade', rotulo: 'Unidade de dose', tipo: 'texto', obrigatorio: true, ajuda: 'mL, dose ou g: a mesma em que se aplica, se dá baixa e se informa o custo. Não muda depois do primeiro uso.' },
+      { id: 'fabricante', rotulo: 'Fabricante', tipo: 'texto' },
+      { id: 'apresentacao', rotulo: 'Embalagem', tipo: 'texto', ajuda: 'Ex.: frasco de 50 doses.' },
+      { id: 'fator_conversao', rotulo: 'Quantidade por embalagem', tipo: 'decimal', casas: 4, min: 0, min_exclusivo: true, ajuda: 'Na unidade de dose: permite lançar a compra em embalagens.' },
+      { id: 'custo_unitario', rotulo: 'Custo por unidade (R$)', tipo: 'decimal', casas: 4, min: 0, ajuda: 'Vira custo dos animais quando o produto é aplicado (a quantidade aplicada × este valor).' },
+      { id: 'dose_padrao_por_cabeca', rotulo: 'Dose padrão por cabeça', tipo: 'decimal', casas: 4, min: 0, min_exclusivo: true },
+      { id: 'dose_padrao_por_kg', rotulo: 'Dose padrão por kg', tipo: 'decimal', casas: 4, min: 0, min_exclusivo: true },
+      { id: 'carencia_padrao_dias', rotulo: 'Carência padrão (dias)', tipo: 'inteiro', min: 0, ajuda: 'Sugerida no lançamento; o sistema registra e alerta, não prescreve.' },
+      { id: 'controla_estoque', rotulo: 'Controlar o estoque', tipo: 'bool', ajuda: 'Com controle, as compras entram no saldo e as aplicações saem dele.' },
+      { id: 'estoque_minimo', rotulo: 'Estoque mínimo', tipo: 'decimal', casas: 4, min: 0, visivel_se: { campo: 'controla_estoque', valores: [true] } },
+      { id: 'lote', rotulo: 'Lote em uso', tipo: 'texto' },
+      { id: 'validade', rotulo: 'Validade do lote', tipo: 'data' },
+      { id: 'observacoes', rotulo: 'Observações', tipo: 'texto' },
+    ];
+    if (!novo) d.push({ id: 'ativo', rotulo: 'Em uso', tipo: 'bool' });
+    return d;
+  }
+  function brutos(registro, defs) {
+    var v = {};
+    defs.forEach(function (d) {
+      var x = registro ? registro[d.id] : undefined;
+      if (x === undefined || x === null) return;
+      v[d.id] = typeof x === 'number' ? String(x).replace('.', ',') : Array.isArray(x) ? x.join(', ') : x;
+    });
+    return v;
+  }
+  function editarProduto(p, origem, aoSalvar) {
+    var defs = defsProduto(!p);
+    Cadastro.folha({
+      titulo: p ? 'Produto: ' + p.nome : 'Novo produto', defs: defs, valores: p ? brutos(p, defs) : { controla_estoque: false }, rota: 'produto.salvar', origem: origem, idBase: 'prod',
+      montar: function (c) { return p ? { product_id: p.product_id, campos: c } : { campos: c }; },
+      sucesso: function (d) { return 'Produto ' + d.nome + ' gravado.'; }, aoSalvar: aoSalvar,
+    });
+  }
+  function lancarEstoque(sub, p) {
+    var campos = { product_id: p.product_id };
+    if (sub === 'AJUSTE') campos.motivo_ajuste = 'CONTAGEM';
+    Registro.abrir('ESTOQUE', { subtipo: sub, campos: campos, origem: 'sanidade/produtos' });
+  }
+  function montarProdutos(el) {
+    el.appendChild(cabecalho('produtos'));
+    var corpo = h('div', { dataset: { produtos: '1' } });
+    el.appendChild(corpo);
+    var podeEstoque = App.podeRegistrar() && Store.tipoEvento('ESTOQUE');
+    function desenhar() {
+      Util.limpar(corpo);
+      corpo.appendChild(h('div', { class: 'acoes' }, UI.botao('Novo produto', { tipo: 'primario', aoClicar: function (ev) { editarProduto(null, ev.currentTarget, desenhar); } })));
+      var lista = Store.produtos({ todos: true });
+      if (!lista.length) { corpo.appendChild(UI.nota('Nenhum produto cadastrado. Cadastre vacinas, vermífugos e medicamentos para lançar as aplicações com baixa de estoque e custo.', 'info')); return; }
+      var baixos = lista.filter(function (p) { return p.abaixo_do_minimo; });
+      if (baixos.length) corpo.appendChild(UI.nota('Abaixo do estoque mínimo: ' + baixos.map(function (p) { return p.nome; }).join(', ') + '.', 'aviso'));
+      corpo.appendChild(UI.tabela({ id: 'produtos', rotulo: 'Produtos sanitários', linhas: lista, chave: function (p) { return p.product_id; },
+        colunas: [
+          { id: 'nome', rotulo: 'Produto', valor: function (p) { return p.nome + (p.ativo === false ? ' (desativado)' : ''); } },
+          { id: 'categoria', rotulo: 'Categoria', valor: function (p) { return Fmt.rotulo('CATEGORIA_PRODUTO', p.categoria); } },
+          { id: 'estoque', rotulo: 'Estoque', num: true, valor: function (p) { return p.controla_estoque === true ? p.estoque_atual : null; }, formatar: function (p) { return p.controla_estoque === true ? qtd(p.estoque_atual, p.unidade) + (p.abaixo_do_minimo ? ' (abaixo do mínimo)' : '') : 'sem controle'; } },
+          { id: 'custo', rotulo: 'Custo por unidade', num: true, valor: function (p) { return p.custo_unitario; }, formatar: function (p) { return typeof p.custo_unitario === 'number' ? 'R$ ' + Fmt.numero(p.custo_unitario, 4) + ' / ' + p.unidade : '—'; } },
+          { id: 'acoes', rotulo: 'Ações', ordenavel: false, formatar: function (p) {
+            return h('div', { class: 'acoes', style: 'margin-top:0' },
+              UI.botao('Editar', { tipo: 'texto', rotulo: 'Editar ' + p.nome, aoClicar: function (ev) { editarProduto(p, ev.currentTarget, desenhar); } }),
+              podeEstoque && p.ativo !== false ? UI.botao('Entrada', { tipo: 'texto', rotulo: 'Entrada de ' + p.nome + ' no estoque', aoClicar: function () { lancarEstoque('ENTRADA', p); } }) : null,
+              podeEstoque && p.ativo !== false && p.controla_estoque === true ? UI.botao('Acertar', { tipo: 'texto', rotulo: 'Acertar o estoque de ' + p.nome, aoClicar: function () { lancarEstoque('AJUSTE', p); } }) : null);
+          } },
+        ] }).el);
+    }
+    desenhar();
+    return function () {};
+  }
+
+  // ------------------------------------------------------------------ protocolos ----
+  function defsProtocolo(novo) {
+    var d = [
+      { id: 'nome', rotulo: 'Nome', tipo: 'texto', obrigatorio: true },
+      { id: 'tipo_procedimento', rotulo: 'Procedimento', tipo: 'lista', obrigatorio: true, opcoes: PROCEDIMENTOS, rotulos_opcoes: PROCEDIMENTOS.map(function (c) { return Fmt.rotulo('PROCEDIMENTO', c); }) },
+      { id: 'product_id', rotulo: 'Produto', tipo: 'ref:PRODUTOS', ajuda: 'Opcional: o produto que o protocolo usa (sugerido no lançamento).' },
+      { id: 'sexo_aplicavel', rotulo: 'Para', tipo: 'lista', obrigatorio: true, opcoes: ['AMBOS', 'F', 'M'], rotulos_opcoes: ['Machos e fêmeas', 'Fêmeas', 'Machos'] },
+      { id: 'idade_min_meses', rotulo: 'Idade mínima (meses)', tipo: 'inteiro', min: 0 },
+      { id: 'idade_max_meses', rotulo: 'Idade máxima (meses)', tipo: 'inteiro', min: 0 },
+      { id: 'category_id', rotulo: 'Só a categoria', tipo: 'ref:CATEGORIAS' },
+      { id: 'recorrencia_tipo', rotulo: 'Recorrência', tipo: 'lista', obrigatorio: true, opcoes: RECORRENCIAS, rotulos_opcoes: RECORRENCIAS.map(function (c) { return Fmt.rotulo('RECORRENCIA', c); }) },
+      { id: 'intervalo_dias', rotulo: 'A cada quantos dias', tipo: 'inteiro', min: 1, visivel_se: { campo: 'recorrencia_tipo', valores: ['INTERVALO_DIAS'] }, obrigatorio_se: { campo: 'recorrencia_tipo', valores: ['INTERVALO_DIAS'] } },
+      { id: 'meses_campanha', rotulo: 'Meses da campanha', tipo: 'texto', ajuda: 'Números de 1 a 12, separados por vírgula (ex.: 5, 11 para maio e novembro).', visivel_se: { campo: 'recorrencia_tipo', valores: ['CAMPANHA_MESES'] }, obrigatorio_se: { campo: 'recorrencia_tipo', valores: ['CAMPANHA_MESES'] } },
+      { id: 'antecedencia_alerta_dias', rotulo: 'Avisar com quantos dias', tipo: 'inteiro', min: 0, ajuda: 'Vazio = o parâmetro geral.' },
+      { id: 'tolerancia_dias', rotulo: 'Tolerância (dias)', tipo: 'inteiro', min: 0, ajuda: 'Na campanha, quantos dias antes e depois do mês ainda contam. Vazio = o parâmetro geral.' },
+      { id: 'descricao', rotulo: 'Descrição', tipo: 'texto' },
+    ];
+    if (!novo) d.push({ id: 'ativo', rotulo: 'Em uso', tipo: 'bool' });
+    return d;
+  }
+  function editarProtocolo(p, origem, aoSalvar) {
+    var defs = defsProtocolo(!p);
+    Cadastro.folha({
+      titulo: p ? 'Protocolo: ' + p.nome : 'Novo protocolo', defs: defs, valores: p ? brutos(p, defs) : { sexo_aplicavel: 'AMBOS' }, rota: 'protocolo.salvar', origem: origem, idBase: 'prot',
+      montar: function (c) { return p ? { protocol_id: p.protocol_id, campos: c } : { campos: c }; },
+      sucesso: function (d) { return 'Protocolo ' + d.nome + ' gravado.'; }, aoSalvar: aoSalvar,
+    });
+  }
+  function textoRecorrencia(p) {
+    if (p.recorrencia_tipo === 'INTERVALO_DIAS') return 'a cada ' + p.intervalo_dias + ' dias';
+    if (p.recorrencia_tipo === 'CAMPANHA_MESES') return 'campanha em ' + (p.meses_campanha || []).map(function (m) { return ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'][m - 1]; }).join(' e ');
+    return 'uma vez';
+  }
+  function montarProtocolos(el) {
+    el.appendChild(cabecalho('protocolos'));
+    var corpo = h('div', { dataset: { protocolos: '1' } });
+    el.appendChild(corpo);
+    function desenhar() {
+      Util.limpar(corpo);
+      corpo.appendChild(h('div', { class: 'acoes' }, UI.botao('Novo protocolo', { tipo: 'primario', aoClicar: function (ev) { editarProtocolo(null, ev.currentTarget, desenhar); } })));
+      var lista = Store.protocolos({ todos: true });
+      if (!lista.length) { corpo.appendChild(UI.nota('Nenhum protocolo cadastrado. Com os protocolos (ex.: aftosa em maio e novembro, vermífugo a cada 90 dias), a agenda mostra as doses atrasadas e próximas.', 'info')); return; }
+      corpo.appendChild(UI.tabela({ id: 'protocolos', rotulo: 'Protocolos sanitários', linhas: lista, chave: function (p) { return p.protocol_id; },
+        colunas: [
+          { id: 'nome', rotulo: 'Protocolo', valor: function (p) { return p.nome + (p.ativo === false ? ' (desativado)' : ''); } },
+          { id: 'tipo', rotulo: 'Procedimento', valor: function (p) { return Fmt.rotulo('PROCEDIMENTO', p.tipo_procedimento); } },
+          { id: 'para', rotulo: 'Para', valor: function (p) { return Fmt.rotulo('SEXO_APLICAVEL', p.sexo_aplicavel) + (p.idade_min_meses || p.idade_max_meses ? ', ' + (p.idade_min_meses || 0) + (p.idade_max_meses ? ' a ' + p.idade_max_meses : '+') + ' meses' : ''); } },
+          { id: 'quando', rotulo: 'Quando', valor: textoRecorrencia },
+          { id: 'acoes', rotulo: 'Ações', ordenavel: false, formatar: function (p) { return UI.botao('Editar', { tipo: 'texto', rotulo: 'Editar ' + p.nome, aoClicar: function (ev) { editarProtocolo(p, ev.currentTarget, desenhar); } }); } },
+        ] }).el);
+    }
+    desenhar();
+    return function () {};
+  }
+
+  Telas.registrar('sanidade/agenda', { titulo: 'Sanidade', modulo: 'SANIDADE', montar: montarAgenda });
+  Telas.registrar('sanidade/aplicacoes', { titulo: 'Aplicações', modulo: 'SANIDADE', montar: montarAplicacoes });
+  Telas.registrar('sanidade/produtos', { titulo: 'Produtos e estoque', modulo: 'SANIDADE', montar: montarProdutos });
+  Telas.registrar('sanidade/protocolos', { titulo: 'Protocolos sanitários', modulo: 'SANIDADE', montar: montarProtocolos });
+  return { SUBTIPO_DO_PROCEDIMENTO: SUBTIPO_DO_PROCEDIMENTO, agrupar: agrupar, camposDoProduto: camposDoProduto, textoRecorrencia: textoRecorrencia };
+})();
+</script>

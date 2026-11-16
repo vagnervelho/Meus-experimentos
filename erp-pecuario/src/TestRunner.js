@@ -638,6 +638,101 @@ var TestRunner = (function () {
       },
     },
     {
+      id: 'CT-06', titulo: 'Vacinação coletiva: um registro por animal, consumo do estoque e custo; a agenda pelo protocolo (próximas e vencidas)',
+      executar: function (t) {
+        var P = t.pastos('CT-06', ['Pasto 1']);
+        var ids = [];
+        var prod;
+        var prot;
+        var ev;
+        // As datas do desenho (05/04, 20/09 e 13/11/2026) contadas do marco zero: a aplicação em D0+94, a agenda 12 dias
+        // antes do vencimento (D0+262) e 42 dias depois dele (D0+316).
+        t.passo('massa', '0601 a 0630 no Pasto 1; "Vacina X" (R$ 3,00 por dose, estoque controlado); entrada de 100 doses; protocolo a cada 180 dias', function () {
+          var bs = [];
+          for (var i = 1; i <= 30; i++) bs.push('06' + (i < 10 ? '0' : '') + i);
+          var r = t.cmd('evento.registrar', entrada_(bs.map(function (b) { return bicho_(t, { brinco: b, data_nascimento: t.dia(-200), pasto_destino_id: P['Pasto 1'] }); })), 'ct06-massa');
+          var por = ids_(r);
+          ids = bs.map(function (b) { return por[b]; });
+          prod = t.cmd('produto.salvar', { campos: { nome: 'Vacina X (CT-06)', categoria: 'VACINA', unidade: 'dose', custo_unitario: 3, controla_estoque: true } }, 'ct06-produto');
+          t.cmd('evento.registrar', { tipo: 'ESTOQUE', subtipo: 'ENTRADA', campos: { event_date: t.dia(60), product_id: prod.product_id, quantidade: 100, valor: 30000 } }, 'ct06-entrada');
+          prot = t.cmd('protocolo.salvar', { campos: { nome: 'Vacina X semestral (CT-06)', tipo_procedimento: 'VACINA', product_id: prod.product_id, sexo_aplicavel: 'AMBOS', recorrencia_tipo: 'INTERVALO_DIAS', intervalo_dias: 180, antecedencia_alerta_dias: 15 } }, 'ct06-protocolo');
+        });
+        var vac = function (dose) {
+          return { tipo: 'SANIDADE', subtipo: 'VACINACAO', campos: { event_date: t.dia(94), produto_id: prod.product_id, protocol_id: prot.protocol_id, modo_dose: 'POR_CABECA', dose_referencia: dose, quantidade_consumida_total: 30 }, animais: ids.map(function (id) { return { animal_id: id }; }) };
+        };
+        t.passo('1', 'Aplicação com dose 0: VALIDATION, nada gravado', function () {
+          var e = t.recusa('evento.registrar', vac(0), 'VALIDATION', 'ct06-dose0');
+          igual_(e.details.map(function (d) { return [d.codigo, d.campo]; }), [['VALOR_FORA_DA_FAIXA', 'dose_referencia']], 'dose 0');
+        });
+        t.passo('2', 'Vacinação de 30 animais, por cabeça, 1 dose, 30 consumidas, vinculada ao protocolo', function () {
+          ev = t.cmd('evento.registrar', vac(1), 'ct06-vacinacao');
+        });
+        t.passo('verificacoes', 'SANIDADE: 30 linhas do mesmo evento, R$ 3,00 cada; 1 saída de 30 (100 → 70); 1 CUSTEIO de R$ 90,00 sem parcela; 30 alocações de R$ 3,00; caixa inalterado; próxima aplicação = D0+94 + 180 dias nas 30 linhas', function () {
+          var linhas = t.doEvento('SANIDADE', ev.event_id);
+          igual_([linhas.length, linhas.filter(function (r) { return r.custo === 300 && r.data_proxima_aplicacao === t.dia(274); }).length], [30, 30], 'linhas de SANIDADE');
+          igual_(t.doEvento('MOVIMENTOS_ESTOQUE', ev.event_id).map(function (m) { return [m.tipo, m.quantidade]; }), [['SAIDA', 30]], 'uma saída');
+          igual_(t.tabela('PRODUTOS').filter(function (p) { return p.product_id === prod.product_id; })[0].estoque_atual, 70, 'saldo');
+          var fins = t.doEvento('FINANCEIRO', ev.event_id);
+          igual_(fins.map(function (f) { return [f.natureza, f.valor, f.status_pagamento]; }), [['CUSTEIO', 9000, 'SEM_CAIXA']], 'consumo sem parcela');
+          igual_(t.tabela('PARCELAS').filter(function (p) { return p.financial_id === fins[0].financial_id; }).length, 0, 'caixa inalterado');
+          var al = t.tabela('ALOCACOES_FINANCEIRAS').filter(function (a) { return a.financial_id === fins[0].financial_id; });
+          igual_([al.length, al.filter(function (a) { return a.valor_alocado === 300; }).length], [30, 30], 'alocações');
+        });
+        t.passo('3', 'sanidade.agenda 12 dias antes do vencimento: 30 próximas; 42 dias depois: 30 vencidas', function () {
+          var antes = t.ok(t.api('sanidade.agenda', { data: t.dia(262) }), 'agenda');
+          // A base é compartilhada: os animais dos outros cenários também são elegíveis a um protocolo sem faixa de idade.
+          var meus = function (a) { return a.pendencias.filter(function (p) { return p.protocol_id === prot.protocol_id && ids.indexOf(p.animal_id) >= 0; }); };
+          igual_([meus(antes).length, meus(antes).every(function (p) { return p.situacao === 'PROXIMA' && p.vencimento === t.dia(274); })], [30, true], 'próximas');
+          var depois = t.ok(t.api('sanidade.agenda', { data: t.dia(316) }), 'agenda');
+          igual_([meus(depois).length, meus(depois).every(function (p) { return p.situacao === 'VENCIDA'; })], [30, true], 'vencidas');
+          // O protocolo do cenário sai da agenda dos cenários seguintes (desativar preserva o histórico de aplicações).
+          t.cmd('protocolo.salvar', { protocol_id: prot.protocol_id, campos: { ativo: false } }, 'ct06-protocolo-fim');
+        });
+        t.passo('fim', 'Projeção = reconstrução e financeiro sem divergência', function () { return t.integra('CT-06'); });
+      },
+    },
+    {
+      id: 'SANIDADE', titulo: 'Casos de regra da sanidade (09, seção 4.1): lote vencido, estoque insuficiente, carência na venda para abate antes, dentro e depois do prazo, agenda de aplicação única',
+      executar: function (t) {
+        var P = t.pastos('SAN', ['Pasto S']);
+        var ids;
+        var prod;
+        var frig;
+        t.passo('massa', 'Três bois e uma bezerra no Pasto S; produto com 20 doses no estoque; frigorífico', function () {
+          ids = ids_(t.cmd('evento.registrar', entrada_(['S1', 'S2', 'S3'].map(function (b) { return bicho_(t, { brinco: b, sexo: 'M', castrado: true, data_nascimento: t.dia(-900), pasto_destino_id: P['Pasto S'] }); })), 'san-massa'));
+          prod = t.cmd('produto.salvar', { campos: { nome: 'Vacina S (aceitação)', categoria: 'VACINA', unidade: 'dose', custo_unitario: 2, controla_estoque: true } }, 'san-produto');
+          t.cmd('evento.registrar', { tipo: 'ESTOQUE', subtipo: 'ENTRADA', campos: { event_date: t.dia(10), product_id: prod.product_id, quantidade: 20, valor: 4000 } }, 'san-entrada');
+          frig = t.parceiro('Frigorífico (sanidade)', 'COMPRADOR', 'san-frig');
+        });
+        t.passo('056-057', 'Lote vencido antes da aplicação (PRODUTO_VENCIDO) e consumo de 30 com saldo de 20 (ESTOQUE_INSUFICIENTE): avisos com aceite', function () {
+          var d = { tipo: 'SANIDADE', subtipo: 'VACINACAO', campos: { event_date: t.dia(30), produto_id: prod.product_id, modo_dose: 'POR_CABECA', dose_referencia: 10, lote: 'V1', validade: t.dia(29) }, animais: [{ animal_id: ids.S1 }, { animal_id: ids.S2 }, { animal_id: ids.S3 }] };
+          var av = t.recusa('evento.registrar', d, 'NEEDS_CONFIRMATION', 'san-avisos');
+          igual_(av.details.map(function (x) { return x.codigo; }).sort(), ['ESTOQUE_INSUFICIENTE', 'PRODUTO_VENCIDO'], 'os dois avisos');
+          t.cmd('evento.registrar', d, 'san-avisos', { avisos: ['ESTOQUE_INSUFICIENTE', 'PRODUTO_VENCIDO'] });
+          igual_(t.tabela('PRODUTOS').filter(function (p) { return p.product_id === prod.product_id; })[0].estoque_atual, -10, 'o saldo negativo aceito fica visível');
+        });
+        t.passo('072', 'Vermífugo em D0+100 com 35 dias: abate em D0+120 e no último dia (D0+135) bloqueado; em D0+136 livre; recria dentro do prazo pede aceite', function () {
+          t.cmd('evento.registrar', { tipo: 'SANIDADE', subtipo: 'VERMIFUGACAO', campos: { event_date: t.dia(100), nome_produto: 'Ivermectina 1%', modo_dose: 'POR_CABECA', dose_referencia: 5, unidade_dose: 'mL', periodo_carencia_dias: 35 }, animais: [{ animal_id: ids.S1 }, { animal_id: ids.S2 }] }, 'san-verm');
+          var venda = function (data, fin, id) { return { tipo: 'VENDA', campos: { event_date: data, partner_id: frig, finalidade: fin, modalidade: 'CABECA', preco_unitario: 400000, valor_bruto: 400000 }, animais: [{ animal_id: id }], parcelas: [{ data_vencimento: data }] }; };
+          igual_(t.recusa('evento.registrar', venda(t.dia(120), 'ABATE', ids.S1), 'VALIDATION', 'san-abate-dentro').details.map(function (x) { return x.codigo; }), ['CARENCIA_ATIVA'], 'dentro');
+          igual_(t.recusa('evento.registrar', venda(t.dia(135), 'ABATE', ids.S1), 'VALIDATION', 'san-abate-ultimo').details.map(function (x) { return x.codigo; }), ['CARENCIA_ATIVA'], 'último dia');
+          t.cmd('evento.registrar', venda(t.dia(136), 'ABATE', ids.S1), 'san-abate-livre');
+          igual_(t.recusa('evento.registrar', venda(t.dia(120), 'RECRIA_ENGORDA', ids.S2), 'NEEDS_CONFIRMATION', 'san-recria').details.map(function (x) { return x.codigo; }), ['CARENCIA_ATIVA'], 'recria: aviso');
+        });
+        t.passo('058-059', 'Protocolo de aplicação única para machos a partir de 24 meses: antes do vencimento, em dia; a agenda e os alertas mostram a pendência vencida; aplicada, cumprida', function () {
+          var pr = t.cmd('protocolo.salvar', { campos: { nome: 'Única (aceitação)', tipo_procedimento: 'VACINA', sexo_aplicavel: 'M', idade_min_meses: 24, recorrencia_tipo: 'UNICA' } }, 'san-unica');
+          var minhas = function (a) { return a.pendencias.filter(function (p) { return p.protocol_id === pr.protocol_id && p.animal_id === ids.S3; }); };
+          var ag = t.ok(t.api('sanidade.agenda', {}), 'agenda');
+          igual_(minhas(ag).map(function (p) { return p.situacao; }), ['VENCIDA'], 'o S3 já tinha 24 meses: vencida desde então');
+          verificar_(t.ok(t.api('alerta.listar', {}), 'alertas').alertas.some(function (a) { return a.codigo === 'SANITARIO_VENCIDO'; }), 'alerta de procedimento vencido');
+          t.cmd('evento.registrar', { tipo: 'SANIDADE', subtipo: 'VACINACAO', campos: { event_date: t.hoje(), protocol_id: pr.protocol_id, nome_produto: 'Vacina U', modo_dose: 'POR_CABECA', dose_referencia: 1, unidade_dose: 'dose' }, animais: [{ animal_id: ids.S3 }] }, 'san-unica-aplicada');
+          igual_(minhas(t.ok(t.api('sanidade.agenda', {}), 'agenda')).length, 0, 'cumprida');
+          t.cmd('protocolo.salvar', { protocol_id: pr.protocol_id, campos: { ativo: false } }, 'san-unica-fim');
+        });
+        t.passo('fim', 'Projeção = reconstrução e financeiro sem divergência', function () { return t.integra('SANIDADE'); });
+      },
+    },
+    {
       id: 'CT-07', titulo: 'Estorno anula sem apagar: original preservado, auditoria, bloqueios e anulação do animal',
       executar: function (t) {
         var P = t.pastos('CT-07', ['Pasto 1', 'Baixada', 'Pasto 3']);
@@ -1288,7 +1383,6 @@ var TestRunner = (function () {
   var DEMO_META = { d0: 240, nascimentos: 255, compras: 70, vendas: 240, mortes: 15, descartes: 5, divergencias: 1, ativos: 304 };
   /** O que 09, seção 7, pede e chega em fase posterior (o relatório da demonstração lista, com a fase). */
   var DEMO_FORA = [
-    { item: 'Manejos sanitários coletivos (vacinações e vermifugações)', fase: 3 },
     { item: 'Três estações de monta (exposição, cobertura, inseminação e diagnóstico)', fase: 3 },
     { item: 'Lançamentos avulsos com rateio (evento RATEIO)', fase: 4 },
     { item: 'Parcelas em todos os estados (baixa, baixa parcial, desfazer baixa)', fase: 4 },
@@ -1300,6 +1394,12 @@ var TestRunner = (function () {
   /** Pesagens coletivas da recria, das novilhas e do pasto arrendado (a cada 120 dias, a partir de D0+60). */
   var DIAS_PESAGEM = [60, 180, 300, 420, 540, 660, 780, 900, 1020];
   var PASTOS_PESADOS = [3, 4, 5];
+  /**
+   * Manejos sanitários coletivos da demonstração (Fase 3, E3.3): a vacina com estoque controlado (a compra das doses
+   * no dia da campanha, antes da aplicação) a cada 180 dias em todo o rebanho, e o vermífugo sem controle de estoque nos
+   * pastos da recria, no dia seguinte a cada pesagem. Sem carência: a demonstração não fica sem vender para abate.
+   */
+  var DIAS_VACINA = [130, 310, 490, 670, 850, 1030];
 
   /**
    * Os comandos da demonstração, sorteados com semente fixa a partir de D0 (09, seção 7, na parte que as fases entregues
@@ -1600,6 +1700,22 @@ var TestRunner = (function () {
         });
       });
     });
+    // Sanidade: a entrada das doses e a campanha de vacinação (pela agenda do protocolo a cada 180 dias), e a vermifugação.
+    DIAS_VACINA.forEach(function (d) {
+      no(d, 1, function () {
+        var ks = ordem.filter(function (k) { return ativo[k]; });
+        if (!ks.length) return;
+        emitir('vacina-entrada-' + d, { tipo: 'ESTOQUE', subtipo: 'ENTRADA', campos: { event_date: dia(d), product_id: '@m:vacina', quantidade: ks.length + 10, valor: (ks.length + 10) * 150, partner_id: '@f:fornecedor', vencimento: dia(d + 30) } });
+        emitir('vacina-' + d, { tipo: 'SANIDADE', subtipo: 'VACINACAO', campos: { event_date: dia(d), produto_id: '@m:vacina', protocol_id: '@m:protocolo', modo_dose: 'POR_CABECA', dose_referencia: 1, via_aplicacao: 'SUBCUTANEA', lote: 'DEMO-' + d }, animais: ks.map(function (k) { return { animal_id: ref(k) }; }) });
+      });
+    });
+    DIAS_PESAGEM.forEach(function (d) {
+      no(d + 1, 1, function () {
+        var ks = ordem.filter(function (k) { return ativo[k] && PASTOS_PESADOS.indexOf(pasto[k]) >= 0; });
+        if (!ks.length) return;
+        emitir('vermifugo-' + (d + 1), { tipo: 'SANIDADE', subtipo: 'VERMIFUGACAO', campos: { event_date: dia(d + 1), produto_id: '@m:vermifugo', modo_dose: 'POR_CABECA', dose_referencia: 5, via_aplicacao: 'SUBCUTANEA' }, animais: ks.map(function (k) { return { animal_id: ref(k) }; }) });
+      });
+    });
     no(610, 1, function () { emitir('nao-localizado', { tipo: 'MARCACAO', subtipo: 'NAO_LOCALIZADO', campos: { event_date: dia(610), acao: 'MARCAR' }, animais: [{ animal_id: ref(garrotes[46]) }] }); });
     no(270, 1, function () { emitir('marcar-descarte', { tipo: 'MARCACAO', subtipo: 'DESCARTE', campos: { event_date: dia(270), acao: 'MARCAR', motivo_descarte: 'IDADE' }, animais: velhas.slice(0, 8).map(function (k) { return { animal_id: ref(k) }; }) }); });
     var corrigidaVenda = false;
@@ -1678,13 +1794,14 @@ var TestRunner = (function () {
     return { d0: d0, comandos: cmds, animais: animais, totais: totais, comandos_por_tipo: porTipo, lotes: lotes, total_ativos: totais.ativos };
   }
 
-  /** Resolve os marcadores do plano ('@a:', '@p:', '@f:', '@e:') no momento de gravar. */
+  /** Resolve os marcadores do plano ('@a:', '@p:', '@f:', '@e:', '@m:' — produtos e protocolo da sanidade) no momento de gravar. */
   function resolverDemo_(t, gen, memo, valor) {
     if (typeof valor === 'string' && valor.charAt(0) === '@' && valor.charAt(2) === ':') {
       var resto = valor.slice(3);
       if (valor.charAt(1) === 'a') return idDemo_(t, gen, memo, resto);
       if (valor.charAt(1) === 'p') return t.estado.pastos[Number(resto)];
       if (valor.charAt(1) === 'f') return t.estado.parceiros[resto];
+      if (valor.charAt(1) === 'm') return t.estado.sanidade[resto];
       if (valor.charAt(1) === 'e') {
         var s = t.ok(t.api('operacao.status', { chave: 'seed:' + resto }), 'operacao.status');
         verificar_(s.situacao === 'CONFIRMADA' && s.resumo && s.resumo.event_id, 'o lançamento seed:' + resto + ' devia estar gravado');
@@ -1774,6 +1891,13 @@ var TestRunner = (function () {
       fornecedor: parceiro('Fazenda Vizinha (demonstração)', ['FORNECEDOR'], 'seed:parceiro'),
       comprador: parceiro('Recriador da Região (demonstração)', ['COMPRADOR'], 'seed:comprador'),
       frigorifico: parceiro('Frigorífico da Região (demonstração)', ['COMPRADOR'], 'seed:frigorifico'),
+    };
+    // Sanidade (Fase 3): a vacina com estoque controlado e o protocolo dela; o vermífugo sem controle de estoque (PR-10).
+    var vacina = t.ok(t.api('produto.salvar', { campos: { nome: 'Vacina (demonstração)', categoria: 'VACINA', unidade: 'dose', custo_unitario: 1.5, controla_estoque: true } }, { chave: 'seed:produto-vacina' }), 'produto vacina').product_id;
+    t.estado.sanidade = {
+      vacina: vacina,
+      vermifugo: t.ok(t.api('produto.salvar', { campos: { nome: 'Vermífugo (demonstração)', categoria: 'VERMIFUGO', unidade: 'mL', custo_unitario: 0.04, controla_estoque: false } }, { chave: 'seed:produto-vermifugo' }), 'produto vermífugo').product_id,
+      protocolo: t.ok(t.api('protocolo.salvar', { campos: { nome: 'Vacina semestral (demonstração)', tipo_procedimento: 'VACINA', product_id: vacina, sexo_aplicavel: 'AMBOS', recorrencia_tipo: 'INTERVALO_DIAS', intervalo_dias: 180 } }, { chave: 'seed:protocolo-vacina' }), 'protocolo').protocol_id,
     };
     t.estado.d0 = d0;
     t.estado.prop = prop.property_id;

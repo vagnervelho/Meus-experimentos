@@ -31,7 +31,7 @@ const D0 = '2026-01-01';
 const HOJE = '2026-11-13';
 const USUARIO = 'dono@gmail.com';
 const FORMATO = { delimitador: ';', codificacao: 'UTF-8', formato_data: 'dd/MM/yyyy', decimal: ',' };
-const AVISOS = ['POSSIVEL_DUPLICIDADE', 'LOTACAO_ACIMA_DA_CAPACIDADE', 'BRINCO_PARECIDO', 'IDADE_REPRODUTIVA', 'INTERVALO_PARTO_CURTO', 'VALOR_DIVERGENTE', 'RATEIO_SEM_PESO', 'CARENCIA_ATIVA', 'CATEGORIAS_SEM_COBERTURA', 'PESO_IMPLAUSIVEL'];
+const AVISOS = ['POSSIVEL_DUPLICIDADE', 'LOTACAO_ACIMA_DA_CAPACIDADE', 'BRINCO_PARECIDO', 'IDADE_REPRODUTIVA', 'INTERVALO_PARTO_CURTO', 'VALOR_DIVERGENTE', 'RATEIO_SEM_PESO', 'CARENCIA_ATIVA', 'CATEGORIAS_SEM_COBERTURA', 'PESO_IMPLAUSIVEL', 'ESTOQUE_INSUFICIENTE', 'PRODUTO_VENCIDO'];
 const RECUSAS = ['VALIDATION', 'CONFLICT', 'NEEDS_CONFIRMATION', 'NOT_FOUND', 'CONFIG', 'IDEMPOTENCY_MISMATCH'];
 const SAIDA = { VENDA: 'VENDIDO', MORTE: 'MORTO', DESCARTE: 'DESCARTADO', AJUSTE_INVENTARIO: 'BAIXADO_AJUSTE' };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -116,6 +116,15 @@ function montar(opcoes) {
   const t = tabelas(sis);
   sis.categorias = t.CATEGORIAS.map((c) => ({ id: c.category_id, sexo: c.sexo_aplicavel, codigo: c.codigo }));
   sis.custeio = t.PLANO_CONTAS.find((c) => c.codigo === 'SERVICOS_VETERINARIOS').conta_id;
+  // Sanidade e insumos (Fase 3, E3.2 e E3.3): a vacina e o antibiótico com estoque controlado, o vermífugo sem; o protocolo
+  // da vacina a cada 180 dias.
+  const produto = (campos) => ok('produto.salvar', { campos }).product_id;
+  sis.produtos = {
+    vacina: produto({ nome: 'Vacina F', categoria: 'VACINA', unidade: 'dose', fator_conversao: 50, custo_unitario: 1.85, controla_estoque: true }),
+    vermifugo: produto({ nome: 'Vermífugo F', categoria: 'VERMIFUGO', unidade: 'mL', custo_unitario: 0.035, controla_estoque: false }),
+    antibiotico: produto({ nome: 'Antibiótico F', categoria: 'MEDICAMENTO', unidade: 'mL', custo_unitario: 0.5, controla_estoque: true }),
+  };
+  sis.protocolo = ok('protocolo.salvar', { campos: { nome: 'Vacina F semestral', tipo_procedimento: 'VACINA', product_id: sis.produtos.vacina, sexo_aplicavel: 'AMBOS', recorrencia_tipo: 'INTERVALO_DIAS', intervalo_dias: 180 } }).protocol_id;
   if (!o.vazio) {
     const P = sis.pastos;
     const f = (brinco, nasc, pasto, extra) => Object.assign({ brinco, sexo: 'F', origem: 'DESCONHECIDA', data_nascimento: nasc, data_nascimento_confianca: 'ESTIMADA', pasto_destino_id: pasto }, extra || {});
@@ -140,6 +149,8 @@ function montar(opcoes) {
   nomear0(sis.externo, '@x');
   nomear0(sis.prop, '@r:base');
   nomear0(sis.custeio, '@conta');
+  Object.keys(sis.produtos).forEach((k) => nomear0(sis.produtos[k], '@v:' + k));
+  nomear0(sis.protocolo, '@q:vacina');
   sis.categorias.forEach((c) => nomear0(c.id, '@c:' + c.codigo));
   tabelas(sis).LISTAS.forEach((x) => nomear0(x.lista_id, '@l:' + x.lista + ':' + x.codigo));
   tabelas(sis).ANIMAIS.forEach((a) => { if (a.brinco && a.situacao_cadastral !== 'EXTERNO') nomear0(a.animal_id, '@b:' + a.brinco); });
@@ -243,7 +254,7 @@ function simbolizar(sis, v) {
 }
 /** Resolve os símbolos; símbolo sem dono (o passo que o criou ficou fora) → null. */
 function resolver(sis, v, faltou) {
-  if (typeof v === 'string' && /^@(\d+\.[aeipcflrnm]\d+|[bpfcr]:\w+|l:\w+:\w+|x|conta)$/.test(v)) { if (!sis.uuid.has(v)) { faltou.push(v); return v; } return sis.uuid.get(v); }
+  if (typeof v === 'string' && /^@(\d+\.[aeipcflrnm]\d+|[bpfcrvq]:\w+|l:\w+:\w+|x|conta)$/.test(v)) { if (!sis.uuid.has(v)) { faltou.push(v); return v; } return sis.uuid.get(v); }
   if (Array.isArray(v)) return v.map((x) => resolver(sis, x, faltou));
   if (v && typeof v === 'object') { const o = {}; Object.keys(v).forEach((k) => { o[k] = resolver(sis, v[k], faltou); }); return o; }
   return v;
@@ -378,6 +389,13 @@ function oraculoGlobal(sis, S, datas) {
     const esperado = u ? [u.p.peso_kg, u.p.data_pesagem] : [null, null];
     if ((a.peso_atual === undefined ? null : a.peso_atual) !== esperado[0] || (a.data_ultima_pesagem || null) !== esperado[1]) out.push(falha('REPLAY:PESO_ATUAL', a.codigo_interno + ': peso atual gravado ' + JSON.stringify([a.peso_atual, a.data_ultima_pesagem]) + ', replay ' + JSON.stringify(esperado)));
   });
+  // Estoque (Fase 3, E3.2): o saldo do produto com estoque controlado = Σ dos movimentos vigentes (entrada +, saída −, acerto
+  // com o sinal), pelas linhas cruas de MOVIMENTOS_ESTOQUE; sem controle, vazio.
+  (S.t.PRODUTOS || []).forEach((p) => {
+    const movs = (S.t.MOVIMENTOS_ESTOQUE || []).filter((mv) => mv.product_id === p.product_id && S.vig.get(mv.event_id));
+    const esperado = p.controla_estoque === true ? movs.reduce((t, mv) => t + Math.round(mv.quantidade * 10000) * (mv.tipo === 'SAIDA' ? -1 : 1), 0) / 10000 : null;
+    if ((p.estoque_atual === undefined || p.estoque_atual === '' ? null : p.estoque_atual) !== esperado) out.push(falha('REPLAY:ESTOQUE', p.nome + ': saldo gravado ' + p.estoque_atual + ', replay ' + esperado + ' (' + movs.length + ' movimentos, controle ' + p.controla_estoque + ')'));
+  });
   // Inventário: o sistema (inventario.posicao) = o replay, em hoje e em datas do passo.
   (datas || []).concat([HOJE]).forEach((D) => {
     if (!S.marco || D < S.marco || D > HOJE) return;
@@ -421,7 +439,7 @@ function oraculoEfeito(sis, cmd, resp, A, S) {
   }
   // Cadastros desativados e reativados no meio da sequência.
   // Passada 3: também criados e editados (todo campo pedido gravado; o novo é a única linha nova da aba).
-  const CADASTRO = { 'propriedade.salvar': ['PROPRIEDADES', 'property_id'], 'pasto.salvar': ['PASTOS', 'pasture_id'], 'parceiro.salvar': ['PARCEIROS', 'partner_id'], 'categoria.salvar': ['CATEGORIAS', 'category_id'], 'lista.salvar': ['LISTAS', 'lista_id'], 'animal.cadastrarExterno': ['ANIMAIS', 'animal_id'] }[cmd.rota];
+  const CADASTRO = { 'propriedade.salvar': ['PROPRIEDADES', 'property_id'], 'pasto.salvar': ['PASTOS', 'pasture_id'], 'parceiro.salvar': ['PARCEIROS', 'partner_id'], 'categoria.salvar': ['CATEGORIAS', 'category_id'], 'lista.salvar': ['LISTAS', 'lista_id'], 'animal.cadastrarExterno': ['ANIMAIS', 'animal_id'], 'produto.salvar': ['PRODUTOS', 'product_id'], 'protocolo.salvar': ['PROTOCOLOS_SANITARIOS', 'protocol_id'] }[cmd.rota];
   if (CADASTRO) {
     const [aba, pk] = CADASTRO;
     const lista = cmd.rota === 'lista.salvar' ? { [pk]: d.lista_id, campos: Object.fromEntries(['rotulo', 'ativo'].filter((c) => d[c] !== undefined).map((c) => [c, d[c]])) } : null;
@@ -1485,6 +1503,275 @@ registrarTipo('PESAGEM', {
   },
 });
 
+// --- SANIDADE e ESTOQUE (Fase 3, E3.2 e E3.3) ---
+// A aplicação individual e coletiva dos seis subtipos: o produto do cadastro (a vacina e o antibiótico com estoque
+// controlado, o vermífugo sem), o produto sem cadastro (nome livre, às vezes com dose) e a doença sem produto; a dose por
+// cabeça, por peso (pelo peso atual de cada animal) e só o total do frasco; às vezes a dose de um animal, a quantidade
+// informada, a carência, a próxima aplicação, o protocolo da vacina (às vezes noutro procedimento: a recusa), o lote
+// vencido (PRODUTO_VENCIDO), o serviço pago no ato em parcelas e o campo obrigatório faltando. A entrada de estoque (por
+// embalagens, na unidade ou as duas que não batem; à vista ou em parcelas) e o acerto (contagem, perda, vencimento; o
+// produto sem controle de estoque é a recusa).
+const PROCEDIMENTO_DO_SUB = { VACINACAO: 'VACINA', VERMIFUGACAO: 'VERMIFUGO', MEDICACAO: 'MEDICAMENTO', TRATAMENTO: 'TRATAMENTO', EXAME: 'EXAME', DOENCA: 'DOENCA' };
+const PRODUTO_DO_SUB = { VACINACAO: 'vacina', VERMIFUGACAO: 'vermifugo', MEDICACAO: 'antibiotico', TRATAMENTO: 'antibiotico' };
+const CONTA_DA_CATEGORIA = { VACINA: 'VACINAS', VERMIFUGO: 'MEDICAMENTOS', MEDICAMENTO: 'MEDICAMENTOS', SUPLEMENTO: 'ALIMENTACAO', OUTRO: 'TRATAMENTOS' };
+/** Centavos de um valor em reais (o arredondamento do sistema: meio para cima, lido com 6 casas). */
+const centavosDe = (reais) => Math.round(Number((reais * 100).toFixed(6)));
+/** Soma exata de quantidades de até 4 casas. */
+const somaQtd = (l) => l.reduce((t, q) => t + Math.round(q * 10000), 0) / 10000;
+/** O que é do subtipo: o produto (ou o nome livre), a dose, o motivo e o diagnóstico (a correção que troca o subtipo refaz). */
+function preencherSanidade(sis, S, rnd, s) {
+  Object.assign(s, { prod: null, nome: null, modo: null, doseRef: null, qtd: null, unidade: null, motivo: null, diag: null });
+  s.itens.forEach((x) => { x.dose = null; });
+  if (s.sub === 'TRATAMENTO' && rnd() < 0.95) s.motivo = sorteio(rnd, ['Pneumonia', 'Diarreia']);
+  if (s.sub === 'MEDICACAO' && rnd() < 0.5) s.motivo = 'Febre';
+  if ((s.sub === 'EXAME' || s.sub === 'DOENCA') && rnd() < 0.96) s.diag = s.sub === 'EXAME' ? 'Brucelose' : 'Tristeza parasitária';
+  if (s.sub === 'DOENCA') return;
+  const k = PRODUTO_DO_SUB[s.sub];
+  const x = rnd();
+  if (k && x < 0.75) s.prod = sis.produtos[k];
+  else if (x < 0.85) s.prod = (sorteio(rnd, S.t.PRODUTOS) || {}).product_id || null;
+  else if (s.sub === 'EXAME' || s.sub === 'TRATAMENTO' ? rnd() < 0.5 : rnd() < 0.05) return; // sem produto (obrigatório na vacinação, na vermifugação e na medicação: a recusa)
+  else s.nome = sorteio(rnd, ['Tuberculina', 'Anti-inflamatório', 'Iodo 10%']);
+  if (s.nome && rnd() < 0.6) return;
+  const y = rnd();
+  s.modo = y < 0.03 ? null : y < 0.55 ? 'POR_CABECA' : y < 0.8 ? 'POR_PESO' : 'TOTAL';
+  if (s.nome && s.modo === 'POR_PESO') s.modo = 'POR_CABECA';
+  if (s.modo === 'POR_CABECA') s.doseRef = sorteio(rnd, [1, 2, 5, 3.5]);
+  if (s.modo === 'POR_PESO') s.doseRef = sorteio(rnd, [0.02, 0.01, 0.025]);
+  if (s.modo === 'TOTAL' || (s.modo && rnd() < 0.15)) s.qtd = sorteio(rnd, [10, 12.5, 50, 0.75]);
+  if (s.nome && s.modo && rnd() < 0.9) s.unidade = 'mL';
+  if (s.modo && s.modo !== 'TOTAL' && rnd() < 0.15) sorteio(rnd, s.itens).dose = sorteio(rnd, [7.5, 1, 0.5]);
+  if (s.modo === 'TOTAL' && rnd() < 0.03) sorteio(rnd, s.itens).dose = 2; // dose de um animal no modo total: a recusa
+}
+function propostaSanidade(sis, S, rnd, sub, data, ids) {
+  const s = { tipo: 'SANIDADE', sub, data, itens: ids.map((id) => ({ id, dose: null, resultado: null })), protocolo: null, carencia: null, proxima: null, lote: null, validade: null, custo: null };
+  preencherSanidade(sis, S, rnd, s);
+  if (s.sub === 'VACINACAO' ? rnd() < 0.5 : rnd() < 0.03) s.protocolo = sorteio(rnd, S.t.PROTOCOLOS_SANITARIOS).protocol_id;
+  if (rnd() < 0.4) s.carencia = sorteio(rnd, [0, 30, 45, 120]);
+  if (rnd() < 0.25) s.proxima = somaDias(data, sorteio(rnd, [30, 180, 180, 0]));
+  if (rnd() < 0.3) { s.lote = 'L' + Math.floor(rnd() * 90 + 10); s.validade = somaDias(data, sorteio(rnd, [365, 30, -10])); }
+  if (rnd() < 0.2) s.custo = { valor: sorteio(rnd, [1, 2, 15000, 33333]), vezes: rnd() < 0.3 ? 3 : null };
+  if (s.sub === 'EXAME') s.itens.forEach((x) => { if (rnd() < 0.3) x.resultado = 'Negativo'; });
+  return s;
+}
+registrarTipo('SANIDADE', {
+  peso: () => 10,
+  propor: (c) => {
+    const { sis, S, rnd, D } = c;
+    const ids = animaisPara(S, rnd, D, rnd() < 0.5 ? 1 : 4, (id, p) => p.dia);
+    if (!ids.length) return null;
+    const data = rnd() < 0.4 ? dataPara(S, rnd, ids) : D;
+    return propostaSanidade(sis, S, rnd, sorteio(rnd, ['VACINACAO', 'VACINACAO', 'VERMIFUGACAO', 'VERMIFUGACAO', 'VERMIFUGACAO', 'MEDICACAO', 'TRATAMENTO', 'EXAME', 'DOENCA']), data, ids);
+  },
+  montar: (sis, s) => {
+    const campos = { event_date: s.data };
+    if (s.sub !== 'DOENCA') {
+      if (s.prod) campos.produto_id = s.prod;
+      else if (s.nome) campos.nome_produto = s.nome;
+      if (s.modo) campos.modo_dose = s.modo;
+      if (s.doseRef !== null) campos.dose_referencia = s.doseRef;
+      if (s.qtd !== null) campos.quantidade_consumida_total = s.qtd;
+      if (s.unidade) campos.unidade_dose = s.unidade;
+      if (s.protocolo) campos.protocol_id = s.protocolo;
+      if (s.carencia !== null) campos.periodo_carencia_dias = s.carencia;
+      if (s.proxima) campos.data_proxima_aplicacao = s.proxima;
+      if (s.lote) { campos.lote = s.lote; campos.validade = s.validade; }
+    }
+    if (s.motivo && (s.sub === 'TRATAMENTO' || s.sub === 'MEDICACAO')) campos.motivo = s.motivo;
+    if (s.diag && (s.sub === 'EXAME' || s.sub === 'DOENCA')) campos.diagnostico = s.diag;
+    if (s.custo) { campos.custo_valor = s.custo.valor; campos.custo_conta_id = sis.custeio; if (s.custo.vezes) campos.custo_parcelas_qtd = s.custo.vezes; }
+    return {
+      tipo: 'SANIDADE', subtipo: s.sub, campos,
+      animais: s.itens.map((x) => {
+        const it = { animal_id: x.id };
+        if (x.dose !== null && s.sub !== 'DOENCA') it.dose = x.dose;
+        if (x.resultado && s.sub === 'EXAME') it.resultado_exame = x.resultado;
+        return it;
+      }),
+    };
+  },
+  animais: (s) => s.itens.map((x) => x.id),
+  // Tira um animal (com mais de um) ou põe outro presente no dia.
+  mutarAnimais: (c) => {
+    const { s, S, rnd } = c;
+    if (s.itens.length > 1 && rnd() < 0.5) s.itens.splice(Math.floor(rnd() * s.itens.length), 1);
+    else { const mais = MOVEIS(S).filter((id) => !s.itens.some((x) => x.id === id) && presenca(S, id, s.data).dia); if (mais.length) s.itens.push({ id: sorteio(rnd, mais), dose: null, resultado: null }); }
+  },
+  // A dose, a quantidade do frasco, a carência ou o serviço pago no ato.
+  mutarValores: (c) => {
+    const { s, rnd } = c;
+    const x = rnd();
+    if (x < 0.3 && s.modo && s.modo !== 'TOTAL') s.doseRef = sorteio(rnd, s.modo === 'POR_PESO' ? [0.01, 0.03] : [1, 4, 2.5]);
+    else if (x < 0.45 && s.modo) s.qtd = s.qtd === null || s.modo === 'TOTAL' ? sorteio(rnd, [8, 20.25]) : null;
+    else if (x < 0.7) s.carencia = sorteio(rnd, [null, 0, 21, 60]);
+    else s.custo = rnd() < 0.3 ? null : { valor: sorteio(rnd, [1, 9999, 15000]), vezes: rnd() < 0.3 ? 2 : null };
+  },
+  // O subtipo (refeito o que é dele), o produto, o modo da dose, o protocolo ou a próxima aplicação.
+  mutarOutro: (c) => {
+    const { sis, S, s, rnd } = c;
+    const x = rnd();
+    if (x < 0.3) { s.sub = sorteio(rnd, Object.keys(PROCEDIMENTO_DO_SUB).filter((v) => v !== s.sub)); preencherSanidade(sis, S, rnd, s); }
+    else if (x < 0.5 && s.sub !== 'DOENCA') { s.prod = sorteio(rnd, S.t.PRODUTOS).product_id; s.nome = null; s.unidade = null; if (!s.modo) { s.modo = 'POR_CABECA'; s.doseRef = 1; } }
+    else if (x < 0.7 && s.prod) { s.modo = sorteio(rnd, ['POR_CABECA', 'POR_PESO', 'TOTAL'].filter((m) => m !== s.modo)); s.doseRef = s.modo === 'POR_PESO' ? 0.02 : s.modo === 'POR_CABECA' ? 2 : null; s.qtd = s.modo === 'TOTAL' ? 15 : null; s.itens.forEach((i) => { i.dose = null; }); }
+    else if (x < 0.85) s.protocolo = s.protocolo ? null : sorteio(rnd, S.t.PROTOCOLOS_SANITARIOS).protocol_id;
+    else s.proxima = s.proxima ? null : somaDias(s.data, 90);
+  },
+  doGravado: (c, e) => {
+    const { S, data } = c;
+    const rows = S.t.SANIDADE.filter((r) => r.event_id === e.event_id);
+    if (!rows.length) return null;
+    const pj = e.payload_json || {};
+    const r0 = rows[0];
+    const servico = S.t.FINANCEIRO.filter((f) => f.event_id === e.event_id && !f.product_id)[0];
+    const parcelas = servico ? S.t.PARCELAS.filter((p) => p.financial_id === servico.financial_id).length : 0;
+    const modo = r0.produto_id || r0.nome_produto ? pj.modo_dose || null : null;
+    const doseRef = typeof pj.dose_referencia === 'number' ? pj.dose_referencia : null;
+    return {
+      tipo: 'SANIDADE', sub: e.event_subtype, data, prod: r0.produto_id || null, nome: r0.produto_id ? null : r0.nome_produto || null, modo, doseRef,
+      qtd: modo === 'TOTAL' && typeof pj.quantidade_consumida_total === 'number' ? pj.quantidade_consumida_total : null,
+      unidade: !r0.produto_id && modo ? rows.map((r) => r.unidade_dose).filter(Boolean)[0] || 'mL' : null,
+      motivo: r0.motivo || null, diag: r0.diagnostico || null, protocolo: r0.protocol_id || null,
+      carencia: typeof r0.periodo_carencia_dias === 'number' ? r0.periodo_carencia_dias : null, proxima: r0.data_proxima_aplicacao || null,
+      lote: r0.lote || null, validade: r0.lote ? r0.validade || null : null,
+      custo: servico ? { valor: servico.valor, vezes: parcelas > 1 ? parcelas : null } : null,
+      itens: rows.map((r) => ({ id: r.animal_id, dose: modo === 'POR_CABECA' && typeof r.dose === 'number' && r.dose !== doseRef ? r.dose : null, resultado: r.resultado_exame || null })),
+    };
+  },
+  efeito: (c) => {
+    const { d, S, E, eid, erro, linhaDe } = c;
+    const cp = d.campos;
+    const rows = S.t.SANIDADE.filter((r) => r.event_id === eid);
+    if (rows.length !== d.animais.length) erro(rows.length + ' registros de sanidade para ' + d.animais.length + ' animais');
+    const prod = cp.produto_id ? S.t.PRODUTOS.find((p) => p.product_id === cp.produto_id) : null;
+    const prot = cp.protocol_id ? S.t.PROTOCOLOS_SANITARIOS.find((p) => p.protocol_id === cp.protocol_id) : null;
+    const fim = typeof cp.periodo_carencia_dias === 'number' && cp.periodo_carencia_dias > 0 ? somaDias(cp.event_date, cp.periodo_carencia_dias) : null;
+    const proxima = cp.data_proxima_aplicacao || (prot && prot.recorrencia_tipo === 'INTERVALO_DIAS' && typeof prot.intervalo_dias === 'number' ? somaDias(cp.event_date, prot.intervalo_dias) : null);
+    const unidade = prod ? prod.unidade : cp.unidade_dose || null;
+    d.animais.forEach((x) => {
+      const r = rows.find((y) => y.animal_id === x.animal_id);
+      const l = linhaDe(x.animal_id);
+      if (!l || l.efeito_inventario !== 0 || l.papel !== 'SUJEITO') erro('linha da aplicação ' + JSON.stringify(l));
+      if (!r) { erro('sem o registro de sanidade do animal ' + x.animal_id); return; }
+      const esperado = [PROCEDIMENTO_DO_SUB[d.subtipo], cp.event_date, cp.produto_id || null, prod ? prod.nome : cp.nome_produto || null, cp.protocol_id || null, fim, proxima];
+      const gravado = [r.tipo_procedimento, r.data_aplicacao, r.produto_id || null, r.nome_produto || null, r.protocol_id || null, r.data_fim_carencia || null, r.data_proxima_aplicacao || null];
+      if (JSON.stringify(gravado) !== JSON.stringify(esperado)) erro('registro de sanidade gravado ' + JSON.stringify(gravado) + ', esperado ' + JSON.stringify(esperado));
+      // A dose: a do animal, senão a do lançamento (por cabeça) ou a calculada pelo peso atual (por peso: positiva); total e
+      // sem produto, vazia.
+      const dose = typeof x.dose === 'number' ? x.dose : cp.modo_dose === 'POR_CABECA' ? cp.dose_referencia : cp.modo_dose === 'POR_PESO' ? undefined : null;
+      if (dose === undefined ? !(typeof r.dose === 'number' && r.dose > 0) : (r.dose === undefined ? null : r.dose) !== dose) erro('dose gravada ' + r.dose + ', esperada ' + dose + ' (' + cp.modo_dose + ')');
+      if (typeof r.dose === 'number' && r.unidade_dose !== unidade) erro('unidade da dose ' + r.unidade_dose + ', esperada ' + unidade);
+    });
+    // O consumo (03b, seção 6; PR-11): um movimento de saída do produto do cadastro (a quantidade informada, senão a soma
+    // das doses), com estoque controlado ou não; o custo pelo consumo (quantidade × custo unitário de agora) rateado aos
+    // tratados, sem parcela; o serviço pago no ato, com as parcelas pedidas; o custo de cada animal = as alocações.
+    const doses = rows.map((r) => r.dose);
+    const q = prod && cp.modo_dose ? (typeof cp.quantidade_consumida_total === 'number' ? cp.quantidade_consumida_total : cp.modo_dose !== 'TOTAL' && doses.every((v) => typeof v === 'number') ? somaQtd(doses) : null) : null;
+    const movs = S.t.MOVIMENTOS_ESTOQUE.filter((mv) => mv.event_id === eid);
+    if (q === null ? movs.length : movs.length !== 1 || movs[0].tipo !== 'SAIDA' || movs[0].quantidade !== q || movs[0].product_id !== prod.product_id || movs[0].data !== cp.event_date) erro('movimentos ' + JSON.stringify(movs.map((mv) => [mv.tipo, mv.quantidade, mv.data])) + ', esperada a saída de ' + q);
+    const fins = S.t.FINANCEIRO.filter((f) => f.event_id === eid);
+    const cu = prod && typeof prod.custo_unitario === 'number' && prod.custo_unitario > 0 ? prod.custo_unitario : null;
+    const vc = q !== null && cu ? centavosDe(q * cu) : 0;
+    const consumo = fins.filter((f) => f.product_id);
+    const servico = fins.filter((f) => !f.product_id);
+    const conta = (f) => (S.t.PLANO_CONTAS.find((p) => p.conta_id === f.conta_id) || {}).codigo;
+    if (vc > 0 ? consumo.length !== 1 || consumo[0].valor !== vc || consumo[0].product_id !== prod.product_id || consumo[0].quantidade !== q || conta(consumo[0]) !== CONTA_DA_CATEGORIA[prod.categoria] : consumo.length) erro('consumo ' + JSON.stringify(consumo.map((f) => [f.valor, f.quantidade, conta(f)])) + ', esperado ' + vc + ' (' + q + ' × ' + cu + ')');
+    consumo.forEach((f) => { if (S.t.PARCELAS.some((p) => p.financial_id === f.financial_id)) erro('o consumo do produto tem parcela'); });
+    if (cp.custo_valor ? servico.length !== 1 || servico[0].valor !== cp.custo_valor || S.t.PARCELAS.filter((p) => p.financial_id === servico[0].financial_id).length !== (cp.custo_parcelas_qtd || 1) : servico.length) erro('serviço pago no ato ' + JSON.stringify(servico.map((f) => f.valor)) + ', pedido ' + cp.custo_valor);
+    const alocs = S.t.ALOCACOES_FINANCEIRAS.filter((a) => fins.some((f) => f.financial_id === a.financial_id));
+    rows.forEach((r) => {
+      const v = fins.length ? alocs.filter((a) => a.animal_id === r.animal_id).reduce((t, a) => t + a.valor_alocado, 0) : null;
+      if ((r.custo === undefined ? null : r.custo) !== v) erro('custo do animal ' + r.animal_id + ' gravado ' + r.custo + ', alocado ' + v);
+    });
+    // No rateio por cabeça, as partes diferem em no máximo um centavo.
+    consumo.concat(servico).forEach((f) => {
+      const partes = alocs.filter((a) => a.financial_id === f.financial_id).map((a) => a.valor_alocado);
+      const porPeso = f.product_id && cp.modo_dose === 'POR_PESO' && rows.length > 1;
+      if (!porPeso && partes.length && Math.max.apply(null, partes) - Math.min.apply(null, partes) > 1) erro('rateio por cabeça desigual ' + JSON.stringify(partes));
+    });
+    const total = fins.reduce((t, f) => t + f.valor, 0);
+    if (fins.length && E.total_value !== total) erro('valor do evento ' + E.total_value + ', lançamentos ' + total);
+  },
+});
+registrarTipo('ESTOQUE', {
+  peso: () => 3,
+  propor: (c) => {
+    const { sis, S, rnd, D } = c;
+    const prod = rnd() < 0.7 ? sis.produtos[sorteio(rnd, ['vacina', 'antibiotico'])] : (sorteio(rnd, S.t.PRODUTOS) || {}).product_id;
+    if (!prod) return null;
+    const s = { tipo: 'ESTOQUE', sub: rnd() < 0.6 ? 'ENTRADA' : 'AJUSTE', data: D, prod };
+    preencherEstoque(S, rnd, s);
+    return s;
+  },
+  montar: (sis, s) => {
+    const campos = { event_date: s.data, product_id: s.prod };
+    if (s.sub === 'ENTRADA') {
+      if (s.emb !== null) campos.qtd_apresentacao = s.emb;
+      if (s.qtd !== null) campos.quantidade = s.qtd;
+      campos.valor = s.valor;
+      if (s.parceiro) campos.partner_id = s.parceiro;
+      if (s.vezes) campos.parcelas_qtd = s.vezes;
+    } else {
+      campos.motivo_ajuste = s.motivo;
+      if (s.motivo === 'CONTAGEM') campos.saldo_contado = s.contado;
+      else campos.quantidade = s.qtd;
+    }
+    if (s.lote) { campos.lote = s.lote; campos.validade = s.validade; }
+    return { tipo: 'ESTOQUE', subtipo: s.sub, campos, animais: [] };
+  },
+  animais: () => [],
+  mutarValores: (c) => preencherEstoque(c.S, c.rnd, c.s),
+  mutarOutro: (c) => {
+    const { S, s, rnd } = c;
+    if (rnd() < 0.5) s.prod = sorteio(rnd, S.t.PRODUTOS).product_id;
+    else { s.sub = s.sub === 'ENTRADA' ? 'AJUSTE' : 'ENTRADA'; preencherEstoque(S, rnd, s); }
+  },
+  efeito: (c) => {
+    const { d, S, E, eid, erro, lsE } = c;
+    const cp = d.campos;
+    const prod = S.t.PRODUTOS.find((p) => p.product_id === cp.product_id);
+    if (lsE.length) erro('o evento de estoque tem linhas de animal');
+    const movs = S.t.MOVIMENTOS_ESTOQUE.filter((mv) => mv.event_id === eid);
+    const fins = S.t.FINANCEIRO.filter((f) => f.event_id === eid);
+    if (d.subtipo === 'ENTRADA') {
+      // Compra de insumo (16.9): sempre o lançamento de compra de insumos, com as parcelas; a entrada só com o controle.
+      const q = typeof cp.quantidade === 'number' ? cp.quantidade : somaQtd([cp.qtd_apresentacao * prod.fator_conversao]);
+      const f = fins[0];
+      const conta = f && (S.t.PLANO_CONTAS.find((p) => p.conta_id === f.conta_id) || {}).codigo;
+      if (fins.length !== 1 || f.valor !== cp.valor || f.product_id !== prod.product_id || f.quantidade !== q || conta !== 'COMPRA_INSUMOS') erro('compra ' + JSON.stringify(fins.map((x) => [x.valor, x.quantidade, x.product_id])) + ', pedida ' + JSON.stringify([cp.valor, q]));
+      else if (S.t.PARCELAS.filter((p) => p.financial_id === f.financial_id).length !== (cp.parcelas_qtd || 1)) erro('parcelas da compra de insumo');
+      const cu = Math.round(Number((cp.valor / 100 / q).toFixed(10)) * 10000) / 10000;
+      if (prod.controla_estoque === true ? movs.length !== 1 || movs[0].tipo !== 'ENTRADA' || movs[0].quantidade !== q || Math.abs(movs[0].custo_unitario - cu) > 0.00011 : movs.length) erro('movimentos da entrada ' + JSON.stringify(movs.map((mv) => [mv.tipo, mv.quantidade, mv.custo_unitario])) + ', esperado ' + (prod.controla_estoque === true ? q : 'nenhum'));
+      if (E.total_value !== cp.valor) erro('valor do evento ' + E.total_value + ', pedido ' + cp.valor);
+      return;
+    }
+    // O acerto: sem lançamento; a contagem lança a diferença para o saldo na data (sem este evento), a perda e o
+    // vencimento tiram a quantidade.
+    if (fins.length) erro('acerto de estoque com lançamento financeiro');
+    let esperado;
+    if (cp.motivo_ajuste === 'CONTAGEM') {
+      const antes = S.t.MOVIMENTOS_ESTOQUE.filter((mv) => mv.product_id === prod.product_id && mv.event_id !== eid && S.vig.get(mv.event_id) && mv.data <= cp.event_date);
+      esperado = somaQtd([cp.saldo_contado, -somaQtd(antes.map((mv) => (mv.tipo === 'SAIDA' ? -mv.quantidade : mv.quantidade)))]);
+    } else esperado = -cp.quantidade;
+    if (movs.length !== 1 || movs[0].tipo !== 'AJUSTE' || movs[0].quantidade !== esperado || movs[0].data !== cp.event_date) erro('movimento do acerto ' + JSON.stringify(movs.map((mv) => [mv.tipo, mv.quantidade])) + ', esperado ' + esperado);
+  },
+});
+/** A entrada (embalagens, quantidade, valor, parcelas) ou o acerto (contagem, perda, vencimento) de estoque. */
+function preencherEstoque(S, rnd, s) {
+  Object.assign(s, { emb: null, qtd: null, valor: null, vezes: null, parceiro: null, motivo: null, contado: null, lote: null, validade: null });
+  if (s.sub === 'ENTRADA') {
+    if (rnd() < 0.5) s.emb = sorteio(rnd, [1, 2, 0.5]);
+    if (s.emb === null || rnd() < 0.12) s.qtd = sorteio(rnd, [50, 100, 250.5, 12]);
+    s.valor = sorteio(rnd, [1, 9250, 18500, 123456]);
+    if (rnd() < 0.3) s.vezes = sorteio(rnd, [2, 3]);
+    if (rnd() < 0.3 && S.t.PARCEIROS.length) s.parceiro = sorteio(rnd, S.t.PARCEIROS).partner_id;
+  } else {
+    s.motivo = sorteio(rnd, ['CONTAGEM', 'CONTAGEM', 'PERDA', 'VENCIMENTO']);
+    if (s.motivo === 'CONTAGEM') s.contado = sorteio(rnd, [0, 10, 25.5, 100]);
+    else s.qtd = sorteio(rnd, [1, 2.5, 10]);
+  }
+  if (rnd() < 0.25) { s.lote = 'E' + Math.floor(rnd() * 90 + 10); s.validade = somaDias(s.data, sorteio(rnd, [400, 60])); }
+}
+
 /**
  * O registro único dos arquivos de importação do teste aleatório: cada tipo de importação declara o arquivo que o gerador
  * monta (`arquivo(c)` → {texto, mapa} | null, com c = {sis, S, rnd, P (nome de cada pasto), pastoNome(), ativos, comBrinco,
@@ -1843,7 +2130,7 @@ function gerarAcao(sis, S, rnd, k, acao, base) {
   }
   if (acao === 'cadastro') {
     // Desativar e reativar no meio: o pasto (sobretudo o D, vazio na montagem), o parceiro e a categoria.
-    const qual = pesado(rnd, [['pasto', 3], ['parceiro', 1.5], ['categoria', 1.5], ['pastoNovo', 0.8], ['pastoEditar', 0.6], ['parceiroNovo', 0.5], ['parceiroTipos', 0.4], ['categoriaNova', 0.7], ['categoriaEditar', 1.2], ['lista', 1.5], ['externo', 0.6], ['propriedadeNova', 0.5], ['propriedadeStatus', 0.5], ['propriedadePadrao', 0.3]]);
+    const qual = pesado(rnd, [['pasto', 3], ['parceiro', 1.5], ['categoria', 1.5], ['pastoNovo', 0.8], ['pastoEditar', 0.6], ['parceiroNovo', 0.5], ['parceiroTipos', 0.4], ['categoriaNova', 0.7], ['categoriaEditar', 1.2], ['lista', 1.5], ['externo', 0.6], ['propriedadeNova', 0.5], ['propriedadeStatus', 0.5], ['propriedadePadrao', 0.3], ['produto', 0.8], ['protocolo', 0.5]]);
     const extra = gerarCadastro(sis, S, rnd, k, qual, base);
     if (extra !== undefined) return extra;
     if (qual === 'pasto') {
@@ -1890,7 +2177,7 @@ function gerarAcao(sis, S, rnd, k, acao, base) {
 /** Itens de lista que os comandos do gerador usam (desativados e reativados no meio, passada 3). */
 const LISTAS_USADAS = [['CAUSA_MORTE', 'DOENCA'], ['CAUSA_MORTE', 'RAIO'], ['MOTIVO_DESCARTE', 'IDADE'], ['DESTINO_DESCARTE', 'CONSUMO_PROPRIO'], ['DESTINO_DESCARTE', 'DOACAO'], ['TIPO_PARTO', 'ASSISTIDO'], ['TIPO_PARTO', 'NORMAL'], ['TIPO_DEDUCAO_VENDA', 'TAXA_FRIGORIFICO'], ['TIPO_DEDUCAO_VENDA', 'FUNRURAL'], ['TIPO_DEDUCAO_VENDA', 'FRETE'], ['MOTIVO_IDENTIFICACAO', 'PERDA'], ['MOTIVO_IDENTIFICACAO', 'DANIFICADO'], ['FINALIDADE_NEGOCIO', 'RECRIA_ENGORDA'], ['RACA', 'NELORE']];
 /** Passada 4: os avisos que a política muda (05, seção 1; Config.CODIGOS_AVISO, sem os da Fase 3). */
-const POLITICAVEIS = ['POSSIVEL_DUPLICIDADE', 'BRINCO_PARECIDO', 'LOTACAO_ACIMA_DA_CAPACIDADE', 'IDADE_REPRODUTIVA', 'PERIODO_BLOQUEADO', 'VALOR_DIVERGENTE', 'RATEIO_SEM_PESO', 'INTERVALO_PARTO_CURTO', 'CATEGORIAS_SEM_COBERTURA', 'CARENCIA_ATIVA'];
+const POLITICAVEIS = ['POSSIVEL_DUPLICIDADE', 'BRINCO_PARECIDO', 'LOTACAO_ACIMA_DA_CAPACIDADE', 'IDADE_REPRODUTIVA', 'PERIODO_BLOQUEADO', 'VALOR_DIVERGENTE', 'RATEIO_SEM_PESO', 'INTERVALO_PARTO_CURTO', 'CATEGORIAS_SEM_COBERTURA', 'CARENCIA_ATIVA', 'ESTOQUE_INSUFICIENTE', 'PRODUTO_VENCIDO'];
 const CONDICOES = ['NENHUMA', 'CASTRADO', 'INTEIRO', 'REPRODUTOR', 'NAO_REPRODUTOR', 'PARIDA', 'NAO_PARIDA'];
 /**
  * Passada 3: cadastros criados e editados no meio (não só desativados): pasto novo e com outra área ou capacidade,
@@ -1969,6 +2256,22 @@ function gerarCadastro(sis, S, rnd, k, qual, base) {
     return com('propriedade.salvar', { property_id: p.property_id, campos: { status }, justificativa: 'Propriedade revista' }, 'propriedade ' + status);
   }
   if (qual === 'propriedadePadrao') return com('config.salvar', { valores: { propriedade_padrao_id: sorteio(rnd, S.t.PROPRIEDADES).property_id } }, 'propriedade padrão');
+  // Fase 3 (E3.2): o produto do cadastro ligando e desligando o controle de estoque (o saldo é projeção), com outro custo
+  // (o consumo seguinte usa o novo; o gravado fica congelado), desativado e reativado; a unidade trocada (recusada depois
+  // do uso). O protocolo com outro intervalo, desativado e reativado.
+  if (qual === 'produto') {
+    const p = sorteio(rnd, S.t.PRODUTOS);
+    if (!p) return null;
+    const x = rnd();
+    const campos = x < 0.4 ? { controla_estoque: p.controla_estoque !== true } : x < 0.65 ? { custo_unitario: sorteio(rnd, [0, 0.035, 1.85, 2.5]) } : x < 0.85 ? { ativo: p.ativo === false } : { unidade: p.unidade === 'mL' ? 'dose' : 'mL' };
+    return com('produto.salvar', { product_id: p.product_id, campos, justificativa: 'Cadastro do produto revisto' }, 'produto ' + Object.keys(campos)[0]);
+  }
+  if (qual === 'protocolo') {
+    const p = sorteio(rnd, S.t.PROTOCOLOS_SANITARIOS);
+    if (!p) return null;
+    const campos = rnd() < 0.5 ? { intervalo_dias: sorteio(rnd, [90, 180, 365]) } : { ativo: p.ativo === false };
+    return com('protocolo.salvar', { protocol_id: p.protocol_id, campos, justificativa: 'Protocolo revisto' }, 'protocolo ' + Object.keys(campos)[0]);
+  }
   if (qual === 'externo') {
     const campos = { nome: sorteio(rnd, ['Touro do sêmen', 'Touro Nelore Elite', 'Reprodutor do vizinho ' + k]), sexo: rnd() < 0.9 ? 'M' : 'F' };
     if (rnd() < 0.5) { campos.data_nascimento = somaDias(D0, -400 - Math.floor(rnd() * 3000)); campos.data_nascimento_confianca = 'ESTIMADA'; }

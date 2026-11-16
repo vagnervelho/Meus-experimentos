@@ -16,7 +16,7 @@ const S = require('./apoio-sistema');
 const FIXTURE = require('./fixtures/coercao.json');
 
 const { js, USUARIO } = S;
-const CENARIOS = ['PREPARO', 'CT-09', 'CT-01', 'CT-02', 'CT-03', 'CT-04', 'CT-05', 'CT-07', 'CT-08', 'CT-13', 'CT-14', 'CT-17', 'CT-18', 'CT-10', 'CT-12', 'RESTAURACAO', 'CT-20', 'CT-11', 'ISOLAMENTO'];
+const CENARIOS = ['PREPARO', 'CT-09', 'CT-01', 'CT-02', 'CT-03', 'CT-04', 'CT-05', 'CT-06', 'SANIDADE', 'CT-07', 'CT-08', 'CT-13', 'CT-14', 'CT-17', 'CT-18', 'CT-10', 'CT-12', 'RESTAURACAO', 'CT-20', 'CT-11', 'ISOLAMENTO'];
 /**
  * Passos que ainda não rodam (peça de fase posterior ou só na conta do dono), com a situação esperada. O CT-09 roda
  * inteiro desde a venda e o CT-12 com a reconciliação (Fase 2); ficam o resultado gerencial (CT-03, Fase 4), o rateio
@@ -159,7 +159,7 @@ test('base de demonstração (TEST_PLAN = DEMO): a composição de 09, seção 7
   assert.deepEqual(d.totais, { d0: 240, nascimentos: 255, partos: d.totais.partos, natimortos: d.totais.natimortos, compras: 70, vendas: 240, mortes: 15, descartes: 5, divergencias: 1, ativos: 304 });
   assert.ok(d.totais.natimortos > 0 && d.totais.partos >= 250, 'partos com natimortos e gêmeos');
   assert.deepEqual(d.saidas, { VENDIDO: 240, MORTO: 15, DESCARTADO: 5, BAIXADO_AJUSTE: 1 }, 'as saídas conferidas no cadastro pelo servidor');
-  assert.deepEqual(d.fora_desta_fase.map((x) => x.fase), [3, 3, 4, 4], 'o que da seção 7 chega nas fases 3 e 4 fica listado');
+  assert.deepEqual(d.fora_desta_fase.map((x) => x.fase), [3, 4, 4], 'o que da seção 7 chega nas fases 3 e 4 fica listado (os manejos sanitários entraram na E3.3)');
   const demo = s.props().DEMO_SPREADSHEET_ID;
   assert.ok(demo && demo !== s.banco());
   assert.match(s.gas.drive.arquivo(demo).name, /BASE DE TESTE/);

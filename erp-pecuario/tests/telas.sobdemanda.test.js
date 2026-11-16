@@ -47,7 +47,7 @@ test('sistema.tela não depende da planilha-banco: sem o banco do ambiente, a co
   assert.equal(r.ok, true, JSON.stringify(r.error));
 });
 
-test('sistema.tela: tela fora da lista → VALIDATION (nome); módulo da Fase 3 a 5 ainda sem tela → NOT_FOUND com a fase; arquivo ausente do projeto → NOT_FOUND com a instrução; as pesagens (E3.1) vêm', () => {
+test('sistema.tela: tela fora da lista → VALIDATION (nome); módulo da Fase 3 a 5 ainda sem tela → NOT_FOUND com a fase; arquivo ausente do projeto → NOT_FOUND com a instrução; as pesagens (E3.1) e a sanidade (E3.2 e E3.3) vêm', () => {
   const s = S.sistema({ semCadastro: true });
   for (const nome of ['Dashboard', 'Styles', 'JavaScript', 'Index', '', '../Import', 'import', null, 7]) {
     const r = chamar(s, { rota: 'sistema.tela', dados: { nome } });
@@ -60,7 +60,12 @@ test('sistema.tela: tela fora da lista → VALIDATION (nome); módulo da Fase 3 
   assert.equal(w.data.conteudo, s.G.Api.compactar(ler('Weights.html')));
   assert.match(w.data.conteudo, /Telas\.registrar\('pesagens'/);
   assert.match(w.data.conteudo, /Telas\.registrar\('pesagens\/curral'/);
-  for (const [nome, modulo, fase] of [['Health', 'Sanidade', 3], ['Reproduction', 'Reprodução', 3], ['Financial', 'Financeiro', 4], ['Reports', 'Relatórios', 5]]) {
+  // Sanidade (Fase 3, E3.2 e E3.3): entregue, sob demanda, com a agenda, as aplicações, os produtos e os protocolos.
+  const hs = chamar(s, { rota: 'sistema.tela', dados: { nome: 'Health' } });
+  assert.deepEqual([hs.ok, hs.data && hs.data.modulo], [true, 'SANIDADE'], JSON.stringify(hs.error));
+  assert.equal(hs.data.conteudo, s.G.Api.compactar(ler('Health.html')));
+  for (const r of ['sanidade/agenda', 'sanidade/aplicacoes', 'sanidade/produtos', 'sanidade/protocolos']) assert.match(hs.data.conteudo, new RegExp("Telas\\.registrar\\('" + r.replace('/', '\\/') + "'"), r);
+  for (const [nome, modulo, fase] of [['Reproduction', 'Reprodução', 3], ['Financial', 'Financeiro', 4], ['Reports', 'Relatórios', 5]]) {
     const r = chamar(s, { rota: 'sistema.tela', dados: { nome } });
     assert.equal(r.error.code, 'NOT_FOUND', nome);
     assert.equal(r.error.message, 'Esta tela faz parte do módulo ' + modulo + ', que chega na fase ' + fase + ' e ainda não foi entregue.');
@@ -83,8 +88,9 @@ test('página inicial: sem as telas sob demanda, com o carregador (Modulos), den
   const paginas = UI.lerPaginas(SRC);
   const m = UI.conferirModulos(paginas, html);
   assert.deepEqual(m.problemas, []);
-  assert.deepEqual(m.modulos.map((x) => [x.nome, x.entregue]).sort(), [['Import', true], ['Weights', true]]);
+  assert.deepEqual(m.modulos.map((x) => [x.nome, x.entregue]).sort(), [['Health', true], ['Import', true], ['Weights', true]]);
   assert.doesNotMatch(html, /var TelaPesagens =/, 'as pesagens não vêm na página inicial');
+  assert.doesNotMatch(html, /var TelaSanidade =/, 'a sanidade não vem na página inicial');
   assert.ok(m.modulos.every((x) => x.bytes <= UI.ORCAMENTO_MODULO_BYTES));
   // O conferidor acusa a tela sob demanda posta de volta no Index e o módulo acima do orçamento.
   const comImport = Object.assign({}, paginas, { 'Index.html': paginas['Index.html'].replace("<?!= include_('Settings') ?>", "<?!= include_('Settings') ?>\n<?!= include_('Import') ?>") });
@@ -121,16 +127,20 @@ test('catálogo de módulos × arquivos × Index: toda tela de módulo existe; s
   assert.deepEqual([imp.tela, imp.sob_demanda, imp.rotas], ['Import', true, ['importar']]);
   const pes = b.data.modulos.find((m) => m.id === 'PESAGENS');
   assert.deepEqual([pes.tela, pes.sob_demanda, pes.rotas], ['Weights', true, ['pesagens']], 'as pesagens (E3.1) vão ao menu, sob demanda');
-  assert.equal(b.data.modulos.some((m) => ['SANIDADE', 'REPRODUCAO'].includes(m.id)), false, 'módulo da Fase 3 sem tela não vai ao menu');
+  const san = b.data.modulos.find((m) => m.id === 'SANIDADE');
+  assert.deepEqual([san.tela, san.sob_demanda, san.rotas], ['Health', true, ['sanidade']], 'a sanidade (E3.2 e E3.3) vai ao menu, sob demanda');
+  assert.equal(b.data.modulos.some((m) => ['REPRODUCAO'].includes(m.id)), false, 'módulo da Fase 3 sem tela não vai ao menu');
 });
 
-test('cliente: a importação e as pesagens injetadas pela rota (como o menu as abre) registram as rotas delas; o include se separa em estilos e scripts', () => {
+test('cliente: a importação, as pesagens e a sanidade injetadas pela rota (como o menu as abre) registram as rotas delas; o include se separa em estilos e scripts', () => {
   const s = S.sistema({ semCadastro: true });
   const c = T.cliente(s);
   assert.equal(typeof c.TelaImportacao.planoConfirmacao, 'function');
   assert.ok(c.Telas.resolver('importar') && c.Telas.resolver('importar/abc/validacao'));
   assert.equal(c.TelaPesagens.BLOCO, 20);
   assert.ok(c.Telas.resolver('pesagens') && c.Telas.resolver('pesagens/curral'));
+  assert.deepEqual(js(c.TelaSanidade.SUBTIPO_DO_PROCEDIMENTO), { VACINA: 'VACINACAO', VERMIFUGO: 'VERMIFUGACAO', MEDICAMENTO: 'MEDICACAO', TRATAMENTO: 'TRATAMENTO', EXAME: 'EXAME' });
+  for (const r of ['sanidade/agenda', 'sanidade/aplicacoes', 'sanidade/produtos', 'sanidade/protocolos']) assert.ok(c.Telas.resolver(r), r);
   const p = js(c.Modulos.partes('<style>\na{color:red}\n</style>\n<script>\nvar A = 1;\n</script>\n<script>\nvar B = "<b>";\n</script>'));
   assert.deepEqual(p, { estilos: ['\na{color:red}\n'], scripts: ['\nvar A = 1;\n', '\nvar B = "<b>";\n'] });
   assert.deepEqual(js(c.Modulos.partes('sem nada')), { estilos: [], scripts: [] });

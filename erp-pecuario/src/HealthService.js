@@ -196,7 +196,7 @@ var HealthService = (function () {
    *  - INTERVALO_DIAS: `data_proxima_aplicacao` da última aplicação, se informada; senão a data dela + `intervalo_dias`;
    *    nunca aplicado: o dia em que ficou elegível (a entrada no rebanho ou o dia em que completa a idade mínima);
    *  - CAMPANHA_MESES: o último dia do mês da campanha; cumprida por aplicação entre o primeiro dia do mês − tolerância e
-   *    o último + tolerância. Vale a campanha mais antiga em aberto entre a última que já venceu e a próxima.
+   *    o último + tolerância. A campanha perdida (já vencida) vale até abrir a janela da seguinte; depois, a seguinte.
    */
   function vencimento(protocolo, perfil, aplicacoes, data, params) {
     var p = protocolo;
@@ -215,7 +215,8 @@ var HealthService = (function () {
       if (!ultima) return { vencimento: elegivelDesde, cumprida: false, ultima: null };
       var u = apl[apl.length - 1];
       var prox = !vazio_(u.data_proxima_aplicacao) ? u.data_proxima_aplicacao : num_(p.intervalo_dias) ? Utils.somaDias(u.data_aplicacao, p.intervalo_dias) : null;
-      return { vencimento: prox, cumprida: prox === null || prox > data, ultima: ultima, pela_ultima: true };
+      // A próxima dose é sempre uma pendência (em dia, próxima ou vencida pela data); sem como contar a próxima, nenhuma.
+      return { vencimento: prox, cumprida: prox === null, ultima: ultima };
     }
     // CAMPANHA_MESES
     var meses = Array.isArray(p.meses_campanha) ? p.meses_campanha.filter(function (m) { return num_(m) && m >= 1 && m <= 12; }) : [];
@@ -232,8 +233,10 @@ var HealthService = (function () {
     };
     var desde = [elegivelDesde, inicioProtocolo_(p)].filter(Boolean).sort().pop();
     var passada = campanhas.filter(function (c) { return c.fim < data && (!desde || c.fim >= desde); }).pop() || null;
-    if (passada && !cumpre(passada)) return { vencimento: passada.fim, cumprida: false, ultima: ultima, campanha: passada };
     var proxima = campanhas.filter(function (c) { return c.fim >= data; })[0];
+    // A campanha perdida continua devida até abrir a janela da seguinte (o primeiro dia do mês dela − tolerância); daí em
+    // diante vale a seguinte (a perdida não se cumpre mais).
+    if (passada && !cumpre(passada) && data < Utils.somaDias(proxima.inicio, -tol)) return { vencimento: passada.fim, cumprida: false, ultima: ultima, campanha: passada };
     return { vencimento: proxima.fim, cumprida: cumpre(proxima), ultima: ultima, campanha: proxima };
   }
   /** Situação da pendência em D: VENCIDA (passou do vencimento), PROXIMA (dentro da antecedência) ou EM_DIA. */

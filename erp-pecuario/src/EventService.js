@@ -961,8 +961,12 @@ var EventService = (function () {
    * registra o que foi decidido.
    */
   function cabecalhoSanidade_(m, ctxEv) {
-    var c = ctxEv.campos;
     var sub = ctxEv.subtipo;
+    // Só os campos do subtipo valem (o registro de doença não tem produto): o campo de fora já foi recusado pelo catálogo.
+    var doSubtipo = {};
+    EventCatalog.camposEvento('SANIDADE', sub).forEach(function (d) { doSubtipo[d.id] = true; });
+    var c = {};
+    Object.keys(ctxEv.campos).forEach(function (k) { if (doSubtipo[k]) c[k] = ctxEv.campos[k]; });
     var data = ctxEv.ev.event_date;
     var s = {
       procedimento: HealthService.PROCEDIMENTO[sub] || null, produto: null, protocolo: null, nome: null, fabricante: null, unidade: null,

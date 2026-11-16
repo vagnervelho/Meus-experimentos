@@ -585,6 +585,14 @@ var Campos = (function () {
       if (co) itens.push({ valor: co.conta_id, rotulo: co.nome + ' — desativada' });
     } else if (tabela === 'CATEGORIAS') {
       itens = Store.categorias().filter(function (c) { return c.ativo !== false || c.category_id === atual; }).map(function (c) { return { valor: c.category_id, rotulo: c.nome + (c.ativo === false ? ' — desativada' : '') }; });
+    } else if (tabela === 'PRODUTOS') {
+      // Sanidade (Fase 3): o produto com a unidade e, com o estoque controlado, o saldo (projeção do servidor).
+      itens = Store.produtos({ todos: true }).filter(function (p) { return p.ativo !== false || p.product_id === atual; }).map(function (p) {
+        var saldo = p.controla_estoque === true && typeof p.estoque_atual === 'number' ? ' · estoque ' + Fmt.numero(p.estoque_atual, Fmt.casas(p.estoque_atual)) + ' ' + p.unidade : '';
+        return { valor: p.product_id, rotulo: p.nome + ' (' + p.unidade + ')' + saldo + (p.ativo === false ? ' — desativado' : '') };
+      });
+    } else if (tabela === 'PROTOCOLOS_SANITARIOS') {
+      itens = Store.protocolos({ todos: true }).filter(function (p) { return p.ativo !== false || p.protocol_id === atual; }).map(function (p) { return { valor: p.protocol_id, rotulo: p.nome + (p.ativo === false ? ' — desativado' : '') }; });
     }
     return itens.sort(function (a, b) { return UI.comparar(a.rotulo, b.rotulo); });
   }
@@ -1528,9 +1536,10 @@ var Registro = (function () {
     ENTRADA_INICIAL: 'Gravar o rebanho inicial', OUTRA_ENTRADA: 'Gravar a entrada', AJUSTE_INVENTARIO: 'Gravar a correção', ESTORNO: 'Estornar',
     NASCIMENTO: 'Gravar o parto', TRANSFERENCIA: 'Transferir', MORTE: 'Registrar a morte', DESCARTE: 'Registrar o descarte', COMPRA: 'Gravar a compra',
     VENDA: 'Gravar a venda', IDENTIFICACAO: 'Gravar a identificação', MARCACAO: 'Gravar a marcação', PESAGEM: 'Gravar a pesagem',
+    SANIDADE: 'Gravar a aplicação', ESTOQUE: 'Gravar no estoque',
   };
   /** O subtipo é o primeiro campo do formulário (08, 4.2): a pergunta muda com o tipo. */
-  var PERGUNTA_SUBTIPO = { IDENTIFICACAO: 'O que fazer', MARCACAO: 'Marcar como' };
+  var PERGUNTA_SUBTIPO = { IDENTIFICACAO: 'O que fazer', MARCACAO: 'Marcar como', SANIDADE: 'O que foi feito', ESTOQUE: 'O que lançar' };
   function perguntaSubtipo(tipo) { return PERGUNTA_SUBTIPO[tipo] || 'O que corrigir'; }
   /** Crítico (08, 4.6): o do tipo ou o do subtipo (a baixa por divergência de contagem). */
   function critico(s) { var sub = s.subtipo && s.def.subtipos ? s.def.subtipos[s.subtipo] : null; return !!(s.def.critico || (sub && sub.critico)); }
@@ -1550,7 +1559,7 @@ var Registro = (function () {
   function rotaDe(s) { return s.corrige ? 'evento.corrigir' : rotaComando(s.tipo); }
   /** Revisão pelo servidor: a do catálogo, e sempre na correção (a folha mostra a diferença para o original). */
   function revServidor(s) { return s.def.revisao === 'SERVIDOR' || !!s.corrige || !Util.vazio(s.campos && (s.campos.custo_valor || s.campos.receita_valor)); }
-  var VERBOS_SUBTIPO = { DIVERGENCIA_CONTAGEM: 'Dar baixa', RECLASSIFICACAO: 'Mudar a categoria' };
+  var VERBOS_SUBTIPO = { DIVERGENCIA_CONTAGEM: 'Dar baixa', RECLASSIFICACAO: 'Mudar a categoria', DOENCA: 'Registrar a doença', EXAME: 'Registrar o exame', ENTRADA: 'Gravar a entrada no estoque', AJUSTE: 'Acertar o estoque' };
   function verbo(s) { return s.corrige ? 'Gravar a correção' : (s.subtipo && VERBOS_SUBTIPO[s.subtipo]) || VERBOS[s.tipo] || ('Gravar ' + s.def.rotulo.toLowerCase()); }
   function plural(n, um, varios) { return n + ' ' + (n === 1 ? um : varios); }
 
@@ -2031,6 +2040,11 @@ var Registro = (function () {
     var ultimo = cEv.filter(function (d) { return d.id === 'notes'; });
     v.opEv = { idBase: 'ev', rotulos: s.rotulos, aoMudar: function (id) {
       tocar(s);
+      if (preencherDoProduto_(s, id)) {
+        desenharMeio(s);
+        var cm = v.blocos.meio && v.blocos.meio.campo(id);
+        if (cm) cm.focar();
+      }
       if (id !== 'event_date') return;
       desenharAvisoData(s);
       if (v.seletor && v.seletor.dataMudou) v.seletor.dataMudou().catch(function (e) { Util.registrarFalha('posição na data', e); });
@@ -2081,6 +2095,30 @@ var Registro = (function () {
     sec.appendChild(UI.botao('Anexar nota fiscal, GTA, laudo ou foto', { icone: 'registrar', aoClicar: function (ev) {
       Anexos.escolher({ origem: ev.currentTarget, tipoPadrao: Anexos.tipoPadrao(s.tipo), aoEscolher: function (a) { a.chave = 'anx:' + Util.uuid(); s.anexos.push(a); desenharAnexos(s); } });
     } }));
+  }
+  /**
+   * Sanidade (Fase 3): o produto do cadastro sugere o que estiver vazio — a carência, o lote, a validade, o modo e a dose
+   * padrão dele —, e o protocolo traz o produto. É só preenchimento da tela: o servidor usa o que for enviado (o fabricante
+   * vazio ele completa pelo cadastro). Devolve true quando algum campo mudou.
+   */
+  function preencherDoProduto_(s, id) {
+    if (s.tipo !== 'SANIDADE' || ['produto_id', 'modo_dose', 'protocol_id'].indexOf(id) < 0) return false;
+    var c = s.campos, mudou = false;
+    var por = function (k, v) { if (Util.vazio(c[k]) && !Util.vazio(v)) { c[k] = typeof v === 'number' ? String(v).replace('.', ',') : v; mudou = true; } };
+    if (id === 'protocol_id' && c.protocol_id) {
+      var pt = Store.protocolo(c.protocol_id);
+      if (pt && pt.product_id && Util.vazio(c.produto_id) && Store.produto(pt.product_id)) { c.produto_id = pt.product_id; mudou = true; id = 'produto_id'; }
+    }
+    var p = c.produto_id ? Store.produto(c.produto_id) : null;
+    if (!p) return mudou;
+    if (id === 'produto_id') {
+      por('periodo_carencia_dias', p.carencia_padrao_dias);
+      por('lote', p.lote);
+      por('validade', p.validade);
+      if (Util.vazio(c.modo_dose) && (p.dose_padrao_por_kg || p.dose_padrao_por_cabeca)) { c.modo_dose = p.dose_padrao_por_kg ? 'POR_PESO' : 'POR_CABECA'; mudou = true; }
+    }
+    por('dose_referencia', c.modo_dose === 'POR_PESO' ? p.dose_padrao_por_kg : c.modo_dose === 'POR_CABECA' ? p.dose_padrao_por_cabeca : null);
+    return mudou;
   }
   /** Campos do cabeçalho entre a data e as observações; com subtipo, os dele vêm junto (redesenhados ao trocar). */
   function desenharMeio(s) {
@@ -2196,6 +2234,8 @@ var Registro = (function () {
     var tirar = UI.botao('Tirar da lista', { tipo: 'texto', icone: 'remover', aoClicar: function () { tirarLinha(s, l); } });
     var cab = h('div', { class: 'cartao-animal-cabecalho' }, h('div', null, titulo, a ? h('div', { class: 'suave', text: Store.descricaoAnimal(a) }) : null), tirar);
     el.appendChild(cab);
+    // Carência na venda (RN-072): o selo à vista; a venda para abate antes do fim é conferida no servidor ao gravar.
+    if (a && a.carencia_ate && s.tipo === 'VENDA') el.appendChild(h('div', { class: 'marca-inelegivel', dataset: { carencia: a.carencia_ate } }, UI.icone('aviso', 'icone-pequeno'), 'Em carência até ' + Fmt.data(a.carencia_ate) + ': não pode ir para abate antes disso.'));
     if (l.erros && l.erros.length) {
       el.appendChild(h('div', { class: 'problema-animal', role: 'alert' }, UI.icone('erro'), h('div', null, l.erros.map(function (d) { return problema_(d, 'div'); }),
         h('div', { class: 'acoes', style: 'margin-top:8px' }, UI.botao('Corrigir', { aoClicar: function () { if (!bloco.focarPrimeiroErro()) { var f = el.querySelector('input, select'); if (f) f.focus(); } } }), UI.botao('Tirar da lista', { aoClicar: function () { tirarLinha(s, l); } })))));
@@ -2480,7 +2520,41 @@ var Registro = (function () {
     if (im.substitui && im.anexos) l.push(['Documentos e fotos do original', (im.anexos_nomes && im.anexos_nomes.length ? im.anexos_nomes.join(', ') : plural(im.anexos, 'documento', 'documentos')) + (im.anexos === 1 ? ' (passa' : ' (passam') + ' a esta correção)']);
     if (im.substitui && (im.anexos_soltos || []).length) l.push(['Ficam sem lançamento', im.anexos_soltos.join(', ') + ': o lançamento deles sai na correção, e eles ficam só no evento']);
     if (im.abertura && im.abertura.total !== undefined) l.push(['Valor de abertura', Fmt.dinheiro(im.abertura.total) + ' em ' + plural(im.abertura.animais, 'animal', 'animais')]);
-    return l.concat(linhasCompra(im.compra), linhasVenda(im.venda), linhasFinanceiro(im.financeiro, im.event_type));
+    return l.concat(linhasCompra(im.compra), linhasVenda(im.venda), linhasSanidade(im.sanidade), linhasEstoque(im.estoque), linhasFinanceiro(im.financeiro, im.event_type));
+  }
+  /** Quantidade com as casas que ela usa (até 4) e a unidade do produto. */
+  function qtd_(v, un) { return v === null || v === undefined ? '—' : Fmt.numero(v, Fmt.casas(v)) + (un ? ' ' + un : ''); }
+  /**
+   * Sanidade (Fase 3, calculada no servidor): o que sai do frasco, o saldo do estoque, o custo pelo consumo, as doses (por
+   * peso, pelo peso atual de cada animal), a carência e a próxima aplicação.
+   */
+  function linhasSanidade(x) {
+    if (!x) return [];
+    var l = [];
+    var doses = (x.animais || []).map(function (a) { return a.dose; }).filter(function (d) { return typeof d === 'number'; });
+    if (doses.length) {
+      var min = Math.min.apply(null, doses), max = Math.max.apply(null, doses);
+      var estimados = (x.animais || []).filter(function (a) { return a.peso_estimado; }).length;
+      l.push(['Dose por animal', (min === max ? qtd_(min, x.unidade) : 'de ' + qtd_(min) + ' a ' + qtd_(max, x.unidade)) + (x.modo_dose === 'POR_PESO' ? ' (pelo peso atual' + (estimados ? '; ' + plural(estimados, 'peso estimado', 'pesos estimados') : '') + ')' : '')]);
+    }
+    if (typeof x.quantidade === 'number') l.push(['Sai do frasco', qtd_(x.quantidade, x.unidade) + (x.quantidade_informada ? ' (informado)' : ' (a soma das doses)')]);
+    if (x.estoque) l.push(['Estoque do produto', qtd_(x.estoque.antes, x.unidade) + ' → ' + qtd_(x.estoque.depois, x.unidade)]);
+    if (x.consumo) l.push(['Custo pelo consumo', x.consumo.valor ? Fmt.dinheiro(x.consumo.valor) + ' (' + qtd_(x.quantidade, x.unidade) + ' × R$ ' + Fmt.numero(x.consumo.custo_unitario, 4) + '), dividido entre os animais' : 'sem custo: o produto não tem custo por unidade no cadastro']);
+    if (x.fim_carencia) l.push(['Carência', plural(x.carencia_dias, 'dia', 'dias') + ': não abater até ' + Fmt.data(x.fim_carencia)]);
+    if (x.proxima_aplicacao) l.push(['Próxima aplicação', Fmt.data(x.proxima_aplicacao)]);
+    return l;
+  }
+  /** Estoque (Fase 3): o que entra ou sai, o custo por unidade da compra e o saldo antes e depois. */
+  function linhasEstoque(e) {
+    if (!e) return [];
+    var l = [];
+    if (e.subtipo === 'ENTRADA') {
+      l.push(['Entra no estoque', e.controla_estoque ? qtd_(e.quantidade, e.unidade) + (e.qtd_apresentacao ? ' (' + qtd_(e.qtd_apresentacao) + ' × ' + qtd_(e.fator_conversao, e.unidade) + ')' : '') : 'nada: ' + e.nome + ' não controla estoque (fica só o lançamento da compra)']);
+      if (e.custo_unitario !== null && e.custo_unitario !== undefined) l.push(['Custo por unidade', 'R$ ' + Fmt.numero(e.custo_unitario, 4) + ' por ' + e.unidade]);
+    } else if (e.motivo === 'CONTAGEM') l.push(['Acerto pela contagem', 'contado ' + qtd_(e.saldo_contado, e.unidade) + ', o sistema tinha ' + qtd_(e.saldo_na_data, e.unidade) + ': ' + (e.quantidade > 0 ? '+' : '') + qtd_(e.quantidade, e.unidade)]);
+    else if (e.motivo) l.push([Fmt.rotulo('MOTIVO_AJUSTE_ESTOQUE', e.motivo), 'sai ' + qtd_(-e.quantidade, e.unidade)]);
+    if (e.saldo) l.push(['Saldo de ' + e.nome, qtd_(e.saldo.antes, e.unidade) + ' → ' + qtd_(e.saldo.depois, e.unidade)]);
+    return l;
   }
   /** Base de todo R$/@ exibido (07, 4.1): de carcaça (apurada no romaneio), negociada a x% ou estimada. */
   function baseArroba(base, rend) {
@@ -2570,6 +2644,8 @@ var Registro = (function () {
     if (ref && ref[1] === 'PLANO_CONTAS') { var co = Store.conta(v); return co ? co.nome : 'conta'; }
     if (ref && ref[1] === 'PROPRIEDADES') { var pr = Store.propriedade(v); return pr ? pr.nome : String(v); }
     if (ref && ref[1] === 'CATEGORIAS') { var ca = Store.categoria(v); return ca ? ca.nome : 'categoria'; }
+    if (ref && ref[1] === 'PRODUTOS') { var pd = Store.produto(v); return pd ? pd.nome : 'produto'; }
+    if (ref && ref[1] === 'PROTOCOLOS_SANITARIOS') { var pt = Store.protocolo(v); return pt ? pt.nome : 'protocolo'; }
     if (def.tipo === 'dinheiro') { var c = typeof v === 'number' ? v : Fmt.lerDinheiro(String(v)).valor; return typeof c === 'number' ? Fmt.dinheiro(c) : 'R$ ' + v; }
     if (def.tipo === 'data') return Fmt.data(v);
     if (def.tipo === 'lista') { var op = Campos.opcoesDe(def, v).filter(function (x) { return x.valor === v; })[0]; return op ? op.rotulo : String(v); }
