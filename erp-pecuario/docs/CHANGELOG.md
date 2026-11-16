@@ -1390,3 +1390,35 @@ Nenhuma linha de código mudou nesta etapa: só documentos.
   - teste aleatório: 120 sementes novas × 60 passos (880000 a 880119): 3.892 comandos aceitos, 2.620 recusados, 0 falhas;
   - a verificar na conta do dono: os cenários da Fase 3 e a base de demonstração (cerca de 410 lançamentos, em várias
     execuções) com o tempo real do Sheets.
+
+## 16/11/2026 — Fuzz das Fases 1 a 3, passada 1 (gerador da Fase 3 e oráculos novos)
+
+- **Lacunas do gerador** (leitura de `tests/apoio-fuzz.js`): os tipos da Fase 3 tinham entrada, mas o modo curral e o
+  tronco em blocos com reenvio nunca eram mandados; a dose por kg só era conferida como positiva; o controle de estoque
+  quase nunca alternava; havia um protocolo só e a agenda não era consultada; a estação de monta quase sempre recusava a
+  data; o parto nunca era da prenhe nem corrigido depois do diagnóstico; as interações com a Fase 2 (venda na carência,
+  aplicação retroativa sobre a venda, pesagem e diagnóstico de quem saiu, estorno da compra de insumo já consumido) só
+  por acaso; o arquivo de sanidade sem carência, próxima e dose por kg; nenhum oráculo para a agenda, o GMD, os
+  indicadores e as consultas de manejo.
+- **Gerador ampliado**: o curral e o tronco (`gerarLida`: blocos com a chave própria `lida:<passo>:<n>`, bloco sem sinal,
+  reenvio com a mesma chave, conferência por `operacao.status`, aviso aceito na linha, peso substituído, animal repetido
+  no bloco, "terminar"); as interações (`gerarInteracao`: venda na carência para abate e para recria, também importada;
+  aplicação retroativa e importada com carência sobre a venda; pesagem, aplicação, ocorrência, diagnóstico e aborto de
+  quem saiu; saída corrigida para antes da pesagem ou do registro reprodutivo; parto da prenhe, parto corrigido ou
+  estornado depois do diagnóstico, aborto; estorno e correção para menos da compra de insumo consumido; desmama das
+  crias; castração do touro do lote; dose por kg; reprodução dentro e na borda da estação); o estoque ligado e desligado
+  (`estoqueLiga`); o protocolo novo (intervalo, aplicação única, campanha, faixa de idade, sexo) e editado na recorrência;
+  a aplicação com o protocolo do mesmo procedimento; o arquivo de sanidade com carência, próxima e dose por kg.
+- **Oráculos novos**: a chave do bloco (reenvio gravado = duplicado com o mesmo evento; `operacao.status` CONFIRMADA ou
+  INEXISTENTE, pelo que o sistema gravou); a dose por kg exata pelo peso vigente na data e o rateio do consumo pela dose;
+  os avisos de transição em todo caminho (`oraculoAvisosDeTransicao`: estoque controlado abaixo de zero e mais baixo que
+  antes → ESTOQUE_INSUFICIENTE com a política; venda que passa a estar na carência → CARENCIA_ATIVA, com a política na
+  venda para abate; também no bloco importado e no desfazer); a agenda sanitária e o GMD por modelos independentes; os
+  indicadores reprodutivos de cada estação (expostas contadas, taxas nunca zero sem denominador) e as consultas de
+  manejo; `COBERTURA` conta o que cada oráculo novo conferiu, e as sementes fixas exigem cada um (a semente 262 entrou).
+- **Medidas** (mutações numa cópia do projeto): sem o aviso de estoque e com a dose em duas casas, 20 de 32 sementes
+  falham; sem a carência contra a venda gravada, 1 de 40; com a idade mínima do protocolo contada errado, 2 de 24.
+- **Achados**: nenhum defeito do sistema. No modelo do teste, um (semente 7106): no período fechado, o pedido aceito de
+  volta sem a justificativa do aviso para antes da trava, e a simulação chega à trava; o oráculo da simulação passou a
+  aceitar esse par. Caso em `tests/fase3.fuzz.regressoes.test.js` (novo).
+- `docs/CONTRATOS.md`: estado e seção 36 (passada 1 das Fases 1 a 3). Nenhuma linha de `src/` mudou nesta etapa.

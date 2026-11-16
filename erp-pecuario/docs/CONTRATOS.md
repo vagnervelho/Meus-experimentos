@@ -130,6 +130,9 @@ Fase 3, etapa ACEITAÇÃO: os cenários de nível 2 da Fase 3 em `runAcceptanceT
 carência na agenda e na venda, o exemplo de 05, seção 4.7), ESTOQUE (o exemplo de 03a, seção 4.7) e REPRODUCAO (RN-060,
 061, 064, 066 e os desfechos da estação) —, a base de demonstração com o manejo completo da Fase 3 conferido pelo servidor
 no fim (`demonstracao.manejo`), a jornada de um ano da Fase 3 só pela `api()` e o mapa RN → teste da Fase 3 (seção 21).
+Fuzz das Fases 1 a 3, passada 1: o gerador do teste aleatório com o curral e o tronco em blocos, as interações da Fase 3
+com a Fase 2, o estoque ligado e desligado e os protocolos, e os oráculos novos (chave do bloco, dose por kg, avisos de
+estoque e de carência pela transição, agenda, GMD e indicadores) (seção 36).
 
 ## 1. Regras que valem para todo arquivo de `src/`
 
@@ -2282,6 +2285,10 @@ financeiro fechado, o comando aceito de volta sem a justificativa do aviso (`sem
 CAMPO_OBRIGATORIO depois da confirmação, antes da trava; a simulação, que não confirma nada, chega à trava (CONFLICT).
 O oráculo da simulação já aceitava esse par sem o pedido de volta e passou a aceitar também com ele sem a justificativa;
 o caso está em `tests/fase3.fuzz.regressoes.test.js` (que falha no modelo de antes).
+
+Execução desta passada (`FUZZ_PASSOS=100`): 1.240 sementes novas × 100 passos com o gerador nas versões da passada, sem
+falha do sistema; a leva final, com o gerador final e depois do conserto do modelo, 500 sementes (950000 a 950499): 27.297
+comandos aceitos, 17.064 recusados, 0 falhas. As 22 sementes fixas de 60 passos rodam em cerca de 40 s no `npm test`.
 
 ## 37. Telas sob demanda (Fase 3, etapa BASE) — `Api` (`sistema.tela`), `EventCatalog` (módulos), `JavaScript` (`Modulos`, `Telas`, `App`), `Index`, `scripts/ui-check.js`
 
