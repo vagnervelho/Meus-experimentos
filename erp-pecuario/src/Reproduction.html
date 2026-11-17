@@ -410,6 +410,7 @@ var TelaReproducao = (function () {
   async function enviarBloco(c, b, aoMudar) {
     var linhas = c.linhas.filter(function (l) { return l.bloco === b.chave; });
     b.estado = 'ENVIANDO';
+    b.recusa = null;
     c.erroGeral = null;
     linhas.forEach(function (l) { l.estado = 'ENVIANDO'; l.mensagem = null; });
     await guardarTronco(c, { imediato: true });
@@ -441,13 +442,19 @@ var TelaReproducao = (function () {
         b.estado = 'SEM_SINAL';
         b.mensagem = e.message;
         linhas.forEach(function (l) { l.estado = 'SEM_SINAL'; });
-      } else {
-        // Outra recusa do servidor (bloco já gravado com outro conteúdo, sem permissão, falha interna): não é "sem sinal". A
-        // mensagem fica na área de status, as linhas viram pendência com o motivo, e o bloco é solto (nada fica preso).
+      } else if (e.code === 'IDEMPOTENCY_MISMATCH') {
+        // A chave já está gravada, com outro conteúdo: os diagnósticos nunca saem de novo (com outra chave, gravariam duas
+        // vezes); ficam como pendência só com "Tirar", e o servidor diz onde conferir.
         b.estado = 'ERRO';
         c.erroGeral = e.message;
-        linhas.forEach(function (l) { l.estado = 'ERRO'; l.mensagem = e.code === 'IDEMPOTENCY_MISMATCH' ? 'Este bloco já saiu antes com outro cabeçalho e pode já estar gravado: confira em Eventos; se estiver, tire a linha.' : 'Recusado pelo servidor: ' + e.message; });
+        linhas.forEach(function (l) { l.estado = 'ERRO'; l.jaGravada = true; l.mensagem = 'Este bloco já foi gravado com outro conteúdo: confira em Eventos e tire a linha daqui.'; });
         soltarBloco(c, b.chave);
+      } else {
+        // Outra recusa (falha interna, sem permissão, não encontrado): ela não prova que a chave não foi gravada. O bloco fica com
+        // a chave, sem confirmação, e a mensagem do servidor na área de status; o próximo envio usa a mesma chave.
+        b.estado = 'SEM_SINAL';
+        b.recusa = e.message;
+        linhas.forEach(function (l) { l.estado = 'SEM_SINAL'; });
       }
       await guardarTronco(c);
       aoMudar();
@@ -486,17 +493,28 @@ var TelaReproducao = (function () {
       aoMudar();
     }
   }
+  /** O desenho da tela do tronco aberta agora: o envio que continua depois de sair e voltar redesenha a tela nova. */
+  var telaAtual = null;
+  function redesenhar() { if (telaAtual) telaAtual(); }
   async function conferirBlocos(c, aoMudar) {
-    var incertos = c.blocos.filter(function (b) { return b.estado === 'ENVIANDO' || b.estado === 'SEM_SINAL'; });
-    for (var i = 0; i < incertos.length; i++) {
-      var b = incertos[i];
-      var st = null;
-      try { st = await Cliente.verificar(b.chave, {}); } catch (e) { Util.registrarFalha('conferir o bloco do tronco', e); }
-      if (st && st.situacao === 'CONFIRMADA') await enviarBloco(c, b, aoMudar);
-      else { b.estado = 'SEM_SINAL'; c.linhas.forEach(function (l) { if (l.bloco === b.chave) l.estado = 'SEM_SINAL'; }); }
+    // Um envio de cada vez: enquanto confere, o "Enviar" espera (o mesmo bloco não sai por dois caminhos ao mesmo tempo).
+    if (enviando) return;
+    enviando = true;
+    try {
+      var incertos = c.blocos.filter(function (b) { return b.estado === 'ENVIANDO' || b.estado === 'SEM_SINAL'; });
+      for (var i = 0; i < incertos.length; i++) {
+        var b = incertos[i];
+        var st = null;
+        // Sem resposta, o bloco segue sem confirmação; a recusa do servidor à conferência fica com a mensagem dele.
+        try { st = await Cliente.verificar(b.chave, {}); } catch (e) { b.recusa = e.code === 'SEM_RESPOSTA' || e.code === 'TRANSPORTE' ? null : e.message; }
+        if (st && st.situacao === 'CONFIRMADA') await enviarBloco(c, b, aoMudar);
+        else { b.estado = 'SEM_SINAL'; c.linhas.forEach(function (l) { if (l.bloco === b.chave) l.estado = 'SEM_SINAL'; }); }
+      }
+      await guardarTronco(c);
+    } finally {
+      enviando = false;
+      aoMudar();
     }
-    await guardarTronco(c);
-    aoMudar();
   }
   function montarTronco(el) {
     var vivo = true;
@@ -682,7 +700,7 @@ var TelaReproducao = (function () {
       return !r.erro && r.resultado === 'POSITIVO' && r.idade ? 'p' + r.idade : 'p';
     }
     function enviarAgora() {
-      enviarTudo(c, desenhar).then(function (st) { if (st === 'SEM_SINAL') UI.aviso('Sem sinal: os diagnósticos ficaram guardados neste aparelho.', { tipo: 'aviso' }); },
+      enviarTudo(c, redesenhar).then(function (st) { if (st === 'SEM_SINAL') UI.aviso('Sem sinal: os diagnósticos ficaram guardados neste aparelho.', { tipo: 'aviso' }); },
         function (e) { Util.registrarFalha('envio do tronco', e); UI.aviso('Não foi possível enviar: ' + e.message, { tipo: 'erro' }); desenhar(); });
     }
     /** "Está certo" da linha: aceita o aviso dela no bloco; sem bloco (desfeito), a linha volta à fila e pede o aviso de novo. */
@@ -762,7 +780,9 @@ var TelaReproducao = (function () {
         h('div', { class: 'acoes' }, UI.botao('Tentar de novo', { atributos: { 'data-posicao-tentar': '1' }, aoClicar: function () { carregarPosicao(); desenhar(); } })))
         : h('div', { dataset: { troncoPosicao: '1' } }, UI.nota('Fêmeas e brincos conferidos pelo servidor em ' + Fmt.data(ui.posicao.data) + '.', 'info')));
       if (c.linhas.some(function (l) { return l.semPosicao && l.estado === 'NAO_ENCONTRADO'; })) ui.status.appendChild(h('div', { class: 'acoes' }, UI.botao('Conferir os brincos pendentes no servidor', { atributos: { 'data-resolver-pendentes': '1' }, aoClicar: function () { resolverEsperando(); } })));
-      if (semSinal) ui.status.appendChild(UI.nota('Sem sinal ou sem resposta: o que foi digitado está guardado neste aparelho. Toque em "Enviar" quando o sinal voltar; nada será gravado duas vezes.', 'aviso'));
+      var recusados = c.blocos.filter(function (b) { return b.estado === 'SEM_SINAL' && b.recusa; });
+      if (c.blocos.some(function (b) { return b.estado === 'SEM_SINAL' && !b.recusa; })) ui.status.appendChild(UI.nota('Sem sinal ou sem resposta: o que foi digitado está guardado neste aparelho. Toque em "Enviar" quando o sinal voltar; nada será gravado duas vezes.', 'aviso'));
+      recusados.forEach(function (b) { ui.status.appendChild(h('div', { role: 'alert', dataset: { recusaIncerta: b.chave } }, UI.nota('O servidor recusou o envio de ' + b.uids.length + (b.uids.length === 1 ? ' diagnóstico' : ' diagnósticos') + ': ' + b.recusa + ' Eles continuam guardados com a mesma chave e saem de novo no próximo envio; nada será gravado duas vezes.', 'erro'))); });
       if (c.erroGeral) ui.status.appendChild(h('div', { role: 'alert', dataset: { erroGeral: '1' } }, UI.nota('O servidor recusou o envio: ' + c.erroGeral + ' Nada foi gravado; os diagnósticos continuam neste aparelho.', 'erro')));
       if (pend.length) ui.status.appendChild(UI.nota(pend.length + (pend.length === 1 ? ' pendência impede' : ' pendências impedem') + ' o envio: corrija o brinco ou o resultado (digite de novo) ou tire a linha.', 'erro'));
       c.blocos.forEach(function (b) {
@@ -785,7 +805,7 @@ var TelaReproducao = (function () {
         var acoes = [];
         var bl = l.estado === 'AVISO' ? bloco(c, l.bloco) : null;
         if (l.estado === 'AVISO' && ((l.avisosProprios || []).length || !bl || !(bl.gerais || []).length || bl.geralAceito)) acoes.push(UI.botao('Está certo', { aoClicar: function () { aceitar(l); } }));
-        if (l.estado === 'ERRO' && l.animal_id) acoes.push(UI.botao('Corrigir o resultado', { aoClicar: function () { var a = Store.animal(l.animal_id); ui.brinco.value = a ? brincoDe(a) || a.codigo_interno : l.brinco; conferir(); ui.resultado.focus(); } }));
+        if (l.estado === 'ERRO' && l.animal_id && !l.jaGravada) acoes.push(UI.botao('Corrigir o resultado', { aoClicar: function () { var a = Store.animal(l.animal_id); ui.brinco.value = a ? brincoDe(a) || a.codigo_interno : l.brinco; conferir(); ui.resultado.focus(); } }));
         if (l.estado !== 'GRAVADA' && l.estado !== 'ENVIANDO' && l.estado !== 'SEM_SINAL') acoes.push(UI.botao('Tirar', { tipo: 'texto', aoClicar: function () { tirar(l); } }));
         if (acoes.length) li.appendChild(h('div', { class: 'acoes', style: 'margin-top:4px' }, acoes));
         ui.lista.appendChild(li);
@@ -818,8 +838,10 @@ var TelaReproducao = (function () {
       carregarPosicao();
       desenhar();
       ui.brinco.focus();
+      telaAtual = desenhar;
       resolverEsperando();
-      if (c.blocos.some(function (b) { return b.estado === 'ENVIANDO' || b.estado === 'SEM_SINAL'; })) conferirBlocos(c, desenhar).catch(function (e) { Util.registrarFalha('conferir os blocos do tronco', e); });
+      // O envio que ainda está no ar (saiu e voltou) termina sozinho e redesenha esta tela; sem ele, os blocos incertos são conferidos.
+      if (!enviando && c.blocos.some(function (b) { return b.estado === 'ENVIANDO' || b.estado === 'SEM_SINAL'; })) conferirBlocos(c, redesenhar).catch(function (e) { Util.registrarFalha('conferir os blocos do tronco', e); });
     }
     (tronco ? Promise.resolve(tronco) : Rascunhos.obter(ID_RASCUNHO).then(function (r) { return r && r.tipo === TIPO_RASCUNHO ? r : novaSessao(); })).then(function (x) {
       if (!vivo) return;
@@ -830,7 +852,7 @@ var TelaReproducao = (function () {
       Util.limpar(corpo);
       corpo.appendChild(UI.estadoErro(e, { acao: { texto: 'Tentar de novo', aoClicar: function () { Roteador.ir('reproducao/tronco', { forcar: true, substituir: true }); } } }));
     });
-    return function () { vivo = false; ui = {}; };
+    return function () { vivo = false; ui = {}; if (telaAtual === desenhar) telaAtual = null; };
   }
 
   // ------------------------------------------------------------------ ficha da matriz (bloco G) ----

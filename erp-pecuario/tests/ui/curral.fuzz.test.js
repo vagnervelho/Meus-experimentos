@@ -69,6 +69,8 @@ const esperarMs = (ms) => new Promise((r) => setTimeout(r, ms));
 const fmt1 = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const kg = (v) => fmt1.format(v) + ' kg';
 const ROTULO_RES = { POSITIVO: 'prenhe', NEGATIVO: 'vazia', INCONCLUSIVO: 'duvidosa' };
+/** Fêmeas do lote grande (o bloco cheio de 20 sai sozinho; dois blocos numa sessão). */
+const LOTE = Array.from({ length: 26 }, (_, i) => String(2001 + i));
 
 // ------------------------------------------------------------------ o rebanho ----
 /**
@@ -90,7 +92,7 @@ function montarSistema() {
       S.bicho(Object.assign({ brinco: '33', sexo: 'M', pasto_destino_id: S.PASTOS.B }, nasc('2024-01-10'))),
       S.bicho(Object.assign({ brinco: '0702' }, nasc('2022-02-02'))),
       S.bicho(Object.assign({ brinco: '0815' }, nasc('2021-01-01'))),
-    ],
+    ].concat(LOTE.map((b, i) => S.bicho(Object.assign({ brinco: b, pasto_destino_id: i % 2 ? S.PASTOS.B : S.PASTOS.A }, nasc('2022-0' + (1 + (i % 9)) + '-15'))))),
   }, 'semente-rebanho');
   const id = (b) => sem.animais.find((x) => x.brinco === b).animal_id;
   const ids = { vacaA: id('0457'), vacaB: id('0391'), m12: id('12'), m33: id('33'), v520: id('0520'), v611: id('0611'), v702: id('0702'), v815: id('0815') };
@@ -125,7 +127,8 @@ function novaRede(s) {
       reg.entregue = json !== PERDIDA && json !== TRANSPORTE;
       if (reg.entregue) {
         reg.resposta = JSON.parse(json);
-        if (cl === 'registrar' && !reg.resposta.ok && reg.resposta.error.code !== 'LOCKED') rede.novasRecusas.push(reg);
+        // A resposta que chega depois do prazo do aparelho (45 s) não é ouvida por ele: a recusa dela não precisa aparecer.
+        if (cl === 'registrar' && !reg.resposta.ok && reg.resposta.error.code !== 'LOCKED' && !reg.atrasada) rede.novasRecusas.push(reg);
       }
       return json;
     };
@@ -151,6 +154,8 @@ function novaRede(s) {
   /** A página foi embora (recarga): o que estava segurado se perde; o pedido que ainda não tinha chegado chega ou não. */
   rede.largar = (rnd) => { rede.segurados.splice(0, rede.segurados.length).forEach((x) => x.largar(rnd() < 0.5)); };
   rede.limpar = () => { rede.falhas = []; };
+  /** O relógio da página andou: o pedido segurado por 45 s ou mais já venceu o prazo do aparelho. */
+  rede.passou = (ms) => { rede.segurados.forEach((x) => { x.reg.segurado = (x.reg.segurado || 0) + ms; if (x.reg.segurado >= 45000) x.reg.atrasada = true; }); };
   return rede;
 }
 
@@ -236,6 +241,8 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     return resolvidos[k];
   }
   const falhar = (msg) => { throw new Error(msg); };
+  /** O relógio da página anda (os prazos do aparelho vencem; o que estava segurado nesse tempo chega atrasado). */
+  async function avancar(ms) { rede.passou(ms); await page.clock.fastForward(ms); }
 
   /** Espera a tela parar: todo pedido respondido (menos os segurados de propósito) e nenhuma conferência no ar. */
   async function assentar() {
@@ -245,7 +252,7 @@ async function rodarSemente(semente, nAcoes, opcoes) {
       if (st.em <= rede.segurados.length && !st.conf) { quietas += 1; if (quietas >= 3) return; } else quietas = 0;
       if (st.em <= rede.segurados.length && st.conf && quietas === 0 && i > 20) {
         // A conferência do brinco espera uma resposta que se perdeu: o operador espera os 45 s do prazo.
-        await page.clock.fastForward(46000);
+        await avancar(46000);
       }
       await esperarMs(15);
     }
@@ -259,7 +266,7 @@ async function rodarSemente(semente, nAcoes, opcoes) {
       const v = await lerTela(page, tela);
       const enviando = v.c && v.c.linhas.some((l) => l.estado === 'ENVIANDO');
       if (!enviando && i >= 1) return;
-      await page.clock.fastForward(50000);
+      await avancar(50000);
     }
   }
   function blocoDe(c, chave) { return c.blocos.find((b) => b.chave === chave) || null; }
@@ -289,6 +296,17 @@ async function rodarSemente(semente, nAcoes, opcoes) {
   }
 
   // ---------------------------------------------------------------- o oráculo ----
+  /** A mensagem de cada recusa do servidor ao lançamento, entregue desde a última olhada, aparece na tela. */
+  function recusasNaTela(v) {
+    const erros = [];
+    rede.novasRecusas.splice(0, rede.novasRecusas.length).forEach((reg) => {
+      const er = reg.resposta.error;
+      const msgs = (er.details || []).length ? er.details.map((d) => d.mensagem).filter(Boolean) : [er.message];
+      msgs.forEach((m) => { if (v.textoTodo.indexOf(m) < 0) erros.push('a recusa ' + er.code + ' do servidor não aparece na tela: "' + m + '"'); });
+      conta('recusa:' + er.code);
+    });
+    return erros;
+  }
   async function verificar(o2) {
     const op = o2 || {};
     await assentar();
@@ -386,20 +404,17 @@ async function rodarSemente(semente, nAcoes, opcoes) {
         if (!banco.some((g) => g.chave === l.bloco)) e('a linha ' + l.uid + ' diz gravada, e a chave ' + l.bloco + ' não está confirmada no banco');
       });
     }
-    // A mensagem de cada recusa do servidor ao lançamento aparece na tela.
-    rede.novasRecusas.splice(0, rede.novasRecusas.length).forEach((reg) => {
-      const er = reg.resposta.error;
-      const msgs = (er.details || []).length ? er.details.map((d) => d.mensagem).filter(Boolean) : [er.message];
-      msgs.forEach((m) => { if (v.textoTodo.indexOf(m) < 0) e('a recusa ' + er.code + ' do servidor não aparece na tela: "' + m + '"'); });
-      conta('recusa:' + er.code);
-    });
+    recusasNaTela(v).forEach(e);
     // Nada preso: com o tempo passado, nada "enviando", e toda linha não gravada tem saída.
     if (op.preso && c) {
       const pend = c.linhas.filter((l) => l.estado === 'NAO_ENCONTRADO' || l.estado === 'ERRO');
       c.linhas.forEach((l) => {
         const dom = v.linhas.find((x) => x.uid === l.uid) || { botoes: [] };
         if (l.estado === 'ENVIANDO') e('a linha ' + l.uid + ' ficou "enviando" depois de o tempo passar');
-        if ((l.estado === 'FILA' || l.estado === 'SEM_SINAL') && !pend.length && (!v.enviar || v.enviar.desabilitado)) e('a linha ' + l.uid + ' está "' + l.estado + '" e o "Enviar" está desligado sem pendência: ' + JSON.stringify(v.enviar) + ' "' + v.status + '"');
+        // A linha na fila de um bloco com aviso espera a decisão do aviso (de uma linha dele ou o geral), que tem botão.
+        const b = l.bloco ? blocoDe(c, l.bloco) : null;
+        const esperaAviso = b && b.estado === 'AVISO' && (c.linhas.some((x) => x.bloco === b.chave && x.estado === 'AVISO') || ((b.gerais || []).length && !b.geralAceito));
+        if ((l.estado === 'FILA' || l.estado === 'SEM_SINAL') && !esperaAviso && !pend.length && (!v.enviar || v.enviar.desabilitado)) e('a linha ' + l.uid + ' está "' + l.estado + '" e o "Enviar" está desligado sem pendência: ' + JSON.stringify(v.enviar) + ' "' + v.status + '"');
         if ((l.estado === 'NAO_ENCONTRADO' || l.estado === 'ERRO') && dom.botoes.indexOf('Tirar') < 0) e('a pendência ' + l.uid + ' não tem "Tirar": ' + JSON.stringify(dom.botoes));
         if (l.estado === 'AVISO' && dom.botoes.indexOf('Está certo') < 0 && !v.avisoGeral) e('a linha com aviso ' + l.uid + ' não tem "Está certo"');
       });
@@ -459,8 +474,6 @@ async function rodarSemente(semente, nAcoes, opcoes) {
 
   /** Brinco, Enter (ou não, o operador apressado), valor, Enter (ou o botão); a decisão do repetido; a escolha entre vários. */
   async function lancar() {
-    const antes = await lerTela(page, tela);
-    const c0 = antes.c;
     const texto = sortearTexto();
     let val = sortearValor();
     const viaBotao = rnd() < 0.3;
@@ -471,8 +484,13 @@ async function rodarSemente(semente, nAcoes, opcoes) {
       const doCampo = val.valor && val.valor.resultado === 'POSITIVO' && val.valor.idade ? val.valor.idade : null;
       val = { texto: val.texto, valor: { resultado: { p: 'POSITIVO', v: 'NEGATIVO', d: 'INCONCLUSIVO' }[botaoTronco], idade: botaoTronco === 'p' ? doCampo : null } };
     }
+    await lancarUm(texto, val, viaBotao, botaoTronco, false);
+  }
+  async function lancarUm(texto, val, viaBotao, botaoTronco, quieto) {
+    const antes = await lerTela(page, tela);
+    const c0 = antes.c;
     const nResolverAntes = rede.log.length;
-    log('lançar "' + texto + '" ' + JSON.stringify(val.texto) + (viaBotao ? ' (botão' + (botaoTronco ? ' ' + botaoTronco : '') + ')' : ''));
+    if (!quieto) log('lançar "' + texto + '" ' + JSON.stringify(val.texto) + (viaBotao ? ' (botão' + (botaoTronco ? ' ' + botaoTronco : '') + ')' : ''));
     await page.fill(cfg.brinco, texto);
     if (rnd() < 0.8) await page.press(cfg.brinco, 'Enter');
     await page.fill(cfg.valor, val.texto);
@@ -481,6 +499,9 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     else await page.press(cfg.valor, 'Enter');
     await assentar();
     let v = await lerTela(page, tela);
+    // O bloco cheio sai sozinho: a recusa dele aparece já (o passo seguinte do operador pode desfazê-lo).
+    const rec = recusasNaTela(v);
+    if (rec.length) falhar(rec.join('\n  - '));
     const D = M.sessao.data;
     // O que o servidor disse ao resolvedor nesta ação (ou a resposta guardada no aparelho).
     const pedidos = rede.log.slice(nResolverAntes).filter((r) => r.rota === 'animal.resolver' && (r.textos || []).indexOf(texto.trim()) >= 0);
@@ -558,11 +579,26 @@ async function rodarSemente(semente, nAcoes, opcoes) {
         return;
       }
     }
-    if (novas.length !== 1 || novas[0].animal_id !== X || novas[0].estado !== 'FILA') falhar('"' + texto + '" devia entrar na fila no animal ' + X + '; novas: ' + JSON.stringify(novas.map((l) => [l.uid, l.estado, l.animal_id])));
+    // Na fila — ou já saindo, quando ela fechou o bloco de 20 (que sai sozinho).
+    if (novas.length !== 1 || novas[0].animal_id !== X || novas[0].estado === 'NAO_ENCONTRADO') falhar('"' + texto + '" devia entrar na fila no animal ' + X + '; novas: ' + JSON.stringify(novas.map((l) => [l.uid, l.estado, l.animal_id])));
     add(novas[0].uid);
     conta('lancar:fila');
   }
 
+  /** O lote passando depressa: de 6 a 24 animais do lote grande, um atrás do outro (o bloco cheio sai sozinho). */
+  async function lote() {
+    const n = 6 + Math.floor(rnd() * 19);
+    const ini = Math.floor(rnd() * LOTE.length);
+    log('lote de ' + n + ' a partir de ' + LOTE[ini]);
+    for (let i = 0; i < n; i++) {
+      const v0 = await lerTela(page, tela);
+      if (v0.fase !== 'sessao') return;
+      const texto = LOTE[(ini + i) % LOTE.length];
+      const val = tela === 'curral' ? { texto: fmt1.format(300 + i).replace(/\./g, ''), valor: 300 + i } : { texto: i % 3 ? 'v' : 'p', valor: { resultado: i % 3 ? 'NEGATIVO' : 'POSITIVO', idade: null } };
+      await lancarUm(texto, val, false, null, true);
+    }
+    conta('lote');
+  }
   async function desfazer() {
     const c = (await lerTela(page, tela)).c;
     let alvo = null;
@@ -749,7 +785,7 @@ async function rodarSemente(semente, nAcoes, opcoes) {
   async function tempo() {
     const ms = um(rnd, [3000, 12000, 46000, 46000, 120000]);
     log('o tempo passa (' + ms / 1000 + ' s)');
-    await page.clock.fastForward(ms);
+    await avancar(ms);
     conta('tempo');
     return true;
   }
@@ -809,8 +845,11 @@ async function rodarSemente(semente, nAcoes, opcoes) {
       if (v.fase !== 'sessao') falhar('a tela não está no lote: fase ' + v.fase + ' (' + v.titulo + ')');
       let feito = false;
       for (let tent = 0; tent < 6 && !feito; tent++) {
-        const acao = ponderado(rnd, [[34, 'lancar'], [5, 'desfazer'], [4, 'tirar'], [3, 'corrigir'], [3, 'corrigirBrinco'], [5, 'aceitar'], [12, 'enviar'], [3, 'mudar'], [3, 'terminar'], [4, 'recarregar'], [3, 'sair'], [10, 'rede'], [4, 'soltar'], [5, 'tempo'], [2, 'outro'], [2, 'pendentes']]);
+        const temAviso = v.avisoGeral || v.linhas.some((l) => l.estado === 'AVISO');
+        const temErro = v.linhas.some((l) => l.estado === 'ERRO' || l.estado === 'NAO_ENCONTRADO');
+        const acao = ponderado(rnd, [[30, 'lancar'], [3, 'lote'], [5, 'desfazer'], [4, 'tirar'], [temErro || temAviso ? 8 : 1, 'corrigir'], [temErro ? 5 : 1, 'corrigirBrinco'], [temAviso ? 15 : 1, 'aceitar'], [16, 'enviar'], [3, 'mudar'], [3, 'terminar'], [4, 'recarregar'], [3, 'sair'], [10, 'rede'], [rede.segurados.length ? 10 : 1, 'soltar'], [5, 'tempo'], [2, 'outro'], [v.resolverPendentes || v.posicaoTentar ? 8 : 1, 'pendentes']]);
         if (acao === 'lancar') { await lancar(); feito = true; }
+        else if (acao === 'lote') { await lote(); feito = true; }
         else if (acao === 'desfazer') { await desfazer(); feito = true; }
         else if (acao === 'tirar') feito = await tirar(v.c);
         else if (acao === 'corrigir') feito = await corrigirPeso(v.c);
@@ -836,7 +875,7 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     rotulo = 'fim';
     log('== fim: a rede volta');
     rede.limpar();
-    for (let i = 0; i < 25; i++) {
+    for (let i = 0; i < 200; i++) {
       await esperarLongo();
       let v = await verificar({ preso: true });
       if (v.fase === 'inicio') { if (!M.ordem.length) break; const nova = M.sessao || sortearSessao(); await preencherInicio(nova); M.sessao = nova; continue; }
@@ -876,6 +915,16 @@ async function rodarSemente(semente, nAcoes, opcoes) {
         M.tiradas.add(err.uid);
         continue;
       }
+      if (c.erroGeral && v.mudar && !c.linhas.some((l) => l.estado === 'GRAVADA')) {
+        // A recusa geral (a data antes do marco zero): o operador muda a data da sessão.
+        const nova = Object.assign({}, c.sessao, { data: um(rnd, [HOJE, '2026-11-12', '2026-11-04']) });
+        log('fim: a recusa geral ("' + c.erroGeral + '"): mudar a data para ' + nova.data);
+        await page.click(cfg.mudar);
+        await page.waitForSelector(cfg.inicio);
+        await preencherInicio(nova);
+        M.sessao = nova;
+        continue;
+      }
       if (v.enviar && !v.enviar.desabilitado) { log('fim: enviar'); await page.click('[data-enviar]'); continue; }
       falhar('bloco preso no fim: nada a fazer e há linhas não gravadas: ' + JSON.stringify(c.linhas.map((l) => [l.uid, l.estado, l.mensagem])) + ' status "' + v.status + '"');
     }
@@ -904,7 +953,8 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     cont.sementes = (cont.sementes || 0) + 1;
     cont['tela:' + tela] = (cont['tela:' + tela] || 0) + 1;
   } catch (err) {
-    err.message = 'semente ' + semente + ' (' + tela + '), ação ' + k + ' [' + rotulo + ']: ' + err.message + '\n  ações:\n    ' + historico.join('\n    ');
+    const ultimos = rede.log.slice(-Number(process.env.FUZZ_ULTIMOS || 8)).map((r) => r.rota + (r.chave ? ' ' + r.chave.slice(0, 15) : '') + (r.falha ? ' [' + r.falha + ']' : '') + ' → ' + (r.entregue ? (r.resposta.ok ? 'ok' : r.resposta.error.code + ': ' + r.resposta.error.message) : 'não entregue'));
+    err.message = 'semente ' + semente + ' (' + tela + '), ação ' + k + ' [' + rotulo + ']: ' + err.message + '\n  ações:\n    ' + historico.join('\n    ') + '\n  últimos pedidos:\n    ' + ultimos.join('\n    ');
     throw err;
   } finally {
     await a.fechar().catch(() => {});
