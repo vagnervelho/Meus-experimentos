@@ -2808,3 +2808,10 @@ pesagem por lote, a média só se compara com outra MEDIA_LOTE; com uma linha do
   taxas por categoria, "parcial" vai na nota do valor (`UI.grafico` passa a nota ao `formatar`), nunca no item.
 - Sanidade → Aplicações mostra o produto ou o diagnóstico de `item.sanidade`. A aba Reprodução da ficha, com outra versão do
   app no servidor, oferece "Recarregar a página".
+
+**Teste aleatório (seção 36).** O oráculo do efeito da SANIDADE e do ESTOQUE espera, na correção, os valores congelados do
+original (`consumoCongelado`, `intervaloCongelado`, `entradaCongelada` em `tests/apoio-fuzz.js`). `oraculoEfeitoCongelado`
+confere a correção tardia sem mudança depois de o preparo rever o cadastro (custo, categoria, intervalo do protocolo, fator,
+controle de estoque); a correção é a do lançamento preparado (`sis.tardiaAlvo`). O pago no ato na conta Vacinas tem o
+oráculo do aceite (nunca em dobro) e o da recusa (`CUSTO_EM_DOBRO` só com o produto do cadastro numa conta de insumo, em
+`oraculoRecusa`).
