@@ -3008,4 +3008,8 @@ parte estimada da UA pelo rótulo da composição (`ua.rotulo`).
 importação), a contagem pela posição no dia (e a interação "movimento do mesmo dia depois da contagem", com o preparo da
 contagem), o intervalo do GMD da resposta da pesagem (de, peso, ganho e dias do intervalo do modelo; GMD = ganho ÷ dias), a ficha
 igual à agenda nas próximas doses, os partos da lista de Fêmeas iguais aos da ficha, o rótulo único dos pastos no desempenho, o
-último peso na data em `inventario.elegiveis` e o dia do cadastro do protocolo no fuso da fazenda.
+último peso na data em `inventario.elegiveis` e o dia do cadastro do protocolo no fuso da fazenda; a interação "aplicação sem os
+dias de carência, com a carência do cadastro" (com o preparo que põe a carência no produto). As sementes fixas são 23 (entrou a 29:
+com as interações novas no sorteio, nenhuma das 22 chegava à correção tardia com o cadastro mudado) e exigem também a ficha ×
+agenda, os partos da lista × ficha, o último peso na data e o GMD da resposta conferidos. `FUZZ_COBERTURA=1` imprime
+`F.COBERTURA` no fim da leva.

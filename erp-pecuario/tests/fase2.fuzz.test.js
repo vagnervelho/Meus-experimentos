@@ -57,7 +57,8 @@ const { createGas } = require('./harness');
 // e conclui um arquivo de ocorrências).
 // A semente 262 entrou com o fuzz das Fases 1 a 3 (passada 1): com o gerador ampliado, nenhuma das anteriores chegava a
 // uma venda que entrasse na carência de uma aplicação (o oráculo da transição da carência).
-const FIXAS = [20261115, 11, 47, 101, 2718, 3001, 3107, 3213, 3318, 9001, 9055, 1009, 1111, 1234, 4242, 777, 57, 8, 1, 31, 56, 262];
+// Rodada 3 da revisão da Fase 3: com as interações novas do gerador, a 29 entra para a correção tardia com o cadastro mudado.
+const FIXAS = [20261115, 11, 47, 101, 2718, 3001, 3107, 3213, 3318, 9001, 9055, 1009, 1111, 1234, 4242, 777, 57, 8, 1, 31, 56, 262, 29];
 const PASSOS = Number(process.env.FUZZ_PASSOS || 60);
 const N = Number(process.env.FUZZ_SEMENTES || 0);
 const INICIO = process.env.FUZZ_INICIO !== undefined ? Number(process.env.FUZZ_INICIO) : Date.now() % 1000000000;
