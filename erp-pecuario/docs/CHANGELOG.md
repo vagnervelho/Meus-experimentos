@@ -2003,3 +2003,27 @@ estendidos onde o defeito escapou deles (`docs/CONTRATOS.md`, seção 49). Nenhu
 - Teste aleatório da tela (`tests/ui/curral.fuzz.test.js`): o oráculo confere a garantia nova a cada ação; ações novas (as respostas
   chegam com a pergunta do repetido na tela; o brinco conferido sem lançar antes de mudar a sessão); 25% das sementes sem
   `localStorage`, com o rascunho no servidor segurado enquanto o bloco sai (`apoio-curral`: classe de rota `rascunho`).
+- Leva do teste aleatório do motor com o código final (sementes 3800000 a 3800299, 300 × 100 passos, 3 processos): 17.747
+  aceitos, 9.872 recusados, 0 falhas; a agenda conferida com protocolo por categoria 171 vezes (147 com o animal que entrou na
+  categoria depois de entrar no rebanho), 329 correções de aplicação conferidas pelas cópias do original, 395 correções sem
+  mudança mais tarde aceitas, 230.015 pendências da agenda e 2.097.389 unidades da viagem no tempo comparadas. O procedimento do
+  protocolo trocado foi sorteado 1 vez, num protocolo sem aplicação (aceito); a troca no protocolo cumprido e a correção tardia
+  barrada pela carência do próprio original não apareceram na leva — ficam cobertas pelos testes determinísticos (achados 11 e 2).
+  Antes, uma leva de busca com o código intermediário (3700000 a 3700039, 40 × 100) deu 2.274 aceitos, 1.406 recusados e 0 falhas.
+  As 23 sementes fixas de 60 passos dão as mesmas sequências de antes (826 aceitos, 443 recusados, 0 falhas).
+- Leva do teste aleatório da tela (sementes 3000 a 3049, 50 × 40 ações): 49 aprovadas e 1 falha do modelo do teste, refutada como
+  defeito do sistema — a semente 3040 (sem `localStorage`) segurou a gravação do rascunho no servidor além do prazo, e o aparelho
+  registrou a falha no console ("[ERP] rascunho no servidor: O servidor demorou demais…", avisada na faixa), como deve; o oráculo
+  passou a aceitar esse registro nesse modo, e a semente 3040 passa. Nas 49: 2.434 conferências, 2.688 blocos que saíram
+  conferidos intocados, 1.119 linhas gravadas, 15 sementes sem `localStorage` (19 rascunhos segurados), 161 substituições, 142
+  "Pesar de novo", 7 brincos conferidos antes de mudar a sessão; a decisão refeita no meio não apareceu na leva (fica no teste do
+  achado 3). As 6 sementes fixas passam.
+- Verificado no fim, com o código final: `npm test`, 863 testes, 863 aprovados e 0 falhas (908,6 s), com as 23 sementes fixas de 60
+  passos (826 aceitos, 443 recusados, 0 falhas); `npm run ui:check`, 186 testes, 186 aprovados e 0 falhas (438,6 s), a página
+  inicial com 460.755 bytes de 460.800 (450 KB) e, sob demanda, Import 48 KB, Weights 59 KB, Health 25 KB e Reproduction 65 KB de
+  150 KB. Antes da etapa: 855 e 173.
+- `docs/CONTRATOS.md`: o estado ganhou a frase desta etapa; seção 49 nova (os consertos por classe, a decisão do procedimento do
+  protocolo em uso, a garantia nova da fila de lote, a decisão da regressão 6, os testes e os oráculos estendidos); a seção 48 diz
+  que o rascunho no servidor passou a ser coberto. `docs/fase-0/` não mudou.
+- Durante a etapa, o salvamento automático de fora dela gravou estados intermediários (commits "salva convergência em andamento
+  (conserto da revisão final)"); esta etapa não fez commit nem push.
