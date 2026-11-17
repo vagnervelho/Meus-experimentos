@@ -2027,3 +2027,59 @@ estendidos onde o defeito escapou deles (`docs/CONTRATOS.md`, seção 49). Nenhu
   que o rascunho no servidor passou a ser coberto. `docs/fase-0/` não mudou.
 - Durante a etapa, o salvamento automático de fora dela gravou estados intermediários (commits "salva convergência em andamento
   (conserto da revisão final)"); esta etapa não fez commit nem push.
+
+## 17/11/2026 — Fase 3, relatório da convergência
+
+Por quê: a convergência da Fase 3 (as três etapas pela garantia e o conserto da revisão final) precisava entrar no relatório
+da fase, com os números de uma execução feita agora e um balanço honesto: a revisão final terminou sem achado alto? Não
+terminou (7 altos). Esta etapa não mudou código.
+
+- `docs/RELATORIO_FASE3.md`: seção 6.6 nova, "Convergência da Fase 3". Ela traz:
+  - por que: as três rodadas sem queda e as duas classes de defeito;
+  - o oráculo de viagem no tempo: as consultas cobertas, as exceções por desenho, as levas e os 10 defeitos;
+  - o resolvedor único: a regra, a decisão que contraria 08, seção 5, e os 5 defeitos;
+  - o teste aleatório da tela do curral e do tronco: as ações, as falhas de rede, as garantias, as levas e os 9 defeitos;
+  - a revisão final: os 17 achados por lente e gravidade, as decisões e por onde cada um passou pelas garantias;
+  - o balanço: a revisão final não terminou sem achado alto (7 altos, 4 no curral e no tronco; 8 dos 17 eram conserto
+    incompleto ou regressão, 6 deles das próprias etapas da convergência), e a convergência não está demonstrada.
+- Também no relatório, todos os números atualizados: o resumo; as entregas, com a linha da convergência; a seção 2, com a
+  execução desta etapa e a contagem por arquivo (82 de Node, 29 de navegador); os cenários por nível; o que fica com o dono
+  (as decisões da convergência a ratificar, uma delas contra o desenho); a decisão 16; as limitações 1, 3, 10, 11, 13, 15 e 16
+  (nova); a tabela do teste aleatório; e o veredito. A seção 6.5 passou a ser o balanço das três rodadas antes da
+  convergência.
+- Executado nesta etapa, com o código final (`src/` de `bfbdca6`, testes de `d0033b6`):
+  - `npm test`: 863 testes, 863 aprovados e 0 falhas (825,4 s), com as 23 sementes fixas (826 aceitos, 443 recusados, 0
+    falhas);
+  - `npm run ui:check`: 186 testes, 186 aprovados e 0 falhas (433,9 s). A página inicial tem 460.755 bytes de 460.800 (sobram
+    45); sob demanda, Import tem 49.608 bytes, Weights 60.822, Health 25.149 e Reproduction 66.937;
+  - depois da mudança no `CONTRATOS.md`, `static` e `revisao4.interface` de novo: 26 de 26;
+  - a contagem por arquivo pelo registrador (o `node:test` trocado por um contador de `test()`): os 82 arquivos de Node somam
+    863, e os 29 de navegador, 186.
+- `npm run trava:medir -- --vezes 3`, sem outro processo: 430 comandos, média de 167,8 ms (p50 152,9; p95 358,2), 21,3 s de
+  72,2 s na trava (29%). Na etapa das rodadas 2 e 3, a média era 147,8 ms. As três execuções variaram de 149,9 a 169,6 ms.
+- Conferido de novo nesta etapa, com os testes de hoje sobre o `src/` de antes de cada etapa:
+  - revisão final (`11b744a`): os 8 testes de Node falham por asserção; os 13 de navegador falham, 10 por asserção e 3 pela
+    espera de um estado que a tela de então não tinha;
+  - viagem no tempo (`d72e518`): os 16 falham. Os 7 cenários de comportamento falham por asserção. O do retrato e as 8
+    sequências falham porque o oráculo de hoje usa `Timeline.retratoEm`, que lá não existia; o registro da etapa contava 14,
+    com as duas sequências do modelo do teste passando nos dois códigos;
+  - resolvedor (`8dc5c35`): os 2 falham, porque não havia a rota;
+  - tela do curral (`ee1b2cd`): as 7 regressões falham, 5 por asserção ou espera e 2 do tronco porque `TelaReproducao.sessao()`,
+    que o teste lê, ainda não existia.
+- Leva de confirmação do motor, com o código final (3900000 a 3900099, 100 sementes × 100 passos, 2 processos): 5.878
+  aceitos, 3.290 recusados e 0 falhas. Na viagem no tempo, 741 retratos, 714.564 unidades comparadas, 167.939 com o relógio
+  adiantado e 44.905 retratos de hoje conferidos; no resolvedor, 59.497 textos pelos quatro caminhos; a agenda com protocolo
+  por categoria, 84 vezes; 96 correções de aplicação conferidas pelas cópias do original. A troca do procedimento de um
+  protocolo cumprido e a correção tardia barrada pela carência do original não apareceram de novo.
+- Leva de confirmação da tela do curral e do tronco, com o código final (4000 a 4029, 30 sementes × 40 ações, 1 processo):
+  30 aprovadas e 0 falhas; 7 sementes sem `localStorage` (8 rascunhos segurados), 1.426 conferências do oráculo, 1.662 blocos
+  que saíram conferidos intocados e 607 linhas gravadas.
+- `docs/CONTRATOS.md`: a frase do estado desta etapa. Na seção 46, as rotas CONSULTA passam a ser 30 (com `animal.resolver`), e
+  `importacao.linhas` entrou na lista das que só mostram registros. Na seção 47, o caminho da rota no código
+  (`Identificacao.resolverRota` e `consultaResolver`, que eram exportadas e não estavam citadas). Sem mudança de contrato.
+  `docs/fase-0/` não mudou.
+- Ficaram de fora desta etapa: o `README.md` ("Última execução" com 809 e 135 testes, "38 arquivos") e o
+  `docs/GUIA_DE_IMPLANTACAO.md` continuam com números antigos.
+- Durante a etapa, o salvamento automático de fora dela gravou estados intermediários: o commit `752e06c`, com a entrada
+  anterior deste arquivo (o conserto da revisão final), e o `b23e823`, com o `CONTRATOS.md` desta etapa. O `src/` e os testes
+  não mudaram desde o `d0033b6`. Esta etapa não fez commit nem push.
