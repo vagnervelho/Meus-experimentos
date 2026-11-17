@@ -1841,3 +1841,41 @@ aleatório (`docs/CONTRATOS.md`, seção 46). A segunda classe (os estados do cu
   estorno imediato (seção 36) dizem o que mudou. `docs/fase-0/` não mudou.
 - Durante a etapa, o salvamento automático de fora dela gravou estados intermediários (commits `9194f61`, `7336a70`, `da538ec`,
   `a9e05b6`, `e4a7e11` e `8dc5c35`, "salva convergência em andamento"); esta etapa não fez commit nem push.
+
+## 17/11/2026 — Fase 3, conserto pela garantia, etapa 2: resolvedor único da posição na data
+
+Por quê: os achados "conserto incompleto dos achados 7, 16 e 22" voltaram nas três rodadas de revisão — o brinco, o pasto, a
+categoria e o último peso de um animal numa data passada resolvidos de jeitos diferentes no curral, no tronco, no seletor, na
+importação e na conferência (a consulta que falhava sem sinal, o número lançado errado, o código interno parecido com brinco, o
+reuso). Esta etapa troca o caso a caso por UM resolvedor no servidor e faz todos os caminhos usarem só ele
+(`docs/CONTRATOS.md`, seção 47).
+
+- `src/Identificacao.js` (novo, puro): `indice` (os períodos de cada número pela regra única de `Timeline.periodosDeBrinco`,
+  os números lançados errado, os códigos internos e os nomes dos animais de referência), `resolver` (texto e data → ACHADO,
+  VARIOS ou RECUSADO com o porquê: o número em uso em D; o código interno inteiro, ou o atalho só do animal sem brinco em D; o
+  histórico de antes do marco zero pelo número do marco zero; ANTES_DO_USO, SEM_USO, LANCADO_ERRADO, CODIGO_DE_ANIMAL_COM_BRINCO,
+  NAO_ENCONTRADO), `descrever` e `estadoEm` (animal e data → brinco, pasto, categoria, situação, presença, último peso e o
+  porquê de não servir) e a rota `animal.resolver` (CONSULTA). `Timeline.brincosLancadosErrado` (da mesma cadeia da regra única).
+- `inventario.elegiveis` monta cada item por `Identificacao.descrever` (a mesma descrição da conferência do curral e do tronco).
+- `ImportService`: o rebanho inicial (a mãe e o pai no marco zero), os importadores de eventos e de manejo e a conferência do fato
+  já gravado acham o animal pelo resolvedor único (antes, `donoDoBrinco_`/`acharAnimal_`/`referencia_`/`progenitorNaBase_`, com
+  regras próprias). Na compra, a coluna do brinco é o número do animal comprado: o texto lido como código ou nome é um brinco novo.
+- Cliente: `Store.resolverBrinco` e os índices por brinco do aparelho saíram; `Store.resolver` (a rota, guardada por versão dos
+  dados, data e tipo), `Store.buscar` (o texto pelo servidor; o nome pela lista do aparelho só quando o servidor responde "não
+  encontrado") e `Store.doEstado`. O curral e o tronco perguntam ao servidor no Enter do brinco e o lançamento espera a resposta;
+  sem resposta, a linha fica pendente (`SEM_POSICAO`) e vai ao servidor no "Tentar de novo", no botão novo "Conferir os brincos
+  pendentes no servidor" e na próxima conferência respondida — nunca pela lista de hoje. "Corrigir o brinco" também. O seletor
+  (busca e "Colar lista"), a busca do topo, o campo de animal dos formulários (na data do lançamento) e o "Comparar a curva" usam o
+  mesmo pedido. Decisão: o desenho (08, seção 5) resolvia o brinco "no store, sem ida"; esta etapa manda o contrário (seção 47).
+- Testes novos: `tests/resolvedor.unico.test.js` (2 testes: 19 casos difíceis × curral, tronco e seletor pela rota, a
+  conferência pela posição da data com a mesma descrição e a importação de verdade; e a rota), `tests/ui/resolvedor.test.js`
+  (2 testes: a mesma tabela no curral, no tronco e no seletor da tela) e o apoio comum `tests/apoio-resolvedor.js`. Com o `src/`
+  de antes (`8dc5c35`), a importação divergia do resolvedor em 5 dos 19 casos (a pesagem do 1457 de 10/11 na vaca que só o recebeu
+  em 11/11; a vaca pelo código inteiro e a cria sem brinco pelo código, não achadas; a cria achada pelo 0901 antes de nascer).
+- Testes de tela ajustados ao pedido ao servidor (nenhum enfraquecido): `A.enter` (o Enter que espera a resposta) no curral e no
+  tronco; os dois "sem sinal" da rodada 3 cortam também a conferência do brinco (`falharTransporte = 2`); os dois "achado 12"
+  conferem o 20º brinco com sinal antes de o sinal cair; o "Colar lista" espera a resposta.
+- Oráculo novo do teste aleatório (`tests/apoio-fuzz.js`; seção 36): `oraculoResolucao` no passo sorteado da viagem no tempo, em D
+  e hoje (os textos difíceis do modelo pelos quatro caminhos da rota — `RESOLVER:CAMINHOS` —, cada número da posição da data no
+  animal do resolvedor e com a mesma descrição — `RESOLVER:POSICAO`, `RESOLVER:CONFERENCIA`) e `oraculoResolucaoImportacao` ao
+  concluir uma importação (`RESOLVER:IMPORTACAO`). As sementes fixas exigem os quatro contadores novos; as sequências não mudaram.

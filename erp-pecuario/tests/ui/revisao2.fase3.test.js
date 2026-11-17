@@ -20,15 +20,15 @@ const txt = async (page, sel) => ((await page.textContent(sel)) || '').replace(/
 const linhas = (page, lista) => page.$$eval((lista || '.curral-lista') + ' [data-linha]', (ls) => ls.map((l) => [l.dataset.estado, l.textContent.replace(/\s+/g, ' ').trim()]));
 async function pesar(page, brinco, peso) {
   await page.fill('#cur-brinco', brinco);
-  await page.press('#cur-brinco', 'Enter');
+  await A.enter(page, '#cur-brinco');
   await page.fill('#cur-peso', peso);
-  await page.press('#cur-peso', 'Enter');
+  await A.enter(page, '#cur-peso');
 }
 async function diagnosticar(page, brinco, resultado) {
   await page.fill('#tr-brinco', brinco);
-  await page.press('#tr-brinco', 'Enter');
+  await A.enter(page, '#tr-brinco');
   await page.fill('#tr-resultado', resultado);
-  await page.press('#tr-resultado', 'Enter');
+  await A.enter(page, '#tr-resultado');
 }
 const doServidor = (s, aba) => s.read({ rota: 't', reads: [aba, 'EVENTOS', 'OPERACOES'], tratador: (tx) => tx.repo.vigentes(aba) });
 /** O rebanho de exemplo com o 0457 da vaca A trocado em 11/11 (1457) e o 0457 reaproveitado na vaca B (0391) em 12/11. */
@@ -52,19 +52,19 @@ test('achados 7, 16 e 22 (curral): com data passada, o 0457 digitado é a vaca q
   await page.waitForSelector('#cur-brinco');
   await page.waitForFunction(() => /posição em 10\/11\/2026/.test((document.querySelector('[data-curral-posicao]') || {}).textContent || ''));
   await page.fill('#cur-brinco', '0457');
-  await page.press('#cur-brinco', 'Enter');
+  await A.enter(page, '#cur-brinco');
   assert.equal(await page.getAttribute('#cur-conferencia [data-conferencia]', 'data-conferencia'), 'OK');
   assert.match(await txt(page, '#cur-conferencia'), /0457 em 10\/11\/2026 \(hoje 1457\)/, 'a vaca A, que tinha o 0457 naquele dia');
   assert.doesNotMatch(await txt(page, '#cur-conferencia'), /A-000002/);
   await page.fill('#cur-peso', '410');
-  await page.press('#cur-peso', 'Enter');
+  await A.enter(page, '#cur-peso');
   // O 1457 não era de ninguém em 10/11 (a vaca A ainda tinha o 0457): pendência, e nunca a vaca A por engano.
   await page.fill('#cur-brinco', '1457');
-  await page.press('#cur-brinco', 'Enter');
+  await A.enter(page, '#cur-brinco');
   assert.equal(await page.getAttribute('#cur-conferencia [data-conferencia]', 'data-conferencia'), 'NAO_ENCONTRADO');
   assert.match(await txt(page, '#cur-conferencia'), /1457: em 10\/11\/2026 nenhum animal do rebanho tinha este brinco \(hoje ele é de 1457, que naquele dia tinha o 0457\)/);
   await page.fill('#cur-peso', '300');
-  await page.press('#cur-peso', 'Enter');
+  await A.enter(page, '#cur-peso');
   // "Corrigir o brinco" da pendência, para o 0391 (a vaca B naquele dia): aceita pela posição da data.
   await page.click('.curral-lista [data-estado="NAO_ENCONTRADO"] button:has-text("Corrigir o brinco")');
   await page.fill('#cur-corrige-brinco', '0391');
@@ -93,11 +93,11 @@ test('achados 7, 16 e 22 (tronco): com data passada, a fêmea vem da posição d
   await page.waitForSelector('#tr-brinco');
   await page.waitForSelector('[data-tronco-posicao]');
   await page.fill('#tr-brinco', '0457');
-  await page.press('#tr-brinco', 'Enter');
+  await A.enter(page, '#tr-brinco');
   assert.equal(await page.getAttribute('#tr-conferencia [data-conferencia]', 'data-conferencia'), 'OK');
   assert.match(await txt(page, '#tr-conferencia'), /0457 em 10\/11\/2026 \(hoje 1457\)/);
   await page.fill('#tr-resultado', 'p90');
-  await page.press('#tr-resultado', 'Enter');
+  await A.enter(page, '#tr-resultado');
   await page.click('[data-enviar]');
   await page.waitForSelector('.curral-lista [data-estado="GRAVADA"]', { timeout: 15000 });
   await A.esperarServidor(page);
@@ -117,11 +117,11 @@ test('achado 17: o animal sem brinco é achado pelo código interno (A-000004 e 
   await page.click('button:has-text("Começar a pesar")');
   await page.waitForSelector('#cur-brinco');
   await page.fill('#cur-brinco', '000004');
-  await page.press('#cur-brinco', 'Enter');
+  await A.enter(page, '#cur-brinco');
   assert.equal(await page.getAttribute('#cur-conferencia [data-conferencia]', 'data-conferencia'), 'OK');
   assert.match(await txt(page, '#cur-conferencia'), /A-000004/);
   await page.fill('#cur-brinco', 'A-000004');
-  await page.press('#cur-brinco', 'Enter');
+  await A.enter(page, '#cur-brinco');
   assert.equal(await page.getAttribute('#cur-conferencia [data-conferencia]', 'data-conferencia'), 'OK');
   await page.fill('#cur-brinco', '');
   await pesar(page, '0457', '412');
@@ -132,7 +132,7 @@ test('achado 17: o animal sem brinco é achado pelo código interno (A-000004 e 
   assert.equal(await page.getAttribute('#cur-conferencia [data-conferencia]', 'data-conferencia'), 'OK');
   assert.equal(await page.evaluate(() => document.activeElement && document.activeElement.id), 'cur-peso');
   await page.fill('#cur-peso', '180');
-  await page.press('#cur-peso', 'Enter');
+  await A.enter(page, '#cur-peso');
   assert.match(await txt(page, '.curral-contador'), /3 de 3 · faltam 0/);
   assert.equal((await linhas(page)).filter((l) => l[0] === 'NAO_ENCONTRADO').length, 0);
   await page.click('[data-enviar]');

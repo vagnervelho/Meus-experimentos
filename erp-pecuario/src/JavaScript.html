@@ -505,7 +505,7 @@ var Cliente = (function () {
 
 var Store = (function () {
   var FORMATO_CACHE = 1;
-  var est = { dados: null, params: {}, listas: {}, animais: null, porId: null, porBrinco: null, porBrincoSemZeros: null, filhos: null, baixados: null, atualizadoEm: null };
+  var est = { dados: null, params: {}, listas: {}, animais: null, porId: null, filhos: null, baixados: null, atualizadoEm: null };
   var ouvintes = [];
   var cfg = { ambiente: 'PRODUCAO', appVersion: null };
 
@@ -529,7 +529,7 @@ var Store = (function () {
     return v;
   }
   function indexar_() {
-    est.animais = null; est.porId = null; est.porBrinco = null; est.porBrincoSemZeros = null; est.filhos = null;
+    est.animais = null; est.porId = null; est.filhos = null;
   }
   function materializar_(col) {
     if (!col || !col.colunas) return [];
@@ -547,14 +547,9 @@ var Store = (function () {
     reindexar_();
   }
   function reindexar_() {
-    est.porId = {}; est.porBrinco = {}; est.porBrincoSemZeros = {}; est.filhos = {};
+    est.porId = {}; est.filhos = {};
     todosConhecidos_().forEach(function (a) {
       est.porId[a.animal_id] = a;
-      if (a.brinco) {
-        var k = normalizarBrinco(a.brinco, true), z = normalizarBrinco(a.brinco, false);
-        (est.porBrinco[k] = est.porBrinco[k] || []).push(a);
-        (est.porBrincoSemZeros[z] = est.porBrincoSemZeros[z] || []).push(a);
-      }
       if (a.mae_id) (est.filhos[a.mae_id] = est.filhos[a.mae_id] || []).push(a);
     });
   }
@@ -758,50 +753,59 @@ var Store = (function () {
     return p.join(' · ');
   }
   /**
-   * Resolução do brinco no store (08, seção 5): (1) igual exato; (2) sem zeros à esquerda, se o parâmetro
-   * brinco_ignora_zeros_esquerda permitir; (3) mais de um → lista para escolher. Inclui os baixados já trazidos.
-   * Devolve {modo: EXATO | SEM_ZEROS | VARIOS | NENHUM, candidatos}.
+   * O resolvedor único (animal.resolver; CONTRATOS, seção 47): o cliente nunca resolve brinco. Os textos digitados (brinco,
+   * código interno, nome do animal de referência) vão ao servidor com a data; cada um volta achado, com mais de um animal
+   * ou recusado com o porquê, e cada animal citado vem descrito NAQUELE dia. Sem sinal, a promessa falha: quem chama deixa a
+   * linha pendente, nunca a resolve pela lista do aparelho. A resposta fica guardada por versão dos dados, data e tipo.
+   * o: {tipo, sexo, ids}. Resolve {data, motivo, porTexto: {texto: r}, animais: {id: estado}}.
    */
-  function resolverBrinco(texto, filtro) {
-    garantirIndices_();
-    var f = typeof filtro === 'function' ? filtro : function () { return true; };
-    var exatos = (est.porBrinco[normalizarBrinco(texto, true)] || []).filter(f);
-    if (exatos.length === 1) return { modo: 'EXATO', candidatos: exatos };
-    if (exatos.length > 1) return { modo: 'VARIOS', candidatos: exatos };
-    if (param('brinco_ignora_zeros_esquerda') !== false) {
-      var z = (est.porBrincoSemZeros[normalizarBrinco(texto, false)] || []).filter(f);
-      if (z.length === 1) return { modo: 'SEM_ZEROS', candidatos: z };
-      if (z.length > 1) return { modo: 'VARIOS', candidatos: z };
+  var resolvidos = { v: null, g: {} };
+  async function resolver(textos, data, o) {
+    o = o || {};
+    if (resolvidos.v !== versao()) resolvidos = { v: versao(), g: {} };
+    var k = data + '|' + (o.tipo || '') + '|' + (o.sexo || '');
+    var g = resolvidos.g[k] = resolvidos.g[k] || { porTexto: {}, animais: {}, motivo: null };
+    var ts = textos.map(function (t) { return String(t || '').trim(); });
+    var faltam = ts.filter(function (t, i) { return !g.porTexto[t] && ts.indexOf(t) === i; });
+    var ids = (o.ids || []).filter(function (id) { return !g.animais[id]; });
+    if (faltam.length || ids.length) {
+      var r = (await Cliente.consulta('animal.resolver', { data: data, textos: faltam, ids: ids, tipo: o.tipo || null, sexo: o.sexo || null })).data;
+      r.textos.forEach(function (x, i) { g.porTexto[faltam[i]] = x; });
+      Object.assign(g.animais, r.animais);
+      g.motivo = r.motivo;
     }
-    return { modo: 'NENHUM', candidatos: [] };
+    var porTexto = {};
+    ts.forEach(function (t) { porTexto[t] = g.porTexto[t]; });
+    return { data: data, motivo: g.motivo, porTexto: porTexto, animais: g.animais };
   }
+  /** O animal do aparelho, ou o descrito pelo servidor (o que saiu do rebanho e não está na lista). */
+  function doEstado(e) {
+    return e && (animal(e.animal_id) || { animal_id: e.animal_id, codigo_interno: e.codigo_interno, brinco: e.brinco_hoje, sexo: e.sexo, situacao_cadastral: e.situacao_hoje });
+  }
+  function semResposta(e) { return 'O animal é achado pelo servidor, que não respondeu: ' + e.message; }
   /**
-   * Busca do seletor: brinco (com a resolução acima), código interno (A-000123 ou só o número), nome, ou
-   * "crias da <brinco da mãe>" quando o texto é o brinco de uma matriz. Devolve {modo, candidatos, mae}.
+   * Busca de um texto (a do topo, a do campo de animal, a do seletor, a da curva): o texto pelo resolvedor único na data;
+   * sem animal com o texto, os nomes da lista do aparelho (o nome não é brinco). `filtro` marca os candidatos que servem; a
+   * fêmea achada que não serve dá as crias dela sem brinco. Resolve {modo: EXATO | SEM_ZEROS | VARIOS | CRIAS | NENHUM,
+   * candidatos, mae, mensagem}.
    */
-  function buscar(texto, filtro) {
-    garantirIndices_();
+  async function buscar(texto, data, filtro, o) {
     var t = String(texto || '').trim();
     if (!t) return { modo: 'NENHUM', candidatos: [] };
-    var f = typeof filtro === 'function' ? filtro : function () { return true; };
-    var r = resolverBrinco(t, f);
-    if (r.modo !== 'NENHUM') {
-      var crias = r.candidatos.length === 1 ? filhosDe(r.candidatos[0].animal_id).filter(function (x) { return !x.brinco && f(x); }) : [];
-      return { modo: r.modo, candidatos: r.candidatos.concat(crias), mae: crias.length ? r.candidatos[0] : null };
+    var f = filtro || function () { return true; };
+    var res = await resolver([t], data || Fmt.hoje(), o);
+    var x = res.porTexto[t];
+    var de = function (id) { return doEstado(res.animais[id]); };
+    if (x.situacao === 'ACHADO') {
+      var a = de(x.animal_id);
+      var crias = (x.crias || []).map(de).filter(f);
+      if (!f(a)) return { modo: crias.length ? 'CRIAS' : 'NENHUM', candidatos: crias, mae: a, mensagem: rotuloAnimal(a) + ': ' + (res.animais[a.animal_id].inelegivel || 'não serve aqui') + '.' };
+      return { modo: x.como === 'SEM_ZEROS' ? 'SEM_ZEROS' : 'EXATO', candidatos: [a].concat(crias), mae: crias.length ? a : null };
     }
-    var cod = /^(?:A-?)?0*(\d{1,9})$/i.exec(t);
-    var alvo = cod ? 'A-' + String(cod[1]).padStart(6, '0') : null;
+    if (x.situacao === 'VARIOS') return { modo: 'VARIOS', candidatos: x.candidatos.map(de).filter(f), mensagem: x.mensagem };
     var tn = t.toLowerCase();
-    var achados = todosConhecidos_().filter(function (a) {
-      if (!f(a)) return false;
-      if (alvo && a.codigo_interno === alvo) return true;
-      return !!(a.nome && a.nome.toLowerCase().indexOf(tn) >= 0);
-    });
-    var mae = resolverBrinco(t);
-    if (!achados.length && mae.modo !== 'NENHUM' && mae.candidatos.length === 1) {
-      return { modo: 'CRIAS', candidatos: filhosDe(mae.candidatos[0].animal_id).filter(f), mae: mae.candidatos[0] };
-    }
-    return { modo: achados.length === 1 ? 'EXATO' : achados.length ? 'VARIOS' : 'NENHUM', candidatos: achados };
+    var nomes = x.codigo === 'NAO_ENCONTRADO' ? todosConhecidos_().filter(function (a) { return f(a) && a.nome && a.nome.toLowerCase().indexOf(tn) >= 0; }) : [];
+    return { modo: nomes.length === 1 ? 'EXATO' : nomes.length ? 'VARIOS' : 'NENHUM', candidatos: nomes, mensagem: nomes.length ? null : x.mensagem };
   }
   /** Animais que saíram do rebanho (animal.listar), trazidos sob demanda e guardados até a próxima carga. */
   async function carregarBaixados() {
@@ -818,7 +822,7 @@ var Store = (function () {
     parceiros: parceiros, parceiro: parceiro, contas: contas, conta: conta, categorias: categorias, categoria: categoria, animais: animais, animal: animal, filhosDe: filhosDe,
     produtos: produtos, produto: produto, protocolos: protocolos, protocolo: protocolo, estacoes: estacoes, estacao: estacao,
     modulos: modulos, modulo: modulo, catalogo: catalogo, tipoEvento: tipoEvento, nomeEvento: nomeEvento, nomeDeReferencia: nomeDeReferencia, valorLegivel: valorLegivel, rotuloAnimal: rotuloAnimal, descricaoAnimal: descricaoAnimal,
-    resolverBrinco: resolverBrinco, buscar: buscar, carregarBaixados: carregarBaixados, normalizarBrinco: normalizarBrinco,
+    resolver: resolver, doEstado: doEstado, semResposta: semResposta, buscar: buscar, carregarBaixados: carregarBaixados, normalizarBrinco: normalizarBrinco,
     baixados: function () { return est.baixados; },
     dados: function () { return est.dados; },
     ambiente: function () { return (est.dados && est.dados.ambiente) || { codigo: cfg.ambiente, base_de_teste: cfg.ambiente !== 'PRODUCAO', faixa: null }; },

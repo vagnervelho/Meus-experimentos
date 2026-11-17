@@ -510,46 +510,48 @@ var TelaReproducao = (function () {
         campo('tr-resp', 'Quem diagnosticou (veterinário)', resp), erro, h('div', { class: 'acoes' }, UI.botao('Começar', { tipo: 'primario', atributos: { type: 'submit' } }))));
     }
     /**
-     * Diagnóstico com data passada (08, seção 5, item 5, e seção 7): quem estava no rebanho e o brinco de cada fêmea naquele
-     * dia vêm do servidor (inventario.elegiveis na data), nunca da posição de hoje do aparelho — a fêmea que morreu depois
-     * ainda é diagnosticada naquele dia, e o número trocado ou reaproveitado depois é o daquele dia. ui.posicao = {data, itens,
-     * porId} | {carregando} | {erro} | null (hoje).
+     * Quem é a fêmea do brinco digitado e como ela estava NA DATA do diagnóstico vem do resolvedor único do servidor
+     * (animal.resolver; CONTRATOS, seção 47), em qualquer data — o aparelho nunca resolve brinco: a fêmea que morreu depois
+     * ainda é achada naquele dia, o número trocado ou reaproveitado depois é o daquele dia, e sem sinal a linha fica pendente
+     * até o servidor responder. ui.posicao = a conferência da data com o servidor ({data, motivo} | {carregando} | {erro} |
+     * null hoje); ui.estados = {animal_id: estado em D}.
      */
-    function comPosicao() { return !!(ui.posicao && ui.posicao.porId); }
-    /**
-     * Data passada sem a posição do servidor (carregando ou sem sinal): nada é conferido pela posição de hoje. A data sem
-     * posição por motivo do servidor (antes do marco zero, sem marco zero) não espera: o servidor decide a data na gravação.
-     */
-    function semPosicao() { return !!(ui.posicao && !ui.posicao.porId && !ui.posicao.motivo); }
-    function presente(a) { return comPosicao() ? !!ui.posicao.porId[a.animal_id] : a.situacao_cadastral === 'ATIVO'; }
-    function brincoDe(a) { var x = comPosicao() ? ui.posicao.porId[a.animal_id] : null; return x ? x.brinco : a.brinco || null; }
-    /** A fêmea descrita no dia do diagnóstico (categoria, pasto e último peso daquele dia); hoje, pela lista do aparelho. */
+    function passada() { return c.sessao.data !== Fmt.hoje(); }
+    function estadoDe(a) { return (ui.estados || {})[a.animal_id] || null; }
+    function brincoDe(a) { var x = estadoDe(a); return x ? x.brinco : a.brinco || null; }
+    /** A fêmea descrita no dia do diagnóstico (categoria, pasto e último peso daquele dia), pelo servidor. */
     function descricao(a) {
-      var x = comPosicao() ? ui.posicao.porId[a.animal_id] : null;
+      var x = estadoDe(a);
       if (!x) return Store.descricaoAnimal(a);
       var p = [x.categoria || Fmt.rotulo('SEXO', x.sexo), (Store.pasto(x.pasture_id) || {}).nome || 'sem pasto'];
       if (x.ultimo_peso) p.push(Fmt.peso(x.ultimo_peso.kg) + ' em ' + Fmt.dataCurta(x.ultimo_peso.data) + (x.ultimo_peso.estimado ? ' (estimado)' : ''));
       if (brincoDe(a) && a.codigo_interno) p.push(a.codigo_interno);
       return p.join(' · ');
     }
-    function daPosicao(x) { return Store.animal(x.animal_id) || { animal_id: x.animal_id, brinco: x.brinco_hoje, codigo_interno: x.codigo_interno, sexo: x.sexo }; }
     function nomeNaData(a) {
       var b = brincoDe(a);
-      if (!comPosicao() || b === (a.brinco || null)) return Store.rotuloAnimal(a);
-      return (b || a.codigo_interno) + ' em ' + Fmt.data(ui.posicao.data) + ' (hoje ' + (a.brinco || 'sem brinco') + ')';
+      if (!passada() || b === (a.brinco || null)) return Store.rotuloAnimal(a);
+      return (b || a.codigo_interno) + ' em ' + Fmt.data(c.sessao.data) + ' (hoje ' + (a.brinco || 'sem brinco') + ')';
     }
+    var OPCOES = { tipo: 'REPRODUCAO', sexo: 'F' };
+    /** O resolvedor único na data do diagnóstico: {porTexto, animais} | {erro} (sem sinal ou sem resposta). */
+    function resolverNoServidor(textos) {
+      var data = c.sessao.data;
+      return Store.resolver(textos, data, OPCOES).then(function (r) {
+        if (c.sessao.data !== data) return { erro: new Error('A data do diagnóstico mudou.') };
+        ui.estados = Object.assign(ui.estados || {}, r.animais);
+        return r;
+      }, function (e) { return { erro: e }; });
+    }
+    /** A conferência da data com o servidor (há posição do rebanho nela?), numa data passada; com sinal, as pendentes vão junto. */
     function carregarPosicao() {
       var data = c.sessao.data;
       if (data === Fmt.hoje()) { ui.posicao = null; return; }
       ui.posicao = { carregando: true, data: data };
-      Cliente.consulta('inventario.elegiveis', { tipo: 'REPRODUCAO', subtipo: 'DIAGNOSTICO_GESTACAO', data: data }).then(function (r) {
+      Cliente.consulta('animal.resolver', { data: data, textos: [], tipo: OPCOES.tipo, sexo: OPCOES.sexo }).then(function (r) {
         if (!vivo || c.sessao.data !== data) return;
-        var d = r.data || {};
-        var itens = (d.itens || []).filter(function (x) { return x.sexo === 'F'; });
-        var porId = {};
-        itens.forEach(function (x) { porId[x.animal_id] = x; });
-        ui.posicao = d.motivo ? { erro: Fmt.rotulo('MOTIVO', d.motivo), motivo: d.motivo, data: data } : { data: d.data, itens: itens, porId: porId };
-        if (comPosicao()) resolverEsperando();
+        ui.posicao = r.data.motivo ? { erro: Fmt.rotulo('MOTIVO', r.data.motivo), motivo: r.data.motivo, data: data } : { data: data };
+        resolverEsperando();
         desenhar();
       }, function (e) {
         if (!vivo) return;
@@ -557,92 +559,86 @@ var TelaReproducao = (function () {
         desenhar();
       });
     }
-    /** As linhas digitadas sem a posição: com ela na mão, o brinco é conferido pela data; o resto continua pendente. */
+    /** A fêmea achada que não entra no diagnóstico (macho, fora do rebanho na data): o porquê, do servidor. */
+    function motivoFora(a) { var x = estadoDe(a); return x ? x.inelegivel : null; }
+    /** As linhas que ficaram sem resposta do servidor vão juntas ao resolvedor; a fêmea achada e no rebanho vai para a fila. */
     function resolverEsperando() {
-      var mudouAlgo = false;
-      c.linhas.forEach(function (l) {
-        if (!l.semPosicao || l.estado !== 'NAO_ENCONTRADO') return;
-        l.semPosicao = false;
-        mudouAlgo = true;
-        var r = resolver(l.brinco);
-        var a = r.modo === 'EXATO' || r.modo === 'SEM_ZEROS' ? r.candidatos[0] : null;
-        if (!a || !presente(a)) return;
-        l.animal_id = a.animal_id; l.brinco = brincoDe(a) || a.codigo_interno; l.estado = 'FILA'; l.mensagem = null;
+      var esperando = c.linhas.filter(function (l) { return l.semPosicao && l.estado === 'NAO_ENCONTRADO'; });
+      if (!esperando.length) return Promise.resolve();
+      return resolverNoServidor(esperando.map(function (l) { return l.brinco; })).then(function (r) {
+        if (r.erro || !vivo) return;
+        esperando.forEach(function (l) {
+          var x = r.porTexto[String(l.brinco).trim()];
+          if (!x || l.estado !== 'NAO_ENCONTRADO') return;
+          l.semPosicao = false;
+          var a = x.situacao === 'ACHADO' ? Store.doEstado(r.animais[x.animal_id]) : null;
+          var outra = a ? c.linhas.filter(function (y) { return y !== l && y.animal_id === a.animal_id && y.estado !== 'GRAVADA'; })[0] : null;
+          if (!a || motivoFora(a) || outra) { l.mensagem = !a ? x.mensagem || 'Mais de uma fêmea com este brinco: digite de novo.' : outra ? Store.rotuloAnimal(a) + ' já tem outro diagnóstico nesta sessão: tire um dos dois.' : Store.rotuloAnimal(a) + ' ' + motivoFora(a) + ': não entra no diagnóstico.'; return; }
+          l.animal_id = a.animal_id; l.brinco = brincoDe(a) || a.codigo_interno; l.estado = 'FILA'; l.mensagem = null;
+        });
+        mudou();
       });
-      if (mudouAlgo) guardarTronco(c);
     }
     /**
-     * Brinco digitado → a fêmea (na data passada, pelo brinco daquele dia; sem a posição, nada pela lista de hoje); sem fêmea com
-     * o número, o código interno inteiro (A-000004, 000004) da fêmea SEM brinco na data.
+     * Brinco digitado → a pergunta ao resolvedor único na data; a resposta (a fêmea, a escolha entre várias ou a recusa
+     * explicada) aparece na conferência. Devolve a promessa de quando a conferência está pronta (o lançamento espera).
      */
-    function resolver(t) {
-      if (semPosicao()) return { modo: 'NENHUM', candidatos: [], semPosicao: true };
-      var r;
-      if (comPosicao()) {
-        var cmp = function (semZeros) { return ui.posicao.itens.filter(function (x) { return x.brinco && Store.normalizarBrinco(x.brinco, !semZeros) === Store.normalizarBrinco(t, !semZeros); }); };
-        var exatos = cmp(false);
-        if (!exatos.length && Store.param('brinco_ignora_zeros_esquerda') !== false) exatos = cmp(true);
-        r = { modo: exatos.length === 1 ? 'EXATO' : exatos.length ? 'VARIOS' : 'NENHUM', candidatos: exatos.map(daPosicao) };
-      } else r = Store.resolverBrinco(t, function (a) { return a.sexo === 'F' && a.situacao_cadastral === 'ATIVO'; });
-      if (r.modo !== 'NENHUM') return r;
-      var m = /^(?:A-(\d+)|A?(0\d{5,}))$/i.exec(String(t).trim());
-      if (!m) return r;
-      var n = Number(m[1] || m[2]);
-      var lista = comPosicao() ? ui.posicao.itens.map(daPosicao) : Store.animais().filter(function (a) { return a.sexo === 'F' && a.situacao_cadastral === 'ATIVO'; });
-      var mesmo = lista.filter(function (a) { var k = /(\d+)$/.exec(String(a.codigo_interno || '')); return k && Number(k[1]) === n; });
-      var cand = mesmo.filter(function (a) { return !brincoDe(a); });
-      if (!cand.length && mesmo.length === 1) return { modo: 'NENHUM', candidatos: [], codigoDe: mesmo[0] };
-      return { modo: cand.length === 1 ? 'EXATO' : cand.length ? 'VARIOS' : 'NENHUM', candidatos: cand };
-    }
     function conferir() {
       Util.limpar(ui.conferencia);
       Util.limpar(ui.candidatos);
       ui.atual = null;
       var t = ui.brinco.value.trim();
-      if (!t) return null;
-      if (ui.posicao && ui.posicao.carregando) { ui.conferencia.appendChild(h('p', { class: 'aviso', text: 'Conferindo no servidor quem estava no rebanho em ' + Fmt.data(ui.posicao.data) + '… digite de novo em instantes.' })); return null; }
-      var r = resolver(t);
-      var aviso = null;
-      if (r.modo === 'NENHUM' && comPosicao()) {
-        // Ninguém tinha o número na data: a dona de hoje que não estava no rebanho é dita como tal; a que estava, com outro
-        // brinco naquele dia, não é achada por ele (o diagnóstico iria para a fêmea errada).
-        var hoje = Store.resolverBrinco(t, function (a) { return a.sexo === 'F' && a.situacao_cadastral !== 'EXTERNO' && a.situacao_cadastral !== 'ANULADO'; });
-        if (hoje.modo === 'EXATO' || hoje.modo === 'SEM_ZEROS') {
-          var dona = hoje.candidatos[0];
-          aviso = presente(dona) ? t + ': em ' + Fmt.data(ui.posicao.data) + ' nenhuma fêmea do rebanho tinha este brinco (hoje ele é de ' + Store.rotuloAnimal(dona) + ', que naquele dia tinha o ' + (brincoDe(dona) || dona.codigo_interno) + ').'
-            : t + ': ' + Store.rotuloAnimal(dona) + ' não estava no rebanho em ' + Fmt.data(ui.posicao.data) + '.';
-        }
+      if (!t) { ui.conferindo = null; return null; }
+      var vez = ui.vezConf = (ui.vezConf || 0) + 1;
+      ui.conferencia.appendChild(h('p', { class: 'suave', text: 'Conferindo ' + t + ' no servidor…' }));
+      ui.conferindo = { texto: t, pronto: resolverNoServidor([t]).then(function (r) {
+        if (vivo && vez === ui.vezConf) mostrar(t, r);
+        if (vivo && !r.erro) resolverEsperando();
+      }) };
+      return ui.conferindo.pronto;
+    }
+    function mostrar(t, r) {
+      Util.limpar(ui.conferencia);
+      Util.limpar(ui.candidatos);
+      var x = r.erro ? null : r.porTexto[t];
+      var a = x && x.situacao === 'ACHADO' ? Store.doEstado(r.animais[x.animal_id]) : null;
+      if (a && !motivoFora(a)) { escolher(a); return; }
+      if (x && x.situacao === 'VARIOS') {
+        ui.conferencia.appendChild(h('p', { class: 'aviso', text: x.mensagem }));
+        x.candidatos.forEach(function (id) { var b = Store.doEstado(r.animais[id]); ui.candidatos.appendChild(UI.botao(nomeNaData(b) + ' · ' + descricao(b), { bloco: true, aoClicar: function () { escolher(b); ui.resultado.focus(); } })); });
+        return;
       }
-      if (r.modo === 'VARIOS') {
-        ui.conferencia.appendChild(h('p', { class: 'aviso', text: 'Mais de uma fêmea com "' + t + '": escolha.' }));
-        r.candidatos.forEach(function (a) { ui.candidatos.appendChild(UI.botao(nomeNaData(a) + ' · ' + descricao(a), { bloco: true, aoClicar: function () { escolher(a); ui.resultado.focus(); } })); });
-        return 'VARIOS';
-      }
-      if (r.modo === 'NENHUM') {
-        ui.atual = { brinco: t, animal: null, semPosicao: !!r.semPosicao };
-        var texto = r.semPosicao ? t + ': sem a posição do rebanho em ' + Fmt.data(ui.posicao.data) + ', o brinco fica para conferir quando ela chegar (toque em "Tentar de novo" com sinal).'
-          : aviso || (r.codigoDe ? t + ' é o código interno de uma fêmea com brinco (' + brincoDe(r.codigoDe) + '): digite o brinco dela.' : t + ': nenhuma fêmea no rebanho' + (comPosicao() ? ' em ' + Fmt.data(ui.posicao.data) : '') + ' com este brinco.');
-        ui.conferencia.appendChild(h('p', { class: 'destaque-erro', dataset: { conferencia: r.semPosicao ? 'SEM_POSICAO' : 'NAO_ENCONTRADO' }, text: texto + ' Confira; se seguir, a linha fica pendente.' }));
-        return 'NENHUM';
-      }
-      escolher(r.candidatos[0]);
-      return 'OK';
+      var texto = !x ? t + ': sem resposta do servidor (' + r.erro.message + '), o brinco fica para conferir quando houver sinal (toque em "Tentar de novo" ou "Enviar").'
+        : a ? nomeNaData(a) + ' ' + motivoFora(a) + ': não entra no diagnóstico.' : x.mensagem;
+      ui.atual = { brinco: t, animal: null, semPosicao: !x, mensagem: x ? texto : null };
+      ui.conferencia.appendChild(h('p', { class: 'destaque-erro', dataset: { conferencia: x ? 'NAO_ENCONTRADO' : 'SEM_POSICAO' }, text: texto + ' Confira; se seguir, a linha fica pendente.' }));
     }
     function escolher(a) {
       Util.limpar(ui.candidatos);
       Util.limpar(ui.conferencia);
       ui.atual = { brinco: brincoDe(a) || a.codigo_interno, animal: a };
       var ja = c.linhas.filter(function (l) { return l.animal_id === a.animal_id; });
-      // A situação reprodutiva da lista do aparelho é a de hoje: só aparece no diagnóstico de hoje (sem posição de outra data).
-      ui.conferencia.appendChild(h('p', { class: 'dado', dataset: { conferencia: 'OK' }, text: nomeNaData(a) + ' · ' + descricao(a) + (!ui.posicao && a.situacao_reprodutiva ? ' · ' + sit(a.situacao_reprodutiva).toLowerCase() : '') }));
+      // A situação reprodutiva da lista do aparelho é a de hoje: só aparece no diagnóstico de hoje.
+      ui.conferencia.appendChild(h('p', { class: 'dado', dataset: { conferencia: 'OK' }, text: nomeNaData(a) + ' · ' + descricao(a) + (!passada() && a.situacao_reprodutiva ? ' · ' + sit(a.situacao_reprodutiva).toLowerCase() : '') }));
       // A linha ainda não gravada é substituída; a gravada não: diagnosticar de novo grava outro diagnóstico do mesmo dia.
       var ult = ja[ja.length - 1];
       if (ult) ui.conferencia.appendChild(h('p', { class: 'aviso', dataset: { conferenciaRepetido: editavel(c, ult) ? 'substitui' : 'outro' }, text: editavel(c, ult)
         ? 'Já diagnosticada nesta sessão (' + ROTULO_RES[ult.resultado] + ', ainda não enviado): o novo resultado substitui o anterior.'
         : 'Já diagnosticada nesta sessão (' + ROTULO_RES[ult.resultado] + ', ' + ROTULO_ESTADO[ult.estado] + '): diagnosticar de novo grava outro diagnóstico do mesmo dia, e o servidor pede confirmação.' }));
     }
-    function lancar(txt) {
-      if (!ui.atual && conferir() !== 'OK' && (!ui.atual || ui.atual.animal)) { ui.brinco.focus(); return; }
+    async function lancar(txt) {
+      if (ui.lancando) return;
+      ui.lancando = true;
+      try { await lancar_(txt); } finally { ui.lancando = false; }
+    }
+    async function lancar_(txt) {
+      if (!ui.atual) {
+        var t = ui.brinco.value.trim();
+        if (!t) { ui.brinco.focus(); return; }
+        if (!ui.conferindo || ui.conferindo.texto !== t) conferir();
+        await ui.conferindo.pronto;
+        if (!vivo || !ui.atual) { if (vivo) ui.brinco.focus(); return; }
+      }
       var r = lerResultado(txt === undefined ? ui.resultado.value : txt);
       if (r.erro) { Util.limpar(ui.conferencia); ui.conferencia.appendChild(h('p', { class: 'destaque-erro', role: 'alert', text: r.erro })); ui.resultado.focus(); return; }
       var at = ui.atual;
@@ -650,9 +646,9 @@ var TelaReproducao = (function () {
       if (ja.length) { var u = ja[ja.length - 1]; if (u.bloco) desfazerBloco(c, u.bloco); u.resultado = r.resultado; u.idade = r.idade; u.estado = 'FILA'; u.mensagem = null; c.linhas = c.linhas.filter(function (l) { return l !== u; }).concat([u]); }
       else {
         c.seq = (c.seq || 0) + 1;
-        c.linhas.push({ uid: 'd' + c.seq + '-' + Util.uuid().slice(0, 6), brinco: at.brinco, animal_id: at.animal ? at.animal.animal_id : null, resultado: r.resultado, idade: r.idade, estado: at.animal ? 'FILA' : 'NAO_ENCONTRADO', bloco: null, mensagem: null, semPosicao: !at.animal && !!at.semPosicao });
+        c.linhas.push({ uid: 'd' + c.seq + '-' + Util.uuid().slice(0, 6), brinco: at.brinco, animal_id: at.animal ? at.animal.animal_id : null, resultado: r.resultado, idade: r.idade, estado: at.animal ? 'FILA' : 'NAO_ENCONTRADO', bloco: null, mensagem: at.animal ? null : at.mensagem || null, semPosicao: !at.animal && !!at.semPosicao });
       }
-      ui.brinco.value = ''; ui.resultado.value = ''; ui.atual = null; Util.limpar(ui.conferencia); Util.limpar(ui.candidatos);
+      ui.brinco.value = ''; ui.resultado.value = ''; ui.atual = null; ui.conferindo = null; Util.limpar(ui.conferencia); Util.limpar(ui.candidatos);
       mudou();
       ui.brinco.focus();
       if (naFila(c).length >= BLOCO && !pendencias(c).length && !enviando) enviarAgora();
@@ -742,9 +738,10 @@ var TelaReproducao = (function () {
       var gravadas = c.linhas.filter(function (l) { return l.estado === 'GRAVADA'; }).length;
       var comAviso = c.linhas.filter(function (l) { return l.estado === 'AVISO'; }).length;
       ui.status.appendChild(h('p', { class: 'dado', text: [gravadas ? gravadas + ' gravados' : null, fila ? fila + ' na fila deste aparelho' : null, semSinal ? semSinal + ' sem confirmação do servidor' : null, comAviso ? comAviso + ' para conferir' : null, pend.length ? pend.length + (pend.length === 1 ? ' pendente' : ' pendentes') : null].filter(Boolean).join(' · ') || 'Nenhum diagnóstico ainda.' }));
-      if (ui.posicao) ui.status.appendChild(ui.posicao.carregando ? UI.nota('Conferindo no servidor quem estava no rebanho em ' + Fmt.data(ui.posicao.data) + '…', 'info') : ui.posicao.motivo ? UI.nota('Não há posição do rebanho em ' + Fmt.data(ui.posicao.data) + ' (' + ui.posicao.erro + '): o brinco é conferido pela lista de hoje, e o servidor decide se aceita a data.', 'aviso') : ui.posicao.erro ? h('div', { dataset: { posicaoErro: '1' } }, UI.nota('Sem a posição do rebanho em ' + Fmt.data(ui.posicao.data) + ' (' + ui.posicao.erro + '): o brinco não é conferido pela posição de hoje (pode ser de outra fêmea naquele dia). Os diagnósticos ficam pendentes até a posição chegar.', 'aviso'),
+      if (ui.posicao) ui.status.appendChild(ui.posicao.carregando ? UI.nota('Conferindo com o servidor a data ' + Fmt.data(ui.posicao.data) + '…', 'info') : ui.posicao.motivo ? UI.nota('Não há posição do rebanho em ' + Fmt.data(ui.posicao.data) + ' (' + ui.posicao.erro + '): o brinco é conferido pelo servidor nessa data, e ele decide se aceita a data.', 'aviso') : ui.posicao.erro ? h('div', { dataset: { posicaoErro: '1' } }, UI.nota('Sem resposta do servidor para ' + Fmt.data(ui.posicao.data) + ' (' + ui.posicao.erro + '): o brinco é conferido só pelo servidor, na data (o número pode ser de outra fêmea naquele dia). Sem sinal, os diagnósticos ficam pendentes.', 'aviso'),
         h('div', { class: 'acoes' }, UI.botao('Tentar de novo', { atributos: { 'data-posicao-tentar': '1' }, aoClicar: function () { carregarPosicao(); desenhar(); } })))
-        : h('div', { dataset: { troncoPosicao: '1' } }, UI.nota('Fêmeas e brincos na posição em ' + Fmt.data(ui.posicao.data) + ', conferidos pelo servidor.', 'info')));
+        : h('div', { dataset: { troncoPosicao: '1' } }, UI.nota('Fêmeas e brincos conferidos pelo servidor em ' + Fmt.data(ui.posicao.data) + '.', 'info')));
+      if (c.linhas.some(function (l) { return l.semPosicao && l.estado === 'NAO_ENCONTRADO'; })) ui.status.appendChild(h('div', { class: 'acoes' }, UI.botao('Conferir os brincos pendentes no servidor', { atributos: { 'data-resolver-pendentes': '1' }, aoClicar: function () { resolverEsperando(); } })));
       if (semSinal) ui.status.appendChild(UI.nota('Sem sinal ou sem resposta: o que foi digitado está guardado neste aparelho. Toque em "Enviar" quando o sinal voltar; nada será gravado duas vezes.', 'aviso'));
       if (c.erroGeral) ui.status.appendChild(h('div', { role: 'alert', dataset: { erroGeral: '1' } }, UI.nota('O servidor recusou o envio: ' + c.erroGeral + ' Nada foi gravado; os diagnósticos continuam neste aparelho.', 'erro')));
       if (pend.length) ui.status.appendChild(UI.nota(pend.length + (pend.length === 1 ? ' pendência impede' : ' pendências impedem') + ' o envio: corrija o brinco ou o resultado (digite de novo) ou tire a linha.', 'erro'));
@@ -778,14 +775,15 @@ var TelaReproducao = (function () {
       Util.limpar(corpo);
       if (!c.iniciada) { inicio(); return; }
       var s = c.sessao;
+      ui.estados = {};
       ui.contador = h('div', { class: 'curral-contador', role: 'status', 'aria-live': 'polite' });
       ui.mudar = h('div', { dataset: { troncoMudar: '1' } });
       corpo.appendChild(h('div', { class: 'curral-cabecalho', dataset: { troncoCabecalho: '1' } },
         h('p', { class: 'dado', text: Fmt.data(s.data) + ' · ' + Fmt.rotulo('METODO_REPRODUCAO', s.metodo) + (s.estacao_id ? ' · ' + nomeEstacao(s.estacao_id) : '') }), ui.contador, ui.mudar));
       ui.brinco = h('input', { type: 'text', id: 'tr-brinco', class: 'curral-entrada', inputmode: 'numeric', autocomplete: 'off', enterkeyhint: 'next', 'aria-describedby': 'tr-conferencia' });
       ui.resultado = h('input', { type: 'text', id: 'tr-resultado', class: 'curral-entrada', autocomplete: 'off', autocapitalize: 'off', enterkeyhint: 'done' });
-      ui.brinco.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); var r = conferir(); if (r === 'OK' || r === 'NENHUM') ui.resultado.focus(); } });
-      ui.brinco.addEventListener('input', function () { ui.atual = null; });
+      ui.brinco.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); if (conferir()) ui.resultado.focus(); } });
+      ui.brinco.addEventListener('input', function () { ui.atual = null; ui.conferindo = null; ui.vezConf = (ui.vezConf || 0) + 1; });
       ui.resultado.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); lancar(); } });
       ui.conferencia = h('div', { id: 'tr-conferencia', role: 'status', 'aria-live': 'polite', class: 'curral-conferencia' });
       ui.candidatos = h('div', { class: 'curral-candidatos' });

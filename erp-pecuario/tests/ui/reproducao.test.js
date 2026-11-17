@@ -33,9 +33,9 @@ function ok(s, rota, dados, chave) {
 /** Brinco, Enter, resultado, Enter (o veterinário no tronco, sem tocar em botão). */
 async function diagnosticar(page, brinco, resultado) {
   await page.fill('#tr-brinco', brinco);
-  await page.press('#tr-brinco', 'Enter');
+  await A.enter(page, '#tr-brinco');
   await page.fill('#tr-resultado', resultado);
-  await page.press('#tr-resultado', 'Enter');
+  await A.enter(page, '#tr-resultado');
 }
 const linhas = (page) => page.$$eval('.curral-lista [data-linha]', (ls) => ls.map((l) => [l.dataset.estado, l.textContent.replace(/\s+/g, ' ').trim()]));
 

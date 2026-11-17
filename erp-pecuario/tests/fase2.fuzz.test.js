@@ -131,7 +131,11 @@ test('teste aleatório de todos os comandos da Fase 2 (' + (N ? N + ' sementes n
       'viagem no tempo: unidades comparadas', 'viagem no tempo: comparação depois de fato posterior a D', 'viagem no tempo: comparação depois de cadastro',
       'viagem no tempo: comparação depois de fato retroativo noutros animais', 'viagem no tempo: comparação depois de estorno ou correção posterior a D',
       'viagem no tempo: retratos de hoje conferidos com a projeção', 'viagem no tempo: ficha de hoje × consultas da data',
-      'viagem no tempo: ficha de quem saiu × elegíveis do dia da saída'].filter((k) => !F.COBERTURA[k]);
+      'viagem no tempo: ficha de quem saiu × elegíveis do dia da saída',
+      // Conserto pela garantia, etapa 2 (CONTRATOS, seção 47): o resolvedor único deu o mesmo animal pelos caminhos da rota, pela
+      // posição da data (com a mesma descrição) e na importação de verdade.
+      'resolvedor: textos conferidos em todos os caminhos', 'resolvedor: números da posição conferidos', 'resolvedor: animais descritos igual na posição',
+      'resolvedor: linhas importadas no animal do resolvedor'].filter((k) => !F.COBERTURA[k]);
     assert.deepEqual(semCobertura, [], 'oráculos novos sem nada conferido nas sementes fixas (' + JSON.stringify(F.COBERTURA) + ')');
   }
 });

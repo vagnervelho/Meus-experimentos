@@ -118,12 +118,13 @@ var TelaPesagens = (function () {
   function blocoCurvas(d, aoMudar) {
     var caixa = h('div', { dataset: { curvas: '1' } });
     var entrada = h('input', { type: 'search', id: 'curva-brinco', autocomplete: 'off', inputmode: 'numeric', placeholder: 'Brinco', 'aria-describedby': 'curva-ajuda' });
-    var form = h('form', { class: 'filtros', 'aria-label': 'Curvas de peso', on: { submit: function (ev) {
+    var form = h('form', { class: 'filtros', 'aria-label': 'Curvas de peso', on: { submit: async function (ev) {
       ev.preventDefault();
-      var r = Store.buscar(entrada.value, function (a) { return a.situacao_cadastral !== 'EXTERNO'; });
+      var r;
+      try { r = await Store.buscar(entrada.value, null, function (a) { return a.situacao_cadastral !== 'EXTERNO'; }); } catch (e) { UI.aviso(Store.semResposta(e), { tipo: 'erro' }); return; }
       // O brinco inteiro de uma vaca acha a vaca: as crias sem brinco que a busca junta só valem quando não há brinco exato.
       if (r.mae && r.modo !== 'CRIAS') r = { candidatos: [r.mae] };
-      if (r.candidatos.length !== 1) { UI.aviso(r.candidatos.length ? 'Mais de um animal com "' + entrada.value + '": digite o brinco inteiro.' : 'Nenhum animal com "' + entrada.value + '".', { tipo: 'erro' }); return; }
+      if (r.candidatos.length !== 1) { UI.aviso(r.candidatos.length ? 'Mais de um animal com "' + entrada.value + '": digite o brinco inteiro.' : r.mensagem || 'Nenhum animal com "' + entrada.value + '".', { tipo: 'erro' }); return; }
       if (filtros.animais.indexOf(r.candidatos[0].animal_id) < 0) filtros.animais = filtros.animais.concat([r.candidatos[0].animal_id]).slice(-5);
       aoMudar();
     } } }, campo('curva-brinco', 'Comparar a curva de até 5 animais', entrada), UI.botao('Mostrar', { atributos: { type: 'submit' } }));
@@ -434,64 +435,56 @@ var TelaPesagens = (function () {
     el.appendChild(corpo);
     var ui = {};
     /**
-     * Pesagem com data passada (08, seção 7): quem estava no rebanho e em que pasto vem do servidor (inventario.elegiveis na
-     * data), nunca da posição de hoje do aparelho — o animal que morreu depois ainda é pesado naquele dia, e o que mudou de
-     * pasto depois conta no pasto de então. ui.posicao = {data, itens, porId} | {carregando} | {erro} | null (hoje).
+     * Quem é o animal do brinco digitado e como ele estava NA DATA da pesagem vem do resolvedor único do servidor
+     * (animal.resolver; CONTRATOS, seção 47), em qualquer data — o aparelho nunca resolve brinco: sem sinal, a linha fica
+     * pendente até o servidor responder, nunca vai pela lista de hoje. A posição da data (inventario.elegiveis, só numa data
+     * passada) serve à conta dos que faltam do pasto e ao "Pesar este". ui.posicao = {data, itens, porId} | {carregando} |
+     * {erro} | null (hoje); ui.estados = {animal_id: estado em D} (as respostas do resolvedor).
      */
     function comPosicao() { return !!(ui.posicao && ui.posicao.porId); }
+    function passada() { return c.sessao.data !== Fmt.hoje(); }
+    /** O animal em D: o estado que o resolvedor devolveu, senão o item da posição da data (a mesma descrição do servidor). */
+    function estadoDe(a) {
+      var e = (ui.estados || {})[a.animal_id];
+      if (e) return e;
+      var x = comPosicao() ? ui.posicao.porId[a.animal_id] : null;
+      return x ? Object.assign({ presente: true, inelegivel: null }, x) : null;
+    }
     /**
-     * Data passada sem a posição do servidor (carregando ou sem sinal): nada é conferido pela posição de hoje. A data sem
-     * posição por motivo do servidor (antes do marco zero, sem marco zero) não espera: o servidor decide a data na gravação.
-     */
-    function semPosicao() { return !!(ui.posicao && !ui.posicao.porId && !ui.posicao.motivo); }
-    /**
-     * A descrição do animal na data da pesagem: com a posição do servidor, a categoria, o pasto e o último peso daquele dia
-     * (desenho-base 4.3: o dado de hoje não vale para a data passada); hoje, a da lista do aparelho.
+     * A descrição do animal na data da pesagem, a do servidor (desenho-base 4.3: o dado de hoje não vale para a data passada);
+     * sem ela (o "Pesar este" de hoje), a da lista do aparelho, que é a de hoje.
      */
     function descricao(a) {
-      var x = comPosicao() ? ui.posicao.porId[a.animal_id] : null;
+      var x = estadoDe(a);
       if (!x) return Store.descricaoAnimal(a);
-      var p = [x.categoria || Fmt.rotulo('SEXO', x.sexo), (Store.pasto(x.pasture_id) || {}).nome || 'sem pasto'];
+      var p = [x.categoria || Fmt.rotulo('SEXO', x.sexo), x.presente === false ? Fmt.rotulo('SITUACAO_CADASTRAL', x.situacao || x.situacao_hoje) : (Store.pasto(x.pasture_id) || {}).nome || 'sem pasto'];
       if (x.ultimo_peso) p.push(Fmt.peso(x.ultimo_peso.kg) + ' em ' + Fmt.dataCurta(x.ultimo_peso.data) + (x.ultimo_peso.estimado ? ' (estimado)' : ''));
       if (brincoDe(a) && a.codigo_interno) p.push(a.codigo_interno);
       return p.join(' · ');
     }
-    function presente(a) { return comPosicao() ? !!ui.posicao.porId[a.animal_id] : a.situacao_cadastral === 'ATIVO'; }
-    function pastoDe(a) { return comPosicao() ? (ui.posicao.porId[a.animal_id] || {}).pasture_id || null : a.pasto_atual_id; }
+    /** Pode ser pesado na data: o servidor diz (null = sem posição na data, antes do marco zero: o servidor decide na gravação). */
+    function motivoFora(a) { var x = estadoDe(a); return x ? x.inelegivel : a.situacao_cadastral === 'ATIVO' ? null : 'não está no rebanho'; }
+    function presente(a) { return !motivoFora(a); }
+    function pastoDe(a) { var x = estadoDe(a); return x ? x.pasture_id || null : a.pasto_atual_id; }
     function animalDaPosicao(x) { return Store.animal(x.animal_id) || { animal_id: x.animal_id, brinco: x.brinco_hoje, codigo_interno: x.codigo_interno, sexo: x.sexo }; }
-    /** O brinco do animal na data da pesagem (a posição do servidor: o número trocado ou reaproveitado depois é o daquele dia). */
-    function brincoDe(a) { var x = comPosicao() ? ui.posicao.porId[a.animal_id] : null; return x ? x.brinco : a.brinco || null; }
+    /** O brinco do animal na data da pesagem (o do servidor: o número trocado ou reaproveitado depois é o daquele dia). */
+    function brincoDe(a) { var x = estadoDe(a); return x ? x.brinco : a.brinco || null; }
     function nomeNaData(a) {
       var b = brincoDe(a);
-      if (!comPosicao() || b === (a.brinco || null)) return Store.rotuloAnimal(a);
-      return (b || a.codigo_interno) + ' em ' + Fmt.data(ui.posicao.data) + ' (hoje ' + (a.brinco || 'sem brinco') + ')';
+      if (!passada() || b === (a.brinco || null)) return Store.rotuloAnimal(a);
+      return (b || a.codigo_interno) + ' em ' + Fmt.data(c.sessao.data) + ' (hoje ' + (a.brinco || 'sem brinco') + ')';
     }
     /**
-     * Brinco digitado → o animal: na data passada, pela posição do servidor (o brinco daquele dia); hoje, pela lista do
-     * aparelho. Sem animal com o número, o código interno (A-000004 ou 000004: o animal sem brinco; 08, seção 5).
+     * O resolvedor único para os textos, na data da sessão: {porTexto, animais} | {erro} (sem sinal ou sem resposta). As
+     * descrições que voltam ficam em ui.estados.
      */
-    function resolver(t) {
-      // Data passada sem a posição do servidor (sem sinal na consulta): o brinco não é resolvido pela lista de hoje — o número
-      // trocado ou reaproveitado depois iria para o animal errado. A linha fica pendente até a posição chegar.
-      if (semPosicao()) return { modo: 'NENHUM', candidatos: [], semPosicao: true };
-      var r = comPosicao() ? resolverNaPosicao(t) : Store.resolverBrinco(t, function (a) { return a.situacao_cadastral !== 'EXTERNO' && a.situacao_cadastral !== 'ANULADO'; });
-      if (r.modo !== 'NENHUM') return r;
-      return porCodigoInterno(t, r);
-    }
-    /**
-     * O código interno acha só o animal SEM brinco (na data; CONTRATOS, seção 44), escrito inteiro: A-000004 ou o número com
-     * seis algarismos (000004). O brinco inexistente com cara de código continua "não encontrado"; o código de um animal que
-     * tem brinco também, com o brinco dele na mensagem.
-     */
-    function porCodigoInterno(t, r) {
-      var m = /^(?:A-(\d+)|A?(0\d{5,}))$/i.exec(String(t).trim());
-      if (!m) return r;
-      var n = Number(m[1] || m[2]);
-      var lista = comPosicao() ? ui.posicao.itens.map(animalDaPosicao) : Store.animais().filter(function (a) { return a.situacao_cadastral !== 'EXTERNO' && a.situacao_cadastral !== 'ANULADO'; });
-      var mesmo = lista.filter(function (a) { var k = /(\d+)$/.exec(String(a.codigo_interno || '')); return k && Number(k[1]) === n; });
-      var cand = mesmo.filter(function (a) { return !brincoDe(a); });
-      if (!cand.length && mesmo.length === 1) return { modo: 'NENHUM', candidatos: [], codigoDe: mesmo[0] };
-      return { modo: cand.length === 1 ? 'EXATO' : cand.length ? 'VARIOS' : 'NENHUM', candidatos: cand };
+    function resolverNoServidor(textos) {
+      var data = c.sessao.data;
+      return Store.resolver(textos, data, { tipo: 'PESAGEM' }).then(function (r) {
+        if (c.sessao.data !== data) return { erro: new Error('A data da pesagem mudou.') };
+        ui.estados = Object.assign(ui.estados || {}, r.animais);
+        return r;
+      }, function (e) { return { erro: e }; });
     }
     function carregarPosicao() {
       var data = c.sessao.data;
@@ -503,7 +496,6 @@ var TelaPesagens = (function () {
         var porId = {};
         (d.itens || []).forEach(function (x) { porId[x.animal_id] = x; });
         ui.posicao = d.motivo ? { erro: Fmt.rotulo('MOTIVO', d.motivo), motivo: d.motivo, data: data } : { data: d.data, itens: d.itens || [], porId: porId };
-        if (comPosicao()) resolverEsperando();
         desenhar();
       }, function (e) {
         if (!vivo) return;
@@ -512,32 +504,29 @@ var TelaPesagens = (function () {
       });
     }
     /**
-     * As linhas digitadas sem a posição (esperando por ela): com a posição na mão, o brinco é conferido pela data; o achado no
-     * rebanho daquele dia vai para a fila, o resto continua pendente ("Corrigir o brinco").
+     * As linhas pendentes que o servidor ainda não resolveu (sem sinal na hora): vão juntas ao resolvedor único; a achada e
+     * no rebanho na data vai para a fila, o resto continua pendente com o porquê do servidor ("Corrigir o brinco").
      */
     function resolverEsperando() {
-      var mudouAlgo = false;
-      c.linhas.forEach(function (l) {
-        if (!l.semPosicao || l.estado !== 'NAO_ENCONTRADO') return;
-        l.semPosicao = false;
-        mudouAlgo = true;
-        var r = resolver(l.brinco);
-        var a = r.modo === 'EXATO' || r.modo === 'SEM_ZEROS' ? r.candidatos[0] : null;
-        if (!a || !presente(a)) return;
-        l.animal_id = a.animal_id; l.brinco = brincoDe(a) || a.codigo_interno; l.estado = 'FILA'; l.mensagem = null;
-        l.fora = !!(c.sessao.pasto_id && pastoDe(a) !== c.sessao.pasto_id);
+      var esperando = c.linhas.filter(function (l) { return l.semPosicao && l.estado === 'NAO_ENCONTRADO'; });
+      if (!esperando.length) return Promise.resolve();
+      return resolverNoServidor(esperando.map(function (l) { return l.brinco; })).then(function (r) {
+        if (r.erro || !vivo) return;
+        esperando.forEach(function (l) {
+          var x = r.porTexto[String(l.brinco).trim()];
+          if (!x || l.estado !== 'NAO_ENCONTRADO') return;
+          l.semPosicao = false;
+          var a = x.situacao === 'ACHADO' ? Store.doEstado(r.animais[x.animal_id]) : null;
+          var outra = a ? c.linhas.filter(function (y) { return y !== l && y.animal_id === a.animal_id; })[0] : null;
+          if (!a || !presente(a) || outra) { l.mensagem = !a ? x.mensagem || 'Mais de um animal com este brinco: corrija o brinco.' : outra ? Store.rotuloAnimal(a) + ' já tem outra pesagem nesta sessão (' + Fmt.peso(outra.peso) + '): tire uma das duas.' : Store.rotuloAnimal(a) + ' ' + motivoFora(a) + ': não entra na pesagem.'; return; }
+          l.animal_id = a.animal_id; l.brinco = brincoDe(a) || a.codigo_interno; l.estado = 'FILA'; l.mensagem = null;
+          l.fora = !!(c.sessao.pasto_id && pastoDe(a) !== c.sessao.pasto_id);
+        });
+        mudou();
       });
-      if (mudouAlgo) guardar(c);
-    }
-    /** O brinco na posição da data: exato, e sem os zeros à esquerda (a mesma regra da loja do aparelho). */
-    function resolverNaPosicao(t) {
-      var exatos = ui.posicao.itens.filter(function (x) { return x.brinco && Store.normalizarBrinco(x.brinco, true) === Store.normalizarBrinco(t, true); });
-      if (!exatos.length && Store.param('brinco_ignora_zeros_esquerda') !== false) exatos = ui.posicao.itens.filter(function (x) { return x.brinco && Store.normalizarBrinco(x.brinco, false) === Store.normalizarBrinco(t, false); });
-      var cand = exatos.map(animalDaPosicao);
-      return { modo: cand.length === 1 ? 'EXATO' : cand.length ? 'VARIOS' : 'NENHUM', candidatos: cand };
     }
     function animaisDoPasto() {
-      if (!c.sessao.pasto_id || semPosicao()) return null;
+      if (!c.sessao.pasto_id || (passada() && !comPosicao())) return null;
       if (comPosicao()) return ui.posicao.itens.filter(function (x) { return x.pasture_id === c.sessao.pasto_id; }).map(animalDaPosicao);
       return Store.animais().filter(function (a) { return a.situacao_cadastral === 'ATIVO' && a.pasto_atual_id === c.sessao.pasto_id; });
     }
@@ -562,7 +551,7 @@ var TelaPesagens = (function () {
       c.linhas.forEach(function (l) { if (l.animal_id) ids[l.animal_id] = true; });
       var falta = doPasto.filter(function (a) { return !ids[a.animal_id]; }).sort(function (a, b) { return String(brincoDe(a) || a.codigo_interno).localeCompare(String(brincoDe(b) || b.codigo_interno), 'pt-BR', { numeric: true }); });
       ui.faltam.appendChild(UI.secao('Faltam ' + falta.length + ' do ' + ((Store.pasto(c.sessao.pasto_id) || {}).nome || 'pasto'), falta.length ? h('ul', { class: 'lista-simples', dataset: { faltam: String(falta.length) } }, falta.map(function (a) {
-        return h('li', { class: 'linha-acao' }, h('span', { text: nomeNaData(a) + ' · ' + descricao(a) }), UI.botao('Pesar este', { aoClicar: function () { ui.brinco.value = brincoDe(a) || a.codigo_interno; escolher(a); } }));
+        return h('li', { class: 'linha-acao' }, h('span', { text: nomeNaData(a) + ' · ' + descricao(a) }), UI.botao('Pesar este', { aoClicar: function () { ui.brinco.value = brincoDe(a) || a.codigo_interno; ui.conferindo = null; ui.vezConf = (ui.vezConf || 0) + 1; escolher(a); } }));
       })) : UI.nota('Todos os animais do pasto foram pesados.', 'ok'), { dado: 'faltam' }));
     }
     function desenharStatus() {
@@ -583,6 +572,7 @@ var TelaPesagens = (function () {
       if (semSinal.length) ui.status.appendChild(UI.nota('Sem sinal ou sem resposta: o que foi digitado está guardado neste aparelho. Toque em "Enviar" quando o sinal voltar; nada será gravado duas vezes.', 'aviso'));
       if (c.erroGeral) ui.status.appendChild(h('div', { role: 'alert', dataset: { erroGeral: '1' } }, UI.nota('O servidor recusou o envio: ' + c.erroGeral + ' Nada foi gravado; as pesagens continuam neste aparelho.', 'erro')));
       if (pend.length) ui.status.appendChild(UI.nota(pend.length === 1 ? '1 pendência impede o envio: corrija o peso ou o brinco, ou tire a linha.' : pend.length + ' pendências impedem o envio: corrija ou tire as linhas marcadas.', 'erro'));
+      if (c.linhas.some(function (l) { return l.semPosicao && l.estado === 'NAO_ENCONTRADO'; })) ui.status.appendChild(h('div', { class: 'acoes' }, UI.botao('Conferir os brincos pendentes no servidor', { atributos: { 'data-resolver-pendentes': '1' }, aoClicar: function () { resolverEsperando(); } })));
       avisos.forEach(function (b) {
         if (!b.gerais || !b.gerais.length || b.geralAceito) return;
         ui.status.appendChild(h('div', { dataset: { avisoGeral: b.chave } }, UI.nota(b.gerais.map(function (g) { return g.mensagem; }).join(' '), 'aviso'),
@@ -627,9 +617,9 @@ var TelaPesagens = (function () {
       Util.limpar(ui.posicaoNota);
       if (!ui.posicao) return;
       if (ui.posicao.carregando) ui.posicaoNota.appendChild(UI.nota('Conferindo no servidor quem estava no rebanho em ' + Fmt.data(ui.posicao.data) + '…', 'info'));
-      else if (ui.posicao.motivo) ui.posicaoNota.appendChild(UI.nota('Não há posição do rebanho em ' + Fmt.data(ui.posicao.data) + ' (' + ui.posicao.erro + '): o brinco é conferido pela lista de hoje, e o servidor decide se aceita a data.', 'aviso'));
-      else if (ui.posicao.erro) ui.posicaoNota.appendChild(h('div', { dataset: { posicaoErro: '1' } }, UI.nota('Sem a posição do rebanho em ' + Fmt.data(ui.posicao.data) + ' (' + ui.posicao.erro + '): o brinco não é conferido pela posição de hoje (pode ser de outro animal naquele dia). As pesagens ficam pendentes até a posição chegar.', 'aviso'),
-        h('div', { class: 'acoes' }, UI.botao('Tentar de novo', { atributos: { 'data-posicao-tentar': '1' }, aoClicar: function () { carregarPosicao(); desenhar(); } }))));
+      else if (ui.posicao.motivo) ui.posicaoNota.appendChild(UI.nota('Não há posição do rebanho em ' + Fmt.data(ui.posicao.data) + ' (' + ui.posicao.erro + '): o brinco é conferido pelo servidor nessa data, e ele decide se aceita a data.', 'aviso'));
+      else if (ui.posicao.erro) ui.posicaoNota.appendChild(h('div', { dataset: { posicaoErro: '1' } }, UI.nota('Sem resposta do servidor para ' + Fmt.data(ui.posicao.data) + ' (' + ui.posicao.erro + '): o brinco é conferido só pelo servidor, na data (o número pode ser de outro animal naquele dia). Sem sinal, as pesagens ficam pendentes.', 'aviso'),
+        h('div', { class: 'acoes' }, UI.botao('Tentar de novo', { atributos: { 'data-posicao-tentar': '1' }, aoClicar: function () { carregarPosicao(); resolverEsperando(); desenhar(); } }))));
       else ui.posicaoNota.appendChild(UI.nota('Rebanho e pastos na posição em ' + Fmt.data(ui.posicao.data) + ', conferidos pelo servidor.', 'info'));
     }
     /** A sessão (data, método, pasto) só muda enquanto nenhum bloco saiu (CONTRATOS, seções 38 e 43): redesenhado a cada mudança. */
@@ -649,64 +639,76 @@ var TelaPesagens = (function () {
       desenharLinhas();
     }
     function mudou() { guardar(c); desenhar(); }
-    /** Brinco digitado → o animal da lista do aparelho (exato, sem zeros à esquerda; mais de um → escolher). */
+    /**
+     * Brinco digitado → a pergunta ao resolvedor único na data da pesagem; a resposta (o animal, a escolha entre vários ou a
+     * recusa explicada) aparece na conferência. Sem resposta (sem sinal), a linha fica pendente para o servidor resolver.
+     * Devolve a promessa de quando a conferência está pronta (o lançamento do peso espera por ela).
+     */
     function conferir() {
       Util.limpar(ui.conferencia);
       Util.limpar(ui.candidatos);
       ui.atual = null;
       var t = ui.brinco.value.trim();
-      if (!t) return null;
-      if (ui.posicao && ui.posicao.carregando) { ui.conferencia.appendChild(h('p', { class: 'aviso', text: 'Conferindo no servidor quem estava no rebanho em ' + Fmt.data(ui.posicao.data) + '… digite de novo em instantes.' })); return null; }
-      var r = resolver(t);
-      var outroNoDia = null;
-      if (r.modo === 'NENHUM' && comPosicao()) {
-        // Ninguém do rebanho tinha este número na data: o dono de hoje que não estava no rebanho aparece como tal; o que estava,
-        // com outro brinco naquele dia, NÃO é achado por ele (a pesagem iria para o animal errado).
-        var hoje = Store.resolverBrinco(t, function (a) { return a.situacao_cadastral !== 'EXTERNO' && a.situacao_cadastral !== 'ANULADO'; });
-        if ((hoje.modo === 'EXATO' || hoje.modo === 'SEM_ZEROS') && !presente(hoje.candidatos[0])) r = hoje;
-        else if (hoje.modo === 'EXATO' || hoje.modo === 'SEM_ZEROS') outroNoDia = hoje.candidatos[0];
+      if (!t) { ui.conferindo = null; return null; }
+      var vez = ui.vezConf = (ui.vezConf || 0) + 1;
+      ui.conferencia.appendChild(h('p', { class: 'suave', text: 'Conferindo ' + t + ' no servidor…' }));
+      ui.conferindo = { texto: t, pronto: resolverNoServidor([t]).then(function (r) {
+        if (vivo && vez === ui.vezConf) mostrar(t, r);
+        // O sinal voltou: as linhas que ficaram pendentes sem resposta vão ao servidor.
+        if (vivo && !r.erro) resolverEsperando();
+      }) };
+      return ui.conferindo.pronto;
+    }
+    function mostrar(t, r) {
+      Util.limpar(ui.conferencia);
+      Util.limpar(ui.candidatos);
+      var x = r.erro ? null : r.porTexto[t];
+      if (x && x.situacao === 'ACHADO') { escolher(Store.doEstado(r.animais[x.animal_id]), true); return; }
+      if (x && x.situacao === 'VARIOS') {
+        ui.conferencia.appendChild(h('p', { class: 'aviso', text: x.mensagem }));
+        x.candidatos.forEach(function (id) { var a = Store.doEstado(r.animais[id]); ui.candidatos.appendChild(UI.botao(nomeNaData(a) + ' · ' + descricao(a), { bloco: true, aoClicar: function () { escolher(a); } })); });
+        return;
       }
-      if (r.modo === 'VARIOS') {
-        ui.conferencia.appendChild(h('p', { class: 'aviso', text: 'Mais de um animal com "' + t + '": escolha.' }));
-        r.candidatos.forEach(function (a) { ui.candidatos.appendChild(UI.botao(nomeNaData(a) + ' · ' + descricao(a), { bloco: true, aoClicar: function () { escolher(a); } })); });
-        return 'VARIOS';
-      }
-      if (r.modo === 'NENHUM') {
-        ui.atual = { brinco: t, animal: null, semPosicao: !!r.semPosicao };
-        ui.conferencia.appendChild(h('p', { class: 'destaque-erro', dataset: { conferencia: r.semPosicao ? 'SEM_POSICAO' : 'NAO_ENCONTRADO' }, text: r.semPosicao
-          ? t + ': sem a posição do rebanho em ' + Fmt.data(ui.posicao.data) + ', o brinco fica para conferir quando ela chegar (toque em "Tentar de novo" com sinal). Se seguir, a linha fica pendente.'
-          : outroNoDia
-            ? t + ': em ' + Fmt.data(ui.posicao.data) + ' nenhum animal do rebanho tinha este brinco (hoje ele é de ' + Store.rotuloAnimal(outroNoDia) + ', que naquele dia tinha o ' + (brincoDe(outroNoDia) || outroNoDia.codigo_interno) + '). Confira o brinco; se seguir, a linha fica pendente.'
-            : r.codigoDe
-              ? t + ' é o código interno de um animal com brinco (' + brincoDe(r.codigoDe) + '): digite o brinco dele. Se seguir, a linha fica pendente.'
-              : t + ': não encontrado. Confira o brinco; se seguir, a linha fica pendente.' }));
-        return 'NENHUM';
-      }
-      escolher(r.candidatos[0], true);
-      return 'OK';
+      ui.atual = { brinco: t, animal: null, semPosicao: !x, mensagem: x ? x.mensagem : null };
+      ui.conferencia.appendChild(h('p', { class: 'destaque-erro', dataset: { conferencia: x ? 'NAO_ENCONTRADO' : 'SEM_POSICAO' }, text: x
+        ? x.mensagem + ' Confira o brinco; se seguir, a linha fica pendente.'
+        : t + ': sem resposta do servidor (' + r.erro.message + '), o brinco fica para conferir quando houver sinal (toque em "Enviar" ou "Tentar de novo"). Se seguir, a linha fica pendente.' }));
     }
     function escolher(a, semFoco) {
       Util.limpar(ui.candidatos);
       Util.limpar(ui.conferencia);
       ui.atual = { brinco: brincoDe(a) || a.codigo_interno, animal: a };
-      var inativo = !presente(a);
-      var fora = !inativo && c.sessao.pasto_id && pastoDe(a) !== c.sessao.pasto_id;
+      var fora = motivoFora(a);
+      var outro = !fora && c.sessao.pasto_id && pastoDe(a) !== c.sessao.pasto_id;
       var ja = c.linhas.filter(function (l) { return l.animal_id === a.animal_id; });
-      var partes = [nomeNaData(a) + ' · ' + descricao(a)];
-      ui.conferencia.appendChild(h('p', { class: 'dado', dataset: { conferencia: inativo ? 'INATIVO' : 'OK' }, text: partes.join('') }));
-      if (inativo) ui.conferencia.appendChild(h('p', { class: 'destaque-erro', text: comPosicao() ? 'Não estava no rebanho em ' + Fmt.data(ui.posicao.data) + ': não entra na pesagem.' : 'Não está no rebanho (' + Fmt.rotulo('SITUACAO_CADASTRAL', a.situacao_cadastral).toLowerCase() + '): não entra na pesagem.' }));
-      if (fora) ui.conferencia.appendChild(h('p', { class: 'suave', dataset: { conferenciaFora: '1' }, text: (comPosicao() ? 'Estava em outro pasto em ' + Fmt.data(ui.posicao.data) + ' (' : 'Está em outro pasto (') + ((Store.pasto(pastoDe(a)) || {}).nome || 'sem pasto') + '): conta à parte.' }));
+      ui.conferencia.appendChild(h('p', { class: 'dado', dataset: { conferencia: fora ? 'INATIVO' : 'OK' }, text: nomeNaData(a) + ' · ' + descricao(a) }));
+      if (fora) ui.conferencia.appendChild(h('p', { class: 'destaque-erro', text: 'O animal ' + fora + ': não entra na pesagem.' }));
+      if (outro) ui.conferencia.appendChild(h('p', { class: 'suave', dataset: { conferenciaFora: '1' }, text: (passada() ? 'Estava em outro pasto em ' + Fmt.data(c.sessao.data) + ' (' : 'Está em outro pasto (') + ((Store.pasto(pastoDe(a)) || {}).nome || 'sem pasto') + '): conta à parte.' }));
       if (ja.length) ui.conferencia.appendChild(h('p', { class: 'aviso', dataset: { conferenciaRepetido: '1' }, text: 'Já pesado nesta pesagem (' + Fmt.peso(ja[ja.length - 1].peso) + ', ' + ROTULO_ESTADO[ja[ja.length - 1].estado] + ').' }));
       if (!semFoco) ui.peso.focus();
     }
     function aviso(texto) { Util.limpar(ui.conferencia); ui.conferencia.appendChild(h('p', { class: 'destaque-erro', role: 'alert', text: texto })); }
-    /** Enter no peso: confere o formato (vírgula, 1 casa, maior que zero) e põe a linha no topo da fila. */
-    function lancar() {
-      if (!ui.atual) { if (conferir() !== 'OK' && (!ui.atual || ui.atual.animal)) { ui.brinco.focus(); return; } }
+    /**
+     * Enter no peso: espera a conferência do brinco (a resposta do servidor), confere o formato do peso (vírgula, 1 casa,
+     * maior que zero) e põe a linha no topo da fila. Com mais de um animal para o brinco, pede a escolha.
+     */
+    async function lancar() {
+      if (ui.lancando) return;
+      ui.lancando = true;
+      try { await lancar_(); } finally { ui.lancando = false; }
+    }
+    async function lancar_() {
+      if (!ui.atual) {
+        var t = ui.brinco.value.trim();
+        if (!t) { ui.brinco.focus(); return; }
+        if (!ui.conferindo || ui.conferindo.texto !== t) conferir();
+        await ui.conferindo.pronto;
+        if (!vivo || !ui.atual) { if (vivo) ui.brinco.focus(); return; }
+      }
       var p = Fmt.lerDecimal(ui.peso.value, 1);
       if (p.erro || p.valor === null || !(p.valor > 0) || p.valor > PESO_MAX) { aviso(p.erro || (p.valor === null ? 'Digite o peso.' : 'O peso vai de 0,1 a 2.000 kg.')); ui.peso.focus(); return; }
       var at = ui.atual;
-      if (at.animal && !presente(at.animal)) { aviso(comPosicao() ? 'Este animal não estava no rebanho em ' + Fmt.data(ui.posicao.data) + ': não entra na pesagem.' : 'Este animal não está no rebanho: não entra na pesagem.'); ui.brinco.select(); ui.brinco.focus(); return; }
+      if (at.animal && !presente(at.animal)) { aviso('Este animal ' + motivoFora(at.animal) + ': não entra na pesagem.'); ui.brinco.select(); ui.brinco.focus(); return; }
       var ja = at.animal ? c.linhas.filter(function (l) { return l.animal_id === at.animal.animal_id; }) : [];
       var ultimo = ja[ja.length - 1];
       if (ultimo) {
@@ -729,7 +731,7 @@ var TelaPesagens = (function () {
     }
     function adicionar(at, peso) {
       c.seq = (c.seq || 0) + 1;
-      var l = { uid: 'p' + c.seq + '-' + Util.uuid().slice(0, 6), brinco: at.brinco, animal_id: at.animal ? at.animal.animal_id : null, peso: peso, estado: at.animal ? 'FILA' : 'NAO_ENCONTRADO', bloco: null, mensagem: null, semPosicao: !at.animal && !!at.semPosicao };
+      var l = { uid: 'p' + c.seq + '-' + Util.uuid().slice(0, 6), brinco: at.brinco, animal_id: at.animal ? at.animal.animal_id : null, peso: peso, estado: at.animal ? 'FILA' : 'NAO_ENCONTRADO', bloco: null, mensagem: at.animal ? null : at.mensagem || null, semPosicao: !at.animal && !!at.semPosicao };
       l.fora = !!(at.animal && c.sessao.pasto_id && pastoDe(at.animal) !== c.sessao.pasto_id);
       c.linhas.push(l);
     }
@@ -805,14 +807,15 @@ var TelaPesagens = (function () {
     function corrigirBrinco(l) {
       var entrada = h('input', { type: 'text', inputmode: 'numeric', id: 'cur-corrige-brinco', value: l.brinco || '' });
       var f = UI.folha({ titulo: 'Brinco da pesagem de ' + Fmt.peso(l.peso), conteudo: campo('cur-corrige-brinco', 'Brinco', entrada), acoes: [] });
-      f.definirAcoes([UI.botao('Voltar', { aoClicar: function () { f.fechar(); } }), UI.botao('Corrigir', { tipo: 'primario', aoClicar: function () {
-        // A mesma conferência do brinco digitado: na data passada, pela posição do servidor naquela data (presença e pasto).
-        var r = resolver(entrada.value.trim());
-        var quando = comPosicao() ? ' em ' + Fmt.data(ui.posicao.data) : '';
-        if (r.semPosicao) { UI.aviso('Sem a posição do rebanho em ' + Fmt.data(ui.posicao.data) + ': toque em "Tentar de novo" com sinal antes de corrigir o brinco.', { tipo: 'erro' }); return; }
-        if (r.modo === 'NENHUM' || r.modo === 'VARIOS') { UI.aviso(r.modo === 'NENHUM' ? 'Nenhum animal no rebanho' + quando + ' com "' + entrada.value + '".' : 'Mais de um animal com "' + entrada.value + '": digite o brinco inteiro.', { tipo: 'erro' }); return; }
-        var a = r.candidatos[0];
-        if (!presente(a)) { UI.aviso(Store.rotuloAnimal(a) + (comPosicao() ? ' não estava no rebanho' + quando : ' não está no rebanho') + ': não entra na pesagem.', { tipo: 'erro' }); return; }
+      f.definirAcoes([UI.botao('Voltar', { aoClicar: function () { f.fechar(); } }), UI.botao('Corrigir', { tipo: 'primario', aoClicar: async function () {
+        // A mesma conferência do brinco digitado: o resolvedor único do servidor na data da pesagem (presença e pasto naquele dia).
+        var t = entrada.value.trim();
+        var r = await resolverNoServidor([t]);
+        if (r.erro) { UI.aviso('Sem resposta do servidor (' + r.erro.message + '): o brinco é conferido por ele. Corrija com sinal.', { tipo: 'erro' }); return; }
+        var x = r.porTexto[t];
+        if (x.situacao !== 'ACHADO') { UI.aviso(x.mensagem, { tipo: 'erro' }); return; }
+        var a = Store.doEstado(r.animais[x.animal_id]);
+        if (!presente(a)) { UI.aviso(Store.rotuloAnimal(a) + ' ' + motivoFora(a) + ': não entra na pesagem.', { tipo: 'erro' }); return; }
         l.brinco = brincoDe(a) || a.codigo_interno; l.animal_id = a.animal_id; l.estado = 'FILA'; l.mensagem = null; l.semPosicao = false;
         l.fora = !!(c.sessao.pasto_id && pastoDe(a) !== c.sessao.pasto_id);
         f.fechar({ forcar: true });
@@ -847,6 +850,7 @@ var TelaPesagens = (function () {
       if (!c.iniciada) { formularioInicio(corpo, c, montarSessao); return; }
       var s = c.sessao;
       titulo.textContent = 'Pesagem no curral';
+      ui.estados = {};
       ui.contador = h('div', { class: 'curral-contador', role: 'status', 'aria-live': 'polite' });
       ui.mudar = h('div', { dataset: { curralMudar: '1' } });
       var cab = h('div', { class: 'curral-cabecalho', dataset: { curralCabecalho: '1' } },
@@ -856,8 +860,8 @@ var TelaPesagens = (function () {
         ui.mudar);
       ui.brinco = h('input', { type: 'text', id: 'cur-brinco', class: 'curral-entrada', inputmode: 'numeric', autocomplete: 'off', enterkeyhint: 'next', 'aria-describedby': 'cur-conferencia' });
       ui.peso = h('input', { type: 'text', id: 'cur-peso', class: 'curral-entrada', inputmode: 'decimal', autocomplete: 'off', enterkeyhint: 'done' });
-      ui.brinco.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); var r = conferir(); if (r === 'OK' || r === 'NENHUM') ui.peso.focus(); } });
-      ui.brinco.addEventListener('input', function () { ui.atual = null; });
+      ui.brinco.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); if (conferir()) ui.peso.focus(); } });
+      ui.brinco.addEventListener('input', function () { ui.atual = null; ui.conferindo = null; ui.vezConf = (ui.vezConf || 0) + 1; });
       ui.peso.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); lancar(); } });
       var teclado = UI.botao('Brinco com letras', { tipo: 'texto', atributos: { 'aria-pressed': 'false' }, aoClicar: function (ev) {
         var letras = ui.brinco.getAttribute('inputmode') === 'numeric';

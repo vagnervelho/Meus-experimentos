@@ -185,11 +185,12 @@ var UI = (function () {
   function buscaBrinco() {
     var entrada = h('input', { type: 'search', id: 'busca-topo', 'aria-label': 'Buscar animal por brinco', placeholder: 'Brinco', autocomplete: 'off', inputmode: Store.param('brinco_somente_numerico') === true ? 'numeric' : null });
     var form = h('form', { class: 'busca-topo', role: 'search' }, entrada, botao('', { icone: 'busca', rotulo: 'Buscar', atributos: { type: 'submit' } }));
-    form.addEventListener('submit', function (ev) {
+    form.addEventListener('submit', async function (ev) {
       ev.preventDefault();
-      var r = Store.buscar(entrada.value);
+      var r;
+      try { r = await Store.buscar(entrada.value); } catch (e) { aviso(Store.semResposta(e), { tipo: 'erro' }); return; }
       if (r.candidatos.length === 1) { Roteador.ir('animal/' + r.candidatos[0].animal_id + '/resumo'); entrada.value = ''; return; }
-      if (!r.candidatos.length) { aviso('Nenhum animal com "' + entrada.value + '".', { tipo: 'erro' }); return; }
+      if (!r.candidatos.length) { aviso(r.mensagem || 'Nenhum animal com "' + entrada.value + '".', { tipo: 'erro' }); return; }
       var lista = h('ul', { class: 'candidatos' });
       var f = folha({ titulo: r.candidatos.length + ' animais com "' + entrada.value + '"', conteudo: lista, origem: entrada });
       r.candidatos.forEach(function (a) {
@@ -774,7 +775,7 @@ var Campos = (function () {
       focavel = function () { return sel; };
       el._recarregar = preencher;
     } else if (ref && ref[1] === 'ANIMAIS') {
-      controle = campoAnimal_(def, id, atual, mudou, describedby);
+      controle = campoAnimal_(def, id, atual, mudou, describedby, o.dataEvento);
       focavel = function () { return controle.querySelector('input, button'); };
     } else if (ref && ref[1] === 'EVENTOS') {
       var rot = o.rotulos && atual ? o.rotulos[atual] : null;
@@ -854,8 +855,8 @@ var Campos = (function () {
     return caixa;
   }
 
-  /** ref:ANIMAIS: digita o brinco (ou código) e o Enter resolve no store; um candidato → escolhido; vários → lista. */
-  function campoAnimal_(def, id, atual, mudou, describedby) {
+  /** ref:ANIMAIS: digita o brinco (ou código) e o Enter pergunta ao resolvedor único na data do lançamento; um candidato → escolhido; vários → lista. */
+  function campoAnimal_(def, id, atual, mudou, describedby, dataEvento) {
     var caixa = h('div', { class: 'campo-animal' });
     function desenhar(valor, candidatos, msg) {
       Util.limpar(caixa);
@@ -866,10 +867,11 @@ var Campos = (function () {
         return;
       }
       var inp = h('input', { type: 'text', id: id, 'aria-describedby': describedby, autocomplete: 'off', placeholder: 'Brinco ou código', inputmode: Store.param('brinco_somente_numerico') === true ? 'numeric' : null, dataset: { enterProprio: '1' } });
-      var achar = function () {
-        var r = Store.buscar(inp.value);
+      var achar = async function () {
+        var r;
+        try { r = await Store.buscar(inp.value, dataEvento ? dataEvento() : null); } catch (e) { r = { candidatos: [], mensagem: Store.semResposta(e) }; }
         if (r.candidatos.length === 1) { mudou(r.candidatos[0].animal_id); desenhar(r.candidatos[0].animal_id); var b = caixa.querySelector('button'); if (b) b.focus(); return; }
-        desenhar(null, r.candidatos, r.candidatos.length ? null : 'Nenhum animal com "' + inp.value + '".');
+        desenhar(null, r.candidatos, r.candidatos.length ? null : r.mensagem || 'Nenhum animal com "' + inp.value + '".');
         var i2 = caixa.querySelector('input'); if (i2) { i2.value = inp.value; i2.focus(); }
       };
       inp.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); ev.stopPropagation(); achar(); } });
@@ -985,7 +987,7 @@ var Formulario = (function () {
       return false;
     };
     defs.forEach(function (d) {
-      var c = Campos.criar(d, { valor: valores[d.id], idBase: o.idBase, rotulos: o.rotulos, aoNovo: o.aoNovo, novoFixos: o.novoFixos ? o.novoFixos[d.id] : null, aoMudar: function (v) { valores[d.id] = v; c.erro(null); atualizar(); if (o.aoMudar) o.aoMudar(d.id); } });
+      var c = Campos.criar(d, { valor: valores[d.id], idBase: o.idBase, rotulos: o.rotulos, aoNovo: o.aoNovo, dataEvento: o.dataEvento, novoFixos: o.novoFixos ? o.novoFixos[d.id] : null, aoMudar: function (v) { valores[d.id] = v; c.erro(null); atualizar(); if (o.aoMudar) o.aoMudar(d.id); } });
       ctrls[d.id] = c;
       (principal(d) ? grade : gradeExtras).appendChild(c.el);
     });
@@ -1468,8 +1470,11 @@ var Seletor = (function () {
         if (vez !== painelVez) return;
         if (posicaoErro) saida.appendChild(UI.nota(posicaoErro + ' A marcação de elegível usa a posição de hoje; o servidor confere na gravação.', 'aviso'));
         var filtro = baixados ? function (a) { return !elegivel(a); } : null;
-        var r = Store.buscar(t, filtro);
-        if (!r.candidatos.length) { saida.appendChild(UI.nota('Nenhum animal com "' + t + '"' + (baixados ? ' entre os que saíram do rebanho.' : '.'), 'aviso')); return; }
+        var r;
+        // O brinco é achado pelo resolvedor único na data do lançamento (CONTRATOS, seção 47), nunca pela lista do aparelho.
+        try { r = await Store.buscar(t, dataAtual(), filtro, { tipo: o.tipo }); } catch (e) { if (vez === painelVez) saida.appendChild(UI.estadoErro(e)); return; }
+        if (vez !== painelVez) return;
+        if (!r.candidatos.length) { saida.appendChild(UI.nota(r.mensagem || 'Nenhum animal com "' + t + '"' + (baixados ? ' entre os que saíram do rebanho.' : '.'), 'aviso')); return; }
         if ((r.modo === 'EXATO' || r.modo === 'SEM_ZEROS') && r.candidatos.length === 1) {
           var a = r.candidatos[0];
           var n = adicionar([a.animal_id]);
@@ -1559,18 +1564,25 @@ var Seletor = (function () {
         if (vez !== painelVez) return;
         var itens = ta.value.split(/[\n,;\t]+/).map(function (x) { return x.trim(); }).filter(Boolean);
         var achados = [], nao = [], repetidos = [], varios_ = [], vistos = {};
-        var filtro = function (a) { return !elegivel(a); };
+        var res;
+        // A lista inteira vai ao resolvedor único na data do lançamento (CONTRATOS, seção 47): o aparelho não resolve brinco.
+        try { res = await Store.resolver(itens, dataAtual(), { tipo: o.tipo }); } catch (e) { if (vez === painelVez) saida.appendChild(UI.estadoErro(e)); return; }
+        if (vez !== painelVez) return;
+        var de = function (id) { return Store.doEstado(res.animais[id]); };
         itens.forEach(function (t) {
-          var r = Store.resolverBrinco(t, filtro);
-          if (r.modo === 'NENHUM') { nao.push(t); return; }
-          if (r.modo === 'VARIOS') { varios_.push({ texto: t, candidatos: r.candidatos }); return; }
-          var id = r.candidatos[0].animal_id;
+          var x = res.porTexto[t];
+          var cands = x.situacao === 'ACHADO' ? [de(x.animal_id)] : x.situacao === 'VARIOS' ? x.candidatos.map(de) : [];
+          cands.forEach(function (a) { if (!Store.animal(a.animal_id)) daPosicao[a.animal_id] = res.animais[a.animal_id]; });
+          var serve = cands.filter(function (a) { return !elegivel(a); });
+          if (x.situacao === 'RECUSADO' || !serve.length) { nao.push(x.situacao === 'RECUSADO' ? x.mensagem : t + ' (' + (elegivel(cands[0]) || 'não serve') + ')'); return; }
+          if (serve.length > 1) { varios_.push({ texto: t, candidatos: serve }); return; }
+          var id = serve[0].animal_id;
           if (vistos[id] || ids.indexOf(id) >= 0) { repetidos.push(t); return; }
           vistos[id] = true;
           achados.push(id);
         });
         saida.appendChild(h('p', { class: 'dado', text: achados.length + ' achados · ' + nao.length + ' não encontrados · ' + repetidos.length + ' repetidos' }));
-        if (nao.length) saida.appendChild(UI.nota('Não encontrados: ' + nao.join(', '), 'aviso'));
+        if (nao.length) saida.appendChild(UI.nota('Não encontrados: ' + nao.join(' · '), 'aviso'));
         if (repetidos.length) saida.appendChild(UI.nota('Repetidos ou já na lista: ' + repetidos.join(', '), 'info'));
         varios_.forEach(function (v) { saida.appendChild(h('p', { text: '"' + v.texto + '" serve para mais de um animal. Escolha:' })); saida.appendChild(listaCandidatos(v.candidatos)); });
         if (achados.length) saida.appendChild(UI.botao('Incluir os ' + achados.length + ' achados', { tipo: 'primario', aoClicar: function (ev) { adicionar(achados); ev.currentTarget.disabled = true; UI.aviso(achados.length + ' incluídos.', { tipo: 'ok' }); } }));
@@ -2130,7 +2142,7 @@ var Registro = (function () {
     var cEv = camposEvento(s);
     var primeiro = cEv.filter(function (d) { return d.id === 'event_date'; });
     var ultimo = cEv.filter(function (d) { return d.id === 'notes'; });
-    v.opEv = { idBase: 'ev', rotulos: s.rotulos, aoMudar: function (id) {
+    v.opEv = { idBase: 'ev', rotulos: s.rotulos, dataEvento: function () { return s.campos.event_date || Fmt.hoje(); }, aoMudar: function (id) {
       tocar(s);
       if (preencherDoProduto_(s, id)) {
         desenharMeio(s);
@@ -2336,7 +2348,7 @@ var Registro = (function () {
     var defs = defsLinha(s, l);
     if (corr) defs = defs.map(function (d) { return d.id === 'campo' ? Object.assign({}, d, { opcoes: d.opcoes || Object.keys(corr) }) : d; });
     var bloco = Formulario.bloco(defs, l.valores, {
-      idBase: l.uid, principais: s.tipo === 'VENDA' ? PRINCIPAIS_VENDA : l.animal_id && !l.criado ? null : s.tipo === 'COMPRA' ? PRINCIPAIS_COMPRA : PRINCIPAIS_ANIMAL, tituloExtras: 'Mais dados deste animal (opcional)', extras: function () { return s.campos; },
+      idBase: l.uid, dataEvento: function () { return s.campos.event_date || Fmt.hoje(); }, principais: s.tipo === 'VENDA' ? PRINCIPAIS_VENDA : l.animal_id && !l.criado ? null : s.tipo === 'COMPRA' ? PRINCIPAIS_COMPRA : PRINCIPAIS_ANIMAL, tituloExtras: 'Mais dados deste animal (opcional)', extras: function () { return s.campos; },
       aoMudar: function (id) {
         tocar(s);
         if (id === 'brinco') titulo.textContent = tituloTxt();

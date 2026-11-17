@@ -237,6 +237,8 @@ test('correção pelo catálogo: subtipo primeiro, seletor resolve brinco sem ze
   await page.click('.seletor-modos button:has-text("Colar lista")');
   await page.fill('.seletor textarea', '0391\n9999; 457');
   await page.click('button:has-text("Conferir a lista")');
+  // A lista vai ao resolvedor único do servidor na data do lançamento (CONTRATOS, seção 47).
+  await A.esperarServidor(page);
   assert.match(await page.textContent('.seletor .conferencia'), /1 achados · 1 não encontrados · 1 repetidos/);
   await page.click('button:has-text("Incluir os 1 achados")');
   await page.waitForFunction(() => document.querySelectorAll('.seletor .selecionados li').length === 2);

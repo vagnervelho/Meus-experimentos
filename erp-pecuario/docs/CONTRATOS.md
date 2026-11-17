@@ -170,6 +170,10 @@ Fase 3, CONSERTO PELA GARANTIA (etapa 1, viagem no tempo): a propriedade de toda
 até D e dos cadastros que o desenho manda ler como estão hoje), o ponto único do estado em D (`Timeline.fonteAte`,
 `Timeline.retratoEm`, `Timeline.periodosDeBrinco`, `AnimalService.retratoEm`), o inventário das rotas e cálculos com data e
 das exceções por desenho, os consertos que o oráculo de viagem no tempo do teste aleatório achou e o próprio oráculo (seção 46).
+Fase 3, CONSERTO PELA GARANTIA (etapa 2, resolvedor único da posição na data): `Identificacao` (texto digitado e data → o
+animal ou a recusa explicada; animal e data → brinco, pasto, categoria, situação, presença e último peso), a rota
+`animal.resolver`, todos os caminhos que acham o animal por um texto (curral, tronco, seletor, buscas, importação, conferência)
+só por ele, o cliente sem resolução de brinco própria, o teste tabelado e o oráculo do teste aleatório (seção 47).
 
 ## 1. Regras que valem para todo arquivo de `src/`
 
@@ -3085,7 +3089,8 @@ numa data.
 | `evento.listar` | `de`, `ate` | os lançamentos do período com a situação de cada um | — (o estorno de um fato até D é fato retroativo: tira o fato) |
 | `animal.ficha` | a data de referência: hoje no rebanho, a da saída para quem saiu | idade, categoria, peso, situação reprodutiva, cria ao pé, aptidão e carência no retrato da data de referência | as listas (eventos, partos e crias, bezerros, genealogia, anexos, financeiro, registros como touro) e a localização; a volta ao rebanho leva a ficha para hoje |
 | `animal.listar` (lista leve), `evento.obter`, `alerta.listar` | — | — | hoje: a projeção gravada; o brinco do rótulo do evento é o de hoje; os alertas são de hoje |
-| Importação (`importacao.validarBloco` e `importarBloco`) | a data da linha (manejo e eventos) ou o marco zero (a mãe e o pai do rebanho inicial) | o dono do número na data pelos períodos de `Timeline.periodosDeBrinco` | — |
+| Importação (`importacao.validarBloco` e `importarBloco`) | a data da linha (manejo e eventos) ou o marco zero (a mãe e o pai do rebanho inicial) | o animal do texto pelo resolvedor único na data (`Identificacao`, seção 47), sobre os períodos de `Timeline.periodosDeBrinco` | — |
+| `animal.resolver` (seção 47) | `data` (padrão hoje), `textos`, `ids`, `tipo`, `sexo` | o animal de cada texto em D (o número em uso em D; nunca o de hoje) e a descrição dele em D (`Identificacao.descrever`, a mesma de `inventario.elegiveis`) | `brinco_hoje`, `situacao_hoje` e, na recusa do número sem dono em D, "hoje ele é de…" (a explicação; o animal não é achado por ele) |
 | Comandos (`evento.*`) | `event_date` | a validação na linha do tempo do fato (seção 13) | a data de hoje só para recusar a data futura |
 
 Os cálculos do servidor que essas rotas usam recebem a data e leem os fatos até ela: `Timeline.situacaoEm`, `presentesEm`,
@@ -3139,3 +3144,97 @@ estoque volta a ficar abaixo de zero, mais baixo que agora, e o estorno é recus
 aceita essa recusa só quando o modelo a confirma (`estornoBloqueadoPeloEstoque`: a recusa traz só ESTOQUE_INSUFICIENTE, a
 política é BLOQUEIA e o menor saldo de algum produto controlado sem os movimentos do lançamento fica negativo e abaixo do de
 agora); a sequência mínima está no arquivo de regressão desta etapa.
+
+## 47. Resolvedor único da posição na data (conserto da Fase 3 pela garantia, etapa 2) — `Identificacao`, `Timeline` (`brincosLancadosErrado`), `InventoryService` (`inventario.elegiveis`), `ImportService`, `Api` (`animal.resolver`), `JavaScript` (`Store.resolver`, `Store.buscar`, `Store.doEstado`), `Components` (busca do topo, campo de animal, `Seletor`), `Weights` (curral, curva), `Reproduction` (tronco); `tests/resolvedor.unico.test.js`, `tests/ui/resolvedor.test.js`, `tests/apoio-fuzz.js` (`oraculoResolucao`, `oraculoResolucaoImportacao`)
+
+As três rodadas de revisão da Fase 3 acharam de novo, a cada rodada, o brinco, o pasto, a categoria e o último peso de um animal
+numa data passada resolvidos de jeitos diferentes no curral, no tronco, no seletor, na importação e na conferência (a consulta
+que falhava sem sinal, o número lançado errado, o código interno parecido com brinco, o reuso). Esta seção troca o caso a caso
+por UM resolvedor no servidor e faz todos os caminhos usarem só ele.
+
+**A regra (`Identificacao.resolver(idx, f, texto, data)`).** O texto digitado numa data D vira o animal ou a recusa, nesta
+ordem (a primeira que decide):
+1. o número de brinco **em uso em D**, pelos períodos da regra única do brinco numa data (`Timeline.periodosDeBrinco`: o número
+   corrigido por IDENTIFICACAO_INCORRETA vale desde o início do errado; o reaproveitado é de quem o tinha em D; o brinco do
+   cadastro sem identificação gravada vale em qualquer data), comparado sem os zeros à esquerda quando
+   `brinco_ignora_zeros_esquerda` = S (o exato desempata) → ACHADO (`como` BRINCO ou SEM_ZEROS); dois donos em D → VARIOS;
+2. sem dono do número em D, o **código interno**: o inteiro (A-000004) identifica o animal, com ou sem brinco (`como` CODIGO);
+   os atalhos (000004, A000004, A-4) só valem para o animal **sem brinco em D** — o do animal com brinco é recusado
+   (CODIGO_DE_ANIMAL_COM_BRINCO: "000004 é o código interno de um animal com brinco (0457): digite o brinco dele.");
+3. o número usado só **depois** de D: no histórico de antes do marco zero (o primeiro uso no marco zero ou antes dele), o animal
+   que o recebeu primeiro (`como` HISTORICO: o histórico cita o animal pelo número que ele tinha no marco zero, 05, seção
+   4.1); depois do marco zero, ANTES_DO_USO ("1457: em 10/11/2026 nenhum animal do rebanho tinha este brinco (hoje ele é de 1457,
+   que naquele dia tinha o 0457).");
+4. o número que **já tinha saído de uso** em D: SEM_USO, com de quem saiu e quando, ou de quem é hoje;
+5. o número **lançado por engano** e corrigido (nunca esteve na orelha: desenho-base 16.2): LANCADO_ERRADO, com o número certo;
+6. o **nome** de um animal de referência (EXTERNO), exato e sem acento: ACHADO (`como` NOME) ou VARIOS;
+7. nada disso: NAO_ENCONTRADO.
+
+Saída: `{situacao: ACHADO | VARIOS | RECUSADO, codigo, animal, candidatos, como, brinco, mensagem}` e os dados da recusa
+(`animal`, `desde`, `ate`, `corrigido_para`, `dono_hoje`). O brinco de hoje nunca acha o animal de uma data passada; ele só
+aparece na explicação ("hoje ele é de…"). A identidade não depende do caminho: o tipo do lançamento, o sexo e a presença não
+entram na regra; eles dizem, no estado, por que o animal achado não serve.
+
+**O índice (`Identificacao.indice(f, animais, {semZeros, marcoZero, pendentes})`).** Sobre uma fonte da linha do tempo: os
+períodos de cada número (chave normalizada pela mesma `Utils.normalizarBrinco`), os números lançados errado
+(`Timeline.brincosLancadosErrado`: [{codigo, inicio, corrigido_para}], da mesma cadeia de `sequenciaDeBrinco_`), os códigos e
+os nomes dos animais de referência. ANULADO nunca entra; PENDENTE só no ensaio da importação (`pendentes`: os animais criados
+pelas linhas anteriores do arquivo). `indiceDoLeitor(L)` = o índice da base de uma consulta, memorizado no leitor.
+
+**O animal em D (`Identificacao.descrever(L, a, data, pastureId)` e `estadoEm(L, a, data, {tipo, sexo})`).** `descrever`: o
+brinco em uso em D (o do retrato) e o de hoje, o sexo, o pasto, a categoria em D e a última pesagem até D (`{kg, data,
+estimado}`) — a MESMA descrição das linhas de `inventario.elegiveis` (que passou a montar cada item por ela) e da conferência
+do curral e do tronco. `estadoEm` acrescenta a situação em D (null antes de o animal entrar) e a de hoje, a presença em D pela
+regra do tipo (`InventoryService.presentes` no movimento e na saída, `presentesNoDia` nos demais; null sem posição: antes do
+marco zero ou sem ele, com `motivo_posicao`) e `inelegivel` (o porquê de não servir ao lançamento: "não estava no rebanho em
+10/11/2026", "não é fêmea", "é animal de referência (de fora do rebanho)").
+
+**A rota `animal.resolver` (CONSULTA, sem chave).** dados: `{data?, textos?: [texto], ids?: [animal_id], tipo?, sexo?}` (até 500
+entre textos e ids; texto até 60 caracteres; `sexo` vem do filtro de elegíveis do tipo quando não informado). Resposta: `{data,
+tipo, motivo, textos: [{texto, situacao, codigo, animal_id, candidatos, como, brinco, crias, mensagem}], animais: {id: estado}}`.
+`crias` = as crias da fêmea achada sem brinco em D (o "crias da <brinco da mãe>" do seletor). Recusa: data inválida ou futura
+e lista grande demais (VALIDATION). Leituras: as de `AnimalService.leituras()`, com acesso cru.
+
+**Os caminhos — todos pelo resolvedor.**
+
+| Caminho | Como pergunta | O que faz com a resposta |
+| --- | --- | --- |
+| Curral (`Weights`, pesagem) | `Store.resolver([texto], data da sessão, {tipo: PESAGEM})` no Enter do brinco; o Enter do peso espera a resposta | ACHADO → a conferência com o estado do servidor (brinco, categoria, pasto e peso da data); fora do rebanho na data → não entra; VARIOS → escolher; RECUSADO → a linha pendente com a mensagem do servidor; **sem resposta → a linha pendente (`SEM_POSICAO`), nunca resolvida pela lista de hoje**: vai ao servidor no "Tentar de novo", no "Conferir os brincos pendentes no servidor" e na próxima conferência que o servidor responder. "Corrigir o brinco" e "Pesar este" (o item da posição da data, a mesma descrição) também |
+| Tronco (`Reproduction`, diagnóstico) | o mesmo, com `{tipo: REPRODUCAO, sexo: F}` | a mesma fêmea; macho ou fora do rebanho → a linha pendente com o porquê; sem resposta → pendente. A nota da data (`[data-tronco-posicao]`) vem de um `animal.resolver` sem textos (a posição da data existe?) |
+| Seletor (`Components`, busca e "Colar lista") | `Store.buscar(texto, data do lançamento, filtro, {tipo})` e `Store.resolver(lista, data, {tipo})` | o achado (e as crias sem brinco da fêmea achada) marcado pelo filtro de elegíveis; a recusa com a mensagem do servidor; o nome (que não é brinco) pela lista do aparelho só quando o servidor responde NAO_ENCONTRADO |
+| Busca do topo, campo de animal dos formulários (mãe, pai, touro, volta ao rebanho), "Comparar a curva" | `Store.buscar` (hoje; o campo de animal na data do lançamento) | o mesmo |
+| Importação (`ImportService`) | `Identificacao.indice` sobre o ensaio (`indiceDoEnsaio_`) ou sobre a base (`contextoValidacao_`, a mãe e o pai no marco zero) + `Identificacao.resolver` na data da linha | ACHADO → o animal da linha; a coluna do código interno continua sendo o código exato de qualquer animal (e o conflito com o brinco é recusado); na COMPRA, a coluna do brinco é o número que o animal comprado leva: o texto lido como código ou nome é um brinco novo; as recusas viram ANIMAL_NAO_ENCONTRADO com o porquê (o número sem uso na data, o lançado errado, o código de um animal com brinco), o touro e o pai também |
+| Conferência e posição da data (`inventario.elegiveis`) | — | cada item é `Identificacao.descrever` (o curral e o tronco mostram a mesma descrição) |
+
+O que ficou no aparelho e não é resolução: o filtro da lista do rebanho (`Animals`, a lista de hoje filtrada pelo que ela mostra)
+e o casamento das recusas do servidor com as linhas do formulário pelo brinco que o próprio servidor devolve (`mapearErros`).
+`Store.resolverBrinco` e os índices por brinco do aparelho saíram.
+
+**Decisão: a ida ao servidor.** O desenho (08, seção 5; desenho-base, modo curral) resolve o brinco "no store, sem ida". Esta etapa
+manda o contrário — o cliente nunca resolve brinco; sem sinal, a linha fica pendente para o servidor resolver — porque a
+resolução no aparelho era a fonte das divergências (três rodadas). A ida custa uma consulta por brinco digitado (guardada por
+versão dos dados, data e tipo: o mesmo brinco não vai duas vezes); sem sinal o curral e o tronco continuam aceitando o peso e o
+resultado, em linha pendente.
+
+**Os testes.** `tests/resolvedor.unico.test.js`: 19 casos difíceis (reuso antes e depois da troca e sem os zeros, o número antes
+de ser dado e depois de sair, o lançado errado e o certo desde o início, o código inteiro e o atalho de um animal com brinco, o
+brinco inexistente com cara de código, a cria sem brinco pelo atalho e pelo código inteiro, o animal fora do rebanho e de
+volta, o número antes do nascimento e depois, o histórico de antes do marco zero, o número que nunca existiu) × os caminhos do
+servidor (curral, tronco e seletor pela rota; a conferência pela posição da data, com a mesma descrição; a importação de
+verdade, validada e importada): o mesmo animal ou a mesma recusa em todos. `tests/ui/resolvedor.test.js`: a mesma tabela digitada
+no curral, no tronco e no seletor de um formulário. Com o `src/` de antes (commit `8dc5c35`), o arquivo do servidor falha (não
+havia a rota), e só a importação, pelos mesmos 19 casos, diverge em 5: dava a pesagem do 1457 de 10/11 à vaca que só o recebeu
+em 11/11 (o "primeiro dono" depois do marco zero); não achava a vaca pelo código inteiro nem a cria sem brinco pelo código
+(inteiro ou atalho), que o curral achava; e achava a cria pelo 0901 antes de ela nascer (a recusa vinha da presença, não do
+número).
+
+**O oráculo (seção 36, `tests/apoio-fuzz.js`).** No passo sorteado do retrato de viagem no tempo (o mesmo gerador à parte: as
+sequências das sementes não mudam), `oraculoResolucao` em D e hoje: os textos difíceis do modelo (todo número de brinco já
+gravado, com e sem o zero à esquerda, o código inteiro e o atalho de cada animal, os nomes dos animais de referência e um
+número que nunca existiu; até 160) pelos quatro caminhos da rota (curral, tronco, seletor, busca) dão a mesma resposta
+(`RESOLVER:CAMINHOS`); cada número da posição da data é do animal que o resolvedor acha, descrito do mesmo jeito
+(`RESOLVER:POSICAO`, `RESOLVER:CONFERENCIA`); o achado pelo número e no rebanho em D está na posição com esse número. Ao concluir
+uma importação de manejo ou de saída, `oraculoResolucaoImportacao`: cada linha importada foi para o animal que o resolvedor acha
+pelo mesmo texto na data da linha (`RESOLVER:IMPORTACAO`). Contadores: "resolvedor: textos conferidos em todos os caminhos",
+"resolvedor: números da posição conferidos", "resolvedor: animais descritos igual na posição", "resolvedor: linhas importadas
+no animal do resolvedor".

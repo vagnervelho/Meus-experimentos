@@ -30,9 +30,9 @@ function ok(s, rota, dados, chave) {
 }
 async function pesar(page, brinco, peso) {
   await page.fill('#cur-brinco', brinco);
-  await page.press('#cur-brinco', 'Enter');
+  await A.enter(page, '#cur-brinco');
   await page.fill('#cur-peso', peso);
-  await page.press('#cur-peso', 'Enter');
+  await A.enter(page, '#cur-peso');
 }
 /** A próxima chamada da rota responde com a recusa dada (o servidor não é chamado): o teste da recusa inesperada. */
 function recusarProxima(s, rota, code, message) {
@@ -114,13 +114,13 @@ test('achado 2 (tronco): depois de um bloco gravado, "Mudar data, método ou est
   await page.click('button:has-text("Começar")');
   await page.waitForSelector('#tr-brinco');
   assert.ok(await page.isVisible('[data-tronco-mudar] button'));
-  await page.fill('#tr-brinco', '0457'); await page.press('#tr-brinco', 'Enter');
-  await page.fill('#tr-resultado', 'p'); await page.press('#tr-resultado', 'Enter');
+  await page.fill('#tr-brinco', '0457'); await A.enter(page, '#tr-brinco');
+  await page.fill('#tr-resultado', 'p'); await A.enter(page, '#tr-resultado');
   await page.click('[data-enviar]');
   await page.waitForSelector('.curral-lista [data-estado="GRAVADA"]', { timeout: 15000 });
   assert.equal(await page.locator('button:has-text("Mudar data, método ou estação")').count(), 0);
-  await page.fill('#tr-brinco', '0391'); await page.press('#tr-brinco', 'Enter');
-  await page.fill('#tr-resultado', 'v'); await page.press('#tr-resultado', 'Enter');
+  await page.fill('#tr-brinco', '0391'); await A.enter(page, '#tr-brinco');
+  await page.fill('#tr-resultado', 'v'); await A.enter(page, '#tr-resultado');
   recusarProxima(s, 'evento.registrar', 'INTERNAL', 'Falha interna do servidor.');
   await page.click('[data-enviar]');
   await page.waitForSelector('.curral-lista [data-estado="ERRO"]', { timeout: 15000 });
@@ -137,17 +137,18 @@ test('achado 3 (curral): com data passada e sem a posição do servidor, o brinc
   const { page } = a;
   await A.esperarTela(page, 'Pesagem no curral');
   await page.fill('#cur-data', '2026-11-10');
-  await page.evaluate(() => { window.__gas.falharTransporte = 1; });
+  // Sem sinal: falham a posição da data e a conferência do brinco no servidor (o resolvedor único; CONTRATOS, seção 47).
+  await page.evaluate(() => { window.__gas.falharTransporte = 2; });
   await page.click('button:has-text("Começar a pesar")');
   await page.waitForSelector('#cur-brinco');
   await page.waitForSelector('[data-posicao-erro]', { timeout: 15000 });
   assert.doesNotMatch(await txt(page, '[data-curral-posicao]'), /servidor confere na gravação|posição de hoje;/);
   await page.fill('#cur-brinco', '0457');
-  await page.press('#cur-brinco', 'Enter');
+  await A.enter(page, '#cur-brinco');
   assert.equal(await page.getAttribute('#cur-conferencia [data-conferencia]', 'data-conferencia'), 'SEM_POSICAO');
   assert.doesNotMatch(await txt(page, '#cur-conferencia'), /A-000002|Pasto B/, 'nada da dona de hoje');
   await page.fill('#cur-peso', '410');
-  await page.press('#cur-peso', 'Enter');
+  await A.enter(page, '#cur-peso');
   assert.deepEqual((await linhas(page)).map((l) => l[0]), ['NAO_ENCONTRADO']);
   assert.ok(await page.isDisabled('[data-enviar]'), 'pendente: não sai');
   await page.click('[data-posicao-tentar]');
@@ -167,16 +168,17 @@ test('achado 3 (tronco): com data passada e sem a posição, o diagnóstico fica
   const { page } = a;
   await A.esperarTela(page, 'Diagnóstico no tronco');
   await page.fill('#tr-data', '2026-11-10');
-  await page.evaluate(() => { window.__gas.falharTransporte = 1; });
+  // Sem sinal: falham a conferência da data e a do brinco no servidor (o resolvedor único; CONTRATOS, seção 47).
+  await page.evaluate(() => { window.__gas.falharTransporte = 2; });
   await page.click('button:has-text("Começar")');
   await page.waitForSelector('#tr-brinco');
   await page.waitForSelector('[data-posicao-erro]', { timeout: 15000 });
   await page.fill('#tr-brinco', '0457');
-  await page.press('#tr-brinco', 'Enter');
+  await A.enter(page, '#tr-brinco');
   assert.equal(await page.getAttribute('#tr-conferencia [data-conferencia]', 'data-conferencia'), 'SEM_POSICAO');
   assert.doesNotMatch(await txt(page, '#tr-conferencia'), /sem informação|A-000002/i);
   await page.fill('#tr-resultado', 'p');
-  await page.press('#tr-resultado', 'Enter');
+  await A.enter(page, '#tr-resultado');
   assert.deepEqual((await linhas(page)).map((l) => l[0]), ['NAO_ENCONTRADO']);
   await page.click('[data-posicao-tentar]');
   await page.waitForSelector('[data-tronco-posicao]', { timeout: 15000 });
@@ -197,10 +199,10 @@ test('achado 4: no tronco, o botão "Prenhe" grava prenhe mesmo com "v" ou "d" n
   await A.esperarTela(page, 'Diagnóstico no tronco');
   await page.click('button:has-text("Começar")');
   await page.waitForSelector('#tr-brinco');
-  await page.fill('#tr-brinco', '0457'); await page.press('#tr-brinco', 'Enter');
+  await page.fill('#tr-brinco', '0457'); await A.enter(page, '#tr-brinco');
   await page.fill('#tr-resultado', 'v');
   await page.click('[data-resultado-rapido="p"]');
-  await page.fill('#tr-brinco', '0391'); await page.press('#tr-brinco', 'Enter');
+  await page.fill('#tr-brinco', '0391'); await A.enter(page, '#tr-brinco');
   await page.fill('#tr-resultado', 'p 90');
   await page.click('[data-resultado-rapido="p"]');
   const ls = await linhas(page);
@@ -225,12 +227,12 @@ test('achado 5: o brinco inexistente com cara de código ("A3", "000003") fica n
   await page.waitForSelector('#cur-brinco');
   for (const t of ['A3', '000003']) {
     await page.fill('#cur-brinco', t);
-    await page.press('#cur-brinco', 'Enter');
+    await A.enter(page, '#cur-brinco');
     assert.equal(await page.getAttribute('#cur-conferencia [data-conferencia]', 'data-conferencia'), 'NAO_ENCONTRADO', t);
   }
   assert.match(await txt(page, '#cur-conferencia'), /000003 é o código interno de um animal com brinco \(A9\): digite o brinco dele/);
   await page.fill('#cur-peso', '400');
-  await page.press('#cur-peso', 'Enter');
+  await A.enter(page, '#cur-peso');
   assert.deepEqual((await linhas(page)).map((l) => l[0]), ['NAO_ENCONTRADO']);
   assert.deepEqual(doServidor(s, 'PESAGENS'), []);
   await a.fechar();
@@ -239,7 +241,7 @@ test('achado 5: o brinco inexistente com cara de código ("A3", "000003") fica n
   await b.page.click('button:has-text("Começar")');
   await b.page.waitForSelector('#tr-brinco');
   await b.page.fill('#tr-brinco', 'A3');
-  await b.page.press('#tr-brinco', 'Enter');
+  await A.enter(b.page, '#tr-brinco');
   assert.equal(await b.page.getAttribute('#tr-conferencia [data-conferencia]', 'data-conferencia'), 'NAO_ENCONTRADO');
   assert.deepEqual(a.estado.erros.concat(b.estado.erros), []);
   await b.fechar();
@@ -289,7 +291,7 @@ test('achado 9: no curral com data passada, a conferência descreve o animal NAQ
   await page.waitForSelector('#cur-brinco');
   await page.waitForFunction(() => /posição em 05\/11\/2026/.test((document.querySelector('[data-curral-posicao]') || {}).textContent || ''));
   await page.fill('#cur-brinco', '0457');
-  await page.press('#cur-brinco', 'Enter');
+  await A.enter(page, '#cur-brinco');
   const c = await txt(page, '#cur-conferencia');
   assert.match(c, /Pasto A · 380,0 kg em 01\/10/);
   assert.doesNotMatch(c, /455|Pasto B/);

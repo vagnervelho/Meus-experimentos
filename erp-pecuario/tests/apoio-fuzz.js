@@ -536,6 +536,8 @@ function oraculoEfeito(sis, cmd, resp, A, S) {
     if (cmd.rota === 'importacao.concluir' && I && I.efeito) {
       (S.t.IMPORTACAO_LINHAS || []).filter((l) => l.import_id === id && l.status === 'IMPORTADA').forEach((l) => I.efeito({ S, i, l, v: l.dados_originais_json || {}, erro: (m) => erro('linha ' + l.linha_num + ': ' + m) }));
     }
+    // Conserto pela garantia, etapa 2: a linha importada foi para o animal que o resolvedor único acha pelo mesmo texto e data.
+    if (cmd.rota === 'importacao.concluir') oraculoResolucaoImportacao(sis, S, i, erro);
     if (cmd.rota === 'importacao.desfazer') {
       evs.forEach((e) => { if (S.vig.get(e.event_id)) erro('evento importado ainda vale depois de desfazer'); });
       const criados = new Set(S.t.EVENTO_ANIMAIS.filter((l) => evs.some((e) => e.event_id === l.event_id) && !A.animais.has(l.animal_id)).map((l) => l.animal_id));
@@ -4635,6 +4637,123 @@ function oraculoRetratoDeHoje(sis, S) {
   contar('viagem no tempo: retratos de hoje conferidos com a projeção', Object.keys(retratos).length);
   return out;
 }
+// ------------------------------------------------------------------ resolvedor único (conserto pela garantia, etapa 2) ----
+/**
+ * Os caminhos que acham o animal por um texto numa data pela rota (CONTRATOS, seção 47): o curral (pesagem), o tronco
+ * (diagnóstico, só fêmeas) e o seletor de um formulário de movimento. A busca do topo e a da curva são o mesmo pedido sem tipo.
+ */
+const CAMINHOS_RESOLVER = [['curral', { tipo: 'PESAGEM' }], ['tronco', { tipo: 'REPRODUCAO', sexo: 'F' }], ['seletor', { tipo: 'TRANSFERENCIA' }], ['busca', {}]];
+/**
+ * Os textos difíceis do rebanho do modelo: todo número de brinco que já foi gravado (o reaproveitado, o trocado, o lançado
+ * errado), com e sem o zero à esquerda, o código interno inteiro e o atalho dele, o nome dos animais de referência e um
+ * número que nunca existiu. Até 160.
+ */
+function textosDificeis(S, extra) {
+  const t = new Set(extra || []);
+  (S.t.IDENTIFICACOES || []).filter((x) => x.tipo === 'BRINCO' && x.codigo).forEach((x) => {
+    const c = String(x.codigo);
+    t.add(c);
+    if (/^\d+$/.test(c)) { t.add('0' + c); t.add(String(Number(c))); }
+  });
+  Array.from(S.animais.values()).forEach((a) => {
+    if (a.codigo_interno) { t.add(a.codigo_interno); t.add(a.codigo_interno.slice(2)); }
+    if (a.situacao_cadastral === 'EXTERNO' && a.nome) t.add(a.nome);
+  });
+  t.add('9999999');
+  return Array.from(t).filter(Boolean).slice(0, 160);
+}
+const CAMPOS_CONFERENCIA = ['brinco', 'brinco_hoje', 'pasture_id', 'categoria', 'ultimo_peso', 'codigo_interno', 'sexo'];
+/**
+ * O oráculo "todos os caminhos dão o mesmo animal para o mesmo texto e data", numa data D: (1) o curral, o tronco, o seletor e
+ * a busca dão a mesma resposta a cada texto (o mesmo animal, ou a mesma recusa com a mesma explicação; RESOLVER:CAMINHOS);
+ * (2) a posição da data (inventario.elegiveis, a conferência e o "Pesar este") dá a cada número do dia o mesmo animal que o
+ * resolvedor, e o descreve do mesmo jeito (RESOLVER:POSICAO, RESOLVER:CONFERENCIA); (3) o achado pelo número e no rebanho
+ * em D está na posição de D com esse número.
+ */
+function oraculoResolucao(sis, S, D) {
+  const out = [];
+  const marco = S.marco || D0;
+  const datas = Array.from(new Set([D, HOJE]));
+  const norm = (x) => { const v = String(x).trim().toUpperCase().replace(/\s+/g, ''); return /^\d+$/.test(v) ? String(Number(v)) : v; };
+  datas.forEach((data) => {
+    const pos = data >= marco ? sis.api('inventario.elegiveis', { tipo: 'PESAGEM', data }) : null;
+    const itens = pos && pos.ok && pos.data.itens ? pos.data.itens : [];
+    const textos = textosDificeis(S, itens.map((x) => x.brinco).filter(Boolean));
+    const respostas = CAMINHOS_RESOLVER.map(([nome, op]) => [nome, sis.api('animal.resolver', Object.assign({ data, textos }, op))]);
+    const ruim = respostas.find(([, r]) => !r.ok);
+    if (ruim) { out.push(falha('RESOLVER:ROTA', ruim[0] + ' em ' + data + ': ' + JSON.stringify(ruim[1].error).slice(0, 600))); return; }
+    const base = respostas[0][1].data;
+    const chave = (x) => JSON.stringify([x.situacao, x.codigo, x.animal_id, x.como, x.candidatos, x.mensagem]);
+    textos.forEach((t, i) => {
+      const b = base.textos[i];
+      respostas.slice(1).forEach(([nome, r]) => {
+        const x = r.data.textos[i];
+        if (chave(x) !== chave(b) && out.length < 3) out.push(falha('RESOLVER:CAMINHOS', '"' + t + '" em ' + data + ': curral ' + chave(b) + ' × ' + nome + ' ' + chave(x)));
+      });
+    });
+    contar('resolvedor: textos conferidos em todos os caminhos', textos.length);
+    const porTexto = new Map(textos.map((t, i) => [t, base.textos[i]]));
+    // A posição da data: cada número do dia é do animal que o resolvedor acha, descrito do mesmo jeito.
+    itens.forEach((it) => {
+      if (it.brinco) {
+        const x = porTexto.get(it.brinco);
+        if (x && (x.situacao !== 'ACHADO' || x.animal_id !== it.animal_id) && out.length < 3) out.push(falha('RESOLVER:POSICAO', 'em ' + data + ' a posição dá o ' + it.brinco + ' a ' + it.codigo_interno + ', e o resolvedor ' + chave(x)));
+        else if (x) contar('resolvedor: números da posição conferidos');
+      }
+      const e = base.animais[it.animal_id];
+      if (!e) return;
+      const dif = CAMPOS_CONFERENCIA.filter((c) => JSON.stringify(e[c]) !== JSON.stringify(it[c]));
+      if ((dif.length || e.presente !== true) && out.length < 3) out.push(falha('RESOLVER:CONFERENCIA', it.codigo_interno + ' em ' + data + ': o resolvedor descreve ' + JSON.stringify(e) + ', a posição ' + JSON.stringify(it)));
+      else contar('resolvedor: animais descritos igual na posição');
+    });
+    // O achado pelo número e no rebanho em D está na posição de D com esse número.
+    if (pos && pos.ok && !pos.data.motivo) {
+      const naPos = new Map(itens.map((x) => [x.animal_id, x]));
+      textos.forEach((t) => {
+        const x = porTexto.get(t);
+        if (!x || x.situacao !== 'ACHADO' || (x.como !== 'BRINCO' && x.como !== 'SEM_ZEROS')) return;
+        const e = base.animais[x.animal_id];
+        if (!e || e.presente !== true) return;
+        const it = naPos.get(x.animal_id);
+        if ((!it || !it.brinco || norm(it.brinco) !== norm(t)) && out.length < 3) out.push(falha('RESOLVER:POSICAO', '"' + t + '" em ' + data + ' acha ' + x.animal_id + ' no rebanho, e a posição ' + (it ? 'dá a ele o ' + it.brinco : 'não o tem')));
+      });
+    }
+  });
+  return out;
+}
+/**
+ * A importação de verdade: cada linha importada de um arquivo de manejo ou de saída foi para o animal que o resolvedor acha
+ * pelo mesmo texto na data da linha (RESOLVER:IMPORTACAO). Roda ao concluir a importação.
+ */
+const IMPORTA_POR_BRINCO = ['PESAGENS', 'SANIDADE', 'REPRODUCAO', 'OCORRENCIAS', 'MORTES', 'TRANSFERENCIAS', 'VENDAS'];
+function oraculoResolucaoImportacao(sis, S, i, erro) {
+  if (IMPORTA_POR_BRINCO.indexOf(i.tipo) < 0) return;
+  const linhas = (S.t.IMPORTACAO_LINHAS || []).filter((l) => l.import_id === i.import_id && l.status === 'IMPORTADA');
+  const animalDe = (l) => {
+    const id = l.entity_id_gerado;
+    const x = (S.t.PESAGENS || []).find((y) => y.weight_id === id) || (S.t.SANIDADE || []).find((y) => y.health_id === id)
+      || (S.t.REPRODUCAO || []).find((y) => y.reproduction_id === id) || S.t.EVENTO_ANIMAIS.find((y) => y.event_animal_id === id);
+    return x ? x.animal_id : null;
+  };
+  const porData = new Map();
+  linhas.forEach((l) => {
+    const v = l.dados_originais_json || {};
+    const data = deBr(v.data);
+    const a = animalDe(l);
+    if (!v.brinco || v.codigo || !data || !a) return;
+    if (!porData.has(data)) porData.set(data, []);
+    porData.get(data).push({ l, texto: String(v.brinco), a });
+  });
+  porData.forEach((ls, data) => {
+    const r = sis.api('animal.resolver', { data, textos: ls.map((x) => x.texto) });
+    if (!r.ok) { erro('o resolvedor recusou a data ' + data + ': ' + JSON.stringify(r.error).slice(0, 300)); return; }
+    ls.forEach((x, k) => {
+      const y = r.data.textos[k];
+      if (y.situacao !== 'ACHADO' || y.animal_id !== x.a) erro('RESOLVER:IMPORTACAO linha ' + x.l.linha_num + ': o ' + x.texto + ' de ' + data + ' foi para ' + x.a + ', e o resolvedor ' + JSON.stringify([y.situacao, y.codigo, y.animal_id, y.mensagem]));
+      else contar('resolvedor: linhas importadas no animal do resolvedor');
+    });
+  });
+}
 /** O oráculo inteiro, depois de um passo: compara o retrato em curso (se o passo gravou) e tira o retrato pedido. */
 function oraculoTempo(sis, cmd, A, S, k, gravou) {
   const out = [];
@@ -4642,6 +4761,8 @@ function oraculoTempo(sis, cmd, A, S, k, gravou) {
   if (sis.tempo && gravou) out.push(...compararTempo(sis, A, S, cmd));
   if (sis.tempo && gravou && cmd.rota === 'categoria.salvar') out.push(...categoriaDesativada(sis, A, S));
   if (cmd.tempo) out.push(...retratoTempo(sis, S, k, cmd.tempo));
+  // Conserto pela garantia, etapa 2 (CONTRATOS, seção 47): no mesmo passo sorteado, o resolvedor único em D e hoje.
+  if (cmd.tempo) out.push(...oraculoResolucao(sis, S, cmd.tempo.D));
   return out;
 }
 /** O retrato pedido no passo k (gerador à parte: as sequências das sementes não mudam), ou null. */

@@ -20,15 +20,15 @@ const ok = (r) => { if (!r.ok) throw new Error(JSON.stringify(r.error)); return 
 const linhas = (page) => page.$$eval('.curral-lista [data-linha]', (ls) => ls.map((l) => [l.dataset.estado, l.textContent.replace(/\s+/g, ' ').trim()]));
 async function pesar(page, brinco, peso) {
   await page.fill('#cur-brinco', brinco);
-  await page.press('#cur-brinco', 'Enter');
+  await A.enter(page, '#cur-brinco');
   await page.fill('#cur-peso', peso);
-  await page.press('#cur-peso', 'Enter');
+  await A.enter(page, '#cur-peso');
 }
 async function diagnosticar(page, brinco, resultado) {
   await page.fill('#tr-brinco', brinco);
-  await page.press('#tr-brinco', 'Enter');
+  await A.enter(page, '#tr-brinco');
   await page.fill('#tr-resultado', resultado);
-  await page.press('#tr-resultado', 'Enter');
+  await A.enter(page, '#tr-resultado');
 }
 const pesagensNoServidor = (s) => s.read({ rota: 't', reads: ['PESAGENS', 'EVENTOS', 'OPERACOES'], tratador: (tx) => tx.repo.vigentes('PESAGENS') }).length;
 
@@ -93,8 +93,13 @@ test('achado 12 (curral): dois blocos, a resposta do primeiro se perde e a pági
   await page.click('button:has-text("Começar a pesar")');
   await page.waitForSelector('#cur-brinco');
   for (let i = 101; i <= 119; i++) await pesar(page, String(i), '300');
+  // O brinco do 20º é conferido no servidor com sinal (o resolvedor único; CONTRATOS, seção 47); o sinal cai antes do peso: o
+  // bloco cheio sai sozinho e falha.
+  await page.fill('#cur-brinco', '120');
+  await A.enter(page, '#cur-brinco');
   await page.evaluate(() => { window.__gas.falharTransporte = 1; });
-  await pesar(page, '120', '300');
+  await page.fill('#cur-peso', '300');
+  await A.enter(page, '#cur-peso');
   await page.waitForFunction(() => document.querySelectorAll('.curral-lista [data-estado="SEM_SINAL"]').length === 20);
   for (let i = 121; i <= 125; i++) await pesar(page, String(i), '300');
   await page.evaluate(() => { window.__gas.perder = 1; });
@@ -131,8 +136,12 @@ test('achado 12 (tronco): dois blocos, a resposta do primeiro se perde e a pági
   await page.click('button:has-text("Começar")');
   await page.waitForSelector('#tr-brinco');
   for (let i = 101; i <= 119; i++) await diagnosticar(page, String(i), 'v');
+  // O brinco da 20ª é conferido no servidor com sinal; o sinal cai antes do resultado: o bloco cheio sai sozinho e falha.
+  await page.fill('#tr-brinco', '120');
+  await A.enter(page, '#tr-brinco');
   await page.evaluate(() => { window.__gas.falharTransporte = 1; });
-  await diagnosticar(page, '120', 'v');
+  await page.fill('#tr-resultado', 'v');
+  await A.enter(page, '#tr-resultado');
   await page.waitForFunction(() => document.querySelectorAll('.curral-lista [data-estado="SEM_SINAL"]').length === 20);
   for (let i = 121; i <= 125; i++) await diagnosticar(page, String(i), 'v');
   await page.evaluate(() => { window.__gas.perder = 1; });
@@ -181,7 +190,7 @@ test('achados 11, 12 e 17 (tronco): a recusa de uma fêmea fica na linha dela; c
   await A.esperarServidor(page);
   // A fêmea já gravada: a conferência diz que diagnosticar de novo grava outro diagnóstico.
   await page.fill('#tr-brinco', '0391');
-  await page.press('#tr-brinco', 'Enter');
+  await A.enter(page, '#tr-brinco');
   assert.match(await txt(page, '[data-conferencia-repetido="outro"]'), /grava outro diagnóstico do mesmo dia/);
   await a.fechar();
 });
@@ -246,16 +255,16 @@ test('achado 22: o curral com data passada confere brinco, pasto e contador pela
   await page.waitForFunction(() => /posição em 10\/11\/2026/.test((document.querySelector('[data-curral-posicao]') || {}).textContent || ''));
   assert.match(await txt(page, '.curral-contador'), /0 de 3 · faltam 3/);
   await page.fill('#cur-brinco', '0457');
-  await page.press('#cur-brinco', 'Enter');
+  await A.enter(page, '#cur-brinco');
   assert.equal(await page.getAttribute('#cur-conferencia [data-conferencia]', 'data-conferencia'), 'OK');
   assert.doesNotMatch(await txt(page, '#cur-conferencia'), /não encontrado|Não estava no rebanho/);
   await page.fill('#cur-peso', '410');
-  await page.press('#cur-peso', 'Enter');
+  await A.enter(page, '#cur-peso');
   await page.fill('#cur-brinco', '12');
-  await page.press('#cur-brinco', 'Enter');
+  await A.enter(page, '#cur-brinco');
   assert.doesNotMatch(await txt(page, '#cur-conferencia'), /outro pasto/, 'em 10/11 o 12 estava no Pasto A');
   await page.fill('#cur-peso', '300');
-  await page.press('#cur-peso', 'Enter');
+  await A.enter(page, '#cur-peso');
   assert.match(await txt(page, '.curral-contador'), /2 de 3 · faltam 1/);
   await page.click('[data-enviar]');
   await page.waitForFunction(() => document.querySelectorAll('.curral-lista [data-estado="GRAVADA"]').length === 2, null, { timeout: 15000 });

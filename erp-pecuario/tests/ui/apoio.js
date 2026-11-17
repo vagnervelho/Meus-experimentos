@@ -117,6 +117,14 @@ async function esperarTela(page, texto) {
 async function esperarServidor(page) {
   await page.waitForFunction(() => window.__gas && window.__gas.emCurso === 0, null, { timeout: 10000 });
 }
+/**
+ * Enter num campo do curral ou do tronco: o brinco é conferido pelo resolvedor único do servidor (animal.resolver; CONTRATOS,
+ * seção 47), e o lançamento espera a conferência — o teste espera a resposta antes de olhar a tela.
+ */
+async function enter(page, sel) {
+  await page.press(sel, 'Enter');
+  await esperarServidor(page);
+}
 async function ir(page, rota, texto) {
   await page.evaluate((r) => window.Roteador.ir(r), rota);
   await esperarTela(page, texto);
@@ -177,4 +185,4 @@ async function focoVisivel(page) {
   });
 }
 
-module.exports = { ORIGEM, S, js, sistema, semear, pagina, browser, fecharBrowser, abrir, esperarTela, esperarServidor, ir, semRolagemHorizontal, alvosDeToque, focoVisivel };
+module.exports = { ORIGEM, S, js, sistema, semear, pagina, browser, fecharBrowser, abrir, esperarTela, esperarServidor, enter, ir, semRolagemHorizontal, alvosDeToque, focoVisivel };

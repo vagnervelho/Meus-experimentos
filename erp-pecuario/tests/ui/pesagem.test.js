@@ -28,10 +28,10 @@ const porBrinco = (sem, b) => sem.animais.find((x) => x.brinco === b).animal_id;
 /** Brinco, Enter, peso, Enter (o operador no tronco, sem tocar em botão). */
 async function pesar(page, brinco, peso) {
   await page.fill('#cur-brinco', brinco);
-  await page.press('#cur-brinco', 'Enter');
+  await A.enter(page, '#cur-brinco');
   assert.equal(await page.evaluate(() => document.activeElement && document.activeElement.id), 'cur-peso', 'o Enter do brinco leva ao peso');
   await page.fill('#cur-peso', peso);
-  await page.press('#cur-peso', 'Enter');
+  await A.enter(page, '#cur-peso');
 }
 async function abrirCurral(s, o) {
   const a = await A.abrir(s, Object.assign({ largura: 360, hash: 'pesagens/curral', relogio: RELOGIO }, o || {}));
@@ -60,10 +60,10 @@ test('modo curral a 360 px: brinco e peso com Enter, contador do pasto e os que 
   assert.match(await textoTela(page, '.curral-contador'), /1 de 3 · faltam 2/);
   // Do outro pasto: entra, contado à parte.
   await page.fill('#cur-brinco', '391');
-  await page.press('#cur-brinco', 'Enter');
+  await A.enter(page, '#cur-brinco');
   assert.match(await textoTela(page, '#cur-conferencia'), /0391.*Está em outro pasto \(Pasto B\): conta à parte/, 'sem zeros à esquerda acha 0391');
   await page.fill('#cur-peso', '455');
-  await page.press('#cur-peso', 'Enter');
+  await A.enter(page, '#cur-peso');
   assert.match(await textoTela(page, '.curral-contador'), /1 de 3 · faltam 2 · \+1 de outros pastos/);
   // Não encontrado: a linha entra como pendência e trava o envio.
   await pesar(page, '9999', '300');
@@ -82,9 +82,9 @@ test('modo curral a 360 px: brinco e peso com Enter, contador do pasto e os que 
   assert.match(ls[0][1], /0457 · 415,0 kg · na fila/);
   // Formato: vírgula, 1 casa, maior que zero (só formato: a regra é do servidor).
   await page.fill('#cur-brinco', '12');
-  await page.press('#cur-brinco', 'Enter');
+  await A.enter(page, '#cur-brinco');
   await page.fill('#cur-peso', '300,25');
-  await page.press('#cur-peso', 'Enter');
+  await A.enter(page, '#cur-peso');
   assert.match(await textoTela(page, '#cur-conferencia'), /no máximo 1 casa decimal/);
   // Os que faltam do pasto: 12 e a bezerra sem brinco.
   await page.click('[data-ver-faltam]');
@@ -162,10 +162,10 @@ test('modo curral: o peso fora do esperado vem do servidor (PESO_IMPLAUSIVEL) na
   await page.click('button:has-text("Começar a pesar")');
   await page.waitForSelector('#cur-brinco');
   await page.fill('#cur-brinco', '0457');
-  await page.press('#cur-brinco', 'Enter');
+  await A.enter(page, '#cur-brinco');
   assert.match(await textoTela(page, '#cur-conferencia'), /441,0 kg em 03\/09/, 'o último peso, da lista do aparelho');
   await page.fill('#cur-peso', '45,0');
-  await page.press('#cur-peso', 'Enter');
+  await A.enter(page, '#cur-peso');
   await page.click('[data-enviar]');
   await page.waitForSelector('.curral-lista [data-estado="AVISO"]');
   assert.match(await textoTela(page, '.curral-lista [data-estado="AVISO"]'), /45,0 kg em 13\/11\/2026 contra 441,0 kg em 03\/09\/2026 \(71 dias\) dá -5,58 kg por dia/);
