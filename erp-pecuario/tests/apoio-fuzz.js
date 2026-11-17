@@ -4166,6 +4166,385 @@ function specDoGravado(sis, S, rnd, e) {
   return T.doGravado({ sis, S, rnd, ls, idents, brincoDe, data: e.event_date, ids }, e) || null;
 }
 
+// ------------------------------------------------------------------ viagem no tempo ----
+/**
+ * Oráculo de viagem no tempo (conserto da Fase 3 pela garantia, etapa 1; docs/CONTRATOS.md, seção 46).
+ *
+ * Propriedade: a resposta de toda consulta numa data D do passado é função só (1) dos FATOS ATÉ D — os eventos com data até D
+ * (com a situação de cada um: vigente, estornado, de importação em curso), a correção de cadastro e a do brinco lançado errado
+ * em qualquer data (valem para todo o histórico: 04, seção 4.4; desenho-base 16.2), o vínculo de mãe das crias nascidas até D
+ * (a fêmea "parida em D" conta a cria cadastrada nascida até D: 05, seção 4.9) e os atributos de cadastro do animal (nome,
+ * raça) — e (2) dos CADASTROS E PARÂMETROS QUE O DESENHO MANDA LER COMO ESTÃO HOJE: as regras e os nomes de CATEGORIAS
+ * (desenho-base 4.3: "com as regras atuais de CATEGORIAS"), os pastos (área, capacidade, situação, nomes), os protocolos que
+ * já valiam em D (RN-058: o cadastrado depois de D não conta; as regras dos que valiam são as de hoje, 03a, seção 4.9), as
+ * estações de monta (03a, seção 4.10), o plano de contas e os nomes dos produtos, e os parâmetros zootécnicos lidos na
+ * consulta (03a, seção 4.12: "por isso o painel mostra o parâmetro em uso"). Exceções documentadas, fora da comparação: o
+ * `brinco_hoje` dos elegíveis (o número de hoje, por desenho) e os títulos e pendências de cadastro da visão geral (de hoje).
+ *
+ * Como confere: num passo sorteado (`cmd.tempo`, num gerador à parte, gravado na sequência para a repetição e o encolhimento),
+ * guarda a bateria de consultas em D por UNIDADE — a consulta inteira, ou a linha de um animal numa lista — com a impressão
+ * digital do que ela pode ler pelas regras acima (a do rebanho inteiro ou a do animal: os fatos dele, das crias e os
+ * atributos). Depois de cada passo que gravou, refaz as consultas e compara as unidades cuja impressão não mudou ou voltou à
+ * do retrato: um fato com data depois de D (de qualquer tipo, estorno e correção inclusive) e um cadastro que não vale para
+ * o passado (o custo, a categoria ou o controle do produto, o protocolo cadastrado depois de D, os parâmetros que só valem
+ * para os comandos, o parceiro, a lista, o touro de referência) não mudam nada; um fato retroativo muda só as unidades que
+ * ele alcança (a linha de cada outro animal fica igual) e volta ao retrato quando é desfeito. No próprio passo do retrato:
+ * a mesma bateria com o relógio adiantado (a data de hoje não entra em nenhuma resposta pedida numa data D), em D = hoje a
+ * bateria sem a data (o caminho padrão = o caminho com a data), e a lista de pastos em D com todo pasto que tinha animal em
+ * D (o desativado depois continua no histórico: 02, política `escrita`). A ficha do animal que saiu do rebanho entra com a
+ * data da saída (os cálculos dela são dessa data: idade, categoria, aptidão, carência, cria ao pé).
+ */
+const SUB_RETRO = ['CORRECAO_CADASTRO', 'IDENTIFICACAO_INCORRETA'];
+const ehRetro = (e) => !!e && e.event_type === 'AJUSTE_INVENTARIO' && SUB_RETRO.indexOf(e.event_subtype) >= 0;
+const SAIDAS_DO_REBANHO_T = ['VENDIDO', 'MORTO', 'DESCARTADO', 'BAIXADO_AJUSTE'];
+/** Parâmetros lidos pelas consultas numa data (03a, seção 4.12), por grupo de consulta. Os demais só valem para os comandos. */
+const P_INV = ['data_marco_zero', 'fuso', 'ua_peso_kg', 'peso_validade_dias'];
+const P_GMD = ['gmd_intervalo_min_dias', 'gmd_aceita_fita', 'indicador_n_minimo', 'gmd_referencia_janela_dias', 'projecao_peso_horizonte_dias', 'gmd_plausivel_min_kg_dia', 'gmd_plausivel_max_kg_dia', 'peso_nascer_padrao_kg_macho', 'peso_nascer_padrao_kg_femea'];
+const P_AGENDA = ['data_marco_zero', 'fuso', 'agenda_antecedencia_dias', 'agenda_tolerancia_dias'];
+const P_REPRO = ['data_marco_zero', 'fuso', 'dias_gestacao', 'parto_tolerancia_dias', 'indicador_n_minimo', 'prenhez_cobertura_dg_min_pct', 'idade_min_reprodutiva_meses', 'idade_desmama_padrao_meses', 'alerta_parto_previsto_dias', 'alerta_prenhez_vencida_dias'];
+/** Os cadastros que cada grupo de consulta lê como estão hoje (por desenho). */
+const CADASTROS_TEMPO = {
+  pos: ['cat', 'pasto', P_INV], posA: ['cat', 'pasto', P_INV], pastos: ['cat', 'pasto', P_INV], pasto: ['cat', 'pasto', P_INV], painel: ['cat', 'pasto', P_INV], perm: ['pasto', P_INV], dash: ['cat', 'pasto', P_INV],
+  eleg: ['cat', P_INV],
+  desemp: ['cat', 'pasto', P_INV.concat(P_GMD)],
+  agenda: ['prot', 'prod', 'cat', 'contas', P_AGENDA],
+  ind: ['est', 'cat', P_REPRO], mat: ['est', P_REPRO], matE: ['est', P_REPRO],
+  eventos: [],
+  ficha: ['cat', 'pasto', 'est', 'protTodos', 'listas', 'contas', P_INV.concat(P_GMD, P_AGENDA, P_REPRO)],
+};
+/** Índices do estado para as impressões digitais (uma vez por estado). */
+function indiceTempo(S) {
+  if (S._tempo) return S._tempo;
+  const evsPor = new Map();
+  S.t.EVENTO_ANIMAIS.forEach((l) => {
+    if (!S.vig.get(l.event_id)) return;
+    const e = S.ev.get(l.event_id);
+    if (!e || e.event_type === 'ESTORNO') return;
+    (evsPor.get(l.animal_id) || evsPor.set(l.animal_id, []).get(l.animal_id)).push({ id: e.event_id, data: e.event_date, retro: ehRetro(e), criacao: !!l.atributos_iniciais_json });
+  });
+  const filhos = new Map();
+  S.animais.forEach((a, id) => { if (a.mae_id && ['ANULADO', 'PENDENTE'].indexOf(a.situacao_cadastral) < 0) (filhos.get(a.mae_id) || filhos.set(a.mae_id, []).get(a.mae_id)).push(id); });
+  S._tempo = { evsPor, filhos, memo: new Map() };
+  return S._tempo;
+}
+function lembrarTempo(S, k, f) {
+  const m = indiceTempo(S).memo;
+  if (!m.has(k)) m.set(k, f());
+  return m.get(k);
+}
+const evsAte = (lista, D) => (lista || []).filter((x) => x.data <= D || x.retro || x.criacao).map((x) => x.id).sort();
+/**
+ * Os fatos do rebanho inteiro até D: cada evento com data até D (ou de correção que vale para todo o histórico) com a situação
+ * dele (o estornado e o da importação em curso continuam na lista de eventos), e o vínculo de mãe das crias nascidas até D.
+ */
+function digitalFatos(S, D) {
+  return lembrarTempo(S, 'G|' + D, () => {
+    const evs = [];
+    S.t.EVENTOS.forEach((e) => {
+      if (e.event_type === 'ESTORNO' || !(e.event_date <= D || ehRetro(e))) return;
+      evs.push(e.event_id + ':' + (S.vig.get(e.event_id) ? 'V' : [S.op.get(e.op_id) || '?', e.import_id ? (S.imp.get(e.import_id) || {}).status || '?' : '-', S.anuladoPor.has(e.event_id) ? 'A' : '-'].join('/')));
+    });
+    const maes = [];
+    S.animais.forEach((a, id) => {
+      if (!a.mae_id || ['ANULADO', 'PENDENTE'].indexOf(a.situacao_cadastral) >= 0 || (a.data_nascimento && a.data_nascimento > D)) return;
+      maes.push(id + '>' + a.mae_id + '@' + (a.data_nascimento || ''));
+    });
+    return evs.sort().join(',') + '|' + maes.sort().join(',');
+  });
+}
+/** Os fatos de UM animal até D: os eventos dele, os das crias nascidas até D (parida e cria ao pé em D) e os atributos. */
+function digitalAnimal(S, id, D) {
+  return lembrarTempo(S, 'A|' + id + '|' + D, () => {
+    const ix = indiceTempo(S);
+    const a = S.animais.get(id) || {};
+    const crias = (ix.filhos.get(id) || []).map((c) => {
+      const ca = S.animais.get(c) || {};
+      if (ca.data_nascimento && ca.data_nascimento > D) return null;
+      return c + '@' + (ca.data_nascimento || '') + ':' + evsAte(ix.evsPor.get(c), D).join('+');
+    }).filter(Boolean).sort();
+    const fixo = ['EXTERNO', 'ANULADO', 'PENDENTE'].indexOf(a.situacao_cadastral) >= 0 ? a.situacao_cadastral : '';
+    return [evsAte(ix.evsPor.get(id), D).join(','), crias.join(','), [a.sexo, a.data_nascimento, a.mae_id, a.pai_id, a.nome, a.raca, fixo].map((v) => (v === undefined || v === null ? '' : v)).join('/')].join('|');
+  });
+}
+/** Desde quando o protocolo vale (05, RN-058): o dia do cadastro no fuso da fazenda ou, se antes, a primeira aplicação vigente. */
+function protocolosEm(S, D) {
+  const primeira = {};
+  vigentesDe(S, 'SANIDADE').forEach((r) => { if (r.protocol_id && (!primeira[r.protocol_id] || r.data_aplicacao < primeira[r.protocol_id])) primeira[r.protocol_id] = r.data_aplicacao; });
+  return (S.t.PROTOCOLOS_SANITARIOS || []).map((p) => {
+    const ini = [p.created_at ? diaNoFuso(p.created_at) : null, primeira[p.protocol_id] || null].filter(Boolean).sort()[0] || null;
+    return ini && ini > D ? null : semCarimbo(p);
+  }).filter(Boolean);
+}
+function semCarimbo(r) {
+  const o = {};
+  Object.keys(r).sort().forEach((c) => { if (c !== 'created_at' && c !== 'updated_at') o[c] = r[c]; });
+  return o;
+}
+/** Os cadastros e parâmetros que o grupo lê como estão hoje (CADASTROS_TEMPO). */
+function digitalCadastros(S, grupo, D) {
+  return lembrarTempo(S, 'C|' + grupo + '|' + D, () => (CADASTROS_TEMPO[grupo] || []).map((p) => {
+    if (Array.isArray(p)) return p.map((c) => c + '=' + norm(S.config.get(c))).join(',');
+    if (p === 'cat') return JSON.stringify(S.t.CATEGORIAS.map(semCarimbo));
+    if (p === 'pasto') return JSON.stringify([S.t.PASTOS.map(semCarimbo), S.t.PROPRIEDADES.map((r) => [r.property_id, r.nome]), S.t.PARCEIROS.map((r) => [r.partner_id, r.nome])]);
+    if (p === 'prot') return JSON.stringify(protocolosEm(S, D));
+    if (p === 'protTodos') return JSON.stringify((S.t.PROTOCOLOS_SANITARIOS || []).map((r) => [r.protocol_id, r.nome]));
+    if (p === 'prod') return JSON.stringify((S.t.PRODUTOS || []).map((r) => [r.product_id, r.nome]));
+    if (p === 'contas') return JSON.stringify(S.t.PLANO_CONTAS.map((r) => [r.conta_id, r.codigo, r.nome, r.classe_custo_animal, r.natureza, r.tipo]));
+    if (p === 'est') return JSON.stringify((S.t.ESTACOES_MONTA || []).map(semCarimbo));
+    if (p === 'listas') return JSON.stringify(S.t.LISTAS.map((r) => [r.lista_id, r.codigo, r.rotulo, r.ativo]));
+    throw new Error('cadastro desconhecido no oráculo do tempo: ' + p);
+  }).join('#'));
+}
+/** A impressão digital de uma unidade da bateria: os fatos (do rebanho ou do animal) até a data dela e os cadastros do grupo. */
+function digitalUnidade(S, u) {
+  return (u.animal ? digitalAnimal(S, u.animal, u.D) : digitalFatos(S, u.D)) + '#' + digitalCadastros(S, u.grupo, u.D);
+}
+const escolher = (o, campos) => { const x = {}; campos.forEach((c) => { x[c] = o && o[c] !== undefined ? o[c] : null; }); return x; };
+const sem = (o, campos) => { if (!o || typeof o !== 'object') return o; const x = Object.assign({}, o); campos.forEach((c) => { delete x[c]; }); return x; };
+/**
+ * As consultas numa data D, em unidades {grupo, chave, animal, D, valor}. T: {D, animais, amostra, pastos, estacoes,
+ * categoria, fichas}. opcoes: {semData: o caminho padrão (sem a data: hoje), grupos: Set (só estes grupos)}.
+ */
+function bateriaTempo(sis, T, opcoes) {
+  const o = opcoes || {};
+  const D = T.D;
+  const quer = (g) => !o.grupos || o.grupos.has(g);
+  const dd = (campo, x) => (o.semData ? x : Object.assign({ [campo]: D }, x));
+  const out = [];
+  const internos = [];
+  const add = (grupo, chave, valor, animal, Dx) => out.push({ grupo, chave, animal: animal || null, D: Dx || D, valor: valor === undefined ? null : valor });
+  const chamar = (rota, dados) => {
+    const r = sis.api(rota, dados);
+    if (r.ok) return r.data;
+    if (r.error && r.error.code === 'INTERNAL') internos.push(rota + ' ' + JSON.stringify(dados) + ': ' + r.error.message);
+    return { recusa: r.error.code, detalhes: (r.error.details || []).map((x) => x.codigo) };
+  };
+  const porAnimal = (grupo, prefixo, itens, ids) => {
+    const m = new Map();
+    (itens || []).forEach((x) => { (m.get(x.animal_id) || m.set(x.animal_id, []).get(x.animal_id)).push(x); });
+    (ids || T.animais).forEach((id) => add(grupo, prefixo + '|' + id, m.has(id) ? m.get(id) : null, id));
+  };
+  // 1. A posição do rebanho em D (inteira, com os filtros de sexo, pasto e categoria) e a de cada animal da amostra.
+  if (quer('pos')) {
+    add('pos', 'pos', chamar('inventario.posicao', dd('data', {})));
+    add('pos', 'pos:F', chamar('inventario.posicao', dd('data', { sexo: 'F' })));
+    T.pastos.slice(0, 2).forEach((p) => add('pos', 'pos:P:' + p, chamar('inventario.posicao', dd('data', { pasture_id: p }))));
+    if (T.categoria) add('pos', 'pos:C', chamar('inventario.posicao', dd('data', { category_id: T.categoria })));
+  }
+  if (quer('posA')) T.amostra.forEach((id) => add('posA', 'posA|' + id, chamar('inventario.posicao', dd('data', { animal_id: id })), id));
+  // 2. Os elegíveis em D (a conferência do curral e do tronco com data passada): no fim do dia, no dia e as fêmeas.
+  if (quer('eleg')) {
+    ['TRANSFERENCIA', 'PESAGEM', 'NASCIMENTO'].forEach((tipo) => {
+      const r = chamar('inventario.elegiveis', dd('data', { tipo }));
+      const itens = r && Array.isArray(r.itens) ? r.itens.map((x) => sem(x, ['brinco_hoje'])) : null;
+      add('eleg', 'eleg:' + tipo, r && r.recusa ? r : sem(r, ['itens']));
+      porAnimal('eleg', 'eleg:' + tipo, itens);
+    });
+  }
+  // 3. Os pastos em D: todos os cartões (com os inativos), a lista padrão e o painel de cada pasto com os animais e os dias de
+  // permanência dos 60 dias até D.
+  if (quer('pasto') || quer('pastos')) {
+    const todos = chamar('pasto.listar', dd('data', { incluir_inativos: true }));
+    if (Array.isArray(todos)) todos.forEach((c) => add('pasto', 'pasto:' + c.pasture_id, c));
+    else add('pasto', 'pasto:*', todos);
+    const ativos = chamar('pasto.listar', dd('data', {}));
+    add('pastos', 'pastos', Array.isArray(ativos) ? ativos.map((c) => [c.pasture_id, c.status, c.cabecas]) : ativos);
+    out.estrutura = { todos, ativos };
+  }
+  if (quer('painel') || quer('perm')) {
+    T.pastos.forEach((p) => {
+      const r = chamar('pasto.painel', Object.assign(dd('data', { pasture_id: p }), { periodo_inicio: somaDias(D, -60), periodo_fim: D }));
+      if (!r || r.recusa) { add('painel', 'painel:' + p, r); return; }
+      add('painel', 'painel:' + p, sem(r, ['animais', 'permanencia']));
+      porAnimal('painel', 'painel:' + p, r.animais);
+      const perm = r.permanencia || {};
+      add('perm', 'perm:' + p, sem(perm, ['itens']));
+      porAnimal('perm', 'perm:' + p, perm.itens);
+    });
+  }
+  // 4. A agenda sanitária em D: o resumo, a cobertura dos protocolos e os custos do período; as pendências e a carência de cada animal.
+  if (quer('agenda')) {
+    const r = chamar('sanidade.agenda', dd('data', {}));
+    add('agenda', 'agenda', r && r.recusa ? r : sem(r, ['pendencias', 'carencia']));
+    porAnimal('agenda', 'agenda:p', r && r.pendencias);
+    porAnimal('agenda', 'agenda:c', r && r.carencia);
+  }
+  // 5. Os indicadores reprodutivos em D (a estação padrão, cada estação, o ano) e a lista de fêmeas (também a de uma estação).
+  if (quer('ind')) {
+    add('ind', 'ind', chamar('reproducao.indicadores', dd('data', {})));
+    T.estacoes.forEach((e) => add('ind', 'ind:' + e, chamar('reproducao.indicadores', dd('data', { estacao_id: e }))));
+    add('ind', 'ind:ano', chamar('reproducao.indicadores', dd('data', { ano: D.slice(0, 4) })));
+  }
+  if (quer('mat')) {
+    const r = chamar('reproducao.matrizes', dd('data', {}));
+    add('mat', 'mat', r && r.recusa ? r : sem(r, ['itens']));
+    porAnimal('mat', 'mat', r && r.itens);
+  }
+  if (quer('matE') && T.estacoes.length) {
+    const r = chamar('reproducao.matrizes', dd('data', { estacao_id: T.estacoes[0] }));
+    porAnimal('matE', 'matE', r && r.itens ? r.itens.map((x) => ({ animal_id: x.animal_id })) : null);
+  }
+  // 6. O desempenho até D (desde o marco zero e nos 120 dias até D): os grupos e a linha de cada animal.
+  if (quer('desemp')) {
+    [['desemp', {}], ['desemp120', { de: somaDias(D, -120) }]].forEach(([nome, x]) => {
+      const r = chamar('peso.desempenho', dd('ate', x));
+      add('desemp', nome, r && r.recusa ? r : sem(r, ['animais', 'curvas']));
+      porAnimal('desemp', nome, r && r.animais);
+    });
+  }
+  // 7. A visão geral com o período terminando em D (os títulos e as pendências de cadastro são de hoje, por desenho).
+  if (quer('dash')) {
+    const r = chamar('dashboard.obter', dd('data_fim', {}));
+    const v = r && r.recusa ? r : sem(r, ['titulos', 'pendencias', 'geradoEm']);
+    if (v && v.etiquetas) v.etiquetas = sem(v.etiquetas, ['titulos']);
+    add('dash', 'dash', v);
+  }
+  // 8. Os lançamentos até D (com a situação de cada um).
+  if (quer('eventos')) add('eventos', 'eventos', chamar('evento.listar', dd('ate', { por_pagina: 500 })));
+  // 9. A ficha de quem saiu do rebanho: os cálculos dela são da data da saída (as listas de hoje ficam fora: as crias, os
+  // eventos, a genealogia, os anexos, o financeiro, o touro dos registros das fêmeas).
+  if (quer('ficha')) {
+    Object.keys(T.fichas).forEach((id) => {
+      const f = chamar('animal.ficha', { animal_id: id });
+      const v = !f || f.recusa ? f : {
+        geral: escolher(f.geral, ['brinco', 'idade_meses', 'categoria', 'data_referencia', 'sem_categoria', 'situacao_cadastral', 'data_saida', 'peso_atual', 'data_ultima_pesagem', 'situacao_reprodutiva', 'cria_ao_pe', 'marcado_descarte', 'castrado', 'reprodutor', 'partos_previos', 'peso_vigente', 'data_entrada', 'origem', 'sexo', 'data_nascimento']),
+        pastos: f.pastos, peso: f.peso,
+        sanitario: escolher(f.sanitario, ['itens', 'carencia', 'proximas', 'custo_total']),
+        reprodutivo: Object.assign(sem(f.reprodutivo, ['bezerros', 'como_touro']), { partos: ((f.reprodutivo || {}).partos || []).map((p) => sem(p, ['crias'])) }),
+      };
+      add('ficha', 'ficha|' + id, v, id, T.fichas[id]);
+    });
+  }
+  out.internos = internos;
+  return out;
+}
+/** O primeiro caminho em que dois valores (JSON) diferem: {caminho, antes, depois} ou null. */
+function primeiraDiferenca(a, b, caminho) {
+  if (JSON.stringify(a) === JSON.stringify(b)) return null;
+  if (a && b && typeof a === 'object' && typeof b === 'object' && Array.isArray(a) === Array.isArray(b)) {
+    const ks = Array.from(new Set(Object.keys(a).concat(Object.keys(b))));
+    for (const key of ks) { const d = primeiraDiferenca(a[key], b[key], caminho + '.' + key); if (d) return d; }
+  }
+  return { caminho, antes: a, depois: b };
+}
+const curto = (v) => { const s = JSON.stringify(v); return s === undefined ? 'undefined' : s.length > 260 ? s.slice(0, 260) + '…' : s; };
+/** As unidades de duas baterias do mesmo estado (com o relógio adiantado, sem a data) têm de ser iguais. */
+function mesmaBateria(rotulo, T, base, outra) {
+  const out = [];
+  const m = new Map(outra.map((u) => [u.chave, u]));
+  base.forEach((u) => {
+    const x = m.get(u.chave);
+    const d = primeiraDiferenca(u.valor, x ? x.valor : undefined, u.chave);
+    if (d && out.length < 3) out.push(falha('TEMPO:' + rotulo + ':' + u.grupo, rotulo === 'RELOGIO' ? 'a consulta em ' + T.D + ' mudou com o relógio adiantado ' + T.avanco + ' dia(s) (a data de hoje entrou na resposta): ' + d.caminho + ' ' + curto(d.antes) + ' → ' + curto(d.depois) : 'em ' + T.D + ' (hoje), a consulta sem a data respondeu diferente da consulta com a data: ' + d.caminho + ' ' + curto(d.antes) + ' (com a data) → ' + curto(d.depois) + ' (sem a data)'));
+  });
+  return out;
+}
+/** A lista de pastos em D traz todo pasto que tinha animal em D, ativo ou não (02, política `escrita`: o histórico continua). */
+function estruturaTempo(T, bat) {
+  const e = bat.estrutura;
+  if (!e || !Array.isArray(e.todos) || !Array.isArray(e.ativos)) return [];
+  const lista = new Set(e.ativos.map((c) => c.pasture_id));
+  return e.todos.filter((c) => c.cabecas > 0 && !lista.has(c.pasture_id)).slice(0, 1).map((c) => falha('TEMPO:PASTO_SUMIU', 'em ' + T.D + ', o ' + c.nome + ' (' + c.status + ') tinha ' + c.cabecas + ' cabeça(s), mas não aparece na lista de pastos dessa data'));
+}
+/** O retrato em D depois do passo k: a bateria, a impressão de cada unidade, o relógio adiantado e o caminho padrão. */
+function retratoTempo(sis, S, k, pedido) {
+  const D = pedido.D;
+  const vivos = Array.from(S.animais.values()).filter((a) => a.situacao_cadastral !== 'EXTERNO').sort((a, b) => cmp(a.codigo_interno || '', b.codigo_interno || ''));
+  const nEv = (id) => (indiceTempo(S).evsPor.get(id) || []).length;
+  const T = {
+    D, k0: k, avanco: pedido.avanco,
+    animais: vivos.map((a) => a.animal_id),
+    amostra: vivos.slice().sort((a, b) => nEv(b.animal_id) - nEv(a.animal_id) || cmp(a.codigo_interno || '', b.codigo_interno || '')).slice(0, 8).map((a) => a.animal_id),
+    pastos: S.t.PASTOS.map((p) => p.pasture_id).sort(),
+    estacoes: (S.t.ESTACOES_MONTA || []).map((x) => x.estacao_id).sort().slice(0, 3),
+    categoria: (S.t.CATEGORIAS.filter((c) => c.ativo !== false).sort((a, b) => (a.prioridade || 0) - (b.prioridade || 0))[0] || {}).category_id || null,
+    fichas: {},
+  };
+  vivos.filter((a) => SAIDAS_DO_REBANHO_T.indexOf(a.situacao_cadastral) >= 0 && a.data_saida).slice(0, 4).forEach((a) => { T.fichas[a.animal_id] = a.data_saida; });
+  const bat = bateriaTempo(sis, T);
+  const out = bat.internos.slice(0, 1).map((x) => falha('TEMPO:INTERNO', x));
+  T.base = new Map(bat.map((u) => [u.chave, { grupo: u.grupo, animal: u.animal, D: u.D, fp: digitalUnidade(S, u), valor: u.valor }]));
+  sis.tempo = T;
+  contar('viagem no tempo: retratos');
+  // O relógio adiantado: a resposta pedida numa data D não depende de que dia é hoje.
+  const agora = sis.gas.clock.now;
+  sis.gas.clock.now = agora + pedido.avanco * 86400000;
+  let adiantada;
+  try { adiantada = bateriaTempo(sis, T); } finally { sis.gas.clock.now = agora; }
+  out.push(...mesmaBateria('RELOGIO', T, bat, adiantada));
+  contar('viagem no tempo: unidades com o relógio adiantado', bat.length);
+  // Em D = hoje, o caminho padrão (sem a data) é o mesmo que o caminho com a data.
+  if (D === HOJE) { out.push(...mesmaBateria('PADRAO', T, bat, bateriaTempo(sis, T, { semData: true }))); contar('viagem no tempo: caminho padrão conferido'); }
+  out.push(...estruturaTempo(T, bat));
+  return out;
+}
+/** O que o passo mudou, em relação a D: fatos depois de D, fatos até D (retroativos) e cadastros. */
+function naturezaDoPasso(A, S, D) {
+  let depois = 0;
+  let ate = 0;
+  S.t.EVENTOS.forEach((e) => {
+    if ((A.vig.get(e.event_id) || false) === (S.vig.get(e.event_id) || false)) return;
+    if (e.event_type === 'ESTORNO') return;
+    if (e.event_date <= D || ehRetro(e)) ate++; else depois++;
+  });
+  return { depois, ate };
+}
+/** Depois de um passo que gravou: as unidades com a impressão do retrato têm a mesma resposta. */
+function compararTempo(sis, A, S, cmd) {
+  const T = sis.tempo;
+  const comparaveis = [];
+  T.base.forEach((b, chave) => { if (digitalUnidade(S, b) === b.fp) comparaveis.push(chave); });
+  if (!comparaveis.length) return [];
+  const grupos = new Set(comparaveis.map((c) => T.base.get(c).grupo));
+  if (grupos.has('pasto')) grupos.add('pastos');
+  const bat = bateriaTempo(sis, T, { grupos });
+  const m = new Map(bat.map((u) => [u.chave, u]));
+  const out = bat.internos.slice(0, 1).map((x) => falha('TEMPO:INTERNO', x));
+  const nat = naturezaDoPasso(A, S, T.D);
+  let comparadas = 0;
+  comparaveis.forEach((chave) => {
+    const b = T.base.get(chave);
+    const u = m.get(chave);
+    if (!u) return;
+    comparadas++;
+    const d = primeiraDiferenca(b.valor, u.valor, chave);
+    if (d && out.length < 3) {
+      const porque = nat.ate ? nat.ate + ' fato(s) até ' + b.D + ' noutros animais' : nat.depois ? nat.depois + ' fato(s) depois de ' + b.D : 'só cadastro (' + (cmd.rotulo || cmd.rota) + ')';
+      out.push(falha('TEMPO:' + b.grupo, 'a consulta em ' + b.D + ' (retrato do passo ' + T.k0 + ') mudou com ' + (cmd.rotulo || cmd.rota) + ' [' + porque + ']: ' + d.caminho + ' ' + curto(d.antes) + ' → ' + curto(d.depois)));
+    }
+  });
+  contar('viagem no tempo: unidades comparadas', comparadas);
+  if (comparadas) {
+    if (nat.depois && !nat.ate) contar('viagem no tempo: comparação depois de fato posterior a D');
+    if (!nat.depois && !nat.ate) contar('viagem no tempo: comparação depois de cadastro');
+    if (nat.ate) contar('viagem no tempo: comparação depois de fato retroativo noutros animais');
+    if (/^evento\.(corrigir|estornar)$/.test(cmd.rota) && nat.depois && !nat.ate) contar('viagem no tempo: comparação depois de estorno ou correção posterior a D');
+  }
+  return out;
+}
+/** O oráculo inteiro, depois de um passo: compara o retrato em curso (se o passo gravou) e tira o retrato pedido. */
+function oraculoTempo(sis, cmd, A, S, k, gravou) {
+  const out = [];
+  if (sis.tempo && gravou) out.push(...compararTempo(sis, A, S, cmd));
+  if (cmd.tempo) out.push(...retratoTempo(sis, S, k, cmd.tempo));
+  return out;
+}
+/** O retrato pedido no passo k (gerador à parte: as sequências das sementes não mudam), ou null. */
+function escolherTempo(sis, S, rt, k) {
+  const x = rt();
+  if (k < 2 || (sis.tempo ? x > 0.07 : x > 0.5)) return null;
+  const marco = S.marco || D0;
+  const datas = S.t.EVENTOS.filter((e) => S.vig.get(e.event_id) && e.event_type !== 'ESTORNO' && e.event_date >= marco && e.event_date <= HOJE).map((e) => e.event_date);
+  const y = rt();
+  let D;
+  if (y < 0.45 && datas.length) D = somaDias(sorteio(rt, datas), sorteio(rt, [0, 0, -1, 1]));
+  else if (y < 0.8) D = somaDias(marco, Math.floor(rt() * (diasEntre(marco, HOJE) + 1)));
+  else if (y < 0.92) D = HOJE;
+  else if (y < 0.96) D = marco;
+  else D = somaDias(marco, -1 - Math.floor(rt() * 60));
+  return { D: D > HOJE ? HOJE : D, avanco: sorteio(rt, [1, 31, 200, 400]) };
+}
+
 // ------------------------------------------------------------------ execução de um passo ----
 const chaveDo = (k) => 'fz-' + k;
 /**
@@ -4274,6 +4653,9 @@ function executar(sis, k, cmd, antesT, opcoes) {
     if (datas.length && datas[0] !== HOJE) falhas.push(...oraculoAgenda(sis, S, datas[0]));
     falhas.push(...oraculoManejo(sis, S, r.ok && r.data && Array.isArray(r.data.animais) ? r.data.animais.map((a) => a.animal_id) : []));
   }
+  // Viagem no tempo (conserto da Fase 3 pela garantia, etapa 1): a comparação do retrato numa data D depois de cada passo que
+  // gravou, e o retrato pedido neste passo.
+  if (!o.semGlobal) falhas.push(...oraculoTempo(sis, cmd, A, S, k, gravou));
   return { falhas, r, depoisT, S };
 }
 
@@ -4514,6 +4896,8 @@ function rodar(semente, passos) {
   const opcoes = opcoesDaSemente(semente);
   const sis = montar(opcoes);
   const rnd = aleatorio(semente);
+  // O retrato da viagem no tempo sai de um gerador à parte: as sequências de comandos de cada semente não mudam com ele.
+  const rt = aleatorio((semente ^ 0x6c8e9cf5) >>> 0);
   const log = [];
   const stats = { aceitos: 0, recusados: 0, porRotulo: {}, porEvento: {} };
   let t = tabelas(sis);
@@ -4524,6 +4908,8 @@ function rodar(semente, passos) {
     S.foco = sis.foco;
     const cmd = gerar(sis, S, rnd, k);
     if (!cmd) continue;
+    const tempo = escolherTempo(sis, S, rt, k);
+    if (tempo) cmd.tempo = tempo;
     log.push(Object.assign({ k }, gravavel(sis, cmd)));
     const ex = executar(sis, k, cmd, t);
     const rot = cmd.rotulo || cmd.rota;
@@ -4559,6 +4945,7 @@ function gravavel(sis, cmd) {
   if (cmd.correcaoIdentica) o.correcaoIdentica = true;
   if (cmd.correcaoTardia) o.correcaoTardia = true;
   if (cmd.relogio) o.relogio = cmd.relogio;
+  if (cmd.tempo) o.tempo = cmd.tempo;
   if (cmd.desfazerImediato) o.desfazerImediato = true;
   if (cmd.chaveDe !== undefined) { o.chaveDe = cmd.chaveDe; if (cmd.outraChave) o.outraChave = true; else o.reenvio = true; }
   if (cmd.chaveFixa) o.chaveFixa = cmd.chaveFixa;
