@@ -3312,6 +3312,12 @@ function modeloAgenda(S, D) {
     const apls = sans.filter((x) => x.r.animal_id === id && x.data <= D);
     protos.forEach((p) => {
       if (!modelados.has(p.protocol_id)) return;
+      // Rodada 2 da revisão da Fase 3 (achado 10): numa data passada, só o protocolo que já valia nela (o cadastro ou a
+      // primeira aplicação com ele, se antes); o INTERVALO_DIAS nunca aplicado vence a partir de quando ele passou a valer.
+      const primeira = sans.filter((x) => x.r.protocol_id === p.protocol_id).map((x) => x.data).sort()[0] || null;
+      const inicio = [(p.created_at || '').slice(0, 10) || null, primeira].filter(Boolean).sort()[0] || null;
+      if (inicio && inicio > D) return;
+      const desdeOCadastro = (d) => (inicio && d && inicio > d ? inicio : d);
       if (p.sexo_aplicavel !== 'AMBOS' && p.sexo_aplicavel !== a.sexo) return;
       const min = typeof p.idade_min_meses === 'number' ? p.idade_min_meses : null;
       const max = typeof p.idade_max_meses === 'number' ? p.idade_max_meses : null;
@@ -3323,7 +3329,7 @@ function modeloAgenda(S, D) {
         if (min !== null && idade < min) return;
         if (max !== null && idade >= max) {
           if (p.recorrencia_tipo !== 'UNICA') return;
-          const comeco = [min !== null ? completaMesesEm(nasc, min) : nasc, desde, (p.created_at || '').slice(0, 10) || null].filter(Boolean).sort().pop();
+          const comeco = [min !== null ? completaMesesEm(nasc, min) : nasc, desde, inicio].filter(Boolean).sort().pop();
           if (!(comeco && comeco < completaMesesEm(nasc, max))) return;
           devendo = true;
         }
@@ -3348,14 +3354,14 @@ function modeloAgenda(S, D) {
           camps.sort((a, b) => cmp(a.fim, b.fim));
           const cumpre = (c) => doProt.some((x) => x.data >= somaDias(c.ini, -tol) && x.data <= somaDias(c.fim, tol));
           const elegivel = [desde, min !== null && nasc ? completaMesesEm(nasc, min) : null].filter(Boolean).sort().pop() || desde || D;
-          const de = [elegivel, (p.created_at || '').slice(0, 10) || null].filter(Boolean).sort().pop();
+          const de = [elegivel, inicio].filter(Boolean).sort().pop();
           const passada = camps.filter((c) => c.fim < D && (!de || c.fim >= de)).pop() || null;
           const proxima = camps.filter((c) => c.fim >= D)[0];
           if (passada && !cumpre(passada) && D < somaDias(proxima.ini, -tol)) { venc = passada.fim; cumprida = false; } else { venc = proxima.fim; cumprida = cumpre(proxima); }
           contar('campanha da agenda conferida');
         }
       } else if (!doProt.length) {
-        venc = [desde, min !== null && nasc ? completaMesesEm(nasc, min) : null].filter(Boolean).sort().pop() || desde || D;
+        venc = desdeOCadastro([desde, min !== null && nasc ? completaMesesEm(nasc, min) : null].filter(Boolean).sort().pop() || desde || D);
         cumprida = false;
       } else {
         const u = ultimo(doProt).r;

@@ -152,6 +152,13 @@ e propriedade nas seções 15.1 e 15.3) e as 65 rotas de `Api.rotas()`: 51 canô
 e 5) e 14 extras, todas citadas aqui. As rotas da Fase 3 (`produto.salvar`, `protocolo.salvar`, `estacao.salvar`,
 `peso.desempenho`, `sanidade.agenda`, `reproducao.indicadores`) e as extras `sistema.tela` e `reproducao.matrizes` têm
 tratador e contrato (seções 19 e 37 a 40). Sem mudança de contrato. Relatório da fase: `docs/RELATORIO_FASE3.md`.
+Fase 3, CONSERTO DA REVISÃO (rodada 2): a dose por peso congelada na correção, a contagem do estoque que impede o movimento
+anterior a ela (e a conferência do saldo contado), a quantidade do frasco em parte na importação, a entrada de estoque que
+congela o movimento (`com_movimento`), a cria ao pé e o brinco na data, a agenda só com o protocolo que já valia, a
+estimativa visual estimada no peso e na UA, o GMD da resposta pela conta da ficha, a desmama legítima depois de mudar o
+parâmetro, as pesagens de lote dentro do filtro, o produto sem custo avisado, e na tela o curral e o tronco pela posição e
+pelo brinco na data, o código interno, o "Desfazer" e o aviso geral, as telas do curral e do tronco trazidas pela Início e o
+"(parcial)" da tabela (seção 44).
 
 ## 1. Regras que valem para todo arquivo de `src/`
 
@@ -1510,7 +1517,7 @@ dados, {chave, avisos})` (confere a projeção depois de cada comando), `ler(con
 | `posicao(L, data, filtros?)` | `{data, marco_zero, motivo, filtros, etiquetas, cabecas, por_sexo: {M, F}, por_pasto: [{pasture_id, nome, cabecas}], sem_pasto, por_categoria, sem_categoria, peso_vivo_total, ua, peso_medio, por_situacao}`. Filtros `{property_id, pasture_id, sexo, category_id}` (07, seção 9: pasto e categoria do animal em D) valem para cabeças, peso e UA; por sexo ignora o de sexo, por pasto o de pasto, por categoria o de categoria (tratamento E, com `etiquetas.por_sexo` "todos os sexos", `por_pasto` "todos os pastos", `por_categoria` "todas as categorias"); `por_situacao` (`Timeline.inventario`) é do rebanho inteiro (`etiquetas.por_situacao` com filtro). Antes do marco zero: tudo null com o motivo |
 | `consultaPosicao({data?, property_id?, pasture_id?, sexo?, category_id?, animal_id?})` — `inventario.posicao` | `posicao` na data; com `animal_id` (filtros ignorados): `{data, animal_id, presente, pasture_id, situacao, no_rebanho_desde, no_pasto_desde, entrada, saida, sexo, idade_meses, categoria: {category_id, codigo, nome, manual}, peso (pesoVigente), motivo}` — categoria, idade e peso só se presente em D. Futura/inválida, sexo fora de M/F → `VALIDATION`; animal, pasto, propriedade ou categoria inexistente → `NOT_FOUND` |
 | `consultaVisaoGeral({data_inicio?, data_fim?, property_id?, pasture_id?, sexo?, category_id?})` — `dashboard.obter` | 07, seção 9, no recorte da Fase 2 (itens 1 a 10, 12, 15 e 16; G1, G6 e G7). Período: Df padrão hoje; Di padrão o primeiro dia do mês 11 meses antes do de Df (os últimos 12 meses); `periodo: {inicio, fim, inicio_efetivo, parcial, motivo}` (Df antes do marco zero → `ANTERIOR_AO_MARCO_ZERO` em tudo; começa antes → fluxos dele em diante, `parcial`). Devolve `posicao(Df, filtros)` + `geradoEm`, `periodo`, `pendencias: {sem_pasto, sem_brinco, sem_categoria}`, `titulos` (de hoje, sem filtros: `etiquetas.titulos`), `movimento: {nascimentos, compras, vendas, mortes, descartes, baixas_contagem: {cabecas, eventos, valor? (compras: valor dos animais; vendas: receita — o que coube a cada animal no lançamento principal, COMPRA_ANIMAIS ou VENDA_ANIMAIS, pelas alocações do rateio vigente; nunca `valor_individual`, que é só base de rateio: desenho-base §7), motivo}}` (linhas vigentes de D0 em diante; filtros pelo animal no dia do evento: destino na entrada, origem na saída), `receita_vendas: {valor, motivo, n, nao_atribuida, base: LANCAMENTOS\|ALOCACOES}` (Σ RECEITA_VENDA_ANIMAIS por competência; Pr pelo lançamento; com Pa, S ou C só a parte alocada a animais do filtro — tratamento A; lançamento com `pasture_id` conta inteiro para o seu pasto), `series: {rebanho: [{mes, data, cabecas, motivo}], nascimentos_mortes: [{mes, inicio, fim, parcial, nascimentos, mortes, motivo}], compras_vendas: [{mes, inicio, fim, parcial, compras, valor_compras, vendas, valor_vendas, motivo}]}` (mês todo antes do marco zero: null com o motivo). Nos fluxos, zero é informação. Erros: `VALIDATION` (`FORMATO_INVALIDO`, `DATA_FUTURA` em `data_fim`, `FAIXA_INVALIDA`, sexo), `NOT_FOUND` (filtro inexistente) |
-| `consultaElegiveis({tipo, subtipo?, data?, pasture_id?})` — `inventario.elegiveis` | Animais elegíveis a um tipo ativo cujo `filtro_elegiveis.situacao` é ATIVO (transferência, nascimento, venda, morte, descarte, identificação, marcação), pela linha do tempo na data: movimento e saída (transferência, venda, morte, descarte; `MOVIMENTO_OU_SAIDA`) = no rebanho ao fim de D; fato (parto, identificação, marcação e os das fases seguintes) = no rebanho em algum momento de D, o dia da saída contando como na validação (RN-017: a vaca que morre no parto é elegível ao parto desse dia), no pasto em que estava antes das saídas do dia (`presentesNoDia`); no pasto pedido, com o `sexo` do filtro. `{data, tipo, pasture_id, motivo, n, itens: [{animal_id, codigo_interno, brinco, sexo, pasture_id}]}`; antes do marco zero (ou sem ele) `n`/`itens` null com o motivo. `VALIDATION` (`TIPO_SEM_ELEGIVEIS`, data inválida ou futura), `NOT_FOUND` (pasto) |
+| `consultaElegiveis({tipo, subtipo?, data?, pasture_id?})` — `inventario.elegiveis` | Animais elegíveis a um tipo ativo cujo `filtro_elegiveis.situacao` é ATIVO (transferência, nascimento, venda, morte, descarte, identificação, marcação), pela linha do tempo na data: movimento e saída (transferência, venda, morte, descarte; `MOVIMENTO_OU_SAIDA`) = no rebanho ao fim de D; fato (parto, identificação, marcação e os das fases seguintes) = no rebanho em algum momento de D, o dia da saída contando como na validação (RN-017: a vaca que morre no parto é elegível ao parto desse dia), no pasto em que estava antes das saídas do dia (`presentesNoDia`); no pasto pedido, com o `sexo` do filtro. `{data, tipo, pasture_id, motivo, n, itens: [{animal_id, codigo_interno, brinco (o em uso NA data, `Timeline.brincoEm`; seção 44), brinco_hoje, sexo, pasture_id}]}`; antes do marco zero (ou sem ele) `n`/`itens` null com o motivo. `VALIDATION` (`TIPO_SEM_ELEGIVEIS`, data inválida ou futura), `NOT_FOUND` (pasto) |
 | `posicaoEm(ctx, dados)`, `elegiveis(ctx, dados)`, `visaoGeral(ctx, dados)`, `listarAlertas(ctx, estado)` | As formas `x(ctx, dados)` (= `UnitOfWork.read`) de `consultaPosicao`, `consultaElegiveis`, `consultaVisaoGeral` e `consultaAlertas` |
 | `consultaAlertas(estado)` — `alerta.listar` | `estado = {backup: {ultimo_em: ISO\|null}, integridade: {verificado_em, erros}\|null}` vem de quem chama (Maintenance/Api; fora da planilha). Devolve `{data, geradoEm, alertas: [{codigo, nivel AVISO\|ERRO, mensagem, n, ids, entidade}], nao_avaliados: [{codigo, motivo, mensagem}]}`; códigos `ALERTAS`: ATIVO_SEM_PASTO, SEM_BRINCO, SEM_CATEGORIA, NAO_LOCALIZADO (ATIVO com `nao_localizado`, marcado por MARCACAO/NAO_LOCALIZADO; some com a baixa na contagem ou a desmarcação), BACKUP_ATRASADO (`alerta_backup_atrasado_dias`; nenhum backup = alerta), INTEGRIDADE_COM_ERRO, IMPORTACAO_INCOMPLETA (IMPORTACOES `IMPORTANDO`). Parte do `estado` ausente vai para `nao_avaliados` |
 
@@ -2832,3 +2839,95 @@ confere a correção tardia sem mudança depois de o preparo rever o cadastro (c
 controle de estoque); a correção é a do lançamento preparado (`sis.tardiaAlvo`). O pago no ato na conta Vacinas tem o
 oráculo do aceite (nunca em dobro) e o da recusa (`CUSTO_EM_DOBRO` só com o produto do cadastro numa conta de insumo, em
 `oraculoRecusa`).
+
+## 44. Conserto da revisão da Fase 3, rodada 2 — `EventService`, `HealthService`, `AuditService`, `ImportService`, `Timeline`, `ReproductionService`, `InventoryService`, `AnimalService`, `WeightService`, `TestRunner`, `Weights`, `Reproduction`, `Dashboard`, `Health`, `Pastures`, `Components`, `Events`
+
+O que a rodada 2 da revisão da Fase 3 mudou nos contratos das seções 11, 14, 15, 18, 38 a 40 e 43 (os testes, um por achado e
+por caminho, estão em `tests/revisao2.fase3.motor.test.js`, `tests/revisao2.fase3.zootecnia.test.js` e
+`tests/ui/revisao2.fase3.test.js`; o teste aleatório confere o mesmo pelos oráculos da seção 36).
+
+**Dose por peso congelada na correção (`EventService`, `doseDoOriginal_`).** Na correção (e na correção do substituto) da
+SANIDADE com o mesmo produto (ou o mesmo nome livre), o modo `POR_PESO`, a mesma `dose_referencia` e a mesma data, a linha sem
+dose usa a `SANIDADE.dose` gravada do animal no original (03b: a dose é imutável; o operador confirmou a proposta pelo peso
+daquele dia): a pesagem lançada depois, o peso de referência e a validade do peso mudados depois não refazem a dose, a saída nem o
+custo. Mudar a dose por kg, a data ou o produto, ou incluir o animal, refaz pelo peso na data. `impactos.sanidade.animais[]`
+traz `dose_do_original`; a revisão diz "a dose gravada no original". A prévia da correção (`Events`) continua mandando a dose
+vazia: a decisão é do servidor.
+
+**Contagem do estoque (`EventService.contagemPosterior_`, `HealthService.contagensDoProduto`, `contagemAfetada`).** O acerto
+pela contagem (ESTOQUE/AJUSTE, `motivo_ajuste = CONTAGEM`) vale como o saldo no fim do dia contado (03a, MOVIMENTOS_ESTOQUE;
+desenho-base 4.3: "na data D" é o fim do dia D). O comando que muda o saldo do fim do dia de uma contagem vigente do produto (a
+aplicação retroativa, a entrada retroativa, a perda ou a contagem anteriores, o estorno e a correção que mudam a quantidade de um
+movimento até aquele dia) é recusado: CONFLICT `CONTAGEM_POSTERIOR` no campo `product_id`, com o saldo antes e depois e a
+contagem em `conflito`; o caminho é estornar a contagem, gravar o lançamento e contar de novo. A contagem anulada pelo próprio
+comando não conta. Vale no registro, na simulação, na correção, no estorno e na importação (a linha fica com o motivo).
+A verificação confere, em COPIAS (`fonte: false`: não é dado apagado à mão, não bloqueia o reparo das outras projeções), que o
+saldo dos movimentos vigentes no fim do dia contado é o `saldo_contado` do payload, com o `resolver` (estornar a contagem e
+contar de novo) e a chave com o saldo calculado (a trava recusa também o que piora); o desfazer de uma importação que mudaria
+esse saldo é recusado pela trava. O coletor de achados aceita `fonte: false` para uma checagem de FONTE_QUEBRADA.
+
+**Entrada de estoque com o movimento congelado (`com_movimento`).** O payload da ESTOQUE/ENTRADA grava `com_movimento`
+(true/false: o movimento de ENTRADA gravado ou não, pelo controle de estoque do dia ou pelo do original na correção).
+`entradaDoOriginal_` e `HealthService.compraSemMovimento` usam esse valor (sem ele, a entrada anterior ao campo, pela linha). A
+verificação acusa em COPIAS a entrada com `com_movimento = true` sem o movimento (apagado à mão: o produto entra na quarentena da
+seção 43) e a com `false` com movimento.
+
+**Importação de sanidade com a quantidade do frasco (`ImportService`).** Com a coluna "Quantidade que saiu do frasco" e uma linha
+DUPLICADA no lançamento, as demais ficam ERRO com `QUANTIDADE_EM_PARTE` (campo `quantidade_total`): a quantidade é do lançamento
+inteiro (07, seção 5: nunca em dobro). Sem a quantidade, as outras entram com as doses delas (seção 42).
+
+**Na data D (`Timeline.criaAoPeEm(f, filhos, data)`, `Timeline.brincoEm(f, id, data)`).** `reproducao.matrizes` em qualquer data
+calcula `cria_ao_pe` (e o resumo) pela regra da projeção só com os fatos até D: a cria presente no fim de D, sem desmama até D,
+nascida na fazenda ou que entrou abaixo da idade de desmama. `inventario.elegiveis` devolve o brinco em uso no fim de D (a
+sequência de identificações até D; sem nenhuma, o do cadastro) e `brinco_hoje`.
+
+**Agenda sanitária (`HealthService`).** O contexto dá a cada protocolo `inicio_vigencia`: o cadastro (`created_at`) ou, se antes,
+a primeira aplicação vigente que o cumpre (o protocolo já praticado e cadastrado depois). Numa data D, só os protocolos com
+`inicio_vigencia ≤ D` geram pendência e cobertura (05, RN-058: "o protocolo está ativo"). O INTERVALO_DIAS nunca aplicado vence
+no maior entre o dia em que o animal ficou elegível e `inicio_vigencia` (03a, seção 4.9: "o dia em que se tornou elegível"); a
+UNICA segue o vencimento do animal de 03a, seção 4.9. A tela da agenda numa data passada diz que os protocolos são os ativos hoje
+que já valiam naquela data.
+
+**Peso (`AnimalService.pesoVigente`, `InventoryService.compor`, `WeightService`).** A última pesagem por ESTIMATIVA_VISUAL dentro da
+validade dá `situacao: 'ESTIMATIVA_VISUAL'`, `estimado: true` (o peso vale para a UA e o peso vivo, rotulado; P10). A composição
+tem a parte `estimativa_visual` da UA, conta-a em `pct_estimado` e no rótulo. A média do lote (MEDIA_LOTE) é peso de balança
+do lote: fica "pesada". `resultadoDoEvento` (o modo curral) dá o GMD do intervalo da ficha que termina na pesagem (contra a
+individual anterior, com a estimada ou a média do lote no meio fora), ou vazio com o porquê verdadeiro (a própria estimada,
+outra individual depois dela no mesmo dia, as anteriores todas estimadas, a primeira); `anterior` traz `metodo` e `estimado`.
+Em `peso.desempenho`, as pesagens e o GMD de lote contam só os animais do filtro (pasto e categoria na data da pesagem, sexo e
+raça); o lançamento sem nenhum deles sai da lista.
+
+**Desmama (`EventService.itemDesmama_`).** A cria que o original da correção já desmamava continua aceita depois de mudar
+`idade_desmama_padrao_meses`; a regra do parâmetro vale para o bezerro novo no lançamento.
+
+**Produto do cadastro sem custo por unidade.** `impactos.estoque.produto_sem_custo` na entrada; a revisão da entrada e a da
+aplicação (`Components`) dizem que o que foi pago nunca vira custo e mandam preencher o custo no cadastro (03a, seção 4.6:
+vazio = consumo sem custo; desenho-base 16.9).
+
+**Aceitação (`TestRunner`).** O cenário ESTOQUE estorna a contagem antes da vacinação anterior a ela (a recusa
+`CONTAGEM_POSTERIOR` primeiro); o cenário SANIDADE (058-4.7) lança a primeira aplicação do protocolo em D0+41 (o protocolo já
+praticado), para a agenda das datas passadas contar com ele.
+
+**Telas.**
+- Curral e tronco (`Weights`, `Reproduction`): com data diferente de hoje, o animal é achado pelo brinco daquele dia na posição do
+  servidor (`inventario.elegiveis` `{tipo: 'PESAGEM' | 'REPRODUCAO', data}`; o tronco também, com a nota `[data-tronco-posicao]`);
+  o número que ninguém tinha no dia nunca vai para a dona de hoje que estava no rebanho com outro brinco; a conferência mostra
+  "0457 em dd/mm/aaaa (hoje 1457)"; "Corrigir o brinco" usa a mesma resolução, a presença e o pasto da data. O animal sem
+  brinco é achado pelo código interno (A-000004, ou 000004 com seis algarismos) e por "Pesar este". O tronco não mostra a
+  situação reprodutiva de hoje com data passada.
+- "Desfazer o último" tira a última linha não enviada (também a com aviso): a de bloco com aviso desfaz o bloco (as outras voltam
+  à fila); a mensagem diz se a última foi gravada ou espera a confirmação. "Está certo" sem bloco devolve a linha à fila. O aviso
+  geral do lançamento (sem animal) tem um "Está certo (todo o lançamento)" na área de status (`[data-aceitar-geral]`); o da
+  linha, o dela. O status conta as linhas "para conferir" e as pendentes.
+- A linha gravada do curral rotula o ganho "contra peso estimado" e mostra o porquê do GMD vazio (`[data-gmd-explicacao]`).
+- Início (`Dashboard`): as telas sob demanda `Weights` e `Reproduction` vêm em segundo plano quando a Início abre (com sinal); a
+  falha aparece na Início (`[data-pre-carga]`), sem erro no console.
+- Revisão da sanidade: "a dose gravada no original" ou "pelo peso na data". Reprodução: a tabela dos indicadores por categoria
+  rotula "(parcial)" na parição, na natalidade e na desmama. Pastos: a parte "Estimativa visual (estimado)" da UA.
+
+**Teste aleatório (seção 36).** Oráculos novos em `tests/apoio-fuzz.js`: a dose por peso congelada na correção (`doseCongelada`)
+e, na correção tardia, a dose de cada animal e a saída iguais às do original, com o preparo "pesagem lançada depois da aplicação
+por peso"; a cria ao pé de cada fêmea em `reproducao.matrizes` hoje e numa data passada, pelo modelo das linhas cruas, e o resumo;
+o GMD da resposta do registro igual ao do intervalo do modelo que termina na pesagem (`intervalosModelo`); a agenda com o
+`inicio_vigencia` do protocolo.
+

@@ -260,14 +260,12 @@ test('achado 18: com a Início aberta (com sinal), as telas do curral e do tronc
   await A.ir(page, 'reproducao/tronco', 'Diagnóstico no tronco');
   await page.evaluate(() => { window.__gas.falharTransporte = 0; });
   await a.fechar();
-  // Sem sinal desde a abertura da Início: a nota diz que as telas não vieram.
-  const b = await A.abrir(s, { largura: 360, hash: 'rebanho', relogio: RELOGIO });
-  await A.esperarTela(b.page, 'Rebanho');
-  await b.page.evaluate(() => { window.__gas.falharTransporte = 50; });
-  await A.ir(b.page, 'inicio', 'Início');
+  // A Início abriu, mas as telas não vieram (aqui, outra versão do app no servidor): a Início avisa antes de ir ao curral.
+  const b = await A.abrir(s, { largura: 360, hash: 'inicio', relogio: RELOGIO, trocarVersao: '0.0.1' });
+  await A.esperarTela(b.page, 'Início');
   await b.page.waitForSelector('[data-pre-carga="Weights"]', { timeout: 15000 });
   assert.match(await txt(b.page, '[data-pre-carga="Weights"]'), /A tela Pesagens ainda não veio para este aparelho .*abra-a uma vez com sinal antes de ir ao curral/);
-  await b.page.evaluate(() => { window.__gas.falharTransporte = 0; });
+  assert.equal(await b.page.locator('[data-pre-carga="Reproduction"]').count(), 1);
   assert.deepEqual(b.estado.erros, [], 'nenhum erro no console');
   await b.fechar();
 });
@@ -291,5 +289,24 @@ test('achado 24: a tabela dos indicadores por categoria diz "(parcial)" na pari�
   assert.equal(tab.length, 1, JSON.stringify(tab));
   assert.deepEqual(tab[0].slice(0, 3), ['Vaca', '6', '66,7%']);
   assert.deepEqual(tab[0].slice(3), ['0,0% (parcial)', '0,0% (parcial)', '0,0% (parcial)'], 'parição, natalidade e desmama rotuladas, como o gráfico');
+  await a.fechar();
+});
+
+test('achado 9: a revisão da entrada de estoque de um produto do cadastro sem custo por unidade avisa que o que foi pago nunca vira custo e manda preencher o cadastro', async () => {
+  const s = A.sistema();
+  A.semear(s);
+  const r = s.api({ rota: 'produto.salvar', idempotencyKey: 'p', dados: { campos: { nome: 'Vacina sem custo', categoria: 'VACINA', unidade: 'dose', controla_estoque: true } } });
+  assert.equal(r.ok, true, JSON.stringify(r.error));
+  const a = await A.abrir(s, { largura: 360, hash: 'sanidade/produtos', relogio: RELOGIO });
+  const { page } = a;
+  await A.esperarTela(page, 'Sanidade');
+  await page.click('button[aria-label="Entrada de Vacina sem custo no estoque"]');
+  await A.esperarTela(page, 'Estoque de insumos');
+  await page.fill('[data-campo="quantidade"] input', '100');
+  await page.fill('[data-campo="valor"] input', '300,00');
+  await page.click('.form-evento button[type=submit]');
+  await page.waitForSelector('[role=dialog] [data-acao-principal]:not([disabled])');
+  const rev = await txt(page, '[role=dialog]');
+  assert.match(rev, /Custo do insumo\s*sem custo: o produto não tem custo por unidade no cadastro, e o que foi pago na compra nunca vira custo dos animais\. Preencha o custo por unidade no cadastro do produto\./);
   await a.fechar();
 });

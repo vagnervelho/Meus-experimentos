@@ -1579,3 +1579,54 @@ demonstração no cabeçalho de `scripts/medir-trava.js` (391 → 430, o que `np
   falhas), e os 9 de navegador novos ou alterados (67 testes, 0 falhas); a contagem dos 98 arquivos conferida pelo
   registrador. No começo da etapa, antes de qualquer mudança, as duas suítes tinham dado o mesmo (809 e 135, 0 falhas).
   Nada validado na conta do dono.
+
+## 17/11/2026 — Fase 3, conserto da revisão (rodada 2: 25 achados, 8 altos, 15 médios e 2 baixos)
+
+Cada achado tem teste por caminho que falha com o `src/` de antes da rodada (conferido rodando os testes novos sobre uma cópia
+do commit `e056bf6`: os 14 de Node e os 10 de navegador falham lá) e passa agora. Os testes ficam em
+`tests/revisao2.fase3.motor.test.js`, `tests/revisao2.fase3.zootecnia.test.js` e `tests/ui/revisao2.fase3.test.js`. Os 25
+foram corrigidos; seis são o mesmo defeito visto por duas lentes (1 e 4; 2 e 5; 6 e 11; 13 e 21; 15 e 23; 7, 16 e 22).
+Contratos em `docs/CONTRATOS.md`, seção 44.
+
+- **Dose por peso congelada na correção** (achados 1 e 4; `EventService.doseDoOriginal_`): corrigir outro campo da aplicação por
+  peso (o veterinário, o lote) mantém a dose gravada de cada animal, a saída, o custo e o saldo, mesmo com a pesagem lançada
+  depois ou o peso de referência e a validade do peso mudados; mudar a dose por kg, a data ou o produto refaz pelo peso na data.
+  A revisão diz "a dose gravada no original".
+- **Contagem do estoque** (achados 2 e 5): o acerto pela contagem vale como o saldo do fim do dia contado. O movimento que mudaria
+  esse saldo (a aplicação esquecida, a entrada retroativa, a perda ou a contagem anteriores, o estorno e a correção da
+  quantidade) é recusado com `CONTAGEM_POSTERIOR` e o caminho (estornar a contagem, lançar, contar de novo), também na importação;
+  a verificação confere o saldo contado (COPIAS sem "dado mexido à mão"), e a trava recusa o desfazer da importação que o mudaria.
+- **Quantidade do frasco em parte** (achado 3): na importação de sanidade com a quantidade que saiu do frasco e uma linha já
+  lançada, as outras ficam com `QUANTIDADE_EM_PARTE`.
+- **Entrada de estoque apagada à mão** (achado 8): a entrada congela `com_movimento` no payload; sem o movimento previsto, a
+  verificação acusa a fonte quebrada (sem reparo), o produto entra na quarentena e o aviso não fala mais em "compra lançada
+  antes de ligar o controle".
+- **Na data** (achados 6, 11, 7, 16 e 22): `reproducao.matrizes` diz quem tinha cria ao pé na data (`Timeline.criaAoPeEm`); o
+  `inventario.elegiveis` devolve o brinco em uso na data (`Timeline.brincoEm`) e o de hoje. O curral e o tronco com data passada
+  acham o animal pelo brinco daquele dia na posição do servidor (o tronco passou a consultá-la), nunca entregam o número livre no
+  dia à dona de hoje, e "Corrigir o brinco" confere pela mesma posição.
+- **Agenda numa data passada** (achado 10): só os protocolos que já valiam (o cadastro, ou a primeira aplicação com ele se antes);
+  o INTERVALO_DIAS nunca aplicado vence a partir de quando o protocolo passou a valer (03a, seção 4.9: o dia em que o animal se
+  tornou elegível). A tela diz que os protocolos são os ativos hoje.
+- **Peso** (achados 12, 13, 21, 19 e 20): a estimativa visual fica estimada no peso médio e na UA (parte própria, rotulada) e na
+  ficha; o GMD da resposta do registro é o do intervalo da ficha (a média do lote no meio e a segunda pesagem do dia não o
+  escondem), com o porquê verdadeiro quando vazio; as pesagens e o ganho de lote do desempenho seguem os filtros; a linha gravada
+  do curral rotula o ganho "contra peso estimado".
+- **Desmama** (achado 14): a correção da desmama legítima é aceita depois de mudar a idade de desmama de referência.
+- **Produto sem custo** (achado 9): a revisão da entrada e a da aplicação dizem que o que foi pago nunca vira custo e mandam
+  preencher o custo no cadastro (a regra de 03a, seção 4.6, e do desenho-base 16.9 fica).
+- **Curral e tronco** (achados 15, 23, 17, 25, 18): "Desfazer o último" num bloco com aviso devolve as outras linhas à fila, e a
+  mensagem diz o que aconteceu; "Está certo" sem bloco devolve a linha à fila; o aviso geral do lançamento é um "Está certo" só;
+  o animal sem brinco é achado pelo código interno e por "Pesar este"; a Início traz em segundo plano as telas do curral e do
+  tronco, que abrem depois sem sinal, e avisa quando não vieram.
+- **Reprodução** (achado 24): a tabela dos indicadores por categoria rotula "(parcial)".
+- **Aceitação** (`TestRunner`): o cenário ESTOQUE estorna a contagem antes da vacinação anterior a ela (com a recusa primeiro), e o
+  SANIDADE lança a primeira aplicação do protocolo de brucelose em D0+41, para a agenda das datas passadas contar com ele.
+- **Teste aleatório** (`tests/apoio-fuzz.js`): oráculos novos da dose por peso congelada (na correção e na correção tardia, com o
+  preparo "pesagem lançada depois da aplicação por peso"), da cria ao pé de cada fêmea hoje e numa data passada, do GMD da
+  resposta do registro (pelo `intervalosModelo`) e da agenda com o protocolo que já valia.
+- Testes anteriores ajustados ao contrato novo, sem enfraquecer: `tests/estoque.test.js` e `tests/revisao.fase3.motor.test.js` (o
+  payload da entrada traz `com_movimento`), `tests/pesagem.test.js` (a anterior traz `metodo` e `estimado`),
+  `tests/pastures.test.js` (a parte `estimativa_visual` da UA), `tests/sanidade.agenda.test.js` (o INTERVALO_DIAS nunca aplicado
+  vence desde que o protocolo vale), `tests/regras.fase3.test.js` (os protocolos do RN-058 cadastrados antes das datas
+  consultadas), `tests/ui/sobdemanda.test.js` (a Início traz as telas do curral e do tronco).

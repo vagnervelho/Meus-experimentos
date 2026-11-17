@@ -192,6 +192,9 @@ var AnimalService = (function () {
     var ref = cat && typeof cat.peso_referencia_kg === 'number' ? cat.peso_referencia_kg : null;
     var validade = L.params.peso_validade_dias;
     if (ult && (typeof validade !== 'number' || Utils.diffDias(ult.data, data) <= validade)) {
+      // A estimativa visual informada pelo operador vale para a UA e o peso vivo, mas marcada como estimada (P10; 07, seção
+      // 8.1: o peso médio sai com "x% estimado"). A média do lote é peso de balança (o total do lote): fica "pesado".
+      if (ult.metodo === 'ESTIMATIVA_VISUAL') return { kg: ult.kg, situacao: 'ESTIMATIVA_VISUAL', estimado: true, data_pesagem: ult.data, metodo: ult.metodo, referencia_kg: ref };
       return { kg: ult.kg, situacao: 'PESADO', estimado: false, data_pesagem: ult.data, metodo: ult.metodo, referencia_kg: ref };
     }
     if (ult) return { kg: ref !== null && ref > ult.kg ? ref : ult.kg, situacao: 'PESAGEM_VENCIDA', estimado: true, data_pesagem: ult.data, metodo: ult.metodo, referencia_kg: ref };

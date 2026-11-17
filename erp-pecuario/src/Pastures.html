@@ -204,7 +204,7 @@ var TelaPastos = (function () {
       ].concat((p.por_categoria || []).map(function (c) { return [c.nome, Fmt.numero(c.cabecas)]; })))), { dado: 'composicao' }));
       corpo.appendChild(UI.secao('Lotação', h('div', null, UI.pares([
         ['Peso vivo total', valor('peso', p.peso_vivo_total, p, Fmt.peso)], ['Peso médio', valor('peso', p.peso_medio, p, Fmt.peso)], ['UA', ua(p)],
-        parte('pesada', 'Com pesagem em dia'), parte('pesagem_vencida', 'Pesagem vencida (estimado)'), parte('sem_pesagem', 'Sem pesagem (peso de referência)'),
+        parte('pesada', 'Com pesagem em dia'), parte('estimativa_visual', 'Estimativa visual (estimado)'), parte('pesagem_vencida', 'Pesagem vencida (estimado)'), parte('sem_pesagem', 'Sem pesagem (peso de referência)'),
         ['UA/ha', uaHa(p)], ['Ocupação', ocupacao(p)], uaInd.rotulo ? ['Observação', uaInd.rotulo] : null,
       ]), acima(p) ? UI.nota('Pasto acima da capacidade informada em ' + Fmt.data(p.data) + '.', 'aviso') : null,
       !(p.area_hectares > 0) || (p.capacidade_estimada_ua_ha === null && p.capacidade_estimada_cabecas === null) ? UI.nota('Para ver UA/ha e ocupação, informe a área e a capacidade do pasto em "Editar pasto". A capacidade é informada por você; o sistema não a deduz pela área.', 'info') : null), { dado: 'lotacao' }));

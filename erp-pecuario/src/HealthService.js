@@ -178,7 +178,13 @@ var HealthService = (function () {
   function tolerancia_(protocolo, params) {
     return protocolo && num_(protocolo.tolerancia_dias) ? protocolo.tolerancia_dias : num_(params.agenda_tolerancia_dias) ? params.agenda_tolerancia_dias : 7;
   }
+  /**
+   * Desde quando o protocolo vale (05, RN-058: "o protocolo está ativo" em D): o cadastro dele ou, se antes, a primeira
+   * aplicação que o cumpre (o protocolo já praticado e cadastrado depois, com as aplicações lançadas em atraso). O contexto
+   * põe `inicio_vigencia` (sem ele, o dia do cadastro).
+   */
   function inicioProtocolo_(p) {
+    if (p.inicio_vigencia !== undefined) return p.inicio_vigencia;
     return typeof p.created_at === 'string' && p.created_at.length >= 10 ? p.created_at.slice(0, 10) : null;
   }
   /**
@@ -214,7 +220,8 @@ var HealthService = (function () {
    *  - UNICA: o dia em que completa a idade máxima; sem máxima, a mínima; sem faixa, a entrada no rebanho; cumprida por
    *    qualquer aplicação do protocolo;
    *  - INTERVALO_DIAS: `data_proxima_aplicacao` da última aplicação, se informada; senão a data dela + `intervalo_dias`;
-   *    nunca aplicado: o dia em que ficou elegível (a entrada no rebanho ou o dia em que completa a idade mínima);
+   *    nunca aplicado: o dia em que ficou elegível (a entrada no rebanho ou o dia em que completa a idade mínima) ou o dia
+   *    em que o protocolo passou a valer, o que vier depois;
    *  - CAMPANHA_MESES: o último dia do mês da campanha; cumprida por aplicação entre o primeiro dia do mês − tolerância e
    *    o último + tolerância. A campanha perdida (já vencida) vale até abrir a janela da seguinte; depois, a seguinte.
    */
@@ -232,7 +239,10 @@ var HealthService = (function () {
       return { vencimento: v, cumprida: apl.length > 0, ultima: ultima };
     }
     if (p.recorrencia_tipo === 'INTERVALO_DIAS') {
-      if (!ultima) return { vencimento: elegivelDesde, cumprida: false, ultima: null };
+      // Nunca aplicado: o dia em que o animal se tornou elegível (03a, seção 4.9) — e o protocolo valer é um dos critérios
+      // (05, RN-058): o cadastrado depois vence a partir de quando passou a valer, não "há meses" no dia do cadastro.
+      var inicio = inicioProtocolo_(p);
+      if (!ultima) return { vencimento: inicio && inicio > elegivelDesde ? inicio : elegivelDesde, cumprida: false, ultima: null };
       var u = apl[apl.length - 1];
       var prox = !vazio_(u.data_proxima_aplicacao) ? u.data_proxima_aplicacao : num_(p.intervalo_dias) ? Utils.somaDias(u.data_aplicacao, p.intervalo_dias) : null;
       // A próxima dose é sempre uma pendência (em dia, próxima ou vencida pela data); sem como contar a próxima, nenhuma.
@@ -317,6 +327,8 @@ var HealthService = (function () {
     var aplicacoes = c.aplicacoes(animalId).filter(function (r) { return r.data_aplicacao <= data; });
     var out = { pendencias: [], elegivel: {} };
     c.protocolos.forEach(function (p) {
+      // Numa data passada, só os protocolos que já existiam nela (05, RN-058: "o protocolo está ativo" em D).
+      if (inicioProtocolo_(p) && inicioProtocolo_(p) > data) return;
       var el = elegibilidade(p, perfil, data);
       if (!el.elegivel) return;
       var doProt = aplicacoes.filter(function (r) { return r.protocol_id === p.protocol_id; });
@@ -355,7 +367,13 @@ var HealthService = (function () {
   /** Contexto de leitura da sanidade sobre o leitor do AnimalService: protocolos ativos, produtos, aplicações por animal. */
   function contexto(L) {
     var repo = L.repo;
-    var protocolos = repo.carregada('PROTOCOLOS_SANITARIOS') ? Utils.ordenarPor(repo.vigentes('PROTOCOLOS_SANITARIOS').filter(function (p) { return p.ativo !== false; }), ['nome', 'protocol_id']) : [];
+    var primeira = {};
+    if (repo.carregada('SANIDADE')) repo.vigentes('SANIDADE').forEach(function (r) { if (!vazio_(r.protocol_id) && !(L.f.excluidos && L.f.excluidos[r.event_id]) && (!primeira[r.protocol_id] || r.data_aplicacao < primeira[r.protocol_id])) primeira[r.protocol_id] = r.data_aplicacao; });
+    var protocolos = repo.carregada('PROTOCOLOS_SANITARIOS') ? Utils.ordenarPor(repo.vigentes('PROTOCOLOS_SANITARIOS').filter(function (p) { return p.ativo !== false; }), ['nome', 'protocol_id']).map(function (p) {
+      var c = Utils.clonar(p);
+      c.inicio_vigencia = [inicioProtocolo_(p), primeira[p.protocol_id] || null].filter(Boolean).sort()[0] || null;
+      return c;
+    }) : [];
     return {
       L: L, params: L.params, protocolos: protocolos,
       produto: function (id) { return vazio_(id) || !repo.carregada('PRODUTOS') ? null : repo.porId('PRODUTOS', id); },
@@ -408,7 +426,7 @@ var HealthService = (function () {
     out.resumo.em_carencia = out.carencia.length;
     // Por protocolo: cobertura em D e o que foi feito no período.
     var apsPeriodo = L.repo.carregada('SANIDADE') ? L.repo.vigentes('SANIDADE').filter(function (r) { return periodo && r.data_aplicacao >= periodo.inicio && r.data_aplicacao <= periodo.fim; }) : [];
-    out.protocolos = c.protocolos.map(function (p) {
+    out.protocolos = c.protocolos.filter(function (p) { return !(inicioProtocolo_(p) && inicioProtocolo_(p) > data); }).map(function (p) {
       var st = porProt[p.protocol_id];
       var doProt = apsPeriodo.filter(function (r) { return r.protocol_id === p.protocol_id; });
       return {

@@ -731,6 +731,9 @@ var TestRunner = (function () {
         });
         t.passo('058-4.7', 'O exemplo de 05, seção 4.7 (protocolo de aplicação única para fêmeas de 3 a 8 meses), com as datas contadas do nascimento da bezerra (D0+40): antes dos 3 meses fora; dos 3 meses em diante elegível e em dia; 10 dias antes dos 8 meses, próxima com o vencimento nos 8 meses; aplicada dentro da faixa, cumprida', function () {
           var pr = t.cmd('protocolo.salvar', { campos: { nome: 'Brucelose (aceitação)', tipo_procedimento: 'VACINA', sexo_aplicavel: 'F', idade_min_meses: 3, idade_max_meses: 8, recorrencia_tipo: 'UNICA', antecedencia_alerta_dias: 15 } }, 'san-47');
+          // O protocolo já era praticado na fazenda desde D0+41 (a primeira aplicação com ele, lançada agora): a agenda de uma
+          // data passada só conta o protocolo que já valia nela (05, RN-058; revisão da Fase 3, rodada 2, achado 10).
+          t.cmd('evento.registrar', { tipo: 'SANIDADE', subtipo: 'VACINACAO', campos: { event_date: t.dia(41), protocol_id: pr.protocol_id, nome_produto: 'Vacina B19', modo_dose: 'POR_CABECA', dose_referencia: 2, unidade_dose: 'mL' }, animais: [{ animal_id: ids.S4 }] }, 'san-47-inicio');
           var nasc = t.dia(40);
           var tres = Utils.somaMeses(nasc, 3);
           var oito = Utils.somaMeses(nasc, 8);
@@ -802,11 +805,17 @@ var TestRunner = (function () {
           igual_(t.doEvento('MOVIMENTOS_ESTOQUE', c.event_id).map(function (m) { return [m.tipo, m.quantidade]; }), [['AJUSTE', -5]], 'contado − saldo na data');
           igual_(saldo(), 60, 'saldo');
         });
-        t.passo('estorno', 'Estorno da vacinação: as 30 doses voltam (90), o consumo fica cancelado e o saldo continua igual à soma dos movimentos vigentes', function () {
-          t.cmd('evento.estornar', { event_id: vac.event_id, justificativa: 'Vacinação lançada no lote errado' }, 'est-estorno', { avisos: [] });
-          igual_(saldo(), 90, '60 + 30');
+        t.passo('estorno', 'Estorno da vacinação de D0+70, anterior à contagem de D0+90: recusado (a contagem já acertou o saldo daquele dia); estornada a contagem, a vacinação sai: as 30 doses voltam (95), o consumo fica cancelado e o saldo continua igual à soma dos movimentos vigentes', function () {
+          var e = t.recusa('evento.estornar', { event_id: vac.event_id, justificativa: 'Vacinação lançada no lote errado' }, 'CONFLICT', 'est-estorno');
+          igual_(e.details.map(function (x) { return x.codigo; }), ['CONTAGEM_POSTERIOR'], 'a contagem posterior impede');
+          igual_(saldo(), 60, 'nada mudou');
+          var cont = t.tabela('MOVIMENTOS_ESTOQUE').filter(function (m) { return m.product_id === prod && m.tipo === 'AJUSTE' && m.data === t.dia(90); })[0];
+          t.cmd('evento.estornar', { event_id: cont.event_id, justificativa: 'A diferença era a vacinação lançada no lote errado' }, 'est-estorno-contagem');
+          igual_(saldo(), 65, 'sem a contagem: 100 − 30 − 5');
+          t.cmd('evento.estornar', { event_id: vac.event_id, justificativa: 'Vacinação lançada no lote errado' }, 'est-estorno-vacina', { avisos: [] });
+          igual_(saldo(), 95, '65 + 30');
           verificar_(t.doEvento('FINANCEIRO', vac.event_id).every(function (f) { return f.status === 'CANCELADO'; }), 'o consumo da aplicação estornada fica cancelado');
-          igual_(movimentos().reduce(function (x, m) { return x + (m.tipo === 'SAIDA' ? -m.quantidade : m.quantidade); }, 0), 90, 'saldo = Σ dos movimentos vigentes');
+          igual_(movimentos().reduce(function (x, m) { return x + (m.tipo === 'SAIDA' ? -m.quantidade : m.quantidade); }, 0), 95, 'saldo = Σ dos movimentos vigentes');
         });
         t.passo('fim', 'Projeção = reconstrução e financeiro sem divergência', function () { return t.integra('ESTOQUE'); });
       },

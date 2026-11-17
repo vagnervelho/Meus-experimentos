@@ -45,7 +45,10 @@ test('importação sob demanda: fora da página inicial, pedida uma vez pelo men
   await A.esperarTela(page, 'Importação');
   await A.ir(page, 'inicio');
   await A.ir(page, 'importar/novo', 'Importar animais');
-  assert.equal(telas(a).length, 1, 'ir e voltar não pede a tela de novo');
+  // Rodada 2 da revisão da Fase 3 (achado 18): a Início traz em segundo plano as telas do curral e do tronco; a da importação
+  // não é pedida de novo.
+  assert.equal(telas(a).filter((p) => p.dados.nome === 'Import').length, 1, 'ir e voltar não pede a tela de novo');
+  assert.ok(telas(a).every((p) => ['Import', 'Weights', 'Reproduction'].indexOf(p.dados.nome) >= 0), JSON.stringify(telas(a).map((p) => p.dados)));
   assert.equal(await page.locator('script[data-modulo="Import"]').count(), 1);
   assert.deepEqual(a.estado.erros, [], 'nenhum erro no console');
   await a.fechar();

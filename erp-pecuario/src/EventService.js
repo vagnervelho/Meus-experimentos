@@ -1458,7 +1458,10 @@ var EventService = (function () {
     if (vazio_(d.animal_id)) return;
     var e = sujeito_(m, it, 'desmama');
     if (!e || !Utils.dataValida(ev.event_date)) return;
-    if (!ReproductionService.ehCria(m.f, e, m.params)) { erroItem_(m, it, 'animal_id', 'NAO_E_CRIA', 'não é cria ao pé: não nasceu na fazenda e entrou no rebanho com ' + (vazio_(e.data_nascimento) ? 'idade desconhecida' : 'idade igual ou acima da desmama de referência (' + m.params.idade_desmama_padrao_meses + ' meses)') + '.'); return; }
+    // A cria que o original da correção já desmamava continua aceita depois de mudar `idade_desmama_padrao_meses` (o fato
+    // congelado na correção, como a idade da gestação do diagnóstico): a regra do parâmetro vale para o lançamento novo.
+    var jaDesmamadaNoOriginal = !!ctxEv.original && ctxEv.original.event_type === 'DESMAMA' && m.f.linhasDoEvento(ctxEv.original.event_id).some(function (l) { return l.animal_id === it.animal_id && (vazio_(l.papel) || l.papel === 'SUJEITO'); });
+    if (!jaDesmamadaNoOriginal && !ReproductionService.ehCria(m.f, e, m.params)) { erroItem_(m, it, 'animal_id', 'NAO_E_CRIA', 'não é cria ao pé: não nasceu na fazenda e entrou no rebanho com ' + (vazio_(e.data_nascimento) ? 'idade desconhecida' : 'idade igual ou acima da desmama de referência (' + m.params.idade_desmama_padrao_meses + ' meses)') + '.'); return; }
     var outra = Timeline.ordenar(m.f.linhas(it.animal_id).filter(function (l) { return l.event_type === 'DESMAMA' && l.papel === 'SUJEITO'; }))[0];
     if (outra) { erroItem_(m, it, 'animal_id', 'JA_DESMAMADO', 'já foi desmamado em ' + br_(outra.event_date) + '. Para mudar a data, corrija aquela desmama.'); return; }
     var kg = typeof d.peso === 'number' && !(it.camposComErro && it.camposComErro.peso) ? d.peso : null;
@@ -1726,6 +1729,9 @@ var EventService = (function () {
       quantidade: e.quantidade, motivo: e.motivo, saldo_contado: e.saldo_contado, saldo_na_data: e.saldo_na_data === undefined ? null : e.saldo_na_data,
       qtd_apresentacao: e.qtd_apresentacao, fator_conversao: e.fator_conversao, valor: e.valor, saldo: e.saldo || null,
       custo_unitario: e.valor !== null && e.quantidade ? HealthService.custoUnitarioEntrada(e.valor, e.quantidade) : null,
+      // O produto do cadastro sem custo por unidade (03a, seção 4.6: vazio = consumo sem custo; desenho-base 16.9: a compra
+      // fica no estoque, fora do resultado): o que foi pago nunca vira custo. A revisão diz, e manda preencher o cadastro.
+      produto_sem_custo: !(typeof e.produto.custo_unitario === 'number' && e.produto.custo_unitario > 0),
     };
   }
   /** Produtos cujo saldo o comando muda: os dos movimentos do plano e os do original anulado. */

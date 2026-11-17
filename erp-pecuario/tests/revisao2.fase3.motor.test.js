@@ -276,3 +276,24 @@ test('achado 8: a entrada de estoque apagada à mão é fonte quebrada (COPIAS, 
   const e2 = ok(api(s, 'evento.registrar', estoque('ENTRADA', '2026-02-01', { product_id: q.product_id, quantidade: 10, valor: 1000 })), 'entrada sem controle');
   assert.equal(s.tabela('EVENTOS').find((x) => x.event_id === e2.event_id).payload_json.com_movimento, false);
 });
+
+test('achado 9: o produto do cadastro sem custo por unidade é avisado na revisão da entrada e na da aplicação (o que foi pago nunca vira custo); com o custo preenchido no cadastro, a aplicação seguinte vira custo', () => {
+  const s = S.sistema();
+  hoje(s, '2026-11-15');
+  const ids = rebanho(s, ['101', '102']);
+  const p = produto(s, { nome: 'Vacina sem custo' });
+  const ent = estoque('ENTRADA', '2026-04-01', { product_id: p.product_id, quantidade: 100, valor: 30000 });
+  const simE = ok(api(s, 'evento.simular', { acao: 'registrar', dados: ent }), 'simulação da entrada');
+  assert.deepEqual([simE.impactos.estoque.produto_sem_custo, simE.impactos.estoque.custo_unitario], [true, 3]);
+  ok(api(s, 'evento.registrar', ent), 'entrada');
+  const vac = san('VACINACAO', '2026-04-05', [ids['101'], ids['102']], { produto_id: p.product_id, modo_dose: 'POR_CABECA', dose_referencia: 1 });
+  const simV = ok(api(s, 'evento.simular', { acao: 'registrar', dados: vac }), 'simulação da aplicação');
+  assert.deepEqual(simV.impactos.sanidade.consumo, { custo_unitario: null, valor: 0 }, 'sem custo, dito na revisão');
+  // O caminho: o custo por unidade no cadastro; a aplicação seguinte vira custo (a entrada já gravada não muda).
+  ok(api(s, 'produto.salvar', { product_id: p.product_id, campos: { custo_unitario: 3 }, justificativa: 'custo da compra' }), 'custo no cadastro');
+  const simE2 = ok(api(s, 'evento.simular', { acao: 'registrar', dados: estoque('ENTRADA', '2026-04-02', { product_id: p.product_id, quantidade: 10, valor: 3000 }) }));
+  assert.equal(simE2.impactos.estoque.produto_sem_custo, false);
+  const r = ok(api(s, 'evento.registrar', vac), 'aplicação');
+  assert.deepEqual(tab(s, 'FINANCEIRO', { event_id: r.event_id }).map((f) => f.valor), [600]);
+  semErro(s, 'sem custo');
+});

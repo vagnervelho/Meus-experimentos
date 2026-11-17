@@ -577,7 +577,12 @@ var WeightService = (function () {
           geral: g,
           por_pasto: Utils.ordenarPor(listaPastos, function (x) { return x.nome || ''; }),
           por_categoria: Utils.ordenarPor(listaCats, function (x) { var c = x.category_id ? L.categoriaPorId[x.category_id] : null; return c && typeof c.prioridade === 'number' ? c.prioridade : 9999; }),
-          pesagens: pesagensDoPeriodo_(tx, L, per, params),
+          pesagens: pesagensDoPeriodo_(tx, L, per, params, function (a, data) {
+            if (!casa(a)) return false;
+            if (!vazio_(d.pasture_id)) { var sit = Timeline.situacaoEm(L.f.linhas(a.animal_id), data, L.marcoZero); if (sit.pasture_id !== d.pasture_id) return false; }
+            if (!vazio_(d.category_id)) { var c = AnimalService.categoriaEm(L, a, data); if (!c || c.category_id !== d.category_id) return false; }
+            return true;
+          }),
           evolucao: evolucaoMensal_(mensal, per.de, per.ate, params),
           animais: Utils.ordenarPor(linhasAnimais, function (x) { return x.brinco || x.codigo_interno; }),
           curvas: per.animais.map(function (id) {
@@ -596,17 +601,32 @@ var WeightService = (function () {
   /**
    * Os eventos PESAGEM vigentes do período, do mais recente ao mais antigo: {event_id, data, tipo, metodo, jejum, lote,
    * n, media_kg, gmd_lote} — o GMD de lote contra a pesagem anterior mais recente com ao menos `indicador_n_minimo`
-   * animais em comum e o intervalo mínimo (sem ela, null com o motivo).
+   * animais em comum e o intervalo mínimo (sem ela, null com o motivo). Com filtro (`noFiltro(animal, data)`: o pasto, o
+   * sexo, a categoria e a raça da tela, o pasto e a categoria na data da pesagem; 07, seção 8.1), cada lançamento conta só
+   * os animais do filtro — n, a média e o GMD de lote —, e o lançamento sem nenhum deles sai da lista.
    */
-  function pesagensDoPeriodo_(tx, L, per, params) {
-    var todas = tx.repo.vigentes('EVENTOS').filter(function (e) { return e.event_type === 'PESAGEM'; }).map(function (e) { return pesagemDoEvento_(tx, e, params); });
+  function pesagensDoPeriodo_(tx, L, per, params, noFiltro) {
+    var todas = tx.repo.vigentes('EVENTOS').filter(function (e) { return e.event_type === 'PESAGEM'; }).map(function (e) {
+      var p = pesagemDoEvento_(tx, e, params);
+      var linhas = tx.repo.por('PESAGENS', 'event_id', e.event_id);
+      p.linhas = noFiltro ? linhas.filter(function (r) { var a = L.f.animal(r.animal_id); return a && noFiltro(a, e.event_date); }) : linhas;
+      if (p.linhas.length !== linhas.length) {
+        // O lote filtrado não é o lote da balança: a média é a dos animais do filtro.
+        var ids = {};
+        p.linhas.forEach(function (r) { ids[r.animal_id] = true; });
+        Object.keys(p.porAnimal).forEach(function (id) { if (!ids[id]) delete p.porAnimal[id]; });
+        p.lote = null;
+      }
+      return p;
+    });
     todas.sort(function (a, b) { return cmp_(a.ev.event_date, b.ev.event_date) || ((L.f.ordemSeq(a.ev.event_id) || 0) - (L.f.ordemSeq(b.ev.event_id) || 0)); });
     var nMin = typeof params.indicador_n_minimo === 'number' ? params.indicador_n_minimo : 5;
     var min = typeof params.gmd_intervalo_min_dias === 'number' ? params.gmd_intervalo_min_dias : 28;
     var out = [];
     todas.forEach(function (b, i) {
       if ((!vazio_(per.de) && b.ev.event_date < per.de) || b.ev.event_date > per.ate) return;
-      var linhas = tx.repo.por('PESAGENS', 'event_id', b.ev.event_id);
+      var linhas = b.linhas;
+      if (!linhas.length) return;
       var total = linhas.reduce(function (t, r) { return t + (r.peso_kg || 0); }, 0);
       var gl = null;
       for (var k = i - 1; k >= 0 && !gl; k--) {

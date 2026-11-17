@@ -45,7 +45,7 @@ test('painel do pasto: composição, peso vivo, UA com a parte estimada rotulada
   assert.deepEqual(nomesCat(p), [['GARROTE', 1], ['NOVILHA_24_MAIS', 2]]);
   assert.deepEqual(p.peso_vivo_total, { valor: 1100, motivo: null, n: 3, estimado: true, unidade: 'kg' });
   assert.deepEqual([p.ua.valor, p.ua.n, p.ua.estimado, p.ua.ua_peso_kg, p.ua.sem_peso], [2.44, 3, true, 450, 0]);
-  assert.deepEqual(p.ua.partes, { pesada: { cabecas: 2, peso_kg: 750, ua: 1.67 }, pesagem_vencida: { cabecas: 0, peso_kg: 0, ua: 0 }, sem_pesagem: { cabecas: 1, peso_kg: 350, ua: 0.78 } });
+  assert.deepEqual(p.ua.partes, { pesada: { cabecas: 2, peso_kg: 750, ua: 1.67 }, estimativa_visual: { cabecas: 0, peso_kg: 0, ua: 0 }, pesagem_vencida: { cabecas: 0, peso_kg: 0, ua: 0 }, sem_pesagem: { cabecas: 1, peso_kg: 350, ua: 0.78 } });
   assert.match(p.ua.rotulo, /UA estimada em parte: 1 cabeça\(s\) sem pesagem, pelo peso de referência da categoria\./);
   assert.deepEqual([p.ua_ha.valor, p.ua_ha.motivo, p.ua_ha.estimado], [1.22, null, true]);
   assert.deepEqual([p.ocupacao_pct.valor, p.ocupacao_pct.base, p.ocupacao_pct.estimado], [122.2, 'UA_HA', true]);

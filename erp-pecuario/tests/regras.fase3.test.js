@@ -209,7 +209,9 @@ test('RN-053: projeção, média calculada e carcaça nunca entram em PESAGENS �
 // ------------------------------------------------------------------ RN-058 (05, seção 4.7) ----
 test('RN-058 (05, seção 4.7): os quatro critérios da elegibilidade — no rebanho na data e protocolo ativo, sexo, idade em meses completos com o nascimento conhecido, categoria na data — e a pendência só se cumpre com aplicação vigente (estornada, volta)', () => {
   const s = S.sistema();
-  relogio(s, '2026-06-01');
+  // Os protocolos são cadastrados em janeiro: a agenda de uma data só conta o protocolo que já valia nela (revisão da Fase 3,
+  // rodada 2, achado 10).
+  relogio(s, '2026-01-05');
   const cat = (codigo) => s.tabela('CATEGORIAS').find((c) => c.codigo === codigo).category_id;
   const comp = ok(api(s, 'parceiro.salvar', { campos: { nome: 'Recriador', tipos: ['COMPRADOR'] } }, 'comp')).partner_id;
   const ids = rebanho(s, [
@@ -222,6 +224,7 @@ test('RN-058 (05, seção 4.7): os quatro critérios da elegibilidade — no reb
   const faixa = prot({ nome: 'Fêmeas de 3 a 12 meses', sexo_aplicavel: 'F', idade_min_meses: 3, idade_max_meses: 12 }, 'p-faixa');
   const semFaixa = prot({ nome: 'Todo o rebanho' }, 'p-todos');
   const bezerra = prot({ nome: 'Só bezerras', category_id: cat('BEZERRA') }, 'p-cat');
+  relogio(s, '2026-06-01');
   ok(api(s, 'evento.registrar', { tipo: 'VENDA', campos: { event_date: '2026-03-01', partner_id: comp, finalidade: 'RECRIA_ENGORDA', modalidade: 'CABECA', preco_unitario: 150000, valor_bruto: 150000 }, animais: [{ animal_id: ids.F2 }], parcelas: [{ data_vencimento: '2026-03-01' }] }, 'venda'));
   const agenda = (data) => ok(api(s, 'sanidade.agenda', { data }));
   const quem = (a, p) => a.pendencias.filter((x) => x.protocol_id === p).map((x) => x.animal_id).sort();

@@ -164,7 +164,7 @@ var InventoryService = (function () {
   function compor(L, itens, data, opcoes) {
     var o = opcoes || {};
     var r = { cabecas: itens.length, machos: 0, femeas: 0 };
-    var partes = { pesada: { cabecas: 0, peso_kg: 0 }, pesagem_vencida: { cabecas: 0, peso_kg: 0 }, sem_pesagem: { cabecas: 0, peso_kg: 0 } };
+    var partes = { pesada: { cabecas: 0, peso_kg: 0 }, estimativa_visual: { cabecas: 0, peso_kg: 0 }, pesagem_vencida: { cabecas: 0, peso_kg: 0 }, sem_pesagem: { cabecas: 0, peso_kg: 0 } };
     var semPeso = 0;
     var lista = [];
     itens.forEach(function (x) {
@@ -174,6 +174,7 @@ var InventoryService = (function () {
       var cat = AnimalService.categoriaEm(L, a, data);
       var pv = AnimalService.pesoVigente(L, a, data, cat);
       if (pv.situacao === 'PESADO') { partes.pesada.cabecas++; partes.pesada.peso_kg += pv.kg; }
+      else if (pv.situacao === 'ESTIMATIVA_VISUAL') { partes.estimativa_visual.cabecas++; partes.estimativa_visual.peso_kg += pv.kg; }
       else if (pv.situacao === 'PESAGEM_VENCIDA') { partes.pesagem_vencida.cabecas++; partes.pesagem_vencida.peso_kg += pv.kg; }
       else if (pv.situacao === 'SEM_PESAGEM') { partes.sem_pesagem.cabecas++; partes.sem_pesagem.peso_kg += pv.kg; }
       else semPeso++;
@@ -189,8 +190,8 @@ var InventoryService = (function () {
     r.por_categoria = cats.por_categoria;
     r.sem_categoria = cats.sem_categoria;
     var comPeso = r.cabecas - semPeso;
-    var total = partes.pesada.peso_kg + partes.pesagem_vencida.peso_kg + partes.sem_pesagem.peso_kg;
-    var estimadas = partes.pesagem_vencida.cabecas + partes.sem_pesagem.cabecas;
+    var total = partes.pesada.peso_kg + partes.estimativa_visual.peso_kg + partes.pesagem_vencida.peso_kg + partes.sem_pesagem.peso_kg;
+    var estimadas = partes.estimativa_visual.cabecas + partes.pesagem_vencida.cabecas + partes.sem_pesagem.cabecas;
     var uaKg = L.params.ua_peso_kg;
     var valorPeso = r.cabecas === 0 ? 0 : comPeso === 0 ? null : arred_(total, 1);
     r.peso_vivo_total = indicador_(valorPeso, 'DADOS_INSUFICIENTES', comPeso, { estimado: estimadas > 0, unidade: 'kg' });
@@ -205,6 +206,7 @@ var InventoryService = (function () {
     var rotulo = null;
     if (estimadas > 0) {
       var trechos = [];
+      if (partes.estimativa_visual.cabecas) trechos.push(partes.estimativa_visual.cabecas + ' cabeça(s) por estimativa visual');
       if (partes.sem_pesagem.cabecas) trechos.push(partes.sem_pesagem.cabecas + ' cabeça(s) sem pesagem, pelo peso de referência da categoria');
       if (partes.pesagem_vencida.cabecas) trechos.push(partes.pesagem_vencida.cabecas + ' com pesagem vencida (mais de ' + L.params.peso_validade_dias + ' dias)');
       rotulo = 'UA estimada em parte: ' + trechos.join(' e ') + '.';
