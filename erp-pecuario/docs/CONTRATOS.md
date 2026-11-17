@@ -174,6 +174,10 @@ Fase 3, CONSERTO PELA GARANTIA (etapa 2, resolvedor único da posição na data)
 animal ou a recusa explicada; animal e data → brinco, pasto, categoria, situação, presença e último peso), a rota
 `animal.resolver`, todos os caminhos que acham o animal por um texto (curral, tronco, seletor, buscas, importação, conferência)
 só por ele, o cliente sem resolução de brinco própria, o teste tabelado e o oráculo do teste aleatório (seção 47).
+Fase 3, CONSERTO PELA GARANTIA (etapa 3, fuzz de interface do curral e do tronco): o teste aleatório da tela de lote com ações do
+usuário, falhas de rede decididas no Node e o modelo do que deve estar gravado e na fila (`tests/ui/curral.fuzz.test.js`,
+`tests/ui/apoio-curral.js`), as quatro garantias da fila de lote que ele confere e os consertos de `Weights` e `Reproduction`
+que ele achou (seção 48).
 
 ## 1. Regras que valem para todo arquivo de `src/`
 
@@ -2457,7 +2461,7 @@ Interface:
 |---|---|
 | `Weights.html` (sob demanda, seção 37) | `TelaPesagens`; rotas `pesagens` (desempenho) e `pesagens/curral` (tela cheia). Desempenho: filtros de período, pasto, sexo, categoria e raça; indicadores (`[data-indicadores-peso]`), tabelas por pasto e por categoria, as pesagens com o GMD de lote ou o motivo do servidor, a curva de até 5 animais pelo brinco (`#curva-brinco`, "Mostrar"), os animais; tudo vem de `peso.desempenho` |
 | Modo curral (`pesagens/curral`; 08, seção 5) | Começo: data (hoje), método, momento, jejum e o pasto do lote. Depois: `#cur-brinco` (`inputmode=numeric`; sem zeros à esquerda acha o brinco pela loja) → Enter → `#cur-peso` (`inputmode=decimal`) → Enter → volta ao brinco; a conferência mostra o animal e o último peso da loja; candidatos quando o número é ambíguo; contador "N de M · faltam K (+X de outros pastos)" com a lista dos que faltam; repetido na fila → "Substituir o peso"; não encontrado → linha pendente que trava o envio; "Desfazer o último". A fila é um rascunho (`Rascunhos`, id `curral-pesagem`, tipo `CURRAL_PESAGEM`, no aparelho e no servidor; a visão geral lista o rascunho com o link) e sobrevive a recarregar a página |
-| Envio em blocos | `BLOCO = 20` linhas por bloco; cada bloco é um `evento.registrar` com chave própria `curral:<uuid>` guardada no rascunho antes de enviar; estados por bloco NOVO, ENVIANDO, SEM_SINAL, GRAVADO, AVISO, ERRO e por linha FILA, ENVIANDO, SEM_SINAL, GRAVADA, AVISO, ERRO, NAO_ENCONTRADO. Transporte que falha → SEM_SINAL (nada perdido); resposta perdida → `Cliente.comando` (45 s) confere `operacao.status` e reenvia com a mesma chave; ao retomar a fila, os blocos ENVIANDO/SEM_SINAL são conferidos por `Cliente.verificar` antes de qualquer reenvio — nada duplica. A linha gravada mostra o ganho e os dias contra a pesagem anterior vindos da resposta (`pesagem.animais`). Aviso do servidor (PESO_IMPLAUSIVEL, POSSIVEL_DUPLICIDADE) fica na linha; "Está certo" reenvia o bloco com o aceite. "Terminar a pesagem" recusa enquanto há bloco sem confirmação, pede confirmação para descartar o que não foi gravado, apaga o rascunho e mostra os lançamentos gravados com o número e a média do servidor (`[data-resultado-curral]`) |
+| Envio em blocos | `BLOCO = 20` linhas por bloco; cada bloco é um `evento.registrar` com chave própria `curral:<uuid>` guardada no rascunho antes de enviar; estados por bloco NOVO, ENVIANDO, SEM_SINAL, GRAVADO, AVISO, ERRO e por linha FILA, ENVIANDO, SEM_SINAL, GRAVADA, AVISO, ERRO, NAO_ENCONTRADO. Transporte que falha → SEM_SINAL (nada perdido); resposta perdida → `Cliente.comando` (45 s) confere `operacao.status` e reenvia com a mesma chave; ao retomar a fila, os blocos ENVIANDO/SEM_SINAL são conferidos por `Cliente.verificar` antes de qualquer reenvio — nada duplica. A recusa que não prova que nada foi gravado (falha interna, sem permissão, não encontrado) deixa o bloco SEM_SINAL com a chave e a mensagem do servidor (seção 48). A linha gravada mostra o ganho e os dias contra a pesagem anterior vindos da resposta (`pesagem.animais`). Aviso do servidor (PESO_IMPLAUSIVEL, POSSIVEL_DUPLICIDADE) fica na linha; "Está certo" reenvia o bloco com o aceite. "Terminar a pesagem" recusa enquanto há bloco sem confirmação, pede confirmação para descartar o que não foi gravado, apaga o rascunho e mostra os lançamentos gravados com o número e a média do servidor (`[data-resultado-curral]`) |
 | Ficha, aba Peso (`Animals`, `blocoPeso`) | Peso atual, ao nascer, à desmama, ganho no período, GMD do período e peso estimado hoje; `UI.curvaPeso`; tabela das pesagens (data, peso, como, ganho, dias, GMD, variação) e o porquê de cada GMD vazio (`data-porque-sem-gmd`); nota dos estimados |
 | `UI.curvaPeso({titulo, series: [{nome, pontos: [{data, peso_kg, estimado}], nascer, projecao}]})` (`Components`) | SVG próprio, sem biblioteca: marcadores `data-marcador` = medido, estimado, nascer e projeção (linha tracejada, rótulo "Estimativa"), legenda e "Ver tabela" com as mesmas linhas ("Pesagem", "Pesagem estimada", "Peso ao nascer de referência (estimado)", "Projeção (estimativa)"); sem pontos → o estado vazio (`data-vazio`, `.grafico-sem-dados`). Na E3.7 (seção 41): eixos "Peso (kg)" e "Data", title e desc no SVG, `data-valor` e a dica em cada marca, a largura da tela |
 | Formulário, revisão e detalhe (`Components`, `Events`) | PESAGEM no Registro (frequente, revisão local, verbo "Gravar a pesagem", consequência e resultado "N pesagens gravadas · média X kg"); correção pelo detalhe com o momento, o método, o jejum, o lote e o peso de cada animal como gravados (`previaPesagem_`); seções "Pesagem" e "Pesagens" no detalhe |
@@ -3006,6 +3010,8 @@ parte estimada da UA pelo rótulo da composição (`ua.rotulo`).
   bloco GRAVADO, ENVIANDO ou SEM_SINAL; cada bloco guarda o cabeçalho de quando foi criado (`b.campos`, no rascunho com a chave) e
   sai sempre com ele. A recusa que não é falta de sinal (IDEMPOTENCY_MISMATCH, DENIED, NOT_FOUND, INTERNAL…) solta o bloco: as
   linhas viram pendência com o motivo (com "Tirar"), a mensagem do servidor vai à área de status, e nada diz "sem sinal".
+  **Mudado na seção 48:** só IDEMPOTENCY_MISMATCH solta o bloco (só com "Tirar": a chave já está gravada); as demais deixam o
+  bloco com a chave, sem confirmação, e a mensagem do servidor na área de status (`[data-recusa-incerta]`).
 - Com data passada e sem a posição do servidor (carregando ou sem sinal), o brinco não é resolvido pela posição de hoje: a linha
   fica pendente (`data-conferencia="SEM_POSICAO"`), a nota oferece "Tentar de novo" (`[data-posicao-tentar]`), e com a posição na
   mão as linhas que esperavam são conferidas pela data. A data sem posição por motivo do servidor (antes do marco zero, sem marco
@@ -3238,3 +3244,76 @@ uma importação de manejo ou de saída, `oraculoResolucaoImportacao`: cada linh
 pelo mesmo texto na data da linha (`RESOLVER:IMPORTACAO`). Contadores: "resolvedor: textos conferidos em todos os caminhos",
 "resolvedor: números da posição conferidos", "resolvedor: animais descritos igual na posição", "resolvedor: linhas importadas
 no animal do resolvedor".
+
+## 48. Fuzz de interface do curral e do tronco (conserto da Fase 3 pela garantia, etapa 3) — `Weights` (curral), `Reproduction` (tronco); `tests/ui/curral.fuzz.test.js`, `tests/ui/apoio-curral.js`, `tests/ui/curral.fuzz.regressoes.test.js`, `tests/ui/apoio.js` (`servidor`), `tests/ui/mock-gas.js`
+
+As três rodadas de revisão da Fase 3 acharam defeito alto no cliente do curral e do tronco em todas (a tela de lote com fila no
+aparelho, blocos idempotentes e rede caindo), consertado caso a caso. Esta etapa troca o caso a caso por um teste aleatório da
+tela de verdade contra um modelo, que confere depois de cada ação as garantias abaixo, e conserta pela causa o que ele achou.
+
+**As garantias da fila de lote** (curral e tronco; o oráculo confere cada uma):
+
+| Garantia | O que vale | Como o código garante |
+|---|---|---|
+| Nada gravado duas vezes | cada linha digitada está em no máximo uma chave confirmada; nenhuma linha que pode estar gravada sai com outra chave | o bloco guarda chave, linhas e cabeçalho no rascunho antes de sair; só a recusa que prova que a chave não foi gravada solta o bloco (abaixo) |
+| Nada perdido | toda linha digitada está na tela (e no rascunho do aparelho, o mesmo estado) até ser gravada, tirada pelo operador ou descartada no "Terminar" | o rascunho é gravado a cada mudança; recarregar, sair e voltar e o envio no ar não mexem na fila |
+| O animal é o do texto na data da sessão | a linha guarda o texto digitado (`texto`) e a data em que o servidor o resolveu (`dataAnimal`); toda linha com animal tem o animal que o resolvedor único dá a esse texto na data da sessão | mudar a data da sessão confere de novo cada linha não gravada, pelo texto, na data nova (`sessaoMudou`: a linha fica pendente até a resposta); `naFila` nunca põe num bloco uma linha resolvida em outra data |
+| Nenhum bloco preso | com o tempo passado (respostas entregues ou perdidas de vez), nada fica "enviando", e toda linha não gravada tem saída: "Enviar", "Está certo", corrigir ou tirar | `enviarTudo` escolhe o próximo bloco pronto a cada volta (o aviso aceito durante outro envio sai no mesmo envio); o "Enviar" conta as linhas do bloco com o aviso aceito; um envio de cada vez (a conferência dos blocos na volta à tela espera o envio no ar) |
+
+**Recusas.** VALIDATION, NEEDS_CONFIRMATION e CONFLICT provam que a chave não está gravada (o servidor confere a chave antes de
+validar; `UnitOfWork`, seção 10): aviso na linha ou no lançamento, recusa na linha (pendência) ou na área de status, como antes.
+IDEMPOTENCY_MISMATCH prova que a chave ESTÁ gravada (com outro conteúdo): as linhas ficam pendência só com "Tirar" (`jaGravada`;
+sem "Corrigir", que sairia com outra chave). As demais (INTERNAL, DENIED, NOT_FOUND) não provam nada — uma tentativa anterior
+pode ter chegado, ou a falha pode ter vindo depois da gravação: o bloco fica SEM_SINAL com a chave e `b.recusa` (a mensagem do
+servidor, em `[data-recusa-incerta]`, sem "Sem sinal"); o próximo envio usa a mesma chave. A recusa do servidor à conferência
+(`operacao.status`) também fica em `b.recusa` (antes, no tronco, ia só ao console). **Decisão:** a seção 45 mandava soltar o
+bloco em toda recusa que não fosse falta de sinal (para não travar a fila com IDEMPOTENCY_MISMATCH); o teste aleatório mostrou
+que, com a falha interna no reenvio de um bloco já gravado, a linha "recusada" e corrigida gravava duas vezes. O bloco incerto
+não trava o resto da fila de outro jeito: o "Enviar" o manda de novo.
+
+**Redesenho.** O envio continua quando o operador sai da tela e volta: `telaAtual` aponta para o desenho da tela aberta, e o envio
+redesenha ela (antes, a tela nova não via a resposta). Linha pendente barrada só por outra linha do mesmo animal continua
+esperando (`semPosicao`) e sai sozinha quando a outra é tirada (`tirar` e "Desfazer o último" chamam `resolverEsperando`), em
+vez de ficar com a mensagem "tire uma das duas" depois de a outra sair.
+
+**O teste (`tests/ui/curral.fuzz.test.js`).** Por semente: o rebanho (`apoio-curral.montarSistema`: fêmeas e machos em dois
+pastos, um animal sem brinco, pesagens anteriores, o 0457 trocado em 11/11 e reaproveitado em 12/11, uma morte em 05/11, 26
+fêmeas do lote grande e duas estações), a tela (curral ou tronco) a 360 px e o relógio da página. Ações do usuário: lançar
+(brinco válido, sem zeros, trocado, de outro pasto, de quem saiu, inválido, o código interno do animal sem brinco e o de um animal
+com brinco; com e sem Enter no brinco; valor válido e inválido pelo teclado e pelo botão), o lote passando depressa (o bloco de 20
+sai sozinho), desfazer o último, tirar, corrigir o peso ou o resultado, corrigir o brinco, "Está certo" (da linha e do
+lançamento), enviar (resolvendo a pendência que impede), mudar data, método, momento, pasto ou estação (e recarregar com o
+formulário aberto), terminar (descartando ou voltando), recarregar, sair e voltar, o tempo passar, conferir as pendências, e
+outro usuário gravando no mesmo banco (pesagem ou diagnóstico do mesmo animal no mesmo dia; uma morte hoje). Falhas de rede
+(`apoio-curral.novaRede`, no Node, por classe de rota: lançamento, resolvedor, conferência): a resposta perdida depois de gravar,
+o pedido perdido antes de chegar, o transporte que falha antes ou depois de gravar, a resposta segurada (chega quando o teste
+solta, na ordem ou na inversa) e o pedido segurado (só chega ao servidor ao soltar, ou nunca, se a página recarregar), o
+servidor ocupado e a falha interna. Nada depende do tempo real: a nova tentativa do servidor ocupado, o prazo de 45 s da resposta
+perdida e a resposta segurada há 6 ações são andados pelo teste. O modelo guarda o texto e o valor de cada linha, a ordem, o
+cabeçalho, as tiradas e as descartadas e a chave de cada bloco visto. O oráculo, a cada ação: tela = estado do aparelho = rascunho
+guardado; as linhas = as do modelo (desfazer, tirar e substituir fazem o que dizem; o repetido pede a decisão certa: "Substituir"
+só com a anterior ainda não enviada); o animal de cada linha = o do texto na data da sessão; o banco (cada chave confirmada com
+as linhas do bloco, o valor digitado, o animal da data e o cabeçalho da sessão; nenhuma linha em duas chaves; nenhuma linha
+gravada que a tela diga na fila, com aviso, recusada, pendente, tirada ou descartada); a mensagem de cada recusa entregue na
+tela; e, depois de o tempo passar, nada preso. No fim, com a rede boa: avisos aceitos, pendências conferidas (a que o servidor
+resolve não pode ficar pendente), recusas legítimas tiradas, a recusa geral (data antes do marco zero) resolvida mudando a data,
+tudo enviado e "Terminar"; o resultado conta as gravadas; o banco = o modelo; a integridade sem erro e a projeção = reconstrução;
+nenhum erro no console. `npm run ui:check` roda 6 sementes fixas de 40 ações; `FUZZ_SEMENTES`, `FUZZ_INICIO`, `FUZZ_ACOES`,
+`FUZZ_TELA`, `FUZZ_LOG` e `FUZZ_COBERTURA` como no teste do motor.
+
+**Apoio.** `apoio.abrir(s, {servidor: (pedido, executar) => json})` põe quem responde no lugar do backend; o mock aceita do Node
+`{"__mock":"perdida"}` (sem resposta) e `{"__mock":"transporte"}` (falha de transporte). `TelaReproducao.sessao()` devolve o
+estado do tronco (como `TelaPesagens.sessao()`), para o oráculo.
+
+**Regressões (`tests/ui/curral.fuzz.regressoes.test.js`, 6 testes; todos falham com o `src/` de antes da etapa, commit
+`ee1b2cd`).** 1 (curral e tronco): mudar a data com a linha na fila — o 0457 de hoje é a vaca B, o de 04/11 a vaca A, e a
+gravação vai para a A; 2: a falha interna no reenvio de um bloco já gravado não vira "recusada" e o reenvio grava uma vez; 3: o
+"Está certo" dado com outro bloco no ar sai no mesmo envio; 4: sair e voltar com o envio no ar — a resposta aparece na tela nova
+e o bloco não é conferido por outro caminho ao mesmo tempo; 5 (tronco): a recusa do servidor à conferência aparece na tela, nunca
+só no console.
+
+**O que o teste não cobre.** O rascunho no servidor (aparelho sem `localStorage`, gravação agrupada de 1 s), o "Pesar este" da
+lista dos que faltam, a escolha entre vários animais com o mesmo número na mesma data (o rebanho não tem esse caso), duas abas
+abertas na mesma sessão e o celular de verdade (o Chromium do Playwright com o mock de `google.script.run`; desenho-base, seção
+17, e o roteiro do modo curral na conta do dono).
+

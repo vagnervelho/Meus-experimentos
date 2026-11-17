@@ -11,6 +11,8 @@
  *  4. Sair e voltar com o envio no ar: a tela nova não via a resposta (e conferia o mesmo bloco por outro caminho); agora o envio
  *     redesenha a tela aberta.
  *  5. Tronco: a recusa do servidor à conferência de um bloco ia ao console como erro e não aparecia; agora aparece na tela.
+ *  6. A linha pendente barrada por outra linha do mesmo animal ficava pendente para sempre, dizendo "tire um dos dois" depois de a
+ *     outra sair; agora ela continua esperando e entra na fila quando a outra é tirada.
  * Roda por `npm run ui:check`.
  */
 const test = require('node:test');
@@ -182,5 +184,31 @@ test('regressão 5 (tronco): a recusa do servidor à conferência do bloco sem c
   await page.waitForSelector('.curral-lista [data-estado="GRAVADA"]', { timeout: 15000 });
   assert.equal(linhasDoBanco(x).length, 1);
   assert.equal(HOJE, x.sis.s.tabela('EVENTOS').find((e) => String(e.idempotency_key || '').indexOf('tronco:') === 0).event_date);
+  await x.fechar();
+});
+
+test('regressão 6 (tronco): a linha pendente barrada por outra do mesmo animal entra na fila quando a outra é tirada — nunca fica dizendo "tire um dos dois" sozinha', async () => {
+  const x = await abrir('tronco');
+  const { page, rede, sis } = x;
+  await comecar(x);
+  // Sem sinal na conferência: a primeira 0520 fica pendente.
+  rede.falhas.push({ classe: 'resolver', tipo: 'transporte' });
+  await lancar(x, '0520', 'p');
+  assert.deepEqual(await estados(x), ['NAO_ENCONTRADO']);
+  // Com sinal, a mesma vaca de novo: vai para a fila; a pendente, conferida agora, é barrada pela outra linha.
+  await lancar(x, '0520', 'v');
+  let v = await lerTela(page, 'tronco');
+  assert.deepEqual(v.c.linhas.map((l) => [l.estado, l.animal_id]), [['NAO_ENCONTRADO', null], ['FILA', sis.ids.v520]]);
+  assert.match(v.linhas[1].texto, /já tem outro diagnóstico nesta sessão: tire um dos dois/);
+  // O veterinário tira a segunda: a primeira, que só esperava por ela, entra na fila sozinha.
+  await page.click('[data-linha="' + v.c.linhas[1].uid + '"] button:has-text("Tirar")');
+  await parar(x);
+  v = await lerTela(page, 'tronco');
+  assert.deepEqual(v.c.linhas.map((l) => [l.estado, l.animal_id, l.resultado]), [['FILA', sis.ids.v520, 'POSITIVO']]);
+  assert.doesNotMatch(v.textoTodo, /tire um dos dois/);
+  await page.click('[data-enviar]');
+  await page.waitForSelector('.curral-lista [data-estado="GRAVADA"]', { timeout: 15000 });
+  assert.equal(linhasDoBanco(x).length, 1);
+  assert.deepEqual(x.estado.erros, []);
   await x.fechar();
 });

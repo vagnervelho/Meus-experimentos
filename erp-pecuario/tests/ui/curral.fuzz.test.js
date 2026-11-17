@@ -28,6 +28,9 @@
  * as recusas legítimas tiradas, tudo enviado e "Terminar"; o resultado mostra as gravadas; o banco = o modelo (cada linha
  * gravada uma vez, com o animal, o valor e o cabeçalho) e a integridade sem erro, com a projeção = reconstrução.
  *
+ * Nada depende do tempo real (as sementes se repetem): a nova tentativa do servidor ocupado, o prazo de 45 s da resposta perdida e a
+ * resposta segurada há 6 ações são andados pelo próprio teste (o relógio da página, `avancar`).
+ *
  * `npm run ui:check` roda as sementes fixas (poucas). FUZZ_SEMENTES=N roda N sementes a partir de FUZZ_INICIO (padrão 1);
  * FUZZ_ACOES muda as ações por semente (padrão 40); FUZZ_TELA=curral|tronco fixa a tela; FUZZ_LOG=1 imprime cada ação.
  */
@@ -86,6 +89,7 @@ async function rodarSemente(semente, nAcoes, opcoes) {
       if (st.em <= rede.segurados.length && !st.conf && rede.log.some((r) => r.ocupadoAberto)) {
         // O servidor estava ocupado: o aparelho espera 2, 5 ou 10 s para tentar de novo; o relógio anda até lá (nada fica
         // para o tempo real decidir no meio da próxima ação).
+        rede.log.forEach((r) => { r.ocupadoAberto = false; });
         await avancar(10500);
         quietas = 0;
         await esperarMs(15);
@@ -690,6 +694,9 @@ async function rodarSemente(semente, nAcoes, opcoes) {
       const v = await lerTela(page, tela);
       anotarChaves(v.c);
       rotulo = historico.length;
+      // A recusa que chegou com o tempo andando (antes da ação) aparece antes de o operador mexer.
+      const rec = recusasNaTela(v);
+      if (rec.length) falhar(rec.join('\n  - '));
       if (v.fase === 'inicio') {
         // O formulário do começo (depois de "Nova" ou de recarregar no meio de "Mudar"): segue com a sessão sorteada.
         const nova = sortearSessao();
