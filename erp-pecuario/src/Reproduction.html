@@ -971,69 +971,10 @@ var TelaReproducao = (function () {
     return caixa;
   }
 
-  // ------------------------------------------------------------------ prévia da correção ----
-  function texto_(v) { return v === null || v === undefined || v === '' ? null : String(v); }
-  function camposDoDef(def, sub, origem) {
-    var campos = {};
-    ((def.subtipos && sub && def.subtipos[sub] && def.subtipos[sub].campos) || def.campos || []).forEach(function (d) { if (texto_(origem[d.id]) !== null) campos[d.id] = origem[d.id]; });
-    return campos;
-  }
-  /** A despesa do manejo (o lançamento e o primeiro título), como foi digitada: a descrição proposta e o vencimento à vista ficam vazios. */
-  function despesa(det, origem, ev) {
-    var f = (det.FINANCEIRO || [])[0];
-    if (!f) return;
-    var ts = (det.PARCELAS || []).filter(function (x) { return x.financial_id === f.financial_id; }).sort(function (a, b) { return (a.parcela_num || 0) - (b.parcela_num || 0); });
-    var t = ts[0] || {};
-    origem.custo_valor = Fmt.centavosParaTexto(f.valor); origem.custo_conta_id = f.conta_id; origem.custo_partner_id = f.partner_id;
-    origem.custo_vencimento = t.data_vencimento === ev.event_date ? null : t.data_vencimento; origem.custo_forma_pagamento = t.forma_pagamento;
-    origem.custo_parcelas_qtd = ts.length > 1 ? String(ts.length) : null; origem.custo_documento = f.documento;
-    origem.custo_descricao = /: despesa$/.test(f.descricao || '') ? null : f.descricao;
-  }
-  /**
-   * Correção da reprodução, da desmama, da castração e da ocorrência: o cabeçalho e cada animal como foram gravados (o
-   * registro reprodutivo de cada fêmea; na exposição, os touros do lote voltam à lista; na cobertura, o touro do cabeçalho;
-   * na desmama, só os bezerros — a mãe é do servidor —, com o peso e o pasto de destino).
-   */
-  function previaCorrecao(o, def, origem) {
-    var ev = o.evento, det = o.detalhes || {}, payload = ev.payload || {}, sub = ev.event_subtype;
-    var linhasEv = o.linhas || [];
-    var regs = {};
-    (det.REPRODUCAO || []).forEach(function (r) { regs[r.animal_id] = r; });
-    var antes = { campos: {}, linhas: {} };
-    var linhas = [];
-    var poe = function (id, v) { Object.keys(v).forEach(function (k) { if (v[k] === null || v[k] === undefined) delete v[k]; }); linhas.push({ animal_id: id, valores: v }); antes.linhas[id] = Util.clonar(v); };
-    despesa(det, origem, ev);
-    if (ev.event_type === 'REPRODUCAO') {
-      var r0 = (det.REPRODUCAO || [])[0] || {};
-      origem.estacao_id = r0.estacao_id; origem.metodo = r0.metodo; origem.semen_identificacao = r0.semen_identificacao; origem.data_fim = r0.data_fim;
-      var touroLinha = linhasEv.filter(function (l) { return l.papel === 'TOURO'; });
-      if (sub === 'COBERTURA' || sub === 'INSEMINACAO') origem.touro_id = r0.touro_id;
-      linhasEv.forEach(function (l) {
-        if (l.papel === 'TOURO' && sub !== 'EXPOSICAO') return;
-        var r = regs[l.animal_id] || {};
-        poe(l.animal_id, { resultado: r.resultado, idade_gestacional_dias: r.idade_gestacional_dias ? String(r.idade_gestacional_dias) : null, data_prevista_parto: r.data_prevista_parto, observacoes: l.observacoes });
-      });
-      if (!touroLinha.length && sub === 'COBERTURA') origem.touro_id = r0.touro_id;
-    } else if (ev.event_type === 'DESMAMA') {
-      var sujeitos = linhasEv.filter(function (l) { return l.papel === 'SUJEITO'; });
-      var destinos = sujeitos.map(function (l) { return l.pasto_destino_id; }).filter(Boolean);
-      origem.pasto_destino_id = destinos.length ? destinos[0] : null;
-      origem.metodo_pesagem = ((det.PESAGENS || [])[0] || {}).metodo || null;
-      sujeitos.forEach(function (l) { poe(l.animal_id, { peso: typeof l.peso === 'number' ? String(l.peso).replace('.', ',') : null, observacoes: l.observacoes }); });
-    } else {
-      if (ev.event_type === 'CASTRACAO') origem.metodo = payload.metodo;
-      if (ev.event_type === 'OCORRENCIA') origem.tipo_ocorrencia = payload.tipo_ocorrencia;
-      linhasEv.forEach(function (l) { poe(l.animal_id, { observacoes: l.observacoes }); });
-    }
-    var campos = camposDoDef(def, sub, origem);
-    antes.campos = Util.clonar(campos);
-    return { subtipo: sub || undefined, campos: campos, linhas: linhas, origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: Store.nomeEvento(ev.event_type, sub) + ' de ' + Fmt.data(ev.event_date), historico: ev.pre_marco_zero === true, antes: antes } };
-  }
-
   Telas.registrar('reproducao/matrizes', { titulo: 'Reprodução', modulo: 'REPRODUCAO', montar: montarMatrizes });
   Telas.registrar('reproducao/indicadores', { titulo: 'Indicadores reprodutivos', modulo: 'REPRODUCAO', montar: montarIndicadores });
   Telas.registrar('reproducao/estacoes', { titulo: 'Estações de monta', modulo: 'REPRODUCAO', montar: montarEstacoes });
   Telas.registrar('reproducao/tronco', { titulo: 'Diagnóstico no tronco', modulo: 'REPRODUCAO', telaCheia: true, montar: montarTronco });
-  return { blocoFicha: blocoFicha, previaCorrecao: previaCorrecao, lerResultado: lerResultado, textoPrevisao: textoPrevisao, sessao: function () { return tronco ? Util.clonar(tronco) : null; } };
+  return { blocoFicha: blocoFicha, lerResultado: lerResultado, textoPrevisao: textoPrevisao, sessao: function () { return tronco ? Util.clonar(tronco) : null; } };
 })();
 </script>

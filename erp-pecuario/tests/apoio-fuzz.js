@@ -4903,6 +4903,13 @@ function trocarIds(v, mapa) {
   if (v && typeof v === 'object') { const o = {}; Object.keys(v).sort().forEach((k) => { o[k] = trocarIds(v[k], mapa); }); return o; }
   return v;
 }
+/** Os identificadores das linhas de detalhe de um evento (o substituto grava outras): metadados nas respostas das consultas. */
+const IDS_DE_LINHA = new Set(['weight_id', 'weight_de', 'weight_ate', 'health_id', 'reproduction_id', 'mov_id', 'financial_id', 'event_animal_id', 'ident_id', 'ajuste_id', 'baixa_id', 'parcela_id', 'rateio_id', 'alloc_id', 'anexo_id', 'purchase_id', 'sale_id', 'op_id']);
+function semIdsDeLinha(v) {
+  if (Array.isArray(v)) return v.map(semIdsDeLinha);
+  if (v && typeof v === 'object') { const o = {}; Object.keys(v).sort().forEach((k) => { if (!IDS_DE_LINHA.has(k)) o[k] = semIdsDeLinha(v[k]); }); return o; }
+  return v;
+}
 /**
  * Os fatos gravados de um evento, sem os metadados: o cabeçalho (o payload sem os avisos aceitos), as linhas de cada tabela
  * (em ordem canônica) e os lançamentos com as parcelas, o rateio e as alocações.
@@ -4920,7 +4927,8 @@ function fatosDoEvento(S, eid) {
   const pj = sem(ev.payload_json || {}, ['avisos_aceitos', 'justificativa']);
   cab.payload_json = Object.keys(pj).length ? trocarIds(pj, mapa) : null;
   const out = { EVENTOS: cab, FINANCEIRO: fins.map((x) => x.v) };
-  TABELAS_DO_EVENTO.forEach((aba) => { out[aba] = (S.t[aba] || []).filter((r) => r.event_id === eid).map((r) => trocarIds(semMeta(aba, r), mapa)).sort(porJson); });
+  // Os anexos removidos ficam no original, como histórico: passam ao substituto só os que valem (FileService.anexosDoSubstituto).
+  TABELAS_DO_EVENTO.forEach((aba) => { out[aba] = (S.t[aba] || []).filter((r) => r.event_id === eid && (aba !== 'ANEXOS' || r.status === 'ATIVO')).map((r) => trocarIds(semMeta(aba, r), mapa)).sort(porJson); });
   return out;
 }
 /** Os registros de todas as tabelas de eventos que não são do evento (nem dos lançamentos dele), pela chave. */
@@ -4949,11 +4957,18 @@ function diferencasDeMapa(a, b) {
   b.forEach((v, k) => { if (!a.has(k)) out.push({ k, antes: '(não havia)', depois: v }); });
   return out;
 }
-/** A entrada sem mudança de um evento: a do gerador (como foi aceita) ou a remontada pelas linhas gravadas; null sem nenhuma. */
-function entradaDoGerador(sis, S, rnd, e) {
+/**
+ * As entradas sem mudança de um evento: a que o servidor devolve para a correção (evento.obter: `correcao`, a prévia da tela)
+ * e, quando há, a do gerador (o pedido como foi aceito no registro: o reenvio de um cliente da API).
+ */
+function entradasSemMudanca(sis, e) {
+  const out = [];
+  const r = sis.api('evento.obter', { event_id: e.event_id });
+  if (r.ok && r.data.correcao) out.push({ origem: 'servidor', dados: sem(js(r.data.correcao), ['criados']) });
+  else out.push({ origem: 'servidor', erro: r.ok ? 'evento.obter sem a entrada da correção' : r.error.code + ' ' + r.error.message });
   const memo = sis.specs.get(e.event_id);
-  if (!memo) return null;
-  try { return { origem: 'gerador', dados: montarDados(sis, js(memo.spec)) }; } catch (x) { return null; }
+  if (memo) { try { out.push({ origem: 'gerador', dados: montarDados(sis, js(memo.spec)) }); } catch (x) { /* a especificação não monta mais: fica a do servidor */ } }
+  return out;
 }
 /** Corrige com a chave dada, aceitando os avisos (e escrevendo a justificativa do período fechado quando pedida). */
 function corrigirAceitando(sis, dados, chave) {
@@ -5088,6 +5103,67 @@ function mudarCadastros(sis, S, rnd, k) {
   }
   return feitas;
 }
+/**
+ * (b2, b3) A correção que muda UM campo (só a mudança, `dados.mudanca`: Correcao.montar sobre a entrada sem mudança do
+ * vigente). O contrato que o oráculo confere (CONTRATOS, seção 50, tabela B):
+ *  - a anotação do lançamento (`notes`) muda só EVENTOS.notes e, no estoque, a observação do movimento;
+ *  - o responsável muda só EVENTOS.responsible e o responsável das baixas;
+ *  - a observação de um animal muda só as observações dele (a linha do evento e o registro de detalhe do tipo);
+ *  - a data muda os derivados da data, nunca as cópias congeladas do cadastro nem o que não depende dela (b3): na sanidade,
+ *    o produto, o nome, o fabricante, a carência, a unidade, o lote, a via, o veterinário, a dose (salvo por peso), o custo
+ *    unitário da saída, a conta e a descrição do consumo, e a próxima proposta pelo mesmo intervalo; na entrada de estoque,
+ *    o fator, o movimento, a quantidade, o valor e a descrição; no parto, a raça das crias; na venda, o nome do tipo na
+ *    descrição proposta de cada dedução; em todo tipo, os animais do lançamento e as observações deles.
+ */
+function mudancaDeUmCampo(S, e, ent, rnd) {
+  const d = ent.dados;
+  const op = [];
+  op.push('notes', 'responsible');
+  if ((d.animais || []).some((x) => x.animal_id) && ['TRANSFERENCIA', 'NASCIMENTO', 'IDENTIFICACAO', 'AJUSTE_INVENTARIO', 'ESTOQUE'].indexOf(e.event_type) < 0) op.push('obs');
+  if (e.event_type !== 'ENTRADA_INICIAL' && e.pre_marco_zero !== true) op.push('data', 'data');
+  const qual = sorteio(rnd, op);
+  if (qual === 'notes') return { rotulo: 'a anotação', mudanca: { campos: { notes: 'Anotação corrigida' } }, pode: (aba, col) => (aba === 'EVENTOS' && col === 'notes') || (aba === 'MOVIMENTOS_ESTOQUE' && col === 'observacoes') };
+  if (qual === 'responsible') return { rotulo: 'o responsável', mudanca: { campos: { responsible: 'Zé do curral' } }, pode: (aba, col) => (aba === 'EVENTOS' && col === 'responsible') || (aba === 'BAIXAS' && col === 'responsavel') };
+  if (qual === 'obs') {
+    const alvo = sorteio(rnd, d.animais.filter((x) => x.animal_id)).animal_id;
+    return { rotulo: 'a observação de um animal', mudanca: { animais: [{ animal_id: alvo, observacoes: 'Observação corrigida' }] }, pode: (aba, col, r) => col === 'observacoes' && r && r.animal_id === alvo && ['EVENTO_ANIMAIS', 'SANIDADE', 'PESAGENS', 'BAIXAS', 'REPRODUCAO'].indexOf(aba) >= 0 };
+  }
+  const nova = somaDias(e.event_date, sorteio(rnd, [-1, 1, -7, -30]));
+  if (nova > HOJE || nova < (S.marco || D0)) return null;
+  return { rotulo: 'a data (' + e.event_date + ' → ' + nova + ')', data: nova, mudanca: { campos: { event_date: nova } } };
+}
+/** As cópias congeladas e o que não depende da data, que a correção da data não muda (b3). */
+function congeladosNaData(S, e, a, b, nova, erro) {
+  const pj = (S.ev.get(e.event_id) || {}).payload_json || {};
+  const igual = (oque, x, y) => { if (JSON.stringify(x) !== JSON.stringify(y)) erro(oque + ' ' + curto(x) + ' → ' + curto(y)); };
+  const chaveA = (ls) => ls.map((l) => l.animal_id + '/' + (l.papel || 'SUJEITO')).sort();
+  igual('os animais do lançamento', chaveA(a.EVENTO_ANIMAIS), chaveA(b.EVENTO_ANIMAIS));
+  igual('as observações dos animais', a.EVENTO_ANIMAIS.map((l) => [l.animal_id, l.observacoes]).sort(), b.EVENTO_ANIMAIS.map((l) => [l.animal_id, l.observacoes]).sort());
+  if (e.event_type === 'SANIDADE') {
+    const fixos = ['produto_id', 'protocol_id', 'tipo_procedimento', 'nome_produto', 'fabricante', 'periodo_carencia_dias', 'unidade_dose', 'lote', 'validade', 'via_aplicacao', 'motivo', 'diagnostico', 'resultado_exame', 'veterinario', 'observacoes'].concat(pj.modo_dose === 'POR_PESO' ? [] : ['dose']);
+    const porA = (ls) => ls.map((r) => [r.animal_id].concat(fixos.map((c) => r[c]))).sort();
+    igual('a aplicação (o que não depende da data)', porA(a.SANIDADE), porA(b.SANIDADE));
+    const saida = (x) => x.MOVIMENTOS_ESTOQUE.filter((m) => m.tipo === 'SAIDA').map((m) => [m.product_id, m.custo_unitario].concat(pj.modo_dose === 'POR_PESO' ? [] : [m.quantidade, m.lote]));
+    igual('a saída do frasco (o custo congelado)', saida(a), saida(b));
+    const consumo = (x) => x.FINANCEIRO.filter((f) => f.product_id).map((f) => [f.conta_id, f.product_id].concat(pj.modo_dose === 'POR_PESO' ? [String(f.descricao || '').split(':')[0]] : [f.descricao, f.valor, f.quantidade]));
+    igual('o consumo (a conta e a descrição congeladas)', consumo(a), consumo(b));
+    if (typeof pj.intervalo_protocolo_dias === 'number') b.SANIDADE.forEach((r) => igual('a próxima pelo intervalo congelado', somaDias(nova, pj.intervalo_protocolo_dias), r.data_proxima_aplicacao));
+  }
+  if (e.event_type === 'ESTOQUE' && e.event_subtype === 'ENTRADA') {
+    igual('o fator e o movimento congelados', [pj.fator_conversao, pj.com_movimento], [(b.EVENTOS.payload_json || {}).fator_conversao, (b.EVENTOS.payload_json || {}).com_movimento]);
+    const fin = (x) => x.FINANCEIRO.map((f) => [f.conta_id, f.product_id, f.descricao, f.valor, f.quantidade]);
+    igual('a compra do insumo', fin(a), fin(b));
+    igual('o movimento de entrada', a.MOVIMENTOS_ESTOQUE.map((m) => [m.tipo, m.quantidade, m.custo_unitario]), b.MOVIMENTOS_ESTOQUE.map((m) => [m.tipo, m.quantidade, m.custo_unitario]));
+  }
+  if (e.event_type === 'NASCIMENTO') {
+    const raca = (x) => x.EVENTO_ANIMAIS.filter((l) => l.papel === 'CRIA').map((l) => [l.animal_id, (l.atributos_iniciais_json || {}).raca || null]).sort();
+    igual('a raça das crias', raca(a), raca(b));
+  }
+  if (e.event_type === 'VENDA') {
+    const nomes = (x) => x.FINANCEIRO.map((f) => String(f.descricao || '').replace(/ da venda de \d\d\/\d\d\/\d{4}$/, '')).sort();
+    igual('o nome do tipo nas descrições das deduções', nomes(a), nomes(b));
+  }
+}
 /** O passo do oráculo da correção (gerador à parte: as sequências das sementes não mudam), ou null. */
 function escolherCorrecao(S, rc, k) {
   const x = rc();
@@ -5113,13 +5189,14 @@ function oraculoCorrecao(sis, S0, k, plano) {
     const foto1 = sis.gas.estado.salvar();
     const antesCad = cadastrosProjetados(S, null);
     let b4feito = !plano.b4;
-    alvos.forEach((e, i) => {
-      const ent = entradaDoGerador(sis, S, rnd, e);
-      if (!ent) { contar('correção: sem entrada para corrigir'); return; }
+    const casos = [];
+    alvos.forEach((e) => entradasSemMudanca(sis, e).forEach((ent) => casos.push({ e, ent })));
+    casos.forEach(({ e, ent }, i) => {
+      if (ent.erro) { out.push(falha('CORRECAO:ENTRADA', 'o servidor não deu a entrada da correção de ' + tipoEChave(e) + ': ' + ent.erro)); return; }
       const contexto = 'a correção sem mudança (entrada ' + ent.origem + ') de ' + tipoEChave(e) + ' de ' + e.event_date + ' depois de: ' + (mudancas.join('; ') || 'nada') + ' — ';
       const datas = !b4feito ? [HOJE].concat(e.event_date >= (S.marco || D0) && e.event_date < HOJE ? [e.event_date] : []) : [];
       // As chaves em ordem (o mesmo trocarIds dos valores de depois, sem troca).
-      const bat0 = datas.map((D) => bateriaCorrecao(sis, S, D).map((u) => Object.assign({}, u, { valor: trocarIds(u.valor, new Map()) })));
+      const bat0 = datas.map((D) => bateriaCorrecao(sis, S, D).map((u) => Object.assign({}, u, { valor: semIdsDeLinha(u.valor) })));
       const dados = Object.assign(ent.dados, { event_id: e.event_id, justificativa: 'Conferido de novo' });
       const r = corrigirAceitando(sis, dados, 'corr-' + k + '-' + i);
       if (!r.ok) {
@@ -5147,7 +5224,7 @@ function oraculoCorrecao(sis, S0, k, plano) {
         // Os identificadores do substituto nas respostas (o evento da entrada, da saída, da pesagem) são os do original.
         const troca = new Map([[novo, e.event_id]]);
         datas.forEach((D, j) => {
-          const bat1 = bateriaCorrecao(sis, S2, D).map((u) => Object.assign({}, u, { valor: trocarIds(u.valor, troca) }));
+          const bat1 = bateriaCorrecao(sis, S2, D).map((u) => Object.assign({}, u, { valor: semIdsDeLinha(trocarIds(u.valor, troca)) }));
           const m1 = new Map(bat1.map((u) => [u.chave, u]));
           let n = 0;
           bat0[j].forEach((u) => {
@@ -5156,6 +5233,40 @@ function oraculoCorrecao(sis, S0, k, plano) {
             if (d && n++ < 2) out.push(falha('CORRECAO:B4:' + u.grupo, contexto + 'a consulta em ' + D + ' mudou: ' + d.caminho + ' ' + curto(d.antes) + ' → ' + curto(d.depois)));
           });
           contar('correção: consultas conferidas depois da correção sem mudança', bat0[j].length);
+        });
+      }
+      sis.gas.estado.restaurar(foto1);
+    });
+    // (b2, b3) A mudança de um campo, nos mesmos eventos, pela entrada do servidor (Correcao.montar).
+    casos.filter((x) => x.ent.origem === 'servidor' && !x.ent.erro).forEach(({ e, ent }, i) => {
+      const mu = mudancaDeUmCampo(S, e, ent, rnd);
+      if (!mu) return;
+      const contexto = 'a correção de ' + mu.rotulo + ' de ' + tipoEChave(e) + ' de ' + e.event_date + ' depois de: ' + (mudancas.join('; ') || 'nada') + ' — ';
+      const r = corrigirAceitando(sis, { event_id: e.event_id, justificativa: 'Um campo corrigido', mudanca: mu.mudanca }, 'corr1-' + k + '-' + i);
+      if (!r.ok) {
+        if (r.error && r.error.code === 'INTERNAL') out.push(falha('CORRECAO:INTERNO', contexto + r.error.message));
+        // A data nova pode valer menos que a de antes (o animal ainda não estava, a contagem do estoque, o período fechado):
+        // a recusa com o motivo é do desenho. As demais mudanças de um campo não têm por que ser recusadas.
+        else if (!mu.data && !recusaDocumentada(S, e, r)) out.push(falha('CORRECAO:B2:RECUSA:' + tipoEChave(e), contexto + 'recusada: ' + r.error.code + ' ' + JSON.stringify((r.error.details || []).map((d) => d.codigo + ': ' + d.mensagem)).slice(0, 700)));
+        sis.gas.estado.restaurar(foto1);
+        return;
+      }
+      contar('correção: mudança de um campo aceita' + (mu.data ? ' (a data)' : ''));
+      const S2 = estado(tabelas(sis));
+      const a = fatosDoEvento(S, e.event_id);
+      const b = fatosDoEvento(S2, r.data.event_id);
+      if (mu.data) congeladosNaData(S, e, a, b, mu.data, (m) => out.push(falha('CORRECAO:B3:' + tipoEChave(e), contexto + 'mudou ' + m)));
+      else {
+        // Fora o campo e os derivados dele, nada muda (linha a linha, coluna a coluna).
+        Object.keys(a).forEach((aba) => {
+          const la = Array.isArray(a[aba]) ? a[aba] : [a[aba]];
+          const lb = Array.isArray(b[aba]) ? b[aba] : [b[aba]];
+          if (la.length !== lb.length) { out.push(falha('CORRECAO:B2:' + tipoEChave(e) + ':' + aba, contexto + aba + ' tinha ' + la.length + ' linha(s) e ficou com ' + lb.length)); return; }
+          const limpa = (r0) => { const o = {}; Object.keys(r0 || {}).forEach((c) => { if (!mu.pode(aba, c, r0)) o[c] = r0[c]; }); return o; };
+          const xa = la.map(limpa).sort(porJson);
+          const xb = lb.map(limpa).sort(porJson);
+          const dif = primeiraDiferenca(xa, xb, aba);
+          if (dif) out.push(falha('CORRECAO:B2:' + tipoEChave(e) + ':' + aba, contexto + 'mudou o que não depende do campo: ' + dif.caminho + ' ' + curto(dif.antes) + ' → ' + curto(dif.depois)));
         });
       }
       sis.gas.estado.restaurar(foto1);

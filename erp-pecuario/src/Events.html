@@ -91,438 +91,59 @@ var TelaEventos = (function () {
   }
 
   // ------------------------------------------------------------------ correção ----
-  function texto_(v) { return v === null || v === undefined || v === '' ? null : v; }
-  function boolDe(v) { return v === 'S' || v === true ? true : v === 'N' || v === false ? false : null; }
-  function pesoTexto_(v) { return v === null || v === undefined ? null : Fmt.numero(v, 1).replace(/\./g, ''); }
-  function limpo_(v) { Object.keys(v).forEach(function (k) { if (v[k] === null || v[k] === undefined) delete v[k]; }); return v; }
-  function dinheiroTexto_(v) { return v === null || v === undefined ? null : Fmt.centavosParaTexto(v); }
-  function codigoConta_(f) { var c = Store.conta(f.conta_id); return c ? c.codigo : null; }
-  /** Parcelas de um lançamento na ordem do número da parcela (a primeira tem o primeiro vencimento). */
-  function parcelasOrdem_(lista) { return lista.slice().sort(function (a, b) { return (a.parcela_num || 0) - (b.parcela_num || 0); }); }
   /**
-   * O que o servidor propôs quando o campo veio vazio não é do usuário (§20, regra 8; 03b, seção 10.2): a descrição
-   * proposta ("Frete da compra de 10/03/2026") e o vencimento "à vista" (o primeiro título na data do evento) ficam
-   * vazios na prévia, para acompanhar o tipo e a data corrigidos.
+   * O valor da entrada sem mudança do servidor (evento.obter: correcao, CONTRATOS, seção 50) como o formulário o mostra, pelo
+   * tipo do campo: dinheiro em reais, peso com uma casa, decimal e inteiro em texto; o resto como veio. A tela não calcula nada:
+   * o que fica vazio (o que o servidor propôs) e o que vem digitado é decisão do servidor.
    */
-  function propostoOuValor_(valor, proposto) { return valor === proposto ? null : valor; }
-  /** Lançamento opcional da morte (custos) ou do descarte (receita): campos do cabeçalho a partir do lançamento e do título. */
-  function lancamentoDaSaida_(det, origem, tipo, ev) {
-    var f = (det.FINANCEIRO || [])[0];
-    if (!f) return;
-    var p = tipo === 'MORTE' ? 'custo_' : 'receita_';
-    var ts = parcelasOrdem_((det.PARCELAS || []).filter(function (x) { return x.financial_id === f.financial_id; }));
-    var t = ts[0] || {};
-    origem[p + 'valor'] = dinheiroTexto_(f.valor);
-    if (tipo === 'MORTE') origem.custo_conta_id = f.conta_id;
-    origem[p + 'partner_id'] = f.partner_id; origem[p + 'vencimento'] = propostoOuValor_(t.data_vencimento, ev.event_date); origem[p + 'forma_pagamento'] = t.forma_pagamento;
-    origem[p + 'parcelas_qtd'] = ts.length > 1 ? String(ts.length) : null;
-    origem[p + 'documento'] = f.documento;
-    origem[p + 'descricao'] = propostoOuValor_(f.descricao, (tipo === 'MORTE' ? 'Custos da morte de ' : 'Receita do descarte de ') + Fmt.data(ev.event_date));
-  }
-  /**
-   * Com um animal só o critério gravado é sempre DIRETO (03b, seção 4.3), que não é opção do formulário: no lote, a
-   * prévia propõe um critério que aceita o que a linha gravou (com um animal, todos dão 100%): a carcaça na linha só se
-   * informa no rateio por carcaça; sem ela, CABECAS. Por cabeça sem preço, o valor do animal vem da linha.
-   */
-  function criterioDaPrevia_(modalidade, criterio, linhasEv) {
-    if (modalidade !== 'LOTE') return null;
-    if (criterio !== 'DIRETO') return criterio;
-    var l = (linhasEv || [])[0] || {};
-    return l.peso_carcaca_kg !== null && l.peso_carcaca_kg !== undefined && l.peso_carcaca_kg !== '' ? 'PESO_CARCACA' : 'CABECAS';
-  }
-  /**
-   * As linhas dos animais do evento: as de entrada (+1) ou de saída (−1); no registro anterior ao marco zero (compra ou
-   * venda importada, histórica), todas têm efeito 0 (04, seção 6) e são as do próprio evento.
-   */
-  function linhasDoNegocio_(o, efeito) {
-    var hist = o.evento && o.evento.pre_marco_zero === true;
-    return (o.linhas || []).filter(function (l) { return Number(l.efeito_inventario) === (hist ? 0 : efeito); });
-  }
-  function valorPorAnimal_(cab) { return cab.criterio_rateio === 'VALOR_INDIVIDUAL' || (cab.criterio_rateio === 'DIRETO' && cab.modalidade === 'CABECA' && (cab.preco_unitario === null || cab.preco_unitario === undefined)); }
-  /**
-   * Correção de compra: o cabeçalho vem de COMPRAS, do evento e dos lançamentos (parcelas do valor dos animais; frete e
-   * outros custos, um por item, os fretes primeiro); cada animal, da linha do evento (o criado leva os
-   * atributos de criação; o que voltou ao rebanho, só os campos da volta).
-   */
-  function previaCompra_(o, def, origem) {
-    var ev = o.evento, det = o.detalhes || {}, linhasEv = linhasDoNegocio_(o, 1);
-    var cp = (det.COMPRAS || [])[0] || {};
-    var fins = det.FINANCEIRO || [];
-    var principal = fins.filter(function (f) { return codigoConta_(f) === 'COMPRA_ANIMAIS'; })[0] || fins[0] || {};
-    // O tipo de cada custo (FRETE ou OUTRO) vem do servidor (evento.obter: papeis, por FinancialService.tiposDosCustos).
-    var tipos = o.papeis || {};
-    var parcelasDe = function (id) { return (det.PARCELAS || []).filter(function (x) { return x.financial_id === id; }); };
-    var rat = (det.RATEIOS || []).filter(function (r) { return r.financial_id === principal.financial_id; })[0] || {};
-    var bases = {};
-    (det.ALOCACOES_FINANCEIRAS || []).forEach(function (a) { if (a.rateio_id === rat.rateio_id) bases[a.animal_id] = a.base_valor; });
-    var idents = Utils_agrupar(det.IDENTIFICACOES || []);
-    var pesos = Utils_agrupar(det.PESAGENS || []);
-    var pastoLote = linhasEv.length ? linhasEv[0].pasto_destino_id : null;
-    var todosPesados = linhasEv.length && linhasEv.every(function (l) { return l.peso !== null && l.peso !== undefined; });
-    origem.partner_id = ev.partner_id || principal.partner_id; origem.finalidade = cp.finalidade; origem.modalidade = cp.modalidade;
-    origem.base_peso = cp.modalidade === 'ARROBA' ? cp.base_peso : null;
-    if (cp.rendimento_tipo === 'NEGOCIADO' || cp.rendimento_tipo === 'ESTIMADO') { origem.rendimento_carcaca_pct = pesoTexto_(cp.rendimento_carcaca_pct); origem.rendimento_tipo = cp.rendimento_tipo; }
-    origem.preco_unitario = dinheiroTexto_(cp.preco_unitario); origem.peso_total_kg = todosPesados ? null : pesoTexto_(cp.peso_total_kg);
-    origem.valor_animais = dinheiroTexto_(cp.valor_animais); origem.criterio_rateio = criterioDaPrevia_(cp.modalidade, cp.criterio_rateio, linhasEv);
-    origem.justificativa_rateio = rat.justificativa; origem.pasto_destino_id = pastoLote; origem.gta_numero = cp.gta_numero; origem.nota_fiscal = cp.nota_fiscal; origem.condicoes = cp.observacoes;
-    var comValor = valorPorAnimal_(cp);
-    var antes = { campos: {}, linhas: {} };
-    var linhas = linhasEv.map(function (l) {
-      var at = l.atributos_iniciais_json;
-      var ids = idents[l.animal_id] || [];
-      var cod = function (t) { var x = ids.filter(function (i) { return i.tipo === t; })[0]; return x ? x.codigo : null; };
-      var ps = (pesos[l.animal_id] || [])[0];
-      var v = { brinco: cod('BRINCO'), brinco_origem: cod('BRINCO_ORIGEM'), pasto_destino_id: l.pasto_destino_id !== pastoLote ? l.pasto_destino_id : null,
-        peso: pesoTexto_(l.peso), metodo_pesagem: ps ? ps.metodo : null, peso_carcaca_kg: pesoTexto_(l.peso_carcaca_kg),
-        valor_individual: comValor ? dinheiroTexto_(l.valor_individual) : null, base_manual: cp.criterio_rateio === 'MANUAL' && bases[l.animal_id] !== undefined ? String(bases[l.animal_id]).replace('.', ',') : null, observacoes: l.observacoes };
-      if (at) {
-        var a = Store.animal(l.animal_id);
-        Object.assign(v, { nome: a ? a.nome : null, sexo: at.sexo, raca: at.raca, data_nascimento: at.data_nascimento, data_nascimento_confianca: at.data_nascimento_confianca,
-          castrado: boolDe(at.castrado), reprodutor: boolDe(at.reprodutor), partos_previos: at.partos_previos === undefined || at.partos_previos === null ? null : String(at.partos_previos),
-          situacao_reprodutiva: at.situacao_reprodutiva, data_prevista_parto: at.data_prevista_parto });
-        var outras = ids.filter(function (x) { return x.tipo !== 'BRINCO' && x.tipo !== 'BRINCO_ORIGEM'; }).map(function (x) { return { tipo: x.tipo, codigo: x.codigo }; });
-        if (outras.length) v.outras_identificacoes = outras;
-      }
-      limpo_(v);
-      antes.linhas[l.animal_id] = Util.clonar(v);
-      return { animal_id: l.animal_id, criado: !!at, valores: v };
-    });
-    var grupos = {
-      // Parcela única = o pagamento inteiro: o valor fica vazio, para acompanhar o valor dos animais se o preço for corrigido.
-      parcelas: parcelasOrdem_(parcelasDe(principal.financial_id)).map(function (x, k, todas) { return { valores: limpo_({ data_vencimento: x.data_vencimento, valor: todas.length === 1 ? null : dinheiroTexto_(x.valor), forma_pagamento: x.forma_pagamento, documento: x.documento }) }; }),
-      custos: fins.filter(function (f) { return f !== principal; }).map(function (f) {
-        var ts = parcelasOrdem_(parcelasDe(f.financial_id));
-        var t = ts[0] || {};
-        var tipo = tipos[f.financial_id] === 'OUTRO' ? 'OUTRO' : 'FRETE';
-        var proposta = (tipo === 'FRETE' ? 'Frete' : 'Outros custos') + ' da compra de ' + Fmt.data(ev.event_date);
-        return { valores: limpo_({ tipo: tipo, valor: dinheiroTexto_(f.valor), partner_id: f.partner_id, data_vencimento: propostoOuValor_(t.data_vencimento, ev.event_date), parcelas_qtd: ts.length > 1 ? String(ts.length) : null, forma_pagamento: t.forma_pagamento, documento: f.documento, descricao: propostoOuValor_(f.descricao, proposta) }) };
-      }),
-    };
-    var campos = {};
-    (def.campos || []).forEach(function (d) { if (texto_(origem[d.id]) !== null) campos[d.id] = origem[d.id]; });
-    antes.campos = Util.clonar(campos);
-    antes.grupos = Util.clonar(grupos);
-    return { campos: campos, linhas: linhas, grupos: grupos, origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotuloEvento(ev), historico: ev.pre_marco_zero === true, antes: antes } };
-  }
-  /**
-   * Correção de venda: o cabeçalho vem de VENDAS e do evento; as parcelas, da receita (conta VENDA_ANIMAIS); cada
-   * dedução, do seu lançamento, com o tipo guardado em payload_json.deducoes; cada animal, da linha de saída (peso
-   * vivo, carcaça, valor só quando foi informado por animal, motivo de saída). O pasto de origem fica vazio: o
-   * servidor o tira da linha do tempo.
-   */
-  function previaVenda_(o, def, origem) {
-    var ev = o.evento, det = o.detalhes || {}, linhasEv = linhasDoNegocio_(o, -1);
-    var vd = (det.VENDAS || [])[0] || {};
-    var fins = det.FINANCEIRO || [];
-    var receita = fins.filter(function (f) { return codigoConta_(f) === 'VENDA_ANIMAIS'; })[0] || fins[0] || {};
-    var tipoDe = {};
-    ((ev.payload || {}).deducoes || []).forEach(function (x) { tipoDe[x.financial_id] = x.tipo; });
-    var parcelasDe = function (id) { return (det.PARCELAS || []).filter(function (x) { return x.financial_id === id; }); };
-    var rat = (det.RATEIOS || []).filter(function (r) { return r.financial_id === receita.financial_id; })[0] || {};
-    var bases = {};
-    (det.ALOCACOES_FINANCEIRAS || []).forEach(function (a) { if (a.rateio_id === rat.rateio_id) bases[a.animal_id] = a.base_valor; });
-    var pesos = Utils_agrupar(det.PESAGENS || []);
-    var todosPesados = linhasEv.length && linhasEv.every(function (l) { return l.peso !== null && l.peso !== undefined; });
-    var todasCarcacas = linhasEv.length && linhasEv.every(function (l) { return l.peso_carcaca_kg !== null && l.peso_carcaca_kg !== undefined; });
-    origem.partner_id = ev.partner_id || receita.partner_id; origem.finalidade = vd.finalidade; origem.modalidade = vd.modalidade;
-    origem.base_peso = vd.modalidade === 'ARROBA' ? vd.base_peso : null;
-    if (vd.rendimento_tipo === 'NEGOCIADO' || vd.rendimento_tipo === 'ESTIMADO') { origem.rendimento_carcaca_pct = pesoTexto_(vd.rendimento_carcaca_pct); origem.rendimento_tipo = vd.rendimento_tipo; }
-    origem.preco_unitario = dinheiroTexto_(vd.preco_unitario);
-    origem.peso_vivo_total_kg = todosPesados ? null : pesoTexto_(vd.peso_vivo_total_kg);
-    origem.peso_carcaca_total_kg = vd.base_peso === 'CARCACA' && !todasCarcacas ? pesoTexto_(vd.peso_carcaca_total_kg) : null;
-    origem.valor_bruto = dinheiroTexto_(vd.valor_bruto); origem.desconto_comercial = vd.desconto_comercial ? dinheiroTexto_(vd.desconto_comercial) : null;
-    origem.criterio_rateio = criterioDaPrevia_(vd.modalidade, vd.criterio_rateio, linhasEv);
-    origem.justificativa_rateio = vd.criterio_rateio === 'MANUAL' ? rat.justificativa : null;
-    origem.gta_numero = vd.gta_numero; origem.nota_fiscal = vd.nota_fiscal; origem.condicoes = vd.observacoes;
-    var comValor = valorPorAnimal_(vd);
-    var antes = { campos: {}, linhas: {} };
-    var linhas = linhasEv.map(function (l) {
-      var ps = (pesos[l.animal_id] || [])[0];
-      var v = limpo_({ peso: pesoTexto_(l.peso), metodo_pesagem: ps && ps.metodo !== 'BALANCA' ? ps.metodo : null, peso_carcaca_kg: pesoTexto_(l.peso_carcaca_kg),
-        valor_individual: comValor ? dinheiroTexto_(l.valor_individual) : null, base_manual: vd.criterio_rateio === 'MANUAL' && bases[l.animal_id] !== undefined ? String(bases[l.animal_id]).replace('.', ',') : null,
-        motivo_saida: l.motivo_saida, observacoes: l.observacoes });
-      antes.linhas[l.animal_id] = Util.clonar(v);
-      return { animal_id: l.animal_id, valores: v };
-    });
-    var recebimentos = parcelasOrdem_(parcelasDe(receita.financial_id));
-    var grupos = {
-      // Parcela única = o recebimento inteiro: o valor fica vazio, para acompanhar a receita se o preço for corrigido.
-      parcelas: recebimentos.map(function (x, k, todas) { return { valores: limpo_({ data_vencimento: x.data_vencimento, valor: todas.length === 1 ? null : dinheiroTexto_(x.valor), forma_pagamento: x.forma_pagamento, documento: x.documento }) }; }),
-      deducoes: fins.filter(function (f) { return f !== receita; }).map(function (f) {
-        var t = parcelasDe(f.financial_id)[0] || {};
-        var tipo = tipoDe[f.financial_id] || 'OUTRA';
-        var retida = f.retida_pelo_comprador === true || f.retida_pelo_comprador === 'S';
-        // O que o servidor propôs não é do usuário: a descrição ("Comissão da venda de 20/08/2026") segue o tipo; na
-        // retida, o parceiro vazio é o comprador e o vencimento vazio é o primeiro recebimento; na outra, o vencimento
-        // vazio é a data da venda. Assim a correção do comprador, da data ou do recebimento leva a dedução junto.
-        var proposta = Store.rotuloLista('TIPO_DEDUCAO_VENDA', tipo) + ' da venda de ' + Fmt.data(ev.event_date);
-        var vencPadrao = retida ? (recebimentos[0] || {}).data_vencimento : ev.event_date;
-        return { valores: limpo_({ tipo: tipo, valor: dinheiroTexto_(f.valor), retida_pelo_comprador: retida,
-          partner_id: retida ? propostoOuValor_(f.partner_id, ev.partner_id) : f.partner_id, data_vencimento: propostoOuValor_(t.data_vencimento, vencPadrao),
-          forma_pagamento: t.forma_pagamento, documento: f.documento, descricao: propostoOuValor_(f.descricao, proposta) }) };
-      }),
-    };
-    var campos = {};
-    (def.campos || []).forEach(function (d) { if (texto_(origem[d.id]) !== null) campos[d.id] = origem[d.id]; });
-    antes.campos = Util.clonar(campos);
-    antes.grupos = Util.clonar(grupos);
-    return { campos: campos, linhas: linhas, grupos: grupos, origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotuloEvento(ev), historico: ev.pre_marco_zero === true, antes: antes } };
-  }
-  /**
-   * Correção de transferência, parto, morte e descarte: o cabeçalho vem do evento, dos pastos da linha, do detalhe
-   * (BAIXAS, REPRODUCAO) e do payload; as crias do parto vêm como linhas do grupo, com o animal reaproveitado.
-   */
-  function previaMovimento_(o, def, origem) {
-    var ev = o.evento, det = o.detalhes || {}, linhasEv = o.linhas || [];
-    var tipo = ev.event_type;
-    var payload = ev.payload || {};
-    var campos = {};
-    var antes = { campos: {}, linhas: {} };
-    var linhas = [];
-    var grupos = {};
-    if (tipo === 'TRANSFERENCIA') {
-      var l0 = linhasEv[0] || {};
-      origem.pasto_origem_id = l0.pasto_origem_id; origem.pasto_destino_id = l0.pasto_destino_id; origem.gta_numero = payload.gta_numero;
-      linhasEv.forEach(function (l) { linhas.push({ animal_id: l.animal_id, valores: {} }); antes.linhas[l.animal_id] = {}; });
-    } else if (tipo === 'MORTE' || tipo === 'DESCARTE') {
-      var b0 = (det.BAIXAS || [])[0] || {};
-      origem.causa = b0.causa; origem.diagnostico = b0.diagnostico; origem.destino = b0.destino; origem.motivo = b0.motivo;
-      lancamentoDaSaida_(det, origem, tipo, ev);
-      linhasEv.forEach(function (l) { var v = limpo_({ observacoes: l.observacoes }); linhas.push({ animal_id: l.animal_id, valores: v }); antes.linhas[l.animal_id] = Util.clonar(v); });
-    } else if (tipo === 'NASCIMENTO') {
-      var rep = (det.REPRODUCAO || [])[0] || {};
-      var pesos = Utils_agrupar(det.PESAGENS || []);
-      var idents = Utils_agrupar(det.IDENTIFICACOES || []);
-      var crias = linhasEv.filter(function (l) { return l.papel === 'CRIA'; });
-      var at0 = (crias[0] && crias[0].atributos_iniciais_json) || {};
-      // O pasto das crias e a raça que o servidor tira da mãe quando o campo vem vazio (evento.obter: propostas) não
-      // viram valor digitado: ficam vazios, para acompanhar a mãe e a data corrigidas (§20, regra 8; 03b, 10.2).
-      var propostas = o.propostas || {};
-      origem.pasto_destino_id = crias[0] ? propostoOuValor_(crias[0].pasto_destino_id, propostas.pasto_destino_id) : null; origem.pai_id = rep.touro_id || at0.pai_id; origem.pai_confianca = at0.pai_confianca; origem.tipo_parto = rep.tipo_parto;
-      linhasEv.filter(function (l) { return l.papel === 'MATRIZ'; }).forEach(function (l) { linhas.push({ animal_id: l.animal_id, valores: {} }); antes.linhas[l.animal_id] = {}; });
-      grupos.crias = crias.map(function (l) {
-        var at = l.atributos_iniciais_json || {};
-        var a = Store.animal(l.animal_id);
-        var br = (idents[l.animal_id] || []).filter(function (x) { return x.tipo === 'BRINCO'; })[0];
-        var ps = (pesos[l.animal_id] || [])[0];
-        return { animal_id: l.animal_id, valores: limpo_({ situacao_nascimento: 'VIVO', sexo: at.sexo, brinco: br ? br.codigo : null, nome: a ? a.nome : null, raca: propostoOuValor_(at.raca, propostas.raca), peso: pesoTexto_(l.peso), metodo_pesagem: ps ? ps.metodo : null, observacoes: l.observacoes }) };
-      });
-      for (var k = 0; k < (rep.qtd_natimortos || 0); k++) grupos.crias.push({ valores: { situacao_nascimento: 'NATIMORTO' } });
-      antes.grupos = Util.clonar(grupos);
-    }
-    (def.campos || []).forEach(function (d) { if (texto_(origem[d.id]) !== null) campos[d.id] = origem[d.id]; });
-    antes.campos = Util.clonar(campos);
-    return { campos: campos, linhas: linhas, grupos: grupos, origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotuloEvento(ev), historico: ev.pre_marco_zero === true, antes: antes } };
-  }
-  /** Valor de AJUSTES (texto canônico) como o formulário o mostra, pelo tipo do campo corrigível. */
-  function brutoCorrigido_(def, campo, v) {
+  function paraForm_(d, v, corrigiveis, campo) {
     if (v === null || v === undefined || v === '') return null;
-    var sub = def.subtipos && def.subtipos.CORRECAO_CADASTRO;
-    var t = ((sub && sub.campos_corrigiveis) || {})[campo] || {};
-    if (t.tipo === 'bool') return v === 'S';
-    return String(v);
+    if (corrigiveis) { var t = (corrigiveis[campo] || {}).tipo; return t === 'bool' ? v === 'S' : String(v); }
+    if (!d) return v;
+    if (d.tipo === 'dinheiro') return Fmt.centavosParaTexto(v);
+    if (d.tipo === 'decimal' && d.casas === 1) return Fmt.numero(v, 1).replace(/\./g, '');
+    if (d.tipo === 'decimal' || d.tipo === 'inteiro') return String(v).replace('.', ',');
+    return v;
   }
-  /**
-   * Identificação, marcação e ajustes de inventário (E2.6): o subtipo do original, o cabeçalho (tipo de identificação,
-   * ação e motivo do descarte, justificativa) e, por animal, o que o lançamento gravou (código e motivo; categoria;
-   * pasto; campo e valor corrigidos, um item por campo).
-   */
-  function previaManejo_(o, def, origem) {
-    var ev = o.evento, det = o.detalhes || {}, linhasEv = o.linhas || [];
-    var sub = ev.event_subtype, payload = ev.payload || {};
-    var idents = Utils_agrupar(det.IDENTIFICACOES || []), ajustes = Utils_agrupar(det.AJUSTES || []);
-    var antes = { campos: {}, linhas: {} };
-    var linhas = [];
-    var poe = function (id, v) { v = limpo_(v); linhas.push({ animal_id: id, valores: v }); if (!antes.linhas[id]) antes.linhas[id] = Util.clonar(v); return v; };
-    if (ev.event_type === 'IDENTIFICACAO') {
-      origem.tipo_identificacao = ((det.IDENTIFICACOES || [])[0] || {}).tipo;
-      linhasEv.forEach(function (l) { var x = (idents[l.animal_id] || [])[0] || {}; poe(l.animal_id, { codigo: sub === 'REMOCAO' ? null : x.codigo, motivo: x.motivo, observacoes: l.observacoes }); });
-    } else if (ev.event_type === 'MARCACAO') {
-      origem.acao = payload.acao; origem.motivo_descarte = payload.motivo_descarte;
-      linhasEv.forEach(function (l) { poe(l.animal_id, { observacoes: l.observacoes }); });
-    } else {
-      var a0 = (det.AJUSTES || [])[0] || {};
-      origem.justificativa = a0.justificativa || payload.motivo_ajuste || (sub === 'DIVERGENCIA_CONTAGEM' && !(linhasEv[0] || {}).observacoes ? ((det.BAIXAS || [])[0] || {}).observacoes : null);
-      if (sub === 'CORRECAO_CADASTRO') {
-        antes.itens = [];
-        (det.AJUSTES || []).forEach(function (x) { var v = poe(x.animal_id, { campo: x.campo, valor_novo: brutoCorrigido_(def, x.campo, x.valor_novo) }); antes.itens.push({ animal_id: x.animal_id, valores: Util.clonar(v) }); });
-      } else linhasEv.forEach(function (l) {
-        var aj = (ajustes[l.animal_id] || [])[0] || {};
-        if (sub === 'IDENTIFICACAO_INCORRETA') poe(l.animal_id, { brinco: aj.valor_novo || ((idents[l.animal_id] || [])[0] || {}).codigo });
-        else if (sub === 'CORRECAO_LOCALIZACAO') poe(l.animal_id, { pasto_destino_id: l.pasto_destino_id });
-        else if (sub === 'RECLASSIFICACAO') poe(l.animal_id, { categoria_manual_id: aj.valor_novo });
-        else poe(l.animal_id, { observacoes: l.observacoes });
-      });
-    }
-    var campos = {};
-    var defsEv = (def.campos || []).concat((def.subtipos && def.subtipos[sub] && def.subtipos[sub].campos) || []);
-    defsEv.forEach(function (d) { if (texto_(origem[d.id]) !== null) campos[d.id] = origem[d.id]; });
-    antes.campos = Util.clonar(campos);
-    return { subtipo: sub, campos: campos, linhas: linhas, origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotuloEvento(ev), historico: ev.pre_marco_zero === true, antes: antes } };
-  }
-  /**
-   * Pesagem (E3.1): o momento e o método das linhas gravadas, o jejum e o lote do evento; por animal, o peso (vazio na
-   * pesagem por lote, em que cada um fica com a média).
-   */
-  function previaPesagem_(o, def, origem) {
-    var ev = o.evento, det = o.detalhes || {}, payload = ev.payload || {};
-    var pes = Utils_agrupar(det.PESAGENS || []);
-    var p0 = (det.PESAGENS || [])[0] || {};
-    var lote = typeof payload.peso_total_lote_kg === 'number';
-    origem.tipo_pesagem = p0.tipo;
-    origem.metodo_pesagem = lote ? 'BALANCA' : p0.metodo;
-    origem.jejum = payload.jejum === true ? true : null;
-    if (lote) { origem.peso_total_lote_kg = pesoTexto_(payload.peso_total_lote_kg); origem.qtd_cabecas_lote = String(payload.qtd_cabecas_lote); }
-    var antes = { campos: {}, linhas: {} };
-    var linhas = (o.linhas || []).map(function (l) {
-      var x = (pes[l.animal_id] || [])[0] || {};
-      var v = limpo_({ peso: lote ? null : pesoTexto_(x.peso_kg), observacoes: x.observacoes || l.observacoes });
-      antes.linhas[l.animal_id] = Util.clonar(v);
-      return { animal_id: l.animal_id, valores: v };
+  function valoresForm_(defs, obj, corrigiveis) {
+    var por = {};
+    (defs || []).forEach(function (d) { por[d.id] = d; });
+    var out = {};
+    Object.keys(obj || {}).forEach(function (k) {
+      if (k === 'animal_id') return;
+      var v = paraForm_(por[k], obj[k], k === 'valor_novo' ? corrigiveis : null, obj.campo);
+      if (v !== null && v !== undefined) out[k] = v;
     });
-    var campos = {};
-    (def.campos || []).forEach(function (d) { if (texto_(origem[d.id]) !== null) campos[d.id] = origem[d.id]; });
-    antes.campos = Util.clonar(campos);
-    return { campos: campos, linhas: linhas, origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotuloEvento(ev), historico: ev.pre_marco_zero === true, antes: antes } };
-  }
-  function decimalTexto_(v) { return v === null || v === undefined ? null : String(v).replace('.', ','); }
-  /** Os campos do subtipo (sanidade e estoque não têm campos no tipo) que o original preencheu. */
-  function camposDoSubtipo_(def, sub, origem) {
-    var campos = {};
-    ((def.subtipos && def.subtipos[sub] && def.subtipos[sub].campos) || def.campos || []).forEach(function (d) { if (texto_(origem[d.id]) !== null) campos[d.id] = origem[d.id]; });
-    return campos;
+    return out;
   }
   /**
-   * Correção da sanidade (Fase 3): o cabeçalho vem do registro de cada animal (todos iguais), do payload (modo, dose de
-   * referência e quantidade) e do serviço pago no ato. O que o servidor propôs quando veio vazio não vira valor digitado:
-   * o fabricante do cadastro, a próxima aplicação pelo intervalo do protocolo, a quantidade igual à soma das doses e, por
-   * cabeça, a dose de cada animal igual à do lançamento. Por peso, a dose de cada animal fica vazia: o servidor usa a dose
-   * gravada no original enquanto o produto, a dose por kg e a data não mudam, e refaz pelo peso na data quando mudam.
-   */
-  function previaSanidade_(o, def, origem) {
-    var ev = o.evento, det = o.detalhes || {}, payload = ev.payload || {}, sub = ev.event_subtype;
-    var regs = det.SANIDADE || [];
-    var r0 = regs[0] || {};
-    var prod = r0.produto_id ? Store.produto(r0.produto_id) : null;
-    var prot = r0.protocol_id ? Store.protocolo(r0.protocol_id) : null;
-    var porAnimal = Utils_agrupar(regs);
-    origem.protocol_id = r0.protocol_id; origem.produto_id = r0.produto_id; origem.nome_produto = r0.produto_id ? null : r0.nome_produto;
-    origem.fabricante = prod && r0.fabricante === prod.fabricante ? null : r0.fabricante;
-    origem.lote = r0.lote; origem.validade = r0.validade; origem.via_aplicacao = r0.via_aplicacao; origem.motivo = r0.motivo; origem.diagnostico = r0.diagnostico;
-    origem.veterinario = r0.veterinario;
-    origem.modo_dose = payload.modo_dose; origem.dose_referencia = decimalTexto_(payload.dose_referencia);
-    var doses = regs.map(function (r) { return r.dose; });
-    var soma = doses.every(function (d) { return typeof d === 'number'; }) ? doses.reduce(function (t, d) { return t + Math.round(d * 10000); }, 0) / 10000 : null;
-    if (typeof payload.quantidade_consumida_total === 'number' && (payload.modo_dose === 'TOTAL' || payload.quantidade_consumida_total !== soma)) origem.quantidade_consumida_total = decimalTexto_(payload.quantidade_consumida_total);
-    if (!r0.produto_id) origem.unidade_dose = regs.map(function (r) { return r.unidade_dose; }).filter(Boolean)[0] || null;
-    origem.periodo_carencia_dias = decimalTexto_(r0.periodo_carencia_dias);
-    // A próxima que o servidor propôs foi pelo intervalo congelado no lançamento (payload `intervalo_protocolo_dias`, CONTRATOS,
-    // seção 43): é por ele que a tela reconhece a proposta (e manda o campo vazio, para o servidor refazer pela data corrigida).
-    // Só o registro antigo, sem o intervalo no payload, compara com o intervalo de hoje do protocolo.
-    var iv = payload.intervalo_protocolo_dias, proposta = typeof iv === 'number' || (prot && prot.recorrencia_tipo === 'INTERVALO_DIAS' && typeof (iv = prot.intervalo_dias) === 'number') ? Utils_somaDias(ev.event_date, iv) : null;
-    origem.data_proxima_aplicacao = propostoOuValor_(r0.data_proxima_aplicacao, proposta);
-    var serv = (det.FINANCEIRO || []).filter(function (f) { return !f.product_id; })[0];
-    if (serv) {
-      var ts = parcelasOrdem_((det.PARCELAS || []).filter(function (x) { return x.financial_id === serv.financial_id; }));
-      var t = ts[0] || {};
-      origem.custo_valor = dinheiroTexto_(serv.valor); origem.custo_conta_id = serv.conta_id; origem.custo_partner_id = serv.partner_id;
-      origem.custo_vencimento = propostoOuValor_(t.data_vencimento, ev.event_date); origem.custo_forma_pagamento = t.forma_pagamento;
-      origem.custo_parcelas_qtd = ts.length > 1 ? String(ts.length) : null; origem.custo_documento = serv.documento;
-      origem.custo_descricao = /: serviço ou produto pago no ato$/.test(serv.descricao || '') ? null : serv.descricao;
-    }
-    var antes = { campos: {}, linhas: {} };
-    var linhas = (o.linhas || []).map(function (l) {
-      var x = (porAnimal[l.animal_id] || [])[0] || {};
-      var dose = payload.modo_dose === 'POR_CABECA' && typeof x.dose === 'number' && x.dose !== payload.dose_referencia ? decimalTexto_(x.dose) : null;
-      var v = limpo_({ dose: dose, resultado_exame: x.resultado_exame, observacoes: x.observacoes || l.observacoes });
-      antes.linhas[l.animal_id] = Util.clonar(v);
-      return { animal_id: l.animal_id, valores: v };
-    });
-    var campos = camposDoSubtipo_(def, sub, origem);
-    antes.campos = Util.clonar(campos);
-    return { subtipo: sub, campos: campos, linhas: linhas, origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotuloEvento(ev), historico: ev.pre_marco_zero === true, antes: antes } };
-  }
-  /** Correção do estoque (Fase 3): a entrada pelo lançamento da compra e pelo movimento; o acerto pelo movimento e pelo payload. */
-  function previaEstoque_(o, def, origem) {
-    var ev = o.evento, det = o.detalhes || {}, payload = ev.payload || {}, sub = ev.event_subtype;
-    var mv = (det.MOVIMENTOS_ESTOQUE || [])[0] || {};
-    var f = (det.FINANCEIRO || [])[0];
-    origem.product_id = mv.product_id || (f && f.product_id);
-    origem.lote = mv.lote; origem.validade = mv.validade;
-    if (sub === 'ENTRADA') {
-      origem.qtd_apresentacao = decimalTexto_(payload.qtd_apresentacao);
-      origem.quantidade = typeof payload.qtd_apresentacao === 'number' ? null : decimalTexto_(f ? f.quantidade : mv.quantidade);
-      if (f) {
-        var ts = parcelasOrdem_((det.PARCELAS || []).filter(function (x) { return x.financial_id === f.financial_id; }));
-        var t = ts[0] || {};
-        origem.valor = dinheiroTexto_(f.valor); origem.partner_id = f.partner_id; origem.documento = f.documento;
-        origem.vencimento = propostoOuValor_(t.data_vencimento, ev.event_date); origem.forma_pagamento = t.forma_pagamento;
-        origem.parcelas_qtd = ts.length > 1 ? String(ts.length) : null;
-      }
-    } else {
-      origem.motivo_ajuste = payload.motivo_ajuste;
-      origem.saldo_contado = decimalTexto_(payload.saldo_contado);
-      origem.quantidade = payload.motivo_ajuste === 'CONTAGEM' || typeof mv.quantidade !== 'number' ? null : decimalTexto_(-mv.quantidade);
-    }
-    var campos = camposDoSubtipo_(def, sub, origem);
-    return { subtipo: sub, campos: campos, linhas: [], origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotuloEvento(ev), historico: ev.pre_marco_zero === true, antes: { campos: Util.clonar(campos), linhas: {} } } };
-  }
-  /** Pré-preenche o evento substituto com o que o original gravou (valores como digitados no formulário). */
-  /**
-   * Prévia da correção, com os documentos e fotos do original (evento.obter: anexos), que passam ao substituto: o
-   * formulário e a revisão dizem isso, para ninguém anexar de novo achando que se perderam (08, 4.4).
+   * Prévia da correção: a entrada sem mudança que o servidor monta do evento gravado (Correcao.entrada), nos valores do
+   * formulário, com os documentos e fotos do original (evento.obter: anexos), que passam ao substituto: o formulário e a revisão
+   * dizem isso, para ninguém anexar de novo achando que se perderam (08, 4.4). null quando o evento não vale mais.
    */
   function previaCorrecao(o) {
-    var r = previaCorrecaoTipo_(o);
-    if (r && r.corrige) r.corrige.anexos = (o.anexos || []).filter(function (a) { return a.status === undefined || a.status === 'ATIVO'; }).map(function (a) { return a.nome_arquivo; });
-    return r;
-  }
-  function previaCorrecaoTipo_(o) {
-    var ev = o.evento, det = o.detalhes || {};
+    var ev = o.evento, c = o.correcao;
+    if (!c) return null;
     var def = Store.tipoEvento(ev.event_type);
-    var origem = { event_date: ev.event_date, property_id: ev.property_id, description: ev.description, responsible: ev.responsible, notes: ev.notes };
-    if (['NASCIMENTO', 'TRANSFERENCIA', 'MORTE', 'DESCARTE'].indexOf(ev.event_type) >= 0) return previaMovimento_(o, def, origem);
-    if (['IDENTIFICACAO', 'MARCACAO', 'AJUSTE_INVENTARIO'].indexOf(ev.event_type) >= 0) return previaManejo_(o, def, origem);
-    if (ev.event_type === 'COMPRA') return previaCompra_(o, def, origem);
-    if (ev.event_type === 'PESAGEM') return previaPesagem_(o, def, origem);
-    if (ev.event_type === 'SANIDADE') return previaSanidade_(o, def, origem);
-    if (ev.event_type === 'ESTOQUE') return previaEstoque_(o, def, origem);
-    if (ev.event_type === 'VENDA') return previaVenda_(o, def, origem);
-    if (REPRODUTIVOS.indexOf(ev.event_type) >= 0) return TelaReproducao.previaCorrecao(o, def, origem);
-    var campos = {};
-    (def.campos || []).forEach(function (d) { if (texto_(origem[d.id]) !== null) campos[d.id] = origem[d.id]; });
-    var idents = Utils_agrupar(det.IDENTIFICACOES || []);
-    var pesos = Utils_agrupar(det.PESAGENS || []);
+    var sub = c.subtipo || null;
+    var sd = sub && def.subtipos ? def.subtipos[sub] : null;
+    var corr = sd && sd.campos_corrigiveis;
+    var campos = valoresForm_((def.campos || []).concat((sd && sd.campos) || []), c.campos);
     var antes = { campos: Util.clonar(campos), linhas: {} };
-    var linhas = (o.linhas || []).filter(function (l) { return Number(l.efeito_inventario) === 1; }).map(function (l) {
-      var at = l.atributos_iniciais_json;
-      var ids = idents[l.animal_id] || [];
-      var brinco = ids.filter(function (x) { return x.tipo === 'BRINCO'; })[0];
-      var v;
-      if (!at) v = { brinco: brinco ? brinco.codigo : null, pasto_destino_id: l.pasto_destino_id, observacoes: l.observacoes };
-      else {
-        var a = Store.animal(l.animal_id);
-        v = {
-          brinco: brinco ? brinco.codigo : null, nome: a ? a.nome : null, sexo: at.sexo, raca: at.raca, data_nascimento: at.data_nascimento, data_nascimento_confianca: at.data_nascimento_confianca,
-          mae_id: at.mae_id, mae_confianca: at.mae_confianca, pai_id: at.pai_id, pai_confianca: at.pai_confianca, origem: at.origem, castrado: boolDe(at.castrado), reprodutor: boolDe(at.reprodutor),
-          partos_previos: at.partos_previos === undefined || at.partos_previos === null ? null : String(at.partos_previos), situacao_reprodutiva: at.situacao_reprodutiva, data_prevista_parto: at.data_prevista_parto,
-          pasto_destino_id: l.pasto_destino_id, observacoes: l.observacoes,
-          outras_identificacoes: ids.filter(function (x) { return x.tipo !== 'BRINCO'; }).map(function (x) { return { tipo: x.tipo, codigo: x.codigo }; }),
-        };
-        if (ev.event_type === 'ENTRADA_INICIAL') {
-          var ps = (pesos[l.animal_id] || [])[0];
-          v.data_entrada = at.data_entrada; v.data_entrada_confianca = at.data_entrada_confianca;
-          v.peso = l.peso === null || l.peso === undefined ? null : Fmt.numero(l.peso, 1).replace(/\./g, '');
-          v.metodo_pesagem = ps ? ps.metodo : null;
-          v.valor_abertura = l.valor_individual === null || l.valor_individual === undefined ? null : Fmt.centavosParaTexto(l.valor_individual);
-        }
-        if (!v.outras_identificacoes.length) delete v.outras_identificacoes;
-      }
-      Object.keys(v).forEach(function (k) { if (v[k] === null || v[k] === undefined) delete v[k]; });
-      antes.linhas[l.animal_id] = Util.clonar(v);
-      return { animal_id: l.animal_id, criado: !!at, valores: v };
+    var linhas = (c.animais || []).map(function (x) {
+      var v = valoresForm_((sd && sd.campos_animal) || def.campos_animal, x, corr);
+      if (!antes.linhas[x.animal_id]) antes.linhas[x.animal_id] = Util.clonar(v);
+      return { animal_id: x.animal_id, criado: (c.criados || []).indexOf(x.animal_id) >= 0, valores: v };
     });
-    return { campos: campos, linhas: linhas, origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotuloEvento(ev), historico: ev.pre_marco_zero === true, antes: antes } };
+    if (corr) antes.itens = linhas.map(function (l) { return { animal_id: l.animal_id, valores: Util.clonar(l.valores) }; });
+    var grupos = {};
+    Object.keys(def.grupos_repetiveis || {}).forEach(function (g) {
+      if (c[g]) grupos[g] = c[g].map(function (row) { var r = { valores: valoresForm_(def.grupos_repetiveis[g], row) }; if (row.animal_id) r.animal_id = row.animal_id; return r; });
+    });
+    if (Object.keys(grupos).length) antes.grupos = Util.clonar(grupos);
+    var rotulo = REPRODUTIVOS.indexOf(ev.event_type) >= 0 ? Store.nomeEvento(ev.event_type, sub) + ' de ' + Fmt.data(ev.event_date) : rotuloEvento(ev);
+    var anexos = (o.anexos || []).filter(function (a) { return a.status === undefined || a.status === 'ATIVO'; }).map(function (a) { return a.nome_arquivo; });
+    return { subtipo: sub || undefined, campos: campos, linhas: linhas, grupos: grupos, origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotulo, historico: ev.pre_marco_zero === true, antes: antes, anexos: anexos } };
   }
   var ROTULO_AJUSTE = { categoria_manual_id: 'Categoria', pasto_atual_id: 'Pasto', brinco: 'Brinco' };
   /** Valor gravado em AJUSTES (texto canônico) em palavras: categoria, pasto, mãe ou pai pelo nome; vazio = desconhecido. */
@@ -535,9 +156,6 @@ var TelaEventos = (function () {
     return h('details', { class: 'detalhe', dataset: { alocacoes: String(itens.length) } }, h('summary', { text: (cancelado ? 'Por animal, sem efeito (' : 'Por animal (') + itens.length + ')' }),
       h('ul', { class: 'lista-simples' }, itens.map(function (x) { return h('li', { dataset: { alocacao: String(x.valor_alocado) } }, h('span', { class: 'dado', text: nome(x.animal_id) }), ': ' + Fmt.dinheiro(x.valor_alocado) + (porPeso ? ' (base ' + Fmt.peso(x.base_valor) + ')' : '')); })));
   }
-  function Utils_agrupar(lista) { var m = {}; lista.forEach(function (x) { (m[x.animal_id] = m[x.animal_id] || []).push(x); }); return m; }
-  /** Data + n dias (yyyy-MM-dd, sem fuso): a próxima aplicação que o servidor propõe pelo intervalo do protocolo. */
-  function Utils_somaDias(d, n) { return new Date(Date.parse(d + 'T00:00:00Z') + n * 86400000).toISOString().slice(0, 10); }
 
   // ------------------------------------------------------------------ detalhe ----
   function nomeAnimal(l) {
@@ -747,8 +365,7 @@ var TelaEventos = (function () {
           try {
             // Os animais de uma saída (venda, morte, descarte) já não estão na carga do aparelho: busca-os antes de abrir.
             if ((o.linhas || []).some(function (l) { return Number(l.efeito_inventario) === -1; })) await Store.carregarBaixados();
-            // A prévia da reprodução, da desmama, da castração e da ocorrência vem da tela de reprodução (sob demanda).
-            if (REPRODUTIVOS.indexOf(ev.event_type) >= 0) await Modulos.carregar('Reproduction');
+            // A prévia é a entrada que o servidor montou do evento vigente (evento.obter → correcao): aqui só se formata.
             await Registro.abrir(ev.event_type, previaCorrecao(o));
           } catch (e) {
             UI.aviso('Não foi possível abrir a correção: ' + e.message, { tipo: 'erro' });

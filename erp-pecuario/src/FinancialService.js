@@ -308,7 +308,8 @@ var FinancialService = (function () {
    * valor_conferencia (o bruto, contra o qual a conta pelo preço é conferida; padrão = valor), campo_valor e
    * rotulo_valor (para as mensagens) e pesagens: [última pesagem individual de cada animal até a data, em kg, ou null]
    * — sem o peso de cada animal, o rateio usa essas pesagens escaladas para o peso do lote (estimado) ou cai para
-   * CABECAS, com aviso nos dois casos.
+   * CABECAS, com aviso nos dois casos —, e bases_congeladas: [base por animal] (a correção da venda que estimou a divisão,
+   * com os mesmos animais, data, modalidade e peso do lote: as bases que o original gravou; CONTRATOS, seção 50).
    * Devolve {base_peso, rendimento_pct, rendimento_tipo, unidade_preco, preco_unitario, peso_vivo_total,
    * peso_carcaca_total, arrobas, criterio, bases: [número por animal], estimado (base por pesagem anterior escalada),
    * conferencia, desvio_pct, erros, avisos}; erros e avisos: [{codigo, campo, mensagem, indice?}] (indice = posição do
@@ -422,7 +423,7 @@ var FinancialService = (function () {
       if (!vazio_(s.criterio_rateio)) erros.push(det_('CAMPO_NAO_SE_APLICA', 'criterio_rateio', 'O critério de rateio só se escolhe no lote fechado; nas demais formas ele vem da negociação.'));
       // Sem o peso de cada animal (só o do lote, ou só o total do romaneio): a última pesagem de cada um, escalada para o
       // peso do lote (estimado), quando todos têm; senão CABECAS. Aviso nos dois casos (03b, seção 4.3; RN-073).
-      var ult = Array.isArray(s.pesagens) && s.pesagens.length === n ? s.pesagens : null;
+      var ult = Array.isArray(s.bases_congeladas) && s.bases_congeladas.length === n ? s.bases_congeladas : Array.isArray(s.pesagens) && s.pesagens.length === n ? s.pesagens : null;
       var temUlt = ult && ult.every(function (x) { return typeof x === 'number' && x > 0; });
       if (mod === 'CABECA') crit = temValor ? 'VALOR_INDIVIDUAL' : 'CABECAS';
       else if (r.base_peso === 'CARCACA' && (temCarc === n || s.carcacaTotal !== true)) crit = 'PESO_CARCACA';
@@ -454,7 +455,9 @@ var FinancialService = (function () {
     }
     if ((mod === 'KG_VIVO' || (mod === 'ARROBA' && r.base_peso === 'VIVO')) && vivoDec === null) erros.push(det_('PESO_OBRIGATORIO', campoVivo, 'Informe o peso vivo total do lote ou o peso de cada animal.'));
     r.criterio = n === 1 ? 'DIRETO' : crit || null;
-    var escala = r.estimado ? basesEstimadas(ult, vivoDec === null ? null : vivoDec / 10) : null;
+    // As bases estimadas congeladas (a correção de uma venda que estimou a divisão: Correcao, seção 50 dos CONTRATOS) valem como
+    // foram gravadas; senão, a última pesagem de cada animal escalada para o peso do lote.
+    var escala = r.estimado ? (Array.isArray(s.bases_congeladas) && s.bases_congeladas.length === n ? s.bases_congeladas.slice() : basesEstimadas(ult, vivoDec === null ? null : vivoDec / 10)) : null;
     r.bases = animais.map(function (a, i) {
       switch (r.criterio) {
         case 'DIRETO': return typeof s.valor === 'number' ? s.valor / 100 : null;
