@@ -1422,3 +1422,19 @@ Nenhuma linha de código mudou nesta etapa: só documentos.
   volta sem a justificativa do aviso para antes da trava, e a simulação chega à trava; o oráculo da simulação passou a
   aceitar esse par. Caso em `tests/fase3.fuzz.regressoes.test.js` (novo).
 - `docs/CONTRATOS.md`: estado e seção 36 (passada 1 das Fases 1 a 3). Nenhuma linha de `src/` mudou nesta etapa.
+- **Retomada** (o contêiner reiniciou com a passada quase pronta; o gerador e `src/` ficaram como estavam): conferido, pela
+  leitura de `tests/apoio-fuzz.js` e pelas contagens da leva final, que cada item da lista é mandado e aceito ao menos uma
+  vez (cada tipo e subtipo; curral e tronco em blocos, com reenvio e conferência da chave; dose por kg; estoque ligado e
+  desligado; protocolo e agenda; estação com diagnóstico, parto e aborto; desmama; castração; importadores de manejo e
+  desfazer; venda na carência, pesagem de quem saiu, diagnóstico da fêmea que saiu, parto corrigido depois do
+  diagnóstico, estorno da compra de insumo consumido), salvo a venda levada para a véspera da pesagem ou do parto, que a
+  regra recusa (FORA_DA_PERMANENCIA). As 24 recusas da trava em 160 sementes da leva são todas de regras que ela guarda por
+  desenho (castração repetida, registro reprodutivo de quem passaria a macho, pasto desativado, mãe de cria desmamada).
+- Execuções desta passada, verificadas em Node e no Playwright deste repositório:
+  - teste aleatório, `FUZZ_PASSOS=100`: 1.640 sementes novas na passada, sem falha do sistema (1.240 antes da retomada,
+    das quais a leva 950000 a 950499 com 27.297 aceitos, 17.064 recusados e 0 falhas); a leva nova final, depois da
+    retomada: 400 sementes (970000 a 970399), 22.618 comandos aceitos, 13.390 recusados, 0 falhas;
+  - `npm test`: 785 testes, 785 aprovados e 0 falhas (607 s); as 22 sementes fixas de 60 passos: 706 aceitos, 451
+    recusados, 0 falhas;
+  - `npm run ui:check`: 122 testes, 122 aprovados e 0 falhas (264 s); página inicial montada com 447 KB de 450 KB; sob
+    demanda, Import 48 KB, Weights 44 KB, Health 24 KB e Reproduction 50 KB de 150 KB.

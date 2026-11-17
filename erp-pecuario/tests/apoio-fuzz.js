@@ -2536,11 +2536,16 @@ function gerarLida(sis, S, rnd, k, base) {
  */
 function gerarInteracao(sis, S, rnd, k, base) {
   const P = PASTOS_DE(S);
+  const qual = pesado(rnd, [['vendaCarencia', 4], ['sanidadeSobreVenda', 2.5], ['importacaoNaCarencia', 1.5], ['pesagemDeQuemSaiu', 2], ['saidaAntesDaPesagem', 1.5], ['diagnosticoDeQuemSaiu', 2], ['saidaAntesDoRegistro', 1.5], ['partoDaPrenhe', 2.5], ['partoCorrigido', 2], ['aborto', 1.5], ['estornoInsumoConsumido', 2], ['entradaInsumoMenor', 1], ['desmamaDasCrias', 1.5], ['castracaoDoTouro', 1.2], ['dosePorKg', 2.5], ['reproducaoNaEstacao', 3]]);
+  const c = interacaoDe(sis, S, rnd, k, base, P, qual);
+  contar('interação ' + qual + (c ? '' : ' (sem como montar)'));
+  return c;
+}
+function interacaoDe(sis, S, rnd, k, base, P, qual) {
   const registrar = (spec, rotulo) => (spec ? Object.assign(base, { rota: 'evento.registrar', dados: montarDados(sis, spec), spec, rotulo: 'interação: ' + rotulo }) : null);
   const corrigir = (eid, spec, rotulo) => (spec ? Object.assign(base, { rota: 'evento.corrigir', dados: Object.assign(montarDados(sis, spec), { event_id: eid, justificativa: 'Corrigindo o lançamento' }), spec, rotulo: 'interação: ' + rotulo }) : null);
   const specDe = (e) => (sis.specs.has(e.event_id) ? js(sis.specs.get(e.event_id).spec) : specDoGravado(sis, S, rnd, e));
   const animaisDoEvento = (eid) => S.t.EVENTO_ANIMAIS.filter((l) => l.event_id === eid).map((l) => l.animal_id);
-  const qual = pesado(rnd, [['vendaCarencia', 4], ['sanidadeSobreVenda', 2.5], ['importacaoNaCarencia', 1.5], ['pesagemDeQuemSaiu', 2], ['saidaAntesDaPesagem', 1.5], ['diagnosticoDeQuemSaiu', 2], ['saidaAntesDoRegistro', 1.5], ['partoDaPrenhe', 2.5], ['partoCorrigido', 2], ['aborto', 1.5], ['estornoInsumoConsumido', 2], ['entradaInsumoMenor', 1], ['desmamaDasCrias', 1.5], ['castracaoDoTouro', 1.2], ['dosePorKg', 2.5], ['reproducaoNaEstacao', 3]]);
   if (qual === 'vendaCarencia') {
     const x = sorteio(rnd, vigentesDe(S, 'SANIDADE').map((r) => ({ r, fim: fimCarenciaDe(r) })).filter((y) => y.fim && y.r.data_aplicacao >= (S.marco || D0)));
     if (!x || rnd() < 0.25) {

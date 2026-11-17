@@ -2296,8 +2296,9 @@ já gravado, 733 conferências da chave; venda na carência: 4 para recria e 2 p
 CARENCIA_ATIVA com a política BLOQUEIA, e 35 vendas que entraram na carência por todos os caminhos; parto corrigido depois
 do diagnóstico 25; pesagem de quem saiu 10; diagnóstico de fêmea que saiu 23; estorno da compra de insumo consumido 8; dose
 por kg 63; reprodução na estação 3; estoque ligado 97 e desligado 157; protocolo novo 53; arquivos de PESAGENS 73, SANIDADE
-95, REPRODUCAO 72 e OCORRENCIAS 72; desfazer 721), salvo o que a regra recusa sempre (a venda levada para antes da
-pesagem ou do registro reprodutivo: FORA_DA_PERMANENCIA). As 24
+95, REPRODUCAO 72 e OCORRENCIAS 72; desfazer 721), salvo a venda levada para antes da pesagem ou do parto: as 4 sorteadas
+caíram todas na véspera do fato e foram recusadas por FORA_DA_PERMANENCIA, como manda a regra (a morte e o descarte levados
+para o dia do fato foram aceitos). As 24
 recusas da trava em 160 delas (970000 a 970159, `FUZZ_LOG_TRAVA=1`) são todas de regras que ela guarda por desenho
 (seções 11 e 40): a castração que a correção do rebanho de base passaria a repetir (10), o registro reprodutivo de quem
 passaria a ser macho ou nascida no dia dele (8), o animal que voltaria a um pasto desativado (4) e a mãe de uma cria já
