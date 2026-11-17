@@ -433,3 +433,32 @@ test('a correção de cadastro do nascimento seguida de outra que apaga o nascim
   assert.deepEqual(novo.error.details.map((d) => d.codigo), ['CAMPO_OBRIGATORIO']);
   semErro(s, 'par do nascimento');
 });
+
+test('o pasto informado que nenhum animal recebeu (o parto só de natimorto; a desmama do bezerro que já estava nele) não é gravado: desativá-lo depois não recusa a correção sem mudança', () => {
+  const s = S.sistema();
+  hoje(s, '2026-01-05');
+  const { ids } = rebanho(s, [
+    S.bicho({ brinco: 'V1', sexo: 'F', data_nascimento: '2020-01-01', data_nascimento_confianca: 'CONFIRMADA', partos_previos: 1, pasto_destino_id: PASTOS.B }),
+    S.bicho({ brinco: 'C1', sexo: 'M', data_nascimento: '2025-12-01', data_nascimento_confianca: 'CONFIRMADA' }),
+  ]);
+  hoje(s, '2026-06-01');
+  // O parto só de natimorto com o pasto A informado, e a desmama do bezerro que já estava no pasto A.
+  const parto = { tipo: 'NASCIMENTO', campos: { event_date: '2026-03-10', pasto_destino_id: PASTOS.A }, animais: [{ animal_id: ids.V1 }], crias: [{ situacao_nascimento: 'NATIMORTO' }] };
+  const p = ok(api(s, 'evento.registrar', parto), 'parto só de natimorto');
+  const desmama = { tipo: 'DESMAMA', campos: { event_date: '2026-04-01', pasto_destino_id: PASTOS.A, metodo_pesagem: 'BALANCA' }, animais: [{ animal_id: ids.C1, peso: 120 }] };
+  const d = ok(api(s, 'evento.registrar', desmama), 'desmama sem mudar de pasto');
+  const linhas = (eid) => tab(s, 'EVENTO_ANIMAIS', { event_id: eid }).map((l) => [l.animal_id, l.papel || 'SUJEITO', l.pasto_origem_id, l.pasto_destino_id]).sort();
+  const antes = { p: linhas(p.event_id), d: linhas(d.event_id) };
+  assert.deepEqual(antes.d, [[ids.C1, 'SUJEITO', null, null]], 'o bezerro não mudou de pasto');
+  // O bezerro sai do pasto A e o pasto A é desativado.
+  ok(api(s, 'evento.registrar', { tipo: 'TRANSFERENCIA', campos: { event_date: '2026-05-01', pasto_origem_id: PASTOS.A, pasto_destino_id: PASTOS.B }, animais: [{ animal_id: ids.C1 }] }), 'bezerro para o B');
+  ok(api(s, 'pasto.salvar', { pasture_id: PASTOS.A, campos: { status: 'INATIVO' }, justificativa: 'Pasto em reforma' }), 'pasto A desativado');
+  const rp = corrigir(s, p.event_id, parto, 'correção sem mudança do parto');
+  const rd = corrigir(s, d.event_id, desmama, 'correção sem mudança da desmama');
+  assert.deepEqual({ p: linhas(rp.event_id), d: linhas(rd.event_id) }, antes);
+  // A desmama que levaria um bezerro para o pasto desativado continua recusada.
+  const leva = api(s, 'evento.corrigir', Object.assign({}, desmama, { event_id: rd.event_id, justificativa: 'Outra data', campos: Object.assign({}, desmama.campos, { event_date: '2026-05-20' }) }));
+  assert.equal(leva.ok, false);
+  assert.ok(leva.error.details.some((x) => x.codigo === 'PASTO_INATIVO'), JSON.stringify(leva.error.details));
+  semErro(s, 'pasto sem animal');
+});
