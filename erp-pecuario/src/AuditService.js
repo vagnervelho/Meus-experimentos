@@ -1501,19 +1501,22 @@ var AuditService = (function () {
     var max = EventCatalog.PESO_MAX_KG;
     eventos.forEach(function (ev) {
       var linhas = repo.por('PESAGENS', 'event_id', ev.event_id);
-      if (!linhas.length) return;
       var nome = '"' + rotuloEvento_(ev) + '" de ' + br_(ev.event_date);
       var quem = function (id) { return rotuloAnimal_(tx.cru.cruPorId('ANIMAIS', id), id); };
       var achado = function (r, campo, oque, chave) {
         col.achado('COPIAS', { tabela: 'PESAGENS', id: r.weight_id, campo: campo, mensagem: oque + aviso, oque: oque, chaves: r.weight_id + '|' + chave, event_id: ev.event_id, animal_id: r.animal_id });
       };
+      var semPesagem = function (l, oque) {
+        col.achado('COPIAS', { tabela: 'EVENTO_ANIMAIS', id: l.event_animal_id, campo: 'peso', mensagem: oque + aviso, oque: oque, chaves: l.event_animal_id + '|SEM_PESAGEM', event_id: ev.event_id, animal_id: l.animal_id });
+      };
+      if (!linhas.length) { conferirPesoCopiado_(repo, ev, linhas, achado, nome, quem, semPesagem); return; }
       var porAnimal = {};
       linhas.forEach(function (r) {
         if (typeof r.peso_kg !== 'number' || !(r.peso_kg > 0) || r.peso_kg > max) achado(r, 'peso_kg', nome + ', ' + quem(r.animal_id) + ': a pesagem tem ' + (typeof r.peso_kg === 'number' ? Utils.formatarNumero(r.peso_kg) + ' kg' : 'peso vazio') + ', fora da faixa de peso vivo (de 0,1 a ' + Utils.formatarNumero(max) + ' kg).', 'FAIXA');
         if (porAnimal[r.animal_id]) achado(r, 'animal_id', nome + ', ' + quem(r.animal_id) + ': o animal tem mais de uma pesagem no mesmo lançamento.', 'REPETIDA');
         porAnimal[r.animal_id] = r;
       });
-      if (ev.event_type !== 'PESAGEM') return;
+      if (ev.event_type !== 'PESAGEM') { conferirPesoCopiado_(repo, ev, linhas, achado, nome, quem, semPesagem); return; }
       var tipos = Utils.unicos(linhas.map(function (r) { return r.tipo; }));
       if (tipos.length > 1) linhas.slice(1).forEach(function (r) { if (r.tipo !== linhas[0].tipo) achado(r, 'tipo', nome + ', ' + quem(r.animal_id) + ': o momento da pesagem (' + r.tipo + ') difere do das outras linhas do lançamento (' + linhas[0].tipo + ').', 'MOMENTO'); });
       var ea = {};
@@ -1538,6 +1541,35 @@ var AuditService = (function () {
         if (typeof r.peso_kg !== 'number') return;
         if (r.metodo !== 'MEDIA_LOTE' || (media !== null && r.peso_kg !== media)) achado(r, r.metodo !== 'MEDIA_LOTE' ? 'metodo' : 'peso_kg', nome + ', ' + quem(r.animal_id) + ': na pesagem por lote cada animal fica com a média do lote' + (media !== null ? ' (' + Utils.formatarNumero(media, 1) + ' kg)' : '') + ', mas a linha tem ' + Utils.formatarNumero(r.peso_kg) + ' kg (' + r.metodo + ').', 'MEDIA');
       });
+    });
+  }
+  /**
+   * Os tipos que copiam o peso da linha do animal numa pesagem (03b, seção 5): o rebanho inicial, a outra entrada, a compra,
+   * a venda (o peso do animal) e o nascimento (o da cria). A desmama tem a conferência dela (conferirReproducao_).
+   */
+  var COPIAM_PESO = Object.freeze({ ENTRADA_INICIAL: ['SUJEITO'], OUTRA_ENTRADA: ['SUJEITO'], COMPRA: ['SUJEITO'], VENDA: ['SUJEITO'], NASCIMENTO: ['CRIA'] });
+  /**
+   * Nos tipos que copiam o peso (COPIAM_PESO), cada pesagem é a do peso da linha do animal no evento (EVENTO_ANIMAIS.peso):
+   * o peso mexido à mão numa das duas e a pesagem apagada com o peso na linha são a fonte quebrada (achados de COPIAS, sem
+   * reparo: o reparo adotaria o peso adulterado na curva, no GMD e no peso atual).
+   */
+  function conferirPesoCopiado_(repo, ev, linhas, achado, nome, quem, semPesagem) {
+    var papeis = COPIAM_PESO[ev.event_type];
+    if (!papeis || !repo.carregada('EVENTO_ANIMAIS')) return;
+    var ea = {};
+    repo.por('EVENTO_ANIMAIS', 'event_id', ev.event_id).forEach(function (l) { if (papeis.indexOf(vazio_(l.papel) ? 'SUJEITO' : l.papel) >= 0) ea[l.animal_id] = l; });
+    var comPesagem = {};
+    linhas.forEach(function (r) {
+      comPesagem[r.animal_id] = true;
+      var l = ea[r.animal_id];
+      if (!l) return;
+      if (typeof r.peso_kg === 'number' && l.peso !== r.peso_kg) achado(r, 'peso_kg', nome + ', ' + quem(r.animal_id) + ': a pesagem tem ' + Utils.formatarNumero(r.peso_kg) + ' kg, mas a linha do animal no lançamento diz ' + (typeof l.peso === 'number' ? Utils.formatarNumero(l.peso) + ' kg' : 'peso vazio') + '.', 'COPIA');
+    });
+    // A linha com peso sem a pesagem dele (o catálogo exige o método com o peso: o peso informado sempre vira pesagem).
+    Object.keys(ea).forEach(function (id) {
+      var l = ea[id];
+      if (comPesagem[id] || typeof l.peso !== 'number') return;
+      semPesagem(l, nome + ', ' + quem(id) + ': a linha do animal tem o peso de ' + Utils.formatarNumero(l.peso) + ' kg, mas o lançamento não tem a pesagem dele.');
     });
   }
   /**

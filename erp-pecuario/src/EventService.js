@@ -1027,13 +1027,47 @@ var EventService = (function () {
     if (!vazio_(c.data_proxima_aplicacao)) {
       if (Utils.dataValida(c.data_proxima_aplicacao) && Utils.dataValida(data) && c.data_proxima_aplicacao <= data) { erroGeral_(m, 'data_proxima_aplicacao', 'DATA_INVALIDA', 'A próxima aplicação precisa ser depois de ' + br_(data) + '.'); s.ok = false; }
       s.proxima = c.data_proxima_aplicacao;
-    } else if (s.protocolo && s.protocolo.recorrencia_tipo === 'INTERVALO_DIAS' && typeof s.protocolo.intervalo_dias === 'number' && Utils.dataValida(data)) {
-      s.proxima = Utils.somaDias(data, s.protocolo.intervalo_dias);
+    } else if (s.protocolo && s.protocolo.recorrencia_tipo === 'INTERVALO_DIAS' && Utils.dataValida(data)) {
+      // A próxima proposta pelo protocolo usa o intervalo de quando a aplicação foi lançada (payload
+      // `intervalo_protocolo_dias`): a correção com o mesmo protocolo não a refaz pelo intervalo de hoje (o fato não muda
+      // porque o cadastro mudou depois).
+      var congelado = intervaloDoOriginal_(m, ctxEv, s.protocolo.protocol_id);
+      s.intervaloProtocolo = congelado !== null ? congelado : typeof s.protocolo.intervalo_dias === 'number' ? s.protocolo.intervalo_dias : null;
+      if (s.intervaloProtocolo !== null) s.proxima = Utils.somaDias(data, s.intervaloProtocolo);
     }
     // Lote vencido (RN-056): aviso, não bloqueio.
     if (!vazio_(c.validade) && Utils.dataValida(c.validade) && Utils.dataValida(data) && c.validade < data) {
       avisoItem_(m, null, 'PRODUTO_VENCIDO', 'O lote ' + (vazio_(c.lote) ? '' : c.lote + ' ') + 'de ' + (s.nome || 'produto') + ' venceu em ' + br_(c.validade) + ', antes da aplicação (' + br_(data) + '). Gravar mesmo assim?');
     }
+  }
+  /** Na correção com o mesmo protocolo, o intervalo que propôs a próxima aplicação do original (o payload dele); senão null. */
+  function intervaloDoOriginal_(m, ctxEv, protocolId) {
+    if (!ctxEv.original) return null;
+    var pj = ctxEv.original.payload_json || {};
+    if (typeof pj.intervalo_protocolo_dias !== 'number' || !m.repo.carregada('SANIDADE')) return null;
+    var r0 = m.repo.por('SANIDADE', 'event_id', ctxEv.original.event_id)[0];
+    return r0 && r0.protocol_id === protocolId ? pj.intervalo_protocolo_dias : null;
+  }
+  /**
+   * Na correção (e na correção do substituto), o custo do insumo é o congelado na aplicação original (03a,
+   * MOVIMENTOS_ESTOQUE.custo_unitario: "custo congelado no momento do movimento"; 07, seção 5, item 2; PR-11): com o mesmo
+   * produto, o custo unitário da saída do original e a conta do lançamento de consumo dele — não os do cadastro de hoje.
+   * Corrigir o lote, o veterinário ou a dose não reprecifica o fato. null fora da correção, com outro produto ou sem saída
+   * (a aplicação histórica não tem saída).
+   */
+  function consumoDoOriginal_(m, ctxEv, productId) {
+    if (!ctxEv.original || !m.repo.carregada('MOVIMENTOS_ESTOQUE')) return null;
+    var mov = m.repo.por('MOVIMENTOS_ESTOQUE', 'event_id', ctxEv.original.event_id).filter(function (x) { return x.tipo === 'SAIDA' && x.product_id === productId; })[0];
+    if (!mov) return null;
+    var fin = m.repo.carregada('FINANCEIRO') ? m.repo.por('FINANCEIRO', 'event_id', ctxEv.original.event_id).filter(function (f) { return f.product_id === productId; })[0] : null;
+    return { custo_unitario: typeof mov.custo_unitario === 'number' && mov.custo_unitario > 0 ? mov.custo_unitario : null, conta: fin ? m.repo.porId('PLANO_CONTAS', fin.conta_id) : null };
+  }
+  /** As contas em que o consumo de insumo cai (07, seção 1.3): o produto do cadastro com custo nunca é comprado nelas. */
+  function contasDeConsumo_() {
+    var out = {};
+    Object.keys(HealthService.CONTA_DA_CATEGORIA).forEach(function (k) { out[HealthService.CONTA_DA_CATEGORIA[k]] = true; });
+    out.TRATAMENTOS = true;
+    return out;
   }
   function rotuloProcedimento_(p) {
     return { VACINA: 'vacina', VERMIFUGO: 'vermífugo', MEDICAMENTO: 'medicamento', TRATAMENTO: 'tratamento', EXAME: 'exame', DOENCA: 'registro de doença' }[p] || 'outro procedimento';
@@ -1129,7 +1163,9 @@ var EventService = (function () {
       s.quantidade = s.quantidadeInformada !== null ? s.quantidadeInformada : s.modo !== 'TOTAL' && todas && soma > 0 ? soma / 10000 : null;
       if (s.quantidade === null && s.modo === 'TOTAL' && vazio_(c.quantidade_consumida_total)) return; // o catálogo já pediu a quantidade
       if (s.quantidade === null) return;
-      var cu = typeof s.produto.custo_unitario === 'number' && s.produto.custo_unitario > 0 ? s.produto.custo_unitario : null;
+      var congelado = consumoDoOriginal_(m, ctxEv, s.produto.product_id);
+      var cu = congelado ? congelado.custo_unitario : typeof s.produto.custo_unitario === 'number' && s.produto.custo_unitario > 0 ? s.produto.custo_unitario : null;
+      var contaConsumo = congelado && congelado.conta ? congelado.conta : FinancialService.conta(m.repo, HealthService.CONTA_DA_CATEGORIA[s.produto.categoria] || 'TRATAMENTOS');
     }
     // Aplicação anterior ao marco zero (importação do histórico sanitário; 04, seção 6): efeito zero no inventário, também no
     // de insumos — o estoque e o custo do insumo começam no marco zero (a saída de 2025 não baixa o frasco de hoje, e o custo
@@ -1148,7 +1184,7 @@ var EventService = (function () {
       if (valor > 0) {
         var porPeso = s.modo === 'POR_PESO' && itens.length > 1 && todas;
         var pl = FinancialService.planejar(m.tx, {
-          evento: ev, conta: FinancialService.conta(m.repo, HealthService.CONTA_DA_CATEGORIA[s.produto.categoria] || 'TRATAMENTOS'), naturezas: ['CUSTEIO'], valor: valor,
+          evento: ev, conta: contaConsumo, naturezas: ['CUSTEIO'], valor: valor,
           descricao: HealthService.descricaoConsumo(s.produto, s.quantidade), quantidade: s.quantidade, product_id: s.produto.product_id, semCaixa: true,
           rateio: porPeso
             ? { criterio: 'MANUAL', justificativa: 'Proporcional à dose de cada animal (dose por kg de peso vivo).', itens: itens.map(function (it) { return { animal_id: it.animal_id, chave: it.codigo_interno, base: it.dose, quem: it.quem }; }), cemPorCento: true }
@@ -1166,7 +1202,12 @@ var EventService = (function () {
       var conta = m.repo.porId('PLANO_CONTAS', c.custo_conta_id);
       parceiroValido_(m, ctxEv, 'custo_partner_id', c.custo_partner_id);
       if (!conta) erroGeral_(m, 'custo_conta_id', 'NAO_ENCONTRADO', 'A conta escolhida não existe no plano de contas.');
-      else {
+      else if (s.consumo && s.consumo.valor > 0 && contasDeConsumo_()[conta.codigo]) {
+        // O produto do cadastro com custo já entra no resultado pelo consumo (07, seção 5: nunca é comprado em conta CUSTEIO);
+        // o mesmo frasco pago aqui, numa conta de insumo, sairia duas vezes do resultado (13, FIN-04).
+        erroGeral_(m, 'custo_conta_id', 'CUSTO_EM_DOBRO', s.produto.nome + ' é do cadastro e já entra no custo pelo consumo (' + HealthService.quantidadeTexto(s.quantidade, s.produto.unidade) + ', ' +
+          Utils.formatarReais(s.consumo.valor) + ' pelo custo do cadastro). Lance a compra do frasco pela entrada no estoque e deixe aqui só o serviço (a conta Serviços veterinários, por exemplo), ou aplique pelo nome do produto, sem o cadastro.');
+      } else {
         var ps = FinancialService.planejar(m.tx, {
           evento: ev, conta: conta, naturezas: ['CUSTEIO'], valor: c.custo_valor,
           descricao: nulo_(c.custo_descricao) || (rotuloProcedimento_(s.procedimento).replace(/^./, function (x) { return x.toUpperCase(); }) + ' de ' + br_(ev.event_date) + ': serviço ou produto pago no ato'),
@@ -1537,16 +1578,20 @@ var EventService = (function () {
     var obs = typeof c.notes === 'string' ? nulo_(Utils.aparar(c.notes)) : null;
     if (sub === 'ENTRADA') {
       var q = typeof c.quantidade === 'number' ? c.quantidade : null;
+      // Na correção do mesmo produto, a quantidade por embalagem e o movimento são os que o original gravou (o payload
+      // congela o fator; a entrada com controle tinha o movimento): mudar o cadastro depois não muda a compra.
+      var doOriginal = entradaDoOriginal_(m, ctxEv, produto.product_id);
+      var fator = doOriginal && typeof doOriginal.fator === 'number' ? doOriginal.fator : produto.fator_conversao;
       if (!vazio_(c.qtd_apresentacao) && typeof c.qtd_apresentacao === 'number') {
-        if (typeof produto.fator_conversao !== 'number' || !(produto.fator_conversao > 0)) {
+        if (typeof fator !== 'number' || !(fator > 0)) {
           erroGeral_(m, 'qtd_apresentacao', 'SEM_FATOR', 'O produto ' + produto.nome + ' não tem no cadastro quantas unidades vêm em cada embalagem: informe a quantidade em ' + produto.unidade + ' ou complete o cadastro.');
           return;
         }
-        var calc = Utils.arredondar(c.qtd_apresentacao * produto.fator_conversao, 4);
-        if (q !== null && q !== calc) { erroGeral_(m, 'quantidade', 'CONFLITO_DE_CAMPOS', 'As ' + Utils.formatarNumero(c.qtd_apresentacao) + ' embalagens de ' + Utils.formatarNumero(produto.fator_conversao) + ' dão ' + HealthService.quantidadeTexto(calc, produto.unidade) + ', mas a quantidade informada é ' + HealthService.quantidadeTexto(q, produto.unidade) + '. Deixe só uma das duas.'); return; }
+        var calc = Utils.arredondar(c.qtd_apresentacao * fator, 4);
+        if (q !== null && q !== calc) { erroGeral_(m, 'quantidade', 'CONFLITO_DE_CAMPOS', 'As ' + Utils.formatarNumero(c.qtd_apresentacao) + ' embalagens de ' + Utils.formatarNumero(fator) + ' dão ' + HealthService.quantidadeTexto(calc, produto.unidade) + ', mas a quantidade informada é ' + HealthService.quantidadeTexto(q, produto.unidade) + '. Deixe só uma das duas.'); return; }
         q = calc;
         e.qtd_apresentacao = c.qtd_apresentacao;
-        e.fator_conversao = produto.fator_conversao;
+        e.fator_conversao = fator;
       }
       if (q === null) { if (vazio_(c.quantidade)) erroGeral_(m, 'quantidade', 'CAMPO_OBRIGATORIO', 'Informe a quantidade comprada (na unidade do produto, ' + produto.unidade + ') ou as embalagens.'); return; }
       if (!(q > 0)) { erroGeral_(m, 'quantidade', 'VALOR_FORA_DA_FAIXA', 'A quantidade comprada precisa ser maior que zero.'); return; }
@@ -1569,8 +1614,8 @@ var EventService = (function () {
       resumoFinanceiro_(m, ctxEv, [resumoLancamento_(m, pl, m.repo.porId('PLANO_CONTAS', pl.linhas.FINANCEIRO[0].conta_id), { papel: 'INSUMO' })], [pl]);
       var a = FinancialService.avisoPeriodo(m.params, ev.event_date, 'A compra do insumo');
       if (a) avisoItem_(m, null, a.codigo, a.mensagem);
-      // O movimento de entrada só com o estoque controlado (desenho-base 16.9).
-      if (produto.controla_estoque === true) {
+      // O movimento de entrada só com o estoque controlado (desenho-base 16.9); na correção, como o original gravou.
+      if (doOriginal ? doOriginal.comMovimento : produto.controla_estoque === true) {
         ctxEv.plano.MOVIMENTOS_ESTOQUE.push({ mov_id: m.tx.novoId(), product_id: produto.product_id, event_id: ev.event_id, data: ev.event_date, tipo: 'ENTRADA', quantidade: q, custo_unitario: HealthService.custoUnitarioEntrada(c.valor, q), lote: lote, validade: nulo_(c.validade), observacoes: obs });
       }
     } else {
@@ -1604,6 +1649,16 @@ var EventService = (function () {
       });
     }
     e.saldo = produto.controla_estoque === true ? { antes: HealthService.saldo(aa.antes, null), depois: HealthService.saldo(aa.depois, null) } : null;
+  }
+  /** Na correção da entrada do mesmo produto: {fator (o do payload do original), comMovimento (o original tinha a entrada)}. */
+  function entradaDoOriginal_(m, ctxEv, productId) {
+    var o = ctxEv.original;
+    if (!o || o.event_type !== 'ESTOQUE' || o.event_subtype !== 'ENTRADA') return null;
+    var fin = m.repo.carregada('FINANCEIRO') ? m.repo.por('FINANCEIRO', 'event_id', o.event_id).filter(function (f) { return f.product_id === productId; })[0] : null;
+    if (!fin) return null;
+    var pj = o.payload_json || {};
+    var movs = m.repo.carregada('MOVIMENTOS_ESTOQUE') ? m.repo.por('MOVIMENTOS_ESTOQUE', 'event_id', o.event_id) : [];
+    return { fator: typeof pj.fator_conversao === 'number' ? pj.fator_conversao : null, comMovimento: movs.some(function (x) { return x.tipo === 'ENTRADA' && x.product_id === productId; }) };
   }
   /** Resumo do estoque para a revisão (impactos). */
   function resumoEstoque_(ctxEv) {
@@ -3661,6 +3716,8 @@ var EventService = (function () {
       modo_dose: ctxEv.sanidade ? ctxEv.sanidade.modo : null,
       dose_referencia: ctxEv.sanidade && ctxEv.sanidade.modo && ctxEv.sanidade.modo !== 'TOTAL' ? ctxEv.sanidade.doseRef : null,
       quantidade_consumida_total: ctxEv.sanidade ? ctxEv.sanidade.quantidade : null,
+      // O intervalo do protocolo que propôs a próxima aplicação (vazia no formulário): congelado para a correção.
+      intervalo_protocolo_dias: ctxEv.sanidade && typeof ctxEv.sanidade.intervaloProtocolo === 'number' ? ctxEv.sanidade.intervaloProtocolo : null,
       // Estoque (03b, seção 2.6): as embalagens e a quantidade por embalagem congelada; no acerto pela contagem, o saldo contado.
       qtd_apresentacao: ctxEv.estoque ? ctxEv.estoque.qtd_apresentacao : null,
       fator_conversao: ctxEv.estoque ? ctxEv.estoque.fator_conversao : null,

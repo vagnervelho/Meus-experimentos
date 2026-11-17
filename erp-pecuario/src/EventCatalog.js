@@ -406,7 +406,7 @@ var EventCatalog = (function () {
   function camposCustoPago_(rotulo, ajuda) {
     var tem = quando_('custo_valor', true);
     return [
-      c_('custo_valor', rotulo || 'Serviço ou produto pago no ato (opcional)', 'dinheiro', { min: 0.01, ajuda: ajuda || 'Veterinário, produto comprado na hora e não lançado no estoque: vira custo dos animais tratados, com o pagamento a seguir.' }),
+      c_('custo_valor', rotulo || 'Serviço ou produto pago no ato (opcional)', 'dinheiro', { min: 0.01, ajuda: ajuda || 'Veterinário, serviço ou produto sem cadastro comprado na hora: vira custo dos animais tratados, com o pagamento a seguir. O produto do cadastro já entra no custo pelo consumo: a compra dele vai pela entrada no estoque.' }),
       c_('custo_conta_id', 'Conta do custo', 'ref:PLANO_CONTAS', { naturezas: ['CUSTEIO'], visivel_se: tem, obrigatorio_se: tem }),
       c_('custo_partner_id', 'Pago a', 'ref:PARCEIROS', { visivel_se: tem }),
       c_('custo_vencimento', 'Vencimento', 'data', { visivel_se: tem, ajuda: 'Vazio = à vista, na data da aplicação. Em mais de uma vez, é o vencimento da primeira parcela.' }),
