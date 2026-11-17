@@ -1757,3 +1757,61 @@ Nenhuma linha de código mudou nesta etapa: só documentos.
   52 KB) e `docs/fase-0/11-riscos-e-premissas.md`, R-31 (Weights 48, Health 24, Reproduction 52 KB e "sobram cerca de 2,5 KB").
 - Durante a etapa, o salvamento automático de fora dela gravou parte destes documentos (commit `c17c627`, 10:10, só
   documentos); esta etapa não fez commit nem push.
+
+## 17/11/2026 — Fase 3, conserto pela garantia, etapa 1: viagem no tempo (o estado em D)
+
+Por quê: as três rodadas de revisão da Fase 3 (29, 25 e 25 achados; 14, 8 e 5 altos) repetiram duas classes de defeito, consertadas
+caso a caso. Esta etapa trata a primeira — número ou estado pedido numa data passada calculado com o dado de hoje — por uma
+propriedade conferida em todos os caminhos de consulta com data, um ponto único de leitura do estado em D e um oráculo no teste
+aleatório (`docs/CONTRATOS.md`, seção 46). A segunda classe (os estados do curral e do tronco) fica para a etapa seguinte.
+
+- Inventário (seção 46): as 29 rotas CONSULTA — as que recebem data (`inventario.posicao`, `inventario.elegiveis`,
+  `pasto.listar`, `pasto.painel`, `sanidade.agenda`, `reproducao.indicadores`, `reproducao.matrizes`, `peso.desempenho`,
+  `dashboard.obter`, `evento.listar`), a ficha (a data de referência: hoje no rebanho, a da saída para quem saiu), as que são de
+  hoje por desenho (`animal.listar`, `evento.obter`, `alerta.listar`) e as que só mostram registros —, a importação (a data da
+  linha e o marco zero) e os cálculos do servidor com data; para cada uma, o que é "em D" e o que o desenho manda ler como está
+  hoje, com a fonte no desenho (desenho-base 4.3 e 16.2; 02, política `escrita`; 03a, seções 4.9, 4.10, 4.12 e DL-08; 05,
+  RN-058 e seção 4.9; 07, seção 8.1).
+- Propriedade: a resposta numa data D é função só dos fatos até D (com as correções que valem para todo o histórico) e dos
+  cadastros que o desenho manda ler como estão hoje; um fato depois de D (também estorno e correção) e um cadastro que não vale
+  para o passado não a mudam; um fato retroativo muda só o que alcança; ela não depende da data de hoje; e em D = hoje o caminho
+  sem data é o mesmo que o caminho com a data.
+- Ponto único: `Timeline.fonteAte(f, data)` (a fonte restrita aos fatos até D), `Timeline.retratoEm(f, id, data, filhos)` (o
+  MESMO projetor do estado de hoje sobre os fatos até D, com o brinco e a cria ao pé de D), `Timeline.periodosDeBrinco(f, id)` (os
+  períodos de cada número pela sequência de `brincoEm`, com a regra 16.2) e `AnimalService.retratoEm(L, a, data)` (memorizado;
+  em D = hoje, a projeção gravada). `InventoryService.presentes`/`presentesNoDia` entregam `animal` (o retrato, calculado na
+  primeira leitura) e `registro` (a projeção de hoje); as contas de cabeças, categoria e peso leem `registro` e não pagam o
+  retrato.
+- Consertos (cada um com teste em `tests/tempo.regressoes.test.js` que falha com o `src/` de antes, commit `d72e518`):
+  o brinco de hoje nas listas de uma data passada (painel e dias de permanência do pasto, agenda, fêmeas, linhas do desempenho);
+  a situação e o pasto de hoje nas linhas do desempenho de um período passado; a estação padrão dos indicadores e a lista de
+  fêmeas da estação contando registros depois de D; o pasto desativado depois que sumia da lista de pastos da data em que tinha
+  animal; a ficha de quem saiu com a carência pelo relógio e a cria ao pé de hoje (agora as da data da saída); e a importação
+  (manejo, eventos e a mãe e o pai do rebanho inicial) achando o dono do número pelos períodos gravados de IDENTIFICACOES, sem a
+  regra 16.2 (agora `Timeline.periodosDeBrinco`, o mesmo animal que a posição daquela data; a validação da importação de ANIMAIS
+  passou a ler EVENTOS com acesso cru). O arquivo de regressão tem 15 testes (8 cenários pela api e 7 sequências mínimas do teste
+  aleatório): com o `src/` de antes, 14 falham; o 15º, a volta ao rebanho (do modelo do teste), passa nos dois.
+- Oráculo de viagem no tempo (`tests/apoio-fuzz.js`, `oraculoTempo`; seção 36): num passo sorteado por um gerador à parte (as
+  sequências das sementes não mudaram: as 23 sementes fixas dão os mesmos 826 aceitos e 443 recusados), o retrato de uma bateria
+  de consultas em D, por unidade (a consulta ou a linha de um animal) com a impressão digital do que ela pode ler; depois de cada
+  passo que grava, a comparação das unidades com a impressão inalterada; no passo do retrato, o relógio adiantado (1, 31, 200 ou
+  400 dias), o caminho padrão em D = hoje, a lista de pastos da data e a ficha cruzada com as consultas da data; e, a cada passo
+  que grava, o retrato de hoje = a projeção em todo campo projetado. As exceções por desenho estão no oráculo e na seção 46. As
+  sementes fixas exigem os onze contadores principais do oráculo (`FUZZ_COBERTURA=1`); nelas, 109 retratos, 23.425 unidades com o
+  relógio adiantado, 97.205 unidades comparadas e 6.449 retratos de hoje conferidos com a projeção.
+- Leva de busca (3110000 a 3110039, 40 sementes × 100 passos, com o código de antes dos consertos): 1.797 aceitos, 997 recusados
+  e 15 falhas — 13 do código em 6 classes (o brinco de hoje no painel, 3; as fêmeas da estação, 2; a situação e o pasto de hoje no
+  desempenho, 5; a carência da ficha pelo relógio, 1; o pasto que sumia, 1; a cria ao pé da ficha, 1) e 2 do modelo do teste (a
+  volta ao rebanho leva a ficha para hoje, por desenho: refutadas, e o oráculo passou a pôr a situação e a saída de hoje na
+  impressão da ficha). As 15 sequências, as mínimas e as inteiras, se repetem sem falha com o código final (7 delas fixas no
+  arquivo de regressão). Depois dos consertos, com o código de então: 3120000 a 3120079 (80 × 100): 4.590 aceitos, 2.738
+  recusados, 0 falhas.
+- Custo: o retrato só é calculado para o animal que a consulta mostra numa data passada (`itemPresente_`); a visão geral (com a
+  série mensal), a posição e os cartões dos pastos não calculam nenhum. Na base de demonstração (304 cabeças), numa data de
+  2025: os elegíveis calculam 294 retratos, a lista de fêmeas 138, o desempenho 360 e a agenda 18.
+- Uma leva de 1.000 sementes começada às 11:14 com o código intermediário (3200000 a 3200999) abortou aos 40 minutos nas
+  quatro partes, com INTERNAL na montagem do sistema de uma semente: uma edição em curso de `InventoryService` (a contagem por
+  categoria lendo `registro`, que o item montado pelo aviso de lotação do motor não tem; a versão final lê `semData_`) entrou
+  nas sementes que começaram naquele minuto (o teste aleatório lê o `src/` a cada semente). Nenhuma falha foi registrada nas
+  sementes que ela rodou, mas o resumo só sai no fim: a leva foi descartada e refeita inteira com o código final congelado
+  (abaixo).
