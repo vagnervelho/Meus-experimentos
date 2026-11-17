@@ -276,20 +276,21 @@ var WeightService = (function () {
     return true;
   }
   /**
-   * O ganho médio diário da pesagem `s[i]` contra a anterior, pela MESMA conta da ficha (intervalos: só entre individuais da
-   * mesma permanência e com o intervalo mínimo; RN-052, 07, seção 8.1): {gmd_kg_dia, motivo, explicacao}. O modo curral
-   * mostra o que vem daqui, nunca uma conta própria.
+   * O ganho médio diário da pesagem `s[i]`, pela MESMA conta da ficha (intervalos: só entre individuais da mesma permanência,
+   * a última de cada dia, com o intervalo mínimo; RN-052, 07, seção 8.1): o do intervalo que termina nesta pesagem, contra a
+   * pesagem individual anterior (a estimada ou a média do lote no meio não contam). Sem intervalo, vazio com o porquê
+   * verdadeiro: a própria pesagem estimada, outra individual depois dela no mesmo dia, ou nenhuma individual antes.
+   * {gmd_kg_dia, motivo, explicacao}. O modo curral mostra o que vem daqui, nunca uma conta própria.
    */
   function gmdDaPesagem_(s, i, periodos, params) {
     var x = s[i];
-    var ant = i > 0 ? s[i - 1] : null;
     var nada = function (explicacao) { return { gmd_kg_dia: null, motivo: 'DADOS_INSUFICIENTES', explicacao: explicacao }; };
-    if (!ant) return nada('Primeira pesagem do animal: sem anterior para comparar.');
-    if (!x.individual) return nada('Esta pesagem é estimada (estimativa visual ou média do lote): fica fora do ganho médio diário.');
-    if (!ant.individual) return nada('A pesagem anterior é estimada (estimativa visual ou média do lote): fica fora do ganho médio diário.');
     var v = intervalos(s, periodos, params).filter(function (y) { return y.weight_ate === x.weight_id; })[0];
-    if (!v || v.weight_de !== ant.weight_id) return nada('Há outra pesagem no mesmo dia: o ganho médio diário fica com a última do dia.');
-    return { gmd_kg_dia: v.gmd_kg_dia, motivo: v.motivo, explicacao: v.explicacao };
+    if (v) return { gmd_kg_dia: v.gmd_kg_dia, motivo: v.motivo, explicacao: v.explicacao };
+    if (!x.individual) return nada('Esta pesagem é estimada (estimativa visual, média do lote' + (params && params.gmd_aceita_fita === true ? '' : ' ou fita') + '): fica fora do ganho médio diário.');
+    if (s.slice(i + 1).some(function (y) { return y.individual && y.data === x.data; })) return nada('Há outra pesagem no mesmo dia, depois desta: o ganho médio diário fica com a última do dia.');
+    if (s.slice(0, i).some(function (y) { return y.data < x.data; })) return nada('As pesagens anteriores são estimadas (estimativa visual, média do lote' + (params && params.gmd_aceita_fita === true ? '' : ' ou fita') + '): ficam fora do ganho médio diário.');
+    return nada('Primeira pesagem do animal: sem anterior para comparar.');
   }
 
   // ------------------------------------------------------------------ resultado do lançamento ----
@@ -303,7 +304,7 @@ var WeightService = (function () {
   }
   /**
    * Resultado de um evento PESAGEM gravado (resposta do registrar e do reenvio): {n, total_kg, media_kg, tipo, metodo,
-   * jejum, lote, animais: [{animal_id, peso_kg, anterior: {data, peso_kg} | null, ganho_kg, dias, gmd_kg_dia, gmd_motivo,
+   * jejum, lote, animais: [{animal_id, peso_kg, anterior: {data, peso_kg, metodo, estimado} | null, ganho_kg, dias, gmd_kg_dia, gmd_motivo,
    * gmd_explicacao, variacao_pct}]} — o ganho, os dias e a variação contra a pesagem imediatamente anterior (qualquer
    * método); o GMD pela conta da ficha (gmdDaPesagem_: vazio com o porquê no intervalo curto e na pesagem estimada).
    */
@@ -328,7 +329,7 @@ var WeightService = (function () {
       var a = tx.cru ? tx.cru.cruPorId('ANIMAIS', r.animal_id) : tx.repo.porId('ANIMAIS', r.animal_id);
       var dataAtual = a && !vazio_(a.data_ultima_pesagem) ? a.data_ultima_pesagem : null;
       return {
-        animal_id: r.animal_id, peso_kg: r.peso_kg, anterior: ant ? { data: ant.data, peso_kg: ant.peso_kg } : null,
+        animal_id: r.animal_id, peso_kg: r.peso_kg, anterior: ant ? { data: ant.data, peso_kg: ant.peso_kg, metodo: ant.metodo, estimado: ant.estimado === true } : null,
         ganho_kg: v ? v.ganho_kg : null, dias: v ? v.dias : null, gmd_kg_dia: g.gmd_kg_dia, gmd_motivo: g.gmd_kg_dia === null ? g.motivo : null, gmd_explicacao: g.gmd_kg_dia === null ? g.explicacao : null,
         variacao_pct: v ? v.variacao_pct : null,
         peso_atual: a && typeof a.peso_atual === 'number' ? a.peso_atual : null, data_ultima_pesagem: dataAtual,

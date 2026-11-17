@@ -101,6 +101,13 @@ var TelaInicio = (function () {
           h('span', { text: m.texto(r) })),
           h('div', { class: 'acoes', style: 'margin-top:0' }, h('a', { class: 'botao botao-secundario', href: Roteador.href(m.rota), dataset: { rota: m.rota } }, 'Continuar'))));
       });
+      // O curral e o tronco servem ao lugar de sinal fraco (08, seção 9): com a Início aberta (com sinal), as telas deles vêm
+      // em segundo plano e abrem depois sem sinal. Sem sinal agora, a Início avisa antes de ir ao curral.
+      Modulos.sobDemanda().filter(function (m) { return m.tela === 'Weights' || m.tela === 'Reproduction'; }).forEach(function (m) {
+        Modulos.carregar(m.tela).catch(function (e) {
+          if (lista.isConnected) lista.appendChild(h('li', { class: 'linha-acao', dataset: { preCarga: m.tela } }, h('span', { class: 'campo-linha' }, UI.icone('aviso'), h('span', { text: 'A tela ' + m.rotulo + ' ainda não veio para este aparelho (' + e.message + '): abra-a uma vez com sinal antes de ir ao curral.' }))));
+        });
+      });
       rs.filter(function (r) { return Store.tipoEvento(r.tipo); }).forEach(function (r) {
         var enviando = r.estado === 'ENVIANDO';
         var descricao = Registro.descricaoRascunho(r);

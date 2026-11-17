@@ -592,6 +592,17 @@ var Timeline = (function () {
     });
     return por;
   }
+  /**
+   * O brinco em uso no fim do dia D (a regra da projeção, só com as identificações até D): o código, ou null (sem brinco
+   * naquele dia, ou retirado). Sem nenhuma identificação de brinco gravada, o brinco do cadastro. Serve à posição de uma data
+   * passada (o curral e o tronco acham o animal pelo número daquele dia: 08, seção 5, item 5).
+   */
+  function brincoEm(f, id, data) {
+    var lista = linhasDeIdentificacao_(f, id).BRINCO || [];
+    if (!lista.length) { var a = f.animal(id); return a && !vazio_(a.brinco) ? a.brinco : null; }
+    var u = codigoEmUso_(lista.filter(function (x) { return x.data_inicio <= data; }));
+    return u ? u.codigo : null;
+  }
   /** Código em uso de um tipo ao fim da sequência (ou vazio, depois de uma retirada). */
   function codigoEmUso_(lista) {
     var ultima = lista && lista.length ? lista[lista.length - 1] : null;
@@ -629,11 +640,21 @@ var Timeline = (function () {
     });
     return proj;
   }
-  function criaAoPe_(f, id, projetada, desmama) {
+  /**
+   * A cria ao pé da mãe numa data D (a regra da projeção, só com os fatos até D): alguma das crias `filhos` presente no
+   * rebanho em D, sem desmama até D, nascida na fazenda ou que entrou com a idade abaixo da desmama de referência. Serve a
+   * `reproducao.matrizes` em qualquer data (em D = hoje, o mesmo que a projeção `cria_ao_pe`).
+   */
+  function criaAoPeEm(f, filhos, data) {
+    var desmama = f.parametros.idade_desmama_padrao_meses;
+    return (filhos || []).some(function (fid) { return criaAoPe_(f, fid, null, desmama, data); });
+  }
+  function criaAoPe_(f, id, projetada, desmama, data) {
     var c = projetada ? projetada.campos : f.animal(id);
-    if (!c || c.situacao_cadastral !== 'ATIVO') return false;
+    if (!c) return false;
+    if (vazio_(data) ? c.situacao_cadastral !== 'ATIVO' : c.situacao_cadastral === 'EXTERNO' || !situacaoEm(f.linhas(id), data, f.marcoZero).presente) return false;
     var vig = f.linhas(id);
-    if (vig.some(function (l) { return l.event_type === 'DESMAMA' && l.papel === 'SUJEITO'; })) return false;
+    if (vig.some(function (l) { return l.event_type === 'DESMAMA' && l.papel === 'SUJEITO' && (vazio_(data) || l.event_date <= data); })) return false;
     var ev = f.evento(c.evento_origem_id);
     if (!ev) return false;
     if (ev.event_type === 'NASCIMENTO') return true;
@@ -1011,6 +1032,8 @@ var Timeline = (function () {
     fonte: fonte,
     projetarAnimal: projetarAnimal,
     reproducaoEm: reproducaoEm,
+    criaAoPeEm: criaAoPeEm,
+    brincoEm: brincoEm,
     chegadaDeclarada: chegadaDeclarada,
     entradaDoCusto: entradaDoCusto,
     ultimaPesagem: ultimaPesagem,

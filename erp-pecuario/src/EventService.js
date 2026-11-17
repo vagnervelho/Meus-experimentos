@@ -1096,7 +1096,9 @@ var EventService = (function () {
       if (s.doseRef === null) erroItem_(m, it, 'dose', 'CAMPO_OBRIGATORIO', 'informe a dose (a do lançamento ou a deste animal).');
       else dose = s.doseRef;
     } else if (s.modo === 'POR_PESO' && dose === null) {
+      var gravada = s.doseRef === null ? null : doseDoOriginal_(m, ctxEv, it.animal_id);
       if (s.doseRef === null) erroItem_(m, it, 'dose', 'CAMPO_OBRIGATORIO', 'informe a dose por kg (no lançamento) ou a dose deste animal.');
+      else if (gravada !== null) { dose = gravada; it.doseDoOriginal = true; }
       else {
         var L = m.leitorSanidade || (m.leitorSanidade = AnimalService.leitor(m.tx, { fonte: m.f, parametros: m.params }));
         var a = estado_(m, it.animal_id);
@@ -1121,6 +1123,24 @@ var EventService = (function () {
     it.sanidade = r;
     ctxEv.plano.SANIDADE.push(r);
   }
+  /**
+   * Na correção (e na correção do substituto) da aplicação por peso, a dose gravada do animal no original (03b,
+   * SANIDADE.dose: imutável; o operador confirmou a dose proposta pelo peso daquele dia): com o mesmo produto, o mesmo modo,
+   * a mesma dose por kg e a mesma data, corrigir outro campo não refaz a dose pelo peso de hoje (a pesagem lançada depois, o
+   * peso de referência ou a validade do peso mudados depois). Mudar a dose por kg, a data, o produto ou incluir o animal
+   * refaz pelo peso na data. null fora disso.
+   */
+  function doseDoOriginal_(m, ctxEv, animalId) {
+    var o = ctxEv.original;
+    var s = ctxEv.sanidade;
+    if (!o || o.event_type !== 'SANIDADE' || o.event_date !== ctxEv.ev.event_date || !m.repo.carregada('SANIDADE')) return null;
+    var pj = o.payload_json || {};
+    if (pj.modo_dose !== 'POR_PESO' || pj.dose_referencia !== s.doseRef) return null;
+    var r = m.repo.por('SANIDADE', 'event_id', o.event_id).filter(function (x) { return x.animal_id === animalId; })[0];
+    if (!r || typeof r.dose !== 'number') return null;
+    var mesmo = s.produto ? r.produto_id === s.produto.product_id : vazio_(r.produto_id) && Utils.normalizarTexto(r.nome_produto || '') === Utils.normalizarTexto(s.nome || '');
+    return mesmo ? r.dose : null;
+  }
   /** Movimentos do produto antes do comando (os vigentes) e depois (sem os do original da correção, com os do plano). */
   function movimentosAntesDepois_(m, ctxEv, productId) {
     var antes = HealthService.movimentosDoProduto(m.repo, productId, null);
@@ -1143,6 +1163,26 @@ var EventService = (function () {
       : 'Confira a quantidade ou lance antes a entrada do produto.';
     avisoItem_(m, null, 'ESTOQUE_INSUFICIENTE', produto.nome + ': o estoque ficaria em ' + HealthService.quantidadeTexto(dp.saldo, produto.unidade) + ' em ' + br_(dp.data) +
       ' (o saldo não cobre o que sai). ' + conselho + ' Gravar mesmo assim?');
+  }
+  /**
+   * Contagem vigente do produto depois da data do movimento (03a, MOVIMENTOS_ESTOQUE, AJUSTE: o acerto corrige o saldo pela
+   * contagem; desenho-base 4.3: "na data D" é o fim do dia D). O acerto gravou a diferença para o saldo daquele dia: o
+   * comando que muda o saldo do fim do dia contado (o movimento retroativo, a correção que muda a quantidade, o estorno, a
+   * contagem anterior a ela) desfaria em silêncio o que foi contado. Recusado (CONFLICT CONTAGEM_POSTERIOR, com a contagem
+   * que impede): estornar a contagem, gravar o lançamento e contar de novo. As contagens anuladas pelo próprio comando
+   * (`m.f.excluidos`) não contam.
+   */
+  function contagemPosterior_(m, produto, antes, depois) {
+    if (!produto) return;
+    var c = HealthService.contagemAfetada(HealthService.contagensDoProduto(m.repo, produto.product_id, m.f.excluidos), antes, depois);
+    if (!c) return;
+    var ev = m.repo.porId('EVENTOS', c.event_id) || {};
+    m.conflitos.push(Validation.detalhe({
+      codigo: 'CONTAGEM_POSTERIOR', campo: 'product_id',
+      mensagem: produto.nome + ': a contagem do estoque de ' + br_(c.data) + ' (' + HealthService.quantidadeTexto(c.saldo_contado, produto.unidade) + ' contados) já acertou o saldo daquele dia, e este lançamento o mudaria (de ' +
+        HealthService.quantidadeTexto(HealthService.saldo(antes, c.data), produto.unidade) + ' para ' + HealthService.quantidadeTexto(HealthService.saldo(depois, c.data), produto.unidade) + '). Estorne antes a contagem de ' + br_(c.data) + ', grave este lançamento e conte de novo.',
+      conflito: conflitoCom_(c.event_id, ev.event_type || 'ESTOQUE', ev.event_subtype || 'AJUSTE', c.data),
+    }));
   }
   /**
    * Consumo, custo e carência da SANIDADE (03b, seções 10.3 e 15.2; 07, seção 5; PR-11; RN-054): a quantidade consumida
@@ -1183,6 +1223,7 @@ var EventService = (function () {
       });
       var aa = movimentosAntesDepois_(m, ctxEv, s.produto.product_id);
       avisoEstoque_(m, s.produto, aa.antes, aa.depois);
+      contagemPosterior_(m, s.produto, aa.antes, aa.depois);
       s.saldo = s.produto.controla_estoque === true ? { antes: HealthService.saldo(aa.antes, null), depois: HealthService.saldo(aa.depois, null) } : null;
       var valor = HealthService.valorConsumo(s.quantidade, cu);
       s.consumo = { custo_unitario: cu, valor: valor };
@@ -1271,7 +1312,7 @@ var EventService = (function () {
       dose_referencia: s.doseRef, quantidade: s.quantidade, quantidade_informada: s.quantidadeInformada !== null, consumo: s.consumo || null, estoque: s.saldo || null, historico: !!s.historico,
       protocol_id: s.protocolo ? s.protocolo.protocol_id : null, carencia_dias: s.carenciaDias, fim_carencia: s.fimCarencia, proxima_aplicacao: s.proxima,
       animais: ctxEv.itens.filter(function (it) { return it.sanidade; }).map(function (it) {
-        return { animal_id: it.animal_id, codigo_interno: it.codigo_interno || null, brinco: it.brincoTexto || null, dose: it.dose, peso_kg: it.peso ? it.peso.kg : null, peso_situacao: it.peso ? it.peso.situacao : null, peso_estimado: it.peso ? it.peso.estimado : null, custo: it.sanidade.custo };
+        return { animal_id: it.animal_id, codigo_interno: it.codigo_interno || null, brinco: it.brincoTexto || null, dose: it.dose, dose_do_original: it.doseDoOriginal === true, peso_kg: it.peso ? it.peso.kg : null, peso_situacao: it.peso ? it.peso.situacao : null, peso_estimado: it.peso ? it.peso.estimado : null, custo: it.sanidade.custo };
       }),
     };
   }
@@ -1622,8 +1663,11 @@ var EventService = (function () {
       resumoFinanceiro_(m, ctxEv, [resumoLancamento_(m, pl, m.repo.porId('PLANO_CONTAS', pl.linhas.FINANCEIRO[0].conta_id), { papel: 'INSUMO' })], [pl]);
       var a = FinancialService.avisoPeriodo(m.params, ev.event_date, 'A compra do insumo');
       if (a) avisoItem_(m, null, a.codigo, a.mensagem);
-      // O movimento de entrada só com o estoque controlado (desenho-base 16.9); na correção, como o original gravou.
-      if (doOriginal ? doOriginal.comMovimento : produto.controla_estoque === true) {
+      // O movimento de entrada só com o estoque controlado (desenho-base 16.9); na correção, como o original gravou. O payload
+      // congela se a compra tem o movimento (`com_movimento`): a entrada apagada à mão vira fonte quebrada na verificação,
+      // não "compra lançada antes de ligar o controle".
+      e.comMovimento = doOriginal ? doOriginal.comMovimento : produto.controla_estoque === true;
+      if (e.comMovimento) {
         ctxEv.plano.MOVIMENTOS_ESTOQUE.push({ mov_id: m.tx.novoId(), product_id: produto.product_id, event_id: ev.event_id, data: ev.event_date, tipo: 'ENTRADA', quantidade: q, custo_unitario: HealthService.custoUnitarioEntrada(c.valor, q), lote: lote, validade: nulo_(c.validade), observacoes: obs });
       }
     } else {
@@ -1648,17 +1692,22 @@ var EventService = (function () {
     var aa = movimentosAntesDepois_(m, ctxEv, produto.product_id);
     // Na correção, o produto do original que sai do lançamento também muda de saldo.
     avisoEstoque_(m, produto, aa.antes, aa.depois);
+    contagemPosterior_(m, produto, aa.antes, aa.depois);
     if (ctxEv.original) {
       m.repo.por('MOVIMENTOS_ESTOQUE', 'event_id', ctxEv.original.event_id).forEach(function (x) {
         if (x.product_id === produto.product_id) return;
         var outro = m.repo.porId('PRODUTOS', x.product_id);
         var ab = movimentosAntesDepois_(m, ctxEv, x.product_id);
         avisoEstoque_(m, outro, ab.antes, ab.depois);
+        contagemPosterior_(m, outro, ab.antes, ab.depois);
       });
     }
     e.saldo = produto.controla_estoque === true ? { antes: HealthService.saldo(aa.antes, null), depois: HealthService.saldo(aa.depois, null) } : null;
   }
-  /** Na correção da entrada do mesmo produto: {fator (o do payload do original), comMovimento (o original tinha a entrada)}. */
+  /**
+   * Na correção da entrada do mesmo produto: {fator (o do payload do original), comMovimento (o que o payload do original
+   * congelou em `com_movimento`; sem ele, a entrada anterior a esse campo, se o original tem o movimento)}.
+   */
   function entradaDoOriginal_(m, ctxEv, productId) {
     var o = ctxEv.original;
     if (!o || o.event_type !== 'ESTOQUE' || o.event_subtype !== 'ENTRADA') return null;
@@ -1666,7 +1715,7 @@ var EventService = (function () {
     if (!fin) return null;
     var pj = o.payload_json || {};
     var movs = m.repo.carregada('MOVIMENTOS_ESTOQUE') ? m.repo.por('MOVIMENTOS_ESTOQUE', 'event_id', o.event_id) : [];
-    return { fator: typeof pj.fator_conversao === 'number' ? pj.fator_conversao : null, comMovimento: movs.some(function (x) { return x.tipo === 'ENTRADA' && x.product_id === productId; }) };
+    return { fator: typeof pj.fator_conversao === 'number' ? pj.fator_conversao : null, comMovimento: typeof pj.com_movimento === 'boolean' ? pj.com_movimento : movs.some(function (x) { return x.tipo === 'ENTRADA' && x.product_id === productId; }) };
   }
   /** Resumo do estoque para a revisão (impactos). */
   function resumoEstoque_(ctxEv) {
@@ -3756,6 +3805,8 @@ var EventService = (function () {
       qtd_apresentacao: ctxEv.estoque ? ctxEv.estoque.qtd_apresentacao : null,
       fator_conversao: ctxEv.estoque ? ctxEv.estoque.fator_conversao : null,
       saldo_contado: ctxEv.estoque ? ctxEv.estoque.saldo_contado : null,
+      // A entrada com o movimento gravado (o controle de estoque no dia da compra, ou o do original na correção).
+      com_movimento: ctxEv.estoque && ctxEv.subtipo === 'ENTRADA' && typeof ctxEv.estoque.comMovimento === 'boolean' ? ctxEv.estoque.comMovimento : null,
       // Castração e ocorrência (03b, seção 2.6): o método (texto livre) e o tipo da ocorrência (LISTAS.TIPO_OCORRENCIA).
       metodo: ctxEv.tipo === 'CASTRACAO' && typeof ctxEv.campos.metodo === 'string' ? nulo_(Utils.aparar(ctxEv.campos.metodo)) : null,
       tipo_ocorrencia: ctxEv.tipo === 'OCORRENCIA' ? nulo_(ctxEv.campos.tipo_ocorrencia) : null,
@@ -3864,6 +3915,7 @@ var EventService = (function () {
     produtos.forEach(function (pid) {
       var mv = movimentosAntesDepois_(m, null, pid);
       avisoEstoque_(m, m.repo.porId('PRODUTOS', pid), mv.antes, mv.depois);
+      contagemPosterior_(m, m.repo.porId('PRODUTOS', pid), mv.antes, mv.depois);
     });
     m.repo.por('FINANCEIRO', 'event_id', alvo.event_id).forEach(function (fin) {
       if (!vazio_(m.params.fin_bloqueio_ate) && fin.data_competencia <= m.params.fin_bloqueio_ate) {

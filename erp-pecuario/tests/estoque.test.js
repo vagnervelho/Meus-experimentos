@@ -81,7 +81,7 @@ test('03a, seção 4.7: entrada de 2 frascos de 50 doses (100, R$ 1,80), saída 
   const p = produto(s, { fator_conversao: 50, custo_unitario: 1.8, controla_estoque: true }, 'p');
   const e = ok(api(s, 'evento.registrar', estoque('ENTRADA', '2026-03-01', { product_id: p.product_id, qtd_apresentacao: 2, valor: 18000, documento: 'NF 123', vencimento: '2026-03-31' }), 'ent'));
   const ev = s.tabela('EVENTOS').find((x) => x.event_id === e.event_id);
-  assert.deepEqual([ev.event_subtype, ev.total_value, ev.payload_json], ['ENTRADA', 18000, { qtd_apresentacao: 2, fator_conversao: 50 }]);
+  assert.deepEqual([ev.event_subtype, ev.total_value, ev.payload_json], ['ENTRADA', 18000, { qtd_apresentacao: 2, fator_conversao: 50, com_movimento: true }]);
   assert.deepEqual(tab(s, 'MOVIMENTOS_ESTOQUE', { event_id: e.event_id }).map((m) => [m.tipo, m.quantidade, m.custo_unitario]), [['ENTRADA', 100, 1.8]]);
   const fin = tab(s, 'FINANCEIRO', { event_id: e.event_id })[0];
   assert.deepEqual([fin.conta_id, fin.natureza, fin.valor, fin.quantidade, fin.product_id, fin.descricao, fin.documento, fin.status_pagamento], [conta(s, 'COMPRA_INSUMOS').conta_id, 'ESTOQUE_INSUMOS', 18000, 100, p.product_id, 'Compra de Vacina X: 100 doses', 'NF 123', 'ABERTO']);

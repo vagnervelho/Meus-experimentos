@@ -434,7 +434,8 @@ var AuditService = (function () {
         por[codigo].n += 1;
         por[codigo].severidades[sev] = true;
         if (!vazio_(a.id)) por[codigo].ids[String(a.id)] = true;
-        if (a.fonte === true || FONTE_QUEBRADA[codigo]) por[codigo].fonte += 1;
+        var fonte = a.fonte === true || (!!FONTE_QUEBRADA[codigo] && a.fonte !== false);
+        if (fonte) por[codigo].fonte += 1;
         if (!completo && lista.length >= LIMITE_ACHADOS) { truncado = true; return; }
         var item = {
           checagem: codigo, severidade: sev, tabela: nulo_(a.tabela), id: vazio_(a.id) ? null : String(a.id), linha: typeof a.linha === 'number' ? a.linha : null,
@@ -447,7 +448,7 @@ var AuditService = (function () {
           item.brinco = nulo_(a.brinco);
           item.resolver = nulo_(a.resolver);
           item.oque = nulo_(a.oque);
-          item.fonte = a.fonte === true || !!FONTE_QUEBRADA[codigo];
+          item.fonte = fonte;
         }
         lista.push(item);
       },
@@ -1665,6 +1666,10 @@ var AuditService = (function () {
           if (fins.length !== 1 || fe.natureza !== 'ESTOQUE_INSUMOS' || vazio_(fe.product_id) || !(fe.quantidade > 0)) { achado('EVENTOS', ev.event_id, 'FINANCEIRO', nome + ': a entrada de insumo precisa de um lançamento de compra de insumos com o produto e a quantidade.', 'COMPRA'); return; }
           if (typeof pj.qtd_apresentacao === 'number' && (typeof pj.fator_conversao !== 'number' || Utils.arredondar(pj.qtd_apresentacao * pj.fator_conversao, 4) !== fe.quantidade)) achado('EVENTOS', ev.event_id, 'payload_json', nome + ': as embalagens × a quantidade por embalagem não dão a quantidade comprada.', 'EMBALAGENS');
           if (movs.length > 1) achado('EVENTOS', ev.event_id, 'MOVIMENTOS_ESTOQUE', nome + ': a entrada tem ' + movs.length + ' movimentos; precisa ter um só.', 'VARIAS');
+          // O payload congela se a compra tem o movimento de entrada (`com_movimento`; sem o campo, a entrada anterior a ele
+          // vale com ou sem): a que tinha e não tem mais foi apagada à mão, e o saldo não pode ser refeito sem ela.
+          if (pj.com_movimento === true && !movs.length) achado('EVENTOS', ev.event_id, 'MOVIMENTOS_ESTOQUE', nome + ': a compra de ' + Utils.formatarNumero(fe.quantidade) + ' do produto foi gravada com o movimento de entrada no estoque, que não está mais na planilha.', 'ENTRADA_SEM_MOVIMENTO');
+          if (pj.com_movimento === false && movs.length) achado('MOVIMENTOS_ESTOQUE', movs[0].mov_id, 'event_id', nome + ': a compra foi gravada sem movimento de entrada (o produto não controlava estoque), mas há um na planilha.', 'ENTRADA_ALHEIA');
           movs.forEach(function (x) {
             if (x.product_id !== fe.product_id || x.quantidade !== fe.quantidade || x.custo_unitario !== HealthService.custoUnitarioEntrada(fe.valor, fe.quantidade)) achado('MOVIMENTOS_ESTOQUE', x.mov_id, 'quantidade', nome + ': o movimento de entrada não confere com a compra (produto, quantidade e custo unitário = valor ÷ quantidade).', 'ENTRADA');
           });
@@ -1672,6 +1677,20 @@ var AuditService = (function () {
           if (fins.length) achado('FINANCEIRO', fins[0].financial_id, 'event_id', nome + ': o acerto de estoque tem lançamento financeiro, que ele não grava.', 'AJUSTE_FIN');
           if (movs.length !== 1 || !(typeof movs[0].quantidade === 'number' && movs[0].quantidade !== 0)) achado('EVENTOS', ev.event_id, 'MOVIMENTOS_ESTOQUE', nome + ': o acerto de estoque precisa de exatamente um movimento diferente de zero.', 'AJUSTE');
           else if ((pj.motivo_ajuste === 'PERDA' || pj.motivo_ajuste === 'VENCIMENTO') && movs[0].quantidade > 0) achado('MOVIMENTOS_ESTOQUE', movs[0].mov_id, 'quantidade', nome + ': a perda ou o vencimento aumenta o estoque no movimento gravado.', 'SINAL');
+          else if (pj.motivo_ajuste === 'CONTAGEM' && typeof pj.saldo_contado === 'number') {
+            // O acerto pela contagem: no fim do dia contado, o saldo dos movimentos vigentes é o contado (03a, MOVIMENTOS_ESTOQUE,
+            // AJUSTE). O movimento até aquele dia gravado depois (ou mexido à mão) desfaz o que foi contado. O motor recusa o
+            // comando que faria isso (CONTAGEM_POSTERIOR); aqui vale para todo caminho. Não é a fonte apagada: o caminho é
+            // estornar a contagem e contar de novo (a chave leva o saldo, para a trava recusar também o que piora).
+            var pc = produto(movs[0].product_id) || {};
+            var naData = HealthService.saldo(HealthService.movimentosDoProduto(repo, movs[0].product_id, null), ev.event_date);
+            if (naData !== pj.saldo_contado) {
+              var oqueC = 'A contagem de ' + br_(ev.event_date) + ' de ' + (pc.nome || 'insumo') + ' (' + HealthService.quantidadeTexto(pj.saldo_contado, pc.unidade) + ' contados) não confere com o saldo do sistema no fim daquele dia (' +
+                HealthService.quantidadeTexto(naData, pc.unidade) + '): há movimento até aquele dia gravado depois da contagem.';
+              col.achado('COPIAS', { tabela: 'MOVIMENTOS_ESTOQUE', id: movs[0].mov_id, campo: 'quantidade', mensagem: oqueC + ' Estorne a contagem e conte de novo.', oque: oqueC, chaves: movs[0].mov_id + '|CONTAGEM|' + naData, event_id: ev.event_id, fonte: false,
+                resolver: 'Estorne antes a contagem de ' + br_(ev.event_date) + ' (ela acertou o saldo daquele dia), grave o lançamento e conte de novo.' });
+            }
+          }
         }
         return;
       }

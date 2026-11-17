@@ -38,6 +38,7 @@ var TelaReproducao = (function () {
     var v = UI.valorInd(ind, function (x) { return Fmt.numero(x, 1) + '%'; });
     return v.motivo ? v.texto + ' (' + v.motivo + ')' : v.texto;
   }
+  function pctParcial(ind) { return pct(ind) + (ind && ind.parcial && ind.valor !== null && ind.valor !== undefined ? ' (parcial)' : ''); }
   /** "Estimativa: 02/09/2027 (de 13/08 a 22/09)" — a previsão do servidor, sempre rotulada. */
   function textoPrevisao(p) {
     if (!p) return '—';
@@ -238,9 +239,10 @@ var TelaReproducao = (function () {
             { id: 'nome', rotulo: 'Categoria' },
             { id: 'expostas', rotulo: 'Expostas', num: true },
             { id: 'prenhez', rotulo: 'Prenhez', num: true, valor: function (x) { return x.prenhez.valor; }, formatar: function (x) { return pct(x.prenhez); } },
-            { id: 'paricao', rotulo: 'Parição', num: true, valor: function (x) { return x.paricao.valor; }, formatar: function (x) { return pct(x.paricao); } },
-            { id: 'natalidade', rotulo: 'Natalidade', num: true, valor: function (x) { return x.natalidade.valor; }, formatar: function (x) { return pct(x.natalidade); } },
-            { id: 'desmama', rotulo: 'Desmama', num: true, valor: function (x) { return x.desmama.valor; }, formatar: function (x) { return pct(x.desmama); } },
+            // A taxa parcial vai rotulada como no gráfico e na lista geral (R-14): parição de 0% em plena gestação não é 0%.
+            { id: 'paricao', rotulo: 'Parição', num: true, valor: function (x) { return x.paricao.valor; }, formatar: function (x) { return pctParcial(x.paricao); } },
+            { id: 'natalidade', rotulo: 'Natalidade', num: true, valor: function (x) { return x.natalidade.valor; }, formatar: function (x) { return pctParcial(x.natalidade); } },
+            { id: 'desmama', rotulo: 'Desmama', num: true, valor: function (x) { return x.desmama.valor; }, formatar: function (x) { return pctParcial(x.desmama); } },
           ] }).el), { dado: 'estacao-categorias' }));
         corpo.appendChild(UI.nota('Com menos de ' + d.parametros.indicador_n_minimo + ' fêmeas no denominador a taxa fica "—" (dados insuficientes). Abaixo de ' + Fmt.numero(d.parametros.prenhez_cobertura_dg_min_pct, 0) + '% de diagnosticadas, a prenhez é contada entre as diagnosticadas.', 'info'));
       } else if (d.anual) {
@@ -381,9 +383,11 @@ var TelaReproducao = (function () {
         var gerais = [];
         (e.details || []).forEach(function (d) { if (d.animal_id) (porAnimal[d.animal_id] = porAnimal[d.animal_id] || []).push(d); else gerais.push(d); });
         b.gerais = gerais.map(function (d) { return { codigo: d.codigo, mensagem: d.mensagem }; });
+        b.geralAceito = false;
         linhas.forEach(function (l) {
           var ds = porAnimal[l.animal_id] || [];
-          if (b.estado === 'AVISO') { l.estado = ds.length || gerais.length ? 'AVISO' : 'FILA'; l.avisos = ds.concat(gerais).map(function (d) { return d.codigo; }); l.mensagem = ds.length ? ds.map(function (d) { return d.mensagem; }).join(' ') : gerais.map(function (d) { return d.mensagem; }).join(' ') || null; }
+          // O aviso da fêmea pede o "Está certo" da linha; o geral (do lançamento inteiro) fica na área de status, com um só.
+          if (b.estado === 'AVISO') { l.estado = ds.length || gerais.length ? 'AVISO' : 'FILA'; l.avisosProprios = ds.map(function (d) { return d.codigo; }); l.avisos = ds.concat(gerais).map(function (d) { return d.codigo; }); l.mensagem = ds.length ? ds.map(function (d) { return d.mensagem; }).join(' ') : null; }
           else { l.estado = ds.length ? 'ERRO' : 'FILA'; l.mensagem = ds.length ? ds.map(function (d) { return d.mensagem; }).join(' ') : null; }
         });
         // A recusa: as linhas citadas ficam ERRO com o motivo (pendência); a geral fica na área de status; nada some calado.
@@ -472,28 +476,91 @@ var TelaReproducao = (function () {
       } } }, campo('tr-data', 'Data do diagnóstico', data), campo('tr-metodo', 'Como foi o diagnóstico', metodo), campo('tr-estacao', 'Estação de monta', est, 'A estação das fêmeas diagnosticadas (os indicadores de prenhez são por estação).'),
         campo('tr-resp', 'Quem diagnosticou (veterinário)', resp), erro, h('div', { class: 'acoes' }, UI.botao('Começar', { tipo: 'primario', atributos: { type: 'submit' } }))));
     }
+    /**
+     * Diagnóstico com data passada (08, seção 5, item 5, e seção 7): quem estava no rebanho e o brinco de cada fêmea naquele
+     * dia vêm do servidor (inventario.elegiveis na data), nunca da posição de hoje do aparelho — a fêmea que morreu depois
+     * ainda é diagnosticada naquele dia, e o número trocado ou reaproveitado depois é o daquele dia. ui.posicao = {data, itens,
+     * porId} | {carregando} | {erro} | null (hoje).
+     */
+    function comPosicao() { return !!(ui.posicao && ui.posicao.porId); }
+    function presente(a) { return comPosicao() ? !!ui.posicao.porId[a.animal_id] : a.situacao_cadastral === 'ATIVO'; }
+    function brincoDe(a) { var x = comPosicao() ? ui.posicao.porId[a.animal_id] : null; return x ? x.brinco : a.brinco || null; }
+    function daPosicao(x) { return Store.animal(x.animal_id) || { animal_id: x.animal_id, brinco: x.brinco_hoje, codigo_interno: x.codigo_interno, sexo: x.sexo }; }
+    function nomeNaData(a) {
+      var b = brincoDe(a);
+      if (!comPosicao() || b === (a.brinco || null)) return Store.rotuloAnimal(a);
+      return (b || a.codigo_interno) + ' em ' + Fmt.data(ui.posicao.data) + ' (hoje ' + (a.brinco || 'sem brinco') + ')';
+    }
+    function carregarPosicao() {
+      var data = c.sessao.data;
+      if (data === Fmt.hoje()) { ui.posicao = null; return; }
+      ui.posicao = { carregando: true, data: data };
+      Cliente.consulta('inventario.elegiveis', { tipo: 'REPRODUCAO', subtipo: 'DIAGNOSTICO_GESTACAO', data: data }).then(function (r) {
+        if (!vivo || c.sessao.data !== data) return;
+        var d = r.data || {};
+        var itens = (d.itens || []).filter(function (x) { return x.sexo === 'F'; });
+        var porId = {};
+        itens.forEach(function (x) { porId[x.animal_id] = x; });
+        ui.posicao = d.motivo ? { erro: Fmt.rotulo('MOTIVO', d.motivo), data: data } : { data: d.data, itens: itens, porId: porId };
+        desenhar();
+      }, function (e) {
+        if (!vivo) return;
+        ui.posicao = { erro: e.message, data: data };
+        desenhar();
+      });
+    }
+    /** Brinco digitado → a fêmea (na data passada, pelo brinco daquele dia); sem fêmea com o número, o código interno (A-000004). */
+    function resolver(t) {
+      var r;
+      if (comPosicao()) {
+        var cmp = function (semZeros) { return ui.posicao.itens.filter(function (x) { return x.brinco && Store.normalizarBrinco(x.brinco, !semZeros) === Store.normalizarBrinco(t, !semZeros); }); };
+        var exatos = cmp(false);
+        if (!exatos.length && Store.param('brinco_ignora_zeros_esquerda') !== false) exatos = cmp(true);
+        r = { modo: exatos.length === 1 ? 'EXATO' : exatos.length ? 'VARIOS' : 'NENHUM', candidatos: exatos.map(daPosicao) };
+      } else r = Store.resolverBrinco(t, function (a) { return a.sexo === 'F' && a.situacao_cadastral === 'ATIVO'; });
+      if (r.modo !== 'NENHUM') return r;
+      var m = /^(?:A-?(\d+)|(0\d{5,}))$/i.exec(String(t).trim());
+      if (!m) return r;
+      var n = Number(m[1] || m[2]);
+      var lista = comPosicao() ? ui.posicao.itens.map(daPosicao) : Store.animais().filter(function (a) { return a.sexo === 'F' && a.situacao_cadastral === 'ATIVO'; });
+      var cand = lista.filter(function (a) { var k = /(\d+)$/.exec(String(a.codigo_interno || '')); return k && Number(k[1]) === n; });
+      return { modo: cand.length === 1 ? 'EXATO' : cand.length ? 'VARIOS' : 'NENHUM', candidatos: cand };
+    }
     function conferir() {
       Util.limpar(ui.conferencia);
       Util.limpar(ui.candidatos);
       ui.atual = null;
       var t = ui.brinco.value.trim();
       if (!t) return null;
-      var r = Store.resolverBrinco(t, function (a) { return a.sexo === 'F' && a.situacao_cadastral === 'ATIVO'; });
+      if (ui.posicao && ui.posicao.carregando) { ui.conferencia.appendChild(h('p', { class: 'aviso', text: 'Conferindo no servidor quem estava no rebanho em ' + Fmt.data(ui.posicao.data) + '… digite de novo em instantes.' })); return null; }
+      var r = resolver(t);
+      var aviso = null;
+      if (r.modo === 'NENHUM' && comPosicao()) {
+        // Ninguém tinha o número na data: a dona de hoje que não estava no rebanho é dita como tal; a que estava, com outro
+        // brinco naquele dia, não é achada por ele (o diagnóstico iria para a fêmea errada).
+        var hoje = Store.resolverBrinco(t, function (a) { return a.sexo === 'F' && a.situacao_cadastral !== 'EXTERNO' && a.situacao_cadastral !== 'ANULADO'; });
+        if (hoje.modo === 'EXATO' || hoje.modo === 'SEM_ZEROS') {
+          var dona = hoje.candidatos[0];
+          aviso = presente(dona) ? t + ': em ' + Fmt.data(ui.posicao.data) + ' nenhuma fêmea do rebanho tinha este brinco (hoje ele é de ' + Store.rotuloAnimal(dona) + ', que naquele dia tinha o ' + (brincoDe(dona) || dona.codigo_interno) + ').'
+            : t + ': ' + Store.rotuloAnimal(dona) + ' não estava no rebanho em ' + Fmt.data(ui.posicao.data) + '.';
+        }
+      }
       if (r.modo === 'VARIOS') {
         ui.conferencia.appendChild(h('p', { class: 'aviso', text: 'Mais de uma fêmea com "' + t + '": escolha.' }));
-        r.candidatos.forEach(function (a) { ui.candidatos.appendChild(UI.botao(Store.rotuloAnimal(a) + ' · ' + Store.descricaoAnimal(a), { bloco: true, aoClicar: function () { escolher(a); ui.resultado.focus(); } })); });
+        r.candidatos.forEach(function (a) { ui.candidatos.appendChild(UI.botao(nomeNaData(a) + ' · ' + Store.descricaoAnimal(a), { bloco: true, aoClicar: function () { escolher(a); ui.resultado.focus(); } })); });
         return 'VARIOS';
       }
-      if (r.modo === 'NENHUM') { ui.atual = { brinco: t, animal: null }; ui.conferencia.appendChild(h('p', { class: 'destaque-erro', dataset: { conferencia: 'NAO_ENCONTRADO' }, text: t + ': nenhuma fêmea no rebanho com este brinco. Confira; se seguir, a linha fica pendente.' })); return 'NENHUM'; }
+      if (r.modo === 'NENHUM') { ui.atual = { brinco: t, animal: null }; ui.conferencia.appendChild(h('p', { class: 'destaque-erro', dataset: { conferencia: 'NAO_ENCONTRADO' }, text: (aviso || t + ': nenhuma fêmea no rebanho' + (comPosicao() ? ' em ' + Fmt.data(ui.posicao.data) : '') + ' com este brinco.') + ' Confira; se seguir, a linha fica pendente.' })); return 'NENHUM'; }
       escolher(r.candidatos[0]);
       return 'OK';
     }
     function escolher(a) {
       Util.limpar(ui.candidatos);
       Util.limpar(ui.conferencia);
-      ui.atual = { brinco: a.brinco || a.codigo_interno, animal: a };
+      ui.atual = { brinco: brincoDe(a) || a.codigo_interno, animal: a };
       var ja = c.linhas.filter(function (l) { return l.animal_id === a.animal_id; });
-      ui.conferencia.appendChild(h('p', { class: 'dado', dataset: { conferencia: 'OK' }, text: Store.rotuloAnimal(a) + ' · ' + Store.descricaoAnimal(a) + (a.situacao_reprodutiva ? ' · ' + sit(a.situacao_reprodutiva).toLowerCase() : '') }));
+      // A situação reprodutiva da lista do aparelho é a de hoje: só aparece no diagnóstico de hoje.
+      ui.conferencia.appendChild(h('p', { class: 'dado', dataset: { conferencia: 'OK' }, text: nomeNaData(a) + ' · ' + Store.descricaoAnimal(a) + (!comPosicao() && a.situacao_reprodutiva ? ' · ' + sit(a.situacao_reprodutiva).toLowerCase() : '') }));
       // A linha ainda não gravada é substituída; a gravada não: diagnosticar de novo grava outro diagnóstico do mesmo dia.
       var ult = ja[ja.length - 1];
       if (ult) ui.conferencia.appendChild(h('p', { class: 'aviso', dataset: { conferenciaRepetido: editavel(c, ult) ? 'substitui' : 'outro' }, text: editavel(c, ult)
@@ -520,14 +587,45 @@ var TelaReproducao = (function () {
       enviarTudo(c, desenhar).then(function (st) { if (st === 'SEM_SINAL') UI.aviso('Sem sinal: os diagnósticos ficaram guardados neste aparelho.', { tipo: 'aviso' }); },
         function (e) { Util.registrarFalha('envio do tronco', e); UI.aviso('Não foi possível enviar: ' + e.message, { tipo: 'erro' }); desenhar(); });
     }
+    /** "Está certo" da linha: aceita o aviso dela no bloco; sem bloco (desfeito), a linha volta à fila e pede o aviso de novo. */
     function aceitar(l) {
       var b = bloco(c, l.bloco);
-      if (!b) return;
-      (l.avisos || []).forEach(function (cod) { if (b.aceitos.indexOf(cod) < 0) b.aceitos.push(cod); });
+      if (!b) { l.estado = 'FILA'; l.bloco = null; l.mensagem = null; mudou(); return; }
+      (l.avisosProprios || l.avisos || []).forEach(function (cod) { if (b.aceitos.indexOf(cod) < 0) b.aceitos.push(cod); });
       l.estado = 'FILA';
       l.mensagem = 'Confirmado por você: sai no próximo envio.';
-      if (!c.linhas.some(function (x) { return x.bloco === b.chave && x.estado === 'AVISO'; })) { b.reenviar = true; mudou(); enviarAgora(); return; }
+      reenviarSeAceito(b);
+    }
+    /** O aviso geral do lançamento (sem fêmea: a duplicidade do bloco inteiro) é uma decisão só, para o bloco todo. */
+    function aceitarGeral(b) {
+      (b.gerais || []).forEach(function (g) { if (b.aceitos.indexOf(g.codigo) < 0) b.aceitos.push(g.codigo); });
+      b.geralAceito = true;
+      c.linhas.forEach(function (x) { if (x.bloco === b.chave && x.estado === 'AVISO' && !(x.avisosProprios || []).length) { x.estado = 'FILA'; x.mensagem = 'Confirmado por você: sai no próximo envio.'; } });
+      reenviarSeAceito(b);
+    }
+    function reenviarSeAceito(b) {
+      if (!c.linhas.some(function (x) { return x.bloco === b.chave && x.estado === 'AVISO'; }) && (!(b.gerais || []).length || b.geralAceito)) { b.reenviar = true; mudou(); enviarAgora(); return; }
       mudou();
+    }
+    /**
+     * Tira o último diagnóstico que ainda não saiu (na fila, sem fêmea, recusado ou com aviso). O do bloco com aviso desfaz o
+     * bloco: os outros dele voltam à fila (nenhum fica com aviso órfão). A mensagem diz o que de fato aconteceu com o último.
+     */
+    function desfazerUltimo() {
+      var ultimo = null;
+      for (var i = c.linhas.length - 1; i >= 0; i--) {
+        var l = c.linhas[i];
+        if (editavel(c, l) && (l.estado === 'FILA' || l.estado === 'NAO_ENCONTRADO' || l.estado === 'ERRO' || l.estado === 'AVISO')) {
+          if (l.bloco) desfazerBloco(c, l.bloco);
+          c.linhas.splice(i, 1);
+          UI.aviso('Tirado o diagnóstico de ' + (l.animal_id ? nomeDe(l.animal_id) : l.brinco) + ' (' + ROTULO_RES[l.resultado] + ').', { tipo: 'info' });
+          mudou();
+          return;
+        }
+        ultimo = l;
+        if (l.estado !== 'GRAVADA') break;
+      }
+      UI.aviso(!ultimo ? 'Nada para desfazer.' : ultimo.estado === 'GRAVADA' ? 'O último diagnóstico já foi gravado: corrija pelo lançamento gravado, em Eventos.' : 'O último diagnóstico já saiu e espera a confirmação do servidor: toque em "Enviar" com sinal; depois de gravado, corrija pelo lançamento, em Eventos.', { tipo: 'aviso' });
     }
     function tirar(l) { if (l.bloco) desfazerBloco(c, l.bloco); c.linhas = c.linhas.filter(function (x) { return x !== l; }); mudou(); }
     async function terminar() {
@@ -557,19 +655,21 @@ var TelaReproducao = (function () {
       var semSinal = c.blocos.filter(function (b) { return b.estado === 'SEM_SINAL'; }).reduce(function (t, b) { return t + b.uids.length; }, 0);
       var pend = pendencias(c);
       var gravadas = c.linhas.filter(function (l) { return l.estado === 'GRAVADA'; }).length;
-      ui.status.appendChild(h('p', { class: 'dado', text: [gravadas ? gravadas + ' gravados' : null, fila ? fila + ' na fila deste aparelho' : null, semSinal ? semSinal + ' sem confirmação do servidor' : null].filter(Boolean).join(' · ') || 'Nenhum diagnóstico ainda.' }));
+      var comAviso = c.linhas.filter(function (l) { return l.estado === 'AVISO'; }).length;
+      ui.status.appendChild(h('p', { class: 'dado', text: [gravadas ? gravadas + ' gravados' : null, fila ? fila + ' na fila deste aparelho' : null, semSinal ? semSinal + ' sem confirmação do servidor' : null, comAviso ? comAviso + ' para conferir' : null, pend.length ? pend.length + (pend.length === 1 ? ' pendente' : ' pendentes') : null].filter(Boolean).join(' · ') || 'Nenhum diagnóstico ainda.' }));
+      if (ui.posicao) ui.status.appendChild(ui.posicao.carregando ? UI.nota('Conferindo no servidor quem estava no rebanho em ' + Fmt.data(ui.posicao.data) + '…', 'info') : ui.posicao.erro ? UI.nota('Sem a posição do rebanho em ' + Fmt.data(ui.posicao.data) + ' (' + ui.posicao.erro + '): a conferência usa a posição de hoje; o servidor confere na gravação.', 'aviso')
+        : h('div', { dataset: { troncoPosicao: '1' } }, UI.nota('Fêmeas e brincos na posição em ' + Fmt.data(ui.posicao.data) + ', conferidos pelo servidor.', 'info')));
       if (semSinal) ui.status.appendChild(UI.nota('Sem sinal ou sem resposta: o que foi digitado está guardado neste aparelho. Toque em "Enviar" quando o sinal voltar; nada será gravado duas vezes.', 'aviso'));
       if (c.erroGeral) ui.status.appendChild(h('div', { role: 'alert', dataset: { erroGeral: '1' } }, UI.nota('O servidor recusou o envio: ' + c.erroGeral + ' Nada foi gravado; os diagnósticos continuam neste aparelho.', 'erro')));
       if (pend.length) ui.status.appendChild(UI.nota(pend.length + (pend.length === 1 ? ' pendência impede' : ' pendências impedem') + ' o envio: corrija o brinco ou o resultado (digite de novo) ou tire a linha.', 'erro'));
-      c.blocos.forEach(function (b) { if (b.estado === 'AVISO' && b.gerais && b.gerais.length) ui.status.appendChild(UI.nota(b.gerais.map(function (g) { return g.mensagem; }).join(' '), 'aviso')); });
+      c.blocos.forEach(function (b) {
+        if (b.estado !== 'AVISO' || !b.gerais || !b.gerais.length || b.geralAceito) return;
+        ui.status.appendChild(h('div', { dataset: { avisoGeral: b.chave } }, UI.nota(b.gerais.map(function (g) { return g.mensagem; }).join(' '), 'aviso'),
+          h('div', { class: 'acoes' }, UI.botao('Está certo (todo o lançamento)', { atributos: { 'data-aceitar-geral': '1' }, aoClicar: function () { aceitarGeral(b); } }))));
+      });
       ui.status.appendChild(h('div', { class: 'acoes' },
         UI.botao(fila + semSinal ? 'Enviar ' + (fila + semSinal) + (fila + semSinal === 1 ? ' diagnóstico' : ' diagnósticos') : 'Enviar', { tipo: 'primario', desabilitado: enviando || !!pend.length || !(fila + semSinal), atributos: { 'data-enviar': '1' }, aoClicar: enviarAgora }),
-        UI.botao('Desfazer o último', { atributos: { 'data-desfazer': '1' }, aoClicar: function () {
-          var l = c.linhas[c.linhas.length - 1];
-          if (!l || !editavel(c, l) || l.estado === 'GRAVADA' || l.estado === 'ENVIANDO' || l.estado === 'SEM_SINAL') { UI.aviso(l ? 'O último diagnóstico já foi enviado: corrija pelo lançamento gravado, em Eventos.' : 'Nada para desfazer.', { tipo: 'aviso' }); return; }
-          if (l.bloco) soltarBloco(c, l.bloco);
-          c.linhas.pop(); mudou();
-        } }),
+        UI.botao('Desfazer o último', { atributos: { 'data-desfazer': '1' }, aoClicar: desfazerUltimo }),
         UI.botao('Terminar', { tipo: 'texto', aoClicar: terminar })));
       Util.limpar(ui.lista);
       c.linhas.slice().reverse().forEach(function (l, i) {
@@ -580,8 +680,9 @@ var TelaReproducao = (function () {
             h('span', { class: 'dado', text: n + ' · ' + (l.animal_id ? nomeDe(l.animal_id) : l.brinco) + ' · ' + ROTULO_RES[l.resultado] + (l.idade ? ' (' + l.idade + ' dias)' : '') + ' · ' + ROTULO_ESTADO[l.estado] + (ret && ret.previsao_parto ? ' · ' + textoPrevisao(ret.previsao_parto) : '') })),
           l.mensagem ? h('p', { class: 'suave', text: l.mensagem }) : null);
         var acoes = [];
-        if (l.estado === 'AVISO') acoes.push(UI.botao('Está certo', { aoClicar: function () { aceitar(l); } }));
-        if (l.estado === 'ERRO' && l.animal_id) acoes.push(UI.botao('Corrigir o resultado', { aoClicar: function () { var a = Store.animal(l.animal_id); ui.brinco.value = a ? a.brinco || a.codigo_interno : l.brinco; conferir(); ui.resultado.focus(); } }));
+        var bl = l.estado === 'AVISO' ? bloco(c, l.bloco) : null;
+        if (l.estado === 'AVISO' && ((l.avisosProprios || []).length || !bl || !(bl.gerais || []).length || bl.geralAceito)) acoes.push(UI.botao('Está certo', { aoClicar: function () { aceitar(l); } }));
+        if (l.estado === 'ERRO' && l.animal_id) acoes.push(UI.botao('Corrigir o resultado', { aoClicar: function () { var a = Store.animal(l.animal_id); ui.brinco.value = a ? brincoDe(a) || a.codigo_interno : l.brinco; conferir(); ui.resultado.focus(); } }));
         if (l.estado !== 'GRAVADA' && l.estado !== 'ENVIANDO' && l.estado !== 'SEM_SINAL') acoes.push(UI.botao('Tirar', { tipo: 'texto', aoClicar: function () { tirar(l); } }));
         if (acoes.length) li.appendChild(h('div', { class: 'acoes', style: 'margin-top:4px' }, acoes));
         ui.lista.appendChild(li);
@@ -611,6 +712,7 @@ var TelaReproducao = (function () {
         h('div', { class: 'acoes' }, ['p', 'v', 'd'].map(function (k) { return UI.botao({ p: 'Prenhe', v: 'Vazia', d: 'Duvidosa' }[k], { atributos: { 'data-resultado-rapido': k, type: 'button' }, aoClicar: function () { lancar(ui.resultado.value && k === 'p' ? ui.resultado.value : k); } }); }))));
       corpo.appendChild(ui.status);
       corpo.appendChild(ui.lista);
+      carregarPosicao();
       desenhar();
       ui.brinco.focus();
       if (c.blocos.some(function (b) { return b.estado === 'ENVIANDO' || b.estado === 'SEM_SINAL'; })) conferirBlocos(c, desenhar).catch(function (e) { Util.registrarFalha('conferir os blocos do tronco', e); });

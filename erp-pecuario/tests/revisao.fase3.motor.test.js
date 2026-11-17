@@ -116,7 +116,7 @@ test('achado 7: corrigir a entrada de estoque só na nota não muda a quantidade
   const c1 = ok(api(s, 'evento.corrigir', corr(ent.event_id)), 'corrige a nota');
   assert.equal(saldo(s, pid), 100, 'a quantidade comprada não muda');
   assert.deepEqual(vigentes(s, 'FINANCEIRO', { event_id: c1.event_id }).map((f) => f.quantidade), [100]);
-  assert.deepEqual(s.tabela('EVENTOS').find((e) => e.event_id === c1.event_id).payload_json, { qtd_apresentacao: 2, fator_conversao: 50, justificativa: 'número da nota' });
+  assert.deepEqual(s.tabela('EVENTOS').find((e) => e.event_id === c1.event_id).payload_json, { qtd_apresentacao: 2, fator_conversao: 50, com_movimento: true, justificativa: 'número da nota' });
   ok(api(s, 'evento.registrar', san('VACINACAO', '2026-03-10', [ids['101'], ids['102']], { produto_id: pid, modo_dose: 'POR_CABECA', dose_referencia: 1 })), 'vacina');
   assert.equal(saldo(s, pid), 98);
   ok(api(s, 'produto.salvar', { product_id: pid, campos: { controla_estoque: false }, justificativa: 'desliga' }), 'desliga');

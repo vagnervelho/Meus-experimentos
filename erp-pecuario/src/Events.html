@@ -396,8 +396,8 @@ var TelaEventos = (function () {
    * Correção da sanidade (Fase 3): o cabeçalho vem do registro de cada animal (todos iguais), do payload (modo, dose de
    * referência e quantidade) e do serviço pago no ato. O que o servidor propôs quando veio vazio não vira valor digitado:
    * o fabricante do cadastro, a próxima aplicação pelo intervalo do protocolo, a quantidade igual à soma das doses e, por
-   * cabeça, a dose de cada animal igual à do lançamento. Por peso, a dose de cada animal fica vazia (o servidor recalcula
-   * pelo peso atual na data).
+   * cabeça, a dose de cada animal igual à do lançamento. Por peso, a dose de cada animal fica vazia: o servidor usa a dose
+   * gravada no original enquanto o produto, a dose por kg e a data não mudam, e refaz pelo peso na data quando mudam.
    */
   function previaSanidade_(o, def, origem) {
     var ev = o.evento, det = o.detalhes || {}, payload = ev.payload || {}, sub = ev.event_subtype;

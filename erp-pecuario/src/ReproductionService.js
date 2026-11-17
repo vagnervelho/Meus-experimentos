@@ -821,7 +821,8 @@ var ReproductionService = (function () {
       var nPartos = (typeof a.partos_previos === 'number' ? a.partos_previos : 0) + ps.length;
       var apta = apta_(a, p, data, nPartos);
       if (!apta && !regs.length) return;
-      // A mesma regra da projeção em qualquer data (a declarada na entrada vale como o fato da data dela).
+      // A mesma regra da projeção em qualquer data (a declarada na entrada vale como o fato da data dela); a cria ao pé também
+      // (Timeline.criaAoPeEm: as crias presentes na data, sem desmama até ela).
       var naData = Timeline.reproducaoEm(f, a.animal_id, data);
       var sit = naData.situacao_reprodutiva;
       if (!vazio_(o.situacao) && sit !== o.situacao) return;
@@ -830,7 +831,7 @@ var ReproductionService = (function () {
       out.push({
         animal_id: a.animal_id, codigo_interno: a.codigo_interno, brinco: nulo_(a.brinco), nome: nulo_(a.nome), pasture_id: s.pasture_id || null,
         idade_meses: vazio_(a.data_nascimento) ? null : Utils.idadeMeses(a.data_nascimento, data), apta: apta,
-        situacao_reprodutiva: sit, cria_ao_pe: a.cria_ao_pe === true && data === L.hoje, partos: nPartos, marcado_descarte: naData.marcado_descarte,
+        situacao_reprodutiva: sit, cria_ao_pe: Timeline.criaAoPeEm(f, (L.filhosMae[a.animal_id] || []).map(function (c) { return c.animal_id; }), data), partos: nPartos, marcado_descarte: naData.marcado_descarte,
         ultimo: ultimo ? { tipo_evento: ultimo.tipo_evento, data: ultimo.data, resultado: nulo_(ultimo.resultado), event_id: ultimo.event_id } : null,
         previsao_parto: prev, sem_historico: apta && !regs.length && !(typeof a.partos_previos === 'number' && a.partos_previos > 0),
       });

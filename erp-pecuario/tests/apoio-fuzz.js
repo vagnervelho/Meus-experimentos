@@ -1580,6 +1580,21 @@ registrarTipo('PESAGEM', {
       const l = linhaDe(x.animal_id);
       if (!l || l.efeito_inventario !== 0 || l.peso !== kg || l.papel !== 'SUJEITO') erro('linha da pesagem ' + JSON.stringify(l));
     });
+    // Rodada 2 da revisão da Fase 3 (achados 13 e 21): o GMD da resposta do registro (o que o modo curral mostra) = o do
+    // intervalo do modelo que termina nesta pesagem (a última individual do dia contra a individual do dia anterior, com a
+    // estimada ou a média do lote no meio fora), ou vazio com o porquê.
+    const res = c.resp && c.resp.pesagem;
+    if (res && Array.isArray(res.animais)) {
+      res.animais.forEach((x) => {
+        const r = rows.find((y) => y.animal_id === x.animal_id);
+        if (!r) return;
+        const v = intervalosModelo(S, x.animal_id).filter((y) => y.b.weight_id === r.weight_id)[0];
+        const esperado = v ? v.gmd : null;
+        contar('GMD da resposta conferido');
+        if ((typeof x.gmd_kg_dia === 'number' ? x.gmd_kg_dia : null) !== esperado) erro('GMD da resposta ' + x.gmd_kg_dia + ', o da ficha pelo modelo ' + esperado);
+        if (x.gmd_kg_dia === null && !x.gmd_explicacao) erro('GMD da resposta vazio sem o porquê');
+      });
+    }
   },
 });
 
@@ -1752,7 +1767,13 @@ registrarTipo('SANIDADE', {
       // Fuzz das Fases 1 a 3: a dose por kg exata = round4(dose por kg × o peso vigente na data: a última pesagem vigente
       // até a data, pela data e pela posição na cadeia). Com peso de referência em alguma categoria, só a pesagem dentro da
       // validade decide aqui (a vencida e a falta dela vão para o peso de referência da categoria na data).
-      if (dose === undefined) {
+      // Revisão da Fase 3, rodada 2 (achados 1 e 4): na correção com o mesmo produto, o modo por peso, a mesma dose por kg e
+      // a mesma data, a dose gravada do animal no original (o fato confirmado naquele dia), não a do peso de agora.
+      const congeladaDose = dose === undefined ? doseCongelada(c, x.animal_id, cp, prod) : null;
+      if (congeladaDose !== null) {
+        contar('correção da aplicação por peso pela dose congelada');
+        if (r.dose !== congeladaDose) erro('dose por kg na correção ' + r.dose + ', esperada a do original ' + congeladaDose);
+      } else if (dose === undefined) {
         const u = pesagemNaData(S, x.animal_id, cp.event_date);
         const refCat = S.t.CATEGORIAS.some((c) => typeof c.peso_referencia_kg === 'number');
         if (!u && !refCat) erro('dose por kg aceita sem peso nenhum do animal ' + x.animal_id);
@@ -1935,6 +1956,21 @@ function consumoCongelado(c, productId) {
   if (!mov) return null;
   const f = c.A.t.FINANCEIRO.filter((x) => x.event_id === o.event_id && x.product_id === productId)[0];
   return { custo: typeof mov.custo_unitario === 'number' && mov.custo_unitario > 0 ? mov.custo_unitario : null, conta: f ? (c.A.t.PLANO_CONTAS.find((p) => p.conta_id === f.conta_id) || {}).codigo || null : null };
+}
+/**
+ * Na correção da aplicação por peso com o mesmo produto (ou o mesmo nome livre), a mesma dose por kg e a mesma data
+ * (rodada 2, achados 1 e 4): a dose gravada do animal no original; null fora disso (refeita pelo peso na data).
+ */
+function doseCongelada(c, animalId, cp, prod) {
+  const o = originalDaCorrecao(c);
+  if (!o || o.event_type !== 'SANIDADE' || o.event_date !== cp.event_date) return null;
+  const pj = o.payload_json || {};
+  if (pj.modo_dose !== 'POR_PESO' || pj.dose_referencia !== cp.dose_referencia) return null;
+  const r = c.A.t.SANIDADE.filter((x) => x.event_id === o.event_id && x.animal_id === animalId)[0];
+  if (!r || typeof r.dose !== 'number') return null;
+  const nt = (v) => String(v || '').trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ');
+  const mesmo = prod ? r.produto_id === prod.product_id : !r.produto_id && nt(r.nome_produto) === nt(cp.nome_produto);
+  return mesmo ? r.dose : null;
 }
 /** Na correção com o mesmo protocolo, o intervalo que propôs a próxima aplicação do original (o payload dele); senão null. */
 function intervaloCongelado(c, protocolId) {
@@ -3353,35 +3389,47 @@ function modeloAgenda(S, D) {
  * mesma permanência no rebanho e com o intervalo mínimo (`gmd_intervalo_min_dias`), senão vazio. Os intervalos de
  * `peso.desempenho` (curvas) dos animais do comando e dos mais pesados = o modelo.
  */
-function oraculoGmd(sis, S, focos) {
+/** As pesagens individuais vigentes do animal (balança; fita só com `gmd_aceita_fita`). */
+function pesagensIndividuais(S, id) {
   const fita = S.config.get('gmd_aceita_fita') === 'S' || S.config.get('gmd_aceita_fita') === true;
+  return (S.t.PESAGENS || []).filter((p) => p.animal_id === id && S.vig.get(p.event_id) && typeof p.peso_kg === 'number' && (p.metodo === 'BALANCA' || (fita && p.metodo === 'FITA')));
+}
+/**
+ * O modelo dos intervalos de GMD do animal: as individuais, a última de cada dia (pela data e pela posição na cadeia), e
+ * entre duas consecutivas {a, b (as pesagens), ganho, nd, gmd} — o GMD só na mesma permanência e com o intervalo mínimo.
+ */
+function intervalosModelo(S, id) {
   const min = paramNum(S, 'gmd_intervalo_min_dias', 28);
-  const ind = (id) => (S.t.PESAGENS || []).filter((p) => p.animal_id === id && S.vig.get(p.event_id) && typeof p.peso_kg === 'number' && (p.metodo === 'BALANCA' || (fita && p.metodo === 'FITA')));
+  const r1 = (x, c) => { const f = Math.pow(10, c); const v = Math.round(Number((Math.abs(x) * f).toFixed(6))) / f; return x < 0 && v !== 0 ? -v : v; };
+  // Permanências pelas linhas do rebanho (as de antes do marco zero ficam fora).
+  const per = [];
+  S.linhasDe(id).filter((l) => !DE_FATO(l)).forEach((l) => { if (l.efeito === 1) per.push({ ini: l.data, fim: null }); else if (l.efeito === -1 && per.length) per[per.length - 1].fim = l.data; });
+  const perDe = (d) => per.findIndex((x) => d >= x.ini && (x.fim === null || d <= x.fim));
+  const serie = pesagensIndividuais(S, id).map((p) => { const e = S.ev.get(p.event_id); return { p, data: p.data_pesagem, raiz: S.raiz(e), seq: e.event_seq }; })
+    .sort((a, b) => cmp(a.data, b.data) || a.raiz - b.raiz || a.seq - b.seq || cmp(a.p.weight_id, b.p.weight_id));
+  const dias = [];
+  serie.forEach((x) => { if (dias.length && dias[dias.length - 1].data === x.data) dias[dias.length - 1] = x; else dias.push(x); });
+  const out = [];
+  for (let j = 1; j < dias.length; j++) {
+    const a = dias[j - 1];
+    const b = dias[j];
+    const nd = diasEntre(a.data, b.data);
+    const ganho = r1(b.p.peso_kg - a.p.peso_kg, 1);
+    const conta = perDe(a.data) >= 0 && perDe(a.data) === perDe(b.data);
+    out.push({ a: a.p, b: b.p, ganho, nd, gmd: conta && nd >= min ? r1(ganho / nd, 3) : null });
+  }
+  return out;
+}
+function oraculoGmd(sis, S, focos) {
+  const ind = (id) => pesagensIndividuais(S, id);
   const cands = Array.from(S.animais.keys()).filter((id) => existe(S, id) && (S.animais.get(id) || {}).situacao_cadastral !== 'EXTERNO' && ind(id).length >= 2);
   const ids = focos.filter((id) => cands.indexOf(id) >= 0).concat(cands.slice().sort((a, b) => ind(b).length - ind(a).length || cmp(S.animais.get(a).codigo_interno, S.animais.get(b).codigo_interno))).filter((x, i, a) => a.indexOf(x) === i).slice(0, 3);
   if (!ids.length) return [];
   const r = sis.api('peso.desempenho', { animais: ids });
   if (!r.ok) return [falha('GMD:FALHOU', JSON.stringify(r.error).slice(0, 400))];
   const out = [];
-  const r1 = (x, c) => { const f = Math.pow(10, c); const v = Math.round(Number((Math.abs(x) * f).toFixed(6))) / f; return x < 0 && v !== 0 ? -v : v; };
   ids.forEach((id, i) => {
-    // Permanências pelas linhas do rebanho (as de antes do marco zero ficam fora).
-    const per = [];
-    S.linhasDe(id).filter((l) => !DE_FATO(l)).forEach((l) => { if (l.efeito === 1) per.push({ ini: l.data, fim: null }); else if (l.efeito === -1 && per.length) per[per.length - 1].fim = l.data; });
-    const perDe = (d) => per.findIndex((x) => d >= x.ini && (x.fim === null || d <= x.fim));
-    const serie = ind(id).map((p) => { const e = S.ev.get(p.event_id); return { p, data: p.data_pesagem, raiz: S.raiz(e), seq: e.event_seq }; })
-      .sort((a, b) => cmp(a.data, b.data) || a.raiz - b.raiz || a.seq - b.seq || cmp(a.p.weight_id, b.p.weight_id));
-    const dias = [];
-    serie.forEach((x) => { if (dias.length && dias[dias.length - 1].data === x.data) dias[dias.length - 1] = x; else dias.push(x); });
-    const modelo = [];
-    for (let j = 1; j < dias.length; j++) {
-      const a = dias[j - 1];
-      const b = dias[j];
-      const nd = diasEntre(a.data, b.data);
-      const ganho = r1(b.p.peso_kg - a.p.peso_kg, 1);
-      const conta = perDe(a.data) >= 0 && perDe(a.data) === perDe(b.data);
-      modelo.push([a.data, b.data, a.p.peso_kg, b.p.peso_kg, ganho, nd, conta && nd >= min ? r1(ganho / nd, 3) : null].join('|'));
-    }
+    const modelo = intervalosModelo(S, id).map((v) => [v.a.data_pesagem, v.b.data_pesagem, v.a.peso_kg, v.b.peso_kg, v.ganho, v.nd, v.gmd].join('|'));
     contar('intervalos de GMD conferidos', modelo.length);
     const c = (r.data.curvas || [])[i] || {};
     const sist = (c.intervalos || []).map((v) => [v.de, v.ate, v.peso_de_kg, v.peso_ate_kg, v.ganho_kg, v.dias, v.gmd_kg_dia].join('|'));
@@ -3449,6 +3497,30 @@ function oraculoManejo(sis, S, focos) {
       const a = S.animais.get(x.animal_id) || {};
       if (a.sexo !== 'F' || !presenca(S, x.animal_id, HOJE).fim) out.push(falha('MATRIZES', (a.codigo_interno || x.animal_id) + ' na lista das fêmeas sem ser fêmea do rebanho hoje'));
       else if ((x.situacao_reprodutiva || null) !== (a.situacao_reprodutiva || null)) out.push(falha('MATRIZES', a.codigo_interno + ': situação ' + x.situacao_reprodutiva + ' na lista, ' + a.situacao_reprodutiva + ' na projeção'));
+    });
+    // Rodada 2 da revisão da Fase 3 (achados 6 e 11): a cria ao pé de cada fêmea hoje e numa data passada, pelo modelo das
+    // linhas cruas só com os fatos até a data (a cria no rebanho no fim do dia, sem desmama vigente até ele, nascida na
+    // fazenda ou que entrou mais nova que a idade de desmama), e o resumo é a contagem delas. Pega o "não" de toda data
+    // diferente de hoje.
+    const desmamaMeses = paramNum(S, 'idade_desmama_padrao_meses', 8);
+    [HOJE, somaDias(HOJE, -150)].forEach((D) => {
+      if (D < S.marco) return;
+      const r = D === HOJE && mz.ok ? mz : sis.api('reproducao.matrizes', { data: D });
+      if (!r.ok) { out.push(falha('MATRIZES:FALHOU', D + ': ' + JSON.stringify(r.error).slice(0, 400))); return; }
+      const des = new Set(S.t.EVENTO_ANIMAIS.filter((l) => l.papel === 'SUJEITO' && S.vig.get(l.event_id) && (S.ev.get(l.event_id) || {}).event_type === 'DESMAMA' && S.ev.get(l.event_id).event_date <= D).map((l) => l.animal_id));
+      const com = new Set();
+      S.animais.forEach((c, id) => {
+        if (!c.mae_id || ['EXTERNO', 'ANULADO', 'PENDENTE'].indexOf(c.situacao_cadastral) >= 0 || des.has(id) || !presenca(S, id, D).fim) return;
+        const origem = S.ev.get(c.evento_origem_id);
+        if (origem && (origem.event_type === 'NASCIMENTO' || (c.data_nascimento && mesesDe(c.data_nascimento, origem.event_date) < desmamaMeses))) com.add(c.mae_id);
+      });
+      let n = 0;
+      r.data.itens.forEach((x) => {
+        if (com.has(x.animal_id)) n++;
+        if ((x.cria_ao_pe === true) !== com.has(x.animal_id)) out.push(falha('MATRIZES:CRIA_AO_PE', ((S.animais.get(x.animal_id) || {}).codigo_interno || x.animal_id) + ' em ' + D + ': cria ao pé ' + x.cria_ao_pe + ' na lista, ' + com.has(x.animal_id) + ' pelas linhas'));
+      });
+      contar('cria ao pé na data conferida', n);
+      if (r.data.resumo.cria_ao_pe !== n) out.push(falha('MATRIZES:CRIA_AO_PE', D + ': resumo com ' + r.data.resumo.cria_ao_pe + ' com cria ao pé, a lista tem ' + n));
     });
   }
   return out;
@@ -3614,6 +3686,13 @@ function gerarAcao(sis, S, rnd, k, acao, base) {
       // depois do uso, e o fator e o controle de estoque do produto de uma entrada; a correção sem mudança que vem logo é a
       // do lançamento preparado (sis.tardiaAlvo), e oraculoEfeitoCongelado confere que o fato não foi reprecificado.
       const preparado = (rota, dados, rotulo, eid) => { sis.tardiaAlvo = eid; return Object.assign(base, { rota, dados, rotulo }); };
+      // Rodada 2 (achados 1 e 4): a pesagem do animal no dia da aplicação por peso, lançada depois dela (o caderno que
+      // chegou): a correção sem mudança que vem logo não refaz a dose pelo peso novo.
+      const porPeso = sorteio(rnd, S.t.SANIDADE.filter((x) => typeof x.dose === 'number' && cands.some((e) => e.event_id === x.event_id && e.pre_marco_zero !== true && (e.payload_json || {}).modo_dose === 'POR_PESO')));
+      if (porPeso && rnd() < 0.4) {
+        const spec = { tipo: 'PESAGEM', data: porPeso.data_aplicacao, momento: 'ROTINA', metodo: 'BALANCA', jejum: false, itens: [{ id: porPeso.animal_id, peso: 777 }], lote: null };
+        return Object.assign(preparado('evento.registrar', montarDados(sis, spec), 'pesagem lançada depois da aplicação por peso', porPeso.event_id), { spec, aceitar: true, avisos: AVISOS });
+      }
       if (r && r.protocol_id && rnd() < 0.3) {
         const pr = S.t.PROTOCOLOS_SANITARIOS.find((x) => x.protocol_id === r.protocol_id) || {};
         if (pr.recorrencia_tipo === 'INTERVALO_DIAS' && pr.ativo !== false) return preparado('protocolo.salvar', { protocol_id: r.protocol_id, campos: { intervalo_dias: (typeof pr.intervalo_dias === 'number' ? pr.intervalo_dias : 180) + 45 }, justificativa: 'Intervalo do protocolo revisto' }, 'intervalo do protocolo revisto depois do uso', r.event_id);
@@ -4231,6 +4310,15 @@ function oraculoEfeitoCongelado(cmd, r, A, S) {
       const fo = de(A, 'FINANCEIRO', o).filter((f) => f.product_id);
       const fn = de(S, 'FINANCEIRO', n).filter((f) => f.product_id);
       if (fo.length === 1 && fn.length === 1 && fo[0].conta_id !== fn[0].conta_id) out.push(falha('CORRECAO_TARDIA:CONTA', 'a correção sem mudança trocou a conta do consumo'));
+    }
+    // Rodada 2 (achados 1 e 4): a aplicação por peso corrigida sem mudança mantém a dose de cada animal e a saída, mesmo com
+    // a pesagem lançada depois (o preparo) ou o peso de referência e a validade do peso mudados depois.
+    const eo = A.ev.get(o) || {};
+    if ((eo.payload_json || {}).modo_dose === 'POR_PESO') {
+      contar('correção tardia: dose por peso conferida');
+      const doseO = new Map(de(A, 'SANIDADE', o).map((x) => [x.animal_id, x.dose]));
+      de(S, 'SANIDADE', n).forEach((x) => { if (doseO.has(x.animal_id) && doseO.get(x.animal_id) !== x.dose) out.push(falha('CORRECAO_TARDIA:DOSE', 'a correção sem mudança refez a dose por peso: ' + doseO.get(x.animal_id) + ' → ' + x.dose)); });
+      if (so.length === 1 && sn.length === 1 && so[0].quantidade !== sn[0].quantidade) out.push(falha('CORRECAO_TARDIA:SAIDA', 'a correção sem mudança mudou a saída do frasco: ' + so[0].quantidade + ' → ' + sn[0].quantidade));
     }
     const po = new Map(de(A, 'SANIDADE', o).map((x) => [x.animal_id, x]));
     de(S, 'SANIDADE', n).forEach((x) => {

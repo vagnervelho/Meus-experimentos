@@ -603,7 +603,8 @@ var InventoryService = (function () {
    * Vale para os tipos cujo filtro de elegíveis pede animal no rebanho (ATIVO): elegível = no rebanho ao fim do dia D
    * (movimentos e saídas) ou em algum momento de D (fatos: parto, identificação, marcação — o dia da saída conta, como
    * na validação), no pasto pedido nessa data e com o sexo que o tipo exige (`filtro_elegiveis.sexo`). Devolve {data, tipo,
-   * pasture_id, motivo, n, itens: [{animal_id, codigo_interno, brinco, sexo, pasture_id}]}; antes do marco zero (ou
+   * pasture_id, motivo, n, itens: [{animal_id, codigo_interno, brinco (o em uso na data), brinco_hoje, sexo, pasture_id}]};
+   * antes do marco zero (ou
    * sem ele) n e itens voltam null com o motivo. VALIDATION: tipo indisponível ou sem elegíveis por presença, data
    * inválida ou futura; NOT_FOUND: pasto inexistente.
    */
@@ -628,7 +629,9 @@ var InventoryService = (function () {
           if (!vazio_(d.pasture_id) && x.pasture_id !== d.pasture_id) return false;
           return !filtro.sexo || x.animal.sexo === filtro.sexo;
         }).map(function (x) {
-          return { animal_id: x.animal.animal_id, codigo_interno: x.animal.codigo_interno, brinco: vazio_(x.animal.brinco) ? null : x.animal.brinco, sexo: x.animal.sexo, pasture_id: x.pasture_id };
+          // O brinco em uso NA DATA (o número trocado ou reaproveitado depois é de outro animal naquele dia), e o de hoje.
+          var hoje = vazio_(x.animal.brinco) ? null : x.animal.brinco;
+          return { animal_id: x.animal.animal_id, codigo_interno: x.animal.codigo_interno, brinco: data === L.hoje ? hoje : Timeline.brincoEm(L.f, x.animal.animal_id, data), brinco_hoje: hoje, sexo: x.animal.sexo, pasture_id: x.pasture_id };
         });
         base.n = base.itens.length;
         return base;

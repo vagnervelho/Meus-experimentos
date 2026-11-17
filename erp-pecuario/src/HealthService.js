@@ -122,6 +122,26 @@ var HealthService = (function () {
     });
     return menor;
   }
+  /**
+   * As contagens vigentes do produto (ESTOQUE/AJUSTE pela contagem; 03a, MOVIMENTOS_ESTOQUE, AJUSTE: "correção do saldo pela
+   * contagem", o saldo no fim do dia contado é o contado): [{event_id, data, saldo_contado, quantidade}], sem as de `excluidos`.
+   */
+  function contagensDoProduto(repo, productId, excluidos) {
+    if (!repo.carregada('MOVIMENTOS_ESTOQUE') || !repo.carregada('EVENTOS')) return [];
+    return movimentosDoProduto(repo, productId, excluidos).filter(function (m) { return m.tipo === 'AJUSTE'; }).map(function (m) {
+      var ev = repo.porId('EVENTOS', m.event_id);
+      var pj = (ev && ev.payload_json) || {};
+      return pj.motivo_ajuste === 'CONTAGEM' && typeof pj.saldo_contado === 'number' ? { event_id: m.event_id, data: m.data, saldo_contado: pj.saldo_contado, quantidade: m.quantidade } : null;
+    }).filter(Boolean).sort(function (a, b) { return a.data < b.data ? -1 : a.data > b.data ? 1 : 0; });
+  }
+  /**
+   * A primeira contagem cujo saldo no fim do dia contado muda entre os movimentos de antes e os de depois de um comando (o
+   * movimento retroativo, a correção que muda a quantidade, o estorno, a contagem anterior a ela); null sem nenhuma. O acerto
+   * gravou a diferença para o saldo daquele dia: o movimento que muda esse saldo depois desfaria o que foi contado (RN-057).
+   */
+  function contagemAfetada(contagens, antes, depois) {
+    return (contagens || []).filter(function (c) { return saldo(antes, c.data) !== saldo(depois, c.data); })[0] || null;
+  }
   /** Projeção `PRODUTOS.estoque_atual*` (03a, seção 4.6): Σ movimentos vigentes com `controla_estoque = S`; vazio sem controle. */
   function estoqueAtual(produto, movimentos) {
     if (!produto || produto.controla_estoque !== true) return null;
@@ -260,7 +280,13 @@ var HealthService = (function () {
   function compraSemMovimento(repo, productId) {
     if (!repo.carregada('FINANCEIRO') || !repo.carregada('MOVIMENTOS_ESTOQUE')) return false;
     return repo.por('FINANCEIRO', 'product_id', productId).some(function (f) {
-      return f.natureza === 'ESTOQUE_INSUMOS' && !vazio_(f.event_id) && !repo.por('MOVIMENTOS_ESTOQUE', 'event_id', f.event_id).some(function (m) { return m.tipo === 'ENTRADA' && m.product_id === productId; });
+      if (f.natureza !== 'ESTOQUE_INSUMOS' || vazio_(f.event_id)) return false;
+      // O payload da entrada congela se ela tem o movimento (`com_movimento`): a que tinha e não tem mais é fonte quebrada
+      // (a verificação acusa), não a compra de antes de ligar o controle. Sem o campo (entrada anterior a ele), pela linha.
+      var ev = repo.carregada('EVENTOS') ? repo.porId('EVENTOS', f.event_id) : null;
+      var pj = (ev && ev.payload_json) || {};
+      if (typeof pj.com_movimento === 'boolean') return pj.com_movimento === false;
+      return !repo.por('MOVIMENTOS_ESTOQUE', 'event_id', f.event_id).some(function (m) { return m.tipo === 'ENTRADA' && m.product_id === productId; });
     });
   }
   /** Movimentos vigentes do produto (sem os eventos excluídos): as linhas de MOVIMENTOS_ESTOQUE. */
@@ -719,6 +745,8 @@ var HealthService = (function () {
     situacao: situacao,
     aplicacoesDoAnimal: aplicacoesDoAnimal,
     movimentosDoProduto: movimentosDoProduto,
+    contagensDoProduto: contagensDoProduto,
+    contagemAfetada: contagemAfetada,
     compraSemMovimento: compraSemMovimento,
     contexto: contexto,
     pendenciasDoAnimal: pendenciasDoAnimal,

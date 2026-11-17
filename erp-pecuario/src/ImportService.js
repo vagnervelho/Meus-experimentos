@@ -1810,6 +1810,14 @@ var ImportService = (function () {
             r.erros.push(det_(null, 'LOTE_EM_PARTE', 'o lote já foi lançado em parte (' + (duplicadas.length === 1 ? 'a linha ' + duplicadas[0] + ' já está' : 'as linhas ' + duplicadas.join(', ') + ' já estão') + ' na base com a mesma média): a pesagem por lote entra inteira ou não entra. Confira o arquivo: tire o lote já lançado ou separe os animais novos em outro número de pesagem'));
           });
         }
+        // A quantidade que saiu do frasco também é um fato do lançamento inteiro (o movimento de saída e o custo do consumo;
+        // 07, seção 5: nunca em dobro): entrando só as outras linhas com ela, a dose da linha já gravada sairia de novo do
+        // estoque e do custo, dividida entre menos animais. As demais ficam com o motivo e o caminho.
+        if (typeof g.cab.quantidade_total === 'number' && duplicadas.length && g.linhas.length && g.linhas.length < antes) {
+          g.linhas.forEach(function (r) {
+            r.erros.push(det_('quantidade_total', 'QUANTIDADE_EM_PARTE', 'a aplicação já foi lançada em parte (' + (duplicadas.length === 1 ? 'a linha ' + duplicadas[0] + ' já está' : 'as linhas ' + duplicadas.join(', ') + ' já estão') + ' na base) e a quantidade que saiu do frasco (' + Utils.formatarNumero(g.cab.quantidade_total) + ') é do lançamento inteiro: entrando só as outras linhas, as doses já gravadas sairiam de novo do estoque e do custo. Tire do arquivo a linha já lançada e refaça a quantidade só com os animais que faltam (ou deixe-a em branco, por cabeça ou por peso)'));
+          });
+        }
         if (g.linhas.length) g.primeira = g.linhas[0].linha_num;
       });
       grupos = grupos.filter(function (g) { return g.linhas.length; });

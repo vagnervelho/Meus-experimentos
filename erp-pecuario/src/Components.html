@@ -2627,7 +2627,8 @@ var Registro = (function () {
     if (doses.length) {
       var min = Math.min.apply(null, doses), max = Math.max.apply(null, doses);
       var estimados = (x.animais || []).filter(function (a) { return a.peso_estimado; }).length;
-      l.push(['Dose por animal', (min === max ? qtd_(min, x.unidade) : 'de ' + qtd_(min) + ' a ' + qtd_(max, x.unidade)) + (x.modo_dose === 'POR_PESO' ? ' (pelo peso atual' + (estimados ? '; ' + plural(estimados, 'peso estimado', 'pesos estimados') : '') + ')' : '')]);
+      var orig = (x.animais || []).filter(function (a) { return a.dose_do_original; }).length;
+      l.push(['Dose por animal', (min === max ? qtd_(min, x.unidade) : 'de ' + qtd_(min) + ' a ' + qtd_(max, x.unidade)) + (x.modo_dose !== 'POR_PESO' ? '' : orig ? ' (' + (orig < x.animais.length ? orig + ' com ' : '') + 'a dose gravada no original)' : ' (pelo peso na data' + (estimados ? '; ' + plural(estimados, 'peso estimado', 'pesos estimados') : '') + ')')]);
     }
     if (typeof x.quantidade === 'number') l.push(['Sai do frasco', qtd_(x.quantidade, x.unidade) + (x.quantidade_informada ? ' (informado)' : ' (a soma das doses)')]);
     if (x.estoque) l.push(['Estoque do produto', qtd_(x.estoque.antes, x.unidade) + ' → ' + qtd_(x.estoque.depois, x.unidade)]);
