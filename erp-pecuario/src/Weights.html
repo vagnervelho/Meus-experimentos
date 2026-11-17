@@ -248,8 +248,24 @@ var TelaPesagens = (function () {
     c.linhas.forEach(function (l) { if (l.bloco === chave) { l.bloco = null; if (l.estado !== 'NAO_ENCONTRADO') { l.estado = 'FILA'; l.mensagem = null; } } });
     c.blocos = c.blocos.filter(function (b) { return b.chave !== chave; });
   }
+  /**
+   * A sessão mudou (só enquanto nenhum bloco saiu): os blocos não enviados se desfazem (levavam o cabeçalho de antes) e, com a
+   * data nova, toda linha volta a ser conferida pelo servidor NA DATA NOVA pelo texto digitado (o número pode ser de outro animal
+   * naquele dia): fica pendente até a resposta, nunca segue com o animal de outra data.
+   */
+  function sessaoMudou(c, dataMudou) {
+    c.blocos.slice().forEach(function (b) { if (b.estado !== 'GRAVADO') desfazerBloco(c, b.chave); });
+    c.erroGeral = null;
+    if (!dataMudou) return;
+    c.linhas.forEach(function (l) {
+      if (l.estado === 'GRAVADA') return;
+      l.brinco = l.texto || l.brinco; l.animal_id = null; l.dataAnimal = null; l.fora = false;
+      l.estado = 'NAO_ENCONTRADO'; l.semPosicao = true; l.mensagem = 'A data mudou: o brinco é conferido de novo pelo servidor em ' + Fmt.data(c.sessao.data) + '.';
+    });
+  }
   function pendencias(c) { return c.linhas.filter(function (l) { return l.estado === 'NAO_ENCONTRADO' || l.estado === 'ERRO'; }); }
-  function naFila(c) { return c.linhas.filter(function (l) { return l.estado === 'FILA' && !l.bloco; }); }
+  /** Na fila e com o animal conferido na data da sessão (a linha de outra data nunca sai num bloco). */
+  function naFila(c) { return c.linhas.filter(function (l) { return l.estado === 'FILA' && !l.bloco && (!l.dataAnimal || l.dataAnimal === c.sessao.data); }); }
   /** Linhas que ainda não saíram: a fila e as de bloco criado e não enviado (NOVO). */
   function naoEnviadas(c) { return c.linhas.filter(function (l) { if (l.estado !== 'FILA') return false; if (!l.bloco) return true; var b = bloco(c, l.bloco); return !b || b.estado === 'NOVO'; }); }
   /** O cabeçalho do lançamento na sessão de agora (data, momento, método, jejum). */
@@ -416,7 +432,10 @@ var TelaPesagens = (function () {
       ev.preventDefault();
       Util.limpar(erro);
       if (!Fmt.ehData(data.value)) { erro.appendChild(UI.nota('Escolha a data da pesagem.', 'erro')); data.focus(); return; }
+      var antes = JSON.stringify(s);
+      var dataMudou = s.data !== data.value;
       s.data = data.value; s.metodo = metodo.value; s.momento = momento.value; s.jejum = jejum.checked; s.pasto_id = pasto.value;
+      if (antes !== JSON.stringify(s)) sessaoMudou(c, dataMudou);
       c.iniciada = true;
       guardar(c).then(aoComecar);
     } } },
@@ -510,16 +529,17 @@ var TelaPesagens = (function () {
     function resolverEsperando() {
       var esperando = c.linhas.filter(function (l) { return l.semPosicao && l.estado === 'NAO_ENCONTRADO'; });
       if (!esperando.length) return Promise.resolve();
-      return resolverNoServidor(esperando.map(function (l) { return l.brinco; })).then(function (r) {
-        if (r.erro || !vivo) return;
+      var data = c.sessao.data;
+      return resolverNoServidor(esperando.map(function (l) { return l.texto || l.brinco; })).then(function (r) {
+        if (r.erro || !vivo || c.sessao.data !== data) return;
         esperando.forEach(function (l) {
-          var x = r.porTexto[String(l.brinco).trim()];
+          var x = r.porTexto[String(l.texto || l.brinco).trim()];
           if (!x || l.estado !== 'NAO_ENCONTRADO') return;
           l.semPosicao = false;
           var a = x.situacao === 'ACHADO' ? Store.doEstado(r.animais[x.animal_id]) : null;
           var outra = a ? c.linhas.filter(function (y) { return y !== l && y.animal_id === a.animal_id; })[0] : null;
           if (!a || !presente(a) || outra) { l.mensagem = !a ? x.mensagem || 'Mais de um animal com este brinco: corrija o brinco.' : outra ? Store.rotuloAnimal(a) + ' já tem outra pesagem nesta sessão (' + Fmt.peso(outra.peso) + '): tire uma das duas.' : Store.rotuloAnimal(a) + ' ' + motivoFora(a) + ': não entra na pesagem.'; return; }
-          l.animal_id = a.animal_id; l.brinco = brincoDe(a) || a.codigo_interno; l.estado = 'FILA'; l.mensagem = null;
+          l.animal_id = a.animal_id; l.dataAnimal = data; l.brinco = brincoDe(a) || a.codigo_interno; l.estado = 'FILA'; l.mensagem = null;
           l.fora = !!(c.sessao.pasto_id && pastoDe(a) !== c.sessao.pasto_id);
         });
         mudou();
@@ -708,6 +728,7 @@ var TelaPesagens = (function () {
       var p = Fmt.lerDecimal(ui.peso.value, 1);
       if (p.erro || p.valor === null || !(p.valor > 0) || p.valor > PESO_MAX) { aviso(p.erro || (p.valor === null ? 'Digite o peso.' : 'O peso vai de 0,1 a 2.000 kg.')); ui.peso.focus(); return; }
       var at = ui.atual;
+      at.texto = ui.brinco.value.trim() || at.brinco;
       if (at.animal && !presente(at.animal)) { aviso('Este animal ' + motivoFora(at.animal) + ': não entra na pesagem.'); ui.brinco.select(); ui.brinco.focus(); return; }
       var ja = at.animal ? c.linhas.filter(function (l) { return l.animal_id === at.animal.animal_id; }) : [];
       var ultimo = ja[ja.length - 1];
@@ -717,7 +738,7 @@ var TelaPesagens = (function () {
         ui.candidatos.appendChild(h('p', { class: 'aviso', dataset: { decisaoRepetido: '1' }, text: Store.rotuloAnimal(at.animal) + ' já foi pesado nesta pesagem com ' + Fmt.peso(ultimo.peso) + (mudavel ? '. Substituir pelo peso novo (' + Fmt.peso(p.valor) + ')?' : ' (' + ROTULO_ESTADO[ultimo.estado] + '). Pesar de novo grava outra pesagem do mesmo dia.') }));
         ui.candidatos.appendChild(h('div', { class: 'acoes' },
           UI.botao(mudavel ? 'Substituir o peso' : 'Pesar de novo', { tipo: 'primario', aoClicar: function () {
-            if (mudavel) { if (ultimo.bloco) desfazerBloco(c, ultimo.bloco); ultimo.peso = p.valor; ultimo.estado = 'FILA'; ultimo.mensagem = null; c.linhas = c.linhas.filter(function (l) { return l !== ultimo; }).concat([ultimo]); }
+            if (mudavel) { if (ultimo.bloco) desfazerBloco(c, ultimo.bloco); ultimo.peso = p.valor; ultimo.texto = at.texto; ultimo.dataAnimal = c.sessao.data; ultimo.estado = 'FILA'; ultimo.mensagem = null; c.linhas = c.linhas.filter(function (l) { return l !== ultimo; }).concat([ultimo]); }
             else adicionar(at, p.valor);
             limparEntrada(); mudou(); depoisDeLancar();
           } }),
@@ -731,7 +752,7 @@ var TelaPesagens = (function () {
     }
     function adicionar(at, peso) {
       c.seq = (c.seq || 0) + 1;
-      var l = { uid: 'p' + c.seq + '-' + Util.uuid().slice(0, 6), brinco: at.brinco, animal_id: at.animal ? at.animal.animal_id : null, peso: peso, estado: at.animal ? 'FILA' : 'NAO_ENCONTRADO', bloco: null, mensagem: at.animal ? null : at.mensagem || null, semPosicao: !at.animal && !!at.semPosicao };
+      var l = { uid: 'p' + c.seq + '-' + Util.uuid().slice(0, 6), brinco: at.brinco, texto: at.texto || at.brinco, animal_id: at.animal ? at.animal.animal_id : null, dataAnimal: at.animal ? c.sessao.data : null, peso: peso, estado: at.animal ? 'FILA' : 'NAO_ENCONTRADO', bloco: null, mensagem: at.animal ? null : at.mensagem || null, semPosicao: !at.animal && !!at.semPosicao };
       l.fora = !!(at.animal && c.sessao.pasto_id && pastoDe(at.animal) !== c.sessao.pasto_id);
       c.linhas.push(l);
     }
@@ -816,7 +837,7 @@ var TelaPesagens = (function () {
         if (x.situacao !== 'ACHADO') { UI.aviso(x.mensagem, { tipo: 'erro' }); return; }
         var a = Store.doEstado(r.animais[x.animal_id]);
         if (!presente(a)) { UI.aviso(Store.rotuloAnimal(a) + ' ' + motivoFora(a) + ': não entra na pesagem.', { tipo: 'erro' }); return; }
-        l.brinco = brincoDe(a) || a.codigo_interno; l.animal_id = a.animal_id; l.estado = 'FILA'; l.mensagem = null; l.semPosicao = false;
+        l.brinco = brincoDe(a) || a.codigo_interno; l.texto = t; l.animal_id = a.animal_id; l.dataAnimal = c.sessao.data; l.estado = 'FILA'; l.mensagem = null; l.semPosicao = false;
         l.fora = !!(c.sessao.pasto_id && pastoDe(a) !== c.sessao.pasto_id);
         f.fechar({ forcar: true });
         mudou();
@@ -885,6 +906,7 @@ var TelaPesagens = (function () {
       carregarPosicao();
       desenhar();
       ui.brinco.focus();
+      resolverEsperando();
       if (c.blocos.some(function (b) { return b.estado === 'ENVIANDO' || b.estado === 'SEM_SINAL'; })) conferirBlocos(c, desenhar).catch(function (e) { Util.registrarFalha('conferir os blocos do curral', e); });
     }
     carregarSessao().then(function (x) {

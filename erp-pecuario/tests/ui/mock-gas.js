@@ -9,6 +9,8 @@
  *  - perder: n — as próximas n chamadas chegam ao servidor (e gravam), mas a resposta se perde (sem resposta);
  *  - falharTransporte: n — as próximas n chamadas falham no transporte, SEM chegar ao servidor;
  *  - pedidos: o que a página enviou; violacoes: argumentos que o google.script.run real recusaria (Date, função...).
+ * A resposta do lado do Node pode ser uma falha de rede decidida lá (o teste aleatório do curral, `apoio.abrir` com
+ * `servidor`): {"__mock":"perdida"} — sem resposta nenhuma, como `perder`; {"__mock":"transporte"} — falha no transporte.
  * Com window.__ERP_TESTE.historico !== false, emula google.script.history e google.script.url sobre o histórico da
  * própria página (o real espelha na URL da janela de cima). Não é arquivo de teste.
  */
@@ -50,7 +52,8 @@
     var perder = ctl.perder > 0;
     if (perder) ctl.perder -= 1;
     window.__erpServidor(JSON.stringify(pedido)).then(function (json) {
-      if (perder) { ctl.emCurso -= 1; return; }
+      if (perder || json === '{"__mock":"perdida"}') { ctl.emCurso -= 1; return; }
+      if (json === '{"__mock":"transporte"}') { setTimeout(function () { ctl.emCurso -= 1; if (falha) falha(new Error('NetworkError: Connection failure due to HTTP 0')); }, atraso); return; }
       setTimeout(function () { ctl.emCurso -= 1; if (ok) ok(JSON.parse(json)); }, atraso);
     }, function (e) {
       setTimeout(function () { ctl.emCurso -= 1; if (falha) falha(e); }, 0);

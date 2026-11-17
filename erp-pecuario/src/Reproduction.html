@@ -366,8 +366,23 @@ var TelaReproducao = (function () {
     var b = bloco(c, l.bloco);
     return !b || b.estado === 'NOVO' || b.estado === 'AVISO' || b.estado === 'ERRO';
   }
+  /**
+   * A sessão mudou (só enquanto nenhum bloco saiu): os blocos não enviados se desfazem (levavam o cabeçalho de antes) e, com a
+   * data nova, toda linha volta a ser conferida pelo servidor NA DATA NOVA pelo texto digitado: fica pendente até a resposta.
+   */
+  function sessaoMudou(c, dataMudou) {
+    c.blocos.slice().forEach(function (b) { if (b.estado !== 'GRAVADO') desfazerBloco(c, b.chave); });
+    c.erroGeral = null;
+    if (!dataMudou) return;
+    c.linhas.forEach(function (l) {
+      if (l.estado === 'GRAVADA') return;
+      l.brinco = l.texto || l.brinco; l.animal_id = null; l.dataAnimal = null;
+      l.estado = 'NAO_ENCONTRADO'; l.semPosicao = true; l.mensagem = 'A data mudou: o brinco é conferido de novo pelo servidor em ' + Fmt.data(c.sessao.data) + '.';
+    });
+  }
   function pendencias(c) { return c.linhas.filter(function (l) { return l.estado === 'NAO_ENCONTRADO' || l.estado === 'ERRO'; }); }
-  function naFila(c) { return c.linhas.filter(function (l) { return l.estado === 'FILA' && !l.bloco; }); }
+  /** Na fila e com a fêmea conferida na data da sessão (a linha de outra data nunca sai num bloco). */
+  function naFila(c) { return c.linhas.filter(function (l) { return l.estado === 'FILA' && !l.bloco && (!l.dataAnimal || l.dataAnimal === c.sessao.data); }); }
   function naoEnviadas(c) { return c.linhas.filter(function (l) { if (l.estado !== 'FILA') return false; if (!l.bloco) return true; var b = bloco(c, l.bloco); return !b || b.estado === 'NOVO'; }); }
   /** O cabeçalho do lançamento na sessão de agora (data, método, estação, quem diagnosticou). */
   function camposDaSessao(c) {
@@ -503,7 +518,10 @@ var TelaReproducao = (function () {
         ev.preventDefault();
         Util.limpar(erro);
         if (!Fmt.ehData(data.value)) { erro.appendChild(UI.nota('Escolha a data do diagnóstico.', 'erro')); data.focus(); return; }
+        var antes = JSON.stringify(s);
+        var dataMudou = s.data !== data.value;
         s.data = data.value; s.metodo = metodo.value; s.estacao_id = est.value; s.responsavel = resp.value.trim();
+        if (antes !== JSON.stringify(s)) sessaoMudou(c, dataMudou);
         c.iniciada = true;
         guardarTronco(c).then(sessao);
       } } }, campo('tr-data', 'Data do diagnóstico', data), campo('tr-metodo', 'Como foi o diagnóstico', metodo), campo('tr-estacao', 'Estação de monta', est, 'A estação das fêmeas diagnosticadas (os indicadores de prenhez são por estação).'),
@@ -565,16 +583,17 @@ var TelaReproducao = (function () {
     function resolverEsperando() {
       var esperando = c.linhas.filter(function (l) { return l.semPosicao && l.estado === 'NAO_ENCONTRADO'; });
       if (!esperando.length) return Promise.resolve();
-      return resolverNoServidor(esperando.map(function (l) { return l.brinco; })).then(function (r) {
-        if (r.erro || !vivo) return;
+      var data = c.sessao.data;
+      return resolverNoServidor(esperando.map(function (l) { return l.texto || l.brinco; })).then(function (r) {
+        if (r.erro || !vivo || c.sessao.data !== data) return;
         esperando.forEach(function (l) {
-          var x = r.porTexto[String(l.brinco).trim()];
+          var x = r.porTexto[String(l.texto || l.brinco).trim()];
           if (!x || l.estado !== 'NAO_ENCONTRADO') return;
           l.semPosicao = false;
           var a = x.situacao === 'ACHADO' ? Store.doEstado(r.animais[x.animal_id]) : null;
           var outra = a ? c.linhas.filter(function (y) { return y !== l && y.animal_id === a.animal_id && y.estado !== 'GRAVADA'; })[0] : null;
           if (!a || motivoFora(a) || outra) { l.mensagem = !a ? x.mensagem || 'Mais de uma fêmea com este brinco: digite de novo.' : outra ? Store.rotuloAnimal(a) + ' já tem outro diagnóstico nesta sessão: tire um dos dois.' : Store.rotuloAnimal(a) + ' ' + motivoFora(a) + ': não entra no diagnóstico.'; return; }
-          l.animal_id = a.animal_id; l.brinco = brincoDe(a) || a.codigo_interno; l.estado = 'FILA'; l.mensagem = null;
+          l.animal_id = a.animal_id; l.dataAnimal = data; l.brinco = brincoDe(a) || a.codigo_interno; l.estado = 'FILA'; l.mensagem = null;
         });
         mudou();
       });
@@ -642,11 +661,12 @@ var TelaReproducao = (function () {
       var r = lerResultado(txt === undefined ? ui.resultado.value : txt);
       if (r.erro) { Util.limpar(ui.conferencia); ui.conferencia.appendChild(h('p', { class: 'destaque-erro', role: 'alert', text: r.erro })); ui.resultado.focus(); return; }
       var at = ui.atual;
+      var texto = ui.brinco.value.trim() || at.brinco;
       var ja = at.animal ? c.linhas.filter(function (l) { return l.animal_id === at.animal.animal_id && l.estado !== 'GRAVADA' && editavel(c, l); }) : [];
-      if (ja.length) { var u = ja[ja.length - 1]; if (u.bloco) desfazerBloco(c, u.bloco); u.resultado = r.resultado; u.idade = r.idade; u.estado = 'FILA'; u.mensagem = null; c.linhas = c.linhas.filter(function (l) { return l !== u; }).concat([u]); }
+      if (ja.length) { var u = ja[ja.length - 1]; if (u.bloco) desfazerBloco(c, u.bloco); u.resultado = r.resultado; u.idade = r.idade; u.texto = texto; u.dataAnimal = c.sessao.data; u.estado = 'FILA'; u.mensagem = null; c.linhas = c.linhas.filter(function (l) { return l !== u; }).concat([u]); }
       else {
         c.seq = (c.seq || 0) + 1;
-        c.linhas.push({ uid: 'd' + c.seq + '-' + Util.uuid().slice(0, 6), brinco: at.brinco, animal_id: at.animal ? at.animal.animal_id : null, resultado: r.resultado, idade: r.idade, estado: at.animal ? 'FILA' : 'NAO_ENCONTRADO', bloco: null, mensagem: at.animal ? null : at.mensagem || null, semPosicao: !at.animal && !!at.semPosicao });
+        c.linhas.push({ uid: 'd' + c.seq + '-' + Util.uuid().slice(0, 6), brinco: at.brinco, texto: texto, animal_id: at.animal ? at.animal.animal_id : null, dataAnimal: at.animal ? c.sessao.data : null, resultado: r.resultado, idade: r.idade, estado: at.animal ? 'FILA' : 'NAO_ENCONTRADO', bloco: null, mensagem: at.animal ? null : at.mensagem || null, semPosicao: !at.animal && !!at.semPosicao });
       }
       ui.brinco.value = ''; ui.resultado.value = ''; ui.atual = null; ui.conferindo = null; Util.limpar(ui.conferencia); Util.limpar(ui.candidatos);
       mudou();
@@ -798,6 +818,7 @@ var TelaReproducao = (function () {
       carregarPosicao();
       desenhar();
       ui.brinco.focus();
+      resolverEsperando();
       if (c.blocos.some(function (b) { return b.estado === 'ENVIANDO' || b.estado === 'SEM_SINAL'; })) conferirBlocos(c, desenhar).catch(function (e) { Util.registrarFalha('conferir os blocos do tronco', e); });
     }
     (tronco ? Promise.resolve(tronco) : Rascunhos.obter(ID_RASCUNHO).then(function (r) { return r && r.tipo === TIPO_RASCUNHO ? r : novaSessao(); })).then(function (x) {
@@ -920,6 +941,6 @@ var TelaReproducao = (function () {
   Telas.registrar('reproducao/indicadores', { titulo: 'Indicadores reprodutivos', modulo: 'REPRODUCAO', montar: montarIndicadores });
   Telas.registrar('reproducao/estacoes', { titulo: 'Estações de monta', modulo: 'REPRODUCAO', montar: montarEstacoes });
   Telas.registrar('reproducao/tronco', { titulo: 'Diagnóstico no tronco', modulo: 'REPRODUCAO', telaCheia: true, montar: montarTronco });
-  return { blocoFicha: blocoFicha, previaCorrecao: previaCorrecao, lerResultado: lerResultado, textoPrevisao: textoPrevisao };
+  return { blocoFicha: blocoFicha, previaCorrecao: previaCorrecao, lerResultado: lerResultado, textoPrevisao: textoPrevisao, sessao: function () { return tronco ? Util.clonar(tronco) : null; } };
 })();
 </script>

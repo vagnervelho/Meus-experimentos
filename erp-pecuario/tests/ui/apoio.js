@@ -58,7 +58,9 @@ async function fecharBrowser() { if (navegador) { await navegador.close(); naveg
 /**
  * Abre o app. o: {largura (1280), altura, historico (true: emula google.script.history/url), semLocalStorage,
  * params (doGet), trocarVersao, fuso (do aparelho), telasDeTeste: [{padrao, modulo, titulo}], relogio (ms: instala o
- * relógio do Playwright), hash}. Devolve {ctx, page, estado: {chamadas, erros}, pedidos(rota), fechar()}.
+ * relógio do Playwright), hash, servidor: async (pedido, executar) → JSON (quem responde no lugar do backend: `executar()`
+ * chama o backend real e devolve o JSON; o retorno pode ser uma falha de rede do mock-gas.js)}. Devolve {ctx, page, estado:
+ * {chamadas, erros}, pedidos(rota), fechar()}.
  */
 async function abrir(s, o) {
   o = o || {};
@@ -72,7 +74,8 @@ async function abrir(s, o) {
   await ctx.exposeFunction('__erpServidor', (json) => {
     const pedido = JSON.parse(json);
     estado.chamadas.push(pedido);
-    return JSON.stringify(s.gas.exec(() => s.G.api(pedido)));
+    const executar = () => JSON.stringify(s.gas.exec(() => s.G.api(pedido)));
+    return o.servidor ? o.servidor(pedido, executar) : executar();
   });
   await ctx.addInitScript((cfg) => {
     window.__ERP_TESTE = { historico: cfg.historico };

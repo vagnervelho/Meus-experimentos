@@ -1879,3 +1879,17 @@ reuso). Esta etapa troca o caso a caso por UM resolvedor no servidor e faz todos
   e hoje (os textos difíceis do modelo pelos quatro caminhos da rota — `RESOLVER:CAMINHOS` —, cada número da posição da data no
   animal do resolvedor e com a mesma descrição — `RESOLVER:POSICAO`, `RESOLVER:CONFERENCIA`) e `oraculoResolucaoImportacao` ao
   concluir uma importação (`RESOLVER:IMPORTACAO`). As sementes fixas exigem os quatro contadores novos; as sequências não mudaram.
+- Leva nova com o oráculo (3600000 a 3600199, 200 sementes × 100 passos, 4 processos): 11.651 aceitos, 6.731 recusados, 0
+  falhas; o resolvedor conferido em 121.556 textos pelos quatro caminhos, 14.716 números da posição, 15.332 animais descritos
+  igual na posição e 93 linhas importadas no animal do resolvedor (1.476 retratos da viagem no tempo). Nas 23 sementes fixas de
+  60 passos (826 aceitos, 443 recusados, 0 falhas, as mesmas sequências de antes): 8.735 textos, 1.346 números da posição, 1.420
+  animais descritos e 6 linhas importadas.
+- Verificado no fim, com o código final: `npm test`, 855 testes, 855 aprovados e 0 falhas (814,9 s); `npm run ui:check`, 160
+  testes, 160 aprovados e 0 falhas (311,3 s), a página inicial com 460.759 bytes de 460.800 (450 KB; sobram 41 bytes: o
+  resolvedor do aparelho saiu, a pergunta ao servidor entrou) e, sob demanda, Import 48 KB, Weights 54 KB, Health 25 KB e
+  Reproduction 61 KB de 150 KB. Antes da etapa: 853 e 158.
+- `docs/CONTRATOS.md`: o estado ganhou a frase desta etapa; seção 47 nova (a regra, o índice, o animal em D, a rota, a tabela dos
+  caminhos, a decisão da ida ao servidor, os testes e o oráculo); a tabela da seção 46 diz que a importação acha o animal pelo
+  resolvedor e traz a linha de `animal.resolver`. `docs/fase-0/` não mudou.
+- Durante a etapa, o salvamento automático de fora dela gravou um estado intermediário (commit `390a790`, "salva etapa de
+  posição em andamento"); esta etapa não fez commit nem push.
