@@ -419,6 +419,23 @@ function oraculoGlobal(sis, S, datas) {
     if (a.sexo === 'F' && fatos && fatos.length && a.situacao_reprodutiva !== ultimo(fatos).st) out.push(falha('REPLAY:SITUACAO_REPRODUTIVA', a.codigo_interno + ': gravada ' + a.situacao_reprodutiva + ', replay ' + ultimo(fatos).st + ' (' + fatos.length + ' fatos)'));
     if (a.sexo === 'M' && S.linhasDe(id).some((l) => l.tipo === 'CASTRACAO') && (a.castrado !== true || a.reprodutor !== false)) out.push(falha('REPLAY:CASTRADO', a.codigo_interno + ' com castração vigente está castrado ' + a.castrado + ', reprodutor ' + a.reprodutor));
   });
+  // Fuzz das Fases 1 a 3, passada 2: a cria ao pé (03a, 4.3.3; DL-06), pelas linhas cruas: a fêmea tem cria ao pé quando um
+  // filho dela (mae_id) está no rebanho, sem desmama vigente, e nasceu na fazenda ou entrou mais novo que a idade de desmama
+  // (meses completos na data do lançamento que o criou). Pega o projetor que esquece a mãe (a venda da cria, a desmama, a
+  // mãe trocada, o parto estornado) por qualquer caminho.
+  const desmamaMeses = paramNum(S, 'idade_desmama_padrao_meses', 8);
+  const desmamados = new Set(S.t.EVENTO_ANIMAIS.filter((l) => l.papel === 'SUJEITO' && S.vig.get(l.event_id) && (S.ev.get(l.event_id) || {}).event_type === 'DESMAMA').map((l) => l.animal_id));
+  const comCria = new Set();
+  S.animais.forEach((c, id) => {
+    if (!c.mae_id || c.situacao_cadastral !== 'ATIVO' || desmamados.has(id)) return;
+    const origem = S.ev.get(c.evento_origem_id);
+    if (!origem) return;
+    if (origem.event_type === 'NASCIMENTO' || (c.data_nascimento && mesesDe(c.data_nascimento, origem.event_date) < desmamaMeses)) comCria.add(c.mae_id);
+  });
+  S.animais.forEach((a, id) => {
+    if (a.sexo !== 'F' || ['EXTERNO', 'ANULADO', 'PENDENTE'].indexOf(a.situacao_cadastral) >= 0) return;
+    if ((a.cria_ao_pe === true) !== comCria.has(id)) out.push(falha('REPLAY:CRIA_AO_PE', a.codigo_interno + ' (' + a.situacao_cadastral + '): cria ao pé gravada ' + a.cria_ao_pe + ', replay ' + comCria.has(id)));
+  });
   // Estoque (Fase 3, E3.2): o saldo do produto com estoque controlado = Σ dos movimentos vigentes (entrada +, saída −, acerto
   // com o sinal), pelas linhas cruas de MOVIMENTOS_ESTOQUE; sem controle, vazio.
   (S.t.PRODUTOS || []).forEach((p) => {
@@ -760,6 +777,16 @@ function negocio(rnd, n, venda) {
     if (rnd() < 0.4) g.frete = sorteio(rnd, [1, 2, 12345]);
     if (rnd() < 0.2) { g.outros = sorteio(rnd, [3, 7777]); if (rnd() < 0.5) g.vezes = 2; }
   }
+  return g;
+}
+/**
+ * Fuzz das Fases 1 a 3, passada 2: o negócio sem os erros de propósito (por cabeça, uma parcela, sem desconto nem dedução),
+ * para a venda das interações chegar ao que ela quer provocar (a carência, a cria ao pé) em vez de parar na conta.
+ */
+function negocioLimpo(rnd, n) {
+  const g = negocio(rnd, n, true);
+  Object.assign(g, { mod: 'CABECA', preco: sorteio(rnd, [180000, 250000]), parcelas: { n: 1, modo: rnd() < 0.5 ? 'vazias' : 'explicitas' }, finalidade: rnd() < 0.3 ? 'ABATE' : null });
+  ['desvio', 'desconto', 'deducoes', 'loteKg'].forEach((x) => delete g[x]);
   return g;
 }
 
@@ -1782,6 +1809,29 @@ registrarTipo('ESTOQUE', {
     return { tipo: 'ESTOQUE', subtipo: s.sub, campos, animais: [] };
   },
   animais: () => [],
+  // Fuzz das Fases 1 a 3, passada 2: a correção pelas linhas gravadas também no estoque (o lançamento sem linha de animal):
+  // o movimento, a compra de insumo e as parcelas dela.
+  doGravado: (c, e) => {
+    const { S, data } = c;
+    const pj = e.payload_json || {};
+    const f = S.t.FINANCEIRO.filter((x) => x.event_id === e.event_id)[0];
+    const m = S.t.MOVIMENTOS_ESTOQUE.filter((x) => x.event_id === e.event_id)[0];
+    const prod = (f && f.product_id) || (m && m.product_id) || pj.product_id;
+    if (!prod) return null;
+    const s = { tipo: 'ESTOQUE', sub: e.event_subtype, data, prod, emb: null, qtd: null, valor: null, vezes: null, parceiro: null, motivo: null, contado: null, lote: (m && m.lote) || pj.lote || null, validade: null };
+    if (s.lote) s.validade = (m && m.validade) || pj.validade || null;
+    if (!s.validade) s.lote = null;
+    if (s.sub === 'ENTRADA') {
+      if (!f) return null;
+      const n = S.t.PARCELAS.filter((x) => x.financial_id === f.financial_id).length;
+      Object.assign(s, { qtd: f.quantidade, valor: f.valor, vezes: n > 1 ? n : null, parceiro: f.partner_id || null });
+    } else {
+      s.motivo = pj.motivo_ajuste || 'PERDA';
+      if (s.motivo === 'CONTAGEM') s.contado = typeof pj.saldo_contado === 'number' ? pj.saldo_contado : 0;
+      else s.qtd = m ? Math.abs(m.quantidade) : typeof pj.quantidade === 'number' ? pj.quantidade : 1;
+    }
+    return s;
+  },
   mutarValores: (c) => preencherEstoque(c.S, c.rnd, c.s),
   mutarOutro: (c) => {
     const { S, s, rnd } = c;
@@ -2536,10 +2586,128 @@ function gerarLida(sis, S, rnd, k, base) {
  */
 function gerarInteracao(sis, S, rnd, k, base) {
   const P = PASTOS_DE(S);
-  const qual = pesado(rnd, [['vendaCarencia', 4], ['sanidadeSobreVenda', 2.5], ['importacaoNaCarencia', 1.5], ['pesagemDeQuemSaiu', 2], ['saidaAntesDaPesagem', 1.5], ['diagnosticoDeQuemSaiu', 2], ['saidaAntesDoRegistro', 1.5], ['partoDaPrenhe', 2.5], ['partoCorrigido', 2], ['aborto', 1.5], ['estornoInsumoConsumido', 2], ['entradaInsumoMenor', 1], ['desmamaDasCrias', 1.5], ['castracaoDoTouro', 1.2], ['dosePorKg', 2.5], ['reproducaoNaEstacao', 3]]);
-  const c = interacaoDe(sis, S, rnd, k, base, P, qual);
-  contar('interação ' + qual + (c ? '' : ' (sem como montar)'));
+  // Passada 2: a interação cujo preparo foi gravado tende a voltar (a cadeia preparo → interação fecha mais vezes).
+  const pendente = sis.interacaoPendente && rnd() < 0.7 ? sis.interacaoPendente : null;
+  const qual = pendente || pesado(rnd, [['vendaCarencia', 4], ['sanidadeSobreVenda', 2.5], ['importacaoNaCarencia', 1.5], ['pesagemDeQuemSaiu', 2], ['saidaAntesDaPesagem', 1.5], ['diagnosticoDeQuemSaiu', 2], ['saidaAntesDoRegistro', 1.5], ['partoDaPrenhe', 2.5], ['partoCorrigido', 2], ['aborto', 1.5], ['estornoInsumoConsumido', 2], ['entradaInsumoMenor', 1], ['desmamaDasCrias', 1.5], ['castracaoDoTouro', 1.2], ['dosePorKg', 2.5], ['reproducaoNaEstacao', 3],
+    // Fuzz das Fases 1 a 3, passada 2: as interações novas (a venda e a aplicação corrigidas para a carência, o consumo acima
+    // do estoque, o acerto retroativo, o parto da não prenhe, o registro da mãe em volta do parto, a cria ao pé e a desmama
+    // com a venda, a pesagem levada para fora da permanência, a importação de manejo de quem saiu, a estação com registros
+    // mudada no cadastro).
+    ['vendaParaCarencia', 2.5], ['aplicacaoAcimaDoEstoque', 1.5], ['acertoRetroativo', 1], ['partoDaVazia', 1.2], ['depoisDoParto', 1.5], ['desmamaEVenda', 1.5], ['pesagemForaDaPermanencia', 1.2], ['importacaoDeQuemSaiu', 1.2], ['estacaoMudada', 1.2]]);
+  let c = interacaoDe(sis, S, rnd, k, base, P, qual);
+  if (c) { contar('interação ' + qual); sis.interacaoPendente = null; } else {
+    // Passada 2: sem como montar (na passada 1, perto de 70% das sorteadas), o gerador monta o que falta para ela.
+    c = preparoDe(sis, S, rnd, k, base, P, qual);
+    contar('interação ' + qual + (c ? ' (preparo)' : ' (sem como montar)'));
+    sis.interacaoPendente = c ? qual : null;
+  }
   return c;
+}
+/**
+ * Fuzz das Fases 1 a 3, passada 2: o preparo da interação que ainda não tem como ser montada: a estação de monta, a compra
+ * de insumo com estoque controlado e o consumo dela, o diagnóstico positivo e a exposição, o parto, a pesagem, a saída de
+ * quem tem pesagem ou registro reprodutivo, a aplicação com carência. A próxima vez que a mesma interação for sorteada, ela
+ * encontra o que precisa.
+ */
+function preparoDe(sis, S, rnd, k, base, P, qual) {
+  if (!S.marco) return null;
+  const marco = S.marco;
+  const em = (l) => l.indexOf(qual) >= 0;
+  const registrar = (spec, rotulo) => (spec ? Object.assign(base, { rota: 'evento.registrar', dados: montarDados(sis, spec), spec, rotulo: 'interação: preparo, ' + rotulo }) : null);
+  const naFaixa = (d) => (d < marco ? marco : ateHoje(d));
+  const adulta = (D) => (id) => fem(S, id) && existe(S, id) && presenca(S, id, D).dia && ((S.animais.get(id) || {}).data_nascimento || '9999-12-31') <= somaDias(D, -760);
+  const adultas = (D, max) => animaisPara(S, rnd, D, max, (id) => adulta(D)(id)).filter(adulta(D));
+  const saida = (id, desde, rotulo) => {
+    const tipo = sorteio(rnd, ['VENDA', 'VENDA', 'MORTE', 'DESCARTE']);
+    const spec = { tipo, data: ateHoje(sorteio(rnd, [desde, somaDias(desde, 1), somaDias(desde, 40)])), ids: [id] };
+    if (tipo === 'VENDA') spec.neg = negocioLimpo(rnd, 1);
+    return registrar(spec, rotulo + ' (' + tipo.toLowerCase() + ')');
+  };
+  const parto = (rotulo) => {
+    const D = naFaixa(sorteio(rnd, [somaDias(HOJE, -250), somaDias(HOJE, -100), HOJE]));
+    const maes = adultas(D, 1);
+    if (!maes.length) return null;
+    const s = tipoDoRegistro('NASCIMENTO').propor({ sis, S, rnd, D, P });
+    if (!s) return null;
+    Object.assign(s, { mae: maes[0], data: D });
+    s.crias.forEach((c) => { if (c.situacao !== 'VIVO') Object.assign(c, { situacao: 'VIVO', sexo: rnd() < 0.5 ? 'F' : 'M', brinco: null, peso: null }); else if (rnd() < 0.6) c.brinco = null; });
+    return registrar(s, rotulo);
+  };
+  // A estação existe, mas sem registro nela: a reprodução na estação (a exposição, quando o diagnóstico não tem expostas).
+  if (qual === 'estacaoMudada' && (S.t.ESTACOES_MONTA || []).length) return interacaoDe(sis, S, rnd, k, base, P, 'reproducaoNaEstacao');
+  if (em(['reproducaoNaEstacao', 'estacaoMudada'])) {
+    const ini = naFaixa(sorteio(rnd, [somaDias(HOJE, -60), somaDias(HOJE, -150), somaDias(HOJE, -280), somaDias(marco, 20)]));
+    return Object.assign(base, { rota: 'estacao.salvar', dados: { campos: { nome: 'Estação P' + k, data_inicio: ini, data_fim: somaDias(ini, sorteio(rnd, [60, 90, 120])), tipo: sorteio(rnd, ['MONTA_NATURAL', 'IA', 'MISTA']) } }, rotulo: 'interação: preparo, estação de monta' });
+  }
+  if (em(['estornoInsumoConsumido', 'entradaInsumoMenor', 'aplicacaoAcimaDoEstoque', 'acertoRetroativo'])) {
+    const prods = S.t.PRODUTOS.filter((p) => p.controla_estoque === true && p.ativo !== false);
+    const entradas = vigentesDe(S, 'MOVIMENTOS_ESTOQUE').filter((m) => m.tipo === 'ENTRADA' && prods.some((p) => p.product_id === m.product_id));
+    if (entradas.length && rnd() < 0.6) {
+      // O consumo do insumo comprado: a aplicação com o produto, no dia da entrada ou depois.
+      const m = sorteio(rnd, entradas);
+      const p = prods.find((x) => x.product_id === m.product_id);
+      const D = ateHoje(sorteio(rnd, [m.data, somaDias(m.data, 10), HOJE]));
+      const ids = animaisPara(S, rnd, D, 3, (id, pr) => pr.dia).filter((id) => existe(S, id));
+      if (!ids.length) return null;
+      const s = propostaSanidade(sis, S, rnd, p.categoria === 'VACINA' ? 'VACINACAO' : p.categoria === 'VERMIFUGO' ? 'VERMIFUGACAO' : 'MEDICACAO', D, ids);
+      Object.assign(s, { prod: p.product_id, nome: null, unidade: null, modo: 'POR_CABECA', doseRef: sorteio(rnd, [2, 5, 10]), qtd: null, protocolo: null, lote: null, validade: null });
+      s.itens.forEach((i) => { i.dose = null; });
+      return registrar(s, 'consumo do insumo comprado');
+    }
+    const p = sorteio(rnd, prods);
+    if (!p) return null;
+    const s = { tipo: 'ESTOQUE', sub: 'ENTRADA', data: naFaixa(sorteio(rnd, [somaDias(marco, 5), somaDias(HOJE, -120), somaDias(HOJE, -30)])), prod: p.product_id };
+    preencherEstoque(S, rnd, s);
+    Object.assign(s, { emb: null, qtd: sorteio(rnd, [5, 20, 60]) });
+    return registrar(s, 'compra de insumo');
+  }
+  if (em(['partoCorrigido', 'depoisDoParto']) && rnd() < 0.6) {
+    const c = interacaoDe(sis, S, rnd, k, base, P, 'partoDaPrenhe');
+    if (c) return c;
+    return parto('parto');
+  }
+  if (em(['desmamaDasCrias', 'desmamaEVenda'])) return parto('parto para a desmama');
+  if (em(['partoDaPrenhe', 'partoCorrigido', 'aborto', 'depoisDoParto', 'partoDaVazia'])) {
+    const D = naFaixa(sorteio(rnd, [somaDias(HOJE, -30), somaDias(HOJE, -120), somaDias(HOJE, -250)]));
+    const ids = adultas(D, 3);
+    if (!ids.length) return null;
+    if (em(['aborto', 'partoDaVazia'])) {
+      const sub = sorteio(rnd, ['EXPOSICAO', 'INSEMINACAO', 'COBERTURA']);
+      const s = { tipo: 'REPRODUCAO', sub, data: D, itens: ids.map((id) => ({ id })), estacao: null, custo: null };
+      preencherReproducao(S, rnd, s);
+      return registrar(s, 'exposição da fêmea (' + sub.toLowerCase() + ')');
+    }
+    const s = { tipo: 'REPRODUCAO', sub: 'DIAGNOSTICO_GESTACAO', data: D, itens: ids.map((id) => ({ id, resultado: 'POSITIVO', idade: sorteio(rnd, [60, 120, 200]), prevista: null })), estacao: null, metodo: 'PALPACAO', custo: null, touros: [], touro: null, semen: null, fim: null };
+    return registrar(s, 'diagnóstico positivo');
+  }
+  if (em(['diagnosticoDeQuemSaiu', 'saidaAntesDoRegistro'])) {
+    const r = sorteio(rnd, vigentesDe(S, 'REPRODUCAO').filter((x) => x.data >= marco && presenca(S, x.animal_id, HOJE).fim));
+    if (!r) return preparoDe(sis, S, rnd, k, base, P, 'partoDaPrenhe');
+    return saida(r.animal_id, r.data, 'saída da fêmea com registro reprodutivo');
+  }
+  if (em(['saidaAntesDaPesagem', 'pesagemDeQuemSaiu', 'pesagemForaDaPermanencia', 'importacaoDeQuemSaiu'])) {
+    const p = sorteio(rnd, vigentesDe(S, 'PESAGENS').filter((x) => x.data_pesagem >= marco && presenca(S, x.animal_id, HOJE).fim));
+    if (!p) return preparoDe(sis, S, rnd, k, base, P, 'dosePorKg');
+    return saida(p.animal_id, p.data_pesagem, 'saída de quem tem pesagem');
+  }
+  if (qual === 'dosePorKg') {
+    const D = naFaixa(sorteio(rnd, [HOJE, somaDias(HOJE, -60), somaDias(HOJE, -200)]));
+    const ids = animaisPara(S, rnd, D, 3, (id, p) => p.dia).filter((id) => existe(S, id));
+    if (!ids.length) return null;
+    return registrar({ tipo: 'PESAGEM', data: D, momento: 'ROTINA', metodo: 'BALANCA', jejum: false, itens: itensPesagem(S, rnd, ids, D), lote: null }, 'pesagem');
+  }
+  // A venda do animal tratado depois do fim da carência (que a correção leva depois para dentro dela).
+  if (qual === 'vendaParaCarencia' && rnd() < 0.6) {
+    const r = sorteio(rnd, vigentesDe(S, 'SANIDADE').filter((x) => x.data_aplicacao >= marco && x.tipo_procedimento !== 'DOENCA' && presenca(S, x.animal_id, HOJE).fim && existe(S, x.animal_id)));
+    if (r) {
+      const fim = fimCarenciaDe(r) || somaDias(r.data_aplicacao, 20);
+      const spec = { tipo: 'VENDA', data: ateHoje(somaDias(fim, sorteio(rnd, [1, 10, 40]))), ids: [r.animal_id], neg: negocioLimpo(rnd, 1) };
+      return registrar(spec, 'venda do animal tratado, depois da carência');
+    }
+  }
+  // A aplicação com carência (a venda na carência e a importação dela partem daqui).
+  if (em(['importacaoNaCarencia', 'vendaParaCarencia', 'sanidadeSobreVenda'])) return interacaoDe(sis, S, rnd, k, base, P, 'vendaCarencia');
+  return null;
 }
 function interacaoDe(sis, S, rnd, k, base, P, qual) {
   const registrar = (spec, rotulo) => (spec ? Object.assign(base, { rota: 'evento.registrar', dados: montarDados(sis, spec), spec, rotulo: 'interação: ' + rotulo }) : null);
@@ -2559,7 +2727,8 @@ function interacaoDe(sis, S, rnd, k, base, P, qual) {
     }
     const meio = somaDias(x.r.data_aplicacao, Math.floor(diasEntre(x.r.data_aplicacao, x.fim) / 2));
     const D = ateHoje(sorteio(rnd, [x.r.data_aplicacao, meio, x.fim, x.fim, somaDias(x.fim, 1)]));
-    const spec = { tipo: 'VENDA', data: D, ids: [x.r.animal_id], neg: negocio(rnd, 1, true) };
+    // Passada 2: quase sempre o negócio sem erro de propósito (para a venda chegar à carência).
+    const spec = { tipo: 'VENDA', data: D, ids: [x.r.animal_id], neg: rnd() < 0.75 ? negocioLimpo(rnd, 1) : negocio(rnd, 1, true) };
     spec.neg.finalidade = rnd() < 0.5 ? 'ABATE' : null;
     return registrar(spec, 'venda na carência' + (spec.neg.finalidade ? ' (abate)' : ''));
   }
@@ -2699,17 +2868,189 @@ function interacaoDe(sis, S, rnd, k, base, P, qual) {
     if (rnd() < 0.15) s.itens[0].dose = 7.5;
     return registrar(s, 'dose por kg');
   }
+  // ---- Fuzz das Fases 1 a 3, passada 2: as interações novas ----
+  const marco = S.marco || D0;
+  if (qual === 'vendaParaCarencia') {
+    // A venda gravada levada, por correção, para dentro da carência de uma aplicação do animal; ou a aplicação corrigida com a
+    // carência que passa a cobrir a venda gravada (o aviso CARENCIA_ATIVA, e a política na venda para abate, na correção).
+    const pares = [];
+    S.t.EVENTOS.filter((e) => S.vig.get(e.event_id) && e.event_type === 'VENDA' && e.pre_marco_zero !== true).forEach((e) => {
+      animaisDoEvento(e.event_id).forEach((id) => vigentesDe(S, 'SANIDADE').filter((r) => r.animal_id === id && r.data_aplicacao >= marco && r.tipo_procedimento !== 'DOENCA').forEach((r) => pares.push({ e, r })));
+    });
+    const x = sorteio(rnd, pares);
+    if (!x) return null;
+    const fim = fimCarenciaDe(x.r);
+    if (fim && rnd() < 0.5) {
+      const spec = specDe(x.e);
+      if (!spec) return null;
+      spec.data = ateHoje(sorteio(rnd, [x.r.data_aplicacao, fim, somaDias(fim, 1), somaDias(x.r.data_aplicacao, Math.floor(diasEntre(x.r.data_aplicacao, fim) / 2))]));
+      if (spec.neg && rnd() < 0.4) spec.neg.finalidade = 'ABATE';
+      return corrigir(x.e.event_id, spec, 'venda levada para dentro da carência');
+    }
+    if (x.r.data_aplicacao > x.e.event_date) return null;
+    const spec = specDe(S.ev.get(x.r.event_id));
+    if (!spec || spec.tipo !== 'SANIDADE') return null;
+    spec.carencia = Math.max(1, diasEntre(x.r.data_aplicacao, x.e.event_date) + sorteio(rnd, [0, 0, 1, 20, -1]));
+    return corrigir(x.r.event_id, spec, 'aplicação corrigida com a carência sobre a venda');
+  }
+  if (qual === 'aplicacaoAcimaDoEstoque') {
+    // O consumo acima do saldo do produto com estoque controlado, no registro ou na correção que aumenta a quantidade.
+    const p = sorteio(rnd, S.t.PRODUTOS.filter((x) => x.controla_estoque === true && x.ativo !== false));
+    if (!p) return null;
+    const saldo = typeof p.estoque_atual === 'number' ? p.estoque_atual : 0;
+    const qtd = Math.max(0.5, Math.round((Math.max(0, saldo) + sorteio(rnd, [0.5, 10, 0, 100])) * 100) / 100);
+    const apls = vigentesDe(S, 'SANIDADE').filter((r) => r.produto_id === p.product_id && sis.specs.has(r.event_id));
+    if (apls.length && rnd() < 0.4) {
+      const r = sorteio(rnd, apls);
+      const spec = js(sis.specs.get(r.event_id).spec);
+      if (spec.tipo !== 'SANIDADE' || spec.sub === 'DOENCA') return null;
+      Object.assign(spec, { prod: p.product_id, nome: null, unidade: null, modo: 'TOTAL', doseRef: null, qtd });
+      spec.itens.forEach((i) => { i.dose = null; });
+      return corrigir(r.event_id, spec, 'aplicação corrigida acima do estoque');
+    }
+    const datas = vigentesDe(S, 'MOVIMENTOS_ESTOQUE').filter((m) => m.product_id === p.product_id).map((m) => m.data).sort();
+    const D = ateHoje(sorteio(rnd, datas.length ? [HOJE, datas[0], somaDias(datas[0], -1), datas[datas.length - 1]] : [HOJE]));
+    const ids = animaisPara(S, rnd, D, 2, (id, pr) => pr.dia).filter((id) => existe(S, id));
+    if (!ids.length) return null;
+    const s = propostaSanidade(sis, S, rnd, p.categoria === 'VACINA' ? 'VACINACAO' : p.categoria === 'VERMIFUGO' ? 'VERMIFUGACAO' : 'MEDICACAO', D, ids);
+    Object.assign(s, { prod: p.product_id, nome: null, unidade: null, modo: 'TOTAL', doseRef: null, qtd, protocolo: null, lote: null, validade: null });
+    s.itens.forEach((i) => { i.dose = null; });
+    return registrar(s, 'aplicação acima do estoque');
+  }
+  if (qual === 'acertoRetroativo') {
+    // O acerto de estoque (contagem ou perda) datado antes de saídas já gravadas: o saldo dos dias seguintes muda com ele.
+    const p = sorteio(rnd, S.t.PRODUTOS.filter((x) => x.controla_estoque === true && x.ativo !== false));
+    const m = p && sorteio(rnd, vigentesDe(S, 'MOVIMENTOS_ESTOQUE').filter((y) => y.product_id === p.product_id));
+    if (!m) return null;
+    const s = { tipo: 'ESTOQUE', sub: 'AJUSTE', data: ateHoje(sorteio(rnd, [m.data, somaDias(m.data, -1), somaDias(m.data, 1)])), prod: p.product_id };
+    preencherEstoque(S, rnd, s);
+    if (rnd() < 0.6) Object.assign(s, { motivo: 'CONTAGEM', contado: sorteio(rnd, [0, 1, 5]), qtd: null });
+    else Object.assign(s, { motivo: sorteio(rnd, ['PERDA', 'VENCIMENTO']), contado: null, qtd: sorteio(rnd, [5, 50]) });
+    return registrar(s, 'acerto de estoque antes de saídas gravadas');
+  }
+  if (qual === 'partoDaVazia') {
+    // O parto da fêmea que não está prenhe (vazia pelo diagnóstico, exposta, inseminada), antes e depois do último registro.
+    const id = sorteio(rnd, MOVEIS(S).filter((x) => existe(S, x) && fem(S, x) && ['VAZIA', 'EXPOSTA', 'INSEMINADA'].indexOf(S.animais.get(x).situacao_reprodutiva) >= 0 && presenca(S, x, HOJE).fim));
+    if (!id) return null;
+    const u = ultimoReg(S, id, () => true);
+    const D = ateHoje(u ? sorteio(rnd, [somaDias(u.data, 1), somaDias(u.data, 280), u.data, somaDias(u.data, -1), somaDias(u.data, 30)]) : HOJE);
+    const s = tipoDoRegistro('NASCIMENTO').propor({ sis, S, rnd, D, P });
+    if (!s) return null;
+    Object.assign(s, { mae: id, data: D });
+    s.crias.forEach((c) => { if (rnd() < 0.6) c.brinco = null; });
+    return registrar(s, 'parto da fêmea que não estava prenhe');
+  }
+  if (qual === 'depoisDoParto') {
+    // O diagnóstico, o aborto, a exposição ou a inseminação da mãe em volta do parto (o registro novo, ou o registro dela
+    // levado por correção para perto do parto): a gestação que o parto encerrou (PARTO_NA_GESTACAO) e a situação depois.
+    const e = sorteio(rnd, S.t.EVENTOS.filter((x) => S.vig.get(x.event_id) && x.event_type === 'NASCIMENTO' && x.pre_marco_zero !== true));
+    const mae = e && (S.t.EVENTO_ANIMAIS.find((l) => l.event_id === e.event_id && l.papel === 'MATRIZ') || {}).animal_id;
+    if (!mae) return null;
+    const D = ateHoje(sorteio(rnd, [somaDias(e.event_date, -1), e.event_date, somaDias(e.event_date, 1), somaDias(e.event_date, 20), somaDias(e.event_date, -60)]));
+    const regs = vigentesDe(S, 'REPRODUCAO').filter((r) => r.animal_id === mae && sis.specs.has(r.event_id) && r.tipo_evento !== 'DESMAMA');
+    if (regs.length && rnd() < 0.4) {
+      const r = sorteio(rnd, regs);
+      const spec = js(sis.specs.get(r.event_id).spec);
+      if (spec.tipo !== 'REPRODUCAO') return null;
+      spec.data = D;
+      return corrigir(r.event_id, spec, 'registro reprodutivo levado para perto do parto');
+    }
+    const sub = sorteio(rnd, ['DIAGNOSTICO_GESTACAO', 'DIAGNOSTICO_GESTACAO', 'ABORTO', 'EXPOSICAO', 'INSEMINACAO']);
+    const s = { tipo: 'REPRODUCAO', sub, data: D, itens: [{ id: mae }], estacao: null, custo: null };
+    preencherReproducao(S, rnd, s);
+    if (sub === 'DIAGNOSTICO_GESTACAO' && rnd() < 0.6) Object.assign(s.itens[0], { resultado: 'POSITIVO', idade: sorteio(rnd, [30, 120, 250]), prevista: null });
+    return registrar(s, 'registro da mãe em volta do parto (' + sub.toLowerCase() + ')');
+  }
+  if (qual === 'desmamaEVenda') {
+    // A cria ao pé e a desmama com as saídas: a venda (ou a morte) da mãe com a cria ao pé, a saída da cria desmamada, a
+    // desmama corrigida para depois da saída da cria e o estorno da desmama da cria que já saiu.
+    const y = rnd();
+    if (y < 0.35) {
+      const id = sorteio(rnd, MOVEIS(S).filter((x) => existe(S, x) && fem(S, x) && S.animais.get(x).cria_ao_pe === true && presenca(S, x, HOJE).fim));
+      if (!id) return null;
+      const filhos = MOVEIS(S).filter((c) => S.animais.get(c).mae_id === id && S.animais.get(c).data_nascimento && presenca(S, c, HOJE).fim);
+      const nasc = filhos.map((c) => S.animais.get(c).data_nascimento).sort().pop() || HOJE;
+      const tipo = sorteio(rnd, ['VENDA', 'VENDA', 'MORTE']);
+      const spec = { tipo, data: ateHoje(sorteio(rnd, [nasc, somaDias(nasc, 30), HOJE])), ids: [id].concat(tipo === 'VENDA' && rnd() < 0.4 ? filhos.slice(0, 1) : []) };
+      if (tipo === 'VENDA') spec.neg = negocioLimpo(rnd, spec.ids.length);
+      return registrar(spec, (tipo === 'VENDA' ? 'venda' : 'morte') + ' da mãe com a cria ao pé');
+    }
+    const e = sorteio(rnd, S.t.EVENTOS.filter((x) => S.vig.get(x.event_id) && x.event_type === 'DESMAMA'));
+    if (!e) return null;
+    const crias = S.t.EVENTO_ANIMAIS.filter((l) => l.event_id === e.event_id && l.papel === 'SUJEITO').map((l) => l.animal_id);
+    const saiu = crias.filter((x) => S.animais.get(x).data_saida && SAIDA_DO_REBANHO.indexOf(S.animais.get(x).situacao_cadastral) >= 0);
+    if (saiu.length && y < 0.55) return Object.assign(base, { rota: 'evento.estornar', dados: { event_id: e.event_id, justificativa: 'Desmama lançada errado' }, rotulo: 'interação: estorno da desmama da cria que saiu' });
+    if (saiu.length && y < 0.75) {
+      const spec = specDe(e);
+      if (!spec) return null;
+      const sai = S.animais.get(saiu[0]).data_saida;
+      spec.data = ateHoje(sorteio(rnd, [sai, somaDias(sai, 1)]));
+      return corrigir(e.event_id, spec, 'desmama corrigida para depois da saída da cria');
+    }
+    const id = sorteio(rnd, crias.filter((x) => presenca(S, x, HOJE).fim));
+    if (!id) return null;
+    const spec = { tipo: sorteio(rnd, ['VENDA', 'VENDA', 'MORTE']), data: ateHoje(sorteio(rnd, [e.event_date, somaDias(e.event_date, 1), somaDias(e.event_date, -1), HOJE])), ids: [id] };
+    if (spec.tipo === 'VENDA') spec.neg = negocioLimpo(rnd, 1);
+    return registrar(spec, 'saída da cria desmamada');
+  }
+  if (qual === 'pesagemForaDaPermanencia') {
+    // A pesagem gravada levada, por correção, para o dia da saída do animal, para depois dela ou para antes da entrada.
+    const p = sorteio(rnd, vigentesDe(S, 'PESAGENS').filter((x) => sis.specs.has(x.event_id) && (S.ev.get(x.event_id) || {}).event_type === 'PESAGEM'));
+    if (!p) return null;
+    const a = S.animais.get(p.animal_id) || {};
+    const ent = S.linhasDe(p.animal_id).filter((l) => l.efeito === 1).map((l) => l.data);
+    const opcoes = (a.data_saida ? [a.data_saida, somaDias(a.data_saida, 1), somaDias(a.data_saida, 15)] : []).concat(ent.length ? [somaDias(ent[0], -1), ent[0]] : []);
+    if (!opcoes.length) return null;
+    const spec = js(sis.specs.get(p.event_id).spec);
+    spec.data = ateHoje(sorteio(rnd, opcoes));
+    return corrigir(p.event_id, spec, 'pesagem levada para fora da permanência');
+  }
+  if (qual === 'importacaoDeQuemSaiu') {
+    // A importação de manejo de quem já saiu (no dia da saída, depois, na véspera): o brinco é o que estava no animal na data.
+    const id = sorteio(rnd, MOVEIS(S).filter((x) => { const a = S.animais.get(x); return a.brinco && a.data_saida && SAIDA_DO_REBANHO.indexOf(a.situacao_cadastral) >= 0; }));
+    if (!id) return null;
+    const a = S.animais.get(id);
+    const d = ateHoje(sorteio(rnd, [a.data_saida, somaDias(a.data_saida, 1), somaDias(a.data_saida, 10), somaDias(a.data_saida, -1)]));
+    const tipo = fem(S, id) && rnd() < 0.35 ? 'REPRODUCAO' : sorteio(rnd, ['PESAGENS', 'OCORRENCIAS', 'SANIDADE']);
+    const arq = {
+      PESAGENS: [['grupo;data;brinco;peso', ['', br(d), a.brinco, dec(pesoPara(S, rnd, id, d))].join(';')], { grupo: 'grupo', data: 'data', brinco: 'brinco', peso: 'peso' }, { momento: 'ROTINA', metodo: 'BALANCA' }],
+      OCORRENCIAS: [['data;tipo;descricao;brinco', [br(d), 'Observação geral', 'Visto no curral', a.brinco].join(';')], { data: 'data', tipo: 'tipo_ocorrencia', descricao: 'descricao', brinco: 'brinco' }, {}],
+      SANIDADE: [['data;procedimento;produto;nome;modo;dose;unidade;diagnostico;carencia;proxima;brinco', [br(d), 'vermifugação', '', 'Ivermectina 1%', 'por cabeça', '5', 'mL', '', '', '', a.brinco].join(';')], { data: 'data', procedimento: 'procedimento', produto: 'produto', nome: 'nome_produto', modo: 'modo_dose', dose: 'dose_lancamento', unidade: 'unidade', diagnostico: 'diagnostico', carencia: 'carencia', proxima: 'proxima', brinco: 'brinco' }, {}],
+      REPRODUCAO: [['data;registro;estacao;touro;brinco;resultado', [br(d), 'diagnóstico', '', '', a.brinco, sorteio(rnd, ['positivo', 'vazia'])].join(';')], { data: 'data', registro: 'registro', estacao: 'estacao', touro: 'touro', brinco: 'brinco', resultado: 'resultado' }, {}],
+    }[tipo];
+    return Object.assign(base, { rota: 'importacao.criar', dados: { tipo, arquivo_nome: tipo.toLowerCase() + '-quem-saiu-' + k + '.csv', texto: arq[0].join('\n'), formato: FORMATO }, mapa: { colunas: arq[1], confiancas: {}, padroes: arq[2] }, rotulo: 'interação: importar o manejo de quem saiu (' + tipo + ')' });
+  }
+  if (qual === 'estacaoMudada') {
+    // A estação com registros: as datas mudadas no cadastro (os registros ficam com a estação deles) e a correção de um
+    // registro dela fora das datas novas (a estação que o original usava vale na correção).
+    const r = sorteio(rnd, vigentesDe(S, 'REPRODUCAO').filter((x) => x.estacao_id));
+    const est = r && (S.t.ESTACOES_MONTA || []).find((e) => e.estacao_id === r.estacao_id);
+    if (!est) return null;
+    if (rnd() < 0.5) {
+      const ini = somaDias(r.data, sorteio(rnd, [1, 30, -400]));
+      const campos = rnd() < 0.6 ? { data_inicio: ini, data_fim: somaDias(ini, 90) } : { data_fim: somaDias(est.data_inicio, sorteio(rnd, [0, 10])) };
+      return Object.assign(base, { rota: 'estacao.salvar', dados: { estacao_id: est.estacao_id, campos, justificativa: 'Datas da estação revistas' }, rotulo: 'interação: datas da estação mudadas com registros' });
+    }
+    const spec = specDe(S.ev.get(r.event_id));
+    if (!spec || spec.tipo !== 'REPRODUCAO') return null;
+    if (rnd() < 0.6) spec.data = ateHoje(sorteio(rnd, [somaDias(est.data_fim, 1), somaDias(est.data_inicio, -1), spec.data]));
+    else spec.custo = { valor: 1234, vezes: null };
+    return corrigir(r.event_id, spec, 'registro da estação corrigido fora das datas dela');
+  }
   // A reprodução dentro (e na borda) da estação de monta; o diagnóstico das expostas nela.
   const est = sorteio(rnd, S.t.ESTACOES_MONTA || []);
   if (!est) return null;
-  const sub = sorteio(rnd, ['EXPOSICAO', 'EXPOSICAO', 'COBERTURA', 'INSEMINACAO', 'DIAGNOSTICO_GESTACAO', 'DIAGNOSTICO_GESTACAO']);
+  let sub = sorteio(rnd, ['EXPOSICAO', 'EXPOSICAO', 'COBERTURA', 'INSEMINACAO', 'DIAGNOSTICO_GESTACAO', 'DIAGNOSTICO_GESTACAO']);
   let D;
-  let ids;
+  let ids = [];
   if (sub === 'DIAGNOSTICO_GESTACAO') {
     D = ateHoje(somaDias(est.data_inicio, sorteio(rnd, [30, 60, 120, 200, -1])));
     const expostas = vigentesDe(S, 'REPRODUCAO').filter((r) => r.estacao_id === est.estacao_id && r.tipo_evento !== 'DIAGNOSTICO_GESTACAO').map((r) => r.animal_id);
     ids = alguns(rnd, expostas.filter((x, i, a) => a.indexOf(x) === i && presenca(S, x, D).dia), 4);
-  } else {
+    // Passada 2: sem exposta para diagnosticar, a exposição na estação (o diagnóstico vem depois).
+    if (!ids.length) sub = 'EXPOSICAO';
+  }
+  if (sub !== 'DIAGNOSTICO_GESTACAO') {
     const dur = Math.max(0, diasEntre(est.data_inicio, est.data_fim));
     D = ateHoje(somaDias(est.data_inicio, sorteio(rnd, [0, Math.floor(dur / 2), dur, dur + 1])));
     ids = femeasDoDia(S, rnd, D, 4);
@@ -2848,7 +3189,8 @@ function completaMesesEm(nasc, m) {
 function modeloAgenda(S, D) {
   const ant = paramNum(S, 'agenda_antecedencia_dias', 15);
   const protos = (S.t.PROTOCOLOS_SANITARIOS || []).filter((p) => p.ativo !== false);
-  const modelados = new Set(protos.filter((p) => !p.category_id && (p.recorrencia_tipo === 'INTERVALO_DIAS' || p.recorrencia_tipo === 'UNICA')).map((p) => p.protocol_id));
+  // Passada 2: também a campanha (os meses do ano; a perdida devida até abrir a janela da seguinte).
+  const modelados = new Set(protos.filter((p) => !p.category_id && ['INTERVALO_DIAS', 'UNICA', 'CAMPANHA_MESES'].indexOf(p.recorrencia_tipo) >= 0).map((p) => p.protocol_id));
   const sans = vigentesDe(S, 'SANIDADE').map((r) => { const e = S.ev.get(r.event_id); return { r, data: r.data_aplicacao, raiz: S.raiz(e), seq: e.event_seq }; });
   const pend = [];
   const car = [];
@@ -2881,6 +3223,26 @@ function modeloAgenda(S, D) {
       if (p.recorrencia_tipo === 'UNICA') {
         venc = max !== null && nasc ? completaMesesEm(nasc, max) : min !== null && nasc ? completaMesesEm(nasc, min) : desde || D;
         cumprida = doProt.length > 0;
+      } else if (p.recorrencia_tipo === 'CAMPANHA_MESES') {
+        // A campanha de cada mês vence no último dia dele e é cumprida pela aplicação entre o primeiro dia − tolerância e o
+        // último + tolerância; a última campanha vencida desde que o animal ficou elegível (e desde o cadastro do protocolo),
+        // não cumprida, continua devida até abrir a janela da seguinte; depois, vale a seguinte.
+        const meses = (Array.isArray(p.meses_campanha) ? p.meses_campanha : []).filter((m) => Number.isInteger(m) && m >= 1 && m <= 12);
+        if (!meses.length) { venc = null; cumprida = true; } else {
+          const tol = typeof p.tolerancia_dias === 'number' ? p.tolerancia_dias : paramNum(S, 'agenda_tolerancia_dias', 7);
+          const ano = Number(D.slice(0, 4));
+          const dois = (n) => (n < 10 ? '0' : '') + n;
+          const camps = [];
+          [ano - 1, ano, ano + 1].forEach((y) => meses.forEach((m) => camps.push({ ini: y + '-' + dois(m) + '-01', fim: somaDias(m === 12 ? (y + 1) + '-01-01' : y + '-' + dois(m + 1) + '-01', -1) })));
+          camps.sort((a, b) => cmp(a.fim, b.fim));
+          const cumpre = (c) => doProt.some((x) => x.data >= somaDias(c.ini, -tol) && x.data <= somaDias(c.fim, tol));
+          const elegivel = [desde, min !== null && nasc ? completaMesesEm(nasc, min) : null].filter(Boolean).sort().pop() || desde || D;
+          const de = [elegivel, (p.created_at || '').slice(0, 10) || null].filter(Boolean).sort().pop();
+          const passada = camps.filter((c) => c.fim < D && (!de || c.fim >= de)).pop() || null;
+          const proxima = camps.filter((c) => c.fim >= D)[0];
+          if (passada && !cumpre(passada) && D < somaDias(proxima.ini, -tol)) { venc = passada.fim; cumprida = false; } else { venc = proxima.fim; cumprida = cumpre(proxima); }
+          contar('campanha da agenda conferida');
+        }
       } else if (!doProt.length) {
         venc = [desde, min !== null && nasc ? completaMesesEm(nasc, min) : null].filter(Boolean).sort().pop() || desde || D;
         cumprida = false;
@@ -3064,6 +3426,9 @@ function gerar(sis, S, rnd, k) {
     // Fuzz das Fases 1 a 3, passada 1: o curral e o tronco em blocos, as interações da Fase 3 com a Fase 2 e o controle de
     // estoque ligado e desligado.
     ['lida', 2.5], ['interacao', 8], ['estoqueLiga', 1],
+    // Fuzz das Fases 1 a 3, passada 2: mais interações (agora com o preparo do que falta para elas) e a correção sem mudança
+    // de um lançamento de manejo, mais tarde.
+    ['interacao', 6], ['correcaoTardia', 2.5],
   ]);
   return gerarAcao(sis, S, rnd, k, acao, base);
 }
@@ -3073,7 +3438,8 @@ function gerarAcao(sis, S, rnd, k, acao, base) {
   if (acao === 'interacao') return gerarInteracao(sis, S, rnd, k, base);
   // O controle de estoque ligado e desligado alternando (o saldo é projeção: refeito pelos movimentos a cada troca).
   if (acao === 'estoqueLiga') {
-    const p = sorteio(rnd, S.t.PRODUTOS.filter((x) => Object.values(sis.produtos).indexOf(x.product_id) >= 0));
+    // Passada 2: também os produtos criados no meio da sequência.
+    const p = sorteio(rnd, rnd() < 0.7 ? S.t.PRODUTOS.filter((x) => Object.values(sis.produtos).indexOf(x.product_id) >= 0) : S.t.PRODUTOS);
     if (!p) return null;
     const liga = p.controla_estoque !== true;
     return Object.assign(base, { rota: 'produto.salvar', dados: { product_id: p.product_id, campos: { controla_estoque: liga }, justificativa: 'Controle de estoque revisto' }, rotulo: 'estoque ' + (liga ? 'ligado' : 'desligado') });
@@ -3148,6 +3514,26 @@ function gerarAcao(sis, S, rnd, k, acao, base) {
     const dados = Object.assign(montarDados(sis, js(sis.specs.get(snap.eid).spec)), { event_id: snap.eid, justificativa: 'Conferido de novo' });
     return Object.assign(base, { rota: 'evento.corrigir', dados, aceitar: true, semJustAviso: false, correcaoIdentica: true, rotulo: 'correção idêntica de ' + snap.tipo });
   }
+  // Fuzz das Fases 1 a 3, passada 2: a correção sem mudança de um lançamento de manejo (a especificação dele, como foi
+  // aceita), muito depois do registro, com outros comandos gravados no meio (cadastros desativados, estação com outras
+  // datas, parâmetros, animais que saíram, outros fatos do animal).
+  if (acao === 'correcaoTardia') {
+    const cands = S.t.EVENTOS.filter((e) => S.vig.get(e.event_id) && MANEJO.indexOf(e.event_type) >= 0 && sis.specs.has(e.event_id) && !(sis.snap && sis.snap.eid === e.event_id));
+    if (!cands.length) return null;
+    // De preferência o lançamento cujo cadastro mudou depois: o produto ou o protocolo desativado, a estação com outras
+    // datas (o registro ficou fora dela), o pasto de destino desativado. Sem nenhum, às vezes o gerador desativa o produto
+    // ou o protocolo de uma aplicação (o preparo).
+    const mudou = cands.filter((e) => cadastroMudou(S, e));
+    if (mudou.length) contar('correção tardia com o cadastro mudado');
+    if (!mudou.length && rnd() < 0.3) {
+      const r = sorteio(rnd, S.t.SANIDADE.filter((x) => (x.produto_id || x.protocol_id) && cands.some((e) => e.event_id === x.event_id)));
+      if (r && r.protocol_id && (!r.produto_id || rnd() < 0.4)) return Object.assign(base, { rota: 'protocolo.salvar', dados: { protocol_id: r.protocol_id, campos: { ativo: false }, justificativa: 'Protocolo encerrado' }, rotulo: 'protocolo desativado depois do uso' });
+      if (r && r.produto_id) return Object.assign(base, { rota: 'produto.salvar', dados: { product_id: r.produto_id, campos: { ativo: false }, justificativa: 'Produto fora de linha' }, rotulo: 'produto desativado depois do uso' });
+    }
+    const alvo = sorteio(rnd, mudou.length && rnd() < 0.7 ? mudou : cands);
+    const dados = Object.assign(montarDados(sis, js(sis.specs.get(alvo.event_id).spec)), { event_id: alvo.event_id, justificativa: 'Conferido de novo' });
+    return Object.assign(base, { rota: 'evento.corrigir', dados, aceitar: true, semJustAviso: false, correcaoTardia: true, rotulo: 'correção sem mudança, mais tarde, de ' + alvo.event_type + (alvo.event_subtype ? '/' + alvo.event_subtype : '') });
+  }
   // Passada 3: anexos (E2.9) no evento, no lançamento e no animal, e a remoção; o evento anexado é depois corrigido,
   // estornado ou desfeito pela importação como qualquer outro.
   if (acao === 'anexo') {
@@ -3187,6 +3573,11 @@ function gerarAcao(sis, S, rnd, k, acao, base) {
       ['idade_desmama_padrao_meses', ['3', '8', '12', '30']], ['idade_min_reprodutiva_meses', ['12', '24', '40']], ['dias_gestacao', ['270', '290', '300']],
       ['parto_tolerancia_dias', ['0', '20', '60']], ['arroba_kg', ['15', '15', '14.5']], ['rendimento_carcaca_padrao_pct', ['50', '52']],
       ['fin_tolerancia_conferencia_pct', ['0', '1', '5']], ['brinco_somente_numerico', ['S', 'N', 'N']],
+      // Fuzz das Fases 1 a 3, passada 2: os parâmetros da Fase 3 que os oráculos leem (a validade do peso na dose por kg, o
+      // intervalo mínimo e a fita no GMD, o n mínimo e a cobertura do diagnóstico nos indicadores, a antecedência e a
+      // tolerância da agenda, o alerta de parto).
+      ['peso_validade_dias', ['30', '180', '400']], ['gmd_intervalo_min_dias', ['1', '28', '60']], ['gmd_aceita_fita', ['S', 'N']], ['indicador_n_minimo', ['1', '2', '5']],
+      ['prenhez_cobertura_dg_min_pct', ['0', '90', '100']], ['agenda_antecedencia_dias', ['0', '15', '45']], ['agenda_tolerancia_dias', ['0', '7', '20']], ['alerta_parto_previsto_dias', ['0', '30']],
     ]);
     return Object.assign(base, { rota: 'config.salvar', dados: { valores: { [chave]: sorteio(rnd, op) } }, rotulo: 'parâmetro ' + chave });
   }
@@ -3247,7 +3638,7 @@ function gerarAcao(sis, S, rnd, k, acao, base) {
   }
   if (acao === 'cadastro') {
     // Desativar e reativar no meio: o pasto (sobretudo o D, vazio na montagem), o parceiro e a categoria.
-    const qual = pesado(rnd, [['pasto', 3], ['parceiro', 1.5], ['categoria', 1.5], ['pastoNovo', 0.8], ['pastoEditar', 0.6], ['parceiroNovo', 0.5], ['parceiroTipos', 0.4], ['categoriaNova', 0.7], ['categoriaEditar', 1.2], ['lista', 1.5], ['externo', 0.6], ['propriedadeNova', 0.5], ['propriedadeStatus', 0.5], ['propriedadePadrao', 0.3], ['produto', 0.8], ['protocolo', 0.7], ['estacao', 0.7], ['estacaoEditar', 0.3], ['protocoloNovo', 0.8]]);
+    const qual = pesado(rnd, [['pasto', 3], ['parceiro', 1.5], ['categoria', 1.5], ['pastoNovo', 0.8], ['pastoEditar', 0.6], ['parceiroNovo', 0.5], ['parceiroTipos', 0.4], ['categoriaNova', 0.7], ['categoriaEditar', 1.2], ['lista', 1.5], ['externo', 0.6], ['propriedadeNova', 0.5], ['propriedadeStatus', 0.5], ['propriedadePadrao', 0.3], ['produto', 0.8], ['protocolo', 0.7], ['estacao', 0.7], ['estacaoEditar', 0.3], ['protocoloNovo', 0.8], ['produtoNovo', 0.6]]);
     const extra = gerarCadastro(sis, S, rnd, k, qual, base);
     if (extra !== undefined) return extra;
     if (qual === 'pasto') {
@@ -3313,7 +3704,25 @@ function gerarCadastro(sis, S, rnd, k, qual, base) {
   if (qual === 'estacaoEditar') {
     const e = sorteio(rnd, S.t.ESTACOES_MONTA || []);
     if (!e) return null;
-    return com('estacao.salvar', { estacao_id: e.estacao_id, campos: { data_fim: somaDias(e.data_fim, sorteio(rnd, [15, -15, 45])) }, justificativa: 'Datas revistas' }, 'estação editada');
+    // Passada 2: também o início, o nome (às vezes o de outra: a recusa), o tipo e a propriedade.
+    const x = rnd();
+    const outras = (S.t.ESTACOES_MONTA || []).filter((y) => y.estacao_id !== e.estacao_id);
+    const campos = x < 0.4 ? { data_fim: somaDias(e.data_fim, sorteio(rnd, [15, -15, 45])) } : x < 0.65 ? { data_inicio: somaDias(e.data_inicio, sorteio(rnd, [-30, 10, 60])) }
+      : x < 0.8 ? { nome: outras.length && rnd() < 0.3 ? sorteio(rnd, outras).nome.toUpperCase() : e.nome + ' (revista)' } : x < 0.92 ? { tipo: sorteio(rnd, ['MONTA_NATURAL', 'IA', 'MISTA'].filter((v) => v !== e.tipo)) } : { property_id: sorteio(rnd, S.t.PROPRIEDADES).property_id };
+    return com('estacao.salvar', { estacao_id: e.estacao_id, campos, justificativa: 'Datas revistas' }, 'estação editada');
+  }
+  // Fuzz das Fases 1 a 3, passada 2: o produto novo (as cinco categorias: a conta do consumo é a da categoria; a unidade, o
+  // fator da embalagem, o custo, o controle de estoque e os padrões que a tela sugere), às vezes com o nome de outro ativo.
+  if (qual === 'produtoNovo') {
+    const cat = sorteio(rnd, ['VACINA', 'VERMIFUGO', 'MEDICAMENTO', 'SUPLEMENTO', 'OUTRO']);
+    const nomes = S.t.PRODUTOS.filter((p) => p.ativo !== false).map((p) => p.nome);
+    const campos = { nome: rnd() < 0.08 && nomes.length ? sorteio(rnd, nomes).toLowerCase() : 'Produto ' + k, categoria: cat, unidade: sorteio(rnd, cat === 'SUPLEMENTO' ? ['kg', 'g'] : ['mL', 'dose', 'g']), controla_estoque: rnd() < 0.5 };
+    if (rnd() < 0.7) campos.custo_unitario = sorteio(rnd, [0.12, 1.5, 0.0075, 3]);
+    if (rnd() < 0.5) campos.fator_conversao = sorteio(rnd, [10, 25, 500]);
+    if (rnd() < 0.3) campos.carencia_padrao_dias = sorteio(rnd, [0, 21, 35]);
+    if (rnd() < 0.3) campos.dose_padrao_por_cabeca = sorteio(rnd, [1, 2, 5]);
+    if (rnd() < 0.2) campos.estoque_minimo = sorteio(rnd, [5, 50]);
+    return com('produto.salvar', { campos }, 'produto novo');
   }
   if (qual === 'pastoNovo') {
     const nomes = S.t.PASTOS.map((p) => p.nome);
@@ -3344,6 +3753,7 @@ function gerarCadastro(sis, S, rnd, k, qual, base) {
     const campos = { nome: 'Categoria ' + k, sexo_aplicavel: sexo, condicao: sorteio(rnd, CONDICOES), prioridade: sorteio(rnd, [5, 15, 25, 10, 100 + k]), ativo: true };
     if (rnd() < 0.5) campos.idade_minima_meses = sorteio(rnd, [0, 6, 18]);
     if (rnd() < 0.5) campos.idade_maxima_meses = sorteio(rnd, [12, 30, 4]);
+    if (rnd() < 0.2) campos.peso_referencia_kg = sorteio(rnd, [180, 380]);
     return com('categoria.salvar', { campos, justificativa: 'Categoria nova' }, 'categoria nova');
   }
   if (qual === 'categoriaEditar') {
@@ -3362,7 +3772,9 @@ function gerarCadastro(sis, S, rnd, k, qual, base) {
     if (x < 0.45) campos.sexo_aplicavel = sorteio(rnd, ['M', 'F', 'AMBOS'].filter((v) => v !== c.sexo_aplicavel));
     else if (x < 0.65) { campos.idade_minima_meses = sorteio(rnd, [0, 3, 12]); campos.idade_maxima_meses = sorteio(rnd, [10, 20, 48]); }
     else if (x < 0.8) campos.condicao = sorteio(rnd, CONDICOES.filter((v) => v !== c.condicao));
-    else if (x < 0.9) campos.prioridade = sorteio(rnd, [1, 35, 200 + k]);
+    else if (x < 0.88) campos.prioridade = sorteio(rnd, [1, 35, 200 + k]);
+    // Passada 2: o peso de referência (a dose por kg sem pesagem válida usa o da categoria do animal na data).
+    else if (x < 0.95) campos.peso_referencia_kg = sorteio(rnd, [150, 300, 420]);
     else campos.nome = c.nome + ' (revista)';
     return com('categoria.salvar', { category_id: c.category_id, campos, justificativa: 'Categoria revista' }, 'categoria editada');
   }
@@ -3399,7 +3811,9 @@ function gerarCadastro(sis, S, rnd, k, qual, base) {
     if (!p) return null;
     // Fuzz das Fases 1 a 3: também a recorrência trocada (o campo da outra apagado), o sexo e a faixa de idade.
     const x = rnd();
-    const campos = x < 0.3 ? { intervalo_dias: sorteio(rnd, [90, 180, 365]) } : x < 0.55 ? { ativo: p.ativo === false } : x < 0.7 ? (p.recorrencia_tipo === 'INTERVALO_DIAS' ? { recorrencia_tipo: 'UNICA' } : { recorrencia_tipo: 'INTERVALO_DIAS', intervalo_dias: sorteio(rnd, [60, 180]) }) : x < 0.85 ? { sexo_aplicavel: sorteio(rnd, ['AMBOS', 'F', 'M'].filter((v) => v !== p.sexo_aplicavel)) } : { idade_min_meses: sorteio(rnd, [0, 4, 12]) };
+    const campos = x < 0.25 ? { intervalo_dias: sorteio(rnd, [90, 180, 365]) } : x < 0.47 ? { ativo: p.ativo === false } : x < 0.6 ? (p.recorrencia_tipo === 'INTERVALO_DIAS' ? { recorrencia_tipo: 'UNICA' } : { recorrencia_tipo: 'INTERVALO_DIAS', intervalo_dias: sorteio(rnd, [60, 180]) }) : x < 0.72 ? { sexo_aplicavel: sorteio(rnd, ['AMBOS', 'F', 'M'].filter((v) => v !== p.sexo_aplicavel)) } : x < 0.82 ? { idade_min_meses: sorteio(rnd, [0, 4, 12]) }
+      // Passada 2: a campanha (outros meses; a recorrência trocada para campanha) e a tolerância.
+      : x < 0.92 ? (p.recorrencia_tipo === 'CAMPANHA_MESES' ? { meses_campanha: alguns(rnd, [1, 4, 6, 10, 11], 2).sort((a, b) => a - b) } : { recorrencia_tipo: 'CAMPANHA_MESES', meses_campanha: [sorteio(rnd, [5, 11, 10])] }) : { tolerancia_dias: sorteio(rnd, [0, 5, 30]) };
     return com('protocolo.salvar', { protocol_id: p.protocol_id, campos, justificativa: 'Protocolo revisto' }, 'protocolo ' + Object.keys(campos)[0]);
   }
   // Fuzz das Fases 1 a 3: o protocolo novo (intervalo, aplicação única ou campanha; sexo, faixa de idade, às vezes a
@@ -3416,7 +3830,13 @@ function gerarCadastro(sis, S, rnd, k, qual, base) {
     if (rnd() < 0.3) campos.idade_max_meses = sorteio(rnd, [12, 30, 2]);
     if (rnd() < 0.1) campos.category_id = sorteio(rnd, S.t.CATEGORIAS).category_id;
     if (rnd() < 0.3) campos.antecedencia_alerta_dias = sorteio(rnd, [0, 7, 30]);
-    return com('protocolo.salvar', { campos }, 'protocolo novo');
+    // Passada 2: a tolerância própria da campanha (a janela de cumprimento), que o modelo da agenda agora confere.
+    if (rec === 'CAMPANHA_MESES' && rnd() < 0.4) campos.tolerancia_dias = sorteio(rnd, [0, 3, 15]);
+    // Passada 2: às vezes o protocolo cadastrado meses atrás (o relógio do pedido no passado; o cadastro guarda quando foi
+    // criado): a campanha perdida que continua devida e a aplicação única devida por quem passou da idade máxima dependem disso.
+    const c = com('protocolo.salvar', { campos }, 'protocolo novo');
+    if (rnd() < 0.5) { c.relogio = ateHoje(somaDias(S.marco || D0, sorteio(rnd, [0, 40, 120, 200]))); c.rotulo = 'protocolo novo, cadastrado em ' + c.relogio; }
+    return c;
   }
   if (qual === 'externo') {
     const campos = { nome: sorteio(rnd, ['Touro do sêmen', 'Touro Nelore Elite', 'Reprodutor do vizinho ' + k]), sexo: rnd() < 0.9 ? 'M' : 'F' };
@@ -3431,7 +3851,8 @@ function specDoGravado(sis, S, rnd, e) {
   const T = TIPOS.get(e.event_type);
   if (!T || !T.doGravado) return null;
   const ls = S.t.EVENTO_ANIMAIS.filter((l) => l.event_id === e.event_id);
-  if (!ls.length) return null;
+  // Passada 2: o estoque não tem linha de animal (os demais tipos sem linha não têm como ser remontados).
+  if (!ls.length && e.event_type !== 'ESTOQUE') return null;
   const idents = S.t.IDENTIFICACOES.filter((y) => y.event_id === e.event_id);
   const brincoDe = (id) => (idents.find((y) => y.animal_id === id && y.tipo === 'BRINCO') || {}).codigo || null;
   const ids = ls.map((l) => l.animal_id).filter((id, i, a) => a.indexOf(id) === i);
@@ -3463,8 +3884,10 @@ function executar(sis, k, cmd, antesT, opcoes) {
     sim = sis.api('evento.simular', { acao: cmd.rota.split('.')[1], dados: cmd.dados }, { avisosAceitos: cmd.avisos || [] });
   }
   let r;
+  // Passada 2: o pedido feito num dia do passado (o cadastro guarda quando foi criado); as consultas dos oráculos, hoje.
+  const naHora = (f) => { if (!cmd.relogio) return f(); const agora = sis.gas.clock.now; sis.gas.clock.now = Date.parse(cmd.relogio + 'T14:00:00Z'); try { return f(); } finally { sis.gas.clock.now = agora; } };
   try {
-    r = sis.api(cmd.rota, cmd.dados, extra);
+    r = naHora(() => sis.api(cmd.rota, cmd.dados, extra));
   } catch (e) {
     return { falhas: [falha('EXCECAO', String(e && e.stack || e).slice(0, 1500))], r: null };
   }
@@ -3480,7 +3903,7 @@ function executar(sis, k, cmd, antesT, opcoes) {
       const codigos = pedidos;
       // Passada 4: às vezes sem a justificativa do período fechado (a recusa CAMPO_OBRIGATORIO é o esperado).
       const dados = codigos.indexOf('PERIODO_BLOQUEADO') >= 0 && !semJustificativa(cmd) ? Object.assign({}, cmd.dados, { justificativa_aviso: 'Conferido com o pecuarista' }) : cmd.dados;
-      r = sis.api(cmd.rota, dados, Object.assign({}, extra, { avisosAceitos: (cmd.avisos || []).concat(codigos) }));
+      r = naHora(() => sis.api(cmd.rota, dados, Object.assign({}, extra, { avisosAceitos: (cmd.avisos || []).concat(codigos) })));
       depoisT = tabelas(sis);
       if (!r.ok && r.error.code === 'NEEDS_CONFIRMATION') falhas.push(falha('AVISO:REPETIDO', 'aceitos os avisos, o comando pediu confirmação de novo: ' + JSON.stringify(r.error.details.map((d) => d.codigo))));
     }
@@ -3511,6 +3934,7 @@ function executar(sis, k, cmd, antesT, opcoes) {
   if (r.ok && cmd.chaveFixa && !jaGravada && !cmd.outraChave && !(r.meta && r.meta.duplicado) && r.data && r.data.event_id) sis.chavesGravadas.set(chave, r.data.event_id);
   if (cmd.estornoImediato) falhas.push(...oraculoEstornoImediato(sis, cmd, r, S, dv0));
   if (cmd.correcaoIdentica) falhas.push(...oraculoCorrecaoIdentica(sis, cmd, r, S, dv0));
+  if (cmd.correcaoTardia) falhas.push(...oraculoCorrecaoTardia(cmd, r, A));
   if (cmd.desfazerImediato) falhas.push(...oraculoDesfazerImediato(sis, cmd, r, S));
   // O retrato de antes do primeiro bloco de uma importação vale enquanto só os comandos dela forem gravados.
   const gravou = r.ok && !(r.meta && (r.meta.duplicado || r.meta.semAlteracao)) && dv1 !== dv0;
@@ -3640,6 +4064,43 @@ function oraculoDesfazerImediato(sis, cmd, r, S) {
   });
   return out;
 }
+/**
+ * O cadastro que o lançamento usa mudou depois dele: o produto ou o protocolo desativado, a estação com outras datas (o
+ * registro ficou fora dela), o pasto de destino desativado.
+ */
+function cadastroMudou(S, e) {
+  const achar = (aba, pk, id) => (S.t[aba] || []).find((x) => x[pk] === id) || {};
+  if ((S.t.SANIDADE || []).some((r) => r.event_id === e.event_id && ((r.produto_id && achar('PRODUTOS', 'product_id', r.produto_id).ativo === false) || (r.protocol_id && achar('PROTOCOLOS_SANITARIOS', 'protocol_id', r.protocol_id).ativo === false)))) return true;
+  if ((S.t.REPRODUCAO || []).some((r) => {
+    if (r.event_id !== e.event_id || !r.estacao_id) return false;
+    const est = achar('ESTACOES_MONTA', 'estacao_id', r.estacao_id);
+    return !!est.data_inicio && (r.data < est.data_inicio || (r.tipo_evento !== 'DIAGNOSTICO_GESTACAO' && r.data > est.data_fim));
+  })) return true;
+  return S.t.EVENTO_ANIMAIS.some((l) => l.event_id === e.event_id && l.pasto_destino_id && achar('PASTOS', 'pasture_id', l.pasto_destino_id).status !== 'ATIVO');
+}
+/** Os tipos de manejo da Fase 3 (a correção sem mudança, mais tarde, é deles). */
+const MANEJO = ['PESAGEM', 'SANIDADE', 'ESTOQUE', 'REPRODUCAO', 'DESMAMA', 'CASTRACAO', 'OCORRENCIA'];
+/**
+ * Recusas que a correção sem mudança, mais tarde, pode receber por desenho: o que mudou no meio muda a conta (o acerto pela
+ * contagem que passa a bater com o saldo, a dose por kg sem a pesagem estornada, a idade da gestação acima dos dias de
+ * gestação mudados, a cria que entrou acima da idade de desmama mudada, o marco zero levado para depois) e, pela política
+ * BLOQUEIA, os avisos de agora.
+ */
+const RECUSAS_DA_CORRECAO_TARDIA = ['VALOR_IGUAL', 'SEM_PESO', 'VALOR_FORA_DA_FAIXA', 'NAO_E_CRIA', 'ANTES_DO_MARCO_ZERO'];
+/**
+ * Fuzz das Fases 1 a 3, passada 2: o lançamento de manejo que vale, corrigido sem mudança nenhuma muito depois do registro,
+ * é aceito (ou sem alteração): o que ele usava (o produto, o protocolo, a estação, o pasto, o parceiro, a categoria
+ * desativados ou mudados depois) continua valendo na correção, e o problema antigo não o bloqueia (seção 10.5). Com a
+ * importação em curso, todo comando é recusado (16.8).
+ */
+function oraculoCorrecaoTardia(cmd, r, A) {
+  // O reenvio e a mesma chave com outro conteúdo copiam o comando (e a marca): o desfecho deles é outro oráculo.
+  if (r.ok || A.emCurso.length || cmd.outraChave || cmd.reenvio) return [];
+  const pol = politicaDe(A);
+  const codigos = (r.error.details || []).map((d) => d.codigo);
+  if (codigos.length && codigos.every((c) => RECUSAS_DA_CORRECAO_TARDIA.indexOf(c) >= 0 || pol[c] === 'BLOQUEIA' || (c === 'CARENCIA_ATIVA' && (pol[c] || 'BLOQUEIA') === 'BLOQUEIA'))) return [];
+  return [falha('CORRECAO_TARDIA:RECUSADA', 'a correção sem mudança, mais tarde, de ' + cmd.dados.tipo + (cmd.dados.subtipo ? '/' + cmd.dados.subtipo : '') + ' foi recusada: ' + r.error.code + ' ' + r.error.message + ' ' + JSON.stringify((r.error.details || []).map((d) => d.codigo + ': ' + d.mensagem)).slice(0, 700))];
+}
 function oraculoCorrecaoIdentica(sis, cmd, r, S, dv0) {
   const snap = sis.snap;
   if (!snap || snap.eid !== cmd.dados.event_id || snap.dv !== dv0 || (r.ok && r.meta && r.meta.semAlteracao)) return [];
@@ -3735,6 +4196,8 @@ function gravavel(sis, cmd) {
   if (cmd.semJustAviso) o.semJustAviso = true;
   if (cmd.estornoImediato) o.estornoImediato = true;
   if (cmd.correcaoIdentica) o.correcaoIdentica = true;
+  if (cmd.correcaoTardia) o.correcaoTardia = true;
+  if (cmd.relogio) o.relogio = cmd.relogio;
   if (cmd.desfazerImediato) o.desfazerImediato = true;
   if (cmd.chaveDe !== undefined) { o.chaveDe = cmd.chaveDe; if (cmd.outraChave) o.outraChave = true; else o.reenvio = true; }
   if (cmd.chaveFixa) o.chaveFixa = cmd.chaveFixa;
