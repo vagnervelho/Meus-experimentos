@@ -1575,22 +1575,6 @@ var AuditService = (function () {
     });
   }
   /**
-   * Sanidade e estoque de insumos (03a, seções 4.6 e 4.7; 03b, seções 2.6, 6 e 15.2; 07, seção 5; desenho-base 16.9),
-   * conferidos aqui para valerem em todo caminho (registro, correção, estorno, importação e a trava de integridade):
-   *  - SANIDADE: uma linha por animal (DETALHE_OBRIGATORIO), o mesmo produto, nome e protocolo em todo o lançamento, o nome
-   *    do produto nas vacinas, vermífugos e medicamentos, a doença sem produto nem dose, a dose conforme o modo do payload
-   *    (por cabeça ou por peso: em todo animal; total: em nenhum), a unidade da dose = a do produto do cadastro, o último dia
-   *    de carência = aplicação + dias, a cópia do custo = o que coube ao animal nos rateios do evento; o movimento de SAIDA
-   *    do produto do cadastro = a quantidade consumida do payload (e nenhum sem produto); o consumo com custo unitário é
-   *    exatamente um lançamento CUSTEIO sem parcela, com o produto, a quantidade e o valor = quantidade × custo congelado;
-   *  - ESTOQUE: nenhuma linha de animal; na ENTRADA, um lançamento ESTOQUE_INSUMOS com o produto e a quantidade e no máximo
-   *    um movimento de ENTRADA do mesmo produto, com a mesma quantidade e o custo unitário = valor ÷ quantidade (embalagens ×
-   *    quantidade por embalagem = quantidade); no AJUSTE, exatamente um movimento de AJUSTE diferente de zero (negativo na
-   *    perda e no vencimento) e nenhum lançamento;
-   *  - nos demais tipos, nenhum movimento de estoque nem lançamento com produto.
-   * O saldo (`PRODUTOS.estoque_atual*` = Σ dos movimentos) é projeção, conferido em PROJECAO. Achados de COPIAS (fonte).
-   */
-  /**
    * A ordem de um evento no dia (desenho-base 16.1): {ordem_seq (a posição do primeiro da cadeia de substituição), event_seq};
    * pela linha do tempo quando há, senão pela cadeia de reversal_of_event_id nos eventos (crus, quando lidos). null sem o evento.
    */
@@ -1609,6 +1593,22 @@ var AuditService = (function () {
       return { ordem_seq: at.event_seq, event_seq: seq };
     };
   }
+  /**
+   * Sanidade e estoque de insumos (03a, seções 4.6 e 4.7; 03b, seções 2.6, 6 e 15.2; 07, seção 5; desenho-base 16.9),
+   * conferidos aqui para valerem em todo caminho (registro, correção, estorno, importação e a trava de integridade):
+   *  - SANIDADE: uma linha por animal (DETALHE_OBRIGATORIO), o mesmo produto, nome e protocolo em todo o lançamento, o nome
+   *    do produto nas vacinas, vermífugos e medicamentos, a doença sem produto nem dose, a dose conforme o modo do payload
+   *    (por cabeça ou por peso: em todo animal; total: em nenhum), a unidade da dose = a do produto do cadastro, o último dia
+   *    de carência = aplicação + dias, a cópia do custo = o que coube ao animal nos rateios do evento; o movimento de SAIDA
+   *    do produto do cadastro = a quantidade consumida do payload (e nenhum sem produto); o consumo com custo unitário é
+   *    exatamente um lançamento CUSTEIO sem parcela, com o produto, a quantidade e o valor = quantidade × custo congelado;
+   *  - ESTOQUE: nenhuma linha de animal; na ENTRADA, um lançamento ESTOQUE_INSUMOS com o produto e a quantidade e no máximo
+   *    um movimento de ENTRADA do mesmo produto, com a mesma quantidade e o custo unitário = valor ÷ quantidade (embalagens ×
+   *    quantidade por embalagem = quantidade); no AJUSTE, exatamente um movimento de AJUSTE diferente de zero (negativo na
+   *    perda e no vencimento) e nenhum lançamento;
+   *  - nos demais tipos, nenhum movimento de estoque nem lançamento com produto.
+   * O saldo (`PRODUTOS.estoque_atual*` = Σ dos movimentos) é projeção, conferido em PROJECAO. Achados de COPIAS (fonte).
+   */
   function conferirInsumos_(tx, col, eventos, f) {
     var repo = tx.repo;
     var temMov = repo.carregada('MOVIMENTOS_ESTOQUE');

@@ -516,8 +516,11 @@ var TelaReproducao = (function () {
      * porId} | {carregando} | {erro} | null (hoje).
      */
     function comPosicao() { return !!(ui.posicao && ui.posicao.porId); }
-    /** Data passada sem a posição do servidor (carregando ou sem sinal): nada é conferido pela posição de hoje. */
-    function semPosicao() { return !!(ui.posicao && !ui.posicao.porId); }
+    /**
+     * Data passada sem a posição do servidor (carregando ou sem sinal): nada é conferido pela posição de hoje. A data sem
+     * posição por motivo do servidor (antes do marco zero, sem marco zero) não espera: o servidor decide a data na gravação.
+     */
+    function semPosicao() { return !!(ui.posicao && !ui.posicao.porId && !ui.posicao.motivo); }
     function presente(a) { return comPosicao() ? !!ui.posicao.porId[a.animal_id] : a.situacao_cadastral === 'ATIVO'; }
     function brincoDe(a) { var x = comPosicao() ? ui.posicao.porId[a.animal_id] : null; return x ? x.brinco : a.brinco || null; }
     /** A fêmea descrita no dia do diagnóstico (categoria, pasto e último peso daquele dia); hoje, pela lista do aparelho. */
@@ -545,7 +548,7 @@ var TelaReproducao = (function () {
         var itens = (d.itens || []).filter(function (x) { return x.sexo === 'F'; });
         var porId = {};
         itens.forEach(function (x) { porId[x.animal_id] = x; });
-        ui.posicao = d.motivo ? { erro: Fmt.rotulo('MOTIVO', d.motivo), data: data } : { data: d.data, itens: itens, porId: porId };
+        ui.posicao = d.motivo ? { erro: Fmt.rotulo('MOTIVO', d.motivo), motivo: d.motivo, data: data } : { data: d.data, itens: itens, porId: porId };
         if (comPosicao()) resolverEsperando();
         desenhar();
       }, function (e) {
@@ -739,7 +742,7 @@ var TelaReproducao = (function () {
       var gravadas = c.linhas.filter(function (l) { return l.estado === 'GRAVADA'; }).length;
       var comAviso = c.linhas.filter(function (l) { return l.estado === 'AVISO'; }).length;
       ui.status.appendChild(h('p', { class: 'dado', text: [gravadas ? gravadas + ' gravados' : null, fila ? fila + ' na fila deste aparelho' : null, semSinal ? semSinal + ' sem confirmação do servidor' : null, comAviso ? comAviso + ' para conferir' : null, pend.length ? pend.length + (pend.length === 1 ? ' pendente' : ' pendentes') : null].filter(Boolean).join(' · ') || 'Nenhum diagnóstico ainda.' }));
-      if (ui.posicao) ui.status.appendChild(ui.posicao.carregando ? UI.nota('Conferindo no servidor quem estava no rebanho em ' + Fmt.data(ui.posicao.data) + '…', 'info') : ui.posicao.erro ? h('div', { dataset: { posicaoErro: '1' } }, UI.nota('Sem a posição do rebanho em ' + Fmt.data(ui.posicao.data) + ' (' + ui.posicao.erro + '): o brinco não é conferido pela posição de hoje (pode ser de outra fêmea naquele dia). Os diagnósticos ficam pendentes até a posição chegar.', 'aviso'),
+      if (ui.posicao) ui.status.appendChild(ui.posicao.carregando ? UI.nota('Conferindo no servidor quem estava no rebanho em ' + Fmt.data(ui.posicao.data) + '…', 'info') : ui.posicao.motivo ? UI.nota('Não há posição do rebanho em ' + Fmt.data(ui.posicao.data) + ' (' + ui.posicao.erro + '): o brinco é conferido pela lista de hoje, e o servidor decide se aceita a data.', 'aviso') : ui.posicao.erro ? h('div', { dataset: { posicaoErro: '1' } }, UI.nota('Sem a posição do rebanho em ' + Fmt.data(ui.posicao.data) + ' (' + ui.posicao.erro + '): o brinco não é conferido pela posição de hoje (pode ser de outra fêmea naquele dia). Os diagnósticos ficam pendentes até a posição chegar.', 'aviso'),
         h('div', { class: 'acoes' }, UI.botao('Tentar de novo', { atributos: { 'data-posicao-tentar': '1' }, aoClicar: function () { carregarPosicao(); desenhar(); } })))
         : h('div', { dataset: { troncoPosicao: '1' } }, UI.nota('Fêmeas e brincos na posição em ' + Fmt.data(ui.posicao.data) + ', conferidos pelo servidor.', 'info')));
       if (semSinal) ui.status.appendChild(UI.nota('Sem sinal ou sem resposta: o que foi digitado está guardado neste aparelho. Toque em "Enviar" quando o sinal voltar; nada será gravado duas vezes.', 'aviso'));

@@ -27,7 +27,7 @@ function lotado() {
   // O Pasto A fica a 1,22 UA/ha com capacidade de 1,0: a entrada pede confirmação (RN-027 em UA/ha), com a UA do painel.
   const sem = c.m.tentar('registrar', entrada);
   assert.deepEqual([sem.erro.code, codigos(sem.erro)], ['NEEDS_CONFIRMATION', ['LOTACAO_ACIMA_DA_CAPACIDADE']]);
-  assert.equal(sem.erro.details[0].mensagem, 'O pasto Pasto A fica com 1,22 UA/ha em 01/10/2026 (3 cabeças, 2,44 UA em 2 ha), acima da capacidade informada (1 UA/ha). Parte da UA é estimada pelo peso de referência da categoria.');
+  assert.equal(sem.erro.details[0].mensagem, 'O pasto Pasto A fica com 1,22 UA/ha em 01/10/2026 (3 cabeças, 2,44 UA em 2 ha), acima da capacidade informada (1 UA/ha). UA estimada em parte: 1 cabeça(s) sem pesagem, pelo peso de referência da categoria.');
   c.m.run('registrar', entrada, { avisos: ['LOTACAO_ACIMA_DA_CAPACIDADE'] });
   return { c, n24 };
 }

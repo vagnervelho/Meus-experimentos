@@ -4110,8 +4110,7 @@ function gerarCadastro(sis, S, rnd, k, qual, base) {
     const x = rnd();
     // Revisão da Fase 3: também a categoria (a conta do consumo) e a quantidade por embalagem — a correção sem mudança, mais
     // tarde, guarda o custo, a conta e o fator congelados (oraculoCorrecaoTardia).
-    // Rodada 3 (achado 1): também a carência padrão, que a aplicação sem os dias informados usa.
-    const campos = x < 0.3 ? { controla_estoque: p.controla_estoque !== true } : x < 0.47 ? { custo_unitario: sorteio(rnd, [0, 0.035, 1.85, 2.5]) } : x < 0.58 ? { carencia_padrao_dias: sorteio(rnd, [0, 21, 35]) } : x < 0.64 ? { categoria: sorteio(rnd, ['VACINA', 'VERMIFUGO', 'MEDICAMENTO', 'OUTRO']) } : x < 0.7 ? { fator_conversao: sorteio(rnd, [10, 25, 50]) } : x < 0.86 ? { ativo: p.ativo === false } : { unidade: p.unidade === 'mL' ? 'dose' : 'mL' };
+    const campos = x < 0.35 ? { controla_estoque: p.controla_estoque !== true } : x < 0.55 ? { custo_unitario: sorteio(rnd, [0, 0.035, 1.85, 2.5]) } : x < 0.63 ? { categoria: sorteio(rnd, ['VACINA', 'VERMIFUGO', 'MEDICAMENTO', 'OUTRO']) } : x < 0.7 ? { fator_conversao: sorteio(rnd, [10, 25, 50]) } : x < 0.86 ? { ativo: p.ativo === false } : { unidade: p.unidade === 'mL' ? 'dose' : 'mL' };
     return com('produto.salvar', { product_id: p.product_id, campos, justificativa: 'Cadastro do produto revisto' }, 'produto ' + Object.keys(campos)[0]);
   }
   if (qual === 'protocolo') {

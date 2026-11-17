@@ -38,7 +38,8 @@
  *
  * npm test roda as sementes fixas. FUZZ_SEMENTES=N roda N sementes novas a partir de FUZZ_INICIO (padrão: o relógio);
  * FUZZ_PASSOS muda os passos por semente (padrão 60); FUZZ_SAIDA=<pasta> grava cada falha encolhida em JSON;
- * FUZZ_ENCOLHER=0 não encolhe (só a semente e a sequência inteira).
+ * FUZZ_ENCOLHER=0 não encolhe (só a semente e a sequência inteira); FUZZ_COBERTURA=1 imprime quanto cada oráculo e cada
+ * interação conferiu (F.COBERTURA), para relatar a leva.
  */
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -93,6 +94,7 @@ test('teste aleatório de todos os comandos da Fase 2 (' + (N ? N + ' sementes n
     falhas.push('semente ' + semente + ' [' + r.falha.assinatura + '] ' + r.falha.mensagem.slice(0, 300));
   });
   console.log('FUZZ: ' + SEMENTES.length + ' sementes × ' + PASSOS + ' passos: ' + aceitos + ' aceitos, ' + recusados + ' recusados, ' + falhas.length + ' falhas');
+  if (process.env.FUZZ_COBERTURA === '1') console.log('FUZZ-COBERTURA: ' + JSON.stringify(F.COBERTURA));
   assert.deepEqual(falhas, [], 'falhas do teste aleatório (sequência mínima acima)');
   if (!N) {
     // As sementes fixas exercitam cada tipo aceito, a correção, o estorno e a importação de ponta a ponta.
@@ -118,7 +120,9 @@ test('teste aleatório de todos os comandos da Fase 2 (' + (N ? N + ' sementes n
     // Passada 2: também a campanha da agenda, a cria ao pé e a correção sem mudança mais tarde (aceita, e com o cadastro
     // que ela usa mudado depois).
     const semCobertura = ['bloco reenviado depois de gravado', 'chave conferida CONFIRMADA', 'chave conferida INEXISTENTE', 'estoque abaixo de zero pelo comando', 'venda que entrou na carência', 'pendências da agenda conferidas', 'carências da agenda conferidas', 'dose por kg conferida', 'intervalos de GMD conferidos', 'estação com indicadores conferidos',
-      'campanha da agenda conferida', 'cria ao pé conferida', 'correção tardia aceita', 'correção tardia com o cadastro mudado'].filter((k) => !F.COBERTURA[k]);
+      'campanha da agenda conferida', 'cria ao pé conferida', 'correção tardia aceita', 'correção tardia com o cadastro mudado',
+      // Rodada 3 da revisão da Fase 3: a ficha igual à agenda, os partos da lista iguais aos da ficha, o último peso na data.
+      'ficha × agenda conferida', 'partos da lista × ficha conferidos', 'último peso na data conferido', 'GMD da resposta conferido'].filter((k) => !F.COBERTURA[k]);
     assert.deepEqual(semCobertura, [], 'oráculos novos sem nada conferido nas sementes fixas (' + JSON.stringify(F.COBERTURA) + ')');
   }
 });

@@ -439,8 +439,11 @@ var TelaPesagens = (function () {
      * pasto depois conta no pasto de então. ui.posicao = {data, itens, porId} | {carregando} | {erro} | null (hoje).
      */
     function comPosicao() { return !!(ui.posicao && ui.posicao.porId); }
-    /** Data passada sem a posição do servidor (carregando ou sem sinal): nada é conferido pela posição de hoje. */
-    function semPosicao() { return !!(ui.posicao && !ui.posicao.porId); }
+    /**
+     * Data passada sem a posição do servidor (carregando ou sem sinal): nada é conferido pela posição de hoje. A data sem
+     * posição por motivo do servidor (antes do marco zero, sem marco zero) não espera: o servidor decide a data na gravação.
+     */
+    function semPosicao() { return !!(ui.posicao && !ui.posicao.porId && !ui.posicao.motivo); }
     /**
      * A descrição do animal na data da pesagem: com a posição do servidor, a categoria, o pasto e o último peso daquele dia
      * (desenho-base 4.3: o dado de hoje não vale para a data passada); hoje, a da lista do aparelho.
@@ -499,7 +502,7 @@ var TelaPesagens = (function () {
         var d = r.data || {};
         var porId = {};
         (d.itens || []).forEach(function (x) { porId[x.animal_id] = x; });
-        ui.posicao = d.motivo ? { erro: Fmt.rotulo('MOTIVO', d.motivo), data: data } : { data: d.data, itens: d.itens || [], porId: porId };
+        ui.posicao = d.motivo ? { erro: Fmt.rotulo('MOTIVO', d.motivo), motivo: d.motivo, data: data } : { data: d.data, itens: d.itens || [], porId: porId };
         if (comPosicao()) resolverEsperando();
         desenhar();
       }, function (e) {
@@ -624,6 +627,7 @@ var TelaPesagens = (function () {
       Util.limpar(ui.posicaoNota);
       if (!ui.posicao) return;
       if (ui.posicao.carregando) ui.posicaoNota.appendChild(UI.nota('Conferindo no servidor quem estava no rebanho em ' + Fmt.data(ui.posicao.data) + '…', 'info'));
+      else if (ui.posicao.motivo) ui.posicaoNota.appendChild(UI.nota('Não há posição do rebanho em ' + Fmt.data(ui.posicao.data) + ' (' + ui.posicao.erro + '): o brinco é conferido pela lista de hoje, e o servidor decide se aceita a data.', 'aviso'));
       else if (ui.posicao.erro) ui.posicaoNota.appendChild(h('div', { dataset: { posicaoErro: '1' } }, UI.nota('Sem a posição do rebanho em ' + Fmt.data(ui.posicao.data) + ' (' + ui.posicao.erro + '): o brinco não é conferido pela posição de hoje (pode ser de outro animal naquele dia). As pesagens ficam pendentes até a posição chegar.', 'aviso'),
         h('div', { class: 'acoes' }, UI.botao('Tentar de novo', { atributos: { 'data-posicao-tentar': '1' }, aoClicar: function () { carregarPosicao(); desenhar(); } }))));
       else ui.posicaoNota.appendChild(UI.nota('Rebanho e pastos na posição em ' + Fmt.data(ui.posicao.data) + ', conferidos pelo servidor.', 'info'));
