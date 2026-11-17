@@ -324,7 +324,8 @@ test('ficha da matriz (bloco G inteiro), fêmeas (reproducao.matrizes) e alertas
   // reproducao.matrizes: a lista com a situação e a previsão; filtro pela estação e pela situação.
   const m = ok(api(s, 'reproducao.matrizes', {}));
   assert.deepEqual(m.itens.map((x) => [x.brinco, x.situacao_reprodutiva, x.cria_ao_pe, x.partos]), [['100', 'PRENHA', true, 3], ['101', 'PRENHA', false, 1], ['102', 'SEM_INFORMACAO', false, 0]], 'a novilha de 2024 (28 meses, apta, sem registro) entra sem informação; o touro, não');
-  assert.deepEqual(js(m.resumo), { por_situacao: { PRENHA: 2, SEM_INFORMACAO: 1 }, cria_ao_pe: 1, sem_historico: 1, total: 3 });
+  // `expostas_ou_inseminadas`: o total do cartão vem do servidor (revisão da Fase 3, achado 28); aqui nenhuma está exposta.
+  assert.deepEqual(js(m.resumo), { por_situacao: { PRENHA: 2, SEM_INFORMACAO: 1 }, cria_ao_pe: 1, sem_historico: 1, total: 3, expostas_ou_inseminadas: 0 });
   assert.deepEqual(ok(api(s, 'reproducao.matrizes', { estacao_id: e.estacao_id, situacao: 'PRENHA' })).itens.length, 2);
   // Alertas: a 100 com parto previsto em 27/12/2026 (até 30 dias); depois, com a previsão vencida há mais de 15 dias.
   assert.deepEqual(m.alertas.map((x) => [x.codigo, x.brinco, x.data_prevista]), [['PARTO_PREVISTO', '100', '2026-12-27']]);

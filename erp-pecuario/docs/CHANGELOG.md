@@ -1522,3 +1522,6 @@ novos sobre uma cópia com o `src/` anterior). Os testes ficam em `tests/revisao
   congelados na correção, 6 de 40 sementes falham (1 de 40 antes do preparo novo); sem a recusa do custo em dobro, 2 de 40.
 - **Achados do teste aleatório**: nenhum defeito do sistema. No modelo, um: o oráculo do efeito da entrada esperava o
   controle de estoque de agora na correção (semente 1800003), e foi corrigido para o desenho do achado 7.
+- Execuções do teste aleatório: 20 sementes de prova (1800000 a 1800019), com a falha do modelo acima; 300 sementes novas ×
+  100 passos com o gerador intermediário (1810000 a 1810299): 17.936 aceitos, 9.739 recusados, 0 falhas; e a leva final,
+  com o gerador final, 300 sementes novas × 100 passos (1830000 a 1830299): 17.874 aceitos, 9.877 recusados, 0 falhas.

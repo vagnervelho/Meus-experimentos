@@ -182,3 +182,18 @@ test('achado 29: o GMD do período com várias pesagens individuais mas nenhum i
   assert.doesNotMatch(f.gmd_periodo.explicacao, /Menos de duas pesagens/);
   assert.match(f.gmd_periodo.explicacao, /fora do rebanho|marco zero/);
 });
+
+test('achado 28: o total de expostas ou inseminadas e a cobertura do diagnóstico vêm do servidor (a tela não soma nem subtrai)', () => {
+  const s = S.sistema();
+  hoje(s, '2026-11-13');
+  const ids = rebanho(s, ['V1', 'V2', 'V3', 'V4', 'V5'].map((b) => vaca(b)));
+  const est = ok(api(s, 'estacao.salvar', { campos: { nome: 'Estação 26', data_inicio: '2026-06-01', data_fim: '2026-08-31', tipo: 'MONTA_NATURAL' } }), 'estação');
+  ok(api(s, 'evento.registrar', { tipo: 'REPRODUCAO', subtipo: 'EXPOSICAO', campos: { event_date: '2026-06-01', estacao_id: est.estacao_id }, animais: ['V1', 'V2', 'V3'].map((b) => ({ animal_id: ids[b] })) }), 'exposição');
+  ok(api(s, 'evento.registrar', { tipo: 'REPRODUCAO', subtipo: 'INSEMINACAO', campos: { event_date: '2026-06-10', estacao_id: est.estacao_id, metodo: 'IA' }, animais: [{ animal_id: ids.V4 }] }), 'inseminação');
+  ok(api(s, 'evento.registrar', { tipo: 'REPRODUCAO', subtipo: 'DIAGNOSTICO_GESTACAO', campos: { event_date: '2026-09-20', estacao_id: est.estacao_id, metodo: 'PALPACAO' }, animais: [{ animal_id: ids.V1, resultado: 'POSITIVO', idade_gestacional_dias: 100 }] }), 'diagnóstico');
+  const r = ok(api(s, 'reproducao.matrizes', {})).resumo;
+  assert.equal(r.expostas_ou_inseminadas, 3, JSON.stringify(r));
+  assert.equal(r.expostas_ou_inseminadas, (r.por_situacao.EXPOSTA || 0) + (r.por_situacao.INSEMINADA || 0));
+  const g = ok(api(s, 'reproducao.indicadores', { estacao_id: est.estacao_id })).estacao.geral;
+  assert.deepEqual([g.cobertura_dg.numerador, g.cobertura_dg.denominador], [1, 4]);
+});
