@@ -976,6 +976,27 @@ function criarMundoPlanilhas(amb) {
     },
     /** Marca a planilha como fora do alcance do escopo drive.file (não foi criada pelo app). */
     tornarInacessivel: (ssId) => { planilhas.get(ssId).acessivel = false; },
+    /**
+     * Fotografia de todas as planilhas (o estado durável, sem escrita pendente) para o teste voltar a ele depois
+     * (tests/harness.js, `estado`). A restauração repõe o conteúdo no mesmo objeto de cada planilha.
+     */
+    fotografar: () => {
+      if (amb.exec().pendentes.length) throw new Error('fake Sheets: fotografia com escritas pendentes');
+      return { seqSheetId, planilhas: Array.from(planilhas, ([id, ss]) => [id, JSON.stringify(ss)]) };
+    },
+    restaurar: (foto) => {
+      if (amb.exec().pendentes.length) throw new Error('fake Sheets: restauração com escritas pendentes');
+      const ids = new Set(foto.planilhas.map((x) => x[0]));
+      Array.from(planilhas.keys()).forEach((id) => { if (!ids.has(id)) planilhas.delete(id); });
+      foto.planilhas.forEach(([id, txt]) => {
+        const novo = JSON.parse(txt);
+        const ss = planilhas.get(id);
+        if (!ss) { planilhas.set(id, novo); return; }
+        Object.keys(ss).forEach((k) => { delete ss[k]; });
+        Object.assign(ss, novo);
+      });
+      seqSheetId = foto.seqSheetId;
+    },
   };
 
   return { SpreadsheetApp, Sheets, apoio, criarPlanilha, copiarPlanilha, removerPlanilha, suspender, retomar, descarregar, resolverMorte, existe: (id) => planilhas.has(id), obter: (id) => planilhas.get(id), semPendentes };

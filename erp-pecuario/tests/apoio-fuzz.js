@@ -4855,6 +4855,319 @@ function escolherTempo(sis, S, rt, k) {
   return { D: D > HOJE ? HOJE : D, avanco: sorteio(rt, [1, 31, 200, 400]) };
 }
 
+// ------------------------------------------------------------------ correção e fato congelado ----
+/**
+ * Oráculo da correção (conserto da Fase 3 pela garantia: a correção e o fato congelado; CONTRATOS, seção 50). Num passo
+ * sorteado por um gerador à parte (`cmd.correcao`, gravado na sequência para a repetição e o encolhimento: as sequências das
+ * sementes não mudam), sobre o estado do passo e voltando a ele no fim (gas.estado: o ensaio não deixa rastro), o oráculo
+ * muda cadastros como o dono faria (o produto, o protocolo, os parâmetros, a política de avisos, o período fechado, a
+ * categoria, o pasto, o parceiro, o item de lista, a estação e a propriedade) e então corrige eventos vigentes sorteados de
+ * todos os tipos:
+ *  (b1) SEM MUDANÇA (a entrada do próprio lançamento: a do gerador ou a remontada pelas linhas gravadas, e a que o servidor
+ *       devolve para a correção em evento.obter): a correção é aceita, salvo as recusas documentadas (a política de avisos
+ *       de hoje e o acerto de estoque sem o controle), e os fatos gravados do substituto são os do original, menos os
+ *       metadados de versão e auditoria (META_CORRECAO); nenhum outro registro muda; os animais e os produtos ficam iguais;
+ *  (b4) as consultas — a bateria da viagem no tempo em D = hoje e na data do evento, e a lista dos lançamentos que valem —
+ *       depois da correção sem mudança são as de antes.
+ */
+const META_CORRECAO = {
+  EVENTOS: ['event_id', 'op_id', 'event_seq', 'registration_date', 'status', 'created_by', 'source', 'idempotency_key', 'reversal_of_event_id', 'reversed_by_event_id', 'import_id', 'created_at', 'confirmed_at'],
+  EVENTO_ANIMAIS: ['event_animal_id', 'event_id'],
+  IDENTIFICACOES: ['ident_id', 'event_id', 'created_at'],
+  PESAGENS: ['weight_id', 'event_id'],
+  REPRODUCAO: ['reproduction_id', 'event_id'],
+  BAIXAS: ['baixa_id', 'event_id'],
+  AJUSTES: ['ajuste_id', 'event_id'],
+  SANIDADE: ['health_id', 'event_id'],
+  MOVIMENTOS_ESTOQUE: ['mov_id', 'event_id', 'created_at'],
+  COMPRAS: ['purchase_id', 'event_id'],
+  VENDAS: ['sale_id', 'event_id'],
+  FINANCEIRO: ['financial_id', 'event_id', 'created_at', 'status', 'cancelado_em', 'cancelado_por_event_id'],
+  PARCELAS: ['parcela_id', 'financial_id', 'created_at'],
+  RATEIOS: ['rateio_id', 'event_id', 'financial_id', 'escopo_ref', 'created_by', 'created_at'],
+  ALOCACOES_FINANCEIRAS: ['alloc_id', 'rateio_id', 'financial_id'],
+  ANEXOS: ['anexo_id', 'entity_id', 'event_id'],
+};
+const TABELAS_DO_EVENTO = ['EVENTO_ANIMAIS', 'IDENTIFICACOES', 'PESAGENS', 'REPRODUCAO', 'BAIXAS', 'AJUSTES', 'SANIDADE', 'MOVIMENTOS_ESTOQUE', 'COMPRAS', 'VENDAS', 'ANEXOS'];
+const porJson = (a, b) => cmp(JSON.stringify(a), JSON.stringify(b));
+/** Um registro sem os metadados (as colunas em ordem; vazio = null). */
+function semMeta(aba, r) {
+  const o = {};
+  Object.keys(r).sort().forEach((c) => { if ((META_CORRECAO[aba] || []).indexOf(c) < 0) o[c] = r[c] === undefined || r[c] === '' ? null : r[c]; });
+  return o;
+}
+/** Troca no valor os identificadores do mapa pelo rótulo (os lançamentos do evento, citados no payload). */
+function trocarIds(v, mapa) {
+  if (typeof v === 'string') return mapa.has(v) ? mapa.get(v) : v;
+  if (Array.isArray(v)) return v.map((x) => trocarIds(x, mapa));
+  if (v && typeof v === 'object') { const o = {}; Object.keys(v).sort().forEach((k) => { o[k] = trocarIds(v[k], mapa); }); return o; }
+  return v;
+}
+/**
+ * Os fatos gravados de um evento, sem os metadados: o cabeçalho (o payload sem os avisos aceitos), as linhas de cada tabela
+ * (em ordem canônica) e os lançamentos com as parcelas, o rateio e as alocações.
+ */
+function fatosDoEvento(S, eid) {
+  const ev = S.ev.get(eid);
+  const fins = S.t.FINANCEIRO.filter((f) => f.event_id === eid).map((f) => {
+    const parcelas = S.t.PARCELAS.filter((p) => p.financial_id === f.financial_id).map((p) => semMeta('PARCELAS', p)).sort(porJson);
+    const rateios = S.t.RATEIOS.filter((r) => r.financial_id === f.financial_id).map((r) => Object.assign(semMeta('RATEIOS', r), { alocacoes: S.t.ALOCACOES_FINANCEIRAS.filter((a) => a.rateio_id === r.rateio_id).map((a) => semMeta('ALOCACOES_FINANCEIRAS', a)).sort(porJson) }));
+    return { id: f.financial_id, v: Object.assign(semMeta('FINANCEIRO', f), { parcelas, rateios }) };
+  }).sort((a, b) => porJson(a.v, b.v));
+  const mapa = new Map(fins.map((x, i) => [x.id, '@lancamento' + i]));
+  const cab = semMeta('EVENTOS', ev);
+  // No payload, os avisos aceitos e a justificativa da correção são da auditoria do comando, não do fato.
+  const pj = sem(ev.payload_json || {}, ['avisos_aceitos', 'justificativa']);
+  cab.payload_json = Object.keys(pj).length ? trocarIds(pj, mapa) : null;
+  const out = { EVENTOS: cab, FINANCEIRO: fins.map((x) => x.v) };
+  TABELAS_DO_EVENTO.forEach((aba) => { out[aba] = (S.t[aba] || []).filter((r) => r.event_id === eid).map((r) => trocarIds(semMeta(aba, r), mapa)).sort(porJson); });
+  return out;
+}
+/** Os registros de todas as tabelas de eventos que não são do evento (nem dos lançamentos dele), pela chave. */
+function outrosRegistros(S, eids) {
+  const de = new Set(eids);
+  const fins = new Set(S.t.FINANCEIRO.filter((f) => de.has(f.event_id)).map((f) => f.financial_id));
+  const rats = new Set(S.t.RATEIOS.filter((r) => fins.has(r.financial_id)).map((r) => r.rateio_id));
+  const out = new Map();
+  const pk = { EVENTOS: 'event_id', EVENTO_ANIMAIS: 'event_animal_id', IDENTIFICACOES: 'ident_id', PESAGENS: 'weight_id', REPRODUCAO: 'reproduction_id', BAIXAS: 'baixa_id', AJUSTES: 'ajuste_id', SANIDADE: 'health_id', MOVIMENTOS_ESTOQUE: 'mov_id', COMPRAS: 'purchase_id', VENDAS: 'sale_id', FINANCEIRO: 'financial_id', PARCELAS: 'parcela_id', RATEIOS: 'rateio_id', ALOCACOES_FINANCEIRAS: 'alloc_id', ANEXOS: 'anexo_id' };
+  Object.keys(pk).forEach((aba) => (S.t[aba] || []).forEach((r) => {
+    if (de.has(r.event_id) || (aba === 'PARCELAS' && fins.has(r.financial_id)) || (aba === 'ALOCACOES_FINANCEIRAS' && rats.has(r.rateio_id))) return;
+    out.set(aba + ':' + r[pk[aba]], JSON.stringify(r));
+  }));
+  return out;
+}
+/** Os animais e os produtos (todas as colunas menos o carimbo de atualização; a origem do animal no substituto = no original). */
+function cadastrosProjetados(S, troca) {
+  const out = new Map();
+  S.t.ANIMAIS.forEach((a) => { const o = sem(a, ['updated_at']); if (troca && o.evento_origem_id === troca[1]) o.evento_origem_id = troca[0]; out.set('ANIMAIS:' + a.animal_id, JSON.stringify(o)); });
+  (S.t.PRODUTOS || []).forEach((p) => out.set('PRODUTOS:' + p.product_id, JSON.stringify(sem(p, ['updated_at']))));
+  return out;
+}
+function diferencasDeMapa(a, b) {
+  const out = [];
+  a.forEach((v, k) => { if (b.get(k) !== v) out.push({ k, antes: v, depois: b.has(k) ? b.get(k) : '(sumiu)' }); });
+  b.forEach((v, k) => { if (!a.has(k)) out.push({ k, antes: '(não havia)', depois: v }); });
+  return out;
+}
+/** A entrada sem mudança de um evento: a do gerador (como foi aceita) ou a remontada pelas linhas gravadas; null sem nenhuma. */
+function entradaDoGerador(sis, S, rnd, e) {
+  const memo = sis.specs.get(e.event_id);
+  if (!memo) return null;
+  try { return { origem: 'gerador', dados: montarDados(sis, js(memo.spec)) }; } catch (x) { return null; }
+}
+/** Corrige com a chave dada, aceitando os avisos (e escrevendo a justificativa do período fechado quando pedida). */
+function corrigirAceitando(sis, dados, chave) {
+  const extra = { idempotencyKey: chave, avisosAceitos: AVISOS };
+  let r = sis.api('evento.corrigir', dados, extra);
+  if (!r.ok && r.error && r.error.code === 'NEEDS_CONFIRMATION') {
+    const codigos = Array.from(new Set((r.error.details || []).map((d) => d.codigo)));
+    const d2 = codigos.indexOf('PERIODO_BLOQUEADO') >= 0 ? Object.assign({}, dados, { justificativa_aviso: 'Conferido com o pecuarista' }) : dados;
+    r = sis.api('evento.corrigir', d2, Object.assign({}, extra, { avisosAceitos: extra.avisosAceitos.concat(codigos) }));
+  }
+  return r;
+}
+/**
+ * As recusas que o desenho manda também para a correção sem mudança (documentadas na seção 50): o aviso que a política de
+ * hoje bloqueia (`avisos_politica`: vale para todo comando; a carência na venda para abate segue a política) e o acerto de
+ * estoque do produto que deixou de controlar o estoque (PRODUTO_SEM_ESTOQUE, decisão da seção 45).
+ */
+function recusaDocumentada(S, e, r) {
+  if (!r.error || r.error.code !== 'VALIDATION') return false;
+  const pol = politicaDe(S);
+  const codigos = (r.error.details || []).map((d) => d.codigo);
+  return codigos.length > 0 && codigos.every((c) => (pol[c] || (c === 'CARENCIA_ATIVA' ? 'BLOQUEIA' : 'AVISA')) === 'BLOQUEIA' || (c === 'PRODUTO_SEM_ESTOQUE' && e.event_type === 'ESTOQUE' && e.event_subtype === 'AJUSTE'));
+}
+/** As consultas da bateria da viagem no tempo em D (sem a lista dos lançamentos, conferida à parte pela lista dos que valem). */
+const GRUPOS_B4 = new Set(['pos', 'posA', 'eleg', 'pasto', 'pastos', 'painel', 'perm', 'agenda', 'ind', 'mat', 'matE', 'desemp', 'dash', 'ficha']);
+function bateriaCorrecao(sis, S, D) {
+  const vivos = Array.from(S.animais.values()).filter((a) => a.situacao_cadastral !== 'EXTERNO').sort((a, b) => cmp(a.codigo_interno || '', b.codigo_interno || ''));
+  const T = {
+    D, animais: vivos.map((a) => a.animal_id), amostra: vivos.slice(0, 6).map((a) => a.animal_id), pastos: S.t.PASTOS.map((p) => p.pasture_id).sort(),
+    estacoes: (S.t.ESTACOES_MONTA || []).map((x) => x.estacao_id).sort().slice(0, 2),
+    categoria: (S.t.CATEGORIAS.filter((c) => c.ativo !== false).sort((a, b) => (a.prioridade || 0) - (b.prioridade || 0))[0] || {}).category_id || null, fichas: {},
+  };
+  vivos.filter((a) => SAIDAS_DO_REBANHO_T.indexOf(a.situacao_cadastral) >= 0 && a.data_saida).slice(0, 2).forEach((a) => { T.fichas[a.animal_id] = a.data_saida; });
+  const bat = bateriaTempo(sis, T, { grupos: GRUPOS_B4 });
+  const lista = sis.api('evento.listar', { por_pagina: 500, vigentes: true });
+  const semVazio = (p) => (p && Object.keys(p).length ? p : null);
+  const itens = lista.ok ? lista.data.itens.map((x) => sem(Object.assign({}, x, { payload: x.payload ? semVazio(sem(x.payload, ['avisos_aceitos', 'deducoes', 'justificativa'])) : null }), ['event_id', 'event_seq', 'registration_date', 'status', 'vigente', 'created_by', 'source', 'reversal_of_event_id', 'anulado_por', 'created_at'])) : lista.error;
+  return bat.concat([{ grupo: 'eventos', chave: 'eventos', valor: itens }]);
+}
+/**
+ * As mudanças de cadastro que o dono faz entre o registro e a correção (o que ela não pode refazer pelo cadastro de hoje):
+ * do produto usado (nome, fabricante, carência padrão, custo, categoria, fator, controle de estoque, doses padrão, ativo), do
+ * protocolo usado (intervalo, recorrência, nome, idade, ativo; o procedimento, recusado no protocolo cumprido), dos
+ * parâmetros (gestação, desmama, arroba, rendimento, validade do peso, UA, brinco, idade reprodutiva, faixas do GMD,
+ * tolerância), da política de avisos, do período fechado, da categoria (faixa, peso de referência, nome, ativa), do pasto, do
+ * parceiro, do item de lista, da estação (as datas) e da propriedade.
+ */
+function cadastroDaCorrecao(sis, S, rnd) {
+  const usados = (aba, campo) => Array.from(new Set((S.t[aba] || []).filter((r) => S.vig.get(r.event_id) && r[campo]).map((r) => r[campo])));
+  const qual = pesado(rnd, [['produto', 5], ['protocolo', 2.5], ['parametro', 3], ['politica', 0.8], ['bloqueio', 0.8], ['categoria', 1.5], ['pasto', 1], ['parceiro', 1], ['lista', 1], ['estacao', 1], ['propriedade', 0.4]]);
+  const c = (rota, dados, rotulo) => ({ rota, dados, rotulo });
+  if (qual === 'produto') {
+    const ids = usados('SANIDADE', 'produto_id').concat(usados('MOVIMENTOS_ESTOQUE', 'product_id'), usados('FINANCEIRO', 'product_id'));
+    const p = (S.t.PRODUTOS || []).find((x) => x.product_id === sorteio(rnd, ids)) || sorteio(rnd, S.t.PRODUTOS || []);
+    if (!p) return null;
+    const campo = sorteio(rnd, ['nome', 'fabricante', 'carencia_padrao_dias', 'custo_unitario', 'custo_unitario', 'categoria', 'fator_conversao', 'controla_estoque', 'dose_padrao_por_kg', 'dose_padrao_por_cabeca', 'ativo']);
+    const v = {
+      nome: /\(revisto\)$/.test(p.nome || '') ? String(p.nome).replace(/ \(revisto\)$/, '') : p.nome + ' (revisto)', fabricante: p.fabricante === 'Lab Revisto' ? 'Lab Outro' : 'Lab Revisto',
+      carencia_padrao_dias: p.carencia_padrao_dias === 45 ? 10 : 45, custo_unitario: sorteio(rnd, [0.035, 1.85, 2.5, 7.25].filter((x) => x !== p.custo_unitario)),
+      categoria: sorteio(rnd, ['VACINA', 'VERMIFUGO', 'MEDICAMENTO', 'SUPLEMENTO', 'OUTRO'].filter((x) => x !== p.categoria)), fator_conversao: p.fator_conversao === 25 ? 50 : 25,
+      controla_estoque: p.controla_estoque !== true, dose_padrao_por_kg: p.dose_padrao_por_kg === 0.02 ? 0.05 : 0.02, dose_padrao_por_cabeca: p.dose_padrao_por_cabeca === 5 ? 2 : 5, ativo: false,
+    }[campo];
+    return c('produto.salvar', { product_id: p.product_id, campos: { [campo]: v }, justificativa: 'Cadastro do produto revisto' }, 'produto ' + campo);
+  }
+  if (qual === 'protocolo') {
+    const ids = usados('SANIDADE', 'protocol_id');
+    const p = (S.t.PROTOCOLOS_SANITARIOS || []).find((x) => x.protocol_id === sorteio(rnd, ids)) || sorteio(rnd, S.t.PROTOCOLOS_SANITARIOS || []);
+    if (!p) return null;
+    const x = rnd();
+    const campos = x < 0.3 ? { intervalo_dias: (typeof p.intervalo_dias === 'number' ? p.intervalo_dias : 180) + 45 } : x < 0.45 ? (p.recorrencia_tipo === 'INTERVALO_DIAS' ? { recorrencia_tipo: 'UNICA' } : { recorrencia_tipo: 'INTERVALO_DIAS', intervalo_dias: 90 })
+      : x < 0.6 ? { nome: p.nome + ' (revisto)' } : x < 0.72 ? { idade_min_meses: sorteio(rnd, [0, 6, 18]) } : x < 0.88 ? { ativo: false } : { tipo_procedimento: ['VACINA', 'VERMIFUGO', 'MEDICAMENTO', 'EXAME'].filter((v) => v !== p.tipo_procedimento)[0] };
+    return c('protocolo.salvar', { protocol_id: p.protocol_id, campos, justificativa: 'Protocolo revisto' }, 'protocolo ' + Object.keys(campos)[0]);
+  }
+  if (qual === 'parametro') {
+    const [chave, op] = sorteio(rnd, [
+      ['dias_gestacao', ['270', '290', '300']], ['idade_desmama_padrao_meses', ['3', '8', '12']], ['arroba_kg', ['14.5', '15.5']], ['rendimento_carcaca_padrao_pct', ['48', '55']],
+      ['peso_validade_dias', ['30', '400']], ['ua_peso_kg', ['400', '500']], ['brinco_somente_numerico', ['S', 'N']], ['brinco_ignora_zeros_esquerda', ['S', 'N']], ['idade_min_reprodutiva_meses', ['12', '40']],
+      ['gmd_plausivel_min_kg_dia', ['-0.5', '0.2']], ['gmd_plausivel_max_kg_dia', ['1', '3']], ['fin_tolerancia_conferencia_pct', ['0', '5']], ['parto_tolerancia_dias', ['0', '30']],
+      ['peso_nascer_padrao_kg_macho', ['28', '35']], ['peso_nascer_padrao_kg_femea', ['26', '33']],
+    ]);
+    return c('config.salvar', { valores: { [chave]: sorteio(rnd, op) } }, 'parâmetro ' + chave);
+  }
+  if (qual === 'politica') {
+    const pol = {};
+    alguns(rnd, POLITICAVEIS, 3).forEach((x) => { pol[x] = sorteio(rnd, ['BLOQUEIA', 'AVISA', 'IGNORA']); });
+    return c('config.salvar', { valores: { avisos_politica: '{' + Object.keys(pol).sort().map((x) => JSON.stringify(x) + ':' + JSON.stringify(pol[x])).join(',') + '}' } }, 'política de avisos');
+  }
+  if (qual === 'bloqueio') {
+    const datas = S.t.FINANCEIRO.map((f) => f.data_competencia).filter(Boolean);
+    return c('config.salvar', { valores: { fin_bloqueio_ate: datas.length && rnd() < 0.7 ? sorteio(rnd, datas) : HOJE } }, 'período fechado');
+  }
+  if (qual === 'categoria') {
+    const cat = sorteio(rnd, S.t.CATEGORIAS);
+    if (!cat) return null;
+    const x = rnd();
+    const campos = x < 0.3 ? { peso_referencia_kg: sorteio(rnd, [180, 320, 450]) } : x < 0.5 ? { nome: cat.nome + ' (revista)' } : x < 0.7 ? { ativo: false } : typeof cat.idade_minima_meses === 'number' ? { idade_minima_meses: cat.idade_minima_meses + 1 } : { descricao: 'Revista' };
+    return c('categoria.salvar', { category_id: cat.category_id, campos, justificativa: 'Categoria revista' }, 'categoria ' + Object.keys(campos)[0]);
+  }
+  if (qual === 'pasto') {
+    const ids = Array.from(new Set(S.t.EVENTO_ANIMAIS.filter((l) => S.vig.get(l.event_id)).map((l) => l.pasto_destino_id).filter(Boolean)));
+    const p = S.t.PASTOS.find((x) => x.pasture_id === sorteio(rnd, ids)) || sorteio(rnd, S.t.PASTOS);
+    return p ? c('pasto.salvar', { pasture_id: p.pasture_id, campos: { status: 'INATIVO' }, justificativa: 'Pasto em reforma' }, 'pasto desativado') : null;
+  }
+  if (qual === 'parceiro') {
+    const p = sorteio(rnd, S.t.PARCEIROS);
+    return p ? c('parceiro.salvar', { partner_id: p.partner_id, campos: { ativo: false }, justificativa: 'Parceiro conferido' }, 'parceiro desativado') : null;
+  }
+  if (qual === 'lista') {
+    const usadosL = S.t.LISTAS.filter((l) => l.ativo !== false && LISTAS_USADAS.some(([lista, cod]) => l.lista === lista && l.codigo === cod));
+    const it = sorteio(rnd, usadosL);
+    return it ? c('lista.salvar', { lista_id: it.lista_id, ativo: false, justificativa: 'Lista revista' }, 'item de lista desativado') : null;
+  }
+  if (qual === 'estacao') {
+    const e = sorteio(rnd, S.t.ESTACOES_MONTA || []);
+    if (!e) return null;
+    return c('estacao.salvar', { estacao_id: e.estacao_id, campos: { data_inicio: somaDias(e.data_inicio, 20), data_fim: somaDias(e.data_fim, -20) }, justificativa: 'Datas revistas' }, 'estação com outras datas');
+  }
+  const p = sorteio(rnd, S.t.PROPRIEDADES);
+  return p ? c('propriedade.salvar', { property_id: p.property_id, campos: { status: 'INATIVO' }, justificativa: 'Propriedade revista' }, 'propriedade desativada') : null;
+}
+/** Grava as mudanças de cadastro (cada uma aceitando os avisos); devolve o que foi pedido e o desfecho. */
+function mudarCadastros(sis, S, rnd, k) {
+  const feitas = [];
+  const n = 1 + Math.floor(rnd() * 4);
+  for (let i = 0; i < n; i++) {
+    const m = cadastroDaCorrecao(sis, S, rnd);
+    if (!m) continue;
+    const extra = { idempotencyKey: 'corr-cad-' + k + '-' + i, avisosAceitos: AVISOS };
+    let r = sis.api(m.rota, m.dados, extra);
+    if (!r.ok && r.error && r.error.code === 'NEEDS_CONFIRMATION') r = sis.api(m.rota, m.dados, Object.assign({}, extra, { avisosAceitos: AVISOS.concat((r.error.details || []).map((d) => d.codigo)) }));
+    feitas.push(m.rotulo + (r.ok ? '' : ' (recusado: ' + ((r.error.details || [])[0] || {}).codigo + ')'));
+  }
+  return feitas;
+}
+/** O passo do oráculo da correção (gerador à parte: as sequências das sementes não mudam), ou null. */
+function escolherCorrecao(S, rc, k) {
+  const x = rc();
+  if (k < 3 || x > 0.12) return null;
+  return { semente: Math.floor(rc() * 1e9), b4: rc() < 0.4 };
+}
+const tipoEChave = (e) => e.event_type + (e.event_subtype ? '/' + e.event_subtype : '');
+/** O oráculo inteiro num passo: os cadastros mudados, as correções sem mudança e o estado de volta ao do passo. */
+function oraculoCorrecao(sis, S0, k, plano) {
+  if (S0.emCurso.length) return [];
+  const rnd = aleatorio(plano.semente);
+  const foto0 = sis.gas.estado.salvar();
+  const out = [];
+  try {
+    const mudancas = mudarCadastros(sis, S0, rnd, k);
+    const t = tabelas(sis);
+    const S = estado(t);
+    const vig = S.t.EVENTOS.filter((e) => S.vig.get(e.event_id) && e.event_type !== 'ESTORNO');
+    const porTipo = new Map();
+    vig.forEach((e) => { const t2 = tipoEChave(e); if (!porTipo.has(t2)) porTipo.set(t2, []); porTipo.get(t2).push(e); });
+    const tipos = Array.from(porTipo.keys()).sort();
+    const alvos = alguns(rnd, tipos, 4).map((t2) => sorteio(rnd, porTipo.get(t2)));
+    const foto1 = sis.gas.estado.salvar();
+    const antesCad = cadastrosProjetados(S, null);
+    let b4feito = !plano.b4;
+    alvos.forEach((e, i) => {
+      const ent = entradaDoGerador(sis, S, rnd, e);
+      if (!ent) { contar('correção: sem entrada para corrigir'); return; }
+      const contexto = 'a correção sem mudança (entrada ' + ent.origem + ') de ' + tipoEChave(e) + ' de ' + e.event_date + ' depois de: ' + (mudancas.join('; ') || 'nada') + ' — ';
+      const datas = !b4feito ? [HOJE].concat(e.event_date >= (S.marco || D0) && e.event_date < HOJE ? [e.event_date] : []) : [];
+      // As chaves em ordem (o mesmo trocarIds dos valores de depois, sem troca).
+      const bat0 = datas.map((D) => bateriaCorrecao(sis, S, D).map((u) => Object.assign({}, u, { valor: trocarIds(u.valor, new Map()) })));
+      const dados = Object.assign(ent.dados, { event_id: e.event_id, justificativa: 'Conferido de novo' });
+      const r = corrigirAceitando(sis, dados, 'corr-' + k + '-' + i);
+      if (!r.ok) {
+        if (r.error && r.error.code === 'INTERNAL') out.push(falha('CORRECAO:INTERNO', contexto + r.error.message));
+        else if (!recusaDocumentada(S, e, r)) out.push(falha('CORRECAO:B1:RECUSA:' + tipoEChave(e), contexto + 'recusada: ' + r.error.code + ' ' + JSON.stringify((r.error.details || []).map((d) => d.codigo + ': ' + d.mensagem)).slice(0, 700)));
+        else contar('correção: recusa documentada da correção sem mudança');
+        sis.gas.estado.restaurar(foto1);
+        return;
+      }
+      contar('correção: sem mudança aceita');
+      contar('correção: sem mudança aceita (' + ent.origem + ')');
+      const S2 = estado(tabelas(sis));
+      const novo = r.data.event_id;
+      const a = fatosDoEvento(S, e.event_id);
+      const b = fatosDoEvento(S2, novo);
+      Object.keys(a).forEach((aba) => {
+        const d = primeiraDiferenca(a[aba], b[aba], aba);
+        if (d) out.push(falha('CORRECAO:B1:' + tipoEChave(e) + ':' + aba, contexto + 'o fato gravado mudou: ' + d.caminho + ' ' + curto(d.antes) + ' → ' + curto(d.depois)));
+      });
+      const dOutros = diferencasDeMapa(outrosRegistros(S, [e.event_id]), outrosRegistros(S2, [e.event_id, novo]));
+      dOutros.slice(0, 1).forEach((x) => out.push(falha('CORRECAO:B1:OUTROS', contexto + 'outro registro mudou: ' + x.k + ' ' + curto(x.antes) + ' → ' + curto(x.depois))));
+      diferencasDeMapa(antesCad, cadastrosProjetados(S2, [e.event_id, novo])).slice(0, 1).forEach((x) => out.push(falha('CORRECAO:B1:PROJECAO', contexto + x.k + ' mudou: ' + curto(x.antes) + ' → ' + curto(x.depois))));
+      if (datas.length) {
+        b4feito = true;
+        // Os identificadores do substituto nas respostas (o evento da entrada, da saída, da pesagem) são os do original.
+        const troca = new Map([[novo, e.event_id]]);
+        datas.forEach((D, j) => {
+          const bat1 = bateriaCorrecao(sis, S2, D).map((u) => Object.assign({}, u, { valor: trocarIds(u.valor, troca) }));
+          const m1 = new Map(bat1.map((u) => [u.chave, u]));
+          let n = 0;
+          bat0[j].forEach((u) => {
+            const x = m1.get(u.chave);
+            const d = primeiraDiferenca(u.valor, x ? x.valor : undefined, u.chave);
+            if (d && n++ < 2) out.push(falha('CORRECAO:B4:' + u.grupo, contexto + 'a consulta em ' + D + ' mudou: ' + d.caminho + ' ' + curto(d.antes) + ' → ' + curto(d.depois)));
+          });
+          contar('correção: consultas conferidas depois da correção sem mudança', bat0[j].length);
+        });
+      }
+      sis.gas.estado.restaurar(foto1);
+    });
+  } catch (x) {
+    out.push(falha('CORRECAO:EXCECAO', String(x && x.stack || x).slice(0, 1500)));
+  } finally {
+    sis.gas.estado.restaurar(foto0);
+  }
+  return out;
+}
+
 // ------------------------------------------------------------------ execução de um passo ----
 const chaveDo = (k) => 'fz-' + k;
 /**
@@ -4967,6 +5280,9 @@ function executar(sis, k, cmd, antesT, opcoes) {
   // Viagem no tempo (conserto da Fase 3 pela garantia, etapa 1): a comparação do retrato numa data D depois de cada passo que
   // gravou, e o retrato pedido neste passo.
   if (!o.semGlobal) falhas.push(...oraculoTempo(sis, cmd, A, S, k, gravou));
+  // Conserto pela garantia, a correção e o fato congelado (CONTRATOS, seção 50): no passo sorteado, o ensaio das correções
+  // sobre o estado deste passo, que volta a ele no fim.
+  if (!o.semGlobal && cmd.correcao) falhas.push(...oraculoCorrecao(sis, S, k, cmd.correcao));
   return { falhas, r, depoisT, S };
 }
 
@@ -5257,6 +5573,8 @@ function rodar(semente, passos) {
   const rnd = aleatorio(semente);
   // O retrato da viagem no tempo sai de um gerador à parte: as sequências de comandos de cada semente não mudam com ele.
   const rt = aleatorio((semente ^ 0x6c8e9cf5) >>> 0);
+  // O ensaio da correção também sai de um gerador à parte (CONTRATOS, seção 50).
+  const rc = aleatorio((semente ^ 0x2f6b3a1d) >>> 0);
   const log = [];
   const stats = { aceitos: 0, recusados: 0, porRotulo: {}, porEvento: {} };
   let t = tabelas(sis);
@@ -5269,6 +5587,8 @@ function rodar(semente, passos) {
     if (!cmd) continue;
     const tempo = escolherTempo(sis, S, rt, k);
     if (tempo) cmd.tempo = tempo;
+    const correcao = escolherCorrecao(S, rc, k);
+    if (correcao) cmd.correcao = correcao;
     log.push(Object.assign({ k }, gravavel(sis, cmd)));
     const ex = executar(sis, k, cmd, t);
     const rot = cmd.rotulo || cmd.rota;
@@ -5305,6 +5625,9 @@ function gravavel(sis, cmd) {
   if (cmd.correcaoTardia) o.correcaoTardia = true;
   if (cmd.relogio) o.relogio = cmd.relogio;
   if (cmd.tempo) o.tempo = cmd.tempo;
+  if (cmd.correcao) o.correcao = cmd.correcao;
+  // A especificação do lançamento (o ensaio da correção usa a entrada do gerador também na repetição e no encolhimento).
+  if (cmd.spec) o.spec = simbolizar(sis, cmd.spec);
   if (cmd.desfazerImediato) o.desfazerImediato = true;
   if (cmd.chaveDe !== undefined) { o.chaveDe = cmd.chaveDe; if (cmd.outraChave) o.outraChave = true; else o.reenvio = true; }
   if (cmd.chaveFixa) o.chaveFixa = cmd.chaveFixa;
@@ -5330,10 +5653,12 @@ function reproduzir(opcoes, comandos, sisFora) {
     if (c.chaveDe !== undefined && !feitos.has(c.chaveDe)) continue;
     feitos.add(c.k);
     const cmd = Object.assign({}, c, { dados });
+    if (c.spec) cmd.spec = resolver(sis, c.spec, []);
     const ex = executar(sis, c.k, cmd, t);
     if (sisFora && ex.r) sisFora.resultados[c.k] = ex.r.ok ? 'OK' : ex.r.error.code + ':' + (ex.r.error.details || []).map((d) => d.codigo).join(',');
     if (ex.falhas.length) return Object.assign({ k: c.k }, ex.falhas[0]);
     nomear(sis, c.k, t, ex.depoisT);
+    if (ex.r) memorizar(sis, c.k, cmd, ex.r, estado(t), ex.S);
     t = ex.depoisT;
   }
   return null;

@@ -642,6 +642,24 @@ function createGas(opts) {
       criar: (nome, pais) => drive.Drive.Files.create({ name: nome || 'Planilha de teste', mimeType: drive.apoio.MIME_PLANILHA, parents: pais }).id,
     }),
     drive: drive.apoio,
+    /**
+     * O estado que dura entre execuções (planilhas, Drive, propriedades, o contador dos ids e o relógio), para um teste
+     * fazer comandos de ensaio e voltar ao estado de antes (o oráculo da correção do teste aleatório, CONTRATOS, seção 50).
+     * Só fora de gas.exec(): a fotografia não leva escrita pendente.
+     */
+    estado: {
+      salvar: () => ({
+        mundo: mundo.apoio.fotografar(), drive: drive.apoio.fotografar(), ids: ids.n, relogio: clock.now,
+        props: Object.fromEntries(Object.keys(props).map((k) => [k, Array.from(props[k]._data)])),
+      }),
+      restaurar: (f) => {
+        mundo.apoio.restaurar(f.mundo);
+        drive.apoio.restaurar(f.drive);
+        Object.keys(props).forEach((k) => { props[k]._data.clear(); f.props[k].forEach(([c, v]) => props[k]._data.set(c, v)); });
+        ids.n = f.ids;
+        clock.now = f.relogio;
+      },
+    },
     /** Portas falsas para testar domínio puro sem adaptador: {hash, clock, idGen} (contrato em docs/CONTRATOS.md). */
     portas: () => ({
       hash: { sha256Hex },

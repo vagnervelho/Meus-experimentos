@@ -303,6 +303,16 @@ function criarDrive(amb, mundo) {
     /** Força o tamanho declarado da exportação (para testar o teto de 10 MB sem gerar 10 MB). */
     definirTamanhoExportado: (id, bytes) => { arquivos.get(id).tamanhoExportado = bytes; },
     definirDatas: (id, datas) => { Object.assign(arquivos.get(id), datas); },
+    /**
+     * Fotografia dos arquivos (cópia rasa de cada um; o conteúdo binário não muda depois de gravado) e do contador de ids,
+     * para o teste voltar ao estado (tests/harness.js, `estado`).
+     */
+    fotografar: () => ({ seq, arquivos: Array.from(arquivos, ([id, f]) => [id, Object.assign({}, f, { parents: f.parents.slice() })]) }),
+    restaurar: (foto) => {
+      arquivos.clear();
+      foto.arquivos.forEach(([id, f]) => arquivos.set(id, Object.assign({}, f, { parents: f.parents.slice() })));
+      seq = foto.seq;
+    },
   };
 
   return { Drive: { Files }, rest, apoio };
