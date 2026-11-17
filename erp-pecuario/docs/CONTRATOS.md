@@ -138,6 +138,11 @@ carência, consumo acima do estoque, acerto retroativo, parto da não prenhe, m�
 a venda, pesagem fora da permanência, importação de quem saiu, estação mudada), o produto novo, os parâmetros da Fase 3, o
 relógio do pedido, o estoque pelas linhas gravadas, e os oráculos novos (campanha na agenda, cria ao pé, correção sem
 mudança mais tarde) (seção 36).
+Fase 3, CONSERTO DA REVISÃO: o fato congelado na correção (custo, conta e intervalo do protocolo da aplicação; fator e
+movimento da entrada de estoque), o custo em dobro recusado, a duplicidade por animal, a cópia do peso e o saldo do insumo
+na verificação e na quarentena, os indicadores reprodutivos e as matrizes na data, o GMD do curral pela conta da ficha, a
+agenda sem protocolo, e na tela a recusa que fica na linha, o bloco criado na hora de sair, o curral retroativo pela posição
+do servidor, o tronco no Início e os gráficos com um item por lançamento e por categoria (seção 43).
 
 ## 1. Regras que valem para todo arquivo de `src/`
 
@@ -2721,3 +2726,85 @@ varredura de quedas do bloco de PESAGENS e de SANIDADE nas três primitivas: tud
 aplicações, a saída e o consumo inertes até concluir), `tests/fase2.fuzz.test.js` (os quatro importadores no registro, com o
 oráculo do fato de cada linha importada na conclusão; sementes fixas 31 e 56), `tests/import.eventos.test.js` (o modelo
 de PESAGENS entregue; tipo desconhecido recusado) e `tests/ui/importacao-manejo.test.js` (Playwright a 1280 e 360 px).
+
+## 43. Conserto da revisão da Fase 3 — `EventService`, `HealthService`, `AuditService`, `Timeline`, `ReproductionService`, `WeightService`, `ImportService`, `AnimalService`, `EventCatalog`, `Weights`, `Reproduction`, `Dashboard`, `Health`, `Animals`, `Components`
+
+O que a revisão da Fase 3 mudou nos contratos das seções 11, 14, 38 a 42 (os testes estão em
+`tests/revisao.fase3.motor.test.js`, `tests/revisao.fase3.regras.test.js`, `tests/revisao.fase3.zootecnia.test.js` e
+`tests/ui/revisao.fase3.test.js`, um por achado; o teste aleatório confere o mesmo pelo oráculo de cada tipo, seção 36).
+
+**Fato congelado na correção (`EventService`, tratador único da SANIDADE e do ESTOQUE).** Corrigir (e corrigir o substituto)
+não reprecifica o fato pelo cadastro de hoje:
+- SANIDADE com o mesmo produto: o custo unitário é o da SAIDA do original (`MOVIMENTOS_ESTOQUE.custo_unitario`, 03a) e a
+  conta do consumo é a do lançamento de consumo do original; com outro produto, ou sem saída no original (a aplicação
+  histórica), valem o custo e a categoria de agora. Mudar a quantidade usa o custo congelado.
+- Próxima aplicação proposta pelo protocolo (`INTERVALO_DIAS`, sem data informada): o payload grava
+  `intervalo_protocolo_dias`, e a correção com o mesmo protocolo usa esse intervalo. A verificação confere
+  `data_proxima_aplicacao = data_aplicacao + intervalo_protocolo_dias` (COPIAS `PROXIMA`).
+- ESTOQUE/ENTRADA do mesmo produto: as embalagens multiplicam o `fator_conversao` do payload do original, e o movimento de
+  ENTRADA existe se o original o tinha (não pelo `controla_estoque` de hoje).
+- REPRODUCAO: a idade da gestação que o original já tinha nesta fêmea continua aceita depois de mudar `dias_gestacao`; a
+  faixa de 1 a `dias_gestacao` é regra do lançamento (o motor recusa o diagnóstico novo acima dela), não da verificação, que
+  só exige 1 dia em diante.
+
+**Custo em dobro.** Com o produto do cadastro com custo (`s.consumo.valor > 0`), o pago no ato (`custo_valor`) numa conta de
+consumo de insumo (VACINAS, MEDICAMENTOS, ALIMENTACAO, TRATAMENTOS) é recusado: VALIDATION `CUSTO_EM_DOBRO` no campo
+`custo_conta_id`, com o caminho (a compra pela entrada no estoque; aqui só o serviço; ou o produto pelo nome). Vale no
+registro, na simulação e na correção. A ajuda do campo (`EventCatalog`) diz o mesmo.
+
+**Duplicidade por animal.** REPRODUCAO, SANIDADE e OCORRENCIA avisam `POSSIVEL_DUPLICIDADE` na linha do animal quando ele já
+tem o mesmo fato no mesmo dia num lançamento que não chega aos 80% de animais em comum. A chave é a da importação
+(`jaRegistrado_`): mesmo subtipo e data; na sanidade, o mesmo produto do cadastro, o mesmo nome livre ou, sem produto, a
+mesma doença ou o mesmo diagnóstico; na ocorrência, o mesmo tipo. Segue a política de avisos.
+
+**Estoque.** `produto.salvar` que liga o controle com o saldo dos movimentos negativo pede confirmação
+(NEEDS_CONFIRMATION `ESTOQUE_INSUFICIENTE`, com a política) e manda acertar pela contagem. O aviso de estoque insuficiente
+da aplicação também manda acertar pela contagem, e não lançar a entrada de novo, quando há compra do produto sem movimento
+de entrada (`HealthService.compraSemMovimento(repo, productId)`).
+
+**Verificação e quarentena (`AuditService`).**
+- Cópia do peso: ENTRADA_INICIAL, OUTRA_ENTRADA, COMPRA, VENDA (o SUJEITO) e NASCIMENTO (a CRIA) conferem
+  `PESAGENS.peso_kg = EVENTO_ANIMAIS.peso` do animal no evento, e a linha com peso sem a pesagem dele (COPIAS, sem reparo).
+- Quarentena do saldo do insumo: o achado da fonte quebrada cita os produtos do movimento, do consumo e da aplicação do
+  evento (`PRODUTOS\u0000product_id`). O comando que movimenta esse produto é recusado e a projeção `estoque_atual` não é
+  regravada a partir da fonte quebrada (registro, importação e desfazer). O escopo da trava inclui os eventos que movimentam,
+  consomem ou aplicam cada produto tocado.
+- A linha MATRIZ da desmama sem bezerro dela (a mãe trocada por correção de cadastro) tem `resolver`: estornar a desmama,
+  trocar a mãe e desmamar de novo.
+
+**Reprodução na data (`Timeline.reproducaoEm(f, id, data)` → `{situacao_reprodutiva, marcado_descarte}`).** É a mesma regra da
+projeção, só com os fatos até D: o último registro reprodutivo, com a situação declarada na entrada valendo como o fato da
+data dela, e a última MARCACAO/DESCARTE vigente até D. A projeção, `reproducao.matrizes` em qualquer data e
+`reproducao.indicadores` (matrizes ativas, prenhas, sem informação e a natalidade anual) usam esta função. Os indicadores da
+estação na data D usam só a exposição, o diagnóstico, o aborto e o parto até D. `reproducao.matrizes` devolve também
+`resumo.expostas_ou_inseminadas`; a tela não soma.
+
+**Pesagem (`WeightService`).** `resultadoDoEvento` (a resposta do registro, usada pelo modo curral) devolve `gmd_kg_dia` pela
+conta da ficha (intervalos individuais da mesma permanência e com o mínimo de dias) e, quando vazio, `gmd_motivo` e
+`gmd_explicacao`. O ganho, os dias e a variação continuam contra a anterior. Em `peso.desempenho`, a lista `animais` segue o
+filtro de pasto e de categoria: o animal com intervalo, com pesagem no período ou presente lá no fim do período. O GMD do
+período vazio com várias pesagens individuais explica por que nenhum intervalo conta (o marco zero, ou o animal fora do
+rebanho entre as pesagens).
+
+**Outros.** A agenda sem protocolo usa a última aplicação do produto de qualquer lançamento: a com protocolo cumpre a
+pendência (`HealthService.agendaEm`). `carenciaNaVenda_` não confere a venda anterior ao marco zero (a mesma regra da
+aplicação contra a venda histórica). `animal.editar` lê as abas do leitor (`AnimalService.leituras()`), e
+`HealthService.carenciaHoje` lança INTERNAL sem a SANIDADE lida (nunca "sem carência" em silêncio). O item de
+`evento.listar` da SANIDADE traz `sanidade: {produto_id, nome_produto, diagnostico, tipo_procedimento}`. Na importação de
+pesagem por lote, a média só se compara com outra MEDIA_LOTE; com uma linha do lote já na base, as demais ficam com
+`LOTE_EM_PARTE` (o lote entra inteiro ou não entra).
+
+**Telas.**
+- Curral e tronco (`Weights`, `Reproduction`): a recusa solta o bloco sem apagar o que disse. As linhas citadas ficam ERRO,
+  com o motivo e as ações "Corrigir o peso" ou "Corrigir o resultado" e "Tirar", e contam como pendência. A recusa geral fica
+  na área de status (`[data-erro-geral]`). O bloco é criado na hora de sair, um por vez: nenhuma linha fica presa num bloco
+  NOVO, e o botão, o status, "Desfazer" e "Tirar" tratam a linha de bloco NOVO como não enviada. No tronco, rediagnosticar a
+  fêmea já gravada avisa que grava outro diagnóstico (`data-conferencia-repetido="outro"`).
+- Curral com data diferente de hoje: o contador, o brinco e o pasto vêm de `inventario.elegiveis({tipo: 'PESAGEM', data})`,
+  com o rótulo "posição em dd/mm/aaaa" (`[data-curral-posicao]`).
+- Início (`Dashboard`): o rascunho TRONCO_DIAGNOSTICO aparece como o do curral, com "Continuar" e o aviso de diagnósticos sem
+  confirmação.
+- Gráficos: o ganho de lote tem um item por lançamento (o rótulo leva "lançamento n de m" quando há mais de um no dia). Nas
+  taxas por categoria, "parcial" vai na nota do valor (`UI.grafico` passa a nota ao `formatar`), nunca no item.
+- Sanidade → Aplicações mostra o produto ou o diagnóstico de `item.sanidade`. A aba Reprodução da ficha, com outra versão do
+  app no servidor, oferece "Recarregar a página".

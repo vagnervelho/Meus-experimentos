@@ -253,6 +253,51 @@ test('achado 13: a saída de estoque apagada à mão põe o saldo do produto em 
   assert.equal(saldo(s, pid), 90);
 });
 
+/** Importa (cria, valida, grava o bloco) uma aplicação da Vacina P no animal 103; conclui só se pedido. */
+function importarAplicacao(s, concluir) {
+  const csv = ['Data;Procedimento;Produto do cadastro;Como foi a dose;Dose do lançamento (por cabeça ou por kg);Brinco', '15/03/2026;vacinação;Vacina P;por cabeça;1;103'].join('\n');
+  const c = s.exec((ctx) => s.G.ImportService.criar(ctx, { idempotencyKey: 'criar-imp', dados: { tipo: 'SANIDADE', arquivo_nome: 's.csv', conteudo_base64: b64(csv), formato: FORMATO } })).dados;
+  const mapa = { colunas: c.sugestao, confiancas: {}, padroes: {} };
+  for (let b = 1; b < 10; b++) {
+    const est = s.exec((ctx) => s.G.ImportService.validarBloco(ctx, { idempotencyKey: 'val-imp-' + b, dados: { import_id: c.import_id, bloco: b, mapeamento: mapa } })).dados;
+    if (est.importacao.status === 'VALIDADO') break;
+  }
+  const ib = s.tentar((ctx) => s.G.ImportService.importarBloco(ctx, { avisosAceitos: [], dados: { import_id: c.import_id, bloco: 1, modo: 'TOTAL' } }));
+  assert.ok(ib.ok, JSON.stringify(ib.erro));
+  if (concluir) s.exec((ctx) => s.G.ImportService.concluir(ctx, { dados: { import_id: c.import_id } }));
+  return c.import_id;
+}
+
+test('achado 13 (conclusão e desfazer da importação): o que só alcança o saldo do insumo pela reconstrução segue, mas não regrava o saldo a partir da saída apagada à mão — o saldo fica como estava e a verificação continua acusando', () => {
+  // O desfazer: a importação concluída de uma aplicação do produto; depois a saída de outra aplicação apagada à mão.
+  let s = S.sistema();
+  let ids = rebanho(s, ['101', '102', '103']);
+  let pid = produto(s, { nome: 'Vacina P', custo_unitario: 1 }).product_id;
+  ok(api(s, 'evento.registrar', estoque('ENTRADA', '2026-02-01', { product_id: pid, quantidade: 100, valor: 10000 })), 'entrada');
+  const imp = importarAplicacao(s, true);
+  assert.equal(saldo(s, pid), 99);
+  let v = ok(api(s, 'evento.registrar', san('VACINACAO', '2026-04-10', [ids['101'], ids['102']], { produto_id: pid, modo_dose: 'POR_CABECA', dose_referencia: 5 })), 'vacina');
+  assert.equal(saldo(s, pid), 89);
+  s.apagarLinha('MOVIMENTOS_ESTOQUE', tab(s, 'MOVIMENTOS_ESTOQUE', { event_id: v.event_id })[0].mov_id);
+  const d = s.tentar((ctx) => s.G.ImportService.desfazer(ctx, { avisosAceitos: [], dados: { import_id: imp, justificativa: 'Arquivo errado' } }));
+  assert.ok(d.ok, JSON.stringify(d.erro));
+  assert.equal(saldo(s, pid), 89, 'a reconstrução daria 100 a partir da saída apagada: o saldo fica em quarentena');
+  assert.ok(s.integridade().achados.some((a) => a.checagem === 'PROJECAO' && a.tabela === 'PRODUTOS'), 'o saldo continua acusado');
+  // A conclusão: a aplicação lançada antes, a importação gravada em bloco, a saída apagada à mão e então a conclusão.
+  s = S.sistema();
+  ids = rebanho(s, ['101', '102', '103']);
+  pid = produto(s, { nome: 'Vacina P', custo_unitario: 1 }).product_id;
+  ok(api(s, 'evento.registrar', estoque('ENTRADA', '2026-02-01', { product_id: pid, quantidade: 100, valor: 10000 })), 'entrada');
+  v = ok(api(s, 'evento.registrar', san('VACINACAO', '2026-04-10', [ids['101'], ids['102']], { produto_id: pid, modo_dose: 'POR_CABECA', dose_referencia: 5 })), 'vacina');
+  const imp2 = importarAplicacao(s, false);
+  assert.equal(saldo(s, pid), 90);
+  s.apagarLinha('MOVIMENTOS_ESTOQUE', tab(s, 'MOVIMENTOS_ESTOQUE', { event_id: v.event_id })[0].mov_id);
+  const c = s.tentar((ctx) => s.G.ImportService.concluir(ctx, { dados: { import_id: imp2 } }));
+  assert.ok(c.ok, JSON.stringify(c.erro));
+  assert.equal(saldo(s, pid), 90, 'a reconstrução daria 99 a partir da saída apagada: o saldo fica em quarentena');
+  assert.ok(s.integridade().achados.some((a) => a.checagem === 'PROJECAO' && a.tabela === 'PRODUTOS'));
+});
+
 test('achado 14: mudar a duração da gestação depois do diagnóstico não transforma o registro legítimo em fonte quebrada — a verificação fica limpa, a pesagem e a morte da vaca passam; a correção que mantém a idade do original é aceita; o diagnóstico novo acima do parâmetro é recusado pelo motor', () => {
   const s = S.sistema();
   const ids = rebanho(s, ['101', '102'], { data_nascimento: '2020-01-01' });

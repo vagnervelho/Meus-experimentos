@@ -1471,3 +1471,54 @@ Nenhuma linha de código mudou nesta etapa: só documentos.
 - Verificado no fim: `npm test`, 787 testes, 787 aprovados e 0 falhas (671 s), com as 22 sementes fixas de 60 passos (747
   aceitos, 435 recusados, 0 falhas); `npm run ui:check`, 122 testes, 122 aprovados e 0 falhas (267 s), página inicial com
   447 KB de 450 KB; sob demanda, Import 48 KB, Weights 44 KB, Health 24 KB e Reproduction 50 KB de 150 KB.
+
+## 17/11/2026 — Fase 3, conserto da revisão (29 achados: 14 altos, 10 médios e 5 baixos)
+
+Cada achado tem teste por caminho, que falha com o `src/` de antes do conserto e passa agora (conferido rodando os testes
+novos sobre uma cópia com o `src/` anterior). Os testes ficam em `tests/revisao.fase3.motor.test.js`,
+`tests/revisao.fase3.regras.test.js`, `tests/revisao.fase3.zootecnia.test.js` e `tests/ui/revisao.fase3.test.js`. Todos os
+29 foram corrigidos; os achados 3 e 6 são o mesmo defeito, visto por duas lentes. Contratos em `docs/CONTRATOS.md`, seção 43.
+
+- **Fato congelado na correção** (achados 3, 6 e 7; `EventService`, no tratador único, o que vale para a correção, a correção
+  do substituto, a simulação e o estorno da correção): a aplicação corrigida com o mesmo produto usa o custo unitário da
+  saída do original e a conta do consumo dele. A próxima aplicação proposta pelo protocolo usa o intervalo gravado no payload
+  (`intervalo_protocolo_dias`), conferido pela verificação. A entrada de estoque corrigida usa o fator do payload do original
+  e grava o movimento se o original o tinha.
+- **Custo em dobro** (achado 4): o produto do cadastro com custo pago também no ato numa conta de insumo é recusado
+  (`CUSTO_EM_DOBRO`) no registro, na simulação e na correção, e a ajuda do campo diz o caminho.
+- **Integridade e trava** (achados 8, 13 e 14): a cópia do peso das pesagens de entrada, compra, venda e parto entra na
+  verificação (COPIAS, sem reparo). O saldo do insumo entra na quarentena da fonte quebrada: o comando que movimenta o produto
+  é recusado, e a conclusão e o desfazer da importação seguem sem regravar o saldo. A faixa da idade da gestação pelo
+  parâmetro sai da verificação e fica só no motor; a correção que mantém a idade do original é aceita.
+- **Indicadores na data** (achados 1, 2 e 9; `Timeline.reproducaoEm`): a situação e a marca de descarte na data D, pela
+  regra da projeção, servem a projeção, a lista de fêmeas e os indicadores. Os indicadores da estação usam só os fatos até
+  D. A natalidade anual não passa de 100% por uma marcação posterior.
+- **GMD do curral** (achado 5): a resposta do registro traz o GMD pela conta da ficha, ou vazio com o porquê. A linha do
+  curral mostra só o ganho e os dias no intervalo curto.
+- **Agenda** (achado 10): a aplicação com protocolo cumpre a pendência sem protocolo do mesmo produto.
+- **Curral e tronco** (achados 11, 12, 17 e 22): a recusa fica na linha (ERRO, motivo, "Corrigir" e "Tirar") ou na área de
+  status. O bloco é criado na hora de sair, e nenhuma linha fica presa num bloco que não saiu. O tronco não diz que
+  "substitui" a fêmea já gravada. O curral com data passada usa a posição do servidor (`inventario.elegiveis`).
+- **Motor, médios e baixos** (achados 15, 16, 17, 23, 24, 25, 26 e 29): a lista "Animais" do desempenho segue o filtro.
+  Ligar o controle de estoque com saldo negativo pede confirmação e manda acertar pela contagem, e o aviso de estoque não
+  manda lançar de novo a compra já paga. Há aviso `POSSIVEL_DUPLICIDADE` por animal na reprodução, na sanidade e na
+  ocorrência, com a chave da importação. A venda histórica não confere carência, nas duas ordens de importação. A resposta
+  do `animal.editar` traz a carência, e a falta da aba é erro (INTERNAL). A mãe trocada com desmama vigente recebe o caminho
+  da solução. O lote de pesagem não é duplicado pela pesagem individual, e o lote em parte fica com `LOTE_EM_PARTE`. O GMD
+  do período explica por que nenhum intervalo conta.
+- **Telas, médios e baixos** (achados 18 a 21, 27 e 28): o gráfico do ganho de lote tem um item por lançamento, e o das
+  taxas, um item por categoria, com "(parcial)" no valor. A lista de aplicações mostra o produto ou o diagnóstico vindos do
+  servidor. O rascunho do tronco aparece no Início. A ficha com versão nova oferece "Recarregar a página". O total de
+  expostas ou inseminadas e a cobertura do diagnóstico vêm do servidor.
+- **Teste aleatório** (`tests/apoio-fuzz.js`): na correção, o oráculo do efeito da SANIDADE e do ESTOQUE espera o custo,
+  a conta, o intervalo do protocolo, o fator e o movimento do original, e a saída com o custo congelado. O oráculo
+  `oraculoEfeitoCongelado` confere a correção tardia sem mudança. O preparo dela agora revê o custo ou a categoria do produto,
+  o intervalo do protocolo, ou o fator e o controle de estoque do produto de uma entrada, e a correção que vem logo é a do
+  lançamento preparado (`sis.tardiaAlvo`). O gerador de cadastro muda também a categoria e o fator. A agenda segue o modelo
+  novo sem protocolo. O frasco pago no ato vai à conta Vacinas (os de 333,33 e de 99,99 em duas vezes), com o oráculo do
+  aceite (nunca em dobro) e o da recusa (`CUSTO_EM_DOBRO` só com o produto do cadastro numa conta de insumo). As 22 sementes
+  fixas continuam cumprindo todas as contagens exigidas.
+- **Medidas** (mutações numa cópia do projeto, 40 sementes de 100 passos, 1820000 a 1820039): sem o custo e a entrada
+  congelados na correção, 6 de 40 sementes falham (1 de 40 antes do preparo novo); sem a recusa do custo em dobro, 2 de 40.
+- **Achados do teste aleatório**: nenhum defeito do sistema. No modelo, um: o oráculo do efeito da entrada esperava o
+  controle de estoque de agora na correção (semente 1800003), e foi corrigido para o desenho do achado 7.

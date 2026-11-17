@@ -116,6 +116,10 @@ function montar(opcoes) {
   const t = tabelas(sis);
   sis.categorias = t.CATEGORIAS.map((c) => ({ id: c.category_id, sexo: c.sexo_aplicavel, codigo: c.codigo }));
   sis.custeio = t.PLANO_CONTAS.find((c) => c.codigo === 'SERVICOS_VETERINARIOS').conta_id;
+  // Revisão da Fase 3 (achado 4): as contas em que o consumo de insumo cai; o serviço pago no ato nelas, com o produto do
+  // cadastro com custo, entraria em dobro no resultado (a recusa CUSTO_EM_DOBRO).
+  sis.contasInsumo = new Set(t.PLANO_CONTAS.filter((c) => ['VACINAS', 'MEDICAMENTOS', 'ALIMENTACAO', 'TRATAMENTOS'].indexOf(c.codigo) >= 0).map((c) => c.conta_id));
+  sis.contaVacinas = t.PLANO_CONTAS.find((c) => c.codigo === 'VACINAS').conta_id;
   if (!o.vazio) {
     const P = sis.pastos;
     const f = (brinco, nasc, pasto, extra) => Object.assign({ brinco, sexo: 'F', origem: 'DESCONHECIDA', data_nascimento: nasc, data_nascimento_confianca: 'ESTIMADA', pasto_destino_id: pasto }, extra || {});
@@ -298,6 +302,12 @@ function oraculoRecusa(sis, cmd, r, antes, depois, dv0, dv1, chave) {
     if (!d || typeof d.codigo !== 'string' || !d.codigo) out.push(falha('RECUSA:DETALHE', 'detalhe sem código: ' + JSON.stringify(d)));
     else if (typeof d.mensagem !== 'string' || !PORTUGUES.test(d.mensagem) || INGLES.test(d.mensagem)) out.push(falha('RECUSA:MENSAGEM', 'detalhe ' + d.codigo + ' com mensagem fora do padrão: ' + JSON.stringify(d.mensagem)));
   });
+  // Revisão da Fase 3 (achado 4): CUSTO_EM_DOBRO só com o produto do cadastro e o pago no ato numa conta de insumo.
+  if ((e.details || []).some((d) => d && d.codigo === 'CUSTO_EM_DOBRO')) {
+    const cp = (cmd.dados && cmd.dados.campos) || {};
+    if (!cp.produto_id || !sis.contasInsumo.has(cp.custo_conta_id)) out.push(falha('RECUSA:CUSTO_EM_DOBRO', 'custo em dobro acusado sem o produto do cadastro ou fora de conta de insumo: ' + JSON.stringify(cp).slice(0, 600)));
+    else contar('pago no ato em conta de insumo com consumo: recusado');
+  }
   if (dv1 !== dv0) out.push(falha('RECUSA:MUDOU', 'a recusa ' + e.code + ' mudou a data_version de ' + dv0 + ' para ' + dv1));
   const c0 = contagens(antes.t);
   const c1 = contagens(depois.t);
@@ -1653,7 +1663,9 @@ registrarTipo('SANIDADE', {
     }
     if (s.motivo && (s.sub === 'TRATAMENTO' || s.sub === 'MEDICACAO')) campos.motivo = s.motivo;
     if (s.diag && (s.sub === 'EXAME' || s.sub === 'DOENCA')) campos.diagnostico = s.diag;
-    if (s.custo) { campos.custo_valor = s.custo.valor; campos.custo_conta_id = sis.custeio; if (s.custo.vezes) campos.custo_parcelas_qtd = s.custo.vezes; }
+    // O frasco pago no ato na conta Vacinas (o de 333,33 e o de 99,99 em duas vezes): com o produto do cadastro com custo, a
+    // recusa CUSTO_EM_DOBRO (o consumo já é o custo dele); sem produto do cadastro ou sem custo, aceito.
+    if (s.custo) { campos.custo_valor = s.custo.valor; campos.custo_conta_id = s.custo.valor === 33333 || (s.custo.valor === 9999 && s.custo.vezes === 2) ? sis.contaVacinas : sis.custeio; if (s.custo.vezes) campos.custo_parcelas_qtd = s.custo.vezes; }
     return {
       tipo: 'SANIDADE', subtipo: s.sub, campos,
       animais: s.itens.map((x) => {
@@ -1719,7 +1731,11 @@ registrarTipo('SANIDADE', {
     const prod = cp.produto_id ? S.t.PRODUTOS.find((p) => p.product_id === cp.produto_id) : null;
     const prot = cp.protocol_id ? S.t.PROTOCOLOS_SANITARIOS.find((p) => p.protocol_id === cp.protocol_id) : null;
     const fim = typeof cp.periodo_carencia_dias === 'number' && cp.periodo_carencia_dias > 0 ? somaDias(cp.event_date, cp.periodo_carencia_dias) : null;
-    const proxima = cp.data_proxima_aplicacao || (prot && prot.recorrencia_tipo === 'INTERVALO_DIAS' && typeof prot.intervalo_dias === 'number' ? somaDias(cp.event_date, prot.intervalo_dias) : null);
+    // A próxima pelo protocolo: na correção com o mesmo protocolo, o intervalo do original (payload); senão o de agora.
+    const intervaloOriginal = prot ? intervaloCongelado(c, prot.protocol_id) : null;
+    const intervalo = intervaloOriginal !== null ? intervaloOriginal : prot && typeof prot.intervalo_dias === 'number' ? prot.intervalo_dias : null;
+    if (intervaloOriginal !== null && !cp.data_proxima_aplicacao) contar('correção da aplicação pelo intervalo congelado do protocolo');
+    const proxima = cp.data_proxima_aplicacao || (prot && prot.recorrencia_tipo === 'INTERVALO_DIAS' && intervalo !== null ? somaDias(cp.event_date, intervalo) : null);
     const unidade = prod ? prod.unidade : cp.unidade_dose || null;
     d.animais.forEach((x) => {
       const r = rows.find((y) => y.animal_id === x.animal_id);
@@ -1759,12 +1775,23 @@ registrarTipo('SANIDADE', {
     const movs = S.t.MOVIMENTOS_ESTOQUE.filter((mv) => mv.event_id === eid);
     if (q === null ? movs.length : movs.length !== 1 || movs[0].tipo !== 'SAIDA' || movs[0].quantidade !== q || movs[0].product_id !== prod.product_id || movs[0].data !== cp.event_date) erro('movimentos ' + JSON.stringify(movs.map((mv) => [mv.tipo, mv.quantidade, mv.data])) + ', esperada a saída de ' + q);
     const fins = S.t.FINANCEIRO.filter((f) => f.event_id === eid);
-    const cu = prod && typeof prod.custo_unitario === 'number' && prod.custo_unitario > 0 ? prod.custo_unitario : null;
+    // Revisão da Fase 3 (achados 3 e 6): na correção com o mesmo produto, o custo unitário da saída do original e a conta do
+    // consumo dele (o fato não é reprecificado pelo cadastro de agora); senão, o custo e a categoria de agora.
+    const congelado = prod ? consumoCongelado(c, prod.product_id) : null;
+    if (congelado && q !== null) contar('correção da aplicação pelo custo congelado');
+    const cu = congelado ? congelado.custo : prod && typeof prod.custo_unitario === 'number' && prod.custo_unitario > 0 ? prod.custo_unitario : null;
+    const contaEsperada = congelado && congelado.conta ? congelado.conta : prod ? CONTA_DA_CATEGORIA[prod.categoria] : null;
     const vc = q !== null && cu ? centavosDe(q * cu) : 0;
     const consumo = fins.filter((f) => f.product_id);
     const servico = fins.filter((f) => !f.product_id);
     const conta = (f) => (S.t.PLANO_CONTAS.find((p) => p.conta_id === f.conta_id) || {}).codigo;
-    if (vc > 0 ? consumo.length !== 1 || consumo[0].valor !== vc || consumo[0].product_id !== prod.product_id || consumo[0].quantidade !== q || conta(consumo[0]) !== CONTA_DA_CATEGORIA[prod.categoria] : consumo.length) erro('consumo ' + JSON.stringify(consumo.map((f) => [f.valor, f.quantidade, conta(f)])) + ', esperado ' + vc + ' (' + q + ' × ' + cu + ')');
+    if (vc > 0 ? consumo.length !== 1 || consumo[0].valor !== vc || consumo[0].product_id !== prod.product_id || consumo[0].quantidade !== q || conta(consumo[0]) !== contaEsperada : consumo.length) erro('consumo ' + JSON.stringify(consumo.map((f) => [f.valor, f.quantidade, conta(f)])) + ', esperado ' + vc + ' (' + q + ' × ' + cu + ')');
+    // O produto do cadastro com custo pago também no ato numa conta de insumo entraria duas vezes no resultado (07, seção 5;
+    // 13, FIN-04): aceito assim, é defeito (achado 4).
+    if (vc > 0 && servico.length && c.sis.contasInsumo.has(servico[0].conta_id)) erro('o produto do cadastro com custo foi pago também no ato numa conta de insumo (' + conta(servico[0]) + '): o custo entrou em dobro');
+    else if (servico.length && c.sis.contasInsumo.has(servico[0].conta_id)) contar('pago no ato em conta de insumo sem consumo com custo: aceito');
+    // O movimento de saída também leva o custo congelado (03a, MOVIMENTOS_ESTOQUE.custo_unitario).
+    if (q !== null && movs.length === 1 && (movs[0].custo_unitario || null) !== cu) erro('custo unitário da saída ' + movs[0].custo_unitario + ', esperado ' + cu);
     consumo.forEach((f) => { if (S.t.PARCELAS.some((p) => p.financial_id === f.financial_id)) erro('o consumo do produto tem parcela'); });
     if (cp.custo_valor ? servico.length !== 1 || servico[0].valor !== cp.custo_valor || S.t.PARCELAS.filter((p) => p.financial_id === servico[0].financial_id).length !== (hist ? 0 : cp.custo_parcelas_qtd || 1) : servico.length) erro('serviço pago no ato ' + JSON.stringify(servico.map((f) => f.valor)) + ', pedido ' + cp.custo_valor + (hist ? ' (histórico: sem parcela)' : ''));
     const alocs = S.t.ALOCACOES_FINANCEIRAS.filter((a) => fins.some((f) => f.financial_id === a.financial_id));
@@ -1855,13 +1882,19 @@ registrarTipo('ESTOQUE', {
     const fins = S.t.FINANCEIRO.filter((f) => f.event_id === eid);
     if (d.subtipo === 'ENTRADA') {
       // Compra de insumo (16.9): sempre o lançamento de compra de insumos, com as parcelas; a entrada só com o controle.
-      const q = typeof cp.quantidade === 'number' ? cp.quantidade : somaQtd([cp.qtd_apresentacao * prod.fator_conversao]);
+      // Revisão da Fase 3 (achado 7): na correção da entrada do mesmo produto, a quantidade por embalagem do original (o
+      // payload dele) e o movimento como o original gravou — o cadastro mudado depois não muda a compra.
+      const congelado = entradaCongelada(c, prod.product_id);
+      const fator = congelado && congelado.fator !== null ? congelado.fator : prod.fator_conversao;
+      const comMovimento = congelado ? congelado.movimento : prod.controla_estoque === true;
+      if (congelado) contar('correção da entrada pelo que o original gravou');
+      const q = typeof cp.quantidade === 'number' ? cp.quantidade : somaQtd([cp.qtd_apresentacao * fator]);
       const f = fins[0];
       const conta = f && (S.t.PLANO_CONTAS.find((p) => p.conta_id === f.conta_id) || {}).codigo;
       if (fins.length !== 1 || f.valor !== cp.valor || f.product_id !== prod.product_id || f.quantidade !== q || conta !== 'COMPRA_INSUMOS') erro('compra ' + JSON.stringify(fins.map((x) => [x.valor, x.quantidade, x.product_id])) + ', pedida ' + JSON.stringify([cp.valor, q]));
       else if (S.t.PARCELAS.filter((p) => p.financial_id === f.financial_id).length !== (cp.parcelas_qtd || 1)) erro('parcelas da compra de insumo');
       const cu = Math.round(Number((cp.valor / 100 / q).toFixed(10)) * 10000) / 10000;
-      if (prod.controla_estoque === true ? movs.length !== 1 || movs[0].tipo !== 'ENTRADA' || movs[0].quantidade !== q || Math.abs(movs[0].custo_unitario - cu) > 0.00011 : movs.length) erro('movimentos da entrada ' + JSON.stringify(movs.map((mv) => [mv.tipo, mv.quantidade, mv.custo_unitario])) + ', esperado ' + (prod.controla_estoque === true ? q : 'nenhum'));
+      if (comMovimento ? movs.length !== 1 || movs[0].tipo !== 'ENTRADA' || movs[0].quantidade !== q || Math.abs(movs[0].custo_unitario - cu) > 0.00011 : movs.length) erro('movimentos da entrada ' + JSON.stringify(movs.map((mv) => [mv.tipo, mv.quantidade, mv.custo_unitario])) + ', esperado ' + (comMovimento ? q : 'nenhum'));
       if (E.total_value !== cp.valor) erro('valor do evento ' + E.total_value + ', pedido ' + cp.valor);
       return;
     }
@@ -1876,6 +1909,40 @@ registrarTipo('ESTOQUE', {
     if (movs.length !== 1 || movs[0].tipo !== 'AJUSTE' || movs[0].quantidade !== esperado || movs[0].data !== cp.event_date) erro('movimento do acerto ' + JSON.stringify(movs.map((mv) => [mv.tipo, mv.quantidade])) + ', esperado ' + esperado);
   },
 });
+/** O original de uma correção no retrato de antes (A), ou null fora da correção. */
+function originalDaCorrecao(c) {
+  return c.cmd && c.cmd.rota === 'evento.corrigir' && c.d.event_id ? c.A.ev.get(c.d.event_id) || null : null;
+}
+/**
+ * Na correção de uma entrada de estoque do mesmo produto: {fator (o do payload do original, ou null), movimento (o original
+ * tinha a entrada)}; null fora disso (o cadastro de agora decide).
+ */
+function entradaCongelada(c, productId) {
+  const o = originalDaCorrecao(c);
+  if (!o || o.event_type !== 'ESTOQUE' || o.event_subtype !== 'ENTRADA') return null;
+  if (!c.A.t.FINANCEIRO.some((f) => f.event_id === o.event_id && f.product_id === productId)) return null;
+  const pj = o.payload_json || {};
+  return { fator: typeof pj.fator_conversao === 'number' ? pj.fator_conversao : null, movimento: c.A.t.MOVIMENTOS_ESTOQUE.some((m) => m.event_id === o.event_id && m.tipo === 'ENTRADA' && m.product_id === productId) };
+}
+/**
+ * Na correção de uma aplicação com o mesmo produto (achados 3 e 6): {custo (o custo unitário da saída do original, ou null),
+ * conta (o código da conta do consumo do original, ou null)}; null sem a saída do original (o cadastro de agora decide).
+ */
+function consumoCongelado(c, productId) {
+  const o = originalDaCorrecao(c);
+  if (!o) return null;
+  const mov = c.A.t.MOVIMENTOS_ESTOQUE.filter((m) => m.event_id === o.event_id && m.tipo === 'SAIDA' && m.product_id === productId)[0];
+  if (!mov) return null;
+  const f = c.A.t.FINANCEIRO.filter((x) => x.event_id === o.event_id && x.product_id === productId)[0];
+  return { custo: typeof mov.custo_unitario === 'number' && mov.custo_unitario > 0 ? mov.custo_unitario : null, conta: f ? (c.A.t.PLANO_CONTAS.find((p) => p.conta_id === f.conta_id) || {}).codigo || null : null };
+}
+/** Na correção com o mesmo protocolo, o intervalo que propôs a próxima aplicação do original (o payload dele); senão null. */
+function intervaloCongelado(c, protocolId) {
+  const o = originalDaCorrecao(c);
+  if (!o || typeof (o.payload_json || {}).intervalo_protocolo_dias !== 'number') return null;
+  const r0 = c.A.t.SANIDADE.filter((r) => r.event_id === o.event_id)[0];
+  return r0 && r0.protocol_id === protocolId ? o.payload_json.intervalo_protocolo_dias : null;
+}
 /** A entrada (embalagens, quantidade, valor, parcelas) ou o acerto (contagem, perda, vencimento) de estoque. */
 function preencherEstoque(S, rnd, s) {
   Object.assign(s, { emb: null, qtd: null, valor: null, vezes: null, parceiro: null, motivo: null, contado: null, lote: null, validade: null });
@@ -3537,17 +3604,38 @@ function gerarAcao(sis, S, rnd, k, acao, base) {
     // ou o protocolo de uma aplicação (o preparo).
     const mudou = cands.filter((e) => cadastroMudou(S, e));
     if (mudou.length) contar('correção tardia com o cadastro mudado');
-    if (!mudou.length && rnd() < 0.5) {
+    if (!mudou.length && !sis.tardiaAlvo && rnd() < 0.5) {
       // O preparo; a correção sem mudança vem logo depois (sis.tardiaPendente).
       sis.tardiaPendente = true;
       const r = sorteio(rnd, S.t.SANIDADE.filter((x) => (x.produto_id || x.protocol_id) && cands.some((e) => e.event_id === x.event_id)));
       const g = sorteio(rnd, (S.t.REPRODUCAO || []).filter((x) => x.estacao_id && cands.some((e) => e.event_id === x.event_id)));
       if (g && (!r || rnd() < 0.3)) return Object.assign(base, { rota: 'estacao.salvar', dados: { estacao_id: g.estacao_id, campos: { data_inicio: somaDias(g.data, 1), data_fim: somaDias(g.data, 91) }, justificativa: 'Datas da estação revistas' }, rotulo: 'estação mudada depois do registro' });
+      // Revisão da Fase 3 (achados 3, 6 e 7): o custo, a categoria (a conta do consumo) e o intervalo do protocolo revistos
+      // depois do uso, e o fator e o controle de estoque do produto de uma entrada; a correção sem mudança que vem logo é a
+      // do lançamento preparado (sis.tardiaAlvo), e oraculoEfeitoCongelado confere que o fato não foi reprecificado.
+      const preparado = (rota, dados, rotulo, eid) => { sis.tardiaAlvo = eid; return Object.assign(base, { rota, dados, rotulo }); };
+      if (r && r.protocol_id && rnd() < 0.3) {
+        const pr = S.t.PROTOCOLOS_SANITARIOS.find((x) => x.protocol_id === r.protocol_id) || {};
+        if (pr.recorrencia_tipo === 'INTERVALO_DIAS' && pr.ativo !== false) return preparado('protocolo.salvar', { protocol_id: r.protocol_id, campos: { intervalo_dias: (typeof pr.intervalo_dias === 'number' ? pr.intervalo_dias : 180) + 45 }, justificativa: 'Intervalo do protocolo revisto' }, 'intervalo do protocolo revisto depois do uso', r.event_id);
+      }
+      if (r && r.produto_id && rnd() < 0.5) {
+        const pd = S.t.PRODUTOS.find((x) => x.product_id === r.produto_id) || {};
+        const campos = rnd() < 0.65 ? { custo_unitario: pd.custo_unitario === 2.5 ? 1.85 : 2.5 } : { categoria: pd.categoria === 'MEDICAMENTO' ? 'VACINA' : 'MEDICAMENTO' };
+        return preparado('produto.salvar', { product_id: r.produto_id, campos, justificativa: 'Cadastro do produto revisto' }, 'produto revisto depois do uso', r.event_id);
+      }
       if (r && r.protocol_id && (!r.produto_id || rnd() < 0.4)) return Object.assign(base, { rota: 'protocolo.salvar', dados: { protocol_id: r.protocol_id, campos: { ativo: false }, justificativa: 'Protocolo encerrado' }, rotulo: 'protocolo desativado depois do uso' });
       if (r && r.produto_id) return Object.assign(base, { rota: 'produto.salvar', dados: { product_id: r.produto_id, campos: { ativo: false }, justificativa: 'Produto fora de linha' }, rotulo: 'produto desativado depois do uso' });
+      const ent = !r && !g && sorteio(rnd, S.t.FINANCEIRO.filter((f) => f.product_id && cands.some((e) => e.event_id === f.event_id && e.event_type === 'ESTOQUE' && e.event_subtype === 'ENTRADA')));
+      if (ent) {
+        const pd = S.t.PRODUTOS.find((x) => x.product_id === ent.product_id) || {};
+        const campos = rnd() < 0.5 ? { fator_conversao: pd.fator_conversao === 25 ? 50 : 25 } : { controla_estoque: pd.controla_estoque !== true };
+        return preparado('produto.salvar', { product_id: ent.product_id, campos, justificativa: 'Cadastro do produto revisto' }, 'produto da entrada revisto depois da compra', ent.event_id);
+      }
       sis.tardiaPendente = false;
     }
-    const alvo = sorteio(rnd, mudou.length && rnd() < 0.7 ? mudou : cands);
+    const sorteado = sorteio(rnd, mudou.length && rnd() < 0.7 ? mudou : cands);
+    const alvo = (sis.tardiaAlvo && cands.find((e) => e.event_id === sis.tardiaAlvo)) || sorteado;
+    sis.tardiaAlvo = null;
     const dados = Object.assign(montarDados(sis, js(sis.specs.get(alvo.event_id).spec)), { event_id: alvo.event_id, justificativa: 'Conferido de novo' });
     return Object.assign(base, { rota: 'evento.corrigir', dados, aceitar: true, semJustAviso: false, correcaoTardia: true, rotulo: 'correção sem mudança, mais tarde, de ' + alvo.event_type + (alvo.event_subtype ? '/' + alvo.event_subtype : '') });
   }

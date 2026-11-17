@@ -186,6 +186,27 @@ test('achados 11, 12 e 17 (tronco): a recusa de uma fêmea fica na linha dela; c
   await a.fechar();
 });
 
+test('achado 11 (tronco, recusa geral): a recusa sem fêmea (data antes do marco zero) aparece na área de status e os diagnósticos continuam no aparelho', async () => {
+  const s = A.sistema();
+  A.semear(s);
+  const a = await A.abrir(s, { largura: 360, hash: 'reproducao/tronco', relogio: RELOGIO });
+  const { page } = a;
+  await A.esperarTela(page, 'Diagnóstico no tronco');
+  await page.fill('#tr-data', '2025-12-01');
+  await page.click('button:has-text("Começar")');
+  await page.waitForSelector('#tr-brinco');
+  await A.esperarServidor(page);
+  await diagnosticar(page, '0457', 'v');
+  await page.click('[data-enviar]');
+  await page.waitForSelector('[data-erro-geral]');
+  await A.esperarServidor(page);
+  assert.match(await txt(page, '[data-erro-geral]'), /O servidor recusou o envio: .*Nada foi gravado/);
+  assert.deepEqual((await linhas(page)).map((l) => l[0]), ['FILA'], 'a linha não some nem fica presa');
+  const regs = s.read({ rota: 't', reads: ['REPRODUCAO', 'EVENTOS', 'OPERACOES'], tratador: (tx) => tx.repo.vigentes('REPRODUCAO') }).length;
+  assert.equal(regs, 0);
+  await a.fechar();
+});
+
 test('achado 21: o rascunho do tronco (com diagnóstico sem confirmação) aparece no Início ao lado do curral, com "Continuar"', async () => {
   const s = A.sistema();
   A.semear(s);
