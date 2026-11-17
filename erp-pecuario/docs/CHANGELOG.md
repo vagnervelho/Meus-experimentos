@@ -1605,9 +1605,9 @@ Contratos em `docs/CONTRATOS.md`, seção 44.
   `inventario.elegiveis` devolve o brinco em uso na data (`Timeline.brincoEm`) e o de hoje. O curral e o tronco com data passada
   acham o animal pelo brinco daquele dia na posição do servidor (o tronco passou a consultá-la), nunca entregam o número livre no
   dia à dona de hoje, e "Corrigir o brinco" confere pela mesma posição.
-- **Agenda numa data passada** (achado 10): só os protocolos que já valiam (o cadastro, ou a primeira aplicação com ele se antes);
-  o INTERVALO_DIAS nunca aplicado vence a partir de quando o protocolo passou a valer (03a, seção 4.9: o dia em que o animal se
-  tornou elegível). A tela diz que os protocolos são os ativos hoje.
+- **Agenda numa data passada** (achado 10): só os protocolos que já valiam (o cadastro, ou a primeira aplicação com ele se antes).
+  O vencimento segue o de 03a, seção 4.9 (o nunca aplicado deve desde que ficou elegível, também no dia do cadastro). A tela diz
+  que os protocolos são os ativos hoje.
 - **Peso** (achados 12, 13, 21, 19 e 20): a estimativa visual fica estimada no peso médio e na UA (parte própria, rotulada) e na
   ficha; o GMD da resposta do registro é o do intervalo da ficha (a média do lote no meio e a segunda pesagem do dia não o
   escondem), com o porquê verdadeiro quando vazio; as pesagens e o ganho de lote do desempenho seguem os filtros; a linha gravada
@@ -1627,6 +1627,18 @@ Contratos em `docs/CONTRATOS.md`, seção 44.
   resposta do registro (pelo `intervalosModelo`) e da agenda com o protocolo que já valia.
 - Testes anteriores ajustados ao contrato novo, sem enfraquecer: `tests/estoque.test.js` e `tests/revisao.fase3.motor.test.js` (o
   payload da entrada traz `com_movimento`), `tests/pesagem.test.js` (a anterior traz `metodo` e `estimado`),
-  `tests/pastures.test.js` (a parte `estimativa_visual` da UA), `tests/sanidade.agenda.test.js` (o INTERVALO_DIAS nunca aplicado
-  vence desde que o protocolo vale), `tests/regras.fase3.test.js` (os protocolos do RN-058 cadastrados antes das datas
-  consultadas), `tests/ui/sobdemanda.test.js` (a Início traz as telas do curral e do tronco).
+  `tests/pastures.test.js` (a parte `estimativa_visual` da UA), `tests/regras.fase3.test.js` (os protocolos do RN-058 cadastrados
+  antes das datas consultadas), `tests/ui/sobdemanda.test.js` (a Início traz as telas do curral e do tronco).
+- Antes de terminar, a regra do achado 10 foi reconferida contra 03a, seção 4.9, e contra o teste de tela da agenda
+  (`tests/ui/sanidade.test.js`, "os 4 animais nunca vacinados: atrasados desde que ficaram elegíveis"): o vencimento do
+  INTERVALO_DIAS nunca aplicado ficou o do animal (o dia em que ficou elegível), sem a data do cadastro do protocolo; o conserto
+  do achado é só não contar, numa data passada, o protocolo que ainda não valia nela. `tests/sanidade.agenda.test.js` voltou ao
+  original.
+- Teste aleatório, 300 sementes novas de 100 passos no código final (1960000 a 1960299): 17.839 comandos aceitos, 9.884 recusados
+  e 0 falhas (três levas de 100, 736 a 739 s cada). A leva anterior (1950000 a 1950299, antes da reconferência da agenda) também
+  deu 0 falhas (17.277 aceitos, 9.999 recusados).
+- Verificado no fim: `npm test`, 823 testes, 823 aprovados e 0 falhas (908 s, com o teste aleatório rodando ao lado), com as 22
+  sementes fixas de 60 passos (743 aceitos, 438 recusados, 0 falhas); `npm run ui:check`, 145 testes, 145 aprovados e 0 falhas
+  (286 s), página inicial com 448 KB de 450 KB; sob demanda, Import 48 KB, Weights 52 KB, Health 25 KB e Reproduction 58 KB de
+  150 KB. Os 14 testes Node novos (`tests/revisao2.fase3.motor.test.js` e `tests/revisao2.fase3.zootecnia.test.js`) e os 10 de
+  tela (`tests/ui/revisao2.fase3.test.js`) falham no código anterior (e056bf6) e passam agora.

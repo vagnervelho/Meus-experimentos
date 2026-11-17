@@ -3313,11 +3313,11 @@ function modeloAgenda(S, D) {
     protos.forEach((p) => {
       if (!modelados.has(p.protocol_id)) return;
       // Rodada 2 da revisão da Fase 3 (achado 10): numa data passada, só o protocolo que já valia nela (o cadastro ou a
-      // primeira aplicação com ele, se antes); o INTERVALO_DIAS nunca aplicado vence a partir de quando ele passou a valer.
+      // primeira aplicação com ele, se antes). O INTERVALO_DIAS nunca aplicado segue vencendo desde que o animal ficou
+      // elegível (03a, seção 4.9).
       const primeira = sans.filter((x) => x.r.protocol_id === p.protocol_id).map((x) => x.data).sort()[0] || null;
       const inicio = [(p.created_at || '').slice(0, 10) || null, primeira].filter(Boolean).sort()[0] || null;
       if (inicio && inicio > D) return;
-      const desdeOCadastro = (d) => (inicio && d && inicio > d ? inicio : d);
       if (p.sexo_aplicavel !== 'AMBOS' && p.sexo_aplicavel !== a.sexo) return;
       const min = typeof p.idade_min_meses === 'number' ? p.idade_min_meses : null;
       const max = typeof p.idade_max_meses === 'number' ? p.idade_max_meses : null;
@@ -3361,7 +3361,7 @@ function modeloAgenda(S, D) {
           contar('campanha da agenda conferida');
         }
       } else if (!doProt.length) {
-        venc = desdeOCadastro([desde, min !== null && nasc ? completaMesesEm(nasc, min) : null].filter(Boolean).sort().pop() || desde || D);
+        venc = [desde, min !== null && nasc ? completaMesesEm(nasc, min) : null].filter(Boolean).sort().pop() || desde || D;
         cumprida = false;
       } else {
         const u = ultimo(doProt).r;

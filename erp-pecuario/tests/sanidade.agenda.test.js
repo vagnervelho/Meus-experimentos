@@ -55,7 +55,7 @@ test('protocolo.salvar (03a, seção 4.9): nome, procedimento (sem doença), sex
   assert.deepEqual(boot.protocolos.map((p) => p.nome), ['Campanha']);
 });
 
-test('INTERVALO_DIAS (03a, 4.9): aplicação em 10/05/2027 com 180 dias e antecedência de 15 → vence 06/11/2027; em dia antes de 22/10, próxima de 22/10 a 06/11, vencida de 07/11; nunca aplicado, vencido desde que ficou elegível ou desde que o protocolo vale (o que vier depois); a próxima informada vale sobre o intervalo', () => {
+test('INTERVALO_DIAS (03a, 4.9): aplicação em 10/05/2027 com 180 dias e antecedência de 15 → vence 06/11/2027; em dia antes de 22/10, próxima de 22/10 a 06/11, vencida de 07/11; nunca aplicado, vencido desde que ficou elegível; a próxima informada vale sobre o intervalo', () => {
   const s = S.sistema();
   relogio(s, '2027-05-12');
   const ids = ok(api(s, 'evento.registrar', S.entradaInicial(['11', '12', '13'].map((b) => S.bicho({ brinco: b, data_nascimento: '2024-01-01', data_nascimento_confianca: 'CONFIRMADA' }))), 'reb')).animais.map((a) => a.animal_id);
@@ -69,10 +69,7 @@ test('INTERVALO_DIAS (03a, 4.9): aplicação em 10/05/2027 com 180 dias e antece
   const a = venc('2027-11-07');
   assert.deepEqual(situacoes(a, ids[0]), [['VENCIDA', '2027-11-06']]);
   assert.deepEqual(situacoes(a, ids[1]), [['VENCIDA', '2027-08-01']], 'a próxima informada vale sobre o intervalo');
-  // Rodada 2 da revisão da Fase 3 (achado 10): o nunca aplicado vence desde que ficou elegível ou desde que o protocolo
-  // vale (o cadastro, ou a primeira aplicação que o cumpre, se antes), o que vier depois — não desde a entrada no rebanho de
-  // 2026, quando o protocolo ainda não existia.
-  assert.deepEqual(situacoes(a, ids[2]), [['VENCIDA', '2027-05-10']], 'nunca aplicado: vencido desde que o protocolo vale (a primeira aplicação, 10/05/2027)');
+  assert.deepEqual(situacoes(a, ids[2]), [['VENCIDA', '2026-01-01']], 'nunca aplicado: vencido desde que ficou elegível (a entrada no rebanho)');
   assert.deepEqual(a.protocolos.map((x) => [x.elegiveis, x.em_dia, x.cobertura.valor]), [[3, 0, 0]]);
   // A aplicação posterior da mesma chave cumpre: o ciclo recomeça.
   vacina(s, '2027-11-07', [ids[0]], { protocol_id: p.protocol_id }, 'v3');

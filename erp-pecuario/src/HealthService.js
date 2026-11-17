@@ -220,8 +220,7 @@ var HealthService = (function () {
    *  - UNICA: o dia em que completa a idade máxima; sem máxima, a mínima; sem faixa, a entrada no rebanho; cumprida por
    *    qualquer aplicação do protocolo;
    *  - INTERVALO_DIAS: `data_proxima_aplicacao` da última aplicação, se informada; senão a data dela + `intervalo_dias`;
-   *    nunca aplicado: o dia em que ficou elegível (a entrada no rebanho ou o dia em que completa a idade mínima) ou o dia
-   *    em que o protocolo passou a valer, o que vier depois;
+   *    nunca aplicado: o dia em que ficou elegível (a entrada no rebanho ou o dia em que completa a idade mínima);
    *  - CAMPANHA_MESES: o último dia do mês da campanha; cumprida por aplicação entre o primeiro dia do mês − tolerância e
    *    o último + tolerância. A campanha perdida (já vencida) vale até abrir a janela da seguinte; depois, a seguinte.
    */
@@ -239,10 +238,7 @@ var HealthService = (function () {
       return { vencimento: v, cumprida: apl.length > 0, ultima: ultima };
     }
     if (p.recorrencia_tipo === 'INTERVALO_DIAS') {
-      // Nunca aplicado: o dia em que o animal se tornou elegível (03a, seção 4.9) — e o protocolo valer é um dos critérios
-      // (05, RN-058): o cadastrado depois vence a partir de quando passou a valer, não "há meses" no dia do cadastro.
-      var inicio = inicioProtocolo_(p);
-      if (!ultima) return { vencimento: inicio && inicio > elegivelDesde ? inicio : elegivelDesde, cumprida: false, ultima: null };
+      if (!ultima) return { vencimento: elegivelDesde, cumprida: false, ultima: null };
       var u = apl[apl.length - 1];
       var prox = !vazio_(u.data_proxima_aplicacao) ? u.data_proxima_aplicacao : num_(p.intervalo_dias) ? Utils.somaDias(u.data_aplicacao, p.intervalo_dias) : null;
       // A próxima dose é sempre uma pendência (em dia, próxima ou vencida pela data); sem como contar a próxima, nenhuma.

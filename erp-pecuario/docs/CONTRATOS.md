@@ -2883,10 +2883,9 @@ sequência de identificações até D; sem nenhuma, o do cadastro) e `brinco_hoj
 
 **Agenda sanitária (`HealthService`).** O contexto dá a cada protocolo `inicio_vigencia`: o cadastro (`created_at`) ou, se antes,
 a primeira aplicação vigente que o cumpre (o protocolo já praticado e cadastrado depois). Numa data D, só os protocolos com
-`inicio_vigencia ≤ D` geram pendência e cobertura (05, RN-058: "o protocolo está ativo"). O INTERVALO_DIAS nunca aplicado vence
-no maior entre o dia em que o animal ficou elegível e `inicio_vigencia` (03a, seção 4.9: "o dia em que se tornou elegível"); a
-UNICA segue o vencimento do animal de 03a, seção 4.9. A tela da agenda numa data passada diz que os protocolos são os ativos hoje
-que já valiam naquela data.
+`inicio_vigencia ≤ D` geram pendência e cobertura (05, RN-058: "o protocolo está ativo"). O vencimento não muda: o INTERVALO_DIAS
+nunca aplicado e a UNICA seguem o do animal (03a, seção 4.9: "o dia em que se tornou elegível"), também no dia do cadastro do
+protocolo. A tela da agenda numa data passada diz que os protocolos são os ativos hoje que já valiam naquela data.
 
 **Peso (`AnimalService.pesoVigente`, `InventoryService.compor`, `WeightService`).** A última pesagem por ESTIMATIVA_VISUAL dentro da
 validade dá `situacao: 'ESTIMATIVA_VISUAL'`, `estimado: true` (o peso vale para a UA e o peso vivo, rotulado; P10). A composição
