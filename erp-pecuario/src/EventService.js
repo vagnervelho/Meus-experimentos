@@ -1021,8 +1021,11 @@ var EventService = (function () {
     } else s.unidade = unidadeLivre;
     s.quantidadeInformada = typeof c.quantidade_consumida_total === 'number' ? c.quantidade_consumida_total : null;
     if (!vazio_(c.quantidade_consumida_total) && !produto && vazio_(c.produto_id)) { erroGeral_(m, 'quantidade_consumida_total', 'CAMPO_NAO_SE_APLICA', 'A quantidade que saiu do frasco só se informa com produto do cadastro (é ela que baixa o estoque e vira custo).'); s.ok = false; }
-    // Carência e próxima aplicação.
-    s.carenciaDias = typeof c.periodo_carencia_dias === 'number' ? c.periodo_carencia_dias : null;
+    // Carência e próxima aplicação. Sem os dias informados, a carência padrão do produto do cadastro (05, seção 4.8: "usa os
+    // dias informados no produto ou na aplicação"; 03b, SANIDADE.periodo_carencia_dias: proposta por
+    // PRODUTOS.carencia_padrao_dias): a mesma regra no formulário, na API e na importação (o 0 informado é "sem carência").
+    s.carenciaDias = typeof c.periodo_carencia_dias === 'number' ? c.periodo_carencia_dias
+      : doSubtipo.periodo_carencia_dias && vazio_(c.periodo_carencia_dias) && produto && typeof produto.carencia_padrao_dias === 'number' ? produto.carencia_padrao_dias : null;
     s.fimCarencia = HealthService.fimPeloPeriodo(data, s.carenciaDias);
     if (!vazio_(c.data_proxima_aplicacao)) {
       if (Utils.dataValida(c.data_proxima_aplicacao) && Utils.dataValida(data) && c.data_proxima_aplicacao <= data) { erroGeral_(m, 'data_proxima_aplicacao', 'DATA_INVALIDA', 'A próxima aplicação precisa ser depois de ' + br_(data) + '.'); s.ok = false; }
