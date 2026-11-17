@@ -1468,3 +1468,6 @@ Nenhuma linha de código mudou nesta etapa: só documentos.
 - Execuções: 1.600 sementes novas × 100 passos; a leva final com o gerador final, depois dos consertos do modelo, 500
   sementes (1400000 a 1400499): 29.681 aceitos, 16.499 recusados, 0 falhas; mais 160 contadas (1500000 a 1500159), 0 falhas.
 - `docs/CONTRATOS.md`: estado e seção 36 (passada 2 das Fases 1 a 3). Nenhuma linha de `src/` mudou nesta etapa.
+- Verificado no fim: `npm test`, 787 testes, 787 aprovados e 0 falhas (671 s), com as 22 sementes fixas de 60 passos (747
+  aceitos, 435 recusados, 0 falhas); `npm run ui:check`, 122 testes, 122 aprovados e 0 falhas (267 s), página inicial com
+  447 KB de 450 KB; sob demanda, Import 48 KB, Weights 44 KB, Health 24 KB e Reproduction 50 KB de 150 KB.
