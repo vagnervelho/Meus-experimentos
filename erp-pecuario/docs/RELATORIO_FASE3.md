@@ -8,8 +8,8 @@ E3.7) e seção 8 (checklist). Relatório da fase anterior: `docs/RELATORIO_FASE
 - **O código da Fase 3 está completo no repositório** (`erp-pecuario/src/`: 24 arquivos `.js`, 13 `.html` e o
   manifesto; entraram o `WeightService` e as telas `Weights`, `Health` e `Reproduction`) e passou em todos os testes que
   rodam aqui, inclusive os das Fases 1 e 2: **`npm test` com {{NT}} testes, {{NP}} aprovados, {{NF}} falhas** e **`npm run
-  ui:check` com {{UT}} testes de navegador, {{UP}} aprovados, {{UF}} falhas** (execução de 17/11/2026, sobre o código final do
-  conserto da revisão; nesta etapa só mudaram documentos e um comentário de código).
+  ui:check` com {{UT}} testes de navegador, {{UP}} aprovados, {{UF}} falhas** (execução final de 17/11/2026, sobre o código do
+  conserto da revisão; nesta etapa só mudaram documentos e dois comentários de código, seção 4, item 13).
 - Pesagem, sanidade e reprodução são registradas no curral e viram indicadores: pesagem individual, coletiva e por lote,
   com o modo curral no celular; ganho médio diário (GMD), curva de peso e projeção rotulada; insumos com estoque
   opcional, aplicações com consumo e custo no momento da aplicação, carência, agenda e alertas; estação de monta,
@@ -69,8 +69,10 @@ reais do Google, só na conta do dono.
 ## 2. Resultados dos testes executados aqui
 
 Ambiente: Node {{NODE}} (Linux, 4 núcleos), Playwright 1.63.0 com Chromium. Execução de 17/11/2026, sobre o código final
-do conserto da revisão, a última alteração de código desta fase. Na etapa deste relatório só mudaram documentos e um
-comentário de `src/TestRunner.js` e de `scripts/medir-trava.js` (seção 4, item 13).
+do conserto da revisão, a última alteração de comportamento desta fase. Na etapa deste relatório só mudaram documentos e
+um comentário em `src/TestRunner.js` e outro em `scripts/medir-trava.js` (seção 4, item 13). Nesta etapa, a suíte inteira
+rodou duas vezes: no começo, antes de qualquer mudança (`npm test` com 809 de 809 e `npm run ui:check` com 135 de 135), e
+no fim, depois de todas as mudanças; os números abaixo são os da execução do fim.
 
 ### 2.1 Nível 1 — `npm test` (`node --test tests/*.test.js`)
 
@@ -80,9 +82,9 @@ aceitos, 439 recusados, 0 falhas`. Contagem por arquivo, de três formas nesta e
 - **Rodados sozinhos**, cada um com `node --test <arquivo>`: os 32 arquivos novos ou alterados desde o relatório da Fase 2
   (17 novos e 15 alterados) e também `static` e `revisao4.interface`, que leem o `CONTRATOS.md` mudado nesta etapa. Todos
   passaram, com a contagem da tabela.
-- **Os demais 43** não mudaram desde a Fase 2. Os apoios que mudaram (`apoio-fuzz`, `apoio-sistema`, `apoio-telas`) só são
-  usados pelos testes e não declaram teste. Esses 43 passaram na suíte completa.
-- **A contagem de todos os 77 arquivos** foi conferida sem rodar os corpos: um registrador no lugar de `node:test` conta os
+- **Os demais 41** não mudaram desde a Fase 2. Os apoios que mudaram (`apoio-fuzz`, `apoio-sistema`, `apoio-telas`) só são
+  usados pelos testes e não declaram teste. Esses 41 passaram na suíte completa.
+- **A contagem de todos os 75 arquivos** foi conferida sem rodar os corpos: um registrador no lugar de `node:test` conta os
   `test()` de cada arquivo, e bate linha a linha com as tabelas.
 
 A soma confere com o total da suíte: 673 da Fase 2 + 112 dos 17 arquivos novos + 24 a mais em 3 alterados (`estorno`, de
@@ -92,10 +94,44 @@ A soma confere com o total da suíte: 673 da Fase 2 + 112 dos 17 arquivos novos 
 
 | Arquivo | Testes | Aprovados | Falhas | O que cobre |
 |---|---:|---:|---:|---|
-{{TABELA_NODE}}
+| `tests/acceptance.test.js` | 6 | 6 | 0 | Os cenários do `runAcceptanceTests` no fake, nas duas ordens de carga: os 23 das Fases 1 a 3 (com CT-05, CT-06, SANIDADE, ESTOQUE, REPRODUCAO e o passo 3 do CT-10); retomada, falha relatada, base de demonstração completa e retomável com `demonstracao.manejo`, `runDiagnostics` (alterado) |
+| `tests/animals.test.js` | 10 | 10 | 0 | Lista, ficha A a J (os blocos de peso, sanidade e reprodução entregues, com o motivo de cada valor vazio), árvore, edição, animal externo (alterado) |
+| `tests/api.test.js` | 14 | 14 | 0 | Envelope, guarda de dono, roteador, avisos, duplicado, LOCKED, carga condicional (catálogo da Fase 3), ambiente TESTE, rascunho, fuso, páginas (alterado) |
+| `tests/estoque.test.js` | 6 | 6 | 0 | ESTOQUE e PRODUTOS: o cadastro do produto (unidade que não muda depois do uso, estoque desligado por padrão), o exemplo de 03a, 4.7 (entrada, saída, perda, contagem), o frasco pago no ato de 07, seção 5, as regras da entrada e do acerto, os caminhos (correção, substituto, estorno com e sem dependente) e a integridade do estoque |
+| `tests/estorno.test.js` | 44 | 44 | 0 | Estorno e substituição de todo tipo ativo, agora com os da Fase 3: CT-07, CT-08, CT-09, CT-17 (b), CT-18, dependente e retroativo (alterado: 27 → 44) |
+| `tests/events.test.js` | 21 | 21 | 0 | Catálogo (`FASE_ATUAL` 3; tipo ativo só com campos, módulo ativo só com a tela; o menu até a Fase 5), entradas, CT-09, CT-10, CT-18 da Fase 1, estorno e correção, ajustes (alterado) |
+| `tests/fase2.fuzz.test.js` | 2 | 2 | 0 | Teste aleatório de todos os comandos das Fases 1 a 3 pela `api()`: 22 sementes fixas × 60 passos (741 aceitos, 439 recusados, 0 falhas), com a cobertura mínima de cada tipo; e o registro: todo tipo ativo tem gerador e oráculo, todo importável tem arquivo (alterado: 1 → 2) |
+| `tests/fase3.fuzz.regressoes.test.js` | 3 | 3 | 0 | As sequências mínimas das falhas do modelo nas passadas das Fases 1 a 3 (sementes 7106, 1210049 e 1320022), com o desfecho de cada passo |
+| `tests/graficos.test.js` | 6 | 6 | 0 | G5 (evolução mensal do peso) e o rebanho por categoria em cada pasto número a número; a escala do eixo; as regras estáticas do kit (title, desc, tabela equivalente, unidade, nenhuma conta nas telas) e o contraste das 8 cores |
+| `tests/import.test.js` | 9 | 9 | 0 | Importação de ANIMAIS: CT-12 da Fase 1, lotes, queda, retomar, concluir, desfazer (alterado) |
+| `tests/import.eventos.test.js` | 7 | 7 | 0 | Importação de COMPRAS, VENDAS, TRANSFERENCIAS, NASCIMENTOS e MORTES (o tipo "de outra fase" deixou de existir; o desconhecido continua recusado) (alterado) |
+| `tests/import.manejo.test.js` | 10 | 10 | 0 | Importação de PESAGENS, SANIDADE, REPRODUCAO e OCORRENCIAS: agrupamento, pesagem por lote, histórico anterior ao marco zero, duplicadas pela linha e pela base, os caminhos (correção, estorno, desfazer), recusas, rotas e a integridade do histórico sanitário |
+| `tests/integrity.fase2.test.js` | 11 | 11 | 0 | As checagens da Fase 2 por adulteração, com o saldo de estoque na projeção conferida; a demonstração da Fase 3 inteira sem erro; tempo medido (alterado) |
+| `tests/interface.test.js` | 8 | 8 | 0 | Página do `doGet` (compactada, sem as telas sob demanda), sintaxe do cliente e das telas sob demanda, contraste, alvos de toque, regras estáticas (alterado) |
+| `tests/jornada.fase3.test.js` | 1 | 1 | 0 | Um ano de manejo só pela `api()`: inventário por pasto, peso e GMD de cada animal, indicadores da estação, agenda, estoque e custo sanitário contra um modelo independente; projeção = reconstrução e invariantes depois de cada comando; integridade sem erro |
+| `tests/manejo.test.js` | 4 | 4 | 0 | DESMAMA (03b, 3.4 e 16.14) e por caminho; CASTRACAO (o touro castrado deixa de ser reprodutor); OCORRENCIA; a despesa paga no ato |
+| `tests/nascimento.test.js` | 16 | 16 | 0 | NASCIMENTO: CT-01, gemelar, natimorto, peso ao nascer, pai opcional, REPRODUCAO, histórico da matriz (o bloco G entregue) (alterado) |
+| `tests/pesagem.test.js` | 12 | 12 | 0 | PESAGEM pelos caminhos do tratador único: individual, coletiva e por lote, faixa (RN-049), variação brusca (RN-050), retroativo, mesmo dia, correção, substituto, estorno com dependente, importação e desfazer, integridade e trava, lotação em data |
+| `tests/pesagem.desempenho.test.js` | 10 | 10 | 0 | CT-05 na ficha número a número; uma pesagem só; mesmo dia e retroativa; saiu e voltou; métodos; peso ao nascer; projeção; GMD de lote, por pasto e por categoria; `peso.desempenho` |
+| `tests/regras.fase2.test.js` | 8 | 8 | 0 | Mapa RN → teste das 112 regras e as RN da Fase 2 sem caso próprio (alterado: o nome do teste de aceitação das Fases 1 a 3) |
+| `tests/regras.fase3.test.js` | 5 | 5 | 0 | Mapa RN-049 a RN-066 → teste (cada teste citado existe; cada caso de 09, 4.1, no `TestRunner`); RN-051 em todo caminho, RN-053, RN-058 e RN-065 |
+| `tests/reproducao.test.js` | 8 | 8 | 0 | Estação de monta; exposição, cobertura, inseminação, diagnóstico em lote e aborto; os caminhos; integridade e trava; importação e desfazer; ficha da matriz, lista de fêmeas e alertas |
+| `tests/reproducao.indicadores.test.js` | 5 | 5 | 0 | Indicadores de 07, seção 8.3, número a número (80 expostas) e de RN-066 (40 expostas; com 4, sem valor); quem saiu no meio da estação; desmama e mortalidade até a desmama; a forma anual |
+| `tests/revisao.fase3.motor.test.js` | 8 | 8 | 0 | Revisão da Fase 3, um teste por caminho dos achados 3 e 6, 4, 7, 8 e 13 (dois cada) e 14 |
+| `tests/revisao.fase3.regras.test.js` | 6 | 6 | 0 | Revisão da Fase 3: achados 16, 17, 23, 24, 25 e 26 |
+| `tests/revisao.fase3.zootecnia.test.js` | 8 | 8 | 0 | Revisão da Fase 3: achados 1, 2, 5, 9, 10, 15, 28 e 29 |
+| `tests/revisao4.interface.test.js` | 7 | 7 | 0 | Rodada 4 da Fase 2, INTERFACE E REGRAS (sem mudança; lê o `CONTRATOS.md` desta etapa) |
+| `tests/sanidade.test.js` | 9 | 9 | 0 | 03b, 15.2 linha a linha; CT-06; dose por peso; modo total, nome livre e subtipos; protocolo e avisos; caminhos; carência (RN-072) nos dois sentidos; importação e desfazer; integridade |
+| `tests/sanidade.agenda.test.js` | 5 | 5 | 0 | `protocolo.salvar`; INTERVALO_DIAS, CAMPANHA_MESES e UNICA (03a, 4.9; 05, 4.7) com as datas; pendência sem protocolo, carência, custos do período e alertas |
+| `tests/static.test.js` | 19 | 19 | 0 | Lint de camadas, superfície pública, `drive.file`, relógio, manifesto, rotas (as extras com contrato), includes (sem mudança; lê o `CONTRATOS.md` desta etapa) |
+| `tests/telas.test.js` | 7 | 7 | 0 | Rotas acrescentadas pelas telas e regras puras do cliente (`importacao.modelo` com os dez tipos) (alterado) |
+| `tests/telas.sobdemanda.test.js` | 6 | 6 | 0 | `sistema.tela` (compactada, sem a planilha-banco, recusas com a fase); a página inicial e cada tela no orçamento; catálogo × arquivos × `Index`; o cliente injeta as telas |
+| `tests/unitofwork.adversarial.test.js` | 59 | 59 | 0 | Morte depois de cada escrita, também no bloco de PESAGENS e de SANIDADE da importação nas três formas de gravação; subconjuntos densos, oráculos independentes, intercalações, resposta perdida (alterado: 53 → 59) |
+| `tests/venda.test.js` | 15 | 15 | 0 | VENDA: CT-04, CT-14, exemplos de 07 e 03b, carência pela SANIDADE real (alterado) |
+| **Soma dos 32 novos ou alterados** | **349** | **349** | **0** | Sem `static` e `revisao4.interface` (26); com eles, 375 |
 
 **Arquivos sem mudança desde a Fase 2** (passaram na suíte completa; a descrição de cada um está em
-`docs/RELATORIO_FASE2.md`, seção 2.1): {{LISTA_NODE_IGUAIS}}.
+`docs/RELATORIO_FASE2.md`, seção 2.1): `anexos` (9), `compra` (14), `config` (8), `database` (21), `fase2.adversarial` (11), `fase2.fuzz.regressoes` (13), `files` (5), `financeiro` (8), `harness` (25), `identificacao` (10), `integrity` (7), `inventory` (4), `jornada.fase1` (1), `jornada.fase2` (1), `lotacao` (14), `maintenance` (5), `movimentos` (12), `pastures` (7), `regras.fase1` (13), `repository` (10), `revisao1.financeiro` (6), `revisao1.motor` (14), `revisao2.financeiro` (3), `revisao2.motor` (13), `revisao3.financeiro` (6), `revisao3.interface` (2), `revisao3.motor` (24), `revisao4.financeiro` (5), `revisao4.motor` (20), `revisao5.financeiro` (6), `revisao5.interface` (4), `revisao5.motor` (13), `schema` (13), `setup` (5), `telas.fase2` (6), `telas.pastos-importacao` (4), `timeline` (12), `trava.integridade` (16), `unitofwork` (32), `utils` (18), `validation` (14) — soma 434. Conta: 349 + 26 + 434 = 809.
 
 ### 2.2 Nível 3 — `npm run ui:check`
 
@@ -111,9 +147,19 @@ arquivos foi conferida pelo registrador. A soma confere com o total (92 + 42 nov
 
 | Arquivo | Testes | Aprovados | Falhas | O que cobre |
 |---|---:|---:|---:|---|
-{{TABELA_UI}}
+| `tests/ui/graficos.test.js` | 8 | 8 | 0 | Os gráficos a 360 e 1280 px: o componente, a ficha (aba Peso), o desempenho, a reprodução e a sanidade; SVG com título e descrição, os números do desenho iguais aos da tabela e do servidor, texto legível, sem rolagem horizontal, redesenho ao mudar a largura |
+| `tests/ui/importacao-manejo.test.js` | 3 | 3 | 0 | Importação de pesagens (modelo, valores em palavras, linha repetida, parcial aprovado, relatório) e de sanidade (o produto pelo nome), a 1280 e 360 px |
+| `tests/ui/interface.test.js` | 17 | 17 | 0 | Carga, navegação, formulário do catálogo, "hoje" no fuso, avisos, erro por animal, rascunho, LOCKED, sem resposta, faixas, leiaute 360 e 1280 px, acessibilidade; o menu com Pesagens, Sanidade e Reprodução (alterado) |
+| `tests/ui/movimentos.test.js` | 8 | 8 | 0 | Parto pela ficha da mãe, transferência com erro em 1 de 3, morte, correção do parto, transferência com data passada e, novo, com as respostas fora de ordem (a corrida do seletor) (alterado: 7 → 8) |
+| `tests/ui/pesagem.test.js` | 8 | 8 | 0 | Modo curral a 360 px (Enter, contador, não encontrado, repetido, desfazer, recarregar); rede cortada e resposta perdida conferida pela chave; aviso do servidor aceito na linha; a ficha com a curva; o desempenho; a correção pelo detalhe |
+| `tests/ui/reproducao.test.js` | 2 | 2 | 0 | Diagnóstico no tronco a 360 px (p90, v, brinco que não é de fêmea, rede cortada, reenvio pela chave); fêmeas, indicadores e estações a 1280 e 360 px |
+| `tests/ui/revisao.fase3.test.js` | 13 | 13 | 0 | Revisão da Fase 3 na tela: achados 5, 11 (curral e tronco, por animal e geral), 12 (curral e tronco), 17, 18, 19, 20, 21, 22, 27 e 28 |
+| `tests/ui/sanidade.test.js` | 4 | 4 | 0 | Produtos e estoque a 360 px (cadastro pela folha, entrada pelo botão do produto); agenda e "Aplicar em N animais"; detalhe e correção da aplicação a 1280 px |
+| `tests/ui/sobdemanda.test.js` | 4 | 4 | 0 | Importação sob demanda: pedida uma vez pelo menu, falha de rede com "Tentar de novo", endereço direto e menu da fase, outra versão do app no servidor |
+| **Soma dos 9 novos ou alterados** | **67** | **67** | **0** | |
 
-**Arquivos sem mudança desde a Fase 2**: {{LISTA_UI_IGUAIS}}.
+**Arquivos sem mudança desde a Fase 2**: `anexos` (1), `compra` (4), `eventos.fase2` (9), `importacao-periodo` (3), `importacao` (2), `lotacao` (4), `pastos-importacao` (6), `revisao1` (6), `revisao2` (6), `revisao3` (4), `revisao4` (4), `revisao5` (4), `telas` (12), `venda` (3) — soma 68. Conta: 67 + 68 = 135. Os apoios dos testes de navegador que
+mudaram (`tests/ui/apoio.js`: `esperarServidor`; `tests/ui/mock-gas.js`: `emCurso` e `atrasar`) não declaram teste.
 
 ### 2.3 Cenários da Fase 3 por nível
 
@@ -148,13 +194,13 @@ Nada abaixo foi executado. O roteiro está em `docs/GUIA_DE_IMPLANTACAO.md` (se�
 | **Abrir as telas sob demanda no app real** (Pesagens, Sanidade, Reprodução e a Importação) | Guia, seção 11.2, passo 5 | "Abriu" ou a mensagem que apareceu | `PENDENTE NA CONTA DO DONO`. É a hipótese NV da etapa BASE: se o quadro do HtmlService não rodar o `<script>` injetado, a contingência é voltar a tela ao `Index` e tirar `sob_demanda` do módulo (`CONTRATOS.md`, seção 37) |
 | `runAcceptanceTests` com os cenários das Fases 1 a 3 (23 cenários: PREPARO, CT-09, CT-01 a CT-06, SANIDADE, ESTOQUE, REPRODUCAO, CT-07, CT-08, CT-13, CT-14, CT-17, CT-18, CT-10, CT-12, RESTAURACAO, CT-20, CT-11, ISOLAMENTO) | Guia, seção 6, até `completo: true` (várias execuções) | Arquivo `ERP Pecuário — relatório de aceitação <instante>.json` | `PENDENTE NA CONTA DO DONO` |
 | **Testar o modo curral no celular, no curral** (PR-06) | Guia, seção 11.2, "Roteiro do modo curral" | Quantos animais, quanto tempo, se o sinal caiu, se o rascunho voltou, o que atrapalhou | `PENDENTE NA CONTA DO DONO` |
-| **Confirmar PR-06, PR-07, PR-10 e PR-11** | Responder (guia, seção 11.2, passo 6) | As respostas | `PENDENTE NA CONTA DO DONO`; todas têm padrão e configuração, e nenhuma resposta muda o esquema (salvo PR-11, ver `11-riscos-e-premissas.md`) |
+| **Confirmar PR-06, PR-07, PR-10 e PR-11** | Responder (guia, seção 11.2, passo 6) | As respostas | `PENDENTE NA CONTA DO DONO`; todas já têm padrão (PR-06 e PR-07 por uso, PR-10 por produto); só a PR-11, se a resposta for o custo na compra, muda uma regra do desenho (`11-riscos-e-premissas.md`, seção 4) |
 | **Cadastrar produtos e protocolos com o veterinário** | Sanidade → Produtos e estoque; Sanidade → Protocolos | "Cadastrado", ou a lista do que não coube | `PENDENTE NA CONTA DO DONO`. O sistema não prescreve: o protocolo, a dose e a carência são os que o veterinário definir |
 | Base de demonstração da Fase 3 (cerca de 410 lançamentos, em várias execuções de uns 4 minutos; estimativa, não medida) | Guia, seção 6, "Base de demonstração" | O relatório `plano: DEMO`, com `demonstracao.manejo` | `PENDENTE NA CONTA DO DONO` (opcional) |
 | Tempo no Google Sheets com o manejo: comandos com a trava, agenda sanitária, indicadores reprodutivos e verificação de integridade | Registrar uma pesagem coletiva, uma vacinação e um diagnóstico; abrir a agenda e os indicadores; **Verificar a integridade agora** | Os tempos | `PENDENTE NA CONTA DO DONO`; no Node, seção 5, item 10 |
 | Importação de uma planilha grande de pesagens (milhares de linhas) | Guia, seção 8, passo 6 | Relatório final da importação | `PENDENTE NA CONTA DO DONO` (opcional) |
 | Gráficos no celular e no computador, no quadro do HtmlService | Abrir a ficha (aba Peso), Pesagens, Reprodução → Indicadores, Sanidade → Agenda | Captura ou relato | `PENDENTE NA CONTA DO DONO` |
-| **Ratificar as decisões da Fase 3** que ficaram só em `CONTRATOS.md` (seção 4 deste relatório, itens 2 a 10) | Ler e responder | A resposta | `PENDENTE NA CONTA DO DONO` |
+| **Ratificar as decisões da Fase 3** que ficaram só em `CONTRATOS.md` (seção 4 deste relatório, itens 2 a 10; as dos itens 4 e 6 que contrariavam o desenho já foram levadas a `08-ux-ui.md` e ao desenho-base nesta etapa) | Ler e responder | A resposta | `PENDENTE NA CONTA DO DONO` |
 
 Com esses resultados, o próximo passo é: corrigir o que divergir (fake, código ou regra), com registro no `CHANGELOG`;
 marcar a validação da Fase 3 no checklist do plano; e só então dar a Fase 3 por fechada.
@@ -189,7 +235,7 @@ trecho nesta etapa (item 13).
    status. Com data diferente de hoje, o curral confere brinco, pasto e contador pela posição do servidor naquela data. O
    ganho mostrado vem da resposta do servidor (o GMD pela mesma conta da ficha, ou vazio com o porquê). O diagnóstico no
    tronco usa o mesmo padrão dentro de `Reproduction`. **Isso contraria o "um único evento ao final" de 08, seção 5, e do
-   desenho-base, seção 15**: a pesagem de 80 animais vira 4 lançamentos. A troca protege o que já foi pesado quando o sinal
+   desenho-base, seção 8**: a pesagem de 80 animais vira 4 lançamentos. A troca protege o que já foi pesado quando o sinal
    cai no meio; o trecho foi atualizado (item 13).
 5. **Insumos e estoque.** Pela decisão 16.9, a compra de produto do cadastro é sempre um lançamento COMPRA_INSUMOS com
    parcelas, e o movimento de entrada só existe com o controle ligado; a saída por aplicação é gravada mesmo sem controle
@@ -253,7 +299,7 @@ trecho nesta etapa (item 13).
     98%, cobertura de pelo menos 80%), porque os números exatos variam com a data de hoje (o marco zero é hoje − 1095).
     Número fora da faixa derruba a conferência, e a execução seguinte refaz esse passo.
 13. **Documentos da Fase 0 atualizados nesta etapa** (antes, as etapas não podiam mexer em `docs/fase-0/`): `08-ux-ui.md`,
-    seção 5, e o desenho-base, seção 15 (o modo curral em blocos de 20 e o que a Fase 3 entregou dele: pesagem e tronco do
+    seção 5, e o desenho-base, seção 8 (o modo curral em blocos de 20 e o que a Fase 3 entregou dele: pesagem e tronco do
     diagnóstico); `01-arquitetura.md`, seção 6.2 (a página inicial e as telas sob demanda; o modo curral e o tronco nas
     telas `Weights` e `Reproduction`, não em `Components`); `10-plano-de-implementacao.md` (arquivos da Fase 3, a nota do
     E2.6 e o checklist da seção 8); `11-riscos-e-premissas.md` (R-08, R-14, R-23, R-24, R-30, R-31 e PR-06, PR-07, PR-10,
@@ -298,7 +344,7 @@ trecho nesta etapa (item 13).
    precisam ser ratificadas pelo dono na próxima revisão dos documentos da Fase 0.
 10. **Desempenho não medido no Apps Script**: a agenda calcula tudo sobre os presentes na data a cada consulta, e os
     indicadores refazem a estação; a trava confere também os fatos novos. No Node, com a base de demonstração da Fase 3
-    (`npm run trava:medir`, nesta etapa): {{TRAVA}}. No Google Sheets, nada disso foi medido.
+    (`npm run trava:medir`, nesta etapa): 430 comandos (a base inteira com os cadastros), média de 121,3 ms por comando (p50 117,2 ms; p95 260,2 ms), dos quais 15,1 s de 52,2 s (29%) na trava; mediana de 3 execuções. No fim da Fase 2, com a base de demonstração de então (391 comandos, sem o manejo), a média era 53,1 ms: a base cresceu (pesagens, aplicações, estoque, estações), e as duas medidas não comparam bases iguais. O tempo de cada comando cresce com o tamanho da base, e no Sheets a leitura das abas se soma a isso. No Google Sheets, nada disso foi medido.
 11. **Teste aleatório** (seção 6.1): os indicadores reprodutivos têm modelo só das expostas e da coerência das contagens e
     taxas (não das diagnosticadas, prenhas, paridas, perdas e desmamas); a previsão de parto e os alertas `PARTO_PREVISTO` e
     `PRENHEZ_VENCIDA` não têm oráculo; protocolos com categoria ficam fora do modelo da agenda; o relógio do pedido no
@@ -424,7 +470,9 @@ caminhos que eles tocam.
 ## 7. Veredito (09, seção 10)
 
 ```text
-RELATÓRIO DE TESTES, FASE 3, commit {{COMMIT}} (mais as mudanças de documentação desta etapa), 17/11/2026
+RELATÓRIO DE TESTES, FASE 3, 17/11/2026: o código de comportamento é o do commit 7ca19a1 com o ajuste de
+tests/ui/graficos.test.js do conserto da revisão; os commits automáticos seguintes da orquestração (ae14f0d em diante)
+levam só a documentação desta etapa e os dois comentários
 
 1. EXECUTADO AQUI (Node)
    comando: npm test      resultado: {{NP}}/{{NT}}

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 /**
- * Mede o tempo dos comandos da base de demonstração (TestRunner, TEST_PLAN = DEMO: 391 comandos de três anos de rebanho)
+ * Mede o tempo dos comandos da base de demonstração (TestRunner, TEST_PLAN = DEMO: 430 comandos de três anos de rebanho na Fase 3)
  * no harness de testes, e quanto dele fica na trava de integridade da UnitOfWork (AuditService.travar).
  *
  * Uso: node scripts/medir-trava.js [raiz do projeto] [--vezes N]

@@ -284,7 +284,7 @@ var TestRunner = (function () {
   }
   var FORMATO_CSV = { delimitador: ';', codificacao: 'UTF-8', formato_data: 'dd/MM/yyyy', decimal: ',' };
 
-  // ------------------------------------------------------------------ cenários de aceitação (Fases 1 e 2) ----
+  // ------------------------------------------------------------------ cenários de aceitação (Fases 1 a 3) ----
   /**
    * Cada CT roda só com o que as fases entregues trazem (09, seção 8, "cenário que usa peça de fase posterior"); a
    * parte que depende de fase futura fica NAO_SE_APLICA, com o motivo, e é conferida na fase que entrega a peça.

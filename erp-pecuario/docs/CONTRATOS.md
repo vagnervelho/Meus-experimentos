@@ -1946,14 +1946,14 @@ VALOR_INDIVIDUAL, kg em PESO_VIVO e PESO_CARCACA, 1 em CABECAS, peso relativo em
 
 Testes: `tests/ui/compra.test.js` (compra pela tela a 1280 e 360 px, correção pelo detalhe, morte com custo).
 
-## 28. `HealthService` (puro: regras sanitárias; nesta fase, a carência na venda)
+## 28. `HealthService` (puro: regras sanitárias; na Fase 2, só a carência na venda)
 
 Desde a Fase 3 (E3.2 e E3.3), o contrato inteiro do `HealthService` (cadastros, estoque, consumo, agenda, ficha) está na
 seção 39; as duas funções abaixo seguem como estavam.
 
-O evento SANIDADE, a agenda e os protocolos chegam na Fase 3; a regra de carência (RN-072; 05, seção 4.8) já existe porque a
-VENDA a consulta. Recebe as linhas de SANIDADE vigentes de quem chama (o motor passa as do animal, sem os eventos excluídos
-da fonte). Testes: `tests/venda.test.js` (SANIDADE gravada pelo harness).
+Na Fase 2, antes do evento SANIDADE, da agenda e dos protocolos, a regra de carência (RN-072; 05, seção 4.8) já existia porque
+a VENDA a consulta. Recebe as linhas de SANIDADE vigentes de quem chama (o motor passa as do animal, sem os eventos excluídos
+da fonte). Testes: `tests/venda.test.js` (desde a Fase 3, com a SANIDADE gravada pelo próprio evento).
 
 | Função | Contrato |
 |---|---|

@@ -1532,3 +1532,45 @@ novos sobre uma cópia com o `src/` anterior). Os testes ficam em `tests/revisao
 - Verificado no fim: `npm test`, 809 testes, 809 aprovados e 0 falhas (638 s), com as 22 sementes fixas de 60 passos (741
   aceitos, 439 recusados, 0 falhas); `npm run ui:check`, 135 testes, 135 aprovados e 0 falhas (271 s), página inicial com
   448 KB de 450 KB; sob demanda, Import 48 KB, Weights 48 KB, Health 24 KB e Reproduction 52 KB de 150 KB.
+
+## 17/11/2026 — Fase 3, DOCUMENTAÇÃO DE ENTREGA (E3.1 a E3.7 e §20)
+
+Só documentos, conferidos contra o código, e dois comentários de código desatualizados (nenhum comportamento mudou): o
+título da lista de cenários em `src/TestRunner.js` ("Fases 1 e 2" → "Fases 1 a 3") e o número de comandos da base de
+demonstração no cabeçalho de `scripts/medir-trava.js` (391 → 430, o que `npm run trava:medir` contou nesta etapa: média de 121,3 ms por comando no Node, 29% na trava).
+
+- `docs/RELATORIO_FASE3.md` (novo), com a estrutura e a regra de honestidade do relatório da Fase 2: entregas E3.1 a E3.7
+  e as transversais (telas sob demanda, aceitação, trava e teste aleatório), com arquivos, testes e estado; contagens reais
+  de `npm test` e `npm run ui:check`, por arquivo (os novos e alterados rodados sozinhos; todos conferidos pelo
+  registrador); o tamanho da página inicial e de cada tela sob demanda; os cenários da Fase 3 por nível; o que só o dono
+  pode executar (PR-06, PR-07, PR-10, PR-11, produtos e protocolos com o veterinário, o modo curral no curral, as telas sob
+  demanda no app real, `runAcceptanceTests` com os 23 cenários); decisões; limitações; o teste aleatório (5.100 sementes
+  novas na fase, por etapa, 0 falhas do sistema e 5 do modelo do teste) e a revisão independente (29 achados por lente e
+  gravidade, todos corrigidos, e o balanço: convergência não demonstrada); o veredito no modelo de 09, seção 10.
+- `docs/GUIA_DE_IMPLANTACAO.md`: título das Fases 1 a 3; 38 arquivos (24 `.gs`, 13 `.html`); as tabelas da seção 3 com o
+  `WeightService`, as telas `Weights`, `Health` e `Reproduction` (carregadas sob demanda), o `Index` sem a importação e as
+  dependências de hoje (tiradas do código); a seção 11.2, atualização para a Fase 3 (backup, enviar o código, `setup` — o
+  esquema não muda, e a verificação passa a conferir a cópia do peso das pesagens antigas —, aceitação, o que conferir no
+  app, as quatro premissas, como voltar atrás) e o roteiro do modo curral e do diagnóstico no tronco.
+- `README.md`: estado das Fases 1 a 3, o que a Fase 3 acrescenta, estrutura e as contagens da última execução.
+- `docs/CONTRATOS.md`: conferido por amostra contra o código (a superfície pública de cada namespace e as 65 rotas de
+  `Api.rotas()`: 51 canônicas e 14 extras, todas citadas); acrescentadas as funções públicas que não estavam citadas
+  (`WeightService.gmdLote` e `origemDaPesagem`; cinco do `HealthService`; oito do `ReproductionService`; os `salvar…(ctx,
+  pedido)` de lista, categoria, parceiro e propriedade). Nenhum contrato mudou.
+- Documentos da Fase 0 (permitido nesta etapa), onde a implementação contrariou ou estendeu o texto:
+  - `00-desenho-base.md`, seção 8, e `08-ux-ui.md` (resumo, seções 5 e 6): o modo curral sai em blocos de até 20 animais,
+    cada um um evento com chave própria, e não num evento único ao final (decisão da E3.1: o que já foi pesado não se perde
+    quando o sinal cai no meio); entregue para a pesagem e, no mesmo padrão, para o diagnóstico no tronco; a sanidade no
+    formulário comum com a revisão pelo servidor; a desmama e a identificação no formulário comum; o que não entrou dentro
+    do curral ("Todos do pasto" em grade e "Colar brinco;peso"); as idas ao servidor da pesagem e da vacinação.
+  - `01-arquitetura.md`, seção 6.2: a página inicial e as telas sob demanda (risco R-31), com os dois orçamentos; o modo
+    curral e o tronco em `Weights` e `Reproduction`, não em `Components`.
+  - `10-plano-de-implementacao.md`: seção 4, os arquivos que a Fase 3 também tocou; seção 8, uma linha por entrega E3.1 a
+    E3.7 com o estado real e uma linha aberta para a validação na conta do dono; a nota do E2.6 (o modo curral da
+    identificação não chegou com a pesagem).
+  - `11-riscos-e-premissas.md`: R-08 (gráficos SVG próprios, sem CDN), R-14 (indicadores sem valor com o motivo, n,
+    parcial, estimativas rotuladas), R-23 (rascunho e blocos com chave no curral e no tronco), R-24 (o que a Fase 3 fez e
+    o modo curral que faltou), R-30 (a identificação), R-31 (as telas sob demanda adotadas: 448 KB de 450 KB na página
+    inicial, a contingência NV); PR-06, PR-07, PR-10 e PR-11 entregues com o padrão, confirmação pendente; a tabela de
+    decisões.
+- Verificado no fim desta etapa: {{VERIF_FINAL}}
