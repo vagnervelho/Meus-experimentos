@@ -4830,14 +4830,16 @@ function oraculoPeriodo(cmd, A, S, pedidos) {
 }
 
 /**
- * Estorno logo depois do registro, sem nada gravado entre os dois (passada 3): aceito, e cada animal que existia antes do
- * registro volta a cada campo de projeção que tinha (situação, pasto, propriedade, brinco, sexo, nascimento, mãe, pai,
- * categoria, marcações, cria ao pé, chegada, saída, custo, peso). Os que o registro criou ficam anulados.
+ * Estorno logo depois do registro, sem nada gravado entre os dois (passada 3): aceito (salvo a recusa da política do estoque,
+ * `estornoBloqueadoPeloEstoque`), e cada animal que existia antes do registro volta a cada campo de projeção que tinha
+ * (situação, pasto, propriedade, brinco, sexo, nascimento, mãe, pai, categoria, marcações, cria ao pé, chegada, saída,
+ * custo, peso). Os que o registro criou ficam anulados.
  */
 const PROJETADOS = ['brinco', 'brinco_norm', 'sexo', 'data_nascimento', 'data_nascimento_confianca', 'mae_id', 'mae_confianca', 'pai_id', 'pai_confianca', 'origem', 'evento_origem_id', 'castrado', 'reprodutor', 'partos_previos', 'propriedade_atual_id', 'pasto_atual_id', 'categoria_modo', 'categoria_manual_id', 'situacao_reprodutiva', 'cria_ao_pe', 'marcado_descarte', 'nao_localizado', 'situacao_cadastral', 'data_entrada', 'data_entrada_confianca', 'data_saida', 'peso_atual', 'data_ultima_pesagem', 'data_ultimo_movimento', 'custo_aquisicao', 'custo_aquisicao_origem'];
 function oraculoEstornoImediato(sis, cmd, r, S, dv0) {
   const snap = sis.snap;
   if (!snap || snap.eid !== cmd.dados.event_id || snap.dv !== dv0) return [];
+  if (!r.ok && estornoBloqueadoPeloEstoque(S, snap.eid, r)) { contar('estorno imediato recusado pela política do estoque'); return []; }
   if (!r.ok) return [falha('ESTORNO_IMEDIATO:RECUSADO', 'o estorno logo depois do registro (' + snap.tipo + ') foi recusado: ' + r.error.code + ' ' + r.error.message + ' ' + JSON.stringify((r.error.details || []).map((d) => d.codigo + ': ' + d.mensagem)).slice(0, 600))];
   const out = [];
   const antes = new Map(snap.animais.map((a) => [a.animal_id, a]));
@@ -4848,6 +4850,27 @@ function oraculoEstornoImediato(sis, cmd, r, S, dv0) {
     if (dif.length) out.push(falha('ESTORNO_IMEDIATO:' + dif[0], a.codigo_interno + ' não voltou ao que era antes do registro estornado (' + snap.tipo + '): ' + dif.map((c) => c + ' ' + JSON.stringify(b[c]) + ' → ' + JSON.stringify(a[c])).join('; ')));
   });
   return out;
+}
+
+/**
+ * A única recusa esperada do estorno logo depois do registro (RN-057 com a política; CONTRATOS, seção 39): sem o
+ * lançamento, o estoque controlado de um produto ficaria abaixo de zero, mais baixo que agora — o saldo de antes do registro
+ * já era negativo (o consumo aceito com a política AVISA, que depois mudou) —, a política de ESTOQUE_INSUFICIENTE é
+ * BLOQUEIA, e a recusa traz só esse aviso. Confere pelo modelo: os movimentos vigentes com e sem os do lançamento.
+ */
+function estornoBloqueadoPeloEstoque(S, eid, r) {
+  if (!r.error || r.error.code !== 'VALIDATION') return false;
+  const cods = (r.error.details || []).map((d) => d.codigo);
+  if (!cods.length || cods.some((c) => c !== 'ESTOQUE_INSUFICIENTE')) return false;
+  if ((politicaDe(S).ESTOQUE_INSUFICIENTE || 'AVISA') !== 'BLOQUEIA') return false;
+  const vale = vigenciaComImportacao(S);
+  return (S.t.PRODUTOS || []).some((p) => {
+    if (p.controla_estoque !== true) return false;
+    const movs = S.t.MOVIMENTOS_ESTOQUE.filter((m) => m.product_id === p.product_id && vale(m.event_id));
+    const agora = menorSaldoDe(movs);
+    const sem = menorSaldoDe(movs.filter((m) => m.event_id !== eid));
+    return sem.saldo < 0 && sem.saldo < agora.saldo;
+  });
 }
 
 /**

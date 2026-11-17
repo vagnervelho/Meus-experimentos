@@ -7,8 +7,9 @@
  * quando muda um cadastro que não vale para o passado, e não depende da data de hoje.
  *
  * Duas partes: (1) cenários pela api(), um por defeito, que conferem a resposta em D antes e depois do fato posterior (e com o
- * relógio adiantado); (2) as sequências mínimas do teste aleatório, repetidas num sistema novo com o MESMO oráculo de cada
- * passo (o do tempo inclusive: o passo com `tempo` tira o retrato em D, e cada passo seguinte que grava compara).
+ * relógio adiantado); (2) as sequências mínimas do teste aleatório desta etapa, repetidas num sistema novo com o MESMO oráculo
+ * de cada passo (o do tempo inclusive: o passo com `tempo` tira o retrato em D, e cada passo seguinte que grava compara) — as
+ * do oráculo do tempo e a da leva final (a recusa do estorno imediato pela política do estoque, do modelo do teste).
  */
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -353,14 +354,33 @@ const CASOS = [
       passo(97, 'evento.registrar', { tipo: 'OUTRA_ENTRADA', campos: { event_date: '2026-03-18', description: 'Apareceu na divisa' }, animais: [{ animal_id: '@b:1', pasto_destino_id: '@p:D' }] }, { avisos: [], aceitar: false }),
     ],
   },
+
+  {
+    // Semente 3400390 (leva final), no modelo do teste (assinatura ESTORNO_IMEDIATO:RECUSADO): o consumo acima do estoque foi
+    // aceito com a política AVISA; a política de ESTOQUE_INSUFICIENTE passou a BLOQUEIA; a entrada do produto foi registrada e
+    // estornada logo em seguida. Sem a entrada, o estoque volta a -10 mL em 13/11 (mais baixo que agora): o estorno passa pelo
+    // aviso e, com BLOQUEIA, é recusado (RN-057 com a política; CONTRATOS, seção 39). O oráculo do estorno imediato passou a
+    // aceitar essa recusa, conferida pelo modelo (`estornoBloqueadoPeloEstoque`).
+    nome: 'estorno da entrada logo depois do registro com a política BLOQUEIA e o saldo de antes negativo (modelo do teste): a recusa é a do aviso de estoque',
+    opcoes: { ordem: 'reverse', reuso: true, vazio: false },
+    desfecho: { 95: 'VALIDATION:ESTOQUE_INSUFICIENTE' },
+    comandos: [
+      passo(62, 'evento.registrar', { tipo: 'SANIDADE', subtipo: 'MEDICACAO', campos: { event_date: '2026-11-13', produto_id: '@v:antibiotico', modo_dose: 'TOTAL', quantidade_consumida_total: 10, periodo_carencia_dias: 120 }, animais: [{ animal_id: '@b:6' }] }, { rotulo: 'interação: aplicação acima do estoque' }),
+      passo(79, 'config.salvar', { valores: { avisos_politica: '{"ESTOQUE_INSUFICIENTE":"BLOQUEIA","INTERVALO_PARTO_CURTO":"BLOQUEIA","PERIODO_BLOQUEADO":"IGNORA"}' } }, { avisos: [], rotulo: 'política de avisos' }),
+      passo(93, 'evento.registrar', { tipo: 'ESTOQUE', subtipo: 'ENTRADA', campos: { event_date: '2026-01-06', product_id: '@v:antibiotico', quantidade: 60, valor: 9250 }, animais: [] }, { rotulo: 'interação: preparo, compra de insumo' }),
+      passo(95, 'evento.estornar', { event_id: '@93.e0', justificativa: 'Lançado errado' }, { avisos: [], simular: true, estornoImediato: true, rotulo: 'estorno imediato de ESTOQUE/ENTRADA' }),
+    ],
+  },
 ];
 
 CASOS.forEach((caso) => {
-  test('regressão do oráculo de viagem no tempo: ' + caso.nome, () => {
+  test('regressão do teste aleatório desta etapa: ' + caso.nome, () => {
     const fora = {};
     const falha = F.reproduzir(caso.opcoes, caso.comandos, fora);
     assert.equal(falha, null, falha ? 'passo ' + falha.k + ' [' + falha.assinatura + ']: ' + falha.mensagem : '');
-    // O retrato em D foi tirado e cada passo seguinte foi executado (o desfecho de cada um é o do sistema de hoje).
+    // Cada passo foi executado (o do retrato em D e os seguintes; o desfecho de cada um é o do sistema de hoje).
     assert.deepEqual(Object.keys(fora.resultados).map(Number), caso.comandos.map((c) => c.k));
+    // O desfecho que o caso fixa (a recusa esperada pelo desenho, conferida também pelo oráculo).
+    Object.keys(caso.desfecho || {}).forEach((k) => assert.equal(fora.resultados[k], caso.desfecho[k], 'passo ' + k));
   });
 });
