@@ -187,21 +187,25 @@ var ReproductionService = (function () {
   }
   /**
    * "Castrado de origem": o atributo da criação com a última correção de cadastro vigente (sem a castração por evento):
-   * o macho que já entrou castrado, ou foi corrigido para castrado.
+   * o macho que já entrou castrado, ou foi corrigido para castrado. `plano` (opcional, no motor): {linhas, ajustes, ord, seq}
+   * — as linhas e os ajustes que o comando ainda vai gravar, na posição dele.
    */
-  function castradoDeOrigem(f, id) {
+  function castradoDeOrigem(f, id, plano) {
+    var x0 = plano || {};
     var criacao = null;
-    f.linhas(id).forEach(function (l) {
+    f.linhas(id).concat(x0.linhas || []).forEach(function (l) {
       if (l.atributos && (!criacao || l.ordem_seq > criacao.ordem_seq || (l.ordem_seq === criacao.ordem_seq && l.event_seq > criacao.event_seq))) criacao = l;
     });
     var v = criacao ? criacao.atributos.castrado : null;
     var ultima = null;
+    var poe = function (pos, valor) { if (!ultima || pos.ord > ultima.ord || (pos.ord === ultima.ord && pos.seq >= ultima.seq)) ultima = { ord: pos.ord, seq: pos.seq, valor: valor }; };
     f.ajustes(id).forEach(function (x) {
       if (x.tipo_ajuste !== 'CORRECAO_CADASTRO' || x.campo !== 'castrado') return;
       var ev = f.evento(x.event_id);
-      var pos = { ord: ev ? f.ordemSeq(x.event_id) || 0 : 0, seq: ev ? ev.event_seq : 0 };
-      if (!ultima || pos.ord > ultima.ord || (pos.ord === ultima.ord && pos.seq >= ultima.seq)) ultima = { ord: pos.ord, seq: pos.seq, valor: x.valor_novo };
+      poe({ ord: ev ? f.ordemSeq(x.event_id) || 0 : 0, seq: ev ? ev.event_seq : 0 }, x.valor_novo);
     });
+    // As correções de cadastro do próprio comando (ainda no plano), na posição dele.
+    (x0.ajustes || []).forEach(function (x) { if (x.animal_id === id && x.tipo_ajuste === 'CORRECAO_CADASTRO' && x.campo === 'castrado') poe({ ord: x0.ord || 0, seq: x0.seq || 0 }, x.valor_novo); });
     if (ultima) v = ultima.valor;
     return v === true || v === 'S';
   }

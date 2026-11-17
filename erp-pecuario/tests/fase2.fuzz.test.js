@@ -33,6 +33,11 @@
  * Fase 3 e o relógio do pedido; os oráculos novos conferem a campanha na agenda, a cria ao pé e a correção sem mudança de
  * um lançamento de manejo muito depois do registro.
  *
+ * Conserto pela garantia, a correção e o fato congelado (CONTRATOS, seção 50): num passo sorteado à parte, o oráculo da correção
+ * muda os cadastros e corrige sem mudança eventos que valem de todos os tipos (pela entrada do servidor e pela do gerador) e com
+ * um campo só (`dados.mudanca`), e confere que os fatos, os outros registros e as consultas ficam como o contrato manda; o estado
+ * volta ao do passo no fim (as sequências não mudam).
+ *
  * Em falha, o teste imprime a semente e a sequência mínima (encolhida automaticamente), pronta para virar um caso de
  * tests/fase2.fuzz.regressoes.test.js (ou de tests/fase3.fuzz.regressoes.test.js).
  *
@@ -135,7 +140,12 @@ test('teste aleatório de todos os comandos da Fase 2 (' + (N ? N + ' sementes n
       // Conserto pela garantia, etapa 2 (CONTRATOS, seção 47): o resolvedor único deu o mesmo animal pelos caminhos da rota, pela
       // posição da data (com a mesma descrição) e na importação de verdade.
       'resolvedor: textos conferidos em todos os caminhos', 'resolvedor: números da posição conferidos', 'resolvedor: animais descritos igual na posição',
-      'resolvedor: linhas importadas no animal do resolvedor'].filter((k) => !F.COBERTURA[k]);
+      'resolvedor: linhas importadas no animal do resolvedor',
+      // Conserto pela garantia, a correção e o fato congelado (CONTRATOS, seção 50): depois de mudar os cadastros, a correção
+      // sem mudança pelas duas entradas (a do servidor e a do gerador), as consultas comparadas antes e depois dela, e a
+      // correção de um campo só (também a data).
+      'correção: sem mudança aceita (servidor)', 'correção: sem mudança aceita (gerador)', 'correção: consultas conferidas depois da correção sem mudança',
+      'correção: mudança de um campo aceita', 'correção: mudança de um campo aceita (a data)'].filter((k) => !F.COBERTURA[k]);
     assert.deepEqual(semCobertura, [], 'oráculos novos sem nada conferido nas sementes fixas (' + JSON.stringify(F.COBERTURA) + ')');
   }
 });

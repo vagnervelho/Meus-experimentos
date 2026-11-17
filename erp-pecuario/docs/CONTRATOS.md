@@ -189,6 +189,11 @@ e são exportadas; os nomes do curral e do tronco estão em `Weights` e `Reprodu
 seção 46 (30, com `animal.resolver`; `importacao.linhas` entrou na lista das que só mostram registros) e o caminho da rota
 `animal.resolver` no código (seção 47). `Api.rotas()` tem 66 rotas: 51 canônicas (9 ainda de fase futura) e 15 extras. Sem
 mudança de contrato. Relatório: `docs/RELATORIO_FASE3.md`, seção 6.6.
+Fase 3, CONSERTO PELA GARANTIA (a correção e o fato congelado): o inventário, por tipo, do que é informado pelo usuário,
+derivado pelo servidor e copiado do cadastro, com as entradas de que cada um depende (o contrato), o ponto único `Correcao`
+(a entrada sem mudança do evento que vale, o evento corrigido pela mudança e o valor que a correção mantém do original), a
+correção só com a mudança (`dados.mudanca`), a prévia da correção montada pelo servidor (`evento.obter`: `correcao`), o
+oráculo da correção no teste aleatório e os consertos que ele achou (seção 50).
 
 ## 1. Regras que valem para todo arquivo de `src/`
 
@@ -3416,3 +3421,215 @@ barrada entra na fila quando a outra é tirada); a ordem rápida e a lenta ficam
   mudar a sessão (o valor lançado na sessão nova sem brinco não entra); parte das sementes (25%, sorteada à parte) roda sem
   `localStorage`, com o rascunho no servidor que demora (segurado) enquanto o bloco sai — nesse modo a conferência do rascunho é a
   da recarga (o rascunho adiado chega ao servidor antes de recarregar, sair e terminar).
+
+## 50. A correção e o fato congelado (conserto pela garantia) — `Correcao` (novo: `entrada`, `montar`, `contexto`, `congelado`, `CONGELADOS`, `tabela`), `EventService` (`evento.corrigir` com `dados.mudanca`; `evento.obter` com `correcao` e `propostas`; os tratadores leem o que a correção mantém por `Correcao.congelado`), `FinancialService` (`negociacao`: `bases_congeladas`), `ReproductionService` (`castradoDeOrigem` com o plano do comando), `AuditService` (a linha de touro é de um macho), `Events` (a prévia da correção), `Reproduction` (a prévia própria saiu); `tests/correcao.regressoes.test.js`, `tests/correcao.contrato.test.js`, `tests/apoio-fuzz.js` (`oraculoCorrecao`), `tests/harness.js` e `tests/fakes/` (`gas.estado`), `tests/fase2.fuzz.test.js`
+
+A correção grava um evento substituto que ocupa o lugar do original (03b, seção 4; desenho-base 16.1). Até aqui cada tratador
+decidia sozinho o que a correção refazia e o que mantinha do original, e a prévia da tela montava a entrada no cliente, tipo a
+tipo (e somava dias para reconhecer a próxima aplicação proposta). Esta etapa põe a decisão num ponto só, com as tabelas
+abaixo como contrato, e um oráculo no teste aleatório que as confere depois de mudar os cadastros.
+
+### 50.1 As garantias
+
+- **(b1)** A correção SEM MUDANÇA de qualquer evento que vale, em qualquer momento, depois de qualquer mudança de cadastro, é
+  aceita — salvo as regras de desenho da seção 50.6 — e deixa os fatos gravados iguais: o cabeçalho, as linhas de cada tabela
+  de detalhe, os lançamentos com as parcelas, o rateio e as alocações, e os anexos que valem. Mudam só os metadados de versão e
+  de auditoria: os identificadores das linhas, `event_seq`, `registration_date`, `created_at` e `created_by`, a situação do
+  original (`status`, `reversal_of_event_id`, `anulado_por`) e dos lançamentos dele (`status`, `cancelado_em`,
+  `cancelado_por_event_id`), e, no payload, `justificativa` e `avisos_aceitos` (do comando, não do fato). Nenhum outro registro
+  muda (o animal criado passa a ter o substituto como evento de origem), e as projeções de ANIMAIS e PRODUTOS ficam iguais.
+- **(b2)** A correção do campo X muda só X e o que deriva de X pela tabela A, recalculado com o cadastro que o desenho manda:
+  o que o original copiou do cadastro continua o do original enquanto a entidade é a mesma (tabela B); o derivado do estado do
+  dia é refeito pela data do evento; o cadastro de hoje só na exceção da seção 50.5.
+- **(b3)** As cópias congeladas (tabela B) não mudam quando a correção muda outro campo de que elas não dependem — também a
+  data.
+- **(b4)** Toda consulta depois de (b1) é igual à de antes: as datadas da viagem no tempo (seção 46: posição, elegíveis, pastos
+  e painel, permanência, agenda, indicadores, matrizes, desempenho, Início e ficha) em hoje e na data do evento, e a lista dos
+  lançamentos que valem — com os identificadores do substituto lidos como os do original.
+
+### 50.2 O ponto único e a API
+
+- `Correcao.entrada(L, ev, propostas)` — a entrada sem mudança do evento que vale: os dados que, mandados a `evento.corrigir`
+  como estão, gravam os mesmos fatos. Lê só as linhas gravadas do evento (`L`: `por(tabela, coluna, valor)`, `porId(tabela,
+  id)`), nada do cadastro de hoje. O que o servidor propôs quando o campo veio vazio vem VAZIO, para acompanhar a correção das
+  entradas de que depende (seção 20, regra 8; 03b, seção 10.2): a descrição proposta de cada lançamento, o vencimento à vista, o
+  valor da parcela única (= o total), a próxima aplicação pelo intervalo congelado, o fabricante do produto do cadastro, o
+  pasto e a raça da cria tirados da mãe (`propostas`, só no parto), o pasto de origem da venda, o parceiro da dedução retida.
+  O que foi digitado vem como foi gravado. Volta `{tipo, subtipo?, campos, animais, parcelas?, custos?, deducoes?, crias?,
+  criados}` (`criados`: os animais que o evento criou, reaproveitados com todos os atributos).
+- `Correcao.montar(entrada, mudanca)` — o evento corrigido: `mudanca = {campos: {campo: valor | null}, animais: [{animal_id,
+  …campos} | {animal_id, remover: true} | item novo sem animal_id], parcelas | custos | deducoes | crias}` (o grupo vem
+  inteiro); `null` apaga; o que a mudança não cita fica como no evento que vale.
+- `Correcao.contexto(repo, original)` e `Correcao.congelado(c, chave, novo)` — o valor que a correção mantém do original
+  (tabela B): `{v}` enquanto as entradas de que ele depende são as do original e ele tem o valor; `null` fora da correção, com
+  uma entrada mudada ou sem o valor no original (o tratador calcula como no registro). Chave desconhecida é erro INTERNAL.
+  `Correcao.tabela()` devolve a tabela B sem as funções. Todo tratador do motor lê por aqui; as leituras próprias do original
+  que havia no `EventService` (`sanidadeDoOriginal_`, `protocoloDoOriginal_`, `intervaloDoOriginal_`, `consumoDoOriginal_`,
+  `doseDoOriginal_`, `entradaDoOriginal_`, o `doOriginal` do brinco) saíram.
+- `evento.obter` devolve `correcao` (a entrada sem mudança; só do evento que vale, de tipo ativo, que não é ESTORNO) e
+  `propostas` (no parto: o pasto e a raça que o servidor tiraria da mãe).
+- `evento.corrigir` aceita `dados.mudanca` (com `event_id`, `justificativa` e, se for o caso, `justificativa_aviso`): o
+  servidor monta o evento corrigido com `Correcao.montar` sobre `Correcao.entrada` do evento que vale e segue o MESMO caminho de
+  validação e efeito do formulário inteiro (um caminho por comando). Sem `mudanca`, como antes: os dados são o evento
+  corrigido inteiro.
+- A prévia da correção na tela (`TelaEventos.previaCorrecao`, página inicial) só formata `correcao` pelo tipo do campo
+  (dinheiro em reais, decimal de uma casa, decimal e inteiro em texto, o sim/não da correção de cadastro), com os anexos do
+  original; não calcula número nem data. A prévia própria da reprodução (`TelaReproducao.previaCorrecao`) saiu e a correção não
+  carrega mais a tela de reprodução. A página inicial montada caiu de 450 KB para 425 KB.
+
+### 50.3 Tabela A — o que cada tipo grava (o contrato que o oráculo confere)
+
+Em todo tipo: informados a data, a propriedade, o responsável e a anotação (`notes`); derivados `pre_marco_zero` (← a data e o
+marco zero) e a posição (`event_seq`, `ordem_seq`: metadados); copiada a propriedade padrão quando a propriedade vem vazia (→ B
+`EVENTO.propriedade`). "→ B" aponta a linha da tabela B.
+
+| Tipo | Informado (a entrada) | Derivado pelo servidor ← de que depende | Cópia do cadastro ← de que depende |
+|---|---|---|---|
+| ENTRADA_INICIAL, OUTRA_ENTRADA | por animal: brinco e outras identificações, nome, sexo, raça, nascimento (data, ou idade em meses) e a certeza, mãe e pai (do rebanho ou de referência) com a certeza, origem, castrado, reprodutor, partos anteriores, situação reprodutiva e previsão de parto, pasto, observações; no rebanho inicial a chegada e a certeza, o peso e o método e o valor de abertura; na outra entrada a descrição | o animal e o código interno ← o item (reaproveitados na correção); o nascimento ESTIMADA ← a idade e a data (a entrada leva o nascimento gravado); a pesagem de entrada ← o peso e a data; o lançamento do saldo de abertura (conta SALDO_ABERTURA_REBANHO, rateio VALOR_INDIVIDUAL) ← os valores de abertura | — |
+| COMPRA | vendedor, finalidade, modalidade, base do peso, rendimento e o tipo dele, preço, peso total, valor dos animais, critério e justificativa do rateio, pasto do lote, GTA, nota, condições; por animal o da entrada mais o brinco do vendedor, o peso de carcaça, o valor individual e a base manual; as parcelas; os fretes e outros custos | os animais criados; o lançamento (COMPRA_ANIMAIS) ← o valor; as parcelas (a única = o total; vencimento à vista = a data) ← o valor e a data; o rateio e as alocações ← o critério e as bases; o valor individual de cada linha ← o rateio; a descrição proposta de cada custo ← o tipo e a data; as pesagens de entrada ← os pesos e a data; o pasto de cada animal ← o dele ou o do lote | — |
+| VENDA | comprador, finalidade, modalidade, base, rendimento, preço, pesos totais, valor bruto, desconto, critério e justificativa, GTA, nota, condições; por animal o peso, o método, a carcaça, o valor individual, a base manual, o motivo, as observações; as parcelas; as deduções (tipo, valor, retida, parceiro, vencimento, forma, documento, descrição) | o pasto de origem ← a linha do tempo na data; a receita (VENDA_ANIMAIS) ← bruto e desconto; as parcelas, como na compra; o rateio ← o critério e as bases; as bases estimadas sem o peso de cada animal ← os animais, a data, a modalidade, o peso do lote e as pesagens até a data → B `VENDA.bases_estimadas`; de cada dedução a conta ← o tipo, o vencimento (a retida, o 1º recebimento; a outra, a data), o parceiro da retida (o comprador), a descrição proposta ← o tipo e a data → B `VENDA.rotulo_deducao`; as pesagens de saída | o nome do tipo da dedução na descrição proposta (LISTAS `TIPO_DEDUCAO_VENDA`) ← o tipo → B |
+| NASCIMENTO | mãe, pai e a certeza, tipo de parto, pasto; por cria a situação (viva ou natimorta), o sexo, o brinco, o nome, a raça, o peso, o método, as observações | as crias (reaproveitadas) ← a mãe e a data; o pasto da cria vazio ← o da mãe no dia → B `NASCIMENTO.pasto_crias`; a raça vazia ← a da mãe → B `NASCIMENTO.raca_cria`; o registro do parto (vivos, natimortos, touro, tipo) ← as crias e o pai; as pesagens ao nascer ← o peso; sem cria viva, a certeza do pai fica no payload (`pai_confianca`) e o pasto da mãe não é pedido | — |
+| TRANSFERENCIA | pastos de origem e de destino, GTA; os animais | a origem conferida com a linha do tempo ← animal e data | — |
+| MORTE, DESCARTE | causa e diagnóstico (morte), destino e motivo (descarte), o lançamento opcional (valor, conta, parceiro, vencimento, parcelas, forma, documento, descrição); por animal as observações | a baixa e o pasto de origem ← a linha do tempo na data; a descrição proposta e o vencimento à vista ← a data; as parcelas; o rateio por cabeça | — |
+| IDENTIFICACAO | o tipo da identificação; por animal o código, o motivo, as observações | na retirada, o código tirado ← o que estava em uso na data; o fechamento do anterior (projeção) | as regras do número novo (só números, reuso) ← o animal e o número → B `IDENTIFICACAO.brinco` (regra) |
+| MARCACAO | a ação e o motivo do descarte; os animais e as observações | — (a projeção marca) | — |
+| AJUSTE_INVENTARIO | a justificativa; por animal o campo e o valor novo (cadastro), o brinco (identificação incorreta), o pasto (localização), a categoria (reclassificação), as observações (divergência) | o valor de antes ← o animal, o campo, o valor novo e a data → B `AJUSTE.valor_anterior`; a certeza apagada junto com a mãe, o pai ou o nascimento ← o mesmo; a origem da localização ← a linha do tempo na posição; a baixa da divergência ← a linha do tempo | — |
+| PESAGEM | momento, método, jejum, peso e cabeças do lote; por animal o peso e as observações | no lote, o peso de cada um (a média, MEDIA_LOTE) ← o peso e as cabeças | — |
+| SANIDADE (6 subtipos) | protocolo, produto do cadastro ou nome livre (com fabricante e unidade), lote, validade, modo e dose de referência, quantidade consumida, via, motivo, diagnóstico, carência (a tela a preenche pelo produto), próxima aplicação, veterinário, a despesa paga no ato; por animal a dose, o resultado do exame, as observações | a dose ← o modo e a dose de referência (por peso: × o peso do animal na data → B `SANIDADE.dose_por_peso`); a quantidade ← as doses; o fim da carência ← a data e a carência; a próxima aplicação vazia ← a data e o intervalo do protocolo → B `SANIDADE.recorrencia_protocolo`; a saída do estoque (quantidade, custo) ← o produto e a quantidade; o consumo (quantidade × custo; conta; "Consumo de <categoria>: <quantidade>"; rateio) ← o produto e a quantidade; a despesa paga no ato (descrição proposta, vencimento, parcelas, rateio) ← o valor, a data e o procedimento | do produto ← o produto: o nome, o fabricante (vazio na entrada), a carência padrão (com o campo vazio), o custo unitário, a conta e o nome da categoria no consumo; do protocolo ← o protocolo: a recorrência e o intervalo (payload `intervalo_protocolo_dias` e `recorrencia_protocolo`) e o procedimento cumprido (regra); a unidade da dose é a do produto, que não muda depois de usado (PRODUTO_EM_USO) |
+| ESTOQUE, entrada | produto, embalagens ou quantidade, valor, fornecedor, lote, validade, documento, vencimento, parcelas, forma | a quantidade ← as embalagens × o fator; o custo do movimento ← o valor e a quantidade; a compra do insumo ("Compra de <produto>: <quantidade>", vencimento à vista, parcelas) ← o produto, a quantidade e a data | do produto ← o produto: o fator (payload `fator_conversao`), o movimento (payload `com_movimento`), o nome na descrição |
+| ESTOQUE, acerto | produto, motivo, saldo contado ou quantidade, lote, validade | na contagem, a quantidade ← o saldo contado − o saldo na posição (o movimento que mudaria o saldo de um dia contado é recusado: CONTAGEM_POSTERIOR, seção 44) | — (PRODUTO_SEM_ESTOQUE: seção 50.6) |
+| REPRODUCAO (5 subtipos) | estação, retirada (exposição), touro, sêmen, método; por fêmea o resultado, a idade da gestação, a previsão de parto, as observações; a despesa | o registro de cada fêmea; na exposição o papel de cada animal (o macho é touro) ← o sexo do cadastro, e o touro do registro (o único do lote) ← os touros; a despesa, como na sanidade | a faixa da idade da gestação (`dias_gestacao`) ← o animal e a idade → B `REPRODUCAO.idade_gestacional` (regra) |
+| DESMAMA | pasto de destino, método da pesagem; por bezerro o peso e as observações | a mãe de cada bezerro ← a genealogia; a pesagem de desmama ← o peso e a data | quem é cria ao pé (`idade_desmama_padrao_meses`) ← o animal → B `DESMAMA.cria` (regra) |
+| CASTRACAO, OCORRENCIA | o método (castração), o tipo e a descrição (ocorrência), a despesa, as observações | a despesa, como na sanidade; castrado e a categoria (projeção) | — |
+
+### 50.4 Tabela B — o que a correção mantém do original (`Correcao.CONGELADOS`)
+
+Natureza: COPIA (copiado do cadastro no registro), DERIVADO (calculado do estado daquele dia) e REGRA (a regra de cadastro
+que o original já cumpria e que só o cadastro de hoje quebraria). Enquanto as entradas da coluna "depende" são as do original,
+a correção grava o valor do original; quando uma muda, o tratador refaz o valor como no registro.
+
+| Chave | Natureza | De onde vem | Depende de | Onde fica |
+|---|---|---|---|---|
+| `EVENTO.propriedade` | COPIA | CONFIGURACOES.propriedade_padrao_id (a propriedade vazia na entrada) | a propriedade informada | EVENTOS.property_id |
+| `SANIDADE.nome_produto` | COPIA | PRODUTOS.nome | o produto | SANIDADE.nome_produto |
+| `SANIDADE.fabricante` | COPIA | PRODUTOS.fabricante (vazio na entrada) | o produto | SANIDADE.fabricante |
+| `SANIDADE.periodo_carencia_dias` | COPIA | PRODUTOS.carencia_padrao_dias (com o campo vazio) | o produto | SANIDADE.periodo_carencia_dias |
+| `SANIDADE.custo_unitario` | COPIA | PRODUTOS.custo_unitario | o produto | MOVIMENTOS_ESTOQUE.custo_unitario (saída) |
+| `SANIDADE.conta_consumo` | COPIA | PRODUTOS.categoria (a conta) | o produto | FINANCEIRO.conta_id (consumo) |
+| `SANIDADE.rotulo_consumo` | COPIA | PRODUTOS.categoria (o nome na descrição) | o produto | FINANCEIRO.descricao (consumo) |
+| `SANIDADE.recorrencia_protocolo` | COPIA | PROTOCOLOS_SANITARIOS.recorrencia_tipo e intervalo_dias | o protocolo | payload `intervalo_protocolo_dias` e `recorrencia_protocolo`; SANIDADE.data_proxima_aplicacao |
+| `SANIDADE.procedimento_protocolo` | REGRA | PROTOCOLOS_SANITARIOS.tipo_procedimento (PROTOCOLO_DE_OUTRO_PROCEDIMENTO) | o protocolo e o subtipo | SANIDADE.protocol_id |
+| `SANIDADE.dose_por_peso` | DERIVADO | dose por kg × o peso do animal na data | o produto (ou o nome livre), o modo, a dose de referência, a data, o animal | SANIDADE.dose; a quantidade da saída; o rateio do consumo |
+| `ESTOQUE.fator_conversao` | COPIA | PRODUTOS.fator_conversao | o produto | payload `fator_conversao`; FINANCEIRO.quantidade |
+| `ESTOQUE.com_movimento` | COPIA | PRODUTOS.controla_estoque | o produto | payload `com_movimento`; o movimento de entrada |
+| `ESTOQUE.nome_produto` | COPIA | PRODUTOS.nome | o produto | FINANCEIRO.descricao (compra do insumo) |
+| `IDENTIFICACAO.brinco` | REGRA | CONFIGURACOES.brinco_somente_numerico e brinco_permite_reuso (as regras do número novo) | o animal e o número | IDENTIFICACOES (BRINCO), em todo tipo que dá brinco |
+| `REPRODUCAO.idade_gestacional` | REGRA | CONFIGURACOES.dias_gestacao (a faixa) | o animal e a idade | REPRODUCAO.idade_gestacional_dias |
+| `DESMAMA.cria` | REGRA | CONFIGURACOES.idade_desmama_padrao_meses (quem é cria ao pé) | o animal | EVENTO_ANIMAIS (SUJEITO) |
+| `NASCIMENTO.pasto_crias` | DERIVADO | o pasto da mãe no dia do parto | a mãe e a data | EVENTO_ANIMAIS.pasto_destino_id (CRIA) |
+| `NASCIMENTO.raca_cria` | DERIVADO | a raça da mãe | a mãe e a cria | atributos_iniciais_json.raca; ANIMAIS.raca |
+| `AJUSTE.valor_anterior` | DERIVADO | o cadastro do animal antes do ajuste (e a regra VALOR_IGUAL; no brinco lançado errado, também as conferências pelo brinco de hoje) | o animal, o campo, o valor novo e a data | AJUSTES.valor_anterior (também a certeza apagada junto) |
+| `VENDA.bases_estimadas` | DERIVADO | a última pesagem de cada animal até a data | os animais, a data, a modalidade, o peso vivo total | RATEIOS e ALOCACOES_FINANCEIRAS; EVENTO_ANIMAIS.valor_individual |
+| `VENDA.rotulo_deducao` | COPIA | LISTAS (TIPO_DEDUCAO_VENDA).rotulo | o tipo da dedução | FINANCEIRO.descricao (dedução) |
+
+### 50.5 Recalcular quando a entrada muda
+
+- Mesma entidade, outra entrada (a data da aplicação, a dose, o animal): o tratador refaz o derivado com as cópias do
+  original — a próxima aplicação pela data nova e o intervalo congelado; a dose por kg pelo peso do animal na data nova com a
+  dose de referência gravada; o custo, a conta e a descrição do consumo pelo custo e pela categoria congelados; o pasto da cria
+  pelo da mãe na data nova; as bases estimadas pelas pesagens até a data nova; o valor de antes do ajuste pelo cadastro na
+  posição nova.
+- Outra entidade (outro produto, outro protocolo, outra mãe, outro tipo de dedução): **exceção documentada** — o cadastro de
+  hoje da entidade nova, que o original não copiou (é o que a tela mostra ao escolher). Os campos que a tela preenche pelo
+  produto (carência, lote, validade, modo e dose de referência) são informados: a entrada sem mudança os leva como foram
+  gravados e trocar o produto não os troca (o usuário decide na tela).
+- O fato posterior que muda o estado de um dia já registrado (a pesagem retroativa, a transferência retroativa da mãe, a raça
+  da mãe editada) não muda o derivado do original na correção sem mudança (tabela B); a contagem do estoque é a exceção pelo
+  desenho: o movimento que mudaria o saldo de um dia contado é recusado (seção 44).
+
+### 50.6 Regras de desenho que valem também para a correção sem mudança
+
+- A política de avisos (`avisos_politica`): o aviso que ela bloqueia (BLOQUEIA) recusa todo comando, também a correção; a
+  carência na venda para abate (`CARENCIA_ATIVA`) bloqueia por padrão (seção 39).
+- O acerto de estoque de um produto que deixou de controlar o estoque é recusado (`PRODUTO_SEM_ESTOQUE`, seção 45).
+- O lançamento com competência dentro do período fechado pede a justificativa (`PERIODO_BLOQUEADO`, `justificativa_aviso`):
+  aceito com ela.
+- A linha de touro (o macho do lote da exposição, o touro do rebanho na cobertura) é de um macho pelo cadastro: a verificação
+  de integridade acusa a que não é (GENEALOGIA, `TOURO_LINHA`), e a trava recusa a correção de cadastro que tiraria o sexo do
+  touro de um lote com vários touros (com um touro só, o `touro_id` do registro já era conferido). Sem isso, a correção sem
+  mudança da exposição refaria o animal como fêmea exposta.
+- O pasto do lote da compra só recebe os animais sem pasto próprio: com todos de pasto próprio, ele não é gravado, e estar
+  desativado depois não recusa a correção. O parto só de natimorto não pede nem confere o pasto da mãe.
+- Com outra data, as conferências pelo estado de hoje voltam a valer (o valor de antes do ajuste, o VALOR_IGUAL e as do brinco
+  lançado errado são refeitos na posição nova).
+
+### 50.7 O oráculo da correção (`tests/apoio-fuzz.js`, `oraculoCorrecao`)
+
+Num passo sorteado por um gerador à parte (12% dos passos a partir do 4º; as sequências das sementes não mudam), com o estado
+inteiro do sistema guardado (`gas.estado.salvar()` e `restaurar()`, nos fakes da planilha e do Drive) e devolvido no fim:
+
+1. de 1 a 4 mudanças de cadastro (`cadastroDaCorrecao`): do produto usado (nome, fabricante, carência padrão, custo, categoria,
+   fator, controle de estoque, doses padrão, ativo), do protocolo usado (intervalo, recorrência, nome, idade, ativo,
+   procedimento), dos parâmetros (gestação, desmama, arroba, rendimento, validade do peso, UA, brinco, idade reprodutiva, faixas
+   do GMD, tolerância, peso ao nascer), da política de avisos, do período fechado, da categoria, do pasto, do parceiro, do item
+   de lista, da estação e da propriedade;
+2. até 4 eventos que valem, de tipos diferentes; para cada um, a entrada sem mudança do servidor (`evento.obter`: `correcao`) e
+   a do gerador (o pedido como foi aceito no registro: o reenvio de um cliente da API);
+3. (b1) a correção sem mudança por cada entrada: aceita ou recusada só pela seção 50.6; os fatos do substituto = os do original
+   sem os metadados; nenhum outro registro mudou; ANIMAIS e PRODUTOS iguais;
+4. (b4) numa das correções, a bateria da viagem no tempo em hoje e na data do evento, e a lista dos lançamentos que valem: antes
+   = depois, com os identificadores das linhas de detalhe como metadados e o do substituto lido como o do original;
+5. (b2, b3) a correção de um campo só (`dados.mudanca`): a anotação, o responsável, a observação de um animal — fora o campo,
+   nada muda, linha a linha e coluna a coluna — e a data — as cópias congeladas e o que não depende dela ficam (o produto, o
+   nome, o fabricante, a carência, o custo, a conta e a descrição do consumo, o fator e o movimento da entrada de estoque, a raça
+   das crias, o nome do tipo nas deduções, os animais e as observações), e a próxima aplicação é a data nova mais o intervalo
+   congelado.
+
+A cobertura sai em `F.COBERTURA` (`correção: sem mudança aceita`, `… (servidor)`, `… (gerador)`, `correção: recusa documentada
+da correção sem mudança`, `correção: consultas conferidas depois da correção sem mudança`, `correção: mudança de um campo
+aceita`, `… (a data)`); as sementes fixas de `tests/fase2.fuzz.test.js` exigem que cada uma tenha conferido algo.
+
+### 50.8 Defeitos achados e consertados
+
+Cada um com um teste em `tests/correcao.regressoes.test.js` que falha com o `src/` de antes desta etapa (`b8c513b`) e passa
+agora; o conserto está no ponto único (a linha da tabela B, ou a regra que só o estado de hoje quebrava).
+
+| # | Defeito (o que a correção sem mudança fazia) | Gravidade | Conserto |
+|---|---|---|---|
+| 1 | a aplicação refazia a conta e a descrição do consumo pela categoria de hoje do produto ("Consumo de vacina" virava "Consumo de medicamento", noutra conta) | ALTA | `SANIDADE.conta_consumo`, `SANIDADE.rotulo_consumo` |
+| 2 | a compra do insumo refazia a descrição pelo nome de hoje do produto | BAIXA | `ESTOQUE.nome_produto` |
+| 3 | o protocolo que deixou de ser "a cada N dias" apagava a próxima aplicação proposta (e a correção da data não a refazia) | ALTA | `SANIDADE.recorrencia_protocolo` (payload `recorrencia_protocolo`) |
+| 4 | o parto refazia o pasto das crias pela linha do tempo de hoje da mãe (e era recusado, ORIGEM_DIVERGENTE, quando a cria já tinha saído do pasto do parto) | ALTA | `NASCIMENTO.pasto_crias` |
+| 5 | o parto refazia a raça da cria pela raça de hoje da mãe | MEDIA | `NASCIMENTO.raca_cria` |
+| 6 | a venda sem o peso de cada animal refazia a divisão estimada pela pesagem retroativa lançada depois (o valor de cada animal mudava) | ALTA | `VENDA.bases_estimadas` (`FinancialService.negociacao`: `bases_congeladas`) |
+| 7 | a dedução da venda refazia a descrição proposta pelo nome de hoje do tipo na lista | BAIXA | `VENDA.rotulo_deducao` |
+| 8 | a correção de cadastro era recusada (VALOR_IGUAL) quando o estado de hoje já tinha o valor novo, e o valor de antes era refeito | MEDIA | `AJUSTE.valor_anterior` |
+| 9 | a prévia da correção era montada no cliente, tipo a tipo (com a soma do intervalo para a próxima aplicação), e não havia correção só com a mudança | MEDIA | `Correcao.entrada` em `evento.obter`; `dados.mudanca` |
+| 10 | o parto só de natimorto com o pai informado não gravava a certeza do pai (recusado: "Preencha Pai é"), e pedia ou conferia o pasto da mãe (recusado com o pasto dela desativado) | MEDIA | payload `pai_confianca`; o pasto da mãe só com cria viva |
+| 11 | a correção de cadastro para "não castrado" seguida de uma castração era recusada (CASTRACAO_REPETIDA): o castrado de origem depois do comando não contava o próprio comando | MEDIA | `ReproductionService.castradoDeOrigem(f, id, plano)` |
+| 12 | a identificação feita com o reuso de brinco ligado (ou com letra no brinco) era recusada depois de mudar o parâmetro (BRINCO_APOSENTADO, BRINCO_NAO_NUMERICO) | MEDIA | `IDENTIFICACAO.brinco` (regra) |
+| 13 | a correção de cadastro que apagou o nascimento perdia a linha da certeza apagada junto quando o cadastro de hoje já não a tinha | MEDIA | `AJUSTE.valor_anterior` também na certeza apagada |
+| 14 | a compra cujo pasto do lote nenhum animal usou era recusada depois de desativar esse pasto (PASTO_INATIVO) | BAIXA | o pasto do lote conferido só quando recebe animal |
+| 15 | o acerto de brinco lançado errado era recusado (ANTES_DA_IDENTIFICACAO) depois de uma troca posterior do brinco | MEDIA | `AJUSTE.valor_anterior`: as conferências pelo brinco de hoje não se aplicam ao mesmo acerto |
+| 16 | a correção do sexo de um dos touros de um lote com vários touros era aceita, e a correção sem mudança da exposição refazia o animal como fêmea exposta | MEDIA | a linha de touro é de um macho (integridade, GENEALOGIA `TOURO_LINHA`; a trava recusa) |
+| 17 | o lançamento sem a propriedade ia para a propriedade padrão de hoje | MEDIA | `EVENTO.propriedade` |
+
+### 50.9 Decisões
+
+- O valor de antes do ajuste depende também da data: sem mudar a data, a correção mantém o do original (e o VALOR_IGUAL e as
+  conferências pelo brinco de hoje não se aplicam); com outra data, ele é refeito na posição nova, como no registro
+  (`tests/correcao.contrato.test.js`).
+- Os campos que a tela preenche pelo produto (carência, lote, validade, modo e dose de referência) são informados: a entrada sem
+  mudança os leva como foram gravados, e trocar só o produto não os troca — o usuário vê e decide (o nome, o fabricante, o custo,
+  a conta e o nome da categoria no consumo passam a ser os do cadastro de hoje do produto novo: `tests/correcao.contrato.test.js`).
+- O nascimento estimado pela idade em meses fica como data (ESTIMADA): a entrada leva a data gravada, e a correção da data do
+  lançamento não a move.
+- O papel do animal no lote da exposição segue o sexo do cadastro; a correção de cadastro que tiraria o sexo de um touro de um
+  lote gravado é recusada pela trava (com o caminho: corrigir antes a exposição), em vez de a exposição guardar uma fêmea como
+  touro.
+- A entrada do gerador do teste aleatório (o pedido como foi aceito no registro) também é conferida em (b1): o reenvio de um
+  cliente da API pode trazer campos vazios que o servidor completa (a propriedade, a certeza do pai no parto só de natimorto) ou
+  sem efeito gravado (o pasto do lote que nenhum animal usou); o contrato vale para ele também.
+- Metadados no oráculo: os identificadores das linhas de detalhe nas respostas das consultas (`weight_id`, `health_id`,
+  `financial_id`, `weight_de`, `weight_ate` e outros), o `event_id` do substituto lido como o do original, os anexos que valem
+  (os removidos ficam no original, como histórico) e, no payload, `justificativa` e `avisos_aceitos`.

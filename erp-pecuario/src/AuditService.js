@@ -400,6 +400,7 @@ var AuditService = (function () {
   var RESOLVER_FONTE = 'Este lançamento refaria a situação a partir desses dados, como se estivessem certos. Restaure o backup ou investigue a edição manual da planilha antes de lançar para eles.';
   var RESOLVER_CRIA_EM_DOBRO = 'O parto de um animal que já está no cadastro não se lança: a mãe e o nascimento dele ficam no cadastro. Se o parto antigo já foi gravado, estorne-o ou desfaça a importação dele; para pôr no rebanho inicial a cria de um parto antigo, lance "Outra entrada" dela datada do marco zero, em vez de cadastrar um animal novo.';
   var RESOLVER_FEMEA = 'O registro reprodutivo é de uma fêmea nascida antes dele: confira o sexo e o nascimento, ou corrija antes o lançamento que gravou o registro.';
+  var RESOLVER_TOURO_LINHA = 'O touro de uma exposição ou de uma cobertura é macho: confira o sexo do animal, ou corrija antes o lançamento (tire o animal do lote ou troque o touro).';
   /** Detalhes com data que citam o animal sem linha em EVENTO_ANIMAIS (edição à mão): a data de cada um. */
   var DETALHES_DO_ANIMAL = Object.freeze({ IDENTIFICACOES: 'data_inicio', PESAGENS: 'data_pesagem', REPRODUCAO: 'data' });
 
@@ -1098,6 +1099,20 @@ var AuditService = (function () {
           col.achado('GENEALOGIA', { tabela: 'REPRODUCAO', id: r.reproduction_id, campo: 'animal_id', mensagem: 'O registro reprodutivo de ' + br_(r.data) + ' é de ' + nome(m.animal_id) + ', que nasceu em ' + br_(m.data_nascimento) + ', não antes dele.',
             oque: 'O registro reprodutivo de ' + br_(r.data) + ' é de ' + nome(m.animal_id) + ', que ficaria nascida em ' + br_(m.data_nascimento) + ', não antes dele.', chaves: 'FEMEA|' + r.reproduction_id + '|NASCIMENTO|' + m.animal_id, event_id: r.event_id, animal_id: m.animal_id, resolver: RESOLVER_FEMEA });
         }
+      });
+    }
+    // A linha de touro (o macho do lote da exposição; o touro do rebanho na cobertura) é de um macho pelo cadastro (RN-060). Com
+    // vários touros no lote o registro da fêmea fica sem touro, e a correção do sexo de um deles deixaria uma fêmea como touro
+    // — que a correção sem mudança da exposição refaria como fêmea exposta (CONTRATOS, seção 50).
+    if (tx.repo.carregada('EVENTO_ANIMAIS')) {
+      tx.repo.vigentes('EVENTO_ANIMAIS').forEach(function (l) {
+        if (l.papel !== 'TOURO' || (esc && !esc.genealogia[l.animal_id])) return;
+        var t = vale[l.animal_id];
+        if (!t || t.sexo === 'M') return;
+        var ev = tx.repo.porId('EVENTOS', l.event_id) || {};
+        var oque = (ev.event_subtype === 'COBERTURA' ? 'A cobertura de ' : 'A exposição de ') + br_(ev.event_date) + ' tem ' + nome(l.animal_id) + ' como touro';
+        col.achado('GENEALOGIA', { tabela: 'EVENTO_ANIMAIS', id: l.event_animal_id, campo: 'animal_id', mensagem: oque + ', que não é macho pelo cadastro.',
+          oque: oque + ', que passaria a ser ' + (t.sexo === 'F' ? 'fêmea' : 'de sexo desconhecido') + '.', chaves: 'TOURO_LINHA|' + l.event_animal_id + '|SEXO|' + l.animal_id, event_id: l.event_id, animal_id: l.animal_id, resolver: RESOLVER_TOURO_LINHA });
       });
     }
     function cicloDe(id) {

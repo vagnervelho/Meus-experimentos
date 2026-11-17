@@ -53,6 +53,11 @@ var Correcao = (function () {
    * entradas de que o valor depende são as do original; `valor(c, novo)`: o valor do original ({v} ou null).
    */
   var CONGELADOS = {
+    // Todo tipo: a propriedade que o lançamento recebeu da configuração quando veio vazia.
+    'EVENTO.propriedade': {
+      tipo: 'todos', natureza: 'COPIA', de: 'CONFIGURACOES.propriedade_padrao_id (a propriedade vazia na entrada)', depende: 'a propriedade informada', grava: 'EVENTOS.property_id',
+      valor: function (c) { return vazio_(c.original.property_id) ? null : { v: c.original.property_id }; },
+    },
     // SANIDADE: as cópias do produto do cadastro (03b: nome_produto e periodo_carencia_dias, cópias congeladas; 03a,
     // MOVIMENTOS_ESTOQUE.custo_unitario: congelado no movimento) e do protocolo.
     'SANIDADE.nome_produto': {
@@ -131,6 +136,15 @@ var Correcao = (function () {
         return m ? { v: m[1] } : null;
       },
     },
+    // O brinco que o original dava ao animal (a primeira identificação, a troca, a criação, o brinco lançado errado): as regras
+    // do número novo que só o parâmetro de hoje quebraria não o recusam na correção.
+    'IDENTIFICACAO.brinco': {
+      tipo: 'IDENTIFICACAO', natureza: 'REGRA', de: 'CONFIGURACOES.brinco_somente_numerico e brinco_permite_reuso (as regras do número novo)', depende: 'o animal, o número', grava: 'IDENTIFICACOES (BRINCO)',
+      valor: function (c, n) {
+        var k = typeof n.chave === 'function' ? n.chave : function (x) { return Utils.normalizarBrinco(x); };
+        return !vazio_(n.codigo) && linhas_(c, 'IDENTIFICACOES').some(function (r) { return r.tipo === 'BRINCO' && r.animal_id === n.animal_id && k(r.codigo) === k(n.codigo); }) ? { v: true } : null;
+      },
+    },
     // REPRODUCAO e DESMAMA: o parâmetro mudado depois não recusa o fato que o original já tinha.
     'REPRODUCAO.idade_gestacional': {
       tipo: 'REPRODUCAO', natureza: 'REGRA', de: 'CONFIGURACOES.dias_gestacao (a faixa da idade da gestação)', depende: 'o animal, idade_gestacional_dias', grava: 'REPRODUCAO.idade_gestacional_dias',
@@ -157,11 +171,13 @@ var Correcao = (function () {
         return cria ? { v: nulo_((cria.atributos_iniciais_json || {}).raca) } : null;
       },
     },
-    // AJUSTE_INVENTARIO: o valor de antes que o ajuste gravou (o cadastro do animal na posição dele naquele dia) e a regra
-    // VALOR_IGUAL (o ajuste que o estado de hoje torna sem efeito continua sendo o fato gravado).
+    // AJUSTE_INVENTARIO: o valor de antes que o ajuste gravou (o cadastro do animal antes dele; na reclassificação, a categoria
+    // manual que valia logo antes da posição) e a regra VALOR_IGUAL (o ajuste que o estado de hoje torna sem efeito continua
+    // sendo o fato gravado). Com outra data, a posição é outra: refeito pelo estado, como no registro.
     'AJUSTE.valor_anterior': {
-      tipo: 'AJUSTE_INVENTARIO', natureza: 'DERIVADO', de: 'o cadastro do animal antes do ajuste (VALOR_IGUAL quando é o valor novo)', depende: 'o animal, o campo, o valor novo', grava: 'AJUSTES.valor_anterior',
+      tipo: 'AJUSTE_INVENTARIO', natureza: 'DERIVADO', de: 'o cadastro do animal antes do ajuste (VALOR_IGUAL quando é o valor novo)', depende: 'o animal, o campo, o valor novo, event_date', grava: 'AJUSTES.valor_anterior',
       valor: function (c, n) {
+        if (c.original.event_type !== 'AJUSTE_INVENTARIO' || c.original.event_date !== n.data) return null;
         var a = linhas_(c, 'AJUSTES').filter(function (x) { return x.animal_id === n.animal_id && x.campo === n.campo && nulo_(x.valor_novo) === nulo_(n.valor_novo); })[0];
         return a ? { v: nulo_(a.valor_anterior) } : null;
       },
@@ -434,7 +450,8 @@ var Correcao = (function () {
       // mãe e a data não mudam (CONGELADOS). Os digitados diferentes vêm como foram gravados.
       var pr = propostas || {};
       origem.pasto_destino_id = crias[0] ? proposto_(nulo_(crias[0].pasto_destino_id), nulo_(pr.pasto_destino_id)) : null;
-      origem.pai_id = rep.touro_id || at0.pai_id; origem.pai_confianca = at0.pai_confianca; origem.tipo_parto = rep.tipo_parto;
+      // A certeza do pai está nas crias vivas; no parto só de natimorto, no evento (payload `pai_confianca`).
+      origem.pai_id = rep.touro_id || at0.pai_id; origem.pai_confianca = at0.pai_confianca || payload.pai_confianca; origem.tipo_parto = rep.tipo_parto;
       out.animais = linhas.filter(function (l) { return l.papel === 'MATRIZ'; }).map(function (l) { return { animal_id: l.animal_id }; });
       out.crias = crias.map(function (l) {
         var at = l.atributos_iniciais_json || {};

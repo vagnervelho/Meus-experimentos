@@ -405,7 +405,7 @@ var EventService = (function () {
     if (tipo === 'TRANSFERENCIA') cabecalhoTransferencia_(m, ctxEv);
     if (tipo === 'IDENTIFICACAO') cabecalhoIdentificacao_(m, ctxEv);
     if (tipo === 'MARCACAO') cabecalhoMarcacao_(m, ctxEv);
-    if (tipo === 'COMPRA') cabecalhoCompra_(m, ctxEv);
+    if (tipo === 'COMPRA') cabecalhoCompra_(m, ctxEv, animais);
     if (tipo === 'VENDA') cabecalhoVenda_(m, ctxEv);
     if (tipo === 'PESAGEM') cabecalhoPesagem_(m, ctxEv, animais);
     if (tipo === 'SANIDADE') cabecalhoSanidade_(m, ctxEv);
@@ -503,7 +503,10 @@ var EventService = (function () {
       if (data < m.D0 && (EventCatalog.tipo(tipo).aceita_historico === true || importado)) historico = true;
       else if (data < m.D0) erroGeral_(m, 'event_date', 'ANTES_DO_MARCO_ZERO', 'A data ' + br_(data) + ' é anterior ao marco zero (' + br_(m.D0) + '): o rebanho só é controlado a partir dele.');
     }
-    var prop = vazio_(campos.property_id) ? m.params.propriedade_padrao_id : campos.property_id;
+    // A propriedade vazia é a padrão das configurações; na correção, a que o original gravou (a padrão de hoje pode ser outra:
+    // Correcao.congelado).
+    var propCong = vazio_(campos.property_id) ? Correcao.congelado(Correcao.contexto(m.repo, original), 'EVENTO.propriedade', {}) : null;
+    var prop = !vazio_(campos.property_id) ? campos.property_id : propCong ? propCong.v : m.params.propriedade_padrao_id;
     if (vazio_(prop)) erroGeral_(m, 'property_id', 'CAMPO_OBRIGATORIO', 'Escolha a propriedade (ou defina a propriedade padrão nas configurações).');
     else {
       var p = m.repo.porId('PROPRIEDADES', prop);
@@ -1591,7 +1594,11 @@ var EventService = (function () {
       var depoisRegs = ReproductionService.registros(m.f, id).concat(novos).sort(function (a, b) { return a.data < b.data ? -1 : a.data > b.data ? 1 : (a.ord - b.ord) || (a.seq - b.seq); });
       var gravado = m.real.animal(id) || e;
       var antes = ReproductionService.problemasDoAnimal({ linhas: m.real.linhas(id), regs: ReproductionService.registros(m.real, id), sexo: gravado.sexo, castradoOrigem: ReproductionService.castradoDeOrigem(m.real, id) });
-      var depois = ReproductionService.problemasDoAnimal({ linhas: m.f.linhas(id).concat(linhasNovas), regs: depoisRegs, sexo: it.final && it.final.sexo !== undefined ? it.final.sexo : e.sexo, castradoOrigem: ReproductionService.castradoDeOrigem(m.f, id) });
+      // Depois do comando, o castrado de origem conta também o que o comando grava (a correção de cadastro do campo e os
+      // atributos da criação): sem isso, a correção sem mudança da correção para "não castrado" veria repetida a castração
+      // lançada depois dela.
+      var castradoDepois = ReproductionService.castradoDeOrigem(m.f, id, { linhas: linhasNovas, ajustes: ctxEv.plano.AJUSTES, ord: ctxEv.ev.ordem_seq, seq: ctxEv.ev.event_seq });
+      var depois = ReproductionService.problemasDoAnimal({ linhas: m.f.linhas(id).concat(linhasNovas), regs: depoisRegs, sexo: it.final && it.final.sexo !== undefined ? it.final.sexo : e.sexo, castradoOrigem: castradoDepois });
       ReproductionService.problemasNovos(antes, depois).forEach(function (p) {
         if (p.event_id === ctxEv.ev.event_id) erroItem_(m, it, 'animal_id', p.codigo, p.mensagem);
         else conflito_(m, it, p, p.mensagem + ' Estorne ou corrija esse registro antes, ou mude este lançamento.');
@@ -1811,10 +1818,15 @@ var EventService = (function () {
     if (!Array.isArray(lista) || !lista.length) { erroGeral_(m, 'crias', 'SEM_CRIAS', 'Informe a cria do parto (nascida viva ou natimorta).'); return; }
     if (lista.length > MAX_CRIAS) { erroGeral_(m, 'crias', 'CRIAS_DEMAIS', 'Um parto aceita no máximo ' + MAX_CRIAS + ' crias.'); return; }
     var pasto = nulo_(c.pasto_destino_id);
+    // Só a cria viva vai para um pasto: sem ela, o pasto da mãe não é pedido nem conferido (o parto só de natimorto não grava
+    // pasto; a correção sem mudança dele não depende do pasto da mãe naquele dia nem do cadastro do pasto).
+    var comViva = lista.some(function (x) { return x && typeof x === 'object' && x.situacao_nascimento === 'VIVO'; });
     if (pasto) {
       var p = m.f.pasto(pasto);
       if (!p) erroGeral_(m, 'pasto_destino_id', 'NAO_ENCONTRADO', 'O pasto informado para as crias não existe.');
       else if (!hist && p.status !== 'ATIVO' && !usadoNoOriginal_(m, pasto)) erroGeral_(m, 'pasto_destino_id', 'PASTO_INATIVO', 'O pasto ' + p.nome + ' está desativado e não recebe animais.');
+    } else if (!comViva) {
+      pasto = null;
     } else if (mat && !hist && Correcao.congelado(ctxEv.correcao, 'NASCIMENTO.pasto_crias', { mae_id: mat.animal_id, data: ev.event_date })) {
       // Na correção com a mesma mãe e a mesma data, o pasto que o parto tirou da mãe naquele dia é o do original (o estado da
       // mãe mudado depois por outro lançamento não muda o parto: Correcao.congelado).
@@ -2033,7 +2045,7 @@ var EventService = (function () {
     if (!Utils.dataValida(ctxEv.ev.event_date)) return;
     // Na correção do mesmo ajuste, o valor de antes é o que o original gravou (Correcao.congelado): o estado mudado depois não
     // o refaz nem o torna VALOR_IGUAL.
-    var antCong = Correcao.congelado(ctxEv.correcao, 'AJUSTE.valor_anterior', { animal_id: it.animal_id, campo: 'categoria_manual_id', valor_novo: nova });
+    var antCong = Correcao.congelado(ctxEv.correcao, 'AJUSTE.valor_anterior', { animal_id: it.animal_id, campo: 'categoria_manual_id', valor_novo: nova, data: ctxEv.ev.event_date });
     var antes = antCong ? antCong.v : reclassificacaoAntes_(m, it.animal_id, posicao_(ctxEv.ev));
     if (antes === nova && !antCong) {
       var nomeAntes = cat ? cat.nome : '';
@@ -2105,7 +2117,7 @@ var EventService = (function () {
     var valor = valorCorrigido_(m, it, campo, def, texto);
     if (valor === undefined) return;
     var atual = e[campo] === undefined ? null : e[campo];
-    var antCong = Correcao.congelado(ctxEv.correcao, 'AJUSTE.valor_anterior', { animal_id: it.animal_id, campo: campo, valor_novo: textoCampo_(campo, valor) });
+    var antCong = Correcao.congelado(ctxEv.correcao, 'AJUSTE.valor_anterior', { animal_id: it.animal_id, campo: campo, valor_novo: textoCampo_(campo, valor), data: ctxEv.ev.event_date });
     if (!antCong && textoCampo_(campo, atual) === textoCampo_(campo, valor)) { erroItem_(m, it, 'valor_novo', 'VALOR_IGUAL', 'o valor informado em "' + def.rotulo + '" já é o que está no cadastro.'); return; }
     g.campos[campo] = valor;
     ajusteRow_(m, ctxEv, it, campo, antCong ? antCong.v : textoCampo_(campo, atual), textoCampo_(campo, valor));
@@ -2164,8 +2176,11 @@ var EventService = (function () {
       if (fim.sexo === 'M' && fim.castrado === true && fim.reprodutor === true && (g.campos.castrado !== undefined || g.campos.reprodutor !== undefined)) erroItem_(m, it, 'campo', 'CASTRADO_REPRODUTOR', 'animal castrado não pode ser reprodutor.');
       // Apagar a mãe, o pai ou uma data apaga também a confiança (que deixaria de ter a que se referir).
       [['mae_id', 'mae_confianca'], ['pai_id', 'pai_confianca'], ['data_nascimento', 'data_nascimento_confianca']].forEach(function (par) {
-        if (g.campos[par[0]] === null && g.campos[par[1]] === undefined && !vazio_(e[par[1]])) {
-          ajusteRow_(m, ctxEv, it, par[1], textoCampo_(par[1], e[par[1]]), null);
+        // Na correção do mesmo ajuste, a confiança que o original apagou junto continua apagada com o valor de antes que ele
+        // gravou, mesmo que o cadastro de hoje já não a tenha (Correcao.congelado).
+        var confCong = g.campos[par[0]] === null && g.campos[par[1]] === undefined ? Correcao.congelado(ctxEv.correcao, 'AJUSTE.valor_anterior', { animal_id: id, campo: par[1], valor_novo: null, data: ctxEv.ev.event_date }) : null;
+        if (g.campos[par[0]] === null && g.campos[par[1]] === undefined && (confCong || !vazio_(e[par[1]]))) {
+          ajusteRow_(m, ctxEv, it, par[1], confCong ? confCong.v : textoCampo_(par[1], e[par[1]]), null);
           fim[par[1]] = null;
         }
         if (!vazio_(fim[par[0]]) && vazio_(fim[par[1]])) erroItem_(m, it, par[1], 'CAMPO_OBRIGATORIO', 'informe também "' + par[1] + '".');
@@ -2183,19 +2198,25 @@ var EventService = (function () {
     var novo = it.dados.brinco;
     if (vazio_(novo)) return;
     var codigo = Utils.aparar(novo);
-    if (vazio_(e.brinco)) { erroItem_(m, it, 'brinco', 'SEM_BRINCO', 'o animal não tem brinco para corrigir; o primeiro brinco é colocado pelo lançamento de identificação.'); return; }
-    var antCong = Correcao.congelado(ctxEv.correcao, 'AJUSTE.valor_anterior', { animal_id: it.animal_id, campo: 'brinco', valor_novo: codigo });
-    if (!antCong && Utils.normalizarBrinco(codigo) === e.brinco_norm) { erroItem_(m, it, 'brinco', 'VALOR_IGUAL', 'o brinco informado é o mesmo que já está no cadastro.'); return; }
-    var aberta = m.f.identificacoes(it.animal_id).filter(function (r) { return r.tipo === 'BRINCO' && r.codigo_norm === e.brinco_norm; });
-    // A correção vem depois do lançamento do brinco que está no cadastro, na ordem canônica: no mesmo dia, pela posição
-    // (o substituto fica no lugar do original, desenho-base 16.1; antes de uma troca do mesmo dia, ele corrigiria um
-    // número que a troca ainda não tinha posto, e a troca continuaria valendo depois dele).
-    var pos = posicao_(ctxEv.ev);
-    var antes = aberta.some(function (r) {
-      var evr = m.f.evento(r.event_id);
-      return antesDe_(pos, { data: r.data_inicio, ordem_seq: evr ? m.f.ordemSeq(r.event_id) : 0, event_seq: evr ? evr.event_seq : 0 });
-    });
-    if (antes) { erroItem_(m, it, 'brinco', 'ANTES_DA_IDENTIFICACAO', 'a correção precisa vir depois do lançamento do brinco ' + e.brinco + ', que está no cadastro desde ' + br_(aberta[0].data_inicio) + '.'); return; }
+    // Na correção do mesmo ajuste (o mesmo animal, o mesmo número novo, a mesma data), o número trocado é o que o original
+    // gravou (Correcao.congelado), e as conferências pelo brinco de hoje — sem brinco, o mesmo número, o brinco lançado depois
+    // do ajuste — não se aplicam: a troca posterior do brinco não desfaz o acerto daquele dia (a verificação de integridade
+    // confere o número trocado contra o brinco em uso na data).
+    var antCong = Correcao.congelado(ctxEv.correcao, 'AJUSTE.valor_anterior', { animal_id: it.animal_id, campo: 'brinco', valor_novo: codigo, data: ctxEv.ev.event_date });
+    if (!antCong) {
+      if (vazio_(e.brinco)) { erroItem_(m, it, 'brinco', 'SEM_BRINCO', 'o animal não tem brinco para corrigir; o primeiro brinco é colocado pelo lançamento de identificação.'); return; }
+      if (Utils.normalizarBrinco(codigo) === e.brinco_norm) { erroItem_(m, it, 'brinco', 'VALOR_IGUAL', 'o brinco informado é o mesmo que já está no cadastro.'); return; }
+      var aberta = m.f.identificacoes(it.animal_id).filter(function (r) { return r.tipo === 'BRINCO' && r.codigo_norm === e.brinco_norm; });
+      // A correção vem depois do lançamento do brinco que está no cadastro, na ordem canônica: no mesmo dia, pela posição
+      // (o substituto fica no lugar do original, desenho-base 16.1; antes de uma troca do mesmo dia, ele corrigiria um
+      // número que a troca ainda não tinha posto, e a troca continuaria valendo depois dele).
+      var pos = posicao_(ctxEv.ev);
+      var antes = aberta.some(function (r) {
+        var evr = m.f.evento(r.event_id);
+        return antesDe_(pos, { data: r.data_inicio, ordem_seq: evr ? m.f.ordemSeq(r.event_id) : 0, event_seq: evr ? evr.event_seq : 0 });
+      });
+      if (antes) { erroItem_(m, it, 'brinco', 'ANTES_DA_IDENTIFICACAO', 'a correção precisa vir depois do lançamento do brinco ' + e.brinco + ', que está no cadastro desde ' + br_(aberta[0].data_inicio) + '.'); return; }
+    }
     linhaEA_(m, ctxEv, it, { efeito_inventario: 0 });
     ajusteRow_(m, ctxEv, it, 'brinco', antCong ? antCong.v : e.brinco, codigo);
     it.brincoTexto = codigo;
@@ -2229,7 +2250,7 @@ var EventService = (function () {
       erroItem_(m, it, 'pasto_origem_id', 'ORIGEM_DIVERGENTE', 'em ' + br_(data) + ' o sistema registrava o animal no pasto ' + nomePasto_(m, origem) + ', não no ' + nomePasto_(m, d.pasto_origem_id) + '. Confira a origem ou tire o animal da lista.');
       return;
     }
-    var antCong = Correcao.congelado(ctxEv.correcao, 'AJUSTE.valor_anterior', { animal_id: it.animal_id, campo: 'pasto_atual_id', valor_novo: d.pasto_destino_id });
+    var antCong = Correcao.congelado(ctxEv.correcao, 'AJUSTE.valor_anterior', { animal_id: it.animal_id, campo: 'pasto_atual_id', valor_novo: d.pasto_destino_id, data: data });
     if (!antCong && d.pasto_destino_id === origem) { erroItem_(m, it, 'pasto_destino_id', 'VALOR_IGUAL', 'o animal já está registrado no pasto ' + nomePasto_(m, origem) + '.'); return; }
     if (!pastoAtivo_(m, it, 'pasto_destino_id', d.pasto_destino_id)) return;
     linhaEA_(m, ctxEv, it, { efeito_inventario: 0, pasto_origem_id: origem, pasto_destino_id: d.pasto_destino_id });
@@ -2286,17 +2307,14 @@ var EventService = (function () {
       var e = estado_(m, it.animal_id);
       if (e && !vazio_(e.brinco) && chave(e.brinco) !== chave(it.brincoProposto.codigo)) saem[chave(e.brinco)] = it;
     });
-    // Na correção de quem criou o animal, o brinco de criação igual ao do original não é proposta nova (RN-045: corrigir
-    // só valores nunca é bloqueado): o número pode ter sido acertado depois (brinco lançado errado, desenho-base 16.2) ou
-    // trocado e reaproveitado por outro animal; se a nova data o deixaria em dois animais, conferirPeriodosDeBrinco_ acusa.
-    var doOriginal = {};
-    if (ctxEv.original) {
-      m.repo.por('IDENTIFICACOES', 'event_id', ctxEv.original.event_id).forEach(function (r) { if (r.tipo === 'BRINCO') doOriginal[r.animal_id + '|' + chave(r.codigo)] = true; });
-    }
+    // Na correção, o brinco que o original já dava ao mesmo animal não é proposta nova (RN-045: corrigir só valores nunca é
+    // bloqueado; Correcao.congelado): as regras do número que só o parâmetro de hoje quebraria (só números, reuso desligado)
+    // não o recusam; o número pode ter sido acertado depois (brinco lançado errado, desenho-base 16.2) ou trocado e
+    // reaproveitado por outro animal; se a nova data o deixaria em dois animais, conferirPeriodosDeBrinco_ acusa.
     var noEvento = {};
     propostos.forEach(function (it) {
       var b = it.brincoProposto;
-      var mantido = (it.reusado || ctxEv.criadosOriginal[it.animal_id]) && doOriginal[it.animal_id + '|' + chave(b.codigo)];
+      var mantido = !!it.animal_id && !!Correcao.congelado(ctxEv.correcao, 'IDENTIFICACAO.brinco', { animal_id: it.animal_id, codigo: b.codigo, chave: chave });
       if (!mantido && m.params.brinco_somente_numerico === true && !/^\d+$/.test(b.codigo.replace(/\s+/g, ''))) {
         erroItem_(m, it, 'brinco', 'BRINCO_NAO_NUMERICO', 'o brinco precisa ter só números.');
         return;
@@ -3253,14 +3271,18 @@ var EventService = (function () {
     if (p.ativo === false && !ctxEv.parceirosOriginal[id]) { erroGeral_(m, campo, 'PARCEIRO_INATIVO', (prefixo || '') + 'O parceiro ' + p.nome + ' está desativado. Reative-o nas configurações ou escolha outro.'); return false; }
     return true;
   }
-  /** Cabeçalho da compra: fornecedor e pasto de destino do lote. */
-  function cabecalhoCompra_(m, ctxEv) {
+  /**
+   * Cabeçalho da compra: fornecedor e pasto de destino do lote. O pasto do lote só recebe os animais sem pasto próprio: com
+   * todos de pasto próprio ele não recebe ninguém, não fica gravado, e estar desativado não recusa o lançamento.
+   */
+  function cabecalhoCompra_(m, ctxEv, animais) {
     var c = ctxEv.campos;
     parceiroValido_(m, ctxEv, 'partner_id', c.partner_id);
     if (!vazio_(c.pasto_destino_id)) {
       var p = m.f.pasto(c.pasto_destino_id);
+      var recebe = !Array.isArray(animais) || animais.some(function (a) { return !a || typeof a !== 'object' || vazio_(a.pasto_destino_id); });
       if (!p) erroGeral_(m, 'pasto_destino_id', 'NAO_ENCONTRADO', 'O pasto de destino não existe.');
-      else if (p.status !== 'ATIVO' && ctxEv.ev.pre_marco_zero !== true && !usadoNoOriginal_(m, p.pasture_id)) erroGeral_(m, 'pasto_destino_id', 'PASTO_INATIVO', 'O pasto ' + p.nome + ' está desativado e não recebe animais.');
+      else if (recebe && p.status !== 'ATIVO' && ctxEv.ev.pre_marco_zero !== true && !usadoNoOriginal_(m, p.pasture_id)) erroGeral_(m, 'pasto_destino_id', 'PASTO_INATIVO', 'O pasto ' + p.nome + ' está desativado e não recebe animais.');
     }
   }
   function plural_(n, um, varios) {
@@ -3888,6 +3910,9 @@ var EventService = (function () {
       // Castração e ocorrência (03b, seção 2.6): o método (texto livre) e o tipo da ocorrência (LISTAS.TIPO_OCORRENCIA).
       metodo: ctxEv.tipo === 'CASTRACAO' && typeof ctxEv.campos.metodo === 'string' ? nulo_(Utils.aparar(ctxEv.campos.metodo)) : null,
       tipo_ocorrencia: ctxEv.tipo === 'OCORRENCIA' ? nulo_(ctxEv.campos.tipo_ocorrencia) : null,
+      // Parto sem cria viva com o pai informado: a certeza do pai (obrigatória com ele) não fica em cria nenhuma; fica no evento,
+      // para a correção sem mudança (Correcao.entrada) levá-la como foi digitada.
+      pai_confianca: ctxEv.tipo === 'NASCIMENTO' && ctxEv.parto && !ctxEv.parto.nascidos_vivos && !vazio_(ctxEv.campos.pai_id) ? nulo_(ctxEv.campos.pai_confianca) : null,
     };
     ev.payload_json = payload_(m, ctxEv, extra);
     var itensPorAnimal = {};

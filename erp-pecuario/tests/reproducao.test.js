@@ -264,13 +264,15 @@ test('integridade e trava (a mesma função): colunas do registro fora do tipo, 
   // A trava recusa lançar para a fêmea cuja fonte está quebrada (a reconstrução partiria dela).
   const pes = { tipo: 'PESAGEM', campos: { event_date: '2026-05-10', tipo_pesagem: 'ROTINA', metodo_pesagem: 'BALANCA' }, animais: [{ animal_id: ids['101'], peso: 400 }] };
   assert.deepEqual(cods(recusa(api(s, 'evento.registrar', pes, 'p-trava'), 'CONFLICT')), ['INTEGRIDADE_COPIAS']);
-  // De volta (a planilha restaurada): a correção de cadastro que tornaria o touro castrado de origem é recusada pela trava.
+  // De volta (a planilha restaurada): a correção de cadastro que tornaria o touro castrado de origem é recusada — já pelo
+  // motor, com o código da regra (o castrado de origem depois do comando conta a correção do próprio comando: CONTRATOS,
+  // seção 50); antes, só a trava a pegava (INTEGRIDADE_LINHA_DO_TEMPO), com a mesma mensagem.
   const s2 = S.sistema();
   s2.gas.clock.now = Date.parse('2026-06-01T15:00:00.000Z');
   const i2 = rebanho(s2, [S.bicho({ brinco: '904', sexo: 'M', data_nascimento: '2020-01-01', data_nascimento_confianca: 'CONFIRMADA' })]);
   ok(api(s2, 'evento.registrar', repro('COBERTURA', '2026-02-01', [i2['100']], { touro_id: i2['904'] }), 'c1'));
   const t = recusa(api(s2, 'evento.registrar', { tipo: 'AJUSTE_INVENTARIO', subtipo: 'CORRECAO_CADASTRO', campos: { event_date: '2026-05-01', justificativa: 'Era castrado' }, animais: [{ animal_id: i2['904'], campo: 'castrado', valor_novo: 'S' }] }, 'cc'), 'CONFLICT');
-  assert.deepEqual(cods(t), ['INTEGRIDADE_LINHA_DO_TEMPO']);
+  assert.deepEqual(cods(t), ['TOURO_CASTRADO']);
   assert.match(t.details[0].mensagem, /é o touro da cobertura de 01\/02\/2026, mas é castrado pelo cadastro/);
   // E a correção do sexo da fêmea do diagnóstico (GENEALOGIA: o registro reprodutivo é de uma fêmea).
   const g = recusa(api(s2, 'evento.registrar', { tipo: 'AJUSTE_INVENTARIO', subtipo: 'CORRECAO_CADASTRO', campos: { event_date: '2026-05-01', justificativa: 'Sexo errado' }, animais: [{ animal_id: i2['100'], campo: 'sexo', valor_novo: 'M' }] }, 'cs'), 'CONFLICT');
