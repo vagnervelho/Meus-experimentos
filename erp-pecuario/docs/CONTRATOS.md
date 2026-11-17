@@ -159,6 +159,13 @@ estimativa visual estimada no peso e na UA, o GMD da resposta pela conta da fich
 parâmetro, as pesagens de lote dentro do filtro, o produto sem custo avisado, e na tela o curral e o tronco pela posição e
 pelo brinco na data, o código interno, o "Desfazer" e o aviso geral, as telas do curral e do tronco trazidas pela Início e o
 "(parcial)" da tabela (seção 44).
+Fase 3, CONSERTO DA REVISÃO (rodada 3): a carência padrão do produto do cadastro, a contagem do estoque na posição dela dentro
+do dia, a revisão da correção que diz o que o servidor grava (`fora_do_estoque`, `porque_sem_custo`), o brinco na data com a
+identificação incorreta, a categoria e o último peso na data em `inventario.elegiveis`, as próximas doses da ficha e os partos
+da lista de Fêmeas pela mesma conta da agenda e da ficha, a mãe da desmama pela reconstrução na verificação, a recusa da morte
+da mãe com o caminho, o dia do cadastro do protocolo no fuso da fazenda, o `gmd_intervalo` e o rótulo único dos pastos, e na
+tela o curral e o tronco com o cabeçalho guardado por bloco, a recusa inesperada como pendência, a espera pela posição sem
+sinal, o código interno só escrito inteiro, o botão "Prenhe" e o "(parcial)" da lista da estação (seção 45).
 
 ## 1. Regras que valem para todo arquivo de `src/`
 
@@ -2993,8 +3000,10 @@ parte estimada da UA pelo rótulo da composição (`ua.rotulo`).
   linhas viram pendência com o motivo (com "Tirar"), a mensagem do servidor vai à área de status, e nada diz "sem sinal".
 - Com data passada e sem a posição do servidor (carregando ou sem sinal), o brinco não é resolvido pela posição de hoje: a linha
   fica pendente (`data-conferencia="SEM_POSICAO"`), a nota oferece "Tentar de novo" (`[data-posicao-tentar]`), e com a posição na
-  mão as linhas que esperavam são conferidas pela data. A conferência descreve o animal pelo dia (categoria, pasto e último peso
-  da posição); o tronco só mostra a situação reprodutiva no diagnóstico de hoje.
+  mão as linhas que esperavam são conferidas pela data. A data sem posição por motivo do servidor (antes do marco zero, sem marco
+  zero) não espera: o brinco é conferido pela lista de hoje e o servidor decide a data na gravação (a recusa geral da seção 43).
+  A conferência descreve o animal pelo dia (categoria, pasto e último peso da posição); o tronco só mostra a situação reprodutiva
+  no diagnóstico de hoje.
 - O código interno acha só o animal sem brinco na data, escrito inteiro (A-000004 ou 000004); o código de um animal com brinco
   fica "não encontrado", com o brinco dele na mensagem.
 - O botão "Prenhe" grava prenhe; do campo, só a idade da gestação ("p90") vai junto.

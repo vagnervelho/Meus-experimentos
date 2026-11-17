@@ -1585,7 +1585,8 @@ demonstração no cabeçalho de `scripts/medir-trava.js` (391 → 430, o que `np
 Cada achado tem teste por caminho que falha com o `src/` de antes da rodada (conferido rodando os testes novos sobre uma cópia
 do commit `e056bf6`: os 14 de Node e os 10 de navegador falham lá) e passa agora. Os testes ficam em
 `tests/revisao2.fase3.motor.test.js`, `tests/revisao2.fase3.zootecnia.test.js` e `tests/ui/revisao2.fase3.test.js`. Os 25
-foram corrigidos; seis são o mesmo defeito visto por duas lentes (1 e 4; 2 e 5; 6 e 11; 13 e 21; 15 e 23; 7, 16 e 22).
+foram corrigidos; seis grupos são o mesmo defeito visto por mais de uma lente (1 e 4; 2 e 5; 6 e 11; 13 e 21; 15 e 23; 7, 16
+e 22): 18 distintos.
 Contratos em `docs/CONTRATOS.md`, seção 44.
 
 - **Dose por peso congelada na correção** (achados 1 e 4; `EventService.doseDoOriginal_`): corrigir outro campo da aplicação por
@@ -1642,3 +1643,66 @@ Contratos em `docs/CONTRATOS.md`, seção 44.
   (286 s), página inicial com 448 KB de 450 KB; sob demanda, Import 48 KB, Weights 52 KB, Health 25 KB e Reproduction 58 KB de
   150 KB. Os 14 testes Node novos (`tests/revisao2.fase3.motor.test.js` e `tests/revisao2.fase3.zootecnia.test.js`) e os 10 de
   tela (`tests/ui/revisao2.fase3.test.js`) falham no código anterior (e056bf6) e passam agora.
+
+## 17/11/2026 — Fase 3, conserto da revisão (rodada 3: 25 achados, 5 altos, 14 médios e 6 baixos)
+
+Cada achado tem teste por caminho que falha com o `src/` de antes da rodada (conferido rodando os testes novos sobre uma cópia
+do commit `f2cb5fb`: os 14 de Node e os 13 de navegador falham lá) e passa agora. Os testes ficam em
+`tests/revisao3.fase3.motor.test.js`, `tests/revisao3.fase3.zootecnia.test.js` e `tests/ui/revisao3.fase3.test.js`. Os 25
+foram corrigidos; nenhum refutado nem adiado. Três pares são o mesmo defeito visto por duas lentes (8 e 25; 11 e 18; 21 e 23).
+Contratos em `docs/CONTRATOS.md`, seção 45.
+
+- **Carência padrão do produto** (achado 1; `EventService.cabecalhoSanidade_`): sem os dias informados, a aplicação com produto do
+  cadastro usa `carencia_padrao_dias` — no formulário, na API, na correção e na importação sem a coluna da carência; o 0 é "sem
+  carência". A venda para abate dentro dela volta a ser bloqueada (`CARENCIA_ATIVA`).
+- **Curral e tronco** (achados 2, 3, 4, 5, 9, 8/25, 22): "Mudar data, método ou pasto/estação" some assim que um bloco sai (é
+  refeito a cada desenho); cada bloco guarda o cabeçalho de quando foi criado e reenvia sempre o mesmo conteúdo; a recusa que não é
+  falta de sinal (IDEMPOTENCY_MISMATCH, DENIED, NOT_FOUND, INTERNAL) vira pendência com o motivo e a mensagem do servidor, sem
+  travar a fila. Com data passada e sem a posição do servidor (sem sinal), o brinco não é resolvido pela posição de hoje: a linha
+  fica pendente, "Tentar de novo" traz a posição e confere as que esperavam; com a data sem posição por motivo do servidor (antes do
+  marco zero), o servidor decide. O botão "Prenhe" grava prenhe. O código interno acha só o animal sem brinco na data (escrito
+  inteiro). A conferência com data passada descreve o animal naquele dia (`inventario.elegiveis` traz a categoria e o último peso
+  até a data). A linha gravada escreve o GMD com o intervalo dele (`resultadoDoEvento.gmd_intervalo`) e o porquê do GMD vazio
+  sempre que há anterior.
+- **Na data e mesma conta** (achados 6, 7, 11/18, 20): as próximas doses da ficha usam a entrada no rebanho da linha do tempo (a
+  da agenda); os partos da lista de Fêmeas são os da ficha (`contarPartos`); `Timeline.brincoEm` trata o número corrigido por
+  IDENTIFICACAO_INCORRETA como vigente desde o início do errado; a fêmea apta com NAO_APTA gravado aparece como "Sem histórico
+  reprodutivo" (e o filtro "Não apta" não a traz).
+- **Integridade e recusas** (achados 10, 12): a checagem da desmama lê a mãe pela reconstrução (a projeção mexida à mão é PROJECAO,
+  reparável); a morte ou venda retroativa da mãe posta na desmama diz o caminho que funciona (estornar a desmama, gravar, desmamar
+  de novo).
+- **Estoque e custo** (achados 16, 17, 19): a contagem vale na posição dela dentro do dia (a ordem de registro; o substituto no lugar
+  do original) — o movimento do mesmo dia gravado depois dela é aceito; o mesmo na correção da contagem, no estorno, na importação
+  e na verificação. A revisão da correção diz o que o servidor grava: a entrada sem movimento continua fora do saldo
+  (`fora_do_estoque`), e a aplicação gravada sem custo mantém o custo daquele dia (`consumo.porque_sem_custo`).
+- **Telas de indicadores e desempenho** (achados 13, 14, 15): a lista da estação diz "(parcial)" na natalidade, na desmama e na
+  mortalidade até a desmama, com o motivo do servidor; pastos com o mesmo nome em propriedades diferentes têm rótulo único
+  (`por_pasto[].rotulo`) e não se fundem no gráfico; "Comparar a curva" acha a vaca pelo brinco inteiro mesmo com bezerro sem
+  brinco.
+- **Fuso e textos** (achados 21/23, 24): o dia do cadastro do protocolo e o da mensagem de arquivo repetido na importação são os do
+  fuso da fazenda; o aviso de lotação diz de onde vem a parte estimada da UA (`ua.rotulo`).
+- **Teste aleatório** (`tests/apoio-fuzz.js`): oráculos novos da carência padrão do produto (no efeito da SANIDADE e na
+  importação), da contagem pela posição no dia, do intervalo do GMD da resposta da pesagem (GMD = ganho ÷ dias do mesmo
+  intervalo do modelo), das próximas doses da ficha iguais às pendências da agenda, dos partos da lista de Fêmeas iguais aos da
+  ficha, do rótulo único dos pastos no desempenho, do último peso na data em `inventario.elegiveis` e do dia do cadastro do
+  protocolo no fuso da fazenda; as interações novas "movimento do mesmo dia depois da contagem" e "aplicação sem os dias de
+  carência, com a carência do cadastro" (com o preparo de cada uma); as sementes fixas passam a 23 (entrou a 29: com as
+  interações novas no sorteio, nenhuma das 22 chegava à correção tardia com o cadastro mudado) e exigem também que a ficha ×
+  agenda, os partos, o último peso na data e o GMD da resposta confiram algo; `FUZZ_COBERTURA=1` imprime a cobertura dos
+  oráculos.
+- Testes anteriores ajustados ao contrato novo, sem enfraquecer: `tests/pesagem.test.js` (a resposta traz `gmd_intervalo`) e
+  `tests/pastures.test.js` (o aviso de lotação diz "UA estimada em parte: 1 cabeça(s) sem pesagem, pelo peso de referência da
+  categoria", o rótulo da composição).
+- Teste aleatório, 300 sementes novas de 100 passos no gerador final (2050000 a 2050299, três levas de 100 em paralelo, 712 a
+  759 s cada): 17.190 comandos aceitos, 10.199 recusados e 0 falhas; nelas, 22 aplicações com a carência do cadastro, 26
+  interações da carência e 13 do movimento depois da contagem (2 contagens corrigidas com movimento do mesmo dia gravado depois),
+  1.749 GMD de resposta conferidos (6 com o intervalo antes da pesagem anterior), 40.903 conferências ficha × agenda, 34.481 de
+  partos e 52.478 de último peso na data. Antes, 300 sementes (2040000 a 2040299) com o gerador intermediário (a edição de produto
+  também mudava a carência; voltou ao original para as sementes fixas manterem a cobertura): 17.587 aceitos, 10.013 recusados, 0
+  falhas; e duas levas de prova (2030000 a 2030011 e 2031000 a 2031015, 100 passos): 0 falhas.
+- Durante a rodada, um processo de salvamento automático fora desta sessão gravou commits intermediários ("salva revisão em
+  andamento"); esta etapa não fez commit nem push.
+- Verificado no fim: `npm test`, 837 testes, 837 aprovados e 0 falhas (826 s), com as 23 sementes fixas de 60 passos (826
+  aceitos, 443 recusados, 0 falhas); `npm run ui:check`, 158 testes, 158 aprovados e 0 falhas (309 s), página inicial com 448 KB
+  de 450 KB; sob demanda, Import 48 KB, Weights 55 KB, Health 25 KB e Reproduction 62 KB de 150 KB. No começo da etapa, antes de qualquer mudança (cópia do commit `f2cb5fb`): `npm test`,
+  823 testes, 823 aprovados e 0 falhas (698 s).
