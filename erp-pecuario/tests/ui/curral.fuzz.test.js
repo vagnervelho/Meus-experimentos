@@ -207,9 +207,11 @@ async function rodarSemente(semente, nAcoes, opcoes) {
       Object.keys(M.saiu).forEach((k) => {
         const b = blocoDe(c, k);
         const antes = M.saiu[k];
-        if (b) { if (antes === 'GRAVADO' && b.estado !== 'GRAVADO') e('o bloco ' + k + ' estava gravado e agora está ' + b.estado); return; }
-        const provou = rede.log.some((x) => x.chave === k && x.entregue && !x.resposta.ok && ['VALIDATION', 'CONFLICT', 'IDEMPOTENCY_MISMATCH'].indexOf(x.resposta.error.code) >= 0);
-        if (!provou) e('o bloco ' + k + ' saiu (' + antes + ') e o aparelho o desfez sem a recusa do servidor');
+        if (b && saiu(b)) { if (antes === 'GRAVADO' && b.estado !== 'GRAVADO') e('o bloco ' + k + ' estava gravado e agora está ' + b.estado); return; }
+        // Deixou de "ter saído" (desfeito, ou com aviso ou recusa): só a resposta do servidor que prova que a chave não foi
+        // gravada (o aviso, VALIDATION, CONFLICT) ou a chave já gravada (IDEMPOTENCY_MISMATCH) o explica.
+        const provou = rede.log.some((x) => x.chave === k && x.entregue && !x.resposta.ok && ['NEEDS_CONFIRMATION', 'VALIDATION', 'CONFLICT', 'IDEMPOTENCY_MISMATCH'].indexOf(x.resposta.error.code) >= 0);
+        if (!provou) e('o bloco ' + k + ' saiu (' + antes + ') e o aparelho ' + (b ? 'o pôs em ' + b.estado : 'o desfez') + ' sem a resposta do servidor');
         delete M.saiu[k];
       });
       c.blocos.forEach((b) => { if (saiu(b)) { M.saiu[b.chave] = b.estado; conta('bloco que saiu conferido'); } });
@@ -646,6 +648,7 @@ async function rodarSemente(semente, nAcoes, opcoes) {
   /** Sem localStorage, o rascunho adiado (1 s) chega ao servidor antes de a página ir embora (o operador não recarrega no mesmo instante). */
   async function assentarRascunho() {
     if (!semLS) return;
+    rede.falhas = rede.falhas.filter((f) => f.classe !== 'rascunho');
     if (rede.segurados.some((x) => /^rascunho\./.test(x.reg.rota))) { rede.soltar(false); await assentar(); }
     await avancar(1500);
     await assentar();
@@ -903,7 +906,8 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     if (integ.erros !== 0) falhar('a integridade tem ' + integ.erros + ' erro(s): ' + JSON.stringify(integ.checagens.filter((x) => x.situacao === 'ERRO')));
     s.conferirProjecoes('semente ' + semente);
     // Sem localStorage, o aviso de que o armazenamento do aparelho não está disponível é esperado (o rascunho vai ao servidor).
-    const errosConsole = a.estado.erros.filter((x) => !(semLS && /armazenamento local indisponível/.test(x)));
+    // E a falha registrada da gravação do rascunho no servidor que a rede do teste segurou além do prazo (a faixa avisa o operador).
+    const errosConsole = a.estado.erros.filter((x) => !(semLS && /armazenamento local indisponível|\[ERP\] rascunho no servidor: /.test(x)));
     if (errosConsole.length) falhar('erros no console: ' + errosConsole.join(' | '));
     cont.gravadas = (cont.gravadas || 0) + gravadas.size;
     cont.sementes = (cont.sementes || 0) + 1;

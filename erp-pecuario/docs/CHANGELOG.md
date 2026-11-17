@@ -1962,3 +1962,44 @@ contra um modelo, com as garantias da fila de lote escritas e conferidas a cada 
   diz que a recusa que não prova nada deixa o bloco com a chave, e a 45 aponta a mudança. `docs/fase-0/` não mudou.
 - Durante a etapa, o salvamento automático de fora dela gravou estados intermediários (commits `eefe77a`, `c80f3eb`, `a3af10e`,
   `c560bb0` e `63c3ddd`); esta etapa não fez commit nem push.
+
+## 17/11/2026 — Fase 3, conserto da revisão final (17 achados: 7 altos, 9 médios e 1 baixo)
+
+Por quê: a revisão final da Fase 3 achou de novo as duas classes que as rodadas anteriores repetiam — número ou estado numa data
+passada calculado com o dado de hoje, e o curral e o tronco com estados inconsistentes — e mais o fato congelado na correção que
+ainda copiava o cadastro de hoje. Cada achado foi reproduzido por teste que falha com o `src/` de antes (commit `11b744a`) e
+consertado pela causa, apoiado no estado em D (seção 46), no resolvedor único (seção 47) e no teste aleatório da tela (seção 48),
+estendidos onde o defeito escapou deles (`docs/CONTRATOS.md`, seção 49). Nenhum achado refutado nem adiado.
+
+- Data passada: a agenda do protocolo restrito a uma categoria vence no dia em que o animal entrou na categoria
+  (`AnimalService.naCategoriaDesde`; A CADA N DIAS nunca aplicado, CAMPANHA, ÚNICA; a ficha e o alerta da Início seguem a agenda);
+  o histórico de antes do marco zero cita o animal pelo número do marco zero (`Timeline.brincoNaData_`: o desempenho, a descrição
+  e os elegíveis iguais ao resolvedor); as mensagens do servidor citam o brinco da data do lançamento (`nomeNaData_`); os
+  indicadores anuais recusam o ano que ainda não começou na data (`DATA_FUTURA`); a agenda da tela usa o brinco da data que o
+  servidor manda; a lista de pastos de uma data mostra o pasto desativado depois que tinha animal nela; a prévia da correção da
+  aplicação reconhece a próxima proposta pelo intervalo congelado no payload.
+- Fato congelado na correção: com o mesmo produto, a carência (vazio = a do original, nunca a padrão de hoje), o nome e o
+  fabricante do original; o protocolo que o original cumpria continua aceito na correção sem mudança. Decisão: `protocolo.salvar`
+  recusa trocar o procedimento de um protocolo já cumprido (`PROTOCOLO_EM_USO`).
+- Números com o porquê verdadeiro: o vazio do GMD por categoria e por pasto explica que o ganho conta na categoria do início do
+  intervalo (ou nos pastos pelos dias), e a tela diz de onde vêm as cabeças e o ganho; o bezerro descartado antes da desmama conta
+  à parte (`descartados_ao_pe`), nunca como vendido ao pé.
+- Curral e tronco, garantia nova "o bloco que saiu é intocável no aparelho": `desfazerBloco` recusa o bloco que saiu; toda ação
+  confere a linha na hora do clique (o "Substituir o peso" refaz a pergunta se a anterior saiu ou foi gravada enquanto ela estava
+  na tela); a tela mostra o bloco saindo antes de guardar a chave no rascunho do servidor; "Mudar data" recusa mudar a sessão com
+  bloco que saiu. A conferência do brinco vale só na data em que o servidor deu o animal (a linha carimba essa data; mudar a sessão
+  zera a conferência). As pendentes vão na mesma pergunta da conferência e são resolvidas antes da decisão do repetido (o
+  resultado não depende da ordem das respostas; o tronco avisa a substituição); a pendente do animal que já tem pesagem gravada
+  pede "Está certo" ou "Tirar" sem barrar o envio das outras. A linha cita o brinco da data, e "Corrigir o resultado" confere o
+  texto digitado.
+- Testes novos: `tests/revisao.final.fase3.test.js` (8 testes) e `tests/ui/revisao.final.fase3.test.js` (13 testes); todos
+  falham com o `src/` de `11b744a` e passam agora. A regressão 6 de `tests/ui/curral.fuzz.regressoes.test.js` (instável: dependia
+  da ordem das respostas) passou para a sequência determinística das duas pendentes resolvidas juntas, com a mesma garantia.
+- Teste aleatório do motor (`tests/apoio-fuzz.js`): o modelo da agenda cobre os protocolos por categoria (a categoria do sistema e o
+  trecho nela por força bruta, dia a dia); o efeito da correção da aplicação espera as cópias do original (e confere o fabricante);
+  a correção tardia só aceita CARENCIA_ATIVA quando a carência do próprio original cobria a venda; o preparo muda também a carência
+  padrão, o nome, o fabricante e o procedimento do protocolo; `oraculoProcedimentoProtocolo` novo. As 23 sementes fixas dão as
+  mesmas sequências de antes.
+- Teste aleatório da tela (`tests/ui/curral.fuzz.test.js`): o oráculo confere a garantia nova a cada ação; ações novas (as respostas
+  chegam com a pergunta do repetido na tela; o brinco conferido sem lançar antes de mudar a sessão); 25% das sementes sem
+  `localStorage`, com o rascunho no servidor segurado enquanto o bloco sai (`apoio-curral`: classe de rota `rascunho`).

@@ -178,6 +178,12 @@ Fase 3, CONSERTO PELA GARANTIA (etapa 3, fuzz de interface do curral e do tronco
 usuário, falhas de rede decididas no Node e o modelo do que deve estar gravado e na fila (`tests/ui/curral.fuzz.test.js`,
 `tests/ui/apoio-curral.js`), as quatro garantias da fila de lote que ele confere e os consertos de `Weights` e `Reproduction`
 que ele achou (seção 48).
+Fase 3, CONSERTO DA REVISÃO FINAL (17 achados): a agenda do protocolo por categoria conta do dia em que o animal entrou nela
+(`AnimalService.naCategoriaDesde`), as cópias congeladas do cadastro na correção da aplicação (carência, nome, fabricante e o
+protocolo do original) e o procedimento do protocolo em uso que não muda, os indicadores anuais e o desempenho com o vazio
+explicado, o descarte ao pé à parte, o histórico de antes do marco zero pelo número do marco zero, a garantia nova da fila de
+lote ("o bloco que saiu é intocável no aparelho") com a conferência do brinco presa à data e as pendentes resolvidas na mesma
+pergunta, as telas pelo brinco da data, e os oráculos e o teste aleatório da tela estendidos onde os defeitos escaparam (seção 49).
 
 ## 1. Regras que valem para todo arquivo de `src/`
 
@@ -3312,8 +3318,93 @@ gravação vai para a A; 2: a falha interna no reenvio de um bloco já gravado n
 e o bloco não é conferido por outro caminho ao mesmo tempo; 5 (tronco): a recusa do servidor à conferência aparece na tela, nunca
 só no console; 6 (tronco): a linha pendente barrada por outra do mesmo animal entra na fila quando a outra é tirada.
 
-**O que o teste não cobre.** O rascunho no servidor (aparelho sem `localStorage`, gravação agrupada de 1 s), o "Pesar este" da
-lista dos que faltam, a escolha entre vários animais com o mesmo número na mesma data (o rebanho não tem esse caso), duas abas
+**O que o teste não cobre.** (O rascunho no servidor passou a ser coberto na seção 49: parte das sementes roda sem
+`localStorage`, com o rascunho segurado.) O "Pesar este" da lista dos que faltam, a escolha entre vários animais com o mesmo número na mesma data (o rebanho não tem esse caso), duas abas
 abertas na mesma sessão e o celular de verdade (o Chromium do Playwright com o mock de `google.script.run`; desenho-base, seção
 17, e o roteiro do modo curral na conta do dono).
 
+## 49. Conserto da revisão final da Fase 3 — `AnimalService` (`naCategoriaDesde`), `HealthService` (agenda, `protocolo.salvar`), `EventService` (cópias congeladas, `nomeNaData_`), `ReproductionService`, `WeightService`, `Timeline` (`brincoNaData_`), `Utils` (`completaMeses`), `Weights` (curral), `Reproduction` (tronco), `Events`, `Health`, `Pastures`; `tests/revisao.final.fase3.test.js`, `tests/ui/revisao.final.fase3.test.js`, `tests/apoio-fuzz.js`, `tests/ui/curral.fuzz.test.js`
+
+A revisão final da Fase 3 achou 17 defeitos (7 altos, 9 médios, 1 baixo) nas duas classes que as rodadas anteriores repetiam:
+número ou estado numa data passada calculado com o dado de hoje, e estados inconsistentes do curral e do tronco. Todos foram
+reproduzidos por teste que falha com o `src/` de antes (commit `11b744a`) e consertados pela causa; nenhum refutado ou adiado.
+
+**Data passada (o estado em D, seções 46 e 47).**
+
+- *Agenda do protocolo por categoria* (`HealthService.vencimento`, `elegibilidade`; 03a, seção 4.9; 05, seção 4.7). O "dia em
+  que se tornou elegível" é o maior entre a entrada no rebanho, o dia em que completa a idade mínima e, no protocolo restrito a
+  uma categoria, o dia em que o animal entrou na categoria que tem em D. `AnimalService.naCategoriaDesde(L, a, data, piso)`
+  acha o começo do trecho na mesma categoria que termina em D, nunca antes de `piso` (a entrada): a classificação (05, seção 4.9)
+  só muda no dia de um fato do animal (castração, parto, reclassificação, correção de cadastro, a cria nascida) ou no dia em que
+  ele completa a idade de um corte das categorias (`Utils.completaMeses`), e o trecho se acha voltando por esses dias até a véspera
+  ter outra categoria (memorizado no leitor). Vale para A CADA N DIAS nunca aplicado (o garrote vence no dia em que virou garrote),
+  CAMPANHA (a campanha passada antes de ela entrar na categoria não é devida), ÚNICA sem máxima (a mínima ou a entrada na
+  categoria, a maior) e a ÚNICA devida por quem passou da máxima. `perfilEm_` só calcula o trecho quando algum protocolo ativo é da
+  categoria do animal. A ficha (próximas doses) e o alerta da Início usam a mesma agenda.
+- *Histórico de antes do marco zero* (`Timeline.brincoNaData_`). Antes da primeira identificação, numa data anterior ao marco
+  zero, o número é o que o animal tinha no marco zero (05, seção 4.1; a regra (c) do resolvedor): o retrato, a descrição do
+  resolvedor, os elegíveis e as linhas do desempenho dão o mesmo brinco que o resolvedor acha (antes, null).
+- *Mensagens do servidor numa data passada* (`EventService.nomeNaData_`). O animal das mensagens do lançamento é citado pelo
+  brinco que tinha na data do evento, com o de hoje entre parênteses quando mudou ("0391 (hoje 0457): …").
+- *Indicadores anuais* (`ReproductionService.consultaIndicadores`). O ano depois do ano de D (hoje ou a data pedida) é recusado
+  com VALIDATION `DATA_FUTURA` no campo `ano` (antes, contava matrizes numa data que ainda não chegou e dava natalidade 0,0%).
+- *Telas* — a agenda (`Health.nomeAnimal`) mostra o brinco que o servidor mandou para a data (o de hoje entre parênteses quando
+  mudou); a lista de pastos numa data passada (`Pastures`) mostra o pasto desativado depois que tinha animal na data (as cabeças
+  por pasto fecham com o rebanho), mesmo sem "Mostrar pastos inativos"; a prévia da correção da aplicação (`Events`) reconhece a
+  próxima proposta pelo intervalo congelado no payload (`intervalo_protocolo_dias`) — só o registro antigo, sem ele, compara
+  com o intervalo de hoje do protocolo.
+
+**Fato congelado na correção (seção 43).** Na correção de uma aplicação com o mesmo produto do cadastro, as cópias feitas no
+lançamento são as do original (`EventService.sanidadeDoOriginal_`): o nome (`nome_produto`, 03b: cópia congelada; o formulário que
+manda o nome gravado também é aceito), o fabricante (vazio = o do original) e a carência (vazio = a do original, que pode ser
+nenhuma — nunca a padrão de hoje do produto; o 0 informado continua sendo "sem carência"). Com outro produto, o cadastro de hoje do
+outro. O protocolo que o original cumpria com o mesmo procedimento continua aceito na correção sem mudança mesmo que o cadastro dele
+tenha mudado de procedimento (`protocoloDoOriginal_`). **Decisão:** `protocolo.salvar` recusa trocar o `tipo_procedimento` de um
+protocolo já cumprido por alguma aplicação (`PROTOCOLO_EM_USO`, como a unidade do produto em uso): as aplicações contam na agenda
+pelo protocolo, e trocar o procedimento mudaria o que o fato passado cumpria. O protocolo nunca cumprido muda livremente.
+
+**Números com o porquê verdadeiro.** O vazio do GMD por categoria e por pasto (`WeightService.ganhoDoGrupo_`) diz que o ganho de
+cada intervalo conta na categoria do animal no início dele (ou nos pastos pelos dias passados em cada um), e o geral diz que são
+precisas duas pesagens individuais no rebanho com o intervalo mínimo — nunca "nenhum animal com duas pesagens" quando todos têm.
+A tela (`Weights`) diz, embaixo das tabelas, que as cabeças e o peso são do fim do período e o ganho do início dos intervalos. Nos
+indicadores da estação, o bezerro que saiu por DESCARTE antes da desmama (sacrifício, consumo, doação, permuta) conta à parte em
+`descartados_ao_pe` (07, seção 8.3: a mortalidade conta os mortos e os baixados por divergência; os vendidos ao pé à parte) —
+nunca como "vendido ao pé".
+
+**Curral e tronco: a garantia nova** (soma-se às quatro da seção 48):
+
+| Garantia | O que vale | Como o código garante |
+|---|---|---|
+| O bloco que saiu é intocável no aparelho | o bloco ENVIANDO, SEM_SINAL ou GRAVADO só muda pela resposta do servidor: nenhuma ação do operador o desfaz, tira, troca ou corrige uma linha dele, nem muda a sessão; a tela não oferece essas ações | `desfazerBloco` recusa o bloco que saiu (`saiu`); cada ação confere o estado da linha NA HORA DO CLIQUE (`mexivel`, `velho`): o botão desenhado antes que ficou velho não muda nada e redesenha; o "Substituir o peso" refaz a pergunta se a linha anterior saiu, foi gravada ou tirada enquanto a pergunta estava na tela; `enviarBloco` redesenha a tela antes de guardar a chave (no rascunho do servidor a gravação demora) e marca gravadas as linhas do bloco na hora da resposta; "Mudar data" e o formulário do começo recusam mudar a sessão com bloco que saiu |
+| A conferência vale só na data dela | o animal conferido no campo do brinco (`ui.atual`), a conferência em curso e a linha levam a data em que o servidor o deu (`at.data`, `dataAnimal`); mudar a sessão zera a conferência, e o lançamento numa data diferente confere de novo | `montarSessao`/`sessao` zeram `ui.atual`; `lancar_` confere de novo quando a data mudou; `adicionar` e a substituição carimbam `dataAnimal` com a data da conferência (a proteção de `naFila` vale de verdade) |
+| A decisão do repetido não depende da ordem das respostas | as linhas pendentes vão na mesma pergunta da conferência do brinco e são resolvidas ANTES da decisão (`aplicarEsperando`); a pendente barrada só pela outra linha do mesmo animal que ainda é do aparelho espera; a do animal que já tem linha que saiu pede a decisão de pesar de novo (curral: "Está certo" ou "Tirar", sem barrar o envio das outras) ou vai à fila como outro diagnóstico do mesmo dia (tronco, com a mensagem; o servidor confirma) | `conferir` manda `[texto].concat(textosEsperando())`; `resolverEsperando` usa o mesmo `aplicarEsperando`; o tronco avisa ("o novo resultado substituiu o anterior") quando substitui |
+| A linha pela data da sessão | a linha e a mensagem citam o brinco da data (o de hoje entre parênteses); "Corrigir o resultado" confere o texto digitado na linha | `rotuloLinha`; `ui.brinco.value = l.texto` |
+
+**Decisão (regressão 6 de `tests/ui/curral.fuzz.regressoes.test.js`).** A sequência da regressão dependia de a resposta da
+conferência chegar depois do Enter (falhava em 2 de 10 execuções). Com a pendente resolvida na mesma pergunta, ela passa a ser a
+de duas pendentes resolvidas juntas — a única em que a barreira "tire um dos dois" ainda aparece —, com a mesma garantia (a
+barrada entra na fila quando a outra é tirada); a ordem rápida e a lenta ficam fixadas no achado 13 de
+`tests/ui/revisao.final.fase3.test.js`, com o mesmo resultado nas duas.
+
+**Testes.** `tests/revisao.final.fase3.test.js` (8 testes de Node: achados 1, 2, 8, 9, 10, 11, 16 e 17) e
+`tests/ui/revisao.final.fase3.test.js` (13 testes de navegador: achados 3 nas duas ordens, 4 e 7 no curral e no tronco, 5, 6,
+12, 13 nas duas ordens, 14 e 15); todos falham com o `src/` de `11b744a` e passam agora.
+
+**Oráculos estendidos onde o defeito escapou.**
+
+- `tests/apoio-fuzz.js`, agenda: `modeloAgenda` passou a modelar os protocolos por categoria (`categoriasNaData`: a categoria de
+  cada animal em D vem do sistema — a classificação tem os próprios testes — e o trecho na categoria se acha andando dia a dia para
+  trás, força bruta, sem os dias candidatos do sistema); o gerador sorteia, para o protocolo por categoria, as categorias em que o
+  animal entra depois de entrar no rebanho (o mesmo número de sorteios: as sementes fixas não mudaram).
+- Efeito da aplicação: o esperado da correção com o mesmo produto é a carência, o nome e o fabricante do original
+  (`sanidadeCongelada`), conferidos também no fabricante; a correção sem mudança, mais tarde, só aceita a recusa CARENCIA_ATIVA
+  quando a carência do próprio original já cobria uma venda para abate; o preparo dela muda também a carência padrão, o nome e o
+  fabricante do produto e o procedimento do protocolo; `oraculoProcedimentoProtocolo` confere que o procedimento do protocolo
+  cumprido não muda (e que o do protocolo sem aplicação muda).
+- `tests/ui/curral.fuzz.test.js`: o oráculo confere a garantia nova a cada ação (nenhuma linha de bloco que saiu oferece "Tirar",
+  "Corrigir" ou "Está certo"; "Mudar" só sem bloco que saiu; o bloco visto saindo só deixa de ter saído pela resposta do servidor
+  que o explica — o aviso, VALIDATION, CONFLICT ou IDEMPOTENCY_MISMATCH); ações novas: as respostas seguradas chegam com a
+  pergunta do repetido na tela (a decisão velha não muda nada e a pergunta é refeita), e o brinco conferido sem lançar antes de
+  mudar a sessão (o valor lançado na sessão nova sem brinco não entra); parte das sementes (25%, sorteada à parte) roda sem
+  `localStorage`, com o rascunho no servidor que demora (segurado) enquanto o bloco sai — nesse modo a conferência do rascunho é a
+  da recarga (o rascunho adiado chega ao servidor antes de recarregar, sair e terminar).
