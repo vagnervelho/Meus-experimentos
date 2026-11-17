@@ -1789,8 +1789,9 @@ aleatório (`docs/CONTRATOS.md`, seção 46). A segunda classe (os estados do cu
   animal; a ficha de quem saiu com a carência pelo relógio e a cria ao pé de hoje (agora as da data da saída); e a importação
   (manejo, eventos e a mãe e o pai do rebanho inicial) achando o dono do número pelos períodos gravados de IDENTIFICACOES, sem a
   regra 16.2 (agora `Timeline.periodosDeBrinco`, o mesmo animal que a posição daquela data; a validação da importação de ANIMAIS
-  passou a ler EVENTOS com acesso cru). O arquivo de regressão tem 15 testes (8 cenários pela api e 7 sequências mínimas do teste
-  aleatório): com o `src/` de antes, 14 falham; o 15º, a volta ao rebanho (do modelo do teste), passa nos dois.
+  passou a ler EVENTOS com acesso cru). O arquivo de regressão tem 16 testes (8 cenários pela api e 8 sequências mínimas do teste
+  aleatório): com o `src/` de antes, 14 falham; os 2 do modelo do teste (a volta ao rebanho e o estorno imediato com a política
+  do estoque, abaixo) passam nos dois.
 - Oráculo de viagem no tempo (`tests/apoio-fuzz.js`, `oraculoTempo`; seção 36): num passo sorteado por um gerador à parte (as
   sequências das sementes não mudaram: as 23 sementes fixas dão os mesmos 826 aceitos e 443 recusados), o retrato de uma bateria
   de consultas em D, por unidade (a consulta ou a linha de um animal) com a impressão digital do que ela pode ler; depois de cada
@@ -1815,3 +1816,15 @@ aleatório (`docs/CONTRATOS.md`, seção 46). A segunda classe (os estados do cu
   nas sementes que começaram naquele minuto (o teste aleatório lê o `src/` a cada semente). Nenhuma falha foi registrada nas
   sementes que ela rodou, mas o resumo só sai no fim: a leva foi descartada e refeita inteira com o código final congelado
   (abaixo).
+- Leva de 1.000 sementes com o código final congelado (o `src/` de 11:55, sem mudança desde então; 3400000 a 3400999, 100 passos,
+  4 processos, 65 minutos): 58.341 aceitos, 33.470 recusados e 1 falha. Na viagem no tempo: 7.254 retratos, 1.646.617 unidades
+  conferidas com o relógio adiantado, 1.038 caminhos padrão em D = hoje, 7.008.184 unidades comparadas (depois de fato posterior
+  a D, 14.241 vezes; de estorno ou correção posterior a D, 6.480; de cadastro, 14.847; de fato retroativo noutros animais,
+  18.447), 5.493 fichas de hoje e 7.037 fichas de quem saiu cruzadas com as consultas da data e 418.487 retratos de hoje
+  conferidos com a projeção — nenhuma falha do tempo. A falha (semente 3400390, `ESTORNO_IMEDIATO:RECUSADO`) é do modelo do teste
+  e fora da viagem no tempo: o consumo acima do estoque aceito com a política AVISA, a política de ESTOQUE_INSUFICIENTE mudada
+  para BLOQUEIA, a entrada do produto registrada e estornada logo em seguida; sem a entrada, o estoque volta a -10 mL em 13/11,
+  mais baixo que agora, e o servidor recusa o estorno como o desenho manda (RN-057 com a política; `docs/CONTRATOS.md`, seção 39).
+  Refutada como defeito do sistema: o oráculo do estorno imediato passou a aceitar essa recusa quando o modelo a confirma
+  (`estornoBloqueadoPeloEstoque`; seções 36 e 46), e a sequência mínima (4 passos) entrou no arquivo de regressão, com a recusa
+  fixada (`VALIDATION:ESTOQUE_INSUFICIENTE`).
