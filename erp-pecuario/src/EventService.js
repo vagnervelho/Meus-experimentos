@@ -1482,12 +1482,15 @@ var EventService = (function () {
     var c = ctxEv.campos;
     var pasto = nulo_(c.pasto_destino_id);
     var ok = true;
+    var inativo = null;
     if (pasto) {
       var p = m.f.pasto(pasto);
       if (!p) { erroGeral_(m, 'pasto_destino_id', 'NAO_ENCONTRADO', 'O pasto escolhido não existe.'); ok = false; }
-      else if (p.status !== 'ATIVO' && !usadoNoOriginal_(m, pasto)) { erroGeral_(m, 'pasto_destino_id', 'PASTO_INATIVO', 'O pasto ' + p.nome + ' está desativado e não recebe animais.'); ok = false; }
+      // O pasto desativado só recusa a desmama que leva bezerro para ele (itemDesmama_): o bezerro que já estava nele não muda
+      // de pasto, e o pasto não fica gravado.
+      else if (p.status !== 'ATIVO' && !usadoNoOriginal_(m, pasto)) inativo = p;
     }
-    ctxEv.desmama = { pasto: ok ? pasto : null, metodo: nulo_(c.metodo_pesagem) || 'BALANCA', maes: {} };
+    ctxEv.desmama = { pasto: ok ? pasto : null, pastoInativo: inativo, metodo: nulo_(c.metodo_pesagem) || 'BALANCA', maes: {} };
   }
   /** Presença do animal no rebanho no dia (fato: os dois limites contam), pela linha do tempo do motor. */
   function presenteNoDia_(m, id, data) {
@@ -1519,7 +1522,12 @@ var EventService = (function () {
     var campos = { efeito_inventario: 0, peso: kg, observacoes: observacoes_(d) };
     if (dz.pasto) {
       var onde = pastoNaPosicao_(m, it.animal_id, ev);
-      if (onde.presente && onde.pasture_id !== dz.pasto) { campos.pasto_origem_id = nulo_(onde.pasture_id); campos.pasto_destino_id = dz.pasto; it.movido = true; }
+      if (onde.presente && onde.pasture_id !== dz.pasto) {
+        if (dz.pastoInativo) {
+          if (!dz.avisouInativo) erroGeral_(m, 'pasto_destino_id', 'PASTO_INATIVO', 'O pasto ' + dz.pastoInativo.nome + ' está desativado e não recebe animais.');
+          dz.avisouInativo = true;
+        } else { campos.pasto_origem_id = nulo_(onde.pasture_id); campos.pasto_destino_id = dz.pasto; it.movido = true; }
+      }
     }
     if (campos.pasto_destino_id && !campos.pasto_origem_id) { delete campos.pasto_destino_id; it.movido = false; }
     linhaEA_(m, ctxEv, it, campos);
@@ -1828,13 +1836,14 @@ var EventService = (function () {
     if (!Array.isArray(lista) || !lista.length) { erroGeral_(m, 'crias', 'SEM_CRIAS', 'Informe a cria do parto (nascida viva ou natimorta).'); return; }
     if (lista.length > MAX_CRIAS) { erroGeral_(m, 'crias', 'CRIAS_DEMAIS', 'Um parto aceita no máximo ' + MAX_CRIAS + ' crias.'); return; }
     var pasto = nulo_(c.pasto_destino_id);
-    // Só a cria viva vai para um pasto: sem ela, o pasto da mãe não é pedido nem conferido (o parto só de natimorto não grava
-    // pasto; a correção sem mudança dele não depende do pasto da mãe naquele dia nem do cadastro do pasto).
+    // Só a cria viva vai para um pasto: sem ela, o pasto da mãe não é pedido nem conferido, e o pasto informado não é conferido
+    // como quem recebe animais (o parto só de natimorto não grava pasto; a correção sem mudança dele não depende do pasto da mãe
+    // naquele dia nem do cadastro do pasto).
     var comViva = lista.some(function (x) { return x && typeof x === 'object' && x.situacao_nascimento === 'VIVO'; });
     if (pasto) {
       var p = m.f.pasto(pasto);
       if (!p) erroGeral_(m, 'pasto_destino_id', 'NAO_ENCONTRADO', 'O pasto informado para as crias não existe.');
-      else if (!hist && p.status !== 'ATIVO' && !usadoNoOriginal_(m, pasto)) erroGeral_(m, 'pasto_destino_id', 'PASTO_INATIVO', 'O pasto ' + p.nome + ' está desativado e não recebe animais.');
+      else if (comViva && !hist && p.status !== 'ATIVO' && !usadoNoOriginal_(m, pasto)) erroGeral_(m, 'pasto_destino_id', 'PASTO_INATIVO', 'O pasto ' + p.nome + ' está desativado e não recebe animais.');
     } else if (!comViva) {
       pasto = null;
     } else if (mat && !hist && Correcao.congelado(ctxEv.correcao, 'NASCIMENTO.pasto_crias', { mae_id: mat.animal_id, data: ev.event_date })) {
@@ -2193,8 +2202,12 @@ var EventService = (function () {
           ajusteRow_(m, ctxEv, it, par[1], confCong ? confCong.v : textoCampo_(par[1], e[par[1]]), null);
           fim[par[1]] = null;
         }
-        if (!vazio_(fim[par[0]]) && vazio_(fim[par[1]])) erroItem_(m, it, par[1], 'CAMPO_OBRIGATORIO', 'informe também "' + par[1] + '".');
-        if (vazio_(fim[par[0]]) && !vazio_(g.campos[par[1]])) erroItem_(m, it, par[1], 'CAMPO_SEM_VINCULO', '"' + par[1] + '" precisa de "' + par[0] + '" preenchido.');
+        // O par (o dado e a certeza dele) é conferido no cadastro de hoje; na correção do mesmo ajuste (o mesmo valor, a mesma
+        // data), o que o original gravou continua valendo: a correção de cadastro posterior que apagou a certeza (ou o dado) não
+        // recusa a correção sem mudança dele (Correcao.congelado).
+        var doOriginal = function (campo) { return g.campos[campo] !== undefined && !!Correcao.congelado(ctxEv.correcao, 'AJUSTE.valor_anterior', { animal_id: id, campo: campo, valor_novo: textoCampo_(campo, g.campos[campo]), data: ctxEv.ev.event_date }); };
+        if (!vazio_(fim[par[0]]) && vazio_(fim[par[1]]) && !(g.campos[par[1]] === undefined && doOriginal(par[0]))) erroItem_(m, it, par[1], 'CAMPO_OBRIGATORIO', 'informe também "' + par[1] + '".');
+        if (vazio_(fim[par[0]]) && !vazio_(g.campos[par[1]]) && !(g.campos[par[0]] === undefined && doOriginal(par[1]))) erroItem_(m, it, par[1], 'CAMPO_SEM_VINCULO', '"' + par[1] + '" precisa de "' + par[0] + '" preenchido.');
       });
       if (g.campos.data_entrada !== undefined || g.campos.data_entrada_confianca !== undefined) {
         var entrada = Timeline.ordenar(m.f.linhas(id).filter(function (l) { return l.efeito === 1 && !l.pre_marco_zero; }))[0];

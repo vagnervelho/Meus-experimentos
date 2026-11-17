@@ -6,8 +6,8 @@
  * pelo estado de hoje) o que o registro tinha congelado, ou recusava por uma regra que só o estado de hoje quebra. O ponto
  * único (Correcao.congelado) dá o valor do original enquanto as entradas de que ele depende não mudam. Cada teste falha com o
  * `src/` de antes desta etapa (commit b8c513b) e passa agora. Os testes 1 a 9 são da primeira leva do oráculo (e da mesma causa
- * por outro caminho); do 10 em diante, das falhas das sementes fixas e da leva de 1.000 sementes × 100 passos (610000 a 610999),
- * reduzidas ao cenário mínimo.
+ * por outro caminho); do 10 em diante, das falhas das sementes fixas, da leva de 1.000 sementes × 100 passos (610000 a 610999)
+ * e da primeira leva de confirmação (a semente 611819), reduzidas ao cenário mínimo.
  */
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -410,4 +410,26 @@ test('as mães da desmama são as do dia do lançamento: a mãe que o cadastro d
   const outra = ok(api(s, 'evento.corrigir', { event_id: r.event_id, justificativa: 'Data certa', mudanca: { campos: { event_date: '2026-04-30' } } }), 'outra data');
   assert.deepEqual(fatos(outra.event_id), { linhas: [[ids.C1, 'SUJEITO'], [ids.V1, 'MATRIZ']].sort(), regs: [[ids.V1, 'DESMAMA']] });
   semErro(s, 'mães da desmama');
+});
+
+test('a correção de cadastro do nascimento seguida de outra que apaga o nascimento (e a certeza junto): a correção sem mudança da primeira não pede a certeza que o cadastro de hoje já não tem', () => {
+  const s = S.sistema();
+  hoje(s, '2026-01-05');
+  const reb = rebanho(s, [S.bicho({ brinco: '7', sexo: 'M', castrado: true, data_nascimento: '2024-03-01', data_nascimento_confianca: 'ESTIMADA' })]);
+  hoje(s, '2026-06-01');
+  const cad = { tipo: 'AJUSTE_INVENTARIO', subtipo: 'CORRECAO_CADASTRO', campos: { event_date: '2026-05-01', justificativa: 'Nascimento pela ficha' }, animais: [{ animal_id: reb.ids['7'], campo: 'data_nascimento', valor_novo: '2021-07-19' }] };
+  const c = ok(api(s, 'evento.registrar', cad), 'correção do nascimento');
+  ok(api(s, 'evento.registrar', { tipo: 'AJUSTE_INVENTARIO', subtipo: 'CORRECAO_CADASTRO', campos: { event_date: '2026-05-10', justificativa: 'Nascimento desconhecido' }, animais: [{ animal_id: reb.ids['7'], campo: 'data_nascimento', valor_novo: '' }] }), 'nascimento apagado depois');
+  const ajustes = (eid) => tab(s, 'AJUSTES', { event_id: eid }).map((a) => [a.campo, a.valor_anterior, a.valor_novo]);
+  const antes = ajustes(c.event_id);
+  assert.deepEqual(antes, [['data_nascimento', '2024-03-01', '2021-07-19']]);
+  const r = corrigir(s, c.event_id, cad, 'correção sem mudança da primeira correção de cadastro');
+  assert.deepEqual(ajustes(r.event_id), antes);
+  const a = tab(s, 'ANIMAIS', { animal_id: reb.ids['7'] })[0];
+  assert.deepEqual([a.data_nascimento, a.data_nascimento_confianca], [null, null], 'a correção posterior continua valendo');
+  // Um ajuste novo com o nascimento e sem a certeza continua recusado pelo cadastro de hoje.
+  const novo = api(s, 'evento.registrar', { tipo: 'AJUSTE_INVENTARIO', subtipo: 'CORRECAO_CADASTRO', campos: { event_date: '2026-05-20', justificativa: 'Outra data' }, animais: [{ animal_id: reb.ids['7'], campo: 'data_nascimento', valor_novo: '2021-08-01' }] });
+  assert.equal(novo.ok, false);
+  assert.deepEqual(novo.error.details.map((d) => d.codigo), ['CAMPO_OBRIGATORIO']);
+  semErro(s, 'par do nascimento');
 });

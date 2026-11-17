@@ -3475,7 +3475,7 @@ abaixo como contrato, e um oráculo no teste aleatório que as confere depois de
 - A prévia da correção na tela (`TelaEventos.previaCorrecao`, página inicial) só formata `correcao` pelo tipo do campo
   (dinheiro em reais, decimal de uma casa, decimal e inteiro em texto, o sim/não da correção de cadastro), com os anexos do
   original; não calcula número nem data. A prévia própria da reprodução (`TelaReproducao.previaCorrecao`) saiu e a correção não
-  carrega mais a tela de reprodução. A página inicial montada caiu de 450 KB para 425 KB.
+  carrega mais a tela de reprodução. A página inicial montada caiu de 460.759 para 435.471 bytes (orçamento: 460.800).
 
 ### 50.3 Tabela A — o que cada tipo grava (o contrato que o oráculo confere)
 
@@ -3529,7 +3529,7 @@ a correção grava o valor do original; quando uma muda, o tratador refaz o valo
 | `DESMAMA.maes` | DERIVADO | a mãe de cada bezerro pelo cadastro, presente no rebanho no dia | os bezerros e a data | EVENTO_ANIMAIS (MATRIZ); REPRODUCAO (DESMAMA da mãe) |
 | `NASCIMENTO.pasto_crias` | DERIVADO | o pasto da mãe no dia do parto | a mãe e a data | EVENTO_ANIMAIS.pasto_destino_id (CRIA) |
 | `NASCIMENTO.raca_cria` | DERIVADO | a raça da mãe | a mãe e a cria | atributos_iniciais_json.raca; ANIMAIS.raca |
-| `AJUSTE.valor_anterior` | DERIVADO | o cadastro do animal antes do ajuste (e a regra VALOR_IGUAL; no brinco lançado errado, também as conferências pelo brinco de hoje) | o animal, o campo, o valor novo e a data | AJUSTES.valor_anterior (também a certeza apagada junto) |
+| `AJUSTE.valor_anterior` | DERIVADO | o cadastro do animal antes do ajuste (e as regras que o cadastro de hoje quebraria: VALOR_IGUAL, o par do dado e da certeza; no brinco lançado errado, as conferências pelo brinco de hoje) | o animal, o campo, o valor novo e a data | AJUSTES.valor_anterior (também a certeza apagada junto) |
 | `VENDA.bases_estimadas` | DERIVADO | a última pesagem de cada animal até a data | os animais, a data, a modalidade, o peso vivo total | RATEIOS e ALOCACOES_FINANCEIRAS; EVENTO_ANIMAIS.valor_individual |
 | `VENDA.rotulo_deducao` | COPIA | LISTAS (TIPO_DEDUCAO_VENDA).rotulo | o tipo da dedução | FINANCEIRO.descricao (dedução) |
 
@@ -3588,7 +3588,8 @@ inteiro do sistema guardado (`gas.estado.salvar()` e `restaurar()`, nos fakes da
 
 A cobertura sai em `F.COBERTURA` (`correção: sem mudança aceita`, `… (servidor)`, `… (gerador)`, `correção: recusa documentada
 da correção sem mudança`, `correção: consultas conferidas depois da correção sem mudança`, `correção: mudança de um campo
-aceita`, `… (a data)`); as sementes fixas de `tests/fase2.fuzz.test.js` exigem que cada uma tenha conferido algo.
+aceita`, `… (a data)`); as sementes fixas de `tests/fase2.fuzz.test.js` exigem que a correção sem mudança pelas duas entradas,
+as consultas comparadas e a correção de um campo (também a data) tenham conferido algo.
 
 ### 50.8 Defeitos achados e consertados
 
@@ -3615,6 +3616,7 @@ agora; o conserto está no ponto único (a linha da tabela B, ou a regra que só
 | 16 | a correção do sexo de um dos touros de um lote com vários touros era aceita, e a correção sem mudança da exposição refazia o animal como fêmea exposta | MEDIA | a linha de touro é de um macho (integridade, GENEALOGIA `TOURO_LINHA`; a trava recusa) |
 | 17 | o lançamento sem a propriedade ia para a propriedade padrão de hoje | MEDIA | `EVENTO.propriedade` |
 | 18 | a desmama ganhava a linha da mãe (e o registro DESMAMA dela, que conta nos indicadores) que o cadastro do bezerro só ganhou depois | MEDIA | `DESMAMA.maes` |
+| 19 | a correção de cadastro do nascimento era recusada ("informe também a certeza") depois de outra correção de cadastro, posterior, apagar o nascimento e a certeza: o par era conferido no cadastro de hoje | MEDIA | `AJUSTE.valor_anterior`: o par (o dado e a certeza dele) do mesmo ajuste vale como o original gravou |
 
 ### 50.9 Decisões
 
