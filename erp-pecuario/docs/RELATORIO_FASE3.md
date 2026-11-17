@@ -7,8 +7,8 @@ E3.7) e seção 8 (checklist). Relatório da fase anterior: `docs/RELATORIO_FASE
 
 - **O código da Fase 3 está completo no repositório** (`erp-pecuario/src/`: 24 arquivos `.js`, 13 `.html` e o
   manifesto; entraram o `WeightService` e as telas `Weights`, `Health` e `Reproduction`) e passou em todos os testes que
-  rodam aqui, inclusive os das Fases 1 e 2: **`npm test` com {{NT}} testes, {{NP}} aprovados, {{NF}} falhas** e **`npm run
-  ui:check` com {{UT}} testes de navegador, {{UP}} aprovados, {{UF}} falhas** (execução final de 17/11/2026, sobre o código do
+  rodam aqui, inclusive os das Fases 1 e 2: **`npm test` com 809 testes, 809 aprovados, 0 falhas** e **`npm run
+  ui:check` com 135 testes de navegador, 135 aprovados, 0 falhas** (execução final de 17/11/2026, sobre o código do
   conserto da revisão; nesta etapa só mudaram documentos e dois comentários de código, seção 4, item 13).
 - Pesagem, sanidade e reprodução são registradas no curral e viram indicadores: pesagem individual, coletiva e por lote,
   com o modo curral no celular; ganho médio diário (GMD), curva de peso e projeção rotulada; insumos com estoque
@@ -20,9 +20,9 @@ E3.7) e seção 8 (checklist). Relatório da fase anterior: `docs/RELATORIO_FASE
 - Cada tipo novo passa por **um tratador só** em todo caminho (registrar, simular, retroativo, mesmo dia, corrigir,
   corrigir o substituto, estornar, importar, desfazer, base de demonstração), e o que ele grava é conferido pela mesma
   função da verificação de integridade e da trava única (`AuditService.conferirDominio_`).
-- **Telas sob demanda (risco R-31).** A página inicial ficou em {{KB_INI}} KB de 450 KB; a importação e as três telas
-  novas são pedidas ao servidor quando o menu as abre (Import {{KB_IMP}} KB, Weights {{KB_W}} KB, Health {{KB_H}} KB e
-  Reproduction {{KB_R}} KB, de 150 KB cada). Que o quadro (iframe) do HtmlService rode a tela injetada é hipótese (NV):
+- **Telas sob demanda (risco R-31).** A página inicial ficou em 448 KB de 450 KB; a importação e as três telas
+  novas são pedidas ao servidor quando o menu as abre (Import 48 KB, Weights 48 KB, Health 24 KB e
+  Reproduction 52 KB, de 150 KB cada). Que o quadro (iframe) do HtmlService rode a tela injetada é hipótese (NV):
   se não rodar, a contingência está pronta (seção 5, item 1).
 - **Nada foi implantado nem executado na conta Google do dono.** Continuam **PENDENTES NA CONTA DO DONO** os itens das
   Fases 1 e 2 e, da Fase 3: `runAcceptanceTests` com os 23 cenários, as premissas PR-06, PR-07, PR-10 e PR-11, o
@@ -68,7 +68,7 @@ reais do Google, só na conta do dono.
 
 ## 2. Resultados dos testes executados aqui
 
-Ambiente: Node {{NODE}} (Linux, 4 núcleos), Playwright 1.63.0 com Chromium. Execução de 17/11/2026, sobre o código final
+Ambiente: Node 22.23.4 (Linux, 4 núcleos), Playwright 1.63.0 com Chromium. Execução de 17/11/2026, sobre o código final
 do conserto da revisão, a última alteração de comportamento desta fase. Na etapa deste relatório só mudaram documentos e
 um comentário em `src/TestRunner.js` e outro em `scripts/medir-trava.js` (seção 4, item 13). Nesta etapa, a suíte inteira
 rodou duas vezes: no começo, antes de qualquer mudança (`npm test` com 809 de 809 e `npm run ui:check` com 135 de 135), e
@@ -76,8 +76,8 @@ no fim, depois de todas as mudanças; os números abaixo são os da execução d
 
 ### 2.1 Nível 1 — `npm test` (`node --test tests/*.test.js`)
 
-Saída: `# tests {{NT}} · # pass {{NP}} · # fail {{NF}} · # cancelled 0 · # skipped 0 · # todo 0` (duração {{ND}} s;
-{{NWALL}} de relógio). As 22 sementes fixas do teste aleatório, 60 passos cada: `FUZZ: 22 sementes × 60 passos: 741
+Saída: `# tests 809 · # pass 809 · # fail 0 · # cancelled 0 · # skipped 0 · # todo 0` (duração 598,0 s;
+9 min 58 s de relógio). As 22 sementes fixas do teste aleatório, 60 passos cada: `FUZZ: 22 sementes × 60 passos: 741
 aceitos, 439 recusados, 0 falhas`. Contagem por arquivo, de três formas nesta etapa:
 - **Rodados sozinhos**, cada um com `node --test <arquivo>`: os 32 arquivos novos ou alterados desde o relatório da Fase 2
   (17 novos e 15 alterados) e também `static` e `revisao4.interface`, que leem o `CONTRATOS.md` mudado nesta etapa. Todos
@@ -135,11 +135,11 @@ A soma confere com o total da suíte: 673 da Fase 2 + 112 dos 17 arquivos novos 
 
 ### 2.2 Nível 3 — `npm run ui:check`
 
-Parte estática: `{{UI_ESTATICA}}` Parte Playwright: `# tests {{UT}} · # pass {{UP}} · # fail {{UF}} · # cancelled 0 · #
-skipped 0 · # todo 0` (duração {{UD}} s; {{UWALL}} de relógio com a parte estática). Tamanho do que vai ao aparelho: a
-página inicial montada pelo `doGet` com {{KB_INI}} KB de 450 KB (eram 449 KB no fim da Fase 2, antes de a importação sair
-dela; 406 KB depois da etapa BASE; o kit de gráficos e a ficha somaram o resto); sob demanda, Import {{KB_IMP}} KB,
-Weights {{KB_W}} KB, Health {{KB_H}} KB e Reproduction {{KB_R}} KB, de 150 KB cada. Contagem por arquivo: os 9 arquivos novos ou
+Parte estática: `ui:check — 13 arquivo(s) .html conferidos (a página inicial montada pelo doGet e as telas sob demanda), sem recurso externo e dentro do orçamento (página inicial montada: 448 KB de 450 KB; sob demanda: Import 48 KB, Weights 48 KB, Health 24 KB, Reproduction 52 KB, de 150 KB cada).` Parte Playwright: `# tests 135 · # pass 135 · # fail 0 · # cancelled 0 · #
+skipped 0 · # todo 0` (duração 268,1 s; 4 min 28 s de relógio com a parte estática). Tamanho do que vai ao aparelho: a
+página inicial montada pelo `doGet` com 448 KB de 450 KB (eram 449 KB no fim da Fase 2, antes de a importação sair
+dela; 406 KB depois da etapa BASE; o kit de gráficos e a ficha somaram o resto); sob demanda, Import 48 KB,
+Weights 48 KB, Health 24 KB e Reproduction 52 KB, de 150 KB cada. Contagem por arquivo: os 9 arquivos novos ou
 alterados desde o relatório da Fase 2 foram rodados de novo nesta etapa, cada um sozinho com `node --test
 --test-concurrency=1 <arquivo>`: 7 novos (`graficos`, `importacao-manejo`, `pesagem`, `reproducao`, `revisao.fase3`,
 `sanidade`, `sobdemanda`) e 2 alterados (`interface`, `movimentos`). Os demais 14 não mudaram, e a contagem dos 23
@@ -322,7 +322,7 @@ trecho nesta etapa (item 13).
    desmama e a identificação usam o formulário comum com o seletor, embora o catálogo ainda declare `modo_entrada: CURRAL`
    para elas (o cliente não usa esse campo). Dentro do curral não entraram "Colar brinco;peso" nem a grade "Todos do pasto"
    de 08, seção 5: o formulário comum da pesagem tem o seletor com "Todos do pasto", e a planilha entra pela importação.
-3. **Orçamento da página inicial**: {{KB_INI}} KB de 450 KB. Sobram cerca de {{KB_SOBRA}} KB: as telas das Fases 4 e 5 têm de
+3. **Orçamento da página inicial**: 448 KB de 450 KB. Sobram cerca de 2,5 KB: as telas das Fases 4 e 5 têm de
    nascer sob demanda, e mudanças no Início, na ficha ou nos componentes precisam caber nisso ou ir para uma tela sob
    demanda.
 4. **Avisos e alertas que não existem**: `PESO_IMPLAUSIVEL` só na pesagem (os pesos da compra, da venda e do parto não são
@@ -475,10 +475,10 @@ tests/ui/graficos.test.js do conserto da revisão; os commits automáticos segui
 levam só a documentação desta etapa e os dois comentários
 
 1. EXECUTADO AQUI (Node)
-   comando: npm test      resultado: {{NP}}/{{NT}}
+   comando: npm test      resultado: 809/809
    cenários: CT-05 ok | CT-06 ok | SANIDADE ok | ESTOQUE ok | REPRODUCAO ok | CT-10 passo 3 ok | CT-17 e CT-18 com a
              pesagem ok | CT-12 com o manejo ok | Fases 1 e 2 ok
-   interface (Playwright): executado, {{UP}}/{{UT}}
+   interface (Playwright): executado, 135/135
 
 2. A EXECUTAR NA CONTA DO DONO (nível 2)
    runAcceptanceTests()    PENDENTE        relatório JSON (23 cenários)

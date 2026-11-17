@@ -1573,4 +1573,9 @@ demonstração no cabeçalho de `scripts/medir-trava.js` (391 → 430, o que `np
     o modo curral que faltou), R-30 (a identificação), R-31 (as telas sob demanda adotadas: 448 KB de 450 KB na página
     inicial, a contingência NV); PR-06, PR-07, PR-10 e PR-11 entregues com o padrão, confirmação pendente; a tabela de
     decisões.
-- Verificado no fim desta etapa: {{VERIF_FINAL}}
+- Verificado no fim desta etapa: `npm test`, 809 testes, 809 aprovados e 0 falhas (598 s), com as 22 sementes fixas de 60 passos (741 aceitos, 439 recusados, 0 falhas); `npm run ui:check`, 135 testes, 135 aprovados e 0 falhas (268 s), página inicial com 448 KB de
+  450 KB (sobram 2.511 bytes); sob demanda, Import 48 KB, Weights 48 KB, Health 24 KB e Reproduction 52 KB de 150 KB. Os 32
+  arquivos de teste novos ou alterados na Fase 3, mais `static` e `revisao4.interface`, rodados sozinhos (375 testes, 0
+  falhas), e os 9 de navegador novos ou alterados (67 testes, 0 falhas); a contagem dos 98 arquivos conferida pelo
+  registrador. No começo da etapa, antes de qualquer mudança, as duas suítes tinham dado o mesmo (809 e 135, 0 falhas).
+  Nada validado na conta do dono.
