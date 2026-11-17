@@ -61,8 +61,11 @@ test('produto.salvar (03a, seção 4.6): nome, categoria e unidade obrigatórios
   assert.equal(prod(s, p.product_id).estoque_atual, null);
   // A unidade é a da dose, do estoque e do custo: depois do uso, não muda.
   assert.deepEqual(det(recusa(api(s, 'produto.salvar', { product_id: p.product_id, campos: { unidade: 'mL' } }, 'p6'), 'VALIDATION')), [['PRODUTO_EM_USO', 'unidade']]);
-  // Ligar o controle: o saldo é Σ dos movimentos vigentes (−30: só a saída); com a contagem, o acerto põe o saldo certo.
-  const lig = ok(api(s, 'produto.salvar', { product_id: p.product_id, campos: { controla_estoque: true } }, 'p7'));
+  // Ligar o controle: o saldo é Σ dos movimentos vigentes (−30: só a saída); como começaria negativo, pede confirmação e
+  // manda acertar pela contagem (revisão da Fase 3, achado 16); com a contagem, o acerto põe o saldo certo.
+  const aviso = recusa(api(s, 'produto.salvar', { product_id: p.product_id, campos: { controla_estoque: true } }, 'p7'), 'NEEDS_CONFIRMATION');
+  assert.deepEqual(aviso.details.map((d) => d.codigo), ['ESTOQUE_INSUFICIENTE']);
+  const lig = ok(api(s, 'produto.salvar', { product_id: p.product_id, campos: { controla_estoque: true } }, 'p7', ['ESTOQUE_INSUFICIENTE']));
   assert.deepEqual([lig.estoque_atual, lig.abaixo_do_minimo], [-30, true]);
   ok(api(s, 'evento.registrar', estoque('AJUSTE', '2026-03-15', { product_id: p.product_id, motivo_ajuste: 'CONTAGEM', saldo_contado: 70 }), 'cont'));
   assert.deepEqual([prod(s, p.product_id).estoque_atual, tab(s, 'MOVIMENTOS_ESTOQUE', { tipo: 'AJUSTE' })[0].quantidade], [70, 100]);

@@ -164,6 +164,17 @@ var WeightService = (function () {
     }
     return out;
   }
+  /**
+   * Por que nenhum intervalo conta (P9, o motivo de cada vazio): menos de duas pesagens individuais, ou várias pesagens com
+   * nenhum intervalo dentro do controle (a pesagem anterior ao marco zero; o animal fora do rebanho entre as duas).
+   */
+  function semIntervalo_(ints) {
+    if (!ints.length) return 'Menos de duas pesagens individuais.';
+    var hist = ints.some(function (v) { return /marco zero/.test(v.explicacao || ''); });
+    var fora = ints.some(function (v) { return /fora do rebanho/.test(v.explicacao || ''); });
+    return 'Há ' + (ints.length + 1) + ' pesagens individuais, mas nenhum intervalo entre elas conta: ' +
+      (hist && fora ? 'umas são anteriores ao marco zero e, nas outras, o animal esteve fora do rebanho entre as pesagens.' : hist ? 'as pesagens anteriores ao marco zero ficam fora do ganho médio diário.' : 'o animal esteve fora do rebanho entre as pesagens.');
+  }
   /** Σ ganho ÷ Σ dias dos intervalos que contam (no período), com o mínimo de dias: {ganho_kg, dias, gmd: indicador}. */
   function somaPeriodo_(ints, params) {
     var min = typeof params.gmd_intervalo_min_dias === 'number' ? params.gmd_intervalo_min_dias : 28;
@@ -172,7 +183,7 @@ var WeightService = (function () {
     ints.forEach(function (v) { if (v.conta) { ganho += v.ganho_kg; dias += v.dias; } });
     ganho = Utils.arredondar(ganho, 1);
     var gmd = dias >= min && dias > 0 ? Utils.arredondar(ganho / dias, 3) : null;
-    return { ganho_kg: dias ? ganho : null, dias: dias, gmd: indicador_(gmd, 'DADOS_INSUFICIENTES', dias ? 1 : 0, { dias: dias, explicacao: gmd === null ? (dias ? 'Menos de ' + min + ' dias entre a primeira e a última pesagem individual.' : 'Menos de duas pesagens individuais.') : null }) };
+    return { ganho_kg: dias ? ganho : null, dias: dias, gmd: indicador_(gmd, 'DADOS_INSUFICIENTES', dias ? 1 : 0, { dias: dias, explicacao: gmd === null ? (dias ? 'Menos de ' + min + ' dias entre a primeira e a última pesagem individual.' : semIntervalo_(ints)) : null }) };
   }
   /**
    * Projeção de peso (07, seção 8.1): base = a última pesagem individual na permanência aberta; GMD de referência = da
@@ -255,6 +266,32 @@ var WeightService = (function () {
     return d;
   }
 
+  /** O animal no pasto e na categoria do filtro na data (a presença no fim do período). */
+  function noFiltroEm_(L, a, data, d) {
+    if (!vazio_(d.pasture_id)) {
+      var sit = Timeline.situacaoEm(L.f.linhas(a.animal_id), data, L.marcoZero);
+      if (!sit.presente || sit.pasture_id !== d.pasture_id) return false;
+    }
+    if (!vazio_(d.category_id)) { var c = AnimalService.categoriaEm(L, a, data); if (!c || c.category_id !== d.category_id) return false; }
+    return true;
+  }
+  /**
+   * O ganho médio diário da pesagem `s[i]` contra a anterior, pela MESMA conta da ficha (intervalos: só entre individuais da
+   * mesma permanência e com o intervalo mínimo; RN-052, 07, seção 8.1): {gmd_kg_dia, motivo, explicacao}. O modo curral
+   * mostra o que vem daqui, nunca uma conta própria.
+   */
+  function gmdDaPesagem_(s, i, periodos, params) {
+    var x = s[i];
+    var ant = i > 0 ? s[i - 1] : null;
+    var nada = function (explicacao) { return { gmd_kg_dia: null, motivo: 'DADOS_INSUFICIENTES', explicacao: explicacao }; };
+    if (!ant) return nada('Primeira pesagem do animal: sem anterior para comparar.');
+    if (!x.individual) return nada('Esta pesagem é estimada (estimativa visual ou média do lote): fica fora do ganho médio diário.');
+    if (!ant.individual) return nada('A pesagem anterior é estimada (estimativa visual ou média do lote): fica fora do ganho médio diário.');
+    var v = intervalos(s, periodos, params).filter(function (y) { return y.weight_ate === x.weight_id; })[0];
+    if (!v || v.weight_de !== ant.weight_id) return nada('Há outra pesagem no mesmo dia: o ganho médio diário fica com a última do dia.');
+    return { gmd_kg_dia: v.gmd_kg_dia, motivo: v.motivo, explicacao: v.explicacao };
+  }
+
   // ------------------------------------------------------------------ resultado do lançamento ----
   /** Resumo da pesagem no plano (impactos do SIMULAR): o momento, o método, o lote, quantas, total e média. */
   function resumoDoPlano(p, linhas) {
@@ -266,30 +303,34 @@ var WeightService = (function () {
   }
   /**
    * Resultado de um evento PESAGEM gravado (resposta do registrar e do reenvio): {n, total_kg, media_kg, tipo, metodo,
-   * jejum, lote, animais: [{animal_id, peso_kg, anterior: {data, peso_kg} | null, ganho_kg, dias, gmd_kg_dia,
-   * variacao_pct}]} — cada animal contra a pesagem dele imediatamente anterior (qualquer método), pela conta do servidor.
+   * jejum, lote, animais: [{animal_id, peso_kg, anterior: {data, peso_kg} | null, ganho_kg, dias, gmd_kg_dia, gmd_motivo,
+   * gmd_explicacao, variacao_pct}]} — o ganho, os dias e a variação contra a pesagem imediatamente anterior (qualquer
+   * método); o GMD pela conta da ficha (gmdDaPesagem_: vazio com o porquê no intervalo curto e na pesagem estimada).
    */
   function resultadoDoEvento(tx, eventId) {
     var linhas = tx.cru ? tx.cru.cruPor('PESAGENS', 'event_id', eventId) : tx.repo.por('PESAGENS', 'event_id', eventId);
     var ev = tx.cru ? tx.cru.cruPorId('EVENTOS', eventId) : tx.repo.porId('EVENTOS', eventId);
     if (!linhas.length || !ev) return null;
     var f = Timeline.fonte(tx);
-    var validade = Config.parametros(tx.repo).peso_validade_dias;
+    var params = Config.parametros(tx.repo);
+    var validade = params.peso_validade_dias;
     var total = 0;
     var animais = linhas.map(function (r) {
       total += r.peso_kg;
-      var s = serie(f, r.animal_id, null);
+      var s = serie(f, r.animal_id, params);
       var i = -1;
       s.forEach(function (x, k) { if (x.weight_id === r.weight_id) i = k; });
       var ant = i > 0 ? s[i - 1] : null;
       var v = ant ? variacao(ant, { data: r.data_pesagem, peso_kg: r.peso_kg }) : null;
+      var g = i >= 0 ? gmdDaPesagem_(s, i, permanencias_(f, r.animal_id), params) : { gmd_kg_dia: null, motivo: 'DADOS_INSUFICIENTES', explicacao: null };
       // O peso atual do animal depois do lançamento (a projeção gravada: no retroativo continua o mais recente), para a lista
       // do aparelho se atualizar sem recarregar o rebanho inteiro.
       var a = tx.cru ? tx.cru.cruPorId('ANIMAIS', r.animal_id) : tx.repo.porId('ANIMAIS', r.animal_id);
       var dataAtual = a && !vazio_(a.data_ultima_pesagem) ? a.data_ultima_pesagem : null;
       return {
         animal_id: r.animal_id, peso_kg: r.peso_kg, anterior: ant ? { data: ant.data, peso_kg: ant.peso_kg } : null,
-        ganho_kg: v ? v.ganho_kg : null, dias: v ? v.dias : null, gmd_kg_dia: v ? v.gmd_kg_dia : null, variacao_pct: v ? v.variacao_pct : null,
+        ganho_kg: v ? v.ganho_kg : null, dias: v ? v.dias : null, gmd_kg_dia: g.gmd_kg_dia, gmd_motivo: g.gmd_kg_dia === null ? g.motivo : null, gmd_explicacao: g.gmd_kg_dia === null ? g.explicacao : null,
+        variacao_pct: v ? v.variacao_pct : null,
         peso_atual: a && typeof a.peso_atual === 'number' ? a.peso_atual : null, data_ultima_pesagem: dataAtual,
         peso_vencido: a && a.situacao_cadastral === 'ATIVO' && dataAtual && typeof validade === 'number' && !vazio_(tx.hoje) ? Utils.diffDias(dataAtual, tx.hoje) > validade : null,
       };
@@ -444,15 +485,19 @@ var WeightService = (function () {
           if (!s.length) return;
           var noPeriodo = s.filter(function (x) { return (vazio_(per.de) || x.data >= per.de) && x.data <= per.ate; });
           if (!noPeriodo.length) return;
+          var pesadoNoFiltro = false;
           porDia_(noPeriodo.filter(function (x) { return x.individual; })).forEach(function (x) {
             if (!vazio_(d.pasture_id) && Timeline.situacaoEm(L.f.linhas(a.animal_id), x.data, L.marcoZero).pasture_id !== d.pasture_id) return;
             if (!vazio_(d.category_id)) { var cx = AnimalService.categoriaEm(L, a, x.data); if (!cx || cx.category_id !== d.category_id) return; }
+            pesadoNoFiltro = true;
             var gm = mensal[x.data.slice(0, 7)] = mensal[x.data.slice(0, 7)] || { soma: 0, n: 0, animais: {} };
             gm.soma += x.peso_kg; gm.n++; gm.animais[a.animal_id] = true;
           });
           var periodos = permanencias_(L.f, a.animal_id);
-          var ints = intervalos(noPeriodo, periodos, params).filter(function (v) { return v.conta; });
-          var soma = somaPeriodo_(ints, params);
+          var todos = intervalos(noPeriodo, periodos, params);
+          var ints = todos.filter(function (v) { return v.conta; });
+          var soma = somaPeriodo_(todos, params);
+          var noFiltro = vazio_(d.pasture_id) && vazio_(d.category_id);
           var estadas = Timeline.estadas(L.f.linhas(a.animal_id));
           var contou = soma.dias >= minDias;
           ints.forEach(function (v) {
@@ -463,6 +508,7 @@ var WeightService = (function () {
             var dp = diasPorPasto_(estadas, v.de, v.ate);
             Object.keys(dp).forEach(function (pid) {
               if (!vazio_(d.pasture_id) && pid !== d.pasture_id) return;
+              noFiltro = true;
               var parte = v.ganho_kg * dp[pid] / v.dias;
               var gp = grupo_(porPasto, pid);
               gp.ganho += parte; gp.dias += dp[pid]; gp.animais[a.animal_id] = true;
@@ -471,6 +517,10 @@ var WeightService = (function () {
               gc.ganho += parte; gc.dias += dp[pid]; gc.animais[a.animal_id] = true;
             });
           });
+          // A tabela "Animais" segue o filtro de pasto e de categoria do GMD (07, seção 8.1): o animal com intervalo no pasto ou
+          // na categoria filtrada, com pesagem lá no período, ou presente lá no fim do período.
+          if (!noFiltro) noFiltro = pesadoNoFiltro || noFiltroEm_(L, a, per.ate, d);
+          if (!noFiltro) return;
           var ultima = s.filter(function (x) { return x.data <= per.ate; }).pop();
           linhasAnimais.push({
             animal_id: a.animal_id, codigo_interno: a.codigo_interno, brinco: vazio_(a.brinco) ? null : a.brinco, sexo: a.sexo || null, raca: a.raca || null,

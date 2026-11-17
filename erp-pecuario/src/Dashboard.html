@@ -89,11 +89,17 @@ var TelaInicio = (function () {
   function desenharRascunhos(el, lista) {
     return Rascunhos.listar().then(function (rs) {
       if (!el.isConnected) return;
-      // A pesagem no curral (Fase 3) tem rascunho próprio, com os blocos já enviados: continua na tela dela.
-      rs.filter(function (r) { return r.tipo === 'CURRAL_PESAGEM' && Telas.existe('pesagens/curral'); }).forEach(function (r) {
+      // A pesagem no curral e o diagnóstico no tronco (Fase 3) têm rascunho próprio, com os blocos já enviados: continuam na
+      // tela deles (08, seção 9: a tela Início lista os pendentes; o rascunho ENVIANDO tem algo sem confirmação).
+      var MODO_CURRAL = {
+        CURRAL_PESAGEM: { rota: 'pesagens/curral', texto: function (r) { return 'Pesagem no curral de ' + Fmt.data(r.data) + ' não concluída (' + (r.n || 0) + ((r.n || 0) === 1 ? ' animal)' : ' animais)') + (r.estado === 'ENVIANDO' ? ' · há pesagens sem confirmação' : ''); } },
+        TRONCO_DIAGNOSTICO: { rota: 'reproducao/tronco', texto: function (r) { return 'Diagnóstico no tronco de ' + Fmt.data(r.data) + ' não concluído (' + (r.n || 0) + ((r.n || 0) === 1 ? ' fêmea)' : ' fêmeas)') + (r.estado === 'ENVIANDO' ? ' · há diagnósticos sem confirmação' : ''); } },
+      };
+      rs.filter(function (r) { return MODO_CURRAL[r.tipo] && Telas.existe(MODO_CURRAL[r.tipo].rota); }).forEach(function (r) {
+        var m = MODO_CURRAL[r.tipo];
         lista.appendChild(h('li', { class: 'linha-acao', dataset: { rascunho: r.tipo, estado: r.estado || 'EDITANDO' } }, h('span', { class: 'campo-linha' }, UI.icone(r.estado === 'ENVIANDO' ? 'aviso' : 'editar'),
-          h('span', { text: 'Pesagem no curral de ' + Fmt.data(r.data) + ' não concluída (' + (r.n || 0) + ((r.n || 0) === 1 ? ' animal)' : ' animais)') + (r.estado === 'ENVIANDO' ? ' · há pesagens sem confirmação' : '') })),
-          h('div', { class: 'acoes', style: 'margin-top:0' }, h('a', { class: 'botao botao-secundario', href: Roteador.href('pesagens/curral'), dataset: { rota: 'pesagens/curral' } }, 'Continuar'))));
+          h('span', { text: m.texto(r) })),
+          h('div', { class: 'acoes', style: 'margin-top:0' }, h('a', { class: 'botao botao-secundario', href: Roteador.href(m.rota), dataset: { rota: m.rota } }, 'Continuar'))));
       });
       rs.filter(function (r) { return Store.tipoEvento(r.tipo); }).forEach(function (r) {
         var enviando = r.estado === 'ENVIANDO';

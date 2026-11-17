@@ -1791,14 +1791,25 @@ var ImportService = (function () {
     // `jaNaBase(g, r)` → detalhe ou null (na validação); `duplicadas` = {linha_num: true} (no bloco, o que a validação gravou).
     if (op.jaNaBase || op.duplicadas) {
       grupos.forEach(function (g) {
+        var antes = g.linhas.length;
+        var duplicadas = [];
         g.linhas = g.linhas.filter(function (r) {
           if (op.duplicadas) return !op.duplicadas[r.linha_num];
           var d = r.erros.length ? null : op.jaNaBase(g, r);
           if (!d) return true;
           r.status = 'DUPLICADA';
           r.erros.unshift(d);
+          duplicadas.push(r.linha_num);
           return false;
         });
+        // A pesagem por lote é um fato só (o peso total e as cabeças da balança): não entra em parte. Com uma linha já na
+        // base, as demais ficam com o motivo claro, em vez de "a lista tem N animais, mas Cabeças na balança diz M".
+        var ehLote = typeof g.cab.peso_total_lote === 'number' || typeof g.cab.cabecas_lote === 'number';
+        if (ehLote && duplicadas.length && g.linhas.length && g.linhas.length < antes) {
+          g.linhas.forEach(function (r) {
+            r.erros.push(det_(null, 'LOTE_EM_PARTE', 'o lote já foi lançado em parte (' + (duplicadas.length === 1 ? 'a linha ' + duplicadas[0] + ' já está' : 'as linhas ' + duplicadas.join(', ') + ' já estão') + ' na base com a mesma média): a pesagem por lote entra inteira ou não entra. Confira o arquivo: tire o lote já lançado ou separe os animais novos em outro número de pesagem'));
+          });
+        }
         if (g.linhas.length) g.primeira = g.linhas[0].linha_num;
       });
       grupos = grupos.filter(function (g) { return g.linhas.length; });
@@ -2137,7 +2148,10 @@ var ImportService = (function () {
     var achado = null;
     if (evento === 'PESAGEM') {
       if (typeof o.peso !== 'number') return null;
+      // A média do lote só se compara com a média de outro lote (MEDIA_LOTE), e o peso individual com o individual: a
+      // pesagem individual de 333,3 kg não é a mesma que a média 1.000 ÷ 3 do lote (revisão da Fase 3).
       tx.repo.por('PESAGENS', 'animal_id', animalId).some(function (p) {
+        if ((p.metodo === 'MEDIA_LOTE') !== (o.lote === true)) return false;
         var ev = p.data_pesagem === data && p.peso_kg === o.peso ? tx.repo.porId('EVENTOS', p.event_id) : null;
         if (!ev || ev.import_id === importId) return false;
         achado = ev;
@@ -2201,7 +2215,7 @@ var ImportService = (function () {
         var alvo = modelo.evento === 'NASCIMENTO' ? (mont.dados.animais[0] || {}).animal_id : mont.porLinha[x.linha_num];
         // O peso da linha (na pesagem por lote, a média que cada animal recebe).
         var lote = typeof g.cab.peso_total_lote === 'number' && typeof g.cab.cabecas_lote === 'number' && g.cab.cabecas_lote > 0 ? Utils.arredondar(g.cab.peso_total_lote / g.cab.cabecas_lote, 1) : null;
-        var extra = { subtipo: mont.dados.subtipo || null, peso: lote !== null ? lote : x.lidos.peso };
+        var extra = { subtipo: mont.dados.subtipo || null, peso: lote !== null ? lote : x.lidos.peso, lote: lote !== null };
         var ev = jaRegistrado_(ens.tx, o.importId, modelo.evento, g.data, alvo, mont.dados.campos, extra);
         if (ev) r.duplicadas[x.linha_num] = det_(null, 'EVENTO_JA_REGISTRADO', textoJaRegistrado_(modelo.evento, ev, extra));
       });
@@ -2357,7 +2371,7 @@ var ImportService = (function () {
       var sub = null;
       Object.keys(modelo.campos).forEach(function (k) { if (modelo.campos[k].subtipo && g.cab[k] !== undefined) sub = g.cab[k]; });
       var lote = typeof g.cab.peso_total_lote === 'number' && typeof g.cab.cabecas_lote === 'number' && g.cab.cabecas_lote > 0 ? Utils.arredondar(g.cab.peso_total_lote / g.cab.cabecas_lote, 1) : null;
-      var x = { subtipo: sub, peso: lote !== null ? lote : r.lidos.peso };
+      var x = { subtipo: sub, peso: lote !== null ? lote : r.lidos.peso, lote: lote !== null };
       var ev = jaRegistrado_(ens.tx, importId, modelo.evento, g.data, achado.animal.animal_id, camposDoGrupo_(modelo, g), x);
       return ev ? det_(null, 'EVENTO_JA_REGISTRADO', textoJaRegistrado_(modelo.evento, ev, x)) : null;
     };

@@ -410,7 +410,7 @@ var UI = (function () {
         var p = ponto(sr, x);
         if (!p) return fechar();
         trecho.push(Math.round(px(i) * 10) / 10 + ',' + Math.round(q.py(p.y) * 10) / 10);
-        marcas.push(marca_('circle', { cx: px(i), cy: q.py(p.y), r: 4, dataset: { x: String(x), valor: String(p.y) } }, cls, (series.length > 1 ? sr.nome + ', ' : '') + x + ': ' + o.formatar(p.y)));
+        marcas.push(marca_('circle', { cx: px(i), cy: q.py(p.y), r: 4, dataset: { x: String(x), valor: String(p.y) } }, cls, (series.length > 1 ? sr.nome + ', ' : '') + x + ': ' + o.formatar(p.y, p.nota)));
       });
       fechar();
       marcas.forEach(function (m) { q.svg.appendChild(m); });
@@ -428,7 +428,7 @@ var UI = (function () {
     var total = function (x) { var t = o.totais ? o.totais[x] : null; return typeof t === 'number' && isFinite(t) ? t : null; };
     xs.forEach(function (x) {
       var soma = 0;
-      series.forEach(function (sr) { var p = ponto(sr, x); if (!p) return; textos.push(larguraTexto_(o.formatar(p.y))); if (empilhar) soma += Math.max(0, p.y); else vals.push(p.y); });
+      series.forEach(function (sr) { var p = ponto(sr, x); if (!p) return; textos.push(larguraTexto_(o.formatar(p.y, p.nota))); if (empilhar) soma += Math.max(0, p.y); else vals.push(p.y); });
       if (empilhar) vals.push(soma, total(x) || 0);
       if (total(x) !== null) textos.push(larguraTexto_(o.formatar(total(x))));
     });
@@ -452,7 +452,7 @@ var UI = (function () {
       series.forEach(function (sr, j) {
         var p = ponto(sr, x), yy = y0 + (empilhar ? 0 : j * (barra + 3));
         if (!p) { if (!empilhar) svg.appendChild(texto_(px(0) + 4, yy + 13, '— sem dado')); return; }
-        var v = p.y, t = o.formatar(v);
+        var v = p.y, t = o.formatar(v, p.nota);
         if (empilhar && v <= 0) return;
         var a = px(empilhar ? acc : Math.min(0, v)), b = px(empilhar ? acc + v : Math.max(0, v));
         acc += v;
@@ -479,7 +479,9 @@ var UI = (function () {
       pontos.forEach(function (p) { if (xs.indexOf(p.x) < 0) xs.push(p.x); if (p.y !== null && p.y !== undefined && p.y !== '' && isFinite(p.y)) vals.push(Number(p.y)); });
       return { nome: sr.nome, pontos: pontos };
     });
-    var ponto = function (sr, x) { var p = sr.pontos.filter(function (q) { return q.x === x; })[0]; return p && p.y !== null && p.y !== undefined && p.y !== '' && isFinite(p.y) ? { x: x, y: Number(p.y) } : null; };
+    var ponto = function (sr, x) { var p = sr.pontos.filter(function (q) { return q.x === x; })[0]; return p && p.y !== null && p.y !== undefined && p.y !== '' && isFinite(p.y) ? { x: x, y: Number(p.y), nota: p.nota || null } : null; };
+    // A nota de um valor presente ("parcial") acompanha o valor no rótulo, na dica e na tabela; a do ausente é o motivo do "—".
+    c.formatar = (function (f) { return function (v, nota) { return f(v) + (nota ? ' (' + nota + ')' : ''); }; })(c.formatar);
     var fig = figura_(o.tipo, o.titulo, vals.length ? null : o.vazio || 'Sem dados para desenhar este gráfico.');
     if (o.dado) fig.setAttribute('data-grafico-id', o.dado);
     if (vals.length) {
@@ -493,7 +495,7 @@ var UI = (function () {
     if (!xs.length) return fig;
     var cab = [{ texto: o.rotuloX || 'Item' }].concat(series.map(function (sr) { return { texto: sr.nome, num: true }; }), o.totais ? [{ texto: 'Total', num: true }] : []);
     fig.appendChild(tabelaGrafico_(o.titulo, cab, xs.map(function (x) {
-      return [String(x)].concat(series.map(function (sr) { var p = ponto(sr, x), cru = sr.pontos.filter(function (q) { return q.x === x; })[0]; return p ? c.formatar(p.y) : '—' + (cru && cru.nota ? ' (' + cru.nota + ')' : ''); }),
+      return [String(x)].concat(series.map(function (sr) { var p = ponto(sr, x), cru = sr.pontos.filter(function (q) { return q.x === x; })[0]; return p ? c.formatar(p.y, p.nota) : '—' + (cru && cru.nota ? ' (' + cru.nota + ')' : ''); }),
         o.totais ? [typeof o.totais[x] === 'number' ? c.formatar(o.totais[x]) : '—'] : []);
     })));
     return fig;

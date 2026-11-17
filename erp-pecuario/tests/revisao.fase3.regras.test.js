@@ -50,8 +50,8 @@ function validarTudo(s, id, mapa) {
   throw new Error('validação não terminou');
 }
 const linhas = (s, id) => s.read(s.G.ImportService.consultaLinhas({ import_id: id, por_pagina: 500 })).itens;
-function importarTudo(s, id) {
-  const r = s.tentar((ctx) => s.G.ImportService.importarBloco(ctx, { avisosAceitos: [], dados: { import_id: id, bloco: 1, modo: 'TOTAL' } }));
+function importarTudo(s, id, avisos) {
+  const r = s.tentar((ctx) => s.G.ImportService.importarBloco(ctx, { avisosAceitos: avisos || [], dados: { import_id: id, bloco: 1, modo: 'TOTAL' } }));
   assert.ok(r.ok, JSON.stringify(r.erro));
   return s.exec((ctx) => s.G.ImportService.concluir(ctx, { dados: { import_id: id } })).dados;
 }
@@ -65,7 +65,7 @@ test('achado 16: ligar o controle de estoque com aplicações já gravadas e com
   ok(api(s, 'evento.registrar', san('VACINACAO', '2026-05-10', ids, { produto_id: p.product_id, modo_dose: 'POR_CABECA', dose_referencia: 1 })), 'vacina');
   const e = recusa(api(s, 'produto.salvar', { product_id: p.product_id, campos: { controla_estoque: true } }, 'liga'), 'NEEDS_CONFIRMATION', 'liga');
   assert.deepEqual(cods(e), ['ESTOQUE_INSUFICIENTE']);
-  assert.match(e.details[0].mensagem, /começa em −3 doses/);
+  assert.match(e.details[0].mensagem, /começa em -3 doses/);
   assert.match(e.details[0].mensagem, /acerte o estoque pela contagem/);
   assert.doesNotMatch(e.details[0].mensagem, /lance antes a entrada/);
   const pr = ok(api(s, 'produto.salvar', { product_id: p.product_id, campos: { controla_estoque: true } }, 'liga', ['ESTOQUE_INSUFICIENTE']), 'liga com aceite');
@@ -102,8 +102,8 @@ test('achado 17: o mesmo diagnóstico, a mesma aplicação e a mesma ocorrência
   // Outro produto no mesmo dia não é o mesmo fato.
   ok(api(s, 'evento.registrar', san('VACINACAO', '2026-06-01', brincos.map((b) => ids[b]), { nome_produto: 'Vacina da loja', modo_dose: 'POR_CABECA', dose_referencia: 1, unidade_dose: 'dose' })), 'outro produto');
   // A ocorrência do mesmo tipo.
-  const oc = (tipo) => ({ tipo: 'OCORRENCIA', campos: { event_date: '2026-06-02', tipo_ocorrencia: tipo, descricao: 'Mancando' }, animais: brincos.map((b) => ({ animal_id: ids[b] })) });
-  ok(api(s, 'evento.registrar', { tipo: 'OCORRENCIA', campos: { event_date: '2026-06-02', tipo_ocorrencia: 'LESAO', descricao: 'Pata' }, animais: [{ animal_id: ids['202'] }] }), 'ocorrência 1');
+  const oc = (tipo) => ({ tipo: 'OCORRENCIA', campos: { event_date: '2026-06-02', tipo_ocorrencia: tipo, description: 'Mancando' }, animais: brincos.map((b) => ({ animal_id: ids[b] })) });
+  ok(api(s, 'evento.registrar', { tipo: 'OCORRENCIA', campos: { event_date: '2026-06-02', tipo_ocorrencia: 'LESAO', description: 'Pata' }, animais: [{ animal_id: ids['202'] }] }), 'ocorrência 1');
   const e3 = recusa(api(s, 'evento.registrar', oc('LESAO')), 'NEEDS_CONFIRMATION', 'ocorrência 2');
   assert.deepEqual(cods(e3), ['POSSIVEL_DUPLICIDADE']);
   ok(api(s, 'evento.registrar', oc('LESAO'), null, ['POSSIVEL_DUPLICIDADE']), 'aceita');
@@ -175,7 +175,8 @@ test('achado 26: a pesagem por lote importada não é duplicada pela pesagem ind
   const c = criarImportacao(s, 'PESAGENS', csv, 'c1');
   const v = validarTudo(s, c.import_id, MAPA);
   assert.deepEqual([v.contadores.validas, v.contadores.erro, v.contadores.duplicadas], [3, 0, 0], JSON.stringify(linhas(s, c.import_id)));
-  importarTudo(s, c.import_id);
+  // A segunda pesagem do 100 no mesmo dia pede o aceite do motor (POSSIVEL_DUPLICIDADE), como no formulário.
+  importarTudo(s, c.import_id, ['POSSIVEL_DUPLICIDADE']);
   // O mesmo lote importado de novo, mais um animal: as três linhas são do lote já lançado; a quarta não pode entrar sozinha.
   const csv2 = ['Nº da pesagem;Data da pesagem;Brinco;Peso (kg);Peso total do lote (kg);Cabeças na balança',
     'L1;20/09/2026;100;;1.333,2;4', 'L1;20/09/2026;101;;;', 'L1;20/09/2026;102;;;', 'L1;20/09/2026;103;;;'].join('\n');

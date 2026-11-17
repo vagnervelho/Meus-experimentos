@@ -500,9 +500,11 @@ var ReproductionService = (function () {
    * As fêmeas de um período reprodutivo: as expostas na estação E (07, seção 8.3: com exposição, cobertura ou inseminação
    * vinculada a E), cada uma com {animal_id, inicio, fim (da exposição), janela: [início + dias − tolerância, fim + dias +
    * tolerância], ultimo_dg, parto (o atribuído a E), aborto, saida}. O parto pertence à exposição mais recente da matriz
-   * cuja janela o contém (de qualquer estação, ou sem estação).
+   * cuja janela o contém (de qualquer estação, ou sem estação). Só os fatos até a data D (07, seção 8.3: "o último
+   * diagnóstico conhecido na data D"): a reconfirmação, o aborto, o parto e a exposição gravados depois de D não mudam o
+   * indicador de D.
    */
-  function expostasDaEstacao_(L, est) {
+  function expostasDaEstacao_(L, est, data) {
     var f = L.f;
     var p = L.params;
     var dias = p.dias_gestacao;
@@ -510,7 +512,7 @@ var ReproductionService = (function () {
     var estacoes = mapaEstacoes_(L.repo);
     var porFemea = {};
     L.repo.por('REPRODUCAO', 'estacao_id', est.estacao_id).forEach(function (r) {
-      if (EXPOEM.indexOf(r.tipo_evento) < 0 || (f.excluidos && f.excluidos[r.event_id])) return;
+      if (EXPOEM.indexOf(r.tipo_evento) < 0 || (f.excluidos && f.excluidos[r.event_id]) || (data && r.data > data)) return;
       if (!f.vale(r.event_id)) return;
       porFemea[r.animal_id] = true;
     });
@@ -521,7 +523,7 @@ var ReproductionService = (function () {
       return e ? e.data_fim : r.data;
     };
     return Object.keys(porFemea).map(function (id) {
-      var regs = registros(f, id);
+      var regs = registros(f, id).filter(function (r) { return !data || r.data <= data; });
       var expostos = regs.filter(function (r) { return EXPOEM.indexOf(r.tipo_evento) >= 0; });
       var deE = expostos.filter(function (r) { return r.estacao_id === est.estacao_id; });
       var inicio = deE[0].data;
@@ -673,25 +675,19 @@ var ReproductionService = (function () {
       if (!s.presente) return;
       var ps = partos(f, a.animal_id).filter(function (x) { return x.data <= data; });
       var nP = (typeof a.partos_previos === 'number' ? a.partos_previos : 0) + ps.length;
-      if (!apta_(a, p, data, nP) || a.marcado_descarte === true) return;
+      // A marca de descarte e a situação vigentes NA DATA (a marcação de dezembro não muda o 1º de janeiro).
+      var naData = Timeline.reproducaoEm(f, a.animal_id, data);
+      if (!apta_(a, p, data, nP) || naData.marcado_descarte) return;
       var regs = registros(f, a.animal_id).filter(function (r) { return r.data <= data; });
-      lista.push({ a: a, regs: regs, partos: nP });
+      lista.push({ a: a, regs: regs, partos: nP, situacao: naData.situacao_reprodutiva });
     });
     return lista;
   }
-  function situacaoNaData_(x) {
-    var s = null;
-    x.regs.forEach(function (r) {
-      if (r.tipo_evento === 'DIAGNOSTICO_GESTACAO') s = r.resultado === 'POSITIVO' ? 'PRENHA' : r.resultado === 'NEGATIVO' ? 'VAZIA' : s;
-      else if (r.tipo_evento === 'EXPOSICAO' || r.tipo_evento === 'COBERTURA') s = 'EXPOSTA';
-      else if (r.tipo_evento === 'INSEMINACAO') s = 'INSEMINADA';
-      else if (r.tipo_evento === 'PARTO' || r.tipo_evento === 'ABORTO') s = 'VAZIA';
-    });
-    return s;
-  }
+  /** Sem informação: nenhuma situação conhecida na data (nem fato até ela, nem a declarada na entrada). */
+  var SEM_SITUACAO = ['SEM_INFORMACAO', 'NAO_APTA'];
   function indicadoresDaEstacao_(L, est, data) {
     var minimo = typeof L.params.indicador_n_minimo === 'number' ? L.params.indicador_n_minimo : 5;
-    var femeas = expostasDaEstacao_(L, est);
+    var femeas = expostasDaEstacao_(L, est, data);
     var geral = calcular_(L, femeas, data, minimo);
     var porCat = {};
     femeas.forEach(function (x) {
@@ -761,8 +757,8 @@ var ReproductionService = (function () {
         if (!vazio_(d.ano) && !/^\d{4}$/.test(String(d.ano))) throw Validation.erro('VALIDATION', 'O ano precisa ter quatro algarismos.', [det_('FORMATO_INVALIDO', 'ano', 'Ano inválido.')]);
         var minimo = typeof L.params.indicador_n_minimo === 'number' ? L.params.indicador_n_minimo : 5;
         var matrizes = vazio_(L.marcoZero) || data < L.marcoZero ? null : matrizesEm_(L, data);
-        var prenhas = matrizes ? matrizes.filter(function (x) { return situacaoNaData_(x) === 'PRENHA'; }).length : null;
-        var semInfo = matrizes ? matrizes.filter(function (x) { return situacaoNaData_(x) === null; }).length : null;
+        var prenhas = matrizes ? matrizes.filter(function (x) { return x.situacao === 'PRENHA'; }).length : null;
+        var semInfo = matrizes ? matrizes.filter(function (x) { return !x.situacao || SEM_SITUACAO.indexOf(x.situacao) >= 0; }).length : null;
         var semHist = matrizes ? matrizes.filter(function (x) { return !x.regs.length && x.partos === 0; }).length : null;
         return {
           data: data,
@@ -779,7 +775,7 @@ var ReproductionService = (function () {
    * `reproducao.matrizes`: as fêmeas no rebanho na data (padrão hoje) com a situação reprodutiva (a projeção, com o rótulo
    * do sistema), a cria ao pé, o número de partos, o último fato, a previsão de parto (estimativa) e se está apta, mais as
    * listas de parto previsto e de prenhez com a previsão vencida (alertas). Filtros: `estacao_id` (só as expostas nela),
-   * `pasture_id`, `situacao`. {data, itens: [...], resumo: {por_situacao, cria_ao_pe, sem_historico}}.
+   * `pasture_id`, `situacao`. {data, itens: [...], resumo: {por_situacao, cria_ao_pe, sem_historico, total, expostas_ou_inseminadas}}.
    */
   function consultaMatrizes(dados) {
     var d = dados || {};
@@ -796,9 +792,11 @@ var ReproductionService = (function () {
           tx.repo.por('REPRODUCAO', 'estacao_id', d.estacao_id).forEach(function (r) { if (EXPOEM.indexOf(r.tipo_evento) >= 0 && L.f.vale(r.event_id)) naEstacao[r.animal_id] = true; });
         }
         var itens = matrizes_(L, data, d).filter(function (x) { return !naEstacao || naEstacao[x.animal_id]; });
-        var resumo = { por_situacao: {}, cria_ao_pe: 0, sem_historico: 0, total: itens.length };
+        var resumo = { por_situacao: {}, cria_ao_pe: 0, sem_historico: 0, total: itens.length, expostas_ou_inseminadas: 0 };
         itens.forEach(function (x) {
           resumo.por_situacao[x.situacao_reprodutiva || 'SEM_INFORMACAO'] = (resumo.por_situacao[x.situacao_reprodutiva || 'SEM_INFORMACAO'] || 0) + 1;
+          // O total do cartão "Expostas ou inseminadas" é conta do servidor (P5): a tela não soma.
+          if (x.situacao_reprodutiva === 'EXPOSTA' || x.situacao_reprodutiva === 'INSEMINADA') resumo.expostas_ou_inseminadas++;
           if (x.cria_ao_pe) resumo.cria_ao_pe++;
           if (x.sem_historico) resumo.sem_historico++;
         });
@@ -823,14 +821,16 @@ var ReproductionService = (function () {
       var nPartos = (typeof a.partos_previos === 'number' ? a.partos_previos : 0) + ps.length;
       var apta = apta_(a, p, data, nPartos);
       if (!apta && !regs.length) return;
-      var sit = data === L.hoje ? nulo_(a.situacao_reprodutiva) : situacaoNaData_({ regs: regs }) || nulo_(a.situacao_reprodutiva);
+      // A mesma regra da projeção em qualquer data (a declarada na entrada vale como o fato da data dela).
+      var naData = Timeline.reproducaoEm(f, a.animal_id, data);
+      var sit = naData.situacao_reprodutiva;
       if (!vazio_(o.situacao) && sit !== o.situacao) return;
       var ultimo = regs.length ? regs[regs.length - 1] : null;
       var prev = ['PRENHA', 'INSEMINADA', 'EXPOSTA'].indexOf(sit) >= 0 ? previsaoParto(regs, p, est) : null;
       out.push({
         animal_id: a.animal_id, codigo_interno: a.codigo_interno, brinco: nulo_(a.brinco), nome: nulo_(a.nome), pasture_id: s.pasture_id || null,
         idade_meses: vazio_(a.data_nascimento) ? null : Utils.idadeMeses(a.data_nascimento, data), apta: apta,
-        situacao_reprodutiva: sit, cria_ao_pe: a.cria_ao_pe === true && data === L.hoje, partos: nPartos, marcado_descarte: a.marcado_descarte === true,
+        situacao_reprodutiva: sit, cria_ao_pe: a.cria_ao_pe === true && data === L.hoje, partos: nPartos, marcado_descarte: naData.marcado_descarte,
         ultimo: ultimo ? { tipo_evento: ultimo.tipo_evento, data: ultimo.data, resultado: nulo_(ultimo.resultado), event_id: ultimo.event_id } : null,
         previsao_parto: prev, sem_historico: apta && !regs.length && !(typeof a.partos_previos === 'number' && a.partos_previos > 0),
       });

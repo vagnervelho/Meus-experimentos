@@ -1136,8 +1136,13 @@ var EventService = (function () {
     var a = HealthService.menorSaldo(antes);
     var dp = HealthService.menorSaldo(depois);
     if (!(dp.saldo < 0) || !(dp.saldo < a.saldo)) return;
+    // A compra lançada antes de ligar o controle não tem movimento (desenho-base 16.9): o caminho é o acerto pela contagem,
+    // não lançar de novo a entrada já paga.
+    var conselho = HealthService.compraSemMovimento(m.repo, produto.product_id)
+      ? 'Há compra deste produto lançada antes de ligar o controle de estoque, que o saldo não conta: acerte o estoque pela contagem (Produtos, "Acertar") em vez de lançar a entrada de novo.'
+      : 'Confira a quantidade ou lance antes a entrada do produto.';
     avisoItem_(m, null, 'ESTOQUE_INSUFICIENTE', produto.nome + ': o estoque ficaria em ' + HealthService.quantidadeTexto(dp.saldo, produto.unidade) + ' em ' + br_(dp.data) +
-      ' (o saldo não cobre o que sai). Confira a quantidade ou lance antes a entrada do produto. Gravar mesmo assim?');
+      ' (o saldo não cobre o que sai). ' + conselho + ' Gravar mesmo assim?');
   }
   /**
    * Consumo, custo e carência da SANIDADE (03b, seções 10.3 e 15.2; 07, seção 5; PR-11; RN-054): a quantidade consumida
@@ -2968,8 +2973,13 @@ var EventService = (function () {
   /** O produto de um registro sanitário, para a guarda de duplicidade: o do cadastro ou o nome em texto livre. */
   function chaveSanidade_(r) {
     if (!r) return '';
-    return !vazio_(r.produto_id) ? 'P:' + r.produto_id : 'N:' + Utils.normalizarTexto(String(r.nome_produto || ''));
+    if (!vazio_(r.produto_id)) return 'P:' + r.produto_id;
+    if (!vazio_(r.nome_produto)) return 'N:' + Utils.normalizarTexto(String(r.nome_produto));
+    // Sem produto (a doença, o exame): a mesma doença ou o mesmo diagnóstico, como na importação (jaRegistrado_).
+    return 'D:' + Utils.normalizarTexto(String(r.diagnostico || ''));
   }
+  /** Tipos cujo fato é de cada animal (a mesma chave da importação, jaRegistrado_): o aviso de duplicidade vai por animal. */
+  var FATO_POR_ANIMAL = Object.freeze({ REPRODUCAO: true, SANIDADE: true, OCORRENCIA: true });
   function guardaDuplicidade_(m, ctxEv) {
     var ev = ctxEv.ev;
     // O touro do lote não conta: o lançamento é das fêmeas (a reprodução) e dos bezerros (a desmama).
@@ -2983,6 +2993,7 @@ var EventService = (function () {
       if (ev.event_type === 'OCORRENCIA') return (c.payload_json || {}).tipo_ocorrencia === nulo_(ctxEv.campos.tipo_ocorrencia);
       return ev.event_type !== 'MARCACAO' || (c.payload_json || {}).acao === (ev.payload_json || {}).acao;
     });
+    var avisados = {};
     candidatos.forEach(function (c) {
       var linhas = m.repo.por('EVENTO_ANIMAIS', 'event_id', c.event_id).filter(function (l) { return l.papel === 'SUJEITO' || l.papel === 'CRIA' || l.papel === 'MATRIZ'; });
       var ids = {};
@@ -3006,7 +3017,24 @@ var EventService = (function () {
         var quantos = itens.length === 1 ? 'com este animal' : 'com ' + comuns + ' destes ' + itens.length + ' animais';
         avisoItem_(m, null, 'POSSIVEL_DUPLICIDADE', 'Já existe ' + nome + ' de ' + br_(c.event_date) + ' ' + quantos + '. Gravar mesmo assim?',
           conflitoCom_(c.event_id, c.event_type, c.event_subtype, c.event_date));
+        avisados[c.event_id] = true;
       }
+    });
+    // Por animal (RN-090 e RN-091; revisão da Fase 3): o mesmo diagnóstico, a mesma aplicação ou a mesma ocorrência do animal
+    // no mesmo dia, gravada num lançamento que não chega aos 80% deste (o bloco do tronco com outras fêmeas, a vacinação do
+    // lote), pede confirmação na linha dele — a mesma chave da importação, que a marca DUPLICADA. A pesagem tem o aviso dela.
+    if (!FATO_POR_ANIMAL[ev.event_type]) return;
+    var porAnimal = {};
+    candidatos.forEach(function (c) {
+      if (avisados[c.event_id]) return;
+      m.repo.por('EVENTO_ANIMAIS', 'event_id', c.event_id).forEach(function (l) { if ((l.papel || 'SUJEITO') === 'SUJEITO' && !porAnimal[l.animal_id]) porAnimal[l.animal_id] = c; });
+    });
+    itens.forEach(function (it) {
+      var c = porAnimal[it.animal_id];
+      if (!c || it.novo) return;
+      var nome = EventCatalog.nomeEvento(c.event_type, c.event_subtype).replace(/^(a|o) /, '');
+      avisoItem_(m, it, 'POSSIVEL_DUPLICIDADE', it.quem + ': já tem ' + nome + ' de ' + br_(c.event_date) + (c.event_type === 'SANIDADE' ? ' com o mesmo produto' : c.event_type === 'OCORRENCIA' ? ' do mesmo tipo' : '') +
+        ', em outro lançamento. Gravar mesmo assim?', conflitoCom_(c.event_id, c.event_type, c.event_subtype, c.event_date));
     });
   }
   /**
@@ -3358,6 +3386,9 @@ var EventService = (function () {
    * demais é sempre aviso com aceite (aplicarPolitica_).
    */
   function carenciaNaVenda_(m, ctxEv) {
+    // A venda anterior ao marco zero (o histórico importado) não confere a carência: a aplicação também não confere a venda
+    // histórica (carenciaContraVendas_), e o resultado da importação não pode depender da ordem dos arquivos.
+    if (ctxEv.ev.pre_marco_zero === true) return;
     var data = ctxEv.ev.event_date;
     var abate = ctxEv.campos.finalidade === 'ABATE';
     m.carenciaSemPolitica = !abate;
@@ -3923,7 +3954,17 @@ var EventService = (function () {
       description: nulo_(ev.description), notes: nulo_(ev.notes), responsible: nulo_(ev.responsible), total_value: nulo_(ev.total_value),
       created_by: ev.created_by, source: ev.source, pre_marco_zero: ev.pre_marco_zero === true, payload: ev.payload_json || null,
       reversal_of_event_id: nulo_(ev.reversal_of_event_id), anulado_por: a.anulador_id, animais: n, created_at: ev.created_at,
+      sanidade: ev.event_type === 'SANIDADE' ? sanidadeDoItem_(tx, ev.event_id) : null,
     };
+  }
+  /**
+   * O produto (do cadastro, pelo nome congelado, ou o nome livre) e o diagnóstico da SANIDADE, para a lista de aplicações:
+   * eles ficam nos registros SANIDADE, não no payload (um lançamento é um procedimento com um produto).
+   */
+  function sanidadeDoItem_(tx, eventId) {
+    var r0 = tx.repo.carregada('SANIDADE') ? tx.cru.cruPor('SANIDADE', 'event_id', eventId)[0] : null;
+    if (!r0) return null;
+    return { produto_id: nulo_(r0.produto_id), nome_produto: nulo_(r0.nome_produto), diagnostico: nulo_(r0.diagnostico), tipo_procedimento: nulo_(r0.tipo_procedimento) };
   }
   /**
    * Consulta evento.listar: filtros {tipo, subtipo, de, ate, animal_id, vigentes (só os que valem), pagina, por_pagina}.

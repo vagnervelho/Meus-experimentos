@@ -253,6 +253,16 @@ var HealthService = (function () {
     if (!repo.carregada('SANIDADE')) return [];
     return repo.por('SANIDADE', 'animal_id', id).filter(function (r) { return !(f && f.excluidos && f.excluidos[r.event_id]); });
   }
+  /**
+   * A compra do produto lançada sem o movimento de entrada (o controle estava desligado; desenho-base 16.9): o saldo
+   * controlado não a vê. O aviso de estoque insuficiente manda então acertar pela contagem, não lançar a entrada de novo.
+   */
+  function compraSemMovimento(repo, productId) {
+    if (!repo.carregada('FINANCEIRO') || !repo.carregada('MOVIMENTOS_ESTOQUE')) return false;
+    return repo.por('FINANCEIRO', 'product_id', productId).some(function (f) {
+      return f.natureza === 'ESTOQUE_INSUMOS' && !vazio_(f.event_id) && !repo.por('MOVIMENTOS_ESTOQUE', 'event_id', f.event_id).some(function (m) { return m.tipo === 'ENTRADA' && m.product_id === productId; });
+    });
+  }
   /** Movimentos vigentes do produto (sem os eventos excluídos): as linhas de MOVIMENTOS_ESTOQUE. */
   function movimentosDoProduto(repo, productId, excluidos) {
     if (!repo.carregada('MOVIMENTOS_ESTOQUE')) return [];
@@ -293,16 +303,18 @@ var HealthService = (function () {
         vencimento: v.vencimento, situacao: sit, dias: Utils.diffDias(v.vencimento, data), ultima_aplicacao: v.ultima,
       });
     });
-    // Sem protocolo: a próxima dose informada na última aplicação do produto do cadastro.
+    // Sem protocolo: a próxima dose informada na última aplicação do produto do cadastro (CONTRATOS, seção 39). A última
+    // aplicação do produto é a de qualquer lançamento, com ou sem protocolo (RN-058: a aplicação posterior da mesma chave
+    // cumpre a pendência); a pendência sem protocolo só vale quando essa última também é sem protocolo.
     var porProduto = {};
     aplicacoes.forEach(function (r) {
-      if (!vazio_(r.protocol_id) || vazio_(r.produto_id)) return;
+      if (vazio_(r.produto_id)) return;
       var u = porProduto[r.produto_id];
       if (!u || r.data_aplicacao > u.data_aplicacao || (r.data_aplicacao === u.data_aplicacao && c.seq(r.event_id) > c.seq(u.event_id))) porProduto[r.produto_id] = r;
     });
     Object.keys(porProduto).forEach(function (pid) {
       var u = porProduto[pid];
-      if (vazio_(u.data_proxima_aplicacao)) return;
+      if (!vazio_(u.protocol_id) || vazio_(u.data_proxima_aplicacao)) return;
       var v = { vencimento: u.data_proxima_aplicacao, cumprida: false };
       var sit = situacao(v, data, antecedencia_(null, c.params));
       if (SITUACOES_AGENDA.indexOf(sit) < 0) return;
@@ -489,6 +501,8 @@ var HealthService = (function () {
   }
   /** Carência do animal hoje (para a lista leve: o selo "em carência até" na venda e no rebanho). */
   function carenciaHoje(L, a) {
+    // Sem a aba lida, a carência seria "nenhuma" em silêncio e o aparelho apagaria o selo: é erro de programação.
+    if (!L.repo.carregada('SANIDADE')) throw Validation.erro('INTERNAL', 'A consulta do animal precisa ler a sanidade para dizer a carência (AnimalService.leituras).');
     if (a.situacao_cadastral !== 'ATIVO') return null;
     var car = carenciaEm(aplicacoesDoAnimal(L.repo, a.animal_id, L.f), L.hoje);
     return car ? car.fim : null;
@@ -563,13 +577,27 @@ var HealthService = (function () {
           if (igual) col.erro(det_('NOME_REPETIDO', 'nome', 'Já existe um produto ativo chamado "' + igual.nome + '".'));
         }
         if (col.temErros()) return { erros: col.erros };
+        // Ligar o controle de estoque depois das aplicações: o saldo é Σ dos movimentos, e as saídas já gravadas (a aplicação
+        // gera a saída com ou sem controle; PR-11) entram nele, mas as compras lançadas sem o controle não têm movimento
+        // (desenho-base 16.9). O saldo começaria negativo: pede confirmação e diz o caminho (o acerto pela contagem), nunca
+        // "lance a entrada" — a compra já foi paga e lançada.
+        var avisos = [];
+        if (atual && campos.controla_estoque === true && atual.controla_estoque !== true) {
+          var inicial = saldo(movimentosDoProduto(tx.repo, id, null), null);
+          if (inicial < 0) {
+            avisos.push(det_('ESTOQUE_INSUFICIENTE', 'controla_estoque', atual.nome + ': ao ligar o controle, o saldo começa em ' + quantidadeTexto(inicial, atual.unidade) +
+              ' (as aplicações já gravadas baixam o estoque, e as compras lançadas sem o controle não entram nele). Depois de gravar, acerte o estoque pela contagem (Produtos, "Acertar"). Ligar mesmo assim?'));
+            avisos = Config.aplicarPolitica(Config.parametros(tx.repo), avisos, col);
+            if (col.temErros()) return { erros: col.erros };
+          }
+        }
         if (atual) AuditService.alteracao(tx, 'PRODUTOS', id, campos, d.justificativa);
         else {
           // O saldo nasce com o cadastro (zero com controle, vazio sem): a projeção dos movimentos dá o mesmo.
           campos.estoque_atual = campos.controla_estoque === true ? 0 : null;
           AuditService.criacao(tx, 'PRODUTOS', id, campos, d.justificativa);
         }
-        return { resumo: { product_id: id }, derivados: { produtos: [id] }, resposta: function (t) { return produtoPublico(t.repo, t.repo.porId('PRODUTOS', id)); } };
+        return { avisos: avisos, resumo: { product_id: id }, derivados: { produtos: [id] }, resposta: function (t) { return produtoPublico(t.repo, t.repo.porId('PRODUTOS', id)); } };
       },
       reconstruir: function (tx, op) { return produtoPublico(tx.repo, tx.repo.porId('PRODUTOS', op.resumo.product_id)); },
     };
@@ -691,6 +719,7 @@ var HealthService = (function () {
     situacao: situacao,
     aplicacoesDoAnimal: aplicacoesDoAnimal,
     movimentosDoProduto: movimentosDoProduto,
+    compraSemMovimento: compraSemMovimento,
     contexto: contexto,
     pendenciasDoAnimal: pendenciasDoAnimal,
     agendaEm: agendaEm,

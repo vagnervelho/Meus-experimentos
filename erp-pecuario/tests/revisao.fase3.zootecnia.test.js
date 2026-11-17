@@ -53,7 +53,7 @@ test('achado 1: os indicadores da estação numa data passada usam o último dia
   assert.equal(ind.matrizes.prenhas, 8);
   // Depois da reconfirmação e do aborto, o número muda (o fato já aconteceu).
   const depois = geral('2026-07-15');
-  assert.deepEqual([depois.prenhez.numerador, depois.perda_gestacional.numerador], [6, 1]);
+  assert.deepEqual([depois.prenhez.numerador, depois.perda_gestacional.numerador], [7, 1], 'a última reconfirmação (7 de 8) e o aborto como perda');
 });
 
 test('achado 2: matrizes ativas e a natalidade anual pela marca de descarte vigente na data — a marcação de dezembro não muda o 1º de janeiro nem uma data anterior a ela; depois dela, a marcada sai', () => {
@@ -160,12 +160,11 @@ test('achado 15: a tabela "Animais" da tela de desempenho só traz os animais do
   ok(pesar(s, '2026-04-30', todos.map((x) => ({ animal_id: x, peso: 345 }))));
   const d = ok(api(s, 'peso.desempenho', { pasture_id: PASTOS.B }));
   assert.deepEqual([d.geral.cabecas, d.animais.map((a) => a.brinco).sort()], [2, ['B1', 'B2']]);
-  const cats = s.tabela('CATEGORIAS').filter((c) => c.ativo !== false);
-  const usada = new Set(todos.map(() => null));
-  const semNinguem = cats.find((c) => c.sexo === 'F');
-  const c = ok(api(s, 'peso.desempenho', { category_id: semNinguem.category_id }));
+  const cat = (codigo) => s.tabela('CATEGORIAS').find((c) => c.codigo === codigo).category_id;
+  const c = ok(api(s, 'peso.desempenho', { category_id: cat('VACA') }));
   assert.deepEqual([c.geral.cabecas, c.animais.length], [0, 0], 'categoria sem nenhum animal');
-  assert.ok(usada);
+  const g = ok(api(s, 'peso.desempenho', { category_id: cat('NOVILHO'), pasture_id: PASTOS.A }));
+  assert.deepEqual([g.geral.cabecas, g.animais.map((a) => a.brinco).sort()], [2, ['A1', 'A2']], 'categoria e pasto juntos');
   const sem = ok(api(s, 'peso.desempenho', {}));
   assert.equal(sem.animais.length, 4, 'sem filtro, todos');
 });

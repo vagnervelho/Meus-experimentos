@@ -598,7 +598,8 @@ var AnimalService = (function () {
     return {
       rota: 'animal.editar', idempotencyKey: p.idempotencyKey, dados: p.dados, avisosAceitos: p.avisosAceitos || [],
       dataVersionEsperada: p.dataVersionEsperada, modo: p.modo, acessoCru: true,
-      reads: Utils.unicos(EventCatalog.leituras('AJUSTE_INVENTARIO').concat(Timeline.LEITURAS, ['ANEXOS'])),
+      // As abas do leitor (leituras()) também: a resposta traz a linha leve inteira, com a carência de hoje (SANIDADE).
+      reads: Utils.unicos(EventCatalog.leituras('AJUSTE_INVENTARIO').concat(Timeline.LEITURAS, leituras(), ['ANEXOS'])),
       tratador: planejarEdicao_,
       reconstruir: function (tx, op) { return respostaEdicao_(tx, op.resumo); },
     };

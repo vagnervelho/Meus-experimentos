@@ -501,23 +501,42 @@ var Timeline = (function () {
   function chegadaDeclarada(f, id) {
     return projetarAnimal(f, id).meta.chegada || { data: null, confianca: null };
   }
+  /**
+   * A situação reprodutiva e a marca de descarte do animal NA DATA D (07, seção 8.3: "contagem em D"): a mesma regra da
+   * projeção, só com os fatos até D — o último registro reprodutivo, com a situação declarada na entrada valendo como o fato
+   * da data dela (a projeção, a lista de fêmeas e os indicadores usam esta função; um fato gravado depois de D não muda o
+   * número de D) e a última marcação de descarte vigente até D. {situacao_reprodutiva, marcado_descarte}.
+   */
+  function reproducaoEm(f, id, data) {
+    var vig = f.linhas(id);
+    var criacao = ultimoPor_(vig.filter(function (l) { return !!l.atributos; }), function (a, b) { return a.ordem_seq - b.ordem_seq || a.event_seq - b.event_seq; });
+    var at = (criacao && criacao.atributos) || {};
+    var animal = f.animal(id);
+    return {
+      situacao_reprodutiva: animal && animal.sexo !== 'F' ? null : situacaoReprodutiva_(f, id, false, at, criacao, data),
+      marcado_descarte: marcacao_(vig.filter(function (l) { return l.event_date <= data; }), 'DESCARTE'),
+    };
+  }
   function marcacao_(vig, subtipo) {
     var ultima = ultimoPor_(vig.filter(function (l) { return l.event_type === 'MARCACAO' && l.event_subtype === subtipo; }), function (a, b) { return comparar_(a.event_date, b.event_date) || a.ordem_seq - b.ordem_seq; });
     return !!ultima && !!ultima.payload && ultima.payload.acao === 'MARCAR';
   }
-  function situacaoReprodutiva_(f, id, fora, at, criacao) {
+  function situacaoReprodutiva_(f, id, fora, at, criacao, ate) {
     // A situação declarada na entrada (rebanho inicial, compra, outra entrada) vale como o fato da data da entrada: o
     // registro de antes dela (o histórico reprodutivo importado de antes do marco zero, E3.6) fica na ficha e nos
-    // indicadores, mas não desfaz o que foi declarado depois dele.
+    // indicadores, mas não desfaz o que foi declarado depois dele. Com `ate` (a data D), só os fatos até D; a declarada vale
+    // a partir da data da entrada.
     var desde = !vazio_(at.situacao_reprodutiva) && criacao ? criacao.event_date : null;
-    var fatos = fora ? [] : f.reproducao(id).map(function (r) {
+    if (ate && desde && desde > ate) desde = null;
+    var declarada = vazio_(at.situacao_reprodutiva) || (ate && criacao && criacao.event_date > ate) ? null : at.situacao_reprodutiva;
+    var fatos = fora ? [] : f.reproducao(id).filter(function (r) { return !ate || r.data <= ate; }).map(function (r) {
       var ev = f.evento(r.event_id);
       var s = r.tipo_evento === 'DIAGNOSTICO_GESTACAO' ? (r.resultado === 'POSITIVO' ? 'PRENHA' : r.resultado === 'NEGATIVO' ? 'VAZIA' : null) : REPRO_SITUACAO[r.tipo_evento] || null;
       return { s: s, data: r.data, seq: ev ? ev.event_seq : 0, ord: ev ? f.ordemSeq(r.event_id) : 0 };
     }).filter(function (x) { return x.s !== null && (desde === null || x.data >= desde); });
     var ultimo = ultimoPor_(fatos, function (a, b) { return comparar_(a.data, b.data) || a.ord - b.ord || a.seq - b.seq; });
     if (ultimo) return ultimo.s;
-    if (!vazio_(at.situacao_reprodutiva)) return at.situacao_reprodutiva;
+    if (declarada) return declarada;
     return criacao && criacao.event_type === 'NASCIMENTO' ? 'NAO_APTA' : 'SEM_INFORMACAO';
   }
   function custo_(f, id, entrada, campos) {
@@ -991,6 +1010,7 @@ var Timeline = (function () {
     descrever: descrever,
     fonte: fonte,
     projetarAnimal: projetarAnimal,
+    reproducaoEm: reproducaoEm,
     chegadaDeclarada: chegadaDeclarada,
     entradaDoCusto: entradaDoCusto,
     ultimaPesagem: ultimaPesagem,

@@ -122,7 +122,7 @@ var TelaReproducao = (function () {
         UI.indicador('Fêmeas', String(r.total), 'em ' + Fmt.dataCurta(d.data), 'femeas'),
         UI.indicador('Prenhes', String(ps.PRENHA || 0), null, 'prenhas'),
         UI.indicador('Vazias', String(ps.VAZIA || 0), null, 'vazias'),
-        UI.indicador('Expostas ou inseminadas', String((ps.EXPOSTA || 0) + (ps.INSEMINADA || 0)), null, 'expostas'),
+        UI.indicador('Expostas ou inseminadas', String(r.expostas_ou_inseminadas), null, 'expostas'),
         UI.indicador('Com cria ao pé', String(r.cria_ao_pe), null, 'cria-ao-pe'),
         UI.indicador('Sem histórico reprodutivo', String(r.sem_historico), 'aptas, sem nenhum registro', 'sem-historico')));
       var al = blocoAlertas(d.alertas || []);
@@ -162,7 +162,7 @@ var TelaReproducao = (function () {
     return [
       ['Expostas', String(g.expostas)],
       ['Taxa de prenhez', pct(g.prenhez) + ' · ' + g.prenhez.numerador + ' de ' + g.prenhez.denominador + (g.prenhez.rotulo !== 'Taxa de prenhez' ? ' (' + g.prenhez.rotulo.toLowerCase() + ')' : '')],
-      ['Diagnosticadas', g.diagnosticadas + ' de ' + (g.expostas - g.sairam_sem_diagnostico) + ' (cobertura do diagnóstico ' + pct(g.cobertura_dg) + ')'],
+      ['Diagnosticadas', g.cobertura_dg.numerador + ' de ' + g.cobertura_dg.denominador + ' (cobertura do diagnóstico ' + pct(g.cobertura_dg) + ')'],
       ['Taxa de parição', pct(g.paricao) + ' · ' + g.paricao.numerador + ' de ' + g.paricao.denominador + (g.paricao.parcial ? ' (parcial: há prenhe ainda sem parto)' : '')],
       ['Natalidade', pct(g.natalidade) + ' · ' + g.natalidade.numerador + ' nascidos vivos de ' + g.natalidade.denominador + ' expostas'],
       ['Perda gestacional', pct(g.perda_gestacional) + ' · ' + g.perda_gestacional.numerador + ' de ' + g.perda_gestacional.denominador + ' prenhes' + (g.perda_gestacional.parcial ? ' (parcial)' : '')],
@@ -177,7 +177,9 @@ var TelaReproducao = (function () {
    * Gráficos das taxas (SP-08, Components): as do servidor, as mesmas da lista; a taxa sem valor fica "—" com o motivo e
    * o n (denominador zero ou abaixo do mínimo: nunca zero).
    */
-  function pontoTaxa(x, ind) { return { x: x + (ind && ind.parcial ? ' (parcial)' : ''), y: ind ? ind.valor : null, nota: ind && ind.valor === null ? Fmt.rotulo('MOTIVO', ind.motivo || 'DADOS_INSUFICIENTES') + ', n = ' + (ind.denominador === undefined ? ind.n : ind.denominador) : null }; }
+  // O item do gráfico é só o nome (a categoria, a taxa): "parcial" vai na nota do valor, nunca no item — o item é a chave das
+  // barras agrupadas, e a categoria com uma taxa parcial não pode virar duas linhas.
+  function pontoTaxa(x, ind) { return { x: x, y: ind ? ind.valor : null, nota: !ind ? null : ind.valor === null ? Fmt.rotulo('MOTIVO', ind.motivo || 'DADOS_INSUFICIENTES') + ', n = ' + (ind.denominador === undefined ? ind.n : ind.denominador) : ind.parcial ? 'parcial' : null }; }
   function fmtPct(v) { return Fmt.numero(v, 1) + '%'; }
   var TAXAS = [['prenhez', null], ['paricao', 'Parição'], ['natalidade', 'Natalidade'], ['perda_gestacional', 'Perda gestacional'], ['desmama', 'Desmama'], ['mortalidade_ate_desmama', 'Mortalidade até a desmama']];
   function graficoTaxas(e, nMin) {
@@ -332,8 +334,20 @@ var TelaReproducao = (function () {
     c.linhas.forEach(function (l) { if (l.bloco === chave) { l.bloco = null; if (l.estado !== 'NAO_ENCONTRADO') { l.estado = 'FILA'; l.mensagem = null; } } });
     c.blocos = c.blocos.filter(function (b) { return b.chave !== chave; });
   }
+  /** A recusa solta o bloco sem apagar o que ela disse: as citadas ficam ERRO (pendência, com o motivo), as demais na fila. */
+  function soltarBloco(c, chave) {
+    c.linhas.forEach(function (l) { if (l.bloco === chave) l.bloco = null; });
+    c.blocos = c.blocos.filter(function (b) { return b.chave !== chave; });
+  }
+  /** Linha que ainda não saiu: fora de bloco, ou num bloco criado e não enviado (NOVO), recusado ou com aviso. */
+  function editavel(c, l) {
+    if (!l.bloco) return true;
+    var b = bloco(c, l.bloco);
+    return !b || b.estado === 'NOVO' || b.estado === 'AVISO' || b.estado === 'ERRO';
+  }
   function pendencias(c) { return c.linhas.filter(function (l) { return l.estado === 'NAO_ENCONTRADO' || l.estado === 'ERRO'; }); }
   function naFila(c) { return c.linhas.filter(function (l) { return l.estado === 'FILA' && !l.bloco; }); }
+  function naoEnviadas(c) { return c.linhas.filter(function (l) { if (l.estado !== 'FILA') return false; if (!l.bloco) return true; var b = bloco(c, l.bloco); return !b || b.estado === 'NOVO'; }); }
   function dadosDoBloco(c, b) {
     var s = c.sessao;
     var campos = { event_date: s.data, metodo: s.metodo };
@@ -353,6 +367,7 @@ var TelaReproducao = (function () {
   async function enviarBloco(c, b, aoMudar) {
     var linhas = c.linhas.filter(function (l) { return l.bloco === b.chave; });
     b.estado = 'ENVIANDO';
+    c.erroGeral = null;
     linhas.forEach(function (l) { l.estado = 'ENVIANDO'; l.mensagem = null; });
     await guardarTronco(c, { imediato: true });
     aoMudar();
@@ -368,11 +383,15 @@ var TelaReproducao = (function () {
         b.gerais = gerais.map(function (d) { return { codigo: d.codigo, mensagem: d.mensagem }; });
         linhas.forEach(function (l) {
           var ds = porAnimal[l.animal_id] || [];
-          if (b.estado === 'AVISO') { l.estado = ds.length || gerais.length ? 'AVISO' : 'FILA'; l.avisos = ds.concat(gerais).map(function (d) { return d.codigo; }); }
-          else l.estado = ds.length ? 'ERRO' : 'FILA';
-          l.mensagem = ds.length ? ds.map(function (d) { return d.mensagem; }).join(' ') : gerais.map(function (d) { return d.mensagem; }).join(' ') || null;
+          if (b.estado === 'AVISO') { l.estado = ds.length || gerais.length ? 'AVISO' : 'FILA'; l.avisos = ds.concat(gerais).map(function (d) { return d.codigo; }); l.mensagem = ds.length ? ds.map(function (d) { return d.mensagem; }).join(' ') : gerais.map(function (d) { return d.mensagem; }).join(' ') || null; }
+          else { l.estado = ds.length ? 'ERRO' : 'FILA'; l.mensagem = ds.length ? ds.map(function (d) { return d.mensagem; }).join(' ') : null; }
         });
-        if (b.estado === 'ERRO') desfazerBloco(c, b.chave);
+        // A recusa: as linhas citadas ficam ERRO com o motivo (pendência); a geral fica na área de status; nada some calado.
+        if (b.estado === 'ERRO') {
+          var semLinha = !linhas.some(function (l) { return l.estado === 'ERRO'; });
+          c.erroGeral = semLinha || gerais.length ? (gerais.length ? gerais.map(function (d) { return d.mensagem; }).join(' ') : e.message) : null;
+          soltarBloco(c, b.chave);
+        }
       } else {
         b.estado = 'SEM_SINAL';
         b.mensagem = e.message;
@@ -398,14 +417,17 @@ var TelaReproducao = (function () {
     if (pendencias(c).length) { aoMudar(); return 'PENDENCIA'; }
     enviando = true;
     try {
-      var fila = naFila(c);
-      for (var i = 0; i < fila.length; i += BLOCO) {
-        var b = { chave: 'tronco:' + Util.uuid(), uids: fila.slice(i, i + BLOCO).map(function (l) { return l.uid; }), estado: 'NOVO', aceitos: [] };
+      // Primeiro os blocos que já têm chave (a mesma chave); depois a fila, um bloco de cada vez, criado na hora de sair:
+      // nenhuma linha fica presa num bloco que não saiu. Sem sinal ou com recusa, para ali.
+      var ordem = c.blocos.filter(function (b) { return b.estado === 'NOVO' || b.estado === 'SEM_SINAL' || b.estado === 'ENVIANDO' || (b.estado === 'AVISO' && b.reenviar); });
+      for (var k = 0; k < ordem.length; k++) { var st = await enviarBloco(c, ordem[k], aoMudar); if (st === 'SEM_SINAL' || st === 'ERRO') return st; }
+      for (var fila = naFila(c); fila.length; fila = naFila(c)) {
+        var b = { chave: 'tronco:' + Util.uuid(), uids: fila.slice(0, BLOCO).map(function (l) { return l.uid; }), estado: 'NOVO', aceitos: [] };
         c.blocos.push(b);
         b.uids.forEach(function (u) { c.linhas.forEach(function (l) { if (l.uid === u) l.bloco = b.chave; }); });
+        var sb = await enviarBloco(c, b, aoMudar);
+        if (sb === 'SEM_SINAL' || sb === 'ERRO') return sb;
       }
-      var ordem = c.blocos.filter(function (b) { return b.estado === 'NOVO' || b.estado === 'SEM_SINAL' || b.estado === 'ENVIANDO' || (b.estado === 'AVISO' && b.reenviar); });
-      for (var k = 0; k < ordem.length; k++) if (await enviarBloco(c, ordem[k], aoMudar) === 'SEM_SINAL') return 'SEM_SINAL';
       return 'OK';
     } finally {
       enviando = false;
@@ -472,14 +494,18 @@ var TelaReproducao = (function () {
       ui.atual = { brinco: a.brinco || a.codigo_interno, animal: a };
       var ja = c.linhas.filter(function (l) { return l.animal_id === a.animal_id; });
       ui.conferencia.appendChild(h('p', { class: 'dado', dataset: { conferencia: 'OK' }, text: Store.rotuloAnimal(a) + ' · ' + Store.descricaoAnimal(a) + (a.situacao_reprodutiva ? ' · ' + sit(a.situacao_reprodutiva).toLowerCase() : '') }));
-      if (ja.length) ui.conferencia.appendChild(h('p', { class: 'aviso', dataset: { conferenciaRepetido: '1' }, text: 'Já diagnosticada nesta sessão (' + ROTULO_RES[ja[ja.length - 1].resultado] + '): o novo resultado substitui o anterior.' }));
+      // A linha ainda não gravada é substituída; a gravada não: diagnosticar de novo grava outro diagnóstico do mesmo dia.
+      var ult = ja[ja.length - 1];
+      if (ult) ui.conferencia.appendChild(h('p', { class: 'aviso', dataset: { conferenciaRepetido: editavel(c, ult) ? 'substitui' : 'outro' }, text: editavel(c, ult)
+        ? 'Já diagnosticada nesta sessão (' + ROTULO_RES[ult.resultado] + ', ainda não enviado): o novo resultado substitui o anterior.'
+        : 'Já diagnosticada nesta sessão (' + ROTULO_RES[ult.resultado] + ', ' + ROTULO_ESTADO[ult.estado] + '): diagnosticar de novo grava outro diagnóstico do mesmo dia, e o servidor pede confirmação.' }));
     }
     function lancar(txt) {
       if (!ui.atual && conferir() !== 'OK' && (!ui.atual || ui.atual.animal)) { ui.brinco.focus(); return; }
       var r = lerResultado(txt === undefined ? ui.resultado.value : txt);
       if (r.erro) { Util.limpar(ui.conferencia); ui.conferencia.appendChild(h('p', { class: 'destaque-erro', role: 'alert', text: r.erro })); ui.resultado.focus(); return; }
       var at = ui.atual;
-      var ja = at.animal ? c.linhas.filter(function (l) { return l.animal_id === at.animal.animal_id && (!l.bloco || bloco(c, l.bloco) && ['AVISO', 'ERRO'].indexOf(bloco(c, l.bloco).estado) >= 0); }) : [];
+      var ja = at.animal ? c.linhas.filter(function (l) { return l.animal_id === at.animal.animal_id && l.estado !== 'GRAVADA' && editavel(c, l); }) : [];
       if (ja.length) { var u = ja[ja.length - 1]; if (u.bloco) desfazerBloco(c, u.bloco); u.resultado = r.resultado; u.idade = r.idade; u.estado = 'FILA'; u.mensagem = null; c.linhas = c.linhas.filter(function (l) { return l !== u; }).concat([u]); }
       else {
         c.seq = (c.seq || 0) + 1;
@@ -527,19 +553,21 @@ var TelaReproducao = (function () {
       Util.limpar(ui.contador);
       ui.contador.appendChild(h('span', { dataset: { contador: String(c.linhas.length) }, text: c.linhas.length + ' diagnosticadas · ' + conta.POSITIVO + ' prenhes · ' + conta.NEGATIVO + ' vazias · ' + conta.INCONCLUSIVO + ' duvidosas' }));
       Util.limpar(ui.status);
-      var fila = naFila(c).length;
+      var fila = naoEnviadas(c).length;
       var semSinal = c.blocos.filter(function (b) { return b.estado === 'SEM_SINAL'; }).reduce(function (t, b) { return t + b.uids.length; }, 0);
       var pend = pendencias(c);
       var gravadas = c.linhas.filter(function (l) { return l.estado === 'GRAVADA'; }).length;
       ui.status.appendChild(h('p', { class: 'dado', text: [gravadas ? gravadas + ' gravados' : null, fila ? fila + ' na fila deste aparelho' : null, semSinal ? semSinal + ' sem confirmação do servidor' : null].filter(Boolean).join(' · ') || 'Nenhum diagnóstico ainda.' }));
       if (semSinal) ui.status.appendChild(UI.nota('Sem sinal ou sem resposta: o que foi digitado está guardado neste aparelho. Toque em "Enviar" quando o sinal voltar; nada será gravado duas vezes.', 'aviso'));
-      if (pend.length) ui.status.appendChild(UI.nota(pend.length + (pend.length === 1 ? ' pendência impede' : ' pendências impedem') + ' o envio: corrija o brinco ou tire a linha.', 'erro'));
+      if (c.erroGeral) ui.status.appendChild(h('div', { role: 'alert', dataset: { erroGeral: '1' } }, UI.nota('O servidor recusou o envio: ' + c.erroGeral + ' Nada foi gravado; os diagnósticos continuam neste aparelho.', 'erro')));
+      if (pend.length) ui.status.appendChild(UI.nota(pend.length + (pend.length === 1 ? ' pendência impede' : ' pendências impedem') + ' o envio: corrija o brinco ou o resultado (digite de novo) ou tire a linha.', 'erro'));
       c.blocos.forEach(function (b) { if (b.estado === 'AVISO' && b.gerais && b.gerais.length) ui.status.appendChild(UI.nota(b.gerais.map(function (g) { return g.mensagem; }).join(' '), 'aviso')); });
       ui.status.appendChild(h('div', { class: 'acoes' },
         UI.botao(fila + semSinal ? 'Enviar ' + (fila + semSinal) + (fila + semSinal === 1 ? ' diagnóstico' : ' diagnósticos') : 'Enviar', { tipo: 'primario', desabilitado: enviando || !!pend.length || !(fila + semSinal), atributos: { 'data-enviar': '1' }, aoClicar: enviarAgora }),
         UI.botao('Desfazer o último', { atributos: { 'data-desfazer': '1' }, aoClicar: function () {
           var l = c.linhas[c.linhas.length - 1];
-          if (!l || l.bloco) { UI.aviso(l ? 'O último diagnóstico já foi enviado: corrija pelo lançamento gravado, em Eventos.' : 'Nada para desfazer.', { tipo: 'aviso' }); return; }
+          if (!l || !editavel(c, l) || l.estado === 'GRAVADA' || l.estado === 'ENVIANDO' || l.estado === 'SEM_SINAL') { UI.aviso(l ? 'O último diagnóstico já foi enviado: corrija pelo lançamento gravado, em Eventos.' : 'Nada para desfazer.', { tipo: 'aviso' }); return; }
+          if (l.bloco) soltarBloco(c, l.bloco);
           c.linhas.pop(); mudou();
         } }),
         UI.botao('Terminar', { tipo: 'texto', aoClicar: terminar })));
@@ -553,6 +581,7 @@ var TelaReproducao = (function () {
           l.mensagem ? h('p', { class: 'suave', text: l.mensagem }) : null);
         var acoes = [];
         if (l.estado === 'AVISO') acoes.push(UI.botao('Está certo', { aoClicar: function () { aceitar(l); } }));
+        if (l.estado === 'ERRO' && l.animal_id) acoes.push(UI.botao('Corrigir o resultado', { aoClicar: function () { var a = Store.animal(l.animal_id); ui.brinco.value = a ? a.brinco || a.codigo_interno : l.brinco; conferir(); ui.resultado.focus(); } }));
         if (l.estado !== 'GRAVADA' && l.estado !== 'ENVIANDO' && l.estado !== 'SEM_SINAL') acoes.push(UI.botao('Tirar', { tipo: 'texto', aoClicar: function () { tirar(l); } }));
         if (acoes.length) li.appendChild(h('div', { class: 'acoes', style: 'margin-top:4px' }, acoes));
         ui.lista.appendChild(li);

@@ -206,7 +206,8 @@ var TelaSanidade = (function () {
         colunas: [
           { id: 'data', rotulo: 'Data', valor: function (x) { return x.event_date; }, formatar: function (x) { return link('evento/' + x.event_id, Fmt.data(x.event_date)); } },
           { id: 'tipo', rotulo: 'O que foi feito', valor: function (x) { return x.rotulo_subtipo || x.rotulo; } },
-          { id: 'produto', rotulo: 'Produto', valor: function (x) { var p = x.payload || {}; return p.nome_produto || (p.produto_id && Store.produto(p.produto_id) ? Store.produto(p.produto_id).nome : '') || p.diagnostico || '—'; } },
+          // O produto e o diagnóstico vêm do servidor (os registros SANIDADE do lançamento); a doença sem produto mostra o diagnóstico.
+          { id: 'produto', rotulo: 'Produto ou diagnóstico', valor: function (x) { var sd = x.sanidade || {}; return sd.nome_produto || sd.diagnostico || 'Sem produto'; } },
           { id: 'animais', rotulo: 'Animais', num: true },
           { id: 'total_value', rotulo: 'Custo', num: true, formatar: function (x) { return x.total_value === null ? '—' : Fmt.dinheiro(x.total_value); } },
         ] }).el);

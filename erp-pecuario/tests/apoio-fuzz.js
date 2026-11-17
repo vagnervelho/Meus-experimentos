@@ -3262,12 +3262,14 @@ function modeloAgenda(S, D) {
       const sit = devendo && !cumprida ? 'VENCIDA' : situacao(venc, cumprida, typeof p.antecedencia_alerta_dias === 'number' ? p.antecedencia_alerta_dias : ant);
       if (sit !== 'EM_DIA') pend.push([id, p.protocol_id, p.product_id || '', venc, sit].join('|'));
     });
-    // Sem protocolo: a próxima dose da última aplicação de cada produto do cadastro.
+    // Sem protocolo: a próxima dose da última aplicação de cada produto do cadastro — a última de qualquer lançamento do
+    // produto, com ou sem protocolo (revisão da Fase 3: a aplicação com protocolo cumpre a pendência sem protocolo).
     const porProduto = new Map();
-    apls.forEach((x) => { if (!x.r.protocol_id && x.r.produto_id) (porProduto.get(x.r.produto_id) || porProduto.set(x.r.produto_id, []).get(x.r.produto_id)).push(x); });
+    apls.forEach((x) => { if (x.r.produto_id) (porProduto.get(x.r.produto_id) || porProduto.set(x.r.produto_id, []).get(x.r.produto_id)).push(x); });
     porProduto.forEach((l, pid) => {
       const u = ultimo(l).r;
-      if (!u.data_proxima_aplicacao) return;
+      if (u.protocol_id) contar('pendência sem protocolo cumprida por aplicação com protocolo');
+      if (u.protocol_id || !u.data_proxima_aplicacao) return;
       const sit = situacao(u.data_proxima_aplicacao, false, ant);
       if (sit !== 'EM_DIA') pend.push([id, '', pid, u.data_proxima_aplicacao, sit].join('|'));
     });
@@ -3818,7 +3820,9 @@ function gerarCadastro(sis, S, rnd, k, qual, base) {
     const p = sorteio(rnd, S.t.PRODUTOS);
     if (!p) return null;
     const x = rnd();
-    const campos = x < 0.4 ? { controla_estoque: p.controla_estoque !== true } : x < 0.65 ? { custo_unitario: sorteio(rnd, [0, 0.035, 1.85, 2.5]) } : x < 0.85 ? { ativo: p.ativo === false } : { unidade: p.unidade === 'mL' ? 'dose' : 'mL' };
+    // Revisão da Fase 3: também a categoria (a conta do consumo) e a quantidade por embalagem — a correção sem mudança, mais
+    // tarde, guarda o custo, a conta e o fator congelados (oraculoCorrecaoTardia).
+    const campos = x < 0.35 ? { controla_estoque: p.controla_estoque !== true } : x < 0.55 ? { custo_unitario: sorteio(rnd, [0, 0.035, 1.85, 2.5]) } : x < 0.63 ? { categoria: sorteio(rnd, ['VACINA', 'VERMIFUGO', 'MEDICAMENTO', 'OUTRO']) } : x < 0.7 ? { fator_conversao: sorteio(rnd, [10, 25, 50]) } : x < 0.86 ? { ativo: p.ativo === false } : { unidade: p.unidade === 'mL' ? 'dose' : 'mL' };
     return com('produto.salvar', { product_id: p.product_id, campos, justificativa: 'Cadastro do produto revisto' }, 'produto ' + Object.keys(campos)[0]);
   }
   if (qual === 'protocolo') {
@@ -3949,7 +3953,7 @@ function executar(sis, k, cmd, antesT, opcoes) {
   if (r.ok && cmd.chaveFixa && !jaGravada && !cmd.outraChave && !(r.meta && r.meta.duplicado) && r.data && r.data.event_id) sis.chavesGravadas.set(chave, r.data.event_id);
   if (cmd.estornoImediato) falhas.push(...oraculoEstornoImediato(sis, cmd, r, S, dv0));
   if (cmd.correcaoIdentica) falhas.push(...oraculoCorrecaoIdentica(sis, cmd, r, S, dv0));
-  if (cmd.correcaoTardia) { if (r.ok && !cmd.outraChave && !cmd.reenvio) contar('correção tardia aceita'); falhas.push(...oraculoCorrecaoTardia(cmd, r, A)); }
+  if (cmd.correcaoTardia) { if (r.ok && !cmd.outraChave && !cmd.reenvio) contar('correção tardia aceita'); falhas.push(...oraculoCorrecaoTardia(cmd, r, A)); falhas.push(...oraculoEfeitoCongelado(cmd, r, A, S)); }
   if (cmd.desfazerImediato) falhas.push(...oraculoDesfazerImediato(sis, cmd, r, S));
   // O retrato de antes do primeiro bloco de uma importação vale enquanto só os comandos dela forem gravados.
   const gravou = r.ok && !(r.meta && (r.meta.duplicado || r.meta.semAlteracao)) && dv1 !== dv0;
@@ -4116,6 +4120,50 @@ function oraculoCorrecaoTardia(cmd, r, A) {
   const codigos = (r.error.details || []).map((d) => d.codigo);
   if (codigos.length && codigos.every((c) => RECUSAS_DA_CORRECAO_TARDIA.indexOf(c) >= 0 || pol[c] === 'BLOQUEIA' || (c === 'CARENCIA_ATIVA' && (pol[c] || 'BLOQUEIA') === 'BLOQUEIA'))) return [];
   return [falha('CORRECAO_TARDIA:RECUSADA', 'a correção sem mudança, mais tarde, de ' + cmd.dados.tipo + (cmd.dados.subtipo ? '/' + cmd.dados.subtipo : '') + ' foi recusada: ' + r.error.code + ' ' + r.error.message + ' ' + JSON.stringify((r.error.details || []).map((d) => d.codigo + ': ' + d.mensagem)).slice(0, 700))];
+}
+/**
+ * Revisão da Fase 3: a correção sem mudança, depois de mudar o cadastro (o custo, a categoria, o fator do produto; o
+ * intervalo do protocolo; o controle de estoque), tem o mesmo efeito do original — o fato não é reprecificado: na aplicação
+ * com o mesmo produto, o custo unitário da saída, a conta do consumo e a próxima aplicação de cada animal; na entrada de
+ * estoque do mesmo produto, a quantidade comprada e o movimento de entrada (o original tinha, o substituto tem).
+ */
+function oraculoEfeitoCongelado(cmd, r, A, S) {
+  if (!r.ok || cmd.outraChave || cmd.reenvio || !r.data || !r.data.event_id || (r.meta && (r.meta.duplicado || r.meta.semAlteracao))) return [];
+  const o = cmd.dados.event_id;
+  const n = r.data.event_id;
+  const de = (T, aba, eid) => (T.t[aba] || []).filter((x) => x.event_id === eid);
+  const out = [];
+  const tipo = cmd.dados.tipo;
+  if (tipo === 'SANIDADE') {
+    const so = de(A, 'MOVIMENTOS_ESTOQUE', o).filter((m) => m.tipo === 'SAIDA');
+    const sn = de(S, 'MOVIMENTOS_ESTOQUE', n).filter((m) => m.tipo === 'SAIDA');
+    if (so.length === 1 && sn.length === 1 && so[0].product_id === sn[0].product_id) {
+      contar('correção tardia: custo da saída conferido');
+      if ((so[0].custo_unitario || null) !== (sn[0].custo_unitario || null)) out.push(falha('CORRECAO_TARDIA:CUSTO', 'a correção sem mudança reprecificou a saída: custo unitário ' + so[0].custo_unitario + ' → ' + sn[0].custo_unitario));
+      const fo = de(A, 'FINANCEIRO', o).filter((f) => f.product_id);
+      const fn = de(S, 'FINANCEIRO', n).filter((f) => f.product_id);
+      if (fo.length === 1 && fn.length === 1 && fo[0].conta_id !== fn[0].conta_id) out.push(falha('CORRECAO_TARDIA:CONTA', 'a correção sem mudança trocou a conta do consumo'));
+    }
+    const po = new Map(de(A, 'SANIDADE', o).map((x) => [x.animal_id, x]));
+    de(S, 'SANIDADE', n).forEach((x) => {
+      const y = po.get(x.animal_id);
+      if (!y || y.protocol_id !== x.protocol_id || y.data_aplicacao !== x.data_aplicacao) return;
+      contar('correção tardia: próxima aplicação conferida');
+      if ((y.data_proxima_aplicacao || null) !== (x.data_proxima_aplicacao || null)) out.push(falha('CORRECAO_TARDIA:PROXIMA', 'a correção sem mudança mudou a próxima aplicação: ' + y.data_proxima_aplicacao + ' → ' + x.data_proxima_aplicacao));
+    });
+  }
+  if (tipo === 'ESTOQUE' && cmd.dados.subtipo === 'ENTRADA') {
+    const fo = de(A, 'FINANCEIRO', o)[0];
+    const fn = de(S, 'FINANCEIRO', n)[0];
+    if (fo && fn && fo.product_id === fn.product_id) {
+      contar('correção tardia: entrada de estoque conferida');
+      if (fo.quantidade !== fn.quantidade) out.push(falha('CORRECAO_TARDIA:QUANTIDADE', 'a correção sem mudança mudou a quantidade comprada: ' + fo.quantidade + ' → ' + fn.quantidade));
+      const mo = de(A, 'MOVIMENTOS_ESTOQUE', o).filter((m) => m.tipo === 'ENTRADA').length;
+      const mn = de(S, 'MOVIMENTOS_ESTOQUE', n).filter((m) => m.tipo === 'ENTRADA').length;
+      if (mo !== mn) out.push(falha('CORRECAO_TARDIA:MOVIMENTO', 'a correção sem mudança ' + (mo ? 'apagou' : 'criou') + ' o movimento de entrada'));
+    }
+  }
+  return out;
 }
 function oraculoCorrecaoIdentica(sis, cmd, r, S, dv0) {
   const snap = sis.snap;

@@ -508,7 +508,8 @@ var TelaRebanho = (function () {
     var caixa = h('div', { dataset: { blocoReproducao: '1' } }, UI.carregando('Abrindo a ficha reprodutiva…'));
     function abrir() {
       Modulos.carregar('Reproduction').then(function () { Util.limpar(caixa); caixa.appendChild(TelaReproducao.blocoFicha(f)); },
-        function (e) { Util.limpar(caixa); caixa.appendChild(UI.estadoErro(e, { acao: { texto: 'Tentar de novo', aoClicar: abrir } })); });
+        // Outra versão do app no servidor: pedir a tela de novo dá o mesmo erro; o caminho é recarregar a página.
+        function (e) { Util.limpar(caixa); caixa.appendChild(UI.estadoErro(e, { acao: e.recarregar ? App.acaoRecarregar('Recarregar a página') : { texto: 'Tentar de novo', aoClicar: abrir } })); });
     }
     abrir();
     return caixa;
