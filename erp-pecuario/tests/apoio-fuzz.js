@@ -2726,7 +2726,7 @@ function gerarInteracao(sis, S, rnd, k, base) {
     // mudada no cadastro).
     ['vendaParaCarencia', 2.5], ['aplicacaoAcimaDoEstoque', 1.5], ['acertoRetroativo', 1], ['partoDaVazia', 1.2], ['depoisDoParto', 1.5], ['desmamaEVenda', 1.5], ['pesagemForaDaPermanencia', 1.2], ['importacaoDeQuemSaiu', 1.2], ['estacaoMudada', 1.2],
     // Rodada 3 da revisão da Fase 3 (achado 16): o movimento do mesmo dia gravado depois de uma contagem.
-    ['movimentoDepoisDaContagem', 1.2]]);
+    ['movimentoDepoisDaContagem', 1.2], ['carenciaDoCadastro', 1.2]]);
   let c = interacaoDe(sis, S, rnd, k, base, P, qual);
   if (c) { contar('interação ' + qual); sis.interacaoPendente = null; } else {
     // Passada 2: sem como montar (na passada 1, perto de 70% das sorteadas), o gerador monta o que falta para ela.
@@ -2771,6 +2771,12 @@ function preparoDe(sis, S, rnd, k, base, P, qual) {
   if (em(['reproducaoNaEstacao', 'estacaoMudada'])) {
     const ini = naFaixa(sorteio(rnd, [somaDias(HOJE, -60), somaDias(HOJE, -150), somaDias(HOJE, -280), somaDias(marco, 20)]));
     return Object.assign(base, { rota: 'estacao.salvar', dados: { campos: { nome: 'Estação P' + k, data_inicio: ini, data_fim: somaDias(ini, sorteio(rnd, [60, 90, 120])), tipo: sorteio(rnd, ['MONTA_NATURAL', 'IA', 'MISTA']) } }, rotulo: 'interação: preparo, estação de monta' });
+  }
+  if (qual === 'carenciaDoCadastro') {
+    // A carência padrão no cadastro de um produto ativo (a aplicação sem os dias informados passa a usá-la).
+    const p = sorteio(rnd, S.t.PRODUTOS.filter((x) => x.ativo !== false));
+    if (!p) return null;
+    return Object.assign(base, { rota: 'produto.salvar', dados: { product_id: p.product_id, campos: { carencia_padrao_dias: sorteio(rnd, [21, 35, 60]) }, justificativa: 'Carência da bula' }, rotulo: 'interação: preparo, carência no cadastro' });
   }
   if (qual === 'movimentoDepoisDaContagem' && rnd() < 0.6) {
     // A contagem do armário num dia em que já há movimento do produto (ou hoje): a interação lança depois, no mesmo dia.
@@ -3060,6 +3066,19 @@ function interacaoDe(sis, S, rnd, k, base, P, qual) {
     Object.assign(s, { prod: p.product_id, nome: null, unidade: null, modo: 'TOTAL', doseRef: null, qtd, protocolo: null, lote: null, validade: null });
     s.itens.forEach((i) => { i.dose = null; });
     return registrar(s, 'aplicação acima do estoque');
+  }
+  if (qual === 'carenciaDoCadastro') {
+    // Rodada 3 da revisão da Fase 3 (achado 1): a aplicação com produto do cadastro que tem carência padrão, sem os dias
+    // informados (às vezes o 0, "sem carência"), registrada ou importada: o efeito confere a carência gravada.
+    const p = sorteio(rnd, S.t.PRODUTOS.filter((x) => x.ativo !== false && typeof x.carencia_padrao_dias === 'number' && x.carencia_padrao_dias > 0));
+    if (!p) return null;
+    const D = ateHoje(sorteio(rnd, [HOJE, somaDias(HOJE, -20), somaDias(HOJE, -90)]));
+    const ids = animaisPara(S, rnd, D, 2, (id, pr) => pr.dia).filter((id) => existe(S, id));
+    if (!ids.length || D < (S.marco || HOJE)) return null;
+    const s = propostaSanidade(sis, S, rnd, p.categoria === 'VACINA' ? 'VACINACAO' : p.categoria === 'VERMIFUGO' ? 'VERMIFUGACAO' : 'MEDICACAO', D, ids);
+    Object.assign(s, { prod: p.product_id, nome: null, unidade: null, modo: 'POR_CABECA', doseRef: 1, qtd: null, protocolo: null, carencia: rnd() < 0.15 ? 0 : null });
+    s.itens.forEach((i) => { i.dose = null; });
+    return registrar(s, 'aplicação sem os dias de carência, com a carência do cadastro');
   }
   if (qual === 'movimentoDepoisDaContagem') {
     // Rodada 3 da revisão da Fase 3 (achado 16): o movimento do mesmo dia gravado depois de uma contagem (a vacinação da
