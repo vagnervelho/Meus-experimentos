@@ -1438,3 +1438,33 @@ Nenhuma linha de código mudou nesta etapa: só documentos.
     recusados, 0 falhas;
   - `npm run ui:check`: 122 testes, 122 aprovados e 0 falhas (264 s); página inicial montada com 447 KB de 450 KB; sob
     demanda, Import 48 KB, Weights 44 KB, Health 24 KB e Reproduction 50 KB de 150 KB.
+
+## 17/11/2026 — Fuzz das Fases 1 a 3, passada 2 (preparo das interações, interações novas e oráculos novos)
+
+- **Lacunas do gerador** (leitura de `tests/apoio-fuzz.js` e contagens de 30 sementes com o gerador da passada 1): cerca
+  de 70% das interações sorteadas voltavam vazias (a reprodução na estação foi aceita 1 vez em 30 sementes, a venda na
+  carência nenhuma); a venda e a aplicação corrigidas para a carência, o consumo acima do estoque, o acerto retroativo, o
+  parto da não prenhe, a mãe em volta do parto, a cria ao pé e a desmama com a venda, a pesagem fora da permanência, a
+  importação de manejo de quem saiu e a estação com registros mudada no cadastro nunca eram montadas; o produto nunca era
+  criado; os parâmetros da Fase 3 nunca mudavam; a categoria não tinha peso de referência; a estação só mudava o fim; o
+  estoque não era corrigido pelas linhas gravadas; a campanha ficava fora do modelo da agenda e todo protocolo nascia
+  "hoje" (relógio fixo); a cria ao pé não tinha replay; nenhuma correção era conferida tempo depois do registro.
+- **Gerador ampliado** (`tests/apoio-fuzz.js`): o preparo de cada interação (`preparoDe`, com a interação pendente que
+  volta logo) e o negócio sem erro de propósito nas vendas delas (`negocioLimpo`); nove interações novas; o produto novo
+  nas cinco categorias; a categoria com peso de referência; a estação editada no início, no nome, no tipo e na
+  propriedade; o protocolo de campanha mais frequente, com tolerância e meses editados; oito parâmetros da Fase 3 no meio;
+  o relógio do pedido (`relogio`: a vermifugação de campanha `@q:campanha` da montagem cadastrada no marco zero e metade
+  dos protocolos novos num dia do passado); `doGravado` do ESTOQUE (`specDoGravado` aceita o lançamento sem linha de
+  animal); a ação `correcaoTardia`.
+- **Oráculos novos**: a campanha no modelo da agenda (a perdida devida até abrir a janela da seguinte); `REPLAY:CRIA_AO_PE`
+  pelas linhas cruas; a correção sem mudança, mais tarde, de um lançamento de manejo (de preferência com o cadastro que ele
+  usa mudado depois) é aceita, salvo as recusas que o que mudou no meio explica por desenho. As sementes fixas exigem as
+  quatro contagens novas (`tests/fase2.fuzz.test.js`; as 22 sementes cumprem sem mudar a lista).
+- **Medidas** (mutações numa cópia do projeto): a campanha perdida esquecida, 30 de 30 sementes falham; a cria ao pé que
+  não sai com a desmama, 6 de 30 (a integridade não vê); o cadastro do original deixando de valer na correção, 6 de 30.
+- **Achados**: nenhum defeito do sistema. No modelo do teste, dois, da correção tardia: a mesma chave com outro conteúdo
+  copiava a marca dela (semente 1210049) e o acerto de estoque do produto com o controle desligado depois é recusado por
+  `PRODUTO_SEM_ESTOQUE`, como manda o desenho (semente 1320022). Casos em `tests/fase3.fuzz.regressoes.test.js`.
+- Execuções: 1.600 sementes novas × 100 passos; a leva final com o gerador final, depois dos consertos do modelo, 500
+  sementes (1400000 a 1400499): 29.681 aceitos, 16.499 recusados, 0 falhas; mais 160 contadas (1500000 a 1500159), 0 falhas.
+- `docs/CONTRATOS.md`: estado e seção 36 (passada 2 das Fases 1 a 3). Nenhuma linha de `src/` mudou nesta etapa.

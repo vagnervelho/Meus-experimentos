@@ -133,6 +133,11 @@ no fim (`demonstracao.manejo`), a jornada de um ano da Fase 3 só pela `api()` e
 Fuzz das Fases 1 a 3, passada 1: o gerador do teste aleatório com o curral e o tronco em blocos, as interações da Fase 3
 com a Fase 2, o estoque ligado e desligado e os protocolos, e os oráculos novos (chave do bloco, dose por kg, avisos de
 estoque e de carência pela transição, agenda, GMD e indicadores) (seção 36).
+Fuzz das Fases 1 a 3, passada 2: o preparo das interações e as interações novas (venda e aplicação corrigidas para a
+carência, consumo acima do estoque, acerto retroativo, parto da não prenhe, mãe em volta do parto, cria ao pé e desmama com
+a venda, pesagem fora da permanência, importação de quem saiu, estação mudada), o produto novo, os parâmetros da Fase 3, o
+relógio do pedido, o estoque pelas linhas gravadas, e os oráculos novos (campanha na agenda, cria ao pé, correção sem
+mudança mais tarde) (seção 36).
 
 ## 1. Regras que valem para todo arquivo de `src/`
 
@@ -2303,6 +2308,56 @@ recusas da trava em 160 delas (970000 a 970159, `FUZZ_LOG_TRAVA=1`) são todas d
 (seções 11 e 40): a castração que a correção do rebanho de base passaria a repetir (10), o registro reprodutivo de quem
 passaria a ser macho ou nascida no dia dele (8), o animal que voltaria a um pasto desativado (4) e a mãe de uma cria já
 desmamada trocada no cadastro ou na correção do parto (2, `INTEGRIDADE_COPIAS` da desmama).
+
+**Fuzz das Fases 1 a 3, passada 2** (lacunas achadas na leitura de `tests/apoio-fuzz.js` e nas contagens de uma leva com o
+gerador da passada 1, 30 sementes × 100 passos): cerca de 70% das interações sorteadas voltavam vazias (sem estação, sem
+compra de insumo, sem prenhe, sem fêmea que saiu, sem venda de animal tratado), e por isso a reprodução na estação, a venda
+na carência e o parto da prenhe quase não aconteciam; a venda e a aplicação **corrigidas** para a carência, o consumo acima
+do estoque, o acerto retroativo, o parto da não prenhe, o registro da mãe em volta do parto, a venda da mãe com a cria ao
+pé, a saída e o estorno da desmama da cria, a pesagem levada para fora da permanência, a importação de manejo de quem saiu
+e a estação com registros mudada no cadastro nunca eram montados; o produto nunca era criado (as categorias suplemento e
+outro, a unidade, o fator da embalagem); os parâmetros da Fase 3 que os oráculos leem nunca mudavam; a categoria nunca tinha
+peso de referência; a estação só mudava o fim; o estoque não tinha correção pelas linhas gravadas; a campanha ficava fora
+do modelo da agenda e, com o relógio fixo, todo protocolo nascia "hoje" (a campanha perdida e a aplicação única devida não
+apareciam); a cria ao pé não tinha replay; nenhuma correção era conferida tempo depois do registro. Tudo isso entrou:
+
+| Peça | Contrato |
+|---|---|
+| Preparo (`preparoDe`) | Sem como montar a interação sorteada, o gerador monta o que falta: a estação de monta (ou a exposição na estação que ainda não tem registro), a compra de insumo com estoque controlado e o consumo dela, o diagnóstico positivo, a exposição, o parto (com as crias vivas), a pesagem, a saída de quem tem pesagem ou registro reprodutivo, a venda do animal tratado depois da carência e a aplicação com carência; a interação preparada volta logo (`sis.interacaoPendente`, 70%). `COBERTURA` conta por interação o montado, o preparo e o sem como montar. A venda das interações usa o negócio sem erro de propósito (`negocioLimpo`: por cabeça, uma parcela) |
+| Interações novas (`interacaoDe`) | A venda gravada corrigida para dentro da carência (no dia da aplicação, no meio, no último dia, no seguinte; às vezes para abate) e a aplicação corrigida com a carência que passa a cobrir a venda; o consumo acima do saldo (registro e correção que aumenta a quantidade); o acerto (contagem, perda, vencimento) datado antes de saídas gravadas; o parto da vazia, exposta ou inseminada; o diagnóstico, o aborto, a exposição ou a inseminação da mãe em volta do parto e o registro dela levado por correção para perto do parto; a venda ou a morte da mãe com a cria ao pé (às vezes com a cria), a saída da cria desmamada, a desmama corrigida para depois da saída da cria e o estorno dela; a pesagem corrigida para a saída, depois dela ou antes da entrada; a importação de pesagem, ocorrência, aplicação e diagnóstico de quem saiu; as datas da estação mudadas com registros e a correção de um registro dela fora das datas novas |
+| Cadastros e parâmetros | Produto novo nas cinco categorias (a conta do consumo é a da categoria), com unidade, fator, custo, controle de estoque, os padrões que a tela sugere e às vezes o nome de outro ativo (`NOME_REPETIDO`); o controle ligado e desligado também nos produtos novos; a categoria com peso de referência (a dose por kg sem pesagem válida); a estação editada no início, no nome (às vezes o de outra), no tipo e na propriedade; o protocolo de campanha mais frequente, com tolerância própria, e editado nos meses; os parâmetros `peso_validade_dias`, `gmd_intervalo_min_dias`, `gmd_aceita_fita`, `indicador_n_minimo`, `prenhez_cobertura_dg_min_pct`, `agenda_antecedencia_dias`, `agenda_tolerancia_dias` e `alerta_parto_previsto_dias` mudados no meio |
+| Relógio do pedido (`relogio`) | A montagem cadastra a vermifugação de campanha `@q:campanha` (maio e agosto) com o relógio no marco zero, e metade dos protocolos novos sai com o relógio de um dia do passado (gravado na sequência; só o pedido usa esse relógio, os oráculos consultam hoje): o cadastro guarda quando foi criado, e a campanha perdida e a aplicação única devida dependem disso |
+| Estoque pelas linhas | `doGravado` do ESTOQUE (o lançamento sem linha de animal): o produto, a quantidade, o valor, as parcelas e o parceiro da compra; o motivo, o saldo contado ou a quantidade do acerto; o lote do movimento |
+| Agenda: campanha (`modeloAgenda`) | O protocolo de campanha sem categoria entra no modelo: a campanha de cada mês vence no último dia dele e é cumprida pela aplicação do protocolo entre o primeiro dia − tolerância e o último + tolerância (a do protocolo, senão `agenda_tolerancia_dias`); a última campanha vencida desde que o animal ficou elegível e desde o cadastro do protocolo, não cumprida, continua devida (VENCIDA) até abrir a janela da seguinte; depois, vale a seguinte |
+| Replay da cria ao pé (`REPLAY:CRIA_AO_PE`) | Pelas linhas cruas: a fêmea tem cria ao pé quando um filho dela (`mae_id`) está no rebanho, sem desmama vigente, e nasceu na fazenda ou entrou mais novo que `idade_desmama_padrao_meses` (meses completos na data do lançamento que o criou) |
+| Correção sem mudança, mais tarde (`correcaoTardia`, `oraculoCorrecaoTardia`) | Um lançamento de manejo que vale (pesagem, sanidade, estoque, reprodução, desmama, castração, ocorrência), corrigido com a especificação com que foi aceito muito depois do registro, de preferência quando o cadastro que ele usa mudou (o produto ou o protocolo desativado, a estação com outras datas, o pasto de destino desativado; sem nenhum, o gerador desativa o produto ou o protocolo, ou muda as datas da estação, e a correção vem logo): aceito, salvo as recusas que o que mudou no meio explica por desenho (`VALOR_IGUAL`, `SEM_PESO`, `VALOR_FORA_DA_FAIXA`, `NAO_E_CRIA`, `ANTES_DO_MARCO_ZERO`, `PRODUTO_SEM_ESTOQUE`) e os avisos com a política BLOQUEIA; com a importação em curso, fora. O reenvio e a mesma chave com outro conteúdo, que copiam o comando, ficam fora |
+| Cobertura | As sementes fixas exigem também a campanha conferida na agenda, a cria ao pé conferida e a correção tardia aceita e com o cadastro mudado (as 22 sementes de antes cumprem sem mudar a lista) |
+
+Medidas de que os oráculos novos enxergam (mutações numa cópia do projeto, `src/` mudado de propósito; sementes 1300000 em
+diante, 100 passos): a campanha perdida esquecida (`HealthService.vencimento`), 30 de 30 sementes falham por
+`AGENDA:PENDENCIAS`; a cria ao pé que não sai com a desmama (`Timeline.criaAoPe_`), 6 de 30 por `REPLAY:CRIA_AO_PE` (a
+verificação de integridade não vê: o projetor erra igual na gravação e na reconstrução); o cadastro que o original usava
+deixando de valer na correção (`EventService.usadoNoOriginal_`), 6 de 30 por `CORRECAO_TARDIA:RECUSADA`. Antes do relógio
+do pedido, a primeira dava 0 de 30 (todo protocolo nascia hoje); antes da preferência pelo cadastro mudado, a terceira dava
+0 de 30 e 0 de 40.
+
+Achados desta passada: nenhum defeito do sistema. No modelo do teste, dois, ambos da correção tardia nova (casos em
+`tests/fase3.fuzz.regressoes.test.js`, que falham no modelo de antes): a "mesma chave com outro conteúdo" copia o comando
+com a marca da correção tardia e a recusa `IDEMPOTENCY_MISMATCH` era tomada como recusa da correção (semente 1210049); o
+acerto de estoque corrigido sem mudança depois de o controle do produto ser desligado é recusado por `PRODUTO_SEM_ESTOQUE`,
+o que é o desenho (o acerto só existe com o saldo controlado; o estorno continua livre) (semente 1320022).
+
+Execução desta passada (`FUZZ_PASSOS=100`): 1.600 sementes novas × 100 passos no sistema. Nas levas de exploração, 940
+sementes com o gerador nas versões da passada (990000 a 990079, 990100 a 990139, 1100000 a 1100499, 1200000 a 1200159, 1210000 a 1210079,
+1310000 a 1310039 e 1320000 a 1320039), duas falhas, ambas do modelo (acima). Depois dos consertos do modelo, com o
+gerador final, 660 sementes sem falha: a leva final de 500 (1400000 a 1400499), 29.681 comandos aceitos e 16.499
+recusados, e mais 160 contadas (1500000 a 1500159), 9.336 aceitos e 5.360 recusados. Nas 160: interações montadas 454,
+preparos 653, sem como montar 223 (reprodução na estação 38, venda na carência 61, parto da prenhe 24, parto corrigido 21,
+estorno da compra de insumo consumido 24, consumo acima do estoque 23, acerto retroativo 15, parto da não prenhe 15,
+registro da mãe em volta do parto 12, desmama e venda 9, pesagem fora da permanência 11, importação de quem saiu 10,
+estação mudada 6, venda corrigida para a carência 6); correção sem mudança mais tarde aceita 194, com o cadastro mudado 50;
+campanha conferida na agenda 83.544 vezes; cria ao pé conferida 12.791; venda que entrou na carência 38; estoque abaixo de
+zero pelo comando 194; produto novo 16; os oito parâmetros da Fase 3 mudados 76 vezes.
 
 ## 37. Telas sob demanda (Fase 3, etapa BASE) — `Api` (`sistema.tela`), `EventCatalog` (módulos), `JavaScript` (`Modulos`, `Telas`, `App`), `Index`, `scripts/ui-check.js`
 

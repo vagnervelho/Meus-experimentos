@@ -27,6 +27,11 @@
  * consumido; desmama das crias; castração do touro; dose por kg; reprodução na estação), o controle de estoque ligado e
  * desligado e os protocolos novos; os oráculos novos conferem a dose por kg, os avisos de estoque e de carência pela
  * transição, a agenda sanitária e o GMD por modelos independentes, e os indicadores reprodutivos (tests/apoio-fuzz.js).
+ * Passada 2: o preparo do que falta a cada interação e nove interações novas (venda e aplicação corrigidas para a
+ * carência, consumo acima do estoque, acerto retroativo, parto da não prenhe, mãe em volta do parto, cria ao pé e desmama
+ * com a venda, pesagem fora da permanência, importação de quem saiu, estação mudada), o produto novo, os parâmetros da
+ * Fase 3 e o relógio do pedido; os oráculos novos conferem a campanha na agenda, a cria ao pé e a correção sem mudança de
+ * um lançamento de manejo muito depois do registro.
  *
  * Em falha, o teste imprime a semente e a sequência mínima (encolhida automaticamente), pronta para virar um caso de
  * tests/fase2.fuzz.regressoes.test.js (ou de tests/fase3.fuzz.regressoes.test.js).
@@ -110,7 +115,10 @@ test('teste aleatório de todos os comandos da Fase 2 (' + (N ? N + ' sementes n
     // Fuzz das Fases 1 a 3: cada oráculo novo conferiu algo de verdade nas sementes fixas (o reenvio do bloco gravado, a
     // conferência da chave gravada e da não enviada, a transição do estoque e da carência, a agenda, a dose por kg, o GMD
     // e os indicadores da estação).
-    const semCobertura = ['bloco reenviado depois de gravado', 'chave conferida CONFIRMADA', 'chave conferida INEXISTENTE', 'estoque abaixo de zero pelo comando', 'venda que entrou na carência', 'pendências da agenda conferidas', 'carências da agenda conferidas', 'dose por kg conferida', 'intervalos de GMD conferidos', 'estação com indicadores conferidos'].filter((k) => !F.COBERTURA[k]);
+    // Passada 2: também a campanha da agenda, a cria ao pé e a correção sem mudança mais tarde (aceita, e com o cadastro
+    // que ela usa mudado depois).
+    const semCobertura = ['bloco reenviado depois de gravado', 'chave conferida CONFIRMADA', 'chave conferida INEXISTENTE', 'estoque abaixo de zero pelo comando', 'venda que entrou na carência', 'pendências da agenda conferidas', 'carências da agenda conferidas', 'dose por kg conferida', 'intervalos de GMD conferidos', 'estação com indicadores conferidos',
+      'campanha da agenda conferida', 'cria ao pé conferida', 'correção tardia aceita', 'correção tardia com o cadastro mudado'].filter((k) => !F.COBERTURA[k]);
     assert.deepEqual(semCobertura, [], 'oráculos novos sem nada conferido nas sementes fixas (' + JSON.stringify(F.COBERTURA) + ')');
   }
 });

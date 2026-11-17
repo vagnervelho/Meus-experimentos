@@ -43,6 +43,32 @@ const CASOS = [
     ],
     esperado: { 27: 'OK', 47: 'OK', 72: 'VALIDATION:CAMPO_OBRIGATORIO' },
   },
+  {
+    // Passada 2, semente 1320022, no modelo do teste (assinatura CORRECAO_TARDIA:RECUSADA): o acerto de estoque pela contagem,
+    // corrigido, e o controle de estoque do produto desligado depois; a correção sem mudança do acerto, mais tarde, é
+    // recusada com PRODUTO_SEM_ESTOQUE. É o desenho (o acerto só existe com o saldo controlado; o estorno continua livre):
+    // o oráculo da correção tardia passou a aceitar essa recusa.
+    nome: 'acerto de estoque corrigido sem mudança depois de o controle do produto ser desligado: recusado por desenho (PRODUTO_SEM_ESTOQUE)',
+    comandos: [
+      passo(0, 'evento.registrar', { tipo: 'ESTOQUE', subtipo: 'AJUSTE', campos: { event_date: '2026-02-20', product_id: '@v:antibiotico', motivo_ajuste: 'CONTAGEM', saldo_contado: 10 }, animais: [] }, { avisos: [] }),
+      passo(10, 'evento.corrigir', { tipo: 'ESTOQUE', subtipo: 'AJUSTE', campos: { event_date: '2026-02-20', product_id: '@v:antibiotico', motivo_ajuste: 'CONTAGEM', saldo_contado: 100 }, animais: [], event_id: '@0.e0', justificativa: 'Corrigindo o lançamento' }),
+      passo(41, 'produto.salvar', { product_id: '@v:antibiotico', campos: { controla_estoque: false }, justificativa: 'Controle de estoque revisto' }),
+      passo(44, 'evento.corrigir', { tipo: 'ESTOQUE', subtipo: 'AJUSTE', campos: { event_date: '2026-02-20', product_id: '@v:antibiotico', motivo_ajuste: 'CONTAGEM', saldo_contado: 100 }, animais: [], event_id: '@10.e0', justificativa: 'Conferido de novo' }, { correcaoTardia: true }),
+    ],
+    esperado: { 0: 'OK', 10: 'OK', 41: 'OK', 44: 'VALIDATION:PRODUTO_SEM_ESTOQUE' },
+  },
+  {
+    // Passada 2, semente 1210049, no modelo do teste (assinatura CORRECAO_TARDIA:RECUSADA): a "mesma chave com outro
+    // conteúdo" copia o comando anterior, inclusive a marca da correção tardia; a recusa IDEMPOTENCY_MISMATCH é a que o
+    // reenvio com outro conteúdo deve ter, e o oráculo da correção tardia passou a ignorar o reenvio e a outra chave.
+    nome: 'pesagem corrigida sem mudança, mais tarde, e a mesma chave com outro conteúdo: IDEMPOTENCY_MISMATCH, nada gravado',
+    comandos: [
+      passo(44, 'evento.registrar', { tipo: 'PESAGEM', campos: { event_date: '2026-04-16', tipo_pesagem: 'DESMAMA', metodo_pesagem: 'ESTIMATIVA_VISUAL', jejum: true }, animais: [{ animal_id: '@b:4', peso: 376.2 }, { animal_id: '@b:2', peso: 315.4 }, { animal_id: '@b:8', peso: 279.9 }] }),
+      passo(77, 'evento.corrigir', { tipo: 'PESAGEM', campos: { event_date: '2026-04-16', tipo_pesagem: 'DESMAMA', metodo_pesagem: 'ESTIMATIVA_VISUAL', jejum: true }, animais: [{ animal_id: '@b:4', peso: 376.2 }, { animal_id: '@b:2', peso: 315.4 }, { animal_id: '@b:8', peso: 279.9 }], event_id: '@44.e0', justificativa: 'Conferido de novo' }, { correcaoTardia: true }),
+      passo(78, 'evento.corrigir', { tipo: 'PESAGEM', campos: { event_date: '2026-04-16', tipo_pesagem: 'DESMAMA', metodo_pesagem: 'ESTIMATIVA_VISUAL', jejum: true, notes: 'Outro conteúdo com a mesma chave' }, animais: [{ animal_id: '@b:4', peso: 376.2 }, { animal_id: '@b:2', peso: 315.4 }, { animal_id: '@b:8', peso: 279.9 }], event_id: '@44.e0', justificativa: 'Conferido de novo' }, { correcaoTardia: true, chaveDe: 77, outraChave: true }),
+    ],
+    esperado: { 44: 'OK', 77: 'OK', 78: 'IDEMPOTENCY_MISMATCH:' },
+  },
 ];
 
 CASOS.forEach((caso) => {

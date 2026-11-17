@@ -143,6 +143,12 @@ function montar(opcoes) {
     antibiotico: produto({ nome: 'Antibiótico F', categoria: 'MEDICAMENTO', unidade: 'mL', custo_unitario: 0.5, controla_estoque: true }),
   };
   sis.protocolo = ok('protocolo.salvar', { campos: { nome: 'Vacina F semestral', tipo_procedimento: 'VACINA', product_id: sis.produtos.vacina, sexo_aplicavel: 'AMBOS', recorrencia_tipo: 'INTERVALO_DIAS', intervalo_dias: 180 } }).protocol_id;
+  // Fuzz das Fases 1 a 3, passada 2: a vermifugação de campanha (maio e agosto), cadastrada no marco zero (o relógio no
+  // passado só para este pedido): a campanha perdida continua devida até abrir a janela da seguinte, e o modelo da agenda
+  // confere as duas situações em toda semente.
+  const hoje = gas.clock.now;
+  gas.clock.now = Date.parse(D0 + 'T14:00:00Z');
+  try { sis.campanha = ok('protocolo.salvar', { campos: { nome: 'Vermífugo F de campanha', tipo_procedimento: 'VERMIFUGO', product_id: sis.produtos.vermifugo, sexo_aplicavel: 'AMBOS', recorrencia_tipo: 'CAMPANHA_MESES', meses_campanha: [5, 8] } }).protocol_id; } finally { gas.clock.now = hoje; }
   // Nomes estáveis do que a montagem cria, para a sequência gravada ficar legível e repetível.
   const nomear0 = (id, nome) => { sis.sim.set(id, nome); sis.uuid.set(nome, id); };
   Object.keys(sis.pastos).forEach((k) => nomear0(sis.pastos[k], '@p:' + k));
@@ -152,6 +158,7 @@ function montar(opcoes) {
   nomear0(sis.custeio, '@conta');
   Object.keys(sis.produtos).forEach((k) => nomear0(sis.produtos[k], '@v:' + k));
   nomear0(sis.protocolo, '@q:vacina');
+  nomear0(sis.campanha, '@q:campanha');
   sis.categorias.forEach((c) => nomear0(c.id, '@c:' + c.codigo));
   tabelas(sis).LISTAS.forEach((x) => nomear0(x.lista_id, '@l:' + x.lista + ':' + x.codigo));
   tabelas(sis).ANIMAIS.forEach((a) => { if (a.brinco && a.situacao_cadastral !== 'EXTERNO') nomear0(a.animal_id, '@b:' + a.brinco); });
@@ -432,6 +439,7 @@ function oraculoGlobal(sis, S, datas) {
     if (!origem) return;
     if (origem.event_type === 'NASCIMENTO' || (c.data_nascimento && mesesDe(c.data_nascimento, origem.event_date) < desmamaMeses)) comCria.add(c.mae_id);
   });
+  contar('cria ao pé conferida', comCria.size);
   S.animais.forEach((a, id) => {
     if (a.sexo !== 'F' || ['EXTERNO', 'ANULADO', 'PENDENTE'].indexOf(a.situacao_cadastral) >= 0) return;
     if ((a.cria_ao_pe === true) !== comCria.has(id)) out.push(falha('REPLAY:CRIA_AO_PE', a.codigo_interno + ' (' + a.situacao_cadastral + '): cria ao pé gravada ' + a.cria_ao_pe + ', replay ' + comCria.has(id)));
@@ -3414,6 +3422,8 @@ function gerar(sis, S, rnd, k) {
     if (imp && imp.status === 'IMPORTADO') return Object.assign(base, { rota: 'importacao.desfazer', dados: { import_id: imp.import_id, justificativa: 'Arquivo errado' }, aceitar: true, semJustAviso: false, desfazerImediato: true, rotulo: 'desfazer logo depois de importar' });
   }
   if (sis.snap && sis.snap.dv === sis.versao() && rnd() < 0.18) { const c = gerarAcao(sis, S, rnd, k, rnd() < 0.65 ? 'estornoImediato' : 'correcaoIdentica', base); if (c) return c; }
+  // Passada 2: depois do preparo (o cadastro mudado), a correção sem mudança vem logo.
+  if (sis.tardiaPendente && rnd() < 0.6) { sis.tardiaPendente = false; const c = gerarAcao(sis, S, rnd, k, 'correcaoTardia', base); if (c) return c; }
   // Fuzz das Fases 1 a 3, passada 1: a fila do curral ou do tronco em curso tende a continuar (outros comandos no meio).
   if (sis.lida && rnd() < 0.5) { const c = gerarLida(sis, S, rnd, k, base); if (c) return c; }
   const acao = pesado(rnd, [
@@ -3428,7 +3438,7 @@ function gerar(sis, S, rnd, k) {
     ['lida', 2.5], ['interacao', 8], ['estoqueLiga', 1],
     // Fuzz das Fases 1 a 3, passada 2: mais interações (agora com o preparo do que falta para elas) e a correção sem mudança
     // de um lançamento de manejo, mais tarde.
-    ['interacao', 6], ['correcaoTardia', 2.5],
+    ['interacao', 6], ['correcaoTardia', 3.5],
   ]);
   return gerarAcao(sis, S, rnd, k, acao, base);
 }
@@ -3525,10 +3535,15 @@ function gerarAcao(sis, S, rnd, k, acao, base) {
     // ou o protocolo de uma aplicação (o preparo).
     const mudou = cands.filter((e) => cadastroMudou(S, e));
     if (mudou.length) contar('correção tardia com o cadastro mudado');
-    if (!mudou.length && rnd() < 0.3) {
+    if (!mudou.length && rnd() < 0.5) {
+      // O preparo; a correção sem mudança vem logo depois (sis.tardiaPendente).
+      sis.tardiaPendente = true;
       const r = sorteio(rnd, S.t.SANIDADE.filter((x) => (x.produto_id || x.protocol_id) && cands.some((e) => e.event_id === x.event_id)));
+      const g = sorteio(rnd, (S.t.REPRODUCAO || []).filter((x) => x.estacao_id && cands.some((e) => e.event_id === x.event_id)));
+      if (g && (!r || rnd() < 0.3)) return Object.assign(base, { rota: 'estacao.salvar', dados: { estacao_id: g.estacao_id, campos: { data_inicio: somaDias(g.data, 1), data_fim: somaDias(g.data, 91) }, justificativa: 'Datas da estação revistas' }, rotulo: 'estação mudada depois do registro' });
       if (r && r.protocol_id && (!r.produto_id || rnd() < 0.4)) return Object.assign(base, { rota: 'protocolo.salvar', dados: { protocol_id: r.protocol_id, campos: { ativo: false }, justificativa: 'Protocolo encerrado' }, rotulo: 'protocolo desativado depois do uso' });
       if (r && r.produto_id) return Object.assign(base, { rota: 'produto.salvar', dados: { product_id: r.produto_id, campos: { ativo: false }, justificativa: 'Produto fora de linha' }, rotulo: 'produto desativado depois do uso' });
+      sis.tardiaPendente = false;
     }
     const alvo = sorteio(rnd, mudou.length && rnd() < 0.7 ? mudou : cands);
     const dados = Object.assign(montarDados(sis, js(sis.specs.get(alvo.event_id).spec)), { event_id: alvo.event_id, justificativa: 'Conferido de novo' });
@@ -3820,7 +3835,7 @@ function gerarCadastro(sis, S, rnd, k, qual, base) {
   // categoria e a antecedência própria; às vezes a faixa invertida: a recusa).
   if (qual === 'protocoloNovo') {
     const proc = sorteio(rnd, ['VACINA', 'VACINA', 'VERMIFUGO', 'MEDICAMENTO', 'EXAME']);
-    const rec = pesado(rnd, [['INTERVALO_DIAS', 6], ['UNICA', 3], ['CAMPANHA_MESES', 1.5]]);
+    const rec = pesado(rnd, [['INTERVALO_DIAS', 6], ['UNICA', 3], ['CAMPANHA_MESES', 3]]);
     const campos = { nome: 'Protocolo ' + k, tipo_procedimento: proc, sexo_aplicavel: sorteio(rnd, ['AMBOS', 'AMBOS', 'F', 'M']), recorrencia_tipo: rec };
     const prod = { VACINA: sis.produtos.vacina, VERMIFUGO: sis.produtos.vermifugo, MEDICAMENTO: sis.produtos.antibiotico }[proc];
     if (prod && rnd() < 0.7) campos.product_id = prod;
@@ -3934,7 +3949,7 @@ function executar(sis, k, cmd, antesT, opcoes) {
   if (r.ok && cmd.chaveFixa && !jaGravada && !cmd.outraChave && !(r.meta && r.meta.duplicado) && r.data && r.data.event_id) sis.chavesGravadas.set(chave, r.data.event_id);
   if (cmd.estornoImediato) falhas.push(...oraculoEstornoImediato(sis, cmd, r, S, dv0));
   if (cmd.correcaoIdentica) falhas.push(...oraculoCorrecaoIdentica(sis, cmd, r, S, dv0));
-  if (cmd.correcaoTardia) falhas.push(...oraculoCorrecaoTardia(cmd, r, A));
+  if (cmd.correcaoTardia) { if (r.ok && !cmd.outraChave && !cmd.reenvio) contar('correção tardia aceita'); falhas.push(...oraculoCorrecaoTardia(cmd, r, A)); }
   if (cmd.desfazerImediato) falhas.push(...oraculoDesfazerImediato(sis, cmd, r, S));
   // O retrato de antes do primeiro bloco de uma importação vale enquanto só os comandos dela forem gravados.
   const gravou = r.ok && !(r.meta && (r.meta.duplicado || r.meta.semAlteracao)) && dv1 !== dv0;
@@ -4083,10 +4098,11 @@ const MANEJO = ['PESAGEM', 'SANIDADE', 'ESTOQUE', 'REPRODUCAO', 'DESMAMA', 'CAST
 /**
  * Recusas que a correção sem mudança, mais tarde, pode receber por desenho: o que mudou no meio muda a conta (o acerto pela
  * contagem que passa a bater com o saldo, a dose por kg sem a pesagem estornada, a idade da gestação acima dos dias de
- * gestação mudados, a cria que entrou acima da idade de desmama mudada, o marco zero levado para depois) e, pela política
- * BLOQUEIA, os avisos de agora.
+ * gestação mudados, a cria que entrou acima da idade de desmama mudada, o marco zero levado para depois, o acerto de
+ * estoque do produto cujo controle foi desligado: o acerto só existe com o saldo controlado) e, pela política BLOQUEIA, os
+ * avisos de agora.
  */
-const RECUSAS_DA_CORRECAO_TARDIA = ['VALOR_IGUAL', 'SEM_PESO', 'VALOR_FORA_DA_FAIXA', 'NAO_E_CRIA', 'ANTES_DO_MARCO_ZERO'];
+const RECUSAS_DA_CORRECAO_TARDIA = ['VALOR_IGUAL', 'SEM_PESO', 'VALOR_FORA_DA_FAIXA', 'NAO_E_CRIA', 'ANTES_DO_MARCO_ZERO', 'PRODUTO_SEM_ESTOQUE'];
 /**
  * Fuzz das Fases 1 a 3, passada 2: o lançamento de manejo que vale, corrigido sem mudança nenhuma muito depois do registro,
  * é aceito (ou sem alteração): o que ele usava (o produto, o protocolo, a estação, o pasto, o parceiro, a categoria
