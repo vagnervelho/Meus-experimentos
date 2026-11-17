@@ -1706,3 +1706,54 @@ Contratos em `docs/CONTRATOS.md`, seção 45.
   aceitos, 443 recusados, 0 falhas); `npm run ui:check`, 158 testes, 158 aprovados e 0 falhas (309 s), página inicial com 448 KB
   de 450 KB; sob demanda, Import 48 KB, Weights 55 KB, Health 25 KB e Reproduction 62 KB de 150 KB. No começo da etapa, antes de qualquer mudança (cópia do commit `f2cb5fb`): `npm test`,
   823 testes, 823 aprovados e 0 falhas (698 s).
+
+## 17/11/2026 — Fase 3, relatório com as rodadas 2 e 3 da revisão
+
+Nenhuma linha de código mudou nesta etapa: só documentos.
+
+- `docs/RELATORIO_FASE3.md`, seção 6: as rodadas 2 (25 achados, 18 distintos; 8 altos, 15 médios e 2 baixos) e 3 (25
+  achados, 22 distintos; 5 altos, 14 médios e 6 baixos), por lente e gravidade, com a decisão de cada achado (todos
+  corrigidos; nenhum refutado nem adiado) e, para as rodadas 1 e 2, quais consertos a rodada seguinte achou incompletos
+  (5 de 28 e 10 de 18); o teste aleatório das duas rodadas (1.228 sementes novas, 0 falhas; 6.328 na fase); e o balanço
+  (seção 6.5, nova): a última rodada **não** terminou sem achado alto (5 altos, quatro deles no curral e no tronco), os
+  consertos dela não foram revisados, 40% e 52% dos achados das rodadas 2 e 3 eram conserto incompleto ou regressão da
+  rodada anterior, e a convergência não está demonstrada. O que continua em aberto está listado lá.
+- O mesmo relatório, outras seções: o resumo; as entregas (os testes das rodadas 2 e 3 em cada uma); os números da seção 2;
+  o que só o dono pode executar (os casos novos do modo curral e a ratificação das decisões das rodadas 2 e 3); as decisões
+  (item 6, porque o servidor passou a preencher a carência padrão do produto; item 14, as 23 sementes fixas; e o novo item
+  15, as decisões das rodadas 2 e 3); as limitações (itens 3, 6, 9, 10, 11 e 13, e o novo 15); o veredito.
+- Execuções desta etapa, sobre o código da rodada 3 (`src/` do commit `d81c6fd`, testes do `a2828b5`):
+  - `npm test` com 837 testes, 837 aprovados e 0 falhas (771,8 s), com as 23 sementes fixas de 60 passos (826 aceitos, 443
+    recusados, 0 falhas);
+  - `npm run ui:check` com 158 testes, 158 aprovados e 0 falhas (303,1 s); a página inicial com 459.213 bytes (448 KB) de
+    460.800, sobrando 1.587 bytes (2.511 na entrega); sob demanda, Import 48 KB, Weights 55 KB, Health 25 KB e Reproduction
+    62 KB, de 150 KB cada;
+  - rodados sozinhos, todos aprovados com a contagem da tabela: os 37 arquivos do Node novos ou alterados na Fase 3, mais
+    `static` e `revisao4.interface`, que leem o `CONTRATOS.md` (410 testes, depois da frase nova do `CONTRATOS.md`), e os 11
+    de navegador (90 testes);
+  - a contagem dos 104 arquivos de teste (79 do Node e 25 de navegador) conferida sem rodar os corpos (um registrador no
+    lugar de `node:test`): 837 e 158;
+  - os testes novos das rodadas sobre o `src/` de antes de cada uma: os 14 de Node e os 10 de navegador da rodada 2 falham
+    com o `src/` do commit `e056bf6`, e os 14 de Node e os 13 de navegador da rodada 3, com o do `f2cb5fb` (por asserção ou
+    pela espera de um elemento que a tela de então não tinha), como as rodadas tinham registrado;
+  - `npm run trava:medir -- --vezes 3`: 430 comandos, média de 147,8 ms por comando (p50 141,4; p95 324,2), 18,9 s de
+    63,6 s na trava; na entrega, com a mesma base, 121,3 ms.
+- `docs/CONTRATOS.md`: o estado ganhou a frase da rodada 3. O arquivo foi conferido por amostra contra o código nas funções
+  e campos das seções 44 e 45, sem divergência: `EventService.doseDoOriginal_`, `contagemPosterior_`, `cabecalhoSanidade_`
+  com `carencia_padrao_dias`, `itemDesmama_` com `jaDesmamadaNoOriginal`; `HealthService.contagensDoProduto`, `saldoNaPosicao`,
+  `contagemAfetada(contagens, antes, depois, ordem)`, `compraSemMovimento` e o `inicio_vigencia` com `Utils.hoje(created_at,
+  fuso)` (também no `ImportService`); `AuditService.ordemDoEvento_`, `ENTRADA_SEM_MOVIMENTO` e `ENTRADA_ALHEIA`;
+  `Timeline.criaAoPeEm(f, filhos, data)` e `brincoEm(f, id, data)`; `inventario.elegiveis` com `brinco_hoje`, `categoria` e
+  `ultimo_peso: {kg, data, estimado}`; `ReproductionService.contarPartos`; `QUANTIDADE_EM_PARTE`; `impactos` com
+  `dose_do_original`, `produto_sem_custo`, `fora_do_estoque` e `porque_sem_custo`; `gmd_intervalo`; a parte
+  `estimativa_visual` da UA; nas telas, `[data-gmd-explicacao]`, `[data-aceitar-geral]`, `[data-pre-carga]`,
+  `[data-posicao-tentar]`, `[data-tronco-posicao]`, `data-conferencia="SEM_POSICAO"`, `prenheDoCampo` e `pctParcial`; as 23
+  sementes fixas (com a 29) e `FUZZ_COBERTURA`.
+- `docs/CHANGELOG.md`, rodada 2: "seis são o mesmo defeito visto por duas lentes" passou a "seis grupos são o mesmo defeito
+  visto por mais de uma lente (...): 18 distintos" (o grupo 7, 16 e 22 tem três lentes).
+- `docs/fase-0/10-plano-de-implementacao.md`, seção 8: as rodadas 2 e 3 não mudaram nenhum estado de entrega (E3.1 a E3.7
+  continuam entregues, e a validação da Fase 3 na conta do dono continua aberta). O arquivo não mudou.
+- Ficaram com números antigos, fora desta etapa: `README.md` (809 e 135 testes; Weights 48 KB, Health 24 KB, Reproduction
+  52 KB) e `docs/fase-0/11-riscos-e-premissas.md`, R-31 (Weights 48, Health 24, Reproduction 52 KB e "sobram cerca de 2,5 KB").
+- Durante a etapa, o salvamento automático de fora dela gravou parte destes documentos (commit `c17c627`, 10:10, só
+  documentos); esta etapa não fez commit nem push.

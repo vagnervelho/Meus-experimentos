@@ -22,8 +22,8 @@ E3.7) e seção 8 (checklist). Relatório da fase anterior: `docs/RELATORIO_FASE
   função da verificação de integridade e da trava única (`AuditService.conferirDominio_`).
 - **Telas sob demanda (risco R-31).** A página inicial ficou em 448 KB de 450 KB (sobram 1.587 bytes); a importação e as
   três telas novas são pedidas ao servidor quando o menu as abre (Import 48 KB, Weights 55 KB, Health 25 KB e
-  Reproduction 62 KB, de 150 KB cada), e a Início traz em segundo plano as do curral e do tronco. Que o quadro (iframe) do HtmlService rode a tela injetada é hipótese (NV):
-  se não rodar, a contingência está pronta (seção 5, item 1).
+  Reproduction 62 KB, de 150 KB cada), e a Início traz em segundo plano as do curral e do tronco. Que o quadro (iframe)
+  do HtmlService rode a tela injetada é hipótese (NV): se não rodar, a contingência está pronta (seção 5, item 1).
 - **Nada foi implantado nem executado na conta Google do dono.** Continuam **PENDENTES NA CONTA DO DONO** os itens das
   Fases 1 e 2 e, da Fase 3: `runAcceptanceTests` com os 23 cenários, as premissas PR-06, PR-07, PR-10 e PR-11, o
   cadastro dos produtos e protocolos com o veterinário e o modo curral num celular de verdade, no curral. Pela regra de
@@ -82,7 +82,8 @@ depois dela. As rodadas 2 e 3 tinham rodado a suíte no começo e no fim (no fim
 ### 2.1 Nível 1 — `npm test` (`node --test tests/*.test.js`)
 
 Saída: `# tests 837 · # pass 837 · # fail 0 · # cancelled 0 · # skipped 0 · # todo 0` (duração 771,8 s;
-12 min 52 s de relógio; no primeiro minuto rodou ao lado o registrador descrito abaixo). As 23 sementes fixas do teste
+12 min 52 s de relógio; durante cerca de 1 minuto, no começo, rodou ao lado, com prioridade baixa, o registrador descrito
+abaixo). As 23 sementes fixas do teste
 aleatório, 60 passos cada: `FUZZ: 23 sementes × 60 passos: 826 aceitos, 443 recusados, 0 falhas`. Contagem por arquivo, de
 três formas nesta etapa:
 - **Rodados sozinhos**, cada um com `node --test <arquivo>`: os 37 arquivos novos ou alterados desde o relatório da Fase 2
@@ -153,8 +154,7 @@ skipped 0 · # todo 0` (duração 303,1 s; 5 min 3 s de relógio com a parte est
 bytes medidos pelas mesmas funções do `ui:check`: a página inicial montada pelo `doGet` com 459.213 bytes (448 KB) de
 460.800 (450 KB), sobrando **1.587 bytes**; na entrega sobravam 2.511, e as mudanças das rodadas 2 e 3 nos arquivos da
 página inicial (`Dashboard`, com a pré-carga das telas do curral e do tronco; `Components`, `Events` e `Pastures`) gastaram
-a diferença (eram 449 KB no fim da Fase 2, antes
-de a importação sair dela; 406 KB depois da etapa BASE). Sob demanda: Import 49.608 bytes (48 KB), Weights 56.514
+a diferença (eram 449 KB no fim da Fase 2, antes de a importação sair dela; 406 KB depois da etapa BASE). Sob demanda: Import 49.608 bytes (48 KB), Weights 56.514
 (55 KB; 48 KB na entrega), Health 25.094 (25 KB; 24 KB) e Reproduction 63.018 (62 KB; 52 KB), de 150 KB cada; o curral e o
 tronco cresceram com os consertos das rodadas 2 e 3. Contagem por arquivo: os 11 arquivos novos ou alterados desde o
 relatório da Fase 2 foram rodados de novo nesta etapa, cada um sozinho com `node --test --test-concurrency=1 <arquivo>`:
@@ -229,8 +229,8 @@ marcar a validação da Fase 3 no checklist do plano; e só então dar a Fase 3 
 
 Além das decisões do desenho (seções 16 e 17 do desenho-base). O detalhe de cada uma está em `docs/CHANGELOG.md` e nos
 contratos (`docs/CONTRATOS.md`, seções 37 a 45). As que contrariavam um documento da Fase 0 levaram à atualização do
-trecho na etapa de documentação da entrega (item 13). As rodadas 2 e 3 da revisão tomaram as do item 15; nenhuma delas
-contraria um trecho da Fase 0.
+trecho na etapa de documentação da entrega (item 13). As rodadas 2 e 3 da revisão tomaram as do item 15; pelos registros delas,
+nenhuma contraria um trecho da Fase 0 (cada uma cita o trecho que completa).
 
 1. **Catálogo e módulos.** `EventCatalog.FASE_ATUAL = 3`. Como o tipo só fica ativo com campos, o **módulo só fica ativo
    com a tela entregue** (campo `tela`): o menu mostra Pesagens, Sanidade e Reprodução só depois de cada tela existir, e os
@@ -404,7 +404,11 @@ contraria um trecho da Fase 0.
    precisam ser ratificadas pelo dono na próxima revisão dos documentos da Fase 0.
 10. **Desempenho não medido no Apps Script**: a agenda calcula tudo sobre os presentes na data a cada consulta, e os
     indicadores refazem a estação; a trava confere também os fatos novos. No Node, com a base de demonstração da Fase 3
-    (`npm run trava:medir`, nesta etapa): 430 comandos (a base inteira com os cadastros), média de 121,3 ms por comando (p50 117,2 ms; p95 260,2 ms), dos quais 15,1 s de 52,2 s (29%) na trava; mediana de 3 execuções. No fim da Fase 2, com a base de demonstração de então (391 comandos, sem o manejo), a média era 53,1 ms: a base cresceu (pesagens, aplicações, estoque, estações), e as duas medidas não comparam bases iguais. O tempo de cada comando cresce com o tamanho da base, e no Sheets a leitura das abas se soma a isso. No Google Sheets, nada disso foi medido.
+    (`npm run trava:medir -- --vezes 3`, na etapa que acrescentou as rodadas 2 e 3, sem outro processo rodando): 430
+    comandos (a base inteira com os cadastros; 304 cabeças), média de 147,8 ms por comando (p50 141,4 ms; p95 324,2 ms), dos
+    quais 18,9 s de 63,6 s (30%) na trava; mediana de 3 execuções. Na entrega, com a mesma base, a média era 121,3 ms (15,1 s
+    de 52,2 s na trava): com os consertos das rodadas 2 e 3, o comando ficou cerca de 22% mais lento, dentro da trava (+25%)
+    e fora dela (+20%); a parte de cada conserto não foi medida. No fim da Fase 2, com a base de demonstração de então (391 comandos, sem o manejo), a média era 53,1 ms: a base cresceu (pesagens, aplicações, estoque, estações), e as duas medidas não comparam bases iguais. O tempo de cada comando cresce com o tamanho da base, e no Sheets a leitura das abas se soma a isso. No Google Sheets, nada disso foi medido.
 11. **Teste aleatório** (seção 6.1): os indicadores reprodutivos têm modelo só das expostas e da coerência das contagens e
     taxas (não das diagnosticadas, prenhas, paridas, perdas e desmamas); a previsão de parto e os alertas `PARTO_PREVISTO` e
     `PRENHEZ_VENCIDA` não têm oráculo; protocolos com categoria ficam fora do modelo da agenda; o relógio do pedido no
@@ -474,16 +478,17 @@ perdida esquecida, 30 de 30; a cria ao pé que não sai com a desmama, 6 de 30 (
 cadastro do original deixando de valer na correção, 6 de 30; depois da revisão, o custo e a entrada não congelados na
 correção, 6 de 40; sem a recusa do custo em dobro, 2 de 40.
 
-**O que esta tabela não mostra.** Nenhuma das 5.100 sementes achou defeito do sistema, e a revisão independente achou 29
-logo depois. Os oráculos conferem a coerência interna (o que foi gravado bate com a reconstrução, com a integridade e com o
-efeito pedido) e algumas regras por modelo próprio; os defeitos da revisão eram de outra natureza: a regra certa num
+**O que esta tabela não mostra.** Nenhuma das 4.480 sementes de antes da rodada 1 achou defeito do sistema, e a rodada 1
+da revisão independente achou 29 logo depois. Os oráculos conferem a coerência interna (o que foi gravado bate com a
+reconstrução, com a integridade e com o efeito pedido) e algumas regras por modelo próprio; os defeitos da revisão eram de outra natureza: a regra certa num
 caminho e ausente noutro (a correção que reprecifica, o curral que calcula o GMD diferente da ficha), indicador numa data
 passada com fatos de depois, tela que perde a recusa. Depois da revisão, os oráculos da correção congelada e do custo em
 dobro passaram a existir e pegam o defeito reintroduzido (6 e 2 de 40 sementes).
 
-O mesmo se repetiu nas rodadas 2 e 3: as 1.228 sementes novas delas não acharam defeito do sistema, e as duas rodadas
-acharam 50 (13 altos). Os oráculos novos dessas rodadas não foram medidos com mutações, como os da rodada 1. O que se
-sabe deles é quanto conferiram na leva final da rodada 3 (`FUZZ_COBERTURA=1`, 300 sementes, pelo registro da rodada): 22
+O mesmo se repetiu depois: as 620 sementes do conserto da rodada 1 não acharam defeito do sistema, e a rodada 2 achou 25
+(8 altos); as 600 do conserto da rodada 2 também não, e a rodada 3 achou 25 (5 altos). As 628 do conserto da rodada 3
+também não acharam nenhum, e nenhuma revisão veio depois delas. Os oráculos novos das rodadas 2 e 3, ao contrário dos da
+rodada 1, não foram medidos com mutações. O que se sabe deles é quanto conferiram na leva final da rodada 3 (`FUZZ_COBERTURA=1`, 300 sementes, pelo registro da rodada): 22
 aplicações com a carência do cadastro; 26 interações da carência e 13 do movimento depois da contagem (2 com a contagem
 corrigida e um movimento do mesmo dia gravado depois); 1.749 GMD de resposta conferidos (6 com o intervalo começando antes
 da pesagem anterior); 40.903 conferências da ficha contra a agenda, 34.481 dos partos e 52.478 do último peso na data.
@@ -556,8 +561,10 @@ se chamar CORREÇÕES ANTERIORES). Achou **25** (8 altos, 15 médios e 2 baixos)
 mais de uma lente (1 e 4; 2 e 5; 6 e 11; 13 e 21; 15 e 23; 7, 16 e 22): **18 distintos**, 6 deles altos. Todos foram
 **CORRIGIDOS**; nenhum foi refutado nem adiado. No achado 9, o conserto foi o aviso: a regra de 03a, seção 4.6, e do
 desenho-base, 16.9, ficou (seção 4, item 15). Cada achado tem teste por caminho em `tests/revisao2.fase3.motor.test.js`,
-`tests/revisao2.fase3.zootecnia.test.js` e `tests/ui/revisao2.fase3.test.js`. Pelo registro da rodada (`CHANGELOG`), os
-14 testes de Node e os 10 de navegador falham numa cópia com o `src/` do commit `e056bf6`, o da entrega, e passam agora.
+`tests/revisao2.fase3.zootecnia.test.js` e `tests/ui/revisao2.fase3.test.js`. Os 14 testes de Node e os 10 de navegador
+falham numa cópia com o `src/` do commit `e056bf6`, o da entrega, e passam agora: a rodada registrou isso, e esta etapa
+conferiu de novo (os testes de hoje sobre o `src/` de lá: 14 de 14 e 10 de 10 falham, por asserção ou pela espera de um
+elemento que a tela de então não tinha).
 Teste aleatório da rodada: 600 sementes novas, nenhuma falha (seção 6.1).
 
 | Lente | ALTA | MÉDIA | BAIXA | Total |
@@ -608,9 +615,9 @@ de gravidade alta (2 e 5, 7, 8).
 A rodada 3 examinou os consertos da rodada 2 com as mesmas quatro lentes. Achou **25** (5 altos, 14 médios e 6 baixos).
 Três pares são o mesmo defeito (8 e 25; 11 e 18; 21 e 23): **22 distintos**, todos os 5 altos distintos. Todos foram
 reproduzidos e **CORRIGIDOS**; nenhum foi refutado nem adiado. Cada achado tem teste por caminho em
-`tests/revisao3.fase3.motor.test.js`, `tests/revisao3.fase3.zootecnia.test.js` e `tests/ui/revisao3.fase3.test.js`. Pelo
-registro da rodada (`CHANGELOG`), os 14 testes de Node e os 13 de navegador falham numa cópia com o `src/` do commit
-`f2cb5fb`, o de antes da rodada, e passam agora. Teste aleatório da rodada: 628 sementes novas, nenhuma falha (seção 6.1).
+`tests/revisao3.fase3.motor.test.js`, `tests/revisao3.fase3.zootecnia.test.js` e `tests/ui/revisao3.fase3.test.js`. Os 14
+testes de Node e os 13 de navegador falham numa cópia com o `src/` do commit `f2cb5fb`, o de antes da rodada, e passam
+agora (registrado pela rodada e conferido de novo nesta etapa: 14 de 14 e 13 de 13 falham lá). Teste aleatório da rodada: 628 sementes novas, nenhuma falha (seção 6.1).
 
 | Lente | ALTA | MÉDIA | BAIXA | Total |
 |---|---:|---:|---:|---:|
@@ -682,7 +689,8 @@ Nenhuma revisão examinou estes 25 consertos.
      quadro do HtmlService ou com sinal fraco de verdade (seção 3).
   3. Os resíduos que as rodadas registraram, na seção 5 (itens 6 e 15): a recusa `IDEMPOTENCY_MISMATCH` que o curral não
      confere sozinho; a data sem posição por motivo do servidor, conferida pela lista de hoje; as bases com dados de antes
-     dos consertos.
+     dos consertos. E a margem da página inicial (item 3 da seção 5): 1.587 bytes, que o próximo conserto na Início, na
+     ficha ou nos componentes pode esgotar.
   4. A validação na conta do dono (seção 3), que nenhuma rodada substitui.
 - **Próximo passo recomendado**, antes de dar a Fase 3 por fechada: uma rodada de revisão só sobre os consertos da rodada 3
   e o cliente do curral e do tronco, e o roteiro do modo curral num celular de verdade, no curral.
@@ -691,8 +699,9 @@ Nenhuma revisão examinou estes 25 consertos.
 
 ```text
 RELATÓRIO DE TESTES, FASE 3, 17/11/2026 (com as rodadas 2 e 3 da revisão): o código de comportamento é o do
-commit d81c6fd (src/) e os testes os do a2828b5, dois salvamentos automáticos da orquestração durante a rodada 3; o
-CHANGELOG da rodada 3, o ajuste final do CONTRATOS e esta etapa (só documentos) estão na árvore de trabalho, sem commit
+commit d81c6fd (src/) e os testes os do a2828b5, salvamentos automáticos da orquestração durante a rodada 3; os
+seguintes (c17c627 em diante) levam só documentos, inclusive parte desta etapa, gravada por esse processo de fora
+dela; esta etapa não fez commit nem push
 
 1. EXECUTADO AQUI (Node)
    comando: npm test      resultado: 837/837 (771,8 s; 23 sementes fixas do teste aleatório: 826 aceitos, 0 falhas)
