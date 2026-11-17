@@ -3305,12 +3305,12 @@ nenhum erro no console. `npm run ui:check` roda 6 sementes fixas de 40 ações; 
 `{"__mock":"perdida"}` (sem resposta) e `{"__mock":"transporte"}` (falha de transporte). `TelaReproducao.sessao()` devolve o
 estado do tronco (como `TelaPesagens.sessao()`), para o oráculo.
 
-**Regressões (`tests/ui/curral.fuzz.regressoes.test.js`, 6 testes; todos falham com o `src/` de antes da etapa, commit
+**Regressões (`tests/ui/curral.fuzz.regressoes.test.js`, 7 testes; todos falham com o `src/` de antes da etapa, commit
 `ee1b2cd`).** 1 (curral e tronco): mudar a data com a linha na fila — o 0457 de hoje é a vaca B, o de 04/11 a vaca A, e a
 gravação vai para a A; 2: a falha interna no reenvio de um bloco já gravado não vira "recusada" e o reenvio grava uma vez; 3: o
 "Está certo" dado com outro bloco no ar sai no mesmo envio; 4: sair e voltar com o envio no ar — a resposta aparece na tela nova
 e o bloco não é conferido por outro caminho ao mesmo tempo; 5 (tronco): a recusa do servidor à conferência aparece na tela, nunca
-só no console.
+só no console; 6 (tronco): a linha pendente barrada por outra do mesmo animal entra na fila quando a outra é tirada.
 
 **O que o teste não cobre.** O rascunho no servidor (aparelho sem `localStorage`, gravação agrupada de 1 s), o "Pesar este" da
 lista dos que faltam, a escolha entre vários animais com o mesmo número na mesma data (o rebanho não tem esse caso), duas abas

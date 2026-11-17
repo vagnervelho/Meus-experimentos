@@ -1893,3 +1893,72 @@ reuso). Esta etapa troca o caso a caso por UM resolvedor no servidor e faz todos
   resolvedor e traz a linha de `animal.resolver`. `docs/fase-0/` não mudou.
 - Durante a etapa, o salvamento automático de fora dela gravou um estado intermediário (commit `390a790`, "salva etapa de
   posição em andamento"); esta etapa não fez commit nem push.
+
+## 17/11/2026 — Fase 3, conserto pela garantia, etapa 3: fuzz de interface do curral e do tronco
+
+Por quê: o cliente do curral e do tronco (a tela de lote com fila no aparelho, blocos idempotentes e rede caindo) teve achado alto
+nas três rodadas de revisão, consertado caso a caso. Esta etapa troca o caso a caso por um teste aleatório da tela de verdade
+contra um modelo, com as garantias da fila de lote escritas e conferidas a cada ação (`docs/CONTRATOS.md`, seção 48).
+
+- `tests/ui/curral.fuzz.test.js` (novo): Playwright contra o mock de `google.script.run` ligado ao backend real; gerador com semente
+  de ações do usuário no curral e no tronco (brinco válido, sem zeros, trocado, de outro pasto, de quem saiu, inválido, código
+  interno; peso e resultado pelo teclado e pelo botão, válidos e inválidos; o lote depressa com o bloco de 20; desfazer, tirar,
+  corrigir, "Está certo", enviar, mudar data, método, pasto ou estação, terminar, recarregar, sair e voltar, o tempo passar,
+  outro usuário gravando) intercaladas com falhas de rede decididas no Node (resposta perdida depois de gravar, pedido perdido
+  antes de chegar, transporte antes e depois de gravar, resposta e pedido segurados e soltos fora de ordem, servidor ocupado,
+  falha interna); modelo do que deve estar gravado e na fila; oráculo a cada ação (tela = aparelho = rascunho; as linhas digitadas,
+  com o valor e o animal do texto na data da sessão; nada gravado duas vezes, nada gravado que a tela diga não gravado; a mensagem
+  de cada recusa na tela; nada preso depois de o tempo passar) e no fim (banco = modelo, integridade sem erro, projeção =
+  reconstrução, nada no console). Nada depende do tempo real (o teste anda o relógio da página). `tests/ui/apoio-curral.js`
+  (novo): o rebanho, a rede e a leitura da tela. `tests/ui/apoio.js`: `abrir(s, {servidor})`; `tests/ui/mock-gas.js`: as respostas
+  `{"__mock":"perdida"}` e `{"__mock":"transporte"}` vindas do Node.
+- Defeitos achados e consertados pela causa (`Weights.html` e `Reproduction.html`), cada um com regressão em
+  `tests/ui/curral.fuzz.regressoes.test.js` (7 testes; todos falham com o `src/` de antes da etapa, commit `ee1b2cd`, e passam
+  com o de agora):
+  1. "Mudar data" com linhas na fila mantinha o animal resolvido na data antiga (curral e tronco; achado na primeira semente): com
+     o 0457 trocado em 11/11 e reaproveitado em 12/11, a pesagem de 04/11 ia para a vaca B. Agora cada linha guarda o texto
+     digitado e a data em que foi resolvida; mudar a data confere de novo, no servidor e na data nova, toda linha não gravada
+     (`sessaoMudou`), e nenhuma linha resolvida em outra data entra num bloco (`naFila`). Mudar a sessão também desfaz os blocos com
+     aviso (levavam o cabeçalho de antes).
+  2. A falha interna do servidor no reenvio de um bloco que uma tentativa anterior já tinha gravado virava "recusada": a chave era
+     solta e a linha, corrigida, saía com outra chave e gravava duas vezes. Agora só VALIDATION, NEEDS_CONFIRMATION e CONFLICT
+     (que provam que a chave não foi gravada) soltam o bloco; IDEMPOTENCY_MISMATCH (a chave está gravada) deixa só "Tirar"; as
+     demais deixam o bloco sem confirmação, com a chave e a mensagem do servidor (`[data-recusa-incerta]`). Decisão: muda a regra
+     da seção 45 (soltar em toda recusa que não fosse falta de sinal).
+  3. O "Está certo" dado enquanto outro bloco estava no ar deixava as linhas na fila com o "Enviar" desligado (o envio em curso
+     tinha a lista de blocos de antes, e a conta do botão não via o bloco com o aviso aceito). Agora o envio escolhe o próximo
+     bloco pronto a cada volta, e o botão conta esse bloco.
+  4. Sair e voltar com o envio no ar: a resposta não redesenhava a tela nova, e a volta conferia o mesmo bloco por outro caminho
+     ao mesmo tempo (achado na leitura do código para o modelo). Agora o envio redesenha a tela aberta (`telaAtual`), e a
+     conferência na volta espera o envio no ar (um envio de cada vez).
+  5. Tronco: a recusa do servidor à conferência de um bloco (`operacao.status`) ia ao console como erro e não aparecia; agora fica
+     na tela com a mensagem (curral e tronco).
+  6. A linha pendente barrada por outra linha do mesmo animal ficava pendente para sempre, dizendo "tire um dos dois" depois de a
+     outra sair; agora continua esperando e entra na fila quando a outra é tirada.
+- Testes de tela ajustados à decisão 2 (nenhum enfraquecido): o "achado 2" do curral (`tests/ui/revisao3.fase3.test.js`) exige a
+  mensagem nova e a ausência de "Corrigir o peso" na linha da chave já gravada; o do tronco exige a falha interna com a mensagem
+  do servidor, sem "Sem sinal", sem "Tirar" nem "Corrigir" na linha e o reenvio com a mesma chave gravando uma vez.
+- Erros do modelo do teste, refutados como defeito do sistema (o oráculo corrigido): a resposta que chega depois do prazo de 45 s
+  não é ouvida pelo aparelho (a recusa dela não precisa aparecer); as linhas na fila de um bloco com aviso esperam a decisão do
+  aviso; o bloco cheio de 20 sai sozinho (a linha nova pode já estar saindo); a pendência resolvida durante a ação conta como
+  linha já existente; a recusa geral (a data antes do marco zero) se resolve mudando a data; e o tempo real (a nova tentativa do
+  servidor ocupado e o prazo de 45 s corriam sozinhos e mudavam a sequência entre execuções) passou a ser andado pelo teste.
+- Levas durante a etapa: as primeiras (sementes 1 a 16, 1 a 60, 100 a 147, 200 a 259 e 300 a 419, de 40 ações) acharam os defeitos
+  1, 2, 3 e 6 acima e os erros do modelo; 500 a 619 e 700 a 819 (40 ações) saíram limpas; 900 a 935 (100 ações) achou o tempo real
+  correndo sozinho no teste (7 falhas em duas rodadas, todas do teste: refutadas e corrigidas).
+- Leva final, com o código final (`src/` e testes congelados): sementes 1000 a 1149, 150 × 40 ações, 6 processos: 150 aprovadas, 0
+  falhas; 7.237 conferências do oráculo (1.883 com o tempo passado, sem nada preso), 3.221 linhas gravadas, 3.790 lançamentos na
+  fila, 667 substituições, 236 "Pesar de novo", 229 lotes depressa, 424 envios, 297 recargas, 215 saídas e voltas, 94 mudanças de
+  sessão, 274 "Terminar"; recusas do servidor conferidas na tela: 375 avisos, 106 validações e 38 falhas internas; falhas de rede:
+  120 respostas perdidas depois de gravar, 63 pedidos perdidos antes, 104 transportes antes e 65 depois de gravar, 72 respostas e
+  58 pedidos segurados, 48 servidor ocupado e 83 falhas internas. Sementes 2000 a 2035, 36 × 100 ações: 36 aprovadas, 0 falhas;
+  3.968 conferências, 1.190 linhas gravadas.
+- Verificado no fim, com o código final: `npm test`, 855 testes, 855 aprovados e 0 falhas (797,1 s; nenhum teste de Node mudou);
+  `npm run ui:check` rodado duas vezes seguidas: 173 testes, 173 aprovados e 0 falhas nas duas (399,4 s e 396,2 s), com as 6
+  sementes fixas de 40 ações e as 7 regressões; a página inicial com 460.759 bytes de 460.800 (não mudou) e, sob demanda, Import
+  48 KB, Weights 56 KB, Health 25 KB e Reproduction 63 KB de 150 KB. Antes da etapa: 855 e 160.
+- `docs/CONTRATOS.md`: o estado ganhou a frase desta etapa; seção 48 nova (as garantias da fila de lote e como o código as
+  garante, a regra das recusas e a decisão, o redesenho, o teste, o apoio, as regressões e o que o teste não cobre); a seção 38
+  diz que a recusa que não prova nada deixa o bloco com a chave, e a 45 aponta a mudança. `docs/fase-0/` não mudou.
+- Durante a etapa, o salvamento automático de fora dela gravou estados intermediários (commits `eefe77a`, `c80f3eb`, `a3af10e`,
+  `c560bb0` e `63c3ddd`); esta etapa não fez commit nem push.
