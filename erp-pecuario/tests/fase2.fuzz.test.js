@@ -123,7 +123,15 @@ test('teste aleatório de todos os comandos da Fase 2 (' + (N ? N + ' sementes n
     const semCobertura = ['bloco reenviado depois de gravado', 'chave conferida CONFIRMADA', 'chave conferida INEXISTENTE', 'estoque abaixo de zero pelo comando', 'venda que entrou na carência', 'pendências da agenda conferidas', 'carências da agenda conferidas', 'dose por kg conferida', 'intervalos de GMD conferidos', 'estação com indicadores conferidos',
       'campanha da agenda conferida', 'cria ao pé conferida', 'correção tardia aceita', 'correção tardia com o cadastro mudado',
       // Rodada 3 da revisão da Fase 3: a ficha igual à agenda, os partos da lista iguais aos da ficha, o último peso na data.
-      'ficha × agenda conferida', 'partos da lista × ficha conferidos', 'último peso na data conferido', 'GMD da resposta conferido'].filter((k) => !F.COBERTURA[k]);
+      'ficha × agenda conferida', 'partos da lista × ficha conferidos', 'último peso na data conferido', 'GMD da resposta conferido',
+      // Conserto pela garantia, etapa 1 (CONTRATOS, seção 46): o oráculo de viagem no tempo tirou retratos, comparou depois de
+      // fato posterior a D (também estorno e correção), de cadastro e de fato retroativo noutros animais, com o relógio
+      // adiantado e pelo caminho padrão, e cruzou a ficha com as consultas da data; o retrato de hoje = a projeção.
+      'viagem no tempo: retratos', 'viagem no tempo: unidades com o relógio adiantado', 'viagem no tempo: caminho padrão conferido',
+      'viagem no tempo: unidades comparadas', 'viagem no tempo: comparação depois de fato posterior a D', 'viagem no tempo: comparação depois de cadastro',
+      'viagem no tempo: comparação depois de fato retroativo noutros animais', 'viagem no tempo: comparação depois de estorno ou correção posterior a D',
+      'viagem no tempo: retratos de hoje conferidos com a projeção', 'viagem no tempo: ficha de hoje × consultas da data',
+      'viagem no tempo: ficha de quem saiu × elegíveis do dia da saída'].filter((k) => !F.COBERTURA[k]);
     assert.deepEqual(semCobertura, [], 'oráculos novos sem nada conferido nas sementes fixas (' + JSON.stringify(F.COBERTURA) + ')');
   }
 });

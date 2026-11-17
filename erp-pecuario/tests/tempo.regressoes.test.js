@@ -44,6 +44,8 @@ function semErro(s, onde) {
   s.conferirProjecoes(onde);
 }
 const daLinha = (lista, id) => (lista || []).filter((x) => x.animal_id === id);
+const b64 = (t) => Buffer.from(t, 'utf8').toString('base64');
+const FORMATO = { delimitador: ';', codificacao: 'UTF-8', formato_data: 'dd/MM/yyyy', decimal: ',' };
 
 test('o brinco numa data passada é o daquele dia em toda lista: painel do pasto, dias de permanência, agenda (carência), fêmeas e desempenho — a troca de brinco depois de D não muda a resposta de D, e o relógio adiantado também não', () => {
   const s = S.sistema();
@@ -219,8 +221,6 @@ test('resolução do brinco numa data passada: a importação de manejo acha pel
   // A posição de 01/03 (a do curral com data passada): o 55 é de A desde 15/02.
   const eleg = ok(api(s, 'inventario.elegiveis', { tipo: 'PESAGEM', data: '2026-03-01' }), 'elegíveis').itens;
   assert.deepEqual(eleg.map((x) => [x.animal_id, x.brinco]).sort(), [[A, '55'], [B, '56']].sort());
-  const b64 = (t) => Buffer.from(t, 'utf8').toString('base64');
-  const FORMATO = { delimitador: ';', codificacao: 'UTF-8', formato_data: 'dd/MM/yyyy', decimal: ',' };
   const mapa = { colunas: { Data: 'data', Brinco: 'brinco', Peso: 'peso', Momento: 'momento', 'Método': 'metodo' }, confiancas: {}, padroes: {} };
   const linha = (brinco) => {
     const csv = ['Data;Brinco;Peso;Momento;Método', '01/03/2026;' + brinco + ';410;rotina;balança'].join('\n');
@@ -241,6 +241,35 @@ test('resolução do brinco numa data passada: a importação de manejo acha pel
   s.exec((ctx) => s.G.ImportService.concluir(ctx, { dados: { import_id: com55.import_id } }));
   semErro(s, 'importada');
   assert.deepEqual(s.tabela('PESAGENS').filter((p) => p.data_pesagem === '2026-03-01').map((p) => [p.animal_id, p.peso_kg]), [[A, 410]]);
+});
+
+test('o brinco da mãe no marco zero, na importação de ANIMAIS, segue a mesma regra do brinco numa data: o número corrigido por IDENTIFICACAO_INCORRETA acha a vaca, e o errado (que nunca esteve na orelha) não acha', () => {
+  const s = S.sistema({ config: { importacao_lote_linhas: '50' } });
+  hoje(s, '2026-07-01');
+  const M = ok(api(s, 'evento.registrar', S.entradaInicial([S.bicho({ brinco: '50', data_nascimento: '2019-01-10', data_nascimento_confianca: 'CONFIRMADA' })])), 'rebanho').animais[0].animal_id;
+  ok(api(s, 'evento.registrar', { tipo: 'AJUSTE_INVENTARIO', subtipo: 'IDENTIFICACAO_INCORRETA', campos: { event_date: '2026-06-01', justificativa: 'Brinco digitado errado' }, animais: [{ animal_id: M, brinco: '55' }] }), 'o 50 era o 55');
+  semErro(s, 'correção');
+  // A posição do marco zero diz que a vaca tinha o 55 (desde o início do 50, que nunca esteve na orelha).
+  const pos = ok(api(s, 'inventario.elegiveis', { tipo: 'PESAGEM', data: S.D0 }), 'elegíveis').itens;
+  assert.deepEqual(pos.map((x) => [x.animal_id, x.brinco]), [[M, '55']]);
+  const MAPA = { colunas: { Brinco: 'brinco', Sexo: 'sexo', 'Nasc.': 'data_nascimento', 'Mãe': 'mae', Pasto: 'pasto' }, confiancas: { data_nascimento: 'ESTIMADA', mae: 'CONFIRMADA' }, padroes: { castrado: false, reprodutor: false } };
+  const linha = (mae) => {
+    const csv = 'Brinco;Sexo;Nasc.;Mãe;Pasto\n7' + mae + ';F;01/10/2025;' + mae + ';Pasto A';
+    const c = s.exec((ctx) => s.G.ImportService.criar(ctx, { idempotencyKey: 'a' + mae, dados: { tipo: 'ANIMAIS', arquivo_nome: 'a' + mae + '.csv', conteudo_base64: b64(csv), formato: FORMATO } })).dados;
+    s.exec((ctx) => s.G.ImportService.validarBloco(ctx, { idempotencyKey: 'v' + mae, dados: { import_id: c.import_id, bloco: 1, mapeamento: MAPA } }));
+    const l = s.read(s.G.ImportService.consultaLinhas({ import_id: c.import_id })).itens[0];
+    return { import_id: c.import_id, status: l.status, erros: l.erros.map((e) => e.codigo) };
+  };
+  // Antes do conserto, o 50 (o número errado) achava a vaca no marco zero pelo período gravado dele.
+  const com50 = linha('50');
+  assert.deepEqual([com50.status, com50.erros], ['ERRO', ['MAE_NAO_ENCONTRADA']]);
+  const com55 = linha('55');
+  assert.deepEqual([com55.status, com55.erros], ['VALIDA', []]);
+  const imp = s.tentar((ctx) => s.G.ImportService.importarBloco(ctx, { avisosAceitos: [], dados: { import_id: com55.import_id, bloco: 1, modo: 'TOTAL' } }));
+  assert.ok(imp.ok, JSON.stringify(imp.erro));
+  s.exec((ctx) => s.G.ImportService.concluir(ctx, { dados: { import_id: com55.import_id } }));
+  semErro(s, 'importada');
+  assert.equal(s.tabela('ANIMAIS').find((a) => a.brinco === '755').mae_id, M);
 });
 
 // ------------------------------------------------------------------ sequências mínimas do teste aleatório ----

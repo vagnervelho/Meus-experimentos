@@ -430,19 +430,21 @@ var HealthService = (function () {
     c.protocolos.forEach(function (p) { porProt[p.protocol_id] = { elegiveis: 0, em_dia: 0 }; });
     var pendentes = {};
     pres.itens.forEach(function (x) {
-      var a = x.animal;
+      // As contas pelo que não muda com a data (o sexo, o nascimento; a categoria em D sai da linha do tempo) e o brinco das
+      // listas pelo retrato em D, só de quem entra nelas (InventoryService.presentes: `registro` e `animal`).
+      var a = x.registro;
       var r = pendenciasDoAnimal(c, a.animal_id, perfilEm_(L, a, data, x.no_rebanho_desde), data);
       Object.keys(r.elegivel).forEach(function (pid) { porProt[pid].elegiveis += 1; if (r.elegivel[pid].em_dia) porProt[pid].em_dia += 1; });
       r.pendencias.forEach(function (p) {
         p.codigo_interno = a.codigo_interno;
-        p.brinco = nulo_(a.brinco);
+        p.brinco = nulo_(x.animal.brinco);
         p.pasture_id = nulo_(x.pasture_id);
         out.pendencias.push(p);
         pendentes[a.animal_id] = true;
         if (p.situacao === 'VENCIDA') out.resumo.vencidas += 1; else out.resumo.proximas += 1;
       });
       var car = carenciaEm(c.aplicacoes(a.animal_id), data);
-      if (car) out.carencia.push({ animal_id: a.animal_id, codigo_interno: a.codigo_interno, brinco: nulo_(a.brinco), pasture_id: nulo_(x.pasture_id), fim: car.fim, nome_produto: car.nome_produto, data_aplicacao: car.data_aplicacao, event_id: car.event_id });
+      if (car) out.carencia.push({ animal_id: a.animal_id, codigo_interno: a.codigo_interno, brinco: nulo_(x.animal.brinco), pasture_id: nulo_(x.pasture_id), fim: car.fim, nome_produto: car.nome_produto, data_aplicacao: car.data_aplicacao, event_id: car.event_id });
     });
     out.pendencias.sort(function (p, q) { return (p.situacao === q.situacao ? 0 : p.situacao === 'VENCIDA' ? -1 : 1) || (p.vencimento < q.vencimento ? -1 : p.vencimento > q.vencimento ? 1 : 0) || (p.codigo_interno < q.codigo_interno ? -1 : 1); });
     out.carencia.sort(function (p, q) { return p.fim < q.fim ? 1 : p.fim > q.fim ? -1 : p.codigo_interno < q.codigo_interno ? -1 : 1; });

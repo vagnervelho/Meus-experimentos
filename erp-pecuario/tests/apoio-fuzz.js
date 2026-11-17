@@ -4178,8 +4178,10 @@ function specDoGravado(sis, S, rnd, e) {
  * (desenho-base 4.3: "com as regras atuais de CATEGORIAS"), os pastos (área, capacidade, situação, nomes), os protocolos que
  * já valiam em D (RN-058: o cadastrado depois de D não conta; as regras dos que valiam são as de hoje, 03a, seção 4.9), as
  * estações de monta (03a, seção 4.10), o plano de contas e os nomes dos produtos, e os parâmetros zootécnicos lidos na
- * consulta (03a, seção 4.12: "por isso o painel mostra o parâmetro em uso"). Exceções documentadas, fora da comparação: o
- * `brinco_hoje` dos elegíveis (o número de hoje, por desenho) e os títulos e pendências de cadastro da visão geral (de hoje).
+ * consulta (03a, seção 4.12: "por isso o painel mostra o parâmetro em uso"). Exceções documentadas (CONTRATOS, seção 46),
+ * fora da comparação: o `brinco_hoje` dos elegíveis (o número de hoje, por desenho), os títulos, as pendências de cadastro e o
+ * `geradoEm` da visão geral (de hoje), as `curvas` do desempenho (a curva da vida do animal pedido, com o ponto de hoje da
+ * projeção; a bateria não pede curva) e, na ficha, as listas (eventos, crias, genealogia, anexos, financeiro, touro).
  *
  * Como confere: num passo sorteado (`cmd.tempo`, num gerador à parte, gravado na sequência para a repetição e o encolhimento),
  * guarda a bateria de consultas em D por UNIDADE — a consulta inteira, ou a linha de um animal numa lista — com a impressão

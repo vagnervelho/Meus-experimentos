@@ -88,11 +88,11 @@ var InventoryService = (function () {
   function casa_(L, f, x, data, ignorar) {
     var ig = ignorar || [];
     var usa = function (k) { return !vazio_(f[k]) && ig.indexOf(k) < 0; };
-    if (usa('sexo') && x.animal.sexo !== f.sexo) return false;
+    if (usa('sexo') && semData_(x).sexo !== f.sexo) return false;
     if (usa('pasture_id') && x.pasture_id !== f.pasture_id) return false;
     if (usa('property_id') && x.property_id !== f.property_id) return false;
     if (usa('category_id')) {
-      var c = AnimalService.categoriaEm(L, x.animal, data);
+      var c = AnimalService.categoriaEm(L, semData_(x), data);
       if (!c || c.category_id !== f.category_id) return false;
     }
     return true;
@@ -113,12 +113,35 @@ var InventoryService = (function () {
     pr.itens.forEach(function (x) {
       var a = L.repo.porId('ANIMAIS', x.animal_id);
       if (!a) return;
-      itens.push({
-        animal: AnimalService.retratoEm(L, a, data) || a, registro: a, pasture_id: x.pasture_id, property_id: propriedadeDe_(L, x.pasture_id, x.entrada ? x.entrada.event_id : null),
+      itens.push(itemPresente_(L, a, data, {
+        pasture_id: x.pasture_id, property_id: propriedadeDe_(L, x.pasture_id, x.entrada ? x.entrada.event_id : null),
         no_rebanho_desde: x.no_rebanho_desde, no_pasto_desde: x.no_pasto_desde,
-      });
+      }));
     });
-    return { motivo: null, itens: Utils.ordenarPor(itens, function (x) { return x.animal.codigo_interno; }) };
+    return { motivo: null, itens: Utils.ordenarPor(itens, function (x) { return x.registro.codigo_interno; }) };
+  }
+  /**
+   * Um item de presença em D: `registro` (a projeção de hoje) e `animal` (o retrato em D), calculado na primeira leitura e
+   * guardado no item. Quem só conta cabeças, sexo, categoria e peso em D (a posição, os cartões dos pastos, a série mensal
+   * da visão geral, os grupos do desempenho) lê `registro`: o sexo e o código não mudam com a data, e a categoria e o peso
+   * em D saem da linha do tempo (AnimalService.categoriaEm, pesoVigente), não dos campos do objeto; quem descreve o animal
+   * naquele dia (brinco, situação, cria ao pé) lê `animal` e paga o retrato só dos animais que mostra.
+   */
+  function itemPresente_(L, a, data, campos) {
+    var retrato = null;
+    campos.registro = a;
+    Object.defineProperty(campos, 'animal', {
+      enumerable: true,
+      get: function () { if (!retrato) retrato = AnimalService.retratoEm(L, a, data) || a; return retrato; },
+    });
+    return campos;
+  }
+  /**
+   * O animal do item para o que não depende da data (o código, o sexo; a categoria e o peso em D, que saem da linha do
+   * tempo): a projeção do item de presença (`registro`, sem calcular o retrato) ou o animal do item montado por quem chama.
+   */
+  function semData_(x) {
+    return x.registro || x.animal;
   }
   /**
    * Animais no rebanho em algum momento do dia D (o dia da entrada e o da saída contam: RN-017), com o pasto em que
@@ -134,16 +157,16 @@ var InventoryService = (function () {
       var p = Timeline.pastoAntesDaSaida(porAnimal[id], data, L.marcoZero);
       if (!p.presente) return;
       var a = L.repo.porId('ANIMAIS', id);
-      if (a) itens.push({ animal: AnimalService.retratoEm(L, a, data) || a, registro: a, pasture_id: p.pasture_id });
+      if (a) itens.push(itemPresente_(L, a, data, { pasture_id: p.pasture_id }));
     });
-    return { motivo: null, itens: Utils.ordenarPor(itens, function (x) { return x.animal.codigo_interno; }) };
+    return { motivo: null, itens: Utils.ordenarPor(itens, function (x) { return x.registro.codigo_interno; }) };
   }
   /** Cabeças por categoria em D (em ordem de prioridade) e as sem categoria: {por_categoria, sem_categoria}. */
   function contarCategorias_(L, itens, data) {
     var cats = {};
     var sem = 0;
     itens.forEach(function (x) {
-      var cat = AnimalService.categoriaEm(L, x.animal, data);
+      var cat = AnimalService.categoriaEm(L, semData_(x), data);
       if (!cat) { sem++; return; }
       var c = cats[cat.category_id] = cats[cat.category_id] || { category_id: cat.category_id, codigo: cat.codigo, nome: cat.nome, cabecas: 0 };
       c.cabecas++;
@@ -170,7 +193,8 @@ var InventoryService = (function () {
     var semPeso = 0;
     var lista = [];
     itens.forEach(function (x) {
-      var a = x.animal;
+      // As contas pelo que não depende da data (o retrato em D só para a lista, que mostra o brinco daquele dia).
+      var a = semData_(x);
       if (a.sexo === 'M') r.machos++;
       else if (a.sexo === 'F') r.femeas++;
       var cat = AnimalService.categoriaEm(L, a, data);
@@ -181,8 +205,9 @@ var InventoryService = (function () {
       else if (pv.situacao === 'SEM_PESAGEM') { partes.sem_pesagem.cabecas++; partes.sem_pesagem.peso_kg += pv.kg; }
       else semPeso++;
       if (o.animais) {
+        var em = x.animal;
         lista.push({
-          animal_id: a.animal_id, codigo_interno: a.codigo_interno, brinco: a.brinco || null, sexo: a.sexo || null, idade_meses: AnimalService.idadeEm(a, data),
+          animal_id: em.animal_id, codigo_interno: em.codigo_interno, brinco: em.brinco || null, sexo: em.sexo || null, idade_meses: AnimalService.idadeEm(em, data),
           categoria_id: cat ? cat.category_id : null, pasture_id: x.pasture_id, peso: pv,
           no_pasto_desde: x.no_pasto_desde || null, no_rebanho_desde: x.no_rebanho_desde || null,
         });
@@ -270,7 +295,7 @@ var InventoryService = (function () {
     var pp = porPasto_(L, itens.filter(function (x) { return casa_(L, f, x, data, ['pasture_id']); }));
     var cats = contarCategorias_(L, itens.filter(function (x) { return casa_(L, f, x, data, ['category_id']); }), data);
     base.cabecas = c.cabecas;
-    base.por_sexo = { M: sx.filter(function (x) { return x.animal.sexo === 'M'; }).length, F: sx.filter(function (x) { return x.animal.sexo === 'F'; }).length };
+    base.por_sexo = { M: sx.filter(function (x) { return semData_(x).sexo === 'M'; }).length, F: sx.filter(function (x) { return semData_(x).sexo === 'F'; }).length };
     base.por_pasto = pp.lista;
     base.sem_pasto = pp.sem;
     base.por_categoria = cats.por_categoria;
@@ -632,7 +657,7 @@ var InventoryService = (function () {
         if (pres.motivo) return base;
         base.itens = pres.itens.filter(function (x) {
           if (!vazio_(d.pasture_id) && x.pasture_id !== d.pasture_id) return false;
-          return !filtro.sexo || x.animal.sexo === filtro.sexo;
+          return !filtro.sexo || semData_(x).sexo === filtro.sexo;
         }).map(function (x) {
           // O brinco em uso NA DATA (o do retrato: o número trocado ou reaproveitado depois é de outro animal naquele dia), e o
           // de hoje (a projeção gravada: o curral mostra "hoje X" quando os dois diferem).

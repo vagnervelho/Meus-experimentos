@@ -737,8 +737,9 @@ var ReproductionService = (function () {
   /**
    * `reproducao.indicadores` (07, seção 8.3): {estacao_id?, ano?, data? (≤ hoje; padrão hoje)}. Devolve {data, parametros,
    * matrizes: {ativas, prenhas, sem_informacao, sem_historico}, estacoes: [{estacao_id, nome, data_inicio, data_fim}],
-   * estacao: {estacao, geral, por_categoria} | null, anual: {...} | null}. Sem estação pedida: a mais recente com fêmeas
-   * expostas; sem nenhuma estação cadastrada: a forma anual do ano da data (ou do `ano` pedido).
+   * estacao: {estacao, geral, por_categoria} | null, anual: {...} | null}. Sem estação pedida: a mais recente iniciada até a
+   * data com registro reprodutivo até a data (CONTRATOS, seção 46); sem nenhuma: a forma anual do ano da data (ou do `ano`
+   * pedido).
    */
   function consultaIndicadores(dados) {
     var d = dados || {};

@@ -543,10 +543,12 @@ var WeightService = (function () {
         var compPasto = {};
         var compCat = {};
         if (!pres.motivo) {
+          // Contas de cabeças, categoria e peso em `ate`: pela projeção (o sexo e a raça não mudam com a data; a categoria e o
+          // peso em `ate` saem da linha do tempo), sem o retrato de cada animal (InventoryService.presentes, `registro`).
           var itens = pres.itens.filter(function (x) {
-            if (!casa(x.animal)) return false;
+            if (!casa(x.registro)) return false;
             if (!vazio_(d.pasture_id) && x.pasture_id !== d.pasture_id) return false;
-            if (!vazio_(d.category_id)) { var c = AnimalService.categoriaEm(L, x.animal, per.ate); if (!c || c.category_id !== d.category_id) return false; }
+            if (!vazio_(d.category_id)) { var c = AnimalService.categoriaEm(L, x.registro, per.ate); if (!c || c.category_id !== d.category_id) return false; }
             return true;
           });
           compoeGeral = InventoryService.compor(L, itens, per.ate);
@@ -554,7 +556,7 @@ var WeightService = (function () {
             compPasto[pid] = InventoryService.compor(L, itens.filter(function (x) { return (x.pasture_id || 'SEM_PASTO') === pid; }), per.ate);
           });
           var catDe = {};
-          itens.forEach(function (x) { var c = AnimalService.categoriaEm(L, x.animal, per.ate); var k = c ? c.category_id : 'SEM_CATEGORIA'; (catDe[k] = catDe[k] || []).push(x); });
+          itens.forEach(function (x) { var c = AnimalService.categoriaEm(L, x.registro, per.ate); var k = c ? c.category_id : 'SEM_CATEGORIA'; (catDe[k] = catDe[k] || []).push(x); });
           Object.keys(catDe).forEach(function (k) { compCat[k] = InventoryService.compor(L, catDe[k], per.ate); });
         }
         var linhaGrupo = function (comp, g) {

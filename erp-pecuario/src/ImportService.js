@@ -378,37 +378,40 @@ var ImportService = (function () {
       if (vazio_(a.brinco)) return;
       base[Utils.normalizarBrinco(a.brinco, !semZeros)] = a;
     });
-    // Número que outro animal usava no marco zero ou depois dele (período fechado depois de D0): o animal do rebanho
-    // inicial com ele o teria em dois animais ao mesmo tempo (RN-002; RN-004: reuso só de período já encerrado). O
-    // número corrigido por IDENTIFICACAO_INCORRETA não conta (desenho-base 16.2).
-    var noMarco = {};
-    var D0 = params.data_marco_zero;
-    if (!vazio_(D0) && tx.repo.carregada('IDENTIFICACOES')) {
-      var errados = {};
-      (tx.repo.carregada('AJUSTES') ? tx.repo.vigentes('AJUSTES') : []).forEach(function (x) {
-        if (x.tipo_ajuste === 'IDENTIFICACAO_INCORRETA' && x.campo === 'brinco' && !vazio_(x.valor_anterior)) errados[x.animal_id + '|' + Utils.normalizarBrinco(String(x.valor_anterior), !semZeros)] = true;
-      });
-      tx.repo.vigentes('IDENTIFICACOES').forEach(function (r) {
-        if (r.tipo !== 'BRINCO' || vazio_(r.codigo) || vazio_(r.data_fim) || r.data_fim <= D0 || r.data_fim <= r.data_inicio) return;
-        var a = tx.repo.porId('ANIMAIS', r.animal_id);
-        var k = Utils.normalizarBrinco(String(r.codigo), !semZeros);
-        if (!a || a.situacao_cadastral === 'ANULADO' || a.situacao_cadastral === 'PENDENTE' || errados[r.animal_id + '|' + k]) return;
-        if (!noMarco[k] || r.data_fim > noMarco[k].ate) noMarco[k] = { animal: a, ate: r.data_fim };
-      });
-    }
-    // A mãe e o pai citados pelo brinco são o animal que usava o número no marco zero (a data do rebanho inicial; RN-002,
-    // RN-004), pelos períodos de IDENTIFICACOES — a mesma resolução das importações de eventos (donoDoBrinco_) —, e não
-    // quem tem o número hoje: a vaca que trocou de brinco depois continua sendo achada pelo número que tinha.
+    // Os períodos de uso de cada número pela regra única do brinco numa data (Timeline.periodosDeBrinco, a mesma da posição
+    // numa data e das importações de eventos; CONTRATOS, seção 46): o número corrigido por IDENTIFICACAO_INCORRETA vale desde
+    // o início do errado, e o errado nunca esteve na orelha (desenho-base 16.2: não tem período). Sem as identificações e os
+    // eventos na leitura (a consulta das linhas), sem períodos: vale quem usa o número hoje.
     var periodos = {};
     var porId = {};
     tx.repo.vigentes('ANIMAIS').forEach(function (a) { if (a.situacao_cadastral !== 'ANULADO' && a.situacao_cadastral !== 'PENDENTE') porId[a.animal_id] = a; });
-    if (tx.repo.carregada('IDENTIFICACOES')) {
-      tx.repo.vigentes('IDENTIFICACOES').forEach(function (r) {
-        if (r.tipo !== 'BRINCO' || vazio_(r.codigo) || !porId[r.animal_id]) return;
-        var k = Utils.normalizarBrinco(String(r.codigo), !semZeros);
-        (periodos[k] = periodos[k] || []).push({ animal: porId[r.animal_id], inicio: r.data_inicio, fim: nulo_(r.data_fim) });
+    if (tx.repo.carregada('IDENTIFICACOES') && tx.repo.carregada('EVENTOS')) {
+      var comBrinco = {};
+      tx.repo.vigentes('IDENTIFICACOES').forEach(function (r) { if (r.tipo === 'BRINCO' && !vazio_(r.codigo) && porId[r.animal_id]) comBrinco[r.animal_id] = true; });
+      var fonte = Object.keys(comBrinco).length ? Timeline.fonte(tx) : null;
+      Object.keys(comBrinco).forEach(function (id) {
+        Timeline.periodosDeBrinco(fonte, id).forEach(function (p) {
+          var k = Utils.normalizarBrinco(String(p.codigo), !semZeros);
+          (periodos[k] = periodos[k] || []).push({ animal: porId[id], inicio: p.inicio, fim: p.fim });
+        });
       });
     }
+    // Número que outro animal usava no marco zero ou depois dele (período fechado depois de D0): o animal do rebanho
+    // inicial com ele o teria em dois animais ao mesmo tempo (RN-002; RN-004: reuso só de período já encerrado). O
+    // número corrigido por IDENTIFICACAO_INCORRETA não conta (desenho-base 16.2: não tem período).
+    var noMarco = {};
+    var D0 = params.data_marco_zero;
+    if (!vazio_(D0)) {
+      Object.keys(periodos).forEach(function (k) {
+        periodos[k].forEach(function (p) {
+          if (p.fim === null || p.fim <= D0 || p.fim <= p.inicio) return;
+          if (!noMarco[k] || p.fim > noMarco[k].ate) noMarco[k] = { animal: p.animal, ate: p.fim };
+        });
+      });
+    }
+    // A mãe e o pai citados pelo brinco são o animal que usava o número no marco zero (a data do rebanho inicial; RN-002,
+    // RN-004), pelos mesmos períodos — a mesma resolução das importações de eventos (donoDoBrinco_) —, e não quem tem o
+    // número hoje: a vaca que trocou de brinco depois continua sendo achada pelo número que tinha.
     return { params: params, D0: params.data_marco_zero, pastos: pastos, pastosPorId: pastosPorId, racas: racas, listas: listas, base: base, noMarco: noMarco, externos: externos, codigos: codigos, semZeros: semZeros, brincos: { porBrinco: base, periodos: periodos } };
   }
   var AMBIGUO = Object.freeze({ ambiguo: true });
@@ -621,7 +624,9 @@ var ImportService = (function () {
     Object.keys(TIPOS_EVENTO).forEach(function (t) { l = l.concat(EventService.leiturasEvento(TIPOS_EVENTO[t])); });
     return Utils.unicos(l.concat(['IMPORTACOES', 'IMPORTACAO_LINHAS', 'ANEXOS', 'PASTOS', 'LISTAS', 'CONFIGURACOES', 'PROPRIEDADES']));
   }
-  var LEITURAS_VALIDACAO = Object.freeze(['IMPORTACOES', 'IMPORTACAO_LINHAS', 'ANEXOS', 'ANIMAIS', 'PASTOS', 'LISTAS', 'CONFIGURACOES', 'IDENTIFICACOES', 'AJUSTES']);
+  // Os EVENTOS (com o acesso cru) dão a ordem e o tipo de cada identificação: os períodos de cada número pela regra única do
+  // brinco numa data (Timeline.periodosDeBrinco; CONTRATOS, seção 46).
+  var LEITURAS_VALIDACAO = Object.freeze(['IMPORTACOES', 'IMPORTACAO_LINHAS', 'ANEXOS', 'ANIMAIS', 'PASTOS', 'LISTAS', 'CONFIGURACOES', 'IDENTIFICACOES', 'AJUSTES', 'EVENTOS']);
   /**
    * Uma importação em curso por vez (05, RN-032; desenho-base 16.8): a exceção das rotas `importacao.*` vale para
    * retomar, concluir e desfazer a que está em IMPORTANDO, não para começar outra (os animais e eventos PENDENTE de
@@ -810,8 +815,9 @@ var ImportService = (function () {
     var eventos = !!TIPOS_EVENTO[orig.imp.tipo];
     return UnitOfWork.run(ctx, {
       rota: 'importacao.validarBloco', idempotencyKey: p.idempotencyKey, dados: { import_id: d.import_id, bloco: bloco, mapeamento: d.mapeamento || {} },
-      // Eventos: a validação passa cada evento pelo motor (ensaio), que lê o que o formulário lê, com acesso cru.
-      reads: eventos ? leiturasImportacao_() : LEITURAS_VALIDACAO, acessoCru: eventos, anexaSemPai: ['IMPORTACAO_LINHAS'], permiteDuranteImportacao: true,
+      // Eventos: a validação passa cada evento pelo motor (ensaio), que lê o que o formulário lê, com acesso cru. ANIMAIS: o
+      // brinco da mãe e do pai no marco zero pelos períodos da linha do tempo (Timeline.periodosDeBrinco), também com acesso cru.
+      reads: eventos ? leiturasImportacao_() : LEITURAS_VALIDACAO, acessoCru: true, anexaSemPai: ['IMPORTACAO_LINHAS'], permiteDuranteImportacao: true,
       reconstruir: function (tx, op) { return estado_(tx, op.resumo.import_id); },
       tratador: function (tx) {
         var imp = exigirImportacao_(tx, d.import_id);
