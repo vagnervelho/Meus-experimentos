@@ -2289,6 +2289,19 @@ o caso está em `tests/fase3.fuzz.regressoes.test.js` (que falha no modelo de an
 Execução desta passada (`FUZZ_PASSOS=100`): 1.240 sementes novas × 100 passos com o gerador nas versões da passada, sem
 falha do sistema; a leva final, com o gerador final e depois do conserto do modelo, 500 sementes (950000 a 950499): 27.297
 comandos aceitos, 17.064 recusados, 0 falhas. As 22 sementes fixas de 60 passos rodam em cerca de 40 s no `npm test`.
+Depois da retomada (o contêiner reiniciou; nada no gerador nem em `src/` mudou), a leva de sementes novas que fecha a
+passada: 400 sementes (970000 a 970399) × 100 passos, 22.618 comandos aceitos, 13.390 recusados, 0 falhas. Nas 400, cada
+item da lista foi mandado e aceito ao menos uma vez (curral e tronco: 407 primeiros blocos aceitos, 216 reenvios de bloco
+já gravado, 733 conferências da chave; venda na carência: 4 para recria e 2 para abate aceitas, 8 para abate recusadas por
+CARENCIA_ATIVA com a política BLOQUEIA, e 35 vendas que entraram na carência por todos os caminhos; parto corrigido depois
+do diagnóstico 25; pesagem de quem saiu 10; diagnóstico de fêmea que saiu 23; estorno da compra de insumo consumido 8; dose
+por kg 63; reprodução na estação 3; estoque ligado 97 e desligado 157; protocolo novo 53; arquivos de PESAGENS 73, SANIDADE
+95, REPRODUCAO 72 e OCORRENCIAS 72; desfazer 721), salvo o que a regra recusa sempre (a venda levada para antes da
+pesagem ou do registro reprodutivo: FORA_DA_PERMANENCIA). As 24
+recusas da trava em 160 delas (970000 a 970159, `FUZZ_LOG_TRAVA=1`) são todas de regras que ela guarda por desenho
+(seções 11 e 40): a castração que a correção do rebanho de base passaria a repetir (10), o registro reprodutivo de quem
+passaria a ser macho ou nascida no dia dele (8), o animal que voltaria a um pasto desativado (4) e a mãe de uma cria já
+desmamada trocada no cadastro ou na correção do parto (2, `INTEGRIDADE_COPIAS` da desmama).
 
 ## 37. Telas sob demanda (Fase 3, etapa BASE) — `Api` (`sistema.tela`), `EventCatalog` (módulos), `JavaScript` (`Modulos`, `Telas`, `App`), `Index`, `scripts/ui-check.js`
 
