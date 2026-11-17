@@ -266,8 +266,10 @@ var TelaPesagens = (function () {
   function pendencias(c) { return c.linhas.filter(function (l) { return l.estado === 'NAO_ENCONTRADO' || l.estado === 'ERRO'; }); }
   /** Na fila e com o animal conferido na data da sessão (a linha de outra data nunca sai num bloco). */
   function naFila(c) { return c.linhas.filter(function (l) { return l.estado === 'FILA' && !l.bloco && (!l.dataAnimal || l.dataAnimal === c.sessao.data); }); }
-  /** Linhas que ainda não saíram: a fila e as de bloco criado e não enviado (NOVO). */
-  function naoEnviadas(c) { return c.linhas.filter(function (l) { if (l.estado !== 'FILA') return false; if (!l.bloco) return true; var b = bloco(c, l.bloco); return !b || b.estado === 'NOVO'; }); }
+  /** Bloco que sai no próximo envio, com a chave dele: criado e não enviado, sem confirmação, ou com o aviso aceito. */
+  function prontoParaSair(b) { return b.estado === 'NOVO' || b.estado === 'SEM_SINAL' || b.estado === 'ENVIANDO' || (b.estado === 'AVISO' && !!b.reenviar); }
+  /** Linhas que ainda não saíram: a fila e as de bloco criado e não enviado (NOVO) ou com o aviso já aceito. */
+  function naoEnviadas(c) { return c.linhas.filter(function (l) { if (l.estado !== 'FILA') return false; if (!l.bloco) return true; var b = bloco(c, l.bloco); return !b || b.estado === 'NOVO' || (b.estado === 'AVISO' && !!b.reenviar); }); }
   /** O cabeçalho do lançamento na sessão de agora (data, momento, método, jejum). */
   function camposDaSessao(c) {
     var campos = { event_date: c.sessao.data, tipo_pesagem: c.sessao.momento, metodo_pesagem: c.sessao.metodo };
@@ -307,6 +309,7 @@ var TelaPesagens = (function () {
     var linhas = c.linhas.filter(function (l) { return l.bloco === b.chave; });
     b.estado = 'ENVIANDO';
     b.recusa = null;
+    b.reenviar = false;
     c.erroGeral = null;
     linhas.forEach(function (l) { l.estado = 'ENVIANDO'; l.mensagem = null; });
     await guardar(c, { imediato: true });
@@ -388,19 +391,22 @@ var TelaPesagens = (function () {
     if (pendencias(c).length) { aoMudar(); return 'PENDENCIA'; }
     enviando = true;
     try {
-      var ordem = c.blocos.filter(function (b) { return b.estado === 'NOVO' || b.estado === 'SEM_SINAL' || b.estado === 'ENVIANDO' || (b.estado === 'AVISO' && b.reenviar); });
-      for (var k = 0; k < ordem.length; k++) {
-        var st = await enviarBloco(c, ordem[k], aoMudar);
+      // O próximo bloco pronto é escolhido de novo a cada volta: o que ficou pronto durante o envio (o aviso aceito, a linha
+      // nova) sai nesta mesma vez — nada fica esperando um "Enviar" que não aparece.
+      var feitos = {};
+      for (;;) {
+        var b = c.blocos.filter(function (x) { return !feitos[x.chave] && prontoParaSair(x); })[0];
+        if (!b) {
+          var fila = pendencias(c).length ? [] : naFila(c);
+          if (!fila.length) return 'OK';
+          b = { chave: 'curral:' + Util.uuid(), uids: fila.slice(0, BLOCO).map(function (l) { return l.uid; }), estado: 'NOVO', aceitos: [], campos: camposDaSessao(c) };
+          c.blocos.push(b);
+          b.uids.forEach(function (u) { c.linhas.forEach(function (l) { if (l.uid === u) l.bloco = b.chave; }); });
+        }
+        feitos[b.chave] = true;
+        var st = await enviarBloco(c, b, aoMudar);
         if (st === 'SEM_SINAL' || st === 'ERRO') return st;
       }
-      for (var fila = naFila(c); fila.length; fila = naFila(c)) {
-        var b = { chave: 'curral:' + Util.uuid(), uids: fila.slice(0, BLOCO).map(function (l) { return l.uid; }), estado: 'NOVO', aceitos: [], campos: camposDaSessao(c) };
-        c.blocos.push(b);
-        b.uids.forEach(function (u) { c.linhas.forEach(function (l) { if (l.uid === u) l.bloco = b.chave; }); });
-        var sb = await enviarBloco(c, b, aoMudar);
-        if (sb === 'SEM_SINAL' || sb === 'ERRO') return sb;
-      }
-      return 'OK';
     } finally {
       enviando = false;
       aoMudar();

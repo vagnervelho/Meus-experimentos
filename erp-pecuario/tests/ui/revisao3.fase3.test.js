@@ -94,7 +94,10 @@ test('achado 2 (curral): com um bloco sem confirmação, "Mudar data, método ou
   await page.waitForSelector('.curral-lista [data-estado="ERRO"]', { timeout: 15000 });
   assert.match(await txt(page, '[data-erro-geral]'), /já foi gravado com outro conteúdo/);
   assert.doesNotMatch(await txt(page, '[data-curral-status]'), /Sem sinal/);
-  assert.match((await linhas(page)).find((l) => l[0] === 'ERRO')[1], /pode já estar gravado: confira em Eventos/);
+  // A chave já está gravada (com outro conteúdo): a linha nunca sai de novo com outra chave — só "Tirar", sem "Corrigir o peso"
+  // (teste aleatório do curral, etapa 3: corrigida, ela gravaria duas vezes).
+  assert.match((await linhas(page)).find((l) => l[0] === 'ERRO')[1], /já foi gravado com outro conteúdo: confira em Eventos e tire a linha daqui/);
+  assert.equal(await page.locator('.curral-lista [data-estado="ERRO"] button:has-text("Corrigir o peso")').count(), 0);
   await page.click('.curral-lista [data-estado="ERRO"] button:has-text("Tirar")');
   await pesar(page, '000004', '181');
   await page.waitForSelector('[data-enviar]:not([disabled])', { timeout: 15000 });
@@ -105,7 +108,7 @@ test('achado 2 (curral): com um bloco sem confirmação, "Mudar data, método ou
   await a.fechar();
 });
 
-test('achado 2 (tronco): depois de um bloco gravado, "Mudar data, método ou estação" some; a recusa inesperada aparece como recusa, com "Tirar", e não como "sem sinal"', async () => {
+test('achado 2 (tronco): depois de um bloco gravado, "Mudar data, método ou estação" some; a falha interna do servidor aparece com a mensagem dele, não como "sem sinal", e o bloco sai de novo com a mesma chave (etapa 3: ela não prova que nada foi gravado)', async () => {
   const s = A.sistema();
   A.semear(s);
   const a = await A.abrir(s, { largura: 360, hash: 'reproducao/tronco', relogio: RELOGIO });
@@ -123,10 +126,17 @@ test('achado 2 (tronco): depois de um bloco gravado, "Mudar data, método ou est
   await page.fill('#tr-resultado', 'v'); await A.enter(page, '#tr-resultado');
   recusarProxima(s, 'evento.registrar', 'INTERNAL', 'Falha interna do servidor.');
   await page.click('[data-enviar]');
-  await page.waitForSelector('.curral-lista [data-estado="ERRO"]', { timeout: 15000 });
-  assert.match(await txt(page, '[data-erro-geral]'), /Falha interna do servidor/);
+  await page.waitForSelector('[data-recusa-incerta]', { timeout: 15000 });
+  assert.match(await txt(page, '[data-recusa-incerta]'), /O servidor recusou o envio de 1 diagnóstico: Falha interna do servidor\. Eles continuam guardados com a mesma chave/);
   assert.doesNotMatch(await txt(page, '[data-tronco-status]'), /Sem sinal/);
-  assert.ok(await page.isVisible('.curral-lista [data-estado="ERRO"] button:has-text("Tirar")'));
+  // Sem "Tirar" nem "Corrigir": a linha pode estar gravada; o "Enviar" a manda de novo com a mesma chave.
+  assert.equal(await page.locator('.curral-lista [data-estado="ERRO"]').count(), 0);
+  assert.equal(await page.locator('.curral-lista [data-estado="SEM_SINAL"] button').count(), 0);
+  await page.click('[data-enviar]');
+  await page.waitForFunction(() => document.querySelectorAll('.curral-lista [data-estado="GRAVADA"]').length === 2, null, { timeout: 15000 });
+  const envios = await registros(page);
+  assert.equal(envios[envios.length - 1].chave, envios[envios.length - 2].chave, 'o reenvio usa a mesma chave');
+  assert.equal(doServidor(s, 'REPRODUCAO').filter((r) => r.tipo_evento === 'DIAGNOSTICO_GESTACAO').length, 2, 'cada diagnóstico gravado uma vez');
   assert.deepEqual(a.estado.erros, []);
   await a.fechar();
 });
