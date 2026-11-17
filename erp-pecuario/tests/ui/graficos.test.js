@@ -248,7 +248,12 @@ for (const largura of [360, 1280]) {
     conferirMoldura(tx, 'Taxas da estação Estação 26', largura);
     const chaves = ['prenhez', 'paricao', 'natalidade', 'perda_gestacional', 'desmama', 'mortalidade_ate_desmama'];
     assert.equal(ind.geral.prenhez.valor, 66.7, '4 prenhes de 6 diagnosticadas');
-    assert.deepEqual(tx.valores, await pct(chaves.map((k) => ind.geral[k].valor).filter((v) => v !== null)), 'as taxas do servidor');
+    // A taxa que o servidor marca parcial leva "(parcial)" junto do valor (revisão da Fase 3, achado 19: a nota vai no valor,
+    // nunca no item do gráfico); o número continua o do servidor.
+    const comValor = chaves.map((k) => ind.geral[k]).filter((i) => i.valor !== null);
+    const parciais = comValor.map((i) => (i.parcial ? ' (parcial)' : ''));
+    assert.ok(parciais.some(Boolean), 'há taxa parcial (prenhe ainda sem parto) neste cenário');
+    assert.deepEqual(tx.valores, (await pct(comValor.map((i) => i.valor))).map((t, j) => t + parciais[j]), 'as taxas do servidor');
     assert.deepEqual(tx.valores, celulasComValor(tx));
     assert.equal(tx.semDado, chaves.filter((k) => ind.geral[k].valor === null).length, 'cada taxa sem valor, escrita no lugar da barra');
     tx.linhas.filter((l) => /^—/.test(l[1])).forEach((l) => assert.match(l[1], /^— \(.+, n = \d+\)$/, 'o motivo e o n na tabela: ' + l[0]));

@@ -1525,3 +1525,10 @@ novos sobre uma cópia com o `src/` anterior). Os testes ficam em `tests/revisao
 - Execuções do teste aleatório: 20 sementes de prova (1800000 a 1800019), com a falha do modelo acima; 300 sementes novas ×
   100 passos com o gerador intermediário (1810000 a 1810299): 17.936 aceitos, 9.739 recusados, 0 falhas; e a leva final,
   com o gerador final, 300 sementes novas × 100 passos (1830000 a 1830299): 17.874 aceitos, 9.877 recusados, 0 falhas.
+- Testes anteriores ajustados ao contrato novo, sem enfraquecer: `tests/estoque.test.js` (ligar o controle com saldo
+  negativo pede a confirmação), `tests/pesagem.test.js` (a resposta traz `gmd_motivo` e `gmd_explicacao`),
+  `tests/reproducao.test.js` (o resumo traz `expostas_ou_inseminadas`) e `tests/ui/graficos.test.js` (a taxa parcial leva
+  "(parcial)" junto do valor do servidor, e o teste exige que o cenário tenha uma).
+- Verificado no fim: `npm test`, 809 testes, 809 aprovados e 0 falhas (638 s), com as 22 sementes fixas de 60 passos (741
+  aceitos, 439 recusados, 0 falhas); `npm run ui:check`, 135 testes, 135 aprovados e 0 falhas (271 s), página inicial com
+  448 KB de 450 KB; sob demanda, Import 48 KB, Weights 48 KB, Health 24 KB e Reproduction 52 KB de 150 KB.

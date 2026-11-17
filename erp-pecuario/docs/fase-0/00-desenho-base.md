@@ -602,7 +602,9 @@ relatório de testes da Fase 1. Segunda linha de defesa: histórico de versões 
 - **Modo curral** (pesagem, sanidade, desmama, identificação): cabeçalho fixo + campos Brinco e Peso; Enter
   percorre brinco → peso → nova linha; resolução do brinco no store (exato → sem zeros à esquerda → lista); estados
   por linha (não encontrado, inativo, repetido, fora do pasto, variação implausível); alternativas "todos do pasto"
-  e "colar brinco;peso". Um único evento ao final, com rascunho persistente.
+  e "colar brinco;peso". Um único evento ao final, com rascunho persistente. Na implementação (Fase 3): a fila sai em
+  blocos de até 20 animais, cada bloco um evento com chave própria guardada no rascunho antes do envio; entregue para a
+  pesagem e, no mesmo padrão, para o diagnóstico de gestação (`08-ux-ui.md`, seção 5).
 - **Rascunho e rede** (UX-01): rascunho + chave em `localStorage` (fallback no servidor se o spike mostrar que não é
   durável no iframe); timeout → "verificando se gravou" via `operacao.status`; `appVersion` no envelope → faixa
   "nova versão — recarregar".

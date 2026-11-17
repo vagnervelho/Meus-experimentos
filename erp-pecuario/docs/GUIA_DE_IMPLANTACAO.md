@@ -1,17 +1,20 @@
-# Guia de implantação — ERP Pecuário, Fases 1 e 2
+# Guia de implantação — ERP Pecuário, Fases 1 a 3
 
 Para o dono do sistema. Não é preciso conhecer Apps Script: cada passo diz onde clicar, o que deve aparecer e o que
 fazer quando aparece outra coisa. A primeira implantação deve levar menos de uma hora, mais o tempo da importação do
 rebanho (estimativa, ainda não medida na sua conta).
 
-> **Já tem a Fase 1 implantada?** Vá direto à seção 11.1 (atualização para a Fase 2).
+> **Já tem a Fase 1 implantada?** Vá direto à seção 11.1 (atualização para a Fase 2) e depois à 11.2.
+>
+> **Já tem a Fase 2 implantada?** Vá direto à seção 11.2 (atualização para a Fase 3, com o roteiro do modo curral).
 
 > Faça tudo com a **conta Google pessoal que será a dona do sistema**. Só essa conta abre o app; a planilha-banco,
 > os backups e as fotos ficam no Google Drive dela.
 
 Sumário: 1 Criar o projeto · 2 Enviar o código · 3 Os arquivos, um a um · 4 `setup` · 5 `runDiagnostics` ·
 6 `runAcceptanceTests` · 7 Abrir o aplicativo · 8 Marco zero e importação do rebanho · 9 Backup e restauração ·
-10 O que nunca fazer na planilha · 11 Atualizar o sistema depois (11.1 Fase 2) · 12 Quando algo der errado.
+10 O que nunca fazer na planilha · 11 Atualizar o sistema depois (11.1 Fase 2; 11.2 Fase 3 e o modo curral) · 12 Quando
+algo der errado.
 
 ---
 
@@ -32,7 +35,7 @@ Mantenha o projeto no **projeto Cloud padrão** que o Apps Script cria. Não é 
 ## 2. Enviar o código
 
 Há dois caminhos. O recomendado é o `clasp`, a ferramenta oficial do Google, pelo script `npm run gas:push` (o mesmo
-fluxo que você já usou no Inbox Intelligence). A cópia manual funciona, mas são 34 arquivos e cada atualização exige
+fluxo que você já usou no Inbox Intelligence). A cópia manual funciona, mas são 38 arquivos e cada atualização exige
 repetir tudo.
 
 ### 2.1 Pelo `npm run gas:push` (recomendado)
@@ -56,7 +59,7 @@ repetir tudo.
    terminal, na mesma execução.
 5. O script mostra a conta e o projeto e pergunta *"Enviar src/ para esse projeto, substituindo todos os arquivos dele,
    e publicar o Web App (acesso: somente você)? [s/N]"*. Confira e responda `s`.
-6. O clasp envia os 34 arquivos (os 23 `.js` viram `.gs`, mais os 10 `.html` e o manifesto), apaga o `Código.gs` vazio
+6. O clasp envia os 38 arquivos (os 24 `.js` viram `.gs`, mais os 13 `.html` e o manifesto), apaga o `Código.gs` vazio
    do projeto novo e publica o Web App. No fim aparece a URL `https://script.google.com/macros/s/…/exec`. Guarde-a.
 7. Recarregue o editor do Apps Script e abra **Serviços** na barra lateral: devem aparecer **Sheets** e **Drive**. Se
    algum faltar, adicione-o ali (*Google Sheets API* v4 com o nome `Sheets`; *Drive API* v3 com o nome `Drive`).
@@ -78,8 +81,8 @@ cada publicação gasta uma das 200 versões que o Apps Script guarda); `--yes` 
 3. Para cada arquivo `src/*.html`: **+** → **HTML** → o nome **sem** `.html`, com as maiúsculas exatamente como na
    tabela (`Index`, `Styles`, `JavaScript`...: a página carrega as partes pelo nome) → cole → Ctrl+S.
 4. Apague o `Código.gs` inicial (três pontinhos ao lado do nome → *Excluir*).
-5. Copie cada arquivo da visualização *Raw* do GitHub, para não levar formatação junto. Confira no fim: 23 arquivos
-   `.gs`, 10 `.html` e o manifesto.
+5. Copie cada arquivo da visualização *Raw* do GitHub, para não levar formatação junto. Confira no fim: 24 arquivos
+   `.gs`, 13 `.html` e o manifesto.
 6. Confira os **Serviços** como no passo 2.1.7.
 7. Publique o Web App: **Implantar** → **Nova implantação** → tipo **App da Web** → *Executar como*: **Eu** → *Quem
    pode acessar*: **Somente eu** → **Implantar**. Nunca escolha "Qualquer pessoa".
@@ -104,22 +107,23 @@ todos precisam estar presentes; um que falte faz a função parar com erro.
 | Arquivo em `src/` | Nome no editor | O que faz | Depende de |
 |---|---|---|---|
 | `Code.js` | `Code` | As oito funções que você executa ou que o Google chama: `doGet`, `api`, `setup`, `runAcceptanceTests`, `runDiagnostics`, `verifyIntegrity`, `trgManutencaoDiaria`, `trgIntegridadeSemanal`; cada uma confere primeiro se quem chama é o dono | Api, AuditService, Maintenance, TestRunner |
-| `Api.js` | `Api` | Porta única do aplicativo: confere o dono, encaminha cada pedido da tela ao serviço certo, devolve sempre uma resposta padronizada, guarda rascunhos e monta a página (compactada) | AnimalService, AuditService, Config, Database, EventCatalog, EventService, FileService, ImportService, InventoryService, Maintenance, PastureService, TestRunner, UnitOfWork, Utils, Validation |
+| `Api.js` | `Api` | Porta única do aplicativo: confere o dono, encaminha cada pedido da tela ao serviço certo, devolve sempre uma resposta padronizada, guarda rascunhos, monta a página inicial (compactada) e entrega as telas carregadas sob demanda (Importação, Pesagens, Sanidade, Reprodução) | AnimalService, AuditService, Config, Database, EventCatalog, EventService, FileService, HealthService, ImportService, InventoryService, Maintenance, PastureService, ReproductionService, TestRunner, UnitOfWork, Utils, Validation, WeightService |
 | `Config.js` | `Config` | Parâmetros, listas, categorias e parceiros (cadastros das Configurações) | AuditService, EventService, Schema, Timeline, UnitOfWork, Utils, Validation |
 | `Schema.js` | `Schema` | Gerado automaticamente: as 34 abas da planilha-banco, colunas, tipos, listas fechadas e valores iniciais. Não edite à mão | — |
 | `Database.js` | `Database` | Leitura e gravação na planilha pelas três formas de gravação, conversão de tipos, teste de ida e volta dos valores, trava (lock), relógio, identificadores e propriedades | Schema, Utils, Validation |
 | `Repository.js` | `Repository` | Quais linhas valem, índices em memória, contadores (número do evento, código do animal) | Schema, Validation |
 | `UnitOfWork.js` | `UnitOfWork` | Toda gravação: trava, registro da operação, as três fases, recuperação de operação interrompida, proteção contra envio repetido, leitura conferida | AuditService, Repository, Schema, Utils, Validation |
-| `AuditService.js` | `AuditService` | Trilha de auditoria (eventos, ajustes e alterações), verificação de integridade (26 conferências, inclusive linha do tempo, partos, genealogia e as contas do financeiro), reparo | EventCatalog, EventService, FinancialService, Repository, Schema, Timeline, UnitOfWork, Utils, Validation |
+| `AuditService.js` | `AuditService` | Trilha de auditoria (eventos, ajustes e alterações), verificação de integridade (26 conferências, inclusive linha do tempo, partos, genealogia, as contas do financeiro e, desde a Fase 3, pesagens, aplicações, estoque de insumos e registros reprodutivos), reparo, e a trava que confere cada gravação antes de gravar | EventCatalog, EventService, FinancialService, HealthService, Repository, ReproductionService, Schema, Timeline, UnitOfWork, Utils, Validation |
 | `EventCatalog.js` | `EventCatalog` | A definição dos tipos de evento (campos, regras, quem aparece no formulário, nome de cada lançamento) | Utils, Validation |
-| `EventService.js` | `EventService` | Registrar, corrigir, estornar e simular eventos: entradas, nascimento, compra, venda, transferência, morte, descarte, identificação, marcação e ajustes; brinco único, genealogia, avisos com confirmação, guarda de duplicidade, histórico importado | AnimalService, AuditService, EventCatalog, FileService, FinancialService, HealthService, InventoryService, PastureService, ReproductionService, Schema, Timeline, UnitOfWork, Utils, Validation |
+| `EventService.js` | `EventService` | Registrar, corrigir, estornar e simular eventos: entradas, nascimento, compra, venda, transferência, morte, descarte, identificação, marcação e ajustes; na Fase 3, pesagem, sanidade, estoque de insumos, reprodução, desmama, castração e ocorrência; brinco único, genealogia, avisos com confirmação, guarda de duplicidade, histórico importado | AnimalService, AuditService, EventCatalog, FileService, FinancialService, HealthService, InventoryService, PastureService, ReproductionService, Schema, Timeline, UnitOfWork, Utils, Validation, WeightService |
 | `FinancialService.js` | `FinancialService` | O dinheiro de cada evento: lançamentos, parcelas (a pagar e a receber), rateio entre os animais ao centavo, a conta da negociação de compra e de venda (por cabeça, kg, arroba de peso vivo ou de carcaça, lote), deduções da venda, as conferências que garantem que os valores fecham, o custo do animal na ficha | EventCatalog, Timeline, Utils, Validation |
-| `HealthService.js` | `HealthService` | Regras sanitárias; nesta versão, só a carência que a venda confere (o registro de sanidade chega na Fase 3) | Utils, Validation |
-| `ReproductionService.js` | `ReproductionService` | Partos e histórico reprodutivo da vaca (ficha, avisos do parto) | Timeline, Utils |
-| `Timeline.js` | `Timeline` | Linha do tempo de cada animal (ordem dos eventos e o que pode vir depois do quê), situação atual calculada pelos eventos, rebanho e pasto numa data, dias de permanência | Config, FinancialService, Repository, Schema, Utils, Validation |
-| `AnimalService.js` | `AnimalService` | Lista do rebanho, ficha do animal (inclusive custo de aquisição e lançamentos), árvore genealógica, edição com auditoria, animal de fora do rebanho (touro de sêmen, mãe de outra fazenda) | AuditService, Config, EventCatalog, EventService, FinancialService, ReproductionService, Schema, Timeline, UnitOfWork, Utils, Validation |
+| `HealthService.js` | `HealthService` | Sanidade: cadastro de produtos (insumos) e protocolos, estoque, dose, consumo e custo da aplicação, carência, agenda sanitária e alertas | AnimalService, AuditService, Config, InventoryService, Schema, UnitOfWork, Utils, Validation |
+| `ReproductionService.js` | `ReproductionService` | Reprodução: partos, estações de monta, situação de cada fêmea, previsão de parto, indicadores da estação, lista de fêmeas e alertas, regras de manejo (touro castrado, desmama e castração repetidas) | AnimalService, AuditService, Config, Timeline, UnitOfWork, Utils, Validation |
+| `WeightService.js` | `WeightService` | Pesagens: ganho, ganho médio diário (GMD), curva, projeção de peso e a tela de desempenho (por pasto, por categoria, por lote, evolução mensal) | AnimalService, Config, EventCatalog, InventoryService, Timeline, UnitOfWork, Utils, Validation |
+| `Timeline.js` | `Timeline` | Linha do tempo de cada animal (ordem dos eventos e o que pode vir depois do quê), situação atual calculada pelos eventos, rebanho e pasto numa data, dias de permanência, situação reprodutiva e saldo de insumos | Config, FinancialService, HealthService, Repository, Schema, Utils, Validation |
+| `AnimalService.js` | `AnimalService` | Lista do rebanho, ficha do animal (inclusive peso, sanidade, reprodução, custo de aquisição e lançamentos), árvore genealógica, edição com auditoria, animal de fora do rebanho (touro de sêmen, mãe de outra fazenda) | AuditService, Config, EventCatalog, EventService, FinancialService, HealthService, ReproductionService, Schema, Timeline, UnitOfWork, Utils, Validation, WeightService |
 | `PastureService.js` | `PastureService` | Propriedades, pastos (próprios e arrendados), lista e painel do pasto em qualquer data | AnimalService, AuditService, Config, InventoryService, Schema, Timeline, UnitOfWork, Utils, Validation |
-| `InventoryService.js` | `InventoryService` | Posição do rebanho hoje e numa data, quem pode receber cada lançamento, números da Visão geral (movimento do período, a pagar e a receber), alertas | AnimalService, EventCatalog, FinancialService, Timeline, UnitOfWork, Utils, Validation |
+| `InventoryService.js` | `InventoryService` | Posição do rebanho hoje e numa data, quem pode receber cada lançamento, números da Visão geral (movimento do período, a pagar e a receber), alertas (inclusive os sanitários e os de parto) | AnimalService, EventCatalog, FinancialService, HealthService, ReproductionService, Timeline, UnitOfWork, Utils, Validation |
 | `ImportService.js` | `ImportService` | Importação de planilhas de animais, do histórico (compras, vendas, transferências, nascimentos e mortes) e do manejo (pesagens, sanidade, reprodução e ocorrências): leitura, colunas, validação, duplicidades, aprovação, lotes, conclusão, desfazer, relatório e conferência com o marco zero | AuditService, EventCatalog, EventService, Maintenance, Repository, Schema, Timeline, UnitOfWork, Utils, Validation |
 | `FileService.js` | `FileService` | Google Drive: pastas do sistema, planilhas, cópias, lixeira, leitura de arquivos; fotos e documentos do animal, do lançamento e dos lançamentos financeiros (nota fiscal, GTA, boleto) | AuditService, Schema, UnitOfWork, Utils, Validation |
 | `Maintenance.js` | `Maintenance` | Configuração inicial (`setup`), backup, retenção, restauração, rotina diária e semanal, gatilhos, estado do sistema | AuditService, Database, FileService, Schema, Timeline, UnitOfWork, Utils, Validation |
@@ -131,16 +135,19 @@ todos precisam estar presentes; um que falte faz a função parar com erro.
 
 | Arquivo em `src/` | Nome no editor | O que faz | Depende de |
 |---|---|---|---|
-| `Index.html` | `Index` | A página do app; inclui as demais nesta ordem: Styles, JavaScript, Components, Dashboard, Animals, Pastures, Events, Settings, Import | todas as abaixo |
+| `Index.html` | `Index` | A página do app; inclui nesta ordem: Styles, JavaScript, Components, Dashboard, Animals, Pastures, Events, Settings. As telas Import, Weights, Health e Reproduction não entram nela: o app as pede ao servidor quando o menu as abre (carga sob demanda) | todas as abaixo |
 | `Styles.html` | `Styles` | Aparência (cores, tamanhos de letra e de toque, celular e computador) | — |
 | `JavaScript.html` | `JavaScript` | Núcleo da tela: conversa com o servidor, dados guardados no aparelho, navegação, rascunhos, menu | Styles |
 | `Components.html` | `Components` | Peças das telas: botões, tabelas, gráficos, formulários do catálogo, seletor de animais, registrar evento | JavaScript |
 | `Dashboard.html` | `Dashboard` | Tela Início (Visão geral) | JavaScript, Components |
-| `Animals.html` | `Animals` | Rebanho (lista, filtros, CSV) e ficha do animal (linha do tempo, árvore, edição, fotos) | JavaScript, Components |
+| `Animals.html` | `Animals` | Rebanho (lista, filtros, CSV) e ficha do animal (linha do tempo, peso com a curva, sanidade, reprodução, árvore, edição, fotos) | JavaScript, Components |
 | `Pastures.html` | `Pastures` | Pastos e painel do pasto, também numa data passada | JavaScript, Components |
 | `Events.html` | `Events` | Histórico de eventos, detalhe (com o financeiro e os documentos), estorno e correção de qualquer lançamento | JavaScript, Components |
 | `Settings.html` | `Settings` | Configurações: parâmetros, listas, categorias, propriedades, parceiros, sistema (backup, restauração, integridade, diagnóstico) e auditoria | JavaScript, Components |
-| `Import.html` | `Import` | Assistente de importação de animais, do histórico de eventos e do manejo (5 telas), com a conferência com o marco zero | JavaScript, Components |
+| `Import.html` | `Import` | Assistente de importação de animais, do histórico de eventos e do manejo (5 telas), com a conferência com o marco zero. Carregada sob demanda | JavaScript, Components |
+| `Weights.html` | `Weights` | Pesagens: desempenho (peso e GMD por pasto, por categoria e por lote, curvas) e o modo curral. Carregada sob demanda | JavaScript, Components |
+| `Health.html` | `Health` | Sanidade: agenda, aplicações, produtos e estoque, protocolos. Carregada sob demanda | JavaScript, Components |
+| `Reproduction.html` | `Reproduction` | Reprodução: fêmeas, diagnóstico no tronco, indicadores, estações de monta; a aba Reprodução da ficha. Carregada sob demanda | JavaScript, Components |
 
 ## 4. Executar `setup` (configuração inicial)
 
@@ -424,6 +431,95 @@ de gerar a nova (seção 6, "Base de demonstração"). São cerca de 380 lançam
   restaure pelo sistema o backup do passo 1 (seção 9: **Configurações → Sistema → Backups → Restaurar**, com o motivo) e só então
   envie o código da Fase 1. O que foi lançado depois do backup se perde e precisa ser lançado de novo quando você
   voltar à Fase 2; anote antes.
+
+### 11.2 Atualização para a Fase 3 (manejo)
+
+O que muda para você: o menu ganha **Pesagens**, **Sanidade** e **Reprodução**. O app passa a registrar **pesagem**
+(individual, coletiva, por lote e no curral pelo celular), com ganho médio diário, curva de peso e projeção; **sanidade**
+(produtos, estoque opcional por produto, protocolos, aplicações com o consumo e o custo, carência, agenda e alertas);
+**reprodução** (estações de monta, exposição aos touros, cobertura, inseminação, diagnóstico de gestação — também no
+tronco, pelo celular —, aborto e os indicadores da estação); **desmama, castração e ocorrências**; e a importação do
+histórico de pesagens, sanidade, reprodução e ocorrências. A ficha do animal ganha as abas de peso, sanidade e reprodução,
+com gráficos. O sistema registra o que você e o veterinário decidem: ele não sugere tratamento. A planilha-banco não muda
+de forma: as 34 abas, as colunas, os parâmetros e as listas da Fase 3 já vieram na Fase 1.
+
+1. **Antes de tudo, um backup.** **Configurações → Sistema → Fazer backup agora**. Anote a data e a hora.
+2. **Envie o código de novo**, como na seção 2 (`git pull` e `npm run gas:push -- --no-deploy`). São agora **38
+   arquivos**: entraram o `WeightService` (Script) e as telas `Weights`, `Health` e `Reproduction` (HTML). Na cópia
+   manual, crie esses quatro com o nome exato e substitua o conteúdo de todos os outros.
+3. **Rode `setup` uma vez** (seção 4). Ele não deve criar aba, coluna nem valor inicial. Confira `banco_criado: false`,
+   `abas` e `sementes` sem criação, os dois gatilhos e `integridade` sem erros. A verificação agora confere também as
+   pesagens, as aplicações, o estoque de insumos e os registros reprodutivos e, nos dados que você já tem, o peso copiado
+   das pesagens da entrada, da compra, da venda e do parto: se aparecer erro em **Cópias** sem a opção de reparar, alguém
+   mexeu num peso na planilha à mão; restaure o backup do passo 1 ou mande o relatório.
+4. **Rode `runAcceptanceTests`** até `"completo": true` (seção 6). São 23 cenários das Fases 1 a 3 (os novos: pesagem,
+   vacinação coletiva, sanidade, estoque de insumos e reprodução), em várias execuções. Envie o relatório JSON e faça a
+   página de concorrência (seção 6, passo 4), se ainda não fez.
+5. **Confira no app** (pela `/dev`; o app aberto mostra "Nova versão disponível" → **Recarregar**):
+   - **As telas novas abrem.** Toque em **Pesagens**, **Sanidade**, **Reprodução** e em **Configurações → Importação**.
+     Essas quatro telas não vêm com a página: o app as pede ao servidor na primeira vez que você abre cada uma (aparece
+     um esqueleto cinza por um instante) e depois as guarda enquanto a página estiver aberta. **Isto ainda não foi visto
+     no Google de verdade.** Se alguma ficar em branco, ou mostrar "Não foi possível abrir…" mesmo com sinal bom e depois
+     de **Tentar de novo**, mande uma captura da tela: o resto do app continua funcionando, e a correção vem numa versão
+     nova (não é preciso voltar atrás).
+   - **Sanidade → Produtos e estoque** e **Sanidade → Protocolos**: cadastre, **com o veterinário**, as vacinas, os
+     vermífugos e os medicamentos que você usa (unidade da dose, carência, se quer controlar o estoque daquele produto) e
+     os protocolos (para quais animais, de quanto em quanto tempo ou em quais meses). Depois, **Sanidade → Agenda** mostra
+     o que está atrasado e o que vence logo, com **Aplicar em N animais**.
+   - **Reprodução → Estações de monta**: cadastre a estação, se você trabalha com estação (opcional).
+   - A ficha de um animal com pesagens: a aba **Peso** mostra a curva; as abas **Sanidade** e **Reprodução**, o histórico.
+   - **Configurações → Sistema → Verificar a integridade agora**: "Tudo certo", e anote o tempo que aparece na tela.
+6. **Responda quatro perguntas** (premissas): **PR-06**, você vai pesar e vacinar no curral pelo celular, ou vai anotar e
+   lançar no escritório? **PR-07**, a monta é natural, com ou sem estação? Usa inseminação? **PR-10**, de quais produtos
+   você quer controlar o estoque (o padrão é nenhum)? **PR-11**, o custo do insumo entra quando ele é aplicado no animal
+   (o padrão) ou quando é comprado? Todas já têm um padrão; as respostas ajustam o que fica sugerido.
+7. **Teste o modo curral no curral** (roteiro abaixo) e conte como foi.
+8. Publique (`npm run gas:push`, sem `--no-deploy`) quando a `/dev` estiver conferida.
+
+**Roteiro do modo curral (pesagem).** Faça uma vez num dia de pesagem de verdade, com o celular que vai ficar no curral.
+
+1. **Ainda com sinal** (no Wi-Fi da sede, por exemplo), abra o app no celular e toque em **Pesagens**, para a tela
+   ficar carregada. Se a página recarregar sem sinal nenhum, o app não abre (isso vale para o app inteiro); as pesagens
+   já digitadas continuam guardadas no celular.
+2. **Pesar no curral** → escolha a data, **como foi pesado** (balança, fita ou estimativa), o **pasto do lote**
+   (opcional: com ele aparece o contador "37 de 80 · faltam 43") e se os animais estão em jejum → **Começar a pesar**.
+3. Para cada animal: **brinco** (teclado numérico) → **Enter** → **peso** → **Enter**. Confira a linha que aparece
+   (categoria, pasto, último peso). Brinco que não existe fica pendente, com **Corrigir** ou **Tirar**; animal já pesado
+   nesta pesagem pergunta se o peso novo substitui o anterior. **Desfazer o último** apaga a última linha que ainda não
+   saiu.
+4. A cada **20 animais** o app manda um bloco sozinho. Sem sinal, aparece "Sem sinal: as pesagens ficaram guardadas
+   neste aparelho." Continue pesando; quando o sinal voltar, toque em **Enviar**.
+5. **Peso fora do esperado** (diferença grande em relação à última pesagem): a linha volta marcada pelo sistema. Confira
+   a balança e o número: **Está certo** grava assim; se foi erro de digitação, corrija o peso. Uma linha recusada fica
+   com o motivo, para corrigir ou tirar; as outras seguem.
+6. No fim, **Enviar** e **Terminar a pesagem**. Se algo não foi gravado, o app pergunta antes de descartar.
+7. **Se o celular fechar o app ou recarregar a página**: abra o app de novo. O **Início** mostra "Pesagem no curral de
+   dd/mm não concluída" → **Continuar**. O app confere com o servidor o que já foi gravado antes de mandar de novo: nada
+   é gravado duas vezes.
+8. De volta ao escritório: **Pesagens** mostra o ganho médio diário por pasto e por categoria (com menos de 28 dias entre
+   duas pesagens, o ganho médio diário fica em branco, com o motivo: não é erro).
+
+O **diagnóstico de gestação no tronco** segue o mesmo jeito: **Reprodução → Diagnóstico no tronco** → data, método,
+estação e quem diagnosticou → **Começar**; para cada vaca, brinco → Enter → resultado → Enter, com **p** para prenhe
+(**p90** = 90 dias de gestação), **v** para vazia e **d** para duvidosa.
+
+**O que contar depois** (é a evidência que fecha a Fase 3): quantos animais, quanto tempo levou, se o sinal caiu e
+quantas vezes, se o rascunho voltou certo, e o que atrapalhou (tamanho da letra, teclado, botões, luz do sol na tela).
+
+**Base de demonstração da Fase 2?** Ela não continua com o plano novo: apague a propriedade `DEMO_SPREADSHEET_ID` antes
+de gerar a nova (seção 6, "Base de demonstração"). São cerca de 410 lançamentos, em várias execuções de uns 4 minutos.
+
+**Como voltar atrás.** O código e os dados voltam juntos; nunca só um deles.
+
+- **Antes de gravar qualquer lançamento ou cadastro da Fase 3** (pesagem, aplicação, entrada de estoque, produto,
+  protocolo, estação, registro reprodutivo, desmama, castração, ocorrência, importação de manejo): basta enviar de novo
+  o código da Fase 2. `git log --oneline | grep "Fase 2" | head -1` mostra o último commit da Fase 2; `git checkout
+  <esse commit>` e `npm run gas:push`, depois `git checkout -` para voltar ao ramo.
+- **Depois de gravar lançamentos ou cadastros da Fase 3**, a versão da Fase 2 não sabe ler esses tipos. Ainda com o
+  código da Fase 3, restaure pelo sistema o backup do passo 1 (seção 9: **Configurações → Sistema → Backups →
+  Restaurar**, com o motivo) e só então envie o código da Fase 2. O que foi lançado depois do backup se perde e precisa
+  ser lançado de novo quando você voltar à Fase 3; anote antes.
+- **Se só as telas novas não abrirem** (passo 5), não volte atrás: mande a captura; o resto do app funciona.
 
 ## 12. Quando algo der errado
 

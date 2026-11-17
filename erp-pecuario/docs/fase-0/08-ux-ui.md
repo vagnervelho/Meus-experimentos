@@ -3,8 +3,8 @@
 ## Em resumo
 
 - **Dois contextos, um produto.** Escritório (desktop, tabelas) e curral (celular, uma mão, sinal fraco). Toda tela de registro é desenhada primeiro para 360 px e teclado numérico.
-- **Registrar evento em uma ida ao servidor.** Botão global e atalhos por contexto, com pré-preenchimento. Revisão LOCAL nos tipos simples; simulação no servidor só em compra, venda, estorno e correção.
-- **Modo curral** (pesagem, sanidade, desmama, identificação): brinco → Enter → peso → Enter, sem tocar em botão. Um único evento ao final, tudo ou nada.
+- **Registrar evento em uma ida ao servidor.** Botão global e atalhos por contexto, com pré-preenchimento. Revisão LOCAL nos tipos simples; simulação no servidor só em compra, venda, estorno e correção. Na implementação da Fase 3, a sanidade e o estoque também têm a revisão pelo servidor (a dose por peso, o consumo, o custo e o saldo são contas do servidor, P5).
+- **Modo curral** (pesagem, sanidade, desmama, identificação): brinco → Enter → peso → Enter, sem tocar em botão. Na implementação (Fase 3), a fila sai em blocos de até 20 animais, cada bloco um evento com chave própria, e o modo curral foi entregue para a pesagem e, no mesmo padrão, para o diagnóstico de gestação ("tronco"); ver seção 5.
 - **Nada se perde nem duplica.** Rascunho persistente com chave de idempotência; sem resposta em ~45 s, o app pergunta ao servidor se gravou antes de reenviar.
 - **Só aparece o que está entregue.** Menu e seletor seguem a lista de módulos ativos; dado ausente vira "—" com motivo, nunca zero.
 - **Catálogo antes de tela à mão.** Formulários de evento saem do `EventCatalog`; os 17 relatórios, do `ReportCatalog`.
@@ -240,6 +240,8 @@ flowchart TD
 
 No brete os animais passam em ordem aleatória; o operador tem o brinco e a leitura da balança. Selecionar 80 e depois procurar a linha de cada um custa 3 a 4 interações por animal. O modo curral inverte: digita-se na ordem em que o gado passa. É o `modo_entrada = CURRAL` de PESAGEM, SANIDADE, DESMAMA e IDENTIFICACAO.
 
+**Na implementação (Fase 3; decisões em `docs/RELATORIO_FASE3.md`, seção 4, itens 4 e 6).** (1) **Blocos em vez de um evento só**: a fila sai em blocos de até 20 animais, cada bloco um evento PESAGEM com chave própria, guardada no rascunho persistente antes do envio; o bloco cheio sai sozinho, e "Enviar" manda o resto. Com o sinal caindo no meio, o que já foi gravado não se perde nem se repete: ao voltar, o bloco sem confirmação é conferido pela chave (`operacao.status`) antes de qualquer reenvio. A pesagem de 80 animais vira 4 lançamentos. (2) **Sem folha de revisão no fim**: o aviso do servidor (PESO_IMPLAUSIVEL, POSSIVEL_DUPLICIDADE) e a recusa voltam na linha de cada animal ("Está certo" reenvia com o aceite; "Corrigir" e "Tirar" na recusa). (3) **Entregue para a pesagem** (tela Pesagens, carregada sob demanda) e, no mesmo padrão, para o **diagnóstico de gestação no tronco** (brinco e resultado com Enter; tela Reprodução). A sanidade ficou no formulário comum, com a revisão pelo servidor; a desmama e a identificação usam o formulário comum com o seletor. (4) Dentro do modo curral não entraram "Todos do pasto" (grade) e "Colar brinco;peso": o formulário comum da pesagem tem o seletor com "Todos do pasto", e a planilha entra pela importação de pesagens. (5) Com data diferente de hoje, brinco, pasto e contador são conferidos pela posição do servidor naquela data.
+
 ```text
 +----------------------------------------+
 | <  Pesagem   13/11/2026   Balança      |  cabeçalho fixo: data, método,
@@ -282,7 +284,7 @@ Exemplo: último peso 441,0 kg em 03/09; digitado 45,0 em 13/11 (faltou um dígi
 
 **Alternativas na mesma tela.** "Todos do pasto" abre uma grade com uma linha por animal, para quem digita do caderno. "Colar brinco;peso" aceita linhas copiadas de planilha e passa pelas mesmas marcas; cobre a "importação de pesagens" do dia a dia (§6).
 
-**Fim.** "Revisar 37 pesagens" → folha LOCAL (quantidade, média, linhas com aviso) → um único `evento.registrar`. Linha "não encontrado" desabilita o envio e diz por quê.
+**Fim.** "Revisar 37 pesagens" → folha LOCAL (quantidade, média, linhas com aviso) → um único `evento.registrar`. Linha "não encontrado" desabilita o envio e diz por quê. (Na implementação, os blocos de 20 descritos no começo desta seção; "Terminar a pesagem" pergunta antes de descartar o que não foi gravado.)
 
 ---
 
@@ -292,8 +294,8 @@ Exemplo: último peso 441,0 kg em 03/09; digitado 45,0 em 13/11 (faltou um dígi
 
 | Caso | Antes | Depois | De onde vem o ganho |
 |---|---|---|---|
-| Pesagem de 80 animais | ~8 toques fixos + 3 a 4 interações por animal para achar a linha (240 a 320); 2 idas | 6 toques fixos + 2 Enter por animal (160); 1 ida | Modo curral; revisão LOCAL |
-| Vacinação de um pasto | ~11 toques; 2 idas | 5 a 6, a partir do painel do pasto; 1 ida | "Todos do pasto" já marcado; lote, validade e carência herdados do produto |
+| Pesagem de 80 animais | ~8 toques fixos + 3 a 4 interações por animal para achar a linha (240 a 320); 2 idas | 6 toques fixos + 2 Enter por animal (160); 1 ida (na implementação, uma ida por bloco de 20: 4 idas) | Modo curral; revisão LOCAL |
+| Vacinação de um pasto | ~11 toques; 2 idas | 5 a 6, a partir do painel do pasto; 1 ida (na implementação, 2 idas: a revisão da sanidade é do servidor) | "Todos do pasto" já marcado; lote, validade e carência herdados do produto |
 | Transferência | ~9 a 10 toques; 2 idas | 5; 1 ida | "Transferir daqui" traz origem e animais |
 | Nascimento | ~7 toques + digitação; 2 idas | 4 a 5, a partir da ficha da mãe; 1 ida | Mãe, pasto e raça herdados |
 | Venda de lote de 30 | ~20 a 25 toques; 2 idas; comprador novo obriga a sair do formulário | ~12 a 15 toques; 2 idas (3 com comprador novo, sem sair) | Seleção múltipla na listagem; "+ Novo". A simulação fica: rateio e parcelas só o servidor calcula |

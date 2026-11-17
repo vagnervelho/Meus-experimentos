@@ -356,6 +356,8 @@ Camada é propriedade da função, não do arquivo: nos serviços de domínio co
 
 `Index` é avaliado por `HtmlService.createTemplateFromFile`; os demais entram por `createHtmlOutputFromFile(nome).getContent()`. Orçamento da página inteira: até ~450 KB.
 
+**Telas sob demanda (desde a Fase 3; risco R-31).** A página inicial leva só `Styles`, `JavaScript`, `Components`, `Dashboard`, `Animals`, `Pastures`, `Events` e `Settings`, e o orçamento de ~450 KB vale para ela. `Import` e as telas das Fases 3 a 5 (`Weights`, `Health`, `Reproduction`, `Financial`, `Reports`) são pedidas pela rota `sistema.tela` quando o menu as abre (o catálogo marca o módulo `sob_demanda`), injetadas uma vez e guardadas na memória da página, com orçamento de 150 KB cada; o `ui:check` mede as duas coisas. O modo curral e o diagnóstico no tronco ficam nas telas `Weights` e `Reproduction`, não em `Components`, para não pesar na página inicial; o kit de gráficos fica em `Components`.
+
 ### 6.3 Fora de `src/`
 
 | Local | Conteúdo |

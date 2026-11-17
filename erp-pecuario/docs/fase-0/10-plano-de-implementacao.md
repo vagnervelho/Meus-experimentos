@@ -117,7 +117,7 @@ Saída do spike: um relatório curto em `docs/` com o resultado de cada item, a 
 | E3.6 | Importadores de pesagens, sanidade, reprodução e ocorrências | M |
 | E3.7 | Gráficos (biblioteca decidida no spike) | P |
 
-- **Arquivos:** `WeightService`, `HealthService`, `ReproductionService`; `Weights.html`, `Health.html`, `Reproduction.html`.
+- **Arquivos:** `WeightService`, `HealthService`, `ReproductionService`; `Weights.html`, `Health.html`, `Reproduction.html`. Na implementação, as três telas e a importação são carregadas sob demanda (risco R-31; `01-arquitetura.md`, seção 6.2), e entraram também `EventCatalog`, `EventService` e `AuditService` (o tratador único e a conferência de cada tipo novo), `Timeline`, `ImportService` (E3.6), `TestRunner` (aceitação e demonstração), `Api` (`sistema.tela`) e as telas `Components` (gráficos), `Animals`, `Events`, `Dashboard` e `Import`.
 - **Testes para fechar:** CT-05, CT-06; cenários novos de agenda sanitária, carência e indicadores reprodutivos descritos em `09-plano-de-testes.md`.
 - **O dono faz:** confirmar PR-06, PR-07, PR-10 e PR-11; cadastrar produtos e protocolos com o veterinário; testar o modo curral no celular, no curral.
 - **Riscos da fase:** R-08, R-14, R-23, R-24.
@@ -288,7 +288,7 @@ O caminho crítico é spike → persistência → UnitOfWork → motor → anima
 - [x] E2.3 PARCEIROS e COMPRA — modalidades × base de peso, grade de animais novos, rateio ao centavo, lançamentos, parcelas, alocações; fórmulas a validar pelo dono com um caso real
 - [x] E2.4 VENDA — modalidades × base de peso, deduções (inclusive retida pelo comprador), parcelas, rateio, aviso de carência; fórmulas a validar pelo dono com um caso real e PR-09 a confirmar
 - [x] E2.5 MORTE e DESCARTE — com custo ou receita opcional, em uma ou mais parcelas
-- [x] E2.6 IDENTIFICACAO, MARCACAO, AJUSTE_INVENTARIO (reclassificação, divergência de contagem) — o modo curral da identificação chega com a pesagem (E3.1)
+- [x] E2.6 IDENTIFICACAO, MARCACAO, AJUSTE_INVENTARIO (reclassificação, divergência de contagem) — o modo curral da identificação não chegou com a pesagem: na Fase 3 a identificação continua no formulário comum com o seletor (`docs/RELATORIO_FASE3.md`, seção 5, item 2)
 - [x] E2.7 Estorno e substituição de qualquer evento; histórico e detalhe; tela de auditoria com a trilha completa
 - [x] E2.8 Inventário em data passada; composição do pasto em data histórica; UA, UA/ha e ocupação — os filtros da Visão geral estão no servidor; na tela, só o período (o resto com o dashboard da Fase 5)
 - [x] E2.9 Anexos de evento — testados sobre o fake do Drive; o Drive real fica para a conta do dono
@@ -296,9 +296,19 @@ O caminho crítico é spike → persistência → UnitOfWork → motor → anima
 - [x] E2.11 Verificação de integridade completa (26 checagens: linha do tempo, partos, genealogia, financeiro)
 - [ ] Validação da Fase 2 na conta do dono — `runAcceptanceTests` com os cenários da Fase 2, fórmulas de compra e venda com um caso real, PR-09 (`docs/RELATORIO_FASE2.md`, seção 3)
 
-### Fases 3 a 5
+### Fase 3 — Manejo
 
-- [ ] Fase 3: E3.1 a E3.7
+- [x] E3.1 PESAGEM — individual, coletiva e por lote; GMD só com pesagem individual e 28 dias ou mais (sem valor com o motivo, nunca zero); curva e projeção rotulada; tela de desempenho; modo curral em blocos de 20 com chave própria e rascunho no aparelho e no servidor; o celular de verdade no curral fica para a conta do dono
+- [x] E3.2 PRODUTOS, estoque opcional (evento ESTOQUE: entrada e acerto), PROTOCOLOS_SANITARIOS — saldo como projeção dos movimentos; PR-10 a confirmar pelo dono
+- [x] E3.3 SANIDADE — seis subtipos, dose por cabeça, por peso ou total, consumo e custo na aplicação, carência nos dois sentidos, agenda, alertas; formulário comum com revisão pelo servidor (sem modo curral); PR-11 a confirmar pelo dono
+- [x] E3.4 ESTACOES_MONTA e REPRODUCAO (exposição, cobertura, inseminação, diagnóstico, aborto) — situação reprodutiva, previsão de parto, ficha da matriz, indicadores de 07, seção 8.3, numa data qualquer, e o diagnóstico no tronco; PR-07 a confirmar pelo dono
+- [x] E3.5 DESMAMA, CASTRACAO, OCORRENCIA — com a despesa paga no ato; desmama no formulário comum (sem modo curral)
+- [x] E3.6 Importadores de pesagens, sanidade, reprodução e ocorrências — também o histórico anterior ao marco zero; tempo com planilhas grandes a medir na conta do dono
+- [x] E3.7 Gráficos — SVG próprio (SP-08) em `Components`, com a tabela equivalente; testados no Chromium, não no quadro do HtmlService
+- [ ] Validação da Fase 3 na conta do dono — `runAcceptanceTests` com os cenários da Fase 3, as telas sob demanda no app real, o modo curral no celular, no curral, produtos e protocolos cadastrados com o veterinário, PR-06, PR-07, PR-10 e PR-11 (`docs/RELATORIO_FASE3.md`, seção 3)
+
+### Fases 4 e 5
+
 - [ ] Fase 4: E4.1 a E4.7
 - [ ] Fase 5: E5.1 a E5.5
 
