@@ -385,3 +385,29 @@ test('o lançamento sem a propriedade recebe a padrão das configurações: a co
   assert.equal(tab(s, 'EVENTOS', { event_id: r.event_id })[0].property_id, S.PROP);
   semErro(s, 'propriedade');
 });
+
+test('as mães da desmama são as do dia do lançamento: a mãe que o cadastro do bezerro ganhou depois não entra na correção sem mudança da desmama (com outra data, entra)', () => {
+  const s = S.sistema();
+  hoje(s, '2026-01-05');
+  const { ids } = rebanho(s, [
+    S.bicho({ brinco: 'V1', sexo: 'F', data_nascimento: '2020-01-01', data_nascimento_confianca: 'CONFIRMADA', partos_previos: 2 }),
+    S.bicho({ brinco: 'C1', sexo: 'M', data_nascimento: '2025-12-01', data_nascimento_confianca: 'CONFIRMADA' }),
+  ]);
+  hoje(s, '2026-06-01');
+  const desmama = { tipo: 'DESMAMA', campos: { event_date: '2026-05-01', metodo_pesagem: 'BALANCA' }, animais: [{ animal_id: ids.C1, peso: 150 }] };
+  const d = ok(api(s, 'evento.registrar', desmama), 'desmama sem mãe conhecida');
+  const fatos = (eid) => ({
+    linhas: tab(s, 'EVENTO_ANIMAIS', { event_id: eid }).map((l) => [l.animal_id, l.papel || 'SUJEITO']).sort(),
+    regs: tab(s, 'REPRODUCAO', { event_id: eid }).map((r) => [r.animal_id, r.tipo_evento]),
+  });
+  const antes = fatos(d.event_id);
+  assert.deepEqual(antes, { linhas: [[ids.C1, 'SUJEITO']], regs: [] });
+  // A mãe do bezerro passa a ser conhecida depois da desmama.
+  ok(api(s, 'evento.registrar', { tipo: 'AJUSTE_INVENTARIO', subtipo: 'CORRECAO_CADASTRO', campos: { event_date: '2026-05-20', justificativa: 'Mãe identificada' }, animais: [{ animal_id: ids.C1, campo: 'mae_id', valor_novo: ids.V1 }, { animal_id: ids.C1, campo: 'mae_confianca', valor_novo: 'CONFIRMADA' }] }), 'mãe do bezerro');
+  const r = corrigir(s, d.event_id, desmama, 'correção sem mudança da desmama');
+  assert.deepEqual(fatos(r.event_id), antes);
+  // Com outra data, a mãe é refeita pelo cadastro e pela presença dela no dia (o derivado segue a data).
+  const outra = ok(api(s, 'evento.corrigir', { event_id: r.event_id, justificativa: 'Data certa', mudanca: { campos: { event_date: '2026-04-30' } } }), 'outra data');
+  assert.deepEqual(fatos(outra.event_id), { linhas: [[ids.C1, 'SUJEITO'], [ids.V1, 'MATRIZ']].sort(), regs: [[ids.V1, 'DESMAMA']] });
+  semErro(s, 'mães da desmama');
+});

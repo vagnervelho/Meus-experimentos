@@ -150,7 +150,10 @@ test('achado 24: evento.obter devolve os totais da venda (FinancialService.totai
   const oc = m.obter(compraId);
   assert.deepEqual(Object.values(oc.papeis).sort(), ['ANIMAIS', 'FRETE', 'OUTRO']);
   assert.equal(oc.totais_venda, null);
-  // O detalhe da venda não refaz a conta no aparelho (§20, regra 8): lê os totais do servidor.
+  // O detalhe da venda não refaz a conta no aparelho (§20, regra 8): lê os totais do servidor. A prévia da correção lê a entrada
+  // que o servidor montou (evento.obter: `correcao`, com o tipo de cada dedução; CONTRATOS, seção 50), em vez de remontá-la pelos
+  // papéis dos lançamentos.
   const telas = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'src', 'Events.html'), 'utf8');
-  assert.ok(!/valor_bruto\s*-\s*\(vd\.desconto_comercial/.test(telas) && /o\.totais_venda/.test(telas) && /o\.papeis/.test(telas));
+  assert.ok(!/valor_bruto\s*-\s*\(vd\.desconto_comercial/.test(telas) && /o\.totais_venda/.test(telas) && /o\.correcao\b/.test(telas));
+  assert.deepEqual(C.js(o.correcao.deducoes).map((x) => x.tipo).sort(), ['COMISSAO', 'FRETE', 'FUNRURAL'], 'o tipo de cada dedução vem do servidor');
 });

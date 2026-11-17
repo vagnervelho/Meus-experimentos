@@ -325,7 +325,10 @@ function propVenda(M, amb, data, ids, negocio, rnd, substitui) {
   };
   return { novo, excl, pre, tocados: ids.concat(substitui ? substitui.linhas.map((l) => l.animal) : []), substitui, acao: substitui ? 'corrigir' : 'registrar', negocio: g };
 }
-/** NASCIMENTO: crias [{situacao: VIVO | NATIMORTO, sexo, brinco, id (na correção)}]; pasto vazio = o da mãe no dia. */
+/**
+ * NASCIMENTO: crias [{situacao: VIVO | NATIMORTO, sexo, brinco, id (na correção)}]; pasto vazio = o da mãe no dia (na correção
+ * com a mesma mãe e a mesma data, o das crias do original).
+ */
 function propNascimento(M, data, matriz, crias, pasto, substitui) {
   const excl = new Set(substitui ? [substitui.id] : []);
   const pre = [];
@@ -335,7 +338,10 @@ function propNascimento(M, data, matriz, crias, pasto, substitui) {
   const novo = novoEvento(M, 'NASCIMENTO', data, { raiz: substitui ? substitui.raiz : M.seq + 1 });
   novo.linhas.push({ animal: matriz, efeito: 0, origem: null, destino: null, fato: true });
   const ondeMae = antesDaSaida(linhasDe(M, matriz, excl), data);
-  const destino = pasto || (ondeMae.presente ? ondeMae.pasto : null);
+  // Na correção com a mesma mãe e a mesma data, o pasto vazio é o que o parto original tirou da mãe naquele dia, não o que a
+  // linha do tempo dela diz hoje para aquele dia (CONTRATOS, seção 50: NASCIMENTO.pasto_crias, a cópia do derivado).
+  const criaDoOriginal = substitui && substitui.data === data && substitui.dados.animais[0].animal_id === matriz ? substitui.linhas.find((l) => l.efeito === 1) : null;
+  const destino = pasto || (criaDoOriginal ? criaDoOriginal.destino : ondeMae.presente ? ondeMae.pasto : null);
   const novos = [];
   crias.forEach((x) => {
     if (x.situacao !== 'VIVO') return;

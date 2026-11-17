@@ -154,6 +154,17 @@ var Correcao = (function () {
       tipo: 'DESMAMA', natureza: 'REGRA', de: 'CONFIGURACOES.idade_desmama_padrao_meses (quem é cria ao pé, DL-06)', depende: 'o animal', grava: 'EVENTO_ANIMAIS (SUJEITO)',
       valor: function (c, n) { return c.original.event_type === 'DESMAMA' && linhas_(c, 'EVENTO_ANIMAIS').some(function (l) { return l.animal_id === n.animal_id && (vazio_(l.papel) || l.papel === 'SUJEITO'); }) ? { v: true } : null; },
     },
+    'DESMAMA.maes': {
+      tipo: 'DESMAMA', natureza: 'DERIVADO', de: 'a mãe de cada bezerro pelo cadastro, presente no rebanho no dia', depende: 'os bezerros, event_date', grava: 'EVENTO_ANIMAIS (MATRIZ); REPRODUCAO (DESMAMA da mãe)',
+      valor: function (c, n) {
+        if (c.original.event_type !== 'DESMAMA' || c.original.event_date !== n.data) return null;
+        var ls = linhas_(c, 'EVENTO_ANIMAIS');
+        var antes = ls.filter(function (l) { return vazio_(l.papel) || l.papel === 'SUJEITO'; }).map(function (l) { return l.animal_id; }).sort();
+        var agora = (n.bezerros || []).slice().sort();
+        if (antes.length !== agora.length || antes.some(function (x, i) { return x !== agora[i]; })) return null;
+        return { v: ls.filter(function (l) { return l.papel === 'MATRIZ'; }).map(function (l) { return l.animal_id; }) };
+      },
+    },
     // NASCIMENTO: o pasto e a raça que o parto tirou da mãe quando vieram vazios (o estado da mãe naquele dia).
     'NASCIMENTO.pasto_crias': {
       tipo: 'NASCIMENTO', natureza: 'DERIVADO', de: 'o pasto da mãe no dia do parto (pasto vazio na entrada)', depende: 'a mãe, event_date', grava: 'EVENTO_ANIMAIS.pasto_destino_id (CRIA)',

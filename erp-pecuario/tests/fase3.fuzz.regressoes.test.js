@@ -35,13 +35,16 @@ const CASOS = [
     // CAMPO_OBRIGATORIO depois da confirmação; a simulação, que não confirma nada, vai até a trava (CONFLICT, castração
     // repetida). As duas respostas são compatíveis: o desfecho depois da confirmação não é visto pelo pedido sem
     // justificativa (o oráculo da simulação passou a aceitar, como já aceitava sem o pedido de volta).
+    // Conserto pela garantia, a correção e o fato congelado (CONTRATOS, seção 50): o castrado de origem depois do comando passou a
+    // contar os atributos de criação que o próprio comando grava, e o motor acha a castração repetida (CONFLICT, com o código da
+    // regra) antes de pedir a justificativa — o comando e a simulação dão a mesma resposta.
     nome: 'correção no período fechado sem a justificativa do aviso: a simulação chega à trava, o comando para na justificativa',
     comandos: [
       passo(27, 'config.salvar', { valores: { fin_bloqueio_ate: '2026-11-13' } }),
       passo(47, 'evento.registrar', { tipo: 'CASTRACAO', campos: { event_date: '2026-01-01' }, animais: [{ animal_id: '@b:8' }] }),
       passo(72, 'evento.corrigir', { tipo: 'ENTRADA_INICIAL', campos: { event_date: '2026-01-01' }, animais: rebanhoComOitoCastrado, event_id: ENTRADA_BASE, justificativa: 'Corrigindo o lançamento' }, { avisos: [], simular: true, semJustAviso: true }),
     ],
-    esperado: { 27: 'OK', 47: 'OK', 72: 'VALIDATION:CAMPO_OBRIGATORIO' },
+    esperado: { 27: 'OK', 47: 'OK', 72: 'CONFLICT:CASTRACAO_REPETIDA' },
   },
   {
     // Passada 2, semente 1320022, no modelo do teste (assinatura CORRECAO_TARDIA:RECUSADA): o acerto de estoque pela contagem,

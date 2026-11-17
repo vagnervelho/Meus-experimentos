@@ -3499,7 +3499,7 @@ marco zero) e a posição (`event_seq`, `ordem_seq`: metadados); copiada a propr
 | ESTOQUE, entrada | produto, embalagens ou quantidade, valor, fornecedor, lote, validade, documento, vencimento, parcelas, forma | a quantidade ← as embalagens × o fator; o custo do movimento ← o valor e a quantidade; a compra do insumo ("Compra de <produto>: <quantidade>", vencimento à vista, parcelas) ← o produto, a quantidade e a data | do produto ← o produto: o fator (payload `fator_conversao`), o movimento (payload `com_movimento`), o nome na descrição |
 | ESTOQUE, acerto | produto, motivo, saldo contado ou quantidade, lote, validade | na contagem, a quantidade ← o saldo contado − o saldo na posição (o movimento que mudaria o saldo de um dia contado é recusado: CONTAGEM_POSTERIOR, seção 44) | — (PRODUTO_SEM_ESTOQUE: seção 50.6) |
 | REPRODUCAO (5 subtipos) | estação, retirada (exposição), touro, sêmen, método; por fêmea o resultado, a idade da gestação, a previsão de parto, as observações; a despesa | o registro de cada fêmea; na exposição o papel de cada animal (o macho é touro) ← o sexo do cadastro, e o touro do registro (o único do lote) ← os touros; a despesa, como na sanidade | a faixa da idade da gestação (`dias_gestacao`) ← o animal e a idade → B `REPRODUCAO.idade_gestacional` (regra) |
-| DESMAMA | pasto de destino, método da pesagem; por bezerro o peso e as observações | a mãe de cada bezerro ← a genealogia; a pesagem de desmama ← o peso e a data | quem é cria ao pé (`idade_desmama_padrao_meses`) ← o animal → B `DESMAMA.cria` (regra) |
+| DESMAMA | pasto de destino, método da pesagem; por bezerro o peso e as observações | a mãe de cada bezerro (a linha MATRIZ e o registro DESMAMA dela) ← o cadastro do bezerro e a presença da mãe no rebanho no dia → B `DESMAMA.maes`; a origem do bezerro que muda de pasto ← a linha do tempo; a pesagem de desmama ← o peso e a data | quem é cria ao pé (`idade_desmama_padrao_meses`) ← o animal → B `DESMAMA.cria` (regra) |
 | CASTRACAO, OCORRENCIA | o método (castração), o tipo e a descrição (ocorrência), a despesa, as observações | a despesa, como na sanidade; castrado e a categoria (projeção) | — |
 
 ### 50.4 Tabela B — o que a correção mantém do original (`Correcao.CONGELADOS`)
@@ -3526,6 +3526,7 @@ a correção grava o valor do original; quando uma muda, o tratador refaz o valo
 | `IDENTIFICACAO.brinco` | REGRA | CONFIGURACOES.brinco_somente_numerico e brinco_permite_reuso (as regras do número novo) | o animal e o número | IDENTIFICACOES (BRINCO), em todo tipo que dá brinco |
 | `REPRODUCAO.idade_gestacional` | REGRA | CONFIGURACOES.dias_gestacao (a faixa) | o animal e a idade | REPRODUCAO.idade_gestacional_dias |
 | `DESMAMA.cria` | REGRA | CONFIGURACOES.idade_desmama_padrao_meses (quem é cria ao pé) | o animal | EVENTO_ANIMAIS (SUJEITO) |
+| `DESMAMA.maes` | DERIVADO | a mãe de cada bezerro pelo cadastro, presente no rebanho no dia | os bezerros e a data | EVENTO_ANIMAIS (MATRIZ); REPRODUCAO (DESMAMA da mãe) |
 | `NASCIMENTO.pasto_crias` | DERIVADO | o pasto da mãe no dia do parto | a mãe e a data | EVENTO_ANIMAIS.pasto_destino_id (CRIA) |
 | `NASCIMENTO.raca_cria` | DERIVADO | a raça da mãe | a mãe e a cria | atributos_iniciais_json.raca; ANIMAIS.raca |
 | `AJUSTE.valor_anterior` | DERIVADO | o cadastro do animal antes do ajuste (e a regra VALOR_IGUAL; no brinco lançado errado, também as conferências pelo brinco de hoje) | o animal, o campo, o valor novo e a data | AJUSTES.valor_anterior (também a certeza apagada junto) |
@@ -3582,8 +3583,8 @@ inteiro do sistema guardado (`gas.estado.salvar()` e `restaurar()`, nos fakes da
 5. (b2, b3) a correção de um campo só (`dados.mudanca`): a anotação, o responsável, a observação de um animal — fora o campo,
    nada muda, linha a linha e coluna a coluna — e a data — as cópias congeladas e o que não depende dela ficam (o produto, o
    nome, o fabricante, a carência, o custo, a conta e a descrição do consumo, o fator e o movimento da entrada de estoque, a raça
-   das crias, o nome do tipo nas deduções, os animais e as observações), e a próxima aplicação é a data nova mais o intervalo
-   congelado.
+   das crias, o nome do tipo nas deduções, os animais informados e as observações — na desmama, as mães seguem a data), e a
+   próxima aplicação é a data nova mais o intervalo congelado.
 
 A cobertura sai em `F.COBERTURA` (`correção: sem mudança aceita`, `… (servidor)`, `… (gerador)`, `correção: recusa documentada
 da correção sem mudança`, `correção: consultas conferidas depois da correção sem mudança`, `correção: mudança de um campo
@@ -3613,6 +3614,7 @@ agora; o conserto está no ponto único (a linha da tabela B, ou a regra que só
 | 15 | o acerto de brinco lançado errado era recusado (ANTES_DA_IDENTIFICACAO) depois de uma troca posterior do brinco | MEDIA | `AJUSTE.valor_anterior`: as conferências pelo brinco de hoje não se aplicam ao mesmo acerto |
 | 16 | a correção do sexo de um dos touros de um lote com vários touros era aceita, e a correção sem mudança da exposição refazia o animal como fêmea exposta | MEDIA | a linha de touro é de um macho (integridade, GENEALOGIA `TOURO_LINHA`; a trava recusa) |
 | 17 | o lançamento sem a propriedade ia para a propriedade padrão de hoje | MEDIA | `EVENTO.propriedade` |
+| 18 | a desmama ganhava a linha da mãe (e o registro DESMAMA dela, que conta nos indicadores) que o cadastro do bezerro só ganhou depois | MEDIA | `DESMAMA.maes` |
 
 ### 50.9 Decisões
 

@@ -1538,6 +1538,16 @@ var EventService = (function () {
   function fecharDesmama_(m, ctxEv) {
     var dz = ctxEv.desmama;
     if (!dz) return;
+    // Na correção com os mesmos bezerros e a mesma data, as mães são as que o original registrou: a mãe que o cadastro do
+    // bezerro ganhou depois, ou que passou a estar no rebanho naquele dia por outro lançamento, não muda a desmama
+    // (Correcao.congelado).
+    var bezerros = ctxEv.itens.filter(function (it) { return it.cria && it.animal_id; }).map(function (it) { return it.animal_id; });
+    var maesCong = Correcao.congelado(ctxEv.correcao, 'DESMAMA.maes', { data: ctxEv.ev.event_date, bezerros: bezerros });
+    if (maesCong) {
+      var doOriginal = {};
+      maesCong.v.forEach(function (id) { var em = existente_(m, id); if (em) doOriginal[id] = em; });
+      dz.maes = doOriginal;
+    }
     Object.keys(dz.maes).forEach(function (id) {
       var e = dz.maes[id];
       var it = { indice: ctxEv.itens.length, dados: { animal_id: id }, animal_id: id, publico: true, quem: 'A mãe ' + nomeAnimal_(e), brincoTexto: nulo_(e.brinco), linhas: [], novo: false, final: {}, estado: e, codigo_interno: e.codigo_interno, matrizDesmama: true };

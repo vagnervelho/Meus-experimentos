@@ -119,6 +119,9 @@ for (const largura of [1280, 360]) {
     await page.click('button:has-text("Validar o arquivo")');
     await page.waitForSelector('[data-secao="resultado"]');
     assert.match(await textoTela(page, '[data-secao="resultado"]'), /Linhas no arquivo\s*4\s*Válidas\s*4\s*Com erro\s*0/);
+    // As linhas chegam numa consulta própria (importacao.linhas): espera o servidor responder antes de ler (sob carga, a seção
+    // ainda dizia "Buscando as linhas…").
+    await A.esperarServidor(page);
     const linhas = await textoTela(page, '[data-secao="linhas"]');
     assert.match(linhas, /Fornecedor: Fazenda Vizinha/, 'o que o sistema entendeu, em palavras');
     assert.match(linhas, /lançamento das linhas 2, 3/);
@@ -140,6 +143,8 @@ for (const largura of [1280, 360]) {
     await page.click('label[for="imp-parcial"]');
     await importarB.click();
     await page.waitForSelector('[data-relatorio="IMPORTADO"]', { timeout: 20000 });
+    // O relatório e a reconciliação também chegam por consultas próprias: espera o servidor responder antes de ler.
+    await A.esperarServidor(page);
     const bloco1 = a.pedidos('importacao.importarBloco').filter((p) => p.dados.bloco === 1)[0];
     assert.deepEqual([bloco1.dados.modo, bloco1.dados.aprovacao, bloco1.dados.ignorar_linhas], ['PARCIAL_APROVADO', { importar: 2, ignorar: 2 }, [2, 3]]);
     assert.match(await textoTela(page, '[data-relatorio]'), /2 lançamentos entraram, com 1 animal novo/);

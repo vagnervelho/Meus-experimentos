@@ -5113,7 +5113,8 @@ function mudarCadastros(sis, S, rnd, k) {
  *    o produto, o nome, o fabricante, a carência, a unidade, o lote, a via, o veterinário, a dose (salvo por peso), o custo
  *    unitário da saída, a conta e a descrição do consumo, e a próxima proposta pelo mesmo intervalo; na entrada de estoque,
  *    o fator, o movimento, a quantidade, o valor e a descrição; no parto, a raça das crias; na venda, o nome do tipo na
- *    descrição proposta de cada dedução; em todo tipo, os animais do lançamento e as observações deles.
+ *    descrição proposta de cada dedução; em todo tipo, os animais do lançamento e as observações deles (na desmama, os
+ *    bezerros: as mães são derivadas da data, tabela B, DESMAMA.maes).
  */
 function mudancaDeUmCampo(S, e, ent, rnd) {
   const d = ent.dados;
@@ -5136,9 +5137,12 @@ function mudancaDeUmCampo(S, e, ent, rnd) {
 function congeladosNaData(S, e, a, b, nova, erro) {
   const pj = (S.ev.get(e.event_id) || {}).payload_json || {};
   const igual = (oque, x, y) => { if (JSON.stringify(x) !== JSON.stringify(y)) erro(oque + ' ' + curto(x) + ' → ' + curto(y)); };
-  const chaveA = (ls) => ls.map((l) => l.animal_id + '/' + (l.papel || 'SUJEITO')).sort();
+  // Na desmama, as mães (linhas MATRIZ) são derivadas do cadastro dos bezerros e da presença delas no rebanho no dia (tabela B,
+  // DESMAMA.maes: dependem da data): a data nova as refaz. Os animais informados ficam.
+  const informados = (ls) => ls.filter((l) => !(e.event_type === 'DESMAMA' && l.papel === 'MATRIZ'));
+  const chaveA = (ls) => informados(ls).map((l) => l.animal_id + '/' + (l.papel || 'SUJEITO')).sort();
   igual('os animais do lançamento', chaveA(a.EVENTO_ANIMAIS), chaveA(b.EVENTO_ANIMAIS));
-  igual('as observações dos animais', a.EVENTO_ANIMAIS.map((l) => [l.animal_id, l.observacoes]).sort(), b.EVENTO_ANIMAIS.map((l) => [l.animal_id, l.observacoes]).sort());
+  igual('as observações dos animais', informados(a.EVENTO_ANIMAIS).map((l) => [l.animal_id, l.observacoes]).sort(), informados(b.EVENTO_ANIMAIS).map((l) => [l.animal_id, l.observacoes]).sort());
   if (e.event_type === 'SANIDADE') {
     const fixos = ['produto_id', 'protocol_id', 'tipo_procedimento', 'nome_produto', 'fabricante', 'periodo_carencia_dias', 'unidade_dose', 'lote', 'validade', 'via_aplicacao', 'motivo', 'diagnostico', 'resultado_exame', 'veterinario', 'observacoes'].concat(pj.modo_dose === 'POR_PESO' ? [] : ['dose']);
     const porA = (ls) => ls.map((r) => [r.animal_id].concat(fixos.map((c) => r[c]))).sort();
