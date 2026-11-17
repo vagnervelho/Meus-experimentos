@@ -614,9 +614,10 @@ var TelaReproducao = (function () {
         esperando.forEach(function (l) {
           var x = r.porTexto[String(l.texto || l.brinco).trim()];
           if (!x || l.estado !== 'NAO_ENCONTRADO') return;
-          l.semPosicao = false;
           var a = x.situacao === 'ACHADO' ? Store.doEstado(r.animais[x.animal_id]) : null;
           var outra = a ? c.linhas.filter(function (y) { return y !== l && y.animal_id === a.animal_id && y.estado !== 'GRAVADA'; })[0] : null;
+          // Barrada só pela outra linha do mesmo animal: continua esperando, e sai sozinha quando a outra for tirada.
+          l.semPosicao = !!(a && !motivoFora(a) && outra);
           if (!a || motivoFora(a) || outra) { l.mensagem = !a ? x.mensagem || 'Mais de uma fêmea com este brinco: digite de novo.' : outra ? Store.rotuloAnimal(a) + ' já tem outro diagnóstico nesta sessão: tire um dos dois.' : Store.rotuloAnimal(a) + ' ' + motivoFora(a) + ': não entra no diagnóstico.'; return; }
           l.animal_id = a.animal_id; l.dataAnimal = data; l.brinco = brincoDe(a) || a.codigo_interno; l.estado = 'FILA'; l.mensagem = null;
         });
@@ -743,6 +744,7 @@ var TelaReproducao = (function () {
           c.linhas.splice(i, 1);
           UI.aviso('Tirado o diagnóstico de ' + (l.animal_id ? nomeDe(l.animal_id) : l.brinco) + ' (' + ROTULO_RES[l.resultado] + ').', { tipo: 'info' });
           mudou();
+          resolverEsperando();
           return;
         }
         ultimo = l;
@@ -750,7 +752,7 @@ var TelaReproducao = (function () {
       }
       UI.aviso(!ultimo ? 'Nada para desfazer.' : ultimo.estado === 'GRAVADA' ? 'O último diagnóstico já foi gravado: corrija pelo lançamento gravado, em Eventos.' : 'O último diagnóstico já saiu e espera a confirmação do servidor: toque em "Enviar" com sinal; depois de gravado, corrija pelo lançamento, em Eventos.', { tipo: 'aviso' });
     }
-    function tirar(l) { if (l.bloco) desfazerBloco(c, l.bloco); c.linhas = c.linhas.filter(function (x) { return x !== l; }); mudou(); }
+    function tirar(l) { if (l.bloco) desfazerBloco(c, l.bloco); c.linhas = c.linhas.filter(function (x) { return x !== l; }); mudou(); resolverEsperando(); }
     async function terminar() {
       var nao = c.linhas.filter(function (l) { return l.estado !== 'GRAVADA'; });
       if (nao.some(function (l) { return l.estado === 'SEM_SINAL' || l.estado === 'ENVIANDO'; })) { UI.aviso('Há diagnósticos ainda sem confirmação do servidor: envie de novo com sinal antes de terminar.', { tipo: 'aviso' }); return; }

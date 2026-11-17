@@ -83,6 +83,14 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     let presa = 0;
     for (let i = 0; i < 2000; i++) {
       const st = await page.evaluate((sel) => ({ em: window.__gas ? window.__gas.emCurso : 0, conf: /Conferindo/.test((document.querySelector(sel) || {}).textContent || '') }), cfg.conferencia);
+      if (st.em <= rede.segurados.length && !st.conf && rede.log.some((r) => r.ocupadoAberto)) {
+        // O servidor estava ocupado: o aparelho espera 2, 5 ou 10 s para tentar de novo; o relógio anda até lá (nada fica
+        // para o tempo real decidir no meio da próxima ação).
+        await avancar(10500);
+        quietas = 0;
+        await esperarMs(15);
+        continue;
+      }
       if (st.em <= rede.segurados.length && !st.conf) { quietas += 1; if (quietas >= 3) return; } else quietas = 0;
       presa = st.em <= rede.segurados.length && st.conf ? presa + 1 : 0;
       if (presa >= 3 && rede.log.some((r) => r.perdidaAberta && r.rota === 'animal.resolver')) {
@@ -379,10 +387,14 @@ async function rodarSemente(semente, nAcoes, opcoes) {
       conta('lancar:naoEncontrado');
       return;
     }
-    const ja = c0.linhas.filter((l) => l.animal_id === X);
+    // A linha pendente (sem resposta antes) que o servidor resolveu para o mesmo animal durante esta ação conta como já
+    // existente: a resposta chegou antes da decisão (se chegasse depois, ela veria a linha nova e continuaria pendente).
+    const resolvidaAgora = (l) => l.estado === 'NAO_ENCONTRADO' && v.c.linhas.some((y) => y.uid === l.uid && y.animal_id === X);
+    const c0b = Object.assign({}, c0, { linhas: c0.linhas.map((l) => (resolvidaAgora(l) ? Object.assign({}, l, { animal_id: X, estado: 'FILA', bloco: null }) : l)) });
+    const ja = c0b.linhas.filter((l) => l.animal_id === X);
     if (tela === 'curral' && ja.length) {
       const ult = ja[ja.length - 1];
-      const mudavel = editavel(c0, ult) && ult.estado !== 'GRAVADA';
+      const mudavel = editavel(c0b, ult) && ult.estado !== 'GRAVADA';
       if (!v.decisao) falhar('o repetido (' + texto + ') não pediu a decisão');
       const botao = mudavel ? 'Substituir o peso' : 'Pesar de novo';
       if (!(await page.isVisible('[data-decisao-repetido] ~ .acoes button:has-text("' + botao + '"), .curral-candidatos button:has-text("' + botao + '")'))) falhar('o repetido devia oferecer "' + botao + '"');
@@ -404,7 +416,7 @@ async function rodarSemente(semente, nAcoes, opcoes) {
       return;
     }
     if (tela === 'tronco') {
-      const subst = c0.linhas.filter((l) => l.animal_id === X && l.estado !== 'GRAVADA' && editavel(c0, l));
+      const subst = c0b.linhas.filter((l) => l.animal_id === X && l.estado !== 'GRAVADA' && editavel(c0b, l));
       if (subst.length) {
         const u = subst[subst.length - 1];
         if (novas.length) falhar('o diagnóstico repetido ainda não enviado devia substituir a linha ' + u.uid + ', e criou outra');
@@ -520,6 +532,18 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     return true;
   }
   async function enviar(v) {
+    if (v.enviar && v.enviar.desabilitado && v.c.linhas.some((l) => l.estado === 'NAO_ENCONTRADO' || l.estado === 'ERRO')) {
+      // A pendência impede o envio: o operador resolve uma (corrige o brinco ou tira a linha) para poder enviar.
+      if (tela === 'curral' && rnd() < 0.4 && await corrigirBrinco(v.c)) return true;
+      const pend = v.c.linhas.filter((l) => l.estado === 'NAO_ENCONTRADO' || l.estado === 'ERRO');
+      const l = um(rnd, pend);
+      log('tirar a pendência ' + l.uid + ' para enviar');
+      await page.click('[data-linha="' + l.uid + '"] button:has-text("Tirar")');
+      M.ordem = M.ordem.filter((u) => u !== l.uid);
+      M.tiradas.add(l.uid);
+      conta('tirarParaEnviar');
+      return true;
+    }
     if (!v.enviar || v.enviar.desabilitado) return false;
     log('enviar (' + v.enviar.texto + ')');
     await page.click('[data-enviar]');
@@ -658,6 +682,10 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     await preencherInicio(M.sessao);
     await verificar();
     for (k = 0; k < nAcoes; k++) {
+      rede.acao = k;
+      // Nada espera o tempo real: a resposta segurada há 6 ações chega, e a perdida há 6 ações vence o prazo (o operador esperou).
+      if (rede.segurados.some((x) => k - x.reg.acao >= 6)) { log('(a resposta segurada chega)'); rede.soltar(false); }
+      if (rede.log.some((r) => r.perdidaAberta && k - r.acao >= 6)) { log('(o prazo da resposta perdida vence)'); await avancar(46000); }
       await assentar();
       const v = await lerTela(page, tela);
       anotarChaves(v.c);
@@ -721,14 +749,14 @@ async function rodarSemente(semente, nAcoes, opcoes) {
       if (v.avisoGeral) { log('fim: "Está certo (todo o lançamento)"'); await page.click('[data-aceitar-geral] >> nth=0'); continue; }
       const av = v.linhas.find((l) => l.estado === 'AVISO' && l.botoes.indexOf('Está certo') >= 0);
       if (av) { log('fim: "Está certo" em ' + av.uid); await page.click('[data-linha="' + av.uid + '"] button:has-text("Está certo")'); continue; }
-      if (v.resolverPendentes && !M.pendentesConferidos) { log('fim: conferir os brincos pendentes'); M.pendentesConferidos = true; await page.click('[data-resolver-pendentes]'); continue; }
+      if (v.resolverPendentes && (M.pendentesConferidos || 0) < 3) { log('fim: conferir os brincos pendentes'); M.pendentesConferidos = (M.pendentesConferidos || 0) + 1; await page.click('[data-resolver-pendentes]'); continue; }
       if (v.posicaoTentar && !M.posicaoTentada) { M.posicaoTentada = true; log('fim: tentar de novo (posição)'); await page.click('[data-posicao-tentar]'); continue; }
       const pend = c.linhas.find((l) => l.estado === 'NAO_ENCONTRADO');
       if (pend) {
         const m = M.linhas[pend.uid];
         const rr = resolverModelo(m.texto, c.sessao.data);
         const outra = rr.animal_id && c.linhas.some((l) => l.uid !== pend.uid && l.animal_id === rr.animal_id);
-        if (rr.situacao === 'ACHADO' && !rr.inelegivel && !outra && !pend.semPosicao) falhar('a linha ' + pend.uid + ' ("' + m.texto + '") ficou pendente, e em ' + c.sessao.data + ' o servidor acha o animal ' + rr.animal_id + ' no rebanho: ' + (pend.mensagem || ''));
+        if (rr.situacao === 'ACHADO' && !rr.inelegivel && !outra) falhar('a linha ' + pend.uid + ' ("' + m.texto + '") ficou pendente, e em ' + c.sessao.data + ' o servidor acha o animal ' + rr.animal_id + ' no rebanho: ' + (pend.mensagem || ''));
         log('fim: tirar a pendência ' + pend.uid + ' ("' + m.texto + '": ' + (pend.mensagem || rr.situacao) + ')');
         await page.click('[data-linha="' + pend.uid + '"] button:has-text("Tirar")');
         M.ordem = M.ordem.filter((u) => u !== pend.uid);

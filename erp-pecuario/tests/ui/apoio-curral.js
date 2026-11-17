@@ -83,13 +83,16 @@ function montarSistema() {
  * servidor ao soltar) até a ação "soltar": o operador segue com o envio no ar, e a ordem de chegada muda.
  */
 function novaRede(s) {
-  const rede = { falhas: [], segurados: [], log: [], novasRecusas: [] };
+  const rede = { falhas: [], segurados: [], log: [], novasRecusas: [], acao: 0 };
   const classe = (rota) => (rota === 'evento.registrar' ? 'registrar' : rota === 'animal.resolver' ? 'resolver' : rota === 'operacao.status' ? 'status' : 'outra');
   rede.servidor = (pedido, executar) => {
     const cl = classe(pedido.rota);
     const i = rede.falhas.findIndex((f) => f.classe === cl);
     const f = i >= 0 ? rede.falhas.splice(i, 1)[0] : null;
     const reg = { rota: pedido.rota, chave: pedido.idempotencyKey || null, falha: f ? f.tipo : null, textos: pedido.dados && pedido.dados.textos, entregue: false, resposta: null };
+    // A nova tentativa da mesma chave fecha a espera do servidor ocupado.
+    if (reg.chave) rede.log.forEach((r) => { if (r.chave === reg.chave) r.ocupadoAberto = false; });
+    reg.acao = rede.acao;
     rede.log.push(reg);
     const entregar = (json) => {
       reg.entregue = json !== PERDIDA && json !== TRANSPORTE;
@@ -99,6 +102,8 @@ function novaRede(s) {
         reg.resposta = JSON.parse(json);
         // A resposta que chega depois do prazo do aparelho (45 s) não é ouvida por ele: a recusa dela não precisa aparecer.
         if (cl === 'registrar' && !reg.resposta.ok && reg.resposta.error.code !== 'LOCKED' && !reg.atrasada) rede.novasRecusas.push(reg);
+      // O servidor ocupado: o aparelho tenta de novo sozinho em 2, 5 e 10 s (o teste anda o relógio até a nova tentativa).
+      if (reg.entregue && !reg.resposta.ok && reg.resposta.error.code === 'LOCKED') reg.ocupadoAberto = true;
       }
       return json;
     };

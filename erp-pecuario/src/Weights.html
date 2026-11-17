@@ -561,9 +561,10 @@ var TelaPesagens = (function () {
         esperando.forEach(function (l) {
           var x = r.porTexto[String(l.texto || l.brinco).trim()];
           if (!x || l.estado !== 'NAO_ENCONTRADO') return;
-          l.semPosicao = false;
           var a = x.situacao === 'ACHADO' ? Store.doEstado(r.animais[x.animal_id]) : null;
           var outra = a ? c.linhas.filter(function (y) { return y !== l && y.animal_id === a.animal_id; })[0] : null;
+          // Barrada só pela outra linha do mesmo animal: continua esperando, e sai sozinha quando a outra for tirada.
+          l.semPosicao = !!(a && presente(a) && outra);
           if (!a || !presente(a) || outra) { l.mensagem = !a ? x.mensagem || 'Mais de um animal com este brinco: corrija o brinco.' : outra ? Store.rotuloAnimal(a) + ' já tem outra pesagem nesta sessão (' + Fmt.peso(outra.peso) + '): tire uma das duas.' : Store.rotuloAnimal(a) + ' ' + motivoFora(a) + ': não entra na pesagem.'; return; }
           l.animal_id = a.animal_id; l.dataAnimal = data; l.brinco = brincoDe(a) || a.codigo_interno; l.estado = 'FILA'; l.mensagem = null;
           l.fora = !!(c.sessao.pasto_id && pastoDe(a) !== c.sessao.pasto_id);
@@ -805,6 +806,7 @@ var TelaPesagens = (function () {
           c.linhas.splice(i, 1);
           UI.aviso('Tirada a pesagem de ' + (l.animal_id ? nomeDe(l.animal_id) : l.brinco) + ' (' + Fmt.peso(l.peso) + ').', { tipo: 'info' });
           mudou();
+          resolverEsperando();
           return;
         }
         ultima = l;
@@ -816,6 +818,7 @@ var TelaPesagens = (function () {
       if (l.bloco) desfazerBloco(c, l.bloco);
       c.linhas = c.linhas.filter(function (x) { return x !== l; });
       mudou();
+      resolverEsperando();
     }
     /** "Está certo" da linha: aceita o aviso dela no bloco; sem bloco (desfeito), a linha volta à fila e pede o aviso de novo. */
     function aceitar(l) {
