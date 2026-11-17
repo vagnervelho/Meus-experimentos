@@ -659,17 +659,9 @@ var InventoryService = (function () {
           if (!vazio_(d.pasture_id) && x.pasture_id !== d.pasture_id) return false;
           return !filtro.sexo || semData_(x).sexo === filtro.sexo;
         }).map(function (x) {
-          // O brinco em uso NA DATA (o do retrato: o número trocado ou reaproveitado depois é de outro animal naquele dia), e o
-          // de hoje (a projeção gravada: o curral mostra "hoje X" quando os dois diferem).
-          var hoje = vazio_(x.registro.brinco) ? null : x.registro.brinco;
-          // A descrição do animal NA DATA (a conferência do curral e do tronco com data passada; desenho-base 4.3: o dado de
-          // hoje não vale para a data passada): a categoria em D e a última pesagem até D (qualquer método, rotulada).
-          var cat = AnimalService.categoriaEm(L, x.animal, data);
-          var pv = AnimalService.pesoVigente(L, x.animal, data, null);
-          return {
-            animal_id: x.animal.animal_id, codigo_interno: x.animal.codigo_interno, brinco: vazio_(x.animal.brinco) ? null : x.animal.brinco, brinco_hoje: hoje, sexo: x.animal.sexo, pasture_id: x.pasture_id,
-            categoria: cat ? cat.nome : null, ultimo_peso: pv.data_pesagem ? { kg: pv.kg, data: pv.data_pesagem, estimado: pv.metodo === 'ESTIMATIVA_VISUAL' } : null,
-          };
+          // O animal descrito NA DATA pelo resolvedor único (Identificacao.descrever, a mesma conferência do curral e do tronco;
+          // CONTRATOS, seção 47): o brinco em uso em D e o de hoje, a categoria em D e a última pesagem até D.
+          return Identificacao.descrever(L, x.registro, data, x.pasture_id);
         });
         base.n = base.itens.length;
         return base;

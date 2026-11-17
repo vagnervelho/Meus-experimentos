@@ -364,73 +364,49 @@ var ImportService = (function () {
     });
     var semZeros = params.brinco_ignora_zeros_esquerda !== false;
     var base = {};
-    // Progenitor que não tem brinco (RN-094: o dono cadastra o touro de sêmen como animal de referência): achado pelo
-    // nome do EXTERNO ou pelo código interno (A-000123) de qualquer animal; nome repetido entre externos fica ambíguo.
-    var externos = {};
-    var codigos = {};
-    tx.repo.vigentes('ANIMAIS').forEach(function (a) {
-      if (a.situacao_cadastral === 'ANULADO' || a.situacao_cadastral === 'PENDENTE') return;
-      if (!vazio_(a.codigo_interno)) codigos[String(a.codigo_interno).toUpperCase()] = a;
-      if (a.situacao_cadastral === 'EXTERNO' && !vazio_(a.nome)) {
-        var n = Utils.normalizarTexto(a.nome);
-        externos[n] = externos[n] ? AMBIGUO : a;
-      }
-      if (vazio_(a.brinco)) return;
-      base[Utils.normalizarBrinco(a.brinco, !semZeros)] = a;
-    });
-    // Os períodos de uso de cada número pela regra única do brinco numa data (Timeline.periodosDeBrinco, a mesma da posição
-    // numa data e das importações de eventos; CONTRATOS, seção 46): o número corrigido por IDENTIFICACAO_INCORRETA vale desde
-    // o início do errado, e o errado nunca esteve na orelha (desenho-base 16.2: não tem período). Sem as identificações e os
-    // eventos na leitura (a consulta das linhas), sem períodos: vale quem usa o número hoje.
-    var periodos = {};
-    var porId = {};
-    tx.repo.vigentes('ANIMAIS').forEach(function (a) { if (a.situacao_cadastral !== 'ANULADO' && a.situacao_cadastral !== 'PENDENTE') porId[a.animal_id] = a; });
-    if (tx.repo.carregada('IDENTIFICACOES') && tx.repo.carregada('EVENTOS')) {
-      var comBrinco = {};
-      tx.repo.vigentes('IDENTIFICACOES').forEach(function (r) { if (r.tipo === 'BRINCO' && !vazio_(r.codigo) && porId[r.animal_id]) comBrinco[r.animal_id] = true; });
-      var fonte = Object.keys(comBrinco).length ? Timeline.fonte(tx) : null;
-      Object.keys(comBrinco).forEach(function (id) {
-        Timeline.periodosDeBrinco(fonte, id).forEach(function (p) {
-          var k = Utils.normalizarBrinco(String(p.codigo), !semZeros);
-          (periodos[k] = periodos[k] || []).push({ animal: porId[id], inicio: p.inicio, fim: p.fim });
-        });
-      });
-    }
-    // Número que outro animal usava no marco zero ou depois dele (período fechado depois de D0): o animal do rebanho
-    // inicial com ele o teria em dois animais ao mesmo tempo (RN-002; RN-004: reuso só de período já encerrado). O
-    // número corrigido por IDENTIFICACAO_INCORRETA não conta (desenho-base 16.2: não tem período).
+    var vivos = tx.repo.vigentes('ANIMAIS').filter(function (a) { return a.situacao_cadastral !== 'ANULADO' && a.situacao_cadastral !== 'PENDENTE'; });
+    vivos.forEach(function (a) { if (!vazio_(a.brinco)) base[Utils.normalizarBrinco(a.brinco, !semZeros)] = a; });
+    // A mãe e o pai citados pelo brinco, pelo código interno ou pelo nome do animal de referência (RN-094: o touro de sêmen)
+    // são achados pelo resolvedor único na data do rebanho inicial (Identificacao, CONTRATOS, seção 47): o número em uso no
+    // marco zero, pelos períodos da regra única do brinco numa data — a vaca que trocou de brinco depois continua sendo achada
+    // pelo número que tinha. Sem as identificações e os eventos na leitura (a consulta das linhas), sem índice: a consulta não
+    // resolve progenitor.
+    var brincos = null;
+    var fonte = null;
     var noMarco = {};
     var D0 = params.data_marco_zero;
-    if (!vazio_(D0)) {
-      Object.keys(periodos).forEach(function (k) {
-        periodos[k].forEach(function (p) {
-          if (p.fim === null || p.fim <= D0 || p.fim <= p.inicio) return;
-          if (!noMarco[k] || p.fim > noMarco[k].ate) noMarco[k] = { animal: p.animal, ate: p.fim };
+    if (tx.repo.carregada('IDENTIFICACOES') && tx.repo.carregada('EVENTOS')) {
+      fonte = Timeline.fonte(tx);
+      brincos = Identificacao.indice(fonte, vivos, { semZeros: semZeros, marcoZero: D0 });
+      // Número que outro animal usava no marco zero ou depois dele (período fechado depois de D0): o animal do rebanho
+      // inicial com ele o teria em dois animais ao mesmo tempo (RN-002; RN-004: reuso só de período já encerrado). O
+      // número corrigido por IDENTIFICACAO_INCORRETA não conta (desenho-base 16.2: não tem período).
+      if (!vazio_(D0)) {
+        Object.keys(brincos.periodos).forEach(function (k) {
+          brincos.periodos[k].forEach(function (p) {
+            if (p.fim === null || p.fim <= D0 || (p.inicio !== null && p.fim <= p.inicio)) return;
+            if (!noMarco[k] || p.fim > noMarco[k].ate) noMarco[k] = { animal: p.animal, ate: p.fim };
+          });
         });
-      });
+      }
     }
-    // A mãe e o pai citados pelo brinco são o animal que usava o número no marco zero (a data do rebanho inicial; RN-002,
-    // RN-004), pelos mesmos períodos — a mesma resolução das importações de eventos (donoDoBrinco_) —, e não quem tem o
-    // número hoje: a vaca que trocou de brinco depois continua sendo achada pelo número que tinha.
-    return { params: params, D0: params.data_marco_zero, pastos: pastos, pastosPorId: pastosPorId, racas: racas, listas: listas, base: base, noMarco: noMarco, externos: externos, codigos: codigos, semZeros: semZeros, brincos: { porBrinco: base, periodos: periodos } };
+    return { params: params, D0: params.data_marco_zero, pastos: pastos, pastosPorId: pastosPorId, racas: racas, listas: listas, base: base, noMarco: noMarco, semZeros: semZeros, brincos: brincos, fonte: fonte };
   }
   var AMBIGUO = Object.freeze({ ambiguo: true });
-  /** Progenitor no rebanho pela referência do arquivo: brinco; senão código interno; senão nome de animal de referência. */
   /**
-   * Progenitor do rebanho citado na linha: pelo brinco em uso no marco zero (donoDoBrinco_; sem os períodos, o de hoje),
-   * pelo código interno ou pelo nome do animal de referência. Devolve o animal, AMBIGUO (nome de externo repetido),
-   * {ambiguo_brinco: true} (o número em dois animais no marco zero), {sem_uso: {animal, ate} | null} (o número não estava
-   * em uso no marco zero) ou null.
+   * Progenitor do rebanho citado na linha, pelo resolvedor único no marco zero (Identificacao.resolver: o brinco em uso
+   * em D0, o código interno, o nome do animal de referência). Devolve o animal, AMBIGUO (nome de referência repetido),
+   * {ambiguo_brinco: true} (o número em dois animais no marco zero), {sem_uso: {animal, ate} | null} (o número não estava em
+   * uso no marco zero), {recusa: mensagem} (o código de um animal com brinco, o número lançado por engano) ou null.
    */
-  function progenitorNaBase_(cv, ref, chave) {
-    if (chave && cv.brincos) {
-      var dono = donoDoBrinco_(cv.brincos, cv, ref, cv.D0);
-      if (dono.animal) return dono.animal;
-      if (dono.ambiguo) return { ambiguo_brinco: true };
-      if (dono.semUso !== undefined && !cv.codigos[Utils.aparar(ref).toUpperCase()] && !cv.externos[Utils.normalizarTexto(Utils.aparar(ref))]) return { sem_uso: dono.semUso };
-    } else if (chave && cv.base[chave]) return cv.base[chave];
-    var t = Utils.aparar(ref);
-    return (cv.codigos && cv.codigos[t.toUpperCase()]) || (cv.externos && cv.externos[Utils.normalizarTexto(t)]) || null;
+  function progenitorNaBase_(cv, ref) {
+    if (!cv.brincos) throw Validation.erro('INTERNAL', 'A validação do rebanho inicial precisa das identificações para achar a mãe e o pai.');
+    var r = Identificacao.resolver(cv.brincos, cv.fonte, ref, cv.D0);
+    if (r.situacao === 'ACHADO') return r.animal;
+    if (r.situacao === 'VARIOS') return r.como === 'NOME' ? AMBIGUO : { ambiguo_brinco: true };
+    if (r.codigo === 'ANTES_DO_USO' || r.codigo === 'SEM_USO') return { sem_uso: r.ate ? { animal: r.animal, ate: r.ate } : null };
+    if (r.codigo === 'NAO_ENCONTRADO') return null;
+    return { recusa: r.mensagem };
   }
   function chaveBrinco_(cv, b) {
     return vazio_(b) ? null : Utils.normalizarBrinco(b, !cv.semZeros);
@@ -532,7 +508,7 @@ var ImportService = (function () {
         var k = chaveBrinco_(cv, b);
         if (k === r.chave) { r.erros.push(det_(cfg[0], 'PROPRIO_PROGENITOR', 'o animal não pode ser ' + cfg[2] + ' de si mesmo')); return; }
         var noArq = noArquivo[k];
-        var naBase = noArq ? null : progenitorNaBase_(cv, b, k);
+        var naBase = noArq ? null : progenitorNaBase_(cv, b);
         if (naBase === AMBIGUO) {
           r.erros.push(det_(cfg[0], cfg[0] === 'mae' ? 'MAE_NAO_ENCONTRADA' : 'PAI_NAO_ENCONTRADO', 'há mais de um animal de referência chamado "' + b + '". Use o código interno dele (A-000…) nesta coluna'));
           return;
@@ -543,6 +519,7 @@ var ImportService = (function () {
           r.erros.push(det_(cfg[0], codigoNF, 'o brinco ' + b + ' estava em mais de um animal no marco zero (' + br_(cv.D0) + '): informe o código interno ' + (cfg[0] === 'mae' ? 'da mãe' : 'do pai') + ' (A-000…) nesta coluna'));
           return;
         }
+        if (naBase && naBase.recusa) { r.erros.push(det_(cfg[0], codigoNF, naBase.recusa)); return; }
         if (naBase && naBase.sem_uso !== undefined) {
           var saiu = naBase.sem_uso ? ' (saiu do animal ' + naBase.sem_uso.animal.codigo_interno + ' em ' + br_(naBase.sem_uso.ate) + ')' : '';
           r.erros.push(det_(cfg[0], codigoNF, 'o brinco ' + b + ' não estava em uso no marco zero (' + br_(cv.D0) + ')' + saiu + ': informe o código interno ' + (cfg[0] === 'mae' ? 'da mãe' : 'do pai') + ' (A-000…) nesta coluna ou corrija o brinco'));
@@ -1946,84 +1923,51 @@ var ImportService = (function () {
     return cv;
   }
   /**
-   * Animais do ensaio por brinco e por código interno (os criados pelos eventos anteriores do arquivo inclusos) e os
-   * períodos de cada brinco, para achar o dono do número NA DATA do evento (05, seção 4.1 e RN-002/RN-004: o número tem
-   * dono por período). Os períodos são os da regra única do brinco numa data (Timeline.periodosDeBrinco: o número corrigido
-   * por IDENTIFICACAO_INCORRETA vale desde o início do errado, e o errado não tem período; desenho-base 16.2): o animal que
-   * a linha de uma data passada acha pelo número é o mesmo que a posição daquela data dá a ele (CONTRATOS, seção 46).
+   * O índice do resolvedor único sobre o ensaio (Identificacao.indice; CONTRATOS, seção 47): os animais do ensaio (os
+   * criados pelos eventos anteriores do arquivo inclusos), os períodos de cada número pela regra única do brinco numa data
+   * (Timeline.periodosDeBrinco: o número corrigido por IDENTIFICACAO_INCORRETA vale desde o início do errado; o errado não
+   * tem período, desenho-base 16.2), os códigos internos e os nomes dos animais de referência. A linha de uma data acha o
+   * mesmo animal que o curral, o tronco, o seletor e a posição daquela data acham pelo mesmo texto.
    */
   function indiceDoEnsaio_(ens, cv) {
-    var porBrinco = {};
-    var porCodigo = {};
-    var porId = {};
-    var externos = {};
-    var periodos = {};
-    ens.rep.vigentes('ANIMAIS').forEach(function (a) {
-      porId[a.animal_id] = a;
-      if (!vazio_(a.codigo_interno)) porCodigo[String(a.codigo_interno).toUpperCase()] = a;
-      if (!vazio_(a.brinco)) porBrinco[Utils.normalizarBrinco(a.brinco, !cv.semZeros)] = a;
-      if (a.situacao_cadastral === 'EXTERNO' && !vazio_(a.nome)) {
-        var n = Utils.normalizarTexto(a.nome);
-        externos[n] = externos[n] ? AMBIGUO : a;
-      }
-    });
-    var comBrinco = {};
-    ens.rep.vigentes('IDENTIFICACOES').forEach(function (r) {
-      if (r.tipo === 'BRINCO' && !vazio_(r.codigo) && porId[r.animal_id] && porId[r.animal_id].situacao_cadastral !== 'ANULADO') comBrinco[r.animal_id] = true;
-    });
-    var f = Object.keys(comBrinco).length ? Timeline.fonte({ repo: ens.rep.publico(), cru: ens.rep.leituraCrua() }) : null;
-    Object.keys(comBrinco).forEach(function (id) {
-      Timeline.periodosDeBrinco(f, id).forEach(function (p) {
-        var k = Utils.normalizarBrinco(String(p.codigo), !cv.semZeros);
-        (periodos[k] = periodos[k] || []).push({ animal: porId[id], inicio: p.inicio, fim: p.fim });
-      });
-    });
-    return { porBrinco: porBrinco, porCodigo: porCodigo, externos: externos, periodos: periodos };
+    var f = Timeline.fonte({ repo: ens.rep.publico(), cru: ens.rep.leituraCrua() });
+    return { f: f, ident: Identificacao.indice(f, ens.rep.vigentes('ANIMAIS'), { semZeros: cv.semZeros, marcoZero: cv.D0, pendentes: true }) };
+  }
+  /** Mensagem da recusa do resolvedor para a linha (o brinco que ninguém tinha na data, o código, o número lançado errado). */
+  function recusaDoBrinco_(r, brinco, data, rotulo) {
+    if (r.codigo === 'ANTES_DO_USO' || r.codigo === 'SEM_USO') {
+      var ate = r.codigo === 'SEM_USO' && r.animal ? ' (saiu do animal ' + r.animal.codigo_interno + ' em ' + br_(r.ate) + ')' : r.codigo === 'ANTES_DO_USO' && r.animal ? ' (só passou a ser usado em ' + br_(r.desde) + ', no animal ' + r.animal.codigo_interno + ')' : '';
+      return det_('brinco', 'ANIMAL_NAO_ENCONTRADO', 'o brinco ' + brinco + ' não estava em uso em ' + br_(data) + ate + ': informe o código do animal (A-000…) ou corrija o brinco');
+    }
+    if (r.codigo === 'NAO_ENCONTRADO') return det_('brinco', 'ANIMAL_NAO_ENCONTRADO', (rotulo || 'o animal') + ' de brinco ' + brinco + ' não está no rebanho nem no histórico. Importe antes a entrada dele (rebanho inicial, compra ou nascimento) ou corrija o brinco');
+    return det_('brinco', 'ANIMAL_NAO_ENCONTRADO', r.mensagem);
   }
   /**
-   * Dono do brinco na data D: o animal com o número em uso em D (início ≤ D < fim); em data anterior a todo uso do
-   * número (o histórico antes do marco zero, citado pelo brinco da fotografia), o primeiro animal que o recebeu; sem
-   * data, quem o usa hoje. {animal} | {ambiguo} | {semUso: {animal, ate}} | {}.
+   * Animal da linha pelo resolvedor único na data do evento (o brinco em uso na data, o código interno, o nome do animal de
+   * referência) ou pela coluna do código interno: {animal, como} | {nenhum: true} | {nenhum: true, erro} | {erro}.
    */
-  function donoDoBrinco_(idx, cv, brinco, data) {
-    var k = Utils.normalizarBrinco(String(brinco), !cv.semZeros);
-    var ps = idx.periodos[k] || [];
-    if (!Utils.dataValida(data) || !ps.length) return idx.porBrinco[k] ? { animal: idx.porBrinco[k] } : {};
-    var unicos = function (lista) { var v = {}; return lista.filter(function (p) { if (v[p.animal.animal_id]) return false; v[p.animal.animal_id] = true; return true; }); };
-    var em = unicos(ps.filter(function (p) { return p.inicio <= data && (p.fim === null || data < p.fim); }));
-    if (em.length === 1) return { animal: em[0].animal };
-    if (em.length > 1) return { ambiguo: true };
-    var primeiro = ps.reduce(function (a, p) { return !a || p.inicio < a.inicio ? p : a; }, null);
-    if (primeiro.inicio > data) {
-      var antes = unicos(ps.filter(function (p) { return p.inicio === primeiro.inicio; }));
-      return antes.length === 1 ? { animal: primeiro.animal } : { ambiguo: true };
-    }
-    var ultimo = ps.filter(function (p) { return p.fim !== null && p.fim <= data; }).reduce(function (a, p) { return !a || p.fim > a.fim ? p : a; }, null);
-    return { semUso: ultimo ? { animal: ultimo.animal, ate: ultimo.fim } : null };
-  }
-  /** Animal da linha pelo brinco (em uso na data do evento) ou pelo código interno: {animal} | {nenhum: true} | {erro}. */
   function acharAnimal_(idx, cv, brinco, codigo, rotulo, data) {
-    var dono = vazio_(brinco) ? {} : donoDoBrinco_(idx, cv, brinco, data);
-    var b = dono.animal || null;
-    var c = vazio_(codigo) ? null : idx.porCodigo[Utils.aparar(String(codigo)).toUpperCase()] || null;
+    var r = vazio_(brinco) ? null : Identificacao.resolver(idx.ident, idx.f, String(brinco), data);
+    var b = r && r.situacao === 'ACHADO' ? r.animal : null;
+    var c = vazio_(codigo) ? null : idx.ident.codigos[Utils.aparar(String(codigo)).toUpperCase()] || null;
     if (!vazio_(codigo) && !c) return { erro: det_('codigo', 'ANIMAL_NAO_ENCONTRADO', 'não há animal com o código ' + codigo + ' no rebanho nem no histórico') };
     if (b && c && b.animal_id !== c.animal_id) return { erro: det_('codigo', 'CONFLITO_DE_CAMPOS', 'o brinco ' + brinco + ' é do animal ' + b.codigo_interno + (Utils.dataValida(data) ? ' em ' + br_(data) : '') + ', não do ' + c.codigo_interno) };
-    if (c) return { animal: c };
-    if (b) return { animal: b };
+    if (c) return { animal: c, como: 'CODIGO' };
+    if (b) return { animal: b, como: r.como };
     if (vazio_(brinco)) return { nenhum: true };
-    if (dono.ambiguo) return { erro: det_('brinco', 'CONFLITO_DE_CAMPOS', 'o brinco ' + brinco + ' estava em mais de um animal em ' + br_(data) + ': informe o código do animal (A-000…)') };
-    if (dono.semUso !== undefined) {
-      var ate = dono.semUso ? ' (saiu do animal ' + dono.semUso.animal.codigo_interno + ' em ' + br_(dono.semUso.ate) + ')' : '';
-      return { nenhum: true, erro: det_('brinco', 'ANIMAL_NAO_ENCONTRADO', 'o brinco ' + brinco + ' não estava em uso em ' + br_(data) + ate + ': informe o código do animal (A-000…) ou corrija o brinco') };
-    }
-    return { nenhum: true, erro: det_('brinco', 'ANIMAL_NAO_ENCONTRADO', (rotulo || 'o animal') + ' de brinco ' + brinco + ' não está no rebanho nem no histórico. Importe antes a entrada dele (rebanho inicial, compra ou nascimento) ou corrija o brinco') };
+    if (r.situacao === 'VARIOS') return { erro: det_('brinco', 'CONFLITO_DE_CAMPOS', r.como === 'NOME' ? 'há mais de um animal de referência chamado "' + brinco + '": informe o código do animal (A-000…)' : 'o brinco ' + brinco + ' estava em mais de um animal em ' + br_(data) + ': informe o código do animal (A-000…)') };
+    return { nenhum: true, erro: recusaDoBrinco_(r, brinco, data, rotulo) };
   }
   /**
-   * Animal citado por texto (o pai do parto, o touro da cobertura): o dono do brinco na data, senão o código interno, senão
-   * o nome de um animal de referência (EXTERNO). animal | AMBIGUO (nome repetido entre os de referência) | null.
+   * Animal citado por texto (o pai do parto, o touro da cobertura), pelo resolvedor único na data: o dono do brinco na data,
+   * o código interno ou o nome de um animal de referência (EXTERNO). animal | AMBIGUO (mais de um com o texto) | {recusa:
+   * mensagem} (o resolvedor explica: o número que ninguém tinha na data, o código de um animal com brinco) | null.
    */
   function referencia_(idx, cv, t, data) {
-    return donoDoBrinco_(idx, cv, t, data).animal || idx.porCodigo[Utils.aparar(t).toUpperCase()] || idx.externos[Utils.normalizarTexto(t)] || null;
+    var r = Identificacao.resolver(idx.ident, idx.f, t, data);
+    if (r.situacao === 'ACHADO') return r.animal;
+    if (r.situacao === 'VARIOS') return AMBIGUO;
+    return r.codigo === 'NAO_ENCONTRADO' || r.codigo === 'VAZIO' ? null : { recusa: r.mensagem };
   }
   /** Os campos do lançamento (escopo EVENTO, com destino) do grupo, na forma do formulário. */
   function camposDoGrupo_(modelo, g) {
@@ -2066,6 +2010,7 @@ var ImportService = (function () {
       var tt = String(g.cab.touro);
       var touro = referencia_(idx, cv, tt, g.data);
       if (touro === AMBIGUO) g.linhas.forEach(function (r) { erro(r, det_('touro', 'TOURO_NAO_ENCONTRADO', 'há mais de um animal de referência chamado "' + tt + '": use o código interno dele (A-000…)')); });
+      else if (touro && touro.recusa) g.linhas.forEach(function (r) { erro(r, det_('touro', 'TOURO_NAO_ENCONTRADO', 'o touro "' + tt + '": ' + touro.recusa)); });
       else if (!touro) g.linhas.forEach(function (r) { erro(r, det_('touro', 'TOURO_NAO_ENCONTRADO', 'o touro "' + tt + '" não está no rebanho nem entre os animais de referência. Cadastre o touro de fora (sêmen) como animal de referência, ou corrija')); });
       else campos.touro_id = touro.animal_id;
     }
@@ -2077,6 +2022,7 @@ var ImportService = (function () {
         var t = String(g.cab.pai);
         var pai = referencia_(idx, cv, t, g.data);
         if (pai === AMBIGUO) g.linhas.forEach(function (r) { erro(r, det_('pai', 'PAI_NAO_ENCONTRADO', 'há mais de um animal de referência chamado "' + t + '": use o código interno dele (A-000…)')); });
+        else if (pai && pai.recusa) g.linhas.forEach(function (r) { erro(r, det_('pai', 'PAI_NAO_ENCONTRADO', 'o pai "' + t + '": ' + pai.recusa)); });
         else if (!pai) g.linhas.forEach(function (r) { erro(r, det_('pai', 'PAI_NAO_ENCONTRADO', 'o pai "' + t + '" não está no rebanho nem entre os animais de referência. Deixe em branco (desconhecido), cadastre o touro como animal de referência ou corrija')); });
         else { campos.pai_id = pai.animal_id; campos.pai_confianca = g.cab.pai_confianca || null; }
       }
@@ -2097,6 +2043,10 @@ var ImportService = (function () {
         if (d && d.escopo === 'LINHA' && d.destino) it[d.destino] = l[k];
       });
       if (evento === 'COMPRA') {
+        // Na compra, a coluna do brinco é o número que o animal comprado leva: o animal já cadastrado (a volta ao rebanho, a
+        // compra histórica) só é o achado por ESSE número; o texto que o resolvedor leu como código ou nome é um brinco novo
+        // (o código interno vai na coluna dele).
+        if (achado.animal && vazio_(l.codigo) && (achado.como === 'CODIGO' || achado.como === 'NOME')) achado = { nenhum: true };
         if (achado.erro && !achado.nenhum) { erro(r, achado.erro); return; }
         if (!vazio_(l.brinco)) it.brinco = String(l.brinco);
         if (achado.animal) {

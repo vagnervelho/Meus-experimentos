@@ -1828,3 +1828,16 @@ aleatório (`docs/CONTRATOS.md`, seção 46). A segunda classe (os estados do cu
   Refutada como defeito do sistema: o oráculo do estorno imediato passou a aceitar essa recusa quando o modelo a confirma
   (`estornoBloqueadoPeloEstoque`; seções 36 e 46), e a sequência mínima (4 passos) entrou no arquivo de regressão, com a recusa
   fixada (`VALIDATION:ESTOQUE_INSUFICIENTE`).
+- Leva nova limpa, com o código final e o oráculo corrigido (3500000 a 3500199, 200 sementes × 100 passos): 11.985 aceitos,
+  6.531 recusados, 0 falhas; na viagem no tempo, 1.470 retratos, 335.270 unidades com o relógio adiantado, 1.454.080 unidades
+  comparadas e 89.258 retratos de hoje conferidos com a projeção.
+- Verificado no fim, com o código final: `npm test`, 853 testes, 853 aprovados e 0 falhas (873,7 s), com as 23 sementes fixas de
+  60 passos (826 aceitos, 443 recusados, 0 falhas, e os onze contadores do oráculo do tempo); `npm run ui:check`, 158 testes,
+  158 aprovados e 0 falhas (302,9 s), a página inicial com 448 KB de 450 KB e, sob demanda, Import 48 KB, Weights 55 KB,
+  Health 25 KB e Reproduction 62 KB de 150 KB (nenhuma tela mudou nesta etapa). Antes da etapa: 837 e 158.
+- `docs/CONTRATOS.md`: o estado ganhou a frase desta etapa; seção 46 nova (a propriedade, o ponto único, o inventário das rotas
+  e dos cálculos com data, as exceções por desenho, os consertos e o oráculo); os contratos de `pasto.listar`,
+  `inventario.elegiveis`, `reproducao.indicadores`, da validação das importações (o dono do brinco na data) e do oráculo do
+  estorno imediato (seção 36) dizem o que mudou. `docs/fase-0/` não mudou.
+- Durante a etapa, o salvamento automático de fora dela gravou estados intermediários (commits `9194f61`, `7336a70`, `da538ec`,
+  `a9e05b6`, `e4a7e11` e `8dc5c35`, "salva convergência em andamento"); esta etapa não fez commit nem push.

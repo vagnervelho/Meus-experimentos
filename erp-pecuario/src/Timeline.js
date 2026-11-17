@@ -609,16 +609,34 @@ var Timeline = (function () {
    * duas correções seguidas recuam juntas. [{codigo, codigo_norm, data_inicio, remocao}], na ordem.
    */
   function sequenciaDeBrinco_(f, id) {
+    return cadeiaDeBrinco_(f, id).seq;
+  }
+  /**
+   * A cadeia da regra única: {seq (a de `sequenciaDeBrinco_`), errados: [{codigo, codigo_norm, inicio, i}]} — cada número
+   * lançado por engano e corrigido, com o início do período que teria e a posição `i`, na sequência, do número que o corrigiu.
+   */
+  function cadeiaDeBrinco_(f, id) {
     var seq = [];
+    var errados = [];
     (linhasDeIdentificacao_(f, id).BRINCO || []).forEach(function (x) {
       var anterior = seq.length ? seq[seq.length - 1] : null;
       if (x.event_type === 'AJUSTE_INVENTARIO' && x.event_subtype === 'IDENTIFICACAO_INCORRETA' && anterior && !anterior.remocao) {
+        errados.push({ codigo: anterior.codigo, codigo_norm: anterior.codigo_norm, inicio: anterior.data_inicio, i: seq.length - 1 });
         seq[seq.length - 1] = { codigo: x.codigo, codigo_norm: x.codigo_norm, data_inicio: anterior.data_inicio, remocao: false };
         return;
       }
       seq.push({ codigo: x.codigo, codigo_norm: x.codigo_norm, data_inicio: x.data_inicio, remocao: x.remocao });
     });
-    return seq;
+    return { seq: seq, errados: errados };
+  }
+  /**
+   * Os números de brinco lançados por engano no animal e corrigidos por AJUSTE_INVENTARIO/IDENTIFICACAO_INCORRETA (nunca
+   * estiveram na orelha: desenho-base 16.2), com o número que vale no lugar de cada um (o último da correção em cadeia):
+   * [{codigo, codigo_norm, inicio, corrigido_para}]. Serve à recusa explicada do resolvedor único (`Identificacao`).
+   */
+  function brincosLancadosErrado(f, id) {
+    var c = cadeiaDeBrinco_(f, id);
+    return c.errados.map(function (x) { return { codigo: x.codigo, codigo_norm: nulo_(x.codigo_norm), inicio: x.inicio, corrigido_para: c.seq[x.i].codigo }; });
   }
   /** {codigo, codigo_norm} do brinco em uso no fim do dia D, ou null (a regra de `brincoEm`). */
   function brincoNaData_(f, id, data) {
@@ -1144,6 +1162,7 @@ var Timeline = (function () {
     criaAoPeEm: criaAoPeEm,
     brincoEm: brincoEm,
     periodosDeBrinco: periodosDeBrinco,
+    brincosLancadosErrado: brincosLancadosErrado,
     fonteAte: fonteAte,
     retratoEm: retratoEm,
     chegadaDeclarada: chegadaDeclarada,
