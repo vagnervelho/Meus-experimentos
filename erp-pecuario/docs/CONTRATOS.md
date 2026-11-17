@@ -184,6 +184,11 @@ protocolo do original) e o procedimento do protocolo em uso que não muda, os in
 explicado, o descarte ao pé à parte, o histórico de antes do marco zero pelo número do marco zero, a garantia nova da fila de
 lote ("o bloco que saiu é intocável no aparelho") com a conferência do brinco presa à data e as pendentes resolvidas na mesma
 pergunta, as telas pelo brinco da data, e os oráculos e o teste aleatório da tela estendidos onde os defeitos escaparam (seção 49).
+Fase 3, RELATÓRIO DA CONVERGÊNCIA: as seções 46 a 49 conferidas com o código por amostra (as funções e as rotas citadas existem
+e são exportadas; os nomes do curral e do tronco estão em `Weights` e `Reproduction`); corrigidos o número de rotas CONSULTA da
+seção 46 (30, com `animal.resolver`; `importacao.linhas` entrou na lista das que só mostram registros) e o caminho da rota
+`animal.resolver` no código (seção 47). `Api.rotas()` tem 66 rotas: 51 canônicas (9 ainda de fase futura) e 15 extras. Sem
+mudança de contrato. Relatório: `docs/RELATORIO_FASE3.md`, seção 6.6.
 
 ## 1. Regras que valem para todo arquivo de `src/`
 
@@ -3082,10 +3087,11 @@ categoria e o peso em D saem da linha do tempo, `AnimalService.categoriaEm` e `p
 animal daquele dia (o brinco, a situação, a cria ao pé) lê `animal`. Na base de demonstração (304 cabeças), a visão geral e a
 posição numa data não calculam nenhum retrato; os elegíveis de 15/06/2025 calculam 294, um por animal da lista.
 
-**Inventário: rotas de consulta e cálculos do servidor com data.** As 29 rotas CONSULTA de `Api.rotas()`; as que não aparecem
-(`anexo.obter`, `auditoria.listar`, `importacao.listar`, `importacao.obter`, `importacao.previa`, `importacao.modelo`,
-`importacao.relatorio`, `importacao.reconciliacao`, `operacao.status`, `sistema.*`) mostram registros como estão, sem cálculo
-numa data.
+**Inventário: rotas de consulta e cálculos do servidor com data.** As 30 rotas CONSULTA de `Api.rotas()` (29 quando esta seção
+foi escrita; `animal.resolver` entrou com a seção 47); `evento.simular` está na linha dos comandos; as que não aparecem
+(`anexo.obter`, `auditoria.listar`, `importacao.listar`, `importacao.obter`, `importacao.previa`, `importacao.linhas`,
+`importacao.modelo`, `importacao.relatorio`, `importacao.reconciliacao`, `operacao.status`, `sistema.*`) mostram registros como
+estão, sem cálculo numa data.
 
 | Rota | Data | Em D (pelo ponto único) | Lido como está hoje, por desenho |
 | --- | --- | --- | --- |
@@ -3205,7 +3211,9 @@ marco zero ou sem ele, com `motivo_posicao`) e `inelegivel` (o porquê de não s
 entre textos e ids; texto até 60 caracteres; `sexo` vem do filtro de elegíveis do tipo quando não informado). Resposta: `{data,
 tipo, motivo, textos: [{texto, situacao, codigo, animal_id, candidatos, como, brinco, crias, mensagem}], animais: {id: estado}}`.
 `crias` = as crias da fêmea achada sem brinco em D (o "crias da <brinco da mãe>" do seletor). Recusa: data inválida ou futura
-e lista grande demais (VALIDATION). Leituras: as de `AnimalService.leituras()`, com acesso cru.
+e lista grande demais (VALIDATION). Leituras: as de `AnimalService.leituras()`, com acesso cru. No código: `Api` chama
+`Identificacao.resolverRota(ctx, dados)`, que roda pela `UnitOfWork.read` a consulta que `Identificacao.consultaResolver(dados)`
+monta (as leituras, o acesso cru e o tratador, que valida a data e o tamanho da lista).
 
 **Os caminhos — todos pelo resolvedor.**
 
