@@ -642,7 +642,11 @@ var Timeline = (function () {
   function brincoNaData_(f, id, data) {
     var seq = sequenciaDeBrinco_(f, id);
     if (!seq.length) { var a = f.animal(id); return a && !vazio_(a.brinco) ? { codigo: a.brinco, codigo_norm: nulo_(a.brinco_norm) } : null; }
-    var u = codigoEmUso_(seq.filter(function (x) { return x.data_inicio <= data; }));
+    var ate = seq.filter(function (x) { return x.data_inicio <= data; });
+    // O histórico de antes do marco zero cita o animal pelo número que ele tinha no marco zero (05, seção 4.1; a regra (c)
+    // do resolvedor único, CONTRATOS, seção 47): antes da primeira identificação, o número em uso no marco zero.
+    if (!ate.length && !vazio_(f.marcoZero) && data < f.marcoZero) ate = seq.filter(function (x) { return x.data_inicio <= f.marcoZero; });
+    var u = codigoEmUso_(ate);
     return u ? { codigo: u.codigo, codigo_norm: nulo_(u.codigo_norm) } : null;
   }
   /**

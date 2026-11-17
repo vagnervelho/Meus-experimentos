@@ -613,14 +613,18 @@ var ReproductionService = (function () {
     });
     var mortas = [];
     var vendidasAoPe = [];
+    var descartadasAoPe = [];
     crias.forEach(function (id) {
       if (desmamadas.indexOf(id) >= 0) return;
       var s = saidas_(f, id).filter(function (x) { return x.data <= data; })[0];
       if (!s) return;
       var c = corte(id);
       if (c !== null && s.data > c) return;
+      // 07, seção 8.3: a mortalidade conta os mortos e os baixados por divergência; os vendidos ao pé ficam à parte, e o
+      // descarte (sacrifício, consumo, doação, permuta) também, com o próprio nome — nunca como venda.
       if (s.tipo === 'MORTE' || s.tipo === 'DIVERGENCIA_CONTAGEM') mortas.push(id);
-      else vendidasAoPe.push(id);
+      else if (s.tipo === 'VENDA') vendidasAoPe.push(id);
+      else descartadasAoPe.push(id);
     });
     var prenhasPerda = prenhas.filter(function (x) { return !(x.saida && x.saida.data <= data && x.saida.data <= x.janela.fim && !desfecho(x)); });
     var perdas = prenhasPerda.filter(function (x) {
@@ -654,6 +658,7 @@ var ReproductionService = (function () {
       crias_ao_pe: aoPe.length,
       mortos_antes_da_desmama: mortas.length,
       vendidos_ao_pe: vendidasAoPe.length,
+      descartados_ao_pe: descartadasAoPe.length,
       cobertura_dg: cobertura,
       prenhez: prenhez,
       prenhez_entre_diagnosticadas: taxa_(prenhas.length, diag.length, minimo, { rotulo: 'Prenhez entre diagnosticadas' }),
