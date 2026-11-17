@@ -527,9 +527,12 @@ var WeightService = (function () {
           if (!noFiltro) noFiltro = pesadoNoFiltro || noFiltroEm_(L, a, per.ate, d);
           if (!noFiltro) return;
           var ultima = s.filter(function (x) { return x.data <= per.ate; }).pop();
+          // O animal no fim do período (o retrato em `ate`; CONTRATOS, seção 46): o brinco, a situação e o pasto daquele dia,
+          // não os de hoje (a venda ou a transferência depois do período não mudam a tabela do período).
+          var r = AnimalService.retratoEm(L, a, per.ate) || a;
           linhasAnimais.push({
-            animal_id: a.animal_id, codigo_interno: a.codigo_interno, brinco: vazio_(a.brinco) ? null : a.brinco, sexo: a.sexo || null, raca: a.raca || null,
-            situacao_cadastral: a.situacao_cadastral, pasture_id: vazio_(a.pasto_atual_id) ? null : a.pasto_atual_id,
+            animal_id: a.animal_id, codigo_interno: a.codigo_interno, brinco: vazio_(r.brinco) ? null : r.brinco, sexo: a.sexo || null, raca: a.raca || null,
+            situacao_cadastral: r.situacao_cadastral, pasture_id: vazio_(r.pasto_atual_id) ? null : r.pasto_atual_id,
             ultima: ultima ? { data: ultima.data, peso_kg: ultima.peso_kg, metodo: ultima.metodo, estimado: ultima.estimado } : null,
             pesagens: noPeriodo.length, ganho_kg: soma.ganho_kg, dias: soma.dias, gmd: soma.gmd,
           });

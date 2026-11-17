@@ -205,6 +205,22 @@ var AnimalService = (function () {
   function dataReferencia_(L, a) {
     return a.situacao_cadastral === 'ATIVO' || a.situacao_cadastral === 'EXTERNO' || vazio_(a.data_saida) ? L.hoje : a.data_saida;
   }
+  /**
+   * O animal no fim do dia D (Timeline.retratoEm: o mesmo projetor do estado de hoje sobre os fatos até D), memorizado no
+   * leitor. É o ponto único das consultas numa data (CONTRATOS, seção 46): toda lista ou conta em D descreve o animal por aqui
+   * — brinco, pasto, situação, saída, peso, situação reprodutiva, marcas, castração e cria ao pé daquele dia —, nunca pela
+   * projeção de hoje. Em D = hoje o retrato é a própria projeção gravada (nenhum fato tem data depois de hoje): o atalho
+   * poupa o projetor de cada animal nas consultas do dia, e o teste aleatório confere a igualdade a cada passo (o retrato de
+   * hoje = a projeção, e a mesma consulta pelos dois caminhos com o relógio adiantado). null antes de o animal entrar.
+   */
+  function retratoEm(L, a, data) {
+    if (!a || data === L.hoje || a.situacao_cadastral === 'EXTERNO') return a;
+    var k = 'r|' + a.animal_id + '|' + data;
+    if (L.memo && k in L.memo) return L.memo[k];
+    var r = Timeline.retratoEm(L.f, a.animal_id, data, (L.filhosMae[a.animal_id] || []).map(function (c) { return c.animal_id; }));
+    if (L.memo) L.memo[k] = r;
+    return r;
+  }
 
   // ------------------------------------------------------------------ lista leve (colunar) ----
   /** Uma linha da lista leve (objeto com as COLUNAS_LEVE), com idade e categoria calculadas. */
@@ -441,13 +457,17 @@ var AnimalService = (function () {
         if (!a) throw Validation.erro('NOT_FOUND', 'Animal não encontrado. Atualize a tela e tente de novo.');
         var ref = dataReferencia_(L, a);
         var cat = a.situacao_cadastral === 'EXTERNO' ? null : categoriaEm(L, a, ref);
+        // Os cálculos que dependem da data são da data de referência (hoje no rebanho; a da saída para o baixado), pelo retrato
+        // do animal nela (CONTRATOS, seção 46): a cria ao pé, a situação, a aptidão e a carência do baixado são as do dia em que
+        // saiu, não as de hoje. As listas (eventos, partos e crias, genealogia, anexos, financeiro) são as gravadas hoje.
+        var r = retratoEm(L, a, ref) || a;
         var periodos = periodos_(L, a);
         var aberto = periodos.length && periodos[periodos.length - 1].em_andamento ? periodos[periodos.length - 1] : null;
         var pasto = L.f.pasto(a.pasto_atual_id);
         var prop = vazio_(a.propriedade_atual_id) ? null : tx.repo.porId('PROPRIEDADES', a.propriedade_atual_id);
         var out = {
           animal_id: a.animal_id, data: L.hoje,
-          geral: blocoGeral_(L, a, ref, cat),
+          geral: blocoGeral_(L, r, ref, cat),
           genealogia: genealogia(L, a, g),
           localizacao: {
             entregue: true, pasture_id: nulo_(a.pasto_atual_id), pasto_nome: pasto ? pasto.nome : null, propriedade_atual_id: nulo_(a.propriedade_atual_id),
@@ -458,8 +478,8 @@ var AnimalService = (function () {
           // Bloco E (Fase 3): a curva, a tabela com ganho, dias, GMD e variação e a projeção rotulada (WeightService).
           peso: a.situacao_cadastral === 'EXTERNO' ? { entregue: true, externo: true, serie: [], intervalos: [] } : WeightService.blocoFicha(L, a),
           // Bloco F (Fase 3, E3.3): os registros sanitários, a carência e as próximas doses (HealthService).
-          sanitario: a.situacao_cadastral === 'EXTERNO' ? { entregue: true, externo: true, animal_id: a.animal_id, itens: [], carencia: null, proximas: [], custo_total: null } : HealthService.blocoFicha(L, a),
-          reprodutivo: ReproductionService.blocoFicha(L, a),
+          sanitario: a.situacao_cadastral === 'EXTERNO' ? { entregue: true, externo: true, animal_id: a.animal_id, itens: [], carencia: null, proximas: [], custo_total: null } : HealthService.blocoFicha(L, a, ref),
+          reprodutivo: ReproductionService.blocoFicha(L, r, ref),
           financeiro: blocoFinanceiro_(tx, L, a),
           eventos: { entregue: true, itens: eventos_(tx, L, a) },
           anexos: { entregue: true, itens: anexos_(tx, a) },
@@ -685,6 +705,7 @@ var AnimalService = (function () {
     perfilEm: perfilEm,
     categoriaEm: categoriaEm,
     pesoVigente: pesoVigente,
+    retratoEm: retratoEm,
     linhaLeve: linhaLeve,
     genealogia: genealogia,
     consultaCargaInicial: consultaCargaInicial,

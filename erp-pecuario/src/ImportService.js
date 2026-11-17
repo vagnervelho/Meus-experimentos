@@ -1941,8 +1941,10 @@ var ImportService = (function () {
   }
   /**
    * Animais do ensaio por brinco e por código interno (os criados pelos eventos anteriores do arquivo inclusos) e os
-   * períodos de cada brinco (IDENTIFICACOES do tipo BRINCO: de data_inicio até data_fim, exclusiva), para achar o dono
-   * do número NA DATA do evento (05, seção 4.1 e RN-002/RN-004: o número tem dono por período).
+   * períodos de cada brinco, para achar o dono do número NA DATA do evento (05, seção 4.1 e RN-002/RN-004: o número tem
+   * dono por período). Os períodos são os da regra única do brinco numa data (Timeline.periodosDeBrinco: o número corrigido
+   * por IDENTIFICACAO_INCORRETA vale desde o início do errado, e o errado não tem período; desenho-base 16.2): o animal que
+   * a linha de uma data passada acha pelo número é o mesmo que a posição daquela data dá a ele (CONTRATOS, seção 46).
    */
   function indiceDoEnsaio_(ens, cv) {
     var porBrinco = {};
@@ -1959,10 +1961,16 @@ var ImportService = (function () {
         externos[n] = externos[n] ? AMBIGUO : a;
       }
     });
+    var comBrinco = {};
     ens.rep.vigentes('IDENTIFICACOES').forEach(function (r) {
-      if (r.tipo !== 'BRINCO' || vazio_(r.codigo) || !porId[r.animal_id] || porId[r.animal_id].situacao_cadastral === 'ANULADO') return;
-      var k = Utils.normalizarBrinco(String(r.codigo), !cv.semZeros);
-      (periodos[k] = periodos[k] || []).push({ animal: porId[r.animal_id], inicio: r.data_inicio, fim: nulo_(r.data_fim) });
+      if (r.tipo === 'BRINCO' && !vazio_(r.codigo) && porId[r.animal_id] && porId[r.animal_id].situacao_cadastral !== 'ANULADO') comBrinco[r.animal_id] = true;
+    });
+    var f = Object.keys(comBrinco).length ? Timeline.fonte({ repo: ens.rep.publico(), cru: ens.rep.leituraCrua() }) : null;
+    Object.keys(comBrinco).forEach(function (id) {
+      Timeline.periodosDeBrinco(f, id).forEach(function (p) {
+        var k = Utils.normalizarBrinco(String(p.codigo), !cv.semZeros);
+        (periodos[k] = periodos[k] || []).push({ animal: porId[id], inicio: p.inicio, fim: p.fim });
+      });
     });
     return { porBrinco: porBrinco, porCodigo: porCodigo, externos: externos, periodos: periodos };
   }

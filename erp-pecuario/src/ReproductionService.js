@@ -345,12 +345,14 @@ var ReproductionService = (function () {
    * Bloco G da ficha (08, seção 3; 07, seção 8.3): situação reprodutiva e cria ao pé, a previsão de parto, o histórico de
    * partos, os bezerros (nascidos vivos, natimortos, desmamados), as exposições, coberturas, inseminações, diagnósticos e
    * abortos, as perdas gestacionais (abortos e natimortos), o intervalo entre partos e a idade ao primeiro parto. Macho: os
-   * registros em que ele é o touro e a castração. L = AnimalService.leitor (ou só a fonte, nas chamadas antigas).
+   * registros em que ele é o touro e a castração. L = AnimalService.leitor (ou só a fonte, nas chamadas antigas). `a` = o
+   * animal na data de referência da ficha (`ref`: hoje no rebanho; a da saída para o baixado: o retrato nela, com a situação,
+   * a cria ao pé e a aptidão daquele dia; CONTRATOS, seção 46).
    */
-  function blocoFicha(L, a) {
+  function blocoFicha(L, a, ref) {
     var f = L && L.f ? L.f : L;
     var params = L && L.params ? L.params : f.parametros;
-    var hoje = L && L.hoje ? L.hoje : null;
+    var hoje = !vazio_(ref) ? ref : L && L.hoje ? L.hoje : null;
     var estacoes = L && L.repo ? mapaEstacoes_(L.repo) : {};
     var femea = a.sexo === 'F';
     var out = { entregue: true, parcial: false, aplica: femea, situacao_reprodutiva: femea ? nulo_(a.situacao_reprodutiva) : null, cria_ao_pe: femea ? a.cria_ao_pe === true : null };
@@ -753,7 +755,8 @@ var ReproductionService = (function () {
           est = tx.repo.porId('ESTACOES_MONTA', d.estacao_id);
           if (!est) throw Validation.erro('NOT_FOUND', 'A estação de monta não existe mais. Atualize a tela e tente de novo.');
         } else if (vazio_(d.ano)) {
-          est = estacoes.filter(function (e) { return e.data_inicio <= data && tx.repo.por('REPRODUCAO', 'estacao_id', e.estacao_id).length; })[0] || null;
+          // A estação padrão é a mais recente com registro reprodutivo ATÉ a data (o de depois de D não muda a escolha de D).
+          est = estacoes.filter(function (e) { return e.data_inicio <= data && tx.repo.por('REPRODUCAO', 'estacao_id', e.estacao_id).some(function (r) { return r.data <= data; }); })[0] || null;
         }
         var ano = !vazio_(d.ano) ? d.ano : data.slice(0, 4);
         if (!vazio_(d.ano) && !/^\d{4}$/.test(String(d.ano))) throw Validation.erro('VALIDATION', 'O ano precisa ter quatro algarismos.', [det_('FORMATO_INVALIDO', 'ano', 'Ano inválido.')]);
@@ -790,8 +793,9 @@ var ReproductionService = (function () {
         if (!vazio_(d.estacao_id) && !tx.repo.porId('ESTACOES_MONTA', d.estacao_id)) throw Validation.erro('NOT_FOUND', 'A estação de monta não existe mais. Atualize a tela e tente de novo.');
         var naEstacao = null;
         if (!vazio_(d.estacao_id)) {
+          // As expostas na estação ATÉ a data (a exposição gravada depois de D não põe a fêmea na lista de D; seção 46).
           naEstacao = {};
-          tx.repo.por('REPRODUCAO', 'estacao_id', d.estacao_id).forEach(function (r) { if (EXPOEM.indexOf(r.tipo_evento) >= 0 && L.f.vale(r.event_id)) naEstacao[r.animal_id] = true; });
+          tx.repo.por('REPRODUCAO', 'estacao_id', d.estacao_id).forEach(function (r) { if (EXPOEM.indexOf(r.tipo_evento) >= 0 && r.data <= data && L.f.vale(r.event_id)) naEstacao[r.animal_id] = true; });
         }
         var itens = matrizes_(L, data, d).filter(function (x) { return !naEstacao || naEstacao[x.animal_id]; });
         var resumo = { por_situacao: {}, cria_ao_pe: 0, sem_historico: 0, total: itens.length, expostas_ou_inseminadas: 0 };
@@ -833,8 +837,10 @@ var ReproductionService = (function () {
       if (!vazio_(o.situacao) && sitFiltro !== o.situacao) return;
       var ultimo = regs.length ? regs[regs.length - 1] : null;
       var prev = ['PRENHA', 'INSEMINADA', 'EXPOSTA'].indexOf(sit) >= 0 ? previsaoParto(regs, p, est) : null;
+      // O brinco daquele dia (o retrato em D; CONTRATOS, seção 46): a lista de uma data passada não mostra o número de hoje.
+      var r = AnimalService.retratoEm(L, a, data) || a;
       out.push({
-        animal_id: a.animal_id, codigo_interno: a.codigo_interno, brinco: nulo_(a.brinco), nome: nulo_(a.nome), pasture_id: s.pasture_id || null,
+        animal_id: a.animal_id, codigo_interno: a.codigo_interno, brinco: nulo_(r.brinco), nome: nulo_(a.nome), pasture_id: s.pasture_id || null,
         idade_meses: vazio_(a.data_nascimento) ? null : Utils.idadeMeses(a.data_nascimento, data), apta: apta,
         situacao_reprodutiva: sit, cria_ao_pe: Timeline.criaAoPeEm(f, (L.filhosMae[a.animal_id] || []).map(function (c) { return c.animal_id; }), data), partos: nPartos, marcado_descarte: naData.marcado_descarte,
         ultimo: ultimo ? { tipo_evento: ultimo.tipo_evento, data: ultimo.data, resultado: nulo_(ultimo.resultado), event_id: ultimo.event_id } : null,

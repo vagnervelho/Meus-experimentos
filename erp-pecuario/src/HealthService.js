@@ -530,10 +530,11 @@ var HealthService = (function () {
   // ------------------------------------------------------------------ ficha (bloco F) ----
   /**
    * Bloco F da ficha (08, seção 3): todos os registros sanitários do animal (do mais recente ao mais antigo), com o custo
-   * que coube a ele pelas alocações vigentes (nunca a cópia `SANIDADE.custo`: 03b, seção 6), a carência hoje e as
-   * próximas doses (as pendências dele na agenda de hoje, quando está no rebanho).
+   * que coube a ele pelas alocações vigentes (nunca a cópia `SANIDADE.custo`: 03b, seção 6), a carência na data de
+   * referência da ficha (`ref`: hoje no rebanho; a da saída para o baixado — se saiu dentro da carência; CONTRATOS, seção 46)
+   * e as próximas doses (as pendências dele na agenda de hoje, quando está no rebanho).
    */
-  function blocoFicha(L, a) {
+  function blocoFicha(L, a, ref) {
     var c = contexto(L);
     var regs = c.aplicacoes(a.animal_id);
     var protNome = function (id) { var p = vazio_(id) || !L.repo.carregada('PROTOCOLOS_SANITARIOS') ? null : L.repo.porId('PROTOCOLOS_SANITARIOS', id); return p ? p.nome : null; };
@@ -550,7 +551,7 @@ var HealthService = (function () {
     });
     itens.sort(function (x, y) { return (x.data < y.data ? 1 : x.data > y.data ? -1 : 0) || (y.seq - x.seq); });
     itens.forEach(function (x) { delete x.seq; });
-    var car = regs.length ? carenciaEm(regs, L.hoje) : null;
+    var car = regs.length ? carenciaEm(regs, vazio_(ref) ? L.hoje : ref) : null;
     var proximas = [];
     if (a.situacao_cadastral === 'ATIVO') {
       // A entrada no rebanho é a da linha do tempo (a mesma que a agenda e os alertas usam: InventoryService.presentes), não a

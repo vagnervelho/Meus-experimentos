@@ -229,12 +229,14 @@ var PastureService = (function () {
   /**
    * Dias de permanência de cada animal no pasto num período (05, seção 4.6: a base do rateio DIAS_PERMANENCIA), pela
    * função única da linha do tempo (Timeline.diasPermanencia, escopo PASTO). {inicio, fim, inicio_efetivo, parcial,
-   * motivo, base_total, n, itens: [{animal_id, codigo_interno, brinco, sexo, dias, intervalos}]}.
+   * motivo, base_total, n, itens: [{animal_id, codigo_interno, brinco (o em uso no fim do período), sexo, dias, intervalos}]}.
    */
   function permanencia_(L, p, inicio, fim) {
     var r = Timeline.diasPermanencia(L.f.todasAsLinhas(), { inicio: inicio, fim: fim }, { tipo: 'PASTO', ref: p.pasture_id }, { marcoZero: L.marcoZero });
     var itens = r.itens === null ? null : Utils.ordenarPor(r.itens.map(function (x) {
-      var a = L.repo.porId('ANIMAIS', x.animal_id) || {};
+      var g = L.repo.porId('ANIMAIS', x.animal_id);
+      // O animal no fim do período (o retrato: o número trocado depois de `fim` não é o daquele período; CONTRATOS, seção 46).
+      var a = (g && AnimalService.retratoEm(L, g, fim)) || g || {};
       return { animal_id: x.animal_id, codigo_interno: nulo_(a.codigo_interno), brinco: nulo_(a.brinco), sexo: nulo_(a.sexo), dias: x.dias, intervalos: x.intervalos.map(function (i) { return { inicio: i.inicio, fim: i.fim, dias: i.dias }; }) };
     }), [{ campo: 'dias', desc: true }, 'codigo_interno']);
     return { inicio: r.inicio, fim: r.fim, inicio_efetivo: r.inicio_efetivo, parcial: r.parcial, motivo: r.motivo, base_total: r.base_total, n: r.n, itens: itens };
@@ -285,7 +287,9 @@ var PastureService = (function () {
   /**
    * Consulta `pasto.listar`. filtros: {property_id?, incluir_inativos? (padrão false), data? (padrão hoje: a posição
    * de todos os pastos ao fim do dia D, pelo mesmo replay do painel; antes do marco zero, os nulos com o motivo)}.
-   * Cartões: o cabeçalho de cada pasto + cabeças, UA, UA/ha e ocupação (sem a lista de animais), em ordem de nome.
+   * Cartões: o cabeçalho de cada pasto + cabeças, UA, UA/ha e ocupação (sem a lista de animais), em ordem de nome. Sem os
+   * inativos, entra também o pasto desativado depois que tinha animal em D (02, política `escrita`: o histórico continua
+   * válido, com a marca de inativo; CONTRATOS, seção 46): as cabeças por pasto da data fecham com o rebanho dela.
    * VALIDATION para data inválida ou futura.
    */
   function consultaListar(filtros) {
@@ -296,9 +300,11 @@ var PastureService = (function () {
         var L = AnimalService.leitor(tx);
         var data = dataConsulta_(L, o.data);
         var pr = InventoryService.presentes(L, data);
+        var comAnimais = {};
+        (pr.itens || []).forEach(function (x) { if (!vazio_(x.pasture_id)) comAnimais[x.pasture_id] = true; });
         var pastos = tx.repo.vigentes('PASTOS').filter(function (p) {
           if (!vazio_(o.property_id) && p.property_id !== o.property_id) return false;
-          return o.incluir_inativos === true || p.status === 'ATIVO';
+          return o.incluir_inativos === true || p.status === 'ATIVO' || comAnimais[p.pasture_id] === true;
         });
         return Utils.ordenarPor(pastos, ['nome', 'pasture_id']).map(function (p) { return painel_(L, p, data, pr, false); });
       },

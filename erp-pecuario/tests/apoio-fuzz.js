@@ -4280,11 +4280,15 @@ function semCarimbo(r) {
   Object.keys(r).sort().forEach((c) => { if (c !== 'created_at' && c !== 'updated_at') o[c] = r[c]; });
   return o;
 }
-/** Os cadastros e parâmetros que o grupo lê como estão hoje (CADASTROS_TEMPO). */
-function digitalCadastros(S, grupo, D) {
-  return lembrarTempo(S, 'C|' + grupo + '|' + D, () => (CADASTROS_TEMPO[grupo] || []).map((p) => {
+/**
+ * Os cadastros e parâmetros que o grupo lê como estão hoje (CADASTROS_TEMPO). `semAtivoCat`: as categorias sem a marca de
+ * ativa (a desativação de uma categoria muda a classificação automática, regra de hoje, mas não a reclassificação manual
+ * daquela data: 02, política `escrita`).
+ */
+function digitalCadastros(S, grupo, D, semAtivoCat) {
+  return lembrarTempo(S, 'C|' + grupo + '|' + D + (semAtivoCat ? '|sa' : ''), () => (CADASTROS_TEMPO[grupo] || []).map((p) => {
     if (Array.isArray(p)) return p.map((c) => c + '=' + norm(S.config.get(c))).join(',');
-    if (p === 'cat') return JSON.stringify(S.t.CATEGORIAS.map(semCarimbo));
+    if (p === 'cat') return JSON.stringify(S.t.CATEGORIAS.map((c) => (semAtivoCat ? sem(semCarimbo(c), ['ativo']) : semCarimbo(c))));
     if (p === 'pasto') return JSON.stringify([S.t.PASTOS.map(semCarimbo), S.t.PROPRIEDADES.map((r) => [r.property_id, r.nome]), S.t.PARCEIROS.map((r) => [r.partner_id, r.nome])]);
     if (p === 'prot') return JSON.stringify(protocolosEm(S, D));
     if (p === 'protTodos') return JSON.stringify((S.t.PROTOCOLOS_SANITARIOS || []).map((r) => [r.protocol_id, r.nome]));
@@ -4295,9 +4299,13 @@ function digitalCadastros(S, grupo, D) {
     throw new Error('cadastro desconhecido no oráculo do tempo: ' + p);
   }).join('#'));
 }
-/** A impressão digital de uma unidade da bateria: os fatos (do rebanho ou do animal) até a data dela e os cadastros do grupo. */
-function digitalUnidade(S, u) {
-  return (u.animal ? digitalAnimal(S, u.animal, u.D) : digitalFatos(S, u.D)) + '#' + digitalCadastros(S, u.grupo, u.D);
+/**
+ * A impressão digital de uma unidade da bateria: os fatos (do rebanho ou do animal) até a data dela e os cadastros do grupo.
+ * Na ficha, também a data de referência dela (a do animal hoje: a volta ao rebanho muda a ficha para a de hoje, por desenho).
+ */
+function digitalUnidade(S, u, semAtivoCat) {
+  const ref = u.grupo === 'ficha' ? '#' + ((S.animais.get(u.animal) || {}).situacao_cadastral || '') + '@' + ((S.animais.get(u.animal) || {}).data_saida || '') : '';
+  return (u.animal ? digitalAnimal(S, u.animal, u.D) : digitalFatos(S, u.D)) + '#' + digitalCadastros(S, u.grupo, u.D, semAtivoCat) + ref;
 }
 const escolher = (o, campos) => { const x = {}; campos.forEach((c) => { x[c] = o && o[c] !== undefined ? o[c] : null; }); return x; };
 const sem = (o, campos) => { if (!o || typeof o !== 'object') return o; const x = Object.assign({}, o); campos.forEach((c) => { delete x[c]; }); return x; };
@@ -4386,18 +4394,25 @@ function bateriaTempo(sis, T, opcoes) {
   }
   // 6. O desempenho até D (desde o marco zero e nos 120 dias até D): os grupos e a linha de cada animal.
   if (quer('desemp')) {
-    [['desemp', {}], ['desemp120', { de: somaDias(D, -120) }]].forEach(([nome, x]) => {
+    const variantes = [['desemp', {}], ['desemp120', { de: somaDias(D, -120) }]];
+    // Com os filtros de pasto e de categoria (o pasto e a categoria na data de cada pesagem e no fim do período).
+    if (T.pastos.length) variantes.push(['desempP', { pasture_id: T.pastos[0] }]);
+    if (T.categoria) variantes.push(['desempC', { category_id: T.categoria }]);
+    variantes.forEach(([nome, x]) => {
       const r = chamar('peso.desempenho', dd('ate', x));
       add('desemp', nome, r && r.recusa ? r : sem(r, ['animais', 'curvas']));
       porAnimal('desemp', nome, r && r.animais);
     });
   }
-  // 7. A visão geral com o período terminando em D (os títulos e as pendências de cadastro são de hoje, por desenho).
+  // 7. A visão geral com o período terminando em D, inteira e com o filtro de pasto (os títulos e as pendências de cadastro
+  // são de hoje, por desenho).
   if (quer('dash')) {
-    const r = chamar('dashboard.obter', dd('data_fim', {}));
-    const v = r && r.recusa ? r : sem(r, ['titulos', 'pendencias', 'geradoEm']);
-    if (v && v.etiquetas) v.etiquetas = sem(v.etiquetas, ['titulos']);
-    add('dash', 'dash', v);
+    [['dash', {}]].concat(T.pastos.length ? [['dashP', { pasture_id: T.pastos[0] }]] : []).forEach(([nome, x]) => {
+      const r = chamar('dashboard.obter', dd('data_fim', x));
+      const v = r && r.recusa ? r : sem(r, ['titulos', 'pendencias', 'geradoEm']);
+      if (v && v.etiquetas) v.etiquetas = sem(v.etiquetas, ['titulos']);
+      add('dash', nome, v);
+    });
   }
   // 8. Os lançamentos até D (com a situação de cada um).
   if (quer('eventos')) add('eventos', 'eventos', chamar('evento.listar', dd('ate', { por_pagina: 500 })));
@@ -4446,6 +4461,47 @@ function estruturaTempo(T, bat) {
   const lista = new Set(e.ativos.map((c) => c.pasture_id));
   return e.todos.filter((c) => c.cabecas > 0 && !lista.has(c.pasture_id)).slice(0, 1).map((c) => falha('TEMPO:PASTO_SUMIU', 'em ' + T.D + ', o ' + c.nome + ' (' + c.status + ') tinha ' + c.cabecas + ' cabeça(s), mas não aparece na lista de pastos dessa data'));
 }
+/**
+ * A ficha (a visão de hoje, com os cálculos na data de referência) e as consultas numa data dizem o mesmo do animal: em
+ * D = hoje, a do animal no rebanho (categoria, idade, peso vigente, situação, cria ao pé e aptidão, carência) = a posição, a
+ * lista de fêmeas e a agenda de hoje; a do animal que saiu, o brinco e a categoria do dia da saída = os elegíveis daquele dia.
+ */
+function cruzarFicha(sis, T, bat) {
+  const out = [];
+  const de = new Map(bat.map((u) => [u.chave, u.valor]));
+  const ruim = (id, oque, ficha, data) => { if (out.length < 2) out.push(falha('TEMPO:FICHA_X_DATA', 'ficha de ' + id + ' × consulta em ' + T.D + ': ' + oque + ' na ficha ' + curto(ficha) + ', na consulta numa data ' + curto(data))); };
+  if (T.D === HOJE) {
+    T.amostra.forEach((id) => {
+      const p = de.get('posA|' + id);
+      if (!p || p.recusa || !p.presente) return;
+      const f = sis.api('animal.ficha', { animal_id: id });
+      if (!f.ok) return;
+      const g = f.data.geral || {};
+      contar('viagem no tempo: ficha de hoje × consultas da data');
+      if (((g.categoria || {}).category_id || null) !== ((p.categoria || {}).category_id || null)) ruim(id, 'a categoria', g.categoria, p.categoria);
+      if ((g.idade_meses === undefined ? null : g.idade_meses) !== p.idade_meses) ruim(id, 'a idade', g.idade_meses, p.idade_meses);
+      if (JSON.stringify(g.peso_vigente) !== JSON.stringify(p.peso)) ruim(id, 'o peso vigente', g.peso_vigente, p.peso);
+      const m = (de.get('mat|' + id) || [])[0];
+      const rp = f.data.reprodutivo || {};
+      if (m && (m.cria_ao_pe !== (rp.cria_ao_pe === true) || m.situacao_reprodutiva !== rp.situacao_reprodutiva || m.apta !== rp.apta)) ruim(id, 'a situação, a cria ao pé ou a aptidão', escolher(rp, ['situacao_reprodutiva', 'cria_ao_pe', 'apta']), escolher(m, ['situacao_reprodutiva', 'cria_ao_pe', 'apta']));
+      const c = (de.get('agenda:c|' + id) || [])[0];
+      const cf = (f.data.sanitario || {}).carencia;
+      if (((c && c.fim) || null) !== ((cf && cf.fim) || null)) ruim(id, 'o fim da carência', cf, c);
+    });
+  }
+  Object.keys(T.fichas).forEach((id) => {
+    const f = de.get('ficha|' + id);
+    if (!f || f.recusa) return;
+    const e = sis.api('inventario.elegiveis', { tipo: 'PESAGEM', data: T.fichas[id] });
+    if (!e.ok || !Array.isArray(e.data.itens)) return;
+    const x = e.data.itens.find((i) => i.animal_id === id);
+    if (!x) return;
+    contar('viagem no tempo: ficha de quem saiu × elegíveis do dia da saída');
+    if ((f.geral.brinco || null) !== (x.brinco || null)) ruim(id, 'o brinco no dia da saída (' + T.fichas[id] + ')', f.geral.brinco, x.brinco);
+    if (((f.geral.categoria || {}).nome || null) !== (x.categoria || null)) ruim(id, 'a categoria no dia da saída (' + T.fichas[id] + ')', f.geral.categoria, x.categoria);
+  });
+  return out;
+}
 /** O retrato em D depois do passo k: a bateria, a impressão de cada unidade, o relógio adiantado e o caminho padrão. */
 function retratoTempo(sis, S, k, pedido) {
   const D = pedido.D;
@@ -4463,7 +4519,7 @@ function retratoTempo(sis, S, k, pedido) {
   vivos.filter((a) => SAIDAS_DO_REBANHO_T.indexOf(a.situacao_cadastral) >= 0 && a.data_saida).slice(0, 4).forEach((a) => { T.fichas[a.animal_id] = a.data_saida; });
   const bat = bateriaTempo(sis, T);
   const out = bat.internos.slice(0, 1).map((x) => falha('TEMPO:INTERNO', x));
-  T.base = new Map(bat.map((u) => [u.chave, { grupo: u.grupo, animal: u.animal, D: u.D, fp: digitalUnidade(S, u), valor: u.valor }]));
+  T.base = new Map(bat.map((u) => [u.chave, { grupo: u.grupo, animal: u.animal, D: u.D, fp: digitalUnidade(S, u), fpSemAtivoCat: u.grupo === 'posA' ? digitalUnidade(S, u, true) : null, valor: u.valor }]));
   sis.tempo = T;
   contar('viagem no tempo: retratos');
   // O relógio adiantado: a resposta pedida numa data D não depende de que dia é hoje.
@@ -4476,6 +4532,31 @@ function retratoTempo(sis, S, k, pedido) {
   // Em D = hoje, o caminho padrão (sem a data) é o mesmo que o caminho com a data.
   if (D === HOJE) { out.push(...mesmaBateria('PADRAO', T, bat, bateriaTempo(sis, T, { semData: true }))); contar('viagem no tempo: caminho padrão conferido'); }
   out.push(...estruturaTempo(T, bat));
+  out.push(...cruzarFicha(sis, T, bat));
+  return out;
+}
+/**
+ * A categoria desativada depois de D (só a marca de ativa mudou): a reclassificação manual que valia em D continua valendo
+ * nela (02, política `escrita`: o alvo desativado mais tarde continua válido no histórico); a automática segue a regra de
+ * hoje (desenho-base 4.3) e fica fora.
+ */
+function categoriaDesativada(sis, A, S) {
+  const antes = new Map(A.t.CATEGORIAS.map((c) => [c.category_id, c]));
+  const desativadas = S.t.CATEGORIAS.filter((c) => { const b = antes.get(c.category_id); return b && b.ativo !== false && c.ativo === false; });
+  if (!desativadas.length) return [];
+  const outras = S.t.CATEGORIAS.some((c) => { const b = antes.get(c.category_id); return !b || JSON.stringify(sem(semCarimbo(b), ['ativo'])) !== JSON.stringify(sem(semCarimbo(c), ['ativo'])); });
+  if (outras) return [];
+  const T = sis.tempo;
+  const out = [];
+  const ids = new Set(desativadas.map((c) => c.category_id));
+  T.base.forEach((b) => {
+    if (b.grupo !== 'posA' || !b.valor || !b.valor.categoria || b.valor.categoria.manual !== true || !ids.has(b.valor.categoria.category_id)) return;
+    if (digitalUnidade(S, b, true) !== b.fpSemAtivoCat) return;
+    const r = sis.api('inventario.posicao', { data: b.D, animal_id: b.animal });
+    contar('viagem no tempo: categoria manual da data depois de desativada');
+    const c = r.ok ? r.data.categoria : null;
+    if (!c || c.category_id !== b.valor.categoria.category_id || c.manual !== true) out.push(falha('TEMPO:CATEGORIA_DESATIVADA', 'em ' + b.D + ', ' + b.animal + ' estava reclassificado à mão em ' + b.valor.categoria.nome + '; desativada a categoria depois, a posição daquela data diz ' + curto(c)));
+  });
   return out;
 }
 /** O que o passo mudou, em relação a D: fatos depois de D, fatos até D (retroativos) e cadastros. */
@@ -4522,10 +4603,42 @@ function compararTempo(sis, A, S, cmd) {
   }
   return out;
 }
+/**
+ * O ponto único (Timeline.retratoEm: o projetor do estado de hoje sobre os fatos até D) em D = hoje é a projeção gravada, em
+ * todo campo projetado de todo animal: o retrato de uma data passada e o estado de hoje saem da mesma conta.
+ */
+function oraculoRetratoDeHoje(sis, S) {
+  const { G, gas } = sis;
+  const retratos = js(gas.exec(() => G.UnitOfWork.read(G.Api.contexto({ usuario: USUARIO }), {
+    rota: 'teste.retratos', reads: G.AnimalService.leituras(), acessoCru: true,
+    tratador: (tx) => {
+      const f = G.Timeline.fonte(tx);
+      const filhos = {};
+      const vivos = tx.repo.vigentes('ANIMAIS');
+      vivos.forEach((a) => { if (a.mae_id) (filhos[a.mae_id] = filhos[a.mae_id] || []).push(a.animal_id); });
+      const out = {};
+      vivos.forEach((a) => { if (a.situacao_cadastral !== 'EXTERNO') out[a.animal_id] = G.Timeline.retratoEm(f, a.animal_id, tx.hoje, filhos[a.animal_id] || []); });
+      return out;
+    },
+  }).dados));
+  const out = [];
+  // O custo de aquisição fica fora do retrato (o da permanência atual, 03a DL-08; as consultas numa data não leem o financeiro).
+  const campos = PROJETADOS.filter((c) => c !== 'custo_aquisicao' && c !== 'custo_aquisicao_origem');
+  Object.keys(retratos).forEach((id) => {
+    const a = S.animais.get(id) || {};
+    const r = retratos[id] || {};
+    const dif = campos.filter((c) => norm(r[c]) !== norm(a[c]));
+    if (dif.length && out.length < 2) out.push(falha('TEMPO:RETRATO_DE_HOJE', a.codigo_interno + ': o retrato de hoje (Timeline.retratoEm) difere da projeção gravada: ' + dif.map((c) => c + ' ' + JSON.stringify(a[c]) + ' (gravada) × ' + JSON.stringify(r[c]) + ' (retrato)').join('; ')));
+  });
+  contar('viagem no tempo: retratos de hoje conferidos com a projeção', Object.keys(retratos).length);
+  return out;
+}
 /** O oráculo inteiro, depois de um passo: compara o retrato em curso (se o passo gravou) e tira o retrato pedido. */
 function oraculoTempo(sis, cmd, A, S, k, gravou) {
   const out = [];
+  if (gravou) out.push(...oraculoRetratoDeHoje(sis, S));
   if (sis.tempo && gravou) out.push(...compararTempo(sis, A, S, cmd));
+  if (sis.tempo && gravou && cmd.rota === 'categoria.salvar') out.push(...categoriaDesativada(sis, A, S));
   if (cmd.tempo) out.push(...retratoTempo(sis, S, k, cmd.tempo));
   return out;
 }

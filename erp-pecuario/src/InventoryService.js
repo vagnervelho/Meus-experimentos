@@ -101,7 +101,9 @@ var InventoryService = (function () {
   // ------------------------------------------------------------------ presença e composição ----
   /**
    * Animais no rebanho ao fim do dia D, pela linha do tempo (Timeline.presentesEm, o replay das linhas vigentes):
-   * {motivo, itens: [{animal, pasture_id, property_id, no_rebanho_desde, no_pasto_desde}]} (ordem de código interno).
+   * {motivo, itens: [{animal, registro, pasture_id, property_id, no_rebanho_desde, no_pasto_desde}]} (ordem de código
+   * interno). `animal` é o animal como estava em D (AnimalService.retratoEm: brinco, situação reprodutiva, marcas, peso e
+   * cria ao pé daquele dia; CONTRATOS, seção 46), e `registro` a projeção de hoje (o que a consulta mostra como "hoje").
    * Sem marco zero → DADOS_INSUFICIENTES; D antes dele → ANTERIOR_AO_MARCO_ZERO (itens null).
    */
   function presentes(L, data) {
@@ -112,7 +114,7 @@ var InventoryService = (function () {
       var a = L.repo.porId('ANIMAIS', x.animal_id);
       if (!a) return;
       itens.push({
-        animal: a, pasture_id: x.pasture_id, property_id: propriedadeDe_(L, x.pasture_id, x.entrada ? x.entrada.event_id : null),
+        animal: AnimalService.retratoEm(L, a, data) || a, registro: a, pasture_id: x.pasture_id, property_id: propriedadeDe_(L, x.pasture_id, x.entrada ? x.entrada.event_id : null),
         no_rebanho_desde: x.no_rebanho_desde, no_pasto_desde: x.no_pasto_desde,
       });
     });
@@ -121,7 +123,7 @@ var InventoryService = (function () {
   /**
    * Animais no rebanho em algum momento do dia D (o dia da entrada e o da saída contam: RN-017), com o pasto em que
    * estavam antes das saídas do dia (Timeline.pastoAntesDaSaida): os que podem receber um fato datado de D. Mesma
-   * forma e mesmos motivos de `presentes`.
+   * forma e mesmos motivos de `presentes` (o animal, o retrato no fim do dia D).
    */
   function presentesNoDia(L, data) {
     if (vazio_(L.marcoZero)) return { motivo: 'DADOS_INSUFICIENTES', itens: null };
@@ -132,7 +134,7 @@ var InventoryService = (function () {
       var p = Timeline.pastoAntesDaSaida(porAnimal[id], data, L.marcoZero);
       if (!p.presente) return;
       var a = L.repo.porId('ANIMAIS', id);
-      if (a) itens.push({ animal: a, pasture_id: p.pasture_id });
+      if (a) itens.push({ animal: AnimalService.retratoEm(L, a, data) || a, registro: a, pasture_id: p.pasture_id });
     });
     return { motivo: null, itens: Utils.ordenarPor(itens, function (x) { return x.animal.codigo_interno; }) };
   }
@@ -632,14 +634,15 @@ var InventoryService = (function () {
           if (!vazio_(d.pasture_id) && x.pasture_id !== d.pasture_id) return false;
           return !filtro.sexo || x.animal.sexo === filtro.sexo;
         }).map(function (x) {
-          // O brinco em uso NA DATA (o número trocado ou reaproveitado depois é de outro animal naquele dia), e o de hoje.
-          var hoje = vazio_(x.animal.brinco) ? null : x.animal.brinco;
+          // O brinco em uso NA DATA (o do retrato: o número trocado ou reaproveitado depois é de outro animal naquele dia), e o
+          // de hoje (a projeção gravada: o curral mostra "hoje X" quando os dois diferem).
+          var hoje = vazio_(x.registro.brinco) ? null : x.registro.brinco;
           // A descrição do animal NA DATA (a conferência do curral e do tronco com data passada; desenho-base 4.3: o dado de
           // hoje não vale para a data passada): a categoria em D e a última pesagem até D (qualquer método, rotulada).
           var cat = AnimalService.categoriaEm(L, x.animal, data);
           var pv = AnimalService.pesoVigente(L, x.animal, data, null);
           return {
-            animal_id: x.animal.animal_id, codigo_interno: x.animal.codigo_interno, brinco: data === L.hoje ? hoje : Timeline.brincoEm(L.f, x.animal.animal_id, data), brinco_hoje: hoje, sexo: x.animal.sexo, pasture_id: x.pasture_id,
+            animal_id: x.animal.animal_id, codigo_interno: x.animal.codigo_interno, brinco: vazio_(x.animal.brinco) ? null : x.animal.brinco, brinco_hoje: hoje, sexo: x.animal.sexo, pasture_id: x.pasture_id,
             categoria: cat ? cat.nome : null, ultimo_peso: pv.data_pesagem ? { kg: pv.kg, data: pv.data_pesagem, estimado: pv.metodo === 'ESTIMATIVA_VISUAL' } : null,
           };
         });

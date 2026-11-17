@@ -595,25 +595,122 @@ var Timeline = (function () {
   /**
    * O brinco em uso no fim do dia D (a regra da projeção, só com as identificações até D): o código, ou null (sem brinco
    * naquele dia, ou retirado). Sem nenhuma identificação de brinco gravada, o brinco do cadastro. Serve à posição de uma data
-   * passada (o curral e o tronco acham o animal pelo número daquele dia: 08, seção 5, item 5).
+   * passada (o curral e o tronco acham o animal pelo número daquele dia: 08, seção 5, item 5) e ao retrato em D (`retratoEm`).
    */
   function brincoEm(f, id, data) {
-    var lista = linhasDeIdentificacao_(f, id).BRINCO || [];
-    if (!lista.length) { var a = f.animal(id); return a && !vazio_(a.brinco) ? a.brinco : null; }
-    // O número lançado por engano e corrigido por AJUSTE_INVENTARIO/IDENTIFICACAO_INCORRETA nunca esteve na orelha
-    // (desenho-base 16.2): o número certo vale desde o início do período do errado, não da data da correção. A correção
-    // toma o lugar da linha que corrige na sequência (com a data de início dela); duas correções seguidas recuam juntas.
+    var b = brincoNaData_(f, id, data);
+    return b ? b.codigo : null;
+  }
+  /**
+   * A sequência dos números de brinco do animal pela regra única do brinco numa data (a de `brincoEm`, da posição numa data e
+   * da importação de fatos de uma data passada): o número lançado por engano e corrigido por AJUSTE_INVENTARIO/
+   * IDENTIFICACAO_INCORRETA nunca esteve na orelha (desenho-base 16.2) — o número certo vale desde o início do período do
+   * errado, não da data da correção. A correção toma o lugar da linha que corrige na sequência (com a data de início dela);
+   * duas correções seguidas recuam juntas. [{codigo, codigo_norm, data_inicio, remocao}], na ordem.
+   */
+  function sequenciaDeBrinco_(f, id) {
     var seq = [];
-    lista.forEach(function (x) {
+    (linhasDeIdentificacao_(f, id).BRINCO || []).forEach(function (x) {
       var anterior = seq.length ? seq[seq.length - 1] : null;
       if (x.event_type === 'AJUSTE_INVENTARIO' && x.event_subtype === 'IDENTIFICACAO_INCORRETA' && anterior && !anterior.remocao) {
-        seq[seq.length - 1] = { codigo: x.codigo, data_inicio: anterior.data_inicio, remocao: false };
+        seq[seq.length - 1] = { codigo: x.codigo, codigo_norm: x.codigo_norm, data_inicio: anterior.data_inicio, remocao: false };
         return;
       }
-      seq.push({ codigo: x.codigo, data_inicio: x.data_inicio, remocao: x.remocao });
+      seq.push({ codigo: x.codigo, codigo_norm: x.codigo_norm, data_inicio: x.data_inicio, remocao: x.remocao });
     });
+    return seq;
+  }
+  /** {codigo, codigo_norm} do brinco em uso no fim do dia D, ou null (a regra de `brincoEm`). */
+  function brincoNaData_(f, id, data) {
+    var seq = sequenciaDeBrinco_(f, id);
+    if (!seq.length) { var a = f.animal(id); return a && !vazio_(a.brinco) ? { codigo: a.brinco, codigo_norm: nulo_(a.brinco_norm) } : null; }
     var u = codigoEmUso_(seq.filter(function (x) { return x.data_inicio <= data; }));
-    return u ? u.codigo : null;
+    return u ? { codigo: u.codigo, codigo_norm: nulo_(u.codigo_norm) } : null;
+  }
+  /**
+   * Os períodos de uso dos números de brinco do animal pela mesma regra (`sequenciaDeBrinco_`; o número errado corrigido não
+   * tem período): [{codigo, codigo_norm, inicio, fim}], com o fim exclusivo (o início do seguinte ou a retirada; null = em
+   * uso). O dono de um número numa data passada sai daqui na importação, e é o mesmo animal que a posição daquela data dá ao
+   * número (inventario.elegiveis, o curral; CONTRATOS, seção 46).
+   */
+  function periodosDeBrinco(f, id) {
+    var seq = sequenciaDeBrinco_(f, id);
+    var out = [];
+    seq.forEach(function (x, i) {
+      if (x.remocao) return;
+      var prox = i + 1 < seq.length ? seq[i + 1] : null;
+      out.push({ codigo: x.codigo, codigo_norm: nulo_(x.codigo_norm), inicio: x.data_inicio, fim: prox ? prox.data_inicio : null });
+    });
+    return out;
+  }
+  /** A linha de correção que vale para todo o histórico (04, seção 4.4; desenho-base 16.2): cadastro e brinco lançado errado. */
+  function semPresenca_(l) {
+    return (SEM_PRESENCA[l.event_type] || []).indexOf(l.event_subtype) >= 0;
+  }
+  /**
+   * A fonte restrita aos fatos até o fim do dia D (desenho-base 4.3: "na data D" = estado ao fim do dia D): as linhas, as
+   * pesagens, os registros reprodutivos, as identificações, as reclassificações e as alocações de aquisição com data até D.
+   * A correção de cadastro e a do brinco lançado errado valem para todo o histórico e ficam em qualquer data. O resto (os
+   * eventos, a ordem do dia, os cadastros, os parâmetros) é o da fonte. Memorizada por fonte e data.
+   */
+  function fonteAte(f, data) {
+    // Sempre sobre a fonte inteira (restringir uma fonte já restrita a outra data perderia fatos), que pode herdar os métodos
+    // de outra (a fonte do lançamento em análise no motor).
+    var base = f.base_ || f;
+    if (!Object.prototype.hasOwnProperty.call(base, 'ates_')) base.ates_ = Object.create(null);
+    if (base.ates_[data]) return base.ates_[data];
+    var memo = Object.create(null);
+    var lembrar = function (k, fn) { if (!(k in memo)) memo[k] = fn(); return memo[k]; };
+    var ate = function (l) { return l.event_date <= data || semPresenca_(l); };
+    var g = Object.create(base);
+    g.base_ = base;
+    g.ate = data;
+    g.linhas = function (id) { return lembrar('l' + id, function () { return base.linhas(id).filter(ate); }); };
+    g.todasAsLinhas = function () { return lembrar('t', function () { return base.todasAsLinhas().filter(ate); }); };
+    g.pesagens = function (id) { return base.pesagens(id).filter(function (p) { return p.data_pesagem <= data; }); };
+    g.reproducao = function (id) { return base.reproducao(id).filter(function (r) { return r.data <= data; }); };
+    g.identificacoes = function (id) { return base.identificacoes(id).filter(function (r) { return r.data_inicio <= data; }); };
+    g.ajustes = function (id) {
+      return base.ajustes(id).filter(function (x) {
+        if (x.tipo_ajuste === 'CORRECAO_CADASTRO' || x.tipo_ajuste === 'IDENTIFICACAO_INCORRETA') return true;
+        var ev = base.evento(x.event_id);
+        return !!ev && ev.event_date <= data;
+      });
+    };
+    g.aquisicoes = function (id) { return base.aquisicoes(id).filter(function (x) { return x.data_competencia <= data; }); };
+    base.ates_[data] = g;
+    return g;
+  }
+  /**
+   * O animal como estava no fim do dia D: a projeção de ANIMAIS pelo MESMO projetor do estado de hoje (`projetarAnimal`)
+   * sobre os fatos até D (`fonteAte`), com o brinco em uso em D (`brincoEm`: o número corrigido por IDENTIFICACAO_INCORRETA
+   * desde o início do errado, desenho-base 16.2) e a cria ao pé em D (`criaAoPeEm`). Os atributos de criação e as correções
+   * de cadastro valem para todo o histórico; o resto (situação, pasto, saída, peso, situação reprodutiva, marcas, castração,
+   * reclassificação) é o daquele dia. Em D = hoje é a projeção gravada (nenhum fato tem data depois de hoje; a verificação
+   * do teste aleatório confere). É o ponto único das consultas numa data (CONTRATOS, seção 46): uma lista ou conta em D
+   * descreve o animal por aqui, nunca pela projeção de hoje. null quando o animal ainda não tinha linha até D (nem no
+   * histórico anterior ao marco zero). `filhos` = os animal_id das crias (mae_id), para a cria ao pé.
+   */
+  function retratoEm(f, id, data, filhos) {
+    var base = f.base_ || f;
+    var a = base.animal(id);
+    if (!a) return null;
+    if (a.situacao_cadastral === 'EXTERNO') return a;
+    var g = fonteAte(base, data);
+    if (!g.linhas(id).some(function (l) { return !semPresenca_(l); })) return null;
+    var p = projetarAnimal(g, id).campos;
+    var r = {};
+    Object.keys(a).forEach(function (k) { r[k] = a[k]; });
+    Object.keys(p).forEach(function (k) { r[k] = p[k]; });
+    // O custo de aquisição não é um dado da data (03a, DL-08: o da permanência atual ou da última) e depende das abas do
+    // financeiro, que as consultas numa data não leem: o retrato não o traz.
+    delete r.custo_aquisicao;
+    delete r.custo_aquisicao_origem;
+    var b = brincoNaData_(base, id, data);
+    r.brinco = b ? b.codigo : null;
+    r.brinco_norm = b ? b.codigo_norm : null;
+    r.cria_ao_pe = r.sexo === 'F' && r.situacao_cadastral !== 'EXTERNO' ? criaAoPeEm(base, filhos || [], data) : null;
+    return r;
   }
   /** Código em uso de um tipo ao fim da sequência (ou vazio, depois de uma retirada). */
   function codigoEmUso_(lista) {
@@ -1046,6 +1143,9 @@ var Timeline = (function () {
     reproducaoEm: reproducaoEm,
     criaAoPeEm: criaAoPeEm,
     brincoEm: brincoEm,
+    periodosDeBrinco: periodosDeBrinco,
+    fonteAte: fonteAte,
+    retratoEm: retratoEm,
     chegadaDeclarada: chegadaDeclarada,
     entradaDoCusto: entradaDoCusto,
     ultimaPesagem: ultimaPesagem,
