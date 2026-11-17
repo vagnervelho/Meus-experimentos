@@ -176,6 +176,40 @@ var AnimalService = (function () {
     return c;
   }
   /**
+   * Desde quando o animal está, sem interrupção, na categoria que tem em D: o primeiro dia do trecho na mesma categoria que
+   * termina em D, nunca antes de `piso` (a entrada no rebanho). É o "dia em que se tornou elegível" de um protocolo restrito
+   * a uma categoria (03a, seção 4.9; 05, seção 4.7: a categoria em D faz parte da elegibilidade). A classificação (05, seção
+   * 4.9) só muda no dia de um fato do animal (castração, parto, reclassificação, correção de cadastro, a cria nascida) ou no
+   * dia em que ele completa a idade de um corte das categorias: o trecho se acha voltando por esses dias, da data para trás,
+   * até o primeiro em que a véspera tinha outra categoria. Memorizado no leitor.
+   */
+  function naCategoriaDesde(L, a, data, piso) {
+    var k = 'cd|' + a.animal_id + '|' + data + '|' + (piso || '');
+    if (L.memo && k in L.memo) return L.memo[k];
+    var chave = function (c) { return c ? c.category_id : null; };
+    var atual = chave(categoriaEm(L, a, data));
+    var dias = {};
+    var add = function (d) { if (typeof d === 'string' && Utils.dataValida(d) && d <= data && (vazio_(piso) || d > piso)) dias[d] = true; };
+    var id = a.animal_id;
+    L.f.linhas(id).forEach(function (l) { add(l.event_date); });
+    L.f.ajustes(id).forEach(function (x) { var ev = L.f.evento(x.event_id); if (ev) add(ev.event_date); });
+    L.f.reproducao(id).forEach(function (r) { add(r.data); });
+    (L.filhosMae[id] || []).forEach(function (c) { add(c.data_nascimento); });
+    if (!vazio_(a.data_nascimento) && Utils.dataValida(a.data_nascimento)) {
+      add(a.data_nascimento);
+      L.categorias.forEach(function (c) {
+        [c.idade_minima_meses, c.idade_maxima_meses].forEach(function (m) { if (typeof m === 'number' && m >= 0 && Math.floor(m) === m) add(Utils.completaMeses(a.data_nascimento, m)); });
+      });
+    }
+    var desde = vazio_(piso) ? null : piso;
+    var lista = Object.keys(dias).sort().reverse();
+    for (var i = 0; i < lista.length; i++) {
+      if (chave(categoriaEm(L, a, Utils.somaDias(lista[i], -1))) !== atual) { desde = lista[i]; break; }
+    }
+    if (L.memo) L.memo[k] = desde;
+    return desde;
+  }
+  /**
    * Peso vigente em D (desenho-base, seção 6): última pesagem até D dentro de `peso_validade_dias` → PESADO; vencida
    * → o maior entre o último peso e o `peso_referencia_kg` da categoria, estimado (PESAGEM_VENCIDA); sem pesagem →
    * o peso de referência, estimado (SEM_PESAGEM); sem os dois → SEM_PESO (kg null, nunca zero).
@@ -704,6 +738,7 @@ var AnimalService = (function () {
     idadeEm: idadeEm,
     perfilEm: perfilEm,
     categoriaEm: categoriaEm,
+    naCategoriaDesde: naCategoriaDesde,
     pesoVigente: pesoVigente,
     retratoEm: retratoEm,
     linhaLeve: linhaLeve,

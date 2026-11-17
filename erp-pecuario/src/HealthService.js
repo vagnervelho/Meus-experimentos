@@ -183,11 +183,9 @@ var HealthService = (function () {
   }
 
   // ------------------------------------------------------------------ protocolos e agenda (RN-058, RN-059) ----
-  /** Primeiro dia em que o animal tem `meses` completos (Utils.idadeMeses; o nascido em 31/01 completa 1 mês em 01/03). */
+  /** Primeiro dia em que o animal tem `meses` completos (Utils.completaMeses). */
   function completaMeses_(nascimento, meses) {
-    var d = Utils.somaMeses(nascimento, meses);
-    for (var i = 0; i < 4 && Utils.idadeMeses(nascimento, d) < meses; i++) d = Utils.somaDias(d, 1);
-    return d;
+    return Utils.completaMeses(nascimento, meses);
   }
   function ultimoDiaDoMes_(ano, mes) {
     var prox = mes === 12 ? String(ano + 1) + '-01-01' : String(ano) + '-' + (mes + 1 < 10 ? '0' : '') + (mes + 1) + '-01';
@@ -207,6 +205,10 @@ var HealthService = (function () {
    * aplicação que o cumpre (o protocolo já praticado e cadastrado depois, com as aplicações lançadas em atraso). O contexto
    * põe `inicio_vigencia` (sem ele, o dia do cadastro).
    */
+  /** No protocolo restrito a uma categoria, o dia em que o animal entrou na categoria que tem em D (perfil.na_categoria_desde). */
+  function naCategoria_(p, perfil) {
+    return vazio_(p.category_id) || !perfil ? null : nulo_(perfil.na_categoria_desde);
+  }
   function inicioProtocolo_(p) {
     if (p.inicio_vigencia !== undefined) return p.inicio_vigencia;
     return typeof p.created_at === 'string' && p.created_at.length >= 10 ? p.created_at.slice(0, 10) : null;
@@ -234,7 +236,7 @@ var HealthService = (function () {
     if (max === null || idade < max) return { elegivel: true, devendo: false };
     if (p.recorrencia_tipo !== 'UNICA') return nao;
     var fimFaixa = completaMeses_(a.data_nascimento, max);
-    var comeco = [min !== null ? completaMeses_(a.data_nascimento, min) : a.data_nascimento, a.no_rebanho_desde, inicioProtocolo_(p)].filter(Boolean).sort().pop();
+    var comeco = [min !== null ? completaMeses_(a.data_nascimento, min) : a.data_nascimento, a.no_rebanho_desde, inicioProtocolo_(p), naCategoria_(p, a)].filter(Boolean).sort().pop();
     return comeco && comeco < fimFaixa ? { elegivel: true, devendo: true } : nao;
   }
   /**
@@ -256,9 +258,12 @@ var HealthService = (function () {
     var min = num_(p.idade_min_meses) ? p.idade_min_meses : null;
     var max = num_(p.idade_max_meses) ? p.idade_max_meses : null;
     var nasc = Utils.dataValida(a.data_nascimento) ? a.data_nascimento : null;
-    var elegivelDesde = [a.no_rebanho_desde, min !== null && nasc ? completaMeses_(nasc, min) : null].filter(Boolean).sort().pop() || a.no_rebanho_desde || data;
+    // O dia em que se tornou elegível: a entrada no rebanho, o dia em que completa a idade mínima e, no protocolo restrito a
+    // uma categoria, o dia em que entrou nela (o trecho na categoria que termina em D; 05, seção 4.7).
+    var cat = naCategoria_(p, a);
+    var elegivelDesde = [a.no_rebanho_desde, min !== null && nasc ? completaMeses_(nasc, min) : null, cat].filter(Boolean).sort().pop() || a.no_rebanho_desde || data;
     if (p.recorrencia_tipo === 'UNICA') {
-      var v = max !== null && nasc ? completaMeses_(nasc, max) : min !== null && nasc ? completaMeses_(nasc, min) : (a.no_rebanho_desde || data);
+      var v = max !== null && nasc ? completaMeses_(nasc, max) : min !== null && nasc ? [completaMeses_(nasc, min), cat].filter(Boolean).sort().pop() : elegivelDesde;
       return { vencimento: v, cumprida: apl.length > 0, ultima: ultima };
     }
     if (p.recorrencia_tipo === 'INTERVALO_DIAS') {
@@ -405,10 +410,18 @@ var HealthService = (function () {
       seq: function (eventId) { var ev = L.f.evento(eventId); return ev ? (L.f.ordemSeq(eventId) || 0) * 1e6 + (ev.event_seq || 0) : 0; },
     };
   }
-  /** Perfil do animal na data para a elegibilidade: sexo, nascimento, categoria em D e a entrada no rebanho. */
-  function perfilEm_(L, a, data, desde) {
+  /**
+   * Perfil do animal na data para a elegibilidade: sexo, nascimento, categoria em D, a entrada no rebanho e, quando algum
+   * protocolo é restrito a uma categoria, desde quando o animal está na categoria de D (AnimalService.naCategoriaDesde).
+   */
+  function perfilEm_(L, c, a, data, desde) {
     var cat = AnimalService.categoriaEm(L, a, data);
-    return { sexo: a.sexo, data_nascimento: nulo_(a.data_nascimento), category_id: cat ? cat.category_id : null, no_rebanho_desde: desde || nulo_(a.data_entrada) };
+    var entrada = desde || nulo_(a.data_entrada);
+    var porCategoria = c.protocolos.some(function (p) { return !vazio_(p.category_id) && cat && p.category_id === cat.category_id; });
+    return {
+      sexo: a.sexo, data_nascimento: nulo_(a.data_nascimento), category_id: cat ? cat.category_id : null, no_rebanho_desde: entrada,
+      na_categoria_desde: porCategoria ? AnimalService.naCategoriaDesde(L, a, data, entrada) : null,
+    };
   }
   /**
    * A agenda em D (05, RN-058 e RN-059; 07, seção 8.4; 08, seção 3): animais no rebanho em D com pendência vencida ou
@@ -433,7 +446,7 @@ var HealthService = (function () {
       // As contas pelo que não muda com a data (o sexo, o nascimento; a categoria em D sai da linha do tempo) e o brinco das
       // listas pelo retrato em D, só de quem entra nelas (InventoryService.presentes: `registro` e `animal`).
       var a = x.registro;
-      var r = pendenciasDoAnimal(c, a.animal_id, perfilEm_(L, a, data, x.no_rebanho_desde), data);
+      var r = pendenciasDoAnimal(c, a.animal_id, perfilEm_(L, c, a, data, x.no_rebanho_desde), data);
       Object.keys(r.elegivel).forEach(function (pid) { porProt[pid].elegiveis += 1; if (r.elegivel[pid].em_dia) porProt[pid].em_dia += 1; });
       r.pendencias.forEach(function (p) {
         p.codigo_interno = a.codigo_interno;
@@ -559,7 +572,7 @@ var HealthService = (function () {
       // A entrada no rebanho é a da linha do tempo (a mesma que a agenda e os alertas usam: InventoryService.presentes), não a
       // data_entrada declarada no cadastro (vazia no rebanho inicial): o nunca aplicado vence no mesmo dia na ficha e na agenda.
       var desde = Timeline.situacaoEm(L.f.linhas(a.animal_id), L.hoje, L.marcoZero).no_rebanho_desde;
-      proximas = pendenciasDoAnimal(c, a.animal_id, perfilEm_(L, a, L.hoje, desde), L.hoje).pendencias;
+      proximas = pendenciasDoAnimal(c, a.animal_id, perfilEm_(L, c, a, L.hoje, desde), L.hoje).pendencias;
       // Também a próxima dose ainda longe (EM_DIA): o que a última aplicação de cada chave prevê.
       itens.forEach(function (x) {
         if (vazio_(x.data_proxima_aplicacao) || x.data_proxima_aplicacao < L.hoje) return;
@@ -706,7 +719,7 @@ var HealthService = (function () {
     var p = pedido || {};
     return {
       rota: 'protocolo.salvar', idempotencyKey: p.idempotencyKey, dados: p.dados, avisosAceitos: p.avisosAceitos || [],
-      dataVersionEsperada: p.dataVersionEsperada, reads: ['PROTOCOLOS_SANITARIOS', 'PRODUTOS', 'CATEGORIAS'],
+      dataVersionEsperada: p.dataVersionEsperada, reads: ['PROTOCOLOS_SANITARIOS', 'PRODUTOS', 'CATEGORIAS', 'SANIDADE'],
       tratador: function (tx) {
         var d = tx.dados || {};
         var col = Validation.coletor();
@@ -733,6 +746,11 @@ var HealthService = (function () {
         }
         if (rec && rec !== 'CAMPANHA_MESES' && !vazio_(final.meses_campanha)) {
           if (campos.meses_campanha === undefined) { campos.meses_campanha = null; final.meses_campanha = null; } else col.erro(det_('CAMPO_NAO_SE_APLICA', 'meses_campanha', 'Os meses só valem para o protocolo de campanha.'));
+        }
+        // O procedimento não muda depois que o protocolo foi cumprido por alguma aplicação: as aplicações dele contam na agenda
+        // pelo protocolo, e trocar o procedimento mudaria o que o fato passado cumpria (como a unidade do produto em uso).
+        if (atual && campos.tipo_procedimento !== undefined && campos.tipo_procedimento !== atual.tipo_procedimento && tx.repo.por('SANIDADE', 'protocol_id', atual.protocol_id).length) {
+          col.erro(det_('PROTOCOLO_EM_USO', 'tipo_procedimento', 'O protocolo ' + atual.nome + ' já foi cumprido por aplicações de ' + ({ VACINA: 'vacina', VERMIFUGO: 'vermífugo', MEDICAMENTO: 'medicamento', TRATAMENTO: 'tratamento', EXAME: 'exame' }[atual.tipo_procedimento] || 'outro procedimento') + ': o procedimento não muda mais. Cadastre outro protocolo para o outro procedimento.'));
         }
         if (num_(final.idade_min_meses) && num_(final.idade_max_meses) && final.idade_max_meses <= final.idade_min_meses) col.erro(det_('FAIXA_INVALIDA', 'idade_max_meses', 'A idade máxima precisa ser maior que a mínima (a máxima não conta: de 3 a 8 meses vale até o dia antes de completar 8).'));
         if (!vazio_(campos.product_id)) {

@@ -419,11 +419,20 @@ var WeightService = (function () {
     var c = id ? L.categoriaPorId[id] : null;
     return c ? c.nome : null;
   }
-  function ganhoDoGrupo_(g, params) {
+  /**
+   * O GMD do grupo (Σ ganho ÷ Σ dias, n mínimo) com o porquê verdadeiro do vazio (P9): o ganho de cada intervalo entre
+   * pesagens conta na categoria do animal no início do intervalo e nos pastos pelos dias passados em cada um. `tipo`:
+   * 'categoria', 'pasto' ou 'geral' (o geral com o filtro de pasto ou de categoria explica pelo filtro).
+   */
+  function ganhoDoGrupo_(g, params, tipo) {
     var nMin = typeof params.indicador_n_minimo === 'number' ? params.indicador_n_minimo : 5;
+    var min = typeof params.gmd_intervalo_min_dias === 'number' ? params.gmd_intervalo_min_dias : 28;
     var n = Object.keys(g.animais).length;
     var valor = n >= nMin && g.dias > 0 ? Utils.arredondar(g.ganho / g.dias, 3) : null;
-    return indicador_(valor, 'DADOS_INSUFICIENTES', n, { dias: g.dias, ganho_kg: g.dias ? Utils.arredondar(g.ganho, 1) : null, explicacao: valor === null ? (n ? 'Só ' + n + (n === 1 ? ' animal' : ' animais') + ' com ganho medido no período (mínimo ' + nMin + ').' : 'Nenhum animal com duas pesagens individuais no período.') : null });
+    var vazio = tipo === 'categoria' ? 'Nenhum animal com ganho medido a partir desta categoria no período: o ganho de cada intervalo entre pesagens conta na categoria do animal no início dele.'
+      : tipo === 'pasto' ? 'Nenhum animal com ganho medido enquanto estava neste pasto no período: o ganho de cada intervalo entre pesagens conta nos pastos em que o animal ficou entre elas.'
+      : 'Nenhum animal com ganho medido no período: são precisas duas pesagens individuais no rebanho, com ao menos ' + min + ' dias entre a primeira e a última.';
+    return indicador_(valor, 'DADOS_INSUFICIENTES', n, { dias: g.dias, ganho_kg: g.dias ? Utils.arredondar(g.ganho, 1) : null, explicacao: valor === null ? (n ? 'Só ' + n + (n === 1 ? ' animal' : ' animais') + ' com ganho medido no período (mínimo ' + nMin + ').' : vazio) : null });
   }
   function grupo_(mapa, chave) {
     if (!mapa[chave]) mapa[chave] = { ganho: 0, dias: 0, animais: {} };
@@ -559,14 +568,14 @@ var WeightService = (function () {
           itens.forEach(function (x) { var c = AnimalService.categoriaEm(L, x.registro, per.ate); var k = c ? c.category_id : 'SEM_CATEGORIA'; (catDe[k] = catDe[k] || []).push(x); });
           Object.keys(catDe).forEach(function (k) { compCat[k] = InventoryService.compor(L, catDe[k], per.ate); });
         }
-        var linhaGrupo = function (comp, g) {
-          return { cabecas: comp ? comp.cabecas : null, peso_medio: comp ? comp.peso_medio : indicador_(null, pres.motivo, 0), ua: comp ? comp.ua : null, gmd: ganhoDoGrupo_(g || { ganho: 0, dias: 0, animais: {} }, params),
+        var linhaGrupo = function (comp, g, tipo) {
+          return { cabecas: comp ? comp.cabecas : null, peso_medio: comp ? comp.peso_medio : indicador_(null, pres.motivo, 0), ua: comp ? comp.ua : null, gmd: ganhoDoGrupo_(g || { ganho: 0, dias: 0, animais: {} }, params, tipo),
             por_categoria: comp ? comp.por_categoria.map(function (c) { return { category_id: c.category_id, nome: c.nome, cabecas: c.cabecas }; }) : null, sem_categoria: comp ? comp.sem_categoria : null };
         };
         var pastosIds = Utils.unicos(Object.keys(porPasto).concat(Object.keys(compPasto)));
         var listaPastos = pastosIds.map(function (pid) {
           var p = pid === 'SEM_PASTO' ? null : L.f.pasto(pid);
-          var x = linhaGrupo(compPasto[pid] || (pres.motivo ? null : InventoryService.compor(L, [], per.ate)), porPasto[pid]);
+          var x = linhaGrupo(compPasto[pid] || (pres.motivo ? null : InventoryService.compor(L, [], per.ate)), porPasto[pid], 'pasto');
           x.pasture_id = pid === 'SEM_PASTO' ? null : pid;
           x.nome = p ? p.nome : 'Sem pasto';
           x.rotulo = x.nome;
@@ -583,12 +592,12 @@ var WeightService = (function () {
         rotular(function (p) { return vazio_(p.identificacao) ? p.pasture_id : p.identificacao; });
         var catIds = Utils.unicos(Object.keys(porCat).concat(Object.keys(compCat)));
         var listaCats = catIds.map(function (cid) {
-          var x = linhaGrupo(compCat[cid] || (pres.motivo ? null : InventoryService.compor(L, [], per.ate)), porCat[cid]);
+          var x = linhaGrupo(compCat[cid] || (pres.motivo ? null : InventoryService.compor(L, [], per.ate)), porCat[cid], 'categoria');
           x.category_id = cid === 'SEM_CATEGORIA' ? null : cid;
           x.nome = cid === 'SEM_CATEGORIA' ? 'Sem categoria' : nomeCategoria_(L, cid);
           return x;
         });
-        var g = linhaGrupo(compoeGeral, geral);
+        var g = linhaGrupo(compoeGeral, geral, !vazio_(d.pasture_id) ? 'pasto' : !vazio_(d.category_id) ? 'categoria' : 'geral');
         g.motivo = pres.motivo;
         return {
           periodo: { de: per.de, ate: per.ate }, filtros: { pasture_id: d.pasture_id || null, sexo: d.sexo || null, category_id: d.category_id || null, raca: d.raca || null },

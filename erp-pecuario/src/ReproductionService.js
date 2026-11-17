@@ -761,6 +761,8 @@ var ReproductionService = (function () {
         }
         var ano = !vazio_(d.ano) ? d.ano : data.slice(0, 4);
         if (!vazio_(d.ano) && !/^\d{4}$/.test(String(d.ano))) throw Validation.erro('VALIDATION', 'O ano precisa ter quatro algarismos.', [det_('FORMATO_INVALIDO', 'ano', 'Ano inválido.')]);
+        // A resposta em D só com os fatos até D (CONTRATOS, seção 46): o ano depois do de D ainda não começou nela.
+        if (String(ano) > data.slice(0, 4)) throw Validation.erro('VALIDATION', 'O ano de ' + ano + ' ainda não começou em ' + br_(data) + '.', [det_('DATA_FUTURA', 'ano', 'Escolha um ano até ' + data.slice(0, 4) + '.')]);
         var minimo = typeof L.params.indicador_n_minimo === 'number' ? L.params.indicador_n_minimo : 5;
         var matrizes = vazio_(L.marcoZero) || data < L.marcoZero ? null : matrizesEm_(L, data);
         var prenhas = matrizes ? matrizes.filter(function (x) { return x.situacao === 'PRENHA'; }).length : null;

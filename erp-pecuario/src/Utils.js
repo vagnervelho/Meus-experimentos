@@ -96,6 +96,12 @@ var Utils = (function () {
     var d = exigirData_(naData, 'idadeMeses');
     return (d.ano - n.ano) * 12 + (d.mes - n.mes) - (d.dia < n.dia ? 1 : 0);
   }
+  /** Primeiro dia em que o nascido em `nascimento` tem `meses` completos (idadeMeses; o nascido em 31/01 completa 1 mês em 01/03). */
+  function completaMeses(nascimento, meses) {
+    var d = somaMeses(nascimento, meses);
+    for (var i = 0; i < 4 && idadeMeses(nascimento, d) < meses; i++) d = somaDias(d, 1);
+    return d;
+  }
   function instanteMs_(instante) {
     if (typeof instante === 'number' && isFinite(instante)) return instante;
     if (typeof instante === 'string' && RE_INSTANTE.test(instante)) {
@@ -463,6 +469,7 @@ var Utils = (function () {
     somaDias: somaDias,
     compararDatas: compararDatas,
     idadeMeses: idadeMeses,
+    completaMeses: completaMeses,
     hoje: hoje,
     instanteValido: instanteValido,
     instanteIso: instanteIso,

@@ -989,13 +989,17 @@ var EventService = (function () {
     var produto = produtoDoCampo_(m, 'produto_id', c.produto_id);
     if (!vazio_(c.produto_id) && !produto) s.ok = false;
     s.produto = produto;
+    // Na correção com o mesmo produto, as cópias do cadastro feitas no lançamento (o nome, o fabricante e a carência
+    // proposta) são as do original, não as do cadastro de hoje (03b, SANIDADE.nome_produto e periodo_carencia_dias: cópias
+    // congeladas; CONTRATOS, seção 43: corrigir não refaz o fato pelo cadastro de hoje).
+    var congelado = produto ? sanidadeDoOriginal_(m, ctxEv, produto.product_id) : null;
     var nomeLivre = typeof c.nome_produto === 'string' ? nulo_(Utils.aparar(c.nome_produto)) : null;
-    if (produto && nomeLivre && Utils.normalizarTexto(nomeLivre) !== Utils.normalizarTexto(produto.nome)) {
+    if (produto && nomeLivre && Utils.normalizarTexto(nomeLivre) !== Utils.normalizarTexto(produto.nome) && !(congelado && Utils.normalizarTexto(nomeLivre) === Utils.normalizarTexto(congelado.nome_produto || ''))) {
       erroGeral_(m, 'nome_produto', 'CAMPO_NAO_SE_APLICA', 'Com o produto do cadastro, o nome vem do cadastro (' + produto.nome + '): deixe o nome em branco ou escolha outro produto.');
       s.ok = false;
     }
-    s.nome = produto ? produto.nome : nomeLivre;
-    s.fabricante = typeof c.fabricante === 'string' && nulo_(Utils.aparar(c.fabricante)) ? Utils.aparar(c.fabricante) : produto ? nulo_(produto.fabricante) : null;
+    s.nome = produto ? (congelado && !vazio_(congelado.nome_produto) ? congelado.nome_produto : produto.nome) : nomeLivre;
+    s.fabricante = typeof c.fabricante === 'string' && nulo_(Utils.aparar(c.fabricante)) ? Utils.aparar(c.fabricante) : congelado ? nulo_(congelado.fabricante) : produto ? nulo_(produto.fabricante) : null;
     if (HealthService.COM_PRODUTO_OBRIGATORIO.indexOf(sub) >= 0 && !s.nome && vazio_(c.produto_id)) {
       erroGeral_(m, 'produto_id', 'CAMPO_OBRIGATORIO', 'Escolha o produto do cadastro ou digite o nome do produto aplicado.');
       s.ok = false;
@@ -1004,7 +1008,7 @@ var EventService = (function () {
       var p = m.repo.porId('PROTOCOLOS_SANITARIOS', c.protocol_id);
       if (!p) { erroGeral_(m, 'protocol_id', 'NAO_ENCONTRADO', 'O protocolo escolhido não existe. Atualize a tela e escolha de novo.'); s.ok = false; }
       else if (p.ativo === false && !usadoNoOriginal_(m, p.protocol_id)) { erroGeral_(m, 'protocol_id', 'PROTOCOLO_INATIVO', 'O protocolo ' + p.nome + ' está desativado. Reative-o no cadastro de protocolos ou deixe o campo em branco.'); s.ok = false; }
-      else if (p.tipo_procedimento !== s.procedimento) { erroGeral_(m, 'protocol_id', 'PROTOCOLO_DE_OUTRO_PROCEDIMENTO', 'O protocolo ' + p.nome + ' é cumprido por ' + rotuloProcedimento_(p.tipo_procedimento) + ', não por ' + rotuloProcedimento_(s.procedimento) + '.'); s.ok = false; }
+      else if (p.tipo_procedimento !== s.procedimento && !protocoloDoOriginal_(m, ctxEv, p.protocol_id, s.procedimento)) { erroGeral_(m, 'protocol_id', 'PROTOCOLO_DE_OUTRO_PROCEDIMENTO', 'O protocolo ' + p.nome + ' é cumprido por ' + rotuloProcedimento_(p.tipo_procedimento) + ', não por ' + rotuloProcedimento_(s.procedimento) + '.'); s.ok = false; }
       else s.protocolo = p;
     }
     var temProduto = !!s.nome || !vazio_(c.produto_id);
@@ -1024,8 +1028,11 @@ var EventService = (function () {
     // Carência e próxima aplicação. Sem os dias informados, a carência padrão do produto do cadastro (05, seção 4.8: "usa os
     // dias informados no produto ou na aplicação"; 03b, SANIDADE.periodo_carencia_dias: proposta por
     // PRODUTOS.carencia_padrao_dias): a mesma regra no formulário, na API e na importação (o 0 informado é "sem carência").
+    // Na correção com o mesmo produto, o vazio é a carência gravada no original (que pode ser nenhuma), não a padrão de hoje.
     s.carenciaDias = typeof c.periodo_carencia_dias === 'number' ? c.periodo_carencia_dias
-      : doSubtipo.periodo_carencia_dias && vazio_(c.periodo_carencia_dias) && produto && typeof produto.carencia_padrao_dias === 'number' ? produto.carencia_padrao_dias : null;
+      : !doSubtipo.periodo_carencia_dias || !vazio_(c.periodo_carencia_dias) ? null
+      : congelado ? (typeof congelado.periodo_carencia_dias === 'number' ? congelado.periodo_carencia_dias : null)
+      : produto && typeof produto.carencia_padrao_dias === 'number' ? produto.carencia_padrao_dias : null;
     s.fimCarencia = HealthService.fimPeloPeriodo(data, s.carenciaDias);
     if (!vazio_(c.data_proxima_aplicacao)) {
       if (Utils.dataValida(c.data_proxima_aplicacao) && Utils.dataValida(data) && c.data_proxima_aplicacao <= data) { erroGeral_(m, 'data_proxima_aplicacao', 'DATA_INVALIDA', 'A próxima aplicação precisa ser depois de ' + br_(data) + '.'); s.ok = false; }
@@ -1042,6 +1049,19 @@ var EventService = (function () {
     if (!vazio_(c.validade) && Utils.dataValida(c.validade) && Utils.dataValida(data) && c.validade < data) {
       avisoItem_(m, null, 'PRODUTO_VENCIDO', 'O lote ' + (vazio_(c.lote) ? '' : c.lote + ' ') + 'de ' + (s.nome || 'produto') + ' venceu em ' + br_(c.validade) + ', antes da aplicação (' + br_(data) + '). Gravar mesmo assim?');
     }
+  }
+  /** Na correção, a linha de SANIDADE do original quando ele usou o mesmo produto do cadastro; senão null. */
+  function sanidadeDoOriginal_(m, ctxEv, productId) {
+    if (!ctxEv.original || !m.repo.carregada('SANIDADE')) return null;
+    return m.repo.por('SANIDADE', 'event_id', ctxEv.original.event_id).filter(function (r) { return r.produto_id === productId; })[0] || null;
+  }
+  /**
+   * Na correção, o protocolo que o original cumpria com o mesmo procedimento: continua valendo mesmo que o cadastro dele
+   * tenha mudado de procedimento depois (o fato congelado, como o protocolo desativado depois de usado).
+   */
+  function protocoloDoOriginal_(m, ctxEv, protocolId, procedimento) {
+    if (!ctxEv.original || !m.repo.carregada('SANIDADE')) return false;
+    return m.repo.por('SANIDADE', 'event_id', ctxEv.original.event_id).some(function (r) { return r.protocol_id === protocolId && r.tipo_procedimento === procedimento; });
   }
   /** Na correção com o mesmo protocolo, o intervalo que propôs a próxima aplicação do original (o payload dele); senão null. */
   function intervaloDoOriginal_(m, ctxEv, protocolId) {
