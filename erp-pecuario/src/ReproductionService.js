@@ -674,7 +674,9 @@ var ReproductionService = (function () {
       var s = Timeline.situacaoEm(f.linhas(a.animal_id), data, L.marcoZero);
       if (!s.presente) return;
       var ps = partos(f, a.animal_id).filter(function (x) { return x.data <= data; });
-      var nP = (typeof a.partos_previos === 'number' ? a.partos_previos : 0) + ps.length;
+      // A mesma conta da ficha (contarPartos): os partos registrados antes da entrada descrevem o mesmo passado que
+      // partos_previos (vale o maior); só os de depois somam.
+      var nP = contarPartos(a.partos_previos, ps, dataDaEntrada_(f, a.animal_id));
       // A marca de descarte e a situação vigentes NA DATA (a marcação de dezembro não muda o 1º de janeiro).
       var naData = Timeline.reproducaoEm(f, a.animal_id, data);
       if (!apta_(a, p, data, nP) || naData.marcado_descarte) return;
@@ -818,14 +820,17 @@ var ReproductionService = (function () {
       if (!vazio_(o.pasture_id) && s.pasture_id !== o.pasture_id) return;
       var regs = registros(f, a.animal_id).filter(function (r) { return r.data <= data; });
       var ps = regs.filter(function (r) { return r.tipo_evento === 'PARTO'; });
-      var nPartos = (typeof a.partos_previos === 'number' ? a.partos_previos : 0) + ps.length;
+      var nPartos = contarPartos(a.partos_previos, ps, dataDaEntrada_(f, a.animal_id));
       var apta = apta_(a, p, data, nPartos);
       if (!apta && !regs.length) return;
       // A mesma regra da projeção em qualquer data (a declarada na entrada vale como o fato da data dela); a cria ao pé também
       // (Timeline.criaAoPeEm: as crias presentes na data, sem desmama até ela).
       var naData = Timeline.reproducaoEm(f, a.animal_id, data);
       var sit = naData.situacao_reprodutiva;
-      if (!vazio_(o.situacao) && sit !== o.situacao) return;
+      // O filtro por situação segue o que a lista mostra (03a, seção 4.3.3; DL-05): a fêmea apta com NAO_APTA gravado (o valor
+      // inicial; a aptidão por idade é da leitura) não é "não apta" — fica com as sem informação.
+      var sitFiltro = apta && sit === 'NAO_APTA' ? 'SEM_INFORMACAO' : sit;
+      if (!vazio_(o.situacao) && sitFiltro !== o.situacao) return;
       var ultimo = regs.length ? regs[regs.length - 1] : null;
       var prev = ['PRENHA', 'INSEMINADA', 'EXPOSTA'].indexOf(sit) >= 0 ? previsaoParto(regs, p, est) : null;
       out.push({

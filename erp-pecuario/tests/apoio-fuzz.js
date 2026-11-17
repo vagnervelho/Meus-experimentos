@@ -43,6 +43,8 @@ function somaDias(d, n) {
   return new Date(t).toISOString().slice(0, 10);
 }
 const br = (d) => d.slice(8, 10) + '/' + d.slice(5, 7) + '/' + d.slice(0, 4);
+/** O dia (yyyy-MM-dd) de um instante ISO no fuso da fazenda do harness (America/Porto_Velho, UTC−4, sem horário de verão). */
+const diaNoFuso = (ts) => new Date(Date.parse(ts) - 4 * 3600000).toISOString().slice(0, 10);
 function reais(c) {
   const r = Math.floor(c / 100);
   const s = String(r).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
@@ -1593,6 +1595,13 @@ registrarTipo('PESAGEM', {
         contar('GMD da resposta conferido');
         if ((typeof x.gmd_kg_dia === 'number' ? x.gmd_kg_dia : null) !== esperado) erro('GMD da resposta ' + x.gmd_kg_dia + ', o da ficha pelo modelo ' + esperado);
         if (x.gmd_kg_dia === null && !x.gmd_explicacao) erro('GMD da resposta vazio sem o porquê');
+        // Rodada 3 (achados 8 e 25): o intervalo do GMD vai junto (de, peso, ganho e dias do MESMO intervalo do modelo), e o
+        // GMD é o ganho ÷ os dias dele — nunca o ganho e os dias contra outra pesagem.
+        const iv = x.gmd_intervalo || null;
+        const ivModelo = v ? { de: v.a.data_pesagem, peso_de_kg: v.a.peso_kg, ganho_kg: v.ganho, dias: v.nd } : null;
+        if (JSON.stringify(iv) !== JSON.stringify(ivModelo)) erro('intervalo do GMD da resposta ' + JSON.stringify(iv) + ', o do modelo ' + JSON.stringify(ivModelo));
+        else if (iv && typeof x.gmd_kg_dia === 'number' && Math.abs(x.gmd_kg_dia - iv.ganho_kg / iv.dias) > 0.0006) erro('GMD da resposta ' + x.gmd_kg_dia + ' não é o ganho ÷ os dias do intervalo dele ' + JSON.stringify(iv));
+        if (iv && x.anterior && iv.de !== x.anterior.data) contar('GMD da resposta com intervalo antes da pesagem anterior');
       });
     }
   },
@@ -1745,7 +1754,11 @@ registrarTipo('SANIDADE', {
     if (rows.length !== d.animais.length) erro(rows.length + ' registros de sanidade para ' + d.animais.length + ' animais');
     const prod = cp.produto_id ? S.t.PRODUTOS.find((p) => p.product_id === cp.produto_id) : null;
     const prot = cp.protocol_id ? S.t.PROTOCOLOS_SANITARIOS.find((p) => p.protocol_id === cp.protocol_id) : null;
-    const fim = typeof cp.periodo_carencia_dias === 'number' && cp.periodo_carencia_dias > 0 ? somaDias(cp.event_date, cp.periodo_carencia_dias) : null;
+    // Rodada 3 da revisão da Fase 3 (achado 1): sem os dias informados, a carência padrão do produto do cadastro (05, seção
+    // 4.8), como o formulário propõe; o 0 informado é "sem carência".
+    const diasCar = typeof cp.periodo_carencia_dias === 'number' ? cp.periodo_carencia_dias : prod && typeof prod.carencia_padrao_dias === 'number' && d.subtipo !== 'DOENCA' ? prod.carencia_padrao_dias : null;
+    if (typeof cp.periodo_carencia_dias !== 'number' && diasCar !== null) contar('carência pelo padrão do produto');
+    const fim = typeof diasCar === 'number' && diasCar > 0 ? somaDias(cp.event_date, diasCar) : null;
     // A próxima pelo protocolo: na correção com o mesmo protocolo, o intervalo do original (payload); senão o de agora.
     const intervaloOriginal = prot ? intervaloCongelado(c, prot.protocol_id) : null;
     const intervalo = intervaloOriginal !== null ? intervaloOriginal : prot && typeof prot.intervalo_dias === 'number' ? prot.intervalo_dias : null;
@@ -1924,7 +1937,11 @@ registrarTipo('ESTOQUE', {
     if (fins.length) erro('acerto de estoque com lançamento financeiro');
     let esperado;
     if (cp.motivo_ajuste === 'CONTAGEM') {
-      const antes = S.t.MOVIMENTOS_ESTOQUE.filter((mv) => mv.product_id === prod.product_id && mv.event_id !== eid && S.vig.get(mv.event_id) && mv.data <= cp.event_date);
+      // Rodada 3 da revisão da Fase 3 (achado 16): no mesmo dia, só os movimentos antes da contagem na ordem do dia (a
+      // posição na cadeia de substituição e o event_seq: a correção da contagem fica no lugar do original).
+      const antesNoDia = (mv) => { const x = S.ev.get(mv.event_id); return x && (S.raiz(x) < S.raiz(E) || (S.raiz(x) === S.raiz(E) && x.event_seq < E.event_seq)); };
+      const antes = S.t.MOVIMENTOS_ESTOQUE.filter((mv) => mv.product_id === prod.product_id && mv.event_id !== eid && S.vig.get(mv.event_id) && (mv.data < cp.event_date || (mv.data === cp.event_date && antesNoDia(mv))));
+      if (S.t.MOVIMENTOS_ESTOQUE.some((mv) => mv.product_id === prod.product_id && mv.event_id !== eid && S.vig.get(mv.event_id) && mv.data === cp.event_date && !antesNoDia(mv))) contar('contagem corrigida com movimento do mesmo dia gravado depois dela');
       esperado = somaQtd([cp.saldo_contado, -somaQtd(antes.map((mv) => (mv.tipo === 'SAIDA' ? -mv.quantidade : mv.quantidade)))]);
     } else esperado = -cp.quantidade;
     if (movs.length !== 1 || movs[0].tipo !== 'AJUSTE' || movs[0].quantidade !== esperado || movs[0].data !== cp.event_date) erro('movimento do acerto ' + JSON.stringify(movs.map((mv) => [mv.tipo, mv.quantidade])) + ', esperado ' + esperado);
@@ -2503,7 +2520,10 @@ registrarImportador('SANIDADE', {
     const proc = { 'vacinação': 'VACINA', 'vermifugação': 'VERMIFUGO', 'doença': 'DOENCA', 'medicação': 'MEDICAMENTO' }[v.procedimento];
     if (h.event_id !== l.event_id_gerado || h.data_aplicacao !== deBr(v.data) || h.tipo_procedimento !== proc) erro('aplicação gravada ' + JSON.stringify([h.data_aplicacao, h.tipo_procedimento]) + ', a linha diz ' + JSON.stringify([v.data, v.procedimento]));
     if ((h.nome_produto || '') !== (v.produto || v.nome || '')) erro('produto gravado ' + h.nome_produto + ', a linha diz ' + (v.produto || v.nome));
-    const car = v.carencia ? Number(v.carencia) : null;
+    // Rodada 3 (achado 1): sem a coluna da carência, a carência padrão do produto do cadastro (o mesmo caminho do formulário).
+    const prodCad = v.produto && h.produto_id ? S.t.PRODUTOS.find((p) => p.product_id === h.produto_id) : null;
+    const car = v.carencia !== undefined && v.carencia !== null && v.carencia !== '' ? Number(v.carencia) : prodCad && typeof prodCad.carencia_padrao_dias === 'number' && proc !== 'DOENCA' ? prodCad.carencia_padrao_dias : null;
+    if ((v.carencia === undefined || v.carencia === null || v.carencia === '') && car !== null) contar('carência importada pelo padrão do produto');
     if ((typeof h.periodo_carencia_dias === 'number' ? h.periodo_carencia_dias : null) !== car || (h.data_fim_carencia || null) !== (car ? somaDias(deBr(v.data), car) : null)) erro('carência gravada ' + JSON.stringify([h.periodo_carencia_dias, h.data_fim_carencia]) + ', a linha diz ' + v.carencia);
     if (v.proxima && h.data_proxima_aplicacao !== deBr(v.proxima)) erro('próxima gravada ' + h.data_proxima_aplicacao + ', a linha diz ' + v.proxima);
     const e = linhaEvento(S, l);
@@ -2704,7 +2724,9 @@ function gerarInteracao(sis, S, rnd, k, base) {
     // do estoque, o acerto retroativo, o parto da não prenhe, o registro da mãe em volta do parto, a cria ao pé e a desmama
     // com a venda, a pesagem levada para fora da permanência, a importação de manejo de quem saiu, a estação com registros
     // mudada no cadastro).
-    ['vendaParaCarencia', 2.5], ['aplicacaoAcimaDoEstoque', 1.5], ['acertoRetroativo', 1], ['partoDaVazia', 1.2], ['depoisDoParto', 1.5], ['desmamaEVenda', 1.5], ['pesagemForaDaPermanencia', 1.2], ['importacaoDeQuemSaiu', 1.2], ['estacaoMudada', 1.2]]);
+    ['vendaParaCarencia', 2.5], ['aplicacaoAcimaDoEstoque', 1.5], ['acertoRetroativo', 1], ['partoDaVazia', 1.2], ['depoisDoParto', 1.5], ['desmamaEVenda', 1.5], ['pesagemForaDaPermanencia', 1.2], ['importacaoDeQuemSaiu', 1.2], ['estacaoMudada', 1.2],
+    // Rodada 3 da revisão da Fase 3 (achado 16): o movimento do mesmo dia gravado depois de uma contagem.
+    ['movimentoDepoisDaContagem', 1.2]]);
   let c = interacaoDe(sis, S, rnd, k, base, P, qual);
   if (c) { contar('interação ' + qual); sis.interacaoPendente = null; } else {
     // Passada 2: sem como montar (na passada 1, perto de 70% das sorteadas), o gerador monta o que falta para ela.
@@ -2750,7 +2772,18 @@ function preparoDe(sis, S, rnd, k, base, P, qual) {
     const ini = naFaixa(sorteio(rnd, [somaDias(HOJE, -60), somaDias(HOJE, -150), somaDias(HOJE, -280), somaDias(marco, 20)]));
     return Object.assign(base, { rota: 'estacao.salvar', dados: { campos: { nome: 'Estação P' + k, data_inicio: ini, data_fim: somaDias(ini, sorteio(rnd, [60, 90, 120])), tipo: sorteio(rnd, ['MONTA_NATURAL', 'IA', 'MISTA']) } }, rotulo: 'interação: preparo, estação de monta' });
   }
-  if (em(['estornoInsumoConsumido', 'entradaInsumoMenor', 'aplicacaoAcimaDoEstoque', 'acertoRetroativo'])) {
+  if (qual === 'movimentoDepoisDaContagem' && rnd() < 0.6) {
+    // A contagem do armário num dia em que já há movimento do produto (ou hoje): a interação lança depois, no mesmo dia.
+    const movs = vigentesDe(S, 'MOVIMENTOS_ESTOQUE').filter((m) => S.t.PRODUTOS.some((p) => p.product_id === m.product_id && p.controla_estoque === true && p.ativo !== false));
+    const m = sorteio(rnd, movs);
+    if (m) {
+      const s = { tipo: 'ESTOQUE', sub: 'AJUSTE', data: ateHoje(sorteio(rnd, [m.data, HOJE])), prod: m.product_id };
+      preencherEstoque(S, rnd, s);
+      Object.assign(s, { motivo: 'CONTAGEM', contado: sorteio(rnd, [0, 3, 40]), qtd: null });
+      return registrar(s, 'contagem do armário');
+    }
+  }
+  if (em(['estornoInsumoConsumido', 'entradaInsumoMenor', 'aplicacaoAcimaDoEstoque', 'acertoRetroativo', 'movimentoDepoisDaContagem'])) {
     const prods = S.t.PRODUTOS.filter((p) => p.controla_estoque === true && p.ativo !== false);
     const entradas = vigentesDe(S, 'MOVIMENTOS_ESTOQUE').filter((m) => m.tipo === 'ENTRADA' && prods.some((p) => p.product_id === m.product_id));
     if (entradas.length && rnd() < 0.6) {
@@ -3027,6 +3060,29 @@ function interacaoDe(sis, S, rnd, k, base, P, qual) {
     Object.assign(s, { prod: p.product_id, nome: null, unidade: null, modo: 'TOTAL', doseRef: null, qtd, protocolo: null, lote: null, validade: null });
     s.itens.forEach((i) => { i.dose = null; });
     return registrar(s, 'aplicação acima do estoque');
+  }
+  if (qual === 'movimentoDepoisDaContagem') {
+    // Rodada 3 da revisão da Fase 3 (achado 16): o movimento do mesmo dia gravado depois de uma contagem (a vacinação da
+    // tarde, a perda, a compra que chegou) fica depois dela na ordem do dia (11: a ordem de registro) e é aceito; o efeito e o
+    // replay conferem o saldo.
+    const conts = vigentesDe(S, 'MOVIMENTOS_ESTOQUE').filter((m) => m.tipo === 'AJUSTE' && ((S.ev.get(m.event_id) || {}).payload_json || {}).motivo_ajuste === 'CONTAGEM');
+    const m = sorteio(rnd, conts);
+    const p = m && S.t.PRODUTOS.find((x) => x.product_id === m.product_id && x.ativo !== false && x.controla_estoque === true);
+    if (!p) return null;
+    const x = rnd();
+    if (x < 0.45) {
+      const ids = animaisPara(S, rnd, m.data, 2, (id, pr) => pr.dia).filter((id) => existe(S, id));
+      if (!ids.length) return null;
+      const s = propostaSanidade(sis, S, rnd, p.categoria === 'VACINA' ? 'VACINACAO' : p.categoria === 'VERMIFUGO' ? 'VERMIFUGACAO' : 'MEDICACAO', m.data, ids);
+      Object.assign(s, { prod: p.product_id, nome: null, unidade: null, modo: 'POR_CABECA', doseRef: 1, qtd: null, protocolo: null, lote: null, validade: null });
+      s.itens.forEach((i) => { i.dose = null; });
+      return registrar(s, 'aplicação no dia da contagem, depois dela');
+    }
+    const s = { tipo: 'ESTOQUE', sub: x < 0.75 ? 'AJUSTE' : 'ENTRADA', data: m.data, prod: p.product_id };
+    preencherEstoque(S, rnd, s);
+    if (s.sub === 'AJUSTE') Object.assign(s, { motivo: 'PERDA', contado: null, qtd: sorteio(rnd, [1, 2]) });
+    else Object.assign(s, { emb: null, qtd: sorteio(rnd, [5, 20]) });
+    return registrar(s, (s.sub === 'AJUSTE' ? 'perda' : 'compra') + ' no dia da contagem, depois dela');
   }
   if (qual === 'acertoRetroativo') {
     // O acerto de estoque (contagem ou perda) datado antes de saídas já gravadas: o saldo dos dias seguintes muda com ele.
@@ -3316,7 +3372,8 @@ function modeloAgenda(S, D) {
       // primeira aplicação com ele, se antes). O INTERVALO_DIAS nunca aplicado segue vencendo desde que o animal ficou
       // elegível (03a, seção 4.9).
       const primeira = sans.filter((x) => x.r.protocol_id === p.protocol_id).map((x) => x.data).sort()[0] || null;
-      const inicio = [(p.created_at || '').slice(0, 10) || null, primeira].filter(Boolean).sort()[0] || null;
+      // Rodada 3 (achados 21 e 23): o dia do cadastro no fuso da fazenda, não o dia UTC do created_at.
+      const inicio = [p.created_at ? diaNoFuso(p.created_at) : null, primeira].filter(Boolean).sort()[0] || null;
       if (inicio && inicio > D) return;
       if (p.sexo_aplicavel !== 'AMBOS' && p.sexo_aplicavel !== a.sexo) return;
       const min = typeof p.idade_min_meses === 'number' ? p.idade_min_meses : null;
@@ -3458,6 +3515,20 @@ function oraculoAgenda(sis, S, D) {
   const car = r.data.carencia.map((c) => c.animal_id + '|' + c.fim).sort();
   if (JSON.stringify(car) !== JSON.stringify(m.car)) out.push(falha('AGENDA:CARENCIA', 'carência em ' + D + ': o sistema tem ' + JSON.stringify(dif(car, m.car)) + ' e o modelo ' + JSON.stringify(dif(m.car, car))));
   if (r.data.resumo.em_carencia !== car.length || r.data.resumo.vencidas + r.data.resumo.proximas !== r.data.pendencias.length) out.push(falha('AGENDA:RESUMO', 'resumo da agenda ' + JSON.stringify(r.data.resumo) + ' × ' + r.data.pendencias.length + ' pendências e ' + car.length + ' em carência'));
+  // Rodada 3 da revisão da Fase 3 (achado 6): as próximas doses da ficha (as vencidas e próximas) são as pendências do animal na
+  // agenda de hoje, com o mesmo vencimento (a mesma entrada no rebanho). Até dois animais com pendência e um sem.
+  if (D === HOJE) {
+    const comPend = Array.from(new Set(r.data.pendencias.map((p) => p.animal_id))).slice(0, 2);
+    const semPend = Array.from(S.animais.keys()).filter((id) => comPend.indexOf(id) < 0 && (S.animais.get(id) || {}).situacao_cadastral === 'ATIVO').slice(0, 1);
+    comPend.concat(semPend).forEach((id) => {
+      const f = sis.api('animal.ficha', { animal_id: id });
+      if (!f.ok) { out.push(falha('AGENDA:FICHA', 'ficha de ' + id + ': ' + JSON.stringify(f.error).slice(0, 300))); return; }
+      const naFicha = ((f.data.sanitario || {}).proximas || []).filter((p) => p.situacao !== 'EM_DIA').map((p) => [p.protocol_id || '', p.produto_id || '', p.vencimento, p.situacao].join('|')).sort();
+      const naAgenda = r.data.pendencias.filter((p) => p.animal_id === id).map((p) => [p.protocol_id || '', p.produto_id || '', p.vencimento, p.situacao].join('|')).sort();
+      contar('ficha × agenda conferida');
+      if (JSON.stringify(naFicha) !== JSON.stringify(naAgenda)) out.push(falha('AGENDA:FICHA', ((S.animais.get(id) || {}).codigo_interno || id) + ': próximas doses da ficha ' + JSON.stringify(naFicha) + ', pendências na agenda ' + JSON.stringify(naAgenda)));
+    });
+  }
   return out;
 }
 /**
@@ -3496,11 +3567,36 @@ function oraculoManejo(sis, S, focos) {
   });
   const pd = sis.api('peso.desempenho', {});
   if (!pd.ok) out.push(falha('DESEMPENHO:FALHOU', JSON.stringify(pd.error).slice(0, 400)));
+  else {
+    // Rodada 3 (achado 14): cada pasto do desempenho tem rótulo único (o nome repetido em outra propriedade leva a propriedade).
+    const rots = pd.data.por_pasto.map((x) => x.rotulo);
+    if (new Set(rots).size !== rots.length) out.push(falha('DESEMPENHO:ROTULO', 'pastos com o mesmo rótulo no desempenho: ' + JSON.stringify(rots)));
+  }
+  // Rodada 3 (achado 9): numa data passada, a posição do curral descreve o animal pelo último peso até a data (o do modelo).
+  const Dp = somaDias(HOJE, -100);
+  if (S.marco && Dp >= S.marco) {
+    const el = sis.api('inventario.elegiveis', { tipo: 'PESAGEM', data: Dp });
+    if (!el.ok) out.push(falha('ELEGIVEIS:FALHOU', JSON.stringify(el.error).slice(0, 400)));
+    else (el.data.itens || []).slice(0, 4).forEach((x) => {
+      const ps = vigentesDe(S, 'PESAGENS').filter((p) => p.animal_id === x.animal_id && p.data_pesagem <= Dp && typeof p.peso_kg === 'number').map((p) => { const e = S.ev.get(p.event_id); return { kg: p.peso_kg, data: p.data_pesagem, raiz: S.raiz(e), seq: e.event_seq }; })
+        .sort((a, b) => cmp(a.data, b.data) || a.raiz - b.raiz || a.seq - b.seq);
+      const u = ps.length ? ps[ps.length - 1] : null;
+      contar('último peso na data conferido');
+      if ((x.ultimo_peso ? [x.ultimo_peso.kg, x.ultimo_peso.data] : null) + '' !== (u ? [u.kg, u.data] : null) + '') out.push(falha('ELEGIVEIS:PESO', ((S.animais.get(x.animal_id) || {}).codigo_interno || x.animal_id) + ' em ' + Dp + ': último peso ' + JSON.stringify(x.ultimo_peso) + ', o do modelo ' + JSON.stringify(u)));
+    });
+  }
   if (S.marco) {
     const mz = sis.api('reproducao.matrizes', {});
     if (!mz.ok) out.push(falha('MATRIZES:FALHOU', JSON.stringify(mz.error).slice(0, 400)));
-    else mz.data.itens.forEach((x) => {
+    else mz.data.itens.forEach((x, i) => {
       const a = S.animais.get(x.animal_id) || {};
+      // Rodada 3 (achado 7): os partos da lista de Fêmeas = os da ficha (a mesma conta: partos_previos e os registrados antes
+      // da entrada descrevem o mesmo passado). Até três fêmeas por passo.
+      if (i < 3) {
+        const f = sis.api('animal.ficha', { animal_id: x.animal_id });
+        if (f.ok && f.data.reprodutivo && f.data.reprodutivo.n_partos !== x.partos) out.push(falha('MATRIZES:PARTOS', (a.codigo_interno || x.animal_id) + ': ' + x.partos + ' partos na lista, ' + f.data.reprodutivo.n_partos + ' na ficha'));
+        else contar('partos da lista × ficha conferidos');
+      }
       if (a.sexo !== 'F' || !presenca(S, x.animal_id, HOJE).fim) out.push(falha('MATRIZES', (a.codigo_interno || x.animal_id) + ' na lista das fêmeas sem ser fêmea do rebanho hoje'));
       else if ((x.situacao_reprodutiva || null) !== (a.situacao_reprodutiva || null)) out.push(falha('MATRIZES', a.codigo_interno + ': situação ' + x.situacao_reprodutiva + ' na lista, ' + a.situacao_reprodutiva + ' na projeção'));
     });
@@ -3995,7 +4091,8 @@ function gerarCadastro(sis, S, rnd, k, qual, base) {
     const x = rnd();
     // Revisão da Fase 3: também a categoria (a conta do consumo) e a quantidade por embalagem — a correção sem mudança, mais
     // tarde, guarda o custo, a conta e o fator congelados (oraculoCorrecaoTardia).
-    const campos = x < 0.35 ? { controla_estoque: p.controla_estoque !== true } : x < 0.55 ? { custo_unitario: sorteio(rnd, [0, 0.035, 1.85, 2.5]) } : x < 0.63 ? { categoria: sorteio(rnd, ['VACINA', 'VERMIFUGO', 'MEDICAMENTO', 'OUTRO']) } : x < 0.7 ? { fator_conversao: sorteio(rnd, [10, 25, 50]) } : x < 0.86 ? { ativo: p.ativo === false } : { unidade: p.unidade === 'mL' ? 'dose' : 'mL' };
+    // Rodada 3 (achado 1): também a carência padrão, que a aplicação sem os dias informados usa.
+    const campos = x < 0.3 ? { controla_estoque: p.controla_estoque !== true } : x < 0.47 ? { custo_unitario: sorteio(rnd, [0, 0.035, 1.85, 2.5]) } : x < 0.58 ? { carencia_padrao_dias: sorteio(rnd, [0, 21, 35]) } : x < 0.64 ? { categoria: sorteio(rnd, ['VACINA', 'VERMIFUGO', 'MEDICAMENTO', 'OUTRO']) } : x < 0.7 ? { fator_conversao: sorteio(rnd, [10, 25, 50]) } : x < 0.86 ? { ativo: p.ativo === false } : { unidade: p.unidade === 'mL' ? 'dose' : 'mL' };
     return com('produto.salvar', { product_id: p.product_id, campos, justificativa: 'Cadastro do produto revisto' }, 'produto ' + Object.keys(campos)[0]);
   }
   if (qual === 'protocolo') {

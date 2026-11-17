@@ -605,7 +605,8 @@ var InventoryService = (function () {
    * Vale para os tipos cujo filtro de elegíveis pede animal no rebanho (ATIVO): elegível = no rebanho ao fim do dia D
    * (movimentos e saídas) ou em algum momento de D (fatos: parto, identificação, marcação — o dia da saída conta, como
    * na validação), no pasto pedido nessa data e com o sexo que o tipo exige (`filtro_elegiveis.sexo`). Devolve {data, tipo,
-   * pasture_id, motivo, n, itens: [{animal_id, codigo_interno, brinco (o em uso na data), brinco_hoje, sexo, pasture_id}]};
+   * pasture_id, motivo, n, itens: [{animal_id, codigo_interno, brinco (o em uso na data), brinco_hoje, sexo, pasture_id, categoria
+   * (o nome na data), ultimo_peso: {kg, data, estimado} | null (a última pesagem até a data)}]};
    * antes do marco zero (ou
    * sem ele) n e itens voltam null com o motivo. VALIDATION: tipo indisponível ou sem elegíveis por presença, data
    * inválida ou futura; NOT_FOUND: pasto inexistente.
@@ -633,7 +634,14 @@ var InventoryService = (function () {
         }).map(function (x) {
           // O brinco em uso NA DATA (o número trocado ou reaproveitado depois é de outro animal naquele dia), e o de hoje.
           var hoje = vazio_(x.animal.brinco) ? null : x.animal.brinco;
-          return { animal_id: x.animal.animal_id, codigo_interno: x.animal.codigo_interno, brinco: data === L.hoje ? hoje : Timeline.brincoEm(L.f, x.animal.animal_id, data), brinco_hoje: hoje, sexo: x.animal.sexo, pasture_id: x.pasture_id };
+          // A descrição do animal NA DATA (a conferência do curral e do tronco com data passada; desenho-base 4.3: o dado de
+          // hoje não vale para a data passada): a categoria em D e a última pesagem até D (qualquer método, rotulada).
+          var cat = AnimalService.categoriaEm(L, x.animal, data);
+          var pv = AnimalService.pesoVigente(L, x.animal, data, null);
+          return {
+            animal_id: x.animal.animal_id, codigo_interno: x.animal.codigo_interno, brinco: data === L.hoje ? hoje : Timeline.brincoEm(L.f, x.animal.animal_id, data), brinco_hoje: hoje, sexo: x.animal.sexo, pasture_id: x.pasture_id,
+            categoria: cat ? cat.nome : null, ultimo_peso: pv.data_pesagem ? { kg: pv.kg, data: pv.data_pesagem, estimado: pv.metodo === 'ESTIMATIVA_VISUAL' } : null,
+          };
         });
         base.n = base.itens.length;
         return base;

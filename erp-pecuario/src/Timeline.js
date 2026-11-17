@@ -600,7 +600,19 @@ var Timeline = (function () {
   function brincoEm(f, id, data) {
     var lista = linhasDeIdentificacao_(f, id).BRINCO || [];
     if (!lista.length) { var a = f.animal(id); return a && !vazio_(a.brinco) ? a.brinco : null; }
-    var u = codigoEmUso_(lista.filter(function (x) { return x.data_inicio <= data; }));
+    // O número lançado por engano e corrigido por AJUSTE_INVENTARIO/IDENTIFICACAO_INCORRETA nunca esteve na orelha
+    // (desenho-base 16.2): o número certo vale desde o início do período do errado, não da data da correção. A correção
+    // toma o lugar da linha que corrige na sequência (com a data de início dela); duas correções seguidas recuam juntas.
+    var seq = [];
+    lista.forEach(function (x) {
+      var anterior = seq.length ? seq[seq.length - 1] : null;
+      if (x.event_type === 'AJUSTE_INVENTARIO' && x.event_subtype === 'IDENTIFICACAO_INCORRETA' && anterior && !anterior.remocao) {
+        seq[seq.length - 1] = { codigo: x.codigo, data_inicio: anterior.data_inicio, remocao: false };
+        return;
+      }
+      seq.push({ codigo: x.codigo, data_inicio: x.data_inicio, remocao: x.remocao });
+    });
+    var u = codigoEmUso_(seq.filter(function (x) { return x.data_inicio <= data; }));
     return u ? u.codigo : null;
   }
   /** Código em uso de um tipo ao fim da sequência (ou vazio, depois de uma retirada). */

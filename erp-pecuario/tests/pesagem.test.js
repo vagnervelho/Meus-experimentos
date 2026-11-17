@@ -59,7 +59,7 @@ test('registro individual e coletivo: uma linha de PESAGENS por animal (momento,
   assert.deepEqual([animal(s, ids['0501']).peso_atual, animal(s, ids['0501']).data_ultima_pesagem, animal(s, ids['0503']).peso_atual], [300, '2026-03-10', null]);
   // Segunda pesagem com jejum e o momento "saída": a resposta compara com a anterior (91 dias, 0,800 kg/dia, 24,27%).
   const r2 = ok(api(s, 'evento.registrar', pes('2026-06-09', [{ animal_id: ids['0501'], peso: 372.8 }], { jejum: true, tipo_pesagem: 'VENDA' }), 'p2'));
-  assert.deepEqual(r2.pesagem.animais[0], { animal_id: ids['0501'], peso_kg: 372.8, anterior: { data: '2026-03-10', peso_kg: 300, metodo: 'BALANCA', estimado: false }, ganho_kg: 72.8, dias: 91, gmd_kg_dia: 0.8, gmd_motivo: null, gmd_explicacao: null, variacao_pct: 24.27, peso_atual: 372.8, data_ultima_pesagem: '2026-06-09', peso_vencido: false });
+  assert.deepEqual(r2.pesagem.animais[0], { animal_id: ids['0501'], peso_kg: 372.8, anterior: { data: '2026-03-10', peso_kg: 300, metodo: 'BALANCA', estimado: false }, ganho_kg: 72.8, dias: 91, gmd_kg_dia: 0.8, gmd_motivo: null, gmd_explicacao: null, gmd_intervalo: { de: '2026-03-10', peso_de_kg: 300, ganho_kg: 72.8, dias: 91 }, variacao_pct: 24.27, peso_atual: 372.8, data_ultima_pesagem: '2026-06-09', peso_vencido: false });
   assert.equal(r1.pesagem.animais.find((x) => x.animal_id === ids['0501']).peso_vencido, true, 'a de 10/03 já passou dos 180 dias de validade em 13/11 (o peso atual que a lista do aparelho recebe)');
   assert.deepEqual(evento(s, r2.event_id).payload_json, { jejum: true });
   assert.equal(pesagensDe(s, ids['0501']).find((p) => p.event_id === r2.event_id).tipo, 'VENDA');

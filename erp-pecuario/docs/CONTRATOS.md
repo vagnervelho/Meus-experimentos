@@ -2930,3 +2930,82 @@ por peso"; a cria ao pé de cada fêmea em `reproducao.matrizes` hoje e numa dat
 o GMD da resposta do registro igual ao do intervalo do modelo que termina na pesagem (`intervalosModelo`); a agenda com o
 `inicio_vigencia` do protocolo.
 
+
+## 45. Conserto da revisão da Fase 3, rodada 3 — `EventService`, `HealthService`, `AuditService`, `Timeline`, `ReproductionService`, `InventoryService`, `WeightService`, `ImportService`, `Weights`, `Reproduction`, `Components`
+
+O que a rodada 3 da revisão da Fase 3 mudou nos contratos das seções 11, 14, 38 a 40, 43 e 44 (os testes, um por achado e por
+caminho, estão em `tests/revisao3.fase3.motor.test.js`, `tests/revisao3.fase3.zootecnia.test.js` e
+`tests/ui/revisao3.fase3.test.js`; o teste aleatório confere o mesmo pelos oráculos da seção 36).
+
+**Carência padrão do produto (`EventService.cabecalhoSanidade_`).** Sem `periodo_carencia_dias` informado, a aplicação com produto
+do cadastro usa `PRODUTOS.carencia_padrao_dias` (05, seção 4.8: "os dias informados no produto ou na aplicação"; 03b,
+SANIDADE.periodo_carencia_dias: proposta pelo produto). Vale no formulário, na API, na correção e na importação (o modelo padrão
+sem a coluna "Carência (dias)"); o 0 informado é "sem carência"; o nome livre (sem cadastro) e o registro de doença não têm
+padrão. A revisão (`impactos.sanidade.carencia_dias`, `fim_carencia`) mostra a carência que será gravada, e a venda para abate
+dentro dela é a de sempre (`CARENCIA_ATIVA`).
+
+**Contagem do estoque na ordem do dia (`HealthService.saldoNaPosicao`, `contagemAfetada(contagens, antes, depois, ordem)`).** O
+acerto pela contagem vale como o saldo na posição dela dentro do dia (11, riscos e premissas: "eventos têm data, não hora; a ordem
+dentro do dia segue a ordem de registro"; desenho-base 16.1: o substituto fica na posição do original): os movimentos dos dias
+anteriores e os do mesmo dia até a contagem, por (posição na cadeia de substituição, `event_seq`). O movimento do mesmo dia gravado
+depois dela (a vacinação da tarde, a perda, a compra que chegou) fica depois e é aceito; a correção de um movimento do mesmo dia
+gravado antes dela continua `CONTAGEM_POSTERIOR`. A mesma posição vale no cálculo do acerto (a correção da contagem conta só o
+que estava antes do original), no registro, na simulação, na correção, no estorno, na importação e na verificação (COPIAS,
+`AuditService.ordemDoEvento_`: pela linha do tempo, ou pela cadeia de `reversal_of_event_id`).
+
+**Revisão do que o servidor grava.** `impactos.estoque.fora_do_estoque` (texto; null quando a entrada entra no saldo): a entrada sem
+movimento — o produto que não controla estoque, ou a correção de uma compra gravada sem movimento (`com_movimento = false`) com o
+controle ligado depois, que continua fora do saldo e cujo caminho é o acerto pela contagem. `impactos.sanidade.consumo.
+porque_sem_custo`: na correção de uma aplicação gravada sem custo, a correção mantém o custo daquele dia (03a,
+MOVIMENTOS_ESTOQUE.custo_unitario congelado), e preencher o cadastro depois vale para as aplicações novas. A revisão (`Components`)
+mostra esses textos, não o controle nem o custo de hoje.
+
+**Na data D.** `Timeline.brincoEm`: o número corrigido por AJUSTE_INVENTARIO/IDENTIFICACAO_INCORRETA vale desde o início do período
+do número errado (desenho-base 16.2: o errado nunca esteve na orelha); a troca física depois continua com a data dela.
+`inventario.elegiveis` traz, por animal, `categoria` (o nome na data) e `ultimo_peso: {kg, data, estimado}` (a última pesagem até a
+data, qualquer método; null sem nenhuma), para a conferência do curral e do tronco com data passada.
+
+**Ficha e lista de Fêmeas com a mesma conta.** As próximas doses da ficha (`HealthService.blocoFicha`) usam a entrada no rebanho da
+linha do tempo (`no_rebanho_desde`), a mesma da agenda e dos alertas. Os partos de `reproducao.matrizes` (hoje e na data, e a
+aptidão nas matrizes ativas) são `ReproductionService.contarPartos` (o maior entre `partos_previos` e os registrados antes da
+entrada, mais os de depois), a conta da ficha. O filtro por situação da lista põe a fêmea apta com NAO_APTA gravado em
+SEM_INFORMACAO (03a, seção 4.3.3; DL-05), e a tela a mostra como "Sem histórico reprodutivo".
+
+**Integridade.** Na checagem da DESMAMA (COPIAS), a mãe do bezerro vem da reconstrução (a criação e as correções de cadastro
+vigentes), não da célula de projeção `ANIMAIS.mae_id`: a projeção mexida à mão é achado de PROJECAO, reparável.
+
+**Recusas que levam à solução.** A morte (ou a venda) retroativa da mãe que o servidor pôs na desmama (a linha MATRIZ) é recusada
+com o caminho que funciona: estornar a desmama, gravar o lançamento e desmamar de novo (corrigir a desmama a poria de novo como
+mãe).
+
+**Fuso da fazenda.** O dia do cadastro do protocolo (`inicio_vigencia`) e o dia do envio na mensagem de arquivo repetido da
+importação são a data do `created_at` no fuso da fazenda (`Utils.hoje(created_at, fuso)`), não a data UTC.
+
+**Peso.** `resultadoDoEvento` traz `gmd_intervalo: {de, peso_de_kg, ganho_kg, dias} | null`, o intervalo do GMD (que pode começar
+antes da pesagem anterior mostrada). `peso.desempenho` dá a cada pasto `rotulo` único (o nome; repetido, com a propriedade e, se
+ainda repetir, a identificação), e o gráfico e a tabela usam o rótulo. O aviso de lotação acima da capacidade diz de onde vem a
+parte estimada da UA pelo rótulo da composição (`ua.rotulo`).
+
+**Telas.**
+- Curral e tronco (`Weights`, `Reproduction`): "Mudar data, método ou pasto/estação" é refeito a cada desenho e some quando há
+  bloco GRAVADO, ENVIANDO ou SEM_SINAL; cada bloco guarda o cabeçalho de quando foi criado (`b.campos`, no rascunho com a chave) e
+  sai sempre com ele. A recusa que não é falta de sinal (IDEMPOTENCY_MISMATCH, DENIED, NOT_FOUND, INTERNAL…) solta o bloco: as
+  linhas viram pendência com o motivo (com "Tirar"), a mensagem do servidor vai à área de status, e nada diz "sem sinal".
+- Com data passada e sem a posição do servidor (carregando ou sem sinal), o brinco não é resolvido pela posição de hoje: a linha
+  fica pendente (`data-conferencia="SEM_POSICAO"`), a nota oferece "Tentar de novo" (`[data-posicao-tentar]`), e com a posição na
+  mão as linhas que esperavam são conferidas pela data. A conferência descreve o animal pelo dia (categoria, pasto e último peso
+  da posição); o tronco só mostra a situação reprodutiva no diagnóstico de hoje.
+- O código interno acha só o animal sem brinco na data, escrito inteiro (A-000004 ou 000004); o código de um animal com brinco
+  fica "não encontrado", com o brinco dele na mensagem.
+- O botão "Prenhe" grava prenhe; do campo, só a idade da gestação ("p90") vai junto.
+- A linha gravada do curral escreve o GMD com o intervalo dele quando não começa na pesagem anterior ("ganho médio diário de X
+  kg/dia desde dd/mm/aaaa (+G kg em N dias)") e mostra o porquê do GMD vazio sempre que há anterior (`[data-gmd-explicacao]`).
+- Desempenho: "Comparar a curva" acha a vaca pelo brinco inteiro (as crias sem brinco só quando não há brinco exato).
+- Indicadores da estação: a lista diz "(parcial)" na natalidade, na desmama e na mortalidade até a desmama, com o motivo do
+  servidor (prenhe ainda sem parto, crias ainda ao pé).
+
+**Teste aleatório (seção 36).** Oráculos novos em `tests/apoio-fuzz.js`: a carência padrão do produto (no efeito da SANIDADE e na
+importação), a contagem pela posição no dia (e a interação "movimento do mesmo dia depois da contagem", com o preparo da
+contagem), o intervalo do GMD da resposta da pesagem (de, peso, ganho e dias do intervalo do modelo; GMD = ganho ÷ dias), a ficha
+igual à agenda nas próximas doses, os partos da lista de Fêmeas iguais aos da ficha, o rótulo único dos pastos no desempenho, o
+último peso na data em `inventario.elegiveis` e o dia do cadastro do protocolo no fuso da fazenda.

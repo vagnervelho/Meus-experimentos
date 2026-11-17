@@ -1168,6 +1168,17 @@ var EventService = (function () {
       ' (o saldo não cobre o que sai). ' + conselho + ' Gravar mesmo assim?');
   }
   /**
+   * A ordem de um movimento no dia (desenho-base 16.1): a posição do evento na cadeia de substituição e o event_seq; o evento
+   * do comando (ctxEv) na posição dele (o substituto na do original). null para evento desconhecido.
+   */
+  function ordemDoMovimento_(m, ctxEv) {
+    return function (eventId) {
+      if (ctxEv && eventId === ctxEv.ev.event_id) return { ordem_seq: ctxEv.ev.ordem_seq, event_seq: ctxEv.ev.event_seq };
+      var ev = m.f.evento(eventId);
+      return ev ? { ordem_seq: m.f.ordemSeq(eventId), event_seq: ev.event_seq } : null;
+    };
+  }
+  /**
    * Contagem vigente do produto depois da data do movimento (03a, MOVIMENTOS_ESTOQUE, AJUSTE: o acerto corrige o saldo pela
    * contagem; desenho-base 4.3: "na data D" é o fim do dia D). O acerto gravou a diferença para o saldo daquele dia: o
    * comando que muda o saldo do fim do dia contado (o movimento retroativo, a correção que muda a quantidade, o estorno, a
@@ -1175,15 +1186,18 @@ var EventService = (function () {
    * que impede): estornar a contagem, gravar o lançamento e contar de novo. As contagens anuladas pelo próprio comando
    * (`m.f.excluidos`) não contam.
    */
-  function contagemPosterior_(m, produto, antes, depois) {
+  function contagemPosterior_(m, produto, antes, depois, ctxEv) {
     if (!produto) return;
-    var c = HealthService.contagemAfetada(HealthService.contagensDoProduto(m.repo, produto.product_id, m.f.excluidos), antes, depois);
+    var ordem = ordemDoMovimento_(m, ctxEv);
+    var c = HealthService.contagemAfetada(HealthService.contagensDoProduto(m.repo, produto.product_id, m.f.excluidos), antes, depois, ordem);
     if (!c) return;
     var ev = m.repo.porId('EVENTOS', c.event_id) || {};
+    var oc = ordem(c.event_id);
+    var pos = { data: c.data, ordem_seq: oc ? oc.ordem_seq : null, event_seq: oc ? oc.event_seq : null };
     m.conflitos.push(Validation.detalhe({
       codigo: 'CONTAGEM_POSTERIOR', campo: 'product_id',
       mensagem: produto.nome + ': a contagem do estoque de ' + br_(c.data) + ' (' + HealthService.quantidadeTexto(c.saldo_contado, produto.unidade) + ' contados) já acertou o saldo daquele dia, e este lançamento o mudaria (de ' +
-        HealthService.quantidadeTexto(HealthService.saldo(antes, c.data), produto.unidade) + ' para ' + HealthService.quantidadeTexto(HealthService.saldo(depois, c.data), produto.unidade) + '). Estorne antes a contagem de ' + br_(c.data) + ', grave este lançamento e conte de novo.',
+        HealthService.quantidadeTexto(HealthService.saldoNaPosicao(antes, pos, ordem), produto.unidade) + ' para ' + HealthService.quantidadeTexto(HealthService.saldoNaPosicao(depois, pos, ordem), produto.unidade) + '). Estorne antes a contagem de ' + br_(c.data) + ', grave este lançamento e conte de novo.',
       conflito: conflitoCom_(c.event_id, ev.event_type || 'ESTOQUE', ev.event_subtype || 'AJUSTE', c.data),
     }));
   }
@@ -1226,10 +1240,14 @@ var EventService = (function () {
       });
       var aa = movimentosAntesDepois_(m, ctxEv, s.produto.product_id);
       avisoEstoque_(m, s.produto, aa.antes, aa.depois);
-      contagemPosterior_(m, s.produto, aa.antes, aa.depois);
+      contagemPosterior_(m, s.produto, aa.antes, aa.depois, ctxEv);
       s.saldo = s.produto.controla_estoque === true ? { antes: HealthService.saldo(aa.antes, null), depois: HealthService.saldo(aa.depois, null) } : null;
       var valor = HealthService.valorConsumo(s.quantidade, cu);
       s.consumo = { custo_unitario: cu, valor: valor };
+      // Sem custo pelo custo congelado vazio do original (a aplicação gravada quando o cadastro não tinha custo): a correção
+      // mantém o custo daquele dia (03a, MOVIMENTOS_ESTOQUE.custo_unitario: congelado no movimento), e preencher o cadastro
+      // agora não muda esta aplicação. A revisão diz isso, e não "preencha o custo no cadastro".
+      if (!(valor > 0) && congelado && congelado.custo_unitario === null) s.consumo.porque_sem_custo = 'sem custo: a aplicação original foi gravada sem custo (o produto não tinha custo por unidade no cadastro naquele dia), e a correção mantém o custo daquele dia. O custo preenchido depois no cadastro vale para as aplicações novas.';
       if (valor > 0) {
         var porPeso = s.modo === 'POR_PESO' && itens.length > 1 && todas;
         var pl = FinancialService.planejar(m.tx, {
@@ -1681,7 +1699,9 @@ var EventService = (function () {
       e.motivo = HealthService.MOTIVOS_AJUSTE.indexOf(c.motivo_ajuste) >= 0 ? c.motivo_ajuste : null;
       if (!e.motivo) return;
       var mov = movimentosAntesDepois_(m, null, produto.product_id);
-      var saldoNaData = HealthService.saldo(mov.depois, ev.event_date);
+      // O saldo na posição da contagem no dia (a correção dela fica no lugar do original: o movimento do mesmo dia gravado
+      // depois da contagem original não entra no que ela contou).
+      var saldoNaData = HealthService.saldoNaPosicao(mov.depois, { data: ev.event_date, ordem_seq: ev.ordem_seq, event_seq: ev.event_seq }, ordemDoMovimento_(m, ctxEv));
       if (e.motivo === 'CONTAGEM') {
         if (typeof c.saldo_contado !== 'number') return;
         e.saldo_contado = c.saldo_contado;
@@ -1698,14 +1718,14 @@ var EventService = (function () {
     var aa = movimentosAntesDepois_(m, ctxEv, produto.product_id);
     // Na correção, o produto do original que sai do lançamento também muda de saldo.
     avisoEstoque_(m, produto, aa.antes, aa.depois);
-    contagemPosterior_(m, produto, aa.antes, aa.depois);
+    contagemPosterior_(m, produto, aa.antes, aa.depois, ctxEv);
     if (ctxEv.original) {
       m.repo.por('MOVIMENTOS_ESTOQUE', 'event_id', ctxEv.original.event_id).forEach(function (x) {
         if (x.product_id === produto.product_id) return;
         var outro = m.repo.porId('PRODUTOS', x.product_id);
         var ab = movimentosAntesDepois_(m, ctxEv, x.product_id);
         avisoEstoque_(m, outro, ab.antes, ab.depois);
-        contagemPosterior_(m, outro, ab.antes, ab.depois);
+        contagemPosterior_(m, outro, ab.antes, ab.depois, ctxEv);
       });
     }
     e.saldo = produto.controla_estoque === true ? { antes: HealthService.saldo(aa.antes, null), depois: HealthService.saldo(aa.depois, null) } : null;
@@ -1735,6 +1755,11 @@ var EventService = (function () {
       // O produto do cadastro sem custo por unidade (03a, seção 4.6: vazio = consumo sem custo; desenho-base 16.9: a compra
       // fica no estoque, fora do resultado): o que foi pago nunca vira custo. A revisão diz, e manda preencher o cadastro.
       produto_sem_custo: !(typeof e.produto.custo_unitario === 'number' && e.produto.custo_unitario > 0),
+      // A entrada: o que o servidor grava (o movimento congelado em `com_movimento`), não o controle de estoque de hoje. Sem
+      // movimento, o porquê.
+      fora_do_estoque: e.subtipo !== 'ENTRADA' || e.comMovimento !== false ? null : e.produto.controla_estoque === true
+        ? 'a compra foi lançada quando ' + e.produto.nome + ' não controlava estoque, e a correção a mantém fora do saldo (como o lançamento original). Para pôr a quantidade no saldo, acerte o estoque pela contagem (Produtos, "Acertar").'
+        : e.produto.nome + ' não controla estoque (fica só o lançamento da compra)',
     };
   }
   /** Produtos cujo saldo o comando muda: os dos movimentos do plano e os do original anulado. */
@@ -2624,6 +2649,9 @@ var EventService = (function () {
         // A origem do registro posterior é imutável e conferida pela linha do tempo de hoje (03b, seção 3: pasto_origem_id;
         // 04, seção 5.2 ii): corrigi-lo antes não a muda. O caminho é estorná-lo, lançar este e registrá-lo de novo.
         else if (p.codigo === 'ORIGEM_DIVERGENTE') conflito_(m, it, p, texto + ' Corrigir esse registro não muda a origem dele: estorne-o, lance este e depois registre-o de novo (ou mude este lançamento).');
+        // A mãe na desmama é posta pelo servidor (a mãe do bezerro que estava no rebanho naquele dia; 03b, seção 16.14):
+        // corrigir a desmama com ela ainda no rebanho a põe de novo. O caminho é refazer a desmama depois deste lançamento.
+        else if (p.event_type === 'DESMAMA' && p.papel === 'MATRIZ') conflito_(m, it, p, texto + ' Ela está nessa desmama como a mãe do bezerro, que o sistema põe sozinho enquanto ela está no rebanho, e corrigir a desmama não a tira: estorne a desmama de ' + br_(p.event_date) + ', grave este lançamento e lance a desmama dos bezerros de novo (sem ela como mãe).');
         else conflito_(m, it, p, texto + ' Estorne ou corrija esse registro antes, ou mude este lançamento.');
       });
     });
@@ -3172,7 +3200,8 @@ var EventService = (function () {
       if (acimaCab && acimaUa) msg = 'O pasto ' + p.nome + ' fica com ' + n + ' cabeças e ' + uaHa + ' em ' + br_(data) + ', acima da capacidade informada (' + capCab + ' cabeças; ' + Utils.formatarNumero(capUa) + ' UA/ha).';
       else if (acimaCab) msg = 'O pasto ' + p.nome + ' fica com ' + n + ' cabeças em ' + br_(data) + ', acima da capacidade informada (' + capCab + ').';
       else msg = 'O pasto ' + p.nome + ' fica com ' + uaHa + ' em ' + br_(data) + ' (' + n + ' cabeças, ' + Utils.formatarNumero(lot.ua.valor, 2) + ' UA em ' + Utils.formatarNumero(p.area_hectares) + ' ha), acima da capacidade informada (' + Utils.formatarNumero(capUa) + ' UA/ha).';
-      if (acimaUa && lot.ua.estimado) msg += ' Parte da UA é estimada pelo peso de referência da categoria.';
+      // O rótulo da composição diz de onde vem a parte estimada (estimativa visual, peso de referência, pesagem vencida; P10).
+      if (acimaUa && lot.ua.estimado) msg += ' ' + (lot.ua.rotulo || 'Parte da UA é estimada.');
       avisoItem_(m, null, 'LOTACAO_ACIMA_DA_CAPACIDADE', msg);
     });
   }

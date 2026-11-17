@@ -647,17 +647,18 @@ var AuditService = (function () {
     conferirBrincos_(tx, col, params, esc);
     conferirIdentificacoes_(tx, col, params, esc);
     var f = null;
+    var proj = null;
     if (Timeline.LEITURAS.every(function (t) { return repo.carregada(t); })) {
       f = Timeline.fonte(tx, { parametros: params });
       var memo = {};
-      var proj = function (id) { if (!memo[id]) memo[id] = Timeline.projetarAnimal(f, id); return memo[id]; };
+      proj = function (id) { if (!memo[id]) memo[id] = Timeline.projetarAnimal(f, id); return memo[id]; };
       conferirAnimais_(tx, col, f, proj, esc, o.porAnimal || null);
       conferirPartos_(tx, col, f, proj, esc);
       conferirGenealogia_(tx, col, esc);
       conferirProjecoes_(tx, col, esc, o);
     }
     conferirFinanceiro_(tx, col, esc);
-    conferirCopias_(tx, col, esc);
+    conferirCopias_(tx, col, esc, proj, f);
     return { fonte: f };
   }
   /**
@@ -1589,7 +1590,26 @@ var AuditService = (function () {
    *  - nos demais tipos, nenhum movimento de estoque nem lançamento com produto.
    * O saldo (`PRODUTOS.estoque_atual*` = Σ dos movimentos) é projeção, conferido em PROJECAO. Achados de COPIAS (fonte).
    */
-  function conferirInsumos_(tx, col, eventos) {
+  /**
+   * A ordem de um evento no dia (desenho-base 16.1): {ordem_seq (a posição do primeiro da cadeia de substituição), event_seq};
+   * pela linha do tempo quando há, senão pela cadeia de reversal_of_event_id nos eventos (crus, quando lidos). null sem o evento.
+   */
+  function ordemDoEvento_(tx, f) {
+    return function (id) {
+      if (f) { var e = f.evento(id); return e ? { ordem_seq: f.ordemSeq(id), event_seq: e.event_seq } : null; }
+      var porId = function (x) { return tx.cru ? tx.cru.cruPorId('EVENTOS', x) : tx.repo.porId('EVENTOS', x); };
+      var at = porId(id);
+      if (!at) return null;
+      var seq = at.event_seq;
+      for (var g = 0; g < 10000 && !vazio_(at.reversal_of_event_id) && at.event_type !== 'ESTORNO'; g++) {
+        var alvo = porId(at.reversal_of_event_id);
+        if (!alvo || alvo.event_type !== at.event_type) break;
+        at = alvo;
+      }
+      return { ordem_seq: at.event_seq, event_seq: seq };
+    };
+  }
+  function conferirInsumos_(tx, col, eventos, f) {
     var repo = tx.repo;
     var temMov = repo.carregada('MOVIMENTOS_ESTOQUE');
     var temSan = repo.carregada('SANIDADE');
@@ -1683,7 +1703,11 @@ var AuditService = (function () {
             // comando que faria isso (CONTAGEM_POSTERIOR); aqui vale para todo caminho. Não é a fonte apagada: o caminho é
             // estornar a contagem e contar de novo (a chave leva o saldo, para a trava recusar também o que piora).
             var pc = produto(movs[0].product_id) || {};
-            var naData = HealthService.saldo(HealthService.movimentosDoProduto(repo, movs[0].product_id, null), ev.event_date);
+            // O saldo na posição da contagem no dia (11: a ordem dentro do dia é a de registro; o movimento do mesmo dia
+            // gravado depois da contagem não desfaz o que foi contado).
+            var ordem = ordemDoEvento_(tx, f);
+            var oc = ordem(ev.event_id);
+            var naData = HealthService.saldoNaPosicao(HealthService.movimentosDoProduto(repo, movs[0].product_id, null), { data: ev.event_date, ordem_seq: oc ? oc.ordem_seq : null, event_seq: oc ? oc.event_seq : null }, ordem);
             if (naData !== pj.saldo_contado) {
               var oqueC = 'A contagem de ' + br_(ev.event_date) + ' de ' + (pc.nome || 'insumo') + ' (' + HealthService.quantidadeTexto(pj.saldo_contado, pc.unidade) + ' contados) não confere com o saldo do sistema no fim daquele dia (' +
                 HealthService.quantidadeTexto(naData, pc.unidade) + '): há movimento até aquele dia gravado depois da contagem.';
@@ -1713,7 +1737,7 @@ var AuditService = (function () {
    * Achados de COPIAS (a fonte quebrada: o reparo refaria a situação a partir do dado quebrado).
    */
   var CABECALHO_REPRODUCAO = Object.freeze(['data_fim', 'estacao_id', 'touro_id', 'semen_identificacao', 'metodo']);
-  function conferirReproducao_(tx, col, eventos) {
+  function conferirReproducao_(tx, col, eventos, proj) {
     var repo = tx.repo;
     if (!repo.carregada('REPRODUCAO') || !repo.carregada('EVENTO_ANIMAIS')) return;
     var aviso = ' Restaure o backup ou investigue a edição manual; o reparo automático só refaz a situação a partir dos lançamentos.';
@@ -1760,7 +1784,9 @@ var AuditService = (function () {
       var bezerros = linhas.filter(function (l) { return papel(l) === 'SUJEITO'; });
       var maes = {};
       bezerros.forEach(function (l) {
-        var b = tx.cru.cruPorId('ANIMAIS', l.animal_id);
+        // A mãe do bezerro pela reconstrução (a criação e as correções de cadastro vigentes), não pela célula da projeção
+        // gravada em ANIMAIS: a projeção mexida à mão é achado de PROJECAO (o reparo refaz), não fonte quebrada.
+        var b = proj ? proj(l.animal_id).campos : tx.cru.cruPorId('ANIMAIS', l.animal_id);
         if (b && !vazio_(b.mae_id)) maes[b.mae_id] = true;
         if (vazio_(l.pasto_origem_id) !== vazio_(l.pasto_destino_id)) achado('EVENTO_ANIMAIS', l.event_animal_id, 'pasto_destino_id', nome + ', ' + quem(l.animal_id) + ': a linha do bezerro tem só um dos pastos (origem e destino vão juntos, quando a desmama muda o pasto).', 'PASTOS', l.animal_id);
         var ps = repo.carregada('PESAGENS') ? repo.por('PESAGENS', 'event_id', ev.event_id).filter(function (p) { return p.animal_id === l.animal_id; }) : [];
@@ -1787,7 +1813,7 @@ var AuditService = (function () {
    * Cópias × fonte (06, seção 9): a fonte de cada evento, o detalhe obrigatório, o tipo da linha de detalhe = o do evento e
    * a data do detalhe = a do evento. No escopo, os eventos dele.
    */
-  function conferirCopias_(tx, col, esc) {
+  function conferirCopias_(tx, col, esc, proj, f) {
     col.aplicar('COPIAS');
     var repo = tx.repo;
     if (!repo.carregada('EVENTOS')) return;
@@ -1795,8 +1821,8 @@ var AuditService = (function () {
     conferirLinhasDosEventos_(tx, col, eventos);
     conferirDetalhes_(tx, col, eventos);
     conferirPesagens_(tx, col, eventos);
-    conferirInsumos_(tx, col, eventos);
-    conferirReproducao_(tx, col, eventos);
+    conferirInsumos_(tx, col, eventos, f);
+    conferirReproducao_(tx, col, eventos, proj);
     var linhasDe = function (t) {
       if (!esc) return repo.vigentes(t);
       var out = [];

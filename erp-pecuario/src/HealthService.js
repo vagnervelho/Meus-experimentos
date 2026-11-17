@@ -135,12 +135,36 @@ var HealthService = (function () {
     }).filter(Boolean).sort(function (a, b) { return a.data < b.data ? -1 : a.data > b.data ? 1 : 0; });
   }
   /**
-   * A primeira contagem cujo saldo no fim do dia contado muda entre os movimentos de antes e os de depois de um comando (o
-   * movimento retroativo, a correção que muda a quantidade, o estorno, a contagem anterior a ela); null sem nenhuma. O acerto
-   * gravou a diferença para o saldo daquele dia: o movimento que muda esse saldo depois desfaria o que foi contado (RN-057).
+   * Saldo na posição de um lançamento dentro do dia (11, riscos e premissas: "eventos têm data, não hora; a ordem dentro do
+   * dia segue a ordem de registro"; desenho-base 16.1: o substituto fica na posição do original): os movimentos dos dias
+   * anteriores e os do mesmo dia até a posição, na ordem (posição na cadeia de substituição, event_seq). pos = {data,
+   * ordem_seq, event_seq}; ordem(event_id) → {ordem_seq, event_seq} | null (sem a ordem, o movimento do dia conta). Sem
+   * pos.ordem_seq, o fim do dia.
    */
-  function contagemAfetada(contagens, antes, depois) {
-    return (contagens || []).filter(function (c) { return saldo(antes, c.data) !== saldo(depois, c.data); })[0] || null;
+  function saldoNaPosicao(movimentos, pos, ordem) {
+    if (typeof pos.ordem_seq !== 'number') return saldo(movimentos, pos.data);
+    return somaQtd_((movimentos || []).filter(function (m) {
+      if (m.data !== pos.data) return m.data < pos.data;
+      var o = ordem ? ordem(m.event_id) : null;
+      return !o || o.ordem_seq < pos.ordem_seq || (o.ordem_seq === pos.ordem_seq && o.event_seq <= pos.event_seq);
+    }));
+  }
+  /**
+   * A primeira contagem cujo saldo na posição dela (o dia contado até ela, na ordem do dia) muda entre os movimentos de antes
+   * e os de depois de um comando (o movimento retroativo, a correção que muda a quantidade, o estorno, a contagem anterior a
+   * ela); null sem nenhuma. O acerto gravou a diferença para o saldo naquele ponto: o movimento que o muda desfaria o que foi
+   * contado (RN-057). O movimento do mesmo dia gravado depois da contagem (a vacinação da tarde, a compra que chegou) fica
+   * depois dela e não a desfaz. ordem(event_id) → {ordem_seq, event_seq}.
+   */
+  function contagemAfetada(contagens, antes, depois, ordem) {
+    return (contagens || []).filter(function (c) {
+      var pos = posicaoDe_(c, ordem);
+      return saldoNaPosicao(antes, pos, ordem) !== saldoNaPosicao(depois, pos, ordem);
+    })[0] || null;
+  }
+  function posicaoDe_(c, ordem) {
+    var o = ordem ? ordem(c.event_id) : null;
+    return { data: c.data, ordem_seq: o ? o.ordem_seq : null, event_seq: o ? o.event_seq : null };
   }
   /** Projeção `PRODUTOS.estoque_atual*` (03a, seção 4.6): Σ movimentos vigentes com `controla_estoque = S`; vazio sem controle. */
   function estoqueAtual(produto, movimentos) {
@@ -365,9 +389,13 @@ var HealthService = (function () {
     var repo = L.repo;
     var primeira = {};
     if (repo.carregada('SANIDADE')) repo.vigentes('SANIDADE').forEach(function (r) { if (!vazio_(r.protocol_id) && !(L.f.excluidos && L.f.excluidos[r.event_id]) && (!primeira[r.protocol_id] || r.data_aplicacao < primeira[r.protocol_id])) primeira[r.protocol_id] = r.data_aplicacao; });
+    // O dia do cadastro no fuso da fazenda (o de `hoje`; desenho-base: datas no fuso da planilha), nunca a data UTC do
+    // created_at: o protocolo cadastrado às 22h de Porto Velho vale naquele dia, não no seguinte.
+    var fuso = L.tx && L.tx.ctx ? L.tx.ctx.fuso : null;
+    var cadastro = function (p) { return typeof p.created_at === 'string' && p.created_at.length >= 10 ? (vazio_(fuso) ? p.created_at.slice(0, 10) : Utils.hoje(p.created_at, fuso)) : null; };
     var protocolos = repo.carregada('PROTOCOLOS_SANITARIOS') ? Utils.ordenarPor(repo.vigentes('PROTOCOLOS_SANITARIOS').filter(function (p) { return p.ativo !== false; }), ['nome', 'protocol_id']).map(function (p) {
       var c = Utils.clonar(p);
-      c.inicio_vigencia = [inicioProtocolo_(p), primeira[p.protocol_id] || null].filter(Boolean).sort()[0] || null;
+      c.inicio_vigencia = [cadastro(p), primeira[p.protocol_id] || null].filter(Boolean).sort()[0] || null;
       return c;
     }) : [];
     return {
@@ -525,7 +553,9 @@ var HealthService = (function () {
     var car = regs.length ? carenciaEm(regs, L.hoje) : null;
     var proximas = [];
     if (a.situacao_cadastral === 'ATIVO') {
-      var desde = nulo_(a.data_entrada);
+      // A entrada no rebanho é a da linha do tempo (a mesma que a agenda e os alertas usam: InventoryService.presentes), não a
+      // data_entrada declarada no cadastro (vazia no rebanho inicial): o nunca aplicado vence no mesmo dia na ficha e na agenda.
+      var desde = Timeline.situacaoEm(L.f.linhas(a.animal_id), L.hoje, L.marcoZero).no_rebanho_desde;
       proximas = pendenciasDoAnimal(c, a.animal_id, perfilEm_(L, a, L.hoje, desde), L.hoje).pendencias;
       // Também a próxima dose ainda longe (EM_DIA): o que a última aplicação de cada chave prevê.
       itens.forEach(function (x) {
@@ -761,6 +791,7 @@ var HealthService = (function () {
     movimentosDoProduto: movimentosDoProduto,
     contagensDoProduto: contagensDoProduto,
     contagemAfetada: contagemAfetada,
+    saldoNaPosicao: saldoNaPosicao,
     compraSemMovimento: compraSemMovimento,
     contexto: contexto,
     pendenciasDoAnimal: pendenciasDoAnimal,

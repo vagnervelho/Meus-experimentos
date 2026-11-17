@@ -32,6 +32,15 @@ var TelaReproducao = (function () {
   function link(rota, texto) { return h('a', { class: 'botao botao-texto', href: Roteador.href(rota), dataset: { rota: rota } }, texto); }
   function nomeDe(id) { var a = Store.animal(id); return a ? Store.rotuloAnimal(a) : 'animal'; }
   function sit(codigo) { return codigo ? Fmt.rotulo('SITUACAO_REPRODUTIVA', codigo) : '—'; }
+  /**
+   * A situação da fêmea na lista (03a, seção 4.3.3; DL-05): a apta com NAO_APTA ou SEM_INFORMACAO gravado (o valor inicial;
+   * a aptidão por idade é da leitura do servidor, `apta`) aparece como sem histórico reprodutivo, nunca "Não apta"; a jovem
+   * leva "(jovem)".
+   */
+  function sitFemea(x) {
+    if (x.apta && (x.situacao_reprodutiva === 'NAO_APTA' || x.situacao_reprodutiva === 'SEM_INFORMACAO')) return x.sem_historico ? 'Sem histórico reprodutivo' : sit('SEM_INFORMACAO');
+    return sit(x.situacao_reprodutiva) + (x.apta ? '' : ' (jovem)');
+  }
   function estacoes() { return Store.estacoes(); }
   function nomeEstacao(id) { var e = Store.estacao(id); return e ? e.nome : '—'; }
   function pct(ind) {
@@ -80,7 +89,7 @@ var TelaReproducao = (function () {
     el.appendChild(cabecalho('matrizes'));
     var data = h('input', { type: 'date', id: 'rm-data', value: filtros.data });
     var est = h('select', { id: 'rm-estacao' }, opcoes(estacoes().map(function (e) { return [e.estacao_id, e.nome]; }), filtros.estacao_id, 'Todas as fêmeas'));
-    var sitSel = h('select', { id: 'rm-situacao' }, opcoes(['VAZIA', 'EXPOSTA', 'INSEMINADA', 'PRENHA', 'SEM_INFORMACAO', 'NAO_APTA'].map(function (s) { return [s, sit(s)]; }), filtros.situacao, 'Qualquer situação'));
+    var sitSel = h('select', { id: 'rm-situacao' }, opcoes(['VAZIA', 'EXPOSTA', 'INSEMINADA', 'PRENHA', 'SEM_INFORMACAO', 'NAO_APTA'].map(function (s) { return [s, s === 'SEM_INFORMACAO' ? 'Sem informação ou sem histórico' : s === 'NAO_APTA' ? 'Não apta (jovem)' : sit(s)]; }), filtros.situacao, 'Qualquer situação'));
     var pasto = h('select', { id: 'rm-pasto' }, opcoes(Store.pastos({ todos: true }).map(function (p) { return [p.pasture_id, p.nome]; }), filtros.pasture_id, 'Todos'));
     el.appendChild(h('form', { class: 'filtros', role: 'search', 'aria-label': 'Filtrar as fêmeas', on: { submit: function (ev) {
       ev.preventDefault();
@@ -135,7 +144,7 @@ var TelaReproducao = (function () {
         // (ficha e último registro) numa linha de ações, com o respiro dos alvos de toque.
         cartao: function (x) {
           return h('div', null,
-            h('div', { class: 'cartao-linha-topo' }, h('span', { class: 'cartao-linha-titulo brinco', text: x.brinco || x.codigo_interno }), h('span', { text: sit(x.situacao_reprodutiva) + (x.apta ? '' : ' (jovem)') })),
+            h('div', { class: 'cartao-linha-topo' }, h('span', { class: 'cartao-linha-titulo brinco', text: x.brinco || x.codigo_interno }), h('span', { text: sitFemea(x) })),
             h('div', { class: 'suave', text: 'Cria ao pé: ' + (x.cria_ao_pe ? 'sim' : 'não') + ' · ' + x.partos + (x.partos === 1 ? ' parto' : ' partos') + (x.idade_meses === null ? '' : ' · ' + x.idade_meses + ' meses') }),
             h('div', { text: 'Previsão de parto: ' + textoPrevisao(x.previsao_parto) }),
             h('div', { class: 'acoes', style: 'margin-top:4px' }, link('animal/' + x.animal_id + '/reproducao', 'Ficha reprodutiva'),
@@ -143,7 +152,7 @@ var TelaReproducao = (function () {
         },
         colunas: [
           { id: 'animal', rotulo: 'Fêmea', valor: function (x) { return x.brinco || x.codigo_interno; }, formatar: function (x) { return link('animal/' + x.animal_id + '/reproducao', x.brinco || x.codigo_interno); } },
-          { id: 'situacao', rotulo: 'Situação', valor: function (x) { return sit(x.situacao_reprodutiva) + (x.apta ? '' : ' (jovem)'); } },
+          { id: 'situacao', rotulo: 'Situação', valor: function (x) { return sitFemea(x); } },
           { id: 'cria', rotulo: 'Cria ao pé', valor: function (x) { return x.cria_ao_pe ? 'sim' : 'não'; } },
           { id: 'partos', rotulo: 'Partos', num: true },
           { id: 'idade', rotulo: 'Idade (meses)', num: true, valor: function (x) { return x.idade_meses; }, formatar: function (x) { return x.idade_meses === null ? '—' : String(x.idade_meses); } },
@@ -159,16 +168,26 @@ var TelaReproducao = (function () {
   }
 
   // ------------------------------------------------------------------ indicadores ----
+  /**
+   * O porquê de uma taxa parcial, pelo que o servidor diz (R-14): prenhe ainda sem parto (a parição parcial) e crias ainda ao
+   * pé; nada suposto aqui.
+   */
+  function porqueParcial(g, comPrenhe, comAoPe) {
+    var m = [];
+    if (comPrenhe && g.paricao.parcial) m.push('há prenhe ainda sem parto');
+    if (comAoPe && g.crias_ao_pe) m.push(g.crias_ao_pe + ' ainda ao pé');
+    return ' (parcial' + (m.length ? ': ' + m.join(' e ') : '') + ')';
+  }
   function linhasTaxas(g) {
     return [
       ['Expostas', String(g.expostas)],
       ['Taxa de prenhez', pct(g.prenhez) + ' · ' + g.prenhez.numerador + ' de ' + g.prenhez.denominador + (g.prenhez.rotulo !== 'Taxa de prenhez' ? ' (' + g.prenhez.rotulo.toLowerCase() + ')' : '')],
       ['Diagnosticadas', g.cobertura_dg.numerador + ' de ' + g.cobertura_dg.denominador + ' (cobertura do diagnóstico ' + pct(g.cobertura_dg) + ')'],
       ['Taxa de parição', pct(g.paricao) + ' · ' + g.paricao.numerador + ' de ' + g.paricao.denominador + (g.paricao.parcial ? ' (parcial: há prenhe ainda sem parto)' : '')],
-      ['Natalidade', pct(g.natalidade) + ' · ' + g.natalidade.numerador + ' nascidos vivos de ' + g.natalidade.denominador + ' expostas'],
+      ['Natalidade', pct(g.natalidade) + ' · ' + g.natalidade.numerador + ' nascidos vivos de ' + g.natalidade.denominador + ' expostas' + (g.natalidade.parcial ? porqueParcial(g, true, false) : '')],
       ['Perda gestacional', pct(g.perda_gestacional) + ' · ' + g.perda_gestacional.numerador + ' de ' + g.perda_gestacional.denominador + ' prenhes' + (g.perda_gestacional.parcial ? ' (parcial)' : '')],
-      ['Taxa de desmama', pct(g.desmama) + ' · ' + g.desmama.numerador + ' de ' + g.desmama.denominador + (g.desmama.parcial ? ' (parcial: ' + g.crias_ao_pe + ' ainda ao pé)' : '')],
-      ['Mortalidade até a desmama', pct(g.mortalidade_ate_desmama) + ' · ' + g.mortalidade_ate_desmama.numerador + ' de ' + g.mortalidade_ate_desmama.denominador + ' nascidos vivos' + (g.vendidos_ao_pe ? ' · ' + g.vendidos_ao_pe + ' vendidos ao pé, à parte' : '')],
+      ['Taxa de desmama', pct(g.desmama) + ' · ' + g.desmama.numerador + ' de ' + g.desmama.denominador + (g.desmama.parcial ? porqueParcial(g, true, true) : '')],
+      ['Mortalidade até a desmama', pct(g.mortalidade_ate_desmama) + ' · ' + g.mortalidade_ate_desmama.numerador + ' de ' + g.mortalidade_ate_desmama.denominador + ' nascidos vivos' + (g.mortalidade_ate_desmama.parcial ? porqueParcial(g, false, true) : '') + (g.vendidos_ao_pe ? ' · ' + g.vendidos_ao_pe + ' vendidos ao pé, à parte' : '')],
       ['Intervalo entre partos', g.iep_dias.valor === null ? '— (' + Fmt.rotulo('MOTIVO', g.iep_dias.motivo) + ', n = ' + g.iep_dias.n + ')' : g.iep_dias.valor + ' dias (n = ' + g.iep_dias.n + ')'],
       ['Idade ao primeiro parto', g.idade_primeiro_parto_meses.valor === null ? '— (' + Fmt.rotulo('MOTIVO', g.idade_primeiro_parto_meses.motivo) + ', n = ' + g.idade_primeiro_parto_meses.n + ')' : Fmt.numero(g.idade_primeiro_parto_meses.valor, 1) + ' meses (n = ' + g.idade_primeiro_parto_meses.n + ')'],
       g.sairam_sem_diagnostico || g.sairam_sem_desfecho ? ['Saíram no meio da estação', g.sairam_sem_diagnostico + ' antes do diagnóstico (fora da prenhez) · ' + g.sairam_sem_desfecho + ' sem parto, aborto nem diagnóstico vazio (fora da parição, da natalidade e da desmama)'] : null,
@@ -350,11 +369,18 @@ var TelaReproducao = (function () {
   function pendencias(c) { return c.linhas.filter(function (l) { return l.estado === 'NAO_ENCONTRADO' || l.estado === 'ERRO'; }); }
   function naFila(c) { return c.linhas.filter(function (l) { return l.estado === 'FILA' && !l.bloco; }); }
   function naoEnviadas(c) { return c.linhas.filter(function (l) { if (l.estado !== 'FILA') return false; if (!l.bloco) return true; var b = bloco(c, l.bloco); return !b || b.estado === 'NOVO'; }); }
-  function dadosDoBloco(c, b) {
+  /** O cabeçalho do lançamento na sessão de agora (data, método, estação, quem diagnosticou). */
+  function camposDaSessao(c) {
     var s = c.sessao;
     var campos = { event_date: s.data, metodo: s.metodo };
     if (s.estacao_id) campos.estacao_id = s.estacao_id;
     if (s.responsavel) campos.responsible = s.responsavel;
+    return campos;
+  }
+  /** O bloco sai sempre com o cabeçalho de quando foi criado (o mesmo conteúdo para a mesma chave em todo reenvio). */
+  function dadosDoBloco(c, b) {
+    if (!b.campos) b.campos = camposDaSessao(c);
+    var campos = Util.clonar(b.campos);
     var porUid = {};
     c.linhas.forEach(function (l) { porUid[l.uid] = l; });
     return { tipo: 'REPRODUCAO', subtipo: 'DIAGNOSTICO_GESTACAO', campos: campos, animais: b.uids.map(function (u) {
@@ -396,10 +422,17 @@ var TelaReproducao = (function () {
           c.erroGeral = semLinha || gerais.length ? (gerais.length ? gerais.map(function (d) { return d.mensagem; }).join(' ') : e.message) : null;
           soltarBloco(c, b.chave);
         }
-      } else {
+      } else if (e.code === 'TRANSPORTE' || e.code === 'SEM_RESPOSTA' || e.code === 'LOCKED') {
         b.estado = 'SEM_SINAL';
         b.mensagem = e.message;
         linhas.forEach(function (l) { l.estado = 'SEM_SINAL'; });
+      } else {
+        // Outra recusa do servidor (bloco já gravado com outro conteúdo, sem permissão, falha interna): não é "sem sinal". A
+        // mensagem fica na área de status, as linhas viram pendência com o motivo, e o bloco é solto (nada fica preso).
+        b.estado = 'ERRO';
+        c.erroGeral = e.message;
+        linhas.forEach(function (l) { l.estado = 'ERRO'; l.mensagem = e.code === 'IDEMPOTENCY_MISMATCH' ? 'Este bloco já saiu antes com outro cabeçalho e pode já estar gravado: confira em Eventos; se estiver, tire a linha.' : 'Recusado pelo servidor: ' + e.message; });
+        soltarBloco(c, b.chave);
       }
       await guardarTronco(c);
       aoMudar();
@@ -426,7 +459,7 @@ var TelaReproducao = (function () {
       var ordem = c.blocos.filter(function (b) { return b.estado === 'NOVO' || b.estado === 'SEM_SINAL' || b.estado === 'ENVIANDO' || (b.estado === 'AVISO' && b.reenviar); });
       for (var k = 0; k < ordem.length; k++) { var st = await enviarBloco(c, ordem[k], aoMudar); if (st === 'SEM_SINAL' || st === 'ERRO') return st; }
       for (var fila = naFila(c); fila.length; fila = naFila(c)) {
-        var b = { chave: 'tronco:' + Util.uuid(), uids: fila.slice(0, BLOCO).map(function (l) { return l.uid; }), estado: 'NOVO', aceitos: [] };
+        var b = { chave: 'tronco:' + Util.uuid(), uids: fila.slice(0, BLOCO).map(function (l) { return l.uid; }), estado: 'NOVO', aceitos: [], campos: camposDaSessao(c) };
         c.blocos.push(b);
         b.uids.forEach(function (u) { c.linhas.forEach(function (l) { if (l.uid === u) l.bloco = b.chave; }); });
         var sb = await enviarBloco(c, b, aoMudar);
@@ -483,8 +516,19 @@ var TelaReproducao = (function () {
      * porId} | {carregando} | {erro} | null (hoje).
      */
     function comPosicao() { return !!(ui.posicao && ui.posicao.porId); }
+    /** Data passada sem a posição do servidor (carregando ou sem sinal): nada é conferido pela posição de hoje. */
+    function semPosicao() { return !!(ui.posicao && !ui.posicao.porId); }
     function presente(a) { return comPosicao() ? !!ui.posicao.porId[a.animal_id] : a.situacao_cadastral === 'ATIVO'; }
     function brincoDe(a) { var x = comPosicao() ? ui.posicao.porId[a.animal_id] : null; return x ? x.brinco : a.brinco || null; }
+    /** A fêmea descrita no dia do diagnóstico (categoria, pasto e último peso daquele dia); hoje, pela lista do aparelho. */
+    function descricao(a) {
+      var x = comPosicao() ? ui.posicao.porId[a.animal_id] : null;
+      if (!x) return Store.descricaoAnimal(a);
+      var p = [x.categoria || Fmt.rotulo('SEXO', x.sexo), (Store.pasto(x.pasture_id) || {}).nome || 'sem pasto'];
+      if (x.ultimo_peso) p.push(Fmt.peso(x.ultimo_peso.kg) + ' em ' + Fmt.dataCurta(x.ultimo_peso.data) + (x.ultimo_peso.estimado ? ' (estimado)' : ''));
+      if (brincoDe(a) && a.codigo_interno) p.push(a.codigo_interno);
+      return p.join(' · ');
+    }
     function daPosicao(x) { return Store.animal(x.animal_id) || { animal_id: x.animal_id, brinco: x.brinco_hoje, codigo_interno: x.codigo_interno, sexo: x.sexo }; }
     function nomeNaData(a) {
       var b = brincoDe(a);
@@ -502,6 +546,7 @@ var TelaReproducao = (function () {
         var porId = {};
         itens.forEach(function (x) { porId[x.animal_id] = x; });
         ui.posicao = d.motivo ? { erro: Fmt.rotulo('MOTIVO', d.motivo), data: data } : { data: d.data, itens: itens, porId: porId };
+        if (comPosicao()) resolverEsperando();
         desenhar();
       }, function (e) {
         if (!vivo) return;
@@ -509,8 +554,26 @@ var TelaReproducao = (function () {
         desenhar();
       });
     }
-    /** Brinco digitado → a fêmea (na data passada, pelo brinco daquele dia); sem fêmea com o número, o código interno (A-000004). */
+    /** As linhas digitadas sem a posição: com ela na mão, o brinco é conferido pela data; o resto continua pendente. */
+    function resolverEsperando() {
+      var mudouAlgo = false;
+      c.linhas.forEach(function (l) {
+        if (!l.semPosicao || l.estado !== 'NAO_ENCONTRADO') return;
+        l.semPosicao = false;
+        mudouAlgo = true;
+        var r = resolver(l.brinco);
+        var a = r.modo === 'EXATO' || r.modo === 'SEM_ZEROS' ? r.candidatos[0] : null;
+        if (!a || !presente(a)) return;
+        l.animal_id = a.animal_id; l.brinco = brincoDe(a) || a.codigo_interno; l.estado = 'FILA'; l.mensagem = null;
+      });
+      if (mudouAlgo) guardarTronco(c);
+    }
+    /**
+     * Brinco digitado → a fêmea (na data passada, pelo brinco daquele dia; sem a posição, nada pela lista de hoje); sem fêmea com
+     * o número, o código interno inteiro (A-000004, 000004) da fêmea SEM brinco na data.
+     */
     function resolver(t) {
+      if (semPosicao()) return { modo: 'NENHUM', candidatos: [], semPosicao: true };
       var r;
       if (comPosicao()) {
         var cmp = function (semZeros) { return ui.posicao.itens.filter(function (x) { return x.brinco && Store.normalizarBrinco(x.brinco, !semZeros) === Store.normalizarBrinco(t, !semZeros); }); };
@@ -519,11 +582,13 @@ var TelaReproducao = (function () {
         r = { modo: exatos.length === 1 ? 'EXATO' : exatos.length ? 'VARIOS' : 'NENHUM', candidatos: exatos.map(daPosicao) };
       } else r = Store.resolverBrinco(t, function (a) { return a.sexo === 'F' && a.situacao_cadastral === 'ATIVO'; });
       if (r.modo !== 'NENHUM') return r;
-      var m = /^(?:A-?(\d+)|(0\d{5,}))$/i.exec(String(t).trim());
+      var m = /^(?:A-(\d+)|A?(0\d{5,}))$/i.exec(String(t).trim());
       if (!m) return r;
       var n = Number(m[1] || m[2]);
       var lista = comPosicao() ? ui.posicao.itens.map(daPosicao) : Store.animais().filter(function (a) { return a.sexo === 'F' && a.situacao_cadastral === 'ATIVO'; });
-      var cand = lista.filter(function (a) { var k = /(\d+)$/.exec(String(a.codigo_interno || '')); return k && Number(k[1]) === n; });
+      var mesmo = lista.filter(function (a) { var k = /(\d+)$/.exec(String(a.codigo_interno || '')); return k && Number(k[1]) === n; });
+      var cand = mesmo.filter(function (a) { return !brincoDe(a); });
+      if (!cand.length && mesmo.length === 1) return { modo: 'NENHUM', candidatos: [], codigoDe: mesmo[0] };
       return { modo: cand.length === 1 ? 'EXATO' : cand.length ? 'VARIOS' : 'NENHUM', candidatos: cand };
     }
     function conferir() {
@@ -547,10 +612,16 @@ var TelaReproducao = (function () {
       }
       if (r.modo === 'VARIOS') {
         ui.conferencia.appendChild(h('p', { class: 'aviso', text: 'Mais de uma fêmea com "' + t + '": escolha.' }));
-        r.candidatos.forEach(function (a) { ui.candidatos.appendChild(UI.botao(nomeNaData(a) + ' · ' + Store.descricaoAnimal(a), { bloco: true, aoClicar: function () { escolher(a); ui.resultado.focus(); } })); });
+        r.candidatos.forEach(function (a) { ui.candidatos.appendChild(UI.botao(nomeNaData(a) + ' · ' + descricao(a), { bloco: true, aoClicar: function () { escolher(a); ui.resultado.focus(); } })); });
         return 'VARIOS';
       }
-      if (r.modo === 'NENHUM') { ui.atual = { brinco: t, animal: null }; ui.conferencia.appendChild(h('p', { class: 'destaque-erro', dataset: { conferencia: 'NAO_ENCONTRADO' }, text: (aviso || t + ': nenhuma fêmea no rebanho' + (comPosicao() ? ' em ' + Fmt.data(ui.posicao.data) : '') + ' com este brinco.') + ' Confira; se seguir, a linha fica pendente.' })); return 'NENHUM'; }
+      if (r.modo === 'NENHUM') {
+        ui.atual = { brinco: t, animal: null, semPosicao: !!r.semPosicao };
+        var texto = r.semPosicao ? t + ': sem a posição do rebanho em ' + Fmt.data(ui.posicao.data) + ', o brinco fica para conferir quando ela chegar (toque em "Tentar de novo" com sinal).'
+          : aviso || (r.codigoDe ? t + ' é o código interno de uma fêmea com brinco (' + brincoDe(r.codigoDe) + '): digite o brinco dela.' : t + ': nenhuma fêmea no rebanho' + (comPosicao() ? ' em ' + Fmt.data(ui.posicao.data) : '') + ' com este brinco.');
+        ui.conferencia.appendChild(h('p', { class: 'destaque-erro', dataset: { conferencia: r.semPosicao ? 'SEM_POSICAO' : 'NAO_ENCONTRADO' }, text: texto + ' Confira; se seguir, a linha fica pendente.' }));
+        return 'NENHUM';
+      }
       escolher(r.candidatos[0]);
       return 'OK';
     }
@@ -559,8 +630,8 @@ var TelaReproducao = (function () {
       Util.limpar(ui.conferencia);
       ui.atual = { brinco: brincoDe(a) || a.codigo_interno, animal: a };
       var ja = c.linhas.filter(function (l) { return l.animal_id === a.animal_id; });
-      // A situação reprodutiva da lista do aparelho é a de hoje: só aparece no diagnóstico de hoje.
-      ui.conferencia.appendChild(h('p', { class: 'dado', dataset: { conferencia: 'OK' }, text: nomeNaData(a) + ' · ' + Store.descricaoAnimal(a) + (!comPosicao() && a.situacao_reprodutiva ? ' · ' + sit(a.situacao_reprodutiva).toLowerCase() : '') }));
+      // A situação reprodutiva da lista do aparelho é a de hoje: só aparece no diagnóstico de hoje (sem posição de outra data).
+      ui.conferencia.appendChild(h('p', { class: 'dado', dataset: { conferencia: 'OK' }, text: nomeNaData(a) + ' · ' + descricao(a) + (!ui.posicao && a.situacao_reprodutiva ? ' · ' + sit(a.situacao_reprodutiva).toLowerCase() : '') }));
       // A linha ainda não gravada é substituída; a gravada não: diagnosticar de novo grava outro diagnóstico do mesmo dia.
       var ult = ja[ja.length - 1];
       if (ult) ui.conferencia.appendChild(h('p', { class: 'aviso', dataset: { conferenciaRepetido: editavel(c, ult) ? 'substitui' : 'outro' }, text: editavel(c, ult)
@@ -576,12 +647,20 @@ var TelaReproducao = (function () {
       if (ja.length) { var u = ja[ja.length - 1]; if (u.bloco) desfazerBloco(c, u.bloco); u.resultado = r.resultado; u.idade = r.idade; u.estado = 'FILA'; u.mensagem = null; c.linhas = c.linhas.filter(function (l) { return l !== u; }).concat([u]); }
       else {
         c.seq = (c.seq || 0) + 1;
-        c.linhas.push({ uid: 'd' + c.seq + '-' + Util.uuid().slice(0, 6), brinco: at.brinco, animal_id: at.animal ? at.animal.animal_id : null, resultado: r.resultado, idade: r.idade, estado: at.animal ? 'FILA' : 'NAO_ENCONTRADO', bloco: null, mensagem: null });
+        c.linhas.push({ uid: 'd' + c.seq + '-' + Util.uuid().slice(0, 6), brinco: at.brinco, animal_id: at.animal ? at.animal.animal_id : null, resultado: r.resultado, idade: r.idade, estado: at.animal ? 'FILA' : 'NAO_ENCONTRADO', bloco: null, mensagem: null, semPosicao: !at.animal && !!at.semPosicao });
       }
       ui.brinco.value = ''; ui.resultado.value = ''; ui.atual = null; Util.limpar(ui.conferencia); Util.limpar(ui.candidatos);
       mudou();
       ui.brinco.focus();
       if (naFila(c).length >= BLOCO && !pendencias(c).length && !enviando) enviarAgora();
+    }
+    /**
+     * O botão "Prenhe" grava prenhe: do campo, só a idade da gestação que veio junto (p90, p 90); "v", "d" ou outro texto no
+     * campo não mudam o toque explícito.
+     */
+    function prenheDoCampo() {
+      var r = lerResultado(ui.resultado.value);
+      return !r.erro && r.resultado === 'POSITIVO' && r.idade ? 'p' + r.idade : 'p';
     }
     function enviarAgora() {
       enviarTudo(c, desenhar).then(function (st) { if (st === 'SEM_SINAL') UI.aviso('Sem sinal: os diagnósticos ficaram guardados neste aparelho.', { tipo: 'aviso' }); },
@@ -646,6 +725,9 @@ var TelaReproducao = (function () {
     }
     function desenhar() {
       if (!vivo || !c || !ui.lista) return;
+      // A sessão só muda enquanto nenhum bloco saiu (CONTRATOS, seções 38 e 43): o botão é refeito a cada mudança.
+      Util.limpar(ui.mudar);
+      if (!c.blocos.some(function (b) { return ['GRAVADO', 'SEM_SINAL', 'ENVIANDO'].indexOf(b.estado) >= 0; })) ui.mudar.appendChild(UI.botao('Mudar data, método ou estação', { tipo: 'texto', aoClicar: function () { c.iniciada = false; sessao(); } }));
       var conta = { POSITIVO: 0, NEGATIVO: 0, INCONCLUSIVO: 0 };
       c.linhas.forEach(function (l) { conta[l.resultado] = (conta[l.resultado] || 0) + 1; });
       Util.limpar(ui.contador);
@@ -657,7 +739,8 @@ var TelaReproducao = (function () {
       var gravadas = c.linhas.filter(function (l) { return l.estado === 'GRAVADA'; }).length;
       var comAviso = c.linhas.filter(function (l) { return l.estado === 'AVISO'; }).length;
       ui.status.appendChild(h('p', { class: 'dado', text: [gravadas ? gravadas + ' gravados' : null, fila ? fila + ' na fila deste aparelho' : null, semSinal ? semSinal + ' sem confirmação do servidor' : null, comAviso ? comAviso + ' para conferir' : null, pend.length ? pend.length + (pend.length === 1 ? ' pendente' : ' pendentes') : null].filter(Boolean).join(' · ') || 'Nenhum diagnóstico ainda.' }));
-      if (ui.posicao) ui.status.appendChild(ui.posicao.carregando ? UI.nota('Conferindo no servidor quem estava no rebanho em ' + Fmt.data(ui.posicao.data) + '…', 'info') : ui.posicao.erro ? UI.nota('Sem a posição do rebanho em ' + Fmt.data(ui.posicao.data) + ' (' + ui.posicao.erro + '): a conferência usa a posição de hoje; o servidor confere na gravação.', 'aviso')
+      if (ui.posicao) ui.status.appendChild(ui.posicao.carregando ? UI.nota('Conferindo no servidor quem estava no rebanho em ' + Fmt.data(ui.posicao.data) + '…', 'info') : ui.posicao.erro ? h('div', { dataset: { posicaoErro: '1' } }, UI.nota('Sem a posição do rebanho em ' + Fmt.data(ui.posicao.data) + ' (' + ui.posicao.erro + '): o brinco não é conferido pela posição de hoje (pode ser de outra fêmea naquele dia). Os diagnósticos ficam pendentes até a posição chegar.', 'aviso'),
+        h('div', { class: 'acoes' }, UI.botao('Tentar de novo', { atributos: { 'data-posicao-tentar': '1' }, aoClicar: function () { carregarPosicao(); desenhar(); } })))
         : h('div', { dataset: { troncoPosicao: '1' } }, UI.nota('Fêmeas e brincos na posição em ' + Fmt.data(ui.posicao.data) + ', conferidos pelo servidor.', 'info')));
       if (semSinal) ui.status.appendChild(UI.nota('Sem sinal ou sem resposta: o que foi digitado está guardado neste aparelho. Toque em "Enviar" quando o sinal voltar; nada será gravado duas vezes.', 'aviso'));
       if (c.erroGeral) ui.status.appendChild(h('div', { role: 'alert', dataset: { erroGeral: '1' } }, UI.nota('O servidor recusou o envio: ' + c.erroGeral + ' Nada foi gravado; os diagnósticos continuam neste aparelho.', 'erro')));
@@ -693,10 +776,9 @@ var TelaReproducao = (function () {
       if (!c.iniciada) { inicio(); return; }
       var s = c.sessao;
       ui.contador = h('div', { class: 'curral-contador', role: 'status', 'aria-live': 'polite' });
-      var podeMudar = !c.blocos.some(function (b) { return ['GRAVADO', 'SEM_SINAL', 'ENVIANDO'].indexOf(b.estado) >= 0; });
+      ui.mudar = h('div', { dataset: { troncoMudar: '1' } });
       corpo.appendChild(h('div', { class: 'curral-cabecalho', dataset: { troncoCabecalho: '1' } },
-        h('p', { class: 'dado', text: Fmt.data(s.data) + ' · ' + Fmt.rotulo('METODO_REPRODUCAO', s.metodo) + (s.estacao_id ? ' · ' + nomeEstacao(s.estacao_id) : '') }), ui.contador,
-        podeMudar ? UI.botao('Mudar data, método ou estação', { tipo: 'texto', aoClicar: function () { c.iniciada = false; sessao(); } }) : null));
+        h('p', { class: 'dado', text: Fmt.data(s.data) + ' · ' + Fmt.rotulo('METODO_REPRODUCAO', s.metodo) + (s.estacao_id ? ' · ' + nomeEstacao(s.estacao_id) : '') }), ui.contador, ui.mudar));
       ui.brinco = h('input', { type: 'text', id: 'tr-brinco', class: 'curral-entrada', inputmode: 'numeric', autocomplete: 'off', enterkeyhint: 'next', 'aria-describedby': 'tr-conferencia' });
       ui.resultado = h('input', { type: 'text', id: 'tr-resultado', class: 'curral-entrada', autocomplete: 'off', autocapitalize: 'off', enterkeyhint: 'done' });
       ui.brinco.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); var r = conferir(); if (r === 'OK' || r === 'NENHUM') ui.resultado.focus(); } });
@@ -709,7 +791,7 @@ var TelaReproducao = (function () {
       corpo.appendChild(h('form', { class: 'curral-form', novalidate: true, on: { submit: function (ev) { ev.preventDefault(); lancar(); } } },
         h('div', { class: 'curral-campos' }, campo('tr-brinco', 'Brinco', ui.brinco), campo('tr-resultado', 'Resultado', ui.resultado, 'p = prenhe (p90 = 90 dias de gestação), v = vazia, d = duvidosa.')),
         ui.conferencia, ui.candidatos,
-        h('div', { class: 'acoes' }, ['p', 'v', 'd'].map(function (k) { return UI.botao({ p: 'Prenhe', v: 'Vazia', d: 'Duvidosa' }[k], { atributos: { 'data-resultado-rapido': k, type: 'button' }, aoClicar: function () { lancar(ui.resultado.value && k === 'p' ? ui.resultado.value : k); } }); }))));
+        h('div', { class: 'acoes' }, ['p', 'v', 'd'].map(function (k) { return UI.botao({ p: 'Prenhe', v: 'Vazia', d: 'Duvidosa' }[k], { atributos: { 'data-resultado-rapido': k, type: 'button' }, aoClicar: function () { lancar(k === 'p' ? prenheDoCampo() : k); } }); }))));
       corpo.appendChild(ui.status);
       corpo.appendChild(ui.lista);
       carregarPosicao();

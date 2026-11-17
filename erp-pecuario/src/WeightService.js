@@ -286,7 +286,7 @@ var WeightService = (function () {
     var x = s[i];
     var nada = function (explicacao) { return { gmd_kg_dia: null, motivo: 'DADOS_INSUFICIENTES', explicacao: explicacao }; };
     var v = intervalos(s, periodos, params).filter(function (y) { return y.weight_ate === x.weight_id; })[0];
-    if (v) return { gmd_kg_dia: v.gmd_kg_dia, motivo: v.motivo, explicacao: v.explicacao };
+    if (v) return { gmd_kg_dia: v.gmd_kg_dia, motivo: v.motivo, explicacao: v.explicacao, intervalo: { de: v.de, peso_de_kg: v.peso_de_kg, ganho_kg: v.ganho_kg, dias: v.dias } };
     if (!x.individual) return nada('Esta pesagem é estimada (estimativa visual, média do lote' + (params && params.gmd_aceita_fita === true ? '' : ' ou fita') + '): fica fora do ganho médio diário.');
     if (s.slice(i + 1).some(function (y) { return y.individual && y.data === x.data; })) return nada('Há outra pesagem no mesmo dia, depois desta: o ganho médio diário fica com a última do dia.');
     if (s.slice(0, i).some(function (y) { return y.data < x.data; })) return nada('As pesagens anteriores são estimadas (estimativa visual, média do lote' + (params && params.gmd_aceita_fita === true ? '' : ' ou fita') + '): ficam fora do ganho médio diário.');
@@ -305,8 +305,9 @@ var WeightService = (function () {
   /**
    * Resultado de um evento PESAGEM gravado (resposta do registrar e do reenvio): {n, total_kg, media_kg, tipo, metodo,
    * jejum, lote, animais: [{animal_id, peso_kg, anterior: {data, peso_kg, metodo, estimado} | null, ganho_kg, dias, gmd_kg_dia, gmd_motivo,
-   * gmd_explicacao, variacao_pct}]} — o ganho, os dias e a variação contra a pesagem imediatamente anterior (qualquer
-   * método); o GMD pela conta da ficha (gmdDaPesagem_: vazio com o porquê no intervalo curto e na pesagem estimada).
+   * gmd_explicacao, gmd_intervalo: {de, peso_de_kg, ganho_kg, dias} | null, variacao_pct}]} — o ganho, os dias e a variação
+   * contra a pesagem imediatamente anterior (qualquer método); o GMD pela conta da ficha (gmdDaPesagem_: vazio com o porquê no
+   * intervalo curto e na pesagem estimada), com o intervalo dele.
    */
   function resultadoDoEvento(tx, eventId) {
     var linhas = tx.cru ? tx.cru.cruPor('PESAGENS', 'event_id', eventId) : tx.repo.por('PESAGENS', 'event_id', eventId);
@@ -331,6 +332,9 @@ var WeightService = (function () {
       return {
         animal_id: r.animal_id, peso_kg: r.peso_kg, anterior: ant ? { data: ant.data, peso_kg: ant.peso_kg, metodo: ant.metodo, estimado: ant.estimado === true } : null,
         ganho_kg: v ? v.ganho_kg : null, dias: v ? v.dias : null, gmd_kg_dia: g.gmd_kg_dia, gmd_motivo: g.gmd_kg_dia === null ? g.motivo : null, gmd_explicacao: g.gmd_kg_dia === null ? g.explicacao : null,
+        // O intervalo do GMD (07, seção 8.1: o ganho e os dias do MESMO intervalo), que pode começar antes da pesagem anterior
+        // mostrada (a estimada ou a do mesmo dia no meio ficam fora): a linha do curral diz desde quando ele é contado.
+        gmd_intervalo: g.intervalo || null,
         variacao_pct: v ? v.variacao_pct : null,
         peso_atual: a && typeof a.peso_atual === 'number' ? a.peso_atual : null, data_ultima_pesagem: dataAtual,
         peso_vencido: a && a.situacao_cadastral === 'ATIVO' && dataAtual && typeof validade === 'number' && !vazio_(tx.hoje) ? Utils.diffDias(dataAtual, tx.hoje) > validade : null,
@@ -560,8 +564,18 @@ var WeightService = (function () {
           var x = linhaGrupo(compPasto[pid] || (pres.motivo ? null : InventoryService.compor(L, [], per.ate)), porPasto[pid]);
           x.pasture_id = pid === 'SEM_PASTO' ? null : pid;
           x.nome = p ? p.nome : 'Sem pasto';
+          x.rotulo = x.nome;
           return x;
         });
+        // Dois pastos com o mesmo nome (permitido em propriedades diferentes; ESPECIFICACAO, seção 21): o rótulo leva a
+        // propriedade (e, se ainda repetir, a identificação), e o gráfico e a tabela usam o rótulo — um pasto nunca some no outro.
+        var rotular = function (campo) {
+          var vistos = {};
+          listaPastos.forEach(function (x) { vistos[x.rotulo] = (vistos[x.rotulo] || 0) + 1; });
+          listaPastos.forEach(function (x) { if (vistos[x.rotulo] > 1 && x.pasture_id) { var t = campo(L.f.pasto(x.pasture_id) || {}); if (t) x.rotulo = x.rotulo + ' (' + t + ')'; } });
+        };
+        rotular(function (p) { var pr = !vazio_(p.property_id) && L.repo.carregada('PROPRIEDADES') ? L.repo.porId('PROPRIEDADES', p.property_id) : null; return pr ? pr.nome : null; });
+        rotular(function (p) { return vazio_(p.identificacao) ? p.pasture_id : p.identificacao; });
         var catIds = Utils.unicos(Object.keys(porCat).concat(Object.keys(compCat)));
         var listaCats = catIds.map(function (cid) {
           var x = linhaGrupo(compCat[cid] || (pres.motivo ? null : InventoryService.compor(L, [], per.ate)), porCat[cid]);
@@ -575,7 +589,7 @@ var WeightService = (function () {
           periodo: { de: per.de, ate: per.ate }, filtros: { pasture_id: d.pasture_id || null, sexo: d.sexo || null, category_id: d.category_id || null, raca: d.raca || null },
           parametros: parametrosDasContas_(params),
           geral: g,
-          por_pasto: Utils.ordenarPor(listaPastos, function (x) { return x.nome || ''; }),
+          por_pasto: Utils.ordenarPor(listaPastos, function (x) { return x.rotulo || ''; }),
           por_categoria: Utils.ordenarPor(listaCats, function (x) { var c = x.category_id ? L.categoriaPorId[x.category_id] : null; return c && typeof c.prioridade === 'number' ? c.prioridade : 9999; }),
           pesagens: pesagensDoPeriodo_(tx, L, per, params, function (a, data) {
             if (!casa(a)) return false;

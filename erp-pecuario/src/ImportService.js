@@ -735,7 +735,9 @@ var ImportService = (function () {
     comando.tratador = function (tx) {
       var x = tx.dados;
       var avisos = tx.repo.vigentes('IMPORTACOES').filter(function (i) { return i.arquivo_hash === x.arquivo_hash && i.status !== 'CANCELADO'; }).map(function (i) {
-        return Validation.detalhe({ codigo: 'POSSIVEL_DUPLICIDADE', mensagem: 'Este mesmo arquivo já foi enviado em ' + br_(String(i.created_at).slice(0, 10)) + ' (' + i.arquivo_nome + ', situação ' + i.status.toLowerCase() + '). Enviar de novo mesmo assim?' });
+        // O dia do envio no fuso da fazenda (o de `hoje`), não o dia UTC do created_at.
+        var quando = vazio_(ctx.fuso) ? String(i.created_at).slice(0, 10) : Utils.hoje(i.created_at, ctx.fuso);
+        return Validation.detalhe({ codigo: 'POSSIVEL_DUPLICIDADE', mensagem: 'Este mesmo arquivo já foi enviado em ' + br_(quando) + ' (' + i.arquivo_nome + ', situação ' + i.status.toLowerCase() + '). Enviar de novo mesmo assim?' });
       });
       var importId = tx.novoId();
       var anexoId = tx.novoId();

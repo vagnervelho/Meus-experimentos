@@ -2633,7 +2633,7 @@ var Registro = (function () {
     }
     if (typeof x.quantidade === 'number') l.push(['Sai do frasco', qtd_(x.quantidade, x.unidade) + (x.quantidade_informada ? ' (informado)' : ' (a soma das doses)')]);
     if (x.estoque) l.push(['Estoque do produto', qtd_(x.estoque.antes, x.unidade) + ' → ' + qtd_(x.estoque.depois, x.unidade)]);
-    if (x.consumo) l.push(['Custo pelo consumo', x.consumo.valor ? Fmt.dinheiro(x.consumo.valor) + ' (' + qtd_(x.quantidade, x.unidade) + ' × R$ ' + Fmt.numero(x.consumo.custo_unitario, 4) + '), dividido entre os animais' : SEM_CUSTO]);
+    if (x.consumo) l.push(['Custo pelo consumo', x.consumo.valor ? Fmt.dinheiro(x.consumo.valor) + ' (' + qtd_(x.quantidade, x.unidade) + ' × R$ ' + Fmt.numero(x.consumo.custo_unitario, 4) + '), dividido entre os animais' : x.consumo.porque_sem_custo || SEM_CUSTO]);
     if (x.fim_carencia) l.push(['Carência', plural(x.carencia_dias, 'dia', 'dias') + ': não abater até ' + Fmt.data(x.fim_carencia)]);
     if (x.proxima_aplicacao) l.push(['Próxima aplicação', Fmt.data(x.proxima_aplicacao)]);
     return l;
@@ -2643,7 +2643,7 @@ var Registro = (function () {
     if (!e) return [];
     var l = [];
     if (e.subtipo === 'ENTRADA') {
-      l.push(['Entra no estoque', e.controla_estoque ? qtd_(e.quantidade, e.unidade) + (e.qtd_apresentacao ? ' (' + qtd_(e.qtd_apresentacao) + ' × ' + qtd_(e.fator_conversao, e.unidade) + ')' : '') : 'nada: ' + e.nome + ' não controla estoque (fica só o lançamento da compra)']);
+      l.push(['Entra no estoque', e.fora_do_estoque ? 'nada: ' + e.fora_do_estoque : qtd_(e.quantidade, e.unidade) + (e.qtd_apresentacao ? ' (' + qtd_(e.qtd_apresentacao) + ' × ' + qtd_(e.fator_conversao, e.unidade) + ')' : '')]);
       if (e.custo_unitario !== null && e.custo_unitario !== undefined) l.push(['Custo por unidade', 'R$ ' + Fmt.numero(e.custo_unitario, 4) + ' por ' + e.unidade]);
       if (e.produto_sem_custo) l.push(['Custo do insumo', SEM_CUSTO]);
     } else if (e.motivo === 'CONTAGEM') l.push(['Acerto pela contagem', 'contado ' + qtd_(e.saldo_contado, e.unidade) + ', o sistema tinha ' + qtd_(e.saldo_na_data, e.unidade) + ': ' + (e.quantidade > 0 ? '+' : '') + qtd_(e.quantidade, e.unidade)]);
