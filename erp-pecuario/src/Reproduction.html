@@ -351,9 +351,19 @@ var TelaReproducao = (function () {
     return { resultado: res, idade: m[2] ? Number(m[2]) : null };
   }
   function bloco(c, chave) { return c.blocos.filter(function (b) { return b.chave === chave; })[0] || null; }
+  /**
+   * O bloco que saiu (no ar, sem confirmação ou gravado) pode estar gravado: só a resposta do servidor decide o destino dele
+   * (CONTRATOS, seção 48). O aparelho nunca o desfaz, nunca tira, troca ou corrige uma linha dele e nunca muda a sessão.
+   */
+  function saiu(b) { return !!b && (b.estado === 'ENVIANDO' || b.estado === 'SEM_SINAL' || b.estado === 'GRAVADO'); }
+  function algumSaiu(c) { return c.blocos.some(saiu); }
+  /** A linha ainda é do aparelho na hora do clique: está na sessão, não foi gravada e o bloco dela não saiu. */
+  function mexivel(c, l) { return c.linhas.indexOf(l) >= 0 && l.estado !== 'GRAVADA' && l.estado !== 'ENVIANDO' && l.estado !== 'SEM_SINAL' && editavel(c, l); }
   function desfazerBloco(c, chave) {
+    if (saiu(bloco(c, chave))) return false;
     c.linhas.forEach(function (l) { if (l.bloco === chave) { l.bloco = null; if (l.estado !== 'NAO_ENCONTRADO') { l.estado = 'FILA'; l.mensagem = null; } } });
     c.blocos = c.blocos.filter(function (b) { return b.chave !== chave; });
+    return true;
   }
   /** A recusa solta o bloco sem apagar o que ela disse: as citadas ficam ERRO (pendência, com o motivo), as demais na fila. */
   function soltarBloco(c, chave) {
@@ -371,7 +381,7 @@ var TelaReproducao = (function () {
    * data nova, toda linha volta a ser conferida pelo servidor NA DATA NOVA pelo texto digitado: fica pendente até a resposta.
    */
   function sessaoMudou(c, dataMudou) {
-    c.blocos.slice().forEach(function (b) { if (b.estado !== 'GRAVADO') desfazerBloco(c, b.chave); });
+    c.blocos.slice().forEach(function (b) { desfazerBloco(c, b.chave); });
     c.erroGeral = null;
     if (!dataMudou) return;
     c.linhas.forEach(function (l) {
@@ -416,12 +426,16 @@ var TelaReproducao = (function () {
     b.reenviar = false;
     c.erroGeral = null;
     linhas.forEach(function (l) { l.estado = 'ENVIANDO'; l.mensagem = null; });
+    // A tela mostra o bloco saindo antes de guardar a chave (no rascunho do servidor, sem localStorage, a gravação demora):
+    // nenhum botão de mexer na linha fica na tela enquanto ela sai.
+    aoMudar();
     await guardarTronco(c, { imediato: true });
     aoMudar();
     var r;
     try {
       r = await Cliente.comando('evento.registrar', dadosDoBloco(c, b), { chave: b.chave, avisosAceitos: b.aceitos || [], aoEstado: function () { aoMudar(); } });
     } catch (e) {
+      linhas = c.linhas.filter(function (l) { return l.bloco === b.chave; });
       if (e.code === 'NEEDS_CONFIRMATION' || e.code === 'VALIDATION' || e.code === 'CONFLICT') {
         b.estado = e.code === 'NEEDS_CONFIRMATION' ? 'AVISO' : 'ERRO';
         var porAnimal = {};
@@ -465,6 +479,8 @@ var TelaReproducao = (function () {
     }
     var porId = {};
     ((r.data.reproducao || {}).animais || []).forEach(function (x) { porId[x.animal_id] = x; });
+    // Gravadas são as linhas do bloco na hora da resposta (o bloco que saiu não se desfaz: as mesmas que saíram).
+    linhas = c.linhas.filter(function (l) { return l.bloco === b.chave; });
     b.estado = 'GRAVADO';
     b.event_id = r.data.event_id;
     b.n = linhas.length;
@@ -545,7 +561,10 @@ var TelaReproducao = (function () {
         if (!Fmt.ehData(data.value)) { erro.appendChild(UI.nota('Escolha a data do diagnóstico.', 'erro')); data.focus(); return; }
         var antes = JSON.stringify(s);
         var dataMudou = s.data !== data.value;
-        s.data = data.value; s.metodo = metodo.value; s.estacao_id = est.value; s.responsavel = resp.value.trim();
+        var nova = { data: data.value, metodo: metodo.value, estacao_id: est.value, responsavel: resp.value.trim() };
+        // Um bloco saiu enquanto o formulário estava aberto: ele foi com o cabeçalho de antes, e a sessão não muda mais.
+        if (algumSaiu(c) && antes !== JSON.stringify(Object.assign({}, s, nova))) { erro.appendChild(UI.nota('Um envio já saiu para o servidor com ' + Fmt.data(s.data) + ': a data, o método e a estação não mudam mais neste diagnóstico. Termine este e comece outro.', 'erro')); return; }
+        Object.assign(s, nova);
         if (antes !== JSON.stringify(s)) sessaoMudou(c, dataMudou);
         c.iniciada = true;
         guardarTronco(c).then(sessao);
@@ -583,8 +602,15 @@ var TelaReproducao = (function () {
       return Store.resolver(textos, data, OPCOES).then(function (r) {
         if (c.sessao.data !== data) return { erro: new Error('A data do diagnóstico mudou.') };
         ui.estados = Object.assign(ui.estados || {}, r.animais);
-        return r;
+        return { porTexto: r.porTexto, animais: r.animais, data: data };
       }, function (e) { return { erro: e }; });
+    }
+    /** A linha pelo brinco da data da sessão (o que o servidor deu ao texto naquele dia), nunca pelo de hoje. */
+    function rotuloLinha(l) {
+      var a = l.animal_id ? Store.animal(l.animal_id) : null;
+      if (!a) return l.brinco || l.texto;
+      var b = l.brinco || a.codigo_interno;
+      return !passada() || b === (a.brinco || null) ? Store.rotuloAnimal(a) : b + ' (hoje ' + (a.brinco || 'sem brinco') + ')';
     }
     /** A conferência da data com o servidor (há posição do rebanho nela?), numa data passada; com sinal, as pendentes vão junto. */
     function carregarPosicao() {
@@ -605,24 +631,37 @@ var TelaReproducao = (function () {
     /** A fêmea achada que não entra no diagnóstico (macho, fora do rebanho na data): o porquê, do servidor. */
     function motivoFora(a) { var x = estadoDe(a); return x ? x.inelegivel : null; }
     /** As linhas que ficaram sem resposta do servidor vão juntas ao resolvedor; a fêmea achada e no rebanho vai para a fila. */
+    function textosEsperando() {
+      return c.linhas.filter(function (l) { return l.semPosicao && l.estado === 'NAO_ENCONTRADO'; }).map(function (l) { return String(l.texto || l.brinco).trim(); });
+    }
     function resolverEsperando() {
-      var esperando = c.linhas.filter(function (l) { return l.semPosicao && l.estado === 'NAO_ENCONTRADO'; });
-      if (!esperando.length) return Promise.resolve();
-      var data = c.sessao.data;
-      return resolverNoServidor(esperando.map(function (l) { return l.texto || l.brinco; })).then(function (r) {
-        if (r.erro || !vivo || c.sessao.data !== data) return;
-        esperando.forEach(function (l) {
-          var x = r.porTexto[String(l.texto || l.brinco).trim()];
-          if (!x || l.estado !== 'NAO_ENCONTRADO') return;
-          var a = x.situacao === 'ACHADO' ? Store.doEstado(r.animais[x.animal_id]) : null;
-          var outra = a ? c.linhas.filter(function (y) { return y !== l && y.animal_id === a.animal_id && y.estado !== 'GRAVADA'; })[0] : null;
-          // Barrada só pela outra linha do mesmo animal: continua esperando, e sai sozinha quando a outra for tirada.
-          l.semPosicao = !!(a && !motivoFora(a) && outra);
-          if (!a || motivoFora(a) || outra) { l.mensagem = !a ? x.mensagem || 'Mais de uma fêmea com este brinco: digite de novo.' : outra ? Store.rotuloAnimal(a) + ' já tem outro diagnóstico nesta sessão: tire um dos dois.' : Store.rotuloAnimal(a) + ' ' + motivoFora(a) + ': não entra no diagnóstico.'; return; }
-          l.animal_id = a.animal_id; l.dataAnimal = data; l.brinco = brincoDe(a) || a.codigo_interno; l.estado = 'FILA'; l.mensagem = null;
-        });
-        mudou();
+      var textos = textosEsperando();
+      if (!textos.length) return Promise.resolve();
+      return resolverNoServidor(textos).then(function (r) { if (aplicarEsperando(r)) mudou(); });
+    }
+    /**
+     * As linhas pendentes, pela resposta do servidor na data da sessão: a achada e no rebanho vai para a fila. A barrada por outra
+     * linha da mesma fêmea que ainda é do aparelho continua esperando (sai sozinha quando a outra for tirada). A da fêmea que já
+     * tem diagnóstico que saiu (gravado ou no ar) vai para a fila como outro diagnóstico do mesmo dia — a mesma regra do
+     * lançamento na hora, e o servidor pede a confirmação. O resto continua pendente com o porquê. Devolve se alguma mudou.
+     */
+    function aplicarEsperando(r) {
+      if (r.erro || !vivo || c.sessao.data !== r.data) return false;
+      var mexeu = false;
+      c.linhas.filter(function (l) { return l.semPosicao && l.estado === 'NAO_ENCONTRADO'; }).forEach(function (l) {
+        var x = r.porTexto[String(l.texto || l.brinco).trim()];
+        if (!x) return;
+        mexeu = true;
+        var a = x.situacao === 'ACHADO' ? Store.doEstado(r.animais[x.animal_id]) : null;
+        var outras = a ? c.linhas.filter(function (y) { return y !== l && y.animal_id === a.animal_id; }) : [];
+        var outra = outras.filter(function (y) { return mexivel(c, y); })[0] || null;
+        var saida = outras.filter(function (y) { return !mexivel(c, y); }).pop() || null;
+        l.semPosicao = !!(a && !motivoFora(a) && outra);
+        if (!a || motivoFora(a) || outra) { l.mensagem = !a ? x.mensagem || 'Mais de uma fêmea com este brinco: digite de novo.' : outra ? nomeNaData(a) + ' já tem outro diagnóstico nesta sessão: tire um dos dois.' : nomeNaData(a) + ' ' + motivoFora(a) + ': não entra no diagnóstico.'; return; }
+        l.animal_id = a.animal_id; l.dataAnimal = r.data; l.brinco = brincoDe(a) || a.codigo_interno; l.estado = 'FILA'; l.bloco = null;
+        l.mensagem = saida ? 'Já diagnosticada nesta sessão (' + ROTULO_RES[saida.resultado] + ', ' + ROTULO_ESTADO[saida.estado] + '): este grava outro diagnóstico do mesmo dia, e o servidor pede confirmação. Tire esta linha se foi engano.' : null;
       });
+      return mexeu;
     }
     /**
      * Brinco digitado → a pergunta ao resolvedor único na data; a resposta (a fêmea, a escolha entre várias ou a recusa
@@ -636,9 +675,12 @@ var TelaReproducao = (function () {
       if (!t) { ui.conferindo = null; return null; }
       var vez = ui.vezConf = (ui.vezConf || 0) + 1;
       ui.conferencia.appendChild(h('p', { class: 'suave', text: 'Conferindo ' + t + ' no servidor…' }));
-      ui.conferindo = { texto: t, pronto: resolverNoServidor([t]).then(function (r) {
+      // As linhas que ficaram pendentes sem resposta vão na mesma pergunta e são resolvidas ANTES da conferência: a decisão do
+      // brinco repetido (o novo resultado substitui o anterior) não depende de qual resposta chega primeiro.
+      var textos = [t].concat(textosEsperando().filter(function (x) { return x !== t; }));
+      ui.conferindo = { texto: t, data: c.sessao.data, pronto: resolverNoServidor(textos).then(function (r) {
+        if (aplicarEsperando(r)) mudou();
         if (vivo && vez === ui.vezConf) mostrar(t, r);
-        if (vivo && !r.erro) resolverEsperando();
       }) };
       return ui.conferindo.pronto;
     }
@@ -655,19 +697,19 @@ var TelaReproducao = (function () {
       }
       var texto = !x ? t + ': sem resposta do servidor (' + r.erro.message + '), o brinco fica para conferir quando houver sinal (toque em "Tentar de novo" ou "Enviar").'
         : a ? nomeNaData(a) + ' ' + motivoFora(a) + ': não entra no diagnóstico.' : x.mensagem;
-      ui.atual = { brinco: t, animal: null, semPosicao: !x, mensagem: x ? texto : null };
+      ui.atual = { brinco: t, animal: null, semPosicao: !x, mensagem: x ? texto : null, data: c.sessao.data };
       ui.conferencia.appendChild(h('p', { class: 'destaque-erro', dataset: { conferencia: x ? 'NAO_ENCONTRADO' : 'SEM_POSICAO' }, text: texto + ' Confira; se seguir, a linha fica pendente.' }));
     }
     function escolher(a) {
       Util.limpar(ui.candidatos);
       Util.limpar(ui.conferencia);
-      ui.atual = { brinco: brincoDe(a) || a.codigo_interno, animal: a };
+      ui.atual = { brinco: brincoDe(a) || a.codigo_interno, animal: a, data: c.sessao.data };
       var ja = c.linhas.filter(function (l) { return l.animal_id === a.animal_id; });
       // A situação reprodutiva da lista do aparelho é a de hoje: só aparece no diagnóstico de hoje.
       ui.conferencia.appendChild(h('p', { class: 'dado', dataset: { conferencia: 'OK' }, text: nomeNaData(a) + ' · ' + descricao(a) + (!passada() && a.situacao_reprodutiva ? ' · ' + sit(a.situacao_reprodutiva).toLowerCase() : '') }));
       // A linha ainda não gravada é substituída; a gravada não: diagnosticar de novo grava outro diagnóstico do mesmo dia.
       var ult = ja[ja.length - 1];
-      if (ult) ui.conferencia.appendChild(h('p', { class: 'aviso', dataset: { conferenciaRepetido: editavel(c, ult) ? 'substitui' : 'outro' }, text: editavel(c, ult)
+      if (ult) ui.conferencia.appendChild(h('p', { class: 'aviso', dataset: { conferenciaRepetido: mexivel(c, ult) ? 'substitui' : 'outro' }, text: mexivel(c, ult)
         ? 'Já diagnosticada nesta sessão (' + ROTULO_RES[ult.resultado] + ', ainda não enviado): o novo resultado substitui o anterior.'
         : 'Já diagnosticada nesta sessão (' + ROTULO_RES[ult.resultado] + ', ' + ROTULO_ESTADO[ult.estado] + '): diagnosticar de novo grava outro diagnóstico do mesmo dia, e o servidor pede confirmação.' }));
     }
@@ -677,10 +719,12 @@ var TelaReproducao = (function () {
       try { await lancar_(txt); } finally { ui.lancando = false; }
     }
     async function lancar_(txt) {
+      // A fêmea conferida vale só na data em que o servidor a deu: com a sessão mudada, o brinco é conferido de novo.
+      if (ui.atual && ui.atual.data !== c.sessao.data) ui.atual = null;
       if (!ui.atual) {
         var t = ui.brinco.value.trim();
         if (!t) { ui.brinco.focus(); return; }
-        if (!ui.conferindo || ui.conferindo.texto !== t) conferir();
+        if (!ui.conferindo || ui.conferindo.texto !== t || ui.conferindo.data !== c.sessao.data) conferir();
         await ui.conferindo.pronto;
         if (!vivo || !ui.atual) { if (vivo) ui.brinco.focus(); return; }
       }
@@ -688,11 +732,17 @@ var TelaReproducao = (function () {
       if (r.erro) { Util.limpar(ui.conferencia); ui.conferencia.appendChild(h('p', { class: 'destaque-erro', role: 'alert', text: r.erro })); ui.resultado.focus(); return; }
       var at = ui.atual;
       var texto = ui.brinco.value.trim() || at.brinco;
-      var ja = at.animal ? c.linhas.filter(function (l) { return l.animal_id === at.animal.animal_id && l.estado !== 'GRAVADA' && editavel(c, l); }) : [];
-      if (ja.length) { var u = ja[ja.length - 1]; if (u.bloco) desfazerBloco(c, u.bloco); u.resultado = r.resultado; u.idade = r.idade; u.texto = texto; u.dataAnimal = c.sessao.data; u.estado = 'FILA'; u.mensagem = null; c.linhas = c.linhas.filter(function (l) { return l !== u; }).concat([u]); }
-      else {
+      // A linha da mesma fêmea que ainda é do aparelho é substituída (com o aviso: nunca calado); a que saiu fica.
+      var ja = at.animal ? c.linhas.filter(function (l) { return l.animal_id === at.animal.animal_id && mexivel(c, l); }) : [];
+      if (ja.length) {
+        var u = ja[ja.length - 1];
+        var antes = ROTULO_RES[u.resultado] + (u.idade ? ' (' + u.idade + ' dias)' : '');
+        if (u.bloco) desfazerBloco(c, u.bloco);
+        u.resultado = r.resultado; u.idade = r.idade; u.texto = texto; u.dataAnimal = at.data; u.estado = 'FILA'; u.mensagem = 'O novo resultado substituiu o anterior (' + antes + ').'; c.linhas = c.linhas.filter(function (l) { return l !== u; }).concat([u]);
+        UI.aviso(rotuloLinha(u) + ': o novo resultado (' + ROTULO_RES[r.resultado] + ') substituiu o anterior (' + antes + ').', { tipo: 'info' });
+      } else {
         c.seq = (c.seq || 0) + 1;
-        c.linhas.push({ uid: 'd' + c.seq + '-' + Util.uuid().slice(0, 6), brinco: at.brinco, texto: texto, animal_id: at.animal ? at.animal.animal_id : null, dataAnimal: at.animal ? c.sessao.data : null, resultado: r.resultado, idade: r.idade, estado: at.animal ? 'FILA' : 'NAO_ENCONTRADO', bloco: null, mensagem: at.animal ? null : at.mensagem || null, semPosicao: !at.animal && !!at.semPosicao });
+        c.linhas.push({ uid: 'd' + c.seq + '-' + Util.uuid().slice(0, 6), brinco: at.brinco, texto: texto, animal_id: at.animal ? at.animal.animal_id : null, dataAnimal: at.animal ? at.data : null, resultado: r.resultado, idade: r.idade, estado: at.animal ? 'FILA' : 'NAO_ENCONTRADO', bloco: null, mensagem: at.animal ? null : at.mensagem || null, semPosicao: !at.animal && !!at.semPosicao });
       }
       ui.brinco.value = ''; ui.resultado.value = ''; ui.atual = null; ui.conferindo = null; Util.limpar(ui.conferencia); Util.limpar(ui.candidatos);
       mudou();
@@ -712,7 +762,15 @@ var TelaReproducao = (function () {
         function (e) { Util.registrarFalha('envio do tronco', e); UI.aviso('Não foi possível enviar: ' + e.message, { tipo: 'erro' }); desenhar(); });
     }
     /** "Está certo" da linha: aceita o aviso dela no bloco; sem bloco (desfeito), a linha volta à fila e pede o aviso de novo. */
+    /** O botão desenhado antes pode ter ficado velho: a linha que já saiu não muda (a tela é redesenhada com o estado de agora). */
+    function velho(l) {
+      if (mexivel(c, l)) return false;
+      UI.aviso('Este diagnóstico já saiu para o servidor: espere a resposta; depois de gravado, corrija pelo lançamento, em Eventos.', { tipo: 'aviso' });
+      desenhar();
+      return true;
+    }
     function aceitar(l) {
+      if (l.estado !== 'AVISO' || velho(l)) return;
       var b = bloco(c, l.bloco);
       if (!b) { l.estado = 'FILA'; l.bloco = null; l.mensagem = null; mudou(); return; }
       (l.avisosProprios || l.avisos || []).forEach(function (cod) { if (b.aceitos.indexOf(cod) < 0) b.aceitos.push(cod); });
@@ -722,6 +780,7 @@ var TelaReproducao = (function () {
     }
     /** O aviso geral do lançamento (sem fêmea: a duplicidade do bloco inteiro) é uma decisão só, para o bloco todo. */
     function aceitarGeral(b) {
+      if (b.estado !== 'AVISO' || c.blocos.indexOf(b) < 0) { desenhar(); return; }
       (b.gerais || []).forEach(function (g) { if (b.aceitos.indexOf(g.codigo) < 0) b.aceitos.push(g.codigo); });
       b.geralAceito = true;
       c.linhas.forEach(function (x) { if (x.bloco === b.chave && x.estado === 'AVISO' && !(x.avisosProprios || []).length) { x.estado = 'FILA'; x.mensagem = 'Confirmado por você: sai no próximo envio.'; } });
@@ -742,7 +801,7 @@ var TelaReproducao = (function () {
         if (editavel(c, l) && (l.estado === 'FILA' || l.estado === 'NAO_ENCONTRADO' || l.estado === 'ERRO' || l.estado === 'AVISO')) {
           if (l.bloco) desfazerBloco(c, l.bloco);
           c.linhas.splice(i, 1);
-          UI.aviso('Tirado o diagnóstico de ' + (l.animal_id ? nomeDe(l.animal_id) : l.brinco) + ' (' + ROTULO_RES[l.resultado] + ').', { tipo: 'info' });
+          UI.aviso('Tirado o diagnóstico de ' + rotuloLinha(l) + ' (' + ROTULO_RES[l.resultado] + ').', { tipo: 'info' });
           mudou();
           resolverEsperando();
           return;
@@ -752,7 +811,7 @@ var TelaReproducao = (function () {
       }
       UI.aviso(!ultimo ? 'Nada para desfazer.' : ultimo.estado === 'GRAVADA' ? 'O último diagnóstico já foi gravado: corrija pelo lançamento gravado, em Eventos.' : 'O último diagnóstico já saiu e espera a confirmação do servidor: toque em "Enviar" com sinal; depois de gravado, corrija pelo lançamento, em Eventos.', { tipo: 'aviso' });
     }
-    function tirar(l) { if (l.bloco) desfazerBloco(c, l.bloco); c.linhas = c.linhas.filter(function (x) { return x !== l; }); mudou(); resolverEsperando(); }
+    function tirar(l) { if (velho(l)) return; if (l.bloco) desfazerBloco(c, l.bloco); c.linhas = c.linhas.filter(function (x) { return x !== l; }); mudou(); resolverEsperando(); }
     async function terminar() {
       var nao = c.linhas.filter(function (l) { return l.estado !== 'GRAVADA'; });
       if (nao.some(function (l) { return l.estado === 'SEM_SINAL' || l.estado === 'ENVIANDO'; })) { UI.aviso('Há diagnósticos ainda sem confirmação do servidor: envie de novo com sinal antes de terminar.', { tipo: 'aviso' }); return; }
@@ -773,7 +832,7 @@ var TelaReproducao = (function () {
       if (!vivo || !c || !ui.lista) return;
       // A sessão só muda enquanto nenhum bloco saiu (CONTRATOS, seções 38 e 43): o botão é refeito a cada mudança.
       Util.limpar(ui.mudar);
-      if (!c.blocos.some(function (b) { return ['GRAVADO', 'SEM_SINAL', 'ENVIANDO'].indexOf(b.estado) >= 0; })) ui.mudar.appendChild(UI.botao('Mudar data, método ou estação', { tipo: 'texto', aoClicar: function () { c.iniciada = false; sessao(); } }));
+      if (!algumSaiu(c)) ui.mudar.appendChild(UI.botao('Mudar data, método ou estação', { tipo: 'texto', aoClicar: function () { if (algumSaiu(c)) { desenhar(); return; } c.iniciada = false; sessao(); } }));
       var conta = { POSITIVO: 0, NEGATIVO: 0, INCONCLUSIVO: 0 };
       c.linhas.forEach(function (l) { conta[l.resultado] = (conta[l.resultado] || 0) + 1; });
       Util.limpar(ui.contador);
@@ -809,12 +868,13 @@ var TelaReproducao = (function () {
         var ret = l.retorno;
         var li = h('li', { class: 'curral-linha', dataset: { linha: l.uid, estado: l.estado } },
           h('div', { class: 'campo-linha' }, UI.icone(ICONE_ESTADO[l.estado] || 'info'),
-            h('span', { class: 'dado', text: n + ' · ' + (l.animal_id ? nomeDe(l.animal_id) : l.brinco) + ' · ' + ROTULO_RES[l.resultado] + (l.idade ? ' (' + l.idade + ' dias)' : '') + ' · ' + ROTULO_ESTADO[l.estado] + (ret && ret.previsao_parto ? ' · ' + textoPrevisao(ret.previsao_parto) : '') })),
+            h('span', { class: 'dado', text: n + ' · ' + rotuloLinha(l) + ' · ' + ROTULO_RES[l.resultado] + (l.idade ? ' (' + l.idade + ' dias)' : '') + ' · ' + ROTULO_ESTADO[l.estado] + (ret && ret.previsao_parto ? ' · ' + textoPrevisao(ret.previsao_parto) : '') })),
           l.mensagem ? h('p', { class: 'suave', text: l.mensagem }) : null);
         var acoes = [];
         var bl = l.estado === 'AVISO' ? bloco(c, l.bloco) : null;
         if (l.estado === 'AVISO' && ((l.avisosProprios || []).length || !bl || !(bl.gerais || []).length || bl.geralAceito)) acoes.push(UI.botao('Está certo', { aoClicar: function () { aceitar(l); } }));
-        if (l.estado === 'ERRO' && l.animal_id && !l.jaGravada) acoes.push(UI.botao('Corrigir o resultado', { aoClicar: function () { var a = Store.animal(l.animal_id); ui.brinco.value = a ? brincoDe(a) || a.codigo_interno : l.brinco; conferir(); ui.resultado.focus(); } }));
+        // "Corrigir o resultado" confere de novo o TEXTO digitado na linha, na data da sessão (o brinco de hoje pode ser de outra fêmea naquele dia).
+        if (l.estado === 'ERRO' && l.animal_id && !l.jaGravada) acoes.push(UI.botao('Corrigir o resultado', { aoClicar: function () { if (velho(l)) return; ui.brinco.value = l.texto || l.brinco; conferir(); ui.resultado.focus(); } }));
         if (l.estado !== 'GRAVADA' && l.estado !== 'ENVIANDO' && l.estado !== 'SEM_SINAL') acoes.push(UI.botao('Tirar', { tipo: 'texto', aoClicar: function () { tirar(l); } }));
         if (acoes.length) li.appendChild(h('div', { class: 'acoes', style: 'margin-top:4px' }, acoes));
         ui.lista.appendChild(li);
@@ -825,6 +885,8 @@ var TelaReproducao = (function () {
       if (!c.iniciada) { inicio(); return; }
       var s = c.sessao;
       ui.estados = {};
+      // A conferência do brinco digitado antes era de outra data (ou sessão): nada dela segue para a tela nova.
+      ui.atual = null; ui.conferindo = null; ui.vezConf = (ui.vezConf || 0) + 1;
       ui.contador = h('div', { class: 'curral-contador', role: 'status', 'aria-live': 'polite' });
       ui.mudar = h('div', { dataset: { troncoMudar: '1' } });
       corpo.appendChild(h('div', { class: 'curral-cabecalho', dataset: { troncoCabecalho: '1' } },

@@ -1758,8 +1758,17 @@ registrarTipo('SANIDADE', {
     const prot = cp.protocol_id ? S.t.PROTOCOLOS_SANITARIOS.find((p) => p.protocol_id === cp.protocol_id) : null;
     // Rodada 3 da revisão da Fase 3 (achado 1): sem os dias informados, a carência padrão do produto do cadastro (05, seção
     // 4.8), como o formulário propõe; o 0 informado é "sem carência".
-    const diasCar = typeof cp.periodo_carencia_dias === 'number' ? cp.periodo_carencia_dias : prod && typeof prod.carencia_padrao_dias === 'number' && d.subtipo !== 'DOENCA' ? prod.carencia_padrao_dias : null;
-    if (typeof cp.periodo_carencia_dias !== 'number' && diasCar !== null) contar('carência pelo padrão do produto');
+    // Revisão final da Fase 3 (achados 2 e 17): na correção com o mesmo produto, as cópias do cadastro feitas no lançamento
+    // (a carência proposta, o nome e o fabricante) são as do original, não as do cadastro de agora.
+    const orig = prod ? sanidadeCongelada(c, prod.product_id) : null;
+    if (orig) contar('correção da aplicação com as cópias congeladas do produto');
+    const diasCar = typeof cp.periodo_carencia_dias === 'number' ? cp.periodo_carencia_dias : d.subtipo === 'DOENCA' ? null
+      : orig ? (typeof orig.periodo_carencia_dias === 'number' ? orig.periodo_carencia_dias : null)
+      : prod && typeof prod.carencia_padrao_dias === 'number' ? prod.carencia_padrao_dias : null;
+    if (typeof cp.periodo_carencia_dias !== 'number' && diasCar !== null && !orig) contar('carência pelo padrão do produto');
+    const nomeEsperado = prod ? (orig && orig.nome_produto ? orig.nome_produto : prod.nome) : cp.nome_produto || null;
+    const fabInf = typeof cp.fabricante === 'string' && cp.fabricante.trim() ? cp.fabricante.trim() : null;
+    const fabEsperado = fabInf || (orig ? orig.fabricante || null : prod ? prod.fabricante || null : null);
     const fim = typeof diasCar === 'number' && diasCar > 0 ? somaDias(cp.event_date, diasCar) : null;
     // A próxima pelo protocolo: na correção com o mesmo protocolo, o intervalo do original (payload); senão o de agora.
     const intervaloOriginal = prot ? intervaloCongelado(c, prot.protocol_id) : null;
@@ -1772,8 +1781,8 @@ registrarTipo('SANIDADE', {
       const l = linhaDe(x.animal_id);
       if (!l || l.efeito_inventario !== 0 || l.papel !== 'SUJEITO') erro('linha da aplicação ' + JSON.stringify(l));
       if (!r) { erro('sem o registro de sanidade do animal ' + x.animal_id); return; }
-      const esperado = [PROCEDIMENTO_DO_SUB[d.subtipo], cp.event_date, cp.produto_id || null, prod ? prod.nome : cp.nome_produto || null, cp.protocol_id || null, fim, proxima];
-      const gravado = [r.tipo_procedimento, r.data_aplicacao, r.produto_id || null, r.nome_produto || null, r.protocol_id || null, r.data_fim_carencia || null, r.data_proxima_aplicacao || null];
+      const esperado = [PROCEDIMENTO_DO_SUB[d.subtipo], cp.event_date, cp.produto_id || null, nomeEsperado, fabEsperado, cp.protocol_id || null, fim, proxima];
+      const gravado = [r.tipo_procedimento, r.data_aplicacao, r.produto_id || null, r.nome_produto || null, r.fabricante || null, r.protocol_id || null, r.data_fim_carencia || null, r.data_proxima_aplicacao || null];
       if (JSON.stringify(gravado) !== JSON.stringify(esperado)) erro('registro de sanidade gravado ' + JSON.stringify(gravado) + ', esperado ' + JSON.stringify(esperado));
       // A dose: a do animal, senão a do lançamento (por cabeça) ou a calculada pelo peso atual (por peso: positiva); total e
       // sem produto, vazia.
@@ -1990,6 +1999,12 @@ function doseCongelada(c, animalId, cp, prod) {
   const nt = (v) => String(v || '').trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ');
   const mesmo = prod ? r.produto_id === prod.product_id : !r.produto_id && nt(r.nome_produto) === nt(cp.nome_produto);
   return mesmo ? r.dose : null;
+}
+/** Na correção, a linha de SANIDADE do original que usou o mesmo produto do cadastro; senão null. */
+function sanidadeCongelada(c, productId) {
+  const o = originalDaCorrecao(c);
+  if (!o || o.event_type !== 'SANIDADE') return null;
+  return c.A.t.SANIDADE.filter((r) => r.event_id === o.event_id && r.produto_id === productId)[0] || null;
 }
 /** Na correção com o mesmo protocolo, o intervalo que propôs a próxima aplicação do original (o payload dele); senão null. */
 function intervaloCongelado(c, protocolId) {
@@ -3374,11 +3389,13 @@ function completaMesesEm(nasc, m) {
  * entrada; devendo, vencida até a aplicação); sem protocolo, a próxima informada na última aplicação do produto; e a
  * carência de cada animal (o maior fim, ≥ D, das aplicações até D).
  */
-function modeloAgenda(S, D) {
+function modeloAgenda(S, D, cats) {
   const ant = paramNum(S, 'agenda_antecedencia_dias', 15);
   const protos = (S.t.PROTOCOLOS_SANITARIOS || []).filter((p) => p.ativo !== false);
   // Passada 2: também a campanha (os meses do ano; a perdida devida até abrir a janela da seguinte).
-  const modelados = new Set(protos.filter((p) => !p.category_id && ['INTERVALO_DIAS', 'UNICA', 'CAMPANHA_MESES'].indexOf(p.recorrencia_tipo) >= 0).map((p) => p.protocol_id));
+  // Revisão final da Fase 3 (achado 1): também os protocolos restritos a uma categoria, com a categoria de cada animal em D e
+  // desde quando ele está nela (`cats`, categoriasNaData: a categoria vem do sistema; o trecho, andando dia a dia para trás).
+  const modelados = new Set(protos.filter((p) => (!p.category_id || cats) && ['INTERVALO_DIAS', 'UNICA', 'CAMPANHA_MESES'].indexOf(p.recorrencia_tipo) >= 0).map((p) => p.protocol_id));
   const sans = vigentesDe(S, 'SANIDADE').map((r) => { const e = S.ev.get(r.event_id); return { r, data: r.data_aplicacao, raiz: S.raiz(e), seq: e.event_seq }; });
   const pend = [];
   const car = [];
@@ -3397,6 +3414,15 @@ function modeloAgenda(S, D) {
       const inicio = [p.created_at ? diaNoFuso(p.created_at) : null, primeira].filter(Boolean).sort()[0] || null;
       if (inicio && inicio > D) return;
       if (p.sexo_aplicavel !== 'AMBOS' && p.sexo_aplicavel !== a.sexo) return;
+      // A categoria em D (05, seção 4.7) e o dia em que o animal entrou nela, que conta como o dia em que se tornou elegível.
+      let naCat = null;
+      if (p.category_id) {
+        const c = cats.get(id);
+        if (!c || c.cat !== p.category_id) return;
+        naCat = c.desde;
+        contar('agenda: protocolo por categoria conferido');
+        if (naCat && desde && naCat > desde) contar('agenda: animal que entrou na categoria depois de entrar no rebanho');
+      }
       const min = typeof p.idade_min_meses === 'number' ? p.idade_min_meses : null;
       const max = typeof p.idade_max_meses === 'number' ? p.idade_max_meses : null;
       const nasc = a.data_nascimento || null;
@@ -3407,7 +3433,7 @@ function modeloAgenda(S, D) {
         if (min !== null && idade < min) return;
         if (max !== null && idade >= max) {
           if (p.recorrencia_tipo !== 'UNICA') return;
-          const comeco = [min !== null ? completaMesesEm(nasc, min) : nasc, desde, inicio].filter(Boolean).sort().pop();
+          const comeco = [min !== null ? completaMesesEm(nasc, min) : nasc, desde, inicio, naCat].filter(Boolean).sort().pop();
           if (!(comeco && comeco < completaMesesEm(nasc, max))) return;
           devendo = true;
         }
@@ -3416,7 +3442,7 @@ function modeloAgenda(S, D) {
       let venc;
       let cumprida;
       if (p.recorrencia_tipo === 'UNICA') {
-        venc = max !== null && nasc ? completaMesesEm(nasc, max) : min !== null && nasc ? completaMesesEm(nasc, min) : desde || D;
+        venc = max !== null && nasc ? completaMesesEm(nasc, max) : min !== null && nasc ? [completaMesesEm(nasc, min), naCat].filter(Boolean).sort().pop() : [desde, naCat].filter(Boolean).sort().pop() || D;
         cumprida = doProt.length > 0;
       } else if (p.recorrencia_tipo === 'CAMPANHA_MESES') {
         // A campanha de cada mês vence no último dia dele e é cumprida pela aplicação entre o primeiro dia − tolerância e o
@@ -3431,7 +3457,7 @@ function modeloAgenda(S, D) {
           [ano - 1, ano, ano + 1].forEach((y) => meses.forEach((m) => camps.push({ ini: y + '-' + dois(m) + '-01', fim: somaDias(m === 12 ? (y + 1) + '-01-01' : y + '-' + dois(m + 1) + '-01', -1) })));
           camps.sort((a, b) => cmp(a.fim, b.fim));
           const cumpre = (c) => doProt.some((x) => x.data >= somaDias(c.ini, -tol) && x.data <= somaDias(c.fim, tol));
-          const elegivel = [desde, min !== null && nasc ? completaMesesEm(nasc, min) : null].filter(Boolean).sort().pop() || desde || D;
+          const elegivel = [desde, min !== null && nasc ? completaMesesEm(nasc, min) : null, naCat].filter(Boolean).sort().pop() || desde || D;
           const de = [elegivel, inicio].filter(Boolean).sort().pop();
           const passada = camps.filter((c) => c.fim < D && (!de || c.fim >= de)).pop() || null;
           const proxima = camps.filter((c) => c.fim >= D)[0];
@@ -3439,7 +3465,7 @@ function modeloAgenda(S, D) {
           contar('campanha da agenda conferida');
         }
       } else if (!doProt.length) {
-        venc = [desde, min !== null && nasc ? completaMesesEm(nasc, min) : null].filter(Boolean).sort().pop() || desde || D;
+        venc = [desde, min !== null && nasc ? completaMesesEm(nasc, min) : null, naCat].filter(Boolean).sort().pop() || desde || D;
         cumprida = false;
       } else {
         const u = ultimo(doProt).r;
@@ -3522,11 +3548,47 @@ function oraculoGmd(sis, S, focos) {
   return out;
 }
 /** A agenda do sistema (`sanidade.agenda`) = o modelo, nas pendências dos protocolos modelados, nas sem protocolo e na carência. */
+/**
+ * Revisão final da Fase 3 (achado 1): para os protocolos restritos a uma categoria, a categoria de cada animal em D (a do
+ * sistema: a classificação tem os próprios testes) e desde quando ele está nela sem interrupção — andando dia a dia para trás
+ * a partir de D até a véspera ter outra categoria ou até a entrada no rebanho (força bruta, sem os dias candidatos do sistema).
+ * Map id → {cat, desde}; null sem protocolo por categoria.
+ */
+function categoriasNaData(sis, S, D) {
+  const porCat = (S.t.PROTOCOLOS_SANITARIOS || []).filter((p) => p.ativo !== false && p.category_id);
+  if (!porCat.length) return null;
+  const alvos = new Set(porCat.map((p) => p.category_id));
+  const pedidos = [];
+  S.animais.forEach((a, id) => {
+    if (a.situacao_cadastral === 'EXTERNO' || !presenca(S, id, D).fim) return;
+    if (!porCat.some((p) => p.sexo_aplicavel === 'AMBOS' || p.sexo_aplicavel === a.sexo)) return;
+    pedidos.push({ id, piso: (S.linhasDe(id).filter((l) => l.efeito === 1 && l.data <= D).pop() || {}).data || null });
+  });
+  const { G, gas } = sis;
+  const res = js(gas.exec(() => G.UnitOfWork.read(G.Api.contexto({ usuario: USUARIO }), {
+    rota: 'teste.categorias', reads: G.AnimalService.leituras(), acessoCru: true,
+    tratador: (tx) => {
+      const L = G.AnimalService.leitor(tx);
+      const chave = (a, d) => { const c = G.AnimalService.categoriaEm(L, a, d); return c ? c.category_id : null; };
+      const out = {};
+      pedidos.forEach((x) => {
+        const a = tx.repo.porId('ANIMAIS', x.id);
+        if (!a) return;
+        const cat = chave(a, D);
+        let desde = D;
+        if (alvos.has(cat)) while (!(x.piso && desde <= x.piso) && chave(a, somaDias(desde, -1)) === cat) desde = somaDias(desde, -1);
+        out[x.id] = { cat, desde };
+      });
+      return out;
+    },
+  }).dados));
+  return new Map(Object.keys(res).map((k) => [k, res[k]]));
+}
 function oraculoAgenda(sis, S, D) {
   if (!S.marco || D < S.marco || D > HOJE) return [];
   const r = sis.api('sanidade.agenda', { data: D });
   if (!r.ok) return [falha('AGENDA:FALHOU', D + ': ' + JSON.stringify(r.error).slice(0, 400))];
-  const m = modeloAgenda(S, D);
+  const m = modeloAgenda(S, D, categoriasNaData(sis, S, D));
   const out = [];
   const pend = r.data.pendencias.filter((p) => !p.protocol_id || m.modelados.has(p.protocol_id)).map((p) => [p.animal_id, p.protocol_id || '', p.protocol_id ? (S.t.PROTOCOLOS_SANITARIOS.find((x) => x.protocol_id === p.protocol_id) || {}).product_id || '' : p.produto_id || '', p.vencimento, p.situacao].join('|')).sort();
   const dif = (a, b) => a.filter((x) => b.indexOf(x) < 0).slice(0, 3);
@@ -3819,10 +3881,18 @@ function gerarAcao(sis, S, rnd, k, acao, base) {
       if (r && r.protocol_id && rnd() < 0.3) {
         const pr = S.t.PROTOCOLOS_SANITARIOS.find((x) => x.protocol_id === r.protocol_id) || {};
         if (pr.recorrencia_tipo === 'INTERVALO_DIAS' && pr.ativo !== false) return preparado('protocolo.salvar', { protocol_id: r.protocol_id, campos: { intervalo_dias: (typeof pr.intervalo_dias === 'number' ? pr.intervalo_dias : 180) + 45 }, justificativa: 'Intervalo do protocolo revisto' }, 'intervalo do protocolo revisto depois do uso', r.event_id);
+        // Revisão final da Fase 3 (achado 11): nos demais, o procedimento do protocolo trocado depois do uso (o cadastro recusa:
+        // PROTOCOLO_EM_USO, oraculoProcedimentoProtocolo); a correção sem mudança vem logo depois.
+        const outro = ['VACINA', 'VERMIFUGO', 'MEDICAMENTO', 'EXAME'].filter((v) => v !== pr.tipo_procedimento)[0];
+        return preparado('protocolo.salvar', { protocol_id: r.protocol_id, campos: { tipo_procedimento: outro }, justificativa: 'Procedimento do protocolo revisto' }, 'procedimento do protocolo trocado depois do uso', r.event_id);
       }
       if (r && r.produto_id && rnd() < 0.5) {
         const pd = S.t.PRODUTOS.find((x) => x.product_id === r.produto_id) || {};
-        const campos = rnd() < 0.65 ? { custo_unitario: pd.custo_unitario === 2.5 ? 1.85 : 2.5 } : { categoria: pd.categoria === 'MEDICAMENTO' ? 'VACINA' : 'MEDICAMENTO' };
+        // Revisão final da Fase 3 (achados 2 e 17): também a carência padrão, o nome e o fabricante do cadastro mudados depois
+        // (cópias congeladas na aplicação: oraculoEfeito confere a correção pelo original).
+        const y = rnd();
+        const campos = y < 0.4 ? { custo_unitario: pd.custo_unitario === 2.5 ? 1.85 : 2.5 } : y < 0.55 ? { categoria: pd.categoria === 'MEDICAMENTO' ? 'VACINA' : 'MEDICAMENTO' }
+          : y < 0.75 ? { carencia_padrao_dias: pd.carencia_padrao_dias === 45 ? 10 : 45 } : y < 0.88 ? { nome: /revisto/.test(pd.nome || '') ? String(pd.nome).replace(/ \(revisto\)$/, '') : pd.nome + ' (revisto)' } : { fabricante: pd.fabricante === 'Lab Revisto' ? 'Lab Outro' : 'Lab Revisto' };
         return preparado('produto.salvar', { product_id: r.produto_id, campos, justificativa: 'Cadastro do produto revisto' }, 'produto revisto depois do uso', r.event_id);
       }
       if (r && r.protocol_id && (!r.produto_id || rnd() < 0.4)) return Object.assign(base, { rota: 'protocolo.salvar', dados: { protocol_id: r.protocol_id, campos: { ativo: false }, justificativa: 'Protocolo encerrado' }, rotulo: 'protocolo desativado depois do uso' });
@@ -4122,7 +4192,9 @@ function gerarCadastro(sis, S, rnd, k, qual, base) {
     const x = rnd();
     const campos = x < 0.25 ? { intervalo_dias: sorteio(rnd, [90, 180, 365]) } : x < 0.47 ? { ativo: p.ativo === false } : x < 0.6 ? (p.recorrencia_tipo === 'INTERVALO_DIAS' ? { recorrencia_tipo: 'UNICA' } : { recorrencia_tipo: 'INTERVALO_DIAS', intervalo_dias: sorteio(rnd, [60, 180]) }) : x < 0.72 ? { sexo_aplicavel: sorteio(rnd, ['AMBOS', 'F', 'M'].filter((v) => v !== p.sexo_aplicavel)) } : x < 0.82 ? { idade_min_meses: sorteio(rnd, [0, 4, 12]) }
       // Passada 2: a campanha (outros meses; a recorrência trocada para campanha) e a tolerância.
-      : x < 0.92 ? (p.recorrencia_tipo === 'CAMPANHA_MESES' ? { meses_campanha: alguns(rnd, [1, 4, 6, 10, 11], 2).sort((a, b) => a - b) } : { recorrencia_tipo: 'CAMPANHA_MESES', meses_campanha: [sorteio(rnd, [5, 11, 10])] }) : { tolerancia_dias: sorteio(rnd, [0, 5, 30]) };
+      : x < 0.92 ? (p.recorrencia_tipo === 'CAMPANHA_MESES' ? { meses_campanha: alguns(rnd, [1, 4, 6, 10, 11], 2).sort((a, b) => a - b) } : { recorrencia_tipo: 'CAMPANHA_MESES', meses_campanha: [sorteio(rnd, [5, 11, 10])] })
+      // Revisão final da Fase 3 (achado 11): o procedimento trocado (o do protocolo usado é recusado: oraculoProcedimentoProtocolo).
+      : x < 0.95 ? { tipo_procedimento: ['VACINA', 'VERMIFUGO', 'MEDICAMENTO', 'EXAME'].filter((v) => v !== p.tipo_procedimento)[Math.floor((x - 0.92) * 100) % 3] } : { tolerancia_dias: sorteio(rnd, [0, 5, 30]) };
     return com('protocolo.salvar', { protocol_id: p.protocol_id, campos, justificativa: 'Protocolo revisto' }, 'protocolo ' + Object.keys(campos)[0]);
   }
   // Fuzz das Fases 1 a 3: o protocolo novo (intervalo, aplicação única ou campanha; sexo, faixa de idade, às vezes a
@@ -4137,7 +4209,9 @@ function gerarCadastro(sis, S, rnd, k, qual, base) {
     if (rec === 'CAMPANHA_MESES') campos.meses_campanha = alguns(rnd, [3, 5, 11, 12], 2).sort((a, b) => a - b);
     if (rnd() < 0.4) campos.idade_min_meses = sorteio(rnd, [0, 3, 8, 24]);
     if (rnd() < 0.3) campos.idade_max_meses = sorteio(rnd, [12, 30, 2]);
-    if (rnd() < 0.1) campos.category_id = sorteio(rnd, S.t.CATEGORIAS).category_id;
+    // Revisão final da Fase 3 (achado 1): de preferência as categorias em que o animal entra depois de entrar no rebanho (pela
+    // idade ou pelo parto), onde o vencimento conta do dia em que ele entrou nela (o mesmo número de sorteios de antes).
+    if (rnd() < 0.1) { const passagem = S.t.CATEGORIAS.filter((c) => ['VACA', 'GARROTE', 'NOVILHA_12_24', 'NOVILHO', 'NOVILHA_24_MAIS', 'BOI'].indexOf(c.codigo) >= 0); campos.category_id = sorteio(rnd, passagem.length ? passagem : S.t.CATEGORIAS).category_id; }
     if (rnd() < 0.3) campos.antecedencia_alerta_dias = sorteio(rnd, [0, 7, 30]);
     // Passada 2: a tolerância própria da campanha (a janela de cumprimento), que o modelo da agenda agora confere.
     if (rec === 'CAMPANHA_MESES' && rnd() < 0.4) campos.tolerancia_dias = sorteio(rnd, [0, 3, 15]);
@@ -4857,6 +4931,7 @@ function executar(sis, k, cmd, antesT, opcoes) {
   if (cmd.estornoImediato) falhas.push(...oraculoEstornoImediato(sis, cmd, r, S, dv0));
   if (cmd.correcaoIdentica) falhas.push(...oraculoCorrecaoIdentica(sis, cmd, r, S, dv0));
   if (cmd.correcaoTardia) { if (r.ok && !cmd.outraChave && !cmd.reenvio) contar('correção tardia aceita'); falhas.push(...oraculoCorrecaoTardia(cmd, r, A)); falhas.push(...oraculoEfeitoCongelado(cmd, r, A, S)); }
+  falhas.push(...oraculoProcedimentoProtocolo(cmd, r, A));
   if (cmd.desfazerImediato) falhas.push(...oraculoDesfazerImediato(sis, cmd, r, S));
   // O retrato de antes do primeiro bloco de uma importação vale enquanto só os comandos dela forem gravados.
   const gravou = r.ok && !(r.meta && (r.meta.duplicado || r.meta.semAlteracao)) && dv1 !== dv0;
@@ -5042,12 +5117,37 @@ const RECUSAS_DA_CORRECAO_TARDIA = ['VALOR_IGUAL', 'SEM_PESO', 'VALOR_FORA_DA_FA
  * desativados ou mudados depois) continua valendo na correção, e o problema antigo não o bloqueia (seção 10.5). Com a
  * importação em curso, todo comando é recusado (16.8).
  */
+/**
+ * Revisão final da Fase 3 (achado 11): o procedimento de um protocolo já cumprido por alguma aplicação não muda no cadastro
+ * (PROTOCOLO_EM_USO): as aplicações contam na agenda pelo protocolo; o protocolo sem aplicação muda livremente.
+ */
+function oraculoProcedimentoProtocolo(cmd, r, A) {
+  if (cmd.rota !== 'protocolo.salvar' || !cmd.dados || !cmd.dados.protocol_id || !cmd.dados.campos || cmd.dados.campos.tipo_procedimento === undefined || cmd.outraChave || cmd.reenvio) return [];
+  const antes = (A.t.PROTOCOLOS_SANITARIOS || []).find((p) => p.protocol_id === cmd.dados.protocol_id);
+  if (!antes || antes.tipo_procedimento === cmd.dados.campos.tipo_procedimento || A.emCurso.length) return [];
+  const usado = (A.t.SANIDADE || []).some((x) => x.protocol_id === antes.protocol_id);
+  const codigos = r.ok ? [] : (r.error.details || []).map((d) => d.codigo);
+  contar(usado ? 'procedimento de protocolo usado recusado' : 'procedimento de protocolo sem uso trocado');
+  if (usado && r.ok) return [falha('PROTOCOLO:PROCEDIMENTO', 'o procedimento do protocolo ' + antes.nome + ', já cumprido por aplicações, mudou para ' + cmd.dados.campos.tipo_procedimento)];
+  if (usado && codigos.indexOf('PROTOCOLO_EM_USO') < 0) return [falha('PROTOCOLO:PROCEDIMENTO', 'a troca do procedimento do protocolo usado foi recusada sem PROTOCOLO_EM_USO: ' + JSON.stringify(codigos))];
+  if (!usado && codigos.indexOf('PROTOCOLO_EM_USO') >= 0) return [falha('PROTOCOLO:PROCEDIMENTO', 'o protocolo sem aplicação foi recusado como em uso')];
+  return [];
+}
 function oraculoCorrecaoTardia(cmd, r, A) {
   // O reenvio e a mesma chave com outro conteúdo copiam o comando (e a marca): o desfecho deles é outro oráculo.
   if (r.ok || A.emCurso.length || cmd.outraChave || cmd.reenvio) return [];
   const pol = politicaDe(A);
   const codigos = (r.error.details || []).map((d) => d.codigo);
-  if (codigos.length && codigos.every((c) => RECUSAS_DA_CORRECAO_TARDIA.indexOf(c) >= 0 || pol[c] === 'BLOQUEIA' || (c === 'CARENCIA_ATIVA' && (pol[c] || 'BLOQUEIA') === 'BLOQUEIA'))) return [];
+  // Revisão final da Fase 3 (achado 2): a carência só barra a correção sem mudança quando a do próprio original (congelada) já
+  // cobria uma venda para abate — nunca uma carência que a correção ganhasse pelo cadastro de hoje.
+  const carenciaDoOriginal = () => {
+    const ids = new Set(A.t.SANIDADE.filter((x) => x.event_id === cmd.dados.event_id).map((x) => x.health_id));
+    let cobre = false;
+    paresCarencia(A, vigenciaComImportacao(A)).forEach((x, k) => { if (x.abate && ids.has(k.split('|')[2])) cobre = true; });
+    if (cobre) contar('correção tardia barrada pela carência do original');
+    return cobre;
+  };
+  if (codigos.length && codigos.every((c) => RECUSAS_DA_CORRECAO_TARDIA.indexOf(c) >= 0 || (c !== 'CARENCIA_ATIVA' && pol[c] === 'BLOQUEIA') || (c === 'CARENCIA_ATIVA' && (pol[c] || 'BLOQUEIA') === 'BLOQUEIA' && carenciaDoOriginal()))) return [];
   return [falha('CORRECAO_TARDIA:RECUSADA', 'a correção sem mudança, mais tarde, de ' + cmd.dados.tipo + (cmd.dados.subtipo ? '/' + cmd.dados.subtipo : '') + ' foi recusada: ' + r.error.code + ' ' + r.error.message + ' ' + JSON.stringify((r.error.details || []).map((d) => d.codigo + ': ' + d.mensagem)).slice(0, 700))];
 }
 /**

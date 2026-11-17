@@ -12,7 +12,9 @@
  *     redesenha a tela aberta.
  *  5. Tronco: a recusa do servidor à conferência de um bloco ia ao console como erro e não aparecia; agora aparece na tela.
  *  6. A linha pendente barrada por outra linha do mesmo animal ficava pendente para sempre, dizendo "tire um dos dois" depois de a
- *     outra sair; agora ela continua esperando e entra na fila quando a outra é tirada.
+ *     outra sair; agora ela continua esperando e entra na fila quando a outra é tirada. (Revisão final da Fase 3, achado 13: a
+ *     sequência mudou para a de duas pendentes resolvidas juntas, a única em que a barreira ainda aparece — a conferência de um
+ *     brinco resolve as pendentes na mesma pergunta, antes da decisão, e o resultado não depende mais da ordem das respostas.)
  * Roda por `npm run ui:check`.
  */
 const test = require('node:test');
@@ -188,23 +190,27 @@ test('regressão 5 (tronco): a recusa do servidor à conferência do bloco sem c
 });
 
 test('regressão 6 (tronco): a linha pendente barrada por outra do mesmo animal entra na fila quando a outra é tirada — nunca fica dizendo "tire um dos dois" sozinha', async () => {
+  // Revisão final da Fase 3 (achado 13): a pendente é resolvida na mesma pergunta da conferência do brinco, antes da decisão;
+  // a barreira entre duas linhas da mesma vaca aparece quando as duas ficaram pendentes e o servidor responde às duas juntas.
   const x = await abrir('tronco');
   const { page, rede, sis } = x;
   await comecar(x);
-  // Sem sinal na conferência: a primeira 0520 fica pendente.
-  rede.falhas.push({ classe: 'resolver', tipo: 'transporte' });
+  // Sem sinal nas duas conferências: as duas 0520 ficam pendentes.
+  rede.falhas.push({ classe: 'resolver', tipo: 'transporte' }, { classe: 'resolver', tipo: 'transporte' });
   await lancar(x, '0520', 'p');
-  assert.deepEqual(await estados(x), ['NAO_ENCONTRADO']);
-  // Com sinal, a mesma vaca de novo: vai para a fila; a pendente, conferida agora, é barrada pela outra linha.
   await lancar(x, '0520', 'v');
+  assert.deepEqual(await estados(x), ['NAO_ENCONTRADO', 'NAO_ENCONTRADO']);
+  // Com sinal, as duas vão juntas ao servidor: a primeira entra na fila; a segunda é barrada pela primeira.
+  await page.click('[data-resolver-pendentes]');
+  await parar(x);
   let v = await lerTela(page, 'tronco');
-  assert.deepEqual(v.c.linhas.map((l) => [l.estado, l.animal_id]), [['NAO_ENCONTRADO', null], ['FILA', sis.ids.v520]]);
-  assert.match(v.linhas[1].texto, /já tem outro diagnóstico nesta sessão: tire um dos dois/);
-  // O veterinário tira a segunda: a primeira, que só esperava por ela, entra na fila sozinha.
-  await page.click('[data-linha="' + v.c.linhas[1].uid + '"] button:has-text("Tirar")');
+  assert.deepEqual(v.c.linhas.map((l) => [l.estado, l.animal_id, l.resultado]), [['FILA', sis.ids.v520, 'POSITIVO'], ['NAO_ENCONTRADO', null, 'NEGATIVO']]);
+  assert.match(v.linhas[0].texto, /já tem outro diagnóstico nesta sessão: tire um dos dois/);
+  // O veterinário tira a primeira: a segunda, que só esperava por ela, entra na fila sozinha.
+  await page.click('[data-linha="' + v.c.linhas[0].uid + '"] button:has-text("Tirar")');
   await parar(x);
   v = await lerTela(page, 'tronco');
-  assert.deepEqual(v.c.linhas.map((l) => [l.estado, l.animal_id, l.resultado]), [['FILA', sis.ids.v520, 'POSITIVO']]);
+  assert.deepEqual(v.c.linhas.map((l) => [l.estado, l.animal_id, l.resultado]), [['FILA', sis.ids.v520, 'NEGATIVO']]);
   assert.doesNotMatch(v.textoTodo, /tire um dos dois/);
   await page.click('[data-enviar]');
   await page.waitForSelector('.curral-lista [data-estado="GRAVADA"]', { timeout: 15000 });

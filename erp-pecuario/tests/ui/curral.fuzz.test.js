@@ -55,7 +55,10 @@ async function rodarSemente(semente, nAcoes, opcoes) {
   const sis = montarSistema();
   const { s } = sis;
   const rede = novaRede(s);
-  const a = await A.abrir(s, { largura: 360, hash: cfg.hash, relogio: RELOGIO, servidor: rede.servidor });
+  // Revisão final da Fase 3 (achado 4): parte das sementes roda sem localStorage (o rascunho no servidor, SP-06), com o
+  // rascunho que demora (segurado) enquanto o bloco sai. Sorteado à parte: as sequências das outras sementes não mudam.
+  const semLS = o.semLocalStorage !== undefined ? !!o.semLocalStorage : gerador(semente * 104729 + 3)() < 0.25;
+  const a = await A.abrir(s, { largura: 360, hash: cfg.hash, relogio: RELOGIO, servidor: rede.servidor, semLocalStorage: semLS });
   const { page } = a;
   const historico = [];
   const log = (t) => { historico.push(t); if (process.env.FUZZ_LOG) console.log('  [' + semente + '] ' + t); };
@@ -63,7 +66,8 @@ async function rodarSemente(semente, nAcoes, opcoes) {
   const conta = (k) => { cont[k] = (cont[k] || 0) + 1; };
 
   // O modelo: as linhas (uid → texto, valor), a ordem, o cabeçalho, as tiradas e as descartadas, as chaves de cada bloco visto.
-  const M = { sessao: null, ordem: [], linhas: {}, tiradas: new Set(), descartadas: new Set(), chaves: {}, sessoes: [], versaoOutro: 0, mortos: new Set() };
+  const M = { sessao: null, ordem: [], linhas: {}, tiradas: new Set(), descartadas: new Set(), chaves: {}, sessoes: [], versaoOutro: 0, mortos: new Set(), saiu: {} };
+  if (semLS) { historico.push('(sem localStorage: o rascunho fica no servidor)'); conta('semLocalStorage'); }
   const resolvidos = {};
   /** O resolvedor único do servidor (fora da rede da página): o animal do texto na data, com o porquê de não servir. */
   function resolverModelo(texto, data) {
@@ -119,6 +123,10 @@ async function rodarSemente(semente, nAcoes, opcoes) {
   }
   function blocoDe(c, chave) { return c.blocos.find((b) => b.chave === chave) || null; }
   function editavel(c, l) { if (!l.bloco) return true; const b = blocoDe(c, l.bloco); return !b || b.estado === 'NOVO' || b.estado === 'AVISO' || b.estado === 'ERRO'; }
+  /** O bloco que saiu (no ar, sem confirmação ou gravado): só a resposta do servidor decide o destino dele (CONTRATOS, seção 48). */
+  const saiu = (b) => !!b && ['ENVIANDO', 'SEM_SINAL', 'GRAVADO'].indexOf(b.estado) >= 0;
+  /** A linha ainda é do aparelho: na sessão, não gravada e fora de bloco que saiu. */
+  const mexivel = (c, l) => !!l && c.linhas.some((y) => y.uid === l.uid) && ['GRAVADA', 'ENVIANDO', 'SEM_SINAL'].indexOf(l.estado) < 0 && editavel(c, l);
   const valorIgual = (l, v) => (tela === 'curral' ? l.peso === v : l.resultado === v.resultado && (l.idade || null) === (v.idade || null));
   const textoValor = (v) => (tela === 'curral' ? kg(v) : ROTULO_RES[v.resultado] + (v.idade ? ' (' + v.idade + ' dias)' : ''));
 
@@ -183,8 +191,28 @@ async function rodarSemente(semente, nAcoes, opcoes) {
       // O rascunho guardado é o estado da tela (recarregar não perde nada).
       const r = v.rascunho;
       const essencial = (x) => JSON.stringify({ sessao: x.sessao, linhas: x.linhas.map((l) => [l.uid, l.estado, l.animal_id, l.peso, l.resultado, l.idade || null, l.bloco || null]), blocos: x.blocos.map((b) => [b.chave, b.estado, b.uids, b.campos, b.reenviar || false]) });
-      if (!r) e('a sessão não está guardada no aparelho');
-      else if (essencial(r) !== essencial(c)) e('o rascunho guardado não é o estado da tela:\n   guardado ' + essencial(r) + '\n   na tela  ' + essencial(c));
+      // Sem localStorage o rascunho vai ao servidor adiado (1 s) — a conferência dele é a da recarga (nada perdido).
+      if (!semLS && !r) e('a sessão não está guardada no aparelho');
+      else if (!semLS && essencial(r) !== essencial(c)) e('o rascunho guardado não é o estado da tela:\n   guardado ' + essencial(r) + '\n   na tela  ' + essencial(c));
+      // Revisão final da Fase 3 (achados 3 e 4): o bloco que saiu é intocável no aparelho — nenhuma linha dele oferece mexer
+      // ("Tirar", "Corrigir", "Está certo"), a sessão não muda ("Mudar" some), e ele só deixa a sessão por uma recusa do
+      // servidor que prova que a chave não foi gravada (VALIDATION, CONFLICT) ou pela chave já gravada (IDEMPOTENCY_MISMATCH).
+      c.linhas.forEach((l) => {
+        const b = l.bloco ? blocoDe(c, l.bloco) : null;
+        const dom = v.linhas.find((x) => x.uid === l.uid) || { botoes: [] };
+        if (saiu(b)) ['Tirar', 'Corrigir o peso', 'Corrigir o resultado', 'Está certo'].forEach((t) => { if (dom.botoes.indexOf(t) >= 0) e('a linha ' + l.uid + ' está num bloco que saiu (' + b.estado + ') e a tela oferece "' + t + '"'); });
+      });
+      const algumSaiu = c.blocos.some(saiu);
+      if (v.mudar === algumSaiu) e('"Mudar" ' + (v.mudar ? 'aparece com' : 'some sem') + ' bloco que saiu: ' + JSON.stringify(c.blocos.map((b) => b.estado)));
+      Object.keys(M.saiu).forEach((k) => {
+        const b = blocoDe(c, k);
+        const antes = M.saiu[k];
+        if (b) { if (antes === 'GRAVADO' && b.estado !== 'GRAVADO') e('o bloco ' + k + ' estava gravado e agora está ' + b.estado); return; }
+        const provou = rede.log.some((x) => x.chave === k && x.entregue && !x.resposta.ok && ['VALIDATION', 'CONFLICT', 'IDEMPOTENCY_MISMATCH'].indexOf(x.resposta.error.code) >= 0);
+        if (!provou) e('o bloco ' + k + ' saiu (' + antes + ') e o aparelho o desfez sem a recusa do servidor');
+        delete M.saiu[k];
+      });
+      c.blocos.forEach((b) => { if (saiu(b)) { M.saiu[b.chave] = b.estado; conta('bloco que saiu conferido'); } });
       // As linhas são as do modelo, na ordem e com o valor digitado.
       const uidsC = c.linhas.map((l) => l.uid);
       if (JSON.stringify(uidsC) !== JSON.stringify(M.ordem)) e('as linhas não são as digitadas: aparelho ' + JSON.stringify(uidsC) + ' × modelo ' + JSON.stringify(M.ordem));
@@ -397,12 +425,38 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     const c0b = Object.assign({}, c0, { linhas: c0.linhas.map((l) => (resolvidaAgora(l) ? Object.assign({}, l, { animal_id: X, estado: 'FILA', bloco: null }) : l)) });
     const ja = c0b.linhas.filter((l) => l.animal_id === X);
     if (tela === 'curral' && ja.length) {
-      const ult = ja[ja.length - 1];
-      const mudavel = editavel(c0b, ult) && ult.estado !== 'GRAVADA';
+      let ult = ja[ja.length - 1];
+      let mudavel = editavel(c0b, ult) && ult.estado !== 'GRAVADA';
       if (!v.decisao) falhar('o repetido (' + texto + ') não pediu a decisão');
-      const botao = mudavel ? 'Substituir o peso' : 'Pesar de novo';
+      let botao = mudavel ? 'Substituir o peso' : 'Pesar de novo';
       if (!(await page.isVisible('[data-decisao-repetido] ~ .acoes button:has-text("' + botao + '"), .curral-candidatos button:has-text("' + botao + '")'))) falhar('o repetido devia oferecer "' + botao + '"');
       if (rnd() < 0.25) { await page.click('.curral-candidatos button:has-text("Manter o anterior")'); await assentar(); v = await lerTela(page, tela); esperaSemLinha('com "Manter o anterior"'); conta('lancar:manter'); return; }
+      // Revisão final da Fase 3 (achado 3): as respostas seguradas chegam com a pergunta na tela (o envio continua, a linha
+      // anterior entra num bloco que sai ou é gravada). A decisão vale pelo estado da hora do clique: mudou, a pergunta é refeita
+      // e nada muda; o operador decide de novo.
+      if (rede.segurados.length && rnd() < 0.6) {
+        log('  (as respostas seguradas chegam com a pergunta na tela)');
+        rede.soltar(false);
+        await assentar();
+        const w0 = await lerTela(page, tela);
+        // A recusa que chegou agora aparece antes de o operador decidir (a decisão pode desfazer o bloco com aviso).
+        const rec0 = recusasNaTela(w0);
+        if (rec0.length) falhar(rec0.join('\n  - '));
+        const c1 = w0.c;
+        const ult1 = c1.linhas.filter((l) => l.animal_id === X).pop() || null;
+        const agora = mexivel(c1, ult1);
+        if (!ult1 || ult1.uid !== ult.uid || agora !== mudavel) {
+          const uids1 = JSON.stringify(c1.linhas.map((l) => [l.uid, l.estado, l.peso, l.bloco || null]));
+          await page.click('.curral-candidatos button:has-text("' + botao + '")');
+          await assentar();
+          const w = await lerTela(page, tela);
+          if (JSON.stringify(w.c.linhas.map((l) => [l.uid, l.estado, l.peso, l.bloco || null])) !== uids1) falhar('a decisão velha ("' + botao + '") mexeu nas linhas: ' + uids1 + ' → ' + JSON.stringify(w.c.linhas.map((l) => [l.uid, l.estado, l.peso, l.bloco || null])));
+          if (!w.decisao || w.textoTodo.indexOf('mudou enquanto você decidia') < 0) falhar('a decisão velha ("' + botao + '") não refez a pergunta');
+          ult = ult1; mudavel = agora; botao = mudavel ? 'Substituir o peso' : 'Pesar de novo';
+          if (!(await page.isVisible('.curral-candidatos button:has-text("' + botao + '")'))) falhar('a pergunta refeita devia oferecer "' + botao + '"');
+          conta('lancar:decisaoRefeita');
+        }
+      }
       await page.click('.curral-candidatos button:has-text("' + botao + '")');
       await assentar();
       v = await lerTela(page, tela);
@@ -560,6 +614,9 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     if (pode !== v.mudar) falhar('"Mudar" ' + (v.mudar ? 'aparece' : 'não aparece') + ' com os blocos ' + JSON.stringify(c.blocos.map((b) => b.estado)));
     if (!pode) return false;
     const nova = sortearSessao();
+    // Revisão final da Fase 3 (achado 7): às vezes o operador conferiu um brinco (Enter) sem lançar antes de mudar a sessão.
+    const conferido = rnd() < 0.3 ? sortearTexto() : null;
+    if (conferido) { log('conferir "' + conferido + '" sem lançar'); await page.fill(cfg.brinco, conferido); await page.press(cfg.brinco, 'Enter'); await assentar(); }
     log('mudar a sessão para ' + JSON.stringify(nova));
     await page.click(cfg.mudar);
     await page.waitForSelector(cfg.inicio);
@@ -572,10 +629,30 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     await preencherInicio(nova);
     M.sessao = nova;
     conta('mudar');
+    if (conferido) {
+      // O valor digitado na sessão nova, sem brinco: nada entra (a conferência de antes era de outra sessão).
+      await assentar();
+      const antes = (await lerTela(page, tela)).c.linhas.map((l) => l.uid);
+      await page.fill(cfg.valor, tela === 'curral' ? '300' : 'v');
+      await page.press(cfg.valor, 'Enter');
+      await assentar();
+      const depois = (await lerTela(page, tela)).c.linhas.map((l) => l.uid);
+      if (JSON.stringify(antes) !== JSON.stringify(depois)) falhar('o valor lançado na sessão nova sem brinco usou o animal conferido antes de mudar: ' + JSON.stringify(depois));
+      await page.fill(cfg.valor, '');
+      conta('mudar:conferidoAntes');
+    }
     return true;
+  }
+  /** Sem localStorage, o rascunho adiado (1 s) chega ao servidor antes de a página ir embora (o operador não recarrega no mesmo instante). */
+  async function assentarRascunho() {
+    if (!semLS) return;
+    if (rede.segurados.some((x) => /^rascunho\./.test(x.reg.rota))) { rede.soltar(false); await assentar(); }
+    await avancar(1500);
+    await assentar();
   }
   async function recarregar(semLog) {
     if (!semLog) log('recarregar a página');
+    await assentarRascunho();
     rede.largar(rnd);
     await page.reload();
     await A.esperarTela(page, cfg.titulo);
@@ -584,6 +661,7 @@ async function rodarSemente(semente, nAcoes, opcoes) {
   }
   async function sairEVoltar() {
     log('sair e voltar');
+    await assentarRascunho();
     await A.ir(page, cfg.fora, cfg.foraTitulo);
     if (rnd() < 0.5) await assentar();
     await A.ir(page, cfg.hash, cfg.titulo);
@@ -591,6 +669,8 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     return true;
   }
   async function terminar(v) {
+    await assentarRascunho();
+    v = await lerTela(page, tela);
     const c = v.c;
     const incertas = c.linhas.some((l) => l.estado === 'SEM_SINAL' || l.estado === 'ENVIANDO');
     const naoGravadas = c.linhas.filter((l) => l.estado !== 'GRAVADA');
@@ -620,6 +700,7 @@ async function rodarSemente(semente, nAcoes, opcoes) {
   }
   /** A sessão terminada: as linhas dela saem da tela; as gravadas ficam no modelo com o cabeçalho para a conferência do banco. */
   function fecharSessao(c) {
+    M.saiu = {};
     const sess = M.sessao;
     const chaves = Object.keys(M.chaves).filter((k) => !M.chaves[k].sessao);
     chaves.forEach((k) => { M.chaves[k].sessao = sess; });
@@ -630,7 +711,9 @@ async function rodarSemente(semente, nAcoes, opcoes) {
   M.sessaoDaChave = (k) => (M.chaves[k] ? M.chaves[k].sessao || M.sessao : null);
   async function rede_() {
     const tipo = ponderado(rnd, [[3, 'perdeDepois'], [2, 'perdeAntes'], [3, 'transporte'], [2, 'transporteDepois'], [3, 'segurar'], [2, 'segurarAntes'], [2, 'ocupado'], [2, 'interna']]);
-    const classe = ponderado(rnd, [[6, 'registrar'], [3, 'resolver'], [2, 'status']]);
+    const classe = semLS && rnd() < 0.3 ? 'rascunho' : ponderado(rnd, [[6, 'registrar'], [3, 'resolver'], [2, 'status']]);
+    // O rascunho no servidor que demora (gravado lá, a resposta segurada): o bloco sai depois que ele responde.
+    if (classe === 'rascunho') { const n2 = rnd() < 0.5 ? 1 : 3; for (let i = 0; i < n2; i++) rede.falhas.push({ classe, tipo: 'segurar' }); log('rede: os próximos ' + n2 + ' rascunhos no servidor demoram (segurados)'); conta('rede:rascunhoSegurado'); return true; }
     const n = rnd() < 0.7 ? 1 : 2;
     if (classe === 'resolver' && (tipo === 'segurar' || tipo === 'segurarAntes' || tipo === 'ocupado')) return false;
     for (let i = 0; i < n; i++) rede.falhas.push({ classe, tipo });
@@ -819,7 +902,9 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     const integ = s.integridade();
     if (integ.erros !== 0) falhar('a integridade tem ' + integ.erros + ' erro(s): ' + JSON.stringify(integ.checagens.filter((x) => x.situacao === 'ERRO')));
     s.conferirProjecoes('semente ' + semente);
-    if (a.estado.erros.length) falhar('erros no console: ' + a.estado.erros.join(' | '));
+    // Sem localStorage, o aviso de que o armazenamento do aparelho não está disponível é esperado (o rascunho vai ao servidor).
+    const errosConsole = a.estado.erros.filter((x) => !(semLS && /armazenamento local indisponível/.test(x)));
+    if (errosConsole.length) falhar('erros no console: ' + errosConsole.join(' | '));
     cont.gravadas = (cont.gravadas || 0) + gravadas.size;
     cont.sementes = (cont.sementes || 0) + 1;
     cont['tela:' + tela] = (cont['tela:' + tela] || 0) + 1;

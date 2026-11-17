@@ -243,10 +243,20 @@ var TelaPesagens = (function () {
     c.linhas.forEach(function (l) { if (l.bloco === chave) l.bloco = null; });
     c.blocos = c.blocos.filter(function (b) { return b.chave !== chave; });
   }
+  /**
+   * O bloco que saiu (no ar, sem confirmação ou gravado) pode estar gravado: só a resposta do servidor decide o destino dele
+   * (CONTRATOS, seção 48). O aparelho nunca o desfaz, nunca tira, troca ou corrige uma linha dele e nunca muda a sessão.
+   */
+  function saiu(b) { return !!b && (b.estado === 'ENVIANDO' || b.estado === 'SEM_SINAL' || b.estado === 'GRAVADO'); }
+  function algumSaiu(c) { return c.blocos.some(saiu); }
+  /** A linha ainda é do aparelho na hora do clique: está na sessão, não foi gravada e o bloco dela não saiu. */
+  function mexivel(c, l) { return c.linhas.indexOf(l) >= 0 && l.estado !== 'GRAVADA' && l.estado !== 'ENVIANDO' && l.estado !== 'SEM_SINAL' && editavel(c, l); }
   /** Desfaz o bloco com aviso ou recusado (a chave não foi consumida): as linhas voltam à fila; o próximo envio faz outro. */
   function desfazerBloco(c, chave) {
+    if (saiu(bloco(c, chave))) return false;
     c.linhas.forEach(function (l) { if (l.bloco === chave) { l.bloco = null; if (l.estado !== 'NAO_ENCONTRADO') { l.estado = 'FILA'; l.mensagem = null; } } });
     c.blocos = c.blocos.filter(function (b) { return b.chave !== chave; });
+    return true;
   }
   /**
    * A sessão mudou (só enquanto nenhum bloco saiu): os blocos não enviados se desfazem (levavam o cabeçalho de antes) e, com a
@@ -254,7 +264,7 @@ var TelaPesagens = (function () {
    * naquele dia): fica pendente até a resposta, nunca segue com o animal de outra data.
    */
   function sessaoMudou(c, dataMudou) {
-    c.blocos.slice().forEach(function (b) { if (b.estado !== 'GRAVADO') desfazerBloco(c, b.chave); });
+    c.blocos.slice().forEach(function (b) { desfazerBloco(c, b.chave); });
     c.erroGeral = null;
     if (!dataMudou) return;
     c.linhas.forEach(function (l) {
@@ -312,12 +322,16 @@ var TelaPesagens = (function () {
     b.reenviar = false;
     c.erroGeral = null;
     linhas.forEach(function (l) { l.estado = 'ENVIANDO'; l.mensagem = null; });
+    // A tela mostra o bloco saindo antes de guardar a chave (no rascunho do servidor, sem localStorage, a gravação demora):
+    // nenhum botão de mexer na linha fica na tela enquanto ela sai.
+    aoMudar();
     await guardar(c, { imediato: true });
     aoMudar();
     var r;
     try {
       r = await Cliente.comando('evento.registrar', dadosDoBloco(c, b), { chave: b.chave, avisosAceitos: b.aceitos || [], aoEstado: function (st) { b.situacao = st.estado; aoMudar(); } });
     } catch (e) {
+      linhas = c.linhas.filter(function (l) { return l.bloco === b.chave; });
       if (e.code === 'TRANSPORTE' || e.code === 'SEM_RESPOSTA' || e.code === 'LOCKED') {
         b.estado = 'SEM_SINAL';
         b.mensagem = e.message;
@@ -366,6 +380,8 @@ var TelaPesagens = (function () {
     var res = r.data.pesagem || { animais: [] };
     var porId = {};
     (res.animais || []).forEach(function (x) { porId[x.animal_id] = x; });
+    // Gravadas são as linhas do bloco na hora da resposta (o bloco que saiu não se desfaz: as mesmas que saíram).
+    linhas = c.linhas.filter(function (l) { return l.bloco === b.chave; });
     b.estado = 'GRAVADO';
     b.event_id = r.data.event_id;
     b.media_kg = res.media_kg;
@@ -460,7 +476,10 @@ var TelaPesagens = (function () {
       if (!Fmt.ehData(data.value)) { erro.appendChild(UI.nota('Escolha a data da pesagem.', 'erro')); data.focus(); return; }
       var antes = JSON.stringify(s);
       var dataMudou = s.data !== data.value;
-      s.data = data.value; s.metodo = metodo.value; s.momento = momento.value; s.jejum = jejum.checked; s.pasto_id = pasto.value;
+      var nova = { data: data.value, metodo: metodo.value, momento: momento.value, jejum: jejum.checked, pasto_id: pasto.value };
+      // Um bloco saiu enquanto o formulário estava aberto: ele foi com o cabeçalho de antes, e a sessão não muda mais.
+      if (algumSaiu(c) && antes !== JSON.stringify(Object.assign({}, s, nova))) { erro.appendChild(UI.nota('Um envio já saiu para o servidor com ' + Fmt.data(s.data) + ': a data, o método e o pasto não mudam mais nesta pesagem. Termine esta e comece outra.', 'erro')); return; }
+      Object.assign(s, nova);
       if (antes !== JSON.stringify(s)) sessaoMudou(c, dataMudou);
       c.iniciada = true;
       guardar(c).then(aoComecar);
@@ -528,8 +547,15 @@ var TelaPesagens = (function () {
       return Store.resolver(textos, data, { tipo: 'PESAGEM' }).then(function (r) {
         if (c.sessao.data !== data) return { erro: new Error('A data da pesagem mudou.') };
         ui.estados = Object.assign(ui.estados || {}, r.animais);
-        return r;
+        return { porTexto: r.porTexto, animais: r.animais, data: data };
       }, function (e) { return { erro: e }; });
+    }
+    /** A linha pelo brinco da data da sessão (o que o servidor deu ao texto naquele dia), nunca pelo de hoje. */
+    function rotuloLinha(l) {
+      var a = l.animal_id ? Store.animal(l.animal_id) : null;
+      if (!a) return l.brinco || l.texto;
+      var b = l.brinco || a.codigo_interno;
+      return !passada() || b === (a.brinco || null) ? Store.rotuloAnimal(a) : b + ' (hoje ' + (a.brinco || 'sem brinco') + ')';
     }
     function carregarPosicao() {
       var data = c.sessao.data;
@@ -552,25 +578,39 @@ var TelaPesagens = (function () {
      * As linhas pendentes que o servidor ainda não resolveu (sem sinal na hora): vão juntas ao resolvedor único; a achada e
      * no rebanho na data vai para a fila, o resto continua pendente com o porquê do servidor ("Corrigir o brinco").
      */
+    function textosEsperando() {
+      return c.linhas.filter(function (l) { return l.semPosicao && l.estado === 'NAO_ENCONTRADO'; }).map(function (l) { return String(l.texto || l.brinco).trim(); });
+    }
     function resolverEsperando() {
-      var esperando = c.linhas.filter(function (l) { return l.semPosicao && l.estado === 'NAO_ENCONTRADO'; });
-      if (!esperando.length) return Promise.resolve();
-      var data = c.sessao.data;
-      return resolverNoServidor(esperando.map(function (l) { return l.texto || l.brinco; })).then(function (r) {
-        if (r.erro || !vivo || c.sessao.data !== data) return;
-        esperando.forEach(function (l) {
-          var x = r.porTexto[String(l.texto || l.brinco).trim()];
-          if (!x || l.estado !== 'NAO_ENCONTRADO') return;
-          var a = x.situacao === 'ACHADO' ? Store.doEstado(r.animais[x.animal_id]) : null;
-          var outra = a ? c.linhas.filter(function (y) { return y !== l && y.animal_id === a.animal_id; })[0] : null;
-          // Barrada só pela outra linha do mesmo animal: continua esperando, e sai sozinha quando a outra for tirada.
-          l.semPosicao = !!(a && presente(a) && outra);
-          if (!a || !presente(a) || outra) { l.mensagem = !a ? x.mensagem || 'Mais de um animal com este brinco: corrija o brinco.' : outra ? Store.rotuloAnimal(a) + ' já tem outra pesagem nesta sessão (' + Fmt.peso(outra.peso) + '): tire uma das duas.' : Store.rotuloAnimal(a) + ' ' + motivoFora(a) + ': não entra na pesagem.'; return; }
-          l.animal_id = a.animal_id; l.dataAnimal = data; l.brinco = brincoDe(a) || a.codigo_interno; l.estado = 'FILA'; l.mensagem = null;
-          l.fora = !!(c.sessao.pasto_id && pastoDe(a) !== c.sessao.pasto_id);
-        });
-        mudou();
+      var textos = textosEsperando();
+      if (!textos.length) return Promise.resolve();
+      return resolverNoServidor(textos).then(function (r) { if (aplicarEsperando(r)) mudou(); });
+    }
+    /**
+     * As linhas pendentes, pela resposta do servidor na data da sessão: a achada e no rebanho vai para a fila. A barrada por outra
+     * linha do mesmo animal que ainda é do aparelho continua esperando (sai sozinha quando a outra for tirada). A do animal que já
+     * tem pesagem que saiu (gravada ou no ar) pede a mesma decisão do lançamento na hora — pesar de novo grava outra pesagem do
+     * mesmo dia: "Está certo" ou "Tirar". O resto continua pendente com o porquê do servidor. Devolve se alguma linha mudou.
+     */
+    function aplicarEsperando(r) {
+      if (r.erro || !vivo || c.sessao.data !== r.data) return false;
+      var mexeu = false;
+      c.linhas.filter(function (l) { return l.semPosicao && l.estado === 'NAO_ENCONTRADO'; }).forEach(function (l) {
+        var x = r.porTexto[String(l.texto || l.brinco).trim()];
+        if (!x) return;
+        mexeu = true;
+        var a = x.situacao === 'ACHADO' ? Store.doEstado(r.animais[x.animal_id]) : null;
+        var outras = a ? c.linhas.filter(function (y) { return y !== l && y.animal_id === a.animal_id; }) : [];
+        var outra = outras.filter(function (y) { return mexivel(c, y); })[0] || null;
+        var saida = outras.filter(function (y) { return !mexivel(c, y); }).pop() || null;
+        l.semPosicao = !!(a && presente(a) && outra);
+        if (!a || !presente(a) || outra) { l.mensagem = !a ? x.mensagem || 'Mais de um animal com este brinco: corrija o brinco.' : outra ? nomeNaData(a) + ' já tem outra pesagem nesta sessão (' + Fmt.peso(outra.peso) + '): tire uma das duas.' : nomeNaData(a) + ' ' + motivoFora(a) + ': não entra na pesagem.'; return; }
+        l.animal_id = a.animal_id; l.dataAnimal = r.data; l.brinco = brincoDe(a) || a.codigo_interno; l.bloco = null;
+        l.fora = !!(c.sessao.pasto_id && pastoDe(a) !== c.sessao.pasto_id);
+        if (saida) { l.estado = 'AVISO'; l.avisosProprios = []; l.avisos = []; l.mensagem = nomeNaData(a) + ' já foi pesado nesta pesagem com ' + Fmt.peso(saida.peso) + ' (' + ROTULO_ESTADO[saida.estado] + '). Pesar de novo grava outra pesagem do mesmo dia: toque em "Está certo" ou tire esta linha.'; }
+        else { l.estado = 'FILA'; l.mensagem = null; }
       });
+      return mexeu;
     }
     function animaisDoPasto() {
       if (!c.sessao.pasto_id || (passada() && !comPosicao())) return null;
@@ -638,8 +678,7 @@ var TelaPesagens = (function () {
       var ordem = c.linhas.slice().reverse();
       ordem.forEach(function (l, i) {
         var n = c.linhas.length - i;
-        var a = l.animal_id ? Store.animal(l.animal_id) : null;
-        var nome = a ? Store.rotuloAnimal(a) : l.brinco;
+        var nome = rotuloLinha(l);
         var info = [];
         if (l.estado === 'GRAVADA' && l.resultado) info.push(textoGanho(l.resultado));
         if (l.fora) info.push('de outro pasto');
@@ -675,8 +714,7 @@ var TelaPesagens = (function () {
     function desenharMudar() {
       if (!ui.mudar) return;
       Util.limpar(ui.mudar);
-      var podeMudar = !c.blocos.some(function (b) { return b.estado === 'GRAVADO' || b.estado === 'SEM_SINAL' || b.estado === 'ENVIANDO'; });
-      if (podeMudar) ui.mudar.appendChild(UI.botao('Mudar data, método ou pasto', { tipo: 'texto', aoClicar: function () { c.iniciada = false; montarSessao(); } }));
+      if (!algumSaiu(c)) ui.mudar.appendChild(UI.botao('Mudar data, método ou pasto', { tipo: 'texto', aoClicar: function () { if (algumSaiu(c)) { desenhar(); return; } c.iniciada = false; montarSessao(); } }));
     }
     function desenhar() {
       if (!vivo || !c || !ui.lista) return;
@@ -701,10 +739,12 @@ var TelaPesagens = (function () {
       if (!t) { ui.conferindo = null; return null; }
       var vez = ui.vezConf = (ui.vezConf || 0) + 1;
       ui.conferencia.appendChild(h('p', { class: 'suave', text: 'Conferindo ' + t + ' no servidor…' }));
-      ui.conferindo = { texto: t, pronto: resolverNoServidor([t]).then(function (r) {
+      // As linhas que ficaram pendentes sem resposta vão na mesma pergunta e são resolvidas ANTES da conferência: a decisão do
+      // brinco repetido (substituir ou pesar de novo) não depende de qual resposta chega primeiro.
+      var textos = [t].concat(textosEsperando().filter(function (x) { return x !== t; }));
+      ui.conferindo = { texto: t, data: c.sessao.data, pronto: resolverNoServidor(textos).then(function (r) {
+        if (aplicarEsperando(r)) mudou();
         if (vivo && vez === ui.vezConf) mostrar(t, r);
-        // O sinal voltou: as linhas que ficaram pendentes sem resposta vão ao servidor.
-        if (vivo && !r.erro) resolverEsperando();
       }) };
       return ui.conferindo.pronto;
     }
@@ -718,7 +758,7 @@ var TelaPesagens = (function () {
         x.candidatos.forEach(function (id) { var a = Store.doEstado(r.animais[id]); ui.candidatos.appendChild(UI.botao(nomeNaData(a) + ' · ' + descricao(a), { bloco: true, aoClicar: function () { escolher(a); } })); });
         return;
       }
-      ui.atual = { brinco: t, animal: null, semPosicao: !x, mensagem: x ? x.mensagem : null };
+      ui.atual = { brinco: t, animal: null, semPosicao: !x, mensagem: x ? x.mensagem : null, data: c.sessao.data };
       ui.conferencia.appendChild(h('p', { class: 'destaque-erro', dataset: { conferencia: x ? 'NAO_ENCONTRADO' : 'SEM_POSICAO' }, text: x
         ? x.mensagem + ' Confira o brinco; se seguir, a linha fica pendente.'
         : t + ': sem resposta do servidor (' + r.erro.message + '), o brinco fica para conferir quando houver sinal (toque em "Enviar" ou "Tentar de novo"). Se seguir, a linha fica pendente.' }));
@@ -726,7 +766,7 @@ var TelaPesagens = (function () {
     function escolher(a, semFoco) {
       Util.limpar(ui.candidatos);
       Util.limpar(ui.conferencia);
-      ui.atual = { brinco: brincoDe(a) || a.codigo_interno, animal: a };
+      ui.atual = { brinco: brincoDe(a) || a.codigo_interno, animal: a, data: c.sessao.data };
       var fora = motivoFora(a);
       var outro = !fora && c.sessao.pasto_id && pastoDe(a) !== c.sessao.pasto_id;
       var ja = c.linhas.filter(function (l) { return l.animal_id === a.animal_id; });
@@ -747,10 +787,12 @@ var TelaPesagens = (function () {
       try { await lancar_(); } finally { ui.lancando = false; }
     }
     async function lancar_() {
+      // O animal conferido vale só na data em que o servidor o deu: com a sessão mudada, o brinco é conferido de novo.
+      if (ui.atual && ui.atual.data !== c.sessao.data) ui.atual = null;
       if (!ui.atual) {
         var t = ui.brinco.value.trim();
         if (!t) { ui.brinco.focus(); return; }
-        if (!ui.conferindo || ui.conferindo.texto !== t) conferir();
+        if (!ui.conferindo || ui.conferindo.texto !== t || ui.conferindo.data !== c.sessao.data) conferir();
         await ui.conferindo.pronto;
         if (!vivo || !ui.atual) { if (vivo) ui.brinco.focus(); return; }
       }
@@ -759,29 +801,32 @@ var TelaPesagens = (function () {
       var at = ui.atual;
       at.texto = ui.brinco.value.trim() || at.brinco;
       if (at.animal && !presente(at.animal)) { aviso('Este animal ' + motivoFora(at.animal) + ': não entra na pesagem.'); ui.brinco.select(); ui.brinco.focus(); return; }
-      var ja = at.animal ? c.linhas.filter(function (l) { return l.animal_id === at.animal.animal_id; }) : [];
-      var ultimo = ja[ja.length - 1];
-      if (ultimo) {
-        Util.limpar(ui.candidatos);
-        var mudavel = editavel(c, ultimo) && ultimo.estado !== 'GRAVADA';
-        ui.candidatos.appendChild(h('p', { class: 'aviso', dataset: { decisaoRepetido: '1' }, text: Store.rotuloAnimal(at.animal) + ' já foi pesado nesta pesagem com ' + Fmt.peso(ultimo.peso) + (mudavel ? '. Substituir pelo peso novo (' + Fmt.peso(p.valor) + ')?' : ' (' + ROTULO_ESTADO[ultimo.estado] + '). Pesar de novo grava outra pesagem do mesmo dia.') }));
-        ui.candidatos.appendChild(h('div', { class: 'acoes' },
-          UI.botao(mudavel ? 'Substituir o peso' : 'Pesar de novo', { tipo: 'primario', aoClicar: function () {
-            if (mudavel) { if (ultimo.bloco) desfazerBloco(c, ultimo.bloco); ultimo.peso = p.valor; ultimo.texto = at.texto; ultimo.dataAnimal = c.sessao.data; ultimo.estado = 'FILA'; ultimo.mensagem = null; c.linhas = c.linhas.filter(function (l) { return l !== ultimo; }).concat([ultimo]); }
-            else adicionar(at, p.valor);
-            limparEntrada(); mudou(); depoisDeLancar();
-          } }),
-          UI.botao('Manter o anterior', { aoClicar: function () { limparEntrada(); desenhar(); } })));
-        return;
-      }
-      adicionar(at, p.valor);
-      limparEntrada();
-      mudou();
-      depoisDeLancar();
+      perguntarRepetido(at, p.valor, '');
+    }
+    /**
+     * O animal repetido na sessão: a linha anterior ainda do aparelho é substituída; a que já saiu (gravada ou no ar) pede "Pesar
+     * de novo" (outra pesagem do mesmo dia). A decisão vale pelo estado da linha NA HORA DO CLIQUE: se ela saiu, foi tirada ou
+     * gravada enquanto a pergunta estava na tela, a pergunta é refeita com o estado de agora (nunca desfaz um bloco que saiu).
+     */
+    function perguntarRepetido(at, peso, nota) {
+      var ultimo = at.animal ? c.linhas.filter(function (l) { return l.animal_id === at.animal.animal_id; }).pop() : null;
+      if (!ultimo) { adicionar(at, peso); limparEntrada(); mudou(); depoisDeLancar(); return; }
+      Util.limpar(ui.candidatos);
+      var mudavel = mexivel(c, ultimo);
+      ui.candidatos.appendChild(h('p', { class: 'aviso', dataset: { decisaoRepetido: mudavel ? 'substitui' : 'outra' }, text: nota + nomeNaData(at.animal) + ' já foi pesado nesta pesagem com ' + Fmt.peso(ultimo.peso) + (mudavel ? '. Substituir pelo peso novo (' + Fmt.peso(peso) + ')?' : ' (' + ROTULO_ESTADO[ultimo.estado] + '). Pesar de novo grava outra pesagem do mesmo dia.') }));
+      ui.candidatos.appendChild(h('div', { class: 'acoes' },
+        UI.botao(mudavel ? 'Substituir o peso' : 'Pesar de novo', { tipo: 'primario', aoClicar: function () {
+          var agora = c.linhas.filter(function (l) { return l.animal_id === at.animal.animal_id; }).pop() || null;
+          if (agora !== ultimo || mexivel(c, ultimo) !== mudavel) { perguntarRepetido(at, peso, 'A pesagem anterior mudou enquanto você decidia. '); return; }
+          if (mudavel) { if (ultimo.bloco) desfazerBloco(c, ultimo.bloco); ultimo.peso = peso; ultimo.texto = at.texto; ultimo.dataAnimal = at.data; ultimo.estado = 'FILA'; ultimo.mensagem = null; c.linhas = c.linhas.filter(function (l) { return l !== ultimo; }).concat([ultimo]); }
+          else adicionar(at, peso);
+          limparEntrada(); mudou(); depoisDeLancar();
+        } }),
+        UI.botao('Manter o anterior', { aoClicar: function () { limparEntrada(); desenhar(); } })));
     }
     function adicionar(at, peso) {
       c.seq = (c.seq || 0) + 1;
-      var l = { uid: 'p' + c.seq + '-' + Util.uuid().slice(0, 6), brinco: at.brinco, texto: at.texto || at.brinco, animal_id: at.animal ? at.animal.animal_id : null, dataAnimal: at.animal ? c.sessao.data : null, peso: peso, estado: at.animal ? 'FILA' : 'NAO_ENCONTRADO', bloco: null, mensagem: at.animal ? null : at.mensagem || null, semPosicao: !at.animal && !!at.semPosicao };
+      var l = { uid: 'p' + c.seq + '-' + Util.uuid().slice(0, 6), brinco: at.brinco, texto: at.texto || at.brinco, animal_id: at.animal ? at.animal.animal_id : null, dataAnimal: at.animal ? at.data : null, peso: peso, estado: at.animal ? 'FILA' : 'NAO_ENCONTRADO', bloco: null, mensagem: at.animal ? null : at.mensagem || null, semPosicao: !at.animal && !!at.semPosicao };
       l.fora = !!(at.animal && c.sessao.pasto_id && pastoDe(at.animal) !== c.sessao.pasto_id);
       c.linhas.push(l);
     }
@@ -804,7 +849,7 @@ var TelaPesagens = (function () {
         if (editavel(c, l) && (l.estado === 'FILA' || l.estado === 'NAO_ENCONTRADO' || l.estado === 'ERRO' || l.estado === 'AVISO')) {
           if (l.bloco) desfazerBloco(c, l.bloco);
           c.linhas.splice(i, 1);
-          UI.aviso('Tirada a pesagem de ' + (l.animal_id ? nomeDe(l.animal_id) : l.brinco) + ' (' + Fmt.peso(l.peso) + ').', { tipo: 'info' });
+          UI.aviso('Tirada a pesagem de ' + rotuloLinha(l) + ' (' + Fmt.peso(l.peso) + ').', { tipo: 'info' });
           mudou();
           resolverEsperando();
           return;
@@ -814,7 +859,15 @@ var TelaPesagens = (function () {
       }
       UI.aviso(!ultima ? 'Nenhuma pesagem para desfazer.' : ultima.estado === 'GRAVADA' ? 'A última pesagem já foi gravada: corrija pelo lançamento gravado, em Eventos.' : 'A última pesagem já saiu e espera a confirmação do servidor: toque em "Enviar" com sinal; depois de gravada, corrija pelo lançamento, em Eventos.', { tipo: 'aviso' });
     }
+    /** O botão desenhado antes pode ter ficado velho: a linha que já saiu não muda (a tela é redesenhada com o estado de agora). */
+    function velho(l) {
+      if (mexivel(c, l)) return false;
+      UI.aviso('Esta pesagem já saiu para o servidor: espere a resposta; depois de gravada, corrija pelo lançamento, em Eventos.', { tipo: 'aviso' });
+      desenhar();
+      return true;
+    }
     function tirar(l) {
+      if (velho(l)) return;
       if (l.bloco) desfazerBloco(c, l.bloco);
       c.linhas = c.linhas.filter(function (x) { return x !== l; });
       mudou();
@@ -822,6 +875,7 @@ var TelaPesagens = (function () {
     }
     /** "Está certo" da linha: aceita o aviso dela no bloco; sem bloco (desfeito), a linha volta à fila e pede o aviso de novo. */
     function aceitar(l) {
+      if (l.estado !== 'AVISO' || velho(l)) return;
       var b = bloco(c, l.bloco);
       if (!b) { l.estado = 'FILA'; l.bloco = null; l.mensagem = null; mudou(); return; }
       (l.avisosProprios || l.avisos || []).forEach(function (cod) { if (b.aceitos.indexOf(cod) < 0) b.aceitos.push(cod); });
@@ -831,6 +885,7 @@ var TelaPesagens = (function () {
     }
     /** O aviso geral do lançamento (sem animal: a duplicidade do bloco inteiro) é uma decisão só, para o bloco todo. */
     function aceitarGeral(b) {
+      if (b.estado !== 'AVISO' || c.blocos.indexOf(b) < 0) { desenhar(); return; }
       (b.gerais || []).forEach(function (g) { if (b.aceitos.indexOf(g.codigo) < 0) b.aceitos.push(g.codigo); });
       b.geralAceito = true;
       c.linhas.forEach(function (x) { if (x.bloco === b.chave && x.estado === 'AVISO' && !(x.avisosProprios || []).length) { x.estado = 'FILA'; x.mensagem = 'Confirmado por você: sai no próximo envio.'; } });
@@ -843,10 +898,11 @@ var TelaPesagens = (function () {
     }
     function corrigirPeso(l) {
       var entrada = h('input', { type: 'text', inputmode: 'decimal', id: 'cur-corrige', value: Fmt.numero(l.peso, 1).replace(/\./g, '') });
-      var f = UI.folha({ titulo: 'Peso de ' + (l.animal_id ? nomeDe(l.animal_id) : l.brinco), conteudo: campo('cur-corrige', 'Peso (kg)', entrada), acoes: [] });
+      var f = UI.folha({ titulo: 'Peso de ' + rotuloLinha(l), conteudo: campo('cur-corrige', 'Peso (kg)', entrada), acoes: [] });
       f.definirAcoes([UI.botao('Voltar', { aoClicar: function () { f.fechar(); } }), UI.botao('Corrigir', { tipo: 'primario', aoClicar: function () {
         var p = Fmt.lerDecimal(entrada.value, 1);
         if (p.erro || !(p.valor > 0) || p.valor > PESO_MAX) { UI.aviso(p.erro || 'O peso vai de 0,1 a 2.000 kg.', { tipo: 'erro' }); return; }
+        if (velho(l)) { f.fechar({ forcar: true }); return; }
         if (l.bloco) desfazerBloco(c, l.bloco);
         l.peso = p.valor;
         l.estado = 'FILA';
@@ -868,7 +924,8 @@ var TelaPesagens = (function () {
         if (x.situacao !== 'ACHADO') { UI.aviso(x.mensagem, { tipo: 'erro' }); return; }
         var a = Store.doEstado(r.animais[x.animal_id]);
         if (!presente(a)) { UI.aviso(Store.rotuloAnimal(a) + ' ' + motivoFora(a) + ': não entra na pesagem.', { tipo: 'erro' }); return; }
-        l.brinco = brincoDe(a) || a.codigo_interno; l.texto = t; l.animal_id = a.animal_id; l.dataAnimal = c.sessao.data; l.estado = 'FILA'; l.mensagem = null; l.semPosicao = false;
+        if (velho(l)) { f.fechar({ forcar: true }); return; }
+        l.brinco = brincoDe(a) || a.codigo_interno; l.texto = t; l.animal_id = a.animal_id; l.dataAnimal = r.data; l.estado = 'FILA'; l.mensagem = null; l.semPosicao = false;
         l.fora = !!(c.sessao.pasto_id && pastoDe(a) !== c.sessao.pasto_id);
         f.fechar({ forcar: true });
         mudou();
@@ -903,6 +960,8 @@ var TelaPesagens = (function () {
       var s = c.sessao;
       titulo.textContent = 'Pesagem no curral';
       ui.estados = {};
+      // A conferência do brinco digitado antes era de outra data (ou sessão): nada dela segue para a tela nova.
+      ui.atual = null; ui.conferindo = null; ui.vezConf = (ui.vezConf || 0) + 1;
       ui.contador = h('div', { class: 'curral-contador', role: 'status', 'aria-live': 'polite' });
       ui.mudar = h('div', { dataset: { curralMudar: '1' } });
       var cab = h('div', { class: 'curral-cabecalho', dataset: { curralCabecalho: '1' } },

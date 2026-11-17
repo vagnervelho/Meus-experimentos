@@ -415,8 +415,11 @@ var TelaEventos = (function () {
     var soma = doses.every(function (d) { return typeof d === 'number'; }) ? doses.reduce(function (t, d) { return t + Math.round(d * 10000); }, 0) / 10000 : null;
     if (typeof payload.quantidade_consumida_total === 'number' && (payload.modo_dose === 'TOTAL' || payload.quantidade_consumida_total !== soma)) origem.quantidade_consumida_total = decimalTexto_(payload.quantidade_consumida_total);
     if (!r0.produto_id) origem.unidade_dose = regs.map(function (r) { return r.unidade_dose; }).filter(Boolean)[0] || null;
-    origem.periodo_carencia_dias = r0.periodo_carencia_dias === null || r0.periodo_carencia_dias === undefined ? null : String(r0.periodo_carencia_dias);
-    var proposta = prot && prot.recorrencia_tipo === 'INTERVALO_DIAS' && typeof prot.intervalo_dias === 'number' ? Utils_somaDias(ev.event_date, prot.intervalo_dias) : null;
+    origem.periodo_carencia_dias = decimalTexto_(r0.periodo_carencia_dias);
+    // A próxima que o servidor propôs foi pelo intervalo congelado no lançamento (payload `intervalo_protocolo_dias`, CONTRATOS,
+    // seção 43): é por ele que a tela reconhece a proposta (e manda o campo vazio, para o servidor refazer pela data corrigida).
+    // Só o registro antigo, sem o intervalo no payload, compara com o intervalo de hoje do protocolo.
+    var iv = payload.intervalo_protocolo_dias, proposta = typeof iv === 'number' || (prot && prot.recorrencia_tipo === 'INTERVALO_DIAS' && typeof (iv = prot.intervalo_dias) === 'number') ? Utils_somaDias(ev.event_date, iv) : null;
     origem.data_proxima_aplicacao = propostoOuValor_(r0.data_proxima_aplicacao, proposta);
     var serv = (det.FINANCEIRO || []).filter(function (f) { return !f.product_id; })[0];
     if (serv) {

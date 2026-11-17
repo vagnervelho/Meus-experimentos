@@ -237,6 +237,17 @@ var EventService = (function () {
     if (!e) return 'animal';
     return !vazio_(e.brinco) ? e.brinco : e.codigo_interno;
   }
+  /**
+   * O animal nas mensagens de um lançamento numa data passada: pelo brinco que ele tinha NAQUELE dia (CONTRATOS, seção 47; o
+   * número trocado ou reaproveitado depois é de outro animal), com o de hoje entre parênteses quando mudou.
+   */
+  function nomeNaData_(m, e) {
+    if (!e || vazio_(m.dataEv) || !Utils.dataValida(m.dataEv) || m.dataEv >= m.hoje || e.situacao_cadastral === 'EXTERNO') return nomeAnimal_(e);
+    var b = Timeline.brincoEm(m.f, e.animal_id, m.dataEv);
+    var naData = vazio_(b) ? e.codigo_interno : b;
+    var hoje = nomeAnimal_(e);
+    return naData === hoje ? hoje : naData + ' (hoje ' + hoje + ')';
+  }
   function nomePasto_(m, id) {
     var p = m.f.pasto(id);
     return p ? p.nome : id;
@@ -371,6 +382,7 @@ var EventService = (function () {
 
     var plano = { EVENTOS: [], ANIMAIS: [], EVENTO_ANIMAIS: [], IDENTIFICACOES: [], PESAGENS: [], REPRODUCAO: [], BAIXAS: [], AJUSTES: [], SANIDADE: [], MOVIMENTOS_ESTOQUE: [], COMPRAS: [], VENDAS: [], FINANCEIRO: [], PARCELAS: [], RATEIOS: [], ALOCACOES_FINANCEIRAS: [], ANEXOS: [] };
     var ctxEv = { tipo: tipo, subtipo: subtipo, ev: ev, campos: campos, original: original, plano: plano, itens: [], criadosOriginal: {}, auditorias: [] };
+    m.dataEv = ev.event_date;
     if (original) {
       m.f.linhasDoEvento(original.event_id).forEach(function (l) { if (l.atributos_iniciais_json) ctxEv.criadosOriginal[l.animal_id] = true; });
     }
@@ -484,7 +496,7 @@ var EventService = (function () {
     var codigo = typeof item.brinco === 'string' ? Utils.aparar(item.brinco) : null;
     var existente = typeof item.animal_id === 'string' ? m.f.animal(item.animal_id) : null;
     var rotulo = m.opcoes.rotulos ? m.opcoes.rotulos[i] : null;
-    var quem = !vazio_(rotulo) ? rotulo : !vazio_(codigo) ? 'Brinco ' + codigo : existente ? nomeAnimal_(existente) : 'Animal ' + (i + 1) + ' da lista';
+    var quem = !vazio_(rotulo) ? rotulo : !vazio_(codigo) ? 'Brinco ' + codigo : existente ? nomeNaData_(m, existente) : 'Animal ' + (i + 1) + ' da lista';
     return { indice: i, dados: item, animal_id: null, publico: false, quem: quem, brincoTexto: vazio_(codigo) ? null : codigo, linhas: [], novo: false, final: {} };
   }
   /** Linha de EVENTO_ANIMAIS no plano e na forma da linha do tempo. */
@@ -737,7 +749,7 @@ var EventService = (function () {
     if (!e) { erroItem_(m, it, 'animal_id', 'NAO_ENCONTRADO', 'animal não encontrado.'); return null; }
     it.codigo_interno = e.codigo_interno;
     it.estado = e;
-    it.quem = nomeAnimal_(e);
+    it.quem = nomeNaData_(m, e);
     it.brincoTexto = nulo_(e.brinco);
     if (e.situacao_cadastral === 'EXTERNO') { erroItem_(m, it, 'animal_id', 'ANIMAL_EXTERNO', 'animal de fora do rebanho (touro de sêmen, progenitor de outra fazenda) não se ' + verbo + ': ele não está no inventário.'); return null; }
     return e;

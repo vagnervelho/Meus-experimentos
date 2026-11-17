@@ -84,7 +84,7 @@ function montarSistema() {
  */
 function novaRede(s) {
   const rede = { falhas: [], segurados: [], log: [], novasRecusas: [], acao: 0 };
-  const classe = (rota) => (rota === 'evento.registrar' ? 'registrar' : rota === 'animal.resolver' ? 'resolver' : rota === 'operacao.status' ? 'status' : 'outra');
+  const classe = (rota) => (rota === 'evento.registrar' ? 'registrar' : rota === 'animal.resolver' ? 'resolver' : rota === 'operacao.status' ? 'status' : /^rascunho\./.test(rota) ? 'rascunho' : 'outra');
   rede.servidor = (pedido, executar) => {
     const cl = classe(pedido.rota);
     const i = rede.falhas.findIndex((f) => f.classe === cl);

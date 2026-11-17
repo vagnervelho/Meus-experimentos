@@ -25,7 +25,11 @@ var TelaSanidade = (function () {
     return h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo', for: id, text: rotulo }), controle, ajuda ? h('p', { class: 'campo-ajuda', text: ajuda }) : null);
   }
   function link(rota, texto) { return h('a', { class: 'botao botao-texto', href: Roteador.href(rota), dataset: { rota: rota } }, texto); }
-  function nomeAnimal(x) { var a = Store.animal(x.animal_id); return a ? Store.rotuloAnimal(a) : (x.brinco || x.codigo_interno || 'animal'); }
+  /**
+   * O animal da agenda pelo brinco da data dela, o que o servidor mandou (CONTRATOS, seção 46: o número trocado depois é o daquele
+   * dia), nunca pela lista de hoje do aparelho; o de hoje entre parênteses quando mudou.
+   */
+  function nomeAnimal(x) { var a = Store.animal(x.animal_id); var b = x.brinco || x.codigo_interno || 'animal'; return a && a.brinco && a.brinco !== x.brinco ? b + ' (hoje ' + a.brinco + ')' : b; }
   function qtd(v, un) { return v === null || v === undefined ? '—' : Fmt.numero(v, Fmt.casas(v)) + (un ? ' ' + un : ''); }
   function cabecalho(aba) {
     var acoes = h('div', { class: 'acoes', style: 'margin-top:0' });

@@ -102,7 +102,11 @@ var TelaPastos = (function () {
     el.appendChild(titulo);
     var lista = h('ul', { class: 'lista-cartoes', 'aria-label': 'Pastos' });
     el.appendChild(lista);
-    /** Hoje, os cartões do store (carga inicial); noutra data, pasto.listar com a data (o replay do servidor). */
+    /**
+     * Hoje, os cartões do store (carga inicial); noutra data, pasto.listar com a data (o replay do servidor). O pasto desativado
+     * depois que tinha animal na data aparece mesmo sem "Mostrar pastos inativos" (CONTRATOS, seção 46: as cabeças por pasto
+     * fecham com o rebanho da data), marcado inativo.
+     */
     async function carregar() {
       var d = dataAtual();
       if (d === Fmt.hoje()) { cartoes = null; desenhar(); return; }
@@ -123,7 +127,7 @@ var TelaPastos = (function () {
       Util.limpar(lista);
       var d = dataAtual();
       titulo.textContent = d === Fmt.hoje() ? 'Situação de hoje.' : 'Posição em ' + Fmt.data(d) + ', recalculada pelos lançamentos que valem hoje.';
-      var ps = (cartoes || Store.pastos({ todos: true })).filter(function (p) { return mostrarInativos || p.status !== 'INATIVO'; }).sort(function (a, b) { return UI.comparar(a.nome, b.nome); });
+      var ps = (cartoes || Store.pastos({ todos: true })).filter(function (p) { return mostrarInativos || p.status !== 'INATIVO' || p.cabecas > 0; }).sort(function (a, b) { return UI.comparar(a.nome, b.nome); });
       if (!ps.length) { lista.appendChild(h('li', null, UI.vazio({ texto: 'Nenhum pasto cadastrado.' }))); return; }
       var varias = Store.propriedades({ todas: true }).length > 1;
       ps.forEach(function (p) {
