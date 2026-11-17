@@ -31,21 +31,37 @@ def tri(rng, lo, mode, hi, n):
     return rng.triangular(lo, mode, hi, n)
 
 
-def monte_carlo(p, g, n=4000, seed=7):
+def monte_carlo(p, g, n=4000, seed=7, modo="estresse"):
+    """modo='neutro': ruído simétrico em torno do caso-base (mede só a volatilidade).
+    modo='estresse': caudas para baixo (viés de planejamento: demanda abaixo do plano, capex estoura,
+    atraso, mais horas). Mesmas regras para todas as ideias; muda só a largura da incerteza de demanda/preço."""
     rng = np.random.default_rng(seed)
     dlo, dhi = p.get("demanda_faixa", (0.65, 1.15))
     plo, phi = p.get("preco_faixa", (0.85, 1.05))
-    draws = dict(
-        demanda=tri(rng, dlo, 1.0, dhi, n),
-        preco=tri(rng, plo, 1.0, phi, n),
-        capex=tri(rng, 0.95, 1.0, p.get("capex_max", 1.30), n),
-        fixo=tri(rng, 0.92, 1.0, 1.20, n),
-        energia=tri(rng, 0.95, 1.0, 1.30, n),
-        residual=tri(rng, 0.60, 1.0, 1.10, n),
-        horas=tri(rng, 0.80, 1.0, 1.50, n),
-    )
-    atrasos, probs = zip(*p.get("atraso_dist", [(0.0, 0.55), (0.5, 0.30), (1.0, 0.15)]))
-    draws["atraso"] = rng.choice(atrasos, size=n, p=probs)
+    if modo == "neutro":
+        w = (dhi - dlo) / 2
+        draws = dict(
+            demanda=tri(rng, 1 - w, 1.0, 1 + w, n),
+            preco=tri(rng, 0.92, 1.0, 1.08, n),
+            capex=tri(rng, 0.92, 1.0, 1.08, n),
+            fixo=tri(rng, 0.92, 1.0, 1.08, n),
+            energia=tri(rng, 0.85, 1.0, 1.15, n),
+            residual=tri(rng, 0.70, 1.0, 1.30, n),
+            horas=tri(rng, 0.80, 1.0, 1.20, n),
+            atraso=rng.choice([-0.25, 0.0, 0.25], size=n, p=[0.25, 0.5, 0.25]),
+        )
+    else:
+        draws = dict(
+            demanda=tri(rng, dlo, 1.0, dhi, n),
+            preco=tri(rng, plo, 1.0, phi, n),
+            capex=tri(rng, 0.95, 1.0, p.get("capex_max", 1.30), n),
+            fixo=tri(rng, 0.92, 1.0, 1.20, n),
+            energia=tri(rng, 0.95, 1.0, 1.30, n),
+            residual=tri(rng, 0.60, 1.0, 1.10, n),
+            horas=tri(rng, 0.80, 1.0, 1.50, n),
+        )
+        atrasos, probs = zip(*p.get("atraso_dist", [(0.0, 0.55), (0.5, 0.30), (1.0, 0.15)]))
+        draws["atraso"] = rng.choice(atrasos, size=n, p=probs)
     ps, cs = p.get("p_sinistro", 0.0), p.get("custo_sinistro", 0.0)
     sin = (rng.random((n, ANOS)) < ps) * cs
     res = []
@@ -64,6 +80,21 @@ def monte_carlo(p, g, n=4000, seed=7):
         roi_p50=np.percentile(roiv, 50),
         vpl_amostra=vplv, tir_amostra=tirv,
     )
+
+
+def mult_equilibrio(p, g, chave, lo, hi):
+    """Multiplicador de uma alavanca (preco, capex...) que zera o VPL. NaN se fora do intervalo."""
+    f = lambda m: projetar(p, g, {chave: m})["vpl"]
+    flo, fhi = f(lo), f(hi)
+    if np.sign(flo) == np.sign(fhi):
+        return np.nan
+    for _ in range(60):
+        mid = 0.5 * (lo + hi)
+        if np.sign(f(mid)) == np.sign(flo):
+            lo, flo = mid, f(mid)
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)
 
 
 def main(n_mc=4000, verbose=True):
@@ -87,9 +118,14 @@ def main(n_mc=4000, verbose=True):
         for nome, ch in ESTRESSES.items():
             s = projetar(p, g, ch)
             stress_rows.append(dict(id=k, estresse=nome, vpl=s["vpl"], tir_real=s["tir"], payback=s["pb"]))
-        mc = monte_carlo(p, g, n=n_mc)
+        mc = monte_carlo(p, g, n=n_mc, modo="estresse")
+        mcn = monte_carlo(p, g, n=n_mc, modo="neutro")
         mc_full[k] = mc
-        mc_rows.append(dict(id=k, **{x: y for x, y in mc.items() if not x.endswith("amostra")}))
+        linha = {x: y for x, y in mc.items() if not x.endswith("amostra")}
+        linha.update({"neutro_" + x: y for x, y in mcn.items() if not x.endswith("amostra")})
+        mc_rows.append(dict(id=k, **linha))
+        base_rows[-1]["preco_equilibrio"] = mult_equilibrio(p, g, "preco", 0.3, 3.0)
+        base_rows[-1]["capex_equilibrio"] = mult_equilibrio(p, g, "capex", 0.05, 3.0)
     base = pd.DataFrame(base_rows).set_index("id")
     stress = pd.DataFrame(stress_rows)
     mc = pd.DataFrame(mc_rows).set_index("id")
