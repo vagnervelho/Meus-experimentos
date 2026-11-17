@@ -259,14 +259,14 @@ test('achado 14: mudar a duração da gestação depois do diagnóstico não tra
   const est = ok(api(s, 'estacao.salvar', { campos: { nome: 'E26', data_inicio: '2026-01-10', data_fim: '2026-04-10', tipo: 'MONTA_NATURAL' } }), 'estação');
   ok(api(s, 'evento.registrar', { tipo: 'REPRODUCAO', subtipo: 'EXPOSICAO', campos: { event_date: '2026-01-10', estacao_id: est.estacao_id }, animais: [{ animal_id: ids['101'] }, { animal_id: ids['102'] }] }), 'exposição');
   const dg = ok(api(s, 'evento.registrar', { tipo: 'REPRODUCAO', subtipo: 'DIAGNOSTICO_GESTACAO', campos: { event_date: '2026-09-10', estacao_id: est.estacao_id }, animais: [{ animal_id: ids['101'], resultado: 'POSITIVO', idade_gestacional_dias: 200 }] }), 'diagnóstico');
-  ok(api(s, 'config.salvar', { campos: { dias_gestacao: 185 }, justificativa: 'raça' }), 'dias de gestação');
+  ok(api(s, 'config.salvar', { valores: { dias_gestacao: 185 }, justificativa: 'raça' }), 'dias de gestação');
   semErro(s, 'o diagnóstico antigo não é fonte quebrada');
   ok(api(s, 'evento.registrar', { tipo: 'PESAGEM', campos: { event_date: '2026-10-01', tipo_pesagem: 'ROTINA', metodo_pesagem: 'BALANCA' }, animais: [{ animal_id: ids['101'], peso: 450 }] }), 'pesagem');
   // A correção que só muda o responsável mantém a idade do original.
-  ok(api(s, 'evento.corrigir', { event_id: dg.event_id, justificativa: 'responsável', tipo: 'REPRODUCAO', subtipo: 'DIAGNOSTICO_GESTACAO', campos: { event_date: '2026-09-10', estacao_id: est.estacao_id, responsavel: 'Dr. B' }, animais: [{ animal_id: ids['101'], resultado: 'POSITIVO', idade_gestacional_dias: 200 }] }), 'correção');
+  ok(api(s, 'evento.corrigir', { event_id: dg.event_id, justificativa: 'responsável', tipo: 'REPRODUCAO', subtipo: 'DIAGNOSTICO_GESTACAO', campos: { event_date: '2026-09-10', estacao_id: est.estacao_id, metodo: 'ULTRASSOM' }, animais: [{ animal_id: ids['101'], resultado: 'POSITIVO', idade_gestacional_dias: 200 }] }), 'correção');
   // O diagnóstico novo acima do parâmetro: a regra do motor, com a mensagem dele.
   const e = recusa(api(s, 'evento.registrar', { tipo: 'REPRODUCAO', subtipo: 'DIAGNOSTICO_GESTACAO', campos: { event_date: '2026-09-11', estacao_id: est.estacao_id }, animais: [{ animal_id: ids['102'], resultado: 'POSITIVO', idade_gestacional_dias: 200 }] }), 'VALIDATION', 'novo acima');
   assert.deepEqual(cods(e), ['VALOR_FORA_DA_FAIXA']);
-  ok(api(s, 'evento.registrar', { tipo: 'MORTE', campos: { event_date: '2026-10-05', causa_morte: 'Raio' }, animais: [{ animal_id: ids['101'] }] }), 'morte');
+  ok(api(s, 'evento.registrar', { tipo: 'MORTE', campos: { event_date: '2026-10-05', causa: 'DOENCA' }, animais: [{ animal_id: ids['101'] }] }), 'morte');
   semErro(s, 'depois');
 });

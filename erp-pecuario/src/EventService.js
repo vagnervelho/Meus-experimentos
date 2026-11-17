@@ -1341,7 +1341,10 @@ var EventService = (function () {
     var erroCampo = function (campo) { return !!(it.camposComErro && it.camposComErro[campo]); };
     var res = sub === 'DIAGNOSTICO_GESTACAO' && !erroCampo('resultado') ? nulo_(d.resultado) : null;
     var idade = (sub === 'ABORTO' || res === 'POSITIVO') && typeof d.idade_gestacional_dias === 'number' && !erroCampo('idade_gestacional_dias') ? d.idade_gestacional_dias : null;
-    if (idade !== null && typeof m.params.dias_gestacao === 'number' && idade > m.params.dias_gestacao) erroItem_(m, it, 'idade_gestacional_dias', 'VALOR_FORA_DA_FAIXA', 'a idade da gestação (' + idade + ' dias) passa da duração da gestação (' + m.params.dias_gestacao + ' dias).');
+    // A duração da gestação é parâmetro: a idade que o original da correção já tinha nesta fêmea continua valendo depois de o
+    // parâmetro mudar (o registro legítimo não vira erro; a faixa é regra do lançamento, não da integridade).
+    var idadeDoOriginal = ctxEv.original && m.repo.carregada('REPRODUCAO') && m.repo.por('REPRODUCAO', 'event_id', ctxEv.original.event_id).some(function (x) { return x.animal_id === it.animal_id && x.idade_gestacional_dias === idade; });
+    if (idade !== null && !idadeDoOriginal && typeof m.params.dias_gestacao === 'number' && idade > m.params.dias_gestacao) erroItem_(m, it, 'idade_gestacional_dias', 'VALOR_FORA_DA_FAIXA', 'a idade da gestação (' + idade + ' dias) passa da duração da gestação (' + m.params.dias_gestacao + ' dias).');
     var prevista = res === 'POSITIVO' && !erroCampo('data_prevista_parto') ? nulo_(d.data_prevista_parto) : null;
     if (prevista && Utils.dataValida(prevista) && Utils.dataValida(ev.event_date) && prevista <= ev.event_date) erroItem_(m, it, 'data_prevista_parto', 'DATA_INVALIDA', 'a previsão de parto (' + br_(prevista) + ') precisa ser depois do diagnóstico (' + br_(ev.event_date) + ').');
     linhaEA_(m, ctxEv, it, { efeito_inventario: 0, observacoes: obs });

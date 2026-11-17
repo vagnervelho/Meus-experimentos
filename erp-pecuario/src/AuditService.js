@@ -1622,6 +1622,10 @@ var AuditService = (function () {
           if (prod && !vazio_(r.dose) && r.unidade_dose !== prod.unidade) achado('SANIDADE', r.health_id, 'unidade_dose', nome + ', ' + quem(r) + ': a dose está em "' + (r.unidade_dose || 'sem unidade') + '", mas o produto ' + prod.nome + ' é controlado em "' + prod.unidade + '".', 'UNIDADE', r.animal_id);
           var fim = HealthService.fimPeloPeriodo(r.data_aplicacao, r.periodo_carencia_dias);
           if (nulo_(r.data_fim_carencia) !== fim) achado('SANIDADE', r.health_id, 'data_fim_carencia', nome + ', ' + quem(r) + ': o fim da carência gravado (' + (vazio_(r.data_fim_carencia) ? 'vazio' : br_(r.data_fim_carencia)) + ') não é a aplicação mais os dias de carência (' + (fim ? br_(fim) : 'sem carência') + ').', 'CARENCIA', r.animal_id);
+          // A próxima proposta pelo protocolo (payload `intervalo_protocolo_dias`, o intervalo congelado): aplicação + intervalo.
+          if (typeof pj.intervalo_protocolo_dias === 'number' && (vazio_(r.protocol_id) || nulo_(r.data_proxima_aplicacao) !== Utils.somaDias(r.data_aplicacao, pj.intervalo_protocolo_dias))) {
+            achado('SANIDADE', r.health_id, 'data_proxima_aplicacao', nome + ', ' + quem(r) + ': a próxima aplicação gravada (' + (vazio_(r.data_proxima_aplicacao) ? 'vazia' : br_(r.data_proxima_aplicacao)) + ') não é a aplicação mais o intervalo do protocolo (' + pj.intervalo_protocolo_dias + ' dias).', 'PROXIMA', r.animal_id);
+          }
           if (temFin && repo.carregada('RATEIOS') && repo.carregada('ALOCACOES_FINANCEIRAS')) {
             var alocado = null;
             fins.forEach(function (f) { repo.por('RATEIOS', 'financial_id', f.financial_id).forEach(function (rt) { repo.por('ALOCACOES_FINANCEIRAS', 'rateio_id', rt.rateio_id).forEach(function (al) { if (al.animal_id === r.animal_id) alocado = (alocado || 0) + (al.valor_alocado || 0); }); }); });
@@ -1680,7 +1684,7 @@ var AuditService = (function () {
    * correção, estorno, importação e a trava de integridade):
    *  - REPRODUCAO: cada registro com as colunas do seu tipo (matriz da seção 7.2: a retirada só na exposição e não antes
    *    dela; o sêmen só na inseminação; o resultado só e sempre no diagnóstico; a idade da gestação só no diagnóstico
-   *    positivo e no aborto, de 1 à duração da gestação; a previsão informada só no diagnóstico positivo e depois dele; o
+   *    positivo e no aborto, de 1 dia em diante (a duração da gestação é parâmetro: a faixa fica no motor); a previsão informada só no diagnóstico positivo e depois dele; o
    *    touro nunca no diagnóstico nem no aborto; nada do parto), o mesmo cabeçalho (retirada, estação, touro, sêmen e
    *    método) em todos os registros do lançamento, e o touro coerente com as linhas TOURO: na exposição, o único touro do
    *    lote (ou nenhum, com vários); na cobertura, no máximo um, que é o touro do registro; nos demais, nenhuma linha TOURO;
@@ -1694,7 +1698,8 @@ var AuditService = (function () {
     var repo = tx.repo;
     if (!repo.carregada('REPRODUCAO') || !repo.carregada('EVENTO_ANIMAIS')) return;
     var aviso = ' Restaure o backup ou investigue a edição manual; o reparo automático só refaz a situação a partir dos lançamentos.';
-    var dias = repo.carregada('CONFIGURACOES') ? Timeline.parametros(repo).dias_gestacao : null;
+    // A idade da gestação acima de `dias_gestacao` é regra do lançamento (o motor), não da integridade: o parâmetro muda
+    // depois, e o diagnóstico legítimo de antes não pode virar "fonte quebrada" (trava única; a decisão do reuso de brinco).
     eventos.forEach(function (ev) {
       if (ev.event_type !== 'REPRODUCAO' && ev.event_type !== 'DESMAMA') return;
       var nome = '"' + rotuloEvento_(ev) + '" de ' + br_(ev.event_date);
@@ -1714,7 +1719,7 @@ var AuditService = (function () {
           if (!vazio_(r.semen_identificacao) && sub !== 'INSEMINACAO') falta('semen_identificacao', 'o registro tem a identificação do sêmen, que só existe na inseminação.');
           if ((sub === 'DIAGNOSTICO_GESTACAO') !== !vazio_(r.resultado)) falta('resultado', sub === 'DIAGNOSTICO_GESTACAO' ? 'o diagnóstico está sem o resultado.' : 'o registro tem resultado de diagnóstico, que ele não grava.');
           var comIdade = sub === 'ABORTO' || (sub === 'DIAGNOSTICO_GESTACAO' && r.resultado === 'POSITIVO');
-          if (!vazio_(r.idade_gestacional_dias) && (!comIdade || !(r.idade_gestacional_dias >= 1) || (typeof dias === 'number' && r.idade_gestacional_dias > dias))) falta('idade_gestacional_dias', comIdade ? 'a idade da gestação (' + r.idade_gestacional_dias + ' dias) está fora da faixa (de 1 à duração da gestação).' : 'o registro tem idade da gestação, que só existe no diagnóstico positivo e no aborto.');
+          if (!vazio_(r.idade_gestacional_dias) && (!comIdade || !(r.idade_gestacional_dias >= 1))) falta('idade_gestacional_dias', comIdade ? 'a idade da gestação (' + r.idade_gestacional_dias + ' dias) está fora da faixa (de 1 dia em diante).' : 'o registro tem idade da gestação, que só existe no diagnóstico positivo e no aborto.');
           if (!vazio_(r.data_prevista_parto) && (sub !== 'DIAGNOSTICO_GESTACAO' || r.resultado !== 'POSITIVO' || r.data_prevista_parto <= r.data)) falta('data_prevista_parto', sub === 'DIAGNOSTICO_GESTACAO' && r.resultado === 'POSITIVO' ? 'a previsão de parto informada (' + br_(r.data_prevista_parto) + ') não é depois do diagnóstico.' : 'o registro tem previsão de parto, que só o diagnóstico positivo informa.');
           if (!vazio_(r.touro_id) && (sub === 'DIAGNOSTICO_GESTACAO' || sub === 'ABORTO')) falta('touro_id', 'o registro tem touro, que o diagnóstico e o aborto não gravam.');
           ['qtd_nascidos_vivos', 'qtd_natimortos', 'tipo_parto', 'data_parto'].forEach(function (c) { if (!vazio_(r[c])) falta(c, 'o registro tem dado de parto, que só o nascimento grava.'); });
@@ -1743,7 +1748,12 @@ var AuditService = (function () {
         if (ps.length > 1 || (ps.length === 1 && ps[0].peso_kg !== l.peso) || (!ps.length && typeof l.peso === 'number')) achado('EVENTO_ANIMAIS', l.event_animal_id, 'peso', nome + ', ' + quem(l.animal_id) + ': o peso à desmama da linha do bezerro não confere com a pesagem da desmama.', 'PESO', l.animal_id);
       });
       linhas.filter(function (l) { return papel(l) === 'MATRIZ'; }).forEach(function (l) {
-        if (!maes[l.animal_id]) achado('EVENTO_ANIMAIS', l.event_animal_id, 'animal_id', nome + ': ' + quem(l.animal_id) + ' está como mãe, mas não é a mãe de nenhum bezerro desmamado no lançamento.', 'MAE', l.animal_id);
+        if (!maes[l.animal_id]) {
+          var oqueMae = nome + ': ' + quem(l.animal_id) + ' está como mãe, mas não é a mãe de nenhum bezerro desmamado no lançamento.';
+          // O caminho que funciona quando a mãe do bezerro é trocada por correção de cadastro (a desmama registra a mãe).
+          col.achado('COPIAS', { tabela: 'EVENTO_ANIMAIS', id: l.event_animal_id, campo: 'animal_id', mensagem: oqueMae + aviso, oque: oqueMae, chaves: l.event_animal_id + '|MAE', event_id: ev.event_id, animal_id: l.animal_id,
+            resolver: 'Estorne antes a desmama de ' + br_(ev.event_date) + ' (ela registra a mãe do bezerro), troque a mãe e lance a desmama de novo.' });
+        }
       });
       var comLinhaMae = {};
       linhas.forEach(function (l) { if (papel(l) === 'MATRIZ') comLinhaMae[l.animal_id] = true; });
@@ -2074,6 +2084,13 @@ var AuditService = (function () {
       linhasPor('EVENTO_ANIMAIS', 'animal_id', id).forEach(function (l) { esc.fonte[l.event_id] = true; });
       DETALHES_COM_ANIMAL.forEach(function (tab) { linhasPor(tab, 'animal_id', id).forEach(function (r) { if (!vazio_(r.event_id)) esc.fonte[r.event_id] = true; }); });
     });
+    // A fonte do saldo de cada produto tocado (o estoque é projeção dos movimentos): os eventos que o movimentam, o consomem
+    // ou o aplicam. A saída apagada à mão é achada pela aplicação dela; o comando que regravaria o saldo é recusado.
+    Object.keys(esc.produtos).forEach(function (pid) {
+      linhasPor('MOVIMENTOS_ESTOQUE', 'product_id', pid).forEach(function (x) { esc.fonte[x.event_id] = true; });
+      linhasPor('FINANCEIRO', 'product_id', pid).forEach(function (f) { if (!vazio_(f.event_id)) esc.fonte[f.event_id] = true; });
+      linhasPor('SANIDADE', 'produto_id', pid).forEach(function (r) { esc.fonte[r.event_id] = true; });
+    });
     return esc;
   }
   /**
@@ -2114,13 +2131,32 @@ var AuditService = (function () {
       animais.forEach(function (id) { registros.push('ANIMAIS\u0000' + id); });
       var fin = a.tabela === 'FINANCEIRO' ? a.id : a.tabela === 'PARCELAS' && carregada('PARCELAS') ? (cru.cruPorId('PARCELAS', a.id) || {}).financial_id : null;
       if (!vazio_(fin)) registros.push('FINANCEIRO\u0000' + fin);
+      // O saldo do insumo (PRODUTOS.estoque_atual, Fase 3) é projeção como a do animal: o produto do movimento, do consumo ou
+      // da aplicação citados pelo achado entra na quarentena, e o comando que movimenta o produto é recusado.
+      var produtos = produtosDoAchado_(a, cru, carregada);
+      produtos.forEach(function (pid) { registros.push('PRODUTOS\u0000' + pid); });
       var tocados = registros.filter(function (k) { return regrava[k]; });
       if (!tocados.length) return;
-      var direto = animais.some(function (id) { return lanca.animais[id]; }) || (!vazio_(a.event_id) && lanca.eventos[a.event_id]) || (!vazio_(fin) && s.lancamentos[fin]);
+      var direto = animais.some(function (id) { return lanca.animais[id]; }) || (!vazio_(a.event_id) && lanca.eventos[a.event_id]) || (!vazio_(fin) && s.lancamentos[fin]) ||
+        produtos.some(function (pid) { return s.produtos && s.produtos[pid]; });
       if (direto && !s.tudo) out.diretos.push(a);
       else tocados.forEach(function (k) { out.quarentena[k] = true; });
     });
     return out;
+  }
+  /** Os produtos de um achado da fonte quebrada: o próprio, o do movimento, e os dos movimentos, lançamentos e aplicações do evento. */
+  function produtosDoAchado_(a, cru, carregada) {
+    var ids = [];
+    var mais = function (tab, campo, chave, valor) { if (carregada(tab)) cru.cruPor(tab, chave, valor).forEach(function (r) { if (!vazio_(r[campo])) ids.push(r[campo]); }); };
+    if (a.tabela === 'PRODUTOS') ids.push(a.id);
+    if (a.tabela === 'MOVIMENTOS_ESTOQUE' && carregada('MOVIMENTOS_ESTOQUE')) { var mv = cru.cruPorId('MOVIMENTOS_ESTOQUE', a.id); if (mv && !vazio_(mv.product_id)) ids.push(mv.product_id); }
+    if (a.tabela === 'FINANCEIRO' && carregada('FINANCEIRO')) { var f = cru.cruPorId('FINANCEIRO', a.id); if (f && !vazio_(f.product_id)) ids.push(f.product_id); }
+    if (!vazio_(a.event_id)) {
+      mais('MOVIMENTOS_ESTOQUE', 'product_id', 'event_id', a.event_id);
+      mais('FINANCEIRO', 'product_id', 'event_id', a.event_id);
+      mais('SANIDADE', 'produto_id', 'event_id', a.event_id);
+    }
+    return Utils.unicos(ids);
   }
   /**
    * O que o lote grava (para a trava dizer se o problema é do próprio lançamento): {eventos, linhas: {ABA\u0000id: true},
