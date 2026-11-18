@@ -3228,7 +3228,8 @@ var Registro = (function () {
         return h('li', { class: 'linha-acao' }, h('span', { text: descricaoRascunho(r) + (r.estado === 'ENVIANDO' ? ' · verificando se gravou' : '') }), h('a', { class: 'botao botao-secundario', href: Roteador.href(rotaDoForm(r.tipo)), dataset: { rota: rotaDoForm(r.tipo) } }, 'Continuar'));
       }))));
     }, function (e) { pend.appendChild(UI.nota('Não foi possível ler os rascunhos: ' + e.message, 'aviso')); });
-    var tipos = (Store.catalogo().tipos || []).filter(function (t) { return t.tipo !== 'ESTORNO'; });
+    // O estorno parte do lançamento a desfazer, e o rateio, do lançamento a dividir (`a_partir_de`; 08, seção 4.2): não estão aqui.
+    var tipos = (Store.catalogo().tipos || []).filter(function (t) { return t.tipo !== 'ESTORNO' && !t.a_partir_de; });
     if (!tipos.length) { el.appendChild(UI.vazio({ texto: 'Nenhum tipo de registro disponível nesta fase.' })); return; }
     var link = function (t) { return h('li', null, h('a', { class: 'botao botao-secundario botao-bloco', href: Roteador.href(rotaDoForm(t.tipo)), dataset: { rota: rotaDoForm(t.tipo), tipoEvento: t.tipo } }, t.rotulo)); };
     var freq = tipos.filter(function (t) { return t.frequente; }).sort(function (a, b) { return a.ordem - b.ordem; });

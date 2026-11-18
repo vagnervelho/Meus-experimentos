@@ -1327,7 +1327,21 @@ var AuditService = (function () {
     };
     var f = Timeline.LEITURAS.every(function (t) { return repo.carregada(t); }) ? Timeline.fonte(tx, {}) : null;
     var nomeDe = function (id) { return rotuloAnimal_(tx.cru ? tx.cru.cruPorId('ANIMAIS', id) : null, id); };
+    var L = null;
     repo.vigentes('RATEIOS').forEach(function (r) {
+      // O rateio de um evento RATEIO (Fase 4, E4.3): a base refeita pela mesma conta do evento (Rateio.bases, com o critério, o
+      // escopo, o período e a data-base gravados): pesagem, transferência, venda ou morte lançadas depois mudam a base.
+      var dono = tx.cru ? tx.cru.cruPorId('EVENTOS', r.event_id) : repo.porId('EVENTOS', r.event_id);
+      if (dono && dono.event_type === 'RATEIO') {
+        if (!tx.cru || !AnimalService.leituras().every(function (t) { return repo.carregada(t); })) return;
+        if (!L) L = AnimalService.leitor(tx);
+        var cmp = Rateio.desatualizado(L, tx.cru, r);
+        if (!cmp.desatualizado) return;
+        var fin = repo.porId('FINANCEIRO', r.financial_id) || {};
+        var oque = cmp.diferencas.slice(0, 4).map(function (x) { return nomeDe(x.animal_id) + ' (' + (x.gravada === null ? 'fora' : x.gravada) + ' → ' + (x.hoje === null ? 'fora' : x.hoje) + ')'; }).join(', ');
+        col.achado('BASE_RATEIO', { tabela: 'RATEIOS', id: r.rateio_id, mensagem: 'O rateio de ' + br_(dono.event_date) + ' do lançamento "' + (fin.descricao || r.financial_id) + '" está desatualizado: ' + (cmp.refazivel ? 'a base refeita hoje muda' + (oque ? ' — ' + oque + (cmp.diferencas.length > 4 ? ' e mais ' + (cmp.diferencas.length - 4) : '') : '') : cmp.problemas.map(function (p) { return p.mensagem; }).slice(0, 2).join(' ')) + '. Rateie de novo por decisão do dono.' });
+        return;
+      }
       if ((!BASE_DA_LINHA[r.criterio] && r.criterio !== 'DIRETO') || r.escopo_tipo !== 'EVENTO' || vazio_(r.escopo_ref)) return;
       var allocs = repo.por('ALOCACOES_FINANCEIRAS', 'rateio_id', r.rateio_id);
       if (r.criterio === 'PESO_CARCACA' && /^Base estimada/.test(r.justificativa || '')) return;
@@ -1653,6 +1667,14 @@ var AuditService = (function () {
   var LIDAS_PELA_CORRECAO = /^(MESMO_|SOMA_DOSES$|BASE_DOSE$|SAIDA_LOTE$|RATEIO_MODO$)/;
   var CABECALHO_SANIDADE = Object.freeze(['produto_id', 'nome_produto', 'protocol_id', 'tipo_procedimento', 'fabricante', 'lote', 'validade', 'via_aplicacao', 'motivo', 'diagnostico', 'veterinario', 'periodo_carencia_dias', 'data_proxima_aplicacao']);
   var NOME_CABECALHO_SANIDADE = Object.freeze({ tipo_procedimento: 'procedimento', fabricante: 'fabricante', lote: 'lote', validade: 'validade do lote', via_aplicacao: 'via de aplicação', motivo: 'motivo', diagnostico: 'diagnóstico', veterinario: 'veterinário', periodo_carencia_dias: 'período de carência', data_proxima_aplicacao: 'dia da próxima aplicação' });
+  /** Os rateios que o evento gravou para o lançamento (os que um re-rateio deixou de valer também; lidos crus). */
+  function rateiosProprios_(tx, eventId, financialId) {
+    var l = tx.cru ? tx.cru.cruPor('RATEIOS', 'event_id', eventId) : tx.repo.por('RATEIOS', 'event_id', eventId);
+    return l.filter(function (r) { return r.financial_id === financialId; });
+  }
+  function alocacoesCruas_(tx, rateioId) {
+    return tx.cru ? tx.cru.cruPor('ALOCACOES_FINANCEIRAS', 'rateio_id', rateioId) : tx.repo.por('ALOCACOES_FINANCEIRAS', 'rateio_id', rateioId);
+  }
   function conferirInsumos_(tx, col, eventos, f) {
     var repo = tx.repo;
     var temMov = repo.carregada('MOVIMENTOS_ESTOQUE');
@@ -1697,7 +1719,8 @@ var AuditService = (function () {
           }
           if (temFin && repo.carregada('RATEIOS') && repo.carregada('ALOCACOES_FINANCEIRAS')) {
             var alocado = null;
-            fins.forEach(function (f) { repo.por('RATEIOS', 'financial_id', f.financial_id).forEach(function (rt) { repo.por('ALOCACOES_FINANCEIRAS', 'rateio_id', rt.rateio_id).forEach(function (al) { if (al.animal_id === r.animal_id) alocado = (alocado || 0) + (al.valor_alocado || 0); }); }); });
+            // A cópia é do rateio que o próprio evento gravou (02, seção 6.3: o re-rateio posterior, por evento RATEIO, não a muda).
+            fins.forEach(function (f) { rateiosProprios_(tx, ev.event_id, f.financial_id).forEach(function (rt) { alocacoesCruas_(tx, rt.rateio_id).forEach(function (al) { if (al.animal_id === r.animal_id) alocado = (alocado || 0) + (al.valor_alocado || 0); }); }); });
             if (nulo_(r.custo) !== alocado) achado('SANIDADE', r.health_id, 'custo', nome + ', ' + quem(r) + ': o custo copiado na aplicação (' + (vazio_(r.custo) ? 'vazio' : Utils.formatarReais(r.custo)) + ') difere do que coube ao animal no lançamento (' + (alocado === null ? 'nada' : Utils.formatarReais(alocado)) + ').', 'CUSTO', r.animal_id);
           }
         });
@@ -1735,12 +1758,12 @@ var AuditService = (function () {
             // rateio não recalcula o MANUAL.
             var doseDe = {};
             linhas.forEach(function (r) { doseDe[r.animal_id] = r.dose; });
-            repo.por('RATEIOS', 'financial_id', f0.financial_id).forEach(function (rt) {
+            rateiosProprios_(tx, ev.event_id, f0.financial_id).forEach(function (rt) {
               var pelaDose = rt.criterio === 'MANUAL' && /^Proporcional à dose/.test(rt.justificativa || '');
               var porPeso = pj.modo_dose === 'POR_PESO' && linhas.length > 1 && linhas.every(function (r) { return typeof r.dose === 'number'; });
               if (pelaDose !== porPeso) achado('RATEIOS', rt.rateio_id, 'criterio', nome + ': o consumo está rateado ' + (pelaDose ? 'pela dose de cada animal' : 'por cabeça') + ', mas o lançamento é ' + (porPeso ? 'por peso (rateio pela dose)' : 'de dose por cabeça ou do total (rateio por cabeça)') + '.', 'RATEIO_MODO');
               if (!pelaDose) return;
-              repo.por('ALOCACOES_FINANCEIRAS', 'rateio_id', rt.rateio_id).forEach(function (al) {
+              alocacoesCruas_(tx, rt.rateio_id).forEach(function (al) {
                 if (al.base_valor !== doseDe[al.animal_id]) achado('ALOCACOES_FINANCEIRAS', al.alloc_id, 'base_valor', nome + ', ' + rotuloAnimal_(tx.cru.cruPorId('ANIMAIS', al.animal_id), al.animal_id) + ': a base do rateio do consumo (' + al.base_valor + ') não é a dose do animal na aplicação (' + (typeof doseDe[al.animal_id] === 'number' ? Utils.formatarNumero(doseDe[al.animal_id]) : 'vazia') + ').', 'BASE_DOSE', al.animal_id);
               });
             });
@@ -2167,6 +2190,8 @@ var AuditService = (function () {
         linhasPor(tab, 'event_id', eid).forEach(function (r) { if (!vazio_(r.animal_id)) esc.animais[r.animal_id] = true; if (!vazio_(r.touro_id)) esc.genealogia[r.touro_id] = true; });
       });
       linhasPor('FINANCEIRO', 'event_id', eid).forEach(function (f) { esc.lancamentos[f.financial_id] = true; });
+      // O rateio gravado ou anulado (o evento RATEIO e o estorno dele): o lançamento que ele distribui.
+      linhasPor('RATEIOS', 'event_id', eid).forEach(function (r) { esc.lancamentos[r.financial_id] = true; });
       linhasPor('MOVIMENTOS_ESTOQUE', 'event_id', eid).forEach(function (x) { esc.produtos[x.product_id] = true; });
     });
     Object.keys(esc.lancamentos).forEach(function (fid) { linhasPor('ALOCACOES_FINANCEIRAS', 'financial_id', fid).forEach(function (a) { esc.animais[a.animal_id] = true; }); });
@@ -2454,6 +2479,33 @@ var AuditService = (function () {
     var a = FinancialService.avisoPeriodo(params, achada.data, 'A baixa da parcela ' + achada.p.parcela_num + ' de "' + (fin.descricao || fin.natureza || 'lançamento') + '", que este comando muda,');
     return [Validation.detalhe({ codigo: a.codigo, campo: 'justificativa_aviso', mensagem: a.mensagem })];
   }
+  /**
+   * O rateio do período fechado (RN-082; Fase 4, E4.3; CONTRATOS, seção 57): o comando que muda o rateio que vale num lançamento
+   * na data do fechamento (`fin_bloqueio_ate`) — o rateio novo datado até ela, o estorno ou a correção de um rateio datado até
+   * ela — muda o custo por animal do período fechado e pede PERIODO_BLOQUEADO, um só. O rateio datado depois do fechamento
+   * não muda nada que se pede numa data até ele (o rateio vigente numa data: Repository.rateioEm).
+   */
+  function avisoDosRateios_(t, params) {
+    var ate = params.fin_bloqueio_ate;
+    var antes = t.antes.repo;
+    var depois = t.depois.repo;
+    if (!antes.carregada('RATEIOS') || typeof antes.rateioEm !== 'function') return [];
+    var fins = {};
+    var lote = t.lote || {};
+    (lote.RATEIOS || []).forEach(function (r) { fins[r.financial_id] = true; });
+    (lote.EVENTOS || []).forEach(function (e) { if (!vazio_(e.reversal_of_event_id)) t.antes.cru.cruPor('RATEIOS', 'event_id', e.reversal_of_event_id).forEach(function (r) { fins[r.financial_id] = true; }); });
+    var mexido = null;
+    Object.keys(fins).sort().forEach(function (fid) {
+      if (mexido) return;
+      var a = antes.rateioEm(fid, ate);
+      var d = depois.rateioEm(fid, ate);
+      if ((a ? a.rateio_id : null) !== (d ? d.rateio_id : null)) mexido = t.depois.cru.cruPorId('FINANCEIRO', fid) || { financial_id: fid };
+    });
+    if (!mexido) return [];
+    var oque = 'O rateio do lançamento "' + (mexido.descricao || mexido.natureza || mexido.financial_id) + '", que este comando muda,';
+    var a0 = FinancialService.avisoPeriodo(params, ate, oque);
+    return a0 ? [Validation.detalhe({ codigo: a0.codigo, campo: 'justificativa_aviso', mensagem: oque + ' vale dentro do período financeiro fechado (até ' + br_(ate) + '). Confirme com uma justificativa.' })] : [];
+  }
   function avisosDaTrava(t) {
     var antes = t.antes.repo;
     var ja = t.jaPedidos || {};
@@ -2471,7 +2523,7 @@ var AuditService = (function () {
       var cancelou = !!v && v.status === 'ATIVO' && f.status === 'CANCELADO';
       if ((criou || cancelou) && !vazio_(f.data_competencia) && FinancialService.avisoPeriodo(params, f.data_competencia, '-')) mexidos.push({ f: f, criou: criou });
     });
-    if (!mexidos.length) return avisoDasBaixas_(t, params);
+    if (!mexidos.length) { var baixas = avisoDasBaixas_(t, params); return baixas.length ? baixas : avisoDosRateios_(t, params); }
     mexidos.sort(function (a, b) { return a.f.data_competencia < b.f.data_competencia ? -1 : a.f.data_competencia > b.f.data_competencia ? 1 : 0; });
     var m = mexidos[0];
     var oque = 'O lançamento "' + (m.f.descricao || m.f.natureza) + '", que este comando ' + (m.criou ? 'cria' : 'cancela') + (mexidos.length > 1 ? ' (e mais ' + (mexidos.length - 1) + ')' : '') + ',';

@@ -242,6 +242,29 @@ var Correcao = (function () {
         return { v: ids.map(function (id) { return bases[id]; }) };
       },
     },
+    // RATEIO (Fase 4, E4.3): a base de cada animal que o rateio gravou (a contagem na data-base, o peso vigente, os dias de
+    // permanência) é a observação do dia do rateio (03b, seção 12.3: "o rateio congela a base"). A correção com as mesmas
+    // entradas da base (o lançamento, o critério, o escopo, o período, a data-base e os animais escolhidos) grava a mesma base,
+    // ainda que um fato lançado depois a mudasse (isso é o alerta "rateio desatualizado", e o caminho é ratear de novo);
+    // mudar uma delas refaz a base pela conta de hoje.
+    'RATEIO.bases': {
+      tipo: 'RATEIO', natureza: 'DERIVADO', de: 'a base de cada animal na data-base ou no período (Rateio.bases)', depende: 'financial_id, criterio, escopo_tipo e a referência, periodo_inicio, periodo_fim, data_base, os animais escolhidos', grava: 'ALOCACOES_FINANCEIRAS.base_valor; RATEIOS.base_total',
+      valor: function (c, n) {
+        if (c.original.event_type !== 'RATEIO' || !c.cru) return null;
+        var r = linhas_(c, 'RATEIOS')[0];
+        if (!r || r.financial_id !== n.financial_id || n.criterio === 'MANUAL') return null;
+        var g = Rateio.specGravado(c.cru, r);
+        var ids = function (l) { return (l || []).map(function (x) { return x.animal_id; }).sort().join('|'); };
+        var mesmo = g.criterio === n.criterio && g.escopo_tipo === n.escopo_tipo && nulo_(g.escopo_ref) === nulo_(n.escopo_ref) && nulo_(g.periodo_inicio) === nulo_(n.periodo_inicio)
+          && nulo_(g.periodo_fim) === nulo_(n.periodo_fim) && nulo_(g.data_base) === nulo_(n.data_base) && ids(g.animais) === ids(n.escopo_tipo === 'LISTA' ? n.animais : []);
+        if (!mesmo) return null;
+        var allocs = c.cru.cruPor('ALOCACOES_FINANCEIRAS', 'rateio_id', r.rateio_id);
+        var m0 = /^Base zero: (.*?)\.(?: |$)/.exec(r.justificativa || '');
+        var estimado = ((c.pj.avisos_aceitos || []).some(function (a) { return a.codigo === 'RATEIO_SEM_PESO'; }));
+        // Com um animal só (DIRETO), a base gravada é o valor; o rateio de novo com um animal dá o mesmo DIRETO.
+        return { v: { itens: allocs.map(function (a) { return { animal_id: a.animal_id, base: a.base_valor }; }), motivo: r.total_alocado === 0 && m0 ? m0[1] : null, estimado: estimado } };
+      },
+    },
     // Todo tipo com lançamento (Fase 4, E4.2; RN-046): a baixa da parcela paga do original (03b, seção 11: "a substituição
     // transporta a baixa quando valor e vencimento da parcela não mudam"). A baixa é um fato do pagamento, gravado fora do
     // evento (parcela.baixar, ou "Já pago em" no avulso): a correção a mantém na parcela correspondente do substituto; com o
@@ -274,12 +297,16 @@ var Correcao = (function () {
    * O que a correção precisa do evento vigente (o original): as linhas dele por tabela e o payload. null fora da correção.
    * `repo`: o repositório do comando (por, porId, carregada).
    */
-  function contexto(repo, original) {
+  function contexto(repo, original, cru) {
     if (!original) return null;
-    return { repo: repo, original: original, pj: original.payload_json || {}, memo: {} };
+    return { repo: repo, cru: cru || null, original: original, pj: original.payload_json || {}, memo: {} };
   }
+  /** As linhas do original por tabela; o rateio dele lido cru (um re-rateio posterior o deixa de valer, e ele continua sendo dele). */
+  var CRUAS = { RATEIOS: true, ALOCACOES_FINANCEIRAS: true };
   function linhas_(c, tabela) {
-    if (!(tabela in c.memo)) c.memo[tabela] = c.repo.carregada(tabela) ? c.repo.por(tabela, 'event_id', c.original.event_id) : [];
+    if (!(tabela in c.memo)) {
+      c.memo[tabela] = !c.repo.carregada(tabela) ? [] : CRUAS[tabela] && c.cru ? c.cru.cruPor(tabela, 'event_id', c.original.event_id) : c.repo.por(tabela, 'event_id', c.original.event_id);
+    }
     return c.memo[tabela];
   }
   function sanidadeDoProduto_(c, productId) {
@@ -654,6 +681,37 @@ var Correcao = (function () {
     });
     out.animais = [];
   }
+  /**
+   * O rateio (Fase 4, E4.3): o lançamento, o critério pedido, o escopo e a referência dele, o período e a data-base (vazios
+   * quando são os do lançamento: o servidor os propõe), o valor a ratear (vazio quando é o lançamento inteiro), a justificativa
+   * (sem o motivo da base zero, que o servidor escreve) e os animais escolhidos ou o valor de cada um (as alocações).
+   */
+  function entradaRateio_(L, ev, det, linhas, origem, out) {
+    var r = det.RATEIOS[0];
+    out.animais = [];
+    if (!r) return;
+    var fin = L.porId('FINANCEIRO', r.financial_id) || {};
+    var pj = ev.payload_json || {};
+    var crit = vazio_(pj.criterio_pedido) ? r.criterio : pj.criterio_pedido;
+    origem.financial_id = r.financial_id;
+    origem.criterio = crit;
+    origem.escopo_tipo = r.escopo_tipo;
+    if (r.escopo_tipo === 'PASTO') origem.pasture_id = r.escopo_ref;
+    if (r.escopo_tipo === 'CATEGORIA') origem.category_id = r.escopo_ref;
+    var doLancamento = nulo_(r.periodo_inicio) === nulo_(fin.competencia_inicio) && nulo_(r.periodo_fim) === nulo_(fin.competencia_fim);
+    if (crit === 'DIAS_PERMANENCIA' && !doLancamento) { origem.periodo_inicio = r.periodo_inicio; origem.periodo_fim = r.periodo_fim; }
+    if (r.escopo_tipo !== 'EVENTO' && crit !== 'DIAS_PERMANENCIA') origem.data_base = proposto_(r.data_base, fin.data_competencia);
+    if (r.total_alocado > 0 && r.total_alocado !== fin.valor) origem.valor = r.total_alocado;
+    var just = nulo_(r.justificativa);
+    if (just && r.total_alocado === 0) just = nulo_(just.replace(/^Base zero: .*?\.(?: |$)/, ''));
+    origem.justificativa_rateio = just;
+    origem.notes = ev.notes;
+    if (r.escopo_tipo === 'LISTA' || crit === 'MANUAL') {
+      out.animais_rateio = Utils.ordenarPor(det.ALOCACOES_FINANCEIRAS.filter(function (a) { return a.rateio_id === r.rateio_id; }).map(function (a) {
+        return limpo_({ animal_id: a.animal_id, valor: crit === 'MANUAL' ? a.valor_alocado : null });
+      }), 'animal_id');
+    }
+  }
   function entradaReproducao_(L, ev, det, linhas, origem, out) {
     var sub = ev.event_subtype;
     var payload = ev.payload_json || {};
@@ -728,6 +786,7 @@ var Correcao = (function () {
     else if (tipo === 'SANIDADE') entradaSanidade_(L, ev, det, linhas, origem, out);
     else if (tipo === 'ESTOQUE') entradaEstoque_(L, ev, det, linhas, origem, out);
     else if (tipo === 'LANCAMENTO_FINANCEIRO') entradaAvulso_(L, ev, det, linhas, origem, out);
+    else if (tipo === 'RATEIO') entradaRateio_(L, ev, det, linhas, origem, out);
     else if (['REPRODUCAO', 'DESMAMA', 'CASTRACAO', 'OCORRENCIA'].indexOf(tipo) >= 0) entradaReproducao_(L, ev, det, linhas, origem, out);
     else entradaEntrada_(L, ev, det, linhas, origem, out);
     out.campos = camposDoTipo_(tipo, sub, origem);
@@ -735,7 +794,7 @@ var Correcao = (function () {
   }
 
   // ------------------------------------------------------------------ o evento corrigido pela mudança ----
-  var GRUPOS = ['parcelas', 'custos', 'deducoes', 'crias'];
+  var GRUPOS = ['parcelas', 'custos', 'deducoes', 'crias', 'animais_rateio'];
   /**
    * O item da entrada que a mudança cita (índice, ou −1 = item novo). O item é o do animal; na correção de cadastro, que tem um
    * item por dado do animal, o do animal E do campo (`campo`). Com mais de um item do animal e a mudança sem o campo, ela é

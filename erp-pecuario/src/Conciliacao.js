@@ -131,8 +131,15 @@ var Conciliacao = (function () {
           return { valor: p.valor || 0, status: p.status, data_pagamento: vazio_(p.data_pagamento) ? null : p.data_pagamento, valor_pago: p.valor_pago || 0, juros_multa: p.juros_multa || 0, desconto: p.desconto || 0 };
         }),
         alocacoes: repo.por('ALOCACOES_FINANCEIRAS', 'financial_id', fin.financial_id).map(function (a) { return { animal_id: a.animal_id, valor: a.valor_alocado || 0 }; }),
+        // Os rateios de evento vigente, na ordem em que um substitui o outro (Fase 4, E4.3): o rateio que vale numa data D é o
+        // último com data até D (o mesmo predicado de Repository.rateioEm), e a conta em D não muda com um re-rateio posterior.
+        rateios: repo.rateiosDoLancamento(fin.financial_id).map(function (r) {
+          var er = repo.porId('EVENTOS', r.event_id) || {};
+          var alocs = tx.cru ? tx.cru.cruPor('ALOCACOES_FINANCEIRAS', 'rateio_id', r.rateio_id) : repo.por('ALOCACOES_FINANCEIRAS', 'rateio_id', r.rateio_id);
+          return { data: er.event_date || null, alocacoes: alocs.map(function (a) { return { animal_id: a.animal_id, valor: a.valor_alocado || 0 }; }) };
+        }),
       };
-      if (l.natureza === 'AQUISICAO_ANIMAIS') l.alocacoes.forEach(function (a) { comAquisicao[a.animal_id] = true; });
+      if (l.natureza === 'AQUISICAO_ANIMAIS') l.rateios.forEach(function (r) { r.alocacoes.forEach(function (a) { comAquisicao[a.animal_id] = true; }); });
       lancamentos.push(l);
     });
     var permanencias = {};
@@ -166,12 +173,22 @@ var Conciliacao = (function () {
     lista.forEach(function (p) { if (p.entrada.data <= l.data) achada = p; });
     return achada;
   }
-  /** As alocações de aquisição dos lançamentos que contam em D, cada uma com a sua permanência. */
+  /**
+   * As alocações do lançamento pelo rateio que vale em D (o último rateio com data até D; sem a lista de rateios, as de hoje).
+   * O re-rateio datado depois de D não muda a conta de D (a regra de tempo; CONTRATOS, seção 57).
+   */
+  function alocacoesEm(l, D) {
+    if (!Array.isArray(l.rateios)) return l.alocacoes || [];
+    var achado = null;
+    l.rateios.forEach(function (r) { if (!vazio_(r.data) && r.data <= D) achado = r; });
+    return achado ? achado.alocacoes : [];
+  }
+  /** As alocações de aquisição dos lançamentos que contam em D (pelo rateio que vale em D), cada uma com a sua permanência. */
   function aquisicoes_(fx, D) {
     var out = [];
     fx.lancamentos.forEach(function (l) {
       if (l.natureza !== 'AQUISICAO_ANIMAIS' || l.data > D) return;
-      l.alocacoes.forEach(function (a) { out.push({ l: l, animal_id: a.animal_id, valor: a.valor, p: permanenciaDe_(fx, l, a.animal_id) }); });
+      alocacoesEm(l, D).forEach(function (a) { out.push({ l: l, animal_id: a.animal_id, valor: a.valor, p: permanenciaDe_(fx, l, a.animal_id) }); });
     });
     return out;
   }
@@ -349,6 +366,7 @@ var Conciliacao = (function () {
     competenciaAte: competenciaAte,
     leituras: leituras,
     fatos: fatos,
+    alocacoesEm: alocacoesEm,
     caixa: caixa,
     resultado: resultado,
     posicao: posicao,

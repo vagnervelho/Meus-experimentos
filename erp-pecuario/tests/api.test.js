@@ -201,8 +201,8 @@ test('carga inicial condicional: completa na primeira vez; {atual: true} com a v
   assert.deepEqual(d.pastos.map((p) => p.pasture_id).sort(), [PASTOS.A, PASTOS.B].sort());
   assert.deepEqual(d.modulos.map((m) => m.id), ['DASHBOARD', 'REBANHO', 'PASTOS', 'EVENTOS', 'PESAGENS', 'SANIDADE', 'REPRODUCAO', 'FINANCEIRO', 'CONFIGURACOES', 'IMPORTACAO'], 'só os módulos entregues (Pesagens, Sanidade e Reprodução, na Fase 3; Financeiro, na etapa BASE da Fase 4)');
   assert.deepEqual([d.produtos, d.protocolos], [[], []], 'os cadastros da sanidade vão no bootstrap (nenhum protocolo de fábrica)');
-  assert.deepEqual(d.catalogo.tipos.map((t) => t.tipo), ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'NASCIMENTO', 'COMPRA', 'VENDA', 'TRANSFERENCIA', 'MORTE', 'DESCARTE', 'PESAGEM', 'SANIDADE', 'REPRODUCAO', 'DESMAMA', 'CASTRACAO', 'IDENTIFICACAO', 'MARCACAO', 'AJUSTE_INVENTARIO', 'OCORRENCIA', 'LANCAMENTO_FINANCEIRO', 'ESTOQUE', 'ESTORNO'], 'os da Fase 2, a pesagem (Fase 3, E3.1), a sanidade e o estoque (E3.2 e E3.3), a reprodução, a desmama, a castração e a ocorrência (E3.4 e E3.5) e o lançamento financeiro avulso (Fase 4, E4.1)');
-  assert.equal(d.catalogo.fase, 4, 'a Fase 4 (EventCatalog.FASE_ATUAL): o lançamento avulso tem campos; o rateio ainda não');
+  assert.deepEqual(d.catalogo.tipos.map((t) => t.tipo), ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'NASCIMENTO', 'COMPRA', 'VENDA', 'TRANSFERENCIA', 'MORTE', 'DESCARTE', 'PESAGEM', 'SANIDADE', 'REPRODUCAO', 'DESMAMA', 'CASTRACAO', 'IDENTIFICACAO', 'MARCACAO', 'AJUSTE_INVENTARIO', 'OCORRENCIA', 'LANCAMENTO_FINANCEIRO', 'RATEIO', 'ESTOQUE', 'ESTORNO'], 'os da Fase 2, a pesagem (Fase 3, E3.1), a sanidade e o estoque (E3.2 e E3.3), a reprodução, a desmama, a castração e a ocorrência (E3.4 e E3.5), o lançamento financeiro avulso (Fase 4, E4.1) e o rateio (E4.3)');
+  assert.equal(d.catalogo.fase, 4, 'a Fase 4 (EventCatalog.FASE_ATUAL): o lançamento avulso e o rateio têm campos');
   assert.ok(Array.isArray(d.alertas.alertas));
   assert.equal(d.dataVersion, b1.meta.dataVersion);
   // Com a versão em cache e nada mudou: nada além da versão.

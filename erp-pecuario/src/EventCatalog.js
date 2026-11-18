@@ -611,6 +611,35 @@ var EventCatalog = (function () {
     a_('pago_em', 'Já pago em', 'data', { ajuda: 'Só se já foi pago (ou recebido): a parcela nasce paga nessa data, pelo valor dela. Vazio = em aberto (a baixa vem depois, em "A pagar e a receber").' }),
   ]);
 
+  /**
+   * RATEIO (Fase 4, E4.3; 03b, seções 12 e 13; 07, seção 3; 04, seção 4.7): distribui um lançamento que já existe (ou a parte
+   * dele declarada em "Valor a ratear") entre os animais, pelo critério e pelo escopo, e substitui o rateio que valia. Começa
+   * a partir do lançamento (08, seção 4.2: "Rateio, a partir de um lançamento"), não do seletor de registros (`a_partir_de`).
+   * Sem linha de animal (03b, seção 3.1): os animais são as alocações. A conta da base é a de `Rateio.bases`; o tratador
+   * (EventService) confere critério × escopo, a data-base, o período, o valor, a justificativa e propõe o padrão do
+   * arrendamento de pasto (dias de permanência no pasto arrendado, no período do lançamento).
+   */
+  var CRITERIOS_RATEIO = ['CABECAS', 'PESO_VIVO', 'PESO_CARCACA', 'VALOR_INDIVIDUAL', 'DIAS_PERMANENCIA', 'MANUAL'];
+  var ESCOPOS_RATEIO = ['EVENTO', 'REBANHO', 'PASTO', 'CATEGORIA', 'LISTA'];
+  var CAMPOS_RATEIO = [
+    c_('event_date', 'Data do rateio', 'data', { obrigatorio: true, default: 'HOJE', ajuda: 'O dia em que este rateio passa a valer. Ratear de novo depois substitui este rateio dali em diante.' }),
+    c_('financial_id', 'Lançamento', 'ref:FINANCEIRO', { obrigatorio: true }),
+    c_('criterio', 'Dividir', 'lista', { opcoes: CRITERIOS_RATEIO, ajuda: 'Por cabeça, pelo peso vivo, pelos dias de permanência ou pelo valor digitado de cada animal. No arrendamento de pasto, sempre pelos dias de permanência no pasto.' }),
+    c_('escopo_tipo', 'Entre', 'lista', { opcoes: ESCOPOS_RATEIO, ajuda: 'Os animais do registro (compra, venda, manejo), do rebanho, de um pasto, de uma categoria ou os escolhidos.' }),
+    c_('pasture_id', 'Pasto', 'ref:PASTOS'),
+    c_('category_id', 'Categoria', 'ref:CATEGORIAS'),
+    c_('periodo_inicio', 'Período: de', 'data', { ajuda: 'Dias de permanência: vazio = o período do lançamento.' }),
+    c_('periodo_fim', 'Período: até', 'data'),
+    c_('data_base', 'Data-base', 'data', { ajuda: 'O dia em que se contam os animais e se toma o peso. Vazio = a data do lançamento.' }),
+    c_('valor', 'Valor a ratear (opcional)', 'dinheiro', { min: 0.01, ajuda: 'Vazio = o lançamento inteiro. Menor que ele, o resto fica "sem alocar aos animais".' }),
+    c_('justificativa_rateio', 'Por que este rateio', 'texto', { ajuda: 'Obrigatória no rateio pelo valor digitado e quando o lançamento já estava rateado.' }),
+    c_('notes', 'Observações', 'texto'),
+  ];
+  var CAMPOS_ANIMAL_RATEIO = [
+    a_('animal_id', 'Animal', 'ref:ANIMAIS', { obrigatorio: true }),
+    a_('valor', 'Valor deste animal', 'dinheiro', { min: 0.01, ajuda: 'Só no rateio pelo valor digitado: os valores somam o valor a ratear.' }),
+  ];
+
   /** Definições completas dos tipos da Fase 1. */
   var DEFINICOES = {
     ENTRADA_INICIAL: {
@@ -869,6 +898,14 @@ var EventCatalog = (function () {
       componentes: ['bloco_parcelas'],
       grupos_repetiveis: { parcelas: CAMPOS_PARCELA_AVULSO },
     },
+    RATEIO: {
+      frequente: false, selecao_animais: 'NENHUM', filtro_elegiveis: null, modo_entrada: 'FORM', revisao: 'SERVIDOR', critico: false,
+      a_partir_de: 'LANCAMENTO',
+      reads: LEITURAS_MOTOR.concat(LEITURAS_FINANCEIRO, ['SANIDADE']),
+      campos: CAMPOS_RATEIO,
+      componentes: [],
+      grupos_repetiveis: { animais_rateio: CAMPOS_ANIMAL_RATEIO },
+    },
     ESTORNO: {
       frequente: false, selecao_animais: 'NENHUM', filtro_elegiveis: null, modo_entrada: 'FORM', revisao: 'SERVIDOR', critico: true,
       reads: LEITURAS_MOTOR.concat(LEITURAS_FINANCEIRO, LEITURAS_INSUMOS),
@@ -1076,6 +1113,8 @@ var EventCatalog = (function () {
     MODOS_DOSE: MODOS_DOSE,
     MOTIVOS_AJUSTE_ESTOQUE: MOTIVOS_AJUSTE_ESTOQUE,
     NATUREZAS_AVULSO: NATUREZAS_AVULSO,
+    CRITERIOS_RATEIO: CRITERIOS_RATEIO,
+    ESCOPOS_RATEIO: ESCOPOS_RATEIO,
     RESULTADOS_DIAGNOSTICO: RESULTADOS_DIAGNOSTICO,
     METODOS_REPRODUCAO: METODOS_REPRODUCAO,
     LEITURAS_INSUMOS: LEITURAS_INSUMOS,

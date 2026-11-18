@@ -3565,6 +3565,7 @@ tabela são as do código (`Correcao.tabela()`), e `tests/correcao.contrato.test
 | `AJUSTE.valor_anterior` | DERIVADO | o cadastro do animal antes do ajuste (e as regras que o cadastro de hoje quebraria: VALOR_IGUAL, as regras entre campos, o par do dado e da certeza; no brinco lançado errado, as conferências pelo brinco de hoje) | o animal, o campo, o valor novo e a data | AJUSTES.valor_anterior (também a certeza apagada junto) |
 | `VENDA.bases_estimadas` | DERIVADO | a última pesagem de cada animal até a data (ou a divisão por cabeça, quando algum não tinha pesagem: seção 54) | os animais, a data, a modalidade, o peso vivo total | RATEIOS e ALOCACOES_FINANCEIRAS; EVENTO_ANIMAIS.valor_individual |
 | `PARCELAS.baixa` | COPIA | a baixa da parcela paga do original (data, valor pago, juros e multa, desconto, forma) | o lançamento, o valor e o vencimento da parcela | PARCELAS (status, data_pagamento, valor_pago, juros_multa, desconto, forma_pagamento) |
+| `RATEIO.bases` | DERIVADO | a base de cada animal na data-base ou no período (Rateio.bases: a contagem, o peso vigente, os dias de permanência; Fase 4, E4.3, seção 57) | o lançamento, o critério, o escopo e a referência, o período, a data-base, os animais escolhidos | ALOCACOES_FINANCEIRAS.base_valor; RATEIOS.base_total (os valores saem da base pelo maior resto) |
 | `VENDA.rotulo_deducao` | COPIA | LISTAS (TIPO_DEDUCAO_VENDA).rotulo | o tipo da dedução | FINANCEIRO.descricao (dedução) |
 
 ### 50.5 Recalcular quando a entrada muda

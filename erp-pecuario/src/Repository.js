@@ -230,14 +230,58 @@ var Repository = (function () {
         return s;
       });
     }
-    function rateiosVigentes_() {
-      var candidatos = cru('RATEIOS').filter(function (r) { return idsVigentes_('FINANCEIRO')[r.financial_id] && eventoVigente(r.event_id); });
-      var melhor = mapa_();
-      candidatos.forEach(function (r) {
-        var seq = (cruPorId('EVENTOS', r.event_id) || {}).event_seq || 0;
-        if (!melhor[r.financial_id] || seq > melhor[r.financial_id].seq) melhor[r.financial_id] = { seq: seq, rateio: r };
+    /**
+     * A posição de um evento entre os rateios do mesmo lançamento (desenho-base 16.1): o `event_seq` do primeiro evento da
+     * cadeia de substituição (a correção ocupa o lugar do original), depois o próprio `event_seq`.
+     */
+    function ordemDaCadeia_(ev) {
+      var atual = ev;
+      for (var guarda = 0; guarda < 10000; guarda++) {
+        if (vazio_(atual.reversal_of_event_id) || atual.event_type === 'ESTORNO') break;
+        var alvo = cruPorId('EVENTOS', atual.reversal_of_event_id);
+        if (!alvo || alvo.event_type !== atual.event_type) break;
+        atual = alvo;
+      }
+      return atual.event_seq || 0;
+    }
+    /**
+     * Os rateios de cada lançamento que vale, de evento vigente (o do próprio evento de negócio e os dos eventos RATEIO), na
+     * ordem em que um substitui o outro: {financial_id: [{rateio, data (event_date do evento), ord, seq}]}.
+     */
+    function candidatosRateio_() {
+      return lembrar_('v' + SEP + 'RATEIOS' + SEP + 'candidatos', function () {
+        var porLanc = mapa_();
+        cru('RATEIOS').forEach(function (r) {
+          if (!idsVigentes_('FINANCEIRO')[r.financial_id] || !eventoVigente(r.event_id)) return;
+          var ev = cruPorId('EVENTOS', r.event_id) || {};
+          (porLanc[r.financial_id] = porLanc[r.financial_id] || []).push({ rateio: r, data: ev.event_date, ord: ordemDaCadeia_(ev), seq: ev.event_seq || 0 });
+        });
+        Object.keys(porLanc).forEach(function (fid) { porLanc[fid].sort(function (a, b) { return a.ord - b.ord || a.seq - b.seq; }); });
+        return porLanc;
       });
-      return candidatos.filter(function (r) { return melhor[r.financial_id].rateio === r; });
+    }
+    /**
+     * O rateio vigente de um lançamento numa data (03b, seção 12.1; 07, seção 3.4; CONTRATOS, seção 57): entre os rateios de
+     * evento vigente com `event_date` até `data`, o último na ordem da cadeia (o re-rateio substitui o anterior; a correção de
+     * um rateio fica no lugar dele). Sem `data`, o de hoje — o mesmo predicado de `vigentes('RATEIOS')`. null sem rateio.
+     */
+    function rateioEm(financialId, data) {
+      var lista = vazio_(financialId) ? null : candidatosRateio_()[financialId];
+      if (!lista) return null;
+      var achado = null;
+      lista.forEach(function (c) { if (vazio_(data) || (!vazio_(c.data) && c.data <= data)) achado = c.rateio; });
+      return achado;
+    }
+    /** Os rateios de evento vigente de um lançamento que vale, na ordem em que um substitui o outro (o histórico do rateio). */
+    function rateiosDoLancamento(financialId) {
+      var lista = vazio_(financialId) ? null : candidatosRateio_()[financialId];
+      return (lista || []).map(function (c) { return c.rateio; });
+    }
+    function rateiosVigentes_() {
+      var porLanc = candidatosRateio_();
+      var vale = mapa_();
+      Object.keys(porLanc).forEach(function (fid) { var l = porLanc[fid]; vale[l[l.length - 1].rateio.rateio_id] = true; });
+      return cru('RATEIOS').filter(function (r) { return vale[r.rateio_id] === true; });
     }
     /** Linhas VIGENTES da tabela (P3). É o acesso padrão; não altere a lista nem os registros. */
     function vigentes(tabela) {
@@ -383,6 +427,7 @@ var Repository = (function () {
       return {
         vigentes: vigentes, porId: porId, por: por, unico: unico, agrupados: agrupados,
         eventoVigente: eventoVigente, contador: contador, carregada: carregada,
+        rateioEm: rateioEm, rateiosDoLancamento: rateiosDoLancamento,
       };
     }
     /**
@@ -407,6 +452,7 @@ var Repository = (function () {
       carregadas: function () { return Object.keys(dados); },
       vigentes: vigentes, porId: porId, por: por, unico: unico, agrupados: agrupados,
       eventoVigente: eventoVigente, avaliar: avaliar, contador: contador,
+      rateioEm: rateioEm, rateiosDoLancamento: rateiosDoLancamento,
       cru: cru, cruPorId: cruPorId, cruPor: cruPor, linhaDe: linhaDe,
       cabecalho: function (tabela) { return tabela_(tabela).cabecalho.slice(); },
       operacoesOrfas: operacoesOrfas, celulaCoercida: celulaCoercida,

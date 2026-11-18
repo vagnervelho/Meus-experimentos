@@ -375,8 +375,9 @@ var EventService = (function () {
     var ev = cabecalho_(m, tipo, subtipo, campos, original);
     // Tipo sem animais (ESTOQUE: entrada e acerto de insumo): a lista de animais não se aplica.
     var semAnimais = EventCatalog.tipo(tipo).selecao_animais === 'NENHUM';
+    if (tipo !== 'RATEIO' && Array.isArray(d.animais_rateio) && d.animais_rateio.length) erroGeral_(m, 'animais_rateio', 'CAMPO_NAO_SE_APLICA', 'A lista de animais do rateio não se aplica a este lançamento.');
     if (semAnimais) {
-      if (Array.isArray(animais) && animais.length) erroGeral_(m, 'animais', 'CAMPO_NAO_SE_APLICA', 'Este lançamento não leva animais.');
+      if (Array.isArray(animais) && animais.length) erroGeral_(m, 'animais', 'CAMPO_NAO_SE_APLICA', tipo === 'RATEIO' ? 'Os animais do rateio vão na lista do rateio (animais_rateio).' : 'Este lançamento não leva animais.');
       animais = [];
     } else if (!Array.isArray(animais) || !animais.length) erroGeral_(m, 'animais', 'SEM_ANIMAIS', tipo === 'NASCIMENTO' ? 'Escolha a mãe (a vaca que pariu).' : 'Inclua ao menos um animal.');
     else if (animais.length > MAX_ANIMAIS) erroGeral_(m, 'animais', 'ANIMAIS_DEMAIS', 'Um lançamento aceita até ' + MAX_ANIMAIS + ' animais; divida em partes.');
@@ -389,7 +390,7 @@ var EventService = (function () {
     var plano = { EVENTOS: [], ANIMAIS: [], EVENTO_ANIMAIS: [], IDENTIFICACOES: [], PESAGENS: [], REPRODUCAO: [], BAIXAS: [], AJUSTES: [], SANIDADE: [], MOVIMENTOS_ESTOQUE: [], COMPRAS: [], VENDAS: [], FINANCEIRO: [], PARCELAS: [], RATEIOS: [], ALOCACOES_FINANCEIRAS: [], ANEXOS: [] };
     var ctxEv = { tipo: tipo, subtipo: subtipo, ev: ev, campos: campos, original: original, plano: plano, itens: [], criadosOriginal: {}, auditorias: [] };
     // O ponto único da correção: o que ela mantém do original (as cópias congeladas e os derivados; Correcao.congelado).
-    ctxEv.correcao = Correcao.contexto(m.repo, original);
+    ctxEv.correcao = Correcao.contexto(m.repo, original, m.tx.cru);
     m.dataEv = ev.event_date;
     if (original) {
       // A raça que o original deu a cada animal criado (os atributos da criação): a correção só a grava no cadastro quando a muda.
@@ -398,8 +399,11 @@ var EventService = (function () {
     }
     if (semAnimais) {
       if (tipo === 'LANCAMENTO_FINANCEIRO') lancamentoAvulso_(m, ctxEv, d);
+      else if (tipo === 'RATEIO') rateio_(m, ctxEv, d);
       else estoque_(m, ctxEv);
       if (original) {
+        // O rateio feito depois sobre um lançamento do original (o avulso) depende dele: estorne o rateio antes.
+        conferirRateiosDependentes_(m, original, 'corrigir');
         // O produto da entrada corrigida para outro (o saldo dele perde a entrada): o mesmo aviso do caminho com animais.
         produtosQueSaem_(m, ctxEv, original);
         m.repo.por('FINANCEIRO', 'event_id', original.event_id).forEach(function (fin) {
@@ -464,6 +468,7 @@ var EventService = (function () {
     if (tipo === 'CASTRACAO' || tipo === 'OCORRENCIA') despesaDoManejo_(m, ctxEv, ctxEv.itens.filter(function (it) { return it.linhaEA; }));
     if (original) {
       produtosQueSaem_(m, ctxEv, original);
+      conferirRateiosDependentes_(m, original, 'corrigir');
       m.repo.por('FINANCEIRO', 'event_id', original.event_id).forEach(function (fin) {
         var a = FinancialService.avisoPeriodo(m.params, fin.data_competencia, 'A correção cancela um lançamento que');
         if (a) avisoItem_(m, null, a.codigo, a.mensagem);
@@ -476,7 +481,9 @@ var EventService = (function () {
    * com a mudança aplicada (Correcao.montar), mais o event_id, a justificativa e a justificativa do aviso do pedido.
    */
   function correcaoPelaMudanca_(m, original, d) {
-    var L = { por: function (t, c, v) { return m.repo.por(t, c, v); }, porId: function (t, id) { return m.repo.porId(t, id); } };
+    // O rateio e as alocações do próprio evento são lidos crus (como em evento.obter): o re-rateio posterior os deixa de valer.
+    var cruas = { RATEIOS: true, ALOCACOES_FINANCEIRAS: true };
+    var L = { por: function (t, c, v) { return cruas[t] ? m.tx.cru.cruPor(t, c, v) : m.repo.por(t, c, v); }, porId: function (t, id) { return m.repo.porId(t, id); } };
     var base = Correcao.entrada(L, original);
     var out = Correcao.montar(base, d.mudanca);
     ['event_id', 'justificativa', 'justificativa_aviso'].forEach(function (k) { if (d[k] !== undefined) out[k] = d[k]; });
@@ -1935,6 +1942,237 @@ var EventService = (function () {
     resumoFinanceiro_(m, ctxEv, [resumoLancamento_(m, pl, conta, { papel: 'AVULSO', pagas: pl.linhas.PARCELAS.filter(function (x) { return x.status === 'LIQUIDADA'; }).length })], [pl]);
     var a = FinancialService.avisoPeriodo(m.params, ev.event_date, 'O lançamento');
     if (a) avisoItem_(m, null, a.codigo, a.mensagem);
+  }
+  // ------------------------------------------------------------------ rateio de custo compartilhado (Fase 4, E4.3) ----
+  /** O nome do lançamento nas frases do rateio: a descrição, ou a conta. */
+  function nomeLancamento_(m, fin) {
+    if (!vazio_(fin.descricao)) return fin.descricao;
+    var c = m.repo.porId('PLANO_CONTAS', fin.conta_id);
+    return c ? c.nome : 'lançamento';
+  }
+  function campoRateio_(m, campo, codigo, mensagem, animalId) {
+    m.col.erro(Validation.detalhe({ codigo: codigo, campo: campo, animal_id: animalId || null, mensagem: mensagem }));
+  }
+  /**
+   * O evento RATEIO (03b, seções 12 e 13; 07, seção 3; 05, seções 4.5 e 4.6; CONTRATOS, seção 57): distribui o lançamento (ou
+   * o "valor a ratear", a parte dele) entre os animais do escopo pelo critério, pelo maior resto em centavos com o desempate
+   * maior resto → maior base → menor código interno (FinancialService.ratear), e substitui o rateio que valia (as linhas
+   * antigas não mudam). A base de cada animal é a de Rateio.bases — a mesma conta da verificação (BASE_RATEIO) e do detalhe
+   * do lançamento; na correção sem mudança das entradas da base, a base gravada pelo original (Correcao.congelado
+   * 'RATEIO.bases'). Base zero: aviso RATEIO_BASE_ZERO e o rateio gravado com nada alocado e o motivo; peso estimado: aviso
+   * RATEIO_SEM_PESO (RN-073). O lançamento de compra, venda, rebanho inicial, morte, descarte e sanidade (e todo de aquisição)
+   * só se re-rateia entre os animais do próprio registro e por inteiro (invariante 10; 07, seção 3.1); o arrendamento de
+   * pasto, só pelos dias de permanência no pasto arrendado (03b, seção 10.3). Uma regra, um lugar: o mesmo tratador no
+   * registro, na simulação e na correção; a verificação confere o que ele grava (FinancialService.conferir, invariante 25).
+   */
+  function rateio_(m, ctxEv, d) {
+    var c = ctxEv.campos;
+    var ev = ctxEv.ev;
+    var original = ctxEv.original;
+    var cru = m.tx.cru;
+    if (Array.isArray(d.animais_rateio) && d.animais_rateio.length > MAX_ANIMAIS) { erroGeral_(m, 'animais_rateio', 'ANIMAIS_DEMAIS', 'Um rateio aceita até ' + MAX_ANIMAIS + ' animais escolhidos; divida em partes.'); return; }
+    var lista = Array.isArray(d.animais_rateio) ? d.animais_rateio : [];
+    var defsAnimal = EventCatalog.camposGrupo('RATEIO', 'animais_rateio');
+    lista.forEach(function (x, i) {
+      var quem = 'Animal ' + (i + 1) + ' da lista: ';
+      EventCatalog.validarCampos(defsAnimal, x && typeof x === 'object' ? x : {}, { listas: m.listas, desativados: m.desativados }).forEach(function (e) { m.col.erro(Validation.detalhe({ codigo: e.codigo, campo: 'animais_rateio', mensagem: quem + e.mensagem, indice: i })); });
+    });
+    if (vazio_(c.financial_id)) return;
+    var fin = cru.cruPorId('FINANCEIRO', c.financial_id);
+    if (!fin) { erroGeral_(m, 'financial_id', 'NAO_ENCONTRADO', 'O lançamento escolhido não existe.'); return; }
+    var aval = cru.avaliar(fin.event_id);
+    if (!aval || aval.status === 'FALHOU' || aval.status === 'PENDENTE') { erroGeral_(m, 'financial_id', 'NAO_ENCONTRADO', 'O lançamento escolhido não existe.'); return; }
+    var nomeFin = '"' + nomeLancamento_(m, fin) + '"';
+    if (!m.repo.porId('FINANCEIRO', fin.financial_id)) { erroGeral_(m, 'financial_id', 'JA_ANULADO', 'O lançamento ' + nomeFin + ' não vale mais (o registro dele foi estornado ou corrigido): rateie o que vale.'); return; }
+    if (original) {
+      var doOriginal = cru.cruPor('RATEIOS', 'event_id', original.event_id)[0];
+      if (doOriginal && doOriginal.financial_id !== fin.financial_id) { erroGeral_(m, 'financial_id', 'LANCAMENTO_DIFERENTE', 'A correção do rateio é do mesmo lançamento: para ratear outro lançamento, lance um rateio novo a partir dele.'); return; }
+    }
+    var criador = cru.cruPorId('EVENTOS', fin.event_id) || {};
+    if (FinancialService.SEM_RATEIO.indexOf(fin.natureza) >= 0) { erroGeral_(m, 'financial_id', 'NATUREZA_SEM_RATEIO', 'O lançamento ' + nomeFin + ' não se rateia aos animais: ' + (fin.natureza === 'ESTOQUE_INSUMOS' ? 'a compra de insumo vira custo do animal na aplicação (o consumo), não na compra.' : 'o não operacional (aporte, retirada, empréstimo) não é custo nem receita de animal.')); return; }
+    if (criador.pre_marco_zero === true) { erroGeral_(m, 'financial_id', 'LANCAMENTO_HISTORICO', 'O lançamento ' + nomeFin + ' é anterior ao marco zero: fica como foi registrado no histórico.'); return; }
+    if (Utils.dataValida(ev.event_date) && ev.event_date < fin.data_competencia) erroGeral_(m, 'event_date', 'RATEIO_ANTES_DO_LANCAMENTO', 'O rateio (' + br_(ev.event_date) + ') não pode ser anterior ao lançamento (' + br_(fin.data_competencia) + ').');
+    var conta = m.repo.porId('PLANO_CONTAS', fin.conta_id) || {};
+    var arrend = conta.codigo === CONTA_ARRENDAMENTO;
+    var cem = FinancialService.exigeCemPorCento(criador, fin);
+    // Os padrões do servidor (CONTRATOS, seção 57): o arrendamento pelos dias no pasto arrendado; o lançamento do próprio
+    // registro (compra, venda, manejo) entre os animais dele.
+    var crit = !vazio_(c.criterio) ? c.criterio : arrend ? 'DIAS_PERMANENCIA' : null;
+    var escopo = !vazio_(c.escopo_tipo) ? c.escopo_tipo : arrend ? 'PASTO' : cem ? 'EVENTO' : null;
+    if (!crit) erroGeral_(m, 'criterio', 'CAMPO_OBRIGATORIO', 'Escolha como dividir: por cabeça, pelo peso vivo, pelos dias de permanência ou pelo valor de cada animal.');
+    if (!escopo) erroGeral_(m, 'escopo_tipo', 'CAMPO_OBRIGATORIO', 'Escolha entre quais animais dividir: os do registro, o rebanho, um pasto, uma categoria ou os escolhidos.');
+    if (!crit || !escopo || m.col.temErros()) return;
+    if (arrend && (crit !== 'DIAS_PERMANENCIA' || escopo !== 'PASTO')) { erroGeral_(m, crit !== 'DIAS_PERMANENCIA' ? 'criterio' : 'escopo_tipo', 'ARRENDAMENTO_POR_DIAS', 'O arrendamento de pasto é dividido pelos dias de permanência dos animais no pasto arrendado (03b, seção 10.3).'); return; }
+    if (cem && escopo !== 'EVENTO') { erroGeral_(m, 'escopo_tipo', 'ESCOPO_DO_REGISTRO', 'O lançamento ' + nomeFin + ' (' + EventCatalog.nomeEvento(criador.event_type, criador.event_subtype) + ') é dos animais do próprio registro: divida entre eles.'); return; }
+    if (Rateio.CRITERIOS_DO_ESCOPO[escopo].indexOf(crit) < 0) {
+      erroGeral_(m, 'criterio', 'CRITERIO_DO_ESCOPO', escopo === 'EVENTO' ? 'Entre os animais do registro, divida por cabeça, pelo peso, pelo valor de cada um ou pelo valor digitado (os dias de permanência são de um pasto, de uma categoria, do rebanho ou dos animais escolhidos).'
+        : crit === 'MANUAL' ? 'O valor digitado de cada animal vale para os animais do registro ou os escolhidos.' : 'Por carcaça e pelo valor de cada animal, só entre os animais do registro (a compra, a venda).');
+      return;
+    }
+    var naDataBase = Rateio.NA_DATA_BASE.indexOf(crit) >= 0 && escopo !== 'EVENTO';
+    var naoSeAplica = function (campo, rotulo, cond) { if (!vazio_(c[campo]) && cond) erroGeral_(m, campo, 'CAMPO_NAO_SE_APLICA', '"' + rotulo + '" não se aplica a este rateio.'); };
+    naoSeAplica('pasture_id', 'Pasto', escopo !== 'PASTO');
+    naoSeAplica('category_id', 'Categoria', escopo !== 'CATEGORIA');
+    naoSeAplica('periodo_inicio', 'Período: de', crit !== 'DIAS_PERMANENCIA');
+    naoSeAplica('periodo_fim', 'Período: até', crit !== 'DIAS_PERMANENCIA');
+    naoSeAplica('data_base', 'Data-base', !naDataBase);
+    var comLista = escopo === 'LISTA' || crit === 'MANUAL';
+    if (lista.length && !comLista) erroGeral_(m, 'animais_rateio', 'CAMPO_NAO_SE_APLICA', 'A lista de animais vale só para os animais escolhidos ou para o valor digitado de cada um.');
+    if (escopo === 'LISTA' && !lista.length) erroGeral_(m, 'animais_rateio', 'SEM_ANIMAIS', 'Escolha os animais entre os quais dividir.');
+    if (crit === 'MANUAL' && escopo === 'EVENTO' && !lista.length) erroGeral_(m, 'animais_rateio', 'SEM_ANIMAIS', 'Digite o valor de cada animal do registro que recebe parte do lançamento.');
+    var vistos = {};
+    lista.forEach(function (x, i) {
+      if (!x || vazio_(x.animal_id)) return;
+      var a = m.repo.porId('ANIMAIS', x.animal_id);
+      var quem = 'Animal ' + (i + 1) + ' da lista: ';
+      if (!a || a.situacao_cadastral === 'EXTERNO') { m.col.erro(Validation.detalhe({ codigo: 'NAO_ENCONTRADO', campo: 'animais_rateio', animal_id: x.animal_id, mensagem: quem + 'o animal não existe no rebanho.', indice: i })); return; }
+      if (vistos[x.animal_id]) m.col.erro(Validation.detalhe({ codigo: 'ANIMAL_REPETIDO', campo: 'animais_rateio', animal_id: x.animal_id, mensagem: quem + nomeAnimal_(a) + ' aparece duas vezes.', indice: i }));
+      vistos[x.animal_id] = true;
+      if (crit === 'MANUAL' && vazio_(x.valor)) m.col.erro(Validation.detalhe({ codigo: 'CAMPO_OBRIGATORIO', campo: 'animais_rateio', animal_id: x.animal_id, mensagem: quem + 'digite o valor de ' + nomeAnimal_(a) + '.', indice: i }));
+      if (crit !== 'MANUAL' && !vazio_(x.valor)) m.col.erro(Validation.detalhe({ codigo: 'CAMPO_NAO_SE_APLICA', campo: 'animais_rateio', animal_id: x.animal_id, mensagem: quem + 'o valor de cada animal vale só no rateio pelo valor digitado.', indice: i }));
+    });
+    // O universo: o evento de negócio (o `ref_event_id` ou o criador), o pasto, a categoria.
+    var ref = null;
+    var nomes = {};
+    if (escopo === 'EVENTO') {
+      ref = vazio_(fin.ref_event_id) ? fin.event_id : fin.ref_event_id;
+      var anc = cru.cruPorId('EVENTOS', ref);
+      if (!anc || !m.repo.eventoVigente(ref)) erroGeral_(m, 'escopo_tipo', 'JA_ANULADO', 'O registro a que o lançamento se refere não vale mais: escolha outro escopo.');
+      else nomes.evento = EventCatalog.nomeEvento(anc.event_type, anc.event_subtype) + ' de ' + br_(anc.event_date);
+    } else if (escopo === 'PASTO') {
+      ref = !vazio_(c.pasture_id) ? c.pasture_id : nulo_(fin.pasture_id);
+      if (arrend && !vazio_(c.pasture_id) && c.pasture_id !== fin.pasture_id) erroGeral_(m, 'pasture_id', 'ARRENDAMENTO_POR_DIAS', 'O arrendamento é do pasto ' + nomePasto_(m, fin.pasture_id) + ': os dias são os dos animais nele.');
+      if (vazio_(ref)) erroGeral_(m, 'pasture_id', 'CAMPO_OBRIGATORIO', 'Escolha o pasto.');
+      else if (!m.f.pasto(ref)) erroGeral_(m, 'pasture_id', 'NAO_ENCONTRADO', 'O pasto escolhido não existe.');
+      else nomes.pasto = nomePasto_(m, ref);
+    } else if (escopo === 'CATEGORIA') {
+      ref = !vazio_(c.category_id) ? c.category_id : nulo_(fin.categoria_animal_id);
+      var cat = vazio_(ref) ? null : m.repo.porId('CATEGORIAS', ref);
+      if (vazio_(ref)) erroGeral_(m, 'category_id', 'CAMPO_OBRIGATORIO', 'Escolha a categoria.');
+      else if (!cat) erroGeral_(m, 'category_id', 'NAO_ENCONTRADO', 'A categoria escolhida não existe.');
+      else nomes.categoria = cat.nome;
+    }
+    // O período (dias de permanência): vazio = o período do lançamento; a data-base: vazia = a data do lançamento.
+    var ini = null;
+    var fim = null;
+    if (crit === 'DIAS_PERMANENCIA') {
+      var informado = !vazio_(c.periodo_inicio) || !vazio_(c.periodo_fim);
+      ini = informado ? nulo_(c.periodo_inicio) : nulo_(fin.competencia_inicio);
+      fim = informado ? nulo_(c.periodo_fim) : nulo_(fin.competencia_fim);
+      if (vazio_(ini)) erroGeral_(m, 'periodo_inicio', 'CAMPO_OBRIGATORIO', informado ? 'Informe o início do período.' : 'Informe o período dos dias de permanência (o lançamento não tem período).');
+      if (vazio_(fim)) erroGeral_(m, 'periodo_fim', 'CAMPO_OBRIGATORIO', 'Informe o fim do período.');
+      if (Utils.dataValida(ini) && Utils.dataValida(fim)) {
+        if (fim < ini) erroGeral_(m, 'periodo_fim', 'PERIODO_INVERTIDO', 'O fim do período (' + br_(fim) + ') é antes do início (' + br_(ini) + ').');
+        else if (Utils.diasNoIntervalo(ini, fim) > PERIODO_MAX_DIAS) erroGeral_(m, 'periodo_fim', 'VALOR_FORA_DA_FAIXA', 'O período vai até dez anos.');
+      }
+    }
+    var dataBase = null;
+    if (escopo === 'EVENTO') dataBase = ref ? (cru.cruPorId('EVENTOS', ref) || {}).event_date || null : null;
+    else if (naDataBase) {
+      dataBase = !vazio_(c.data_base) ? c.data_base : fin.data_competencia;
+      if (Utils.dataValida(dataBase) && dataBase > m.hoje) erroGeral_(m, 'data_base', 'DATA_FUTURA', 'A data-base ' + br_(dataBase) + ' ainda não chegou.');
+      else if (Utils.dataValida(dataBase) && dataBase < m.D0) erroGeral_(m, 'data_base', 'ANTES_DO_MARCO_ZERO', 'A data-base ' + br_(dataBase) + ' é anterior ao marco zero (' + br_(m.D0) + ').');
+    }
+    // O valor a ratear: vazio = o lançamento inteiro; nunca mais que ele; por inteiro no lançamento do próprio registro.
+    var T = typeof c.valor === 'number' ? c.valor : fin.valor;
+    if (typeof c.valor === 'number' && c.valor > fin.valor) erroGeral_(m, 'valor', 'VALOR_FORA_DA_FAIXA', 'O valor a ratear (' + Utils.formatarReais(c.valor) + ') passa do lançamento (' + Utils.formatarReais(fin.valor) + ').');
+    if (cem && T !== fin.valor) erroGeral_(m, 'valor', 'RATEIO_INCOMPLETO', 'O lançamento ' + nomeFin + ' precisa ser 100% distribuído entre os animais do registro: deixe o valor a ratear vazio.');
+    if (m.col.temErros()) return;
+    var animaisPedidos = lista.map(function (x) { return { animal_id: x.animal_id, valor: typeof x.valor === 'number' ? x.valor : null }; });
+    var spec = { criterio: crit, escopo_tipo: escopo, escopo_ref: escopo === 'LISTA' || escopo === 'REBANHO' ? null : ref, animais: animaisPedidos, periodo_inicio: ini, periodo_fim: fim, data_base: dataBase };
+    // A base: a gravada pelo original quando as entradas dela não mudam (correção sem mudança); senão, a conta de hoje.
+    var cong = Correcao.congelado(ctxEv.correcao, 'RATEIO.bases', { financial_id: fin.financial_id, criterio: crit, escopo_tipo: escopo, escopo_ref: spec.escopo_ref, periodo_inicio: ini, periodo_fim: fim, data_base: dataBase, animais: animaisPedidos });
+    var L = AnimalService.leitor(m.tx, { fonte: m.f, parametros: m.params });
+    var b;
+    if (cong) {
+      b = { itens: [], motivo: cong.v.motivo, estimados: [], problemas: [] };
+      cong.v.itens.forEach(function (x) { var a = m.repo.porId('ANIMAIS', x.animal_id) || cru.cruPorId('ANIMAIS', x.animal_id) || {}; b.itens.push({ animal_id: x.animal_id, chave: a.codigo_interno || x.animal_id, base: x.base, estimado: false, quem: nomeAnimal_(a) }); });
+      b.estimadoNoOriginal = cong.v.estimado === true;
+    } else b = Rateio.bases(L, spec);
+    b.problemas.forEach(function (p) { campoRateio_(m, p.animal_id && comLista ? 'animais_rateio' : p.campo, p.codigo, p.mensagem, p.animal_id); });
+    if (m.col.temErros()) return;
+    if (crit === 'MANUAL') {
+      var soma = animaisPedidos.reduce(function (t, x) { return t + (x.valor || 0); }, 0);
+      if (soma !== T) erroGeral_(m, 'animais_rateio', 'RATEIO_NAO_FECHA', 'Os valores dos animais somam ' + Utils.formatarReais(soma) + ' e o valor a ratear é ' + Utils.formatarReais(T) + ': a soma tem de fechar (RN-071).');
+    }
+    // Re-rateio (o lançamento já tinha rateio valendo: o do próprio registro ou outro rateio) e o manual pedem o porquê.
+    // Na correção, o anterior é o que vinha antes do original na ordem da cadeia (o substituto fica no lugar dele); no registro,
+    // o rateio que vale hoje.
+    var historico = m.repo.rateiosDoLancamento(fin.financial_id);
+    var posOriginal = -1;
+    if (original) historico.forEach(function (r, i) { if (r.event_id === original.event_id) posOriginal = i; });
+    var anterior = original ? (posOriginal > 0 ? historico[posOriginal - 1] : null) : historico.length ? historico[historico.length - 1] : null;
+    var just = typeof c.justificativa_rateio === 'string' ? nulo_(Utils.aparar(c.justificativa_rateio)) : null;
+    if (!just && (crit === 'MANUAL' || anterior)) erroGeral_(m, 'justificativa_rateio', 'CAMPO_OBRIGATORIO', crit === 'MANUAL' ? 'Explique o rateio pelo valor digitado (por que esses valores).' : 'O lançamento já estava rateado: diga por que ratear de novo.');
+    var baseZero = !b.itens.length;
+    if (baseZero && cem) erroGeral_(m, 'escopo_tipo', 'RATEIO_INCOMPLETO', 'O lançamento ' + nomeFin + ' precisa ser 100% distribuído entre os animais do registro, e nenhum entrou.');
+    if (m.col.temErros()) return;
+    var r;
+    try {
+      r = FinancialService.ratear(T, crit, b.itens.map(function (x) { return { animal_id: x.animal_id, chave: x.chave, base: x.base }; }));
+    } catch (e) {
+      if (!Validation.ehAppError(e) || e.code !== 'VALIDATION') throw e;
+      erroGeral_(m, 'criterio', 'RATEIO_INVALIDO', e.message);
+      return;
+    }
+    if (baseZero) avisoItem_(m, null, 'RATEIO_BASE_ZERO', 'Base zero: ' + b.motivo + '. Nada será alocado, e o lançamento ' + nomeFin + ' fica inteiro como "sem alocar aos animais".');
+    var estimados = b.estimados || [];
+    if (estimados.length) avisoItem_(m, null, 'RATEIO_SEM_PESO', plural_(estimados.length, 'animal entra', 'animais entram') + ' com o peso estimado em ' + br_(dataBase) + ' (pesagem vencida ou o peso de referência da categoria): ' + estimados.slice(0, 8).map(function (x) { return x.quem; }).join(', ') + (estimados.length > 8 ? ' e mais ' + (estimados.length - 8) : '') + '.');
+    else if (b.estimadoNoOriginal) avisoItem_(m, null, 'RATEIO_SEM_PESO', 'O rateio continua com as bases estimadas do original (pesagem vencida ou o peso de referência da categoria).');
+    var ratId = m.tx.novoId();
+    var justGravada = baseZero ? 'Base zero: ' + b.motivo + '.' + (just ? ' ' + just : '') : just;
+    ctxEv.plano.RATEIOS.push({
+      rateio_id: ratId, event_id: ev.event_id, financial_id: fin.financial_id, criterio: r.criterio, escopo_tipo: escopo, escopo_ref: spec.escopo_ref,
+      periodo_inicio: ini, periodo_fim: fim, data_base: dataBase, base_total: r.baseTotal, total_alocado: r.totalAlocado, justificativa: justGravada, created_by: m.tx.usuario,
+    });
+    var porId = {};
+    b.itens.forEach(function (x) { porId[x.animal_id] = x; });
+    r.itens.forEach(function (x) {
+      ctxEv.plano.ALOCACOES_FINANCEIRAS.push({ alloc_id: m.tx.novoId(), rateio_id: ratId, financial_id: fin.financial_id, animal_id: x.animal_id, base_valor: x.base, valor_alocado: x.valor });
+    });
+    // O valor do evento é o total distribuído (03b, seção 2.5); na base zero, vazio (nada foi distribuído).
+    ev.total_value = r.totalAlocado > 0 ? r.totalAlocado : null;
+    if (!vazio_(fin.property_id)) ev.property_id = fin.property_id;
+    ev.description = 'Rateio de "' + nomeLancamento_(m, fin) + '" ' + Rateio.descrever({ criterio: crit, escopo_tipo: escopo, escopo_ref: spec.escopo_ref, periodo_inicio: ini, periodo_fim: fim, data_base: dataBase }, nomes);
+    ctxEv.criterioPedido = r.criterio !== crit ? crit : null;
+    var anteriorAnimais = anterior ? m.repo.por('ALOCACOES_FINANCEIRAS', 'rateio_id', anterior.rateio_id).map(function (a) { return a.animal_id; }) : [];
+    if (original) cru.cruPor('RATEIOS', 'event_id', original.event_id).forEach(function (x) { cru.cruPor('ALOCACOES_FINANCEIRAS', 'rateio_id', x.rateio_id).forEach(function (a) { anteriorAnimais.push(a.animal_id); }); });
+    ctxEv.derivadosExtra = { animais: Utils.unicos(r.itens.map(function (x) { return x.animal_id; }).concat(anteriorAnimais)), eventos: [fin.event_id] };
+    var antEv = anterior ? cru.cruPorId('EVENTOS', anterior.event_id) || {} : null;
+    ctxEv.rateio = {
+      financial_id: fin.financial_id, lancamento: nomeLancamento_(m, fin), natureza: fin.natureza, valor_lancamento: fin.valor, valor_a_ratear: T,
+      criterio: r.criterio, criterio_pedido: crit, escopo_tipo: escopo, escopo_ref: spec.escopo_ref, periodo_inicio: ini, periodo_fim: fim, data_base: dataBase,
+      descricao: ev.description, base_total: r.baseTotal, total_alocado: r.totalAlocado, nao_alocado: fin.valor - r.totalAlocado, base_zero: baseZero, motivo: baseZero ? b.motivo : null,
+      parcial: b.parcial === true, congelado: !!cong,
+      itens: r.itens.map(function (x) {
+        var a = m.repo.porId('ANIMAIS', x.animal_id) || {};
+        return { animal_id: x.animal_id, codigo_interno: a.codigo_interno || null, brinco: nulo_(a.brinco), base: x.base, valor: x.valor, estimado: !!(porId[x.animal_id] && porId[x.animal_id].estimado) };
+      }),
+      anterior: anterior ? { rateio_id: anterior.rateio_id, event_id: anterior.event_id, event_type: antEv.event_type || null, event_date: antEv.event_date || null, criterio: anterior.criterio, total_alocado: anterior.total_alocado } : null,
+    };
+  }
+  /**
+   * Rateio que depende do lançamento (CONTRATOS, seção 57): o evento RATEIO que vale e rateia um lançamento do evento que se
+   * estorna ou se corrige. Sem o lançamento (o estorno o cancela; a correção grava outro), o rateio ficaria sem efeito e o
+   * custo dos animais mudaria em silêncio: estorne o rateio antes (CONFLICT RATEIO_DEPENDENTE). A verificação e a trava
+   * conferem o mesmo pela invariante 25, em todo caminho (também no desfazer da importação).
+   */
+  function conferirRateiosDependentes_(m, ev, verbo) {
+    var cru = m.tx.cru;
+    var vistos = {};
+    cru.cruPor('FINANCEIRO', 'event_id', ev.event_id).forEach(function (fin) {
+      cru.cruPor('RATEIOS', 'financial_id', fin.financial_id).forEach(function (r) {
+        if (r.event_id === ev.event_id || vistos[r.event_id]) return;
+        var dono = cru.cruPorId('EVENTOS', r.event_id);
+        if (!dono || dono.event_type !== 'RATEIO' || !m.repo.eventoVigente(dono.event_id)) return;
+        vistos[r.event_id] = true;
+        m.conflitos.push(Validation.detalhe({
+          codigo: 'RATEIO_DEPENDENTE', campo: 'event_id',
+          mensagem: 'O lançamento "' + nomeLancamento_(m, fin) + '" foi rateado entre os animais em ' + br_(dono.event_date) + '. Estorne esse rateio antes de ' + verbo + ' (depois, rateie de novo).',
+          conflito: conflitoCom_(dono.event_id, dono.event_type, dono.event_subtype, dono.event_date),
+        }));
+      });
+    });
   }
   /**
    * O transporte da baixa na correção (RN-046; 03b, seção 11; CONTRATOS, seção 56): cada parcela paga do original vai para a
@@ -4175,6 +4413,9 @@ var EventService = (function () {
       // a leva para ele, não para o da mãe; CONTRATOS, seção 54).
       pasto_destino_id: ctxEv.tipo === 'NASCIMENTO' && ctxEv.parto && !ctxEv.parto.nascidos_vivos && ctxEv.pastoCriasInformado ? ctxEv.pastoParto : null,
       racas_informadas: ctxEv.tipo === 'NASCIMENTO' ? racasInformadas_(ctxEv) : null,
+      // Rateio com um animal só é gravado como DIRETO (invariante 13): o critério pedido fica no evento, para a base ser refeita
+      // (a verificação: BASE_RATEIO) e a correção sem mudança gravar o mesmo (CONTRATOS, seção 57).
+      criterio_pedido: ctxEv.tipo === 'RATEIO' ? ctxEv.criterioPedido : null,
     };
     ev.payload_json = payload_(m, ctxEv, extra);
     var itensPorAnimal = {};
@@ -4197,6 +4438,9 @@ var EventService = (function () {
     Object.keys(ctxEv.plano).forEach(function (t) { ctxEv.plano[t].forEach(function (r) { m.tx.plano.anexar(t, r); }); });
     ctxEv.auditorias.forEach(function (a) { AuditService.alteracao(m.tx, 'ANIMAIS', a.id, a.campos, m.tx.dados.justificativa); });
     var animais = Utils.unicos(ctxEv.itens.filter(function (it) { return it.animal_id; }).map(function (it) { return it.animal_id; }).concat(ctxEv.removidos || []));
+    // O rateio (Fase 4, E4.3): os animais que recebem ou deixam de receber o valor e o lançamento rateado (a projeção do custo
+    // de aquisição e do animal da alocação direta).
+    var extraDer = ctxEv.derivadosExtra || { animais: [], eventos: [] };
     var resumo = { acao: ctxEv.original ? 'corrigir' : 'registrar', event_id: ev.event_id, event_type: ev.event_type, event_subtype: ev.event_subtype, event_date: ev.event_date, animais: animais.length, substitui: ctxEv.original ? ctxEv.original.event_id : null };
     return {
       avisos: m.avisos,
@@ -4214,8 +4458,9 @@ var EventService = (function () {
         sanidade: ctxEv.sanidade ? resumoSanidade_(m, ctxEv) : null,
         estoque: ctxEv.estoque ? resumoEstoque_(ctxEv) : null,
         manejo: resumoManejo_(m, ctxEv),
+        rateio: ctxEv.rateio || null,
       },
-      derivados: { animais: animais, eventos: [ev.event_id].concat(ctxEv.original ? [ctxEv.original.event_id] : []), produtos: produtosDoComando_(m, ctxEv, ctxEv.original ? ctxEv.original.event_id : null) },
+      derivados: { animais: Utils.unicos(animais.concat(extraDer.animais)), eventos: Utils.unicos([ev.event_id].concat(ctxEv.original ? [ctxEv.original.event_id] : [], extraDer.eventos)), produtos: produtosDoComando_(m, ctxEv, ctxEv.original ? ctxEv.original.event_id : null) },
       resposta: function (t) { return resposta_(t, resumo); },
     };
   }
@@ -4269,6 +4514,32 @@ var EventService = (function () {
     // natureza vem à parte, e o total só existe quando os lançamentos são todos de uma natureza.
     return { lancamentos: fins.length, receitas: receitas, despesas: despesas, total: receitas && despesas ? null : receitas + despesas, parcelas_abertas: abertos };
   }
+  /**
+   * O que o estorno de um evento RATEIO desfaz: o rateio dele deixa de valer e volta o anterior do lançamento (Repository:
+   * o último na ordem da cadeia, sem este). {impacto: {financial_id, lancamento, total_alocado, volta: {event_id, event_type,
+   * event_date, criterio, total_alocado} | null}, animais (os dos dois rateios), eventos (o criador do lançamento)}.
+   */
+  function rateioDoEstorno_(m, alvo) {
+    var cru = m.tx.cru;
+    var animais = [];
+    var eventos = [];
+    var impacto = null;
+    cru.cruPor('RATEIOS', 'event_id', alvo.event_id).forEach(function (r) {
+      var fin = cru.cruPorId('FINANCEIRO', r.financial_id);
+      if (!fin) return;
+      eventos.push(fin.event_id);
+      cru.cruPor('ALOCACOES_FINANCEIRAS', 'rateio_id', r.rateio_id).forEach(function (a) { animais.push(a.animal_id); });
+      var outros = m.repo.rateiosDoLancamento(fin.financial_id).filter(function (x) { return x.event_id !== alvo.event_id; });
+      var volta = outros.length ? outros[outros.length - 1] : null;
+      if (volta) m.repo.por('ALOCACOES_FINANCEIRAS', 'rateio_id', volta.rateio_id).forEach(function (a) { animais.push(a.animal_id); });
+      var ve = volta ? cru.cruPorId('EVENTOS', volta.event_id) || {} : null;
+      impacto = {
+        financial_id: fin.financial_id, lancamento: nomeLancamento_(m, fin), total_alocado: r.total_alocado,
+        volta: volta ? { event_id: volta.event_id, event_type: ve.event_type || null, event_date: ve.event_date || null, criterio: volta.criterio, total_alocado: volta.total_alocado } : null,
+      };
+    });
+    return { impacto: impacto, animais: Utils.unicos(animais), eventos: Utils.unicos(eventos) };
+  }
   function planejarEstorno_(tx) {
     var d = tx.dados || {};
     var m = motor_(tx, []);
@@ -4294,6 +4565,11 @@ var EventService = (function () {
     conferirEstadoRestaurado_(m, ficam, 'o estorno', null);
     conferirPeriodosDeBrinco_(m, null, ficam, 'o estorno');
     conferirParcelasLiquidadas_(m, alvo, 'estornar');
+    conferirRateiosDependentes_(m, alvo, 'estornar');
+    // O estorno de um rateio (Fase 4, E4.3): volta a valer o rateio anterior do lançamento (o do próprio registro ou o de um
+    // rateio mais antigo), e os animais dos dois e o lançamento são reprojetados (o custo de aquisição, o animal da alocação
+    // direta). O que ele desfaz vai na revisão.
+    var doRateio = alvo.event_type === 'RATEIO' ? rateioDoEstorno_(m, alvo) : null;
     // Insumo: o estorno da entrada (ou de um acerto que somou) que deixa o saldo negativo pede confirmação (RN-057).
     var produtos = produtosDoComando_(m, null, alvo.event_id);
     produtos.forEach(function (pid) {
@@ -4325,8 +4601,9 @@ var EventService = (function () {
       avisos: m.avisos,
       resumo: resumo,
       impactos: { acao: 'estornar', estorna: alvo.event_id, event_type: alvo.event_type, event_subtype: nulo_(alvo.event_subtype), nome: EventCatalog.nomeEvento(alvo.event_type, alvo.event_subtype),
-        event_date: alvo.event_date, animais: animais.length, anulados: Object.keys(criados).length, cancelados: canceladosDoEstorno_(m, alvo), corrige: originalDaCorrecao_(m, alvo) },
-      derivados: { animais: animais, eventos: [alvo.event_id, id], produtos: produtos },
+        event_date: alvo.event_date, animais: animais.length, anulados: Object.keys(criados).length, cancelados: canceladosDoEstorno_(m, alvo), corrige: originalDaCorrecao_(m, alvo),
+        rateio: doRateio ? doRateio.impacto : null },
+      derivados: { animais: Utils.unicos(animais.concat(doRateio ? doRateio.animais : [])), eventos: Utils.unicos([alvo.event_id, id].concat(doRateio ? doRateio.eventos : [])), produtos: produtos },
       resposta: function (t) { return resposta_(t, resumo); },
     };
   }
