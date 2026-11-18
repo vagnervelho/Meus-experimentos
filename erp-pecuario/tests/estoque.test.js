@@ -168,6 +168,26 @@ test('caminhos do estoque: correção da quantidade, do valor e do produto (o sa
   semErro(s, 'caminhos');
 });
 
+test('a correção da entrada para outro produto deixa o primeiro mais negativo: pede a confirmação (ESTOQUE_INSUFICIENTE) também no tipo sem animais, e a política BLOQUEIA recusa', () => {
+  const s = S.sistema();
+  const a = produto(s, { nome: 'A', custo_unitario: 1, controla_estoque: true }, 'pa');
+  const b = produto(s, { nome: 'B', custo_unitario: 1, controla_estoque: true }, 'pb');
+  const e = ok(api(s, 'evento.registrar', estoque('ENTRADA', '2026-03-01', { product_id: a.product_id, quantidade: 5, valor: 500 }), 'e'));
+  const ids = ok(api(s, 'evento.registrar', S.entradaInicial([S.bicho({ brinco: '931' })]), 'reb')).animais.map((x) => x.animal_id);
+  ok(api(s, 'evento.registrar', { tipo: 'SANIDADE', subtipo: 'VACINACAO', campos: { event_date: '2026-03-01', produto_id: a.product_id, modo_dose: 'TOTAL', quantidade_consumida_total: 50 }, animais: [{ animal_id: ids[0] }] }, 'vac', ['ESTOQUE_INSUFICIENTE']));
+  assert.equal(prod(s, a.product_id).estoque_atual, -45);
+  const pedido = Object.assign(estoque('ENTRADA', '2026-03-01', { product_id: b.product_id, quantidade: 5, valor: 500 }), { event_id: e.event_id, justificativa: 'Era o produto B' });
+  const r = recusa(api(s, 'evento.corrigir', pedido, 'c0'), 'NEEDS_CONFIRMATION', 'sem o aceite');
+  assert.deepEqual(cods(r), ['ESTOQUE_INSUFICIENTE']);
+  assert.match(r.details[0].mensagem, /^A: o estoque ficaria em/);
+  ok(api(s, 'config.salvar', { valores: { avisos_politica: { ESTOQUE_INSUFICIENTE: 'BLOQUEIA' } } }, 'pol'));
+  assert.deepEqual(cods(recusa(api(s, 'evento.corrigir', pedido, 'c1', ['ESTOQUE_INSUFICIENTE']), 'VALIDATION')), ['ESTOQUE_INSUFICIENTE']);
+  ok(api(s, 'config.salvar', { valores: { avisos_politica: {} } }, 'pol2'));
+  ok(api(s, 'evento.corrigir', pedido, 'c2', ['ESTOQUE_INSUFICIENTE']));
+  assert.deepEqual([prod(s, a.product_id).estoque_atual, prod(s, b.product_id).estoque_atual], [-50, 5]);
+  semErro(s, 'produto que sai');
+});
+
 test('integridade do estoque (COPIAS, PROJECAO): entrada sem o lançamento de compra, movimento com custo ou quantidade fora da compra, acerto de perda que aumenta o saldo, movimento num lançamento de outro tipo; o saldo projetado = Σ dos movimentos', () => {
   const s = S.sistema();
   const p = produto(s, { nome: 'P', controla_estoque: true }, 'p');

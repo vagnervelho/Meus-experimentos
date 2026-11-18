@@ -4274,7 +4274,7 @@ Comandos sem evento (`AuditService.alteracao`/`criacao`; a fase C aplica), com u
 | Rota | Contrato |
 |---|---|
 | `parcela.baixar` | `{parcela_id, data_pagamento, valor?, juros_multa?, desconto?, valor_pago?, forma_pagamento?, justificativa?}` ou em lote `{data_pagamento, forma_pagamento?, itens: [{parcela_id, valor?, juros_multa?, desconto?, valor_pago?, forma_pagamento?}] (até 200), justificativa?}`. A parcela vale e está em aberto (`PARCELA_JA_PAGA`); a data não é futura (`DATA_FUTURA`) nem antes da competência (`PAGAMENTO_ANTES_DA_COMPETENCIA`); juros ≥ 0, 0 ≤ desconto < valor (`VALOR_FORA_DA_FAIXA`); `valor_pago` informado = valor + juros − desconto (`VALOR_PAGO_DIVERGENTE`, RN-081); forma da lista `FORMA_PAGAMENTO` (a "conta ou caixa": caixa único, 07, seção 11). `valor` < o da parcela = baixa parcial: a parcela vira CANCELADA e nascem a paga e a que resta (o mesmo número e vencimento, `parcela_origem_id`). Encontro de contas da venda: a baixa do recebimento quita junto, na mesma data e pelo nominal, as deduções retidas pelo comprador que vencem nele (o depósito esperado = recebido − retido); a dedução retida não se baixa sozinha (`PARCELA_RETIDA`); recebimento com retenção não se baixa em parte (`BAIXA_PARCIAL_COM_RETENCAO`); dedução já quitada sem o recebimento → `ENCONTRO_DESFEITO`. Lote: tudo ou nada; `PARCELA_REPETIDA`. Resposta: as parcelas tocadas (`respostaParcelas_`); `impactos {itens: [{…, valor_pago, parcial, resta, encontro, deposito}], entradas, saidas, liquido}` |
-| `parcela.desfazerBaixa` | `{parcela_id, justificativa}` (obrigatória). Paga → ABERTA, as colunas da baixa vazias (data, valor pago, juros, desconto; a forma fica a última informada) (`PARCELA_EM_ABERTO`); a dedução retida volta junto com o recebimento do mesmo encontro e não se desfaz sozinha (`PARCELA_RETIDA`). É o caminho antes do estorno (RN-042) |
+| `parcela.desfazerBaixa` | `{parcela_id, justificativa}` (obrigatória). Paga → ABERTA, as colunas da baixa vazias (data, valor pago, juros, desconto); a forma fica a última informada no título que se divide e, no de parcelas iguais, volta à prevista (a das outras parcelas em aberto: a entrada desse evento tem uma forma só, que a correção usa — `Correcao`, a forma das parcelas em aberto) (`PARCELA_EM_ABERTO`); a dedução retida volta junto com o recebimento do mesmo encontro e não se desfaz sozinha (`PARCELA_RETIDA`). É o caminho antes do estorno (RN-042) |
 | `parcela.desdobrar` (extra) | `{parcela_id, parcelas: [{data_vencimento, valor?, forma_pagamento?, documento?}] \| quantas, primeiro, intervalo?, justificativa}`. A parcela em aberto vira CANCELADA e nascem as novas, que somam o mesmo (`FinancialService.resolverParcelas`; com `quantas`, os vencimentos de `FinancialService.vencimentos`). Igual à de hoje → `VALOR_IGUAL`; mais que `MAX_PARCELAS` → `PARCELAS_DEMAIS`; com retenção → `PARCELA_RETIDA` |
 | `parcela.simular` (extra, consulta) | `{acao: baixar \| desfazerBaixa \| desdobrar, dados}` → a resposta do SIMULAR do comando (`simulacao: true`, `impactos`), sem gravar. A tela confere o valor pago e as parcelas novas por ela (o aparelho não soma) |
 
@@ -4294,8 +4294,8 @@ eventos), um caminho só para todo comando.
 parcela paga do original vai para a parcela do lançamento correspondente do substituto com o mesmo valor e o mesmo vencimento, que
 nasce paga com a mesma baixa (data, valor pago, juros, desconto, forma) — `Correcao.congelado('PARCELAS.baixa')` (tabela B da seção
 50.4, que passa a ter 24 valores: 13 COPIA, 6 DERIVADO e 5 REGRA). Entre parcelas iguais (o mesmo valor e vencimento), a baixa vai
-primeiro para a que o pedido já traz paga com a mesma baixa (o reenvio do pedido como foi aceito), depois para a em aberto. Sem a
-correspondente: `CONFLICT PARCELA_LIQUIDADA` ("desfaça a baixa antes"); a baixa antes da data nova: `CONFLICT
+primeiro para a que o pedido já traz paga com a mesma baixa (o reenvio do pedido como foi aceito), depois para a em aberto com a
+forma do pagamento (a entrada do servidor traz a forma de cada parcela), depois para qualquer em aberto. Sem a correspondente: `CONFLICT PARCELA_LIQUIDADA` ("desfaça a baixa antes"); a baixa antes da data nova: `CONFLICT
 PAGAMENTO_ANTES_DA_COMPETENCIA`. O "Já pago em" na correção só é aceito quando repete a baixa transportada (`PARCELA_JA_PAGA`,
 `PAGAMENTO_NA_CORRECAO`; seção 50.6). O estorno com parcela paga continua `CONFLICT PARCELA_LIQUIDADA` (desfaça a baixa antes).
 A entrada do servidor (`evento.obter`, `correcao.parcelas`) traz só as parcelas que valem — a dividida (CANCELADA) fica fora — na
@@ -4362,6 +4362,9 @@ baixa inteira, em parte e em lote, o encontro de contas, o desfazer, a divisão 
 - O pagamento depois do registro tem um caminho: a baixa. A correção transporta a baixa e não aceita "Já pago em" novo.
 - Baixa parcial e desdobramento só no título que a correção refaz parcela a parcela (a compra, a receita da venda e o avulso):
   sem isso, a correção sem mudança de um frete dividido mudaria os títulos (o fuzz achou: sementes 9100006 e 9100013).
+- Achado do teste aleatório fora do financeiro (Fase 3): a correção da entrada de estoque para outro produto não pedia a
+  confirmação do saldo negativo do produto que sai (o caminho sem animais não chamava `produtosQueSaem_`); agora pede
+  (ESTOQUE_INSUFICIENTE, e a contagem posterior recusa), como no caminho com animais (`tests/estoque.test.js`).
 - As rotas `parcela.desdobrar`, `parcela.simular` e `financeiro.titulos` são extras (08, seção 16: a tela precisa da divisão,
   da prévia do valor pago e da lista de títulos numa data); documentadas aqui.
 

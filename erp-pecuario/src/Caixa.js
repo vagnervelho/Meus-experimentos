@@ -292,11 +292,19 @@ var Caixa = (function () {
     if (col.temErros()) return { erros: col.erros };
     var retidas = retidasDoRecebimento_(tx, alvo.fin, p).filter(function (r) { return r.p.status === 'LIQUIDADA' && r.p.data_pagamento === p.data_pagamento; });
     var limpa = { status: 'ABERTA', data_pagamento: null, valor_pago: null, juros_multa: null, desconto: null };
-    AuditService.alteracao(tx, 'PARCELAS', p.parcela_id, limpa, d.justificativa);
+    // No título em parcelas iguais (a entrada do evento tem uma forma só), a parcela reaberta volta com a forma prevista das
+    // outras em aberto; a forma do pagamento desfeito fica só no título que se refaz parcela a parcela (CONTRATOS, seção 56.3).
+    var reaberta = function (fin, q, ev) {
+      if (tituloLivre_(tx, fin, ev)) return limpa;
+      var outra = tx.repo.por('PARCELAS', 'financial_id', fin.financial_id).filter(function (x) { return x.parcela_id !== q.parcela_id && x.status === 'ABERTA'; })
+        .sort(function (a, b) { return (a.parcela_num || 0) - (b.parcela_num || 0); })[0];
+      return outra ? Object.assign({ forma_pagamento: nulo_(outra.forma_pagamento) }, limpa) : limpa;
+    };
+    AuditService.alteracao(tx, 'PARCELAS', p.parcela_id, reaberta(alvo.fin, p, alvo.ev), d.justificativa);
     var ids = [p.parcela_id];
     var eventos = {};
     eventos[alvo.fin.event_id] = true;
-    retidas.forEach(function (r) { AuditService.alteracao(tx, 'PARCELAS', r.p.parcela_id, limpa, d.justificativa); ids.push(r.p.parcela_id); eventos[r.fin.event_id] = true; });
+    retidas.forEach(function (r) { AuditService.alteracao(tx, 'PARCELAS', r.p.parcela_id, reaberta(r.fin, r.p, alvo.ev), d.justificativa); ids.push(r.p.parcela_id); eventos[r.fin.event_id] = true; });
     var avisos = [];
     return {
       avisos: avisos,

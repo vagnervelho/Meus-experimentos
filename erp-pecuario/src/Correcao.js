@@ -34,6 +34,14 @@ var Correcao = (function () {
     (lista || []).forEach(function (x) { (m[x.animal_id] = m[x.animal_id] || []).push(x); });
     return m;
   }
+  /**
+   * A forma prevista de um título em parcelas iguais (a entrada compacta tem uma forma só): a das parcelas em aberto; a da
+   * parcela paga é a do pagamento, que a baixa transportada leva (PARCELAS.baixa). Sem parcela em aberto, a da primeira.
+   */
+  function formaPrevista_(ts) {
+    var aberta = ts.filter(function (x) { return x.status !== 'LIQUIDADA'; })[0];
+    return (aberta || ts[0] || {}).forma_pagamento;
+  }
   function parcelasOrdem_(lista) {
     // As que nasceram de uma divisão têm o número da original: o vencimento e o valor desempatam (a ordem não depende da planilha).
     return lista.slice().sort(function (a, b) { return (a.parcela_num || 0) - (b.parcela_num || 0) || (a.data_vencimento < b.data_vencimento ? -1 : a.data_vencimento > b.data_vencimento ? 1 : 0) || (b.valor || 0) - (a.valor || 0) || (a.parcela_id < b.parcela_id ? -1 : 1); });
@@ -344,7 +352,7 @@ var Correcao = (function () {
     if (tipo === 'MORTE') origem.custo_conta_id = f.conta_id;
     origem[p + 'partner_id'] = f.partner_id;
     origem[p + 'vencimento'] = proposto_(t.data_vencimento, ev.event_date);
-    origem[p + 'forma_pagamento'] = t.forma_pagamento;
+    origem[p + 'forma_pagamento'] = formaPrevista_(ts);
     origem[p + 'parcelas_qtd'] = ts.length > 1 ? ts.length : null;
     origem[p + 'documento'] = f.documento;
     origem[p + 'descricao'] = proposto_(f.descricao, (tipo === 'MORTE' ? 'Custos da morte de ' : 'Receita do descarte de ') + br_(ev.event_date));
@@ -356,7 +364,7 @@ var Correcao = (function () {
     var ts = parcelasOrdem_(det.PARCELAS.filter(function (x) { return x.financial_id === f.financial_id; }));
     var t = ts[0] || {};
     origem.custo_valor = f.valor; origem.custo_conta_id = f.conta_id; origem.custo_partner_id = f.partner_id;
-    origem.custo_vencimento = proposto_(t.data_vencimento, ev.event_date); origem.custo_forma_pagamento = t.forma_pagamento;
+    origem.custo_vencimento = proposto_(t.data_vencimento, ev.event_date); origem.custo_forma_pagamento = formaPrevista_(ts);
     origem.custo_parcelas_qtd = ts.length > 1 ? ts.length : null; origem.custo_documento = f.documento;
     origem.custo_descricao = proposta.test(f.descricao || '') ? null : f.descricao;
   }
@@ -425,7 +433,7 @@ var Correcao = (function () {
       var ts = parcelasOrdem_(parcelasDe(x.f.financial_id));
       var t = ts[0] || {};
       var proposta = (x.tipo === 'FRETE' ? 'Frete' : 'Outros custos') + ' da compra de ' + br_(ev.event_date);
-      return limpo_({ tipo: x.tipo, valor: x.f.valor, partner_id: x.f.partner_id, data_vencimento: proposto_(t.data_vencimento, ev.event_date), parcelas_qtd: ts.length > 1 ? ts.length : null, forma_pagamento: t.forma_pagamento, documento: x.f.documento, descricao: proposto_(x.f.descricao, proposta) });
+      return limpo_({ tipo: x.tipo, valor: x.f.valor, partner_id: x.f.partner_id, data_vencimento: proposto_(t.data_vencimento, ev.event_date), parcelas_qtd: ts.length > 1 ? ts.length : null, forma_pagamento: formaPrevista_(ts), documento: x.f.documento, descricao: proposto_(x.f.descricao, proposta) });
     });
   }
   function entradaVenda_(L, ev, det, linhas, origem, out) {
@@ -463,7 +471,8 @@ var Correcao = (function () {
     var recebimentos = parcelasOrdem_(parcelasDe(receita.financial_id));
     out.parcelas = recebimentos.map(function (x, k, todas) { return limpo_({ data_vencimento: x.data_vencimento, valor: todas.length === 1 ? null : x.valor, forma_pagamento: x.forma_pagamento, documento: x.documento }); });
     out.deducoes = fins.filter(function (f) { return f !== receita; }).map(function (f) {
-      var t = parcelasDe(f.financial_id)[0] || {};
+      var tsd = parcelasDe(f.financial_id);
+      var t = tsd[0] || {};
       var tipo = tipoDe[f.financial_id] || 'OUTRA';
       var retida = f.retida_pelo_comprador === true || f.retida_pelo_comprador === 'S';
       // O que o servidor propôs não é do usuário: a descrição (o nome do tipo da dedução gravado nela, CONGELADOS), o parceiro
@@ -473,7 +482,7 @@ var Correcao = (function () {
       var d = String(f.descricao || '');
       var proposta = d.length > sufixo.length && d.slice(-sufixo.length) === sufixo;
       return limpo_({ tipo: tipo, valor: f.valor, retida_pelo_comprador: retida, partner_id: retida ? proposto_(f.partner_id, ev.partner_id) : f.partner_id,
-        data_vencimento: proposto_(t.data_vencimento, vencPadrao), forma_pagamento: t.forma_pagamento, documento: f.documento, descricao: proposta ? null : f.descricao });
+        data_vencimento: proposto_(t.data_vencimento, vencPadrao), forma_pagamento: formaPrevista_(parcelasOrdem_(tsd)), documento: f.documento, descricao: proposta ? null : f.descricao });
     });
   }
   function entradaMovimento_(L, ev, det, linhas, origem, out) {
@@ -620,7 +629,7 @@ var Correcao = (function () {
         var ts = parcelasOrdem_(det.PARCELAS.filter(function (x) { return x.financial_id === f.financial_id; }));
         var t = ts[0] || {};
         origem.valor = f.valor; origem.partner_id = f.partner_id; origem.documento = f.documento;
-        origem.vencimento = proposto_(t.data_vencimento, ev.event_date); origem.forma_pagamento = t.forma_pagamento;
+        origem.vencimento = proposto_(t.data_vencimento, ev.event_date); origem.forma_pagamento = formaPrevista_(ts);
         origem.parcelas_qtd = ts.length > 1 ? ts.length : null;
       }
     } else {

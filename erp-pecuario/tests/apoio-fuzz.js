@@ -4350,6 +4350,9 @@ function efeitoParcela(cmd, A, S, erro) {
     const p0 = antes.get(d.parcela_id);
     const p1 = agora.get(d.parcela_id);
     if (p1.status !== 'ABERTA' || [p1.data_pagamento, p1.valor_pago, p1.juros_multa, p1.desconto].some((v) => v !== null && v !== undefined && v !== '')) erro('o desfazer deixou ' + JSON.stringify([p1.status, p1.data_pagamento, p1.valor_pago]));
+    // No título em parcelas iguais, a parcela reaberta volta com a forma prevista das outras em aberto (CONTRATOS, seção 56.3).
+    const outras = A.t.PARCELAS.filter((q) => q.financial_id === p0.financial_id && q.parcela_id !== p0.parcela_id && q.status === 'ABERTA').sort((a, b) => (a.parcela_num || 0) - (b.parcela_num || 0));
+    if (!tituloLivre(A, finsA.get(p0.financial_id)) && outras.length && (p1.forma_pagamento || null) !== (outras[0].forma_pagamento || null)) erro('a parcela reaberta do título em parcelas iguais ficou com a forma ' + JSON.stringify(p1.forma_pagamento) + ', e a prevista (das outras em aberto) é ' + JSON.stringify(outras[0].forma_pagamento));
     retidasDe(p0).filter((q) => q.status === 'LIQUIDADA' && q.data_pagamento === p0.data_pagamento).forEach((q) => { if (agora.get(q.parcela_id).status !== 'ABERTA') erro('a dedução retida não voltou junto'); });
     contar('baixa: desfeita');
     return;

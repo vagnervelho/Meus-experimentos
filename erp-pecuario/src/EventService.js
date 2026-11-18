@@ -400,6 +400,8 @@ var EventService = (function () {
       if (tipo === 'LANCAMENTO_FINANCEIRO') lancamentoAvulso_(m, ctxEv, d);
       else estoque_(m, ctxEv);
       if (original) {
+        // O produto da entrada corrigida para outro (o saldo dele perde a entrada): o mesmo aviso do caminho com animais.
+        produtosQueSaem_(m, ctxEv, original);
         m.repo.por('FINANCEIRO', 'event_id', original.event_id).forEach(function (fin) {
           var a0 = FinancialService.avisoPeriodo(m.params, fin.data_competencia, 'A correção cancela um lançamento que');
           if (a0) avisoItem_(m, null, a0.codigo, a0.mensagem);
@@ -1960,9 +1962,12 @@ var EventService = (function () {
         var b = Correcao.congelado(ctxEv.correcao, 'PARCELAS.baixa', { financial_id: fin.financial_id, valor: p.valor, data_vencimento: p.data_vencimento, parcela_id: p.parcela_id });
         var iguais = function (x) { return ['data_pagamento', 'valor_pago', 'juros_multa', 'desconto'].every(function (k) { return nulo_(x[k]) === nulo_(b.v[k]); }); };
         // Entre as parcelas do pedido com o mesmo valor e vencimento: primeiro a que já vem paga com esta mesma baixa (o reenvio do
-        // pedido como foi aceito), depois a em aberto; a paga com outra baixa só por último (PARCELA_JA_PAGA).
+        // pedido como foi aceito), depois a em aberto com a forma do pagamento (a entrada do servidor traz a forma de cada parcela),
+        // depois qualquer em aberto; a paga com outra baixa só por último (PARCELA_JA_PAGA).
         var candidatas = b ? novas.filter(function (x) { return !usadas[x.parcela_id] && x.valor === p.valor && x.data_vencimento === p.data_vencimento; }) : [];
-        var q = candidatas.filter(function (x) { return x.status === 'LIQUIDADA' && iguais(x); })[0] || candidatas.filter(function (x) { return x.status !== 'LIQUIDADA'; })[0] || candidatas[0] || null;
+        var abertas = candidatas.filter(function (x) { return x.status !== 'LIQUIDADA'; });
+        var q = candidatas.filter(function (x) { return x.status === 'LIQUIDADA' && iguais(x); })[0]
+          || abertas.filter(function (x) { return nulo_(x.forma_pagamento) === nulo_(b.v.forma_pagamento); })[0] || abertas[0] || candidatas[0] || null;
         var nome = '"' + (fin.descricao || EventCatalog.nomeEvento(original.event_type, original.event_subtype)) + '"';
         if (!q) {
           m.conflitos.push(Validation.detalhe({

@@ -126,6 +126,18 @@ test('avulso: a correção com o mesmo pedido, com duas parcelas iguais (o mesmo
   assert.deepEqual(fatos(c.event_id), antes);
 });
 
+test('avulso: duas parcelas iguais, a segunda paga em PIX e a primeira em aberto sem forma; a correção sem mudança pela entrada do servidor leva a baixa para a parcela com a mesma forma e grava os mesmos fatos', () => {
+  const s = montar();
+  const r = s.ok('evento.registrar', avulso(s, { event_date: '2026-03-03', valor: 30000 }, [{ data_vencimento: '2026-06-01' }, { data_vencimento: '2026-06-01' }]));
+  const fatos = (eid) => s.parcelas(s.finDo(eid)[0].financial_id).map((p) => [p.data_vencimento, p.valor, p.status, p.forma_pagamento || null, p.data_pagamento || null]).sort();
+  const [, p2] = s.parcelas(s.finDo(r.event_id)[0].financial_id).sort((a, b) => a.parcela_num - b.parcela_num);
+  s.ok('parcela.baixar', { parcela_id: p2.parcela_id, data_pagamento: '2026-03-10', forma_pagamento: 'PIX' });
+  const antes = fatos(r.event_id);
+  assert.deepEqual(antes, [['2026-06-01', 15000, 'ABERTA', null, null], ['2026-06-01', 15000, 'LIQUIDADA', 'PIX', '2026-03-10']]);
+  const c = s.ok('evento.corrigir', { event_id: r.event_id, justificativa: 'Só a anotação', mudanca: { campos: { notes: 'conferido' } } });
+  assert.deepEqual(fatos(c.event_id), antes);
+});
+
 // ------------------------------------------------------------------ plano de contas ----
 test('plano de contas: criar com a natureza (código pelo nome, tipo, grupo e classe que ela só permite de um jeito), renomear, reordenar, desativar e reativar; combinação, código e classificação depois do primeiro lançamento conferidos; conta do sistema não se desativa', () => {
   const s = montar();
@@ -237,6 +249,34 @@ test('a correção do evento depois da baixa em parte e do desdobramento: a entr
   atual = s.ok('evento.corrigir', { event_id: c.event_id, justificativa: 'De novo', mudanca: { campos: { notes: 'conferido de novo' } } }).event_id;
   assert.deepEqual(titulos(principal().financial_id), antes);
   assert.equal(s.parcelas(s.finDo(atual).find((x) => x.valor === 6000).financial_id).filter((p) => p.status === 'LIQUIDADA').length, 1, 'a baixa do frete também vai junto');
+});
+
+test('título em parcelas iguais (o frete da compra): a forma da baixa fica só na parcela paga; desfeita a baixa, a parcela volta com a forma prevista das outras em aberto; a correção sem mudança grava as mesmas parcelas antes e depois', () => {
+  const s = montar();
+  hoje(s, '2026-06-20');
+  const f = s.ok('parceiro.salvar', { campos: { nome: 'Fornecedor', tipos: ['FORNECEDOR'] } }).partner_id;
+  const tr = s.ok('parceiro.salvar', { campos: { nome: 'Frete Rápido', tipos: ['TRANSPORTADOR'] } }).partner_id;
+  const r = s.ok('evento.registrar', {
+    tipo: 'COMPRA', campos: { event_date: '2026-06-01', partner_id: f, pasto_destino_id: S.PASTOS.A, modalidade: 'CABECA', preco_unitario: 100000, valor_animais: 100000 },
+    animais: [{ brinco: '7', sexo: 'M', data_nascimento: '2024-06-01', data_nascimento_confianca: 'ESTIMADA', castrado: true, reprodutor: false }],
+    parcelas: [{ data_vencimento: '2026-07-01' }], custos: [{ tipo: 'FRETE', valor: 6000, partner_id: tr, parcelas_qtd: 3 }],
+  });
+  let atual = r.event_id;
+  const frete = () => s.finDo(atual).find((x) => x.valor === 6000);
+  const fatos = () => s.parcelas(frete().financial_id).filter((p) => p.status !== 'CANCELADA').sort((a, b) => a.parcela_num - b.parcela_num).map((p) => [p.parcela_num, p.status, p.forma_pagamento || null, p.data_pagamento || null]);
+  const corrigir = (nota) => { atual = s.ok('evento.corrigir', { event_id: atual, justificativa: 'Conferido', mudanca: { campos: { notes: nota } } }).event_id; };
+  const [q1] = s.parcelas(frete().financial_id).sort((a, b) => a.parcela_num - b.parcela_num);
+  s.ok('parcela.baixar', { parcela_id: q1.parcela_id, data_pagamento: '2026-06-10', forma_pagamento: 'DINHEIRO' });
+  const pago = fatos();
+  assert.deepEqual(pago, [[1, 'LIQUIDADA', 'DINHEIRO', '2026-06-10'], [2, 'ABERTA', null, null], [3, 'ABERTA', null, null]]);
+  corrigir('um');
+  assert.deepEqual(fatos(), pago, 'a forma da baixa não passa para as parcelas em aberto');
+  const paga = s.parcelas(frete().financial_id).find((p) => p.status === 'LIQUIDADA');
+  s.ok('parcela.desfazerBaixa', { parcela_id: paga.parcela_id, justificativa: 'Pago errado' });
+  assert.deepEqual(fatos(), [[1, 'ABERTA', null, null], [2, 'ABERTA', null, null], [3, 'ABERTA', null, null]], 'a parcela volta com a forma prevista das outras');
+  const aberto = fatos();
+  corrigir('dois');
+  assert.deepEqual(fatos(), aberto);
 });
 
 test('encontro de contas da venda: a baixa do recebimento quita junto a dedução descontada pelo comprador (o depósito esperado); a retida não se baixa nem se desfaz sozinha, e o recebimento com ela não se baixa em parte nem se divide', () => {
