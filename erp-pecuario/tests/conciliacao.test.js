@@ -252,3 +252,107 @@ test('400 bases sorteadas e coerentes: a identidade fecha ao centavo em todo fim
     assert.deepEqual(js(C.termosEm(fx, D)), t0, 'semente ' + s + ': o fato do dia seguinte mudou ' + D);
   }
 });
+
+// ------------------------------------------------------------------ Fase 4, E4.5: o demonstrativo e a ponte (CONTRATOS, seção 58) ----
+/** O caso 2.2 com a conta e o grupo de cada lançamento (o que `fatos` lê do plano de contas e da cópia gravada). */
+function caso22ComContas() {
+  const fx = caso22();
+  const conta = { F1: ['COMPRA_ANIMAIS', 'CUSTO_DIRETO'], F2: ['FRETE_DESPESAS_COMPRA', 'CUSTO_DIRETO'], F3: ['COMPRA_INSUMOS', 'CUSTO_DIRETO'], F4: ['VACINAS', 'CUSTO_DIRETO'], F5: ['ARRENDAMENTO_PASTO', 'CUSTO_OPERACIONAL'], F6: ['CONTABILIDADE', 'DESPESA_ADMINISTRATIVA'], F7: ['VENDA_ANIMAIS', 'RECEITA'], F8: ['TAXAS_RETENCOES_VENDA', 'CUSTO_DIRETO'] };
+  const ordem = { COMPRA_ANIMAIS: 210, FRETE_DESPESAS_COMPRA: 220, COMPRA_INSUMOS: 330, VACINAS: 250, ARRENDAMENTO_PASTO: 415, CONTABILIDADE: 510, VENDA_ANIMAIS: 110, TAXAS_RETENCOES_VENDA: 320 };
+  fx.contas = {};
+  fx.lancamentos.forEach((l) => {
+    const [cod, grupo] = conta[l.financial_id];
+    l.conta_id = 'c-' + cod;
+    l.grupo = grupo;
+    l.descricao = 'Lançamento ' + l.financial_id;
+    fx.contas[l.conta_id] = { conta_id: l.conta_id, codigo: cod, nome: cod.toLowerCase(), ordem: ordem[cod] };
+  });
+  // F6 (contabilidade) sem rateio: o custeio que não chega a nenhum animal.
+  fx.lancamentos.find((l) => l.financial_id === 'F6').alocacoes = [];
+  return fx;
+}
+
+test('E4.5, a ponte (07, 2.1, linha a linha): a identidade aplicada às variações — o resultado do mês = caixa + Δ a receber − Δ a pagar + Δ rebanho + Δ insumos + Δ despesa antecipada − Δ abertura − Δ não operacional; termo que não é inteiro → INTERNAL', () => {
+  const fx = caso22();
+  const p = js(C.ponte(C.termosEm(fx, '2027-05-31'), C.termosEm(fx, '2027-06-30')));
+  assert.deepEqual(p, { resultado: -373333, caixa: -80000, a_receber: 0, a_pagar: 0, custo_rebanho_ativo: -293333, insumos_estoque: 0, despesa_antecipada: 0, saldo_abertura: 0, nao_operacional: 0, direita: -373333, diferenca: 0, fecha: true },
+    'junho: o caixa do arrendamento e da contabilidade (−800,00) e a saída de A3 do rebanho ativo (−2.933,33)');
+  const nov = js(C.ponte(C.termosEm(fx, '2027-10-31'), C.termosEm(fx, '2027-11-30')));
+  assert.deepEqual([nov.resultado, nov.caixa, nov.a_receber, nov.a_pagar, nov.custo_rebanho_ativo, nov.fecha], [549573, 0, 1184000, 17760, -616667, true], 'novembro: nada no caixa; a receber a venda, a pagar a taxa retida, e A1 e A2 saem do rebanho');
+  const abr = js(C.ponte(C.termosEm(fx, '2027-03-31'), C.termosEm(fx, '2027-04-30')));
+  assert.deepEqual([abr.resultado, abr.caixa, abr.a_pagar, abr.insumos_estoque, abr.fecha], [-900, -453000, -450000, 2100, true], 'abril: a 1ª parcela sai do a pagar; o frasco entra no estoque e 3 doses saem');
+  assert.throws(() => C.ponte({ resultado_acumulado: 0.5 }, { resultado_acumulado: 1 }), erroCom('INTERNAL'));
+  const torto = js(C.ponte({ resultado_acumulado: 0, caixa_acumulado: 0, a_receber: 0, a_pagar: 0, custo_rebanho_ativo: 0, insumos_estoque: 0, despesa_antecipada: 0, saldo_abertura: 0, nao_operacional: 0 }, { resultado_acumulado: -100, caixa_acumulado: -50, a_receber: 0, a_pagar: 0, custo_rebanho_ativo: 0, insumos_estoque: 0, despesa_antecipada: 0, saldo_abertura: 0, nao_operacional: 0 }));
+  assert.deepEqual([torto.fecha, torto.diferenca], [false, -50], 'o que não fecha é acusado com a diferença');
+});
+
+test('E4.5, o demonstrativo do 07, 2.2: receitas e despesas por natureza e por conta, o custo de aquisição de quem saiu em três linhas, o custeio por grupo e por conta, juros; o caixa ao lado, o custeio não alocado, os estoques no custo e a ponte de cada mês', () => {
+  const fx = caso22ComContas();
+  const d = js(C.demonstrativo(fx, '2027-01-01', '2027-12-31', { detalhe: true }));
+  assert.equal(d.fecha, true, d.problemas.join('\n'));
+  assert.deepEqual(d.colunas.map((c) => c.rotulo), ['jan/2027', 'fev/2027', 'mar/2027', 'abr/2027', 'mai/2027', 'jun/2027', 'jul/2027', 'ago/2027', 'set/2027', 'out/2027', 'nov/2027', 'dez/2027']);
+  assert.deepEqual(d.resultado.valores, [0, 0, 0, -900, -4500, -373333, 0, 0, 0, 0, 549573, 0], 'CT-19: março 0,00, junho −3.733,33, novembro +5.495,73');
+  assert.equal(d.resultado.total, 170840);
+  const sec = Object.fromEntries(d.secoes.map((s) => [s.chave, s]));
+  assert.deepEqual([sec.RV.total, sec.OR.total, sec.DV.total, sec.CA.total, sec.CT.total, sec.J.total, sec.DB.total], [1184000, 0, 17760, 910000, 80900, 4500, 0]);
+  assert.deepEqual(sec.CA.linhas.map((l) => [l.chave, l.total]), [['vendidos_descartados', 616667], ['mortes', 293333], ['baixas_ajuste', 0]]);
+  assert.deepEqual(sec.CA.linhas[1].animais.map((a) => [a.animal_id, a.data_saida, a.valor]).sort(), [['A3', '2027-06-16', 290000], ['A3', '2027-06-16', 3333]]);
+  assert.deepEqual(sec.CT.grupos.map((g) => [g.grupo, g.total, g.contas.map((c) => [c.codigo, c.total])]), [['CUSTO_DIRETO', 900, [['VACINAS', 900]]], ['CUSTO_OPERACIONAL', 60000, [['ARRENDAMENTO_PASTO', 60000]]], ['DESPESA_ADMINISTRATIVA', 20000, [['CONTABILIDADE', 20000]]]]);
+  assert.deepEqual(sec.DV.contas.map((c) => [c.codigo, c.total, c.lancamentos.map((l) => l.financial_id)]), [['TAXAS_RETENCOES_VENDA', 17760, ['F8']]]);
+  assert.deepEqual(d.caixa.colunas.map((c) => c.liquido), [0, 0, -10000, -453000, -454500, -80000, 0, 0, 0, 0, 0, 1166240]);
+  assert.equal(d.caixa.periodo.liquido, 168740);
+  assert.deepEqual([d.custeio_nao_alocado.total, d.custeio_nao_alocado.valores[5]], [20000, 20000], 'a contabilidade de junho, sem rateio');
+  assert.equal(C.custeioNaoAlocado(fx, '2027-01-01', '2027-12-31'), 20000);
+  assert.deepEqual(d.fora_do_resultado.map((x) => [x.chave, x.total]), [['AQUISICAO', 910000], ['INSUMOS', 3000], ['NAO_OPERACIONAL', 0]], 'a compra de animais e de insumos fica fora do resultado (RN-083)');
+  assert.deepEqual(d.estoques.periodo, { rebanho: { inicio: 0, entradas: 910000, saidas: 910000, fim: 0 }, insumos: { inicio: 0, entradas: 3000, saidas: 900, fim: 2100 } }, 'os estoques no custo: o rebanho entra pela compra e sai pela venda e pela morte; sobram 7 doses');
+  assert.deepEqual(d.estoques.colunas[5].rebanho, { inicio: 910000, entradas: 0, saidas: 293333, fim: 616667 });
+  assert.ok(d.ponte.colunas.every((p, k) => p.fecha && p.resultado === d.resultado.valores[k]), 'a ponte fecha em todo mês');
+  assert.deepEqual([d.ponte.periodo.resultado, d.ponte.periodo.caixa, d.ponte.periodo.insumos_estoque, d.ponte.periodo.fecha], [170840, 168740, 2100, true]);
+  assert.deepEqual([d.identidade.resultado_acumulado, d.identidade.fecha], [170840, true]);
+  // Um mês só e um período que começa no meio do mês: as colunas cortadas nas pontas, a soma igual à do período.
+  const jun = js(C.demonstrativo(fx, '2027-06-10', '2027-06-30'));
+  assert.deepEqual([jun.colunas.length, jun.colunas[0].inicio, jun.resultado.total], [1, '2027-06-10', js(C.resultado(fx, '2027-06-10', '2027-06-30')).total]);
+  assert.throws(() => C.demonstrativo(fx, '2027-13-01', '2027-12-31'), erroCom('VALIDATION'));
+});
+
+test('E4.5, 400 bases sorteadas: o demonstrativo fecha com a visão 2 (a soma das colunas é o resultado do período), a ponte fecha em toda coluna e no período, e o custeio não alocado é o mesmo pelos dois caminhos', () => {
+  const NAT = [['RECEITA_VENDA_ANIMAIS', 'RECEITA'], ['OUTRA_RECEITA', 'RECEITA'], ['DESPESA_VENDA', 'DESPESA'], ['CUSTEIO', 'DESPESA'], ['ESTOQUE_INSUMOS', 'DESPESA'], ['NAO_OPERACIONAL', 'RECEITA'], ['NAO_OPERACIONAL', 'DESPESA'], ['AQUISICAO_ANIMAIS', 'DESPESA']];
+  const GR = ['CUSTO_DIRETO', 'CUSTO_OPERACIONAL', 'DESPESA_ADMINISTRATIVA'];
+  const dia = (rnd, de, n) => G.Utils.somaDias(de, Math.floor(rnd() * n));
+  for (let s = 1; s <= 400; s++) {
+    const rnd = aleatorio(77000 + s);
+    const fx = { marco_zero: '2027-01-01', lancamentos: [], permanencias: {}, contas: {} };
+    ['A', 'B', 'C'].forEach((a) => {
+      const ent = dia(rnd, '2027-01-01', 90);
+      const sai = rnd() < 0.6 ? dia(rnd, ent, 200) : null;
+      fx.permanencias[a] = [{ entrada: { event_id: 'ev-' + a, data: ent }, saida: sai ? { event_id: 'ev-s' + a, data: sai, linha: ['vendidos_descartados', 'mortes', 'baixas_ajuste'][Math.floor(rnd() * 3)] } : null }];
+    });
+    for (let i = 0; i < 4 + Math.floor(rnd() * 10); i++) {
+      const [nat, tipo] = NAT[Math.floor(rnd() * NAT.length)];
+      const valor = 1 + Math.floor(rnd() * 500000);
+      let data = dia(rnd, '2027-01-01', 360);
+      const extra = { conta_id: 'c' + (i % 4), grupo: GR[Math.floor(rnd() * 3)] };
+      if (nat === 'AQUISICAO_ANIMAIS') {
+        const a = ['A', 'B', 'C'][Math.floor(rnd() * 3)];
+        data = fx.permanencias[a][0].entrada.data;
+        extra.ancora = 'ev-' + a;
+        extra.alocacoes = [{ animal_id: a, valor }];
+      }
+      if (nat === 'CUSTEIO') extra.alocacoes = rnd() < 0.5 ? [{ animal_id: 'A', valor: Math.floor(valor * rnd()) }] : [];
+      if ((nat === 'CUSTEIO' || nat === 'OUTRA_RECEITA') && rnd() < 0.4) { extra.inicio = data; extra.fim = dia(rnd, data, 400); }
+      extra.parcelas = [rnd() < 0.5 ? aberta(valor) : paga(valor, dia(rnd, data, 100), rnd() < 0.3 ? Math.floor(rnd() * 900) : 0, 0)];
+      fx.lancamentos.push(lanc('L' + i, nat, tipo, valor, data, extra));
+    }
+    const de = dia(rnd, '2027-01-01', 200);
+    const ate = dia(rnd, de, 300);
+    const d = js(C.demonstrativo(fx, de, ate));
+    assert.equal(d.fecha, true, 'semente ' + s + ': ' + d.problemas.join(' | '));
+    assert.equal(d.resultado.total, js(C.resultado(fx, de, ate)).total, 'semente ' + s + ': o demonstrativo e a visão 2');
+    assert.equal(d.resultado.valores.reduce((a, b) => a + b, 0), d.resultado.total);
+    assert.equal(d.custeio_nao_alocado.total, C.custeioNaoAlocado(fx, de, ate), 'semente ' + s);
+    assert.equal(d.caixa.periodo.liquido, C.caixa(fx, de, ate).liquido);
+    const somaContas = d.secoes.filter((x) => x.contas).reduce((t, x) => t + x.contas.reduce((u, c) => u + c.total, 0), 0) + d.secoes.find((x) => x.chave === 'CT').grupos.reduce((t, g) => t + g.total, 0);
+    const somaSecoes = d.secoes.filter((x) => ['RV', 'OR', 'DV', 'CT'].indexOf(x.chave) >= 0).reduce((t, x) => t + x.total, 0);
+    assert.equal(somaContas, somaSecoes, 'semente ' + s + ': as contas somam a seção');
+  }
+});

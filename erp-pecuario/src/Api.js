@@ -144,8 +144,10 @@ var Api = (function () {
     'parcela.simular': consulta_(function (ctx, p) { var d = p.dados || {}; return Caixa.simular(ctx, { acao: d.acao, dados: d.dados || {}, avisosAceitos: p.avisosAceitos }); }),
     'financeiro.fluxoCaixa': consulta_(function (ctx, p) { return Caixa.fluxoCaixa(ctx, p.dados); }),
     'financeiro.titulos': consulta_(function (ctx, p) { return Caixa.listarTitulos(ctx, p.dados); }),
-    'financeiro.resultado': futura_(4, 'Financeiro'),
-    'financeiro.custosAnimal': futura_(4, 'Financeiro'),
+    // Fase 4, E4.4 e E4.5 (CONTRATOS, seção 58): o custo por animal e por pasto numa data (Custos) e o resultado gerencial por
+    // competência, mês a mês, com o caixa ao lado e a ponte entre os dois (Conciliacao).
+    'financeiro.resultado': consulta_(function (ctx, p) { return Conciliacao.resultadoGerencial(ctx, p.dados); }),
+    'financeiro.custosAnimal': consulta_(function (ctx, p) { return Custos.custosAnimal(ctx, p.dados); }),
     // Os vencimentos do "Dividir em parcelas" (o aparelho não soma dias; CONTRATOS, seção 51).
     'financeiro.vencimentos': consulta_(function (ctx, p) { return semDados_(FinancialService.vencimentos(p.dados)); }),
     // Fase 4, etapa BASE (CONTRATOS, seção 55): a lista e o detalhe dos lançamentos (tela Financeiro) e a conciliação das três

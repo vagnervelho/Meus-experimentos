@@ -384,17 +384,12 @@ var AnimalService = (function () {
     return Utils.ordenarPor(Object.keys(g).map(function (k) { return g[k]; }), [{ campo: 'dias', desc: true }, 'pasto_nome']);
   }
   /**
-   * Bloco H (§11.2): custo de aquisição e lançamentos do animal a partir das alocações (FinancialService.blocoFicha).
-   * Parcial na Fase 2: rateio de custos compartilhados, baixa de parcelas e custos por animal chegam com o Financeiro.
+   * Bloco H (§11.2; Fase 4, E4.4): o custo do animal hoje pela mesma conta da rota `financeiro.custosAnimal` (Custos.blocoFicha:
+   * a passagem atual pela fazenda, ou a última; as classes do custo, o custo diário, o resultado e a margem por arroba) e todas
+   * as alocações dele, com o critério de cada valor.
    */
   function blocoFinanceiro_(tx, L, a) {
-    // A passagem atual começa na entrada vigente mais recente (a mesma fronteira do custo de aquisição, 03a DL-08).
-    var entrada = Timeline.projetarAnimal(L.f, a.animal_id).meta.entradaCusto;
-    var b = FinancialService.blocoFicha(tx.repo, a, { desde: entrada ? entrada.event_date : null });
-    var m = EventCatalog.modulo('FINANCEIRO');
-    b.parcial = true;
-    b.pendente = { modulo: 'FINANCEIRO', fase: m ? m.fase : null, mensagem: 'O rateio de custos gerais (pasto, mão de obra, insumos) e o custo completo por animal chegam com o módulo Financeiro.' };
-    return b;
+    return Custos.blocoFicha(tx, L, a);
   }
   function moduloNaoEntregue_(modulo) {
     var m = EventCatalog.modulo(modulo);
@@ -473,13 +468,13 @@ var AnimalService = (function () {
    * reprodutivo (G), financeiro (H), eventos (I), anexos (J)}; cada bloco traz `entregue`. Os blocos de módulos
    * ainda não entregues voltam com `entregue: false`, o módulo, a fase e `itens: []`. O bloco G é a ficha reprodutiva
    * inteira (ReproductionService.blocoFicha, Fase 3: situação, previsão, partos, registros, bezerros, perdas, IEP); o H, o custo de aquisição
-   * e os lançamentos pelas alocações (FinancialService.blocoFicha), também `parcial`. NOT_FOUND se o animal não
+   * e os lançamentos pelas alocações (Custos.blocoFicha: a conta da rota `financeiro.custosAnimal` hoje). NOT_FOUND se o animal não
    * existe (ou foi anulado).
    */
   function consultaFicha(dados) {
     var d = dados || {};
     return {
-      rota: 'animal.ficha', dados: d, reads: Utils.unicos(leituras().concat(['PROPRIEDADES', 'LISTAS', 'ANEXOS', 'FINANCEIRO', 'PARCELAS', 'RATEIOS', 'ALOCACOES_FINANCEIRAS', 'PLANO_CONTAS', 'ESTACOES_MONTA'], HealthService.LEITURAS_CADASTRO)), acessoCru: true,
+      rota: 'animal.ficha', dados: d, reads: Utils.unicos(leituras().concat(['PROPRIEDADES', 'LISTAS', 'ANEXOS', 'FINANCEIRO', 'PARCELAS', 'RATEIOS', 'ALOCACOES_FINANCEIRAS', 'PLANO_CONTAS', 'ESTACOES_MONTA', 'VENDAS'], HealthService.LEITURAS_CADASTRO)), acessoCru: true,
       tratador: function (tx) {
         var g = d.geracoes === undefined || d.geracoes === null ? GERACOES_PADRAO : d.geracoes;
         if (typeof g !== 'number' || Math.floor(g) !== g || g < 1 || g > GERACOES_MAX) {

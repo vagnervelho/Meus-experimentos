@@ -70,8 +70,8 @@ test('roteador: rota desconhecida e rota de fase futura → NOT_FOUND; pedido ma
   const ops = s.tabela('OPERACOES').length;
   const nf = chamar(s, { rota: 'animal.apagar', dados: {} });
   assert.deepEqual([nf.error.code, /desconhecida/.test(nf.error.message)], ['NOT_FOUND', true]);
-  // Fase 4, E4.1 e E4.2 (CONTRATOS, seção 56): a baixa da parcela foi entregue; o resultado gerencial ainda é de etapa futura.
-  const fut = chamar(s, { rota: 'financeiro.resultado', dados: {} });
+  // Fase 4, E4.4 e E4.5 (CONTRATOS, seção 58): o resultado e os custos foram entregues; o preço de referência ainda é de etapa futura.
+  const fut = chamar(s, { rota: 'preco.salvar', dados: {} });
   assert.equal(fut.error.code, 'NOT_FOUND');
   assert.match(fut.error.message, /Financeiro, que chega na fase 4/);
   for (const [pedido, campo] of [

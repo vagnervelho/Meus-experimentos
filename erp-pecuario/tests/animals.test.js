@@ -100,8 +100,13 @@ test('ficha: blocos A a J, árvore genealógica até N gerações, crias, pastos
   // nenhum registro, sem carência e sem próxima dose.
   assert.deepEqual([f.sanitario.entregue, f.sanitario.itens, f.sanitario.carencia, f.sanitario.proximas, f.sanitario.custo_total], [true, [], null, [], null], 'sanidade: módulo entregue');
   for (const b of ['geral', 'genealogia', 'localizacao', 'pastos', 'eventos', 'anexos']) assert.equal(f[b].entregue, true, b);
-  // H: entregue na Fase 2 pela compra (alocações); parcial até o Financeiro (Fase 4). Nascida: custo 0, sem lançamentos.
-  assert.deepEqual([f.financeiro.entregue, f.financeiro.parcial, f.financeiro.pendente.fase, f.financeiro.lancamentos.length], [true, true, 4, 0]);
+  // H: entregue na Fase 2 pela compra (alocações) e inteiro desde o Financeiro (Fase 4, E4.4: Custos.blocoFicha, sem aviso de
+  // módulo pendente). A bezerra do rebanho inicial sem valor de abertura: custo de aquisição desconhecido (nunca zero), o mesmo da
+  // projeção; sem lançamentos e, no rebanho, ainda sem resultado.
+  assert.deepEqual([f.financeiro.entregue, f.financeiro.parcial, f.financeiro.pendente, f.financeiro.lancamentos.length], [true, undefined, undefined, 0]);
+  assert.deepEqual([f.financeiro.custo_aquisicao, f.financeiro.custo_aquisicao_origem], [bezerra.custo_aquisicao, bezerra.custo_aquisicao_origem], 'o bloco H e a projeção dão o mesmo custo de aquisição');
+  assert.deepEqual([f.financeiro.custo_aquisicao, f.financeiro.custo_aquisicao_origem, f.financeiro.custo_acumulado, f.financeiro.resultado.valor, f.financeiro.resultado.mensagem],
+    [null, 'DESCONHECIDO', null, null, 'O resultado só existe depois que o animal sai do rebanho.']);
   // G: inteiro desde a reprodução (Fase 3, E3.4): a bezerra sem registro reprodutivo fica "sem informação" (a projeção).
   assert.deepEqual([f.reprodutivo.entregue, f.reprodutivo.parcial, f.reprodutivo.pendente, f.reprodutivo.aplica, f.reprodutivo.partos_registrados, f.reprodutivo.n_partos, f.reprodutivo.situacao_reprodutiva, f.reprodutivo.registros.length], [true, false, undefined, true, 0, 0, 'SEM_INFORMACAO', 0]);
   assert.deepEqual([f.geral.codigo_interno, f.geral.brinco, f.geral.idade_meses, f.geral.categoria.codigo, f.geral.sem_categoria], [bezerra.codigo_interno, null, 10, 'BEZERRA', false]);

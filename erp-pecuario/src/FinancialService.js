@@ -1005,51 +1005,6 @@ var FinancialService = (function () {
     });
     return out;
   }
-  /**
-   * Bloco H da ficha (§11.2): custo de aquisição (a projeção, que é a soma das alocações) e os lançamentos do animal,
-   * sempre a partir de ALOCACOES_FINANCEIRAS vigentes (a única fonte de valor por animal). Lê FINANCEIRO, RATEIOS,
-   * ALOCACOES_FINANCEIRAS, PLANO_CONTAS e EVENTOS. Devolve {entregue, animal_id, custo_aquisicao,
-   * custo_aquisicao_origem, por_natureza, custeio, custo_acumulado, receitas, despesas_venda, resultado, lancamentos}.
-   */
-  function blocoFicha(repo, animal, opcoes) {
-    var a = animal || {};
-    var desde = opcoes && !vazio_(opcoes.desde) ? opcoes.desde : null;
-    var temContas = repo.carregada('PLANO_CONTAS');
-    var por = { RECEITA_VENDA_ANIMAIS: 0, OUTRA_RECEITA: 0, AQUISICAO_ANIMAIS: 0, CUSTEIO: 0, DESPESA_VENDA: 0 };
-    var anteriores = 0;
-    var itens = repo.por('ALOCACOES_FINANCEIRAS', 'animal_id', a.animal_id).map(function (al) {
-      var fin = repo.porId('FINANCEIRO', al.financial_id) || {};
-      var rat = repo.porId('RATEIOS', al.rateio_id) || {};
-      var ev = repo.porId('EVENTOS', fin.event_id) || {};
-      var c = temContas ? repo.porId('PLANO_CONTAS', fin.conta_id) : null;
-      // Uma base só (a do custo de aquisição da projeção, 03a DL-08): a passagem atual pela fazenda.
-      var atual = desde === null || !(fin.data_competencia < desde);
-      if (!atual) anteriores++;
-      if (atual && Object.prototype.hasOwnProperty.call(por, fin.natureza)) por[fin.natureza] += al.valor_alocado || 0;
-      return {
-        passagem_atual: atual,
-        financial_id: fin.financial_id || al.financial_id, event_id: fin.event_id || null, event_type: ev.event_type || null, event_date: ev.event_date || null,
-        data_competencia: fin.data_competencia || null, conta_codigo: c ? c.codigo : null, conta_nome: c ? c.nome : null, natureza: fin.natureza || null,
-        tipo: fin.tipo || null, classe_custo_animal: c ? c.classe_custo_animal : null, descricao: fin.descricao || null, valor_lancamento: fin.valor || 0,
-        valor_alocado: al.valor_alocado || 0, criterio: rat.criterio || null, base_valor: al.base_valor, base_total: rat.base_total, partner_id: fin.partner_id || null,
-      };
-    });
-    itens = Utils.ordenarPor(itens, [{ campo: 'event_date', desc: true }, 'conta_codigo']);
-    var saiu = SAIDAS.indexOf(a.situacao_cadastral) >= 0;
-    var custo = nulo_(a.custo_aquisicao);
-    var receitas = por.RECEITA_VENDA_ANIMAIS + por.OUTRA_RECEITA;
-    var acumulado = custo === null ? null : custo + por.CUSTEIO;
-    var resultado = saiu && acumulado !== null
-      ? { valor: receitas - por.DESPESA_VENDA - acumulado, motivo: null }
-      : { valor: null, motivo: 'DADOS_INSUFICIENTES', mensagem: saiu ? 'Sem custo de aquisição conhecido, o resultado não é calculado.' : 'O resultado só existe depois que o animal sai do rebanho.' };
-    return {
-      entregue: true, animal_id: a.animal_id || null, custo_aquisicao: custo, custo_aquisicao_origem: nulo_(a.custo_aquisicao_origem),
-      desde: desde, lancamentos_anteriores: anteriores,
-      por_natureza: por, custeio: por.CUSTEIO, custo_acumulado: acumulado, receitas: receitas, despesas_venda: por.DESPESA_VENDA,
-      resultado: resultado, lancamentos: itens,
-    };
-  }
-
   // ------------------------------------------------------------------ lançamentos (tela Financeiro; Fase 4, etapa BASE) ----
   var NATUREZAS = ['RECEITA_VENDA_ANIMAIS', 'OUTRA_RECEITA', 'AQUISICAO_ANIMAIS', 'CUSTEIO', 'DESPESA_VENDA', 'ESTOQUE_INSUMOS', 'NAO_OPERACIONAL'];
   /** Situação do lançamento na lista: ATIVO (vale), CANCELADO (o evento criador foi estornado, corrigido ou desfeito), TODOS. */
@@ -1353,7 +1308,6 @@ var FinancialService = (function () {
     tiposDosCustos: tiposDosCustos,
     basesEstimadas: basesEstimadas,
     titulos: titulos,
-    blocoFicha: blocoFicha,
     NATUREZAS: NATUREZAS,
     leiturasLancamentos: leiturasLancamentos,
     consultaLancamentos: consultaLancamentos,

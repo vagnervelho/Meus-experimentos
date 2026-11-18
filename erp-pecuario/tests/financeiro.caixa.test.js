@@ -411,9 +411,12 @@ test('regra de tempo do fluxo e dos títulos: numa data passada, só os fatos at
   assert.equal(s.ok('financeiro.titulos', { data: D }).itens.length, 1);
 });
 
-test('rotas da Fase 4 nesta etapa: as de E4.1 e E4.2 respondem; resultado e custos por animal continuam de fase futura', () => {
+test('rotas da Fase 4: as de E4.1 e E4.2 respondem (e, desde a E4.4 e a E4.5, o resultado e os custos); o preço de referência continua de fase futura', () => {
   const s = montar();
-  ['financeiro.resultado', 'financeiro.custosAnimal', 'preco.salvar'].forEach((rota) => {
+  assert.equal(s.api('financeiro.resultado', {}).ok, true);
+  assert.equal(s.api('financeiro.custosAnimal', {}).ok, true);
+  assert.equal(s.api('financeiro.custosAnimal', { visao: 'PASTOS' }).ok, true);
+  ['preco.salvar'].forEach((rota) => {
     const r = s.api(rota, {});
     assert.equal(r.ok, false);
     assert.equal(r.error.code, 'NOT_FOUND', rota);

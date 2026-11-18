@@ -300,7 +300,10 @@ var Timeline = (function () {
       identificacoes: function (animalId) { return filhasVigentes('IDENTIFICACOES', 'animal_id', animalId); },
       pesagens: function (animalId) { return filhasVigentes('PESAGENS', 'animal_id', animalId); },
       reproducao: function (animalId) { return filhasVigentes('REPRODUCAO', 'animal_id', animalId); },
-      /** Alocações vigentes de lançamentos AQUISICAO_ANIMAIS do animal: [{valor, data_competencia, event_id}]. */
+      /**
+       * Alocações vigentes de lançamentos AQUISICAO_ANIMAIS do animal: [{valor, data_competencia, event_id (o do rateio), ancora (o
+       * evento de negócio do lançamento: `ref_event_id` ou o criador)}].
+       */
       aquisicoes: function (animalId) {
         if (!repo.carregada('ALOCACOES_FINANCEIRAS')) return [];
         var out = [];
@@ -308,7 +311,7 @@ var Timeline = (function () {
           var fin = repo.porId('FINANCEIRO', a.financial_id);
           var rat = repo.porId('RATEIOS', a.rateio_id);
           if (!fin || !rat || excl[fin.event_id] || excl[rat.event_id] || fin.natureza !== 'AQUISICAO_ANIMAIS') return;
-          out.push({ valor: a.valor_alocado || 0, data_competencia: fin.data_competencia, event_id: rat.event_id });
+          out.push({ valor: a.valor_alocado || 0, data_competencia: fin.data_competencia, event_id: rat.event_id, ancora: vazio_(fin.ref_event_id) ? fin.event_id : fin.ref_event_id });
         });
         return out;
       },
@@ -547,7 +550,9 @@ var Timeline = (function () {
     var t = entrada.event_type;
     if (t === 'COMPRA') campos.custo_aquisicao_origem = 'NEGOCIADO';
     else if (t === 'NASCIMENTO') campos.custo_aquisicao_origem = 'NAO_SE_APLICA';
-    else if (t === 'ENTRADA_INICIAL' && alocs.some(function (a) { return a.event_id === entrada.event_id; })) {
+    // A abertura é o lançamento do próprio rebanho inicial (o evento de negócio dele), qualquer que seja o rateio que vale: o
+    // re-rateio do valor de abertura (evento RATEIO, Fase 4) não o torna desconhecido (achado do teste aleatório da E4.4).
+    else if (t === 'ENTRADA_INICIAL' && alocs.some(function (a) { return a.ancora === entrada.event_id; })) {
       campos.custo_aquisicao_origem = entrada.payload && entrada.payload.valor_abertura_origem === 'TABELA_PRECOS' ? 'ABERTURA_ESTIMADA' : 'ABERTURA_INFORMADA';
     } else campos.custo_aquisicao_origem = 'DESCONHECIDO';
   }

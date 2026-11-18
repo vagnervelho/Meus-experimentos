@@ -4910,6 +4910,13 @@ const CADASTROS_TEMPO = {
   // do parceiro.
   fluxo: ['saldo'],
   tit: ['contas', 'pasto'],
+  // Fase 4, E4.4 e E4.5: o resultado lê o nome e a ordem das contas; o custo por animal, também a categoria, o pasto (o nome, a
+  // posse, o arrendador e a área: cadastro sem vigência, 03a 4.2) e o parâmetro da arroba; o custo por pasto, as contas e o pasto.
+  res: ['contas', P_INV],
+  resD: ['contas', P_INV],
+  custo: ['contas', 'cat', 'pasto', P_INV.concat(['arroba_kg'])],
+  custoA: ['contas', 'cat', 'pasto', P_INV.concat(['arroba_kg'])],
+  custoP: ['contas', 'pasto', P_INV],
 };
 /** Índices do estado para as impressões digitais (uma vez por estado). */
 function indiceTempo(S) {
@@ -5026,12 +5033,16 @@ function digitalRateiosDoAnimal(S, id, D) {
   });
 }
 function digitalUnidade(S, u, semAtivoCat) {
-  const ref = u.grupo === 'ficha' ? '#' + ((S.animais.get(u.animal) || {}).situacao_cadastral || '') + '@' + ((S.animais.get(u.animal) || {}).data_saida || '') + '#' + digitalRateiosDoAnimal(S, u.animal, u.D) : '';
+  const ref = u.grupo === 'ficha' ? '#' + ((S.animais.get(u.animal) || {}).situacao_cadastral || '') + '@' + ((S.animais.get(u.animal) || {}).data_saida || '') + '#' + digitalRateiosDoAnimal(S, u.animal, u.D)
+    // Fase 4, E4.4: o custo de um animal também muda com o RATEIO (sem linha de animal) dos lançamentos em que ele tem alocação.
+    : u.animal && GRUPOS_DO_CUSTO.has(u.grupo) ? '#' + digitalRateiosDoAnimal(S, u.animal, u.D) : '';
   const pag = GRUPOS_DO_CAIXA.has(u.grupo) ? '#' + digitalPagamentos(S, u.D) : '';
   return (u.animal ? digitalAnimal(S, u.animal, u.D) : digitalFatos(S, u.D)) + '#' + digitalCadastros(S, u.grupo, u.D, semAtivoCat) + ref + pag;
 }
 /** Os grupos que leem os pagamentos e as divisões de parcela (Fase 4, E4.2). */
-const GRUPOS_DO_CAIXA = new Set(['conc', 'lanc', 'fluxo', 'tit']);
+const GRUPOS_DO_CAIXA = new Set(['conc', 'lanc', 'fluxo', 'tit', 'res', 'resD']);
+/** Os grupos do custo por animal (Fase 4, E4.4): a impressão do animal leva os rateios dos lançamentos dele. */
+const GRUPOS_DO_CUSTO = new Set(['custo', 'custoA']);
 /**
  * Os fatos do caixa até D (Fase 4, E4.2; CONTRATOS, seção 56): cada pagamento com data até D (a data, o valor pago, os juros, o
  * desconto e a forma) e cada divisão de parcela com o dia até D (o primeiro pagamento das que nasceram dela, ou o dia do
@@ -5180,6 +5191,20 @@ function bateriaTempo(sis, T, opcoes) {
       add('tit', 'tit:' + sit, r && r.recusa ? r : Object.assign(sem(r, ['hoje', 'itens']), { itens: (r.itens || []).map((x) => sem(x, ['acoes'])) }));
     });
   }
+  // 12. O resultado e os custos em D (Fase 4, E4.4 e E4.5; CONTRATOS, seção 58): o demonstrativo do ano de D até D (com o detalhe
+  // de cada conta e dos animais do custo de aquisição), o custo por animal em D (a lista e as linhas de cada animal, uma por
+  // passagem), o custo de cada animal da amostra (as alocações, com o critério) e o custo por pasto nos 90 dias até D.
+  if (quer('res')) add('res', 'res', chamar('financeiro.resultado', dd('ate', { de: D.slice(0, 4) + '-01-01' })));
+  // Com o detalhe (os lançamentos de cada conta, pelo identificador: a correção sem mudança grava lançamentos novos, e por isso o
+  // detalhe fica fora do b4 da correção).
+  if (quer('resD')) add('resD', 'resD', chamar('financeiro.resultado', dd('ate', { de: D.slice(0, 4) + '-01-01', detalhe: true })));
+  if (quer('custo')) {
+    const r = chamar('financeiro.custosAnimal', dd('data', {}));
+    add('custo', 'custo', r && r.recusa ? r : sem(r, ['itens']));
+    porAnimal('custo', 'custo', r && r.itens);
+  }
+  if (quer('custoA')) T.amostra.forEach((id) => add('custoA', 'custoA|' + id, chamar('financeiro.custosAnimal', dd('data', { animal_id: id })), id));
+  if (quer('custoP')) add('custoP', 'custoP', chamar('financeiro.custosAnimal', dd('data', { visao: 'PASTOS', de: somaDias(D, -90) })));
   // 9. A ficha de quem saiu do rebanho: os cálculos dela são da data da saída (as listas de hoje ficam fora: as crias, os
   // eventos, a genealogia, os anexos, o financeiro, o touro dos registros das fêmeas).
   if (quer('ficha')) {
@@ -5706,7 +5731,7 @@ function soContagemPosterior(r) {
   return !!r.error && r.error.code === 'CONFLICT' && det.length > 0 && det.every((d) => d.codigo === 'CONTAGEM_POSTERIOR');
 }
 /** As consultas da bateria da viagem no tempo em D (sem a lista dos lançamentos, conferida à parte pela lista dos que valem). */
-const GRUPOS_B4 = new Set(['pos', 'posA', 'eleg', 'pasto', 'pastos', 'painel', 'perm', 'agenda', 'ind', 'mat', 'matE', 'desemp', 'dash', 'ficha', 'conc']);
+const GRUPOS_B4 = new Set(['pos', 'posA', 'eleg', 'pasto', 'pastos', 'painel', 'perm', 'agenda', 'ind', 'mat', 'matE', 'desemp', 'dash', 'ficha', 'conc', 'res', 'custo', 'custoP']);
 function bateriaCorrecao(sis, S, D) {
   const vivos = Array.from(S.animais.values()).filter((a) => a.situacao_cadastral !== 'EXTERNO').sort((a, b) => cmp(a.codigo_interno || '', b.codigo_interno || ''));
   const T = {
@@ -6215,6 +6240,9 @@ function executar(sis, k, cmd, antesT, opcoes) {
   // Fase 4, etapa BASE: a identidade das três visões (07, seção 2.1) ao centavo, no fim de cada mês e no período inteiro, e os
   // termos de hoje contra o modelo tirado das linhas cruas, depois de todo passo que gravou.
   if (!o.semGlobal && (gravou || k === 0)) falhas.push(...oraculoConciliacao(sis, S));
+  // Fase 4, E4.4 e E4.5 (CONTRATOS, seção 58): o custo por animal e por pasto e o resultado gerencial contra o modelo das linhas
+  // cruas, contra a projeção, contra a ficha e entre si, depois de todo passo que gravou.
+  if (!o.semGlobal && (gravou || k === 0)) falhas.push(...oraculoCustos(sis, S));
   // Viagem no tempo (conserto da Fase 3 pela garantia, etapa 1): a comparação do retrato numa data D depois de cada passo que
   // gravou, e o retrato pedido neste passo.
   if (!o.semGlobal) falhas.push(...oraculoTempo(sis, cmd, A, S, k, gravou));
@@ -6263,6 +6291,105 @@ function oraculoConciliacao(sis, S) {
   if (t.saldo_abertura) contar('conciliação: com saldo de abertura');
   if (t.insumos_estoque) contar('conciliação: com insumos em estoque');
   if (c.periodo.resultado.custo_aquisicao.total) contar('conciliação: com custo de aquisição de quem saiu');
+  return out;
+}
+
+/**
+ * Fase 4, E4.4 e E4.5 (CONTRATOS, seção 58): o custo por animal (`financeiro.custosAnimal`), o custo por pasto e o resultado
+ * gerencial (`financeiro.resultado`) de hoje, conferidos:
+ * - contra o modelo das linhas cruas, sem o código do servidor: no animal de uma passagem só (uma entrada do marco zero em diante,
+ *   sem histórico), cada natureza e cada classe do custo = Σ das alocações do rateio que vale hoje (`rateioModelo`, a ordem da
+ *   cadeia) dos lançamentos que valem; o custo de aquisição da passagem atual = a projeção `custo_aquisicao`;
+ * - pela aritmética das colunas (as classes somam o custeio; o acumulado, a aquisição mais o custeio; o resultado, a receita menos
+ *   as despesas de venda e o acumulado; o custo diário, o custeio ÷ os dias);
+ * - contra a ficha (o bloco H é a mesma conta) em até dois animais;
+ * - entre as consultas: o demonstrativo fecha (a ponte de cada mês e a identidade acumulada), a identidade em hoje é a da
+ *   conciliação termo a termo, o custo dos pastos mais o custeio sem pasto é o custeio do demonstrativo no mesmo período, e o
+ *   custeio não alocado é o mesmo na lista dos animais e no demonstrativo.
+ */
+function oraculoCustos(sis, S) {
+  if (!S.marco || S.marco > HOJE) return [];
+  const out = [];
+  const ruim = (cod, msg) => { if (out.length < 3) out.push(falha('CUSTOS:' + cod, msg)); };
+  const de = S.marco > HOJE.slice(0, 4) + '-01-01' ? S.marco : HOJE.slice(0, 4) + '-01-01';
+  const rl = sis.api('financeiro.custosAnimal', { de });
+  const rr = sis.api('financeiro.resultado', { de, ate: HOJE });
+  const rp = sis.api('financeiro.custosAnimal', { visao: 'PASTOS', de });
+  const rc = sis.api('financeiro.conciliacao', { ate: HOJE });
+  [['LISTA', rl], ['RESULTADO', rr], ['PASTOS', rp]].forEach(([n, r]) => { if (!r.ok) ruim('RECUSA_' + n, 'a consulta foi recusada: ' + r.error.code + ' ' + r.error.message); });
+  if (out.length) return out;
+  contar('custos: conferidos');
+  const L = rl.data;
+  const R = rr.data;
+  const P = rp.data;
+  // O demonstrativo fecha; a identidade em hoje é a da conciliação.
+  if (!R.fecha) ruim('DEMONSTRATIVO', R.problemas.slice(0, 2).join(' | '));
+  if (rc.ok) Object.keys(rc.data.periodo.termos).forEach((t) => { if (['data', 'sem_permanencia'].indexOf(t) < 0 && R.identidade[t] !== rc.data.periodo.termos[t]) ruim('IDENTIDADE_X_CONCILIACAO', 'o termo ' + t + ' do resultado (' + R.identidade[t] + ') difere do da conciliação (' + rc.data.periodo.termos[t] + ')'); });
+  const ct = (R.secoes.find((x) => x.chave === 'CT') || {}).total || 0;
+  if (P.total.custo + P.custeio_sem_pasto !== ct) ruim('PASTOS_X_CUSTEIO', 'o custo dos pastos (' + P.total.custo + ') mais o custeio sem pasto (' + P.custeio_sem_pasto + ') difere do custeio do demonstrativo (' + ct + ') de ' + de + ' a ' + HOJE);
+  P.pastos.forEach((x) => { if (x.alocado + x.nao_alocado !== x.custo) ruim('PASTO_ALOCADO', x.nome + ': alocado ' + x.alocado + ' + não alocado ' + x.nao_alocado + ' ≠ custo ' + x.custo); });
+  if (L.custeio_nao_alocado.valor !== R.custeio_nao_alocado.total) ruim('NAO_ALOCADO', 'o custeio não alocado da lista (' + L.custeio_nao_alocado.valor + ') difere do do demonstrativo (' + R.custeio_nao_alocado.total + ')');
+  if (P.total.custo) contar('custos: pastos com custo');
+  if (R.resultado.total) contar('custos: demonstrativo com resultado');
+  // O modelo das linhas cruas: as alocações do rateio que vale hoje, por animal, natureza e classe.
+  const porRateio = new Map();
+  S.t.ALOCACOES_FINANCEIRAS.forEach((a) => { (porRateio.get(a.rateio_id) || porRateio.set(a.rateio_id, []).get(a.rateio_id)).push(a); });
+  const classeDe = new Map(S.t.PLANO_CONTAS.map((c) => [c.conta_id, c.classe_custo_animal]));
+  const modelo = new Map();
+  S.t.FINANCEIRO.forEach((f) => {
+    if (!S.vig.get(f.event_id) || f.data_competencia > HOJE || NAO_RATEIA.indexOf(f.natureza) >= 0) return;
+    const r = rateioModelo(S, f.financial_id, HOJE);
+    if (!r) return;
+    (porRateio.get(r.rateio_id) || []).forEach((a) => {
+      const m = modelo.get(a.animal_id) || modelo.set(a.animal_id, { AQUISICAO_ANIMAIS: 0, CUSTEIO: 0, RECEITA: 0, DESPESA_VENDA: 0, SANITARIO: 0, ALIMENTACAO: 0, REPRODUCAO: 0, OUTROS: 0, n: 0 }).get(a.animal_id);
+      const v = a.valor_alocado || 0;
+      m.n++;
+      if (f.natureza === 'AQUISICAO_ANIMAIS' || f.natureza === 'CUSTEIO' || f.natureza === 'DESPESA_VENDA') m[f.natureza] += v; else m.RECEITA += v;
+      if (f.natureza === 'CUSTEIO') { const cl = classeDe.get(f.conta_id); m[['SANITARIO', 'ALIMENTACAO', 'REPRODUCAO'].indexOf(cl) >= 0 ? cl : 'OUTROS'] += v; }
+    });
+  });
+  const linhasPor = new Map();
+  S.t.EVENTO_ANIMAIS.forEach((l) => { if (S.vig.get(l.event_id)) (linhasPor.get(l.animal_id) || linhasPor.set(l.animal_id, []).get(l.animal_id)).push({ l, e: S.ev.get(l.event_id) }); });
+  const umaPassagem = (id) => {
+    const ls = linhasPor.get(id) || [];
+    if (ls.some((x) => x.e.pre_marco_zero)) return false;
+    return ls.filter((x) => x.l.efeito_inventario === 1).length === 1 && ls.filter((x) => x.l.efeito_inventario === -1).length <= 1;
+  };
+  const vistos = new Set();
+  L.itens.forEach((x) => {
+    const a = S.animais.get(x.animal_id) || {};
+    const classes = x.sanitario + x.alimentacao + x.reproducao + x.outros;
+    if (classes !== x.custeio || x.adicionais !== x.reproducao + x.outros) ruim('CLASSES', x.codigo_interno + ': as classes somam ' + classes + ' e o custeio é ' + x.custeio);
+    if (x.aquisicao !== null && x.custo_acumulado !== x.aquisicao + x.custeio) ruim('ACUMULADO', x.codigo_interno + ': acumulado ' + x.custo_acumulado + ' ≠ ' + x.aquisicao + ' + ' + x.custeio);
+    if (x.resultado.valor !== null && x.resultado.valor !== x.receitas - x.despesas_venda - x.custo_acumulado) ruim('RESULTADO_ANIMAL', x.codigo_interno + ': resultado ' + x.resultado.valor);
+    if ((x.situacao === 'NO_REBANHO') !== (x.resultado.valor === null && x.resultado.mensagem === 'O resultado só existe depois que o animal sai do rebanho.')) ruim('RESULTADO_SEM_SAIDA', x.codigo_interno + ': ' + x.situacao + ' com o resultado ' + JSON.stringify(x.resultado));
+    if (x.dias > 0 && x.custo_diario.valor !== Math.round(x.custeio / x.dias)) ruim('CUSTO_DIARIO', x.codigo_interno + ': ' + x.custo_diario.valor + ' por dia, ' + x.custeio + ' em ' + x.dias + ' dias');
+    // A passagem atual (a última) é a da projeção: o custo de aquisição e a origem.
+    const ultima = !L.itens.some((y) => y.animal_id === x.animal_id && y.entrada.data > x.entrada.data);
+    if (ultima && (x.situacao === 'NO_REBANHO' ? a.situacao_cadastral === 'ATIVO' : a.data_saida === x.saida.data)) {
+      if (x.aquisicao !== (a.custo_aquisicao === undefined ? null : a.custo_aquisicao) || x.aquisicao_origem !== (a.custo_aquisicao_origem || null)) ruim('AQUISICAO_X_PROJECAO', x.codigo_interno + ': custo de aquisição ' + x.aquisicao + ' (' + x.aquisicao_origem + '), a projeção ' + a.custo_aquisicao + ' (' + a.custo_aquisicao_origem + ')');
+      else contar('custos: aquisição conferida com a projeção');
+    }
+    if (umaPassagem(x.animal_id) && !vistos.has(x.animal_id)) {
+      vistos.add(x.animal_id);
+      const m = modelo.get(x.animal_id) || { AQUISICAO_ANIMAIS: 0, CUSTEIO: 0, RECEITA: 0, DESPESA_VENDA: 0, SANITARIO: 0, ALIMENTACAO: 0, REPRODUCAO: 0, OUTROS: 0, n: 0 };
+      const srv = [x.custeio, x.receitas, x.despesas_venda, x.sanitario, x.alimentacao, x.reproducao, x.outros, x.aquisicao === null ? 0 : x.aquisicao];
+      const mod = [m.CUSTEIO, m.RECEITA, m.DESPESA_VENDA, m.SANITARIO, m.ALIMENTACAO, m.REPRODUCAO, m.OUTROS, m.AQUISICAO_ANIMAIS];
+      if (JSON.stringify(srv) !== JSON.stringify(mod)) ruim('MODELO', x.codigo_interno + ': servidor ' + JSON.stringify(srv) + ', modelo das linhas cruas ' + JSON.stringify(mod));
+      else if (m.n) contar('custos: animal conferido com o modelo das linhas cruas');
+    }
+  });
+  // A ficha é a mesma conta (até dois animais, os de mais alocações).
+  L.itens.filter((x) => !L.itens.some((y) => y.animal_id === x.animal_id && y.entrada.data > x.entrada.data))
+    .sort((a, b) => ((modelo.get(b.animal_id) || {}).n || 0) - ((modelo.get(a.animal_id) || {}).n || 0) || cmp(a.codigo_interno || '', b.codigo_interno || '')).slice(0, 2).forEach((x) => {
+      const f = sis.api('animal.ficha', { animal_id: x.animal_id });
+      if (!f.ok) return;
+      const h = f.data.financeiro;
+      const a = [h.custo_aquisicao, h.custeio, h.custo_acumulado, h.receitas, h.despesas_venda, h.resultado.valor, h.classes.sanitario, h.classes.alimentacao, h.classes.adicionais, h.dias];
+      const b = [x.aquisicao, x.custeio, x.custo_acumulado, x.receitas, x.despesas_venda, x.resultado.valor, x.sanitario, x.alimentacao, x.adicionais, x.dias];
+      if (JSON.stringify(a) !== JSON.stringify(b)) ruim('FICHA', x.codigo_interno + ': a ficha ' + JSON.stringify(a) + ', a rota ' + JSON.stringify(b));
+      else contar('custos: ficha conferida com a rota');
+    });
   return out;
 }
 
