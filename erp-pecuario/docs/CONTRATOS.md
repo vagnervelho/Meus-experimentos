@@ -3646,3 +3646,20 @@ agora; o conserto está no ponto único (a linha da tabela B, ou a regra que só
 - Metadados no oráculo: os identificadores das linhas de detalhe nas respostas das consultas (`weight_id`, `health_id`,
   `financial_id`, `weight_de`, `weight_ate` e outros), o `event_id` do substituto lido como o do original, os anexos que valem
   (os removidos ficam no original, como histórico) e, no payload, `justificativa` e `avisos_aceitos`.
+
+### 50.10 As levas
+
+- Leva de busca (sementes 610000 a 610999, 1.000 sementes × 100 passos, 4 processos): 59.078 comandos aceitos, 32.921
+  recusados e 8 falhas, todas triadas — cada uma um defeito, consertado pela causa (seção 50.8, 11 a 18), com a regressão; o
+  `src/` mudou durante a leva (o harness relê o código a cada semente), e as sementes depois de cada conserto rodaram com ele.
+  O oráculo conferiu 37.255 correções sem mudança aceitas (22.074 pela entrada do servidor e 15.181 pela do gerador), 170
+  recusas da seção 50.6, 1.665.515 consultas comparadas antes e depois da correção sem mudança e 19.484 correções de um campo
+  aceitas (5.296 da data). Antes dela, as sementes fixas de `tests/fase2.fuzz.test.js` acharam o parto só de natimorto (10).
+- Primeira leva de confirmação (a partir de 611000): parada na semente 611819 (o 19: o par do nascimento e da certeza), depois
+  de 284 sementes; consertada, com a regressão — e, pela mesma causa, as regras entre campos (21).
+- Segunda leva de confirmação (a partir de 612000): parada na semente 612769 (o 20: o pasto informado do parto só de
+  natimorto), depois de 108 sementes; consertada, com a regressão — e, pela mesma causa, o pasto da desmama.
+- Leva nova, limpa, com o código final (sementes 613000 a 613999, 1.000 sementes × 100 passos, 4 processos): 58.266 comandos
+  aceitos, 33.396 recusados e 0 falhas. O oráculo conferiu 36.975 correções sem mudança aceitas (21.907 pela entrada do servidor
+  e 15.068 pela do gerador), 116 recusas da seção 50.6, 1.709.406 consultas comparadas antes e depois da correção sem mudança e
+  19.320 correções de um campo aceitas (5.178 da data).
