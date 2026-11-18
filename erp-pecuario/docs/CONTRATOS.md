@@ -4349,8 +4349,8 @@ baixa transportada e as parcelas que valem; a mudança de cadastro `conta`) e a 
 saldo inicial como cadastro com data). A entrada do gerador no b1 (o pedido original reenviado) deixa de valer como "sem
 mudança" para o evento cujo título foi renegociado depois do registro (parcela dividida, baixa em parte ou desfeita: o pedido
 traz o vencimento, o valor ou a forma de antes, e reenviá-lo muda o título de propósito); a entrada do servidor continua
-conferida nesses eventos. As sementes fixas (`tests/fase2.fuzz.test.js`) ganharam 445 e 505 (o gerador novo mudou as sequências:
-445 devolve a primeira identificação; 505 dá o encontro de contas) e exigem que cada oráculo novo confira de verdade: o avulso, a
+conferida nesses eventos. As sementes fixas (`tests/fase2.fuzz.test.js`) ganharam 445, 505 e 611 (o gerador novo mudou as
+sequências: 445 devolve a primeira identificação, 611 a correção tardia com o cadastro mudado; 505 dá o encontro de contas) e exigem que cada oráculo novo confira de verdade: o avulso, a
 baixa inteira, em parte e em lote, o encontro de contas, o desfazer, a divisão e a baixa transportada na correção.
 
 ### 56.7 Decisões
@@ -4368,11 +4368,11 @@ baixa inteira, em parte e em lote, o encontro de contas, o desfazer, a divisão 
 - As rotas `parcela.desdobrar`, `parcela.simular` e `financeiro.titulos` são extras (08, seção 16: a tela precisa da divisão,
   da prévia do valor pago e da lista de títulos numa data); documentadas aqui.
 
-**Testes.** `tests/financeiro.caixa.test.js` (13 testes, pela api: o avulso por todo caminho — registro, retroativo, mesmo dia,
+**Testes.** `tests/financeiro.caixa.test.js` (15 testes, pela api: o avulso por todo caminho — registro, retroativo, mesmo dia,
 recusas, correção sem mudança com conta/pasto/categoria desativados, transporte da baixa, estorno, estorno da correção, substituto
 do substituto, o reenvio do pedido com duas parcelas iguais e só uma paga —; o plano de contas; a baixa inteira, parcial, em lote, desfazer, dividir e o período fechado; a correção depois da
-baixa parcial e do desdobramento e o título em parcelas iguais; o encontro de contas da venda; o CT-15 inteiro; o fluxo com o
+baixa parcial e do desdobramento e o título em parcelas iguais (só inteira, a forma prevista no desfazer); duas parcelas iguais com formas diferentes; o encontro de contas da venda; o CT-15 inteiro; o fluxo com o
 saldo inicial como observação; a regra de tempo do fluxo e dos títulos; as rotas; a integridade adulterada),
 `tests/ui/fase4.caixa.test.js` (Playwright, 1280 e 360 px: lançar avulso pela tela, a pagar e a receber com baixa conferida,
 divisão, desfazer e lote, o fluxo com gráfico e tabela, o plano de contas), `tests/estorno.test.js` (o avulso no estorno de
-todo tipo ativo), `tests/events.test.js` e `tests/api.test.js` (fase, catálogo, rotas).
+todo tipo ativo), `tests/estoque.test.js` (o produto que sai na correção da entrada pede a confirmação do saldo negativo), `tests/events.test.js` e `tests/api.test.js` (fase, catálogo, rotas).

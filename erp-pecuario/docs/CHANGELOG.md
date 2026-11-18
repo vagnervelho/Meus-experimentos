@@ -2459,3 +2459,48 @@ cada comando, de cada passo do teste aleatório e na base de demonstração. Con
 - Ficou para as próximas etapas (seção 55, "Premissas"): a baixa não antes da competência (E4.2), o avulso de aquisição rateado 100% e
   o período só em custeio e outra receita (E4.1), o rateio vigente em D (E4.3). `docs/fase-0/` não mudou (o 01, seção 6.2, ainda diz
   que Events e Settings ficam na página inicial; atualizar na entrega da fase). Esta etapa não fez commit nem push.
+
+## 18/11/2026 — Fase 4, E4.1 e E4.2: lançamento avulso, plano de contas, parcelas e fluxo de caixa
+
+- LANCAMENTO_FINANCEIRO ativo (`EventCatalog`): receita ou despesa fora de evento de animal, com conta (custeio, outra receita ou
+  não operacional), parceiro, competência, período opcional (só custeio e outra receita, a partir da data), quantidade, pasto
+  (obrigatório no arrendamento), categoria, registro a que se refere, documento e parcelas — em aberto ou "Já pago em". Um tratador
+  (`EventService.lancamentoAvulso_`) no registro, na simulação, na correção (`Correcao.entradaAvulso_`) e no estorno; sem rateio
+  entre animais nesta etapa (o pasto fica no lançamento). As naturezas que nascem nos próprios eventos são recusadas com o caminho.
+- Plano de contas: `conta.salvar` (`Config`) cria, renomeia, reordena, desativa e reativa; a combinação natureza × tipo × grupo ×
+  classe segue 03a, 4.13; o código não muda; a classificação trava depois do primeiro lançamento; a conta do sistema não se
+  desativa; conta não se apaga. Tela em Configurações → "Plano de contas".
+- Títulos (`src/Caixa.js`, novo): `parcela.baixar` (inteira, parcial = desdobramento, em lote até 200, juros, multa e desconto, o
+  valor pago conferido — RN-081 —, não antes da competência nem no futuro, o encontro de contas da venda com as deduções retidas),
+  `parcela.desfazerBaixa`, e as extras `parcela.desdobrar` e `parcela.simular`. O período fechado pede o aviso pela trava única
+  (`AuditService.avisoDasBaixas_`). Na correção de qualquer evento, a baixa vai para a parcela correspondente do substituto
+  (RN-046; `Correcao` tabela B `PARCELAS.baixa`), e sem ela é CONFLICT `PARCELA_LIQUIDADA` (o CT-15 inteiro passa).
+- Fluxo de caixa (`financeiro.fluxoCaixa`): realizado e previsto por dia, semana ou mês numa data D qualquer, os vencidos à parte e
+  o saldo a partir do saldo inicial informado, que é uma observação com data (antes dela, sem saldo; o pagamento lançado depois com
+  data anterior muda só o movimento anterior). Títulos a pagar e a receber (`financeiro.titulos`, extra) com a situação em D.
+- Integridade: invariantes 21 (avulso), 22 (parcela paga), 23 (desdobramento, também só no título que se divide) e 24 (encontro de
+  contas) em `FinancialService.conferir`, as mesmas na verificação e na trava.
+- Telas (Financeiro, sob demanda): "Novo lançamento", "A pagar e a receber" (totais, filtros, ações por linha, baixa em lote) e
+  "Fluxo de caixa" (indicadores, gráfico de barras do líquido e de linha do saldo do kit, tabela); a folha da baixa confere o valor
+  pago pelo servidor; o detalhe do lançamento ganha as ações de cada parcela.
+- Achados do teste aleatório, cada um com o teste do caminho escrito antes do conserto (e conferido falhando sem ele):
+  a entrada da correção (`evento.obter`) trazia a parcela dividida (CANCELADA) junto com as que nasceram dela (as parcelas não
+  somavam); a baixa parcial e a divisão em título de parcelas iguais (frete, custo da morte, entrada de estoque…) que a
+  correção sem mudança não refazia — agora só no título que se refaz parcela a parcela (`TITULO_EM_PARTES_IGUAIS`, invariante
+  23 na integridade); a baixa levada à parcela errada entre duas iguais (a paga no pedido, depois a de mesma forma); a forma
+  do pagamento passada às parcelas em aberto do título de parcelas iguais (a entrada usa a forma das em aberto; o desfazer
+  devolve a prevista); e, da Fase 3, a correção da entrada de estoque para outro produto sem o aviso do saldo negativo do
+  produto que sai (`tests/estoque.test.js`).
+- Testes: `tests/financeiro.caixa.test.js` (novo, 15 testes), `tests/ui/fase4.caixa.test.js` (novo, 7 testes de navegador),
+  `tests/estoque.test.js` (o produto que sai na correção), `tests/estorno.test.js` (o avulso), `tests/events.test.js` e
+  `tests/api.test.js` (a fase, o catálogo e as rotas, ajustados ao que mudou de propósito), `tests/correcao.contrato.test.js`
+  (a tabela B com `PARCELAS.baixa`: 24 valores, 13 COPIA), `tests/fase2.fuzz.test.js` (sementes fixas 445, 505 e 611; os
+  oráculos novos precisam conferir de verdade).
+- Teste aleatório (`tests/apoio-fuzz.js`): o gerador do avulso e as ações de baixa, desfazer, divisão e plano de contas; os
+  oráculos do efeito, da correção (com a baixa transportada), do período fechado, do estorno imediato e da viagem no tempo
+  (grupos `fluxo` e `tit`). Levas exploratórias (9100004 a 9100015, 9200000 a 9200055, 9300000 a 9300103, 9400000 a 9400103)
+  acharam os defeitos acima; a leva final com o código final, 104 sementes × 100 passos (9500000 a 9500103, 4 processos de 26):
+  5.728 aceitos, 3.481 recusados, **0 falhas** — 98 avulsos, 102 baixas inteiras, 15 em parte, 9 em lote, 1 encontro de contas,
+  20 desfeitas, 26 divisões e 11 baixas transportadas na correção conferidas pelo oráculo do efeito; 3.540 correções sem mudança
+  aceitas e conferidas (2.134 pela entrada do servidor e 1.406 pela do gerador); a conciliação em 5.251 passos; a viagem no
+  tempo comparou 675.006 unidades.
