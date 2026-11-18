@@ -2512,3 +2512,44 @@ cada comando, de cada passo do teste aleatório e na base de demonstração. Con
   E4.3); a "conta ou caixa" da baixa é a forma de pagamento (caixa único); o pagamento depois do registro só pela baixa (a
   correção transporta a baixa e não aceita "Já pago em" novo); baixa em parte e divisão só no título que a correção refaz parcela
   a parcela. `docs/fase-0/` não mudou. Esta etapa não fez commit nem push.
+
+## 18/11/2026 — Fase 4, E4.3: rateio de custos compartilhados
+
+- Evento RATEIO ativo (CONTRATOS, seção 57): o lançamento (ou a parte dele) dividido entre os animais por cabeça, peso vivo (o
+  peso vigente na data-base pelas regras da Fase 3, com o aviso do peso estimado), dias de permanência (07, seção 3.3) ou valor
+  digitado (soma fechada, RN-071), entre os animais do registro, do rebanho, de um pasto, de uma categoria ou os escolhidos; a
+  data-base (padrão: a competência) e o período (padrão: o do lançamento); a base zero com o aviso e o motivo gravado; o re-rateio
+  como evento novo que vale dali em diante (as linhas antigas intactas, com o porquê); o arrendamento de pasto pelos dias no pasto
+  arrendado; o lançamento do próprio registro só entre os animais dele e por inteiro. Um tratador para registrar, simular, corrigir
+  e estornar; maior resto em centavos (desempate pela maior base e pelo menor código); as alocações como única fonte.
+- Novo `Rateio` (puro: as bases, a descrição, o rateio desatualizado). `Repository`: o rateio vigente pela ordem da cadeia
+  (`rateioEm`, `rateiosDoLancamento`, `alocacoesEm`: o que valia numa data). `Correcao`: a entrada do rateio e a base congelada
+  (`RATEIO.bases`; a tabela B com 25 valores). `FinancialService`: a invariante 25, `exigeCemPorCento`, o `ratear` e os `rateios`
+  do detalhe do lançamento, a lista na data. `AuditService`: o `BASE_RATEIO` do evento RATEIO, o período fechado do rateio na
+  trava, o escopo da trava. `EventService`: a dependência (`RATEIO_DEPENDENTE` no estorno e na correção do registro rateado; o
+  desfazer da importação, `DEPENDENTE`), o período fechado pedido junto com os outros avisos. `Conciliacao`, `InventoryService` e
+  `HealthService`: o número numa data com o rateio que valia nela. `TestRunner`: o CT-13 inteiro (c, d, e, f) na aceitação.
+- Tela: no detalhe do lançamento, "Ratear entre os animais" / "Ratear de novo" (o formulário do catálogo, com o lançamento
+  escolhido e só as opções que o servidor deu; os campos que não se aplicam somem, `mostrar_se`), a revisão da simulação com o
+  valor de cada animal, o aviso do rateio desatualizado e o histórico dos rateios; no detalhe do evento, a seção "Rateio" e a
+  correção pelo mesmo formulário. Página inicial 367 KB de 450 KB; Financial 33 KB, Events 31 KB sob demanda.
+- Achados do teste aleatório, cada um com o teste do caminho conferido falhando sem o conserto: a lista dos lançamentos até uma
+  data e o painel numa data usavam o rateio de hoje; o estorno do re-rateio que deixou um animal de fora não refazia o custo de
+  aquisição dele (a trava recusava); o período fechado do rateio vinha numa segunda confirmação; a ficha do baixado mostrava o
+  custo da aplicação pelo rateio de hoje. E o oráculo da aplicação por peso, que não seguia a dose digitada da seção 53
+  (desacordo anterior a esta etapa, conferido no código da E4.2).
+- Testes: `tests/financeiro.rateio.test.js` (novo, 18 testes), `tests/ui/fase4.rateio.test.js` (novo, 3 testes de navegador,
+  1280 e 360 px), `tests/estorno.test.js` (o RATEIO), `tests/acceptance.test.js` (o CT-13 inteiro), `tests/fase2.fuzz.test.js`
+  (semente fixa 503 e os oráculos do rateio), `tests/events.test.js`, `tests/api.test.js`, `tests/correcao.contrato.test.js`
+  (ajustados ao tipo novo ativo e à tabela B). Teste aleatório (`tests/apoio-fuzz.js`, `tests/apoio-oraculos.js`): o gerador do
+  RATEIO, o oráculo do efeito (`efeitoRateio`), a correção, o período, a conciliação, a viagem no tempo (também a ficha com os
+  rateios do animal) e o replay independente com o rateio vigente pela ordem da cadeia.
+- Executado com o código final: teste aleatório com 105 sementes novas × 100 passos (9900000 a 9900104): 6.379 aceitos, 3.242
+  recusados, **0 falhas** (o registro do rateio aceito 114 vezes, 81 conferidos pelo oráculo do efeito em 10 combinações de
+  critério × escopo); `npm test` 962 testes, 962 aprovados, 0 falhas (1.005,2 s; sementes fixas 968 aceitos, 490 recusados, 0
+  falhas); `npm run ui:check` 227 testes de navegador, 227 aprovados, 0 falhas (582 s). Na entrega da E4.2, `npm test` dava 943
+  de 943 e o `ui:check` 224 de 224.
+- Decisões (CONTRATOS, seção 57.6): o rateio é evento, sem rota nova; o vigente numa data é o último da cadeia com data até ela;
+  base zero grava com o aceite (salvo no lançamento 100% do registro); o estorno ou a correção do registro rateado é recusado até
+  o rateio ser estornado; o rateio desatualizado só alerta; `mostrar_se` é só da tela. `docs/fase-0/` não mudou. Esta etapa não
+  fez commit nem push.

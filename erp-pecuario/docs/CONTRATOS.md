@@ -4555,3 +4555,35 @@ faz — a leva desta etapa achou o desacordo (semente 9600006) em código anteri
 - O período fechado do rateio é pedido pelo tratador, junto com os outros avisos (uma confirmação só); a trava fica como rede.
 - O número pedido numa data usa o rateio que valia nela (a lista dos lançamentos, o painel, o custo sanitário do período, o custo
   de cada aplicação na ficha do baixado); as listas de hoje (o financeiro da ficha) e o custo de aquisição gravado, o de hoje.
+### 57.7 Achados, testes e execuções
+
+Achados do teste aleatório nesta etapa, cada um com o teste do caminho escrito e conferido falhando sem o conserto: a lista dos
+lançamentos até `ate` mostrava o critério do rateio de hoje (semente 9600000); o painel numa data somava as alocações do rateio
+de hoje (9700073); o estorno do re-rateio que tinha deixado um animal de fora não refazia o custo de aquisição dele (a trava
+recusava; 9700006); o período fechado do rateio era pedido numa segunda confirmação, depois dos outros avisos (9700013); a ficha
+do baixado mostrava o custo da aplicação pelo rateio de hoje (9800102). E um desacordo do oráculo da aplicação por peso com a
+seção 53, anterior à etapa (9600006, conferido no código da E4.2).
+
+**Testes.** `tests/financeiro.rateio.test.js` (novo, 18 testes, pela api: o arrendamento de 07, seção 3.3; o CT-13 a, b, c, d, e
+e f; 1.000 sorteios; os caminhos — correção sem mudança com a base congelada, correção do período, do substituto, estorno que
+devolve o anterior, estorno da correção, a posição da correção na cadeia, o DIRETO com o critério pedido —; a dependência; a
+compra; o vendido no meio do período e o `BASE_RATEIO`; as recusas; o lançamento do próprio registro; o período fechado numa
+confirmação só; a importação; a integridade adulterada; a regra de tempo na lista, no painel e na ficha; o estorno do re-rateio
+que deixou um animal de fora), `tests/ui/fase4.rateio.test.js` (novo, Playwright, 3 testes: ratear e ratear de novo a 1280 e a
+360 px; o arrendamento, o rateio desatualizado, o detalhe do evento e a correção), `tests/estorno.test.js` (o RATEIO no estorno e
+na correção de todo tipo ativo), `tests/acceptance.test.js` (o CT-13 inteiro), `tests/fase2.fuzz.test.js` (a semente fixa 503 —
+com o rateio no sorteio, nenhuma das anteriores chegava ao encontro de contas — e os oráculos do rateio conferindo de verdade),
+`tests/events.test.js`, `tests/api.test.js` e `tests/correcao.contrato.test.js` (o tipo ativo, o pedido vazio, a tabela B com 25
+valores).
+
+**Execuções desta etapa.** Teste aleatório com o código final, 105 sementes novas × 100 passos (9900000 a 9900104, 3 processos de
+35): 6.379 aceitos, 3.242 recusados, **0 falhas**; o registro do rateio foi aceito 114 vezes e recusado 50 (o oráculo do efeito
+conferiu 81:
+29 CABECAS × EVENTO, 10 MANUAL × EVENTO, 7 VALOR_INDIVIDUAL × EVENTO, 1 PESO_VIVO × EVENTO, 8 CABECAS × PASTO, 5 CABECAS × REBANHO,
+1 CABECAS × LISTA, 13 DIAS × PASTO, 5 DIAS × REBANHO, 2 DIAS × LISTA; 46 DIRETO, 7 bases zero, 13 bases congeladas na correção, 37
+correções só da data); 3.854 correções sem mudança aceitas e conferidas; a conciliação em 5.902 passos; a viagem no
+tempo comparou 783.564 unidades. As levas anteriores (9600000 a 9600011, 9610000 a 9610011, 9700000 a 9700104 em parte e 9800000 a
+9800104) acharam os defeitos acima. `npm test` com o código final: 962 testes, 962 aprovados, 0 falhas (1.005,2 s; as 27 sementes
+fixas: 968 aceitos, 490 recusados, 0 falhas). `npm run ui:check`: 227 testes de navegador, 227 aprovados, 0 falhas (582 s); 14
+arquivos .html dentro do orçamento — a página inicial montada com 367 KB de 450 KB; sob demanda, Import 48 KB, Weights 64 KB,
+Health 24 KB, Reproduction 67 KB, Financial 33 KB, Events 31 KB e Settings 40 KB, de 150 KB cada.
