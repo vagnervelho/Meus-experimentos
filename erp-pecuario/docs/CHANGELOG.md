@@ -2162,3 +2162,46 @@ terminou (7 altos). Esta etapa não mudou código.
 - Durante a etapa, o salvamento automático de fora dela gravou estados intermediários (os commits `1aae96d`, `db29996`,
   `71ace1f`, `406cdb0`, `0df68a8`, `b25e4d4`, `9caac72` e `f74267a`, este com a seção 50.10 do `CONTRATOS.md`). Esta etapa não
   fez commit nem push; `docs/fase-0/` não mudou.
+
+## 18/11/2026 — Fase 3, segunda convergência, etapa 2: curral e tronco sem estado escondido, e nenhum cálculo no aparelho
+
+- **O cliente não calcula** (CONTRATOS, seção 51): `tests/cliente.naocalcula.test.js` (novo), com o leitor
+  `tests/apoio-naocalcula.js` (novo), lê os `<script>` de todo `src/*.html` e acusa a aritmética de data (somar dias, diferença de
+  datas, `Date.parse`/`new Date`/`getDate` e afins, o dia em milissegundos, o ano tirado do texto da data) e a conta com número de
+  domínio pelo nome (GMD, ganho, carência, UA, idade, dias, centavos, valor, total, peso, dose, custo, quantidade e outros). O que
+  pode ficar é uma lista de 11 entradas, cada uma com o porquê (formatação do instante, do peso e do dinheiro; leitura da data
+  digitada; o desvio do relógio para o do servidor; o carimbo do rascunho e da cópia local; a ordenação da tabela; o desenho dos
+  gráficos); o teste falha com conta fora da lista e com entrada da lista sem uso, e tem um autoteste do leitor.
+- O que virou dado do servidor: os vencimentos do "Dividir em parcelas" (rota nova `financeiro.vencimentos`,
+  `FinancialService.vencimentos`: MES, D30, D15, D7, de 1 a 120 parcelas, recusa com o campo); `Fmt.diasEntre` saiu (sem uso);
+  "Dados de …" nos arquivos exportados e na faixa sem conexão formatam o instante pelo `Fmt.instante(ms)`, sem `new Date` na tela.
+  A prévia da correção da sanidade e a agenda já vinham do servidor (seções 50 e 49); o teste confere que nenhuma tela de domínio
+  tem conta. `tests/telas.fase2.test.js`: os vencimentos conferidos pela rota (inclusive D15 e as recusas), não mais pela função
+  do aparelho.
+- **Curral e tronco sem estado escondido** (CONTRATOS, seção 52), dois defeitos do modo sem localStorage (o rascunho no servidor,
+  SP-06), consertados pela causa, cada um com a regressão em `tests/ui/curral.fuzz.regressoes.test.js` que falha com o `src/` de
+  antes da etapa (`8b6b4c3`):
+  - ALTA: o bloco saía sem a chave guardada quando o rascunho no servidor falhava (só a faixa avisava); se a página fosse embora,
+    a linha voltava sem a chave e saía com outra — gravada duas vezes. Agora o bloco que ainda não saiu só sai com a chave
+    guardada: senão volta à fila com a chave e o porquê (`[data-nao-guardado]`), e o envio para. O que já saiu antes sai de novo
+    com a chave dele (regressão 7, curral e tronco);
+  - MEDIA: a falha do rascunho adiado não aparecia no curral nem no tronco (só o formulário de registro ouvia) e o rascunho não ia
+    de novo sem outra mudança na tela. Agora `App` põe a faixa em qualquer tela (`Rascunhos.aoFalhar`) e a tira quando o servidor
+    confirma (`Rascunhos.aoGuardar`, novo), e `Rascunhos` tenta de novo sozinho 5 s depois da falha (regressão 8, curral e tronco).
+- **O teste aleatório do curral e do tronco** (`tests/ui/curral.fuzz.test.js`, `tests/ui/apoio-curral.js`) gera agora: o modo do
+  rascunho fixo por `FUZZ_MODO=semLS|comLS`; sem localStorage, o rascunho no servidor que falha (transporte, falha interna,
+  ocupado, resposta perdida, pedido perdido, segurado) e a página que vai embora de repente (`rede.rascunhoBloqueado`); as datas
+  das trocas do 0457 mais sorteadas; o brinco repetido de uma linha em qualquer estado (`repetir`: na fila, no ar, sem
+  confirmação, gravada, com aviso, recusada, pendente); o brinco conferido e não lançado antes de "Mudar", com a resposta chegando
+  na sessão nova e o brinco lançado de novo; a queda de sinal em várias conferências (`semSinal`). O oráculo confere também: nenhuma
+  linha de bloco no ar ou gravado oferece "Corrigir o brinco" (além das outras ações) nem muda de animal ou de valor; o bloco que
+  volta sem resposta só quando nada com a chave dele saiu, e com o porquê na tela; a linha, a mensagem do servidor e a conferência
+  com o brinco, a categoria e o pasto do servidor NA DATA da sessão (`animal.resolver` com `ids`, fora da rede da página); "Corrigir
+  o resultado" com o texto digitado; o aviso "o novo resultado substituiu o anterior" e "Substituir pelo peso novo" em todo caminho
+  que substitui; a pendente com resposta do servidor resolvida (ou barrada por outra linha do mesmo animal); sem localStorage, o
+  rascunho do servidor igual à tela antes de recarregar, sair e terminar, a faixa quando o rascunho falhou e a página recarregada
+  igual ao rascunho do servidor. O modelo foi acertado onde estava errado (a conferência pergunta junto as pendentes; a chave e a
+  recusa que chegam enquanto o rascunho assenta antes de "Terminar"), sem afrouxar o oráculo.
+- Levas, com o código final: 152 sementes × 40 ações sem localStorage, 152 × 40 com localStorage, 32 × 100 sem e 32 × 100 com
+  (4 processos): 368 sementes, 0 falhas, 7.216 linhas gravadas e 21.609 verificações do oráculo (os números por garantia estão na
+  seção 52.7 do CONTRATOS). As levas de busca antes dela (160 sementes × 40) só acharam erros do modelo do teste.

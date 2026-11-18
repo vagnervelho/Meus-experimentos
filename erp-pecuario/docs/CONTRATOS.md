@@ -3793,3 +3793,24 @@ Os testes 7 e 8 (curral e tronco, sem localStorage) falham com o `src/` de antes
 - Depois de a página ir embora de repente sem localStorage, a confirmação que não chegou ao rascunho do servidor volta a ser
   incerta: o bloco gravado que o rascunho ainda diz "enviando" aparece "sem confirmação" e é conferido pela chave (nunca sai com
   outra). O que foi digitado e não chegou ao servidor se perde — a faixa já pedia "não feche a tela antes de enviar".
+
+### 52.7 As levas
+
+- Levas de busca, com o gerador novo (sementes 2000 a 2039 e 4000 a 4039 sem localStorage, 3000 a 3039 e 5000 a 5039 com ele,
+  40 ações): as falhas foram todas do próprio teste (o modelo da conferência que pergunta junto as pendentes, a chave anotada
+  no "Terminar", a recusa que chega enquanto o rascunho assenta, a falha de rede que sobrava para a página nova, a espera da
+  conferência segurada de propósito) — o modelo foi acertado em cada uma, sem afrouxar o oráculo. Os dois defeitos desta etapa
+  (52.1 e 52.2) foram consertados antes das levas, lendo o código pelas garantias novas, e confirmados pelas regressões 7 e 8.
+- Leva limpa com o código final: 152 sementes × 40 ações sem localStorage (10000 a 10151), 152 × 40 com localStorage (20000 a
+  20151), 32 × 100 sem localStorage (30000 a 30031) e 32 × 100 com localStorage (40000 a 40031), 4 processos: 368 sementes, 0
+  falhas. O oráculo fez 21.609 verificações (5.133 depois de o tempo passar, a do "nada preso") com 7.216 linhas gravadas;
+  conferiu 270.365 rótulos de linha pelo brinco da data (10.210 numa data com o brinco trocado ou reaproveitado depois), 8.169
+  mensagens do servidor nomeando o animal pelo brinco da data, 4.906 conferências do brinco (brinco, categoria e pasto do
+  servidor na data) e 19.784 vezes um bloco no ar ou gravado intocado pela ação. O gerador fez 2.308 substituições e 633 "pesar
+  de novo" (8 com a decisão refeita porque a linha anterior mudou enquanto a pergunta estava na tela), 390 brincos repetidos de
+  uma linha num bloco no ar, sem confirmação, gravado ou com aviso e 105 de uma pendente sem sinal, 1.273 lançamentos sem resposta
+  do servidor (565 quedas de sinal), 43 pendentes resolvidas pela conferência do mesmo brinco, 183 conferências das pendentes (105
+  pendentes barradas por outra linha do mesmo animal), 338 mudanças de sessão (173 com um brinco conferido e não lançado, 87 com ele
+  lançado de novo na sessão nova e 75 com a resposta da conferência chegando na sessão nova); e, sem localStorage, 180 páginas que
+  foram embora de repente (70 perderam o que não tinha chegado ao servidor, sem nada gravado a mais), 1.130 rascunhos do servidor
+  conferidos com a tela, 127 falhas do rascunho avisadas na tela e 12 blocos que não saíram por falta da chave guardada.
