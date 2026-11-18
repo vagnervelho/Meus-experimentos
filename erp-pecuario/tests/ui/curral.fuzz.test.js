@@ -250,7 +250,17 @@ async function rodarSemente(semente, nAcoes, opcoes) {
         if (l.estado !== 'NAO_ENCONTRADO') return;
         const dom = v.linhas.find((x) => x.uid === l.uid);
         if (!dom) return;
-        if (l.semPosicao && (dom.texto.indexOf('brinco não encontrado') >= 0 || dom.texto.indexOf('a conferir no servidor') < 0)) e('a pendente ' + l.uid + ' (sem resposta do servidor) aparece como "' + dom.texto + '"');
+        // Segunda convergência, rodada 2 (achado 16): a barrada por outra linha do mesmo animal diz "barrada", não "a conferir no
+        // servidor" (o servidor já respondeu); e só é barrada se o texto dela, na data da sessão, é de um animal com outra linha
+        // ainda do aparelho.
+        if (l.semPosicao && l.barrada) {
+          const m = M.linhas[l.uid];
+          const rr = m ? resolverModelo(m.texto, c.sessao.data) : null;
+          const justa = rr && rr.situacao === 'ACHADO' && !rr.inelegivel && c.linhas.some((y) => y.uid !== l.uid && y.animal_id === rr.animal_id && mexivel(c, y));
+          if (dom.texto.indexOf('barrada') < 0 || dom.texto.indexOf('a conferir no servidor') >= 0 || dom.texto.indexOf('brinco não encontrado') >= 0) e('a pendente ' + l.uid + ' (barrada por outra linha do mesmo animal) aparece como "' + dom.texto + '"');
+          else if (m && !justa) e('a pendente ' + l.uid + ' ("' + m.texto + '") está barrada sem outra linha do mesmo animal ainda do aparelho em ' + c.sessao.data);
+          else conta('rotulo:barrada');
+        } else if (l.semPosicao && (dom.texto.indexOf('brinco não encontrado') >= 0 || dom.texto.indexOf('a conferir no servidor') < 0)) e('a pendente ' + l.uid + ' (sem resposta do servidor) aparece como "' + dom.texto + '"');
         else if (l.semPosicao) conta('rotulo:pendente');
       });
       // Achado 17: o contador do tronco conta as fêmeas achadas, não as linhas.
@@ -948,7 +958,7 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     conta('sairVoltar');
     return true;
   }
-  async function terminar(v) {
+  async function terminar(v, o) {
     await assentarRascunho();
     v = await lerTela(page, tela);
     anotarChaves(v.c);
@@ -959,6 +969,10 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     const incertas = c.linhas.some((l) => l.estado === 'SEM_SINAL' || l.estado === 'ENVIANDO');
     const naoGravadas = c.linhas.filter((l) => l.estado !== 'GRAVADA');
     log('terminar' + (incertas ? ' (com incertas: deve recusar)' : naoGravadas.length ? ' (com ' + naoGravadas.length + ' não gravadas)' : ''));
+    // Rodada 2 da segunda convergência (achado 14): sem localStorage, o rascunho do servidor é apagado ao terminar — a remoção
+    // que falha (o transporte, a falha interna) não pode terminar a sessão: a que voltasse do rascunho enviaria o descartado.
+    const removeFalha = !(o && o.semFalha) && semLS && !incertas && rnd() < 0.3;
+    if (removeFalha) { rede.falhas.push({ classe: 'rascunho', tipo: um(rnd, ['transporte', 'interna']), rota: 'rascunho.remover' }); log('rede: a remoção do rascunho no servidor falha'); }
     await page.click(cfg.status + ' button:has-text("' + cfg.terminar + '")');
     await assentar();
     if (incertas) {
@@ -969,12 +983,25 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     }
     if (naoGravadas.length) {
       await page.waitForSelector('[role=dialog]');
-      if (rnd() < 0.4) { await page.click('[role=dialog] button:has-text("Voltar")'); conta('terminar:voltou'); return true; }
+      if (rnd() < 0.4) { if (removeFalha) rede.falhas.splice(rede.falhas.findIndex((f) => f.rota === 'rascunho.remover'), 1); await page.click('[role=dialog] button:has-text("Voltar")'); conta('terminar:voltou'); return true; }
       await page.click('[role=dialog] button:has-text("Descartar e terminar")');
       naoGravadas.forEach((l) => M.descartadas.add(l.uid));
     }
+    await assentar();
+    if (removeFalha) {
+      const x = await lerTela(page, tela);
+      if (x.fase === 'resultado') falhar('"Terminar" mostrou o resultado sem o servidor confirmar que apagou o rascunho (a sessão voltaria com o descartado)');
+      if (!/não terminou: o servidor não confirmou que apagou o rascunho/.test(x.textoTodo)) falhar('"Terminar" sem a remoção confirmada e sem dizer por quê');
+      if (x.faixaRascunho && !/Não foi possível apagar o rascunho no servidor/.test(x.textoTodo)) falhar('a faixa da remoção que falhou diz outra coisa: ' + x.textoTodo.slice(0, 300));
+      // O descarte não valeu: as linhas continuam na sessão.
+      naoGravadas.forEach((l) => M.descartadas.delete(l.uid));
+      conta('terminar:remoção sem confirmação (avisada, a sessão continua)');
+      return true;
+    }
     await page.waitForSelector(cfg.resultado);
     const w = await lerTela(page, tela);
+    if (semLS && rascunhoServidor()) falhar('terminou, mas o rascunho continua no servidor (a sessão voltaria com o descartado)');
+    if (semLS) conta('terminar: rascunho do servidor apagado');
     const grav = c.linhas.filter((l) => l.estado === 'GRAVADA').length;
     if (w.resultadoN !== grav) falhar('o resultado diz ' + w.resultadoN + ' gravadas; a sessão tinha ' + grav);
     if (w.rascunho) falhar('o rascunho continua no aparelho depois de terminar');
@@ -1188,6 +1215,9 @@ async function rodarSemente(semente, nAcoes, opcoes) {
       if (!v.c.linhas.every((l) => l.estado === 'GRAVADA')) falhar('o fim não gravou tudo: ' + JSON.stringify(v.c.linhas.map((l) => [l.uid, l.estado, l.mensagem])));
       rotulo = 'terminar no fim';
       await terminar(v);
+      // A remoção do rascunho que falhou no "Terminar" deixa a sessão aberta: com sinal, terminar de novo.
+      const w2 = await lerTela(page, tela);
+      if (w2.fase === 'sessao') { rotulo = 'terminar no fim (de novo, com sinal)'; await terminar(w2, { semFalha: true }); }
     }
     // O banco = o modelo: cada linha gravada uma vez, com o animal da data, o valor e o cabeçalho; a integridade limpa.
     await verificar();
@@ -1205,7 +1235,8 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     s.conferirProjecoes('semente ' + semente);
     // Sem localStorage, o aviso de que o armazenamento do aparelho não está disponível é esperado (o rascunho vai ao servidor).
     // E a falha registrada da gravação do rascunho no servidor que a rede do teste segurou além do prazo (a faixa avisa o operador).
-    const errosConsole = a.estado.erros.filter((x) => !(semLS && /armazenamento local indisponível|\[ERP\] rascunho no servidor( ao sair)?: /.test(x)));
+    // E a remoção do rascunho que falhou no "Terminar" (seção 54: a tela diz que não terminou).
+    const errosConsole = a.estado.erros.filter((x) => !(semLS && /armazenamento local indisponível|\[ERP\] rascunho no servidor( ao sair)?: |\[ERP\] remover o rascunho do (curral|tronco): /.test(x)));
     if (errosConsole.length) falhar('erros no console: ' + errosConsole.join(' | '));
     cont.gravadas = (cont.gravadas || 0) + gravadas.size;
     cont.sementes = (cont.sementes || 0) + 1;

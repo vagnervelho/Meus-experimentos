@@ -3876,10 +3876,12 @@ function gerarAcao(sis, S, rnd, k, acao, base) {
     const campos = Object.assign({ [c.campo]: c.valor }, c.junto || {});
     // Dois campos na mesma edição (o sexo e o nascimento, a mãe e o pai).
     if (rnd() < 0.25) { const c2 = correcaoAleatoria(sis, S, rnd, id); Object.assign(campos, { [c2.campo]: c2.valor }, c2.junto || {}); }
-    if (rnd() < 0.3) campos.nome = sorteio(rnd, ['Mimosa', 'Estrela', 'Valente']);
     // Rodada 2 da segunda convergência (achado 5): a raça corrigida na ficha (auditoria, sem evento) — a correção do lançamento
-    // que criou o animal, sem mudança ou de outro campo, não a desfaz (o oráculo da correção confere ANIMAIS igual).
-    if (rnd() < 0.2 && !(EXTERNOS(S).indexOf(id) >= 0)) campos.raca = sorteio(rnd, ['NELORE', 'ANGUS', 'CRUZADO']);
+    // que criou o animal, sem mudança ou de outro campo, não a desfaz (o oráculo da correção confere ANIMAIS igual). O mesmo
+    // sorteio do nome decide a raça (a sequência das sementes não muda).
+    const rn = rnd();
+    if (rn < 0.3) campos.nome = sorteio(rnd, ['Mimosa', 'Estrela', 'Valente']);
+    else if (rn >= 0.8 && EXTERNOS(S).indexOf(id) < 0) campos.raca = ['NELORE', 'ANGUS', 'CRUZADO'][Math.min(2, Math.floor((rn - 0.8) * 15))];
     return Object.assign(base, { rota: 'animal.editar', dados: Object.assign({ animal_id: id, campos }, rnd() < 0.95 ? { justificativa: 'Conferido na ficha' } : {}), rotulo: 'editar ' + c.campo });
   }
   // Passada 3: o estorno logo depois do registro (nada gravado entre os dois) devolve cada animal que já existia ao que era.

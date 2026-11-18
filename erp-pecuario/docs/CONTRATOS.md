@@ -199,7 +199,13 @@ só sai com a chave guardada e o rascunho no servidor que falha avisa e vai de n
 da revisão (17 achados): o diagnóstico sem estação dado à exposição mais recente, o que foi digitado guardado no payload para a
 entrada da correção (a dose por peso, o pasto e a raça das crias), a mudança da correção de cadastro pelo animal e pelo campo, a
 estação do original só com a mesma data, a agenda desde o início do protocolo, o rascunho no servidor pela versão, nenhum
-formulário sem a chave guardada e um animal por lançamento no curral e no tronco (seção 53).
+formulário sem a chave guardada e um animal por lançamento no curral e no tronco (seção 53); e o da rodada 2 (17 achados): o
+aborto dado ao dono da prenhez que ele encerra, a cópia × fonte na mesma linha do lançamento (o cabeçalho da aplicação, a dose e a
+base do rateio, a soma das doses, o método da pesagem e da desmama) com a correção recusada sobre o que ela lê quebrado, as marcas
+do digitado lidas pelos valores congelados (a dose, o pasto, a raça, a carência, o fabricante, a quantidade e a próxima
+aplicação), o pasto informado da desmama e do parto só de natimorto guardado, a raça da ficha mantida na correção, a venda por
+cabeça congelada, a carência que a tela deixa para o servidor, a estação do diagnóstico pelo filtro da lista, o "Terminar" que só
+termina com o rascunho do servidor apagado e a recusa do servidor separada da falta de sinal no curral e no tronco (seção 54).
 
 ## 1. Regras que valem para todo arquivo de `src/`
 
@@ -3542,7 +3548,7 @@ tabela são as do código (`Correcao.tabela()`), e `tests/correcao.contrato.test
 | `NASCIMENTO.pasto_crias` | DERIVADO | o pasto da mãe no dia do parto | a mãe e a data | EVENTO_ANIMAIS.pasto_destino_id (CRIA) |
 | `NASCIMENTO.raca_cria` | DERIVADO | a raça da mãe | a mãe e a cria | atributos_iniciais_json.raca; ANIMAIS.raca |
 | `AJUSTE.valor_anterior` | DERIVADO | o cadastro do animal antes do ajuste (e as regras que o cadastro de hoje quebraria: VALOR_IGUAL, as regras entre campos, o par do dado e da certeza; no brinco lançado errado, as conferências pelo brinco de hoje) | o animal, o campo, o valor novo e a data | AJUSTES.valor_anterior (também a certeza apagada junto) |
-| `VENDA.bases_estimadas` | DERIVADO | a última pesagem de cada animal até a data | os animais, a data, a modalidade, o peso vivo total | RATEIOS e ALOCACOES_FINANCEIRAS; EVENTO_ANIMAIS.valor_individual |
+| `VENDA.bases_estimadas` | DERIVADO | a última pesagem de cada animal até a data (ou a divisão por cabeça, quando algum não tinha pesagem: seção 54) | os animais, a data, a modalidade, o peso vivo total | RATEIOS e ALOCACOES_FINANCEIRAS; EVENTO_ANIMAIS.valor_individual |
 | `VENDA.rotulo_deducao` | COPIA | LISTAS (TIPO_DEDUCAO_VENDA).rotulo | o tipo da dedução | FINANCEIRO.descricao (dedução) |
 
 ### 50.5 Recalcular quando a entrada muda
@@ -3572,8 +3578,9 @@ tabela são as do código (`Correcao.tabela()`), e `tests/correcao.contrato.test
   touro de um lote com vários touros (com um touro só, o `touro_id` do registro já era conferido). Sem isso, a correção sem
   mudança da exposição refaria o animal como fêmea exposta.
 - O pasto informado só é conferido como quem recebe animais (desativado: PASTO_INATIVO) quando algum animal vai para ele: o
-  pasto do lote da compra com todos os animais de pasto próprio, o do parto só de natimorto e o da desmama cujos bezerros já
-  estavam nele não ficam gravados, e estar desativado depois não recusa a correção. O parto só de natimorto também não pede nem
+  pasto do lote da compra com todos os animais de pasto próprio, o do parto só de natimorto (guardado no payload, seção 54) e o da
+  desmama cujos bezerros já estavam nele (gravado com origem = destino, seção 54) não recebem animal, e estar desativado depois
+  não recusa a correção. O parto só de natimorto também não pede nem
   confere o pasto da mãe.
 - As regras entre campos da correção de cadastro (castrado e reprodutor só no macho, partos anteriores só na fêmea, castrado
   não é reprodutor, o dado e a certeza dele, a chegada depois do nascimento) são conferidas com o cadastro de hoje; na correção
@@ -3643,9 +3650,11 @@ agora; o conserto está no ponto único (a linha da tabela B, ou a regra que só
 - O valor de antes do ajuste depende também da data: sem mudar a data, a correção mantém o do original (e o VALOR_IGUAL e as
   conferências pelo brinco de hoje não se aplicam); com outra data, ele é refeito na posição nova, como no registro
   (`tests/correcao.contrato.test.js`).
-- Os campos que a tela preenche pelo produto (carência, lote, validade, modo e dose de referência) são informados: a entrada sem
-  mudança os leva como foram gravados, e trocar só o produto não os troca — o usuário vê e decide (o nome, o fabricante, o custo,
-  a conta e o nome da categoria no consumo passam a ser os do cadastro de hoje do produto novo: `tests/correcao.contrato.test.js`).
+- Os campos que a tela preenche pelo produto (lote, validade, modo e dose de referência) são informados: a entrada sem mudança
+  os leva como foram gravados, e trocar só o produto pela mudança não os troca — na tela, trocar o produto troca o que veio do
+  anterior (seção 54). A carência não é mais preenchida pela tela: vazia, o servidor a copia do produto (a marca
+  `carencia_informada`, seção 54), e a correção para outro produto a refaz pelo produto novo (o nome, o fabricante, o custo, a
+  conta e o nome da categoria no consumo passam a ser os do cadastro de hoje do produto novo: `tests/correcao.contrato.test.js`).
 - O nascimento estimado pela idade em meses fica como data (ESTIMADA): a entrada leva a data gravada, e a correção da data do
   lançamento não a move.
 - O papel do animal no lote da exposição segue o sexo do cadastro; a correção de cadastro que tiraria o sexo de um touro de um
@@ -3948,3 +3957,84 @@ oráculo que deixou o defeito passar foi estendido (53.3).
   comparou 508.977 consultas; a agenda conferiu 96.831 vencimentos no início do protocolo e 213.565 pendências; a viagem no
   tempo comparou 2.031.536 unidades; o resolvedor conferiu 169.967 textos. A primeira tentativa (o mesmo intervalo, com o
   oráculo de antes) parou na semente 7600019 (53.3), refeita do começo.
+
+## 54. Conserto da rodada 2 da segunda convergência — `ReproductionService` (o dono do aborto, a exposição em curso na previsão, `abortos` nos indicadores), `AuditService` (o cabeçalho da aplicação e o método da pesagem e da desmama na mesma linha do lançamento, a dose × a base do rateio e a soma das doses, o lote da saída, o rateio × o modo; a trava recusa a correção sobre o que ela lê quebrado: `lidaPelaCorrecao`), `Correcao` (as marcas do digitado nos valores congelados; a certeza apagada junto fora da entrada; `MUDANCA_SEM_ITEM`; a venda por cabeça congelada; o pasto do parto só de natimorto), `EventService` (o payload `quantidade_informada`, `carencia_informada`, `fabricante_informado`, `proxima_informada` e `pasto_destino_id` do parto sem cria viva; o intervalo do protocolo congelado também com a próxima digitada; o pasto informado da desmama gravado com o bezerro já nele; a raça da ficha mantida na correção; as mensagens do par do dado e da certeza), `FinancialService` (`bases_congeladas` 'CABECAS'), `EventCatalog` (a ajuda da carência), `Components` (`preencherDoProduto_`: trocar o produto, o modo ou o protocolo troca o que veio do anterior; a carência fica com o servidor), `Health` (a aplicação dos pendentes sem a carência), `Reproduction` (a estação do diagnóstico pelo filtro; o tronco: a recusa do servidor, a barrada, o "Terminar"), `Weights` (o curral: o mesmo), `JavaScript` (`Rascunhos`: a falha só de remoção avisa a remoção); `tests/convergencia2.r2.test.js`, `tests/ui/convergencia2.r2.test.js`, `tests/apoio-fuzz.js`, `tests/ui/curral.fuzz.test.js`
+
+Depois da rodada 1 da segunda convergência, a revisão achou 17 problemas (7 altos), das mesmas duas classes: o fato congelado na
+correção (o valor que o original copiou, derivou ou recebeu digitado, refeito pelo estado de hoje ou pela entrada errada) e
+estados do curral e do tronco que o teste aleatório da interface não gerava. Cada achado tem um teste que falha com o `src/` de
+antes (commit `5e69ebf`) e passa agora; o conserto está na causa, e o oráculo que deixou o defeito passar foi estendido (54.3).
+
+### 54.1 Os achados e os consertos
+
+| # | Achado | Gravidade | Conserto (a causa) | Teste |
+|---|---|---|---|---|
+| 1 | O aborto entrava na estação pela faixa de datas: o da prenhez da estação anterior virava o desfecho da fêmea na seguinte (parição e perda erradas), e a previsão de parto zerava a exposição em curso | ALTA | `donoDoAborto_`: o aborto é da estação dona da prenhez que ele encerra (o último diagnóstico positivo do ciclo, ou a exposição mais recente antes dele) — a regra do parto e do diagnóstico sem estação; o aborto seguido de diagnóstico positivo da mesma estação não é o desfecho; a exposição em curso no parto ou no aborto continua no ciclo novo, a partir dele | `tests/convergencia2.r2.test.js`, achado 1 |
+| 2, 6 | A dose mexida à mão na aplicação por peso passava calada (a base do rateio do consumo é cópia dela), e a correção sem mudança (ou só da anotação) espalhava a dose adulterada no custo; também calados o lote, o fabricante, a via e o veterinário diferentes entre as linhas e o lote da saída ≠ o da aplicação | ALTA | a verificação confere o cabeçalho da aplicação em toda linha (`CABECALHO_SANIDADE`, pela maioria das linhas), a base do rateio do consumo = a dose de cada animal (`BASE_DOSE`), a soma das doses = a saída quando a quantidade não foi informada (`SOMA_DOSES`, pela marca `quantidade_informada`), o lote e a validade da saída (`SAIDA_LOTE`) e o rateio × o modo (`RATEIO_MODO`); a trava recusa a correção do lançamento cuja fonte que ela lê está quebrada (`lidaPelaCorrecao`) | achados 2 e 6, e 6 (as cópias do cabeçalho) |
+| 3 | O método mexido à mão numa linha da pesagem ou da desmama passava calado; a entrada lê o método da primeira linha e a correção sem mudança o espalhava (o GMD sumia) | ALTA | o método é do lançamento na PESAGEM e na DESMAMA (`METODO_DO_LANCAMENTO`): a linha diferente da maioria é COPIAS; a correção sobre ela é recusada | achado 3 |
+| 4 | O pasto de destino da desmama não ficava gravado com o bezerro já nele: o estorno da transferência anterior deixava o desmamado no pasto antigo em silêncio, e as duas entradas sem mudança gravavam fatos diferentes | ALTA | o pasto informado fica gravado também com o bezerro já nele (origem = destino, sem estada nova): a linha do tempo confere a origem, e o fato que tiraria o bezerro dele naquele dia é recusado (ORIGEM_DIVERGENTE); a entrada lê o pasto das linhas | achado 4 |
+| 5 | A correção do lançamento que criou o animal (rebanho inicial, compra, outra entrada, parto) desfazia a raça corrigida na ficha, mesmo sem mudança | ALTA | a raça vai para o cadastro só quando a correção a muda em relação à que o original deu ao animal (`racaMudou_`, os atributos da criação) | achado 5 |
+| 7 | Trocar o produto (ou o protocolo) na aplicação mantinha a carência, a dose, o lote e a validade do anterior — no lançamento novo e na correção | ALTA | a tela troca o que veio do produto (ou do protocolo) anterior — o campo vazio ou ainda com o valor dele — e mantém o digitado; a carência não é mais preenchida no aparelho: vazia, o servidor a copia do produto (`carencia_informada` false), e a entrada da correção a leva vazia, para acompanhar o produto | `tests/ui/convergencia2.r2.test.js`, achado 7 |
+| 8 | Fêmeas → "Diagnóstico": o aparelho escolhia a estação pela data de hoje, e o diagnóstico ia para a estação errada | ALTA | a estação é a do filtro da lista ("Expostas na estação"); sem ele, o diagnóstico vai sem estação, e o servidor o dá à exposição mais recente da fêmea (53.2) | achado 8 |
+| 9 | A venda que o servidor dividiu por cabeça (um animal sem pesagem até a data) passava a ser dividida pelo peso estimado depois de uma pesagem retroativa | ALTA | `VENDA.bases_estimadas` congela também a divisão por cabeça (`bases_congeladas` 'CABECAS') | achado 9 |
+| 10 | Os valores congelados não liam a marca do digitado: apagar na correção a dose, o pasto, a raça ou a carência digitados mantinha o digitado (marcado como proposto) | ALTA | `Correcao.CONGELADOS`: a dose por peso, o pasto e a raça das crias, a carência e o fabricante só têm cópia quando o original os propôs (`doses_informadas`, `pasto_crias_informado`, `racas_informadas`, `carencia_informada`, `fabricante_informado`); o digitado apagado é refeito como no registro; a entrada leva o fabricante digitado | achado 10 |
+| 11 | O pasto informado da desmama com o bezerro já nele e o do parto só de natimorto sumiam da entrada da correção (a correção da data ou o natimorto que vira cria viva punham o animal em outro pasto) | MEDIA | a desmama: o 4; o parto sem cria viva guarda o pasto digitado no payload (`pasto_destino_id`), e a entrada o leva; nenhum dos dois conta como pasto usado pelo original (a correção que passa a levar animal para ele confere se está ativo) | achado 11 |
+| 12 | Na correção de cadastro que apagou a mãe, o pai ou o nascimento, a certeza apagada junto vinha na entrada como digitada, e a mudança que a tirava era aceita sem efeito (o teste aleatório falhava: CORRECAO:B2) | MEDIA | a certeza apagada junto (a derivada) fica fora da entrada; tirar o que o lançamento não tem é VALIDATION `MUDANCA_SEM_ITEM`, com o porquê ("a certeza do pai sai junto com o pai") | achado 12 |
+| 13 | A correção que digitava a próxima aplicação apagava do payload o intervalo congelado; a seguinte, que voltava à proposta, usava o intervalo de hoje | MEDIA | o intervalo do protocolo fica no payload também com a próxima digitada, com a marca `proxima_informada`; a verificação e a entrada leem a marca | achado 13 |
+| 14 | Sem localStorage, "Terminar" com a remoção do rascunho do servidor sem chegar terminava a sessão (e a faixa dizia "não feche antes de enviar"); a que voltava do rascunho enviava o descartado | MEDIA | o "Terminar" só termina com o servidor confirmando a remoção: sem ela, a sessão continua, a tela diz por quê e o rascunho volta a ser o da tela; a faixa da falha só de remoção diz que é a remoção | `tests/ui/convergencia2.r2.test.js`, achado 14 (curral e tronco) |
+| 15 | A recusa do servidor ao resolvedor (a data futura, o limite, o acesso) aparecia como falta de sinal: as linhas ficavam pendentes para sempre, e "Tentar de novo" repetia a recusa | MEDIA | `recusou(e)`: a recusa (o código do servidor) não é falta de sinal — a nota da data, a conferência e a linha dizem o porquê e o caminho ("Mudar data"), e a linha sai da espera ("recusada pelo servidor") | achado 15 (curral e tronco) |
+| 16 | A pendente barrada por outra linha do mesmo animal, depois da resposta do servidor, aparecia "a conferir no servidor (sem resposta na hora)", com o botão que não resolvia | MEDIA | a marca própria (`barrada`): o rótulo "barrada: o animal já tem outra linha", o status "tire uma das duas" e o botão das pendentes só para as que esperam sinal | achado 16 (curral e tronco) |
+| 17 | As mensagens do par do dado e da certeza na correção de cadastro usavam o nome técnico do campo e mandavam "informar" o que o dono apagou | BAIXA | `PAR_CERTEZA`: em português do pecuarista, com o conselho que leva à solução ("o pai não fica sem a certeza: diga se ele é confirmado ou estimado, ou apague também o pai") | achado 17 |
+
+Do achado 6, ficam caladas por desenho as adulterações da própria fonte, sem cópia que as confira (a validade do movimento de
+entrada, a idade da gestação no diagnóstico, a dose de referência e o método da castração no payload, o texto da descrição do
+consumo): a verificação confere a cópia contra a fonte, e o dado que só existe num lugar é o fato (REFUTADO nessa parte).
+
+### 54.2 Regras novas
+
+- **O aborto é do dono da prenhez que ele encerra** (o último diagnóstico positivo do ciclo antes dele, ou a exposição mais
+  recente), a mesma regra do parto e do diagnóstico sem estação; um registro reprodutivo conta numa estação só.
+- **A exposição em curso no parto ou no aborto continua no ciclo novo** (a previsão de parto conta a partir dele).
+- **A cópia na mesma linha do lançamento é conferida** (o cabeçalho da aplicação, o método da pesagem e da desmama, a dose × a base
+  do rateio, a soma das doses × a saída), pela maioria das linhas.
+- **A correção não lê fonte quebrada**: a trava recusa a correção do lançamento cujo dado que ela lê foi mexido à mão
+  (`lidaPelaCorrecao`); a cópia apagada que ela refaz da fonte intacta continua sendo o caminho do conserto (o movimento da compra).
+- **A marca do digitado vale também para a cópia**: o valor congelado só existe quando o original o propôs; o payload marca a
+  quantidade, a carência, o fabricante e a próxima aplicação digitadas (além da dose, do pasto e da raça da seção 53).
+- **O pasto informado não some**: o da desmama com o bezerro já nele fica na linha (origem = destino), o do parto só de natimorto
+  no payload.
+- **A raça da ficha não é desfeita pela correção** do lançamento que criou o animal, salvo quando ela muda a raça.
+- **A carência fica com o servidor**: a tela não a preenche; trocar o produto, o modo ou o protocolo troca o que veio do anterior.
+- **O aparelho não escolhe a estação pela data**: a do filtro, ou nenhuma (a regra do servidor).
+- **"Terminar" só termina com o rascunho do servidor apagado**; e **a recusa do servidor não é falta de sinal** (curral e tronco).
+
+### 54.3 Os oráculos estendidos
+
+- **O teste aleatório de domínio** (`tests/apoio-fuzz.js`): os indicadores de todas as estações somam no máximo um parto, um aborto
+  e um diagnóstico por registro vigente (`INDICADORES:DONO`; o aborto contado em duas estações passava — o oráculo só conferia
+  cada estação sozinha); a ficha corrige também a raça (o oráculo da correção confere ANIMAIS igual depois da correção sem
+  mudança do lançamento que criou o animal — o gerador só mexia no nome), pelo mesmo sorteio do nome (a sequência das sementes não
+  muda); o efeito da desmama exige o pasto informado gravado com o bezerro já nele (antes, exigia o contrário); o efeito da
+  sanidade lê as marcas `carencia_informada` e `fabricante_informado` do original; na correção da data, a próxima digitada fica
+  (`proxima_informada`) e o intervalo continua congelado.
+- **O teste aleatório do curral e do tronco** (`tests/ui/curral.fuzz.test.js`): sem localStorage, o "Terminar" com a remoção do
+  rascunho que falha (o transporte, a falha interna): a sessão continua, a tela diz por quê, a faixa fala da remoção e o descarte
+  não vale; o "Terminar" que termina deixa o rascunho do servidor apagado (nenhum oráculo conferia o servidor depois do
+  "Terminar"); a pendente barrada por outra linha do mesmo animal se lê "barrada" (nunca "a conferir no servidor") e só é barrada
+  quando o texto dela, na data da sessão, é de um animal com outra linha ainda do aparelho (o oráculo da rodada 1 exigia "a
+  conferir no servidor" de toda pendente — o achado 16 estava escrito no oráculo; a primeira leva sem localStorage parou nisso na
+  semente 93000, refeita do começo).
+
+### 54.4 Decisões
+
+- A propriedade não ganha marca do digitado: a entrada a leva sempre como gravada (o formulário a preenche e o dono a vê), e a cópia
+  congelada só vale para o pedido que a omite. Uma marca mudaria o payload pelo caminho (o formulário a manda sempre) e quebraria a
+  correção sem mudança pela tela.
+- O nome do animal não está nos atributos da criação: a entrada da correção o lê do cadastro de hoje, e a correção só o muda quando
+  o item traz outro (como antes). A raça está nos atributos, e a regra nova vale para ela.
+- A previsão de parto da exposição em curso conta a partir do parto ou do aborto (não do início da exposição): a fêmea só emprenha
+  depois dele.
+- A trava recusa a correção sobre o que ela lê quebrado de forma conservadora (a base do rateio diferente da dose recusa mesmo se a
+  mexida foi a base): o dono restaura o backup ou estorna e lança de novo.
+- A linha "recusada pelo servidor" do curral e do tronco sai da espera: o operador a tira, corrige o brinco ou muda a data (a
+  conferência na data nova a refaz).

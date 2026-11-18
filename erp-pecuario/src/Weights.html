@@ -222,7 +222,8 @@ var TelaPesagens = (function () {
   }
   /** O rascunho a cada linha: imediato antes de um envio (a chave do bloco precisa estar guardada antes de sair). */
   function guardar(c, o) {
-    c.n = c.linhas.length;
+    // O Início conta os animais da sessão (o mesmo animal em duas linhas conta uma vez; o brinco ainda sem animal, pelo texto).
+    c.n = Object.keys(c.linhas.reduce(function (m, l) { m[l.animal_id || 't:' + (l.texto || l.brinco)] = true; return m; }, {})).length;
     c.data = c.sessao.data;
     c.estado = c.blocos.some(function (b) { return b.estado === 'ENVIANDO' || b.estado === 'SEM_SINAL'; }) ? 'ENVIANDO' : 'EDITANDO';
     return Rascunhos.salvar(ID_RASCUNHO, c, o).catch(function (e) {
@@ -1027,7 +1028,15 @@ var TelaPesagens = (function () {
         if (!ok) return;
       }
       var gravados = c.blocos.filter(function (b) { return b.estado === 'GRAVADO'; });
-      await Rascunhos.remover(ID_RASCUNHO).catch(function (e) { Util.registrarFalha('remover o rascunho do curral', e); });
+      // O descarte confirmado só vale com o servidor: sem localStorage, o rascunho dele guarda as linhas descartadas, e a sessão
+      // que volta dele as enviaria. Sem a confirmação, a pesagem não termina (CONTRATOS, seção 54).
+      var falha = await Rascunhos.remover(ID_RASCUNHO).then(function () { return null; }, function (e) { Util.registrarFalha('remover o rascunho do curral', e); return e; });
+      if (falha) {
+        // O rascunho volta a ser a sessão da tela (a remoção pendente sai da fila): a tela e o servidor guardam o mesmo.
+        guardar(c);
+        if (vivo) UI.aviso('A pesagem não terminou: o servidor não confirmou que apagou o rascunho dela (' + falha.message + ').' + (naoGravadas.length ? ' As pesagens descartadas continuam nele.' : '') + ' Toque em "Terminar a pesagem" de novo quando houver sinal.', { tipo: 'erro' });
+        return;
+      }
       var resumo = { gravadas: c.linhas.filter(function (l) { return l.estado === 'GRAVADA'; }).length, blocos: gravados.map(function (b) { return { event_id: b.event_id, n: b.n, media_kg: b.media_kg }; }), data: c.sessao.data };
       curral = null;
       mostrarResultado(resumo);

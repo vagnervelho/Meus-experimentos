@@ -348,7 +348,8 @@ var TelaReproducao = (function () {
       sessao: { data: Fmt.hoje(), metodo: 'PALPACAO', estacao_id: '', responsavel: '' }, linhas: [], blocos: [], seq: 0 };
   }
   function guardarTronco(c, o) {
-    c.n = c.linhas.length;
+    // O Início conta os animais da sessão (o mesmo animal em duas linhas conta uma vez; o brinco ainda sem animal, pelo texto).
+    c.n = Object.keys(c.linhas.reduce(function (m, l) { m[l.animal_id || 't:' + (l.texto || l.brinco)] = true; return m; }, {})).length;
     c.data = c.sessao.data;
     c.estado = c.blocos.some(function (b) { return b.estado === 'ENVIANDO' || b.estado === 'SEM_SINAL'; }) ? 'ENVIANDO' : 'EDITANDO';
     return Rascunhos.salvar(ID_RASCUNHO, c, o).catch(function (e) {
@@ -882,7 +883,15 @@ var TelaReproducao = (function () {
       var nao = c.linhas.filter(function (l) { return l.estado !== 'GRAVADA'; });
       if (nao.some(function (l) { return l.estado === 'SEM_SINAL' || l.estado === 'ENVIANDO'; })) { UI.aviso('Há diagnósticos ainda sem confirmação do servidor: envie de novo com sinal antes de terminar.', { tipo: 'aviso' }); return; }
       if (nao.length && !(await UI.confirmar({ titulo: 'Terminar sem enviar tudo?', texto: nao.length + (nao.length === 1 ? ' diagnóstico não foi gravado e será descartado.' : ' diagnósticos não foram gravados e serão descartados.'), verbo: 'Descartar e terminar', cancelar: 'Voltar', perigo: true }))) return;
-      await Rascunhos.remover(ID_RASCUNHO).catch(function (e) { Util.registrarFalha('remover o rascunho do tronco', e); });
+      // O descarte confirmado só vale com o servidor: sem localStorage, o rascunho dele guarda as linhas descartadas, e a sessão
+      // que volta dele as enviaria. Sem a confirmação, o diagnóstico não termina (CONTRATOS, seção 54).
+      var falha = await Rascunhos.remover(ID_RASCUNHO).then(function () { return null; }, function (e) { Util.registrarFalha('remover o rascunho do tronco', e); return e; });
+      if (falha) {
+        // O rascunho volta a ser a sessão da tela (a remoção pendente sai da fila): a tela e o servidor guardam o mesmo.
+        guardarTronco(c);
+        if (vivo) UI.aviso('O diagnóstico não terminou: o servidor não confirmou que apagou o rascunho dele (' + falha.message + ').' + (nao.length ? ' Os diagnósticos descartados continuam nele.' : '') + ' Toque em "Terminar" de novo quando houver sinal.', { tipo: 'erro' });
+        return;
+      }
       var gravadas = c.linhas.filter(function (l) { return l.estado === 'GRAVADA'; });
       var conta = function (res) { return gravadas.filter(function (l) { return l.resultado === res; }).length; };
       var blocos = c.blocos.filter(function (b) { return b.estado === 'GRAVADO'; });

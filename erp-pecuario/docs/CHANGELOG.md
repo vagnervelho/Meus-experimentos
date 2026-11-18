@@ -2290,3 +2290,44 @@ terminou (7 altos). Esta etapa não mudou código.
   oráculos estendidos (também a recusa da dose por kg pela contagem posterior), as decisões e as levas (53.5).
 - Durante a etapa, o salvamento automático de fora dela gravou estados intermediários (os commits `c1387fc`, `198bb8f`, no
   reinício do contêiner, e `53fdbad`). Esta etapa não fez commit nem push; `docs/fase-0/` não mudou.
+
+## 18/11/2026 — Fase 3, segunda convergência, conserto da rodada 2 da revisão
+
+- A revisão depois da rodada 1 achou 17 problemas (7 altos), das mesmas duas classes: o fato congelado na correção (o valor que o
+  original copiou, derivou ou recebeu digitado, refeito pelo estado de hoje ou pela entrada errada) e estados do curral e do
+  tronco que o teste aleatório da interface não gerava. Cada um tem um teste que falha com o `src/` de antes (commit `5e69ebf`) e
+  passa agora — `tests/convergencia2.r2.test.js` (novo, 12 testes: os achados do servidor) e `tests/ui/convergencia2.r2.test.js`
+  (novo, 8 testes de navegador: os da interface) —, o conserto pela causa e o oráculo que deixou passar, estendido (CONTRATOS,
+  seção 54, com a tabela dos achados).
+- ALTA: o aborto é do dono da prenhez que ele encerra (a regra do parto e do diagnóstico sem estação), e a exposição em curso no
+  parto ou no aborto continua na previsão; a verificação confere a cópia na mesma linha do lançamento — o cabeçalho da aplicação
+  (lote, fabricante, via, veterinário e os demais), a dose × a base do rateio do consumo, a soma das doses × a saída do frasco, o
+  lote da saída, o rateio × o modo e o método da pesagem e da desmama — e a trava recusa a correção do lançamento cuja fonte que ela
+  lê foi mexida à mão; o pasto de destino da desmama fica gravado também com o bezerro já nele (o estorno da transferência que o
+  pôs lá é conflito, não muda a desmama em silêncio); a correção do lançamento que criou o animal não desfaz a raça corrigida na
+  ficha; trocar o produto (ou o protocolo) na aplicação troca o que veio do anterior, e a carência fica com o servidor; a estação
+  do diagnóstico vem do filtro da lista de Fêmeas, nunca da data de hoje; a venda dividida por cabeça continua por cabeça na
+  correção; os valores congelados leem a marca do digitado (apagar a dose, o pasto, a raça ou a carência digitados os refaz como
+  no registro).
+- MEDIA: o pasto do parto só de natimorto fica no payload e vem na entrada da correção; a certeza apagada junto com o dado fica fora
+  da entrada da correção de cadastro, e tirar o que o lançamento não tem é recusado (`MUDANCA_SEM_ITEM`); o intervalo do protocolo
+  continua congelado com a próxima aplicação digitada (`proxima_informada`); sem localStorage, "Terminar" só termina com o rascunho
+  do servidor apagado (a faixa da falha só de remoção diz que é a remoção); a recusa do servidor ao resolvedor (a data futura) não
+  é falta de sinal no curral e no tronco; a pendente barrada por outra linha do mesmo animal se lê "barrada" e pede para tirar uma
+  das duas.
+- BAIXA: as mensagens do par do dado e da certeza na correção de cadastro em português do pecuarista, com o conselho certo.
+- Payload novo (marcas do digitado): `quantidade_informada`, `carencia_informada`, `fabricante_informado`, `proxima_informada` (com
+  o intervalo do protocolo sempre que ele é "a cada N dias") e `pasto_destino_id` no parto sem cria viva. Indicadores da estação:
+  `abortos` (as fêmeas com o desfecho do aborto).
+- Oráculos estendidos: no teste aleatório de domínio (`tests/apoio-fuzz.js`), a soma das estações conta cada parto, aborto e
+  diagnóstico uma vez só (`INDICADORES:DONO`), a ficha corrige também a raça (pelo mesmo sorteio do nome: a sequência das sementes
+  fixas não mudou — 831 aceitos e 440 recusados, como antes), o efeito da desmama exige o pasto informado gravado, o da sanidade
+  lê as marcas da carência e do fabricante, e a correção da data mantém a próxima digitada; no do curral e do tronco
+  (`tests/ui/curral.fuzz.test.js`), o "Terminar" com a remoção do rascunho que falha, o rascunho do servidor depois do "Terminar"
+  e o rótulo da pendente barrada (o oráculo de antes exigia "a conferir no servidor" também dela).
+- Testes existentes ajustados ao contrato novo, sem afrouxar o que conferem: `tests/sanidade.test.js` (o payload com as marcas
+  `quantidade_informada` e `carencia_informada`), `tests/pesagem.test.js` (a linha "média do lote" sem o lote também é o método
+  diferente do das outras linhas: dois achados), `tests/correcao.regressoes.test.js` (a carência copiada do produto vem em branco na
+  entrada; a desmama do bezerro que já estava no pasto informado grava o pasto com origem = destino),
+  `tests/ui/sanidade.test.js` (a aplicação dos pendentes deixa a carência em branco; a revisão mostra a do produto) e
+  `tests/ui/reproducao.test.js` (sem o filtro da estação, o diagnóstico abre sem estação).

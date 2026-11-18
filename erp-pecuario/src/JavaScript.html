@@ -850,9 +850,9 @@ var Rascunhos = (function () {
   function versao_() { versao = Math.max(versao + 1, Fmt.agoraMs()); return versao; }
   function viu_(v) { if (typeof v === 'number' && v > versao) versao = v; }
   function avisar_(lista, a, b) { lista.forEach(function (fn) { try { fn(a, b); } catch (x) { Util.registrarFalha('aviso de rascunho', x); } }); }
-  function falhou_(ids, e) {
+  function falhou_(ids, e, soRemocao) {
     ids.forEach(function (id) { situacoes[id] = { estado: 'FALHOU', erro: e }; });
-    avisar_(ouvintesFalha, e, ids);
+    avisar_(ouvintesFalha, e, { ids: ids, soRemocao: !!soRemocao });
     if (tentarDeNovo) tentarDeNovo();
   }
 
@@ -955,7 +955,7 @@ var Rascunhos = (function () {
         else indiceFalhou[id] = lote[id];
       });
       soIndice.forEach(function (id) { if (pendentesServidor[id] === undefined && indiceFalhou[id] === undefined) indiceFalhou[id] = doIndice[id]; });
-      falhou_(ids.concat(soIndice), e);
+      falhou_(ids.concat(soIndice), e, ids.concat(soIndice).every(function (id) { return lote[id] === null || (lote[id] === undefined && doIndice[id] === null); }));
       throw e;
     }
     var guardados = ids.concat(soIndice).filter(function (id) { return pendentesServidor[id] === undefined; });
@@ -1444,7 +1444,7 @@ var App = (function () {
     Store.configurar({ ambiente: cfg.ambiente, appVersion: cfg.appVersion });
     Rascunhos.iniciar({ ambiente: cfg.ambiente });
     // Sem localStorage (SP-06), a falha do rascunho no servidor avisa em qualquer tela (§20, regra 9), não só no formulário.
-    Rascunhos.aoFalhar(function (e) { faixa('rascunho-falhou', { tipo: 'aviso', texto: 'Não foi possível guardar o rascunho no servidor (' + e.message + '). O que foi digitado continua nesta tela e vai de novo sozinho; não feche a tela antes de enviar.' }); });
+    Rascunhos.aoFalhar(function (e, x) { faixa('rascunho-falhou', { tipo: 'aviso', texto: x && x.soRemocao ? 'Não foi possível apagar o rascunho no servidor (' + e.message + '): o pedido vai de novo sozinho, e até lá o rascunho continua guardado lá.' : 'Não foi possível guardar o rascunho no servidor (' + e.message + '). O que foi digitado continua nesta tela e vai de novo sozinho; não feche a tela antes de enviar.' }); });
     Rascunhos.aoGuardar(function () { removerFaixa('rascunho-falhou'); });
     document.addEventListener('click', aoClicar_);
     document.addEventListener('visibilitychange', conferirVersao_);
