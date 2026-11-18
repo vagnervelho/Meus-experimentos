@@ -2293,7 +2293,7 @@ terminou (7 altos). Esta etapa não mudou código.
 
 ## 18/11/2026 — Fase 3, segunda convergência, conserto da rodada 2 da revisão
 
-- A revisão depois da rodada 1 achou 17 problemas (7 altos), das mesmas duas classes: o fato congelado na correção (o valor que o
+- A revisão depois da rodada 1 achou 17 problemas (10 altos, 6 médios e 1 baixo), das mesmas duas classes: o fato congelado na correção (o valor que o
   original copiou, derivou ou recebeu digitado, refeito pelo estado de hoje ou pela entrada errada) e estados do curral e do
   tronco que o teste aleatório da interface não gerava. Cada um tem um teste que falha com o `src/` de antes (commit `5e69ebf`) e
   passa agora — `tests/convergencia2.r2.test.js` (novo, 12 testes: os achados do servidor) e `tests/ui/convergencia2.r2.test.js`
@@ -2346,3 +2346,65 @@ terminou (7 altos). Esta etapa não mudou código.
   conferência geradas; 225 rótulos de recusada e 186 de barrada conferidos; 82 "Terminar" sem localStorage com o rascunho do
   servidor apagado e 33 com a remoção sem confirmação, avisada). `npm test`: 914 testes, 0 falhas. `npm run ui:check`: 212
   testes, 0 falhas; a página inicial com 428 KB de 450 KB.
+
+## 18/11/2026 — Fase 3, relatório da segunda convergência
+
+Por quê: a segunda convergência teve duas etapas pela garantia e duas rodadas de revisão. A correção e o fato congelado estão na
+seção 50, o curral e o tronco sem estado escondido e o cliente que não calcula nas seções 51 e 52, e as duas rodadas nas seções 53
+e 54. Isso precisava entrar no relatório da fase com os números de uma execução feita agora e com um balanço honesto. A última
+rodada terminou sem achado alto? Não terminou: teve 10 altos. Esta etapa não mudou código.
+
+- `docs/RELATORIO_FASE3.md`: subseção nova 6.6.7, "Segunda convergência", dentro de "Convergência da Fase 3". Ela traz:
+  - por que: os 17 achados da revisão final (7 altos) e as duas classes que continuaram;
+  - o oráculo da correção e do fato congelado: as tabelas A e B (23 valores), o ponto único, as garantias b1 a b4, o oráculo, as
+    levas e os 21 defeitos, com a origem de cada um;
+  - o curral e o tronco sem estado escondido e o cliente que não calcula: o gerador e o oráculo ampliados, as regras novas, as
+    levas e os 3 defeitos. Os dois do curral saíram da leitura do código, e não de uma semente;
+  - as duas rodadas: 17 achados (7 altos) e 17 (10 altos), por lente e gravidade, as decisões, os defeitos que o teste aleatório
+    estendido achou e por onde cada achado passou pelas garantias;
+  - o balanço, com a curva de achados por rodada (29, 25, 25, 17, 17 e 17; altos 14, 8, 5, 7, 7 e 10) e a classificação das
+    duas rodadas. A última rodada não terminou sem achado alto; o curral e o tronco tiveram, pela primeira vez, uma rodada sem
+    alto; o fato congelado na correção não caiu; os 17 consertos da rodada 2 não foram revisados. A convergência não está
+    demonstrada.
+- Também no relatório, todos os números foram atualizados:
+  - o resumo e as entregas, com a linha da segunda convergência;
+  - a seção 2, com a execução desta etapa e a contagem por arquivo (87 de Node, 31 de navegador);
+  - os cenários por nível (a correção de um fato passado; o cliente não calcula);
+  - o que fica com o dono (40 arquivos; a verificação nova das cópias; as decisões a ratificar);
+  - a decisão 17 nova, e as 6 a 9 com o que ela mudou;
+  - as limitações 3, 6, 9, 10, 11, 12, 13 e 15;
+  - a tabela do teste aleatório e o veredito.
+- Executado nesta etapa, com o código final (`src/` de `c4721eb`, testes de `b9a2072`):
+  - `npm test`: 914 testes, 914 aprovados e 0 falhas (903,0 s), com as 23 sementes fixas (831 aceitos, 440 recusados, 0
+    falhas);
+  - `npm run ui:check`: 212 testes, 212 aprovados e 0 falhas (527,5 s). A página inicial tem 438.227 bytes de 460.800 (sobram
+    22.573); sob demanda, Import tem 49.584 bytes, Weights 65.924, Health 25.078 e Reproduction 68.215;
+  - depois da mudança no `CONTRATOS.md`, `static`, `revisao4.interface` e `correcao.contrato` de novo: 29 de 29;
+  - a contagem por arquivo pelo registrador: os 87 arquivos de Node somam 914, e os 31 de navegador, 212.
+- `npm run trava:medir -- --vezes 3`, sem outro processo: 430 comandos, média de 176,4 ms (p50 172,8; p95 382,6), 23,7 s de
+  75,9 s na trava (31%). No relatório da primeira convergência, a média era 167,8 ms (21,3 s de 72,2 s na trava). As três
+  execuções variaram de 174,3 a 188,9 ms.
+- Conferido de novo nesta etapa, com os testes de hoje sobre o `src/` de antes de cada etapa:
+  - correção (`b8c513b`): os 21 de `correcao.regressoes` falham, 20 por asserção e 1 porque `evento.obter` ainda não trazia a
+    entrada da correção;
+  - rodada 1 (`67ac9de`): os 12 de `convergencia2.r1` falham por asserção;
+  - rodada 2 (`5e69ebf`): os 12 de `convergencia2.r2` falham por asserção.
+- Levas de confirmação com o código final, nesta etapa:
+  - teste aleatório de domínio, 7800000 a 7800099 (100 sementes × 100 passos, 2 processos): 5.925 aceitos, 3.253 recusados e
+    0 falhas. Foram 3.866 correções sem mudança aceitas (2.280 pela entrada do servidor e 1.586 pela do gerador; 6 recusas
+    documentadas), 1.514 mudanças de um campo (492 da data) e 175.403 consultas comparadas. Também houve 74 conferências de
+    `INDICADORES:DONO`, 720.445 unidades da viagem no tempo e 59.415 textos do resolvedor;
+  - teste aleatório do curral e do tronco, 40 ações: 15 sementes sem localStorage (98000 a 98014) e 15 com ele (99000 a
+    99014), 30 aprovadas e 0 falhas. Foram 1.476 verificações do oráculo, 684 linhas gravadas e 1.438 blocos conferidos
+    intocados. Sem localStorage: 97 rascunhos do servidor conferidos com a tela, 17 páginas que foram embora de repente e 24
+    "Terminar" com o rascunho apagado.
+- `docs/CONTRATOS.md`:
+  - a frase do estado desta etapa;
+  - na seção 54, o número de altos da rodada 2 era 7 e passou a 10, com 6 médios e 1 baixo; os achados 2 e 6 são o mesmo
+    defeito;
+  - na seção 46, as rotas CONSULTA passam a ser 31, com `financeiro.vencimentos`, que não lê fato e fica fora da tabela.
+
+  Sem mudança de contrato. `docs/fase-0/` não mudou.
+- Neste arquivo, a entrada do conserto da rodada 2 dizia "17 problemas (7 altos)", e o certo é 10 altos, 6 médios e 1 baixo.
+- Ficaram de fora desta etapa: o `README.md` ("Última execução" com 809 e 135 testes, "38 arquivos") e o
+  `docs/GUIA_DE_IMPLANTACAO.md` (38 arquivos) continuam com números antigos. Esta etapa não fez commit nem push.

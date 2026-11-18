@@ -206,6 +206,11 @@ do digitado lidas pelos valores congelados (a dose, o pasto, a raça, a carênci
 aplicação), o pasto informado da desmama e do parto só de natimorto guardado, a raça da ficha mantida na correção, a venda por
 cabeça congelada, a carência que a tela deixa para o servidor, a estação do diagnóstico pelo filtro da lista, o "Terminar" que só
 termina com o rascunho do servidor apagado e a recusa do servidor separada da falta de sinal no curral e no tronco (seção 54).
+Fase 3, RELATÓRIO DA SEGUNDA CONVERGÊNCIA: as seções 50 a 54 conferidas com o código por amostra (as funções, os códigos de
+recusa e de integridade, as marcas do payload e as rotas citadas existem; a tabela B tem 23 valores — 12 COPIA, 6 DERIVADO e 5
+REGRA — como `Correcao.tabela()`); corrigidos o número de altos da rodada 2 (seção 54: 10, não 7) e o de rotas CONSULTA da seção
+46 (31, com `financeiro.vencimentos`). `Api.rotas()` tem 67 rotas: 51 canônicas (9 ainda de fase futura) e 16 extras. Sem
+mudança de contrato. Relatório: `docs/RELATORIO_FASE3.md`, seção 6.6.7.
 
 ## 1. Regras que valem para todo arquivo de `src/`
 
@@ -3104,9 +3109,10 @@ categoria e o peso em D saem da linha do tempo, `AnimalService.categoriaEm` e `p
 animal daquele dia (o brinco, a situação, a cria ao pé) lê `animal`. Na base de demonstração (304 cabeças), a visão geral e a
 posição numa data não calculam nenhum retrato; os elegíveis de 15/06/2025 calculam 294, um por animal da lista.
 
-**Inventário: rotas de consulta e cálculos do servidor com data.** As 30 rotas CONSULTA de `Api.rotas()` (29 quando esta seção
-foi escrita; `animal.resolver` entrou com a seção 47); `evento.simular` está na linha dos comandos; as que não aparecem
-(`anexo.obter`, `auditoria.listar`, `importacao.listar`, `importacao.obter`, `importacao.previa`, `importacao.linhas`,
+**Inventário: rotas de consulta e cálculos do servidor com data.** As 31 rotas CONSULTA de `Api.rotas()` (29 quando esta seção
+foi escrita; `animal.resolver` entrou com a seção 47 e `financeiro.vencimentos` com a seção 51); `evento.simular` está na linha
+dos comandos; `financeiro.vencimentos` não lê fato nem cadastro (só soma o intervalo à data pedida) e fica fora da tabela; as
+que não aparecem (`anexo.obter`, `auditoria.listar`, `importacao.listar`, `importacao.obter`, `importacao.previa`, `importacao.linhas`,
 `importacao.modelo`, `importacao.relatorio`, `importacao.reconciliacao`, `operacao.status`, `sistema.*`) mostram registros como
 estão, sem cálculo numa data.
 
@@ -3960,7 +3966,8 @@ oráculo que deixou o defeito passar foi estendido (53.3).
 
 ## 54. Conserto da rodada 2 da segunda convergência — `ReproductionService` (o dono do aborto, a exposição em curso na previsão, `abortos` nos indicadores), `AuditService` (o cabeçalho da aplicação e o método da pesagem e da desmama na mesma linha do lançamento, a dose × a base do rateio e a soma das doses, o lote da saída, o rateio × o modo; a trava recusa a correção sobre o que ela lê quebrado: `lidaPelaCorrecao`), `Correcao` (as marcas do digitado nos valores congelados; a certeza apagada junto fora da entrada; `MUDANCA_SEM_ITEM`; a venda por cabeça congelada; o pasto do parto só de natimorto), `EventService` (o payload `quantidade_informada`, `carencia_informada`, `fabricante_informado`, `proxima_informada` e `pasto_destino_id` do parto sem cria viva; o intervalo do protocolo congelado também com a próxima digitada; o pasto informado da desmama gravado com o bezerro já nele; a raça da ficha mantida na correção; as mensagens do par do dado e da certeza), `FinancialService` (`bases_congeladas` 'CABECAS'), `EventCatalog` (a ajuda da carência), `Components` (`preencherDoProduto_`: trocar o produto, o modo ou o protocolo troca o que veio do anterior; a carência fica com o servidor), `Health` (a aplicação dos pendentes sem a carência), `Reproduction` (a estação do diagnóstico pelo filtro; o tronco: a recusa do servidor, a barrada, o "Terminar", a volta à fila guardada, a marca `naoEntra` limpa), `Weights` (o curral: o mesmo, e o "Corrigir o brinco" recusado), `JavaScript` (`Rascunhos`: a falha só de remoção avisa a remoção); `tests/convergencia2.r2.test.js`, `tests/ui/convergencia2.r2.test.js`, `tests/apoio-fuzz.js`, `tests/ui/curral.fuzz.test.js`, `tests/ui/apoio-curral.js` (a recusa na rede do teste)
 
-Depois da rodada 1 da segunda convergência, a revisão achou 17 problemas (7 altos), das mesmas duas classes: o fato congelado na
+Depois da rodada 1 da segunda convergência, a revisão achou 17 problemas (10 altos, 6 médios e 1 baixo; os achados 2 e 6 são o
+mesmo defeito, visto por duas lentes), das mesmas duas classes: o fato congelado na
 correção (o valor que o original copiou, derivou ou recebeu digitado, refeito pelo estado de hoje ou pela entrada errada) e
 estados do curral e do tronco que o teste aleatório da interface não gerava. Cada achado tem um teste que falha com o `src/` de
 antes (commit `5e69ebf`) e passa agora; o conserto está na causa, e o oráculo que deixou o defeito passar foi estendido (54.3).

@@ -1,7 +1,8 @@
 # Relatório da Fase 3 — Manejo
 
-Data: 18/11/2026 (o relatório da entrega e da primeira convergência é de 17/11/2026). Versão do app: 0.1.0. Plano: `docs/fase-0/10-plano-de-implementacao.md`, seção 4 (entregas E3.1 a
-E3.7) e seção 8 (checklist). Relatório da fase anterior: `docs/RELATORIO_FASE2.md`.
+Data: 18/11/2026 (o relatório da entrega e da primeira convergência é de 17/11/2026). Versão do app: 0.1.0. Plano:
+`docs/fase-0/10-plano-de-implementacao.md`, seção 4 (entregas E3.1 a E3.7) e seção 8 (checklist). Relatório da fase anterior:
+`docs/RELATORIO_FASE2.md`.
 
 ## Em resumo
 
@@ -20,11 +21,11 @@ E3.7) e seção 8 (checklist). Relatório da fase anterior: `docs/RELATORIO_FASE
 - Cada tipo novo passa por **um tratador só** em todo caminho (registrar, simular, retroativo, mesmo dia, corrigir,
   corrigir o substituto, estornar, importar, desfazer, base de demonstração), e o que ele grava é conferido pela mesma
   função da verificação de integridade e da trava única (`AuditService.conferirDominio_`).
-- **Telas sob demanda (risco R-31).** A página inicial tem 428 KB de 450 KB (438.227 bytes de 460.800: sobram 22.573;
-  no fim da primeira convergência sobravam 45, e a segunda tirou da página inicial a prévia da correção montada no aparelho).
-  A importação e as três telas novas são pedidas ao servidor quando o menu as abre (Import 48 KB, Weights 64 KB, Health 24 KB e Reproduction 67 KB, de 150 KB cada), e a Início
-  traz em segundo plano as do curral e do tronco. Que o quadro (iframe)
-  do HtmlService rode a tela injetada é hipótese (NV): se não rodar, a contingência está pronta (seção 5, item 1).
+- **Telas sob demanda (risco R-31).** A página inicial tem 428 KB de 450 KB (438.227 bytes de 460.800: sobram 22.573; no fim
+  da primeira convergência sobravam 45, e a segunda tirou da página inicial a prévia da correção montada no aparelho). A
+  importação e as três telas novas são pedidas ao servidor quando o menu as abre (Import 48 KB, Weights 64 KB, Health 24 KB e
+  Reproduction 67 KB, de 150 KB cada), e a Início traz em segundo plano as do curral e do tronco. Que o quadro (iframe) do
+  HtmlService rode a tela injetada é hipótese (NV): se não rodar, a contingência está pronta (seção 5, item 1).
 - **Nada foi implantado nem executado na conta Google do dono.** Continuam **PENDENTES NA CONTA DO DONO** os itens das
   Fases 1 e 2 e, da Fase 3: `runAcceptanceTests` com os 23 cenários, as premissas PR-06, PR-07, PR-10 e PR-11, o
   cadastro dos produtos e protocolos com o veterinário e o modo curral num celular de verdade, no curral (agora com uma
@@ -45,12 +46,13 @@ E3.7) e seção 8 (checklist). Relatório da fase anterior: `docs/RELATORIO_FASE
   montar o modelo da tela), todos corrigidos.
 - A **segunda convergência** (seção 6.6.7) tratou com mais duas garantias as duas classes que a revisão final ainda achava:
   - o ponto único da correção (`src/Correcao.js`), com a tabela dos 23 valores que a correção mantém do original e o oráculo
-    da correção no teste aleatório. Ele achou 21 defeitos, 4 altos: 11 por semente e 10 pela leitura do código ao montar as tabelas e o ponto único;
+    da correção no teste aleatório. Ele achou 21 defeitos, 4 altos: 11 por semente e 10 pela leitura do código ao montar as
+    tabelas e o ponto único;
   - o curral e o tronco sem estado escondido, com o gerador da tela ampliado (o modo sem `localStorage`), e o teste "o cliente
     não calcula". Foram 3 defeitos, achados pela leitura do código e pelo teste estático; as levas da tela só acharam erros do
     modelo.
 
-  Na fase, o teste aleatório do motor rodou **«SEM_MOTOR» sementes novas**, e o da tela, **«SEM_TELA»**.
+  Na fase, o teste aleatório do motor rodou **11.380 sementes novas**, e o da tela, **1.588**.
 - **A última rodada não terminou sem achado alto**: a rodada 2 da segunda convergência teve 10 altos, mais que os 7 da
   rodada 1 e os 7 da revisão final. Pela primeira vez, o curral e o tronco não tiveram achado alto numa rodada. O fato
   congelado na correção teve 4 altos, e apareceram duas frentes novas com altos: a verificação da cópia na mesma linha do
@@ -97,11 +99,11 @@ reais do Google, só na conta do dono.
 
 Ambiente: Node 22.23.4 (Linux, 4 núcleos), Playwright 1.63.0 com Chromium. A execução é de 18/11/2026, nesta etapa (o
 relatório da segunda convergência), sobre o código final dela, que é a última alteração de comportamento da fase: o `src/` do
-commit `c4721eb` e os testes do `b9a2072`, dois salvamentos automáticos durante o conserto da rodada 2 (seção 7). Nesta etapa só
-mudaram documentos: este relatório, o `CHANGELOG` e o `CONTRATOS.md` (a frase do estado e três correções de texto, nas seções
-19, 46 e 54). A suíte inteira rodou uma vez, antes da mudança no `CONTRATOS.md`. Os três arquivos que o leem (`static`,
-`revisao4.interface` e `correcao.contrato`) rodaram de novo sozinhos depois dela: «REL_CONTRATOS». Pelos registros das etapas, o fim de
-cada uma deu, em testes de Node e de navegador:
+commit `c4721eb` e os testes do `b9a2072`, dois salvamentos automáticos durante o conserto da rodada 2 (seção 7). Nesta etapa
+só mudaram documentos: este relatório, o `CHANGELOG` e o `CONTRATOS.md` (a frase do estado e duas correções de texto, nas
+seções 46 e 54). A suíte inteira rodou uma vez, antes da mudança no `CONTRATOS.md`. Os três arquivos que o leem (`static`,
+`revisao4.interface` e `correcao.contrato`) rodaram de novo sozinhos depois dela: 29 testes, 29 aprovados, 0 falhas. Pelos
+registros das etapas, o fim de cada uma deu, em testes de Node e de navegador:
 - relatório da primeira convergência: 863 e 186;
 - correção: 887 e 186;
 - curral: 890 e 190;
@@ -356,17 +358,17 @@ a 9, como cada uma diz.
    compras antigas).
 6. **Sanidade.** Formulário comum (sem modo curral) com a revisão pelo servidor. A quantidade consumida vazia é a soma das
    doses; no modo total ela é obrigatória e a dose de cada animal fica vazia. Na dose por peso com mais de um animal, o
-   rateio do consumo é pela dose de cada um; nos demais casos, por cabeça; o desempate do maior resto vai para a maior base
-   e depois para o código (03b). O servidor preenche três padrões: a próxima aplicação pelo intervalo do protocolo, o
+   rateio do consumo é pela dose de cada um; nos demais casos, por cabeça; o desempate do maior resto vai para a maior base e
+   depois para o código (03b). O servidor preenche três padrões: a próxima aplicação pelo intervalo do protocolo, o
    fabricante do produto e, sem os dias informados, a carência padrão do produto do cadastro (desde a rodada 3, item 15);
    dose, lote e validade do cadastro são sugestões da tela, e o que foi gravado não muda quando o cadastro muda. Desde a
-   segunda convergência, a tela não preenche mais a carência, e trocar o produto troca o que veio do anterior (item 17). A carência é conferida nos dois sentidos (a aplicação retroativa que cobre uma venda para abate
-   segue a política de `CARENCIA_ATIVA`); a venda anterior ao marco zero não confere carência, nas duas ordens de
-   importação. Produto do cadastro com custo, pago também no ato numa conta de insumo → `CUSTO_EM_DOBRO` (recusa, não aviso).
-   Na correção, o fato fica congelado quando o produto ou o protocolo não muda: o custo unitário e a conta do consumo do
-   original, o intervalo do protocolo gravado (`intervalo_protocolo_dias`, conferido pela verificação), o fator e o
-   movimento da entrada de estoque. A mesma aplicação no mesmo animal no mesmo dia pede `POSSIVEL_DUPLICIDADE` por animal,
-   com a chave da importação.
+   segunda convergência, a tela não preenche mais a carência, e trocar o produto troca o que veio do anterior (item 17). A
+   carência é conferida nos dois sentidos (a aplicação retroativa que cobre uma venda para abate segue a política de
+   `CARENCIA_ATIVA`); a venda anterior ao marco zero não confere carência, nas duas ordens de importação. Produto do cadastro
+   com custo, pago também no ato numa conta de insumo → `CUSTO_EM_DOBRO` (recusa, não aviso). Na correção, o fato fica
+   congelado quando o produto ou o protocolo não muda: o custo unitário e a conta do consumo do original, o intervalo do
+   protocolo gravado (`intervalo_protocolo_dias`, conferido pela verificação), o fator e o movimento da entrada de estoque. A
+   mesma aplicação no mesmo animal no mesmo dia pede `POSSIVEL_DUPLICIDADE` por animal, com a chave da importação.
 7. **Agenda sanitária.** Aplicação única passada da idade máxima continua devida se o animal esteve na faixa depois da
    criação do protocolo; a cada N dias, nunca aplicada, vence desde que o animal ficou elegível (desde a segunda
    convergência, não antes de o protocolo passar a valer: item 17); na campanha, a perdida fica
@@ -604,11 +606,12 @@ a 9, como cada uma diz.
       o aparelho; o que a correção de um fato passado grava; os elegíveis de outros tipos além de TRANSFERENCIA,
       PESAGEM e NASCIMENTO; o filtro por propriedade; as curvas do desempenho; o ano depois de D; e a ficha de quem
       está no rebanho numa data passada.
-    - O teste aleatório da tela (seção 6.6.4) cobre o curral e o tronco. Não cobre o "Pesar este" da lista dos que
-      faltam, vários animais com o mesmo número na mesma data, duas abas abertas e o celular. A decisão do repetido
-      refeita no meio não apareceu nas 50 sementes da revisão final.
+    - O teste aleatório da tela (seções 6.6.4 e 6.6.7) cobre o curral e o tronco, com e sem `localStorage`. Não cobre o
+      "Pesar este" da lista dos que faltam, vários animais com o mesmo número na mesma data, duas abas abertas, o
+      formulário de registro e as outras telas, nem o celular. A decisão do repetido refeita no meio apareceu pouco (8
+      vezes na leva limpa da etapa 2 da segunda convergência, 1 na confirmação desta etapa).
     - O oráculo da correção (seção 6.6.7) confere a correção de um campo só na anotação, no responsável, na observação de
-      um animal, na data, na dose por kg, na dose digitada, num dado da correção de cadastro e na raça da ficha. A troca de
+      um animal, na data, na dose por kg, na dose digitada e num dado da correção de cadastro. A troca de
       entidade (outro produto, protocolo, mãe ou tipo de dedução) e a mudança das entradas dos derivados ficam nos testes
       fixos, e o plano de contas não é variado. Ele supõe a fonte intacta: a adulterada fica com a verificação.
     - Os oráculos da segunda convergência também não foram medidos com mutações. O que o oráculo da correção enxerga foi
@@ -693,13 +696,14 @@ as sequências das sementes fixas, porque todos sorteiam por um gerador à parte
 | Segunda convergência, correção | 2.392 × 100 (610000 a 610999, de busca; 284 a partir de 611000 e 108 a partir de 612000, de confirmação; 613000 a 613999, leva limpa) | 117.344 / 66.317 (a busca e a leva limpa) | 10 (8 na busca e 2 nas confirmações; seção 6.6.7) | 0 |
 | Segunda convergência, rodada 1 | 300 × 100 (7600000 a 7600299, refeita do começo; as levas interrompidas pelo reinício e pela lacuna do oráculo não contam) | 17.395 / 9.949 | 0 | 4 (720043, 720208 e 720241: a impressão do protocolo no oráculo do tempo; 7600019: a recusa da dose por kg) |
 | Segunda convergência, rodada 2 | 300 × 100 (7700000 a 7700299) | 18.273 / 9.577 | 0 | 0 |
-«LINHA_ESTA_ETAPA»
-| **Total** | **8.288 sementes novas** | | **13** | **8** |
+| Relatório da segunda convergência (esta etapa): confirmação | 100 × 100 (7800000 a 7800099) | 5.925 / 3.253 | 0 | 0 |
+| **Total** | **11.380 sementes novas** | | **23** | **12** |
 
-Cada falha do modelo virou caso fixo (`tests/fase3.fuzz.regressoes.test.js`, `tests/import.manejo.test.js` ou
-`tests/tempo.regressoes.test.js`), que falha no modelo de antes. A leva de 1.000 sementes 3200000 a 3200999 da viagem no
+Até a primeira convergência, cada falha do modelo virou caso fixo (`tests/fase3.fuzz.regressoes.test.js`,
+`tests/import.manejo.test.js` ou `tests/tempo.regressoes.test.js`), que falha no modelo de antes. As 4 da segunda convergência
+eram lacunas do próprio oráculo: ele foi estendido, e as levas foram refeitas do começo (seção 6.6.7). A leva de 1.000 sementes 3200000 a 3200999 da viagem no
 tempo abortou com uma edição do `src/` no meio e foi descartada (seção 6.6.2); não está na tabela. O teste aleatório da
-tela do curral e do tronco tem as suas levas na seção 6.6.4. As 24 recusas da trava conferidas uma a uma na passada 1 (160 sementes) são todas de regras que ela
+tela do curral e do tronco tem as suas levas nas seções 6.6.4 e 6.6.7. As 24 recusas da trava conferidas uma a uma na passada 1 (160 sementes) são todas de regras que ela
 guarda por desenho (castração repetida pela correção do rebanho de base, registro reprodutivo de quem passaria a macho,
 pasto desativado, mãe de cria desmamada). O que os oráculos novos enxergam foi medido com mutações numa cópia do projeto
 (`src/` errado de propósito): sem o aviso de estoque e com a dose em duas casas, 20 de 32 sementes falham; a campanha
@@ -724,8 +728,9 @@ corrigida e um movimento do mesmo dia gravado depois); 1.749 GMD de resposta con
 da pesagem anterior); 40.903 conferências da ficha contra a agenda, 34.481 dos partos e 52.478 do último peso na data.
 
 Na segunda convergência, o padrão mudou em parte. O oráculo da correção achou 11 defeitos do sistema: 10 nas sementes novas da
-tabela e 1 nas sementes fixas (seção 6.6.7). As 600 sementes das duas rodadas não acharam nenhum, só duas lacunas do próprio
-oráculo, e as duas revisões acharam 34 logo depois. O teste aleatório da tela, estendido em cada rodada, achou mais 5 defeitos
+tabela e 1 nas sementes fixas (seção 6.6.7). As levas dos consertos das duas rodadas (as 600 sementes contadas e as interrompidas)
+não acharam nenhum, só duas lacunas do próprio oráculo. Logo depois da leva do conserto da rodada 1, a rodada 2 achou 17
+(10 altos). O teste aleatório da tela, estendido em cada rodada, achou mais 5 defeitos
 do sistema que a revisão não tinha apontado.
 
 ### 6.2 Revisão independente da Fase 3, rodada 1
@@ -896,8 +901,8 @@ convergência.
 ### 6.5 Balanço das três rodadas, antes da convergência
 
 Esta seção é o balanço feito no fim da rodada 3 e fica como registro. Parte do que ela dá como aberto mudou depois: a data sem
-posição já não é conferida pela lista de hoje, e a margem da página inicial caiu de 1.587 para 45 bytes. O estado de hoje está
-na seção 6.6.6.
+posição já não é conferida pela lista de hoje, e a margem da página inicial caiu de 1.587 para 45 bytes (e, na segunda convergência, voltou a 22.573).
+O estado de hoje está na seção 6.6.7.
 
 | Rodada | Achados | Distintos | ALTA | MÉDIA | BAIXA | Conserto incompleto ou regressão da rodada anterior (pelo título do achado) |
 |---|---:|---:|---:|---:|---:|---:|
@@ -1326,39 +1331,480 @@ da revisão final. O foco seria o curral e o tronco (o bloco que saiu intocável
 mesma pergunta) e as cópias congeladas na correção. Também falta o roteiro do modo curral num celular de verdade, no curral. A
 decisão é do dono.
 
+#### 6.6.7 Segunda convergência
+
+A revisão final (seção 6.6.5) achou 17 problemas, 7 deles altos, depois da primeira convergência. As rodadas de antes tinham
+achado 29, 25 e 25. A segunda convergência repetiu a forma da primeira. Primeiro vieram duas etapas pela garantia, cada uma com
+a sua seção no `CONTRATOS.md` e a sua entrada no `CHANGELOG`: o oráculo da correção e do fato congelado (seção 50) e o curral e o
+tronco sem estado escondido, com a regra "o cliente não calcula" (seções 51 e 52). Depois veio a revisão independente com as
+quatro lentes, em no máximo duas rodadas, até não haver achado alto (seções 53 e 54). Os números das levas são os do registro de
+cada etapa (seções 50.10, 52.7, 53.5 e 54.5). O que esta etapa executou de novo está marcado como "esta etapa".
+
+##### Por que: as duas classes que continuaram
+
+Pela leitura desta etapa, 12 dos 17 achados da revisão final eram de duas classes:
+- **Classe 1, agora com o nome do caminho: o fato congelado na correção.** Corrigir um evento antigo, mesmo sem mudar nada ou
+  mudando outro campo, refazia pelo cadastro de hoje o que o registro tinha congelado. Também podia recusar a correção por uma
+  regra que só o cadastro de hoje quebrava. Na revisão final foram os achados 2, 11 e 17: a carência padrão, o procedimento do
+  protocolo, o nome e o fabricante do produto. O 5 era a mesma classe na tela: a prévia da correção somava no aparelho o intervalo
+  de hoje do protocolo. O oráculo do tempo compara consultas e não olha o que a correção grava. O oráculo do efeito da correção
+  espelhava o servidor. Cada conserto congelava um campo de um tipo, e os outros campos e os outros tipos continuavam abertos.
+- **Classe 2: o curral e o tronco em estados que o gerador da tela não criava**, e as telas que calculavam no aparelho o que o
+  servidor devia dar. Na revisão final foram os achados 3, 4, 7, 12 e 13: o "Substituir o peso" com a linha anterior num bloco no
+  ar; o modo sem `localStorage`, com o rascunho subindo; o brinco conferido antes de "Mudar data"; a pendente diante de uma linha
+  gravada; a pendente resolvida pela conferência. Os achados 6, 14 e 15 eram telas que trocavam o que o servidor mandava pelo
+  que o aparelho tinha. Com o 6 (o brinco de hoje na linha do tronco), a classe tinha 4 dos 7 altos.
+
+As duas etapas trocaram o conserto caso a caso por duas garantias. A primeira é um ponto único da correção, com a tabela do que
+ela mantém do original e um oráculo no teste aleatório que confere tudo isso depois de mudar os cadastros. A segunda é o gerador
+da tela ampliado para os estados que faltavam, mais um teste que lê todo o código do aparelho e acusa conta de data ou de número
+de domínio.
+
+##### O oráculo da correção e do fato congelado (etapa 1; seção 50)
+
+**O contrato.** A tabela A (seção 50.3) diz, para cada tipo, o que o usuário informa, o que o servidor deriva (e de quê) e o que o
+registro copia do cadastro. A tabela B (50.4) diz o que a correção mantém do original enquanto as entradas de que o valor depende
+são as do original. É `Correcao.CONGELADOS`, hoje com 23 valores: 12 cópias, 6 derivados e 5 regras. Na etapa eram 22, e a
+rodada 1 acrescentou a estação da reprodução (`REPRODUCAO.estacao`). Exemplos:
+- cópias: o nome, o fabricante, a carência padrão, o custo, a conta e a categoria do produto; a recorrência do protocolo; o fator
+  e o controle de estoque da entrada; a propriedade padrão; o nome do tipo da dedução;
+- derivados: a dose pelo peso na data; a mãe na desmama; o pasto e a raça da cria; o valor de antes do ajuste; a divisão estimada
+  da venda;
+- regras: o procedimento do protocolo, as regras do brinco novo, a faixa da idade da gestação, a estação e a idade da desmama.
+
+Quando uma entrada muda, o tratador refaz o valor como no registro (50.5). Com outra entidade (outro produto, protocolo, mãe ou
+tipo de dedução) vale o cadastro de hoje da entidade nova; essa é a exceção documentada. O teste `tests/correcao.contrato.test.js`
+amarra a tabela B do `CONTRATOS.md` ao código (`Correcao.tabela()`): nenhuma chave falta nem sobra.
+
+**O ponto único** (`src/Correcao.js`, novo; 50.2):
+- `entrada` monta a correção sem mudança só a partir das linhas gravadas. O que o servidor propôs vem vazio, para acompanhar a
+  correção das entradas de que depende; o que foi digitado vem como foi gravado.
+- Quando o valor gravado não diz se foi digitado, o payload guarda uma marca. A rodada 1 acrescentou `doses_informadas`,
+  `pasto_crias_informado` e `racas_informadas`. A rodada 2 acrescentou `quantidade_informada`, `carencia_informada`,
+  `fabricante_informado` e `proxima_informada`.
+- `montar` aplica a correção só com a mudança (`dados.mudanca`), pelo mesmo caminho de validação e efeito do formulário inteiro.
+- `contexto` e `congelado` dão o valor do original a todo tratador do motor. As leituras próprias do original que havia no
+  `EventService` saíram.
+
+`evento.obter` devolve a entrada sem mudança (`correcao`). A prévia da correção na tela só a formata. A prévia própria da
+reprodução saiu, e a página inicial caiu de 460.759 para 435.471 bytes.
+
+**As garantias** (50.1):
+- **b1**: a correção sem mudança de qualquer evento que vale, depois de qualquer mudança de cadastro, é aceita e grava os mesmos
+  fatos. Mudam só os metadados de versão e de auditoria. As exceções são as regras de desenho da seção 50.6: a política BLOQUEIA,
+  `PRODUTO_SEM_ESTOQUE` e o período fechado com a justificativa.
+- **b2**: a correção de um campo muda só esse campo e o que deriva dele.
+- **b3**: as cópias não mudam com a correção de outro campo, também da data.
+- **b4**: as consultas depois de b1 são iguais às de antes.
+
+**O oráculo** (`tests/apoio-fuzz.js`, `oraculoCorrecao`; 50.7). Ele roda em 12% dos passos a partir do 4º, sorteados por um
+gerador à parte; por isso as sequências das sementes não mudam. O estado inteiro é guardado e devolvido no fim. A cada vez, o
+oráculo:
+1. muda de 1 a 4 cadastros (produto, protocolo, parâmetros, política de avisos, período fechado, categoria, pasto, parceiro, item
+   de lista, estação, propriedade). Desde a rodada 2, o gerador também corrige a raça na ficha do animal;
+2. sorteia até 4 eventos que valem, de tipos diferentes, entre todos os tipos das Fases 1 a 3 que aparecem na semente (só o
+   ESTORNO fica de fora);
+3. corrige cada um sem mudança por duas entradas: a do servidor e a do gerador (o pedido como foi aceito, como o reenvio de um
+   cliente da API);
+4. confere b1 linha a linha e coluna a coluna, e b4 com a bateria da viagem no tempo em hoje e na data do evento;
+5. corrige um campo só, pela mudança (b2 e b3): a anotação, o responsável, a observação de um animal ou a data. Desde a rodada 1,
+   também a dose por kg, a dose digitada e um dado da correção de cadastro. Desde a rodada 2, a correção da data confere também
+   a próxima aplicação digitada.
+
+As sementes fixas exigem que o oráculo confira algo.
+
+**Sementes** (registro da etapa):
+
+| Leva | Sementes × passos | Aceitos / recusados | Falhas do sistema | Falhas do modelo do teste |
+|---|---|---:|---:|---:|
+| Busca | 1.000 × 100 (610000 a 610999) | 59.078 / 32.921 | 8 (defeitos 11 a 18) | 0 |
+| Primeira confirmação | 284 × 100 (a partir de 611000) | — | 1 (semente 611819: o defeito 19) | 0 |
+| Segunda confirmação | 108 × 100 (a partir de 612000) | — | 1 (semente 612769: o defeito 20) | 0 |
+| Leva limpa, com o código final da etapa | 1.000 × 100 (613000 a 613999) | 58.266 / 33.396 | 0 | 0 |
+
+As duas confirmações pararam na primeira falha e não registraram os aceitos. Na leva limpa, o oráculo conferiu:
+- 36.975 correções sem mudança aceitas: 21.907 pela entrada do servidor e 15.068 pela do gerador;
+- 116 recusas das regras de desenho;
+- 1.709.406 consultas comparadas antes e depois;
+- 19.320 correções de um campo, 5.178 delas da data.
+
+**Defeitos achados.** Foram 21: 4 altos, 13 médios e 4 baixos, todos corrigidos pela causa no ponto único. Cada um tem um
+teste em `tests/correcao.regressoes.test.js` (21 testes) que falha com o `src/` de antes da etapa (`b8c513b`) e passa agora.
+Esta etapa conferiu de novo: os 21 falham com o `src/` de `b8c513b`, 20 por asserção e 1 porque `evento.obter` ainda não
+trazia a entrada da correção. O registro da etapa dá a origem de cada um:
+- 11 vieram do teste aleatório: o 10 das sementes fixas, os 11 a 18 da leva de busca, e o 19 e o 20 das confirmações;
+- o 21 apareceu ao consertar o 19, pela mesma causa;
+- os 9 primeiros não têm semente no registro: saíram do inventário das tabelas e da montagem do ponto único.
+
+| # | Gravidade | O que a correção sem mudança fazia | Origem |
+|---:|---|---|---|
+| 1 | ALTA | Refazia a conta e a descrição do consumo pela categoria de hoje do produto ("Consumo de vacina" virava "Consumo de medicamento", em outra conta) | inventário |
+| 2 | BAIXA | Refazia a descrição da compra do insumo pelo nome de hoje do produto | inventário |
+| 3 | ALTA | O protocolo que deixou de ser "a cada N dias" apagava a próxima aplicação proposta | inventário |
+| 4 | ALTA | Refazia o pasto das crias pela linha do tempo de hoje da mãe, e era recusada quando a cria já tinha saído | inventário |
+| 5 | MÉDIA | Refazia a raça da cria pela raça de hoje da mãe | inventário |
+| 6 | ALTA | Na venda sem o peso de cada animal, refazia a divisão estimada pela pesagem retroativa lançada depois | inventário |
+| 7 | BAIXA | Refazia a descrição da dedução da venda pelo nome de hoje do tipo | inventário |
+| 8 | MÉDIA | A correção de cadastro era recusada (`VALOR_IGUAL`) quando o estado de hoje já tinha o valor novo | inventário |
+| 9 | MÉDIA | A prévia era montada no cliente, tipo a tipo, e não havia correção só com a mudança | inventário |
+| 10 | MÉDIA | O parto só de natimorto não gravava a certeza do pai, e a correção era recusada ("Preencha Pai é") | sementes fixas |
+| 11 | MÉDIA | A correção de cadastro para "não castrado" seguida de uma castração era recusada (`CASTRACAO_REPETIDA`) | leva de busca |
+| 12 | MÉDIA | A identificação feita com o reuso de brinco ligado era recusada depois de mudar o parâmetro | leva de busca |
+| 13 | MÉDIA | A correção de cadastro que apagou o nascimento perdia a linha da certeza apagada junto | leva de busca |
+| 14 | BAIXA | A compra cujo pasto do lote nenhum animal usou era recusada depois de desativar esse pasto | leva de busca |
+| 15 | MÉDIA | O acerto do brinco lançado errado era recusado depois de uma troca posterior do brinco | leva de busca |
+| 16 | MÉDIA | A correção do sexo de um dos touros de um lote era aceita, e a exposição refazia o animal como fêmea | leva de busca |
+| 17 | MÉDIA | O lançamento sem propriedade ia para a propriedade padrão de hoje | leva de busca |
+| 18 | MÉDIA | A desmama ganhava a mãe que o cadastro do bezerro só ganhou depois | leva de busca |
+| 19 | MÉDIA | A correção de cadastro do nascimento era recusada depois de outra correção posterior apagar o nascimento | 611819 |
+| 20 | BAIXA | O parto só de natimorto e a desmama com o pasto informado eram recusados depois de desativar o pasto | 612769 |
+| 21 | MÉDIA | As regras entre campos da correção de cadastro eram conferidas com o sexo ou o nascimento de uma correção posterior | conserto do 19 |
+
+Foi a primeira vez na fase que o teste aleatório achou defeito do sistema no caminho da correção. As 8 falhas da leva de busca
+eram 8 defeitos diferentes.
+
+##### O curral e o tronco sem estado escondido, e o cliente que não calcula (etapa 2; seções 51 e 52)
+
+**O que mudou no gerador da tela** (52.3). O modo do rascunho passou a ser fixado por semente (`FUZZ_MODO=semLS` ou `comLS`).
+Sem `localStorage`, o rascunho no servidor pode falhar (transporte, falha interna, servidor ocupado, resposta perdida, pedido
+perdido ou segurado), e a página pode ir embora de repente. Também entraram:
+- as datas da sessão perto das trocas e do reaproveitamento do brinco 0457;
+- o brinco de uma linha da sessão digitado de novo, com a linha anterior em qualquer estado: na fila, no ar, sem confirmação,
+  gravada, com aviso, recusada ou pendente;
+- o brinco conferido e ainda não lançado antes de "Mudar", às vezes com a resposta chegando na sessão nova;
+- a queda de sinal em várias conferências seguidas, com a pendente resolvida depois pela conferência ou barrada por outra linha
+  do mesmo animal.
+
+**O que mudou no oráculo** (52.4). A cada ação, ele passou a conferir também:
+- que nenhuma ação na tela altera um bloco no ar ou gravado;
+- que tudo o que a tela mostra do animal (o brinco, a categoria, o pasto e a mensagem do servidor) é o que o servidor deu para a
+  data da sessão;
+- o aviso de substituição em todo caminho que substitui;
+- a pendente que tem resposta do servidor;
+- sem `localStorage`, que o rascunho do servidor é o estado da tela.
+
+**As regras novas.** O bloco só sai com a chave guardada no rascunho (52.1). A falha do rascunho no servidor aparece em qualquer
+tela, e o rascunho vai de novo sozinho (52.2).
+
+**O cliente não calcula** (seção 51). O teste `tests/cliente.naocalcula.test.js`, com o leitor `tests/apoio-naocalcula.js`, lê
+os `<script>` de todo `src/*.html` e acusa dois tipos de conta:
+- a aritmética de data: somar dias, diferença de datas, `new Date`, o dia em milissegundos, o ano tirado do texto;
+- a conta com número de domínio, reconhecido pelo nome: GMD, carência, UA, idade, dias, centavos, valor, total, peso, dose e
+  outros.
+
+O que pode ficar é uma lista de 11 entradas, cada uma com o porquê. O teste falha com conta fora da lista e também com entrada da
+lista que deixou de ser usada. Virou dado do servidor o vencimento do "Dividir em parcelas" (rota nova `financeiro.vencimentos`).
+`Fmt.diasEntre` saiu, e o instante dos arquivos exportados passou a ser formatado pelo `Fmt.instante`. A prévia da correção e a
+agenda já vinham do servidor (seções 50 e 49). **Limite:** o leitor lê nomes, e uma conta com variáveis de nome neutro (`a * b`)
+passa.
+
+**Sementes** (registro da etapa):
+
+| Leva | Sementes × ações | Resultado |
+|---|---|---|
+| Busca, com o gerador novo | 160 × 40 (2000 a 2039 e 4000 a 4039 sem `localStorage`; 3000 a 3039 e 5000 a 5039 com ele) | Só erros do modelo do teste, todos acertados sem afrouxar o oráculo |
+| Limpa, com o código final da etapa | 152 × 40 sem `localStorage` (10000 a 10151), 152 × 40 com ele (20000 a 20151), 32 × 100 sem (30000 a 30031) e 32 × 100 com (40000 a 40031) | 368 aprovadas, 0 falhas |
+
+Os números da busca já tinham sido usados na primeira convergência, com o gerador de então; as sequências agora são outras. Na
+leva limpa, o oráculo fez 21.609 verificações com 7.216 linhas gravadas e conferiu:
+- 270.365 rótulos de linha pelo brinco da data, 10.210 deles numa data com o brinco trocado ou reaproveitado depois;
+- 4.906 conferências do brinco, com a categoria e o pasto da data;
+- 19.784 vezes um bloco no ar ou gravado intocado.
+
+O gerador fez:
+- 2.308 substituições;
+- 390 brincos repetidos de uma linha que já tinha saído;
+- 338 mudanças de sessão, 173 delas com um brinco conferido e não lançado;
+- sem `localStorage`, 180 páginas que foram embora de repente, 127 falhas do rascunho avisadas e 12 blocos que não saíram por
+  falta da chave guardada.
+
+**Defeitos achados.** Foram 3 do sistema, corrigidos, e os erros do modelo das levas de busca, refutados:
+
+| Gravidade | Defeito | Teste |
+|---|---|---|
+| ALTA | Sem `localStorage`, o bloco saía sem a chave guardada no rascunho do servidor (só a faixa avisava); se a página fosse embora, a linha voltava sem a chave e gravava duas vezes | `ui/curral.fuzz.regressoes.test.js`, regressão 7 (curral e tronco) |
+| MÉDIA | A falha do rascunho adiado não aparecia no curral nem no tronco, e o rascunho não ia de novo sem outra mudança na tela | regressão 8 (curral e tronco) |
+| MÉDIA | Os vencimentos do "Dividir em parcelas" eram calculados no aparelho | `cliente.naocalcula.test.js`; `telas.fase2.test.js` (a rota) |
+| BAIXA | Falhas das levas de busca que eram do modelo do teste: a conferência que pergunta junto as pendentes, a chave e a recusa que chegam enquanto o rascunho assenta, a falha de rede que sobrava para a página nova | Refutado: modelo acertado |
+
+**Com honestidade:** os dois defeitos do curral não foram achados por uma semente. Saíram da leitura do código pelas garantias
+novas, antes das levas, e foram confirmados pelas regressões 7 e 8, que falham com o `src/` de antes (`8b6b4c3`). Na etapa 2, o gerador
+ampliado só achou erros do próprio modelo.
+
+##### As rodadas de revisão (seções 53 e 54)
+
+A revisão rodou com as mesmas quatro lentes: ZOOTECNIA E CUSTO, MOTOR, INTERFACE E REGRAS e CORREÇÕES ANTERIORES. Teve no máximo
+duas rodadas, cada uma seguida do conserto. A orquestração parava antes da segunda rodada se a primeira não tivesse achado alto,
+e não previa uma terceira.
+
+**Rodada 1: 17 achados (7 altos, 7 médios e 3 baixos).** Os achados 2 e 3 são o mesmo defeito, visto por duas lentes, e por
+isso são 16 distintos. Todos foram reproduzidos e **CORRIGIDOS**; nenhum foi refutado nem adiado. Os testes estão em
+`tests/convergencia2.r1.test.js` (12 de Node) e em `tests/ui/convergencia2.r1.test.js` (11 de navegador). Todos falham com o
+`src/` de antes (`67ac9de`) e passam agora. A rodada registrou isso, e esta etapa conferiu de novo os 12 de Node: os 12
+falham com o `src/` de `67ac9de`, todos por asserção.
+
+| Lente | ALTA | MÉDIA | BAIXA | Total |
+|---|---:|---:|---:|---:|
+| ZOOTECNIA E CUSTO | 2 | 1 | 1 | 4 |
+| MOTOR | 2 | 3 | 1 | 6 |
+| INTERFACE E REGRAS | 2 | 2 | 1 | 5 |
+| CORREÇÕES ANTERIORES | 1 | 1 | 0 | 2 |
+| **Total** | **7** | **7** | **3** | **17** |
+
+| # | Gravidade | Lente | Achado | Decisão |
+|---:|---|---|---|---|
+| 1 | ALTA | ZOOTECNIA | O diagnóstico sem estação (o padrão do tronco) contava em toda estação cuja faixa o cobria: a estação anterior ganhava prenhez e perda gestacional falsas | Corrigido: é da exposição mais recente da fêmea antes dele, a regra do parto |
+| 2 | ALTA | ZOOTECNIA | A dose por kg digitada para um animal sumia da entrada da correção: corrigir só a data refazia a dose pelo peso (a saída do frasco e o custo mudavam) ou era recusada (`SEM_PESO`) | Corrigido: `doses_informadas` no payload; a entrada leva a dose digitada |
+| 3 | ALTA | MOTOR | O mesmo do 2, visto pela correção da dose por kg | Corrigido com o 2 |
+| 4 | ALTA | MOTOR | O lote e a validade digitados na entrada de insumo sem controle de estoque eram aceitos e descartados em silêncio | Corrigido: `CAMPO_NAO_SE_APLICA` |
+| 5 | ALTA | INTERFACE | Sem `localStorage`, um pedido de rascunho que chegava atrasado ao servidor apagava a chave do bloco já gravado: a linha voltava "na fila" e gravava duas vezes (curral e tronco) | Corrigido: o rascunho no servidor vale pela versão |
+| 6 | ALTA | INTERFACE | Conserto incompleto da regra 52.1: o formulário de registro enviava o comando sem a chave guardada | Corrigido: nenhum formulário sai sem a chave guardada |
+| 7 | ALTA | CORREÇÕES ANTERIORES | Correção incompleta do defeito 9 da etapa 1: na correção de cadastro com dois dados do mesmo animal, a mudança achava o item só pelo animal e tirava o dado errado | Corrigido: o item pelo animal e pelo campo; sem o campo, `MUDANCA_AMBIGUA` |
+| 8 | MÉDIA | ZOOTECNIA | Agenda: o protocolo cadastrado hoje deixava o animal nunca aplicado vencido desde a entrada no rebanho | Corrigido: vence no início do protocolo |
+| 9 | MÉDIA | MOTOR | Parto: a entrada da correção comparava o pasto e a raça das crias com o estado de hoje da mãe | Corrigido: `pasto_crias_informado` e `racas_informadas`; `propostas` saiu |
+| 10 | MÉDIA | MOTOR | A estação do original dispensava `FORA_DA_ESTACAO` também com outra data | Corrigido: `REPRODUCAO.estacao` na tabela B, dependente da data |
+| 11 | MÉDIA | MOTOR | A unidade do produto podia mudar depois de uma compra sem movimento, e a correção reescrevia a descrição | Corrigido: `PRODUTO_EM_USO` conta a compra |
+| 12 | MÉDIA | INTERFACE | Curral: "Corrigir o brinco" punha na fila uma segunda linha do mesmo animal, e o bloco inteiro era recusado (`ANIMAL_REPETIDO`) | Corrigido: `darAnimal` em todo caminho; `uidsDoBloco`, um animal por lançamento |
+| 13 | MÉDIA | INTERFACE | A pendente sem sinal aparecia como "brinco não encontrado", e o botão das pendentes não dava resposta sem o servidor | Corrigido: o rótulo pelo porquê; o botão diz "Conferindo…" e depois avisa |
+| 14 | MÉDIA | CORREÇÕES ANTERIORES | Correção incompleta da etapa 2: sem `localStorage`, com a falha só no índice dos rascunhos, a nova tentativa não mandava nada | Corrigido: o índice que falhou vai de novo |
+| 15 | BAIXA | ZOOTECNIA | A previsão de parto só pela exposição não tinha a tolerância | Corrigido: a janela dos indicadores |
+| 16 | BAIXA | MOTOR | O comando que tira o movimento de um dia contado só era barrado pela trava, com um texto que não servia | Corrigido: `CONTAGEM_POSTERIOR` pelo motor, com o caminho do comando |
+| 17 | BAIXA | INTERFACE | O contador do tronco contava linhas que não entram no diagnóstico | Corrigido: conta as fêmeas achadas |
+
+O teste aleatório estendido na rodada achou mais dois defeitos do sistema, das mesmas causas por outro caminho. Os dois foram
+corrigidos e têm regressão:
+- o 12b (semente 70005): a linha que voltava de um bloco desfeito e a de "Pesar de novo" do mesmo animal saíam no mesmo bloco;
+- o 13b (semente 80028): com a resposta perdida, o botão das pendentes ficava calado até o prazo do aparelho.
+
+As levas também acharam duas lacunas do oráculo, e não do sistema, e foram refeitas do começo:
+- sementes 720043, 720208 e 720241: a impressão do protocolo no oráculo do tempo não levava o início dele;
+- semente 7600019: o oráculo da correção não aceitava a recusa `CONTAGEM_POSTERIOR` da dose por kg, que é do desenho.
+
+Levas com o código final:
+- domínio, 300 × 100 (7600000 a 7600299): 17.395 aceitos, 9.949 recusados, 0 falhas;
+- tela, 50 sementes sem `localStorage` (91000 a 91049) e 50 com ele (92000 a 92049): 0 falhas.
+
+As levas de antes do reinício do contêiner (a partir de 720000, 70000 e 80000) foram interrompidas, e a contagem delas não ficou
+registrada.
+
+**Rodada 2: 17 achados (10 altos, 6 médios e 1 baixo).** Os achados 2 e 6 são o mesmo defeito, visto por duas lentes, e por isso
+são 16 distintos. O 11 completa o 4: são o mesmo pasto informado, um na gravação e o outro na entrada. Todos foram reproduzidos e
+**CORRIGIDOS**. No 6, a parte das adulterações só da fonte, sem cópia que as confira, foi **REFUTADA**: o dado que só existe num
+lugar é o fato. Os testes estão em `tests/convergencia2.r2.test.js` (12 de Node) e em `tests/ui/convergencia2.r2.test.js` (11 de
+navegador, 3 deles dos defeitos que o teste aleatório estendido achou). Todos falham com o `src/` de antes (`5e69ebf`) e passam
+agora. A rodada registrou isso, e esta etapa conferiu de novo os 12 de Node: os 12 falham com o `src/` de `5e69ebf`, todos por asserção.
+
+| Lente | ALTA | MÉDIA | BAIXA | Total |
+|---|---:|---:|---:|---:|
+| ZOOTECNIA E CUSTO | 4 | 0 | 0 | 4 |
+| MOTOR | 2 | 3 | 1 | 6 |
+| INTERFACE E REGRAS | 2 | 2 | 0 | 4 |
+| CORREÇÕES ANTERIORES | 2 | 1 | 0 | 3 |
+| **Total** | **10** | **6** | **1** | **17** |
+
+| # | Gravidade | Lente | Achado | Decisão |
+|---:|---|---|---|---|
+| 1 | ALTA | ZOOTECNIA | Conserto incompleto do achado 1 da rodada 1: o aborto entrava na estação pela faixa de datas. O da prenhez anterior virava o desfecho da fêmea na estação seguinte, e a previsão perdia a exposição em curso | Corrigido: o aborto é do dono da prenhez que ele encerra; `abortos` nos indicadores |
+| 2 | ALTA | ZOOTECNIA | A verificação não acusava a dose mexida à mão na aplicação por peso (a base do rateio diverge), e a correção sem mudança espalhava a dose adulterada no custo | Corrigido: `BASE_DOSE`, `SOMA_DOSES`, `RATEIO_MODO`, `SAIDA_LOTE`; a trava recusa a correção sobre fonte quebrada |
+| 3 | ALTA | ZOOTECNIA | A verificação não conferia o método único da pesagem e da desmama, e a correção sem mudança espalhava o método adulterado (o GMD do lote sumia) | Corrigido: `METODO_DO_LANCAMENTO` |
+| 4 | ALTA | ZOOTECNIA | Regressão do conserto da semente 612769: o pasto de destino da desmama não ficava gravado com o bezerro já nele, e o estorno da transferência anterior o deixava no pasto antigo, sem aviso | Corrigido: a linha com origem = destino; o fato que o tiraria dali é recusado |
+| 5 | ALTA | MOTOR | A correção do lançamento que criou o animal desfazia a raça corrigida na ficha, mesmo sem mudança (quebra b1) | Corrigido: `racaMudou_`; o oráculo confere ANIMAIS com a raça |
+| 6 | ALTA | MOTOR | O mesmo do 2, visto pela integridade: também o lote, o fabricante, a via e o veterinário diferentes entre as linhas | Corrigido: `CABECALHO_SANIDADE`; refutado na parte só da fonte |
+| 7 | ALTA | INTERFACE | Trocar o produto ou o protocolo na aplicação mantinha a carência, a dose, o lote e a validade do anterior | Corrigido: a tela troca o que veio do anterior; a carência fica com o servidor |
+| 8 | ALTA | INTERFACE | Fêmeas → "Diagnóstico": o aparelho escolhia a estação pela data de hoje, e o diagnóstico ia para a estação errada | Corrigido: a estação vem só do filtro; sem ele, vai sem estação |
+| 9 | ALTA | CORREÇÕES ANTERIORES | Correção incompleta de `VENDA.bases_estimadas`: a venda dividida por cabeça passava a peso estimado depois de uma pesagem retroativa | Corrigido: `bases_congeladas` 'CABECAS' |
+| 10 | ALTA | CORREÇÕES ANTERIORES | Correção incompleta da marca do digitado: os valores congelados não liam a marca, e apagar o digitado na correção o mantinha | Corrigido: a tabela B lê as marcas |
+| 11 | MÉDIA | MOTOR | Conserto incompleto do pasto informado (612769): o pasto da desmama com o bezerro já nele e o do parto só de natimorto sumiam da entrada | Corrigido: o pasto no payload e nas linhas |
+| 12 | MÉDIA | MOTOR | Conserto incompleto da certeza apagada junto: ela vinha na entrada como digitada, e a mudança que a tirava era aceita sem efeito | Corrigido: fora da entrada; `MUDANCA_SEM_ITEM` |
+| 13 | MÉDIA | MOTOR | Conserto incompleto da recorrência congelada: a correção que digitava a próxima aplicação apagava o intervalo do payload | Corrigido: `proxima_informada` |
+| 14 | MÉDIA | INTERFACE | Sem `localStorage`, "Terminar" com a remoção do rascunho do servidor sem chegar: a sessão voltava com as linhas descartadas | Corrigido: só termina com a remoção confirmada |
+| 15 | MÉDIA | INTERFACE | A recusa do servidor ao resolvedor (a data futura) era tratada como falta de sinal, e as linhas ficavam pendentes para sempre | Corrigido: `recusou(e)` em todos os caminhos |
+| 16 | MÉDIA | CORREÇÕES ANTERIORES | Correção incompleta do achado 13 da rodada 1: a pendente barrada por outra linha aparecia como "sem resposta" | Corrigido: o rótulo "barrada" |
+| 17 | BAIXA | MOTOR | Mensagens da correção de cadastro com o nome técnico do campo e o conselho errado | Corrigido: em português do pecuarista |
+
+Com a recusa do resolvedor gerada pela rede do teste, o teste aleatório estendido achou mais três defeitos do sistema:
+- o "Corrigir o brinco" recusado dizia "sem resposta" (o achado 15 por um caminho que o conserto não cobria);
+- sem `localStorage`, o bloco que não saía por falta da chave guardada voltava à fila sem ser guardado de novo: um defeito da
+  etapa 2, achado pela semente fixa 14 com a sequência nova;
+- a marca "não entra" da data antiga ficava na linha recusada da data nova (semente 95022).
+
+Os três foram corrigidos e têm teste. O oráculo também estava errado duas vezes:
+- na semente 93000, ele exigia "a conferir no servidor" também da pendente barrada; o achado 16 estava escrito no oráculo;
+- na semente 95015, o fim exigia resolver a recusada.
+
+Levas com o código final:
+- domínio, 300 × 100 (7700000 a 7700299): 18.273 aceitos, 9.577 recusados, 0 falhas, com 206 conferências de que cada registro
+  conta numa estação só (`INDICADORES:DONO`);
+- tela, 50 sementes sem `localStorage` (95000 a 95049) e 50 com ele (96000 a 96049): 0 falhas, com 36 recusas do servidor à
+  conferência geradas.
+
+**Por onde os achados passaram pelas garantias.** Pela leitura desta etapa:
+- **Os campos que o oráculo da correção não sorteia.** O b2 era conferido só na anotação, no responsável, na observação e na data.
+  Por isso passaram a dose digitada (rodada 1, achados 2 e 3), a mudança da correção de cadastro (7) e a marca do digitado
+  apagada (rodada 2, 10, 12 e 13). Cada rodada estendeu o sorteio para o que achou.
+- **A fonte adulterada.** O oráculo da correção supõe a fonte intacta. A verificação conferia a cópia entre tabelas, mas não a
+  cópia na mesma linha do lançamento (rodada 2, achados 2, 3 e 6).
+- **O registro que cria o animal.** O gerador só mexia no nome na ficha, e não na raça (rodada 2, 5).
+- **Regras de domínio sem oráculo.** O dono do diagnóstico e do aborto na estação: o modelo dos indicadores só conferia cada
+  estação sozinha (rodada 1, 1; rodada 2, 1). A agenda no início do protocolo (rodada 1, 8). A previsão de parto (rodada 1, 15).
+- **A tela fora do curral e do tronco.** Os achados 7 e 8 da rodada 2 não têm aritmética: a tela escolhia um valor pelo dado de
+  hoje (a estação pela data, a carência do produto anterior). O leitor do "cliente não calcula" não os vê.
+- **O que o gerador da tela não gerava.** O rascunho atrasado (rodada 1, 5), a falha só do índice (14), a recusa do servidor ao
+  resolvedor (rodada 2, 15) e o "Terminar" com a remoção falhando (14). O oráculo também tinha o defeito escrito: ele exigia o
+  rótulo errado (16). O formulário de registro (rodada 1, 6) não está no teste aleatório da tela.
+
+##### Balanço: a última rodada terminou sem achado alto? Não
+
+| Rodada | Achados | Distintos | ALTA | MÉDIA | BAIXA | Conserto incompleto ou regressão (pelo título) |
+|---|---:|---:|---:|---:|---:|---:|
+| 1 (a entrega) | 29 | 28 | 14 | 10 | 5 | — |
+| 2 (os consertos da 1) | 25 | 18 | 8 | 15 | 2 | 10 (40%) |
+| 3 (os consertos da 2) | 25 | 22 | 5 | 14 | 6 | 13 (52%) |
+| Final (depois da primeira convergência) | 17 | 17 | 7 | 9 | 1 | 8 (47%) |
+| 1 da segunda convergência | 17 | 16 | 7 | 7 | 3 | 2 (12%) |
+| 2 da segunda convergência | 17 | 16 | 10 | 6 | 1 | 8 (47%) |
+| **Total** | **130** | **117** | **51** | **61** | **18** | **41** |
+
+**A última rodada terminou sem achado alto? Não.** A rodada 2 da segunda convergência achou 10 altos, o maior número desde a
+rodada 1 da revisão da fase (14). Todos foram corrigidos e têm teste. A orquestração previa no máximo duas rodadas, e por isso
+**nenhuma revisão examinou esses 17 consertos**.
+
+O que os números mostram:
+- **O total parou em 17** nas três últimas revisões (17, 17, 17), e os altos subiram (7, 7, 10).
+- **A parte de conserto incompleto ou regressão** caiu na rodada 1 (2 de 17, pelo título) e voltou na rodada 2 (8 de 17). Pela
+  leitura desta etapa, 7 dos 17 da rodada 1 são das peças novas da segunda convergência: 2, 3, 7 e 9 no ponto único da correção;
+  10, a regra que ficou fora dele; 6 e 14 nas regras 52.1 e 52.2. Os 8 da rodada 2 são todos de consertos ou peças desta
+  convergência.
+
+Pela leitura desta etapa, os achados das duas rodadas se distribuem assim:
+
+| Classe | Rodada 1 | Rodada 2 |
+|---|---|---|
+| 1. O fato congelado na correção | 6 (2, 3, 7, 9, 10, 11), 3 altos | 7 (4, 5, 9, 10, 11, 12, 13), 4 altos |
+| 2. O curral, o tronco e o rascunho | 6 (5, 6, 12, 13, 14, 17), 2 altos | 3 (14, 15, 16), nenhum alto |
+| A verificação das cópias na mesma linha | — | 3 (2, 3, 6), 3 altos |
+| Telas que escolhem pelo dado de hoje (fora do curral) | — | 2 (7, 8), 2 altos |
+| Outras regras de domínio | 5 (1, 4, 8, 15, 16), 2 altos | 2 (1, 17), 1 alto |
+
+- **A classe 2 teve, pela primeira vez na fase, uma rodada sem achado alto no curral e no tronco.** Antes, eles tiveram alto em
+  todas as revisões: nas três rodadas, na final e na rodada 1 desta convergência (o rascunho atrasado). Na rodada 2 ficaram 3
+  médios.
+- **A classe 1 não caiu.** Ela mudou de forma. Na rodada 1, o problema era o que a entrada não trazia: a dose digitada, o item da
+  mudança, o estado de hoje da mãe. Na rodada 2, era a marca do digitado, a raça da criação e a divisão por cabeça. O ponto único
+  existe, e os consertos foram feitos nele. Mesmo assim, cada rodada achou uma família de valores que ele ainda não tratava.
+- **Apareceram duas frentes novas, ambas com achados altos:** a verificação que não conferia a cópia na mesma linha do lançamento,
+  e as telas que escolhem um valor pelo dado de hoje sem fazer conta.
+
+**Esta etapa: confirmação com o código final.** O `src/` não mudou desde a rodada 2. Com ele, esta etapa rodou
+sementes novas:
+- motor, 100 × 100 (7800000 a 7800099, 2 processos): 5.925 aceitos, 3.253 recusados e 0 falhas. O oráculo da correção:
+  - aceitou 3.866 correções sem mudança, 2.280 pela entrada do servidor e 1.586 pela do gerador, com 6 recusas
+    documentadas;
+  - conferiu 1.514 mudanças de um campo: 492 da data, 8 da dose por kg e 8 doses digitadas por peso;
+  - comparou 175.403 consultas.
+
+  Os indicadores contaram cada registro numa estação só em 74 conferências. A viagem no tempo comparou 720.445 unidades, e o
+  resolvedor conferiu 59.415 textos;
+- tela, 15 sementes sem `localStorage` (98000 a 98014) e 15 com ele (99000 a 99014), 40 ações cada: 30 aprovadas e 0 falhas,
+  com 1.476 verificações do oráculo, 684 linhas gravadas e 1.438 blocos que saíram conferidos intocados.
+  - Sem `localStorage`: 97 rascunhos do servidor conferidos com a tela e 7 falhas do rascunho avisadas. 17 páginas foram
+    embora de repente; 3 perderam o que não tinha chegado ao servidor, sem nada gravado a mais. Houve 24 "Terminar" com o
+    rascunho do servidor apagado e 11 com a remoção sem confirmação.
+  - Nas duas: 8 recusas do servidor à conferência geradas e 62 rótulos de recusada conferidos.
+
+Nenhuma falha, como nas levas das duas rodadas. Pelo que se viu na fase, isso não quer dizer que não haja defeito: depois de
+cada leva limpa, a revisão seguinte achou de 17 a 29.
+
+**O que o teste aleatório achou sem revisor.** Na segunda convergência foram 16 defeitos do sistema achados por semente:
+- os 11 do oráculo da correção na etapa 1;
+- 2 da tela na rodada 1 (12b e 13b);
+- 3 da tela na rodada 2 (o "Corrigir o brinco" recusado, a semente 14 e a 95022).
+
+As levas de domínio dos consertos das rodadas (as 600 sementes contadas e as interrompidas) não acharam defeito do sistema,
+só duas lacunas do oráculo. As duas revisões acharam 34.
+
+O que a segunda convergência garante:
+1. **A correção sem mudança grava os mesmos fatos e não muda as consultas** (b1 e b4). Isso é conferido pelas duas entradas,
+   depois de mudar os cadastros, em todos os tipos que aparecem nas sementes, num passo sorteado de cada semente: 2.992 sementes de
+   domínio na etapa e nas rodadas, mais as 100 desta etapa.
+2. **O que a correção mantém do original está numa tabela só.** São 23 valores, e o teste amarra a tabela ao código. Todo
+   tratador lê por um ponto só.
+3. **O curral e o tronco têm as garantias da fila (seção 6.6.4) e mais duas.** O bloco só sai com a chave guardada, e o animal
+   mostrado é o do servidor na data. Elas valem também sem `localStorage`, com o rascunho no servidor falhando, chegando atrasado,
+   recusado ou com a página indo embora. São conferidas a cada ação, no Chromium do Playwright, com o mock.
+4. **O aparelho não faz conta de data nem de número de domínio com nome reconhecível.** Isso é conferido por um teste estático.
+
+O que ela não garante:
+- o b2 e o b3 nos campos que o oráculo não sorteia; a troca de entidade e o plano de contas ficam só em testes fixos;
+- a correção sobre uma fonte adulterada sem cópia que a confira;
+- a tela que escolhe um valor pelo dado de hoje sem fazer conta, e a conta com nomes neutros;
+- o celular, o quadro do HtmlService, o Apps Script e o Google Sheets.
+
+**O que continua em aberto:**
+1. Os 17 consertos da rodada 2 (10 altos), sem revisão. Nas revisões anteriores, a parte dos achados que era conserto incompleto
+   ou regressão foi de 40%, 52%, 47%, 12% e 47%. Pelo que elas acharam, é provável que parte desses consertos esteja incompleta,
+   sobretudo no fato congelado na correção (as marcas do digitado, a raça da criação, a divisão da venda) e na verificação das
+   cópias, que é nova.
+2. Os limites do oráculo da correção. O b2 é conferido em poucos campos. A troca de entidade (outro produto, protocolo, mãe ou
+   tipo de dedução) e a mudança das entradas dos derivados ficam só nos testes fixos. O plano de contas não é variado (fica para a
+   Fase 4).
+3. Os lançamentos gravados antes das marcas do digitado são lidos como "proposto". O parto só de natimorto gravado antes da etapa
+   1, sem `pai_confianca`, ainda pede "Pai é" na correção sem mudança. Esses lançamentos só existem nos testes.
+4. O leitor do "cliente não calcula" lê nomes. A escolha de um valor pelo dado de hoje, sem conta, continua dependendo da revisão.
+5. O teste da tela não cobre o "Pesar este" da lista dos que faltam, vários animais com o mesmo número na mesma data, duas abas
+   abertas, o formulário de registro e o celular. Sem `localStorage`, o que não chegou ao servidor se perde quando a página vai
+   embora de repente; nada é gravado a mais. A linha "recusada pelo servidor" espera o operador.
+6. Continuam abertos os itens 2, 3, 5, 6, 8 e 9 da seção 6.6.6: o celular e o quadro do HtmlService, os limites do oráculo do
+   tempo, os encontros raros, o custo do retrato e da trava no Apps Script, as decisões só no `CONTRATOS.md` e a validação na conta
+   do dono. As decisões desta convergência (seção 4, item 17) também esperam a ratificação.
+7. A margem da página inicial deixou de ser um problema. Ela tem 22.573 bytes livres (seção 5, item 3).
+
+**Recomendação.** Antes de dar a Fase 3 por fechada, fazer uma rodada de revisão independente só sobre os 17 consertos da rodada
+2. O foco seria:
+- o fato congelado na correção (as marcas do digitado, a raça da criação e a divisão por cabeça da venda);
+- a verificação nova das cópias na mesma linha;
+- o dono do aborto nas estações;
+- as telas fora do curral que escolhem valores.
+
+Também falta o roteiro do modo curral num celular de verdade, no curral. A decisão é do dono.
+
 ## 7. Veredito (09, seção 10)
 
 ```text
-RELATÓRIO DE TESTES, FASE 3, 17/11/2026 (com a convergência e a revisão final): o código de comportamento é o
-do commit bfbdca6 (src/) e os testes os do d0033b6, salvamentos automáticos da orquestração durante o conserto
-da revisão final; esta etapa só mudou documentos e não fez commit nem push (o salvamento automático de fora
-dela gravou 752e06c e b23e823, só com documentos)
+RELATÓRIO DE TESTES, FASE 3, 18/11/2026 (com as duas convergências e as seis revisões): o código de comportamento é o
+do commit c4721eb (src/) e os testes os do b9a2072, salvamentos automáticos da orquestração durante o conserto
+da rodada 2 da segunda convergência; esta etapa só mudou documentos e não fez commit nem push
 
 1. EXECUTADO AQUI (Node)
-   comando: npm test      resultado: 863/863 (825,4 s; 23 sementes fixas do teste aleatório: 826 aceitos, 0 falhas)
+   comando: npm test      resultado: 914/914 (903,0 s; 23 sementes fixas do teste aleatório: 831 aceitos, 0 falhas)
    cenários: CT-05 ok | CT-06 ok | SANIDADE ok | ESTOQUE ok | REPRODUCAO ok | CT-10 passo 3 ok | CT-17 e CT-18 com a
-             pesagem ok | CT-12 com o manejo ok | Fases 1 e 2 ok | consultas numa data passada ok | resolvedor ok
-   interface (Playwright): executado, 186/186 (433,9 s; 6 sementes fixas da tela do curral e do tronco);
-             página inicial 450 KB de 450 KB (sobram 45 bytes)
+             pesagem ok | CT-12 com o manejo ok | Fases 1 e 2 ok | consultas numa data passada ok | resolvedor ok |
+             correção sem mudança e fato congelado ok | o cliente não calcula ok
+   interface (Playwright): executado, 212/212 (527,5 s; 6 sementes fixas da tela do curral e do tronco);
+             página inicial 428 KB de 450 KB (sobram 22.573 bytes)
+   teste aleatório desta etapa: motor 100 sementes × 100 passos (5.925 aceitos, 0 falhas); tela 30 × 40
+             (15 sem localStorage), 0 falhas
 
 2. A EXECUTAR NA CONTA DO DONO (nível 2)
    runAcceptanceTests()      PENDENTE      relatório JSON (23 cenários)
    CT-10 passo 6             PENDENTE      captura da página de concorrência
    modo curral no curral     PENDENTE      relato (com a ida ao servidor por brinco)
    PR-06, PR-07, PR-10, PR-11  PENDENTE    respostas
-   decisões da convergência  PENDENTE      ratificar (uma contraria 08, seção 5)
+   decisões das convergências  PENDENTE    ratificar (uma contraria 08, seção 5)
    spike SP-01 a SP-10       PENDENTE (Fase 1)
 
 3. HIPÓTESES NÃO CONFERIDAS NA PLATAFORMA
-   tela sob demanda no iframe (NV); tempo do Sheets com o manejo, o retrato numa data e a ida ao servidor por
-   brinco; teclado e localStorage no celular; as das Fases 1 e 2
+   tela sob demanda no iframe (NV); tempo do Sheets com o manejo, o retrato numa data, a ida ao servidor por
+   brinco e a trava com as conferências novas; teclado e localStorage no celular; as das Fases 1 e 2
 
 4. FALHAS CONHECIDAS E DECISÃO
    nenhuma falha de teste; limitações na seção 5
-   revisão: 3 rodadas e a final, 96 achados (34 altos), todos corrigidos; a final, depois da convergência, teve
-   7 altos (4 no curral e no tronco), e os consertos dela não foram revisados (seção 6.6.6): a convergência não
-   está demonstrada
+   revisão: 3 rodadas, a final e 2 rodadas na segunda convergência, 130 achados (51 altos), todos corrigidos
+   (uma parte de um achado refutada); a última rodada teve 10 altos (nenhum no curral e no tronco; 4 no fato
+   congelado na correção), e os consertos dela não foram revisados (seção 6.6.7): a convergência não está
+   demonstrada
 
 5. VEREDITO: a fase fecha? não — depende da execução na conta do dono (seção 3) e, antes disso, de uma revisão
-   dos 17 consertos da revisão final, sobretudo do curral e do tronco (seção 6.6.6)
+   dos 17 consertos da rodada 2 da segunda convergência, sobretudo do fato congelado na correção e da
+   verificação das cópias (seção 6.6.7)
 ```
