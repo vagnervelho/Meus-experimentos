@@ -2190,9 +2190,16 @@ var EventService = (function () {
       ['sexo', 'castrado', 'reprodutor', 'partos_previos', 'mae_id', 'mae_confianca', 'pai_id', 'pai_confianca', 'data_nascimento', 'data_nascimento_confianca', 'data_entrada', 'data_entrada_confianca'].forEach(function (c) {
         fim[c] = g.campos[c] !== undefined ? g.campos[c] : e[c] === undefined ? null : e[c];
       });
-      if (fim.sexo === 'F' && (g.campos.castrado !== undefined || g.campos.reprodutor !== undefined)) erroItem_(m, it, 'campo', 'NAO_SE_APLICA', 'castrado e reprodutor só se aplicam a machos.');
-      if (fim.sexo === 'M' && g.campos.partos_previos !== undefined) erroItem_(m, it, 'campo', 'NAO_SE_APLICA', 'partos anteriores só se aplicam a fêmeas.');
-      if (fim.sexo === 'M' && fim.castrado === true && fim.reprodutor === true && (g.campos.castrado !== undefined || g.campos.reprodutor !== undefined)) erroItem_(m, it, 'campo', 'CASTRADO_REPRODUTOR', 'animal castrado não pode ser reprodutor.');
+      // As regras entre campos são conferidas com o cadastro de hoje (com as correções de cadastro posteriores). Na correção do
+      // mesmo ajuste — cada campo que o comando corrige neste animal é um que o original corrigiu, com o mesmo valor e na mesma
+      // data —, valem como o original as cumpria: a correção posterior (o sexo, a certeza, o nascimento) não recusa a correção
+      // sem mudança dele (Correcao.congelado).
+      var doOriginal = function (campo) { return g.campos[campo] !== undefined && !!Correcao.congelado(ctxEv.correcao, 'AJUSTE.valor_anterior', { animal_id: id, campo: campo, valor_novo: textoCampo_(campo, g.campos[campo]), data: ctxEv.ev.event_date }); };
+      var corrigidos = Object.keys(g.campos);
+      var mesmoAjuste = corrigidos.length > 0 && corrigidos.every(doOriginal);
+      if (!mesmoAjuste && fim.sexo === 'F' && (g.campos.castrado !== undefined || g.campos.reprodutor !== undefined)) erroItem_(m, it, 'campo', 'NAO_SE_APLICA', 'castrado e reprodutor só se aplicam a machos.');
+      if (!mesmoAjuste && fim.sexo === 'M' && g.campos.partos_previos !== undefined) erroItem_(m, it, 'campo', 'NAO_SE_APLICA', 'partos anteriores só se aplicam a fêmeas.');
+      if (!mesmoAjuste && fim.sexo === 'M' && fim.castrado === true && fim.reprodutor === true && (g.campos.castrado !== undefined || g.campos.reprodutor !== undefined)) erroItem_(m, it, 'campo', 'CASTRADO_REPRODUTOR', 'animal castrado não pode ser reprodutor.');
       // Apagar a mãe, o pai ou uma data apaga também a confiança (que deixaria de ter a que se referir).
       [['mae_id', 'mae_confianca'], ['pai_id', 'pai_confianca'], ['data_nascimento', 'data_nascimento_confianca']].forEach(function (par) {
         // Na correção do mesmo ajuste, a confiança que o original apagou junto continua apagada com o valor de antes que ele
@@ -2202,10 +2209,8 @@ var EventService = (function () {
           ajusteRow_(m, ctxEv, it, par[1], confCong ? confCong.v : textoCampo_(par[1], e[par[1]]), null);
           fim[par[1]] = null;
         }
-        // O par (o dado e a certeza dele) é conferido no cadastro de hoje; na correção do mesmo ajuste (o mesmo valor, a mesma
-        // data), o que o original gravou continua valendo: a correção de cadastro posterior que apagou a certeza (ou o dado) não
-        // recusa a correção sem mudança dele (Correcao.congelado).
-        var doOriginal = function (campo) { return g.campos[campo] !== undefined && !!Correcao.congelado(ctxEv.correcao, 'AJUSTE.valor_anterior', { animal_id: id, campo: campo, valor_novo: textoCampo_(campo, g.campos[campo]), data: ctxEv.ev.event_date }); };
+        // O par (o dado e a certeza dele), também: a correção de cadastro posterior que apagou a certeza (ou o dado) não recusa a
+        // correção sem mudança do original.
         if (!vazio_(fim[par[0]]) && vazio_(fim[par[1]]) && !(g.campos[par[1]] === undefined && doOriginal(par[0]))) erroItem_(m, it, par[1], 'CAMPO_OBRIGATORIO', 'informe também "' + par[1] + '".');
         if (vazio_(fim[par[0]]) && !vazio_(g.campos[par[1]]) && !(g.campos[par[0]] === undefined && doOriginal(par[1]))) erroItem_(m, it, par[1], 'CAMPO_SEM_VINCULO', '"' + par[1] + '" precisa de "' + par[0] + '" preenchido.');
       });
@@ -2214,7 +2219,7 @@ var EventService = (function () {
         if (!entrada || entrada.event_type !== 'ENTRADA_INICIAL') erroItem_(m, it, 'campo', 'NAO_SE_APLICA', 'a data de chegada só se corrige em animal do rebanho inicial; nos demais ela é a data do lançamento de entrada.');
         else if (!vazio_(fim.data_entrada) && fim.data_entrada > m.D0) erroItem_(m, it, 'valor_novo', 'ENTRADA_DEPOIS_DO_MARCO_ZERO', 'a chegada na fazenda não pode ser depois do marco zero (' + br_(m.D0) + ').');
       }
-      if (!vazio_(fim.data_nascimento) && !vazio_(fim.data_entrada) && fim.data_entrada < fim.data_nascimento) erroItem_(m, it, 'valor_novo', 'ENTRADA_ANTES_DO_NASCIMENTO', 'a chegada na fazenda (' + br_(fim.data_entrada) + ') ficaria antes do nascimento (' + br_(fim.data_nascimento) + ').');
+      if (!mesmoAjuste && !vazio_(fim.data_nascimento) && !vazio_(fim.data_entrada) && fim.data_entrada < fim.data_nascimento) erroItem_(m, it, 'valor_novo', 'ENTRADA_ANTES_DO_NASCIMENTO', 'a chegada na fazenda (' + br_(fim.data_entrada) + ') ficaria antes do nascimento (' + br_(fim.data_nascimento) + ').');
     });
   }
   function identificacaoIncorreta_(m, ctxEv, it, e) {

@@ -3,11 +3,15 @@
  * O contrato da correção (CONTRATOS, seção 50) nos casos que o oráculo do teste aleatório não sorteia: a correção que muda a
  * entrada de que um valor congelado depende (b2). Com outra data, o derivado do estado do dia é refeito na posição nova; com
  * outro produto, as cópias são as do cadastro de hoje do produto novo (a exceção documentada), e os campos que a tela preenche
- * pelo produto ficam como foram informados. Tudo pela correção só com a mudança (`dados.mudanca`, Correcao.montar).
+ * pelo produto ficam como foram informados. Tudo pela correção só com a mudança (`dados.mudanca`, Correcao.montar). E a
+ * tabela B do contrato é a do código: cada valor que a correção mantém do original está nela, com a mesma natureza.
  */
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const S = require('./apoio-sistema');
+const { createGas } = require('./harness');
 
 const { js } = S;
 const TODOS = ['PESO_IMPLAUSIVEL', 'POSSIVEL_DUPLICIDADE', 'LOTACAO_ACIMA_DA_CAPACIDADE', 'ESTOQUE_INSUFICIENTE', 'PRODUTO_VENCIDO', 'CARENCIA_ATIVA', 'IDADE_REPRODUTIVA', 'CATEGORIAS_SEM_COBERTURA', 'RATEIO_SEM_PESO', 'VALOR_DIVERGENTE', 'INTERVALO_PARTO_CURTO', 'BRINCO_PARECIDO'];
@@ -78,4 +82,18 @@ test('com outro produto, a aplicação copia o cadastro de hoje do produto novo 
   assert.match(f.fin[0][1], /^Consumo de vermífugo: /);
   assert.equal(f.fin[0][2], 800);
   semErro(s, 'outro produto');
+});
+
+test('a tabela B do contrato (CONTRATOS, 50.4) é a do código: cada valor que a correção mantém do original (Correcao.CONGELADOS) está nela, com a mesma natureza, e nada além deles', () => {
+  const contratos = fs.readFileSync(path.join(__dirname, '..', 'docs', 'CONTRATOS.md'), 'utf8');
+  const ini = contratos.indexOf('### 50.4 ');
+  const fim = contratos.indexOf('### 50.5 ', ini);
+  assert.ok(ini > 0 && fim > ini, 'a seção 50.4 do contrato');
+  const doContrato = [...contratos.slice(ini, fim).matchAll(/^\| `([A-Z_]+\.[a-z_]+)` \| ([A-Z]+) \|/gm)].map((m) => m[1] + ' ' + m[2]).sort();
+  const gas = createGas();
+  const doCodigo = js(gas.G.Correcao.tabela()).map((d) => d.chave + ' ' + d.natureza).sort();
+  assert.equal(doCodigo.length, 22);
+  assert.deepEqual(doContrato, doCodigo);
+  const natureza = (n) => doCodigo.filter((x) => x.endsWith(' ' + n)).length;
+  assert.deepEqual([natureza('COPIA'), natureza('DERIVADO'), natureza('REGRA')], [12, 6, 4], 'as contagens que o contrato e o registro de alterações citam');
 });

@@ -3506,7 +3506,8 @@ marco zero) e a posição (`event_seq`, `ordem_seq`: metadados); copiada a propr
 
 Natureza: COPIA (copiado do cadastro no registro), DERIVADO (calculado do estado daquele dia) e REGRA (a regra de cadastro
 que o original já cumpria e que só o cadastro de hoje quebraria). Enquanto as entradas da coluna "depende" são as do original,
-a correção grava o valor do original; quando uma muda, o tratador refaz o valor como no registro.
+a correção grava o valor do original; quando uma muda, o tratador refaz o valor como no registro. As chaves e a natureza desta
+tabela são as do código (`Correcao.tabela()`), e `tests/correcao.contrato.test.js` confere que nenhuma falta nem sobra.
 
 | Chave | Natureza | De onde vem | Depende de | Onde fica |
 |---|---|---|---|---|
@@ -3529,7 +3530,7 @@ a correção grava o valor do original; quando uma muda, o tratador refaz o valo
 | `DESMAMA.maes` | DERIVADO | a mãe de cada bezerro pelo cadastro, presente no rebanho no dia | os bezerros e a data | EVENTO_ANIMAIS (MATRIZ); REPRODUCAO (DESMAMA da mãe) |
 | `NASCIMENTO.pasto_crias` | DERIVADO | o pasto da mãe no dia do parto | a mãe e a data | EVENTO_ANIMAIS.pasto_destino_id (CRIA) |
 | `NASCIMENTO.raca_cria` | DERIVADO | a raça da mãe | a mãe e a cria | atributos_iniciais_json.raca; ANIMAIS.raca |
-| `AJUSTE.valor_anterior` | DERIVADO | o cadastro do animal antes do ajuste (e as regras que o cadastro de hoje quebraria: VALOR_IGUAL, o par do dado e da certeza; no brinco lançado errado, as conferências pelo brinco de hoje) | o animal, o campo, o valor novo e a data | AJUSTES.valor_anterior (também a certeza apagada junto) |
+| `AJUSTE.valor_anterior` | DERIVADO | o cadastro do animal antes do ajuste (e as regras que o cadastro de hoje quebraria: VALOR_IGUAL, as regras entre campos, o par do dado e da certeza; no brinco lançado errado, as conferências pelo brinco de hoje) | o animal, o campo, o valor novo e a data | AJUSTES.valor_anterior (também a certeza apagada junto) |
 | `VENDA.bases_estimadas` | DERIVADO | a última pesagem de cada animal até a data | os animais, a data, a modalidade, o peso vivo total | RATEIOS e ALOCACOES_FINANCEIRAS; EVENTO_ANIMAIS.valor_individual |
 | `VENDA.rotulo_deducao` | COPIA | LISTAS (TIPO_DEDUCAO_VENDA).rotulo | o tipo da dedução | FINANCEIRO.descricao (dedução) |
 
@@ -3559,8 +3560,14 @@ a correção grava o valor do original; quando uma muda, o tratador refaz o valo
   de integridade acusa a que não é (GENEALOGIA, `TOURO_LINHA`), e a trava recusa a correção de cadastro que tiraria o sexo do
   touro de um lote com vários touros (com um touro só, o `touro_id` do registro já era conferido). Sem isso, a correção sem
   mudança da exposição refaria o animal como fêmea exposta.
-- O pasto do lote da compra só recebe os animais sem pasto próprio: com todos de pasto próprio, ele não é gravado, e estar
-  desativado depois não recusa a correção. O parto só de natimorto não pede nem confere o pasto da mãe.
+- O pasto informado só é conferido como quem recebe animais (desativado: PASTO_INATIVO) quando algum animal vai para ele: o
+  pasto do lote da compra com todos os animais de pasto próprio, o do parto só de natimorto e o da desmama cujos bezerros já
+  estavam nele não ficam gravados, e estar desativado depois não recusa a correção. O parto só de natimorto também não pede nem
+  confere o pasto da mãe.
+- As regras entre campos da correção de cadastro (castrado e reprodutor só no macho, partos anteriores só na fêmea, castrado
+  não é reprodutor, o dado e a certeza dele, a chegada depois do nascimento) são conferidas com o cadastro de hoje; na correção
+  do mesmo ajuste (os mesmos campos, com os mesmos valores, na mesma data) valem como o original as cumpria — a correção de
+  cadastro posterior (o sexo, a certeza, o nascimento) não recusa a correção sem mudança da anterior.
 - Com outra data, as conferências pelo estado de hoje voltam a valer (o valor de antes do ajuste, o VALOR_IGUAL e as do brinco
   lançado errado são refeitos na posição nova).
 
@@ -3617,6 +3624,8 @@ agora; o conserto está no ponto único (a linha da tabela B, ou a regra que só
 | 17 | o lançamento sem a propriedade ia para a propriedade padrão de hoje | MEDIA | `EVENTO.propriedade` |
 | 18 | a desmama ganhava a linha da mãe (e o registro DESMAMA dela, que conta nos indicadores) que o cadastro do bezerro só ganhou depois | MEDIA | `DESMAMA.maes` |
 | 19 | a correção de cadastro do nascimento era recusada ("informe também a certeza") depois de outra correção de cadastro, posterior, apagar o nascimento e a certeza: o par era conferido no cadastro de hoje | MEDIA | `AJUSTE.valor_anterior`: o par (o dado e a certeza dele) do mesmo ajuste vale como o original gravou |
+| 20 | o parto só de natimorto com o pasto informado, e a desmama do bezerro que já estava no pasto informado, eram recusados (PASTO_INATIVO) depois de desativar esse pasto, que não fica gravado | BAIXA | o pasto informado conferido só quando recebe animal (como o da compra, 14) |
+| 21 | a correção de cadastro (castrado, reprodutor, partos, a chegada) era recusada pelas regras entre campos conferidas com o sexo ou o nascimento que uma correção posterior mudou (achado ao consertar o 19, mesma causa) | MEDIA | `AJUSTE.valor_anterior`: as regras entre campos do mesmo ajuste valem como o original as cumpria |
 
 ### 50.9 Decisões
 

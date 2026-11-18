@@ -7,7 +7,8 @@
  * único (Correcao.congelado) dá o valor do original enquanto as entradas de que ele depende não mudam. Cada teste falha com o
  * `src/` de antes desta etapa (commit b8c513b) e passa agora. Os testes 1 a 9 são da primeira leva do oráculo (e da mesma causa
  * por outro caminho); do 10 em diante, das falhas das sementes fixas, da leva de 1.000 sementes × 100 passos (610000 a 610999)
- * e da primeira leva de confirmação (a semente 611819), reduzidas ao cenário mínimo.
+ * e das levas de confirmação (as sementes 611819 e 612769), reduzidas ao cenário mínimo; dois (o pasto da desmama, as regras
+ * entre campos da correção de cadastro) são a mesma causa achada ao consertar a falha, por outro caminho.
  */
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -461,4 +462,23 @@ test('o pasto informado que nenhum animal recebeu (o parto só de natimorto; a d
   assert.equal(leva.ok, false);
   assert.ok(leva.error.details.some((x) => x.codigo === 'PASTO_INATIVO'), JSON.stringify(leva.error.details));
   semErro(s, 'pasto sem animal');
+});
+
+test('a correção de cadastro que declarou o macho castrado, seguida de outra que corrigiu o sexo: a correção sem mudança da primeira não é recusada pelo sexo de hoje (as regras entre campos valem como o original as cumpria)', () => {
+  const s = S.sistema();
+  hoje(s, '2026-01-05');
+  const reb = rebanho(s, [S.bicho({ brinco: '21', sexo: 'M', castrado: false, reprodutor: false, data_nascimento: '2024-01-01', data_nascimento_confianca: 'CONFIRMADA' })]);
+  hoje(s, '2026-06-01');
+  const cad = { tipo: 'AJUSTE_INVENTARIO', subtipo: 'CORRECAO_CADASTRO', campos: { event_date: '2026-03-01', justificativa: 'Castrado na origem' }, animais: [{ animal_id: reb.ids['21'], campo: 'castrado', valor_novo: 'S' }] };
+  const c = ok(api(s, 'evento.registrar', cad), 'castrado');
+  ok(api(s, 'evento.registrar', { tipo: 'AJUSTE_INVENTARIO', subtipo: 'CORRECAO_CADASTRO', campos: { event_date: '2026-04-01', justificativa: 'Era fêmea' }, animais: [{ animal_id: reb.ids['21'], campo: 'sexo', valor_novo: 'F' }] }), 'sexo corrigido depois');
+  const ajustes = (eid) => tab(s, 'AJUSTES', { event_id: eid }).map((a) => [a.campo, a.valor_anterior, a.valor_novo]);
+  const antes = ajustes(c.event_id);
+  const r = corrigir(s, c.event_id, cad, 'correção sem mudança da primeira correção de cadastro');
+  assert.deepEqual(ajustes(r.event_id), antes);
+  // Um ajuste novo do castrado na fêmea continua recusado pelo cadastro de hoje.
+  const novo = api(s, 'evento.registrar', { tipo: 'AJUSTE_INVENTARIO', subtipo: 'CORRECAO_CADASTRO', campos: { event_date: '2026-05-01', justificativa: 'De novo' }, animais: [{ animal_id: reb.ids['21'], campo: 'castrado', valor_novo: 'N' }] });
+  assert.equal(novo.ok, false);
+  assert.ok(novo.error.details.some((d) => d.codigo === 'NAO_SE_APLICA'), JSON.stringify(novo.error.details));
+  semErro(s, 'regras entre campos');
 });
