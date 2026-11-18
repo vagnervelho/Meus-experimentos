@@ -4202,3 +4202,7 @@ quem saiu em 1.987; a viagem no tempo comparou 1.449.756 unidades e o oráculo d
 do oráculo: com a saída do dia D fora da conta do rebanho ativo (`<` no lugar de `<=`), a semente 8100003 falha no passo 53
 (`CONCILIACAO:IDENTIDADE`, diferença de −4.658,75). Na base de demonstração (`tests/acceptance.test.js`), a identidade fecha em todo
 fim de mês dos três anos, com o custo do rebanho ativo igual à soma da projeção.
+`npm test` com o código final: 926 testes, 926 aprovados, 0 falhas (907,7 s; as 23 sementes fixas: 831 aceitos, 440 recusados, 0
+falhas). `npm run ui:check`: 217 testes de navegador, 217 aprovados, 0 falhas (507 s); 14 arquivos .html dentro do orçamento — a
+página inicial montada com 371.434 bytes (363 KB) de 450 KB; sob demanda, Import 48 KB, Weights 64 KB, Health 24 KB, Reproduction
+67 KB, Financial 12 KB, Events 29 KB e Settings 36 KB, de 150 KB cada.

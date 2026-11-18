@@ -578,6 +578,38 @@ var EventCatalog = (function () {
   /** Abas de insumos e sanidade que os comandos de sanidade, de estoque, de venda e de estorno leem. */
   var LEITURAS_INSUMOS = ['PRODUTOS', 'MOVIMENTOS_ESTOQUE', 'SANIDADE', 'PROTOCOLOS_SANITARIOS'];
 
+  /**
+   * LANCAMENTO_FINANCEIRO avulso (Fase 4, E4.1; 03b, seções 10.2, 10.3 e 16.6; 04, seção 4.9; 07, seções 1.1 e 1.3): receita
+   * ou despesa fora de evento de animal — combustível, salário, energia, arrendamento de pasto, imposto, venda de um bem,
+   * aporte, retirada, empréstimo. A data é a competência (o dia a que o fato pertence no resultado); o período, quando há, só
+   * em custeio e outra receita, começando na competência ou depois dela; o pagamento vai nas parcelas (uma ou mais), que
+   * nascem em aberto ou já pagas ("Já pago em", nunca antes da competência). Vínculos: parceiro, pasto (o custo do pasto:
+   * conta inteiro para ele), categoria de animais, propriedade e o lançamento de negócio a que se refere. Nesta etapa não
+   * há rateio entre animais: a compra de animais, a receita de venda, a despesa de venda e a compra de insumos nascem nos
+   * próprios eventos (a natureza que exige 100% de rateio não é aceita aqui: CONTRATOS, seção 56).
+   */
+  var NATUREZAS_AVULSO = ['CUSTEIO', 'OUTRA_RECEITA', 'NAO_OPERACIONAL'];
+  var CAMPOS_LANCAMENTO = [
+    c_('event_date', 'Data (competência)', 'data', { obrigatorio: true, default: 'HOJE', ajuda: 'O dia a que a receita ou a despesa pertence no resultado. Quando foi ou será pago vai nas parcelas.' }),
+    c_('conta_id', 'Conta', 'ref:PLANO_CONTAS', { obrigatorio: true, naturezas: NATUREZAS_AVULSO, ajuda: 'Compra e venda de animais, despesas de venda e compra de insumos são lançadas nos próprios registros (comprar, vender, entrada de estoque).' }),
+    c_('valor', 'Valor', 'dinheiro', { obrigatorio: true, min: 0.01 }),
+    c_('descricao', 'Descrição', 'texto', { ajuda: 'Ex.: diesel do trator, salário de março, conta de luz.' }),
+    c_('partner_id', 'Parceiro (quem recebe ou quem paga)', 'ref:PARCEIROS'),
+    c_('competencia_inicio', 'Período: de (opcional)', 'data', { ajuda: 'Despesa ou receita de um período (arrendamento, salário, seguro): o resultado de cada mês recebe a parte dos dias dele. Começa na data do lançamento ou depois.' }),
+    c_('competencia_fim', 'Período: até', 'data', { visivel_se: quando_('competencia_inicio', true), obrigatorio_se: quando_('competencia_inicio', true) }),
+    c_('quantidade', 'Quantidade (opcional)', 'decimal', { casas: 4, min: 0.0001, ajuda: 'Só para mostrar o preço por unidade: litros, horas, cabeças × meses do arrendamento.' }),
+    c_('pasture_id', 'Pasto', 'ref:PASTOS', { ajuda: 'Custo de um pasto (arrendamento, cerca, adubo): conta inteiro para o pasto. Obrigatório no arrendamento de pasto.' }),
+    c_('categoria_animal_id', 'Categoria de animais', 'ref:CATEGORIAS', { ajuda: 'Opcional: o gasto é de uma categoria (sal para os bezerros).' }),
+    c_('ref_event_id', 'Refere-se ao registro', 'ref:EVENTOS', { ajuda: 'Opcional: o registro de negócio a que este lançamento se refere (só informa; não muda o registro).' }),
+    c_('documento', 'Nota, recibo ou contrato', 'texto'),
+    c_('property_id', 'Propriedade', 'ref:PROPRIEDADES', { default: { de: 'CONFIGURACOES.propriedade_padrao_id' } }),
+    c_('notes', 'Observações', 'texto'),
+  ];
+  /** As parcelas do avulso: as do formulário de compra e venda mais "Já pago em" (a parcela nasce paga nessa data). */
+  var CAMPOS_PARCELA_AVULSO = CAMPOS_PARCELA.concat([
+    a_('pago_em', 'Já pago em', 'data', { ajuda: 'Só se já foi pago (ou recebido): a parcela nasce paga nessa data, pelo valor dela. Vazio = em aberto (a baixa vem depois, em "A pagar e a receber").' }),
+  ]);
+
   /** Definições completas dos tipos da Fase 1. */
   var DEFINICOES = {
     ENTRADA_INICIAL: {
@@ -829,6 +861,13 @@ var EventCatalog = (function () {
       componentes: ['seletor_animais'],
       grupos_repetiveis: {},
     },
+    LANCAMENTO_FINANCEIRO: {
+      frequente: true, selecao_animais: 'NENHUM', filtro_elegiveis: null, modo_entrada: 'FORM', revisao: 'SERVIDOR', critico: false,
+      reads: LEITURAS_MOTOR.concat(LEITURAS_FINANCEIRO),
+      campos: CAMPOS_LANCAMENTO,
+      componentes: ['bloco_parcelas'],
+      grupos_repetiveis: { parcelas: CAMPOS_PARCELA_AVULSO },
+    },
     ESTORNO: {
       frequente: false, selecao_animais: 'NENHUM', filtro_elegiveis: null, modo_entrada: 'FORM', revisao: 'SERVIDOR', critico: true,
       reads: LEITURAS_MOTOR.concat(LEITURAS_FINANCEIRO, LEITURAS_INSUMOS),
@@ -1035,6 +1074,7 @@ var EventCatalog = (function () {
     MOMENTOS_PESAGEM: MOMENTOS_PESAGEM,
     MODOS_DOSE: MODOS_DOSE,
     MOTIVOS_AJUSTE_ESTOQUE: MOTIVOS_AJUSTE_ESTOQUE,
+    NATUREZAS_AVULSO: NATUREZAS_AVULSO,
     RESULTADOS_DIAGNOSTICO: RESULTADOS_DIAGNOSTICO,
     METODOS_REPRODUCAO: METODOS_REPRODUCAO,
     LEITURAS_INSUMOS: LEITURAS_INSUMOS,

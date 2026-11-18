@@ -149,7 +149,10 @@ var FinancialService = (function () {
     var k = 0;
     return lista.map(function (p, i) {
       var v = vazio_(p.valor) ? partes[k++] : p.valor;
-      return { parcela_num: i + 1, data_vencimento: p.data_vencimento, valor: v, forma_pagamento: nulo_(p.forma_pagamento), documento: nulo_(p.documento) };
+      var out = { parcela_num: i + 1, data_vencimento: p.data_vencimento, valor: v, forma_pagamento: nulo_(p.forma_pagamento), documento: nulo_(p.documento) };
+      // O lançamento avulso aceita a parcela já paga ("Já pago em"; quem chama confere a data): nasce LIQUIDADA pelo nominal.
+      if (o.aceitaPago && !vazio_(p.pago_em)) out.pago_em = p.pago_em;
+      return out;
     });
   }
 
@@ -223,7 +226,8 @@ var FinancialService = (function () {
     var campoJaRecusado = col.erros.some(function (e) { return e.campo === campo; });
     if (!c) throw Validation.erro('INTERNAL', 'planejar: conta ausente.');
     if (s.naturezas && s.naturezas.indexOf(c.natureza) < 0) col.erro(det_('CONTA_INVALIDA', campo, 'A conta "' + c.nome + '" não serve para ' + rotulo + ': escolha uma conta de ' + s.naturezas.map(function (n) { return NOME_NATUREZA[n] || n; }).join(' ou ') + '.'));
-    if (c.ativo === false) col.erro(det_('CONTA_INATIVA', campo, 'A conta "' + c.nome + '" está desativada.'));
+    // A conta desativada depois de usada pelo original continua valendo na correção (quem chama diz: `inativaAceita`).
+    if (c.ativo === false && s.inativaAceita !== true) col.erro(det_('CONTA_INATIVA', campo, 'A conta "' + c.nome + '" está desativada.'));
     if (!inteiroPositivo_(s.valor)) {
       // Valor zero, negativo ou com fração de centavo: o catálogo já recusa o campo, com o rótulo dele. Uma causa, um
       // erro: aqui só quando nada apontou o campo, e sem seguir para as parcelas e o rateio, que repetiriam a causa.
@@ -233,7 +237,7 @@ var FinancialService = (function () {
     var parcelas = [];
     if (s.semCaixa) {
       if (Array.isArray(s.parcelas) && s.parcelas.length) throw Validation.erro('INTERNAL', 'Lançamento sem efeito de caixa não tem parcela (invariante 4).');
-    } else parcelas = resolverParcelas(s.valor, s.parcelas, col, { campo: s.campoParcelas || campo, rotulo: rotulo, prefixo: s.prefixo, pagamento: s.pagamento });
+    } else parcelas = resolverParcelas(s.valor, s.parcelas, col, { campo: s.campoParcelas || campo, rotulo: rotulo, prefixo: s.prefixo, pagamento: s.pagamento, aceitaPago: s.aceitaPago === true });
     var rat = null;
     if (s.rateio) {
       if (SEM_RATEIO.indexOf(c.natureza) >= 0) throw Validation.erro('INTERNAL', 'Lançamento de natureza ' + c.natureza + ' não é rateado aos animais (invariante 14).');
@@ -258,18 +262,21 @@ var FinancialService = (function () {
     var ev = s.evento;
     var finId = vazio_(s.financial_id) ? tx.novoId() : s.financial_id;
     var fin = {
-      financial_id: finId, event_id: ev.event_id, ref_event_id: null, conta_id: c.conta_id, natureza: c.natureza, tipo: c.tipo,
-      categoria: c.grupo, descricao: nulo_(s.descricao), data_competencia: s.data_competencia || ev.event_date, competencia_inicio: null,
-      competencia_fim: null, valor: s.valor, quantidade: typeof s.quantidade === 'number' ? s.quantidade : null, product_id: nulo_(s.product_id),
-      pasture_id: nulo_(s.pasture_id), property_id: nulo_(ev.property_id), categoria_animal_id: null, partner_id: nulo_(s.partner_id),
+      financial_id: finId, event_id: ev.event_id, ref_event_id: nulo_(s.ref_event_id), conta_id: c.conta_id, natureza: c.natureza, tipo: c.tipo,
+      categoria: c.grupo, descricao: nulo_(s.descricao), data_competencia: s.data_competencia || ev.event_date, competencia_inicio: nulo_(s.competencia_inicio),
+      competencia_fim: nulo_(s.competencia_fim), valor: s.valor, quantidade: typeof s.quantidade === 'number' ? s.quantidade : null, product_id: nulo_(s.product_id),
+      pasture_id: nulo_(s.pasture_id), property_id: nulo_(ev.property_id), categoria_animal_id: nulo_(s.categoria_animal_id), partner_id: nulo_(s.partner_id),
       retida_pelo_comprador: s.retida === true, documento: nulo_(s.documento), observacoes: nulo_(s.observacoes),
     };
     var linhas = { FINANCEIRO: [fin], PARCELAS: [], RATEIOS: [], ALOCACOES_FINANCEIRAS: [] };
     (parcelas || []).forEach(function (p) {
-      linhas.PARCELAS.push({
+      var linha = {
         parcela_id: tx.novoId(), financial_id: finId, parcela_num: p.parcela_num, data_vencimento: p.data_vencimento, valor: p.valor,
         forma_pagamento: p.forma_pagamento, status: 'ABERTA', parcela_origem_id: null, documento: p.documento,
-      });
+      };
+      // Pago no ato (03b, seção 11, "Estado inicial"): nasce LIQUIDADA pelo nominal, sem juros nem desconto (invariante 5).
+      if (!vazio_(p.pago_em)) { linha.status = 'LIQUIDADA'; linha.data_pagamento = p.pago_em; linha.valor_pago = p.valor; }
+      linhas.PARCELAS.push(linha);
     });
     if (rat) {
       var ratId = tx.novoId();

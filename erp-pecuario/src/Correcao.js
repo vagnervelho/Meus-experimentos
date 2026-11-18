@@ -233,6 +233,19 @@ var Correcao = (function () {
         return { v: ids.map(function (id) { return bases[id]; }) };
       },
     },
+    // Todo tipo com lançamento (Fase 4, E4.2; RN-046): a baixa da parcela paga do original (03b, seção 11: "a substituição
+    // transporta a baixa quando valor e vencimento da parcela não mudam"). A baixa é um fato do pagamento, gravado fora do
+    // evento (parcela.baixar, ou "Já pago em" no avulso): a correção a mantém na parcela correspondente do substituto; com o
+    // valor ou o vencimento mudado, a correção é recusada (desfaça a baixa antes).
+    'PARCELAS.baixa': {
+      tipo: 'todos', natureza: 'COPIA', de: 'a baixa da parcela paga do original (data, valor pago, juros e multa, desconto, forma)', depende: 'o lançamento, o valor e o vencimento da parcela', grava: 'PARCELAS (status, data_pagamento, valor_pago, juros_multa, desconto, forma_pagamento)',
+      valor: function (c, n) {
+        var p = vazio_(n.parcela_id) ? null : c.repo.porId('PARCELAS', n.parcela_id);
+        if (!p || p.status !== 'LIQUIDADA' || p.financial_id !== n.financial_id || p.valor !== n.valor || p.data_vencimento !== n.data_vencimento) return null;
+        if (!linhas_(c, 'FINANCEIRO').some(function (f) { return f.financial_id === p.financial_id; })) return null;
+        return { v: { status: 'LIQUIDADA', data_pagamento: p.data_pagamento, valor_pago: p.valor_pago, juros_multa: nulo_(p.juros_multa), desconto: nulo_(p.desconto), forma_pagamento: nulo_(p.forma_pagamento) } };
+      },
+    },
     'VENDA.rotulo_deducao': {
       tipo: 'VENDA', natureza: 'COPIA', de: 'LISTAS (TIPO_DEDUCAO_VENDA).rotulo (na descrição proposta da dedução)', depende: 'o tipo da dedução', grava: 'FINANCEIRO.descricao (dedução)',
       valor: function (c, n) {
@@ -615,6 +628,21 @@ var Correcao = (function () {
     }
     out.animais = [];
   }
+  /**
+   * O lançamento avulso (Fase 4, E4.1): a conta, o valor, a descrição, o parceiro, o período, a quantidade, o pasto, a
+   * categoria, o registro a que se refere, o documento e as parcelas (vencimento, valor, forma, documento). "Já pago em" não
+   * vem: a parcela paga do original passa à do substituto pelo transporte da baixa (PARCELAS.baixa), com o mesmo valor e
+   * vencimento.
+   */
+  function entradaAvulso_(L, ev, det, linhas, origem, out) {
+    var f = det.FINANCEIRO[0];
+    if (!f) return;
+    ['conta_id', 'valor', 'descricao', 'partner_id', 'competencia_inicio', 'competencia_fim', 'quantidade', 'pasture_id', 'categoria_animal_id', 'ref_event_id', 'documento'].forEach(function (k) { origem[k] = f[k]; });
+    out.parcelas = parcelasOrdem_(det.PARCELAS.filter(function (x) { return x.financial_id === f.financial_id; })).map(function (x, k, todas) {
+      return limpo_({ data_vencimento: x.data_vencimento, valor: todas.length === 1 ? null : x.valor, forma_pagamento: x.forma_pagamento, documento: x.documento });
+    });
+    out.animais = [];
+  }
   function entradaReproducao_(L, ev, det, linhas, origem, out) {
     var sub = ev.event_subtype;
     var payload = ev.payload_json || {};
@@ -688,6 +716,7 @@ var Correcao = (function () {
     else if (tipo === 'PESAGEM') entradaPesagem_(L, ev, det, linhas, origem, out);
     else if (tipo === 'SANIDADE') entradaSanidade_(L, ev, det, linhas, origem, out);
     else if (tipo === 'ESTOQUE') entradaEstoque_(L, ev, det, linhas, origem, out);
+    else if (tipo === 'LANCAMENTO_FINANCEIRO') entradaAvulso_(L, ev, det, linhas, origem, out);
     else if (['REPRODUCAO', 'DESMAMA', 'CASTRACAO', 'OCORRENCIA'].indexOf(tipo) >= 0) entradaReproducao_(L, ev, det, linhas, origem, out);
     else entradaEntrada_(L, ev, det, linhas, origem, out);
     out.campos = camposDoTipo_(tipo, sub, origem);

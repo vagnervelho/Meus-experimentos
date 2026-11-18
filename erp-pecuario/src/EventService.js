@@ -397,9 +397,9 @@ var EventService = (function () {
       m.f.linhasDoEvento(original.event_id).forEach(function (l) { if (l.atributos_iniciais_json) { ctxEv.criadosOriginal[l.animal_id] = true; ctxEv.racaOriginal[l.animal_id] = nulo_(l.atributos_iniciais_json.raca); } });
     }
     if (semAnimais) {
-      estoque_(m, ctxEv);
+      if (tipo === 'LANCAMENTO_FINANCEIRO') lancamentoAvulso_(m, ctxEv, d);
+      else estoque_(m, ctxEv);
       if (original) {
-        conferirParcelasLiquidadas_(m, original, 'corrigir');
         m.repo.por('FINANCEIRO', 'event_id', original.event_id).forEach(function (fin) {
           var a0 = FinancialService.avisoPeriodo(m.params, fin.data_competencia, 'A correção cancela um lançamento que');
           if (a0) avisoItem_(m, null, a0.codigo, a0.mensagem);
@@ -461,7 +461,6 @@ var EventService = (function () {
     if (tipo === 'REPRODUCAO') despesaDoManejo_(m, ctxEv, ctxEv.itens.filter(function (it) { return it.femea && it.linhaEA; }));
     if (tipo === 'CASTRACAO' || tipo === 'OCORRENCIA') despesaDoManejo_(m, ctxEv, ctxEv.itens.filter(function (it) { return it.linhaEA; }));
     if (original) {
-      conferirParcelasLiquidadas_(m, original, 'corrigir');
       produtosQueSaem_(m, ctxEv, original);
       m.repo.por('FINANCEIRO', 'event_id', original.event_id).forEach(function (fin) {
         var a = FinancialService.avisoPeriodo(m.params, fin.data_competencia, 'A correção cancela um lançamento que');
@@ -1344,7 +1343,7 @@ var EventService = (function () {
           // Antes do marco zero, o pagamento é anterior ao controle: sem caixa, como a compra e a morte históricas.
           parcelas: hist ? undefined : FinancialService.parcelasMensais(c.custo_valor, nulo_(c.custo_vencimento) || ev.event_date, nulo_(c.custo_parcelas_qtd), { forma_pagamento: c.custo_forma_pagamento, documento: c.custo_documento }), semCaixa: hist,
           rateio: { criterio: 'CABECAS', itens: itens.map(function (it) { return { animal_id: it.animal_id, chave: it.codigo_interno, base: 1, quem: it.quem }; }), cemPorCento: true },
-          campo: 'custo_conta_id', rotulo: 'o custo pago no ato',
+          campo: 'custo_conta_id', rotulo: 'o custo pago no ato', inativaAceita: usadoNoOriginal_(m, conta.conta_id),
         }, m.col);
         if (ps) {
           FinancialService.juntar(ctxEv.plano, ps);
@@ -1683,7 +1682,7 @@ var EventService = (function () {
       parcelas: ev.pre_marco_zero === true ? undefined : FinancialService.parcelasMensais(c.custo_valor, nulo_(c.custo_vencimento) || ev.event_date, nulo_(c.custo_parcelas_qtd), { forma_pagamento: c.custo_forma_pagamento, documento: c.custo_documento }),
       semCaixa: ev.pre_marco_zero === true,
       rateio: { criterio: 'CABECAS', itens: itens.map(function (it) { return { animal_id: it.animal_id, chave: it.codigo_interno, base: 1, quem: it.quem }; }), cemPorCento: true },
-      campo: 'custo_conta_id', rotulo: 'a despesa',
+      campo: 'custo_conta_id', rotulo: 'a despesa', inativaAceita: usadoNoOriginal_(m, conta.conta_id),
     }, m.col);
     if (!pl) return;
     FinancialService.juntar(ctxEv.plano, pl);
@@ -1844,6 +1843,141 @@ var EventService = (function () {
     var ids = (ctxEv ? ctxEv.plano.MOVIMENTOS_ESTOQUE : []).map(function (x) { return x.product_id; });
     if (anulado && m.repo.carregada('MOVIMENTOS_ESTOQUE')) ids = ids.concat(m.repo.por('MOVIMENTOS_ESTOQUE', 'event_id', anulado).map(function (x) { return x.product_id; }));
     return Utils.unicos(ids);
+  }
+
+  // ------------------------------------------------------------------ lançamento financeiro avulso (Fase 4, E4.1) ----
+  /** Onde nasce o lançamento de cada natureza que o avulso não aceita (07, seção 1.3; CONTRATOS, seção 56). */
+  var CAMINHO_DA_NATUREZA = {
+    AQUISICAO_ANIMAIS: 'a compra de animais (e o frete e os custos dela) é lançada em "Comprar animais"; o frete cobrado depois entra pela correção da compra',
+    RECEITA_VENDA_ANIMAIS: 'a receita da venda de animais nasce em "Vender animais"',
+    DESPESA_VENDA: 'a despesa de venda (frete, comissão, taxas) entra na própria venda, como dedução; cobrada depois, pela correção da venda',
+    ESTOQUE_INSUMOS: 'a compra de insumo do cadastro é lançada na entrada de estoque',
+  };
+  var CONTA_ARRENDAMENTO = 'ARRENDAMENTO_PASTO';
+  /** Período de competência: no máximo dez anos (a conta mês a mês da conciliação; 07, seção 1.1). */
+  var PERIODO_MAX_DIAS = 3653;
+  /**
+   * O lançamento avulso (03b, seções 10.2, 10.3 e 16.6; 07, seções 1.1 e 1.3): a conta (custeio, outra receita ou não
+   * operacional), o valor, a competência (a data do evento) e o período opcional (só custeio e outra receita, a partir da
+   * competência), o parceiro, o pasto (obrigatório no arrendamento de pasto), a categoria, o registro de negócio a que se
+   * refere, o documento e as parcelas — em aberto ou já pagas ("Já pago em": nunca antes da competência nem no futuro). Uma
+   * regra, um lugar: o mesmo tratador no registro, na simulação e na correção; a verificação confere o que ele grava
+   * (FinancialService.conferir, invariante 21).
+   */
+  function lancamentoAvulso_(m, ctxEv, d) {
+    var c = ctxEv.campos;
+    var ev = ctxEv.ev;
+    var conta = vazio_(c.conta_id) ? null : m.repo.porId('PLANO_CONTAS', c.conta_id);
+    if (!vazio_(c.conta_id) && !conta) erroGeral_(m, 'conta_id', 'NAO_ENCONTRADO', 'A conta escolhida não existe no plano de contas.');
+    if (conta && EventCatalog.NATUREZAS_AVULSO.indexOf(conta.natureza) < 0) {
+      erroGeral_(m, 'conta_id', 'CONTA_INVALIDA', 'A conta "' + conta.nome + '" não serve para um lançamento avulso: ' + (CAMINHO_DA_NATUREZA[conta.natureza] || 'escolha uma conta de custeio, outra receita ou não operacional') + '.');
+      conta = null;
+    }
+    var comPeriodo = !vazio_(c.competencia_inicio) || !vazio_(c.competencia_fim);
+    if (conta && comPeriodo && conta.natureza === 'NAO_OPERACIONAL') erroGeral_(m, 'competencia_inicio', 'CAMPO_NAO_SE_APLICA', 'O período só vale para custeio e outras receitas: "' + conta.nome + '" é não operacional e não entra no resultado.');
+    if (!vazio_(c.competencia_inicio) && !vazio_(c.competencia_fim) && Utils.dataValida(c.competencia_inicio) && Utils.dataValida(c.competencia_fim)) {
+      if (c.competencia_fim < c.competencia_inicio) erroGeral_(m, 'competencia_fim', 'PERIODO_INVERTIDO', 'O fim do período (' + br_(c.competencia_fim) + ') é antes do início (' + br_(c.competencia_inicio) + ').');
+      else if (Utils.diasNoIntervalo(c.competencia_inicio, c.competencia_fim) > PERIODO_MAX_DIAS) erroGeral_(m, 'competencia_fim', 'VALOR_FORA_DA_FAIXA', 'O período vai até dez anos.');
+      // A competência no início do período ou antes (o resultado de cada mês pedido no fim dele é o do mês; CONTRATOS, seção 55).
+      if (Utils.dataValida(ev.event_date) && c.competencia_inicio < ev.event_date) erroGeral_(m, 'competencia_inicio', 'PERIODO_ANTES_DA_DATA', 'O período começa em ' + br_(c.competencia_inicio) + ', antes da data do lançamento (' + br_(ev.event_date) + '): lance com a data do início do período (ou antes) e o período a partir dela.');
+    }
+    if (conta && conta.codigo === CONTA_ARRENDAMENTO) {
+      if (vazio_(c.pasture_id)) erroGeral_(m, 'pasture_id', 'CAMPO_OBRIGATORIO', 'O arrendamento é de um pasto: escolha o pasto arrendado.');
+      if (vazio_(c.competencia_inicio)) erroGeral_(m, 'competencia_inicio', 'CAMPO_OBRIGATORIO', 'Informe o período do arrendamento (de quando até quando o pasto foi alugado).');
+    }
+    if (!vazio_(c.pasture_id)) {
+      var pasto = m.f.pasto(c.pasture_id);
+      if (!pasto) erroGeral_(m, 'pasture_id', 'NAO_ENCONTRADO', 'O pasto escolhido não existe.');
+      else if (pasto.status !== 'ATIVO' && !usadoNoOriginal_(m, pasto.pasture_id)) erroGeral_(m, 'pasture_id', 'PASTO_INATIVO', 'O pasto ' + pasto.nome + ' está desativado.');
+    }
+    if (!vazio_(c.categoria_animal_id)) {
+      var cat = m.repo.porId('CATEGORIAS', c.categoria_animal_id);
+      if (!cat) erroGeral_(m, 'categoria_animal_id', 'NAO_ENCONTRADO', 'A categoria escolhida não existe.');
+      else if (cat.ativo === false && !usadoNoOriginal_(m, cat.category_id)) erroGeral_(m, 'categoria_animal_id', 'CATEGORIA_INATIVA', 'A categoria ' + cat.nome + ' está desativada.');
+    }
+    if (!vazio_(c.ref_event_id)) {
+      var ref = m.tx.cru.cruPorId('EVENTOS', c.ref_event_id);
+      var vale = ref ? m.tx.cru.avaliar(ref.event_id).status === 'CONFIRMADO' : false;
+      var doOriginal = ctxEv.original && m.tx.cru.cruPor('FINANCEIRO', 'event_id', ctxEv.original.event_id).some(function (f) { return f.ref_event_id === c.ref_event_id; });
+      if (!ref || ref.event_type === 'ESTORNO') erroGeral_(m, 'ref_event_id', 'NAO_ENCONTRADO', 'O registro a que o lançamento se refere não existe.');
+      else if (ctxEv.original && (ref.event_id === ctxEv.original.event_id)) erroGeral_(m, 'ref_event_id', 'REFERENCIA_INVALIDA', 'O lançamento não pode se referir a ele mesmo.');
+      else if (!vale && !doOriginal) erroGeral_(m, 'ref_event_id', 'JA_ANULADO', 'O registro a que o lançamento se refere foi estornado ou corrigido e não vale mais: escolha o que vale.');
+    }
+    parceiroValido_(m, ctxEv, 'partner_id', c.partner_id);
+    // As parcelas: o formato pelo catálogo (o grupo do tipo) e "Já pago em" a partir da competência, até hoje.
+    var lista = Array.isArray(d.parcelas) ? d.parcelas : [];
+    var defs = EventCatalog.camposGrupo('LANCAMENTO_FINANCEIRO', 'parcelas');
+    lista.forEach(function (p, i) {
+      var quem = lista.length > 1 ? 'Parcela ' + (i + 1) + ': ' : 'A parcela: ';
+      var x = p && typeof p === 'object' ? p : {};
+      EventCatalog.validarCampos(defs, x, { listas: m.listas, desativados: m.desativados }).forEach(function (e) { m.col.erro(Validation.detalhe({ codigo: e.codigo, campo: 'parcelas', mensagem: quem + e.mensagem, indice: i })); });
+      if (vazio_(x.pago_em) || !Utils.dataValida(x.pago_em)) return;
+      if (x.pago_em > m.hoje) m.col.erro(Validation.detalhe({ codigo: 'DATA_FUTURA', campo: 'parcelas', mensagem: quem + 'o pagamento em ' + br_(x.pago_em) + ' ainda não aconteceu: deixe "Já pago em" vazio e dê a baixa quando pagar.', indice: i }));
+      else if (Utils.dataValida(ev.event_date) && x.pago_em < ev.event_date) m.col.erro(Validation.detalhe({ codigo: 'PAGAMENTO_ANTES_DA_COMPETENCIA', campo: 'parcelas', mensagem: quem + 'o pagamento em ' + br_(x.pago_em) + ' é antes da data do lançamento (' + br_(ev.event_date) + '). O pagamento adiantado de um período vai num lançamento com a data do pagamento e o período depois dela.', indice: i }));
+    });
+    if (!conta || typeof c.valor !== 'number' || m.col.temErros()) return;
+    var tipoTxt = conta.tipo === 'RECEITA' ? 'a receita' : 'a despesa';
+    var pl = FinancialService.planejar(m.tx, {
+      evento: ev, conta: conta, naturezas: EventCatalog.NATUREZAS_AVULSO, valor: c.valor, descricao: nulo_(c.descricao),
+      partner_id: nulo_(c.partner_id), documento: nulo_(c.documento), observacoes: nulo_(c.notes), quantidade: typeof c.quantidade === 'number' ? c.quantidade : null,
+      pasture_id: nulo_(c.pasture_id), categoria_animal_id: nulo_(c.categoria_animal_id), ref_event_id: nulo_(c.ref_event_id),
+      competencia_inicio: nulo_(c.competencia_inicio), competencia_fim: nulo_(c.competencia_fim),
+      parcelas: lista, aceitaPago: true, pagamento: conta.tipo === 'RECEITA' ? 'será recebida' : 'será paga', rateio: null,
+      campo: 'valor', campoParcelas: 'parcelas', rotulo: tipoTxt, inativaAceita: usadoNoOriginal_(m, conta.conta_id),
+    }, m.col);
+    if (!pl) return;
+    FinancialService.juntar(ctxEv.plano, pl);
+    ev.total_value = c.valor;
+    ev.partner_id = nulo_(c.partner_id);
+    ev.description = nulo_(c.descricao);
+    resumoFinanceiro_(m, ctxEv, [resumoLancamento_(m, pl, conta, { papel: 'AVULSO', pagas: pl.linhas.PARCELAS.filter(function (x) { return x.status === 'LIQUIDADA'; }).length })], [pl]);
+    var a = FinancialService.avisoPeriodo(m.params, ev.event_date, 'O lançamento');
+    if (a) avisoItem_(m, null, a.codigo, a.mensagem);
+  }
+  /**
+   * O transporte da baixa na correção (RN-046; 03b, seção 11; CONTRATOS, seção 56): cada parcela paga do original vai para a
+   * parcela do lançamento correspondente do substituto com o mesmo valor e o mesmo vencimento, que nasce paga com a baixa dela
+   * (data, valor pago, juros e multa, desconto, forma) — Correcao.congelado('PARCELAS.baixa'). Sem a correspondente (o valor
+   * ou o vencimento mudou, ou o lançamento saiu), a correção é recusada: desfaça a baixa antes (CONFLICT PARCELA_LIQUIDADA).
+   * A baixa transportada não fica antes da data do lançamento novo (a identidade das três visões; seção 55). Vale para todo
+   * tipo de evento, no mesmo ponto (fechar_).
+   */
+  function transportarBaixas_(m, ctxEv) {
+    var original = ctxEv.original;
+    var corresp = lancamentosCorrespondentes_(m, ctxEv);
+    var usadas = {};
+    m.repo.por('FINANCEIRO', 'event_id', original.event_id).forEach(function (fin) {
+      var pagas = m.repo.por('PARCELAS', 'financial_id', fin.financial_id).filter(function (p) { return p.status === 'LIQUIDADA'; })
+        .sort(function (a, b) { return (a.parcela_num || 0) - (b.parcela_num || 0) || (a.data_vencimento < b.data_vencimento ? -1 : a.data_vencimento > b.data_vencimento ? 1 : 0); });
+      if (!pagas.length) return;
+      var novoId = corresp[fin.financial_id] || null;
+      var novoFin = novoId ? ctxEv.plano.FINANCEIRO.filter(function (f) { return f.financial_id === novoId; })[0] : null;
+      var novas = novoId ? ctxEv.plano.PARCELAS.filter(function (q) { return q.financial_id === novoId; }) : [];
+      pagas.forEach(function (p) {
+        var b = Correcao.congelado(ctxEv.correcao, 'PARCELAS.baixa', { financial_id: fin.financial_id, valor: p.valor, data_vencimento: p.data_vencimento, parcela_id: p.parcela_id });
+        var q = b ? novas.filter(function (x) { return !usadas[x.parcela_id] && x.valor === p.valor && x.data_vencimento === p.data_vencimento; })[0] : null;
+        var nome = '"' + (fin.descricao || EventCatalog.nomeEvento(original.event_type, original.event_subtype)) + '"';
+        if (!q) {
+          m.conflitos.push(Validation.detalhe({
+            codigo: 'PARCELA_LIQUIDADA', campo: 'parcelas',
+            mensagem: 'A parcela de ' + Utils.formatarReais(p.valor) + ' com vencimento em ' + br_(p.data_vencimento) + ' do lançamento ' + nome + ' foi paga em ' + br_(p.data_pagamento) + (novoFin ? ', e a correção muda o valor ou o vencimento dela.' : ', e a correção tira o lançamento.') + ' Mantenha o valor e o vencimento da parcela paga, ou desfaça a baixa antes de corrigir.',
+            conflito: conflitoCom_(original.event_id, original.event_type, original.event_subtype, original.event_date),
+          }));
+          return;
+        }
+        usadas[q.parcela_id] = true;
+        if (q.status === 'LIQUIDADA') { erroGeral_(m, 'parcelas', 'PARCELA_JA_PAGA', 'A parcela de ' + Utils.formatarReais(p.valor) + ' com vencimento em ' + br_(p.data_vencimento) + ' já está paga (em ' + br_(p.data_pagamento) + '): deixe "Já pago em" vazio; a correção mantém a baixa dela.'); return; }
+        if (novoFin && b.v.data_pagamento < novoFin.data_competencia) {
+          m.conflitos.push(Validation.detalhe({
+            codigo: 'PAGAMENTO_ANTES_DA_COMPETENCIA', campo: 'event_date',
+            mensagem: 'A parcela do lançamento ' + nome + ' foi paga em ' + br_(b.v.data_pagamento) + ', antes da data nova (' + br_(novoFin.data_competencia) + '). Desfaça a baixa antes de levar o lançamento para depois do pagamento.',
+            conflito: conflitoCom_(original.event_id, original.event_type, original.event_subtype, original.event_date),
+          }));
+          return;
+        }
+        ['status', 'data_pagamento', 'valor_pago', 'juros_multa', 'desconto', 'forma_pagamento'].forEach(function (k) { q[k] = b.v[k]; });
+      });
+    });
   }
 
   // ------------------------------------------------------------------ nascimento ----
@@ -3540,7 +3674,7 @@ var EventService = (function () {
       partner_id: nulo_(c[p + 'partner_id']), documento: nulo_(c[p + 'documento']),
       parcelas: hist ? undefined : FinancialService.parcelasMensais(c[p + 'valor'], nulo_(c[p + 'vencimento']) || ev.event_date, nulo_(c[p + 'parcelas_qtd']), { forma_pagamento: c[p + 'forma_pagamento'], documento: c[p + 'documento'] }), semCaixa: hist,
       rateio: { criterio: 'CABECAS', itens: itens.map(function (it) { return { animal_id: it.animal_id, chave: it.codigo_interno, base: 1, quem: it.quem }; }), cemPorCento: true },
-      campo: morte ? 'custo_conta_id' : 'receita_valor', rotulo: morte ? 'o custo da morte' : 'a receita do descarte',
+      campo: morte ? 'custo_conta_id' : 'receita_valor', rotulo: morte ? 'o custo da morte' : 'a receita do descarte', inativaAceita: usadoNoOriginal_(m, conta.conta_id),
     }, m.col);
     if (!pl) return;
     FinancialService.juntar(ctxEv.plano, pl);
@@ -4029,6 +4163,8 @@ var EventService = (function () {
       // O documento do lançamento que a correção tira (sem correspondente no substituto) fica só no evento: a revisão diz.
       ctxEv.anexosSoltos = m.repo.por('ANEXOS', 'event_id', ctxEv.original.event_id).filter(function (a) { return a.status === 'ATIVO' && a.entidade === 'FINANCEIRO' && !correspondentes[a.entity_id]; }).map(function (a) { return a.nome_arquivo; });
     }
+    // A baixa das parcelas pagas do original passa às do substituto (RN-046), antes de validar as linhas.
+    if (ctxEv.original && !m.col.temErros()) transportarBaixas_(m, ctxEv);
     if (!m.col.temErros()) validarLinhas_(m, ctxEv.plano, itensPorAnimal);
     if (m.col.temErros()) return { erros: m.col.erros };
     if (m.conflitos.length) throw Validation.erro('CONFLICT', m.conflitos.length === 1 ? m.conflitos[0].mensagem : m.conflitos.length + ' registros já gravados impedem este lançamento.', m.conflitos);

@@ -2453,6 +2453,9 @@ cada comando, de cada passo do teste aleatório e na base de demonstração. Con
   de aquisição de quem saiu). Leva nova com o código final: 200 sementes × 100 passos (8100000 a 8100199), 11.927 aceitos, 6.654
   recusados, 0 falhas; a conciliação conferida em 11.043 passos (102.437 fins de mês). Por mutação (a saída do dia D fora do rebanho
   ativo), a semente 8100003 falha no passo 53 com `CONCILIACAO:IDENTIDADE`.
+- Executado com o código final: `npm test` 926 testes, 926 aprovados, 0 falhas (907,7 s; sementes fixas 831 aceitos, 440 recusados, 0
+  falhas); `npm run ui:check` 217 testes de navegador, 217 aprovados, 0 falhas (507 s), página inicial com 371.434 bytes (363 KB) de
+  450 KB, Financial 12 KB, Events 29 KB e Settings 36 KB sob demanda. Antes de mudar o código, `npm test` deu 914 de 914.
 - Ficou para as próximas etapas (seção 55, "Premissas"): a baixa não antes da competência (E4.2), o avulso de aquisição rateado 100% e
   o período só em custeio e outra receita (E4.1), o rateio vigente em D (E4.3). `docs/fase-0/` não mudou (o 01, seção 6.2, ainda diz
   que Events e Settings ficam na página inicial; atualizar na entrega da fase). Esta etapa não fez commit nem push.
