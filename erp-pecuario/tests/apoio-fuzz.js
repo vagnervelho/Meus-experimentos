@@ -5009,8 +5009,24 @@ function digitalCadastros(S, grupo, D, semAtivoCat) {
  * A impressão digital de uma unidade da bateria: os fatos (do rebanho ou do animal) até a data dela e os cadastros do grupo.
  * Na ficha, também a data de referência dela (a do animal hoje: a volta ao rebanho muda a ficha para a de hoje, por desenho).
  */
+/**
+ * Fase 4, E4.3: os rateios (eventos RATEIO que valem, com data até D) dos lançamentos em que o animal tem alocação. O RATEIO não
+ * tem linha de animal, mas muda o custo dele (o custo de cada aplicação na ficha): entra na impressão da ficha.
+ */
+function digitalRateiosDoAnimal(S, id, D) {
+  return lembrarTempo(S, 'R|' + id + '|' + D, () => {
+    const fins = new Set(S.t.ALOCACOES_FINANCEIRAS.filter((a) => a.animal_id === id).map((a) => a.financial_id));
+    const evs = new Set();
+    S.t.RATEIOS.forEach((r) => {
+      const e = S.ev.get(r.event_id);
+      if (!e || e.event_type !== 'RATEIO' || !S.vig.get(e.event_id) || !fins.has(r.financial_id) || !(e.event_date <= D || ehRetro(e))) return;
+      evs.add(e.event_id);
+    });
+    return Array.from(evs).sort().join(',');
+  });
+}
 function digitalUnidade(S, u, semAtivoCat) {
-  const ref = u.grupo === 'ficha' ? '#' + ((S.animais.get(u.animal) || {}).situacao_cadastral || '') + '@' + ((S.animais.get(u.animal) || {}).data_saida || '') : '';
+  const ref = u.grupo === 'ficha' ? '#' + ((S.animais.get(u.animal) || {}).situacao_cadastral || '') + '@' + ((S.animais.get(u.animal) || {}).data_saida || '') + '#' + digitalRateiosDoAnimal(S, u.animal, u.D) : '';
   const pag = GRUPOS_DO_CAIXA.has(u.grupo) ? '#' + digitalPagamentos(S, u.D) : '';
   return (u.animal ? digitalAnimal(S, u.animal, u.D) : digitalFatos(S, u.D)) + '#' + digitalCadastros(S, u.grupo, u.D, semAtivoCat) + ref + pag;
 }

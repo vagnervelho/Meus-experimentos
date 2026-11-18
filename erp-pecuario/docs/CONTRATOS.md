@@ -709,7 +709,7 @@ fuso) → {utilities, utils}`.
 | `EVENTO` | EVENTOS | o predicado |
 | `FILHA` | toda aba com `event_id` (EVENTO_ANIMAIS, detalhes, IDENTIFICACOES, MOVIMENTOS_ESTOQUE, ANEXOS, FINANCEIRO) | `event_id` vazio, ou o evento é vigente |
 | `PARCELA` | PARCELAS | o lançamento vale e `status ≠ CANCELADA` |
-| `RATEIO` | RATEIOS | o lançamento vale, o evento é vigente e é o último do `financial_id` na ordem da cadeia (o `event_seq` do primeiro evento da cadeia de substituição, depois o próprio; Fase 4, E4.3: `rateioEm(financialId, data?)` dá o que vale numa data e `rateiosDoLancamento(financialId)`, o histórico — seção 57.2) |
+| `RATEIO` | RATEIOS | o lançamento vale, o evento é vigente e é o último do `financial_id` na ordem da cadeia (o `event_seq` do primeiro evento da cadeia de substituição, depois o próprio; Fase 4, E4.3: `rateioEm(financialId, data?)` dá o que vale numa data, `alocacoesEm(financialId, data?)` as alocações dele e `rateiosDoLancamento(financialId)` o histórico — seção 57.2) |
 | `ALOCACAO` | ALOCACOES_FINANCEIRAS | o rateio vale |
 | `OPERACAO` | AUDITORIA | `OPERACOES.status = CONFIRMADA` |
 | `ANIMAL` | ANIMAIS | `situacao_cadastral` não é PENDENTE nem ANULADO (projeção) |
@@ -4394,7 +4394,7 @@ recusados, 0 falhas). `npm run ui:check`: 224 testes de navegador, 224 aprovados
 do orçamento — a página inicial montada com 363 KB de 450 KB; sob demanda, Import 48 KB, Weights 64 KB, Health 24 KB, Reproduction
 67 KB, Financial 31 KB, Events 29 KB e Settings 40 KB, de 150 KB cada.
 
-## 57. Fase 4, E4.3: rateio de custos compartilhados — `Rateio` (novo), `Repository` (`rateioEm`, `rateiosDoLancamento`, o rateio vigente pela ordem da cadeia), `EventCatalog` (RATEIO, `mostrar_se`), `EventService` (`rateio_`, `conferirRateiosDependentes_`), `Correcao` (`entradaRateio_`, `RATEIO.bases`), `FinancialService` (invariante 25, `exigeCemPorCento`, `ratear` no detalhe, a lista na data), `AuditService` (`BASE_RATEIO` do evento RATEIO, `avisoDosRateios_`, o escopo da trava), `Conciliacao` (`alocacoesEm`), `ImportService` (o desfazer com o rateio dependente), `TestRunner` (CT-13 c a f), `Financial`, `Events`, `Components` (`Registro`, `Campos`), `JavaScript` (rótulos); `tests/financeiro.rateio.test.js`, `tests/ui/fase4.rateio.test.js`, `tests/apoio-fuzz.js`, `tests/apoio-oraculos.js`, `tests/estorno.test.js`, `tests/acceptance.test.js`, `tests/events.test.js`, `tests/api.test.js`, `tests/correcao.contrato.test.js`
+## 57. Fase 4, E4.3: rateio de custos compartilhados — `Rateio` (novo), `Repository` (`rateioEm`, `rateiosDoLancamento`, `alocacoesEm`, o rateio vigente pela ordem da cadeia), `EventCatalog` (RATEIO, `mostrar_se`), `EventService` (`rateio_`, `rateioMudaNoFechamento_`, `conferirRateiosDependentes_`, `rateioDoEstorno_`), `InventoryService` e `HealthService` (o rateio vigente no fim do período), `Correcao` (`entradaRateio_`, `RATEIO.bases`), `FinancialService` (invariante 25, `exigeCemPorCento`, `ratear` no detalhe, a lista na data), `AuditService` (`BASE_RATEIO` do evento RATEIO, `avisoDosRateios_`, o escopo da trava), `Conciliacao` (`alocacoesEm`), `ImportService` (o desfazer com o rateio dependente), `TestRunner` (CT-13 c a f), `Financial`, `Events`, `Components` (`Registro`, `Campos`), `JavaScript` (rótulos); `tests/financeiro.rateio.test.js`, `tests/ui/fase4.rateio.test.js`, `tests/apoio-fuzz.js`, `tests/apoio-oraculos.js`, `tests/estorno.test.js`, `tests/acceptance.test.js`, `tests/events.test.js`, `tests/api.test.js`, `tests/correcao.contrato.test.js`
 
 **Fase.** RATEIO fica ativo (`tiposAtivos()` = os da E4.2 + ele: 21 tipos). Não há rota nova: o rateio é um evento (`evento.registrar`,
 `evento.simular`, `evento.corrigir`, `evento.estornar`, `evento.obter`) e a tela parte de `financeiro.lancamento`. O tipo tem
@@ -4453,8 +4453,14 @@ substituição (a correção fica no lugar do original), depois o próprio `even
 `vigentes('RATEIOS')` (e, por ele, de `vigentes('ALOCACOES_FINANCEIRAS')`). `Repository.rateiosDoLancamento(financialId)`: o
 histórico nessa ordem. O re-rateio é um evento novo: as linhas do anterior não mudam e deixam de valer dali em diante; o estorno do
 re-rateio devolve o anterior; o estorno de um rateio antigo não muda o que vale. O número numa data D usa o rateio vigente em D:
-`Conciliacao.alocacoesEm(l, D)` (a identidade das três visões, seção 55) e `financeiro.lancamentos` com `ate` (o critério, o
-alocado, o não alocado e os animais de cada item: os do rateio vigente em `ate`; sem `ate`, os de hoje).
+`Repository.alocacoesEm(financialId, data)` (as alocações do rateio que valia na data, pelas linhas cruas dele; sem data, as de
+hoje) e `Conciliacao.alocacoesEm(l, D)` (a identidade das três visões, seção 55); `financeiro.lancamentos` com `ate` (o critério, o
+alocado, o não alocado e os animais de cada item: os do rateio vigente em `ate`; sem `ate`, os de hoje); `dashboard.obter` (o
+valor das compras e das vendas no movimento e nas séries, e a receita de vendas com filtro por animal: os do rateio vigente no fim
+do período — antes, o vigente de hoje); o custo sanitário do período na agenda (`HealthService.custoSanitario`: o alocado no fim
+do período); na ficha do animal, o custo de cada aplicação (e a soma) é o do rateio que valia na data de referência dela (hoje no
+rebanho; a da saída para o baixado: `HealthService.custoAlocado_`). As listas da ficha (o financeiro do animal) e o custo de
+aquisição gravado no cadastro são os de hoje.
 
 ### 57.3 Estorno, correção, dependência e período fechado
 
@@ -4464,13 +4470,19 @@ alocado, o não alocado e os animais de cada item: os do rateio vigente em `ate`
   período, a data-base, os animais escolhidos; não no MANUAL), a base de cada animal é a gravada pelo original
   (`Correcao.congelado('RATEIO.bases')`, DERIVADO na tabela B da seção 50.4, que passa a ter 25 valores: 13 COPIA, 7 DERIVADO e 5
   REGRA): a pesagem ou a transferência lançada depois não reprecifica o rateio em silêncio. Mudada uma entrada, a conta é a de hoje.
+- **Estorno do RATEIO**: volta a valer o rateio anterior do lançamento (o do próprio registro ou o de um RATEIO mais antigo); a
+  projeção é refeita para os animais do rateio estornado e os do que volta (lidos pelas linhas cruas, porque ainda não vale) — o
+  custo de aquisição do animal que o re-rateio pelo valor digitado tinha deixado de fora volta a ser o da compra.
 - **Dependência**: o estorno ou a correção do evento que criou um lançamento rateado por um RATEIO que vale → `CONFLICT
   RATEIO_DEPENDENTE` com o link do rateio ("Estorne esse rateio antes de corrigir (depois, rateie de novo)"); o desfazer da
   importação com um lançamento importado rateado → `DEPENDENTE` ("recebeu valor do rateio de custo de dd/mm, lançado fora da
   importação"). A trava confere o mesmo pela invariante 25 em todo caminho.
 - **Período fechado**: o comando que muda o rateio vigente de um lançamento em `fin_bloqueio_ate` (o rateio datado até ela, o
-  estorno ou a correção de um datado até ela) pede `PERIODO_BLOQUEADO` com justificativa, pela trava única
-  (`AuditService.avisoDosRateios_`); o rateio datado depois não pede.
+  estorno ou a correção de um datado até ela) pede `PERIODO_BLOQUEADO` com justificativa; o rateio datado depois não pede. Quem
+  pede é o tratador (`EventService.rateioMudaNoFechamento_`: o rateio que vale na data do fechamento antes e depois, pela ordem da
+  cadeia), junto com os outros avisos do rateio (a base zero, o peso estimado), numa confirmação só; a aceitação fica no evento
+  (`payload_json.avisos_aceitos`, com a justificativa). A trava confere o mesmo critério (`AuditService.avisoDosRateios_`) em
+  todo caminho e não repete o aviso já pedido.
 - **Rateio desatualizado** (`BASE_RATEIO`, só verificação): `Rateio.desatualizado(L, cru, r)` refaz hoje a base do rateio que vale de
   um evento RATEIO pela mesma conta (`Rateio.specGravado`) e compara com as alocações gravadas; diferente → o alerta "O rateio de
   dd/mm do lançamento "X" está desatualizado: a base refeita hoje muda — <animal> (gravada → hoje)… Rateie de novo por decisão do
@@ -4513,8 +4525,33 @@ ou a menos), a data-base e o período (às vezes antes do marco zero ou invertid
 justificativa. Oráculo do efeito (`efeitoRateio`): as linhas cruas contra o modelo (os presentes, os pesos vigentes, os dias de
 permanência pelas estadas do modelo, o maior resto em BigInt, a base zero com o motivo, o DIRETO, a base congelada na correção). A
 correção (b1–b4), o período (o rateio vigente em `fin_bloqueio_ate`), a conciliação e a viagem no tempo (o grupo `lanc` com o rateio
-vigente na data) valem para ele; o replay independente (`tests/apoio-oraculos.js`) escolhe o rateio vigente pela ordem da cadeia.
+vigente na data; na ficha, a impressão do animal inclui os RATEIO dos lançamentos em que ele tem alocação:
+`digitalRateiosDoAnimal`) valem para ele; o replay independente (`tests/apoio-oraculos.js`) escolhe o rateio vigente pela ordem
+da cadeia.
 O estorno e a correção recusados por `RATEIO_DEPENDENTE` são recusas documentadas quando o modelo tem um RATEIO que vale sobre o
 lançamento do evento (também na correção sem mudança mais tarde). `doseCongelada` (o oráculo da aplicação por peso) passou a
 ignorar a dose digitada no original (`doses_informadas`, seção 53): apagada na correção, ela se refaz pelo peso, como o servidor
 faz — a leva desta etapa achou o desacordo (semente 9600006) em código anterior à etapa.
+
+### 57.6 Decisões
+
+- O rateio é um evento (RATEIO) do motor, sem rota nova: um caminho para registrar, simular, corrigir, estornar e importar, a
+  trava e a verificação de sempre. A tela parte do lançamento (`a_partir_de`), com o formulário do catálogo.
+- O rateio que vale num lançamento é o último na ordem da cadeia (a correção fica no lugar do original; o re-rateio vem depois)
+  entre os de `event_date` até a data pedida: o re-rateio vale dali em diante e não muda o que se pede antes dele.
+- A data-base vazia é a competência do lançamento (o peso e a contagem naquele dia); o período vazio é o do lançamento; no
+  escopo EVENTO, a base é a do registro (sem data-base nem período).
+- Base zero não é recusa (07, seção 3.4): com o aceite, grava o rateio vazio e o motivo, e o lançamento fica "sem alocar" — salvo
+  no lançamento do próprio registro, que precisa de 100% (`RATEIO_INCOMPLETO`).
+- O re-rateio e o rateio pelo valor digitado pedem o porquê (`justificativa_rateio`); a base da correção sem mudança é a gravada
+  (fato congelado); o rateio desatualizado só alerta (`BASE_RATEIO`, o aviso no detalhe) e nunca é refeito sozinho.
+- O estorno ou a correção do registro de um lançamento rateado por um RATEIO que vale é recusado (`RATEIO_DEPENDENTE`), em vez de
+  levar o rateio a outro lançamento: o dono estorna o rateio e rateia de novo o lançamento novo.
+- O lançamento do próprio registro (compra, venda, rebanho inicial, morte, descarte, aplicação, aquisição avulsa) só se re-rateia
+  entre os animais dele e por inteiro; o arrendamento de pasto, só pelos dias no pasto dele (03b, seção 10.3); carcaça e valor
+  individual só existem nas linhas do registro.
+- `mostrar_se` é só da tela: o servidor continua com as regras do tratador (`CAMPO_NAO_SE_APLICA`), e a tela esconde e não envia o
+  que não se aplica.
+- O período fechado do rateio é pedido pelo tratador, junto com os outros avisos (uma confirmação só); a trava fica como rede.
+- O número pedido numa data usa o rateio que valia nela (a lista dos lançamentos, o painel, o custo sanitário do período, o custo
+  de cada aplicação na ficha do baixado); as listas de hoje (o financeiro da ficha) e o custo de aquisição gravado, o de hoje.

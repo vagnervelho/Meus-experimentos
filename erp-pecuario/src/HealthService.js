@@ -332,14 +332,16 @@ var HealthService = (function () {
     if (!repo.carregada('MOVIMENTOS_ESTOQUE')) return [];
     return repo.por('MOVIMENTOS_ESTOQUE', 'product_id', productId).filter(function (m) { return !(excluidos && excluidos[m.event_id]); });
   }
-  /** Custo sanitário do animal no evento: soma das alocações vigentes dos rateios dos lançamentos do evento (a fonte única). */
-  function custoAlocado_(repo, eventId, animalId) {
+  /**
+   * Custo sanitário do animal no evento: soma das alocações dos lançamentos do evento (a fonte única) pelo rateio que valia na
+   * data de referência da ficha (hoje no rebanho; a da saída para o baixado): o re-rateio de depois dela não muda o que a ficha
+   * mostra naquela data (Fase 4, E4.3; CONTRATOS, seção 57.2).
+   */
+  function custoAlocado_(repo, eventId, animalId, data) {
     if (!repo.carregada('FINANCEIRO') || !repo.carregada('RATEIOS') || !repo.carregada('ALOCACOES_FINANCEIRAS')) return null;
     var total = null;
     repo.por('FINANCEIRO', 'event_id', eventId).forEach(function (fin) {
-      repo.por('RATEIOS', 'financial_id', fin.financial_id).forEach(function (r) {
-        repo.por('ALOCACOES_FINANCEIRAS', 'rateio_id', r.rateio_id).forEach(function (al) { if (al.animal_id === animalId) total = (total || 0) + (al.valor_alocado || 0); });
-      });
+      repo.alocacoesEm(fin.financial_id, data).forEach(function (al) { if (al.animal_id === animalId) total = (total || 0) + (al.valor_alocado || 0); });
     });
     return total;
   }
@@ -565,7 +567,7 @@ var HealthService = (function () {
         dose: nulo_(r.dose), unidade_dose: nulo_(r.unidade_dose), via_aplicacao: nulo_(r.via_aplicacao), lote: nulo_(r.lote), validade: nulo_(r.validade),
         motivo: nulo_(r.motivo), diagnostico: nulo_(r.diagnostico), resultado_exame: nulo_(r.resultado_exame),
         data_proxima_aplicacao: nulo_(r.data_proxima_aplicacao), periodo_carencia_dias: nulo_(r.periodo_carencia_dias), data_fim_carencia: fimCarencia(r),
-        custo: custoAlocado_(L.repo, r.event_id, a.animal_id), veterinario: nulo_(r.veterinario), observacoes: nulo_(r.observacoes), seq: c.seq(r.event_id),
+        custo: custoAlocado_(L.repo, r.event_id, a.animal_id, ref), veterinario: nulo_(r.veterinario), observacoes: nulo_(r.observacoes), seq: c.seq(r.event_id),
       };
     });
     itens.sort(function (x, y) { return (x.data < y.data ? 1 : x.data > y.data ? -1 : 0) || (y.seq - x.seq); });

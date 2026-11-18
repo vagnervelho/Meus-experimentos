@@ -2116,6 +2116,8 @@ var EventService = (function () {
       return;
     }
     if (baseZero) avisoItem_(m, null, 'RATEIO_BASE_ZERO', 'Base zero: ' + b.motivo + '. Nada será alocado, e o lançamento ' + nomeFin + ' fica inteiro como "sem alocar aos animais".');
+    // O período fechado: o rateio que valia no fechamento muda (o registro datado até ele; a correção que tira ou põe um).
+    if (rateioMudaNoFechamento_(m, fin.financial_id, original ? original.event_id : null, ev.event_date)) avisoRateioNoFechamento_(m, fin);
     var estimados = b.estimados || [];
     if (estimados.length) avisoItem_(m, null, 'RATEIO_SEM_PESO', plural_(estimados.length, 'animal entra', 'animais entram') + ' com o peso estimado em ' + br_(dataBase) + ' (pesagem vencida ou o peso de referência da categoria): ' + estimados.slice(0, 8).map(function (x) { return x.quem; }).join(', ') + (estimados.length > 8 ? ' e mais ' + (estimados.length - 8) : '') + '.');
     else if (b.estimadoNoOriginal) avisoItem_(m, null, 'RATEIO_SEM_PESO', 'O rateio continua com as bases estimadas do original (pesagem vencida ou o peso de referência da categoria).');
@@ -4519,6 +4521,31 @@ var EventService = (function () {
    * o último na ordem da cadeia, sem este). {impacto: {financial_id, lancamento, total_alocado, volta: {event_id, event_type,
    * event_date, criterio, total_alocado} | null}, animais (os dos dois rateios), eventos (o criador do lançamento)}.
    */
+  /**
+   * O rateio que vale no lançamento na data do fechamento (`fin_bloqueio_ate`) muda com este comando? (Fase 4, E4.3; o mesmo
+   * critério da trava, AuditService.avisoDosRateios_, pedido aqui pelo tratador junto com os outros avisos, numa confirmação
+   * só.) `sai`: o evento RATEIO que deixa de valer (o original da correção, o estornado); `entra`: a data do rateio novo, que
+   * fica no lugar do que sai na ordem da cadeia (ou no fim dela, no registro).
+   */
+  function rateioMudaNoFechamento_(m, financialId, sai, entra) {
+    var ate = m.params.fin_bloqueio_ate;
+    if (vazio_(ate)) return false;
+    var cru = m.tx.cru;
+    var lista = m.repo.rateiosDoLancamento(financialId).map(function (r) { return { id: r.rateio_id, ev: r.event_id, data: (cru.cruPorId('EVENTOS', r.event_id) || {}).event_date }; });
+    var naData = function (l) { var x = null; l.forEach(function (c) { if (!vazio_(c.data) && c.data <= ate) x = c.id; }); return x; };
+    var depois = [];
+    var posto = false;
+    lista.forEach(function (c) {
+      if (c.ev !== sai) { depois.push(c); return; }
+      if (entra) depois.push({ id: '(novo)', data: entra });
+      posto = true;
+    });
+    if (entra && !posto) depois.push({ id: '(novo)', data: entra });
+    return naData(lista) !== naData(depois);
+  }
+  function avisoRateioNoFechamento_(m, fin) {
+    avisoItem_(m, null, 'PERIODO_BLOQUEADO', 'O rateio do lançamento "' + nomeLancamento_(m, fin) + '", que este comando muda, vale dentro do período financeiro fechado (até ' + br_(m.params.fin_bloqueio_ate) + '). Confirme com uma justificativa.');
+  }
   function rateioDoEstorno_(m, alvo) {
     var cru = m.tx.cru;
     var animais = [];
@@ -4533,6 +4560,7 @@ var EventService = (function () {
       var volta = outros.length ? outros[outros.length - 1] : null;
       // Os animais do rateio que volta a valer (ainda não vigente agora: pelas linhas cruas) têm a projeção refeita também.
       if (volta) cru.cruPor('ALOCACOES_FINANCEIRAS', 'rateio_id', volta.rateio_id).forEach(function (a) { animais.push(a.animal_id); });
+      if (rateioMudaNoFechamento_(m, fin.financial_id, alvo.event_id, null)) avisoRateioNoFechamento_(m, fin);
       var ve = volta ? cru.cruPorId('EVENTOS', volta.event_id) || {} : null;
       impacto = {
         financial_id: fin.financial_id, lancamento: nomeLancamento_(m, fin), total_alocado: r.total_alocado,

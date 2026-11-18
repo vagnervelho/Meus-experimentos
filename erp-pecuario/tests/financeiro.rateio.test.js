@@ -413,6 +413,19 @@ test('o lançamento do próprio registro: o custo da morte e a aplicação re-ra
   assert.equal(ficha.financeiro.custeio, 7000, 'o custo do animal lê o rateio que vale');
 });
 
+test('a ficha de quem saiu: o custo de cada aplicação é o do rateio que valia na data da saída (o re-rateio de depois não muda a ficha daquele dia); a de quem ficou, o de hoje', () => {
+  const s = montar();
+  const ids = rebanho(s, 2);
+  const vac = s.ok('evento.registrar', { tipo: 'SANIDADE', subtipo: 'VACINACAO', campos: { event_date: '2026-05-10', nome_produto: 'Vacina da loja', modo_dose: 'POR_CABECA', dose_referencia: 2, unidade_dose: 'mL', custo_valor: 10000, custo_conta_id: s.conta('VACINAS'), custo_vencimento: '2026-06-10' }, animais: ids.map((animal_id) => ({ animal_id })) });
+  const fv = s.finDo(vac.event_id)[0];
+  s.ok('evento.registrar', { tipo: 'MORTE', campos: { event_date: '2026-06-01', causa: 'OUTRA' }, animais: [{ animal_id: ids[0] }] });
+  const custo = (id) => s.ok('animal.ficha', { animal_id: id }).sanitario.itens.find((x) => x.event_id === vac.event_id).custo;
+  assert.deepEqual([custo(ids[0]), custo(ids[1])], [5000, 5000]);
+  // Em 01/07 (depois da morte) a vacina é re-rateada pelo valor digitado.
+  s.ok('evento.registrar', rateio(fv.financial_id, { event_date: '2026-07-01', criterio: 'MANUAL', justificativa_rateio: 'O que morreu levou dose dupla' }, [{ animal_id: ids[0], valor: 7000 }, { animal_id: ids[1], valor: 3000 }]));
+  assert.deepEqual([custo(ids[0]), custo(ids[1])], [5000, 3000], 'a ficha do morto é a de 01/06; a do vivo, a de hoje');
+});
+
 test('período fechado: o rateio datado até o fechamento (e o estorno dele) pede PERIODO_BLOQUEADO com justificativa; o datado depois, não (não muda nada pedido até o fechamento)', () => {
   const s = montar();
   rebanho(s, 3);
@@ -423,10 +436,15 @@ test('período fechado: o rateio datado até o fechamento (e o estorno dele) ped
   assert.equal(r1.error.code, 'NEEDS_CONFIRMATION');
   assert.deepEqual(codigos(r1.error), ['PERIODO_BLOQUEADO']);
   assert.deepEqual(codigos(s.falha('evento.registrar', p, TODOS.concat(['PERIODO_BLOQUEADO']))), ['CAMPO_OBRIGATORIO']);
+  // Com outro aviso do rateio (a base zero), os dois vêm na mesma confirmação: aceitos os dois, grava (sem pedir de novo).
+  const vazio = rateio(fin.financial_id, { event_date: '2026-06-15', criterio: 'CABECAS', escopo_tipo: 'PASTO', pasture_id: S.PASTOS.B, data_base: '2026-06-15' });
+  const r0 = s.api('evento.simular', { acao: 'registrar', dados: vazio }, []);
+  assert.deepEqual(r0.data.avisos.map((a) => a.codigo).sort(), ['PERIODO_BLOQUEADO', 'RATEIO_BASE_ZERO'], 'a simulação: os dois');
+  const r2 = s.api('evento.registrar', vazio, []);
+  assert.deepEqual(codigos(r2.error).sort(), ['PERIODO_BLOQUEADO', 'RATEIO_BASE_ZERO'], 'o comando: os dois, numa confirmação só');
   const ok = s.ok('evento.registrar', Object.assign({}, p, { justificativa_aviso: 'Ajuste do fechamento' }), TODOS.concat(['PERIODO_BLOQUEADO']));
-  // O aviso da trava fica na operação (CONTRATOS, seção 10.5, item 6).
-  const op = s.tabela('OPERACOES').find((x) => x.resumo_json && x.resumo_json.event_id === ok.event_id);
-  assert.deepEqual(op.resumo_json.avisos_aceitos, [{ codigo: 'PERIODO_BLOQUEADO', justificativa: 'Ajuste do fechamento' }]);
+  // O aviso do período fechado fica no evento, com a justificativa (pedido pelo tratador; a trava não o repete).
+  assert.deepEqual(s.tabela('EVENTOS').find((x) => x.event_id === ok.event_id).payload_json.avisos_aceitos, [{ codigo: 'PERIODO_BLOQUEADO', n: 1, justificativa: 'Ajuste do fechamento' }]);
   // Datado depois do fechamento: não pede.
   s.ok('evento.registrar', rateio(fin.financial_id, { event_date: '2026-07-01', criterio: 'CABECAS', escopo_tipo: 'REBANHO', justificativa_rateio: 'De novo' }));
   // O estorno do rateio de 15/06 muda o rateio que valia no fechamento: pede.
