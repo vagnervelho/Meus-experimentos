@@ -5010,6 +5010,14 @@ function recusaDocumentada(S, e, r) {
   const codigos = (r.error.details || []).map((d) => d.codigo);
   return codigos.length > 0 && codigos.every((c) => (pol[c] || (c === 'CARENCIA_ATIVA' ? 'BLOQUEIA' : 'AVISA')) === 'BLOQUEIA' || (c === 'PRODUTO_SEM_ESTOQUE' && e.event_type === 'ESTOQUE' && e.event_subtype === 'AJUSTE'));
 }
+/**
+ * A recusa só porque uma contagem do estoque posterior já acertou o saldo de um dia que o comando mudaria (CONFLICT
+ * CONTAGEM_POSTERIOR, todos os detalhes): do desenho quando a mudança muda a quantidade que sai do frasco (CONTRATOS, 44 e 50.5).
+ */
+function soContagemPosterior(r) {
+  const det = (r.error && r.error.details) || [];
+  return !!r.error && r.error.code === 'CONFLICT' && det.length > 0 && det.every((d) => d.codigo === 'CONTAGEM_POSTERIOR');
+}
 /** As consultas da bateria da viagem no tempo em D (sem a lista dos lançamentos, conferida à parte pela lista dos que valem). */
 const GRUPOS_B4 = new Set(['pos', 'posA', 'eleg', 'pasto', 'pastos', 'painel', 'perm', 'agenda', 'ind', 'mat', 'matE', 'desemp', 'dash', 'ficha']);
 function bateriaCorrecao(sis, S, D) {
@@ -5323,8 +5331,11 @@ function oraculoCorrecao(sis, S0, k, plano) {
         // A data nova pode valer menos que a de antes (o animal ainda não estava, a contagem do estoque, o período fechado):
         // a recusa com o motivo é do desenho. As demais mudanças de um campo não têm por que ser recusadas.
         // Tirar um dos dados de um animal pode quebrar uma regra entre campos (o dado e a certeza dele): a recusa com o motivo
-        // é do desenho; a dose por kg nova pode pedir o peso que falta (SEM_PESO) ou estourar o estoque (o aviso que bloqueia).
-        else if (!mu.data && !(mu.tirar && r.error.code === 'VALIDATION') && !(mu.doseKg && r.error.code === 'VALIDATION') && !recusaDocumentada(S, e, r)) out.push(falha('CORRECAO:B2:RECUSA:' + tipoEChave(e), contexto + 'recusada: ' + r.error.code + ' ' + JSON.stringify((r.error.details || []).map((d) => d.codigo + ': ' + d.mensagem)).slice(0, 700)));
+        // é do desenho; a dose por kg nova pode pedir o peso que falta (SEM_PESO), estourar o estoque (o aviso que bloqueia) ou
+        // mudar a quantidade que saiu do frasco antes de uma contagem do estoque (CONTAGEM_POSTERIOR: o saldo de um dia contado
+        // não muda; CONTRATOS, seções 44 e 50.5).
+        else if (!mu.data && !(mu.tirar && r.error.code === 'VALIDATION') && !(mu.doseKg && (r.error.code === 'VALIDATION' || soContagemPosterior(r))) && !recusaDocumentada(S, e, r)) out.push(falha('CORRECAO:B2:RECUSA:' + tipoEChave(e), contexto + 'recusada: ' + r.error.code + ' ' + JSON.stringify((r.error.details || []).map((d) => d.codigo + ': ' + d.mensagem)).slice(0, 700)));
+        else if (mu.doseKg && soContagemPosterior(r)) contar('correção: dose por kg recusada pela contagem do estoque posterior');
         sis.gas.estado.restaurar(foto1);
         return;
       }

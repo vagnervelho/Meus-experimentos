@@ -194,6 +194,12 @@ derivado pelo servidor e copiado do cadastro, com as entradas de que cada um dep
 (a entrada sem mudança do evento que vale, o evento corrigido pela mudança e o valor que a correção mantém do original), a
 correção só com a mudança (`dados.mudanca`), a prévia da correção montada pelo servidor (`evento.obter`: `correcao`), o
 oráculo da correção no teste aleatório e os consertos que ele achou (seção 50).
+Fase 3, SEGUNDA CONVERGÊNCIA: o cliente não calcula número nem data (seção 51); curral e tronco sem estado escondido — o bloco
+só sai com a chave guardada e o rascunho no servidor que falha avisa e vai de novo sozinho (seção 52); e o conserto da rodada 1
+da revisão (17 achados): o diagnóstico sem estação dado à exposição mais recente, o que foi digitado guardado no payload para a
+entrada da correção (a dose por peso, o pasto e a raça das crias), a mudança da correção de cadastro pelo animal e pelo campo, a
+estação do original só com a mesma data, a agenda desde o início do protocolo, o rascunho no servidor pela versão, nenhum
+formulário sem a chave guardada e um animal por lançamento no curral e no tronco (seção 53).
 
 ## 1. Regras que valem para todo arquivo de `src/`
 
