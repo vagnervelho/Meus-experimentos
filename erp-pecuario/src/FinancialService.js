@@ -442,7 +442,8 @@ var FinancialService = (function () {
       if (!vazio_(s.criterio_rateio)) erros.push(det_('CAMPO_NAO_SE_APLICA', 'criterio_rateio', 'O critério de rateio só se escolhe no lote fechado; nas demais formas ele vem da negociação.'));
       // Sem o peso de cada animal (só o do lote, ou só o total do romaneio): a última pesagem de cada um, escalada para o
       // peso do lote (estimado), quando todos têm; senão CABECAS. Aviso nos dois casos (03b, seção 4.3; RN-073).
-      var ult = Array.isArray(s.bases_congeladas) && s.bases_congeladas.length === n ? s.bases_congeladas : Array.isArray(s.pesagens) && s.pesagens.length === n ? s.pesagens : null;
+      // `bases_congeladas` 'CABECAS': a correção da venda que o original dividiu por cabeça (algum animal sem pesagem até a data).
+      var ult = s.bases_congeladas === 'CABECAS' ? null : Array.isArray(s.bases_congeladas) && s.bases_congeladas.length === n ? s.bases_congeladas : Array.isArray(s.pesagens) && s.pesagens.length === n ? s.pesagens : null;
       var temUlt = ult && ult.every(function (x) { return typeof x === 'number' && x > 0; });
       if (mod === 'CABECA') crit = temValor ? 'VALOR_INDIVIDUAL' : 'CABECAS';
       else if (r.base_peso === 'CARCACA' && (temCarc === n || s.carcacaTotal !== true)) crit = 'PESO_CARCACA';

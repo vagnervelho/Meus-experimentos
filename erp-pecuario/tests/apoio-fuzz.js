@@ -572,6 +572,7 @@ function oraculoEfeito(sis, cmd, resp, A, S) {
     const a = S.animais.get(d.animal_id);
     Object.keys(d.campos || {}).forEach((c) => {
       if (c === 'nome' && norm(a.nome) !== norm(d.campos.nome)) erro('nome gravado ' + a.nome + ', pedido ' + d.campos.nome);
+      if (c === 'raca' && (a.raca || null) !== (d.campos.raca || null)) erro('raça gravada ' + a.raca + ', pedida ' + d.campos.raca);
     });
     if (eid) conferirCorrecoes(S, eid, erro);
     return out;
@@ -1762,13 +1763,17 @@ registrarTipo('SANIDADE', {
     // (a carência proposta, o nome e o fabricante) são as do original, não as do cadastro de agora.
     const orig = prod ? sanidadeCongelada(c, prod.product_id) : null;
     if (orig) contar('correção da aplicação com as cópias congeladas do produto');
+    // Rodada 2 da segunda convergência (achado 10): a carência e o fabricante do original só valem como cópia quando o original
+    // os copiou do produto (as marcas `carencia_informada` false e `fabricante_informado` ausente); os digitados não têm cópia.
+    const pjOrig = (originalDaCorrecao(c) || {}).payload_json || {};
+    const carCopiada = orig && pjOrig.carencia_informada === false;
     const diasCar = typeof cp.periodo_carencia_dias === 'number' ? cp.periodo_carencia_dias : d.subtipo === 'DOENCA' ? null
-      : orig ? (typeof orig.periodo_carencia_dias === 'number' ? orig.periodo_carencia_dias : null)
+      : carCopiada ? (typeof orig.periodo_carencia_dias === 'number' ? orig.periodo_carencia_dias : null)
       : prod && typeof prod.carencia_padrao_dias === 'number' ? prod.carencia_padrao_dias : null;
     if (typeof cp.periodo_carencia_dias !== 'number' && diasCar !== null && !orig) contar('carência pelo padrão do produto');
     const nomeEsperado = prod ? (orig && orig.nome_produto ? orig.nome_produto : prod.nome) : cp.nome_produto || null;
     const fabInf = typeof cp.fabricante === 'string' && cp.fabricante.trim() ? cp.fabricante.trim() : null;
-    const fabEsperado = fabInf || (orig ? orig.fabricante || null : prod ? prod.fabricante || null : null);
+    const fabEsperado = fabInf || (orig && pjOrig.fabricante_informado !== true ? orig.fabricante || null : prod ? prod.fabricante || null : null);
     const fim = typeof diasCar === 'number' && diasCar > 0 ? somaDias(cp.event_date, diasCar) : null;
     // A próxima pelo protocolo: na correção com o mesmo protocolo, o intervalo do original (payload); senão o de agora.
     const intervaloOriginal = prot ? intervaloCongelado(c, prot.protocol_id) : null;
@@ -2247,7 +2252,10 @@ registrarTipo('DESMAMA', {
       if (!l || l.efeito_inventario !== 0 || (l.papel || 'SUJEITO') !== 'SUJEITO') { erro('linha do bezerro ' + JSON.stringify(l)); return; }
       if (l.pasto_destino_id && l.pasto_destino_id !== cp.pasto_destino_id) erro('o bezerro foi para ' + l.pasto_destino_id + ', pedido ' + cp.pasto_destino_id);
       if (!!l.pasto_destino_id !== !!l.pasto_origem_id) erro('movimento da desmama sem origem ou sem destino ' + JSON.stringify([l.pasto_origem_id, l.pasto_destino_id]));
-      if (l.pasto_destino_id && l.pasto_origem_id === l.pasto_destino_id) erro('movimento da desmama para o mesmo pasto');
+      // Rodada 2 da segunda convergência (achado 4): o pasto informado fica gravado também quando o bezerro já estava nele
+      // (origem = destino, sem estada nova) — o dado digitado não some, e a linha do tempo confere a origem.
+      if (cp.pasto_destino_id && !l.pasto_destino_id && presenca(S, x.animal_id, cp.event_date).pasto === cp.pasto_destino_id) erro('o bezerro já estava no pasto informado, que não ficou gravado na linha dele');
+      if (l.pasto_destino_id && l.pasto_origem_id === l.pasto_destino_id) contar('desmama: pasto informado gravado com o bezerro já nele');
       const p = pes.filter((y) => y.animal_id === x.animal_id);
       const kg = typeof x.peso === 'number' ? x.peso : null;
       if ((l.peso === undefined || l.peso === '' ? null : l.peso) !== kg) erro('peso na linha ' + l.peso + ', pedido ' + kg);
@@ -3661,6 +3669,28 @@ function oraculoManejo(sis, S, focos) {
     const somaCat = (r.data.estacao.por_categoria || []).reduce((s, c) => s + ((c.indicadores || c).expostas || 0), 0);
     if ((r.data.estacao.por_categoria || []).length && somaCat !== g.expostas) out.push(falha('INDICADORES', q + 'as categorias somam ' + somaCat + ' expostas, o geral ' + g.expostas));
   });
+  // Rodada 2 da segunda convergência (achado 1): cada registro reprodutivo é de uma estação só — a regra do dono (o parto, o
+  // diagnóstico sem estação e o aborto são da exposição dona da prenhez). Somadas todas as estações, os partos, os abortos e os
+  // diagnósticos contados como desfecho (ou o último diagnóstico) de cada fêmea não passam dos registros vigentes de cada tipo
+  // (o mesmo aborto contado em duas estações passava).
+  const todas = S.t.ESTACOES_MONTA || [];
+  if (todas.length > 1) {
+    const soma = { paridas: 0, abortos: 0, diagnosticadas: 0 };
+    let falhou = false;
+    todas.forEach((est) => {
+      const r = sis.api('reproducao.indicadores', { estacao_id: est.estacao_id });
+      if (!r.ok || !r.data.estacao || !r.data.estacao.geral) { falhou = true; return; }
+      const g = r.data.estacao.geral;
+      Object.keys(soma).forEach((k) => { soma[k] += g[k] || 0; });
+    });
+    if (!falhou) {
+      const regs = vigentesDe(S, 'REPRODUCAO');
+      const fe = (tipo, f) => new Set(regs.filter((x) => x.tipo_evento === tipo && (!f || f(x))).map((x) => x.reproduction_id)).size;
+      const lim = { paridas: fe('PARTO'), abortos: fe('ABORTO'), diagnosticadas: fe('DIAGNOSTICO_GESTACAO', (x) => x.resultado !== 'INCONCLUSIVO') };
+      contar('estações: registros contados uma vez só');
+      Object.keys(soma).forEach((k) => { if (soma[k] > lim[k]) out.push(falha('INDICADORES:DONO', k + ' somados em ' + todas.length + ' estações: ' + soma[k] + ', mas há ' + lim[k] + ' registros vigentes')); });
+    }
+  }
   const pd = sis.api('peso.desempenho', {});
   if (!pd.ok) out.push(falha('DESEMPENHO:FALHOU', JSON.stringify(pd.error).slice(0, 400)));
   else {
@@ -3847,6 +3877,9 @@ function gerarAcao(sis, S, rnd, k, acao, base) {
     // Dois campos na mesma edição (o sexo e o nascimento, a mãe e o pai).
     if (rnd() < 0.25) { const c2 = correcaoAleatoria(sis, S, rnd, id); Object.assign(campos, { [c2.campo]: c2.valor }, c2.junto || {}); }
     if (rnd() < 0.3) campos.nome = sorteio(rnd, ['Mimosa', 'Estrela', 'Valente']);
+    // Rodada 2 da segunda convergência (achado 5): a raça corrigida na ficha (auditoria, sem evento) — a correção do lançamento
+    // que criou o animal, sem mudança ou de outro campo, não a desfaz (o oráculo da correção confere ANIMAIS igual).
+    if (rnd() < 0.2 && !(EXTERNOS(S).indexOf(id) >= 0)) campos.raca = sorteio(rnd, ['NELORE', 'ANGUS', 'CRUZADO']);
     return Object.assign(base, { rota: 'animal.editar', dados: Object.assign({ animal_id: id, campos }, rnd() < 0.95 ? { justificativa: 'Conferido na ficha' } : {}), rotulo: 'editar ' + c.campo });
   }
   // Passada 3: o estorno logo depois do registro (nada gravado entre os dois) devolve cada animal que já existia ao que era.
@@ -5215,7 +5248,9 @@ function congeladosNaData(S, e, a, b, nova, erro, ctx) {
     igual('a saída do frasco (o custo congelado)', saida(a), saida(b));
     const consumo = (x) => x.FINANCEIRO.filter((f) => f.product_id).map((f) => [f.conta_id, f.product_id].concat(pj.modo_dose === 'POR_PESO' ? [String(f.descricao || '').split(':')[0]] : [f.descricao, f.valor, f.quantidade]));
     igual('o consumo (a conta e a descrição congeladas)', consumo(a), consumo(b));
-    if (typeof pj.intervalo_protocolo_dias === 'number') b.SANIDADE.forEach((r) => igual('a próxima pelo intervalo congelado', somaDias(nova, pj.intervalo_protocolo_dias), r.data_proxima_aplicacao));
+    if (typeof pj.intervalo_protocolo_dias === 'number' && pj.proxima_informada !== true) b.SANIDADE.forEach((r) => igual('a próxima pelo intervalo congelado', somaDias(nova, pj.intervalo_protocolo_dias), r.data_proxima_aplicacao));
+    // Rodada 2 da segunda convergência (achado 13): a próxima digitada fica, e o intervalo congelado continua no payload.
+    if (pj.proxima_informada === true) { b.SANIDADE.forEach((r) => igual('a próxima digitada', a.SANIDADE[0].data_proxima_aplicacao, r.data_proxima_aplicacao)); igual('o intervalo congelado com a próxima digitada', pj.intervalo_protocolo_dias, (b.EVENTOS.payload_json || {}).intervalo_protocolo_dias); }
   }
   if (e.event_type === 'ESTOQUE' && e.event_subtype === 'ENTRADA') {
     igual('o fator e o movimento congelados', [pj.fator_conversao, pj.com_movimento], [(b.EVENTOS.payload_json || {}).fator_conversao, (b.EVENTOS.payload_json || {}).com_movimento]);

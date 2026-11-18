@@ -135,7 +135,8 @@ for (const largura of [1280, 360]) {
     assert.equal(await page.locator('[data-campo="protocol_id"] select').inputValue(), prot);
     assert.equal(await page.locator('[data-campo="produto_id"] select').inputValue(), vac);
     assert.equal(await page.locator('[data-campo="dose_referencia"] input').inputValue(), '2', 'a dose padrão do produto');
-    assert.equal(await page.locator('[data-campo="periodo_carencia_dias"] input').inputValue(), '30', 'a carência padrão do produto');
+    // A carência fica em branco: o servidor copia a do produto, e a revisão a mostra (seção 54: o aparelho não a decide).
+    assert.equal(await page.locator('[data-campo="periodo_carencia_dias"] input').inputValue(), '', 'a carência do produto fica com o servidor');
     assert.equal(await page.locator('.cartao-animal').count(), 4, 'os 4 animais pendentes no lançamento');
     await semProblemasDeLeiaute(page, largura, 'formulário da aplicação');
     await page.click('.form-evento button[type=submit]');

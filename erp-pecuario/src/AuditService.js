@@ -398,6 +398,7 @@ var AuditService = (function () {
     PARTO_NA_GESTACAO: 'Confira a idade da gestação do diagnóstico ou a data do parto: a gestação diagnosticada começou depois do parto.',
   });
   var RESOLVER_FONTE = 'Este lançamento refaria a situação a partir desses dados, como se estivessem certos. Restaure o backup ou investigue a edição manual da planilha antes de lançar para eles.';
+  var RESOLVER_FONTE_CORRECAO = 'A correção refaria o lançamento a partir desses dados, como se estivessem certos. Restaure o backup ou investigue a edição manual da planilha; se o lançamento estiver errado, estorne-o e lance de novo.';
   var RESOLVER_CRIA_EM_DOBRO = 'O parto de um animal que já está no cadastro não se lança: a mãe e o nascimento dele ficam no cadastro. Se o parto antigo já foi gravado, estorne-o ou desfaça a importação dele; para pôr no rebanho inicial a cria de um parto antigo, lance "Outra entrada" dela datada do marco zero, em vez de cadastrar um animal novo.';
   var RESOLVER_FEMEA = 'O registro reprodutivo é de uma fêmea nascida antes dele: confira o sexo e o nascimento, ou corrija antes o lançamento que gravou o registro.';
   var RESOLVER_TOURO_LINHA = 'O touro de uma exposição ou de uma cobertura é macho: confira o sexo do animal, ou corrija antes o lançamento (tire o animal do lote ou troque o touro).';
@@ -450,6 +451,9 @@ var AuditService = (function () {
           item.resolver = nulo_(a.resolver);
           item.oque = nulo_(a.oque);
           item.fonte = fonte;
+          // A fonte que a correção do lançamento LÊ (a entrada sem mudança e os valores que ela mantém do original): a correção dele
+          // é recusada pela trava, em vez de refazer o substituto a partir do dado mexido (CONTRATOS, seção 54).
+          item.lidaPelaCorrecao = a.lidaPelaCorrecao === true;
         }
         lista.push(item);
       },
@@ -1521,7 +1525,7 @@ var AuditService = (function () {
       var nome = '"' + rotuloEvento_(ev) + '" de ' + br_(ev.event_date);
       var quem = function (id) { return rotuloAnimal_(tx.cru.cruPorId('ANIMAIS', id), id); };
       var achado = function (r, campo, oque, chave) {
-        col.achado('COPIAS', { tabela: 'PESAGENS', id: r.weight_id, campo: campo, mensagem: oque + aviso, oque: oque, chaves: r.weight_id + '|' + chave, event_id: ev.event_id, animal_id: r.animal_id });
+        col.achado('COPIAS', { tabela: 'PESAGENS', id: r.weight_id, campo: campo, mensagem: oque + aviso, oque: oque, chaves: r.weight_id + '|' + chave, event_id: ev.event_id, animal_id: r.animal_id, lidaPelaCorrecao: chave === 'METODO' });
       };
       var semPesagem = function (l, oque) {
         col.achado('COPIAS', { tabela: 'EVENTO_ANIMAIS', id: l.event_animal_id, campo: 'peso', mensagem: oque + aviso, oque: oque, chaves: l.event_animal_id + '|SEM_PESAGEM', event_id: ev.event_id, animal_id: l.animal_id });
@@ -1533,6 +1537,14 @@ var AuditService = (function () {
         if (porAnimal[r.animal_id]) achado(r, 'animal_id', nome + ', ' + quem(r.animal_id) + ': o animal tem mais de uma pesagem no mesmo lançamento.', 'REPETIDA');
         porAnimal[r.animal_id] = r;
       });
+      // O método é do lançamento na pesagem e na desmama (03b, seção 2.6; CONTRATOS, seção 50.3): todas as linhas com o mesmo —
+      // a linha mexida à mão é a fonte quebrada (a entrada da correção lê o método de uma linha e o espalharia às outras).
+      if (METODO_DO_LANCAMENTO[ev.event_type]) {
+        var metodo = maioria_(linhas, 'metodo');
+        linhas.forEach(function (r) {
+          if (nulo_(r.metodo) !== metodo) achado(r, 'metodo', nome + ', ' + quem(r.animal_id) + ': o método da pesagem (' + (r.metodo || 'vazio') + ') difere do das outras linhas do lançamento (' + (metodo || 'vazio') + '): o método é do lançamento.', 'METODO');
+        });
+      }
       if (ev.event_type !== 'PESAGEM') { conferirPesoCopiado_(repo, ev, linhas, achado, nome, quem, semPesagem); return; }
       var tipos = Utils.unicos(linhas.map(function (r) { return r.tipo; }));
       if (tipos.length > 1) linhas.slice(1).forEach(function (r) { if (r.tipo !== linhas[0].tipo) achado(r, 'tipo', nome + ', ' + quem(r.animal_id) + ': o momento da pesagem (' + r.tipo + ') difere do das outras linhas do lançamento (' + linhas[0].tipo + ').', 'MOMENTO'); });
@@ -1564,6 +1576,19 @@ var AuditService = (function () {
    * Os tipos que copiam o peso da linha do animal numa pesagem (03b, seção 5): o rebanho inicial, a outra entrada, a compra,
    * a venda (o peso do animal) e o nascimento (o da cria). A desmama tem a conferência dela (conferirReproducao_).
    */
+  var METODO_DO_LANCAMENTO = Object.freeze({ PESAGEM: true, DESMAMA: true });
+  /** O valor de `campo` que a maioria das linhas tem (no empate, o da primeira): a linha diferente dele é a mexida. */
+  function maioria_(linhas, campo) {
+    var n = {};
+    var melhor = null;
+    var nMelhor = 0;
+    linhas.forEach(function (r) {
+      var k = JSON.stringify(nulo_(r[campo]));
+      n[k] = (n[k] || 0) + 1;
+      if (n[k] > nMelhor) { nMelhor = n[k]; melhor = nulo_(r[campo]); }
+    });
+    return melhor;
+  }
   var COPIAM_PESO = Object.freeze({ ENTRADA_INICIAL: ['SUJEITO'], OUTRA_ENTRADA: ['SUJEITO'], COMPRA: ['SUJEITO'], VENDA: ['SUJEITO'], NASCIMENTO: ['CRIA'] });
   /**
    * Nos tipos que copiam o peso (COPIAM_PESO), cada pesagem é a do peso da linha do animal no evento (EVENTO_ANIMAIS.peso):
@@ -1624,6 +1649,10 @@ var AuditService = (function () {
    *  - nos demais tipos, nenhum movimento de estoque nem lançamento com produto.
    * O saldo (`PRODUTOS.estoque_atual*` = Σ dos movimentos) é projeção, conferido em PROJECAO. Achados de COPIAS (fonte).
    */
+  /** Os achados da sanidade sobre o que a correção lê do original (o cabeçalho de uma linha, as doses, o lote da saída, o rateio). */
+  var LIDAS_PELA_CORRECAO = /^(MESMO_|SOMA_DOSES$|BASE_DOSE$|SAIDA_LOTE$|RATEIO_MODO$)/;
+  var CABECALHO_SANIDADE = Object.freeze(['produto_id', 'nome_produto', 'protocol_id', 'tipo_procedimento', 'fabricante', 'lote', 'validade', 'via_aplicacao', 'motivo', 'diagnostico', 'veterinario', 'periodo_carencia_dias', 'data_proxima_aplicacao']);
+  var NOME_CABECALHO_SANIDADE = Object.freeze({ tipo_procedimento: 'procedimento', fabricante: 'fabricante', lote: 'lote', validade: 'validade do lote', via_aplicacao: 'via de aplicação', motivo: 'motivo', diagnostico: 'diagnóstico', veterinario: 'veterinário', periodo_carencia_dias: 'período de carência', data_proxima_aplicacao: 'dia da próxima aplicação' });
   function conferirInsumos_(tx, col, eventos, f) {
     var repo = tx.repo;
     var temMov = repo.carregada('MOVIMENTOS_ESTOQUE');
@@ -1634,7 +1663,7 @@ var AuditService = (function () {
     eventos.forEach(function (ev) {
       var nome = '"' + rotuloEvento_(ev) + '" de ' + br_(ev.event_date);
       var achado = function (tabela, id, campo, oque, chave, animal) {
-        col.achado('COPIAS', { tabela: tabela, id: id, campo: campo, mensagem: oque + aviso, oque: oque, chaves: id + '|' + chave, event_id: ev.event_id, animal_id: animal || null });
+        col.achado('COPIAS', { tabela: tabela, id: id, campo: campo, mensagem: oque + aviso, oque: oque, chaves: id + '|' + chave, event_id: ev.event_id, animal_id: animal || null, lidaPelaCorrecao: LIDAS_PELA_CORRECAO.test(chave) });
       };
       var movs = temMov ? repo.por('MOVIMENTOS_ESTOQUE', 'event_id', ev.event_id) : [];
       var fins = temFin ? repo.por('FINANCEIRO', 'event_id', ev.event_id) : [];
@@ -1645,9 +1674,13 @@ var AuditService = (function () {
         if (!linhas.length) return;
         var r0 = linhas[0];
         var quem = function (r) { return rotuloAnimal_(tx.cru.cruPorId('ANIMAIS', r.animal_id), r.animal_id); };
+        var cabecalho = {};
+        CABECALHO_SANIDADE.forEach(function (c) { cabecalho[c] = maioria_(linhas, c); });
         linhas.forEach(function (r) {
-          ['produto_id', 'nome_produto', 'protocol_id'].forEach(function (c) {
-            if (nulo_(r[c]) !== nulo_(r0[c])) achado('SANIDADE', r.health_id, c, nome + ', ' + quem(r) + ': o produto ou o protocolo da linha difere do das outras linhas do lançamento (um lançamento é um procedimento com um produto).', 'MESMO_' + c, r.animal_id);
+          // O cabeçalho da aplicação (03b, seção 2.6) é copiado em cada linha: todas com o mesmo — a linha mexida à mão é a fonte
+          // quebrada (a entrada da correção lê o cabeçalho da primeira linha e o espalharia às outras).
+          CABECALHO_SANIDADE.forEach(function (c) {
+            if (nulo_(r[c]) !== cabecalho[c]) achado('SANIDADE', r.health_id, c, nome + ', ' + quem(r) + ': ' + (c === 'produto_id' || c === 'nome_produto' || c === 'protocol_id' ? 'o produto ou o protocolo da linha difere do das outras linhas do lançamento (um lançamento é um procedimento com um produto).' : 'o ' + NOME_CABECALHO_SANIDADE[c] + ' da linha difere do das outras linhas do lançamento (é um dado do lançamento).'), 'MESMO_' + c, r.animal_id);
           });
           if (['VACINA', 'VERMIFUGO', 'MEDICAMENTO'].indexOf(r.tipo_procedimento) >= 0 && vazio_(r.nome_produto)) achado('SANIDADE', r.health_id, 'nome_produto', nome + ', ' + quem(r) + ': a aplicação está sem o nome do produto.', 'NOME', r.animal_id);
           if (r.tipo_procedimento === 'DOENCA' && (!vazio_(r.produto_id) || !vazio_(r.dose))) achado('SANIDADE', r.health_id, 'produto_id', nome + ', ' + quem(r) + ': o registro de doença tem produto ou dose, que ele não grava.', 'DOENCA', r.animal_id);
@@ -1659,7 +1692,7 @@ var AuditService = (function () {
           var fim = HealthService.fimPeloPeriodo(r.data_aplicacao, r.periodo_carencia_dias);
           if (nulo_(r.data_fim_carencia) !== fim) achado('SANIDADE', r.health_id, 'data_fim_carencia', nome + ', ' + quem(r) + ': o fim da carência gravado (' + (vazio_(r.data_fim_carencia) ? 'vazio' : br_(r.data_fim_carencia)) + ') não é a aplicação mais os dias de carência (' + (fim ? br_(fim) : 'sem carência') + ').', 'CARENCIA', r.animal_id);
           // A próxima proposta pelo protocolo (payload `intervalo_protocolo_dias`, o intervalo congelado): aplicação + intervalo.
-          if (typeof pj.intervalo_protocolo_dias === 'number' && (vazio_(r.protocol_id) || nulo_(r.data_proxima_aplicacao) !== Utils.somaDias(r.data_aplicacao, pj.intervalo_protocolo_dias))) {
+          if (typeof pj.intervalo_protocolo_dias === 'number' && (vazio_(r.protocol_id) || (pj.proxima_informada !== true && nulo_(r.data_proxima_aplicacao) !== Utils.somaDias(r.data_aplicacao, pj.intervalo_protocolo_dias)))) {
             achado('SANIDADE', r.health_id, 'data_proxima_aplicacao', nome + ', ' + quem(r) + ': a próxima aplicação gravada (' + (vazio_(r.data_proxima_aplicacao) ? 'vazia' : br_(r.data_proxima_aplicacao)) + ') não é a aplicação mais o intervalo do protocolo (' + pj.intervalo_protocolo_dias + ' dias).', 'PROXIMA', r.animal_id);
           }
           if (temFin && repo.carregada('RATEIOS') && repo.carregada('ALOCACOES_FINANCEIRAS')) {
@@ -1681,6 +1714,13 @@ var AuditService = (function () {
           if (movs.length) achado('MOVIMENTOS_ESTOQUE', movs[0].mov_id, 'product_id', nome + ': há movimento de estoque, mas a aplicação não é de produto do cadastro.', 'SEM_PRODUTO');
         } else if (typeof q === 'number') {
           if (movs.length !== 1 || movs[0].product_id !== r0.produto_id || movs[0].quantidade !== q) achado('EVENTOS', ev.event_id, 'MOVIMENTOS_ESTOQUE', nome + ': a saída do estoque não confere com o consumo do lançamento (' + Utils.formatarNumero(q) + ' do produto, um movimento só).', 'SAIDA');
+          else if (nulo_(movs[0].lote) !== nulo_(r0.lote) || nulo_(movs[0].validade) !== nulo_(r0.validade)) achado('MOVIMENTOS_ESTOQUE', movs[0].mov_id, 'lote', nome + ': o lote ou a validade da saída do estoque difere do da aplicação.', 'SAIDA_LOTE');
+          // A quantidade que não foi informada é a soma das doses (o payload marca a informada: `quantidade_informada`): a dose
+          // mexida à mão numa linha não fecha mais com a saída do frasco.
+          if (pj.quantidade_informada === false && (pj.modo_dose === 'POR_CABECA' || pj.modo_dose === 'POR_PESO')) {
+            var somaDoses = linhas.reduce(function (t, r) { return t + (typeof r.dose === 'number' ? Math.round(r.dose * 10000) : 0); }, 0) / 10000;
+            if (somaDoses !== q) achado('EVENTOS', ev.event_id, 'payload_json', nome + ': a soma das doses dos animais (' + Utils.formatarNumero(somaDoses) + ') não é a quantidade que saiu do frasco (' + Utils.formatarNumero(q) + '), que não foi informada: a dose de alguma linha foi mexida.', 'SOMA_DOSES');
+          }
         } else if (movs.length) achado('MOVIMENTOS_ESTOQUE', movs[0].mov_id, 'quantidade', nome + ': há saída de estoque, mas o lançamento não tem a quantidade consumida.', 'SEM_QUANTIDADE');
         if (!temFin) return;
         var mv = movs.length === 1 ? movs[0] : null;
@@ -1689,6 +1729,21 @@ var AuditService = (function () {
           var f0 = comProduto[0];
           if (comProduto.length !== 1 || f0.product_id !== r0.produto_id || f0.natureza !== 'CUSTEIO' || f0.valor !== valor || f0.quantidade !== mv.quantidade) {
             achado('EVENTOS', ev.event_id, 'FINANCEIRO', nome + ': o consumo do produto (' + Utils.formatarNumero(mv.quantidade) + ' × ' + Utils.formatarNumero(mv.custo_unitario) + ' = ' + Utils.formatarReais(valor) + ') não confere com o lançamento de consumo do evento.', 'CONSUMO');
+          } else if (repo.carregada('RATEIOS') && repo.carregada('ALOCACOES_FINANCEIRAS')) {
+            // O consumo da aplicação por peso é rateado pela dose de cada animal (03b, seção 15.2; 07, seção 5): a base de cada
+            // um é a cópia da dose dele (o rateio MANUAL que o motor monta), conferida aqui — a verificação genérica da base do
+            // rateio não recalcula o MANUAL.
+            var doseDe = {};
+            linhas.forEach(function (r) { doseDe[r.animal_id] = r.dose; });
+            repo.por('RATEIOS', 'financial_id', f0.financial_id).forEach(function (rt) {
+              var pelaDose = rt.criterio === 'MANUAL' && /^Proporcional à dose/.test(rt.justificativa || '');
+              var porPeso = pj.modo_dose === 'POR_PESO' && linhas.length > 1 && linhas.every(function (r) { return typeof r.dose === 'number'; });
+              if (pelaDose !== porPeso) achado('RATEIOS', rt.rateio_id, 'criterio', nome + ': o consumo está rateado ' + (pelaDose ? 'pela dose de cada animal' : 'por cabeça') + ', mas o lançamento é ' + (porPeso ? 'por peso (rateio pela dose)' : 'de dose por cabeça ou do total (rateio por cabeça)') + '.', 'RATEIO_MODO');
+              if (!pelaDose) return;
+              repo.por('ALOCACOES_FINANCEIRAS', 'rateio_id', rt.rateio_id).forEach(function (al) {
+                if (al.base_valor !== doseDe[al.animal_id]) achado('ALOCACOES_FINANCEIRAS', al.alloc_id, 'base_valor', nome + ', ' + rotuloAnimal_(tx.cru.cruPorId('ANIMAIS', al.animal_id), al.animal_id) + ': a base do rateio do consumo (' + al.base_valor + ') não é a dose do animal na aplicação (' + (typeof doseDe[al.animal_id] === 'number' ? Utils.formatarNumero(doseDe[al.animal_id]) : 'vazia') + ').', 'BASE_DOSE', al.animal_id);
+              });
+            });
           }
         } else if (comProduto.length) achado('FINANCEIRO', comProduto[0].financial_id, 'product_id', nome + ': há lançamento de consumo, mas a saída do estoque não tem custo.', 'CONSUMO_SEM_CUSTO');
         return;
@@ -2311,9 +2366,24 @@ var AuditService = (function () {
       escopo: esc ? { animais: Object.keys(esc.animais).length, genealogia: Object.keys(esc.genealogia).length, eventos: Object.keys(esc.eventos).length, lancamentos: Object.keys(esc.lancamentos).length, linhas: esc.linhas.length } : { tudo: true },
       achados_depois: depois.length, achados_antes: null,
     };
-    if (!depois.some(function (a) { return a.severidade === 'ERRO'; })) return resumo;
+    // A correção de um lançamento lê o original (a entrada sem mudança e os valores que ela mantém dele): com o que ela lê quebrado
+    // à mão (os achados `lidaPelaCorrecao`), o substituto sairia coerente a partir do dado mexido — o mesmo que o reparo
+    // RECONSTRUIR, que a verificação recusa —, e o "depois" não teria achado nenhum. Por isso a correção sempre olha o "antes" do
+    // original. A cópia apagada que a correção refaz da fonte intacta (o movimento da compra, pelo `com_movimento`) continua
+    // sendo o caminho do conserto.
+    var corrigidos = {};
+    ((t.lote || {}).EVENTOS || []).forEach(function (r) { if (!vazio_(r.reversal_of_event_id) && r.event_type !== 'ESTORNO') corrigidos[r.reversal_of_event_id] = true; });
+    var corrige = Object.keys(corrigidos).length > 0;
+    if (!corrige && !depois.some(function (a) { return a.severidade === 'ERRO'; })) return resumo;
     var antes = rodar(t.antes);
     resumo.achados_antes = antes.length;
+    var doOriginal = antes.filter(function (a) { return a.severidade === 'ERRO' && a.fonte && a.lidaPelaCorrecao && !vazio_(a.event_id) && corrigidos[a.event_id]; });
+    if (doOriginal.length) {
+      throw recusaDaTrava_(doOriginal.map(function (a) {
+        return Object.assign({}, a, { resolver: RESOLVER_FONTE_CORRECAO, oque: String(a.mensagem || '').replace(/\s*Restaure o backup ou investigue a edição manual.*$/, '') });
+      }), t.depois, { eventos: {}, linhas: {}, brincos: {} }, true);
+    }
+    if (!depois.some(function (a) { return a.severidade === 'ERRO'; })) return resumo;
     var fonte = fonteTocada_(antes, t, esc);
     if (fonte.diretos.length) {
       throw recusaDaTrava_(fonte.diretos.map(function (a) {

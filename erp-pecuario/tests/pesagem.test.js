@@ -306,7 +306,8 @@ test('verificação de integridade de PESAGENS (COPIAS, LINHA_DO_TEMPO): data �
   assert.deepEqual(achados(), ord([['COPIAS', 'peso_kg'], ['COPIAS', 'peso_kg'], ['PROJECAO', 'peso_atual']]), 'a média do lote (320,0) e a cópia');
   desfazer();
   mexer('PESAGENS', linhaDe(ind.event_id, ids['1402']).weight_id, 'metodo', 'MEDIA_LOTE');
-  assert.deepEqual(achados(), ord([['COPIAS', 'metodo']]));
+  // A linha "média do lote" sem o lote, e o método diferente do das outras linhas (o método é do lançamento; seção 54).
+  assert.deepEqual(achados(), ord([['COPIAS', 'metodo'], ['COPIAS', 'metodo']]));
   desfazer();
   mexer('EVENTOS', lote.event_id, 'payload_json', JSON.stringify({ peso_total_lote_kg: 960, qtd_cabecas_lote: 4 }));
   assert.ok(achados().includes('COPIAS.payload_json'), 'cabeças do lote ≠ animais do lançamento');

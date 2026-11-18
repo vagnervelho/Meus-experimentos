@@ -195,7 +195,9 @@ test('a entrada sem mudança que o servidor dá para a correção (evento.obter:
   // O cadastro muda depois (custo, categoria, nome, fabricante, carência padrão).
   ok(api(s, 'produto.salvar', { product_id: p.product_id, campos: { custo_unitario: 7.25, categoria: 'MEDICAMENTO', nome: 'Vacina F (revisto)', fabricante: 'Lab B', carencia_padrao_dias: 60 }, justificativa: 'Cadastro revisto' }), 'cadastro');
   const ob = ok(api(s, 'evento.obter', { event_id: v.event_id }), 'obter');
-  assert.deepEqual(ob.correcao.campos, { event_date: '2026-03-01', property_id: S.PROP, produto_id: p.product_id, lote: 'L1', modo_dose: 'POR_CABECA', dose_referencia: 1, periodo_carencia_dias: 21 });
+  // A carência que o servidor copiou do produto vem vazia (a marca `carencia_informada`, seção 54): a correção a mantém pelo
+  // produto do original (21 dias, não os 60 de hoje).
+  assert.deepEqual(ob.correcao.campos, { event_date: '2026-03-01', property_id: S.PROP, produto_id: p.product_id, lote: 'L1', modo_dose: 'POR_CABECA', dose_referencia: 1 });
   assert.deepEqual(ob.correcao.animais, [{ animal_id: ids['100'] }, { animal_id: ids['101'] }].sort((a, b) => (a.animal_id < b.animal_id ? -1 : 1)).map((x) => ob.correcao.animais.find((y) => y.animal_id === x.animal_id)));
   const r0 = ok(api(s, 'evento.corrigir', Object.assign({}, ob.correcao, { event_id: v.event_id, justificativa: 'Sem mudança' })), 'pela entrada do servidor');
   assert.deepEqual(fatos(r0.event_id), antes);
@@ -435,7 +437,7 @@ test('a correção de cadastro do nascimento seguida de outra que apaga o nascim
   semErro(s, 'par do nascimento');
 });
 
-test('o pasto informado que nenhum animal recebeu (o parto só de natimorto; a desmama do bezerro que já estava nele) não é gravado: desativá-lo depois não recusa a correção sem mudança', () => {
+test('o pasto informado que nenhum animal recebeu (o parto só de natimorto; a desmama do bezerro que já estava nele) não é conferido como quem recebe animais: desativá-lo depois não recusa a correção sem mudança', () => {
   const s = S.sistema();
   hoje(s, '2026-01-05');
   const { ids } = rebanho(s, [
@@ -450,7 +452,8 @@ test('o pasto informado que nenhum animal recebeu (o parto só de natimorto; a d
   const d = ok(api(s, 'evento.registrar', desmama), 'desmama sem mudar de pasto');
   const linhas = (eid) => tab(s, 'EVENTO_ANIMAIS', { event_id: eid }).map((l) => [l.animal_id, l.papel || 'SUJEITO', l.pasto_origem_id, l.pasto_destino_id]).sort();
   const antes = { p: linhas(p.event_id), d: linhas(d.event_id) };
-  assert.deepEqual(antes.d, [[ids.C1, 'SUJEITO', null, null]], 'o bezerro não mudou de pasto');
+  // Seção 54: o pasto informado da desmama fica gravado também com o bezerro já nele (origem = destino, sem estada nova).
+  assert.deepEqual(antes.d, [[ids.C1, 'SUJEITO', PASTOS.A, PASTOS.A]], 'o bezerro não mudou de pasto, e o pasto informado ficou gravado');
   // O bezerro sai do pasto A e o pasto A é desativado.
   ok(api(s, 'evento.registrar', { tipo: 'TRANSFERENCIA', campos: { event_date: '2026-05-01', pasto_origem_id: PASTOS.A, pasto_destino_id: PASTOS.B }, animais: [{ animal_id: ids.C1 }] }), 'bezerro para o B');
   ok(api(s, 'pasto.salvar', { pasture_id: PASTOS.A, campos: { status: 'INATIVO' }, justificativa: 'Pasto em reforma' }), 'pasto A desativado');

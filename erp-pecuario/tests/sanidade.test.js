@@ -78,7 +78,7 @@ test('03b, seção 15.2, linha a linha: vacinação coletiva de 4 bezerros com 5
   const ev = s.tabela('EVENTOS').find((e) => e.event_id === r.event_id);
   assert.deepEqual([ev.event_type, ev.event_subtype, ev.event_date, ev.registration_date, ev.property_id, ev.total_value, ev.responsible, ev.source, ev.confiabilidade, ev.pre_marco_zero],
     ['SANIDADE', 'VACINACAO', '2027-05-10', '2027-05-20', S.PROP, 925, 'José (vaqueiro)', 'APP', 'CONFIRMADA', false]);
-  assert.deepEqual(ev.payload_json, { modo_dose: 'POR_CABECA', dose_referencia: 1, quantidade_consumida_total: 5 });
+  assert.deepEqual(ev.payload_json, { modo_dose: 'POR_CABECA', dose_referencia: 1, quantidade_consumida_total: 5, quantidade_informada: true, carencia_informada: true });
   assert.deepEqual([ev.description, ev.partner_id, ev.notes, ev.reversal_of_event_id, ev.import_id].map((v) => v || null), [null, null, null, null, null]);
   // EVENTO_ANIMAIS: SUJEITO, efeito 0, nada mais (vacinar não move nem pesa).
   tab(s, 'EVENTO_ANIMAIS', { event_id: r.event_id }).forEach((l) => assert.deepEqual([l.papel, l.efeito_inventario, l.pasto_origem_id, l.pasto_destino_id, l.peso, l.valor_individual].map((v) => (v === '' ? null : v)), ['SUJEITO', 0, null, null, null, null]));
@@ -184,7 +184,7 @@ test('dose por peso (03a, seção 4.6): 0,02 mL/kg × o peso atual de cada anima
   const ev = s.tabela('EVENTOS').find((e) => e.event_id === r.event_id);
   // Segunda convergência, rodada 1 (achados 2 e 3): o payload guarda de quem a dose foi digitada (o 203), para a correção a levar
   // como foi gravada e refazer pelo peso só as propostas.
-  assert.deepEqual(ev.payload_json, { modo_dose: 'POR_PESO', dose_referencia: 0.02, quantidade_consumida_total: 20, doses_informadas: [ids['203']] }, 'vazia = a soma das doses');
+  assert.deepEqual(ev.payload_json, { modo_dose: 'POR_PESO', dose_referencia: 0.02, quantidade_consumida_total: 20, quantidade_informada: false, doses_informadas: [ids['203']], carencia_informada: false }, 'vazia = a soma das doses');
   const f = tab(s, 'FINANCEIRO', { event_id: r.event_id })[0];
   assert.deepEqual([f.valor, f.conta_id, f.descricao], [70, conta(s, 'MEDICAMENTOS').conta_id, 'Consumo de vermífugo: 20 mL'], '20 mL × R$ 0,035 = R$ 0,70; vermífugo vai para Medicamentos');
   const rat = tab(s, 'RATEIOS', { financial_id: f.financial_id })[0];

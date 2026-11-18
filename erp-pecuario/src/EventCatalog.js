@@ -435,7 +435,7 @@ var EventCatalog = (function () {
     if (sub === 'TRATAMENTO' || sub === 'MEDICACAO') l.push(c_('motivo', 'Por que foi tratado', 'texto', { obrigatorio: sub === 'TRATAMENTO' }));
     if (sub === 'EXAME' || sub === 'DOENCA') l.push(c_('diagnostico', sub === 'EXAME' ? 'Doença ou condição pesquisada' : 'Doença identificada ou suspeita', 'texto', { obrigatorio: true }));
     if (sub !== 'DOENCA') {
-      l.push(c_('periodo_carencia_dias', 'Carência (dias)', 'inteiro', { min: 0, max: 3650, ajuda: 'Dias em que o animal não pode ser abatido. O padrão vem do cadastro do produto; o sistema registra e alerta, não prescreve.' }));
+      l.push(c_('periodo_carencia_dias', 'Carência (dias)', 'inteiro', { min: 0, max: 3650, ajuda: 'Dias em que o animal não pode ser abatido. Em branco, vale a carência padrão do produto do cadastro (a revisão mostra os dias e o último dia); o sistema registra e alerta, não prescreve.' }));
       l.push(c_('data_proxima_aplicacao', 'Próxima aplicação', 'data', { ajuda: 'Vazio = pelo protocolo (a cada N dias), quando houver.' }));
     }
     l.push(c_('veterinario', 'Veterinário', 'texto'));

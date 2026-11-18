@@ -37,7 +37,10 @@ var TelaSanidade = (function () {
     return h('div', null, h('div', { class: 'tela-cabecalho' }, h('h1', { text: 'Sanidade' }), acoes),
       UI.abas('Partes da sanidade', ABAS.map(function (x) { return { rotulo: x[1], rota: 'sanidade/' + x[0], atual: x[0] === aba }; })));
   }
-  /** Os campos do lançamento a partir do produto do cadastro (a tela sugere o padrão dele; o servidor usa o que for enviado). */
+  /**
+   * Os campos do lançamento a partir do produto do cadastro (a tela sugere o padrão dele; o servidor usa o que for enviado). A
+   * carência fica vazia: o servidor copia a do produto (CONTRATOS, seção 54).
+   */
   function camposDoProduto(produtoId, extra) {
     var c = Object.assign({}, extra || {});
     var p = produtoId ? Store.produto(produtoId) : null;
@@ -45,7 +48,6 @@ var TelaSanidade = (function () {
     c.produto_id = p.product_id;
     var txt = function (v) { return v === null || v === undefined || v === '' ? undefined : String(v).replace('.', ','); };
     if (p.dose_padrao_por_kg || p.dose_padrao_por_cabeca) { c.modo_dose = p.dose_padrao_por_kg ? 'POR_PESO' : 'POR_CABECA'; c.dose_referencia = txt(p.dose_padrao_por_kg || p.dose_padrao_por_cabeca); }
-    if (txt(p.carencia_padrao_dias) !== undefined) c.periodo_carencia_dias = txt(p.carencia_padrao_dias);
     if (p.lote) c.lote = p.lote;
     if (p.validade) c.validade = p.validade;
     Object.keys(c).forEach(function (k) { if (c[k] === undefined) delete c[k]; });
@@ -236,7 +238,7 @@ var TelaSanidade = (function () {
       { id: 'custo_unitario', rotulo: 'Custo por unidade (R$)', tipo: 'decimal', casas: 4, min: 0, ajuda: 'Vira custo dos animais quando o produto é aplicado (a quantidade aplicada × este valor).' },
       { id: 'dose_padrao_por_cabeca', rotulo: 'Dose padrão por cabeça', tipo: 'decimal', casas: 4, min: 0, min_exclusivo: true },
       { id: 'dose_padrao_por_kg', rotulo: 'Dose padrão por kg', tipo: 'decimal', casas: 4, min: 0, min_exclusivo: true },
-      { id: 'carencia_padrao_dias', rotulo: 'Carência padrão (dias)', tipo: 'inteiro', min: 0, ajuda: 'Sugerida no lançamento; o sistema registra e alerta, não prescreve.' },
+      { id: 'carencia_padrao_dias', rotulo: 'Carência padrão (dias)', tipo: 'inteiro', min: 0, ajuda: 'Vale na aplicação lançada com a carência em branco; o sistema registra e alerta, não prescreve.' },
       { id: 'controla_estoque', rotulo: 'Controlar o estoque', tipo: 'bool', ajuda: 'Com controle, as compras entram no saldo e as aplicações saem dele.' },
       { id: 'estoque_minimo', rotulo: 'Estoque mínimo', tipo: 'decimal', casas: 4, min: 0, visivel_se: { campo: 'controla_estoque', valores: [true] } },
       { id: 'lote', rotulo: 'Lote em uso', tipo: 'texto' },

@@ -179,10 +179,13 @@ var EventService = (function () {
       if (typeof v === 'string') usados[v] = true;
       else if (v && typeof v === 'object') Object.keys(v).forEach(function (k) { coletar(v[k]); });
     };
-    coletar(original.payload_json);
+    // O pasto informado que nenhum animal recebeu (o do parto só de natimorto, no payload; o da desmama do bezerro que já estava
+    // nele, origem = destino) não conta como usado: a correção que passa a levar animal para ele confere se está ativo.
+    coletar(Object.assign({}, original.payload_json || {}, { pasto_destino_id: null }));
     TABELAS_DO_ORIGINAL.forEach(function (t) {
       if (!m.repo.carregada(t)) return;
       m.repo.por(t, 'event_id', original.event_id).forEach(function (r) {
+        if (t === 'EVENTO_ANIMAIS' && !vazio_(r.pasto_destino_id) && r.pasto_origem_id === r.pasto_destino_id) { coletar(Object.assign({}, r, { pasto_origem_id: null, pasto_destino_id: null })); return; }
         coletar(r);
         if (t === 'FINANCEIRO' && m.repo.carregada('PARCELAS')) m.repo.por('PARCELAS', 'financial_id', r.financial_id).forEach(coletar);
       });
@@ -389,7 +392,9 @@ var EventService = (function () {
     ctxEv.correcao = Correcao.contexto(m.repo, original);
     m.dataEv = ev.event_date;
     if (original) {
-      m.f.linhasDoEvento(original.event_id).forEach(function (l) { if (l.atributos_iniciais_json) ctxEv.criadosOriginal[l.animal_id] = true; });
+      // A raça que o original deu a cada animal criado (os atributos da criação): a correção só a grava no cadastro quando a muda.
+      ctxEv.racaOriginal = {};
+      m.f.linhasDoEvento(original.event_id).forEach(function (l) { if (l.atributos_iniciais_json) { ctxEv.criadosOriginal[l.animal_id] = true; ctxEv.racaOriginal[l.animal_id] = nulo_(l.atributos_iniciais_json.raca); } });
     }
     if (semAnimais) {
       estoque_(m, ctxEv);
@@ -548,6 +553,16 @@ var EventService = (function () {
   }
 
   // ------------------------------------------------------------------ entradas ----
+  /**
+   * A raça é cadastro do animal (a ficha a corrige, com auditoria); o lançamento que o criou guarda a de origem nos atributos.
+   * Na correção desse lançamento, a raça vai para o cadastro só quando a correção a muda em relação à que o original deu ao
+   * animal — a correção sem mudança (ou de outro campo) não desfaz a raça corrigida na ficha (CONTRATOS, seção 54).
+   */
+  function racaMudou_(ctxEv, id, raca) {
+    if (vazio_(raca)) return false;
+    var orig = ctxEv.racaOriginal && Object.prototype.hasOwnProperty.call(ctxEv.racaOriginal, id) ? ctxEv.racaOriginal[id] : undefined;
+    return orig === undefined || raca !== orig;
+  }
   function itemEntrada_(m, ctxEv, it) {
     var d = it.dados;
     var tipo = ctxEv.tipo;
@@ -571,7 +586,7 @@ var EventService = (function () {
       if (vazio_(it.brincoTexto)) it.quem = ex.codigo_interno;
       var cad = {};
       if (!vazio_(d.nome) && d.nome !== ex.nome) cad.nome = d.nome;
-      if (!vazio_(d.raca) && d.raca !== ex.raca) cad.raca = d.raca;
+      if (racaMudou_(ctxEv, it.animal_id, d.raca) && d.raca !== ex.raca) cad.raca = d.raca;
       if (Object.keys(cad).length) ctxEv.auditorias.push({ id: it.animal_id, campos: cad });
     } else {
       it.animal_id = m.tx.novoId();
@@ -1052,7 +1067,8 @@ var EventService = (function () {
     }
     s.nome = produto ? (nomeCong ? nomeCong.v : produto.nome) : nomeLivre;
     var fabCong = doProduto ? Correcao.congelado(cc, 'SANIDADE.fabricante', doProduto) : null;
-    s.fabricante = typeof c.fabricante === 'string' && nulo_(Utils.aparar(c.fabricante)) ? Utils.aparar(c.fabricante) : fabCong ? fabCong.v : produto ? nulo_(produto.fabricante) : null;
+    s.fabricanteInformado = typeof c.fabricante === 'string' && !!nulo_(Utils.aparar(c.fabricante));
+    s.fabricante = s.fabricanteInformado ? Utils.aparar(c.fabricante) : fabCong ? fabCong.v : produto ? nulo_(produto.fabricante) : null;
     if (HealthService.COM_PRODUTO_OBRIGATORIO.indexOf(sub) >= 0 && !s.nome && vazio_(c.produto_id)) {
       erroGeral_(m, 'produto_id', 'CAMPO_OBRIGATORIO', 'Escolha o produto do cadastro ou digite o nome do produto aplicado.');
       s.ok = false;
@@ -1083,6 +1099,8 @@ var EventService = (function () {
     // PRODUTOS.carencia_padrao_dias): a mesma regra no formulário, na API e na importação (o 0 informado é "sem carência").
     // Na correção com o mesmo produto, o vazio é a carência gravada no original (que pode ser nenhuma), não a padrão de hoje.
     var carCong = doProduto && doSubtipo.periodo_carencia_dias && vazio_(c.periodo_carencia_dias) ? Correcao.congelado(cc, 'SANIDADE.periodo_carencia_dias', doProduto) : null;
+    // A marca do digitado (CONTRATOS, seção 54): com o produto do cadastro, o payload diz se a carência foi digitada ou copiada.
+    s.carenciaInformada = produto && doSubtipo.periodo_carencia_dias ? typeof c.periodo_carencia_dias === 'number' : null;
     s.carenciaDias = typeof c.periodo_carencia_dias === 'number' ? c.periodo_carencia_dias
       : !doSubtipo.periodo_carencia_dias || !vazio_(c.periodo_carencia_dias) ? null
       : carCong ? carCong.v
@@ -1099,9 +1117,12 @@ var EventService = (function () {
       var rec = Correcao.congelado(cc, 'SANIDADE.recorrencia_protocolo', { protocol_id: s.protocolo.protocol_id });
       s.recorrenciaProtocolo = rec ? rec.v.recorrencia : s.protocolo.recorrencia_tipo;
       var intervalo = rec && typeof rec.v.intervalo === 'number' ? rec.v.intervalo : typeof s.protocolo.intervalo_dias === 'number' ? s.protocolo.intervalo_dias : null;
-      if (vazio_(c.data_proxima_aplicacao) && s.recorrenciaProtocolo === 'INTERVALO_DIAS' && intervalo !== null && Utils.dataValida(data)) {
+      // O intervalo do protocolo fica congelado no payload também quando a próxima é digitada (com a marca
+      // `proxima_informada`): a correção seguinte que volta à proposta usa o do original, não o de hoje (CONTRATOS, seção 54).
+      if (s.recorrenciaProtocolo === 'INTERVALO_DIAS' && intervalo !== null) {
         s.intervaloProtocolo = intervalo;
-        s.proxima = Utils.somaDias(data, intervalo);
+        s.proximaInformada = !vazio_(c.data_proxima_aplicacao);
+        if (!s.proximaInformada && Utils.dataValida(data)) s.proxima = Utils.somaDias(data, intervalo);
       }
     }
     // Lote vencido (RN-056): aviso, não bloqueio.
@@ -1538,6 +1559,12 @@ var EventService = (function () {
           if (!dz.avisouInativo) erroGeral_(m, 'pasto_destino_id', 'PASTO_INATIVO', 'O pasto ' + dz.pastoInativo.nome + ' está desativado e não recebe animais.');
           dz.avisouInativo = true;
         } else { campos.pasto_origem_id = nulo_(onde.pasture_id); campos.pasto_destino_id = dz.pasto; it.movido = true; }
+      } else if (onde.presente && onde.pasture_id === dz.pasto) {
+        // O pasto informado fica gravado também quando o bezerro já está nele (origem = destino, sem estada nova): o dado
+        // digitado não some (a entrada da correção o lê das linhas), e a linha do tempo confere a origem — o fato que tiraria o
+        // bezerro desse pasto naquele dia (o estorno da transferência, a transferência retroativa) é recusado com o conflito,
+        // em vez de mudar em silêncio o efeito desta desmama (CONTRATOS, seção 54).
+        campos.pasto_origem_id = dz.pasto; campos.pasto_destino_id = dz.pasto;
       }
     }
     if (campos.pasto_destino_id && !campos.pasto_origem_id) { delete campos.pasto_destino_id; it.movido = false; }
@@ -1848,6 +1875,7 @@ var EventService = (function () {
     // quais foram digitados (`pasto_crias_informado`, `racas_informadas`): a entrada da correção os lê das linhas gravadas,
     // nunca comparando com o estado de hoje da mãe (CONTRATOS, 50.2).
     ctxEv.pastoCriasInformado = pasto !== null;
+    ctxEv.pastoParto = pasto;
     // Só a cria viva vai para um pasto: sem ela, o pasto da mãe não é pedido nem conferido, e o pasto informado não é conferido
     // como quem recebe animais (o parto só de natimorto não grava pasto; a correção sem mudança dele não depende do pasto da mãe
     // naquele dia nem do cadastro do pasto).
@@ -1960,7 +1988,7 @@ var EventService = (function () {
       it.codigo_interno = ex.codigo_interno;
       var cad = {};
       if (!vazio_(d.nome) && d.nome !== ex.nome) cad.nome = d.nome;
-      if (!vazio_(raca) && raca !== ex.raca) cad.raca = raca;
+      if (racaMudou_(ctxEv, d.animal_id, raca) && raca !== ex.raca) cad.raca = raca;
       if (Object.keys(cad).length) ctxEv.auditorias.push({ id: it.animal_id, campos: cad });
     } else {
       it.animal_id = m.tx.novoId();
@@ -2192,6 +2220,12 @@ var EventService = (function () {
     }
     return texto;
   }
+  /** O dado e a certeza dele (a mãe, o pai, o nascimento), nas palavras do pecuarista. */
+  var PAR_CERTEZA = {
+    mae_id: { falta: 'diga também se a mãe é confirmada ou estimada.', semCerteza: 'a mãe não fica sem a certeza: diga se ela é confirmada ou estimada, ou apague também a mãe.', semDado: 'a certeza da mãe precisa da mãe: informe a mãe ou deixe a certeza em branco.' },
+    pai_id: { falta: 'diga também se o pai é confirmado ou estimado.', semCerteza: 'o pai não fica sem a certeza: diga se ele é confirmado ou estimado, ou apague também o pai.', semDado: 'a certeza do pai precisa do pai: informe o pai ou deixe a certeza em branco.' },
+    data_nascimento: { falta: 'diga também se a data de nascimento é confirmada ou estimada.', semCerteza: 'a data de nascimento não fica sem a certeza: diga se ela é confirmada ou estimada, ou apague também a data.', semDado: 'a certeza do nascimento precisa da data de nascimento: informe a data ou deixe a certeza em branco.' },
+  };
   /** Coerência do animal depois das correções (sexo × castrado/partos, confianças, data de entrada). */
   function fecharCorrecoes_(m, ctxEv) {
     var grupo = ctxEv.porAnimal || {};
@@ -2224,8 +2258,10 @@ var EventService = (function () {
         }
         // O par (o dado e a certeza dele), também: a correção de cadastro posterior que apagou a certeza (ou o dado) não recusa a
         // correção sem mudança do original.
-        if (!vazio_(fim[par[0]]) && vazio_(fim[par[1]]) && !(g.campos[par[1]] === undefined && doOriginal(par[0]))) erroItem_(m, it, par[1], 'CAMPO_OBRIGATORIO', 'informe também "' + par[1] + '".');
-        if (vazio_(fim[par[0]]) && !vazio_(g.campos[par[1]]) && !(g.campos[par[0]] === undefined && doOriginal(par[1]))) erroItem_(m, it, par[1], 'CAMPO_SEM_VINCULO', '"' + par[1] + '" precisa de "' + par[0] + '" preenchido.');
+        // As mensagens em português do pecuarista, com o conselho que leva à solução (sem o nome da coluna).
+        var txt = PAR_CERTEZA[par[0]];
+        if (!vazio_(fim[par[0]]) && vazio_(fim[par[1]]) && !(g.campos[par[1]] === undefined && doOriginal(par[0]))) erroItem_(m, it, par[1], 'CAMPO_OBRIGATORIO', g.campos[par[1]] === null ? txt.semCerteza : txt.falta);
+        if (vazio_(fim[par[0]]) && !vazio_(g.campos[par[1]]) && !(g.campos[par[0]] === undefined && doOriginal(par[1]))) erroItem_(m, it, par[1], 'CAMPO_SEM_VINCULO', txt.semDado);
       });
       if (g.campos.data_entrada !== undefined || g.campos.data_entrada_confianca !== undefined) {
         var entrada = Timeline.ordenar(m.f.linhas(id).filter(function (l) { return l.efeito === 1 && !l.pre_marco_zero; }))[0];
@@ -3949,11 +3985,18 @@ var EventService = (function () {
       modo_dose: ctxEv.sanidade ? ctxEv.sanidade.modo : null,
       dose_referencia: ctxEv.sanidade && ctxEv.sanidade.modo && ctxEv.sanidade.modo !== 'TOTAL' ? ctxEv.sanidade.doseRef : null,
       quantidade_consumida_total: ctxEv.sanidade ? ctxEv.sanidade.quantidade : null,
+      // A marca do digitado (CONTRATOS, seção 54): a quantidade informada ou a soma das doses (a verificação confere a soma).
+      quantidade_informada: ctxEv.sanidade && typeof ctxEv.sanidade.quantidade === 'number' ? ctxEv.sanidade.quantidadeInformada !== null : null,
       doses_informadas: ctxEv.sanidade && ctxEv.sanidade.modo === 'POR_PESO' ? dosesInformadas_(ctxEv) : null,
+      // As marcas do digitado quando o valor gravado não diz (CONTRATOS, seção 54): a carência e o fabricante com o produto do
+      // cadastro (o vazio o servidor copia do produto).
+      carencia_informada: ctxEv.sanidade && typeof ctxEv.sanidade.carenciaInformada === 'boolean' ? ctxEv.sanidade.carenciaInformada : null,
+      fabricante_informado: ctxEv.sanidade && ctxEv.sanidade.produto && ctxEv.sanidade.fabricanteInformado ? true : null,
       // O intervalo do protocolo que propôs a próxima aplicação (vazia no formulário) e a recorrência do protocolo: congelados
       // para a correção (Correcao.congelado: a correção com o mesmo protocolo não refaz a próxima pelo cadastro de hoje).
       intervalo_protocolo_dias: ctxEv.sanidade && typeof ctxEv.sanidade.intervaloProtocolo === 'number' ? ctxEv.sanidade.intervaloProtocolo : null,
       recorrencia_protocolo: ctxEv.sanidade && ctxEv.sanidade.protocolo ? nulo_(ctxEv.sanidade.recorrenciaProtocolo) : null,
+      proxima_informada: ctxEv.sanidade && typeof ctxEv.sanidade.intervaloProtocolo === 'number' && ctxEv.sanidade.proximaInformada ? true : null,
       // Estoque (03b, seção 2.6): as embalagens e a quantidade por embalagem congelada; no acerto pela contagem, o saldo contado.
       qtd_apresentacao: ctxEv.estoque ? ctxEv.estoque.qtd_apresentacao : null,
       fator_conversao: ctxEv.estoque ? ctxEv.estoque.fator_conversao : null,
@@ -3968,6 +4011,9 @@ var EventService = (function () {
       pai_confianca: ctxEv.tipo === 'NASCIMENTO' && ctxEv.parto && !ctxEv.parto.nascidos_vivos && !vazio_(ctxEv.campos.pai_id) ? nulo_(ctxEv.campos.pai_confianca) : null,
       // Parto com cria viva: o pasto das crias e a raça de cada cria digitados (o vazio o servidor tira da mãe).
       pasto_crias_informado: ctxEv.tipo === 'NASCIMENTO' && ctxEv.parto && ctxEv.parto.nascidos_vivos && ctxEv.pastoCriasInformado ? true : null,
+      // Parto sem cria viva com o pasto informado: nenhuma linha o grava, e o digitado não some (a correção que torna a cria viva
+      // a leva para ele, não para o da mãe; CONTRATOS, seção 54).
+      pasto_destino_id: ctxEv.tipo === 'NASCIMENTO' && ctxEv.parto && !ctxEv.parto.nascidos_vivos && ctxEv.pastoCriasInformado ? ctxEv.pastoParto : null,
       racas_informadas: ctxEv.tipo === 'NASCIMENTO' ? racasInformadas_(ctxEv) : null,
     };
     ev.payload_json = payload_(m, ctxEv, extra);

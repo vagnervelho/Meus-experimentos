@@ -56,6 +56,8 @@ var Correcao = (function () {
     // Todo tipo: a propriedade que o lançamento recebeu da configuração quando veio vazia.
     'EVENTO.propriedade': {
       tipo: 'todos', natureza: 'COPIA', de: 'CONFIGURACOES.propriedade_padrao_id (a propriedade vazia na entrada)', depende: 'a propriedade informada', grava: 'EVENTOS.property_id',
+      // A propriedade não tem marca do digitado: a entrada a leva sempre como gravada (o formulário a preenche e o dono a vê), e
+      // a cópia só vale para o pedido que a omite (o reenvio de um cliente da API) — CONTRATOS, seção 54.
       valor: function (c) { return vazio_(c.original.property_id) ? null : { v: c.original.property_id }; },
     },
     // SANIDADE: as cópias do produto do cadastro (03b: nome_produto e periodo_carencia_dias, cópias congeladas; 03a,
@@ -66,11 +68,13 @@ var Correcao = (function () {
     },
     'SANIDADE.fabricante': {
       tipo: 'SANIDADE', natureza: 'COPIA', de: 'PRODUTOS.fabricante (vazio na entrada)', depende: 'produto_id', grava: 'SANIDADE.fabricante',
-      valor: function (c, n) { var r = sanidadeDoProduto_(c, n.produto_id); return r ? { v: nulo_(r.fabricante) } : null; },
+      valor: function (c, n) { var r = sanidadeDoProduto_(c, n.produto_id); return r && c.pj.fabricante_informado !== true ? { v: nulo_(r.fabricante) } : null; },
     },
     'SANIDADE.periodo_carencia_dias': {
       tipo: 'SANIDADE', natureza: 'COPIA', de: 'PRODUTOS.carencia_padrao_dias (vazio na entrada)', depende: 'produto_id', grava: 'SANIDADE.periodo_carencia_dias',
-      valor: function (c, n) { var r = sanidadeDoProduto_(c, n.produto_id); return r ? { v: typeof r.periodo_carencia_dias === 'number' ? r.periodo_carencia_dias : null } : null; },
+      // Só a carência que o original copiou do produto (o campo veio vazio: `carencia_informada` false); a digitada não tem cópia —
+      // apagá-la na correção vale a padrão do produto, como no registro.
+      valor: function (c, n) { var r = sanidadeDoProduto_(c, n.produto_id); return r && c.pj.carencia_informada === false ? { v: typeof r.periodo_carencia_dias === 'number' ? r.periodo_carencia_dias : null } : null; },
     },
     'SANIDADE.custo_unitario': {
       tipo: 'SANIDADE', natureza: 'COPIA', de: 'PRODUTOS.custo_unitario', depende: 'produto_id', grava: 'MOVIMENTOS_ESTOQUE.custo_unitario (saída)',
@@ -110,7 +114,8 @@ var Correcao = (function () {
         var o = c.original;
         if (o.event_type !== 'SANIDADE' || o.event_date !== n.data || c.pj.modo_dose !== 'POR_PESO' || c.pj.dose_referencia !== n.dose_referencia) return null;
         var r = linhas_(c, 'SANIDADE').filter(function (x) { return x.animal_id === n.animal_id; })[0];
-        if (!r || typeof r.dose !== 'number') return null;
+        // A dose digitada (payload `doses_informadas`) não é derivada do peso: apagá-la na correção a refaz pelo peso.
+        if (!r || typeof r.dose !== 'number' || (Array.isArray(c.pj.doses_informadas) && c.pj.doses_informadas.indexOf(n.animal_id) >= 0)) return null;
         var mesmo = n.produto_id ? r.produto_id === n.produto_id : vazio_(r.produto_id) && Utils.normalizarTexto(r.nome_produto || '') === Utils.normalizarTexto(n.nome_produto || '');
         return mesmo ? { v: r.dose } : null;
       },
@@ -180,7 +185,8 @@ var Correcao = (function () {
     'NASCIMENTO.pasto_crias': {
       tipo: 'NASCIMENTO', natureza: 'DERIVADO', de: 'o pasto da mãe no dia do parto (pasto vazio na entrada)', depende: 'a mãe, event_date', grava: 'EVENTO_ANIMAIS.pasto_destino_id (CRIA)',
       valor: function (c, n) {
-        if (c.original.event_type !== 'NASCIMENTO' || c.original.event_date !== n.data || maeDoParto_(c) !== n.mae_id) return null;
+        // O pasto digitado (payload `pasto_crias_informado`) não foi tirado da mãe: apagá-lo na correção o tira da mãe na data.
+        if (c.original.event_type !== 'NASCIMENTO' || c.original.event_date !== n.data || maeDoParto_(c) !== n.mae_id || c.pj.pasto_crias_informado === true) return null;
         var cria = linhas_(c, 'EVENTO_ANIMAIS').filter(function (l) { return l.papel === 'CRIA'; })[0];
         return cria ? { v: nulo_(cria.pasto_destino_id) } : null;
       },
@@ -188,7 +194,8 @@ var Correcao = (function () {
     'NASCIMENTO.raca_cria': {
       tipo: 'NASCIMENTO', natureza: 'DERIVADO', de: 'a raça da mãe (raça vazia na entrada)', depende: 'a mãe, a cria', grava: 'atributos_iniciais_json.raca; ANIMAIS.raca (CRIA)',
       valor: function (c, n) {
-        if (c.original.event_type !== 'NASCIMENTO' || maeDoParto_(c) !== n.mae_id) return null;
+        // A raça digitada (payload `racas_informadas`) não foi tirada da mãe: apagá-la na correção a tira da mãe.
+        if (c.original.event_type !== 'NASCIMENTO' || maeDoParto_(c) !== n.mae_id || (Array.isArray(c.pj.racas_informadas) && c.pj.racas_informadas.indexOf(n.animal_id) >= 0)) return null;
         var cria = linhas_(c, 'EVENTO_ANIMAIS').filter(function (l) { return l.papel === 'CRIA' && l.animal_id === n.animal_id; })[0];
         return cria ? { v: nulo_((cria.atributos_iniciais_json || {}).raca) } : null;
       },
@@ -206,13 +213,18 @@ var Correcao = (function () {
     },
     // VENDA: as bases estimadas do rateio (a última pesagem de cada animal até a data) e o nome do tipo da dedução.
     'VENDA.bases_estimadas': {
-      tipo: 'VENDA', natureza: 'DERIVADO', de: 'a última pesagem de cada animal até a data (sem o peso de cada um)', depende: 'os animais, event_date, modalidade, pesos e carcaças informados, peso vivo total', grava: 'RATEIOS e ALOCACOES_FINANCEIRAS; EVENTO_ANIMAIS.valor_individual',
+      tipo: 'VENDA', natureza: 'DERIVADO', de: 'a última pesagem de cada animal até a data (sem o peso de cada um), ou a divisão por cabeça quando algum não tinha pesagem', depende: 'os animais, event_date, modalidade, pesos e carcaças informados, peso vivo total', grava: 'RATEIOS e ALOCACOES_FINANCEIRAS; EVENTO_ANIMAIS.valor_individual',
       valor: function (c, n) {
         if (c.original.event_type !== 'VENDA' || c.original.event_date !== n.data) return null;
         var vd = linhas_(c, 'VENDAS')[0];
         if (!vd || vd.modalidade !== n.modalidade || vd.peso_vivo_total_kg !== n.peso_vivo_total_kg) return null;
         var receita = linhas_(c, 'FINANCEIRO').filter(function (f) { return f.conta_id === n.conta_receita; })[0];
         var rat = receita ? c.repo.por('RATEIOS', 'financial_id', receita.financial_id)[0] : null;
+        // A divisão por cabeça que o original escolheu porque algum animal não tinha pesagem até a data (sem o peso de cada um,
+        // num negócio por peso): a pesagem retroativa lançada depois não a troca pelo peso estimado.
+        var porPeso = vd.modalidade !== 'CABECA' && vd.modalidade !== 'LOTE';
+        var semPesoNasLinhas = linhas_(c, 'EVENTO_ANIMAIS').every(function (l) { return typeof l.peso !== 'number'; });
+        if (rat && rat.criterio === 'CABECAS' && porPeso && semPesoNasLinhas && n.animais.length > 1 && n.animais.length === c.repo.por('ALOCACOES_FINANCEIRAS', 'rateio_id', rat.rateio_id).length) return { v: 'CABECAS' };
         if (!rat || rat.criterio !== 'PESO_VIVO' || !/^Base estimada:/.test(rat.justificativa || '')) return null;
         var bases = {};
         c.repo.por('ALOCACOES_FINANCEIRAS', 'rateio_id', rat.rateio_id).forEach(function (a) { bases[a.animal_id] = a.base_valor; });
@@ -472,7 +484,7 @@ var Correcao = (function () {
       // (payload `pasto_crias_informado` e `racas_informadas`) vêm como foram gravados — nada se compara com o estado de hoje
       // da mãe.
       var racasDigitadas = Array.isArray(payload.racas_informadas) ? payload.racas_informadas : [];
-      origem.pasto_destino_id = crias[0] && payload.pasto_crias_informado === true ? nulo_(crias[0].pasto_destino_id) : null;
+      origem.pasto_destino_id = crias[0] && payload.pasto_crias_informado === true ? nulo_(crias[0].pasto_destino_id) : crias[0] ? null : nulo_(payload.pasto_destino_id);
       // A certeza do pai está nas crias vivas; no parto só de natimorto, no evento (payload `pai_confianca`).
       origem.pai_id = rep.touro_id || at0.pai_id; origem.pai_confianca = at0.pai_confianca || payload.pai_confianca; origem.tipo_parto = rep.tipo_parto;
       out.animais = linhas.filter(function (l) { return l.papel === 'MATRIZ'; }).map(function (l) { return { animal_id: l.animal_id }; });
@@ -486,6 +498,14 @@ var Correcao = (function () {
       });
       for (var k = 0; k < (rep.qtd_natimortos || 0); k++) out.crias.push({ situacao_nascimento: 'NATIMORTO' });
     }
+  }
+  /** O dado de cada certeza (a certeza apagada junto com ele não é dado digitado). */
+  var DADO_DA_CERTEZA = { mae_confianca: 'mae_id', pai_confianca: 'pai_id', data_nascimento_confianca: 'data_nascimento' };
+  var NOME_CERTEZA = { mae_confianca: 'A certeza da mãe', pai_confianca: 'A certeza do pai', data_nascimento_confianca: 'A certeza do nascimento' };
+  var NOME_DADO = { mae_id: 'a mãe', pai_id: 'o pai', data_nascimento: 'a data de nascimento' };
+  function certezaApagadaJunto_(ajustes, x) {
+    var dado = DADO_DA_CERTEZA[x.campo];
+    return !!dado && vazio_(x.valor_novo) && ajustes.some(function (y) { return y.animal_id === x.animal_id && y.campo === dado && vazio_(y.valor_novo); });
   }
   /** O valor gravado em AJUSTES (texto canônico) como a entrada o leva, pelo tipo do campo corrigível. */
   function valorDoAjuste_(campo, v) {
@@ -508,7 +528,9 @@ var Correcao = (function () {
     } else {
       var a0 = det.AJUSTES[0] || {};
       origem.justificativa = a0.justificativa || payload.motivo_ajuste || (sub === 'DIVERGENCIA_CONTAGEM' && !(linhas[0] || {}).observacoes ? (det.BAIXAS[0] || {}).observacoes : null);
-      if (sub === 'CORRECAO_CADASTRO') out.animais = det.AJUSTES.map(function (x) { return { animal_id: x.animal_id, campo: x.campo, valor_novo: valorDoAjuste_(x.campo, x.valor_novo) }; });
+      // A certeza apagada junto com o dado (Tabela A: derivada — a mãe, o pai ou o nascimento apagados apagam também a certeza)
+      // não é dado digitado: fica fora da entrada, e a correção a refaz com o dado.
+      if (sub === 'CORRECAO_CADASTRO') out.animais = det.AJUSTES.filter(function (x) { return !certezaApagadaJunto_(det.AJUSTES, x); }).map(function (x) { return { animal_id: x.animal_id, campo: x.campo, valor_novo: valorDoAjuste_(x.campo, x.valor_novo) }; });
       else out.animais = linhas.map(function (l) {
         var aj = (ajustes[l.animal_id] || [])[0] || {};
         if (sub === 'IDENTIFICACAO_INCORRETA') return limpo_({ animal_id: l.animal_id, brinco: aj.valor_novo || ((idents[l.animal_id] || [])[0] || {}).codigo });
@@ -538,21 +560,26 @@ var Correcao = (function () {
     var r0 = regs[0] || {};
     var porAnimal = agrupar_(regs);
     origem.protocol_id = r0.protocol_id; origem.produto_id = r0.produto_id; origem.nome_produto = r0.produto_id ? null : r0.nome_produto;
-    // O fabricante do produto do cadastro é cópia congelada (CONGELADOS): vazio, a correção mantém o do original; o nome livre
-    // leva o fabricante digitado.
-    origem.fabricante = r0.produto_id ? null : r0.fabricante;
+    // O fabricante do produto do cadastro é cópia congelada (CONGELADOS): vazio, a correção mantém o do original; o digitado
+    // (payload `fabricante_informado`) e o do nome livre vêm como foram gravados.
+    origem.fabricante = r0.produto_id && payload.fabricante_informado !== true ? null : r0.fabricante;
     origem.lote = r0.lote; origem.validade = r0.validade; origem.via_aplicacao = r0.via_aplicacao; origem.motivo = r0.motivo; origem.diagnostico = r0.diagnostico;
     origem.veterinario = r0.veterinario;
     origem.modo_dose = payload.modo_dose; origem.dose_referencia = payload.dose_referencia;
     var doses = regs.map(function (r) { return r.dose; });
     var soma = doses.length && doses.every(function (d) { return typeof d === 'number'; }) ? doses.reduce(function (t, d) { return t + Math.round(d * 10000); }, 0) / 10000 : null;
-    if (typeof payload.quantidade_consumida_total === 'number' && (payload.modo_dose === 'TOTAL' || payload.quantidade_consumida_total !== soma)) origem.quantidade_consumida_total = payload.quantidade_consumida_total;
+    // A quantidade informada vem como foi gravada; a soma das doses fica vazia (a marca `quantidade_informada`; o lançamento sem
+    // a marca é julgado pela soma).
+    var informada = typeof payload.quantidade_informada === 'boolean' ? payload.quantidade_informada : payload.modo_dose === 'TOTAL' || payload.quantidade_consumida_total !== soma;
+    if (typeof payload.quantidade_consumida_total === 'number' && informada) origem.quantidade_consumida_total = payload.quantidade_consumida_total;
     if (!r0.produto_id) origem.unidade_dose = regs.map(function (r) { return r.unidade_dose; }).filter(Boolean)[0] || null;
-    // A carência vem como foi gravada (a do produto do cadastro, digitada ou a padrão daquele dia, e a do nome livre).
-    origem.periodo_carencia_dias = r0.periodo_carencia_dias;
-    // A próxima proposta pelo intervalo congelado no lançamento fica vazia (a correção da data a refaz por ele).
+    // A carência digitada (e a do nome livre) vem como foi gravada; a que o servidor copiou do produto (`carencia_informada`
+    // false) fica vazia — a correção a mantém pelo produto do original e a refaz pelo produto novo (CONGELADOS).
+    origem.periodo_carencia_dias = r0.produto_id && payload.carencia_informada === false ? null : r0.periodo_carencia_dias;
+    // A próxima proposta pelo intervalo congelado no lançamento fica vazia (a correção da data a refaz por ele); a digitada
+    // (`proxima_informada`) vem como foi gravada.
     var iv = payload.intervalo_protocolo_dias;
-    origem.data_proxima_aplicacao = typeof iv === 'number' && Utils.dataValida(ev.event_date) ? proposto_(r0.data_proxima_aplicacao, Utils.somaDias(ev.event_date, iv)) : r0.data_proxima_aplicacao;
+    origem.data_proxima_aplicacao = typeof iv === 'number' && payload.proxima_informada !== true && Utils.dataValida(ev.event_date) ? proposto_(r0.data_proxima_aplicacao, Utils.somaDias(ev.event_date, iv)) : r0.data_proxima_aplicacao;
     despesa_(det, origem, ev, /: serviço ou produto pago no ato$/);
     // A dose de cada animal: por cabeça, a diferente da do lançamento; por peso, a digitada (payload `doses_informadas`) — a
     // proposta pelo peso fica vazia, para acompanhar a data e a dose por kg corrigidas (CONGELADOS: SANIDADE.dose_por_peso).
@@ -687,6 +714,13 @@ var Correcao = (function () {
     var k0 = doAnimal.filter(function (k) { return itens[k].campo === x.campo; })[0];
     return k0 === undefined ? -1 : k0;
   }
+  function semItem_(itens, x) {
+    var dado = DADO_DA_CERTEZA[x.campo];
+    if (dado && itens.some(function (a) { return a.animal_id === x.animal_id && a.campo === dado && vazio_(a.valor_novo); })) {
+      return NOME_CERTEZA[x.campo] + ' sai junto com ' + NOME_DADO[dado] + ' nesta correção: não é um dado à parte. Para manter a certeza, tire da correção o apagamento d' + (dado === 'pai_id' ? 'o pai' : dado === 'mae_id' ? 'a mãe' : 'a data de nascimento') + '.';
+    }
+    return vazio_(x.campo) ? 'Este animal não está no lançamento: não há o que tirar.' : 'Este lançamento não corrige esse dado deste animal: não há o que tirar.';
+  }
   /**
    * O evento corrigido a partir da entrada sem mudança do vigente e da mudança: {campos: {campo: valor (null apaga)},
    * animais: [{animal_id, ...campos do animal (null apaga)} | {animal_id, remover: true} | item novo sem animal_id na lista],
@@ -700,7 +734,13 @@ var Correcao = (function () {
     (Array.isArray(mu.animais) ? mu.animais : []).forEach(function (x) {
       if (!x || typeof x !== 'object') return;
       var i = itemDaMudanca_(d.animais, x);
-      if (x.remover === true) { if (i >= 0) d.animais.splice(i, 1); return; }
+      if (x.remover === true) {
+        // Tirar o que o lançamento não tem não é mudança nenhuma: a correção que diria que gravou sem fazer o pedido é recusada,
+        // com o porquê (a certeza apagada junto com o dado sai com ele; CONTRATOS, seção 54).
+        if (i < 0) throw Validation.erro('VALIDATION', 'A mudança tira um dado que este lançamento não tem como dado próprio.', [{ codigo: 'MUDANCA_SEM_ITEM', campo: vazio_(x.campo) ? 'animal_id' : x.campo, animal_id: x.animal_id || null, mensagem: semItem_(d.animais, x) }]);
+        d.animais.splice(i, 1);
+        return;
+      }
       var alvo = i >= 0 ? d.animais[i] : (d.animais[d.animais.length] = {});
       Object.keys(x).forEach(function (k) { if (k === 'remover') return; if (vazio_(x[k])) delete alvo[k]; else alvo[k] = x[k]; });
     });

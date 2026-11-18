@@ -118,7 +118,9 @@ test('fêmeas, indicadores e estações (1280 e 360 px): a situação de cada f�
       await page.waitForSelector('.form-evento');
       assert.equal(await page.locator('input[value="DIAGNOSTICO_GESTACAO"]').isChecked(), true, 'o diagnóstico escolhido');
       assert.equal(await page.locator('.cartao-animal').count(), 2, 'as duas fêmeas escolhidas no lançamento');
-      assert.equal(await page.locator('[data-campo="estacao_id"] select').inputValue(), est.estacao_id, 'a estação em curso (o diagnóstico vale depois do início)');
+      // Sem o filtro da estação na lista, o diagnóstico vai sem estação (o servidor o dá à exposição mais recente de cada fêmea):
+      // o aparelho não escolhe a estação pela data de hoje (seção 54; com o filtro: tests/ui/convergencia2.r2.test.js).
+      assert.equal(await page.locator('[data-campo="estacao_id"] select').inputValue(), '', 'sem estação: a regra do servidor');
       // Indicadores da estação: 2 expostas, abaixo do mínimo (5): sem taxa, com o motivo.
       await A.ir(page, 'reproducao/indicadores', 'Reprodução');
       await page.waitForSelector('[data-dado="estacao-geral"], [data-secao="estacao-geral"], .secao');

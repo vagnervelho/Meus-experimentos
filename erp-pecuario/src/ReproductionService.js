@@ -292,7 +292,7 @@ var ReproductionService = (function () {
   // ------------------------------------------------------------------ situação e previsão ----
   /**
    * Previsão de parto (03b, seção 7.3), sempre estimativa salvo a informada, sobre o ciclo atual (os registros depois do
-   * último parto ou aborto): nível 0 = `data_prevista_parto` informada no diagnóstico positivo (ou na prenhez declarada na
+   * último parto ou aborto, e a exposição em curso no dia dele, contada a partir dele): nível 0 = `data_prevista_parto` informada no diagnóstico positivo (ou na prenhez declarada na
    * entrada); 1 = inseminação ou cobertura + `dias_gestacao`; 2 = diagnóstico positivo com a idade da gestação: data +
    * (`dias_gestacao` − idade); 3 = só exposição: janela de início + dias − tolerância a fim + dias + tolerância. Um diagnóstico negativo encerra as
    * tentativas anteriores. Devolve {nivel, data, inicio, fim, base: {tipo, data, event_id}, prenhe, rotulo} ou null.
@@ -302,18 +302,28 @@ var ReproductionService = (function () {
     var dias = params.dias_gestacao;
     if (typeof dias !== 'number') return null;
     var tol = typeof params.parto_tolerancia_dias === 'number' ? params.parto_tolerancia_dias : 0;
+    var fimExpo = function (r) { var est = r.estacao_id && estacoes ? estacoes[r.estacao_id] : null; return nulo_(r.data_fim) || (est ? est.data_fim : null); };
     var ciclo = [];
+    var emCurso = null;
     (regs || []).forEach(function (r) {
-      if (r.tipo_evento === 'PARTO' || r.tipo_evento === 'ABORTO') { ciclo = []; return; }
+      if (r.tipo_evento === 'PARTO' || r.tipo_evento === 'ABORTO') {
+        // O parto ou o aborto encerra a prenhez, não a exposição: a do lote em que a fêmea estava naquele dia (o fim depois
+        // dele, ou em aberto) continua no ciclo novo, a partir do parto ou do aborto — a fêmea pode emprenhar nela depois.
+        var aberta = emCurso;
+        ciclo.forEach(function (x) { if (x.tipo_evento === 'EXPOSICAO') aberta = { r: x, inicio: x.data }; });
+        var fa = aberta ? fimExpo(aberta.r) : null;
+        emCurso = aberta && (fa === null || fa >= r.data) ? { r: aberta.r, inicio: r.data > aberta.inicio ? r.data : aberta.inicio } : null;
+        ciclo = [];
+        return;
+      }
       ciclo.push(r);
     });
-    var expo = null;
+    var expo = emCurso ? { r: emCurso.r, inicio: emCurso.inicio, fim: fimExpo(emCurso.r) } : null;
     var ia = null;
     var dg = null;
     ciclo.forEach(function (r) {
       if (r.tipo_evento === 'EXPOSICAO') {
-        var est = r.estacao_id && estacoes ? estacoes[r.estacao_id] : null;
-        expo = { r: r, inicio: r.data, fim: nulo_(r.data_fim) || (est ? est.data_fim : null) };
+        expo = { r: r, inicio: r.data, fim: fimExpo(r) };
       } else if (r.tipo_evento === 'COBERTURA' || r.tipo_evento === 'INSEMINACAO') {
         ia = r;
       } else if (r.tipo_evento === 'DIAGNOSTICO_GESTACAO') {
@@ -512,6 +522,28 @@ var ReproductionService = (function () {
    * diagnóstico conhecido na data D"): a reconfirmação, o aborto, o parto e a exposição gravados depois de D não mudam o
    * indicador de D.
    */
+  /** A exposição mais recente da fêmea antes do registro `r` (de qualquer estação, ou sem estação); null sem nenhuma. */
+  function exposicaoAntes_(expostos, r) {
+    var dono = null;
+    expostos.forEach(function (x) { if (ordemRegistro_(x, r) < 0 && (!dono || ordemRegistro_(x, dono) > 0)) dono = x; });
+    return dono;
+  }
+  /**
+   * A estação dona do aborto `ab` (o id; '' = sem estação; null = nenhuma exposição): a da prenhez que ele encerra — o último
+   * diagnóstico do ciclo antes dele (depois do último parto ou aborto), se positivo: a estação dele, ou, sem estação, a da
+   * exposição mais recente antes dele; sem diagnóstico positivo, a da exposição mais recente antes do aborto.
+   */
+  function donoDoAborto_(regs, expostos, ab) {
+    var dg = null;
+    regs.forEach(function (r) {
+      if (ordemRegistro_(r, ab) >= 0) return;
+      if (r.tipo_evento === 'PARTO' || r.tipo_evento === 'ABORTO') dg = null;
+      else if (r.tipo_evento === 'DIAGNOSTICO_GESTACAO' && r.resultado !== 'INCONCLUSIVO') dg = r;
+    });
+    if (dg && dg.resultado === 'POSITIVO' && !vazio_(dg.estacao_id)) return dg.estacao_id;
+    var x = exposicaoAntes_(expostos, dg && dg.resultado === 'POSITIVO' ? dg : ab);
+    return x ? nulo_(x.estacao_id) || '' : null;
+  }
   function expostasDaEstacao_(L, est, data) {
     var f = L.f;
     var p = L.params;
@@ -555,11 +587,15 @@ var ReproductionService = (function () {
         if (r.tipo_evento !== 'DIAGNOSTICO_GESTACAO' || r.resultado === 'INCONCLUSIVO') return false;
         if (r.estacao_id) return r.estacao_id === est.estacao_id;
         if (r.data < inicio || r.data > Utils.somaDias(fim, dias)) return false;
-        var dono = null;
-        expostos.forEach(function (x) { if (ordemRegistro_(x, r) < 0 && (!dono || ordemRegistro_(x, dono) > 0)) dono = x; });
+        var dono = exposicaoAntes_(expostos, r);
         return !!dono && dono.estacao_id === est.estacao_id;
       });
-      var aborto = regs.filter(function (r) { return r.tipo_evento === 'ABORTO' && r.data >= inicio && r.data <= janela.fim; })[0] || null;
+      // O aborto encerra uma prenhez e é do dono dela, não da faixa de datas: o do último diagnóstico positivo do ciclo antes
+      // dele (com estação, a dela; sem estação, a exposição mais recente antes do diagnóstico) ou, sem diagnóstico positivo, a
+      // exposição mais recente antes dele — a regra do parto e do diagnóstico sem estação. O aborto da prenhez da estação
+      // anterior, já no lote de E, não é desfecho de E.
+      var abortos = regs.filter(function (r) { return r.tipo_evento === 'ABORTO' && r.data >= inicio && r.data <= janela.fim && donoDoAborto_(regs, expostos, r) === est.estacao_id; });
+      var aborto = abortos.length ? abortos[abortos.length - 1] : null;
       var saida = saidas_(f, id).filter(function (s) { return s.data >= inicio; })[0] || null;
       return { animal_id: id, inicio: inicio, fim: fim, janela: janela, ultimo_dg: dgs.length ? dgs[dgs.length - 1] : null, parto: parto, aborto: aborto, saida: saida };
     });
@@ -590,9 +626,12 @@ var ReproductionService = (function () {
     var cobertura = taxa_(diag.length, baseDg.length, 1);
     var entreDiag = cobertura.valor !== null && cobertura.valor < cobMin;
     var prenhez = entreDiag ? taxa_(prenhas.length, diag.length, minimo, { rotulo: 'Prenhez entre diagnosticadas' }) : taxa_(prenhas.length, baseDg.length, minimo, { rotulo: 'Taxa de prenhez' });
+    // O aborto vale como desfecho até a data enquanto nenhum diagnóstico positivo da estação vem depois dele (a fêmea que
+    // perdeu e emprenhou de novo na mesma estação está prenhe, não com o desfecho do aborto).
+    var abortou = function (x) { return !!x.aborto && x.aborto.data <= data && !(x.ultimo_dg && x.ultimo_dg.data <= data && x.ultimo_dg.resultado === 'POSITIVO' && ordemRegistro_(x.ultimo_dg, x.aborto) > 0); };
     var desfecho = function (x) {
       if (x.parto && x.parto.data <= data) return 'PARTO';
-      if (x.aborto && x.aborto.data <= data) return 'ABORTO';
+      if (abortou(x)) return 'ABORTO';
       if (x.ultimo_dg && x.ultimo_dg.data <= data && x.ultimo_dg.resultado === 'NEGATIVO') return 'VAZIA';
       return null;
     };
@@ -640,10 +679,10 @@ var ReproductionService = (function () {
     var prenhasPerda = prenhas.filter(function (x) { return !(x.saida && x.saida.data <= data && x.saida.data <= x.janela.fim && !desfecho(x)); });
     var perdas = prenhasPerda.filter(function (x) {
       if (x.parto && x.parto.data <= data) return false;
-      if (x.aborto && x.aborto.data <= data && x.aborto.data >= x.ultimo_dg.data) return true;
+      if (abortou(x)) return true;
       return x.janela.fim < data;
     });
-    var perdaAberta = prenhasPerda.some(function (x) { return !(x.parto && x.parto.data <= data) && !(x.aborto && x.aborto.data <= data) && x.janela.fim >= data; });
+    var perdaAberta = prenhasPerda.some(function (x) { return !(x.parto && x.parto.data <= data) && !abortou(x) && x.janela.fim >= data; });
     var parcialParto = prenhaAberta ? 'parcial' : null;
     // IEP: os intervalos entre partos consecutivos da matriz que terminam num parto atribuído à estação.
     var intervalos = [];
@@ -664,6 +703,7 @@ var ReproductionService = (function () {
       diagnosticadas: diag.length,
       prenhas: prenhas.length,
       paridas: paridas.length,
+      abortos: base.filter(function (x) { return desfecho(x) === 'ABORTO'; }).length,
       nascidos_vivos: vivos,
       desmamados: desmamadas.length,
       crias_ao_pe: aoPe.length,

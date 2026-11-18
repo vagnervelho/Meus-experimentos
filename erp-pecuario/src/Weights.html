@@ -273,7 +273,7 @@ var TelaPesagens = (function () {
     c.linhas.forEach(function (l) {
       if (l.estado === 'GRAVADA') return;
       l.brinco = l.texto || l.brinco; l.animal_id = null; l.dataAnimal = null; l.fora = false;
-      l.estado = 'NAO_ENCONTRADO'; l.semPosicao = true; l.mensagem = 'A data mudou: o brinco é conferido de novo pelo servidor em ' + Fmt.data(c.sessao.data) + '.';
+      l.estado = 'NAO_ENCONTRADO'; l.semPosicao = true; l.barrada = false; l.recusada = false; l.mensagem = 'A data mudou: o brinco é conferido de novo pelo servidor em ' + Fmt.data(c.sessao.data) + '.';
     });
   }
   function pendencias(c) { return c.linhas.filter(function (l) { return l.estado === 'NAO_ENCONTRADO' || l.estado === 'ERRO'; }); }
@@ -498,8 +498,14 @@ var TelaPesagens = (function () {
    */
   function rotuloEstado(l) {
     if (l.estado !== 'NAO_ENCONTRADO') return ROTULO_ESTADO[l.estado];
-    return l.semPosicao ? 'pendente: a conferir no servidor' : l.naoEntra ? 'não entra na pesagem' : ROTULO_ESTADO.NAO_ENCONTRADO;
+    return l.barrada ? 'barrada: o animal já tem outra linha' : l.semPosicao ? 'pendente: a conferir no servidor' : l.naoEntra ? 'não entra na pesagem' : l.recusada ? 'recusada pelo servidor' : ROTULO_ESTADO.NAO_ENCONTRADO;
   }
+  /**
+   * A recusa do servidor (a data futura, o limite, o acesso) não é falta de sinal (§20, regra 9): a tela diz o porquê e o caminho,
+   * e a linha não fica à espera de um sinal que não resolve. Sem resposta, transporte, ocupado ou falha interna: tentar de novo.
+   */
+  function recusou(e) { return !!e && !!e.code && ['SEM_RESPOSTA', 'TRANSPORTE', 'LOCKED', 'INTERNAL'].indexOf(e.code) < 0; }
+  var CAMINHO_RECUSA = ' Se a data da pesagem estiver errada, toque em "Mudar data, método ou pasto".';
   var SEM_RESPOSTA_LINHA = 'Sem resposta do servidor na hora: o brinco é conferido por ele quando houver sinal (toque em "Conferir os brincos pendentes no servidor").';
 
   function formularioInicio(el, c, aoComecar) {
@@ -588,7 +594,7 @@ var TelaPesagens = (function () {
         if (c.sessao.data !== data) return { erro: new Error('A data da pesagem mudou.') };
         ui.estados = Object.assign(ui.estados || {}, r.animais);
         return { porTexto: r.porTexto, animais: r.animais, data: data };
-      }, function (e) { return { erro: e }; });
+      }, function (e) { return { erro: e, recusa: recusou(e), data: data }; });
     }
     /** A linha pelo brinco da data da sessão (o que o servidor deu ao texto naquele dia), nunca pelo de hoje. */
     function rotuloLinha(l) {
@@ -610,7 +616,7 @@ var TelaPesagens = (function () {
         desenhar();
       }, function (e) {
         if (!vivo) return;
-        ui.posicao = { erro: e.message, data: data };
+        ui.posicao = { erro: e.message, recusa: recusou(e), data: data };
         desenhar();
       });
     }
@@ -630,7 +636,8 @@ var TelaPesagens = (function () {
       if (doBotao) { ui.pendentesNoAr = (ui.pendentesNoAr || 0) + 1; desenharStatus(); }
       return resolverNoServidor(textos).then(function (r) {
         if (doBotao) ui.pendentesNoAr -= 1;
-        if (r.erro && doBotao && vivo) UI.aviso('Sem resposta do servidor (' + r.erro.message + '): ' + (textos.length === 1 ? 'o brinco pendente continua' : 'os ' + textos.length + ' brincos pendentes continuam') + ' à espera dele. Toque de novo quando houver sinal.', { tipo: 'erro' });
+        if (r.erro && !r.recusa && doBotao && vivo) UI.aviso('Sem resposta do servidor (' + r.erro.message + '): ' + (textos.length === 1 ? 'o brinco pendente continua' : 'os ' + textos.length + ' brincos pendentes continuam') + ' à espera dele. Toque de novo quando houver sinal.', { tipo: 'erro' });
+        if (r.recusa && doBotao && vivo) UI.aviso('O servidor recusou a conferência (' + r.erro.message + ').' + CAMINHO_RECUSA, { tipo: 'erro' });
         if (aplicarEsperando(r)) mudou();
         else if (doBotao && vivo) desenharStatus();
       });
@@ -642,16 +649,21 @@ var TelaPesagens = (function () {
      * mesmo dia: "Está certo" ou "Tirar". O resto continua pendente com o porquê do servidor. Devolve se alguma linha mudou.
      */
     function aplicarEsperando(r) {
-      if (r.erro || !vivo || c.sessao.data !== r.data) return false;
+      if (!vivo || c.sessao.data !== r.data || (r.erro && !r.recusa)) return false;
       var mexeu = false;
       c.linhas.filter(function (l) { return l.semPosicao && l.estado === 'NAO_ENCONTRADO'; }).forEach(function (l) {
+        // A recusa do servidor (a data, o limite): a linha sai da espera com o porquê; não é falta de sinal.
+        if (r.recusa) { mexeu = true; l.semPosicao = false; l.barrada = false; l.recusada = true; l.mensagem = 'O servidor recusou a conferência: ' + r.erro.message + CAMINHO_RECUSA; return; }
         var x = r.porTexto[String(l.texto || l.brinco).trim()];
         if (!x) return;
         mexeu = true;
         var a = x.situacao === 'ACHADO' ? Store.doEstado(r.animais[x.animal_id]) : null;
-        if (!a || !presente(a)) { l.semPosicao = false; l.naoEntra = !!a; l.mensagem = !a ? x.mensagem || 'Mais de um animal com este brinco: corrija o brinco.' : nomeNaData(a) + ' ' + motivoFora(a) + ': não entra na pesagem.'; return; }
+        if (!a || !presente(a)) { l.semPosicao = false; l.barrada = false; l.naoEntra = !!a; l.mensagem = !a ? x.mensagem || 'Mais de um animal com este brinco: corrija o brinco.' : nomeNaData(a) + ' ' + motivoFora(a) + ': não entra na pesagem.'; return; }
         var barrada = darAnimal(l, a, r.data);
+        // A barrada por outra linha do mesmo animal não espera sinal: espera o operador tirar uma das duas (continua na conferência
+        // seguinte, para sair sozinha quando a outra sair).
         l.semPosicao = !!barrada;
+        l.barrada = !!barrada;
         if (barrada) l.mensagem = barrada;
       });
       return mexeu;
@@ -666,7 +678,7 @@ var TelaPesagens = (function () {
       var outra = outras.filter(function (y) { return mexivel(c, y); })[0] || null;
       if (outra) return nomeNaData(a) + ' já tem outra pesagem nesta sessão (' + Fmt.peso(outra.peso) + '): tire uma das duas.';
       var saida = outras.filter(function (y) { return !mexivel(c, y); }).pop() || null;
-      l.animal_id = a.animal_id; l.dataAnimal = data; l.brinco = brincoDe(a) || a.codigo_interno; l.bloco = null; l.semPosicao = false; l.naoEntra = false;
+      l.animal_id = a.animal_id; l.dataAnimal = data; l.brinco = brincoDe(a) || a.codigo_interno; l.bloco = null; l.semPosicao = false; l.naoEntra = false; l.barrada = false; l.recusada = false;
       l.fora = !!(c.sessao.pasto_id && pastoDe(a) !== c.sessao.pasto_id);
       if (saida) { l.estado = 'AVISO'; l.avisosProprios = []; l.avisos = []; l.mensagem = nomeNaData(a) + ' já foi pesado nesta pesagem com ' + Fmt.peso(saida.peso) + ' (' + ROTULO_ESTADO[saida.estado] + '). Pesar de novo grava outra pesagem do mesmo dia: toque em "Está certo" ou tire esta linha.'; }
       else { l.estado = 'FILA'; l.mensagem = null; }
@@ -721,10 +733,12 @@ var TelaPesagens = (function () {
       recusados.forEach(function (b) { ui.status.appendChild(h('div', { role: 'alert', dataset: { recusaIncerta: b.chave } }, UI.nota('O servidor recusou o envio de ' + b.uids.length + (b.uids.length === 1 ? ' pesagem' : ' pesagens') + ': ' + b.recusa + ' Elas continuam guardadas com a mesma chave e saem de novo no próximo envio; nada será gravado duas vezes.', 'erro'))); });
       c.blocos.filter(function (b) { return b.naoGuardado && b.estado === 'NOVO'; }).forEach(function (b) { ui.status.appendChild(h('div', { role: 'alert', dataset: { naoGuardado: b.chave } }, UI.nota('O envio de ' + b.uids.length + (b.uids.length === 1 ? ' pesagem' : ' pesagens') + ' não saiu: não foi possível guardá-lo antes (' + b.naoGuardado + '). Toque em "Enviar" de novo.', 'erro'))); });
       if (c.erroGeral) ui.status.appendChild(h('div', { role: 'alert', dataset: { erroGeral: '1' } }, UI.nota('O servidor recusou o envio: ' + c.erroGeral + ' Nada foi gravado; as pesagens continuam neste aparelho.', 'erro')));
-      var esperam = pend.filter(function (l) { return l.semPosicao && l.estado === 'NAO_ENCONTRADO'; }).length;
-      if (pend.length > esperam) ui.status.appendChild(UI.nota(pend.length - esperam === 1 ? '1 pendência impede o envio: corrija o peso ou o brinco, ou tire a linha.' : (pend.length - esperam) + ' pendências impedem o envio: corrija ou tire as linhas marcadas.', 'erro'));
+      var esperam = pend.filter(function (l) { return l.semPosicao && !l.barrada && l.estado === 'NAO_ENCONTRADO'; }).length;
+      var barradas = pend.filter(function (l) { return l.barrada && l.estado === 'NAO_ENCONTRADO'; }).length;
+      if (pend.length > esperam + barradas) ui.status.appendChild(UI.nota(pend.length - esperam - barradas === 1 ? '1 pendência impede o envio: corrija o peso ou o brinco, ou tire a linha.' : (pend.length - esperam - barradas) + ' pendências impedem o envio: corrija ou tire as linhas marcadas.', 'erro'));
+      if (barradas) ui.status.appendChild(h('div', { dataset: { barradas: String(barradas) } }, UI.nota((barradas === 1 ? '1 linha é' : barradas + ' linhas são') + ' de um animal que já tem outra pesagem nesta sessão: tire uma das duas. O envio espera por isso.', 'erro')));
       if (esperam) ui.status.appendChild(UI.nota((esperam === 1 ? '1 brinco espera' : esperam + ' brincos esperam') + ' a conferência do servidor (sem resposta na hora): com sinal, toque em "Conferir os brincos pendentes no servidor". O envio espera por ' + (esperam === 1 ? 'ele.' : 'eles.'), 'aviso'));
-      if (c.linhas.some(function (l) { return l.semPosicao && l.estado === 'NAO_ENCONTRADO'; })) ui.status.appendChild(h('div', { class: 'acoes' }, UI.botao(ui.pendentesNoAr ? 'Conferindo os brincos pendentes no servidor…' : 'Conferir os brincos pendentes no servidor', { desabilitado: !!ui.pendentesNoAr, atributos: { 'data-resolver-pendentes': '1', 'aria-busy': ui.pendentesNoAr ? 'true' : null }, aoClicar: function () { resolverEsperando(true); } })));
+      if (esperam) ui.status.appendChild(h('div', { class: 'acoes' }, UI.botao(ui.pendentesNoAr ? 'Conferindo os brincos pendentes no servidor…' : 'Conferir os brincos pendentes no servidor', { desabilitado: !!ui.pendentesNoAr, atributos: { 'data-resolver-pendentes': '1', 'aria-busy': ui.pendentesNoAr ? 'true' : null }, aoClicar: function () { resolverEsperando(true); } })));
       avisos.forEach(function (b) {
         if (!b.gerais || !b.gerais.length || b.geralAceito) return;
         ui.status.appendChild(h('div', { dataset: { avisoGeral: b.chave } }, UI.nota(b.gerais.map(function (g) { return g.mensagem; }).join(' '), 'aviso'),
@@ -769,6 +783,7 @@ var TelaPesagens = (function () {
       if (!ui.posicao) return;
       if (ui.posicao.carregando) ui.posicaoNota.appendChild(UI.nota('Conferindo no servidor quem estava no rebanho em ' + Fmt.data(ui.posicao.data) + '…', 'info'));
       else if (ui.posicao.motivo) ui.posicaoNota.appendChild(UI.nota('Não há posição do rebanho em ' + Fmt.data(ui.posicao.data) + ' (' + ui.posicao.erro + '): o brinco é conferido pelo servidor nessa data, e ele decide se aceita a data.', 'aviso'));
+      else if (ui.posicao.recusa) ui.posicaoNota.appendChild(h('div', { role: 'alert', dataset: { posicaoRecusa: '1' } }, UI.nota('O servidor recusou a data ' + Fmt.data(ui.posicao.data) + ': ' + ui.posicao.erro + CAMINHO_RECUSA, 'erro')));
       else if (ui.posicao.erro) ui.posicaoNota.appendChild(h('div', { dataset: { posicaoErro: '1' } }, UI.nota('Sem resposta do servidor para ' + Fmt.data(ui.posicao.data) + ' (' + ui.posicao.erro + '): o brinco é conferido só pelo servidor, na data (o número pode ser de outro animal naquele dia). Sem sinal, as pesagens ficam pendentes.', 'aviso'),
         h('div', { class: 'acoes' }, UI.botao('Tentar de novo', { atributos: { 'data-posicao-tentar': '1' }, aoClicar: function () { carregarPosicao(); resolverEsperando(); desenhar(); } }))));
       else ui.posicaoNota.appendChild(UI.nota('Rebanho e pastos na posição em ' + Fmt.data(ui.posicao.data) + ', conferidos pelo servidor.', 'info'));
@@ -819,6 +834,12 @@ var TelaPesagens = (function () {
       if (x && x.situacao === 'VARIOS') {
         ui.conferencia.appendChild(h('p', { class: 'aviso', text: x.mensagem }));
         x.candidatos.forEach(function (id) { var a = Store.doEstado(r.animais[id]); ui.candidatos.appendChild(UI.botao(nomeNaData(a) + ' · ' + descricao(a), { bloco: true, aoClicar: function () { escolher(a); } })); });
+        return;
+      }
+      if (r.recusa) {
+        // A recusa do servidor não é falta de sinal: a linha não espera um sinal que não resolve.
+        ui.atual = { brinco: t, animal: null, recusada: true, mensagem: 'O servidor recusou a conferência: ' + r.erro.message + CAMINHO_RECUSA, data: c.sessao.data };
+        ui.conferencia.appendChild(h('p', { class: 'destaque-erro', role: 'alert', dataset: { conferencia: 'RECUSA' }, text: t + ': o servidor recusou a conferência (' + r.erro.message + ').' + CAMINHO_RECUSA }));
         return;
       }
       ui.atual = { brinco: t, animal: null, semPosicao: !x, mensagem: x ? x.mensagem : null, data: c.sessao.data };
@@ -889,7 +910,7 @@ var TelaPesagens = (function () {
     }
     function adicionar(at, peso) {
       c.seq = (c.seq || 0) + 1;
-      var l = { uid: 'p' + c.seq + '-' + Util.uuid().slice(0, 6), brinco: at.brinco, texto: at.texto || at.brinco, animal_id: at.animal ? at.animal.animal_id : null, dataAnimal: at.animal ? at.data : null, peso: peso, estado: at.animal ? 'FILA' : 'NAO_ENCONTRADO', bloco: null, mensagem: at.animal ? null : at.mensagem || null, semPosicao: !at.animal && !!at.semPosicao };
+      var l = { uid: 'p' + c.seq + '-' + Util.uuid().slice(0, 6), brinco: at.brinco, texto: at.texto || at.brinco, animal_id: at.animal ? at.animal.animal_id : null, dataAnimal: at.animal ? at.data : null, peso: peso, estado: at.animal ? 'FILA' : 'NAO_ENCONTRADO', bloco: null, mensagem: at.animal ? null : at.mensagem || null, semPosicao: !at.animal && !!at.semPosicao, recusada: !at.animal && !!at.recusada };
       l.fora = !!(at.animal && c.sessao.pasto_id && pastoDe(at.animal) !== c.sessao.pasto_id);
       c.linhas.push(l);
     }
