@@ -167,7 +167,11 @@ test('teste aleatório de todos os comandos da Fase 2 (' + (N ? N + ' sementes n
       'parcela: dividida', 'baixa transportada na correção',
       // Fase 4, E4.3 (CONTRATOS, seção 57): o rateio aceito e conferido pelo modelo, o DIRETO, a base zero, a base congelada na
       // correção sem mudança e a correção só da data do rateio.
-      'rateio: aceito', 'rateio: direto conferido', 'rateio: base zero', 'rateio: base congelada na correção', 'correção da data do rateio: bases conferidas'].filter((k) => !F.COBERTURA[k]);
+      'rateio: aceito', 'rateio: direto conferido', 'rateio: base zero', 'rateio: base congelada na correção', 'correção da data do rateio: bases conferidas',
+      // Fase 4, E4.4 e E4.5 (CONTRATOS, seção 58): o custo por animal contra o modelo das linhas cruas, contra a projeção e contra a
+      // ficha; o custo dos pastos e o demonstrativo com resultado, conferidos entre si.
+      'custos: conferidos', 'custos: animal conferido com o modelo das linhas cruas', 'custos: aquisição conferida com a projeção', 'custos: ficha conferida com a rota',
+      'custos: pastos com custo', 'custos: demonstrativo com resultado'].filter((k) => !F.COBERTURA[k]);
     assert.deepEqual(semCobertura, [], 'oráculos novos sem nada conferido nas sementes fixas (' + JSON.stringify(F.COBERTURA) + ')');
   }
 });

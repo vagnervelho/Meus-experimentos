@@ -219,7 +219,11 @@ canônicas (5 ainda de fase futura: `preco.salvar`, `financeiro.resultado`, `fin
 `relatorio.exportar`) e 22 extras. Fase 4, E4.3: o evento RATEIO (o custo compartilhado dividido entre os animais por cabeça,
 peso vivo, dias de permanência ou valor digitado; a data-base, a base zero, o re-rateio, o rateio vigente numa data, o rateio
 desatualizado e o arrendamento pelos dias no pasto), a invariante 25, o CT-13 inteiro na aceitação e a tela (seção 57); sem rota
-nova (`Api.rotas()` continua com 73).
+nova (`Api.rotas()` continua com 73). Fase 4, E4.4 e E4.5: o custo por animal e por pasto e o resultado por animal numa data
+(`Custos`, rota `financeiro.custosAnimal`; o bloco H da ficha pela mesma conta), o resultado gerencial por competência mês a mês
+por natureza e por conta, com o caixa ao lado, os estoques no custo e a conciliação linha a linha (`Conciliacao.demonstrativo` e
+`ponte`, rota `financeiro.resultado`), o CT-19 inteiro pela api e as telas Resultado e Custos (seção 58). `Api.rotas()` continua
+com 73: 51 canônicas (3 ainda de fase futura: `preco.salvar`, `relatorio.obter`, `relatorio.exportar`) e 22 extras.
 
 ## 1. Regras que valem para todo arquivo de `src/`
 
@@ -1999,7 +2003,7 @@ VALOR_INDIVIDUAL, kg em PESO_VIVO e PESO_CARCACA, 1 em CABECAS, peso relativo em
 | `tiposDosCustos(lancamentosAcessorios, frete)` | `FRETE` ou `OUTRO` para cada lançamento (na ordem da lista recebida), pelo prefixo que soma o frete na ordem do `financial_id` (revisão 4: os fretes da compra recebem os menores identificadores; a ordem física das linhas, que o dono pode classificar, não conta — 06, seção 12); null se nenhum prefixo fecha |
 | `basesEstimadas(pesagens, pesoLoteKg)` | Revisão 4. A base estimada da venda só com o peso do lote: cada pesagem × peso do lote ÷ Σ pesagens, 4 casas (sem o peso do lote, a própria pesagem). A mesma conta na negociação e na integridade (BASE_RATEIO) |
 | `titulos(repo, data?)` | `{data, a_pagar, a_receber, vencido_pagar, vencido_receber, parcelas_abertas}`: nominal das parcelas não liquidadas em D, de lançamentos vigentes com competência até D. Lê FINANCEIRO e PARCELAS |
-| `blocoFicha(repo, animal, {desde?})` | Bloco H: `{entregue: true, animal_id, custo_aquisicao (a projeção = Σ alocações AQUISICAO_ANIMAIS do período atual), custo_aquisicao_origem, desde, lancamentos_anteriores, por_natureza, custeio, custo_acumulado, receitas, despesas_venda, resultado: {valor, motivo, mensagem?} (só com saída e custo conhecido), lancamentos: [{passagem_atual, financial_id, event_id, event_type, event_date, data_competencia, conta_codigo, conta_nome, natureza, tipo, classe_custo_animal, descricao, valor_lancamento, valor_alocado, criterio, base_valor, base_total, partner_id}]}`. Uma base só (a do custo de aquisição, 03a DL-08): totais, custo acumulado e resultado somam as alocações com competência ≥ `desde` (a entrada vigente mais recente, que `AnimalService` passa; revisão 4: `Timeline.entradaDoCusto` — no animal que só existe no histórico, comprado ou nascido e vendido antes do marco zero, o último período é o histórico, e a compra histórica é o custo dele; o animal do marco zero continua sem a compra de antes da entrada dele, 04, seção 6); a lista traz todas as passagens, com `passagem_atual` e `lancamentos_anteriores` (quantos ficaram fora das contas). Sem `desde`, todas. Lê FINANCEIRO, RATEIOS, ALOCACOES_FINANCEIRAS, PLANO_CONTAS e EVENTOS |
+| `blocoFicha` (até a E4.3) | Saiu na Fase 4, E4.4: o bloco H da ficha é `Custos.blocoFicha` (seção 58), a mesma conta da rota `financeiro.custosAnimal`, com os mesmos campos de antes (custo_aquisicao, custo_aquisicao_origem, desde, lancamentos_anteriores, por_natureza, custeio, custo_acumulado, receitas, despesas_venda, resultado, lancamentos) |
 | `parcelasMensais(valor, primeiro, qtd?, {forma_pagamento, documento})` | Parcelas de um título em `qtd` vezes (vazio = 1), de mês em mês a partir de `primeiro` (`Utils.somaMeses`), em partes iguais (`dividirParcelas`): a forma de "1 ou mais parcelas" do frete e dos outros custos da compra (`custos[].parcelas_qtd`) e do lançamento opcional da morte e do descarte (`custo_parcelas_qtd`, `receita_parcelas_qtd`; 03b, 10.3). Entrada inválida → uma parcela (a validação é do catálogo e de `resolverParcelas`) |
 | `NATUREZAS`, `leiturasLancamentos()`, `consultaLancamentos(filtros)`, `listarLancamentos(ctx, filtros)`, `consultaLancamento(dados)`, `obterLancamento(ctx, dados)` (Fase 4, etapa BASE) | A lista e o detalhe dos lançamentos da tela Financeiro (rotas `financeiro.lancamentos` e `financeiro.lancamento`): seção 55. As três visões e a identidade que as liga ficam no módulo `Conciliacao` (seção 55) |
 
@@ -4587,3 +4591,112 @@ tempo comparou 783.564 unidades. As levas anteriores (9600000 a 9600011, 9610000
 fixas: 968 aceitos, 490 recusados, 0 falhas). `npm run ui:check`: 227 testes de navegador, 227 aprovados, 0 falhas (582 s); 14
 arquivos .html dentro do orçamento — a página inicial montada com 367 KB de 450 KB; sob demanda, Import 48 KB, Weights 64 KB,
 Health 24 KB, Reproduction 67 KB, Financial 33 KB, Events 31 KB e Settings 40 KB, de 150 KB cada.
+
+## 58. Fase 4, E4.4 e E4.5: custo por animal e por pasto, resultado por animal e resultado gerencial com a conciliação — `Custos` (novo), `Conciliacao` (`fatos` estendido, `passagemNaLista`, `rateioEm`, `posicao`/`termosEm` com `em`, `colunas`, `competenciaEntre`, `ponte`, `custeioNaoAlocado`, `demonstrativo`, `consultaResultado`), `AnimalService` (bloco H por `Custos.blocoFicha`), `FinancialService` (`blocoFicha` saiu), `Timeline` (a origem do custo de aquisição pelo evento de negócio), `Api` (rotas), `Financial` (Resultado, Custos), `Animals` (bloco H); `tests/financeiro.custos.test.js`, `tests/financeiro.resultado.test.js`, `tests/apoio-ct19.js`, `tests/conciliacao.test.js`, `tests/ui/fase4.custos.test.js`, `tests/apoio-fuzz.js` (`oraculoCustos`, grupos `res`, `resD`, `custo`, `custoA` e `custoP` da viagem no tempo, `res`, `custo` e `custoP` no b4 da correção), `tests/fase2.fuzz.test.js`, `tests/acceptance.test.js`, `tests/animals.test.js`, `tests/api.test.js`, `tests/financeiro.caixa.test.js`
+
+**Fase.** As rotas canônicas `financeiro.custosAnimal` e `financeiro.resultado` deixam de responder `NOT_FOUND` (são consultas; nenhum
+comando novo, nenhum tipo de evento novo). `Api.rotas()` continua com 73 rotas: 51 canônicas (3 de fase futura: `preco.salvar`,
+`relatorio.obter`, `relatorio.exportar`) e 22 extras; `tests/api.test.js` usa `preco.salvar` como o exemplo de rota futura.
+
+### 58.1 A passagem de cada alocação (uma regra só; 07, seção 2.1 "Visão 3" e seção 6; 03a, DL-08)
+
+`Conciliacao.fatos(tx, {animais?})` passa a devolver, além do que a seção 55 descreve: em cada lançamento, `conta_id`, `grupo` (a
+cópia gravada `FINANCEIRO.categoria`), `classe` (a `classe_custo_animal` da conta, que não muda depois do primeiro lançamento),
+`pasture_id`, `descricao`, `partner_id`, `event_type` e `event_date`; em cada rateio, `rateio_id`, `event_id`, `criterio`,
+`escopo_tipo`, `data_base`, `periodo_inicio`, `periodo_fim`, `base_total` e a `base` de cada alocação; as passagens de **todos** os
+animais do marco zero em diante (`permanencias`: a entrada e a saída com o tipo do evento; a abertura pela tabela de preços marcada
+`abertura_estimada`), a passagem histórica do animal que só existe no histórico (`historicas`: a entrada de `Timeline.entradaDoCusto`
+e a primeira saída histórica depois dela), os lançamentos anteriores ao marco zero à parte (`historico`, fora das três visões) e o
+plano de contas (`contas`). Com `animais`, só as passagens desses (o custo de um animal; a conciliação pede todas).
+
+`Conciliacao.passagemNaLista(lista, l, r)`: a passagem a que uma alocação pertence — (1) a aberta ou fechada pelo evento de negócio do
+lançamento (`ancora`: a compra e o rebanho inicial abrem; a venda, a morte e o descarte fecham); (2) senão, a última que começou até a
+data de referência da alocação: a data-base do rateio (o dia em que o animal estava no escopo), o fim do período (os dias de
+permanência) ou a competência. É a regra da conciliação (o custo de quem saiu e o do rebanho ativo) e do custo por animal. Antes, o
+bloco H usava "competência ≥ a entrada atual": o arrendamento de junho (competência 01/06) rateado pelos dias a quem foi comprado em
+11/06 ficava fora do custo dele, como de passagem anterior (achado desta etapa; o teste do caminho falha no código de antes).
+`Conciliacao.rateioEm(l, D)`: o rateio que vale em D (o último com data até D); `alocacoesEm(l, D)` = as alocações dele.
+`posicao(fx, D, em?)` e `termosEm(fx, D, em?)`: `em` (padrão D) é o dia em que se pede a conta de D — só muda o rateio da aquisição
+(o de `em`); a identidade fecha em qualquer `em` ≥ D.
+
+### 58.2 Custo por animal e por pasto: `financeiro.custosAnimal` (`Custos`, puro; 07, seções 6 e 10, relatórios 14 e 15)
+
+| Função | Contrato |
+|---|---|
+| `passagens(fx, id)`, `passagemEm(fx, id, D)` | As passagens do animal (as do marco zero em diante; sem nenhuma, a histórica); a de D = a última que começou até D |
+| `alocacoesEm(fx, D, so?)` | `{animal_id: [{l, r, a, passagem}]}`: as alocações dos lançamentos com competência até D (os do histórico também) pelo rateio que vale em D, cada uma com a passagem (`passagemNaLista`) |
+| `contas(p, itens, D, venda)` | As contas de uma passagem em D: `aquisicao` (Σ AQUISICAO_ANIMAIS; sem alocação, 0 no nascido e `null` — desconhecido, nunca zero — nos demais), `aquisicao_origem` (a regra da projeção: NEGOCIADO, NAO_SE_APLICA, ABERTURA_INFORMADA/ESTIMADA pelo lançamento do próprio rebanho inicial, DESCONHECIDO), `sanitario`, `alimentacao` (inclui a manutenção e o arrendamento de pasto), `reproducao`, `outros`, `adicionais` (reprodução + outros), `custeio`, `custo_acumulado` (aquisição + custeio; null sem aquisição), `receitas` (RECEITA_VENDA_ANIMAIS + OUTRA_RECEITA), `despesas_venda`, `por_natureza`, `dias` ([entrada, saída) com a saída até D; aberta, o dia D conta), `fechada`, `custo_diario` ({valor = custeio ÷ dias, em centavos, metade para longe do zero; motivo}), `resultado` ({valor, motivo, mensagem?}: só com a passagem fechada em D e o custo de aquisição conhecido — receita − despesas de venda − aquisição − custeio; o morto, −custo acumulado), `margem_arroba` ({valor = resultado ÷ arrobas, arrobas (2 casas), estimado, base, motivo}: só com a passagem fechada em D e o peso do animal na venda) |
+| `arrobasNaVenda(repo, p, arrobaKg)` | As arrobas do animal na venda que fechou a passagem: o peso de carcaça da linha ÷ `arroba_kg` (CARCACA, apurado) ou o peso vivo da linha × o rendimento da venda ÷ `arroba_kg` (VIVO, estimado salvo o rendimento APURADO); sem peso na linha, null |
+| `doAnimal(fx, id, D, venda)` | `{passagem, contas, lancamentos (todas as alocações do animal até D, com `passagem_atual`, a conta, a classe, o critério, a base, o rateio que vale e a data dele), anteriores}` |
+| `blocoFicha(tx, L, animal)` | O bloco H (hoje): a mesma conta, com os campos de antes (seção 26) e `classes`, `dias`, `custo_diario`, `margem_arroba`, `saida`, `historica` |
+| `listaAnimais(tx, L, fx, D, de, filtros)` | Uma linha por passagem aberta em D ou fechada em [de, D] (o animal que saiu e voltou tem uma linha por passagem), do marco zero em diante: `{chave (animal + dia da entrada: estável na correção), animal_id, codigo_interno, brinco, sexo, categoria, pasture_id, pasto_nome, property_id, situacao (NO_REBANHO, VENDIDO, MORTO, DESCARTADO, BAIXADO_AJUSTE), data_referencia, entrada {data, tipo}, saida {data, tipo} | null, …as contas}` — o brinco, a categoria e o pasto do animal na data de referência (D aberta; o dia da saída fechada: o pasto de antes da saída). `totais` (cada coluna; o resultado e o custo acumulado só das linhas que os têm; `parciais`: quem saiu sem custo de aquisição), `custeio_nao_alocado` do período, `parcial` ("Parcial: N cabeças saíram sem custo de aquisição conhecido", 07, seção 6). D antes do marco zero → `motivo` ANTERIOR_AO_MARCO_ZERO; sem marco zero → DADOS_INSUFICIENTES; `de` antes do marco zero começa nele (`antes_do_marco_zero`) |
+| `listaPastos(tx, L, fx, de, ate)` | Por pasto (os com custo ou animal no período e os ativos): `{pasture_id, nome, identificacao, property_id, status, posse, arrendador_id, arrendador_nome, area_hectares, custo (a parte da competência no período dos lançamentos de CUSTEIO com o pasto, 07, 1.1), alocado e nao_alocado (o que não foi alocado pelo rateio que vale em `ate`, na mesma competência do lançamento: alocado + não alocado = custo, sem criar nem perder centavo), animais_dia (07, 3.3: [entrada, saída), `Timeline.diasPermanencia`), custo_ha {valor, motivo}, custo_animal_dia {valor, motivo}, contas [{conta_id, codigo, nome, valor}], lancamentos [{financial_id, event_id, descricao, conta_nome, data_competencia, competencia_inicio, competencia_fim, valor_lancamento, valor_periodo, alocado_periodo, nao_alocado_periodo, alocado_lancamento, criterio, rateio_data}]}`; `por_posse` (PROPRIO, ARRENDADO: pastos, custo, alocado, não alocado, animais-dia, custo por animal-dia), `total`, `custeio_sem_pasto` (o custeio do período sem pasto) e `animais_dia_total` |
+| `consulta(dados)` / `custosAnimal(ctx, dados)` | A rota. dados: `{visao? (ANIMAIS — padrão — \| PASTOS), animal_id?, data? (D; padrão hoje), de? (padrão 1º de janeiro do ano de D), situacao? (TODOS — padrão —, NO_REBANHO, SAIRAM), sexo?, pasture_id?, property_id?, category_id?, busca? (brinco ou código)}`. Com `animal_id`: `{visao: 'ANIMAL', data, animal_id, codigo_interno, historica, animal (a linha da passagem em D) \| null, motivo, mensagem, lancamentos, anteriores}`. Recusas: data inválida → `FORMATO_INVALIDO`; futura → `DATA_FUTURA`; `de` depois de D → `PERIODO_INVERTIDO`; visão, situação ou sexo fora da lista → `VALOR_FORA_DA_LISTA`; animal (ou de fora do rebanho), pasto, propriedade ou categoria inexistente → `NOT_FOUND` |
+
+O custo por pasto são os lançamentos de custeio com o pasto (o relatório 15: "FINANCEIRO com `pasture_id`, alocações"; a manutenção,
+o arrendamento), por inteiro para o seu pasto (desenho-base 16.10); o custo que chega aos animais por rateio é o do custo por animal.
+O custo dos pastos mais o custeio sem pasto é o custeio do demonstrativo no mesmo período (o teste aleatório e a base de
+demonstração conferem).
+
+### 58.3 Resultado gerencial: `financeiro.resultado` (`Conciliacao`, puro; 07, seção 2.1; 08, seção 3)
+
+| Função | Contrato |
+|---|---|
+| `colunas(de, ate)` | Os meses de [de, ate], cortados nas pontas: `[{chave (aaaa-mm), inicio, fim, rotulo (mmm/aaaa)}]` |
+| `competenciaEntre(l, ini, fim)` | A parte da competência em [ini, fim] (a conta da 1.1 até o fim menos a da véspera do início) |
+| `ponte(t0, t1)` | A conciliação linha a linha de um período: os termos da identidade no fim menos os da véspera do início, cada um pedido no mesmo dia, pela mesma `identidade` (aritmética pura): `{resultado, caixa, a_receber, a_pagar, custo_rebanho_ativo (a variação do estoque de rebanho), insumos_estoque (a do estoque de insumos), despesa_antecipada, saldo_abertura, nao_operacional, direita, diferenca, fecha}`. Resultado do período = caixa + Δ a receber − Δ a pagar + Δ rebanho + Δ insumos + Δ despesa antecipada − Δ abertura − Δ não operacional. Termo que não é inteiro → `INTERNAL`. `PONTE` = os nomes, na ordem |
+| `custeioNaoAlocado(fx, de, ate)` | O custeio do período não alocado a nenhum animal pelo rateio que vale em `ate`, na competência do lançamento (07, 2.1: "custeio não alocado do período") |
+| `demonstrativo(fx, de, ate, {detalhe?})` | O resultado do período mês a mês, pedido em `ate`: `secoes` — RV, OR, DV (cada uma com `contas`, na ordem do plano de contas, sem as zeradas), CA (`linhas`: vendidos e descartados, mortes, baixas por ajuste; no detalhe, os `animais` de cada uma), CT (`grupos`: custos diretos, operacionais, administrativos, pela cópia gravada do grupo, cada um com as `contas`), J (juros e multas das baixas: o que reduz) e DB (descontos: o que aumenta) —, cada linha com `valores` (um por coluna, em centavos positivos; o sinal é o da seção, `sinal`) e `total`; `resultado` (RV + OR − DV − CA − CT − J + DB por coluna); `caixa` (o líquido de cada coluna e do período); `custeio_nao_alocado`; `fora_do_resultado` (a compra de animais e o saldo de abertura, a compra de insumos, o não operacional líquido — RN-083); `estoques` (rebanho e insumos no custo: início, entradas, saídas, fim; por coluna e no período: as saídas do rebanho são o custo de quem saiu); `ponte` (de cada coluna e do período); `identidade` (os termos em `ate`); `parcial` (quem saiu no período sem custo de aquisição conhecido, 07, seção 6) ou null; `fecha` e `problemas` (a ponte que não fecha, o resultado das linhas que difere do da identidade, a identidade acumulada). No `detalhe`, cada conta traz os `lancamentos` com a parte do período |
+| `consultaResultado(dados)` / `resultadoGerencial(ctx, dados)` | A rota. dados: `{ano? (aaaa), mes? (aaaa-mm), de?, ate? (padrão: de 1º de janeiro até hoje), detalhe?}`; o mês e o ano em curso vão até hoje. Recusas: data, mês ou ano mal escritos → `FORMATO_INVALIDO` (campo `de`, `ate`, `mes`, `ano`); `ate` depois de hoje, ou o período que ainda não começou → `DATA_FUTURA`; invertido → `PERIODO_INVERTIDO`; mais de 120 meses → `VALOR_FORA_DA_FAIXA`. Fim antes do marco zero → `{motivo: 'ANTERIOR_AO_MARCO_ZERO', mensagem, colunas: [], secoes: [], resultado: null}` (P9); começo antes dele → `antes_do_marco_zero` (a conta começa no marco zero). No detalhe, os animais do custo de aquisição com o código e o brinco do dia da saída |
+
+### 58.4 Regra de tempo (RELATORIO_FASE3, seção 6.6; o número pedido numa data D)
+
+Conta só o lançamento com competência até D, pelo rateio que valia em D (o re-rateio de depois não muda D), a parcela paga até D, a
+passagem do animal em D (a aberta em D ou a última que se fechou até D: a venda de depois não traz arrobas nem resultado para D —
+achado desta etapa, sementes 9960031 e 9960035), o brinco, o pasto e a categoria do animal na data. Cadastros lidos como estão hoje,
+por desenho: o nome e a ordem das contas (a natureza, o tipo, o grupo e a classe não mudam depois do primeiro lançamento: 03a, 4.13);
+o nome, a posse, o arrendador e a área do pasto (03a, 4.2: cadastro sem vigência; a área e a posse não têm data, e mudar a posse
+muda só o grupo do pasto, não os números); a categoria e o parâmetro `arroba_kg`. O histórico anterior ao marco zero fica fora das
+três visões e da lista; a ficha e o detalhe do animal que só existe no histórico usam a passagem histórica dele.
+
+**Viagem no tempo** (seção 46): a bateria ganhou os grupos `res` (o demonstrativo do ano de D até D), `resD` (o mesmo com o detalhe),
+`custo` (o custo por animal em D: a lista e as linhas de cada animal), `custoA` (o detalhe de cada animal da amostra) e `custoP` (o
+custo por pasto nos 90 dias até D); `res` e `resD` leem os pagamentos (`GRUPOS_DO_CAIXA`); a impressão do animal nos grupos `custo` e
+`custoA` leva os RATEIO dos lançamentos dele (`GRUPOS_DO_CUSTO`), como a ficha. **Correção** (seção 50, b4): `res`, `custo` e `custoP`
+entram na bateria (a correção sem mudança não muda o resultado nem o custo de ninguém). O detalhe (`resD`, `custoA`) cita os
+lançamentos pelo identificador, que a correção sem mudança regrava; por isso fica fora do b4.
+
+### 58.5 Telas (`Financial`, sob demanda; `Animals`)
+
+O Financeiro ganha duas abas. **Resultado** (`financeiro/resultado`): o ano (vazio = este ano) ou um mês; os indicadores (o resultado
+do período, o caixa líquido, o custeio não alocado, se a conciliação fecha), o rótulo "parcial", o demonstrativo por mês (as seções
+com o sinal, os grupos e as contas, o resultado), "Ao lado do resultado" (o caixa líquido, o custeio não alocado e o que ficou fora
+do resultado), os estoques no custo (rebanho e insumos), a **conciliação linha a linha** (a ponte de cada mês e do período, "Fecha?",
+e a identidade acumulada termo a termo) e, no mês, o que o compõe (os lançamentos e os animais, com o link). **Custos**
+(`financeiro/custos` e `financeiro/custos/pastos`): por animal (a data, o início do período, a situação, o pasto, a categoria, o
+sexo e a busca; os totais, o custeio não alocado, o parcial; a tabela com a aquisição, o sanitário, a alimentação, os adicionais, o
+acumulado, o custeio por dia, a receita, as despesas de venda, o resultado e a margem por arroba, com o link para a ficha) e por
+pasto (de, até; os totais por posse e o custeio sem pasto; a tabela com a posse e o arrendador, a área, o custo, o alocado, o sem
+alocar, os animais-dia, o R$/ha e o R$/animal-dia; os lançamentos dos pastos com o link para o detalhe, onde se rateia de novo). O
+**bloco H** da ficha mostra as classes do custeio, os dias e o custeio por dia e a margem por arroba, e leva ao custo de todos. Todo
+número vem do servidor (`tests/cliente.naocalcula.test.js` vale); a página inicial cresce só o bloco H.
+
+### 58.6 Decisões
+
+- Duas rotas canônicas, sem rota extra: `financeiro.custosAnimal` serve o custo por animal, o detalhe de um animal e o custo por
+  pasto (08, seção 16: "agregado por pasto"); `financeiro.resultado` serve o resultado do ano e do mês e a conciliação linha a linha
+  (07, 2.1 diz "sem tela no MVP"; a tarefa da etapa pede a tela, e ela só mostra o que o servidor conferiu).
+- O resultado por animal é por passagem pela fazenda (03a, DL-08): quem saiu e voltou tem uma linha por passagem; a ficha é a da
+  passagem atual (ou a última), e as alocações das anteriores ficam na lista, fora das contas.
+- A passagem de cada alocação é uma regra só (58.1), a mesma da conciliação; o bloco H deixou a regra "competência ≥ a entrada" (que
+  perdia o arrendamento do mês de quem chegou no meio dele).
+- "Variação de estoque de insumos e de rebanho conforme o desenho" (07, 2.1): o resultado não leva a compra de animais nem a de
+  insumos; a tela mostra os estoques no custo (início, entradas, saídas, fim) e a variação deles na ponte de cada mês.
+- O custeio não alocado de um lançamento com período segue a competência dele (a 1.1): a parte do período, fechada pelo maior resto.
+- O custo diário e a margem por arroba são razões arredondadas ao centavo (metade para longe do zero) e rotuladas; a margem com o
+  rendimento estimado sai marcada "estimada".
+- Achado do teste aleatório fora da etapa (E4.3): o re-rateio do valor de abertura (evento RATEIO) deixava a origem do custo de
+  aquisição "não informado" na projeção (a regra olhava o evento do rateio, não o lançamento); agora a abertura é o lançamento do
+  próprio rebanho inicial (`Timeline`, `f.aquisicoes` com `ancora`). O teste do caminho falhava no código de antes.
+- A posse e a área do pasto são cadastro sem vigência (03a, 4.2), lidos como estão hoje e documentados como exceção da viagem no
+  tempo (como o nome do pasto); reconstruir pela auditoria daria o que o sistema sabia num instante, não o fato da data.

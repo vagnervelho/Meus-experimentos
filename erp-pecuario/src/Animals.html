@@ -455,11 +455,15 @@ var TelaRebanho = (function () {
     var caixa = h('div', { dataset: { blocoFinanceiro: '1' } });
     if (b.entregue === false) { caixa.appendChild(UI.nota(b.mensagem, 'info')); return caixa; }
     var custo = b.custo_aquisicao === null || b.custo_aquisicao === undefined ? '— (sem valor de aquisição)' : Fmt.dinheiro(b.custo_aquisicao) + (b.custo_aquisicao_origem ? ' · ' + (ORIGEM_CUSTO[b.custo_aquisicao_origem] || b.custo_aquisicao_origem) : '');
+    var cl = b.classes || {};
+    var ma = b.margem_arroba || {};
     caixa.appendChild(UI.pares([
-      ['Custo de aquisição', custo], ['Custeio alocado', Fmt.dinheiro(b.custeio)],
+      ['Custo de aquisição', custo], ['Custeio alocado', Fmt.dinheiro(b.custeio) + ' (sanitário ' + Fmt.dinheiro(cl.sanitario || 0) + ' · alimentação ' + Fmt.dinheiro(cl.alimentacao || 0) + ' · adicionais ' + Fmt.dinheiro(cl.adicionais || 0) + ')'],
       ['Custo acumulado', b.custo_acumulado === null ? '—' : Fmt.dinheiro(b.custo_acumulado)],
+      b.dias ? ['Dias no rebanho · custeio por dia', b.dias + ' · ' + UI.valorInd(b.custo_diario, Fmt.dinheiro).texto] : null,
       b.receitas ? ['Receitas', Fmt.dinheiro(b.receitas)] : null, b.despesas_venda ? ['Despesas de venda', Fmt.dinheiro(b.despesas_venda)] : null,
       ['Resultado', b.resultado && b.resultado.valor !== null ? Fmt.dinheiro(b.resultado.valor) : '— (' + ((b.resultado && b.resultado.mensagem) || Fmt.rotulo('MOTIVO', 'DADOS_INSUFICIENTES')) + ')'],
+      ma.valor !== null && ma.valor !== undefined ? ['Margem por arroba', Fmt.dinheiro(ma.valor) + ' (' + Fmt.numero(ma.arrobas, 2) + ' @' + (ma.estimado ? ', estimada' : '') + ')'] : null,
     ].filter(Boolean)));
     caixa.appendChild((b.lancamentos || []).length ? UI.tabela({ id: 'lancamentos-animal', rotulo: 'Lançamentos do animal', linhas: b.lancamentos, chave: function (x) { return x.financial_id; },
       colunas: [
@@ -471,7 +475,7 @@ var TelaRebanho = (function () {
         { id: 'valor_alocado', rotulo: 'Deste animal', num: true, formatar: function (x) { return Fmt.dinheiro(x.valor_alocado); } },
       ] }).el : UI.nota('Nenhum lançamento atribuído a este animal.', 'info'));
     if (b.lancamentos_anteriores && b.desde) caixa.appendChild(UI.nota('Os totais e o resultado são desta passagem pela fazenda, desde ' + Fmt.data(b.desde) + '. Os lançamentos de passagens anteriores aparecem na lista, mas ficam fora das contas.', 'info'));
-    if (b.parcial && b.pendente) caixa.appendChild(UI.nota(b.pendente.mensagem, 'info'));
+    if (Store.modulo('FINANCEIRO')) caixa.appendChild(h('p', null, h('a', { class: 'botao botao-texto', href: Roteador.href('financeiro/custos'), dataset: { rota: 'financeiro/custos' } }, 'Ver o custo de todos os animais')));
     return caixa;
   }
   /**

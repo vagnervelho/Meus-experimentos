@@ -38,6 +38,10 @@ test('CT-19 por animal (07, 2.2 e 6): aquisição, sanitário, alimentação (o 
       [x.aquisicao, x.custeio, x.custo_acumulado, x.receitas, x.despesas_venda, x.resultado.valor, x.sanitario, x.alimentacao, x.dias, x.custo_diario.valor, x.margem_arroba.valor], 'ficha × rota: ' + b);
     assert.equal(h.custo_aquisicao, s.tabela('ANIMAIS').find((a) => a.animal_id === c.id[b]).custo_aquisicao, 'o custo de aquisição é o da projeção: ' + b);
   });
+  // Achado do teste aleatório (sementes 9960031 e 9960035): numa data antes da venda, o animal está no rebanho, e a margem não
+  // pode trazer as arrobas da venda que ainda não aconteceu (a regra de tempo).
+  const antes = Object.fromEntries(s.consulta('financeiro.custosAnimal', { data: '2027-10-31' }).itens.map((x) => [x.brinco, x]));
+  assert.deepEqual([antes.A1.situacao, antes.A1.margem_arroba, antes.A1.resultado.valor], ['NO_REBANHO', { valor: null, arrobas: null, estimado: false, base: null, motivo: 'DADOS_INSUFICIENTES' }, null]);
   // O detalhe de um animal: cada alocação com o critério e a base (08, seção 3: o critério de cada valor).
   const d = s.consulta('financeiro.custosAnimal', { animal_id: c.id.A2, data: '2027-12-31' });
   assert.deepEqual(d.lancamentos.map((x) => [x.conta_codigo, x.criterio, x.base_valor, x.valor_alocado]).sort(), [
@@ -108,6 +112,11 @@ test('a passagem de cada alocação: o arrendamento do mês rateado pelos dias a
   const m = p.itens.find((x) => x.brinco === '777');
   assert.deepEqual([m.aquisicao, m.aquisicao_origem, m.resultado.valor, m.resultado.motivo, p.totais.parciais, p.parcial.cabecas], [null, 'DESCONHECIDO', null, 'DADOS_INSUFICIENTES', 1, 1]);
   assert.match(p.parcial.mensagem, /1 cabeça saiu sem custo de aquisição/);
+  // O resultado gerencial do período sai rotulado "parcial" (07, seção 6), com a mesma contagem.
+  const res = s.consulta('financeiro.resultado', { de: '2026-01-01', ate: '2026-08-10' });
+  assert.deepEqual([res.fecha, res.parcial.cabecas], [true, 1]);
+  assert.match(res.parcial.mensagem, /^Parcial: 1 cabeça saiu no período sem custo de aquisição conhecido/);
+  assert.equal(s.consulta('financeiro.resultado', { de: '2026-08-02', ate: '2026-08-10' }).parcial, null, 'fora do período da saída, sem o rótulo');
 });
 
 test('regra de tempo: o custo numa data usa o rateio que valia nela e os fatos até ela; o re-rateio, a venda e a pesagem de depois não mudam a data; o retroativo muda; o nome da conta é rótulo de hoje; a posse e a área do pasto são o cadastro de hoje (sem vigência, 03a 4.2)', () => {

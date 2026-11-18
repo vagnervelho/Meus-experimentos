@@ -556,7 +556,9 @@ var Conciliacao = (function () {
         if (parte) linhaConta(sec, l).lancamentos.push({ financial_id: l.financial_id, event_id: l.event_id, event_type: l.event_type, descricao: l.descricao, data_competencia: l.data, competencia_inicio: l.inicio, competencia_fim: l.fim, valor_lancamento: l.valor, valor: parte });
       }
     });
+    var comCusto = [];
     aquisicoes_(fx, ate, ate).forEach(function (a) {
+      if (a.p) comCusto.push(a.p);
       if (!a.p || !a.p.saida) return;
       cols.forEach(function (c, k) {
         if (!noPeriodo_(a.p.saida.data, c.inicio, c.fim)) return;
@@ -564,6 +566,14 @@ var Conciliacao = (function () {
         somarNa_(caLinhas[a.p.saida.linha], k, a.valor);
       });
       if (o.detalhe && noPeriodo_(a.p.saida.data, de, ate)) caLinhas[a.p.saida.linha].animais.push({ animal_id: a.animal_id, financial_id: a.l.financial_id, data_saida: a.p.saida.data, tipo_saida: a.p.saida.tipo, valor: a.valor });
+    });
+    // O resultado parcial (07, seção 6): quem saiu no período sem custo de aquisição conhecido (o rebanho inicial sem valor de
+    // abertura; o nascido custa 0,00) deixa o custo dele fora do resultado — o número sai rotulado, nunca com zero inventado.
+    var semCusto = 0;
+    Object.keys(fx.permanencias).forEach(function (id) {
+      fx.permanencias[id].forEach(function (p) {
+        if (p.saida && noPeriodo_(p.saida.data, de, ate) && p.entrada.tipo !== 'NASCIMENTO' && comCusto.indexOf(p) < 0) semCusto++;
+      });
     });
     // O resultado de cada coluna (07, 2.1): RV + OR − DV − CA − CT − J + DB.
     var res = linhaDre_('RESULTADO', 'Resultado', n);
@@ -614,6 +624,7 @@ var Conciliacao = (function () {
       } },
       ponte: { colunas: pontes, periodo: pontePeriodo },
       identidade: tFim,
+      parcial: semCusto ? { cabecas: semCusto, mensagem: 'Parcial: ' + semCusto + (semCusto === 1 ? ' cabeça saiu' : ' cabeças saíram') + ' no período sem custo de aquisição conhecido (o custo delas não entra no resultado).' } : null,
       fecha: problemas.length === 0, problemas: problemas,
     };
   }

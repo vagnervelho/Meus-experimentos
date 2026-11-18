@@ -120,7 +120,9 @@ var Custos = (function () {
     else if (acumulado === null) resultado = { valor: null, motivo: 'DADOS_INSUFICIENTES', mensagem: 'Sem custo de aquisição conhecido, o resultado não é calculado.' };
     else resultado = { valor: o.receitas - o.despesas_venda - acumulado, motivo: null };
     var margem = { valor: null, arrobas: null, estimado: false, base: null, motivo: null };
-    if (venda && venda.arrobas > 0) { margem.arrobas = Math.round(venda.arrobas * 100) / 100; margem.estimado = venda.estimado === true; margem.base = venda.base; }
+    // As arrobas da venda só existem com a passagem fechada em D: numa data antes da venda, o animal está no rebanho (achado do
+    // teste aleatório da E4.4: a margem trazia as arrobas da venda futura).
+    if (fechada && venda && venda.arrobas > 0) { margem.arrobas = Math.round(venda.arrobas * 100) / 100; margem.estimado = venda.estimado === true; margem.base = venda.base; }
     if (resultado.valor === null) margem.motivo = 'DADOS_INSUFICIENTES';
     else if (!margem.arrobas) margem.motivo = 'SEM_VALOR_DE_REFERENCIA';
     else margem.valor = razao_(resultado.valor, venda.arrobas);

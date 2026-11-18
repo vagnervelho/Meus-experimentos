@@ -2553,3 +2553,32 @@ cada comando, de cada passo do teste aleatório e na base de demonstração. Con
   base zero grava com o aceite (salvo no lançamento 100% do registro); o estorno ou a correção do registro rateado é recusado até
   o rateio ser estornado; o rateio desatualizado só alerta; `mostrar_se` é só da tela. `docs/fase-0/` não mudou. Esta etapa não
   fez commit nem push.
+
+## 18/11/2026 — Fase 4, E4.4 e E4.5: custo por animal e por pasto, resultado gerencial e conciliação
+
+- Rotas canônicas entregues (consultas; sem comando nem tipo de evento novo): `financeiro.custosAnimal` (o custo por animal numa
+  data — aquisição, sanitário, alimentação com a manutenção e o arrendamento de pasto, adicionais, custo acumulado, custeio por
+  dia, receita, despesas de venda, resultado de quem saiu e margem por arroba; o detalhe de um animal com o critério de cada valor;
+  o custo por pasto no período com a posse, o alocado e o sem alocar, os animais-dia, o R$/ha e o R$/animal-dia) e
+  `financeiro.resultado` (o resultado por competência mês a mês, por natureza e por conta, com o caixa ao lado, o custeio não
+  alocado, o que ficou fora do resultado, os estoques no custo, a ponte de cada mês e a identidade acumulada; o rótulo "parcial").
+- Novo `Custos` (puro). `Conciliacao`: `fatos` com a conta, o grupo, a classe, o pasto, as bases dos rateios, as passagens de todos
+  os animais e a histórica; a passagem de cada alocação numa regra só (`passagemNaLista`); `ponte` (a identidade aplicada às
+  variações, função pura), `demonstrativo`, `custeioNaoAlocado`, `posicao`/`termosEm` pedidos em `em`. O bloco H da ficha é a mesma
+  conta da rota (`Custos.blocoFicha`; `FinancialService.blocoFicha` saiu), com as classes, os dias, o custeio por dia e a margem.
+- Telas no Financeiro (sob demanda): Resultado (o ano ou um mês, o demonstrativo, o caixa ao lado, os estoques, a conciliação linha
+  a linha e o que compõe o mês) e Custos (por animal e por pasto); o bloco H da ficha com as classes. Página inicial 368 KB de 450
+  KB; Financial 56 KB de 150 KB.
+- Achados, cada um com o teste do caminho escrito e conferido falhando sem o conserto: o arrendamento do mês rateado pelos dias a
+  quem chegou no meio dele ficava fora do custo do animal no bloco H (a regra "competência ≥ a entrada"); o re-rateio do valor de
+  abertura deixava a origem do custo de aquisição "não informado" na projeção (sementes 9950003 e 9950005; anterior à etapa, da
+  E4.3); numa data antes da venda, a margem trazia as arrobas da venda futura (sementes 9960031 e 9960035).
+- Testes: `tests/financeiro.custos.test.js` (novo), `tests/financeiro.resultado.test.js` (novo, o CT-19 inteiro pela api, também
+  depois de estornar a venda), `tests/apoio-ct19.js` (novo: o caso do 07, seção 2.2, comando a comando), `tests/conciliacao.test.js`
+  (a ponte, o demonstrativo do 2.2 e 400 bases sorteadas), `tests/ui/fase4.custos.test.js` (novo, Playwright a 1280 e 360 px),
+  `tests/acceptance.test.js` (a base de demonstração: o resultado de cada ano fecha, o custo de aquisição da lista = a projeção, os
+  pastos mais o custeio sem pasto = o custeio), `tests/animals.test.js`, `tests/api.test.js`, `tests/financeiro.caixa.test.js`
+  (as rotas entregues). Teste aleatório: o oráculo `oraculoCustos` (o custo por animal contra o modelo das linhas cruas, contra a
+  projeção e contra a ficha; o demonstrativo, a conciliação e o custo dos pastos entre si) e os grupos `res`, `resD`, `custo`,
+  `custoA` e `custoP` da viagem no tempo (`res`, `custo` e `custoP` também no b4 da correção); as sementes fixas exigem que o
+  oráculo novo confira.

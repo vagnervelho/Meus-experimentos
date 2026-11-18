@@ -266,6 +266,22 @@ test('base de demonstração (TEST_PLAN = DEMO): a composição de 09, seção 7
   const rc = conc.data.periodo.resultado;
   assert.ok(rc.receita_venda > 0 && rc.custo_aquisicao.vendidos_descartados > 0 && rc.custo_aquisicao.mortes > 0 && rc.custeio > 0 && tc.custo_rebanho_ativo > 0 && tc.a_pagar > 0, 'a base exercita todos os termos: ' + JSON.stringify(tc));
   assert.equal(tc.custo_rebanho_ativo, animais.filter((a) => a.situacao_cadastral === 'ATIVO').reduce((t, a) => t + (a.custo_aquisicao || 0), 0), 'o custo do rebanho ativo da conciliação = a soma da projeção');
+  // Fase 4, E4.4 e E4.5: na base, o resultado de cada ano fecha (a ponte de cada mês e a identidade), e o custo por animal de hoje
+  // dá, para cada animal no rebanho, o custo de aquisição da projeção; o custo dos pastos mais o custeio sem pasto é o custeio do ano.
+  const pedir = (rota, dados) => { const r = js(s.gas.exec(() => s.G.api({ rota, ambiente: 'DEMO', dados }))); assert.equal(r.ok, true, rota + ' ' + JSON.stringify(r.error)); return r.data; };
+  const hojeDemo = conc.data.ate;
+  [hojeDemo.slice(0, 4) - 2, hojeDemo.slice(0, 4) - 1, hojeDemo.slice(0, 4)].map(String).forEach((ano) => {
+    const r = pedir('financeiro.resultado', { ano });
+    if (r.motivo) return;
+    assert.deepEqual([ano, r.fecha, r.problemas], [ano, true, []]);
+    const p = pedir('financeiro.custosAnimal', { visao: 'PASTOS', de: r.de, data: r.ate });
+    assert.equal(p.total.custo + p.custeio_sem_pasto, r.secoes.find((x) => x.chave === 'CT').total, 'os pastos e o custeio sem pasto = o custeio do demonstrativo de ' + ano);
+  });
+  const custos = pedir('financeiro.custosAnimal', { situacao: 'NO_REBANHO' });
+  const proj = Object.fromEntries(animais.filter((a) => a.situacao_cadastral === 'ATIVO').map((a) => [a.animal_id, a.custo_aquisicao === undefined ? null : a.custo_aquisicao]));
+  assert.equal(custos.itens.length, Object.keys(proj).length, 'uma linha por animal no rebanho');
+  assert.deepEqual(custos.itens.filter((x) => x.aquisicao !== proj[x.animal_id]).map((x) => x.codigo_interno), [], 'o custo de aquisição da lista = o da projeção');
+  assert.ok(custos.totais.custeio > 0 && custos.itens.some((x) => x.sanitario > 0), 'a base aloca custeio aos animais (as aplicações)');
   // Determinismo: rodar de novo não grava nada novo (mesmas chaves seed:<n>, mesmo conteúdo).
   const rel2 = js(s.gas.exec(() => s.G.runAcceptanceTests()));
   assert.deepEqual([rel2.ok, rel2.demonstracao.cabecas], [true, 304]);
