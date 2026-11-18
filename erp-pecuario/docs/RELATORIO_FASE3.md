@@ -1,15 +1,15 @@
 # Relatório da Fase 3 — Manejo
 
-Data: 17/11/2026. Versão do app: 0.1.0. Plano: `docs/fase-0/10-plano-de-implementacao.md`, seção 4 (entregas E3.1 a
+Data: 18/11/2026 (o relatório da entrega e da primeira convergência é de 17/11/2026). Versão do app: 0.1.0. Plano: `docs/fase-0/10-plano-de-implementacao.md`, seção 4 (entregas E3.1 a
 E3.7) e seção 8 (checklist). Relatório da fase anterior: `docs/RELATORIO_FASE2.md`.
 
 ## Em resumo
 
-- **O código da Fase 3 está completo no repositório** (`erp-pecuario/src/`: 25 arquivos `.js`, 13 `.html` e o
-  manifesto; entraram o `WeightService`, o `Identificacao` e as telas `Weights`, `Health` e `Reproduction`) e passou em
-  todos os testes que rodam aqui, inclusive os das Fases 1 e 2: **`npm test` com 863 testes, 863 aprovados, 0 falhas** e
-  **`npm run ui:check` com 186 testes de navegador, 186 aprovados, 0 falhas** (execução desta etapa, 17/11/2026, sobre o
-  código final da convergência; nesta etapa só mudaram documentos).
+- **O código da Fase 3 está completo no repositório** (`erp-pecuario/src/`: 26 arquivos `.js`, 13 `.html` e o
+  manifesto; entraram o `WeightService`, o `Identificacao`, o `Correcao` e as telas `Weights`, `Health` e `Reproduction`) e
+  passou em todos os testes que rodam aqui, inclusive os das Fases 1 e 2: **`npm test` com «NT» testes, «NP» aprovados, «NF»
+  falhas** e **`npm run ui:check` com «UT» testes de navegador, «UP» aprovados, «UF» falhas** (execução desta etapa, 18/11/2026,
+  sobre o código final da segunda convergência; nesta etapa só mudaram documentos).
 - Pesagem, sanidade e reprodução são registradas no curral e viram indicadores: pesagem individual, coletiva e por lote,
   com o modo curral no celular; ganho médio diário (GMD), curva de peso e projeção rotulada; insumos com estoque
   opcional, aplicações com consumo e custo no momento da aplicação, carência, agenda e alertas; estação de monta,
@@ -20,30 +20,43 @@ E3.7) e seção 8 (checklist). Relatório da fase anterior: `docs/RELATORIO_FASE
 - Cada tipo novo passa por **um tratador só** em todo caminho (registrar, simular, retroativo, mesmo dia, corrigir,
   corrigir o substituto, estornar, importar, desfazer, base de demonstração), e o que ele grava é conferido pela mesma
   função da verificação de integridade e da trava única (`AuditService.conferirDominio_`).
-- **Telas sob demanda (risco R-31).** A página inicial ficou em 450 KB de 450 KB (460.755 bytes de 460.800: sobram
-  45); a importação e as três telas novas são pedidas ao servidor quando o menu as abre (Import 48 KB, Weights 59 KB,
-  Health 25 KB e Reproduction 65 KB, de 150 KB cada), e a Início traz em segundo plano as do curral e do tronco. Que o quadro (iframe)
+- **Telas sob demanda (risco R-31).** A página inicial tem «PI_KB» de 450 KB («PI_B» bytes de 460.800: sobram «PI_SOBRA»;
+  no fim da primeira convergência sobravam 45, e a segunda tirou da página inicial a prévia da correção montada no aparelho).
+  A importação e as três telas novas são pedidas ao servidor quando o menu as abre («SOB_DEMANDA», de 150 KB cada), e a Início
+  traz em segundo plano as do curral e do tronco. Que o quadro (iframe)
   do HtmlService rode a tela injetada é hipótese (NV): se não rodar, a contingência está pronta (seção 5, item 1).
 - **Nada foi implantado nem executado na conta Google do dono.** Continuam **PENDENTES NA CONTA DO DONO** os itens das
   Fases 1 e 2 e, da Fase 3: `runAcceptanceTests` com os 23 cenários, as premissas PR-06, PR-07, PR-10 e PR-11, o
   cadastro dos produtos e protocolos com o veterinário e o modo curral num celular de verdade, no curral (agora com uma
   ida ao servidor por brinco digitado, seção 6.6.3). Pela regra de honestidade, **a Fase 3 não está fechada** até esses
   resultados chegarem.
-- A **revisão independente** teve três rodadas e uma revisão final: **29 achados** na entrega (14 de gravidade alta),
-  **25** nos consertos da primeira (8 altos), **25** nos da segunda (5 altos) e **17** na revisão final, depois da
-  convergência (7 altos); 96 no total, 85 distintos. Todos foram corrigidos e têm teste; nenhum foi refutado nem adiado.
-  As três rodadas repetiam duas classes de defeito: o número ou o estado numa data passada calculado com o dado de hoje, e
-  o curral e o tronco com estados inconsistentes.
+- A **revisão independente** teve seis rodadas. Foram **29 achados** na entrega (14 de gravidade alta), **25** nos
+  consertos da primeira (8 altos), **25** nos da segunda (5 altos), **17** na revisão final, depois da convergência (7 altos),
+  e **17** e **17** nas duas rodadas da segunda convergência (7 e 10 altos). No total, 130 achados e 117 distintos. Todos
+  foram corrigidos e têm teste. Só uma parte de um achado foi refutada (a adulteração só da fonte, sem cópia que a confira),
+  e nenhum foi adiado. As rodadas repetiam duas classes de defeito: o número ou o estado numa data passada calculado com o dado
+  de hoje (no caminho da correção, o fato congelado refeito pelo cadastro de hoje), e o curral e o tronco com estados
+  inconsistentes.
 - A **convergência** (seção 6.6) trocou o conserto caso a caso dessas duas classes por garantias que valem para todos os
   caminhos. São três: o oráculo de viagem no tempo no teste aleatório, sobre um ponto único do estado numa data; um
   resolvedor único do brinco na data, no servidor (o aparelho não resolve mais brinco); e o teste aleatório da tela do
   curral e do tronco, com a rede caindo. Pela primeira vez na fase, o teste aleatório achou defeitos do sistema sem
   revisor: 13 falhas em 6 classes pelo oráculo do tempo e 5 defeitos pela tela (um sexto saiu da leitura do código para
-  montar o modelo da tela), todos corrigidos. Na fase, o teste
-  aleatório do motor rodou **8.288 sementes novas**, e o da tela, **830**.
-- **A revisão final não terminou sem achado alto**: teve 7 altos, 4 deles no curral e no tronco. Dos 17 achados, 8 eram
-  conserto incompleto ou regressão, 6 deles das próprias etapas da convergência. Os 17 consertos não passaram por outra
-  revisão. **A convergência não está demonstrada** (seção 6.6.6).
+  montar o modelo da tela), todos corrigidos.
+- A **segunda convergência** (seção 6.6.7) tratou com mais duas garantias as duas classes que a revisão final ainda achava:
+  - o ponto único da correção (`src/Correcao.js`), com a tabela dos 23 valores que a correção mantém do original e o oráculo
+    da correção no teste aleatório. Ele achou 21 defeitos, 4 altos: 11 por semente e 10 pela leitura do código ao montar as tabelas e o ponto único;
+  - o curral e o tronco sem estado escondido, com o gerador da tela ampliado (o modo sem `localStorage`), e o teste "o cliente
+    não calcula". Foram 3 defeitos, achados pela leitura do código e pelo teste estático; as levas da tela só acharam erros do
+    modelo.
+
+  Na fase, o teste aleatório do motor rodou **«SEM_MOTOR» sementes novas**, e o da tela, **«SEM_TELA»**.
+- **A última rodada não terminou sem achado alto**: a rodada 2 da segunda convergência teve 10 altos, mais que os 7 da
+  rodada 1 e os 7 da revisão final. Pela primeira vez, o curral e o tronco não tiveram achado alto numa rodada. O fato
+  congelado na correção teve 4 altos, e apareceram duas frentes novas com altos: a verificação da cópia na mesma linha do
+  lançamento e as telas que escolhem um valor pelo dado de hoje. Dos 17 achados, 8 eram conserto incompleto ou regressão, todos
+  de peças ou consertos da própria segunda convergência. Os 17 consertos não passaram por outra revisão, porque a orquestração
+  previa no máximo duas rodadas. **A convergência não está demonstrada** (seção 6.6.7).
 - Como atualizar a implantação: `docs/GUIA_DE_IMPLANTACAO.md`, seção 11.2, com o roteiro do modo curral.
 
 ## Regra de honestidade (09-plano-de-testes.md, seção 1)
@@ -78,40 +91,51 @@ reais do Google, só na conta do dono.
 | Transversal: aceitação, demonstração, jornada e regras | `runAcceptanceTests` com CT-05, CT-06, SANIDADE, ESTOQUE, REPRODUCAO e o passo 3 do CT-10 (23 cenários no total); base de demonstração com o manejo completo (410 comandos, 304 ativos, nenhuma recusa nem aviso aceito), conferida pelo servidor no fim (`demonstracao.manejo`); jornada de um ano de manejo só pela `api()`; mapa RN-049 a RN-066 → teste | `TestRunner` | `acceptance.test.js`, `jornada.fase3.test.js`, `regras.fase3.test.js` | `EXECUTADO AQUI` (fakes); na conta: `PENDENTE NA CONTA DO DONO` |
 | Transversal: trava e teste aleatório | Cada fato novo conferido por `AuditService.conferirDominio_` (PESAGENS e a cópia do peso, SANIDADE, MOVIMENTOS_ESTOQUE e o saldo, REPRODUCAO, as regras de manejo, o histórico sem estoque), a mesma função da trava em todo caminho; o saldo do insumo na quarentena da fonte quebrada; o teste aleatório com gerador e oráculo de cada tipo e importador num registro único, o curral e o tronco em blocos com reenvio, as interações com a Fase 2 | `AuditService`, `UnitOfWork`; `tests/apoio-fuzz.js` | `trava.integridade.test.js`, `integrity.fase2.test.js`, `fase2.fuzz.test.js` (23 sementes fixas), `fase3.fuzz.regressoes.test.js`, `revisao.fase3.*.test.js`, `revisao2.fase3.*.test.js`, `revisao3.fase3.*.test.js` | `EXECUTADO AQUI` |
 | Transversal: convergência pela garantia (seção 6.6) | O estado numa data D por um ponto único (`Timeline.fonteAte` e `retratoEm`: o mesmo projetor de hoje sobre os fatos até D) e o oráculo de viagem no tempo no teste aleatório; o resolvedor único do brinco na data, no servidor (`Identificacao`, rota `animal.resolver`), usado pelo curral, pelo tronco, pelo seletor, pelas buscas e pela importação (o aparelho não resolve brinco); o teste aleatório da tela do curral e do tronco com falhas de rede e as garantias da fila de lote; o conserto da revisão final | `Timeline`, `Identificacao` (novo), `AnimalService`, `InventoryService`, `PastureService`, `HealthService`, `ReproductionService`, `WeightService`, `ImportService`, `EventService`, `Api`, `Utils`, `JavaScript`, `Components`, `Weights`, `Reproduction`, `Events`, `Health`, `Pastures`; `tests/apoio-fuzz.js`, `tests/apoio-resolvedor.js`, `tests/ui/apoio-curral.js` | `tempo.regressoes.test.js`, `resolvedor.unico.test.js`, `revisao.final.fase3.test.js`, `fase2.fuzz.test.js` (os contadores do tempo e do resolvedor nas sementes fixas), `ui/resolvedor.test.js`, `ui/curral.fuzz.test.js` (6 sementes fixas), `ui/curral.fuzz.regressoes.test.js`, `ui/revisao.final.fase3.test.js` | `EXECUTADO AQUI`; a ida ao servidor por brinco no celular e o retrato numa data no Apps Script: `PENDENTE NA CONTA DO DONO` |
+| Transversal: segunda convergência (seção 6.6.7) | O ponto único da correção (`Correcao`: a entrada sem mudança montada só das linhas gravadas, a correção só com a mudança, a tabela dos 23 valores que a correção mantém do original, as marcas do digitado no payload) e o oráculo da correção no teste aleatório; a verificação da cópia na mesma linha do lançamento; o curral e o tronco sem estado escondido (o bloco só sai com a chave guardada; o rascunho no servidor pela versão, que avisa a falha e vai de novo sozinho), com o gerador da tela ampliado; o teste "o cliente não calcula" e a rota `financeiro.vencimentos`; o conserto das duas rodadas de revisão | `Correcao` (novo), `EventService`, `AuditService`, `ReproductionService`, `HealthService`, `FinancialService`, `ImportService`, `EventCatalog`, `Api`, `TestRunner`, `JavaScript`, `Components`, `Events`, `Health`, `Weights`, `Reproduction`, `Animals`, `Import`; `tests/apoio-fuzz.js`, `tests/apoio-naocalcula.js`, `tests/ui/apoio-curral.js` | `correcao.regressoes.test.js`, `correcao.contrato.test.js`, `cliente.naocalcula.test.js`, `convergencia2.r1.test.js`, `convergencia2.r2.test.js`, `fase2.fuzz.test.js` (a cobertura do oráculo da correção nas sementes fixas), `ui/curral.fuzz.test.js`, `ui/curral.fuzz.regressoes.test.js` (regressões 7 e 8), `ui/convergencia2.r1.test.js`, `ui/convergencia2.r2.test.js` | `EXECUTADO AQUI`; o curral sem `localStorage` num celular e o tempo da trava com as conferências novas no Apps Script: `PENDENTE NA CONTA DO DONO` |
 
 ## 2. Resultados dos testes executados aqui
 
-Ambiente: Node 22.23.4 (Linux, 4 núcleos), Playwright 1.63.0 com Chromium. Execução de 17/11/2026, nesta etapa (o
-relatório da convergência), sobre o código final da convergência, a última alteração de comportamento desta fase: o
-`src/` do commit `bfbdca6` e os testes do `d0033b6`, dois salvamentos automáticos durante o conserto da revisão final
-(seção 7). Nesta etapa só mudaram documentos: este relatório, o `CHANGELOG` e o `CONTRATOS.md` (a frase do estado e duas
-correções de texto, nas seções 46 e 47). A suíte inteira rodou uma vez, antes da mudança no `CONTRATOS.md`; os dois
-arquivos que o leem (`static` e `revisao4.interface`) rodaram de novo sozinhos depois dela: 26 testes, 26 aprovados, 0
-falhas. Pelos registros das etapas, o fim de cada uma deu: rodada 3, 837 e 158; viagem no tempo, 853 e 158; resolvedor,
-855 e 160; tela do curral, 855 e 173; conserto da revisão final, 863 e 186.
+Ambiente: Node 22.23.4 (Linux, 4 núcleos), Playwright 1.63.0 com Chromium. A execução é de 18/11/2026, nesta etapa (o
+relatório da segunda convergência), sobre o código final dela, que é a última alteração de comportamento da fase: o `src/` do
+commit `c4721eb` e os testes do `b9a2072`, dois salvamentos automáticos durante o conserto da rodada 2 (seção 7). Nesta etapa só
+mudaram documentos: este relatório, o `CHANGELOG` e o `CONTRATOS.md` (a frase do estado e três correções de texto, nas seções
+19, 46 e 54). A suíte inteira rodou uma vez, antes da mudança no `CONTRATOS.md`. Os três arquivos que o leem (`static`,
+`revisao4.interface` e `correcao.contrato`) rodaram de novo sozinhos depois dela: «REL_CONTRATOS». Pelos registros das etapas, o fim de
+cada uma deu, em testes de Node e de navegador:
+- relatório da primeira convergência: 863 e 186;
+- correção: 887 e 186;
+- curral: 890 e 190;
+- rodada 1: 902 e 201;
+- rodada 2: 914 e 212.
 
 ### 2.1 Nível 1 — `npm test` (`node --test tests/*.test.js`)
 
-Saída: `# tests 863 · # pass 863 · # fail 0 · # cancelled 0 · # skipped 0 · # todo 0` (duração 825,4 s;
-13 min 46 s de relógio; ao lado, por poucos segundos, só o registrador da contagem, com prioridade baixa, e consultas
-curtas ao código). As 23 sementes fixas do teste aleatório, 60 passos cada:
-`FUZZ: 23 sementes × 60 passos: 826 aceitos, 443 recusados, 0 falhas`. São as mesmas sequências de antes da convergência
-(os oráculos do tempo e do resolvedor sorteiam por um gerador à parte), que agora também exigem os contadores desses
-oráculos. Contagem por arquivo nesta etapa:
-- **A contagem de todos os 82 arquivos** foi tirada sem rodar os corpos: um registrador no lugar de `node:test` conta os
-  `test()` de cada arquivo. A soma, 863, é a da suíte; como a suíte inteira passou sem falha, cada arquivo passou com a
-  contagem da tabela.
-- **Os 40 arquivos novos ou alterados na Fase 3** (24 novos e 16 alterados desde o relatório da Fase 2) estão na primeira
-  tabela. Na convergência entraram 3 (`tempo.regressoes`, `resolvedor.unico` e `revisao.final.fase3`) e mudou 1
-  (`fase2.fuzz`, sem mudar a contagem). Os apoios que mudaram ou entraram (`apoio-fuzz`, `apoio-resolvedor`) só são usados
-  pelos testes e não declaram teste.
-- `static` e `revisao4.interface` leem o `CONTRATOS.md` mudado nesta etapa e rodaram de novo sozinhos depois da mudança:
-  26 de 26.
-- **Os demais 40** não mudaram desde a Fase 2 e passaram na suíte completa.
+Saída: `# tests 914 · # pass 914 · # fail 0 · # cancelled 0 · # skipped 0 · # todo 0` (duração 903,0 s; 15 min 4 s de
+relógio). Ao lado, por poucos segundos, rodaram só o registrador da contagem e consultas curtas ao código. As 23 sementes fixas do
+teste aleatório, com 60 passos cada, deram: `FUZZ: 23 sementes × 60 passos: 831 aceitos, 440 recusados, 0 falhas`. Na
+primeira convergência eram 826 aceitos e 443 recusados. A contagem mudou na etapa 1 da segunda convergência, com os consertos da
+correção, e não mudou mais depois, pelos registros das etapas. As sementes fixas exigem também que o oráculo da correção
+confira algo.
 
-A soma confere com o total da suíte: 673 da Fase 2 + 166 dos 24 arquivos novos (112 da entrega, 14 da rodada 2, 14 da
-rodada 3 e 26 da convergência) + 24 a mais em 3 alterados (`estorno`, de 27 para 44; `unitofwork.adversarial`, de 53 para
-59; `fase2.fuzz`, de 1 para 2) = 863.
+Contagem por arquivo nesta etapa:
+- **A contagem de todos os 87 arquivos** foi tirada sem rodar os corpos: um registrador no lugar de `node:test` conta os
+  `test()` de cada arquivo. A soma, 914, é a da suíte. Como a suíte inteira passou sem falha, cada arquivo passou com a contagem
+  da tabela.
+- **Os 48 arquivos novos ou alterados na Fase 3** estão na primeira tabela: 29 novos e 19 alterados desde o relatório da Fase 2.
+  - Na segunda convergência entraram 5: `correcao.regressoes`, `correcao.contrato`, `cliente.naocalcula`, `convergencia2.r1` e
+    `convergencia2.r2`.
+  - Mudaram 14, sem mudar a contagem. Três deles não tinham mudado desde a Fase 2: `fase2.adversarial`, `revisao1.financeiro` e
+    `telas.fase2`. Os outros 11 são `fase2.fuzz`, `fase3.fuzz.regressoes`, `manejo`, `pesagem`, `reproducao`,
+    `revisao.final.fase3`, `revisao2.fase3.motor`, `revisao2.fase3.zootecnia`, `revisao3.fase3.zootecnia`, `sanidade` e
+    `sanidade.agenda`. Cada ajuste está no `CHANGELOG` e não afrouxa o que o teste confere.
+  - Os apoios que mudaram ou entraram (`apoio-fuzz`, `apoio-naocalcula`, `harness` e os fakes da planilha e do Drive, com
+    `gas.estado`) só são usados pelos testes e não declaram teste.
+- `static` e `revisao4.interface` leem o `CONTRATOS.md` mudado nesta etapa e rodaram de novo sozinhos depois da mudança, com
+  `correcao.contrato` (que está na tabela).
+- **Os demais 37** não mudaram desde a Fase 2 e passaram na suíte completa.
+
+A soma confere com o total da suíte: 863 da primeira convergência + 51 dos 5 arquivos novos (21 + 3 + 3 + 12 + 12) = 914. Por
+fase: 673 da Fase 2 + 217 dos 29 arquivos novos da Fase 3 + 24 a mais em 3 alterados = 914.
 
 **Arquivos novos ou alterados na Fase 3** (a contagem pelo registrador; todos passaram na suíte completa desta etapa):
 
@@ -120,11 +144,17 @@ rodada 3 e 26 da convergência) + 24 a mais em 3 alterados (`estorno`, de 27 par
 | `tests/acceptance.test.js` | 6 | 6 | 0 | Os cenários do `runAcceptanceTests` no fake, nas duas ordens de carga: os 23 das Fases 1 a 3 (com CT-05, CT-06, SANIDADE, ESTOQUE, REPRODUCAO e o passo 3 do CT-10); retomada, falha relatada, base de demonstração completa e retomável com `demonstracao.manejo`, `runDiagnostics` (alterado) |
 | `tests/animals.test.js` | 10 | 10 | 0 | Lista, ficha A a J (os blocos de peso, sanidade e reprodução entregues, com o motivo de cada valor vazio), árvore, edição, animal externo (alterado) |
 | `tests/api.test.js` | 14 | 14 | 0 | Envelope, guarda de dono, roteador, avisos, duplicado, LOCKED, carga condicional (catálogo da Fase 3), ambiente TESTE, rascunho, fuso, páginas (alterado) |
+| `tests/cliente.naocalcula.test.js` | 3 | 3 | 0 | O cliente não calcula (seção 6.6.7): o leitor acusa a conta de data e de número de domínio no código do aparelho e não a formatação (autoteste); nenhum `src/*.html` faz conta fora da lista de 11 exceções, e nenhuma entrada da lista fica sem uso; os casos que começaram a regra (a prévia da correção, a agenda e as parcelas) (novo na segunda convergência) |
+| `tests/convergencia2.r1.test.js` | 12 | 12 | 0 | Rodada 1 da segunda convergência no servidor: achados 1, 2 e 3 (com e sem peso), 4, 7, 8, 9, 10, 11, 15, 16 e 5 (o rascunho pela versão) (novo) |
+| `tests/convergencia2.r2.test.js` | 12 | 12 | 0 | Rodada 2 da segunda convergência no servidor: achados 1, 2 e 6, 6 (as cópias do cabeçalho), 3, 4, 5, 9, 10, 11, 12, 13 e 17 (novo) |
+| `tests/correcao.contrato.test.js` | 3 | 3 | 0 | A correção com outra data refaz o derivado do estado do dia; com outro produto copia o cadastro de hoje do produto novo; a tabela B do `CONTRATOS.md` (seção 50.4) é a do código, com a mesma natureza (lê o `CONTRATOS.md` desta etapa) (novo) |
+| `tests/correcao.regressoes.test.js` | 21 | 21 | 0 | Os 21 defeitos do oráculo da correção (seção 6.6.7), um teste cada, que falha com o `src/` de antes da etapa (`b8c513b`) (novo; ajustado na rodada 2 ao contrato da carência e da desmama) |
 | `tests/estoque.test.js` | 6 | 6 | 0 | ESTOQUE e PRODUTOS: o cadastro do produto (unidade que não muda depois do uso, estoque desligado por padrão), o exemplo de 03a, 4.7 (entrada, saída, perda, contagem), o frasco pago no ato de 07, seção 5, as regras da entrada e do acerto, os caminhos (correção, substituto, estorno com e sem dependente) e a integridade do estoque; o payload da entrada traz `com_movimento` (alterado na rodada 2) |
 | `tests/estorno.test.js` | 44 | 44 | 0 | Estorno e substituição de todo tipo ativo, agora com os da Fase 3: CT-07, CT-08, CT-09, CT-17 (b), CT-18, dependente e retroativo (alterado: 27 → 44) |
 | `tests/events.test.js` | 21 | 21 | 0 | Catálogo (`FASE_ATUAL` 3; tipo ativo só com campos, módulo ativo só com a tela; o menu até a Fase 5), entradas, CT-09, CT-10, CT-18 da Fase 1, estorno e correção, ajustes (alterado) |
-| `tests/fase2.fuzz.test.js` | 2 | 2 | 0 | Teste aleatório de todos os comandos das Fases 1 a 3 pela `api()`: 23 sementes fixas × 60 passos (826 aceitos, 443 recusados, 0 falhas), com a cobertura mínima de cada tipo e dos oráculos da rodada 3; e o registro: todo tipo ativo tem gerador e oráculo, todo importável tem arquivo (alterado: 1 → 2; na rodada 3, a semente 29 e `FUZZ_COBERTURA`); na convergência, as sementes fixas exigem também os contadores dos oráculos do tempo e do resolvedor, com as mesmas sequências |
-| `tests/fase3.fuzz.regressoes.test.js` | 3 | 3 | 0 | As sequências mínimas das falhas do modelo nas passadas das Fases 1 a 3 (sementes 7106, 1210049 e 1320022), com o desfecho de cada passo |
+| `tests/fase2.adversarial.test.js` | 11 | 11 | 0 | O ataque ao motor e ao financeiro da Fase 2 com o modelo independente; na segunda convergência, o modelo segue a tabela B na correção do parto (o pasto vazio das crias é o do original) (alterado; não mudava desde a Fase 2) |
+| `tests/fase2.fuzz.test.js` | 2 | 2 | 0 | Teste aleatório de todos os comandos das Fases 1 a 3 pela `api()`: 23 sementes fixas × 60 passos (831 aceitos, 440 recusados, 0 falhas), com a cobertura mínima de cada tipo e dos oráculos da rodada 3; e o registro: todo tipo ativo tem gerador e oráculo, todo importável tem arquivo (alterado: 1 → 2; na rodada 3, a semente 29 e `FUZZ_COBERTURA`); na convergência, as sementes fixas exigem também os contadores dos oráculos do tempo e do resolvedor; na segunda, os do oráculo da correção |
+| `tests/fase3.fuzz.regressoes.test.js` | 3 | 3 | 0 | As sequências mínimas das falhas do modelo nas passadas das Fases 1 a 3 (sementes 7106, 1210049 e 1320022), com o desfecho de cada passo; na segunda convergência, a castração repetida recusada já pelo motor (`CASTRACAO_REPETIDA`) |
 | `tests/graficos.test.js` | 6 | 6 | 0 | G5 (evolução mensal do peso) e o rebanho por categoria em cada pasto número a número; a escala do eixo; as regras estáticas do kit (title, desc, tabela equivalente, unidade, nenhuma conta nas telas) e o contraste das 8 cores |
 | `tests/import.test.js` | 9 | 9 | 0 | Importação de ANIMAIS: CT-12 da Fase 1, lotes, queda, retomar, concluir, desfazer (alterado) |
 | `tests/import.eventos.test.js` | 7 | 7 | 0 | Importação de COMPRAS, VENDAS, TRANSFERENCIAS, NASCIMENTOS e MORTES (o tipo "de outra fase" deixou de existir; o desconhecido continua recusado) (alterado) |
@@ -132,64 +162,88 @@ rodada 3 e 26 da convergência) + 24 a mais em 3 alterados (`estorno`, de 27 par
 | `tests/integrity.fase2.test.js` | 11 | 11 | 0 | As checagens da Fase 2 por adulteração, com o saldo de estoque na projeção conferida; a demonstração da Fase 3 inteira sem erro; tempo medido (alterado) |
 | `tests/interface.test.js` | 8 | 8 | 0 | Página do `doGet` (compactada, sem as telas sob demanda), sintaxe do cliente e das telas sob demanda, contraste, alvos de toque, regras estáticas (alterado) |
 | `tests/jornada.fase3.test.js` | 1 | 1 | 0 | Um ano de manejo só pela `api()`: inventário por pasto, peso e GMD de cada animal, indicadores da estação, agenda, estoque e custo sanitário contra um modelo independente; projeção = reconstrução e invariantes depois de cada comando; integridade sem erro |
-| `tests/manejo.test.js` | 4 | 4 | 0 | DESMAMA (03b, 3.4 e 16.14) e por caminho; CASTRACAO (o touro castrado deixa de ser reprodutor); OCORRENCIA; a despesa paga no ato |
+| `tests/manejo.test.js` | 4 | 4 | 0 | DESMAMA (03b, 3.4 e 16.14) e por caminho; CASTRACAO (o touro castrado deixa de ser reprodutor); OCORRENCIA; a despesa paga no ato; na segunda convergência, o bezerro já no pasto informado tem a linha com origem = destino |
 | `tests/nascimento.test.js` | 16 | 16 | 0 | NASCIMENTO: CT-01, gemelar, natimorto, peso ao nascer, pai opcional, REPRODUCAO, histórico da matriz (o bloco G entregue) (alterado) |
 | `tests/pastures.test.js` | 7 | 7 | 0 | Propriedades, pastos com posse e arrendador, painel, UA/ha sem transformar ausente em zero; a parte `estimativa_visual` da UA e o aviso de lotação com o rótulo da composição (alterado nas rodadas 2 e 3; sem mudança na Fase 3 até a entrega) |
-| `tests/pesagem.test.js` | 12 | 12 | 0 | PESAGEM pelos caminhos do tratador único: individual, coletiva e por lote, faixa (RN-049), variação brusca (RN-050), retroativo, mesmo dia, correção, substituto, estorno com dependente, importação e desfazer, integridade e trava, lotação em data (alterado nas rodadas 2 e 3: a anterior traz o método e se é estimada; a resposta traz `gmd_intervalo`) |
+| `tests/pesagem.test.js` | 12 | 12 | 0 | PESAGEM pelos caminhos do tratador único: individual, coletiva e por lote, faixa (RN-049), variação brusca (RN-050), retroativo, mesmo dia, correção, substituto, estorno com dependente, importação e desfazer, integridade e trava, lotação em data (alterado nas rodadas 2 e 3: a anterior traz o método e se é estimada; a resposta traz `gmd_intervalo`; na segunda convergência, a média do lote sem o lote é método diferente das outras linhas) |
 | `tests/pesagem.desempenho.test.js` | 10 | 10 | 0 | CT-05 na ficha número a número; uma pesagem só; mesmo dia e retroativa; saiu e voltou; métodos; peso ao nascer; projeção; GMD de lote, por pasto e por categoria; `peso.desempenho` |
 | `tests/regras.fase2.test.js` | 8 | 8 | 0 | Mapa RN → teste das 112 regras e as RN da Fase 2 sem caso próprio (alterado: o nome do teste de aceitação das Fases 1 a 3) |
 | `tests/regras.fase3.test.js` | 5 | 5 | 0 | Mapa RN-049 a RN-066 → teste (cada teste citado existe; cada caso de 09, 4.1, no `TestRunner`); RN-051 em todo caminho, RN-053, RN-058 e RN-065 (alterado na rodada 2: os protocolos do RN-058 cadastrados antes das datas consultadas) |
-| `tests/reproducao.test.js` | 8 | 8 | 0 | Estação de monta; exposição, cobertura, inseminação, diagnóstico em lote e aborto; os caminhos; integridade e trava; importação e desfazer; ficha da matriz, lista de fêmeas e alertas |
+| `tests/reproducao.test.js` | 8 | 8 | 0 | Estação de monta; exposição, cobertura, inseminação, diagnóstico em lote e aborto; os caminhos; integridade e trava; importação e desfazer; ficha da matriz, lista de fêmeas e alertas; na segunda convergência, o touro castrado recusado pelo motor (`TOURO_CASTRADO`) e a janela da previsão com a tolerância |
 | `tests/reproducao.indicadores.test.js` | 5 | 5 | 0 | Indicadores de 07, seção 8.3, número a número (80 expostas) e de RN-066 (40 expostas; com 4, sem valor); quem saiu no meio da estação; desmama e mortalidade até a desmama; a forma anual |
 | `tests/resolvedor.unico.test.js` | 2 | 2 | 0 | Resolvedor único (seção 6.6.3): cada um de 19 casos difíceis dá o mesmo resultado no curral, no tronco e no seletor (pela rota `animal.resolver`), na conferência pela posição da data e na importação de verdade; a rota descreve o animal na data e recusa data futura e lista grande demais |
 | `tests/revisao.fase3.motor.test.js` | 8 | 8 | 0 | Revisão da Fase 3, um teste por caminho dos achados 3 e 6, 4, 7, 8 e 13 (dois cada) e 14 (alterado na rodada 2: `com_movimento` no payload da entrada) |
 | `tests/revisao.fase3.regras.test.js` | 6 | 6 | 0 | Revisão da Fase 3: achados 16, 17, 23, 24, 25 e 26 |
 | `tests/revisao.fase3.zootecnia.test.js` | 8 | 8 | 0 | Revisão da Fase 3: achados 1, 2, 5, 9, 10, 15, 28 e 29 |
-| `tests/revisao.final.fase3.test.js` | 8 | 8 | 0 | Revisão final (seção 6.6.5): achados 1, 2, 8, 9, 10, 11, 16 e 17 |
-| `tests/revisao2.fase3.motor.test.js` | 7 | 7 | 0 | Rodada 2 da revisão: achados 1 e 4 (dose por peso congelada, dois caminhos), 2 e 5 (a contagem que impede o movimento anterior; integridade e outros caminhos), 3, 8 e 9 |
-| `tests/revisao2.fase3.zootecnia.test.js` | 7 | 7 | 0 | Rodada 2 da revisão: achados 6 e 11, 7, 16 e 22 (no servidor), 13 e 21, 10, 12, 14 e 19 |
+| `tests/revisao.final.fase3.test.js` | 8 | 8 | 0 | Revisão final (seção 6.6.5): achados 1, 2, 8, 9, 10, 11, 16 e 17; na segunda convergência, o nunca aplicado vence no início do protocolo |
+| `tests/revisao1.financeiro.test.js` | 6 | 6 | 0 | Rodada 1 da revisão da Fase 2, FINANCEIRO; na segunda convergência, a tela lê a entrada da correção do servidor (`o.correcao`), com o tipo de cada dedução (alterado; não mudava desde a Fase 2) |
+| `tests/revisao2.fase3.motor.test.js` | 7 | 7 | 0 | Rodada 2 da revisão: achados 1 e 4 (dose por peso congelada, dois caminhos), 2 e 5 (a contagem que impede o movimento anterior; integridade e outros caminhos), 3, 8 e 9; na segunda convergência, o desfazer da importação recusado já pelo motor (`CONTAGEM_POSTERIOR`) |
+| `tests/revisao2.fase3.zootecnia.test.js` | 7 | 7 | 0 | Rodada 2 da revisão: achados 6 e 11, 7, 16 e 22 (no servidor), 13 e 21, 10, 12, 14 e 19; na segunda convergência, o vencimento no início do protocolo |
 | `tests/revisao3.fase3.motor.test.js` | 9 | 9 | 0 | Rodada 3 da revisão: achados 1, 10, 11 e 18, 12, 16, 17, 19, 21 e 23, 24 |
-| `tests/revisao3.fase3.zootecnia.test.js` | 5 | 5 | 0 | Rodada 3 da revisão: achados 6, 7, 8 e 25, 9 e 14 |
+| `tests/revisao3.fase3.zootecnia.test.js` | 5 | 5 | 0 | Rodada 3 da revisão: achados 6, 7, 8 e 25, 9 e 14; na segunda convergência, o vencimento no início do protocolo, com a ficha igual à agenda |
 | `tests/revisao4.interface.test.js` | 7 | 7 | 0 | Rodada 4 da Fase 2, INTERFACE E REGRAS (sem mudança; lê o `CONTRATOS.md` desta etapa) |
-| `tests/sanidade.test.js` | 9 | 9 | 0 | 03b, 15.2 linha a linha; CT-06; dose por peso; modo total, nome livre e subtipos; protocolo e avisos; caminhos; carência (RN-072) nos dois sentidos; importação e desfazer; integridade |
-| `tests/sanidade.agenda.test.js` | 5 | 5 | 0 | `protocolo.salvar`; INTERVALO_DIAS, CAMPANHA_MESES e UNICA (03a, 4.9; 05, 4.7) com as datas; pendência sem protocolo, carência, custos do período e alertas |
+| `tests/sanidade.test.js` | 9 | 9 | 0 | 03b, 15.2 linha a linha; CT-06; dose por peso; modo total, nome livre e subtipos; protocolo e avisos; caminhos; carência (RN-072) nos dois sentidos; importação e desfazer; integridade; na segunda convergência, o payload com as marcas do digitado |
+| `tests/sanidade.agenda.test.js` | 5 | 5 | 0 | `protocolo.salvar`; INTERVALO_DIAS, CAMPANHA_MESES e UNICA (03a, 4.9; 05, 4.7) com as datas; pendência sem protocolo, carência, custos do período e alertas; na segunda convergência, o vencimento no início do protocolo |
 | `tests/static.test.js` | 19 | 19 | 0 | Lint de camadas, superfície pública, `drive.file`, relógio, manifesto, rotas (as extras com contrato), includes (sem mudança; lê o `CONTRATOS.md` desta etapa) |
 | `tests/telas.test.js` | 7 | 7 | 0 | Rotas acrescentadas pelas telas e regras puras do cliente (`importacao.modelo` com os dez tipos) (alterado) |
+| `tests/telas.fase2.test.js` | 6 | 6 | 0 | Rotas e regras das telas da Fase 2; na segunda convergência, os vencimentos do "Dividir em parcelas" pela rota `financeiro.vencimentos` (inclusive D15 e as recusas), não pela função do aparelho (alterado; não mudava desde a Fase 2) |
 | `tests/telas.sobdemanda.test.js` | 6 | 6 | 0 | `sistema.tela` (compactada, sem a planilha-banco, recusas com a fase); a página inicial e cada tela no orçamento; catálogo × arquivos × `Index`; o cliente injeta as telas |
 | `tests/tempo.regressoes.test.js` | 16 | 16 | 0 | Viagem no tempo (seção 6.6.2): 8 cenários pela `api()`, um por defeito, com a resposta em D antes e depois do fato posterior e com o relógio adiantado; e 8 sequências mínimas do teste aleatório, com o mesmo oráculo de cada passo |
 | `tests/unitofwork.adversarial.test.js` | 59 | 59 | 0 | Morte depois de cada escrita, também no bloco de PESAGENS e de SANIDADE da importação nas três formas de gravação; subconjuntos densos, oráculos independentes, intercalações, resposta perdida (alterado: 53 → 59) |
 | `tests/venda.test.js` | 15 | 15 | 0 | VENDA: CT-04, CT-14, exemplos de 07 e 03b, carência pela SANIDADE real (alterado) |
-| **Soma dos 40 novos ou alterados** | **410** | **410** | **0** | Sem `static` e `revisao4.interface` (26); com eles, 436 |
+| **Soma dos 48 novos ou alterados** | **484** | **484** | **0** | Sem `static` e `revisao4.interface` (26); com eles, 510 |
 
 **Arquivos sem mudança desde a Fase 2** (passaram na suíte completa; a descrição de cada um está em
-`docs/RELATORIO_FASE2.md`, seção 2.1): `anexos` (9), `compra` (14), `config` (8), `database` (21), `fase2.adversarial` (11), `fase2.fuzz.regressoes` (13), `files` (5), `financeiro` (8), `harness` (25), `identificacao` (10), `integrity` (7), `inventory` (4), `jornada.fase1` (1), `jornada.fase2` (1), `lotacao` (14), `maintenance` (5), `movimentos` (12), `regras.fase1` (13), `repository` (10), `revisao1.financeiro` (6), `revisao1.motor` (14), `revisao2.financeiro` (3), `revisao2.motor` (13), `revisao3.financeiro` (6), `revisao3.interface` (2), `revisao3.motor` (24), `revisao4.financeiro` (5), `revisao4.motor` (20), `revisao5.financeiro` (6), `revisao5.interface` (4), `revisao5.motor` (13), `schema` (13), `setup` (5), `telas.fase2` (6), `telas.pastos-importacao` (4), `timeline` (12), `trava.integridade` (16), `unitofwork` (32), `utils` (18), `validation` (14) — soma 427. Conta: 410 + 26 + 427 = 863.
+`docs/RELATORIO_FASE2.md`, seção 2.1): `anexos` (9), `compra` (14), `config` (8), `database` (21), `fase2.fuzz.regressoes` (13), `files` (5), `financeiro` (8), `harness` (25), `identificacao` (10), `integrity` (7), `inventory` (4), `jornada.fase1` (1), `jornada.fase2` (1), `lotacao` (14), `maintenance` (5), `movimentos` (12), `regras.fase1` (13), `repository` (10), `revisao1.motor` (14), `revisao2.financeiro` (3), `revisao2.motor` (13), `revisao3.financeiro` (6), `revisao3.interface` (2), `revisao3.motor` (24), `revisao4.financeiro` (5), `revisao4.motor` (20), `revisao5.financeiro` (6), `revisao5.interface` (4), `revisao5.motor` (13), `schema` (13), `setup` (5), `telas.pastos-importacao` (4), `timeline` (12), `trava.integridade` (16), `unitofwork` (32), `utils` (18), `validation` (14) — 37 arquivos, soma 404. Conta: 484 + 26 + 404 = 914.
 
 ### 2.2 Nível 3 — `npm run ui:check`
 
-Parte estática: `ui:check — 13 arquivo(s) .html conferidos (a página inicial montada pelo doGet e as telas sob demanda), sem recurso externo e dentro do orçamento (página inicial montada: 450 KB de 450 KB; sob demanda: Import 48 KB, Weights 59 KB, Health 25 KB, Reproduction 65 KB, de 150 KB cada).` Parte Playwright: `# tests 186 · # pass 186 · # fail 0 · #
-cancelled 0 · # skipped 0 · # todo 0` (duração 433,9 s; 7 min 14 s de relógio com a parte estática), com as 6 sementes
-fixas do teste aleatório da tela (11 a 16, 40 ações cada). Tamanho do que vai ao aparelho, em bytes medidos pelas mesmas
-funções do `ui:check`: a página inicial montada pelo `doGet` tem 460.755 bytes (450 KB) de 460.800 (450 KB), e sobram
-**45 bytes**. Na entrega sobravam 2.511; depois das rodadas 2 e 3, 1.587; depois do resolvedor (a pergunta ao servidor no
-lugar dos índices do aparelho), 41; depois do conserto da revisão final, 45. Sob demanda: Import 49.608 bytes (48 KB),
-Weights 60.822 (59 KB; 48 KB na entrega), Health 25.149 (25 KB; 24 KB) e Reproduction 66.937 (65 KB; 52 KB), de 150 KB
-cada; o curral e o tronco cresceram com os consertos das rodadas e da convergência. Contagem por arquivo: a dos 29
-arquivos foi tirada pelo registrador (soma 186, a da suíte), e a suíte inteira passou. Os 15 arquivos novos ou alterados
-desde o relatório da Fase 2 estão na tabela: 13 novos (`graficos`, `importacao-manejo`, `pesagem`, `reproducao`,
-`revisao.fase3`, `revisao2.fase3`, `revisao3.fase3`, `sanidade`, `sobdemanda` e, na convergência, `curral.fuzz`,
-`curral.fuzz.regressoes`, `resolvedor` e `revisao.final.fase3`) e 2 alterados (`interface`, `movimentos`). Na
-convergência, seis deles foram ajustados à ida ao servidor para o brinco e à decisão das recusas, sem mudar a contagem
-(`interface`, `pesagem`, `reproducao`, `revisao.fase3`, `revisao2.fase3`, `revisao3.fase3`; seção 6.6.4). A soma
-confere com o total (92 + 93 novos + 1 em `movimentos` = 186):
+Parte estática: `ui:check — 13 arquivo(s) .html conferidos (a página inicial montada pelo doGet e as telas sob demanda), sem recurso externo e dentro do orçamento (página inicial montada: 428 KB de 450 KB; sob demanda: Import 48 KB, Weights 64 KB, Health 24 KB, Reproduction 67 KB, de 150 KB cada).` Parte Playwright: `# tests 212 · # pass 212 · # fail 0 · #
+cancelled 0 · # skipped 0 · # todo 0` (duração 527,5 s; 8 min 48 s de relógio com a parte estática), com as 6 sementes fixas
+do teste aleatório da tela (11 a 16, 40 ações cada). Rodou sozinho, depois do `npm test` e da medida da trava.
+
+Tamanho do que vai ao aparelho, em bytes medidos pelas mesmas funções do `ui:check`: a página inicial montada pelo `doGet` tem
+438.227 bytes (428 KB) de 460.800 (450 KB), e sobram **22.573 bytes**. A margem foi mudando assim:
+- na entrega, 2.511;
+- depois das rodadas 2 e 3, 1.587;
+- depois do resolvedor (a pergunta ao servidor no lugar dos índices do aparelho), 41;
+- depois do conserto da revisão final, 45;
+- na segunda convergência, a etapa 1 tirou da página inicial a prévia da correção montada no aparelho (435.471 bytes), e as
+  etapas seguintes puseram de volta 2.756 bytes (a faixa do rascunho em qualquer tela, o formulário que só sai com a chave
+  guardada, a troca do produto na aplicação).
+
+Sob demanda: Import 49.584 bytes (48 KB), Weights 65.924 (64 KB; 48 KB na entrega), Health 25.078 (24 KB; 24 KB) e
+Reproduction 68.215 (67 KB; 52 KB), de 150 KB cada; o curral e o tronco cresceram com os consertos das rodadas e das duas
+convergências.
+
+Contagem por arquivo: a dos 31 arquivos foi tirada pelo registrador (soma 212, a da suíte), e a suíte inteira passou. Os 18
+arquivos novos ou alterados desde o relatório da Fase 2 estão na tabela:
+- 15 novos: `graficos`, `importacao-manejo`, `pesagem`, `reproducao`, `revisao.fase3`, `revisao2.fase3`, `revisao3.fase3`,
+  `sanidade` e `sobdemanda`; na primeira convergência, `curral.fuzz`, `curral.fuzz.regressoes`, `resolvedor` e
+  `revisao.final.fase3`; na segunda, `convergencia2.r1` e `convergencia2.r2`;
+- 3 alterados: `interface`, `movimentos` e, na segunda convergência, `pastos-importacao`.
+
+Na primeira convergência, seis deles foram ajustados à ida ao servidor para o brinco e à decisão das recusas, sem mudar a
+contagem: `interface`, `pesagem`, `reproducao`, `revisao.fase3`, `revisao2.fase3` e `revisao3.fase3` (seção 6.6.4). Na
+segunda, mudaram:
+- `curral.fuzz`: o gerador e o oráculo ampliados;
+- `curral.fuzz.regressoes`: de 7 para 11 testes, com as regressões 7 e 8 no curral e no tronco;
+- `reproducao` e `sanidade`: o diagnóstico sem a estação do filtro e a carência em branco;
+- `pastos-importacao`: espera a resposta do servidor (`esperarServidor`), porque sob carga falhava por tempo.
+
+A soma confere com o total: 92 + 119 nos 15 novos + 1 em `movimentos` = 212.
 
 | Arquivo | Testes | Aprovados | Falhas | O que cobre |
 |---|---:|---:|---:|---|
-| `tests/ui/curral.fuzz.test.js` | 6 | 6 | 0 | Teste aleatório da tela do curral e do tronco (seção 6.6.4): as 6 sementes fixas (11 a 16) de 40 ações, com as falhas de rede decididas no Node, o oráculo a cada ação e, no fim, banco = modelo, integridade sem erro, projeção = reconstrução e nada no console |
-| `tests/ui/curral.fuzz.regressoes.test.js` | 7 | 7 | 0 | Os defeitos que o teste aleatório da tela achou: mudar a data com linha na fila (curral e tronco), a falha interna no reenvio de um bloco gravado, o "Está certo" com outro bloco no ar, sair e voltar com o envio no ar, a recusa da conferência no tronco e as pendentes do mesmo animal |
+| `tests/ui/convergencia2.r1.test.js` | 11 | 11 | 0 | Rodada 1 da segunda convergência na tela: achados 5 (curral e tronco, sem `localStorage`), 6 (o formulário de registro), 12 e 12b (curral), 13 e 13b (curral e tronco), 14 e 17 (novo) |
+| `tests/ui/convergencia2.r2.test.js` | 11 | 11 | 0 | Rodada 2 da segunda convergência na tela: achados 7, 8, 14, 15 e 16 (curral e tronco), e os três do teste aleatório estendido (a semente 14 no curral e no tronco, a 95022) (novo) |
+| `tests/ui/curral.fuzz.test.js` | 6 | 6 | 0 | Teste aleatório da tela do curral e do tronco (seções 6.6.4 e 6.6.7): as 6 sementes fixas (11 a 16) de 40 ações, com as falhas de rede decididas no Node, o oráculo a cada ação e, no fim, banco = modelo, integridade sem erro, projeção = reconstrução e nada no console; na segunda convergência, o gerador e o oráculo ampliados (o modo sem `localStorage`, o rascunho que falha ou chega atrasado, a recusa do servidor) |
+| `tests/ui/curral.fuzz.regressoes.test.js` | 11 | 11 | 0 | Os defeitos que o teste aleatório da tela achou: mudar a data com linha na fila (curral e tronco), a falha interna no reenvio de um bloco gravado, o "Está certo" com outro bloco no ar, sair e voltar com o envio no ar, a recusa da conferência no tronco e as pendentes do mesmo animal; na segunda convergência, as regressões 7 (o bloco só sai com a chave guardada) e 8 (a falha do rascunho avisa e vai de novo), no curral e no tronco (alterado: 7 → 11) |
 | `tests/ui/graficos.test.js` | 8 | 8 | 0 | Os gráficos a 360 e 1280 px: o componente, a ficha (aba Peso), o desempenho, a reprodução e a sanidade; SVG com título e descrição, os números do desenho iguais aos da tabela e do servidor, texto legível, sem rolagem horizontal, redesenho ao mudar a largura |
 | `tests/ui/importacao-manejo.test.js` | 3 | 3 | 0 | Importação de pesagens (modelo, valores em palavras, linha repetida, parcial aprovado, relatório) e de sanidade (o produto pelo nome), a 1280 e 360 px |
 | `tests/ui/interface.test.js` | 17 | 17 | 0 | Carga, navegação, formulário do catálogo, "hoje" no fuso, avisos, erro por animal, rascunho, LOCKED, sem resposta, faixas, leiaute 360 e 1280 px, acessibilidade; o menu com Pesagens, Sanidade e Reprodução (alterado); na convergência, o "Colar lista" espera a resposta do resolvedor |
 | `tests/ui/movimentos.test.js` | 8 | 8 | 0 | Parto pela ficha da mãe, transferência com erro em 1 de 3, morte, correção do parto, transferência com data passada e, novo, com as respostas fora de ordem (a corrida do seletor) (alterado: 7 → 8) |
+| `tests/ui/pastos-importacao.test.js` | 6 | 6 | 0 | Pastos e importação da Fase 2 a 1280 e 360 px; na segunda convergência, a leitura das linhas validadas e do relatório espera a resposta do servidor (`esperarServidor`), porque sob carga o teste falhava por tempo (alterado; não mudava desde a Fase 2) |
 | `tests/ui/pesagem.test.js` | 8 | 8 | 0 | Modo curral a 360 px (Enter, contador, não encontrado, repetido, desfazer, recarregar); rede cortada e resposta perdida conferida pela chave; aviso do servidor aceito na linha; a ficha com a curva; o desempenho; a correção pelo detalhe; na convergência, o Enter do brinco espera a resposta do servidor |
 | `tests/ui/reproducao.test.js` | 2 | 2 | 0 | Diagnóstico no tronco a 360 px (p90, v, brinco que não é de fêmea, rede cortada, reenvio pela chave); fêmeas, indicadores e estações a 1280 e 360 px; na convergência, o Enter espera a resposta do servidor |
 | `tests/ui/resolvedor.test.js` | 2 | 2 | 0 | A tabela dos 19 casos do resolvedor digitada no curral, no tronco e no seletor de um formulário (seção 6.6.3) |
@@ -199,9 +253,9 @@ confere com o total (92 + 93 novos + 1 em `movimentos` = 186):
 | `tests/ui/revisao3.fase3.test.js` | 13 | 13 | 0 | Rodada 3 da revisão na tela: achados 2 (curral e tronco), 3 (curral e tronco), 4, 5, 8, 22 e 25, 9, 13, 14, 15, 20, 17 e 19; na convergência, o achado 2 segue a decisão das recusas (a chave já gravada fica só com "Tirar"; a falha interna mantém a chave e grava uma vez) |
 | `tests/ui/sanidade.test.js` | 4 | 4 | 0 | Produtos e estoque a 360 px (cadastro pela folha, entrada pelo botão do produto); agenda e "Aplicar em N animais"; detalhe e correção da aplicação a 1280 px |
 | `tests/ui/sobdemanda.test.js` | 4 | 4 | 0 | Importação sob demanda: pedida uma vez pelo menu, falha de rede com "Tentar de novo", endereço direto e menu da fase, outra versão do app no servidor (alterado na rodada 2: conta só os pedidos da tela Import, porque a Início traz as do curral e do tronco) |
-| **Soma dos 15 novos ou alterados** | **118** | **118** | **0** | |
+| **Soma dos 18 novos ou alterados** | **150** | **150** | **0** | |
 
-**Arquivos sem mudança desde a Fase 2**: `anexos` (1), `compra` (4), `eventos.fase2` (9), `importacao-periodo` (3), `importacao` (2), `lotacao` (4), `pastos-importacao` (6), `revisao1` (6), `revisao2` (6), `revisao3` (4), `revisao4` (4), `revisao5` (4), `telas` (12), `venda` (3) — soma 68. Conta: 118 + 68 = 186. Os apoios dos testes de navegador que
+**Arquivos sem mudança desde a Fase 2**: `anexos` (1), `compra` (4), `eventos.fase2` (9), `importacao-periodo` (3), `importacao` (2), `lotacao` (4), `revisao1` (6), `revisao2` (6), `revisao3` (4), `revisao4` (4), `revisao5` (4), `telas` (12), `venda` (3) — soma 68. Conta: 118 + 68 = 186. Os apoios dos testes de navegador que
 mudaram (`tests/ui/apoio.js`: `esperarServidor`, `enter` e a opção `servidor`; `tests/ui/mock-gas.js`: `emCurso`, `atrasar` e
 as respostas `{"__mock":"perdida"}` e `{"__mock":"transporte"}`) e o novo `tests/ui/apoio-curral.js` não declaram teste.
 
@@ -226,7 +280,9 @@ as respostas `{"__mock":"perdida"}` e `{"__mock":"transporte"}`) e o novo `tests
 | Telas sob demanda | `EXECUTADO AQUI` (`telas.sobdemanda.test.js`) | `PENDENTE NA CONTA DO DONO` (NV: o `<script>` injetado no iframe) | `EXECUTADO AQUI` (`ui/sobdemanda.test.js`, com o mock) |
 | Consultas numa data passada: a propriedade do tempo (seção 6.6.2) | `EXECUTADO AQUI` (`tempo.regressoes.test.js`; o oráculo de viagem no tempo nas sementes fixas de `fase2.fuzz.test.js` e nas levas) | `PENDENTE NA CONTA DO DONO` (o custo do retrato numa data passada no Apps Script) | — |
 | O brinco na data por um resolvedor só (seção 6.6.3) | `EXECUTADO AQUI` (`resolvedor.unico.test.js`; o oráculo do resolvedor nas sementes fixas e nas levas) | `PENDENTE NA CONTA DO DONO` (o tempo da ida ao servidor por brinco) | `EXECUTADO AQUI` (`ui/resolvedor.test.js`) |
-| Curral e tronco com a rede caindo: as garantias da fila de lote (seção 6.6.4) | — (o teste aleatório do motor entra pela chave do bloco) | `PENDENTE NA CONTA DO DONO` (o roteiro do modo curral no celular) | `EXECUTADO AQUI` (`ui/curral.fuzz.test.js` com as 6 sementes fixas, `ui/curral.fuzz.regressoes.test.js`, `ui/revisao.final.fase3.test.js`) |
+| Curral e tronco com a rede caindo: as garantias da fila de lote (seções 6.6.4 e 6.6.7), também sem `localStorage` | — (o teste aleatório do motor entra pela chave do bloco; o rascunho no servidor pela versão em `convergencia2.r1.test.js`) | `PENDENTE NA CONTA DO DONO` (o roteiro do modo curral no celular) | `EXECUTADO AQUI` (`ui/curral.fuzz.test.js` com as 6 sementes fixas, `ui/curral.fuzz.regressoes.test.js`, `ui/revisao.final.fase3.test.js`, `ui/convergencia2.r1.test.js`, `ui/convergencia2.r2.test.js`) |
+| A correção de um fato passado: o fato congelado (seção 6.6.7) | `EXECUTADO AQUI` (`correcao.regressoes.test.js`, `correcao.contrato.test.js`, `convergencia2.r1.test.js`, `convergencia2.r2.test.js`; o oráculo da correção nas sementes fixas de `fase2.fuzz.test.js` e nas levas) | `PENDENTE NA CONTA DO DONO` (corrigir um lançamento antigo depois de mudar o cadastro do produto) | `EXECUTADO AQUI` (a correção pelo detalhe: `ui/sanidade.test.js`; trocar o produto: `ui/convergencia2.r2.test.js`) |
+| O cliente não calcula número nem data (seção 6.6.7) | `EXECUTADO AQUI` (`cliente.naocalcula.test.js`, que lê o código do aparelho; a rota dos vencimentos em `telas.fase2.test.js`) | `NÃO SE APLICA`: lê o código | — |
 | CT-03 passo 4, CT-13 c a f, CT-15 (baixa) e CT-19 | `NÃO SE APLICA`: Fase 4 | `NÃO SE APLICA` | — |
 | CT-16 (exportação XLSX e PDF) | `NÃO SE APLICA`: Fase 5 (o CSV já tem teste de tela desde a Fase 1) | `NÃO SE APLICA` | — |
 
@@ -237,17 +293,17 @@ Nada abaixo foi executado. O roteiro está em `docs/GUIA_DE_IMPLANTACAO.md` (se�
 | Item | Como | Evidência a devolver | Estado |
 |---|---|---|---|
 | Itens das Fases 1 e 2 ainda abertos: implantar, `setup`, `runDiagnostics` (SP-01 a SP-10, fuso), página de concorrência, marco zero, fórmulas de compra e venda com um caso real, PR-09, ratificar as decisões das rodadas 3 a 5 e da convergência | `docs/RELATORIO_FASE1.md` e `docs/RELATORIO_FASE2.md`, seção 3 | Os arquivos e as respostas de lá | `PENDENTE NA CONTA DO DONO` |
-| Atualizar o código (39 arquivos: entraram `WeightService`, `Identificacao`, `Weights`, `Health` e `Reproduction`; o guia ainda diz 38) e rodar `setup` | Guia, seção 11.2, passos 1 a 3 | Linha `setup: {...}` do registro (sem aba nem coluna nova; integridade sem erro) | `PENDENTE NA CONTA DO DONO`. O esquema não muda (as 34 abas e os parâmetros da Fase 3 já vieram na Fase 1). A verificação passa a conferir também a cópia do peso das pesagens da entrada, da compra, da venda e do parto (COPIAS): numa base em que esse peso foi mexido à mão na planilha, ela dá ERRO sem oferecer o reparo |
+| Atualizar o código (40 arquivos: entraram `WeightService`, `Identificacao`, `Correcao`, `Weights`, `Health` e `Reproduction`; o guia ainda diz 38) e rodar `setup` | Guia, seção 11.2, passos 1 a 3 | Linha `setup: {...}` do registro (sem aba nem coluna nova; integridade sem erro) | `PENDENTE NA CONTA DO DONO`. O esquema não muda (as 34 abas e os parâmetros da Fase 3 já vieram na Fase 1; as marcas novas da segunda convergência ficam no payload). A verificação passa a conferir também a cópia do peso das pesagens da entrada, da compra, da venda e do parto (COPIAS) e, desde a segunda convergência, a cópia na mesma linha do lançamento e a linha de touro (seção 5, item 12): numa base em que esses dados foram mexidos à mão na planilha, ela dá ERRO sem oferecer o reparo |
 | **Abrir as telas sob demanda no app real** (Pesagens, Sanidade, Reprodução e a Importação) | Guia, seção 11.2, passo 5 | "Abriu" ou a mensagem que apareceu | `PENDENTE NA CONTA DO DONO`. É a hipótese NV da etapa BASE: se o quadro do HtmlService não rodar o `<script>` injetado, a contingência é voltar a tela ao `Index` e tirar `sob_demanda` do módulo (`CONTRATOS.md`, seção 37) |
 | `runAcceptanceTests` com os cenários das Fases 1 a 3 (23 cenários: PREPARO, CT-09, CT-01 a CT-06, SANIDADE, ESTOQUE, REPRODUCAO, CT-07, CT-08, CT-13, CT-14, CT-17, CT-18, CT-10, CT-12, RESTAURACAO, CT-20, CT-11, ISOLAMENTO) | Guia, seção 6, até `completo: true` (várias execuções) | Arquivo `ERP Pecuário — relatório de aceitação <instante>.json` | `PENDENTE NA CONTA DO DONO` |
-| **Testar o modo curral no celular, no curral** (PR-06) | Guia, seção 11.2, "Roteiro do modo curral" | Quantos animais, quanto tempo, se o sinal caiu, se o rascunho voltou, o que atrapalhou | `PENDENTE NA CONTA DO DONO`. Desde as rodadas 2 e 3, vale conferir também: abrir a Início com sinal e depois o curral sem sinal; uma sessão com data passada sem sinal (a linha espera a posição, "Tentar de novo"); o animal sem brinco pelo código interno. O curral e o tronco tiveram achado alto nas três rodadas e na revisão final (seções 6.5 e 6.6.6). Desde a convergência, cada brinco digitado vai ao servidor: vale medir quanto demora a resposta por brinco com sinal fraco e conferir que, sem sinal, a linha fica pendente e é conferida depois |
+| **Testar o modo curral no celular, no curral** (PR-06) | Guia, seção 11.2, "Roteiro do modo curral" | Quantos animais, quanto tempo, se o sinal caiu, se o rascunho voltou, o que atrapalhou | `PENDENTE NA CONTA DO DONO`. Desde as rodadas 2 e 3, vale conferir também: abrir a Início com sinal e depois o curral sem sinal; uma sessão com data passada sem sinal (a linha espera a posição, "Tentar de novo"); o animal sem brinco pelo código interno. O curral e o tronco tiveram achado alto nas três rodadas, na revisão final e na rodada 1 da segunda convergência; na rodada 2, só médios (seções 6.5, 6.6.6 e 6.6.7). Desde a convergência, cada brinco digitado vai ao servidor: vale medir quanto demora a resposta por brinco com sinal fraco e conferir que, sem sinal, a linha fica pendente e é conferida depois |
 | **Confirmar PR-06, PR-07, PR-10 e PR-11** | Responder (guia, seção 11.2, passo 6) | As respostas | `PENDENTE NA CONTA DO DONO`; todas já têm padrão (PR-06 e PR-07 por uso, PR-10 por produto); só a PR-11, se a resposta for o custo na compra, muda uma regra do desenho (`11-riscos-e-premissas.md`, seção 4) |
 | **Cadastrar produtos e protocolos com o veterinário** | Sanidade → Produtos e estoque; Sanidade → Protocolos | "Cadastrado", ou a lista do que não coube | `PENDENTE NA CONTA DO DONO`. O sistema não prescreve: o protocolo, a dose e a carência são os que o veterinário definir |
 | Base de demonstração da Fase 3 (cerca de 410 lançamentos, em várias execuções de uns 4 minutos; estimativa, não medida) | Guia, seção 6, "Base de demonstração" | O relatório `plano: DEMO`, com `demonstracao.manejo` | `PENDENTE NA CONTA DO DONO` (opcional) |
 | Tempo no Google Sheets com o manejo: comandos com a trava, agenda sanitária, indicadores reprodutivos, consultas numa data passada e verificação de integridade | Registrar uma pesagem coletiva, uma vacinação e um diagnóstico; abrir a agenda e os indicadores; abrir Pastos e Reprodução → Fêmeas numa data do ano passado; **Verificar a integridade agora** | Os tempos | `PENDENTE NA CONTA DO DONO`; no Node, seção 5, item 10 |
 | Importação de uma planilha grande de pesagens (milhares de linhas) | Guia, seção 8, passo 6 | Relatório final da importação | `PENDENTE NA CONTA DO DONO` (opcional) |
 | Gráficos no celular e no computador, no quadro do HtmlService | Abrir a ficha (aba Peso), Pesagens, Reprodução → Indicadores, Sanidade → Agenda | Captura ou relato | `PENDENTE NA CONTA DO DONO` |
-| **Ratificar as decisões da Fase 3** que ficaram só em `CONTRATOS.md` (seção 4 deste relatório, itens 2 a 10 e 15; as dos itens 4 e 6 que contrariavam o desenho já foram levadas a `08-ux-ui.md` e ao desenho-base na etapa de documentação da entrega). As das rodadas 2 e 3 que mais pesam no uso: a contagem do estoque que impede o movimento anterior a ela (`CONTAGEM_POSTERIOR`, estornar e contar de novo), a carência padrão do produto quando os dias não são informados, o protocolo que só vale desde o cadastro ou a primeira aplicação, e o produto sem custo por unidade que nunca vira custo (só com aviso). E as da convergência (seção 4, item 16): o brinco resolvido sempre no servidor, que **contraria** 08, seção 5 ("no store, sem ida"); a regra das recusas do curral e do tronco; a ficha de quem saiu na data da saída; e o procedimento do protocolo que não muda depois de cumprido (`PROTOCOLO_EM_USO`) | Ler e responder | A resposta | `PENDENTE NA CONTA DO DONO` |
+| **Ratificar as decisões da Fase 3** que ficaram só em `CONTRATOS.md` (seção 4 deste relatório, itens 2 a 10 e 15; as dos itens 4 e 6 que contrariavam o desenho já foram levadas a `08-ux-ui.md` e ao desenho-base na etapa de documentação da entrega). As das rodadas 2 e 3 que mais pesam no uso: a contagem do estoque que impede o movimento anterior a ela (`CONTAGEM_POSTERIOR`, estornar e contar de novo), a carência padrão do produto quando os dias não são informados, o protocolo que só vale desde o cadastro ou a primeira aplicação, e o produto sem custo por unidade que nunca vira custo (só com aviso). E as da convergência (seção 4, item 16): o brinco resolvido sempre no servidor, que **contraria** 08, seção 5 ("no store, sem ida"); a regra das recusas do curral e do tronco; a ficha de quem saiu na data da saída; e o procedimento do protocolo que não muda depois de cumprido (`PROTOCOLO_EM_USO`). E as da segunda convergência (seção 4, item 17) que mais pesam no uso: o que a correção mantém do original (a tabela de 23 valores) e a exceção da entidade nova; a carência que a tela não preenche mais; o nunca aplicado que vence no início do protocolo; o diagnóstico sem estação e o aborto contados na estação da prenhez; a correção recusada sobre uma fonte mexida à mão; e o "Terminar" sem `localStorage` que espera o servidor apagar o rascunho | Ler e responder | A resposta | `PENDENTE NA CONTA DO DONO` |
 
 Com esses resultados, o próximo passo é: corrigir o que divergir (fake, código ou regra), com registro no `CHANGELOG`;
 marcar a validação da Fase 3 no checklist do plano; e só então dar a Fase 3 por fechada.
@@ -255,10 +311,12 @@ marcar a validação da Fase 3 no checklist do plano; e só então dar a Fase 3 
 ## 4. Decisões tomadas durante a implementação
 
 Além das decisões do desenho (seções 16 e 17 do desenho-base). O detalhe de cada uma está em `docs/CHANGELOG.md` e nos
-contratos (`docs/CONTRATOS.md`, seções 37 a 49). As que contrariavam um documento da Fase 0 levaram à atualização do
+contratos (`docs/CONTRATOS.md`, seções 37 a 54). As que contrariavam um documento da Fase 0 levaram à atualização do
 trecho na etapa de documentação da entrega (item 13). As rodadas 2 e 3 da revisão tomaram as do item 15; pelos registros delas,
 nenhuma contraria um trecho da Fase 0 (cada uma cita o trecho que completa). A convergência tomou as do item 16, e uma
-delas contraria o desenho: o brinco resolvido sempre no servidor (08, seção 5). Ela ainda não foi levada à Fase 0.
+delas contraria o desenho: o brinco resolvido sempre no servidor (08, seção 5). Ela ainda não foi levada à Fase 0. A segunda
+convergência tomou as do item 17; pelos registros dela, nenhuma contraria um trecho da Fase 0, e algumas mudam regras dos itens 6
+a 9, como cada uma diz.
 
 1. **Catálogo e módulos.** `EventCatalog.FASE_ATUAL = 3`. Como o tipo só fica ativo com campos, o **módulo só fica ativo
    com a tela entregue** (campo `tela`): o menu mostra Pesagens, Sanidade e Reprodução só depois de cada tela existir, e os
@@ -300,7 +358,8 @@ delas contraria o desenho: o brinco resolvido sempre no servidor (08, seção 5)
    rateio do consumo é pela dose de cada um; nos demais casos, por cabeça; o desempate do maior resto vai para a maior base
    e depois para o código (03b). O servidor preenche três padrões: a próxima aplicação pelo intervalo do protocolo, o
    fabricante do produto e, sem os dias informados, a carência padrão do produto do cadastro (desde a rodada 3, item 15);
-   dose, lote e validade do cadastro são sugestões da tela, e o que foi gravado não muda quando o cadastro muda. A carência é conferida nos dois sentidos (a aplicação retroativa que cobre uma venda para abate
+   dose, lote e validade do cadastro são sugestões da tela, e o que foi gravado não muda quando o cadastro muda. Desde a
+   segunda convergência, a tela não preenche mais a carência, e trocar o produto troca o que veio do anterior (item 17). A carência é conferida nos dois sentidos (a aplicação retroativa que cobre uma venda para abate
    segue a política de `CARENCIA_ATIVA`); a venda anterior ao marco zero não confere carência, nas duas ordens de
    importação. Produto do cadastro com custo, pago também no ato numa conta de insumo → `CUSTO_EM_DOBRO` (recusa, não aviso).
    Na correção, o fato fica congelado quando o produto ou o protocolo não muda: o custo unitário e a conta do consumo do
@@ -308,7 +367,8 @@ delas contraria o desenho: o brinco resolvido sempre no servidor (08, seção 5)
    movimento da entrada de estoque. A mesma aplicação no mesmo animal no mesmo dia pede `POSSIVEL_DUPLICIDADE` por animal,
    com a chave da importação.
 7. **Agenda sanitária.** Aplicação única passada da idade máxima continua devida se o animal esteve na faixa depois da
-   criação do protocolo; a cada N dias, nunca aplicada, vence desde que o animal ficou elegível; na campanha, a perdida fica
+   criação do protocolo; a cada N dias, nunca aplicada, vence desde que o animal ficou elegível (desde a segunda
+   convergência, não antes de o protocolo passar a valer: item 17); na campanha, a perdida fica
    devida só até abrir a janela da seguinte; sem protocolo, a pendência vem da próxima informada na última dose do produto e
    é cumprida por qualquer aplicação posterior do mesmo produto, com ou sem protocolo. Tudo é calculado a cada consulta
    sobre os presentes na data.
@@ -316,7 +376,8 @@ delas contraria o desenho: o brinco resolvido sempre no servidor (08, seção 5)
    único. O touro de fora (cobertura e sêmen) não tem linha. Parto entre a concepção e o diagnóstico positivo é a regra
    rígida `PARTO_NA_GESTACAO` (VALIDATION no lançamento, CONFLICT pelo outro lado); a prenhez que passa da previsão sem parto
    é alerta (`PRENHEZ_VENCIDA`) e conta como perda gestacional quando a janela fecha. A data contra a estação só é conferida
-   no lançamento novo; a correção mantém a estação do original. Quem saiu no meio da estação: antes de um diagnóstico
+   no lançamento novo; a correção mantém a estação do original (desde a segunda convergência, só com a mesma data: item 17).
+   Quem saiu no meio da estação: antes de um diagnóstico
    conclusivo, sai do denominador da prenhez; antes do fim da janela sem desfecho, sai dos da parição, natalidade, desmama e
    perda; a vazia descartada continua. A cobertura do diagnóstico sai sempre; abaixo de 90%, a prenhez passa a ser "entre
    diagnosticadas". A situação, a marca de descarte e os indicadores numa data D usam só os fatos até D, por uma função só
@@ -324,7 +385,8 @@ delas contraria o desenho: o brinco resolvido sempre no servidor (08, seção 5)
    A faixa da idade da gestação pelo parâmetro `dias_gestacao` fica só no motor (o diagnóstico novo acima dela é recusado), e
    não na verificação, para que mudar o parâmetro não transforme um registro legítimo em fonte quebrada.
 9. **Desmama, castração e ocorrência.** A cria é definida por DL-06; a categoria segue automática pelo cadastro; a linha
-   do bezerro leva o movimento quando o pasto de destino é outro; a linha MATRIZ e o registro DESMAMA saem uma vez por mãe
+   do bezerro leva o movimento quando o pasto de destino é outro (desde a segunda convergência, o pasto informado fica
+   gravado também com o bezerro já nele, com origem = destino: item 17); a linha MATRIZ e o registro DESMAMA saem uma vez por mãe
    presente na data. A castração tira o status de reprodutor na projeção. Trocar a mãe de uma cria já desmamada continua
    recusado pela trava, agora com o caminho: estornar a desmama, trocar a mãe, desmamar de novo.
 10. **Importação de manejo.** Duas pesagens legítimas do mesmo animal no mesmo dia são dois lançamentos (números
@@ -421,6 +483,54 @@ delas contraria o desenho: o brinco resolvido sempre no servidor (08, seção 5)
       - O ano dos indicadores anuais depois do ano de D é recusado (`DATA_FUTURA`).
       - O bezerro que sai por DESCARTE antes da desmama conta à parte (`descartados_ao_pe`), fora da mortalidade.
       - O histórico de antes do marco zero cita o animal pelo número que ele tinha no marco zero.
+17. **Segunda convergência** (`CONTRATOS.md`, seções 50 a 54; o motivo de cada uma está na seção 6.6.7 e no `CHANGELOG`):
+    - **A correção passa por um ponto só** (`Correcao`):
+      - A tabela do que ela mantém do original tem 23 valores.
+      - Na entrada sem mudança, o que o servidor propôs vem vazio, e o que foi digitado vem como foi gravado. Quando o valor
+        gravado não diz se foi digitado, o payload guarda uma marca (`doses_informadas`, `pasto_crias_informado`,
+        `racas_informadas`, `quantidade_informada`, `carencia_informada`, `fabricante_informado`, `proxima_informada`).
+      - Com outra entidade (outro produto, protocolo, mãe ou tipo de dedução), vale o cadastro de hoje da entidade nova.
+      - A propriedade não tem marca: a cópia congelada só vale para o pedido que a omite.
+      - A correção pode vir só com a mudança (`dados.mudanca`). Com dois dados do mesmo animal, a mudança sem o campo é
+        recusada (`MUDANCA_AMBIGUA`), e tirar o que o lançamento não tem também (`MUDANCA_SEM_ITEM`).
+    - **Regras de desenho que valem também na correção sem mudança** (seção 50.6):
+      - a política BLOQUEIA, `PRODUTO_SEM_ESTOQUE` e o período fechado, aceito com a justificativa;
+      - a linha de touro é de um macho: a verificação acusa a que não é (`TOURO_LINHA`), e a trava recusa a correção de
+        cadastro que tiraria o sexo do touro de um lote;
+      - o pasto informado só é conferido como desativado quando recebe animal;
+      - com outra data, as conferências pelo estado de hoje voltam a valer.
+    - **A cópia na mesma linha do lançamento é conferida pela verificação**, pela maioria das linhas: o cabeçalho da aplicação,
+      a dose × a base do rateio, a soma das doses × a saída, o lote da saída, o rateio × o modo e o método da pesagem e da
+      desmama. A trava recusa a correção do lançamento cuja fonte ela lê quebrada; o dono restaura o backup ou estorna e lança
+      de novo.
+    - **Reprodução** (muda o item 8):
+      - o diagnóstico sem estação e o aborto são do dono da prenhez, a exposição mais recente da fêmea antes deles (a regra do
+        parto), e um registro conta numa estação só;
+      - a exposição em curso no parto ou no aborto continua no ciclo novo;
+      - a previsão só pela exposição tem a tolerância;
+      - a estação do original vale na correção só com a mesma data;
+      - o aparelho não escolhe a estação do diagnóstico pela data.
+    - **Agenda** (muda o item 7): o nunca aplicado vence no dia em que o protocolo passou a valer, isto é, o cadastro ou a
+      primeira aplicação com ele, se antes.
+    - **Sanidade e estoque** (muda o item 6):
+      - a tela não preenche a carência: vazia, o servidor copia a do produto;
+      - trocar o produto, o modo ou o protocolo troca na tela o que veio do anterior;
+      - o lote e a validade da entrada só valem com o movimento (`CAMPO_NAO_SE_APLICA`);
+      - a compra do insumo conta como uso do produto (`PRODUTO_EM_USO`);
+      - o comando que tira o movimento de um dia contado é recusado pelo motor (`CONTAGEM_POSTERIOR`).
+    - **Desmama e parto** (muda o item 9):
+      - o pasto informado da desmama fica gravado também com o bezerro já nele;
+      - o pasto do parto só de natimorto fica no payload, e esse parto grava a certeza do pai e não pede o pasto da mãe;
+      - a raça da ficha não é desfeita pela correção do lançamento que criou o animal.
+    - **Curral, tronco e rascunho:**
+      - nenhum formulário sai sem a chave guardada no rascunho;
+      - o rascunho no servidor vale pela versão;
+      - a falha do rascunho aparece em qualquer tela, e ele vai de novo sozinho;
+      - "Terminar" só termina com o rascunho do servidor apagado;
+      - a recusa do servidor ao resolvedor não é falta de sinal, e a linha recusada espera o operador;
+      - um bloco nunca leva o mesmo animal duas vezes.
+    - **O cliente não calcula.** Um teste estático lê o código do aparelho, com uma lista de 11 exceções. O vencimento das
+      parcelas vem da rota `financeiro.vencimentos`.
 
 ## 5. Limitações conhecidas
 
@@ -449,24 +559,32 @@ delas contraria o desenho: o brinco resolvido sempre no servidor (08, seção 5)
    se forem corrigidas, a próxima aplicação usa o intervalo atual do protocolo. As entradas de estoque não têm
    `com_movimento`: a apagada à mão continua indistinguível da compra feita antes de ligar o controle. A contagem seguida de
    um movimento retroativo anterior a ela passa a ser acusada pela verificação, e o caminho é estornar a contagem e contar
-   de novo. Só pesa numa base com lançamentos da Fase 3 anteriores a 17/11/2026, que hoje só existe nos testes.
+   de novo. Desde a segunda convergência, o payload guarda marcas do que foi digitado (seção 4, item 17). Nos lançamentos
+   gravados antes delas, o valor é lido como proposto pelo servidor: a correção sem mudança o refaz como no registro. O parto
+   só de natimorto gravado antes da etapa 1 não tem `pai_confianca`, e a correção sem mudança dele ainda pede "Pai é". Só
+   pesa numa base com lançamentos da Fase 3 anteriores a 18/11/2026, que hoje só existe nos testes.
 7. **Mensagens da trava** mostram o código interno do animal ("A-000001 (brinco 100)") e repetem a data no rótulo do
    evento ("Desmama de 01/08/2026" de 01/08/2026).
 8. **Financeiro da Fase 4** continua como na Fase 2 (`RELATORIO_FASE2.md`, seção 5, item 2): o consumo do insumo e as
    despesas pagas no ato entram no financeiro do próprio evento; rateio por evento RATEIO, baixa de parcelas e resultado
    gerencial, na Fase 4. CT-03 passo 4 e CT-13 c a f seguem `NÃO SE APLICA`.
-9. **Decisões da Fase 3 só em `CONTRATOS.md`**: as da seção 4, itens 2 a 10, 15 e 16, precisam ser ratificadas pelo dono
-   na próxima revisão dos documentos da Fase 0. Quase todas completam a Fase 0 sem contrariá-la; uma do item 16 contraria
-   (o brinco resolvido sempre no servidor, contra 08, seção 5) e ainda não foi levada ao desenho.
+9. **Decisões da Fase 3 só em `CONTRATOS.md`**: as da seção 4, itens 2 a 10, 15, 16 e 17, precisam ser ratificadas pelo
+   dono na próxima revisão dos documentos da Fase 0. Quase todas completam a Fase 0 sem contrariá-la; uma do item 16
+   contraria (o brinco resolvido sempre no servidor, contra 08, seção 5) e ainda não foi levada ao desenho. As do item 17
+   mudam regras dos itens 6 a 9 sem contrariar um trecho da Fase 0.
 10. **Desempenho não medido no Apps Script**: a agenda calcula tudo sobre os presentes na data a cada consulta, os
     indicadores refazem a estação, as consultas numa data passada calculam o retrato de cada animal que mostram, e a
     trava confere também os fatos novos. No Node, com a base de demonstração da Fase 3 (`npm run trava:medir --
     --vezes 3`, nesta etapa, sem outro processo rodando): 430 comandos (a base inteira com os cadastros; 304 cabeças),
-    média de 167,8 ms por comando (p50 152,9 ms; p95 358,2 ms), dos quais 21,3 s de 72,2 s (29%) na trava; mediana de 3
-    execuções. Na etapa que acrescentou as rodadas 2 e 3, com a mesma base, a média era 147,8 ms (18,9 s de 63,6 s na
-    trava); na entrega, 121,3 ms (15,1 s de 52,2 s). Com a convergência, a mediana ficou cerca de 14% mais lenta, dentro
-    da trava (+13%) e fora dela (+14%). As três execuções desta etapa variaram de 149,9 a 169,6 ms de média, e a
-    diferença está na mesma ordem dessa variação. A parte de cada conserto não foi medida. No fim da Fase 2, com a base
+    média de 176,4 ms por comando (p50 172,8 ms; p95 382,6 ms), dos quais 23,7 s de 75,9 s (31%) na trava; mediana de 3
+    execuções, que variaram de 174,3 a 188,9 ms de média. Com a mesma base, as medidas anteriores foram:
+    - no relatório da primeira convergência, 167,8 ms (21,3 s de 72,2 s na trava);
+    - na etapa das rodadas 2 e 3, 147,8 ms (18,9 s de 63,6 s);
+    - na entrega, 121,3 ms (15,1 s de 52,2 s).
+
+    Com a segunda convergência, a mediana ficou cerca de 5% mais lenta: +11% dentro da trava, que passou a conferir também
+    a cópia na mesma linha do lançamento e a linha de touro, e +2% fora dela. A diferença fora da trava está na ordem da
+    variação entre execuções. A parte de cada conserto não foi medida. No fim da Fase 2, com a base
     de demonstração de então (391 comandos, sem o manejo), a média era 53,1 ms: a base cresceu (pesagens, aplicações,
     estoque, estações), e as duas medidas não comparam bases iguais. O tempo de cada comando cresce com o tamanho da
     base, e no Sheets a leitura das abas se soma a isso. No Google Sheets, nada disso foi medido.
@@ -487,13 +605,27 @@ delas contraria o desenho: o brinco resolvido sempre no servidor (08, seção 5)
     - O teste aleatório da tela (seção 6.6.4) cobre o curral e o tronco. Não cobre o "Pesar este" da lista dos que
       faltam, vários animais com o mesmo número na mesma data, duas abas abertas e o celular. A decisão do repetido
       refeita no meio não apareceu nas 50 sementes da revisão final.
+    - O oráculo da correção (seção 6.6.7) confere a correção de um campo só na anotação, no responsável, na observação de
+      um animal, na data, na dose por kg, na dose digitada, num dado da correção de cadastro e na raça da ficha. A troca de
+      entidade (outro produto, protocolo, mãe ou tipo de dedução) e a mudança das entradas dos derivados ficam nos testes
+      fixos, e o plano de contas não é variado. Ele supõe a fonte intacta: a adulterada fica com a verificação.
+    - Os oráculos da segunda convergência também não foram medidos com mutações. O que o oráculo da correção enxerga foi
+      visto pelo que ele achou: os 11 defeitos da etapa 1.
+    - O teste "o cliente não calcula" lê nomes: a conta com variáveis de nome neutro passa, e a escolha de um valor pelo dado
+      de hoje, sem conta, não é vista (achados 7 e 8 da rodada 2 da segunda convergência).
     - O do motor roda no harness Node e o da tela no Chromium do Playwright com o mock; nenhum roda no Apps Script.
-12. **Bases antigas** podem mostrar achados novos na verificação depois de atualizar o código: a cópia do peso das pesagens
-    de entrada, compra, venda e parto (COPIAS, sem reparo). O problema antigo não bloqueia os comandos que não o pioram.
-13. **Revisão sem convergência demonstrada** (seções 6.5 e 6.6.6): três rodadas e a revisão final, com 29, 25, 25 e 17
-    achados (14, 8, 5 e 7 altos). A revisão final, depois da convergência, não terminou sem achado alto, e os 17 consertos
-    dela não passaram por outra revisão. Nas rodadas 2 e 3 e na final, 40%, 52% e 47% dos achados eram conserto
-    incompleto ou regressão; na final, 6 dos 17 eram das próprias etapas da convergência.
+12. **Bases antigas** podem mostrar achados novos na verificação depois de atualizar o código:
+    - a cópia do peso das pesagens de entrada, compra, venda e parto (COPIAS, sem reparo);
+    - desde a segunda convergência, a cópia na mesma linha do lançamento: o cabeçalho da aplicação, a dose × a base do rateio,
+      a soma das doses × a saída, o lote da saída, o rateio × o modo e o método da pesagem e da desmama;
+    - a linha de touro que não é de um macho (`TOURO_LINHA`).
+
+    O problema antigo não bloqueia os comandos que não o pioram. A trava recusa a correção do lançamento cuja fonte ela lê
+    quebrada; nesse caso, o caminho é restaurar o backup ou estornar e lançar de novo.
+13. **Revisão sem convergência demonstrada** (seções 6.5, 6.6.6 e 6.6.7). Foram seis revisões: três rodadas, a revisão
+    final e duas rodadas na segunda convergência. Elas tiveram 29, 25, 25, 17, 17 e 17 achados (14, 8, 5, 7, 7 e 10 altos). A
+    última, depois da segunda convergência, não terminou sem achado alto: teve 10. Os 17 consertos dela não passaram por outra
+    revisão. A parte dos achados que era conserto incompleto ou regressão, pelo título, foi de 40%, 52%, 47%, 12% e 47%.
 14. **Continuam valendo** as limitações da Fase 2 que esta fase não tocou (`RELATORIO_FASE2.md`, seção 5): itens 2 a 6,
     11 (parte da importação e da integridade), 13, 14, 17 a 19 e 21. Ficaram resolvidas: a carência depende da SANIDADE
     real (item 8), a importação de pesagens, sanidade, reprodução e ocorrências (parte do item 7), o modo curral da pesagem
@@ -506,6 +638,11 @@ delas contraria o desenho: o brinco resolvido sempre no servidor (08, seção 5)
       responder (a decisão das recusas, seção 6.6.4).
     - Sem sinal, o brinco digitado não é conferido: a linha fica pendente até o servidor responder, e nunca é resolvida
       pela lista do aparelho.
+    - Sem `localStorage`, o que foi digitado e não chegou ao rascunho do servidor se perde quando a página vai embora de
+      repente; nada é gravado a mais. O bloco gravado que o rascunho ainda diz "enviando" volta "sem confirmação" e é
+      conferido pela chave. "Terminar" só termina com o servidor confirmando a remoção do rascunho.
+    - A linha "recusada pelo servidor" (a recusa do resolvedor, como a data futura) não se resolve sozinha com a rede de
+      volta: o operador a tira, corrige o brinco ou muda a data.
     - A pré-carga das telas do curral e do tronco na Início, o "Tentar de novo" e a conferência das pendentes só foram
       exercitados no Playwright, com o mock de `google.script.run`.
 16. **O custo das consultas numa data e da ida ao servidor.** O retrato numa data passada é calculado só para o animal
@@ -529,7 +666,9 @@ estoque pela posição no dia, as próximas doses da ficha iguais às da agenda,
 ficha, o rótulo único dos pastos e o último peso na data em `inventario.elegiveis`. As sementes fixas passaram a 23 (entrou
 a 29) e exigem que esses oráculos confiram algo. A convergência acrescentou o oráculo de viagem no tempo e o do
 resolvedor (seção 6.6), e a revisão final, o modelo da agenda com protocolo por categoria, as cópias do original no efeito
-da correção e o procedimento do protocolo em uso; as sequências das sementes fixas não mudaram.
+da correção e o procedimento do protocolo em uso. A segunda convergência acrescentou o oráculo da correção (seção 6.6.7), e as
+rodadas dela estenderam esse oráculo e o modelo dos indicadores (cada registro numa estação só). Nenhum desses oráculos mudou
+as sequências das sementes fixas, porque todos sorteiam por um gerador à parte.
 
 | Etapa | Sementes novas × passos | Comandos aceitos / recusados (quando registrados) | Falhas do sistema | Falhas do modelo do teste |
 |---|---|---|---:|---:|
@@ -548,7 +687,11 @@ da correção e o procedimento do protocolo em uso; as sequências das sementes 
 | Convergência, viagem no tempo | 1.320 × 100 (3110000 a 3110039, de busca, com o código de antes dos consertos; 3120000 a 3120079; 3400000 a 3400999, com o código final congelado; 3500000 a 3500199, leva limpa) | 76.713 / 43.736 | 13 (6 classes, todas na leva de busca; seção 6.6.2) | 3 (3110020 e 3110034: a volta ao rebanho leva a ficha para hoje; 3400390: o estorno imediato com a política do estoque) |
 | Convergência, resolvedor | 200 × 100 (3600000 a 3600199) | 11.651 / 6.731 | 0 | 0 |
 | Conserto da revisão final | 340 × 100 (3700000 a 3700039, de busca, com o código intermediário; 3800000 a 3800299, com o código final) | 20.021 / 11.278 | 0 | 0 |
-| Esta etapa: confirmação com o código final | 100 × 100 (3900000 a 3900099) | 5.878 / 3.290 | 0 | 0 |
+| Relatório da primeira convergência: confirmação | 100 × 100 (3900000 a 3900099) | 5.878 / 3.290 | 0 | 0 |
+| Segunda convergência, correção | 2.392 × 100 (610000 a 610999, de busca; 284 a partir de 611000 e 108 a partir de 612000, de confirmação; 613000 a 613999, leva limpa) | 117.344 / 66.317 (a busca e a leva limpa) | 10 (8 na busca e 2 nas confirmações; seção 6.6.7) | 0 |
+| Segunda convergência, rodada 1 | 300 × 100 (7600000 a 7600299, refeita do começo; as levas interrompidas pelo reinício e pela lacuna do oráculo não contam) | 17.395 / 9.949 | 0 | 4 (720043, 720208 e 720241: a impressão do protocolo no oráculo do tempo; 7600019: a recusa da dose por kg) |
+| Segunda convergência, rodada 2 | 300 × 100 (7700000 a 7700299) | 18.273 / 9.577 | 0 | 0 |
+«LINHA_ESTA_ETAPA»
 | **Total** | **8.288 sementes novas** | | **13** | **8** |
 
 Cada falha do modelo virou caso fixo (`tests/fase3.fuzz.regressoes.test.js`, `tests/import.manejo.test.js` ou
@@ -577,6 +720,11 @@ rodada 1, não foram medidos com mutações. O que se sabe deles é quanto confe
 aplicações com a carência do cadastro; 26 interações da carência e 13 do movimento depois da contagem (2 com a contagem
 corrigida e um movimento do mesmo dia gravado depois); 1.749 GMD de resposta conferidos (6 com o intervalo começando antes
 da pesagem anterior); 40.903 conferências da ficha contra a agenda, 34.481 dos partos e 52.478 do último peso na data.
+
+Na segunda convergência, o padrão mudou em parte. O oráculo da correção achou 11 defeitos do sistema: 10 nas sementes novas da
+tabela e 1 nas sementes fixas (seção 6.6.7). As 600 sementes das duas rodadas não acharam nenhum, só duas lacunas do próprio
+oráculo, e as duas revisões acharam 34 logo depois. O teste aleatório da tela, estendido em cada rodada, achou mais 5 defeitos
+do sistema que a revisão não tinha apontado.
 
 ### 6.2 Revisão independente da Fase 3, rodada 1
 
@@ -792,8 +940,10 @@ Depois da rodada 3, o trabalho mudou de forma, como na Fase 2 (`RELATORIO_FASE2.
 caso a caso, garantias que valem para todos os caminhos das duas classes de defeito que as rodadas repetiam. Foram quatro
 etapas, cada uma com a sua entrada no `CHANGELOG` e a sua seção no `CONTRATOS.md`: o oráculo de viagem no tempo (seção 46), o
 resolvedor único da posição na data (47), o teste aleatório da tela do curral e do tronco (48) e o conserto da revisão final
-(49). Os números das levas de teste aleatório são os do registro de cada etapa. O que esta etapa executou de novo está marcado
-como "esta etapa".
+(49). Os números das levas de teste aleatório são os do registro de cada etapa. As seções 6.6.1 a 6.6.6 descrevem essa primeira
+convergência e foram escritas no relatório dela, em 17/11/2026: o "esta etapa" delas é aquele relatório. A revisão final ainda
+achou 7 altos, e veio uma segunda convergência, com duas etapas pela garantia e duas rodadas de revisão (seções 50 a 54). Ela
+está na seção 6.6.7, e o que o relatório dela executou de novo está marcado lá como "esta etapa".
 
 #### 6.6.1 Por que: três rodadas sem queda e duas classes de defeito
 
@@ -1106,6 +1256,9 @@ sem `localStorage`. Os outros 9 (5, 6, 8, 9, 10, 12, 14, 15 e 16) ficam só com 
 confere, em geral, o animal gravado e que nada fique preso, o que alcança parte do 6 e do 12.
 
 #### 6.6.6 Balanço: a convergência está demonstrada? Não
+
+Esta seção é o balanço da primeira convergência e fica como registro. A curva de achados com as duas rodadas da segunda
+convergência e o estado de hoje estão na seção 6.6.7.
 
 | Rodada | Achados | Distintos | ALTA | MÉDIA | BAIXA | Conserto incompleto ou regressão da anterior (pelo título) |
 |---|---:|---:|---:|---:|---:|---:|
