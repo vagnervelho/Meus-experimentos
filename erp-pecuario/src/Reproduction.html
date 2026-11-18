@@ -336,7 +336,10 @@ var TelaReproducao = (function () {
     c.n = c.linhas.length;
     c.data = c.sessao.data;
     c.estado = c.blocos.some(function (b) { return b.estado === 'ENVIANDO' || b.estado === 'SEM_SINAL'; }) ? 'ENVIANDO' : 'EDITANDO';
-    return Rascunhos.salvar(ID_RASCUNHO, c, o).catch(function (e) { App.faixa('rascunho-falhou', { tipo: 'aviso', texto: 'Não foi possível guardar o diagnóstico neste aparelho (' + e.message + '). Não feche esta tela antes de enviar.' }); });
+    return Rascunhos.salvar(ID_RASCUNHO, c, o).catch(function (e) {
+      App.faixa('rascunho-falhou', { tipo: 'aviso', texto: 'Não foi possível guardar o diagnóstico (' + e.message + '). Não feche esta tela antes de enviar.' });
+      return { falhou: e };
+    });
   }
   /**
    * "Resultado" digitado: p (prenhe), v (vazia) ou d (duvidosa), com a idade da gestação em dias depois do p ("p90" ou
@@ -421,15 +424,26 @@ var TelaReproducao = (function () {
   /** Um bloco: gravado → o resultado do servidor; aviso ou recusa → a mensagem na linha; sem sinal → a mesma chave depois. */
   async function enviarBloco(c, b, aoMudar) {
     var linhas = c.linhas.filter(function (l) { return l.bloco === b.chave; });
+    var antes = b.estado;
     b.estado = 'ENVIANDO';
     b.recusa = null;
+    b.naoGuardado = null;
     b.reenviar = false;
     c.erroGeral = null;
     linhas.forEach(function (l) { l.estado = 'ENVIANDO'; l.mensagem = null; });
     // A tela mostra o bloco saindo antes de guardar a chave (no rascunho do servidor, sem localStorage, a gravação demora):
     // nenhum botão de mexer na linha fica na tela enquanto ela sai.
     aoMudar();
-    await guardarTronco(c, { imediato: true });
+    var g = await guardarTronco(c, { imediato: true });
+    if (g && g.falhou && antes !== 'ENVIANDO' && antes !== 'SEM_SINAL') {
+      // A chave do bloco que ainda não saiu não ficou guardada: ele não sai e volta à fila com a chave (CONTRATOS, seção 52).
+      linhas = c.linhas.filter(function (l) { return l.bloco === b.chave; });
+      b.estado = 'NOVO';
+      b.naoGuardado = g.falhou.message;
+      linhas.forEach(function (l) { l.estado = 'FILA'; });
+      aoMudar();
+      return 'SEM_SINAL';
+    }
     aoMudar();
     var r;
     try {
@@ -851,6 +865,7 @@ var TelaReproducao = (function () {
       var recusados = c.blocos.filter(function (b) { return b.estado === 'SEM_SINAL' && b.recusa; });
       if (c.blocos.some(function (b) { return b.estado === 'SEM_SINAL' && !b.recusa; })) ui.status.appendChild(UI.nota('Sem sinal ou sem resposta: o que foi digitado está guardado neste aparelho. Toque em "Enviar" quando o sinal voltar; nada será gravado duas vezes.', 'aviso'));
       recusados.forEach(function (b) { ui.status.appendChild(h('div', { role: 'alert', dataset: { recusaIncerta: b.chave } }, UI.nota('O servidor recusou o envio de ' + b.uids.length + (b.uids.length === 1 ? ' diagnóstico' : ' diagnósticos') + ': ' + b.recusa + ' Eles continuam guardados com a mesma chave e saem de novo no próximo envio; nada será gravado duas vezes.', 'erro'))); });
+      c.blocos.filter(function (b) { return b.naoGuardado && b.estado === 'NOVO'; }).forEach(function (b) { ui.status.appendChild(h('div', { role: 'alert', dataset: { naoGuardado: b.chave } }, UI.nota('O envio de ' + b.uids.length + (b.uids.length === 1 ? ' diagnóstico' : ' diagnósticos') + ' não saiu: não foi possível guardá-lo antes (' + b.naoGuardado + '). Toque em "Enviar" de novo.', 'erro'))); });
       if (c.erroGeral) ui.status.appendChild(h('div', { role: 'alert', dataset: { erroGeral: '1' } }, UI.nota('O servidor recusou o envio: ' + c.erroGeral + ' Nada foi gravado; os diagnósticos continuam neste aparelho.', 'erro')));
       if (pend.length) ui.status.appendChild(UI.nota(pend.length + (pend.length === 1 ? ' pendência impede' : ' pendências impedem') + ' o envio: corrija o brinco ou o resultado (digite de novo) ou tire a linha.', 'erro'));
       c.blocos.forEach(function (b) {

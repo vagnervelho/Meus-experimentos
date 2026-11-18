@@ -44,6 +44,8 @@ const { S } = A;
 test.after(() => A.fecharBrowser());
 
 const N_ACOES = Number(process.env.FUZZ_ACOES || 40);
+/** FUZZ_MODO=semLS (o rascunho no servidor, SP-06) ou comLS fixa o modo do rascunho em todas as sementes. */
+const MODO = process.env.FUZZ_MODO || '';
 const SEMENTES_FIXAS = [11, 12, 13, 14, 15, 16];
 
 // ------------------------------------------------------------------ uma semente ----
@@ -57,7 +59,8 @@ async function rodarSemente(semente, nAcoes, opcoes) {
   const rede = novaRede(s);
   // Revisão final da Fase 3 (achado 4): parte das sementes roda sem localStorage (o rascunho no servidor, SP-06), com o
   // rascunho que demora (segurado) enquanto o bloco sai. Sorteado à parte: as sequências das outras sementes não mudam.
-  const semLS = o.semLocalStorage !== undefined ? !!o.semLocalStorage : gerador(semente * 104729 + 3)() < 0.25;
+  const sorteioLS = gerador(semente * 104729 + 3)() < 0.25;
+  const semLS = o.semLocalStorage !== undefined ? !!o.semLocalStorage : MODO === 'semLS' ? true : MODO === 'comLS' ? false : sorteioLS;
   const a = await A.abrir(s, { largura: 360, hash: cfg.hash, relogio: RELOGIO, servidor: rede.servidor, semLocalStorage: semLS });
   const { page } = a;
   const historico = [];
@@ -66,7 +69,7 @@ async function rodarSemente(semente, nAcoes, opcoes) {
   const conta = (k) => { cont[k] = (cont[k] || 0) + 1; };
 
   // O modelo: as linhas (uid → texto, valor), a ordem, o cabeçalho, as tiradas e as descartadas, as chaves de cada bloco visto.
-  const M = { sessao: null, ordem: [], linhas: {}, tiradas: new Set(), descartadas: new Set(), chaves: {}, sessoes: [], versaoOutro: 0, mortos: new Set(), saiu: {} };
+  const M = { sessao: null, ordem: [], linhas: {}, tiradas: new Set(), descartadas: new Set(), chaves: {}, sessoes: [], versaoOutro: 0, mortos: new Set(), saiu: {}, saiuLinhas: {}, tocados: new Set() };
   if (semLS) { historico.push('(sem localStorage: o rascunho fica no servidor)'); conta('semLocalStorage'); }
   const resolvidos = {};
   /** O resolvedor único do servidor (fora da rede da página): o animal do texto na data, com o porquê de não servir. */
@@ -80,16 +83,37 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     resolvidos[k] = { situacao: x.situacao, animal_id: x.situacao === 'ACHADO' ? x.animal_id : null, inelegivel: est ? est.inelegivel : null, mensagem: x.mensagem, candidatos: x.candidatos };
     return resolvidos[k];
   }
+  /** O animal em D pelo servidor (fora da rede da página): o brinco em uso naquele dia, a categoria, o pasto, a presença. */
+  const estados = {};
+  function estadoModelo(id, data) {
+    const k = M.versaoOutro + '|' + data + '|' + id;
+    if (estados[k]) return estados[k];
+    const r = s.api({ rota: 'animal.resolver', dados: { data, textos: [], ids: [id], tipo: cfg.tipo, sexo: cfg.sexo || null } });
+    if (!r.ok) throw new Error('resolvedor do modelo (ids): ' + JSON.stringify(r.error));
+    estados[k] = r.data.animais[id];
+    return estados[k];
+  }
+  const nomesPasto = {};
+  s.tabela('PASTOS').forEach((p) => { nomesPasto[p.pasture_id] = p.nome; });
+  /** O rascunho guardado no servidor (sem localStorage), lido fora da rede da página. */
+  function rascunhoServidor() {
+    const r = s.api({ rota: 'rascunho.obter', dados: { chave: 'r.' + cfg.rascunho } });
+    if (!r.ok) throw new Error('rascunho.obter do modelo: ' + JSON.stringify(r.error));
+    return r.data.existe ? r.data.conteudo : null;
+  }
   const falhar = (msg) => { throw new Error(msg); };
+  const essencialRascunho = (x) => JSON.stringify({ sessao: x.sessao, linhas: x.linhas.map((l) => [l.uid, l.estado, l.animal_id, l.peso, l.resultado, l.idade || null, l.bloco || null]), blocos: x.blocos.map((b) => [b.chave, b.estado, b.uids, b.campos, b.reenviar || false]) });
   /** O relógio da página anda (os prazos do aparelho vencem; o que estava segurado nesse tempo chega atrasado). */
   async function avancar(ms) { rede.passou(ms); await page.clock.fastForward(ms); }
 
   /** Espera a tela parar: todo pedido respondido (menos os segurados de propósito) e nenhuma conferência no ar. */
-  async function assentar() {
+  async function assentar(o3) {
+    const semConf = !!(o3 && o3.semConferencia);
     let quietas = 0;
     let presa = 0;
     for (let i = 0; i < 2000; i++) {
       const st = await page.evaluate((sel) => ({ em: window.__gas ? window.__gas.emCurso : 0, conf: /Conferindo/.test((document.querySelector(sel) || {}).textContent || '') }), cfg.conferencia);
+      if (semConf) st.conf = false;
       if (st.em <= rede.segurados.length && !st.conf && rede.log.some((r) => r.ocupadoAberto)) {
         // O servidor estava ocupado: o aparelho espera 2, 5 ou 10 s para tentar de novo; o relógio anda até lá (nada fica
         // para o tempo real decidir no meio da próxima ação).
@@ -190,7 +214,7 @@ async function rodarSemente(semente, nAcoes, opcoes) {
       if ((mP ? Number(mP[1]) : 0) !== nPend) e('o status diz ' + (mP ? mP[1] : 0) + ' pendentes; o aparelho tem ' + nPend + ': "' + v.status + '"');
       // O rascunho guardado é o estado da tela (recarregar não perde nada).
       const r = v.rascunho;
-      const essencial = (x) => JSON.stringify({ sessao: x.sessao, linhas: x.linhas.map((l) => [l.uid, l.estado, l.animal_id, l.peso, l.resultado, l.idade || null, l.bloco || null]), blocos: x.blocos.map((b) => [b.chave, b.estado, b.uids, b.campos, b.reenviar || false]) });
+      const essencial = essencialRascunho;
       // Sem localStorage o rascunho vai ao servidor adiado (1 s) — a conferência dele é a da recarga (nada perdido).
       if (!semLS && !r) e('a sessão não está guardada no aparelho');
       else if (!semLS && essencial(r) !== essencial(c)) e('o rascunho guardado não é o estado da tela:\n   guardado ' + essencial(r) + '\n   na tela  ' + essencial(c));
@@ -200,21 +224,47 @@ async function rodarSemente(semente, nAcoes, opcoes) {
       c.linhas.forEach((l) => {
         const b = l.bloco ? blocoDe(c, l.bloco) : null;
         const dom = v.linhas.find((x) => x.uid === l.uid) || { botoes: [] };
-        if (saiu(b)) ['Tirar', 'Corrigir o peso', 'Corrigir o resultado', 'Está certo'].forEach((t) => { if (dom.botoes.indexOf(t) >= 0) e('a linha ' + l.uid + ' está num bloco que saiu (' + b.estado + ') e a tela oferece "' + t + '"'); });
+        if (saiu(b)) ['Tirar', 'Corrigir o peso', 'Corrigir o resultado', 'Corrigir o brinco', 'Está certo'].forEach((t) => { if (dom.botoes.indexOf(t) >= 0) e('a linha ' + l.uid + ' está num bloco que saiu (' + b.estado + ') e a tela oferece "' + t + '"'); });
       });
       const algumSaiu = c.blocos.some(saiu);
       if (v.mudar === algumSaiu) e('"Mudar" ' + (v.mudar ? 'aparece com' : 'some sem') + ' bloco que saiu: ' + JSON.stringify(c.blocos.map((b) => b.estado)));
+      const fotoBloco = (b) => JSON.stringify(c.linhas.filter((l) => l.bloco === b.chave).map((l) => [l.uid, l.animal_id, tela === 'curral' ? l.peso : l.resultado, l.idade || null]));
       Object.keys(M.saiu).forEach((k) => {
         const b = blocoDe(c, k);
         const antes = M.saiu[k];
-        if (b && saiu(b)) { if (antes === 'GRAVADO' && b.estado !== 'GRAVADO') e('o bloco ' + k + ' estava gravado e agora está ' + b.estado); return; }
+        if (b && saiu(b)) {
+          if (antes === 'GRAVADO' && b.estado !== 'GRAVADO') e('o bloco ' + k + ' estava gravado e agora está ' + b.estado);
+          // Nenhuma ação na tela altera o bloco que saiu: as mesmas linhas, com o mesmo animal e o mesmo valor.
+          if (M.saiuLinhas[k] && M.saiuLinhas[k] !== fotoBloco(b)) e('o bloco ' + k + ' saiu (' + b.estado + ') e as linhas dele mudaram: ' + M.saiuLinhas[k] + ' → ' + fotoBloco(b));
+          return;
+        }
         // Deixou de "ter saído" (desfeito, ou com aviso ou recusa): só a resposta do servidor que prova que a chave não foi
-        // gravada (o aviso, VALIDATION, CONFLICT) ou a chave já gravada (IDEMPOTENCY_MISMATCH) o explica.
+        // gravada (o aviso, VALIDATION, CONFLICT) ou a chave já gravada (IDEMPOTENCY_MISMATCH) o explica — ou o bloco nunca
+        // ter saído do aparelho (a chave não ficou guardada no rascunho, e o envio não foi feito; CONTRATOS, seção 52).
         const provou = rede.log.some((x) => x.chave === k && x.entregue && !x.resposta.ok && ['NEEDS_CONFIRMATION', 'VALIDATION', 'CONFLICT', 'IDEMPOTENCY_MISMATCH'].indexOf(x.resposta.error.code) >= 0);
-        if (!provou) e('o bloco ' + k + ' saiu (' + antes + ') e o aparelho ' + (b ? 'o pôs em ' + b.estado : 'o desfez') + ' sem a resposta do servidor');
+        const nuncaSaiu = !rede.log.some((x) => x.chave === k);
+        if (nuncaSaiu) conta('bloco que não saiu (chave não guardada)');
+        if (!provou && !nuncaSaiu) e('o bloco ' + k + ' saiu (' + antes + ') e o aparelho ' + (b ? 'o pôs em ' + b.estado : 'o desfez') + ' sem a resposta do servidor');
+        if (b && nuncaSaiu && b.estado === 'NOVO' && v.naoGuardado.indexOf(k) < 0) e('o bloco ' + k + ' não saiu (a chave não ficou guardada) e a tela não diz por quê');
         delete M.saiu[k];
+        delete M.saiuLinhas[k];
       });
-      c.blocos.forEach((b) => { if (saiu(b)) { M.saiu[b.chave] = b.estado; conta('bloco que saiu conferido'); } });
+      c.blocos.forEach((b) => { if (saiu(b)) { M.saiu[b.chave] = b.estado; if (!M.saiuLinhas[b.chave]) M.saiuLinhas[b.chave] = fotoBloco(b); conta('bloco que saiu conferido'); } });
+      // O rascunho no servidor que falhou é avisado em qualquer tela (o curral e o tronco também), até ir de novo.
+      if (v.situacaoRascunho && v.situacaoRascunho.estado === 'FALHOU') { conta('rascunho:falhou'); if (!v.faixaRascunho) e('o rascunho no servidor falhou (' + (v.situacaoRascunho.erro && v.situacaoRascunho.erro.message) + ') e a tela não avisa'); }
+      // Tudo o que a tela mostra do animal é o que o servidor deu para a data da sessão: a linha começa pelo brinco daquele dia
+      // (o número trocado ou reaproveitado depois é o de hoje, entre parênteses), ou pelo código do animal sem brinco.
+      c.linhas.forEach((l) => {
+        if (!l.animal_id) return;
+        const dom = v.linhas.find((x) => x.uid === l.uid);
+        if (!dom) return;
+        const est = estadoModelo(l.animal_id, c.sessao.data);
+        const esperado = (est && (est.brinco || est.codigo_interno)) || null;
+        const rot = dom.texto.split(' · ')[1] || '';
+        if (esperado && rot !== esperado && rot.indexOf(esperado + ' (hoje ') !== 0) e('a linha ' + l.uid + ' mostra o animal como "' + rot + '"; em ' + c.sessao.data + ' o servidor dá o brinco ' + esperado + ': "' + dom.texto + '"');
+        else conta('rotulo:conferido');
+        if (est && est.brinco_hoje !== est.brinco && est.brinco && c.sessao.data !== HOJE) conta('rotulo:brincoTrocado');
+      });
       // As linhas são as do modelo, na ordem e com o valor digitado.
       const uidsC = c.linhas.map((l) => l.uid);
       if (JSON.stringify(uidsC) !== JSON.stringify(M.ordem)) e('as linhas não são as digitadas: aparelho ' + JSON.stringify(uidsC) + ' × modelo ' + JSON.stringify(M.ordem));
@@ -304,7 +354,9 @@ async function rodarSemente(semente, nAcoes, opcoes) {
   }
 
   // ---------------------------------------------------------------- as ações ----
-  const DATAS = [HOJE, HOJE, HOJE, '2026-11-12', '2026-11-11', '2026-11-10', '2026-11-04', '2026-10-01', '2025-12-20'];
+  // As datas da sessão: hoje, os dias das trocas do 0457 (11/11 e 12/11) e antes delas (o brinco trocado ou reaproveitado
+  // depois é o daquele dia), antes da morte, um mês antes e antes do marco zero.
+  const DATAS = [HOJE, HOJE, HOJE, '2026-11-12', '2026-11-12', '2026-11-11', '2026-11-11', '2026-11-10', '2026-11-04', '2026-11-04', '2026-10-01', '2025-12-20'];
   function sortearSessao() {
     const data = um(rnd, DATAS);
     if (tela === 'curral') return { data, metodo: um(rnd, ['BALANCA', 'BALANCA', 'FITA', 'ESTIMATIVA_VISUAL']), momento: um(rnd, ['ROTINA', 'ROTINA', 'ENTRADA', 'DESMAMA', 'VENDA']), jejum: rnd() < 0.2, pasto_id: um(rnd, ['', S.PASTOS.A, S.PASTOS.B]) };
@@ -350,6 +402,54 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     return { texto: k, valor: { resultado: res, idade: m[2] ? Number(m[2]) : null } };
   }
 
+  /**
+   * Depois do Enter no brinco, o operador lê a conferência: o animal achado aparece com o brinco DAQUELA data (ou o código do
+   * animal sem brinco), a categoria e o pasto do servidor na data da sessão — nunca o estado de hoje do aparelho.
+   */
+  async function olharConferencia(texto) {
+    await assentar();
+    const v = await lerTela(page, tela);
+    if (v.fase !== 'sessao' || !M.sessao) return;
+    const rr = resolverModelo(texto, M.sessao.data);
+    if (rr.situacao !== 'ACHADO' || M.tocados.has(rr.animal_id)) return;
+    if (v.conferenciaTipo !== 'OK' && v.conferenciaTipo !== 'INATIVO') return;
+    const est = estadoModelo(rr.animal_id, M.sessao.data);
+    const erros = [];
+    const nome = est.brinco || est.codigo_interno;
+    if (v.conferenciaTexto.indexOf(nome) !== 0) erros.push('começa pelo brinco ' + nome);
+    if (est.categoria && v.conferenciaTexto.indexOf(est.categoria) < 0) erros.push('mostra a categoria ' + est.categoria);
+    const presente = !(est.presente === false);
+    if (presente && est.pasture_id && v.conferenciaTexto.indexOf(nomesPasto[est.pasture_id]) < 0) erros.push('mostra o pasto ' + nomesPasto[est.pasture_id]);
+    if (erros.length) falhar('a conferência de "' + texto + '" em ' + M.sessao.data + ' devia vir do servidor (' + erros.join('; ') + '): "' + v.conferenciaTexto + '"');
+    conta('conferencia:conferida');
+  }
+  function sortearValorValido() {
+    const x = sortearValor();
+    if (x.valor !== null) return x;
+    return tela === 'curral' ? { texto: '321', valor: 321 } : { texto: 'p', valor: { resultado: 'POSITIVO', idade: null } };
+  }
+  /**
+   * "Conferir os brincos pendentes": com a resposta do servidor, a pendente sem sinal cujo texto o servidor acha (no rebanho na
+   * data) sai da pendência — só a barrada por outra linha do mesmo animal (ainda do aparelho) continua esperando.
+   */
+  async function conferirPendentes() {
+    const n0 = rede.log.length;
+    await page.click('[data-resolver-pendentes]');
+    await assentar();
+    const pedidos = rede.log.slice(n0).filter((x) => x.rota === 'animal.resolver');
+    if (pedidos.length && pedidos.every((x) => !x.entregue || !x.resposta.ok)) return;
+    const v = await lerTela(page, tela);
+    if (v.fase !== 'sessao') return;
+    const c = v.c;
+    c.linhas.filter((l) => l.estado === 'NAO_ENCONTRADO' && l.semPosicao).forEach((l) => {
+      const m = M.linhas[l.uid];
+      const rr = resolverModelo(m.texto, c.sessao.data);
+      if (rr.situacao !== 'ACHADO' || rr.inelegivel) return;
+      const outra = c.linhas.some((y) => y.uid !== l.uid && y.animal_id === rr.animal_id && mexivel(c, y));
+      if (!outra) falhar('a pendente ' + l.uid + ' ("' + m.texto + '") continuou esperando depois da resposta do servidor, que acha ' + rr.animal_id + ' em ' + c.sessao.data + ' sem outra linha dele');
+      conta('pendentes:barrada');
+    });
+  }
   /** Brinco, Enter (ou não, o operador apressado), valor, Enter (ou o botão); a decisão do repetido; a escolha entre vários. */
   async function lancar() {
     const texto = sortearTexto();
@@ -370,7 +470,10 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     const nResolverAntes = rede.log.length;
     if (!quieto) log('lançar "' + texto + '" ' + JSON.stringify(val.texto) + (viaBotao ? ' (botão' + (botaoTronco ? ' ' + botaoTronco : '') + ')' : ''));
     await page.fill(cfg.brinco, texto);
-    if (rnd() < 0.8) await page.press(cfg.brinco, 'Enter');
+    if (rnd() < 0.8) {
+      await page.press(cfg.brinco, 'Enter');
+      if (rnd() < 0.5) await olharConferencia(texto.trim());
+    }
     await page.fill(cfg.valor, val.texto);
     if (botaoTronco) await page.click('[data-resultado-rapido="' + botaoTronco + '"]');
     else if (viaBotao && tela === 'curral') await page.click('[data-proximo]');
@@ -424,6 +527,7 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     // A linha pendente (sem resposta antes) que o servidor resolveu para o mesmo animal durante esta ação conta como já
     // existente: a resposta chegou antes da decisão (se chegasse depois, ela veria a linha nova e continuaria pendente).
     const resolvidaAgora = (l) => l.estado === 'NAO_ENCONTRADO' && v.c.linhas.some((y) => y.uid === l.uid && y.animal_id === X);
+    if (c0.linhas.some(resolvidaAgora)) conta('lancar:pendenteResolvidaPelaConferencia');
     const c0b = Object.assign({}, c0, { linhas: c0.linhas.map((l) => (resolvidaAgora(l) ? Object.assign({}, l, { animal_id: X, estado: 'FILA', bloco: null }) : l)) });
     const ja = c0b.linhas.filter((l) => l.animal_id === X);
     if (tela === 'curral' && ja.length) {
@@ -459,6 +563,7 @@ async function rodarSemente(semente, nAcoes, opcoes) {
           conta('lancar:decisaoRefeita');
         }
       }
+      if (mudavel && !/Substituir pelo peso novo/.test((await lerTela(page, tela)).decisaoTexto)) falhar('o repetido ainda do aparelho não avisa que o novo peso substitui o anterior');
       await page.click('.curral-candidatos button:has-text("' + botao + '")');
       await assentar();
       v = await lerTela(page, tela);
@@ -480,6 +585,8 @@ async function rodarSemente(semente, nAcoes, opcoes) {
       if (subst.length) {
         const u = subst[subst.length - 1];
         if (novas.length) falhar('o diagnóstico repetido ainda não enviado devia substituir a linha ' + u.uid + ', e criou outra');
+        // O aviso "o novo resultado substitui o anterior" aparece em todo caminho que substitui (nunca calado).
+        if (v.textoTodo.indexOf('substituiu o anterior') < 0) falhar('o diagnóstico de ' + u.uid + ' foi substituído sem o aviso: "' + v.textoTodo.slice(0, 400) + '"');
         M.ordem = M.ordem.filter((x) => x !== u.uid).concat([u.uid]);
         M.linhas[u.uid].valor = val.valor;
         M.linhas[u.uid].texto = texto.trim();
@@ -549,8 +656,14 @@ async function rodarSemente(semente, nAcoes, opcoes) {
       await page.click('[data-linha="' + l.uid + '"] button:has-text("Corrigir o resultado")');
       await assentar();
       const t = await page.inputValue(cfg.brinco);
+      // O brinco que volta ao campo é o texto digitado na linha (o da data da sessão), e a conferência mostra o animal daquele dia.
+      if (t !== M.linhas[l.uid].texto) falhar('"Corrigir o resultado" de ' + l.uid + ' pôs "' + t + '" no brinco; o operador digitou "' + M.linhas[l.uid].texto + '"');
+      await olharConferencia(t);
       await page.fill(cfg.valor, 'v');
       await page.press(cfg.valor, 'Enter');
+      await assentar();
+      const w = await lerTela(page, tela);
+      if (t && w.c.linhas.some((y) => y.uid === l.uid && y.resultado === 'NEGATIVO') && w.textoTodo.indexOf('substituiu o anterior') < 0) falhar('"Corrigir o resultado" de ' + l.uid + ' substituiu o diagnóstico sem o aviso');
       M.linhas[l.uid].valor = { resultado: 'NEGATIVO', idade: null };
       M.linhas[l.uid].texto = t;
       M.ordem = M.ordem.filter((u) => u !== l.uid).concat([l.uid]);
@@ -617,8 +730,13 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     if (!pode) return false;
     const nova = sortearSessao();
     // Revisão final da Fase 3 (achado 7): às vezes o operador conferiu um brinco (Enter) sem lançar antes de mudar a sessão.
-    const conferido = rnd() < 0.3 ? sortearTexto() : null;
-    if (conferido) { log('conferir "' + conferido + '" sem lançar'); await page.fill(cfg.brinco, conferido); await page.press(cfg.brinco, 'Enter'); await assentar(); }
+    const conferido = rnd() < 0.5 ? sortearTexto() : null;
+    // A resposta da conferência às vezes ainda está no ar quando a sessão muda (chega depois, na sessão nova).
+    const segurada = conferido && rnd() < 0.4;
+    if (segurada) rede.falhas.unshift({ classe: 'resolver', tipo: 'segurar' });
+    if (conferido) { log('conferir "' + conferido + '" sem lançar' + (segurada ? ' (a resposta fica no ar)' : '')); await page.fill(cfg.brinco, conferido); await page.press(cfg.brinco, 'Enter'); await assentar({ semConferencia: segurada }); }
+    // A conferência que já estava guardada no aparelho não vai ao servidor: a falha de rede que sobrou não vale para depois.
+    rede.falhas = rede.falhas.filter((f) => !(f.classe === 'resolver' && f.tipo === 'segurar'));
     log('mudar a sessão para ' + JSON.stringify(nova));
     await page.click(cfg.mudar);
     await page.waitForSelector(cfg.inicio);
@@ -631,6 +749,15 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     await preencherInicio(nova);
     M.sessao = nova;
     conta('mudar');
+    if (segurada) {
+      // A resposta velha chega na sessão nova: a conferência dela não aparece (era de outra sessão); o animal de cada linha
+      // continua o do texto na data da sessão nova (o oráculo confere na verificação desta ação).
+      rede.segurados.filter((x) => x.reg.rota === 'animal.resolver').forEach((x) => { rede.segurados.splice(rede.segurados.indexOf(x), 1); x.soltar(); });
+      await assentar();
+      const w = await lerTela(page, tela);
+      if (w.conferenciaTipo) falhar('a conferência de "' + conferido + '" da sessão de antes apareceu na sessão nova: "' + w.conferenciaTexto + '"');
+      conta('mudar:respostaVelha');
+    }
     if (conferido) {
       // O valor digitado na sessão nova, sem brinco: nada entra (a conferência de antes era de outra sessão).
       await assentar();
@@ -642,6 +769,8 @@ async function rodarSemente(semente, nAcoes, opcoes) {
       if (JSON.stringify(antes) !== JSON.stringify(depois)) falhar('o valor lançado na sessão nova sem brinco usou o animal conferido antes de mudar: ' + JSON.stringify(depois));
       await page.fill(cfg.valor, '');
       conta('mudar:conferidoAntes');
+      // E o mesmo brinco digitado de novo na sessão nova é conferido na data nova (o animal pode ser outro).
+      if (rnd() < 0.5) { log('  lançar "' + conferido + '" de novo na sessão nova'); await lancarUm(conferido, sortearValorValido(), false, null, true); conta('mudar:conferidoDeNovo'); }
     }
     return true;
   }
@@ -652,6 +781,24 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     if (rede.segurados.some((x) => /^rascunho\./.test(x.reg.rota))) { rede.soltar(false); await assentar(); }
     await avancar(1500);
     await assentar();
+    // O que falhou vai de novo sozinho (5 s depois); a resposta perdida vence em 45 s.
+    for (let i = 0; i < 4; i++) {
+      const v0 = await lerTela(page, tela);
+      const st = v0.situacaoRascunho;
+      if (!st || st.estado === 'GUARDADO') break;
+      if (rede.segurados.length) { rede.soltar(false); await assentar(); }
+      await avancar(i < 2 ? 6000 : 46000);
+      await assentar();
+    }
+    // Sem localStorage, o rascunho no servidor é o estado da tela (recarregar não perde nada).
+    const v = await lerTela(page, tela);
+    anotarChaves(v.c);
+    if (v.fase === 'sessao' && v.c) {
+      const r = rascunhoServidor();
+      if (!r) falhar('sem localStorage, a sessão não está guardada no servidor');
+      if (essencialRascunho(r) !== essencialRascunho(v.c)) falhar('o rascunho guardado no servidor não é o estado da tela:\n   servidor ' + essencialRascunho(r) + '\n   na tela  ' + essencialRascunho(v.c));
+      conta('rascunho:servidorConferido');
+    }
   }
   async function recarregar(semLog) {
     if (!semLog) log('recarregar a página');
@@ -660,6 +807,64 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     await page.reload();
     await A.esperarTela(page, cfg.titulo);
     conta('recarregar');
+    return true;
+  }
+  /**
+   * O operador digita de novo o brinco de uma linha que já está na sessão — a pendente sem sinal (resolvida agora pela mesma
+   * conferência, ou barrada por outra linha do mesmo animal), a que está num bloco no ar, gravado, recusado ou com aviso: a
+   * decisão do repetido vale pelo estado da linha anterior (substituir só a que ainda é do aparelho, sempre com o aviso).
+   */
+  async function repetir(c) {
+    const pend = c.linhas.filter((l) => l.estado === 'NAO_ENCONTRADO' && l.semPosicao);
+    const cands = pend.length && rnd() < 0.7 ? pend : c.linhas;
+    if (!cands.length) return false;
+    const l = um(rnd, cands);
+    const m = M.linhas[l.uid];
+    if (!m) return false;
+    const b = l.bloco ? blocoDe(c, l.bloco) : null;
+    conta('repetir:' + (l.semPosicao && l.estado === 'NAO_ENCONTRADO' ? 'pendente' : b ? 'bloco ' + b.estado : l.estado));
+    log('repetir o brinco de ' + l.uid + ' ("' + m.texto + '", ' + l.estado + (b ? ', bloco ' + b.estado : '') + ')');
+    let val = sortearValor();
+    if (val.valor === null) val = tela === 'curral' ? { texto: '333', valor: 333 } : { texto: 'v', valor: { resultado: 'NEGATIVO', idade: null } };
+    await lancarUm(m.texto, val, false, null, true);
+    return true;
+  }
+  /**
+   * Sem localStorage, a página vai embora de repente (o aparelho trava ou a aba é descartada) com o rascunho no servidor
+   * falhando: o que não chegou ao servidor se perde, mas nada que saiu para o servidor fica sem a chave (o bloco só sai com a
+   * chave guardada; CONTRATOS, seção 52) — nada grava duas vezes nem fica gravado sem aparecer. O modelo adota o rascunho do
+   * servidor (lido fora da rede da página) e confere que a tela recarregada é ele.
+   */
+  async function recarregarBrusco() {
+    if (!semLS) return false;
+    log('a página vai embora de repente (o rascunho no servidor falha ao sair)');
+    // A página nova lê o rascunho do servidor (a falha que sobrou na fila não vale para ela).
+    rede.falhas = rede.falhas.filter((f) => f.classe !== 'rascunho');
+    rede.rascunhoBloqueado = true;
+    rede.largar(rnd);
+    try {
+      await page.reload();
+      await A.esperarTela(page, cfg.titulo);
+    } finally { rede.rascunhoBloqueado = false; }
+    await assentar();
+    const r = rascunhoServidor();
+    const v = await lerTela(page, tela);
+    const uids = r ? r.linhas.map((l) => l.uid) : [];
+    if (v.fase === 'sessao' && JSON.stringify(v.c.linhas.map((l) => l.uid)) !== JSON.stringify(uids)) falhar('a tela recarregada não é o rascunho do servidor: ' + JSON.stringify(v.c.linhas.map((l) => l.uid)) + ' × ' + JSON.stringify(uids));
+    let perdidas = 0;
+    M.ordem.forEach((u) => { if (uids.indexOf(u) < 0) { M.tiradas.add(u); perdidas += 1; } });
+    (r ? r.linhas : []).forEach((l) => {
+      M.tiradas.delete(l.uid);
+      const valor = tela === 'curral' ? l.peso : { resultado: l.resultado, idade: l.idade || null };
+      M.linhas[l.uid] = Object.assign(M.linhas[l.uid] || {}, { texto: String(l.texto || l.brinco).trim(), valor });
+    });
+    M.ordem = uids;
+    if (r && r.sessao) M.sessao = r.sessao;
+    // A confirmação que não chegou ao rascunho do servidor volta a ser incerta (o bloco gravado que o rascunho ainda diz
+    // "enviando" é conferido de novo pela chave): o que vale para o bloco que saiu passa a ser o estado do rascunho.
+    (r ? r.blocos : []).forEach((b) => { if (M.saiu[b.chave] && saiu(b)) M.saiu[b.chave] = b.estado; });
+    if (perdidas) conta('recargaBrusca:perdeu');
+    conta('recargaBrusca');
     return true;
   }
   async function sairEVoltar() {
@@ -674,6 +879,7 @@ async function rodarSemente(semente, nAcoes, opcoes) {
   async function terminar(v) {
     await assentarRascunho();
     v = await lerTela(page, tela);
+    anotarChaves(v.c);
     const c = v.c;
     const incertas = c.linhas.some((l) => l.estado === 'SEM_SINAL' || l.estado === 'ENVIANDO');
     const naoGravadas = c.linhas.filter((l) => l.estado !== 'GRAVADA');
@@ -714,9 +920,18 @@ async function rodarSemente(semente, nAcoes, opcoes) {
   M.sessaoDaChave = (k) => (M.chaves[k] ? M.chaves[k].sessao || M.sessao : null);
   async function rede_() {
     const tipo = ponderado(rnd, [[3, 'perdeDepois'], [2, 'perdeAntes'], [3, 'transporte'], [2, 'transporteDepois'], [3, 'segurar'], [2, 'segurarAntes'], [2, 'ocupado'], [2, 'interna']]);
-    const classe = semLS && rnd() < 0.3 ? 'rascunho' : ponderado(rnd, [[6, 'registrar'], [3, 'resolver'], [2, 'status']]);
+    const classe = semLS && rnd() < 0.3 ? 'rascunho' : ponderado(rnd, [[6, 'registrar'], [4, 'resolver'], [2, 'status']]);
     // O rascunho no servidor que demora (gravado lá, a resposta segurada): o bloco sai depois que ele responde.
-    if (classe === 'rascunho') { const n2 = rnd() < 0.5 ? 1 : 3; for (let i = 0; i < n2; i++) rede.falhas.push({ classe, tipo: 'segurar' }); log('rede: os próximos ' + n2 + ' rascunhos no servidor demoram (segurados)'); conta('rede:rascunhoSegurado'); return true; }
+    // Ou falha (o transporte, a falha interna, o servidor ocupado, a resposta perdida depois de gravar ou o pedido perdido): o
+    // bloco que ia sair sem a chave guardada não sai (CONTRATOS, seção 52), e a tela avisa.
+    if (classe === 'rascunho') {
+      const tr = ponderado(rnd, [[4, 'segurar'], [3, 'transporte'], [2, 'interna'], [1, 'ocupado'], [1, 'perdeDepois'], [1, 'perdeAntes']]);
+      const n2 = rnd() < 0.5 ? 1 : 3;
+      for (let i = 0; i < n2; i++) rede.falhas.push({ classe, tipo: tr });
+      log('rede: os próximos ' + n2 + ' rascunhos no servidor → ' + tr);
+      conta(tr === 'segurar' ? 'rede:rascunhoSegurado' : 'rede:rascunho:' + tr);
+      return true;
+    }
     const n = rnd() < 0.7 ? 1 : 2;
     if (classe === 'resolver' && (tipo === 'segurar' || tipo === 'segurarAntes' || tipo === 'ocupado')) return false;
     for (let i = 0; i < n; i++) rede.falhas.push({ classe, tipo });
@@ -744,6 +959,7 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     const vivos = [sis.ids.v520, sis.ids.v611, sis.ids.v815, sis.ids.vacaB].filter((x) => !M.mortos.has(x));
     if (!vivos.length || !M.sessao) return false;
     const x = um(rnd, vivos);
+    M.tocados.add(x);
     if (rnd() < 0.25 && M.mortos.size < 1) {
       const r = s.api({ rota: 'evento.registrar', idempotencyKey: 'outro-morte-' + x, dados: { tipo: 'MORTE', campos: { event_date: HOJE, causa: 'DOENCA' }, animais: [{ animal_id: x }] } });
       log('outro usuário: morte de ' + x + ' hoje (' + (r.ok ? 'gravada' : r.error.code) + ')');
@@ -804,7 +1020,7 @@ async function rodarSemente(semente, nAcoes, opcoes) {
       for (let tent = 0; tent < 6 && !feito; tent++) {
         const temAviso = v.avisoGeral || v.linhas.some((l) => l.estado === 'AVISO');
         const temErro = v.linhas.some((l) => l.estado === 'ERRO' || l.estado === 'NAO_ENCONTRADO');
-        const acao = ponderado(rnd, [[30, 'lancar'], [3, 'lote'], [5, 'desfazer'], [4, 'tirar'], [temErro || temAviso ? 8 : 1, 'corrigir'], [temErro ? 5 : 1, 'corrigirBrinco'], [temAviso ? 15 : 1, 'aceitar'], [16, 'enviar'], [3, 'mudar'], [3, 'terminar'], [4, 'recarregar'], [3, 'sair'], [10, 'rede'], [rede.segurados.length ? 10 : 1, 'soltar'], [5, 'tempo'], [2, 'outro'], [v.resolverPendentes || v.posicaoTentar ? 8 : 1, 'pendentes']]);
+        const acao = ponderado(rnd, [[30, 'lancar'], [3, 'lote'], [5, 'desfazer'], [4, 'tirar'], [temErro || temAviso ? 8 : 1, 'corrigir'], [temErro ? 5 : 1, 'corrigirBrinco'], [temAviso ? 15 : 1, 'aceitar'], [16, 'enviar'], [4, 'mudar'], [3, 'terminar'], [4, 'recarregar'], [3, 'sair'], [10, 'rede'], [rede.segurados.length ? 10 : 1, 'soltar'], [5, 'tempo'], [2, 'outro'], [v.resolverPendentes || v.posicaoTentar ? 8 : 1, 'pendentes'], [v.c.linhas.length ? 6 : 0, 'repetir'], [semLS ? 2 : 0, 'recarregarBrusco'], [3, 'semSinal']]);
         if (acao === 'lancar') { await lancar(); feito = true; }
         else if (acao === 'lote') { await lote(); feito = true; }
         else if (acao === 'desfazer') { await desfazer(); feito = true; }
@@ -821,8 +1037,11 @@ async function rodarSemente(semente, nAcoes, opcoes) {
         else if (acao === 'soltar') feito = await soltar();
         else if (acao === 'tempo') feito = await tempo();
         else if (acao === 'outro') feito = await outroUsuario();
+        else if (acao === 'repetir') feito = await repetir(v.c);
+        else if (acao === 'recarregarBrusco') feito = await recarregarBrusco();
+        else if (acao === 'semSinal') { const n3 = 2 + Math.floor(rnd() * 3); for (let i = 0; i < n3; i++) rede.falhas.push({ classe: 'resolver', tipo: 'transporte' }); log('rede: o sinal cai para as próximas ' + n3 + ' conferências de brinco'); conta('rede:semSinal'); feito = true; }
         else if (acao === 'pendentes') {
-          if (v.resolverPendentes) { log('conferir os brincos pendentes'); await page.click('[data-resolver-pendentes]'); feito = true; conta('pendentes'); }
+          if (v.resolverPendentes) { log('conferir os brincos pendentes'); await conferirPendentes(); feito = true; conta('pendentes'); }
           else if (v.posicaoTentar) { log('tentar de novo (posição)'); await page.click('[data-posicao-tentar]'); feito = true; conta('posicaoTentar'); }
         }
       }
@@ -907,7 +1126,7 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     s.conferirProjecoes('semente ' + semente);
     // Sem localStorage, o aviso de que o armazenamento do aparelho não está disponível é esperado (o rascunho vai ao servidor).
     // E a falha registrada da gravação do rascunho no servidor que a rede do teste segurou além do prazo (a faixa avisa o operador).
-    const errosConsole = a.estado.erros.filter((x) => !(semLS && /armazenamento local indisponível|\[ERP\] rascunho no servidor: /.test(x)));
+    const errosConsole = a.estado.erros.filter((x) => !(semLS && /armazenamento local indisponível|\[ERP\] rascunho no servidor(, de novo| ao sair)?: /.test(x)));
     if (errosConsole.length) falhar('erros no console: ' + errosConsole.join(' | '));
     cont.gravadas = (cont.gravadas || 0) + gravadas.size;
     cont.sementes = (cont.sementes || 0) + 1;

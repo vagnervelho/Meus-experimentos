@@ -83,12 +83,15 @@ function montarSistema() {
  * servidor ao soltar) até a ação "soltar": o operador segue com o envio no ar, e a ordem de chegada muda.
  */
 function novaRede(s) {
-  const rede = { falhas: [], segurados: [], log: [], novasRecusas: [], acao: 0 };
+  const rede = { falhas: [], segurados: [], log: [], novasRecusas: [], acao: 0, rascunhoBloqueado: false };
   const classe = (rota) => (rota === 'evento.registrar' ? 'registrar' : rota === 'animal.resolver' ? 'resolver' : rota === 'operacao.status' ? 'status' : /^rascunho\./.test(rota) ? 'rascunho' : 'outra');
   rede.servidor = (pedido, executar) => {
     const cl = classe(pedido.rota);
-    const i = rede.falhas.findIndex((f) => f.classe === cl);
-    const f = i >= 0 ? rede.falhas.splice(i, 1)[0] : null;
+    // A página vai embora de repente (`rascunhoBloqueado`): o envio do rascunho ao sair falha no transporte; a leitura do
+    // rascunho pela página nova (rascunho.obter de um rascunho, não do índice) passa.
+    const bloqueado = rede.rascunhoBloqueado && cl === 'rascunho' && !(pedido.rota === 'rascunho.obter' && pedido.dados && pedido.dados.chave !== 'indice');
+    const i = bloqueado ? -1 : rede.falhas.findIndex((f) => f.classe === cl);
+    const f = bloqueado ? { classe: cl, tipo: 'transporte' } : i >= 0 ? rede.falhas.splice(i, 1)[0] : null;
     const reg = { rota: pedido.rota, chave: pedido.idempotencyKey || null, falha: f ? f.tipo : null, textos: pedido.dados && pedido.dados.textos, entregue: false, resposta: null };
     // A nova tentativa da mesma chave fecha a espera do servidor ocupado.
     if (reg.chave) rede.log.forEach((r) => { if (r.chave === reg.chave) r.ocupadoAberto = false; });
@@ -178,6 +181,13 @@ async function lerTela(page, tela) {
       candidatos: document.querySelectorAll('.curral-candidatos button').length,
       dialogo: !!document.querySelector('[role=dialog]'),
       emCurso: window.__gas ? window.__gas.emCurso : 0,
+      // O rascunho no servidor (sem localStorage): a situação do último envio e o aviso da falha.
+      situacaoRascunho: window.Rascunhos && Rascunhos.modo() === 'SERVIDOR' ? Rascunhos.situacao(cfg.rascunho) : null,
+      faixaRascunho: !!document.querySelector('[data-faixa="rascunho-falhou"]'),
+      naoGuardado: Array.from(document.querySelectorAll('[data-nao-guardado]')).map((x) => x.dataset.naoGuardado),
+      conferenciaTexto: ((document.querySelector(cfg.conferencia + ' [data-conferencia]') || {}).textContent || '').trim(),
+      conferenciaTipo: ((document.querySelector(cfg.conferencia + ' [data-conferencia]') || { dataset: {} }).dataset.conferencia) || null,
+      decisaoTexto: ((document.querySelector('[data-decisao-repetido]') || {}).textContent || '').trim(),
       textoTodo: tudo,
       titulo: ((document.querySelector('#conteudo h1') || {}).textContent || '').trim(),
       resultadoN: document.querySelector(cfg.resultado) ? Number(document.querySelector(cfg.resultado).getAttribute(cfg.tela === 'curral' ? 'data-resultado-curral' : 'data-resultado-tronco')) : null,

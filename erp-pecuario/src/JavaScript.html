@@ -839,10 +839,15 @@ var Rascunhos = (function () {
   // No servidor o envio é adiado: quem gravou precisa saber se ele falhou (§20, regra 9: não esconder erro).
   var situacoes = {};
   var ouvintesFalha = [];
+  var ouvintesGuardado = [];
   var emCurso = null;
+  // O que falhou vai de novo sozinho (sem esperar outra mudança na tela): o rascunho não fica só na memória da página.
+  var tentarDeNovo = null;
+  function avisar_(lista, a, b) { lista.forEach(function (fn) { try { fn(a, b); } catch (x) { Util.registrarFalha('aviso de rascunho', x); } }); }
   function falhou_(ids, e) {
     ids.forEach(function (id) { situacoes[id] = { estado: 'FALHOU', erro: e }; });
-    ouvintesFalha.forEach(function (fn) { try { fn(e, ids); } catch (x) { Util.registrarFalha('aviso de rascunho', x); } });
+    avisar_(ouvintesFalha, e, ids);
+    if (tentarDeNovo) tentarDeNovo();
   }
 
   function prefixo_() { return 'erp:' + cfg.ambiente + ':rascunho:'; }
@@ -852,6 +857,7 @@ var Rascunhos = (function () {
     Object.keys(o || {}).forEach(function (k) { cfg[k] = o[k]; });
     modo = Util.armazem.disponivel() ? 'LOCAL' : 'SERVIDOR';
     gravarServidorAdiado = Util.adiar(function () { descarregarServidor_().catch(function (e) { Util.registrarFalha('rascunho no servidor', e); }); }, 1000);
+    tentarDeNovo = Util.adiar(function () { descarregarServidor_().catch(function (e) { Util.registrarFalha('rascunho no servidor, de novo', e); }); }, 5000);
     // Ao sair da página (recarga, aba em segundo plano), o que estiver pendente vai ao servidor na hora.
     var sair = function () {
       if (!Object.keys(pendentesServidor).length) return;
@@ -934,7 +940,9 @@ var Rascunhos = (function () {
       falhou_(falhos.length ? falhos : ids, e);
       throw e;
     }
-    ids.forEach(function (id) { if (pendentesServidor[id] === undefined) situacoes[id] = { estado: 'GUARDADO', erro: null }; });
+    var guardados = ids.filter(function (id) { return pendentesServidor[id] === undefined; });
+    guardados.forEach(function (id) { situacoes[id] = { estado: 'GUARDADO', erro: null }; });
+    if (!Object.keys(situacoes).some(function (id) { return situacoes[id].estado === 'FALHOU'; })) avisar_(ouvintesGuardado, guardados);
   }
   async function remover(id) {
     if (modo === 'LOCAL') {
@@ -952,8 +960,10 @@ var Rascunhos = (function () {
     modo: function () { return modo; },
     /** {estado: PENDENTE | GUARDADO | FALHOU, erro} do rascunho no servidor (null no aparelho ou nunca guardado). */
     situacao: function (id) { return situacoes[id] || null; },
-    /** fn(erro, ids) quando um envio ao servidor falha (o adiado também). */
+    /** fn(erro, ids) quando um envio ao servidor falha (o adiado também; ele vai de novo sozinho em 5 s). */
     aoFalhar: function (fn) { ouvintesFalha.push(fn); },
+    /** fn(ids) quando o servidor confirma o envio e nenhum rascunho ficou com falha. */
+    aoGuardar: function (fn) { ouvintesGuardado.push(fn); },
   };
 })();
 
@@ -1415,6 +1425,9 @@ var App = (function () {
     Cliente.configurar({ ambiente: cfg.ambiente, appVersion: cfg.appVersion, aoNovaVersao: novaVersao_ });
     Store.configurar({ ambiente: cfg.ambiente, appVersion: cfg.appVersion });
     Rascunhos.iniciar({ ambiente: cfg.ambiente });
+    // Sem localStorage (SP-06), a falha do rascunho no servidor avisa em qualquer tela (§20, regra 9), não só no formulário.
+    Rascunhos.aoFalhar(function (e) { faixa('rascunho-falhou', { tipo: 'aviso', texto: 'Não foi possível guardar o rascunho no servidor (' + e.message + '). O que foi digitado continua nesta tela e vai de novo sozinho; não feche a tela antes de enviar.' }); });
+    Rascunhos.aoGuardar(function () { removerFaixa('rascunho-falhou'); });
     document.addEventListener('click', aoClicar_);
     document.addEventListener('visibilitychange', conferirVersao_);
     var pular = document.getElementById('pular');
