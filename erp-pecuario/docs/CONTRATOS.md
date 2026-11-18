@@ -1057,7 +1057,7 @@ achados_antes}` ou a recusa `VALIDATION`/`CONFLICT` com `INTEGRIDADE_<CHECAGEM>`
 ## 12. `EventCatalog` (puro, só dados)
 
 Definição declarativa dos eventos (04, seção 7). Os 21 tipos estão no catálogo com `fase`; só passam pelo motor os
-entregues na fase corrente E com campos (`FASE_ATUAL = 3`, desde a etapa BASE da Fase 3; os tipos dela ficam inativos
+entregues na fase corrente E com campos (`FASE_ATUAL = 4`, desde a etapa BASE da Fase 4 — seção 55; era 3 desde a etapa BASE da Fase 3; os tipos dela ficam inativos
 até terem campos — desde a E3.1, PESAGEM é ativa; desde a E3.2 e a E3.3, SANIDADE e ESTOQUE; REPRODUCAO, DESMAMA, CASTRACAO
 e OCORRENCIA seguem inativos): ENTRADA_INICIAL, OUTRA_ENTRADA, NASCIMENTO, COMPRA, VENDA, PESAGEM, SANIDADE (VACINACAO,
 VERMIFUGACAO, MEDICACAO, TRATAMENTO, EXAME, DOENCA), ESTOQUE (ENTRADA, AJUSTE),
@@ -1990,6 +1990,7 @@ VALOR_INDIVIDUAL, kg em PESO_VIVO e PESO_CARCACA, 1 em CABECAS, peso relativo em
 | `titulos(repo, data?)` | `{data, a_pagar, a_receber, vencido_pagar, vencido_receber, parcelas_abertas}`: nominal das parcelas não liquidadas em D, de lançamentos vigentes com competência até D. Lê FINANCEIRO e PARCELAS |
 | `blocoFicha(repo, animal, {desde?})` | Bloco H: `{entregue: true, animal_id, custo_aquisicao (a projeção = Σ alocações AQUISICAO_ANIMAIS do período atual), custo_aquisicao_origem, desde, lancamentos_anteriores, por_natureza, custeio, custo_acumulado, receitas, despesas_venda, resultado: {valor, motivo, mensagem?} (só com saída e custo conhecido), lancamentos: [{passagem_atual, financial_id, event_id, event_type, event_date, data_competencia, conta_codigo, conta_nome, natureza, tipo, classe_custo_animal, descricao, valor_lancamento, valor_alocado, criterio, base_valor, base_total, partner_id}]}`. Uma base só (a do custo de aquisição, 03a DL-08): totais, custo acumulado e resultado somam as alocações com competência ≥ `desde` (a entrada vigente mais recente, que `AnimalService` passa; revisão 4: `Timeline.entradaDoCusto` — no animal que só existe no histórico, comprado ou nascido e vendido antes do marco zero, o último período é o histórico, e a compra histórica é o custo dele; o animal do marco zero continua sem a compra de antes da entrada dele, 04, seção 6); a lista traz todas as passagens, com `passagem_atual` e `lancamentos_anteriores` (quantos ficaram fora das contas). Sem `desde`, todas. Lê FINANCEIRO, RATEIOS, ALOCACOES_FINANCEIRAS, PLANO_CONTAS e EVENTOS |
 | `parcelasMensais(valor, primeiro, qtd?, {forma_pagamento, documento})` | Parcelas de um título em `qtd` vezes (vazio = 1), de mês em mês a partir de `primeiro` (`Utils.somaMeses`), em partes iguais (`dividirParcelas`): a forma de "1 ou mais parcelas" do frete e dos outros custos da compra (`custos[].parcelas_qtd`) e do lançamento opcional da morte e do descarte (`custo_parcelas_qtd`, `receita_parcelas_qtd`; 03b, 10.3). Entrada inválida → uma parcela (a validação é do catálogo e de `resolverParcelas`) |
+| `NATUREZAS`, `leiturasLancamentos()`, `consultaLancamentos(filtros)`, `listarLancamentos(ctx, filtros)`, `consultaLancamento(dados)`, `obterLancamento(ctx, dados)` (Fase 4, etapa BASE) | A lista e o detalhe dos lançamentos da tela Financeiro (rotas `financeiro.lancamentos` e `financeiro.lancamento`): seção 55. As três visões e a identidade que as liga ficam no módulo `Conciliacao` (seção 55) |
 
 ## 27. Telas da Fase 2, etapa de financeiro do evento e compra — `Components`, `Events`, `Animals`, `JavaScript`
 
@@ -2444,7 +2445,7 @@ abre o módulo.
 | Catálogo | O módulo declara `tela` (o arquivo) quando a tela é entregue, e `sob_demanda` + `rotas` (as raízes de rota) quando ela vem sob demanda (seção 12). O bootstrap leva isso ao cliente em `modulos`. Módulo de fase futura ou ainda sem tela: fora do menu e recusado pela rota |
 | Servidor | `sistema.tela` (seção 19): guarda de dono, lista `Api.TELAS_SOB_DEMANDA`, módulo entregue, o arquivo compactado como o doGet (`Api.compactar`), sem abrir a planilha |
 | Cliente | `Modulos` (seção 22): pede uma vez, injeta como nó, guarda em memória; a rota abre quando a tela chega; falha de rede → "Tentar de novo"; outra versão do app no servidor → "Recarregar a página" |
-| Página inicial | `Index` com Styles, JavaScript, Components, Dashboard, Animals, Pastures, Events e Settings: 406 KB de 450 KB nesta etapa (eram 449 KB); 421 KB na E3.1 (a curva, o bloco de peso da ficha e a pesagem no formulário e no detalhe); 446 KB na E3.7 (o kit de gráficos de `Components`, seção 41) |
+| Página inicial | `Index` com Styles, JavaScript, Components, Dashboard, Animals, Pastures, Events e Settings: 406 KB de 450 KB nesta etapa (eram 449 KB); 421 KB na E3.1 (a curva, o bloco de peso da ficha e a pesagem no formulário e no detalhe); 446 KB na E3.7 (o kit de gráficos de `Components`, seção 41). Desde a etapa BASE da Fase 4 (seção 55), Events e Settings também vêm sob demanda: a página inicial tem Styles, JavaScript, Components, Dashboard, Animals e Pastures, 363 KB (meta ≤ 380 KB) |
 | Orçamento | `npm run ui:check` mede a página inicial montada pelo doGet (≤ 450 KB, sem nenhuma tela sob demanda dentro) e cada tela sob demanda que existe em `src/`, como a rota a entrega (≤ 150 KB por módulo; Import: 47 KB nesta etapa; Weights: 41 KB na E3.1; Health: 23 KB na E3.2 e E3.3, com a página inicial em 439 KB). `conferirModulos(paginas, montada)` → `{modulos: [{nome, bytes, entregue}], problemas}` acusa também a tela sob demanda posta no Index e a rota que não entrega o arquivo compactado |
 | Contingência (NV) | A injeção de `<script>` criado pelo cliente dentro do iframe do HtmlService não foi verificada na conta do dono. Se o Google a bloquear, a tela volta ao Index (`<?!= include_('Import') ?>`), tira-se `sob_demanda` do módulo e o resto funciona sem mudança: a tela já registrada não é pedida |
 
@@ -4097,3 +4098,107 @@ consumo): a verificação confere a cópia contra a fonte, e o dado que só exis
   nela); sob demanda, Import 48 KB, Weights 64 KB, Health 24 KB e Reproduction 67 KB, de 150 KB cada. A primeira execução do
   `ui:check`, em paralelo com o `npm test`, parou num teste de tempo da importação de pesagens (1280 px, "Buscando as linhas…" na
   hora da leitura; nenhum arquivo dele mudou nesta rodada); sozinho ele passa, e a execução seguinte passou inteira.
+
+## 55. Fase 4, etapa BASE: folga na página inicial, tela Financeiro e a conciliação das três visões — `EventCatalog` (`FASE_ATUAL = 4`, módulos), `Api` (`TELAS_SOB_DEMANDA`, rotas), `Index`, `Conciliacao` (novo), `FinancialService` (lançamentos), `Financial` (nova tela); `tests/conciliacao.test.js`, `tests/financeiro.lancamentos.test.js`, `tests/apoio-sistema.js` e `tests/apoio-eventos.js` (a identidade depois de cada comando), `tests/apoio-fuzz.js` (`oraculoConciliacao`, grupos `conc` e `lanc` da viagem no tempo, `conc` no oráculo da correção), `tests/ui/fase4.base.test.js`
+
+**Fase.** `EventCatalog.FASE_ATUAL = 4`. Os tipos da Fase 4 (LANCAMENTO_FINANCEIRO, RATEIO) continuam inativos até terem campos
+(`tiposAtivos()` = `tiposAtivos(3)`); o módulo FINANCEIRO fica ativo com a tela `Financial`. As rotas da Fase 4 que ainda não têm
+tratador (`parcela.baixar`, `parcela.desfazerBaixa`, `financeiro.fluxoCaixa`, `financeiro.resultado`, `financeiro.custosAnimal`,
+`conta.salvar`, `preco.salvar`) continuam `NOT_FOUND` com a fase ("… que chega na fase 4 e ainda não foi entregue").
+
+**Folga na página inicial** (risco R-31; seção 37). A página inicial estava em 428 KB de 450 KB. Saíram dela, para o mesmo
+mecanismo das telas sob demanda, as telas `Events` (a lista, o detalhe de cada lançamento, a prévia da correção e o estorno, que
+partem do detalhe) e `Settings` (Configurações): os módulos EVENTOS (`rotas: ['eventos', 'evento']`) e CONFIGURACOES (`rotas:
+['config']`) ganharam `sob_demanda` e entram em `Api.TELAS_SOB_DEMANDA`; o `Index` não os inclui. A página inicial ficou em **363 KB**
+(meta da etapa: ≤ 380 KB; `tests/telas.sobdemanda.test.js` confere a meta); sob demanda, Events 29 KB, Settings 36 KB, Financial
+12 KB. O registro de evento (seletor, formulário, revisão, resultado; o botão global) continua na página inicial (`Components`):
+a rota `evento/novo` é registrada lá e, como rota registrada vale antes da sob demanda (`renderizarRota_`), ganha da raiz `evento`
+do módulo EVENTOS. Para o usuário, nada muda além do carregamento curto na primeira vez que abre a lista de eventos, o detalhe de
+um lançamento (também pelo link da ficha, do resultado do registro ou do Financeiro) ou as Configurações; sem rede, a mensagem e
+"Tentar de novo"; a volta funciona. Contingência (NV, seção 37): se o Google bloquear a injeção, as duas telas voltam ao `Index` e
+perdem `sob_demanda`, como as demais.
+
+**Tela Financeiro** (`src/Financial.html`, módulo FINANCEIRO, `rotas: ['financeiro']`): `financeiro` e `financeiro/lancamentos`
+(a lista) e `financeiro/lancamento/:id` (o detalhe). A lista filtra por competência (de, até), tipo, natureza, conta, parceiro,
+pasto, situação (os que valem, os cancelados, todos), situação do pagamento e busca; mostra os totais do filtro, as páginas e,
+em cada linha, a competência, o lançamento, a conta, o tipo, o valor, a situação, o parceiro, a origem e o que ficou sem alocar
+aos animais. O detalhe mostra o lançamento, as parcelas com a situação de hoje (os dias de atraso vêm do servidor), o rateio
+entre os animais (critério, distribuído, sem alocar, a base e o valor de cada animal, com o link para a ficha), os documentos e
+o evento que o criou (e o que o anulou). Para mudar um lançamento, o caminho é o do evento de origem (corrigir ou estornar): a
+tela não grava nada nesta etapa. Todo número vem pronto (`tests/cliente.naocalcula.test.js` vale para ela).
+
+**Rotas novas** (consultas; documentadas aqui por serem extras à lista canônica, como `financeiro.vencimentos`; 08, seção 16:
+"rota própria, se criada, só troca a coluna de consultas"):
+
+| Rota | Contrato |
+|---|---|
+| `financeiro.lancamentos` | `FinancialService.consultaLancamentos(filtros)` / `listarLancamentos(ctx, filtros)`. Os lançamentos de evento confirmado (os de operação que falhou e os da importação em curso ficam fora), pela situação do predicado do evento (P3): ATIVO (vale), CANCELADO (o evento foi estornado, corrigido ou a importação desfeita). Filtros: `de`, `ate` (competência; data inválida → `VALIDATION FORMATO_INVALIDO`; `de > ate` → `PERIODO_INVERTIDO`), `natureza`, `tipo` (RECEITA, DESPESA), `conta_id`, `partner_id`, `pasture_id`, `event_type`, `situacao` (ATIVO — padrão —, CANCELADO, TODOS), `status_pagamento` (SEM_CAIXA, ABERTO, PARCIAL, LIQUIDADO), `busca` (descrição ou documento, sem caixa nem acento), `pagina`, `por_pagina` (padrão `itens_por_pagina`, teto 500); valor fora da lista → `VALIDATION VALOR_FORA_DA_LISTA`. Ordem: competência mais recente, o evento mais recente (`event_seq`), o maior valor, o identificador. `{total, pagina, por_pagina, paginas, totais: {receitas, despesas} (do filtro inteiro, centavos), itens}`. Item: os campos gravados do lançamento, `event_type`, `event_subtype`, `rotulo_evento`, `nome_evento`, `event_date`, `event_seq`, `pre_marco_zero`, a conta (`conta_codigo`, `conta_nome`), o parceiro, o pasto e o produto pelo nome (como estão hoje), `situacao`, `cancelado_por_event_id`, `status_pagamento` e `data_pagamento` (pelas parcelas, a mesma conta da projeção: `situacaoPagamento`), `parcelas` (as não canceladas), `em_aberto`, `vencido` (aberta com vencimento antes de hoje), `proximo_vencimento`, `criterio`, `alocado`, `nao_alocado` (null nas naturezas que não se rateiam: ESTOQUE_INSUMOS, NAO_OPERACIONAL), `animais`. O pagamento, o aberto, o vencido, o próximo vencimento e quem cancelou são de hoje, por desenho; o resto depende só dos fatos até a competência (a viagem no tempo confere, grupo `lanc`) |
+| `financeiro.lancamento` | `consultaLancamento({financial_id})` / `obterLancamento`. `{lancamento (o item da lista), evento, referencia (o `ref_event_id`), anulado_por, parcelas: [{parcela_id, parcela_num, data_vencimento, valor, status, data_pagamento, valor_pago, juros_multa, desconto, forma_pagamento, documento, parcela_origem_id, situacao (PAGA, RECEBIDA, A_PAGAR, A_RECEBER, VENCIDA, SUBSTITUIDA — desdobrada numa baixa parcial —, SEM_EFEITO — o lançamento foi cancelado), dias_atraso}], rateio: {rateio_id, event_id, criterio, escopo_tipo, escopo_ref, periodo_inicio, periodo_fim, data_base, base_total, total_alocado, justificativa, vigente} \| null, alocacoes: [{animal_id, codigo_interno, brinco (o de hoje), situacao_cadastral, base_valor, valor_alocado}], anexos}`. No que vale, o rateio vigente (o do último evento vigente, pelo predicado único do Repository); no cancelado, o que o evento criador gravou, `vigente: false`. Lançamento inexistente, de operação que falhou ou de importação em curso → `NOT_FOUND` "Lançamento financeiro não encontrado." |
+| `financeiro.conciliacao` | `Conciliacao.consulta({ate})` / `consultar`: a conciliação até `ate` (padrão: hoje no fuso da fazenda). `ate` depois de hoje → `VALIDATION DATA_FUTURA`; inválida → `FORMATO_INVALIDO` (campo `ate`). Sem tela no MVP (07, seção 2.1): serve ao CT-19, ao teste aleatório e à conferência do dono ("conferir as três visões com um mês real", 10, Fase 4). `{ate, inicio, meses: [{mes, fim, resultado, caixa, termos}], periodo: {resultado, caixa, termos}, fecha, problemas}` (abaixo) |
+
+**`Conciliacao` (puro; 07, seções 1.1, 2.1 e 2.2; desenho-base 7 e 16.14).** `fatos(tx)` lê uma vez as linhas vigentes (o predicado
+único de lançamento, parcela, rateio e alocação é o do Repository) e devolve dados simples: `{marco_zero, lancamentos: [{financial_id,
+event_id, ancora (o `ref_event_id` ou o criador), natureza, tipo, valor, data (competência), inicio, fim, consumo (CUSTEIO com
+produto), abertura (conta SALDO_ABERTURA_REBANHO), parcelas: [{valor, status, data_pagamento, valor_pago, juros_multa, desconto}]
+(sem as CANCELADAS), alocacoes: [{animal_id, valor}]}], permanencias: {animal_id: [{entrada: {event_id, data}, saida: {event_id,
+data, linha} | null}]}}` (as permanências dos animais com alocação de aquisição, na ordem canônica, sem as linhas anteriores ao
+marco zero). O resto são contas puras sobre esses dados, em centavos inteiros:
+
+| Função | Contrato |
+|---|---|
+| `porMes(valor, inicio, fim)` | A competência por período mês a mês (07, 1.1): valor × dias de interseção ÷ dias totais, fechada pelo maior resto; no empate de resto, o mês mais antigo. `[{mes, inicio, fim, dias, valor}]`. Arrendamento de R$ 24.000,00 de 01/01 a 31/12/2027: março R$ 2.038,36; a soma, R$ 24.000,00 (mês a mês arredondado daria 24.000,02). Valor que não é inteiro não negativo ou intervalo invertido → `INTERNAL` |
+| `competenciaAte(l, D)` | A parte da competência até o fim do dia D: sem período, o valor inteiro a partir da competência; com período, os meses inteiros até D mais, no mês de D, os dias até D (o valor do mês em partes iguais por dia, os centavos que sobram nos primeiros). No fim de cada mês é a soma dos meses; nenhum centavo nasce ou some de um dia para outro |
+| `caixa(fx, de, ate)` | Visão 1: Σ `valor_pago` das parcelas LIQUIDADAS com pagamento em [de, ate] (`de` null = desde o começo), receita soma e despesa subtrai, todas as naturezas. `{entradas, saidas, liquido}` |
+| `resultado(fx, de, ate, em?)` | Visão 2 do período [de, ate], pedida em `em` (padrão `ate`): só o lançamento com competência até `em`. `{receita_venda (RV), outras_receitas (OR), despesas_venda (DV), custo_aquisicao: {vendidos_descartados, mortes, baixas_ajuste, total} (CA), custeio (CT, pela competência por período), juros, descontos, total, sem_permanencia}`. CA: as alocações de aquisição de cada permanência encerrada por uma saída no período (venda e descarte; morte; baixa por divergência). A alocação pertence à permanência aberta pelo evento de negócio do lançamento (`ancora`); sem ela, à última que começou até a competência. `juros` = o que reduz o resultado (juros pagos − juros recebidos), `descontos` = o que aumenta (descontos obtidos − concedidos), das parcelas pagas no período (07, 2.1: na receita o sinal inverte). `total = RV + OR − DV − CA − CT − juros + descontos`. Compra de animais e de insumos e o não operacional não entram |
+| `posicao(fx, D)` | Os termos de balanço em D: `a_receber`, `a_pagar` (nominal das parcelas não pagas até D, de todas as naturezas), `custo_rebanho_ativo` (as alocações de aquisição das permanências abertas em D), `insumos_estoque` (Σ ESTOQUE_INSUMOS − Σ consumos), `despesa_antecipada` (a competência depois de D dos lançamentos de resultado que já contam em D: despesa soma, receita subtrai — a "receita antecipada"; 07, 2.1, generalizado a toda natureza de resultado com período), `saldo_abertura`, `nao_operacional` (receita − despesa) |
+| `identidade(t)` | A identidade, aritmética pura (07, 2.1): `resultado_acumulado = caixa_acumulado + a_receber − a_pagar + custo_rebanho_ativo + insumos_estoque + despesa_antecipada − saldo_abertura − nao_operacional`. `{esquerda, direita, diferenca, fecha}`. Termo que não é inteiro → `INTERNAL`. `TERMOS` = os nomes, na ordem |
+| `termosEm(fx, D)` | Os termos em D (resultado e caixa acumulados até D e a posição em D) e a conta da identidade |
+| `conferir(fx, ate)` | A conciliação até `ate`: a identidade no fim de cada mês, do mês do primeiro fato (competência, início de período ou pagamento) até o de `ate`, e em `ate`, cada uma pedida no seu dia; o resultado e o caixa de cada mês pedidos em `ate` somam os do período ao centavo; a alocação de aquisição a animal que não estava no rebanho é acusada. `{ate, inicio, meses, periodo, fecha, problemas}` |
+
+**Regra de tempo da conciliação** (o número pedido numa data D; RELATORIO_FASE3, seção 6.6): conta só o lançamento com competência
+até D (o lançamento retroativo é um fato antigo: entra nos números das datas que alcança), a parcela paga até D, a saída do rebanho
+até D e a alocação de lançamento que já contava em D; cadastro nenhum entra (natureza e tipo são cópias gravadas; a conta do saldo
+de abertura é lida pelo código, que não muda). O histórico anterior ao marco zero fica fora das três visões (pago antes do controle
+do sistema; 04, seção 6): a compra histórica não é caixa, não é a pagar e a alocação dela fica no histórico do animal.
+
+**Premissas para as próximas etapas** (sem elas a identidade deixa de fechar, e o oráculo acusa): a baixa de parcela (E4.2) não pode
+ter `data_pagamento` antes da competência do lançamento (o pagamento antecipado de um período vai num lançamento com competência na
+data do pagamento e o período depois dele, que a despesa antecipada cobre); o lançamento avulso de aquisição (E4.1) é rateado 100%
+(07, 1.3); com período (E4.1), só CUSTEIO e OUTRA_RECEITA, e com a competência (`data_competencia`) no início do período ou antes,
+para o resultado de cada mês pedido no fim dele ser o do mês; o re-rateio (E4.3) precisa do "rateio vigente em D" (o do último evento
+RATEIO até D) para a conciliação numa data passada não mudar com um rateio posterior; a viagem no tempo confere (grupos `conc` e `lanc`).
+
+**Onde a identidade é conferida.**
+- `tests/conciliacao.test.js`: o caso do 07, seção 2.2, mês a mês (caixa −100,00, −4.530,00, −4.545,00, −800,00, 0,00 e +11.662,40;
+  resultado 0,00, −9,00, −45,00, −3.733,33, +5.495,73 e 0,00) e nas três datas da conciliação (−3.787,33 em 30/06; 1.708,40 em 30/11
+  e em 31/12, com os R$ 21,00 das 7 doses em estoque); o arrendamento anual da 1.1 (−5.917,81 = −24.000,00 + 18.082,19 em 31/03); a
+  parte até o dia; o que a identidade acusa; a regra de tempo; 400 bases sorteadas e coerentes.
+- `tests/apoio-sistema.js` e `tests/apoio-eventos.js` (`conferirProjecoes`): depois de cada comando dos testes que usam o apoio, a
+  identidade fecha em todo fim de mês até hoje. A conta foi conferida por mutação (o consumo tirado dos insumos derruba os testes de
+  estoque).
+- `tests/apoio-fuzz.js` (`oraculoConciliacao`, depois de todo passo que grava): `financeiro.conciliacao` fecha ao centavo no fim de
+  cada mês e no período, a soma dos meses é a do período, e os termos de hoje batem com o modelo tirado das linhas cruas sem o código
+  do servidor: caixa, a receber e a pagar pelas parcelas, insumos, saldo de abertura, não operacional e o custo do rebanho ativo =
+  Σ `custo_aquisicao` (a projeção) dos animais no rebanho — a mesma conta por outro caminho.
+- Viagem no tempo (seção 46): os grupos `conc` (a conciliação até D) e `lanc` (a lista de lançamentos com competência até D, sem os
+  campos de hoje: `status_pagamento`, `data_pagamento`, `em_aberto`, `vencido`, `proximo_vencimento`, `cancelado_por_event_id`)
+  entram na bateria; o cadastro que eles leem como está hoje: o plano de contas (`conc`) e os nomes da conta, do parceiro, do pasto
+  e do produto (`lanc`). Oráculo da correção (seção 50): a conciliação entra na bateria b4 (a correção sem mudança não muda nenhum
+  número das três visões).
+
+**Testes.** `tests/conciliacao.test.js` (puro), `tests/financeiro.lancamentos.test.js` (as três rotas pela api, por todo caminho que
+grava lançamento: rebanho inicial com abertura, compra importada e a histórica, venda com retenção, morte com custo e o estorno dela,
+entrada de estoque e consumo, correção sem mudança da venda, desfazer da importação), `tests/events.test.js` e `tests/api.test.js`
+(fase e módulos), `tests/telas.sobdemanda.test.js` (as telas novas sob demanda, a meta de 380 KB), `tests/interface.test.js`,
+`tests/ui/fase4.base.test.js` (Playwright: Eventos e Configurações sob demanda — abrir, esqueleto, ir e voltar, detalhe, correção,
+falha de rede com "Tentar de novo" e a volta, a 1280 e a 360 px —; Financeiro: lista, totais, filtro pelo servidor, detalhe com
+parcelas e rateio, o evento de origem, falha de rede e lançamento inexistente), `tests/ui/interface.test.js` e
+`tests/ui/sobdemanda.test.js` (o menu com o Financeiro; Relatórios como o módulo ainda não entregue).
+
+**Execuções desta etapa.** Teste aleatório com o código final, 200 sementes novas × 100 passos (8100000 a 8100199, 4 processos de
+50): 11.927 aceitos, 6.654 recusados, **0 falhas**; a conciliação foi conferida em 11.043 passos (102.437 fins de mês), o custo do
+rebanho ativo contra a projeção em 7.502, com saldo de abertura em 6.657, com insumos em estoque em 6.141 e com custo de aquisição de
+quem saiu em 1.987; a viagem no tempo comparou 1.449.756 unidades e o oráculo da correção, 343.938 consultas. Conferência por mutação
+do oráculo: com a saída do dia D fora da conta do rebanho ativo (`<` no lugar de `<=`), a semente 8100003 falha no passo 53
+(`CONCILIACAO:IDENTIDADE`, diferença de −4.658,75). Na base de demonstração (`tests/acceptance.test.js`), a identidade fecha em todo
+fim de mês dos três anos, com o custo do rebanho ativo igual à soma da projeção.

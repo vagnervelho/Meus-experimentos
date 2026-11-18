@@ -2408,3 +2408,51 @@ rodada terminou sem achado alto? Não terminou: teve 10 altos. Esta etapa não m
 - Neste arquivo, a entrada do conserto da rodada 2 dizia "17 problemas (7 altos)", e o certo é 10 altos, 6 médios e 1 baixo.
 - Ficaram de fora desta etapa: o `README.md` ("Última execução" com 809 e 135 testes, "38 arquivos") e o
   `docs/GUIA_DE_IMPLANTACAO.md` (38 arquivos) continuam com números antigos. Esta etapa não fez commit nem push.
+
+## 18/11/2026 — Fase 4, etapa BASE: folga na página inicial, tela Financeiro e a conciliação das três visões
+
+Por quê: a Fase 4 começa. Antes das telas e dos comandos financeiros (E4.1 a E4.7), a etapa abre a fase sem quebrar as
+anteriores, dá folga à página inicial (428 KB de 450 KB depois das convergências da Fase 3), liga o esqueleto da tela Financeiro aos
+lançamentos que já existem desde a Fase 2 e põe a identidade das três visões (07, seção 2.1) como função pura conferida depois de
+cada comando, de cada passo do teste aleatório e na base de demonstração. Contrato na seção 55 de `docs/CONTRATOS.md`.
+
+- `EventCatalog.FASE_ATUAL = 4`. Os tipos da Fase 4 (lançamento financeiro, rateio) seguem inativos até terem campos; os das fases
+  anteriores não mudam (`tiposAtivos()` = `tiposAtivos(3)`). O módulo Financeiro entra no menu com a tela `Financial`, sob demanda.
+  As rotas da Fase 4 sem tratador continuam `NOT_FOUND` com a fase.
+- Folga na página inicial: `Events` (lista, detalhe, prévia da correção e estorno) e `Settings` (Configurações) saíram do `Index` e
+  vêm sob demanda (módulos EVENTOS, `rotas: ['eventos', 'evento']`, e CONFIGURACOES, `rotas: ['config']`; `Api.TELAS_SOB_DEMANDA`),
+  pelo mesmo mecanismo da seção 37. A página inicial caiu de 428 KB para 363 KB (meta ≤ 380 KB, conferida em
+  `tests/telas.sobdemanda.test.js`). O registro de evento (o botão global) continua na página inicial: a rota `evento/novo` é do
+  `Components` e ganha da raiz `evento` do módulo. Para o usuário, só o carregamento curto na primeira vez.
+- Tela `Financial.html` (sob demanda): a lista dos lançamentos com os filtros (competência, tipo, natureza, conta, parceiro, pasto,
+  situação, pagamento, busca), os totais e as páginas do servidor, e o detalhe de cada um (parcelas com a situação de hoje e os dias
+  de atraso, o rateio e o valor de cada animal, o que ficou sem alocar, o evento que o criou e o que o anulou, os documentos). Nenhum
+  número calculado no aparelho.
+- Rotas novas (consultas, seção 55): `financeiro.lancamentos`, `financeiro.lancamento` (`FinancialService.consultaLancamentos`,
+  `consultaLancamento`) e `financeiro.conciliacao` (`Conciliacao.consulta`).
+- `src/Conciliacao.js` (novo, puro): `fatos(tx)` lê uma vez as linhas vigentes; `caixa` (visão 1), `resultado` (visão 2, com o custo
+  de aquisição de quem saiu em três linhas e a competência por período pelo maior resto por mês e por dia), `posicao` (a receber, a
+  pagar, custo do rebanho ativo, insumos, despesa antecipada líquida de receita antecipada, saldo de abertura, não operacional),
+  `identidade(t)` (a aritmética da 2.1), `termosEm` e `conferir` (a identidade no fim de cada mês e no período, e os meses somando o
+  período). Regra de tempo: só o lançamento com competência até D, a parcela paga até D e a saída até D; o histórico anterior ao
+  marco zero fica fora das três visões.
+- Testes: `tests/conciliacao.test.js` (o caso do 07, seção 2.2, mês a mês e nas três datas da conciliação; o arrendamento anual da
+  1.1; a parte até o dia; o que a identidade acusa; a regra de tempo; 400 bases sorteadas), `tests/financeiro.lancamentos.test.js`
+  (as três rotas por todo caminho que grava lançamento — rebanho inicial com abertura, compra importada e a histórica, venda com
+  retenção, morte com custo e o estorno, entrada de estoque e consumo, correção sem mudança, desfazer da importação — e a regra de
+  tempo pela rota), `tests/ui/fase4.base.test.js` (Playwright: Eventos e Configurações sob demanda, falha de rede e volta;
+  Financeiro a 1280 e 360 px). A identidade passou a ser conferida também depois de cada comando dos testes que usam
+  `tests/apoio-sistema.js` e `tests/apoio-eventos.js` (conferida por mutação: tirar o consumo dos insumos derruba os testes de
+  estoque) e na base de demonstração (`tests/acceptance.test.js`: três anos, todo fim de mês fecha). Testes ajustados ao que mudou de
+  propósito, sem enfraquecer: a fase e os módulos (`events`, `api`, `telas.sobdemanda`, `interface`, `ui/interface`,
+  `ui/sobdemanda`: o Financeiro no menu; Relatórios como o módulo ainda não entregue; as Configurações pedidas sob demanda).
+- Teste aleatório (`tests/apoio-fuzz.js`): `oraculoConciliacao` depois de todo passo que grava (a identidade em todo fim de mês e no
+  período, a soma dos meses, e os termos de hoje contra um modelo das linhas cruas, com o custo do rebanho ativo = a soma da projeção
+  `custo_aquisicao`); a viagem no tempo ganhou os grupos `conc` e `lanc`; o oráculo da correção, a conciliação na bateria b4.
+  As sementes fixas passam a exigir que o oráculo novo confira de verdade (custo do rebanho ativo, saldo de abertura, insumos e custo
+  de aquisição de quem saiu). Leva nova com o código final: 200 sementes × 100 passos (8100000 a 8100199), 11.927 aceitos, 6.654
+  recusados, 0 falhas; a conciliação conferida em 11.043 passos (102.437 fins de mês). Por mutação (a saída do dia D fora do rebanho
+  ativo), a semente 8100003 falha no passo 53 com `CONCILIACAO:IDENTIDADE`.
+- Ficou para as próximas etapas (seção 55, "Premissas"): a baixa não antes da competência (E4.2), o avulso de aquisição rateado 100% e
+  o período só em custeio e outra receita (E4.1), o rateio vigente em D (E4.3). `docs/fase-0/` não mudou (o 01, seção 6.2, ainda diz
+  que Events e Settings ficam na página inicial; atualizar na entrega da fase). Esta etapa não fez commit nem push.

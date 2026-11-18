@@ -257,6 +257,16 @@ test('base de demonstração (TEST_PLAN = DEMO): a composição de 09, seção 7
   const comprados = animais.filter((a) => a.origem === 'COMPRADO');
   assert.equal(comprados.length, 70);
   assert.equal(comprados.reduce((t, a) => t + a.custo_aquisicao, 0), compras.reduce((t, c) => t + c.valor_total, 0), 'custo de aquisição = soma das alocações = custo total das compras');
+  // Fase 4, etapa BASE: a identidade das três visões (07, seção 2.1) fecha ao centavo em todo fim de mês dos três anos da base,
+  // com compras, vendas (e as deduções), mortes, descartes com receita, insumos comprados e consumidos e a castração paga.
+  const conc = js(s.gas.exec(() => s.G.api({ rota: 'financeiro.conciliacao', ambiente: 'DEMO', dados: {} })));
+  assert.equal(conc.ok, true, JSON.stringify(conc.error));
+  assert.deepEqual([conc.data.fecha, conc.data.problemas], [true, []]);
+  assert.ok(conc.data.meses.length >= 24, conc.data.meses.length + ' meses conferidos');
+  const tc = conc.data.periodo.termos;
+  const rc = conc.data.periodo.resultado;
+  assert.ok(rc.receita_venda > 0 && rc.custo_aquisicao.vendidos_descartados > 0 && rc.custo_aquisicao.mortes > 0 && rc.custeio > 0 && tc.custo_rebanho_ativo > 0 && tc.a_pagar > 0, 'a base exercita todos os termos: ' + JSON.stringify(tc));
+  assert.equal(tc.custo_rebanho_ativo, animais.filter((a) => a.situacao_cadastral === 'ATIVO').reduce((t, a) => t + (a.custo_aquisicao || 0), 0), 'o custo do rebanho ativo da conciliação = a soma da projeção');
   // Determinismo: rodar de novo não grava nada novo (mesmas chaves seed:<n>, mesmo conteúdo).
   const rel2 = js(s.gas.exec(() => s.G.runAcceptanceTests()));
   assert.deepEqual([rel2.ok, rel2.demonstracao.cabecas], [true, 304]);

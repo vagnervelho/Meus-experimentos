@@ -211,3 +211,36 @@ test('financeiro.conciliacao: fecha ao centavo em todo fim de mês com abertura,
   assert.deepEqual([d2.periodo.termos.a_pagar, d2.periodo.termos.custo_rebanho_ativo], [15000 + 3000, 0], 'sem a compra: a pagar só a retenção e a vacina; nenhum custo no rebanho');
   assert.equal(lista(s, { natureza: 'AQUISICAO_ANIMAIS' }).itens.map((x) => x.conta_codigo).join(), 'SALDO_ABERTURA_REBANHO', 'as compras importadas saem da lista dos que valem');
 });
+
+test('regra de tempo pela rota: a conciliação e a lista numa data passada não mudam com fato posterior nem com cadastro mudado; o fato retroativo muda só o que alcança', () => {
+  const s = preparar();
+  importarCompras(s);
+  const D = '2026-03-31';
+  const antes = conciliacao(s, { ate: D });
+  const listaAntes = lista(s, { ate: D, situacao: 'TODOS' });
+  // Fato depois de D: a venda de maio e a morte de abril (com custo).
+  vender(s);
+  s.evento('registrar', morte(s), 'ev-morte');
+  s.conferirProjecoes('fatos depois de D');
+  assert.deepEqual(conciliacao(s, { ate: D }), antes, 'a conciliação de 31/03 não muda com a venda e a morte depois dela');
+  assert.deepEqual(lista(s, { ate: D, situacao: 'TODOS' }), listaAntes, 'nem a lista dos lançamentos até 31/03');
+  // Cadastro mudado: o nome do parceiro (a conciliação não lê cadastro; a lista mostra o nome de hoje, por desenho).
+  s.exec((ctx) => s.G.Config.salvarParceiro(ctx, { idempotencyKey: 'p-forn-2', dados: { partner_id: s.fornecedor, campos: { nome: 'Fazenda Vizinha Ltda' } } }));
+  assert.deepEqual(conciliacao(s, { ate: D }), antes, 'o nome do parceiro não entra na conciliação');
+  const renomeada = lista(s, { ate: D, situacao: 'TODOS' });
+  const nomes = renomeada.itens.map((x) => x.parceiro).filter(Boolean);
+  assert.ok(nomes.length >= 2 && nomes.every((n) => n === 'Fazenda Vizinha Ltda'), 'a lista mostra o nome de hoje: ' + JSON.stringify(nomes));
+  assert.deepEqual(renomeada.itens.map((x) => [x.financial_id, x.valor, x.data_competencia]), listaAntes.itens.map((x) => [x.financial_id, x.valor, x.data_competencia]));
+  // Fato retroativo antes de D: a morte de 202 em 15/03 (com custo) muda a conciliação de 31/03 só no que ela alcança.
+  const est = s.tabela('EVENTOS').find((e) => e.event_type === 'MORTE');
+  s.evento('estornar', { event_id: est.event_id, justificativa: 'data errada' }, 'est-morte-abril');
+  s.evento('registrar', morte(s, { event_date: '2026-03-15', custo_vencimento: '2026-03-30' }), 'ev-morte-marco');
+  s.conferirProjecoes('morte retroativa');
+  const depois = conciliacao(s, { ate: D });
+  assert.equal(depois.fecha, true, depois.problemas.join(' | '));
+  const t0 = antes.periodo.termos;
+  const t1 = depois.periodo.termos;
+  assert.deepEqual([t1.custo_rebanho_ativo, t1.a_pagar, t1.resultado_acumulado], [t0.custo_rebanho_ativo - 210000, t0.a_pagar + 30001, t0.resultado_acumulado - 210000 - 30001],
+    'o custo de 202 sai do rebanho ativo e entra no resultado (mortes), e o custo da morte fica a pagar');
+  assert.deepEqual(depois.meses.slice(0, 2), antes.meses.slice(0, 2), 'janeiro e fevereiro não mudam');
+});
