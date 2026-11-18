@@ -4375,4 +4375,16 @@ baixa parcial e do desdobramento e o título em parcelas iguais (só inteira, a 
 saldo inicial como observação; a regra de tempo do fluxo e dos títulos; as rotas; a integridade adulterada),
 `tests/ui/fase4.caixa.test.js` (Playwright, 1280 e 360 px: lançar avulso pela tela, a pagar e a receber com baixa conferida,
 divisão, desfazer e lote, o fluxo com gráfico e tabela, o plano de contas), `tests/estorno.test.js` (o avulso no estorno de
-todo tipo ativo), `tests/estoque.test.js` (o produto que sai na correção da entrada pede a confirmação do saldo negativo), `tests/events.test.js` e `tests/api.test.js` (fase, catálogo, rotas).
+todo tipo ativo), `tests/estoque.test.js` (o produto que sai na correção da entrada pede a confirmação do saldo negativo), `tests/events.test.js`, `tests/api.test.js` e `tests/ui/interface.test.js` (fase, catálogo, rotas, o seletor de eventos com o
+lançamento financeiro entre os mais usados e no grupo Financeiro).
+
+**Execuções desta etapa.** Teste aleatório com o código final, 104 sementes novas × 100 passos (9500000 a 9500103, 4 processos de
+26): 5.728 aceitos, 3.481 recusados, **0 falhas**; o oráculo do efeito conferiu 98 avulsos, 102 baixas inteiras, 15 em parte, 9 em
+lote, 1 encontro de contas, 20 baixas desfeitas, 26 divisões e 11 baixas transportadas na correção; 3.540 correções sem mudança
+aceitas e conferidas (2.134 pela entrada do servidor, 1.406 pela do gerador); a conciliação em 5.251 passos; a viagem no tempo
+comparou 675.006 unidades. As levas anteriores (9100004 a 9100015, 9200000 a 9200055, 9300000 a 9300103 e 9400000 a 9400103)
+acharam os defeitos consertados nesta etapa (56.7), cada um com o teste do caminho escrito antes e conferido falhando sem o
+conserto. `npm test` com o código final: 943 testes, 943 aprovados, 0 falhas (908,1 s; as 26 sementes fixas: 903 aceitos, 495
+recusados, 0 falhas). `npm run ui:check`: 224 testes de navegador, 224 aprovados, 0 falhas (8 min 45 s); 14 arquivos .html dentro
+do orçamento — a página inicial montada com 363 KB de 450 KB; sob demanda, Import 48 KB, Weights 64 KB, Health 24 KB, Reproduction
+67 KB, Financial 31 KB, Events 29 KB e Settings 40 KB, de 150 KB cada.

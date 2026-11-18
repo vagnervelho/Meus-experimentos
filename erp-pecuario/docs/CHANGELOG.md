@@ -2492,8 +2492,9 @@ cada comando, de cada passo do teste aleatório e na base de demonstração. Con
   devolve a prevista); e, da Fase 3, a correção da entrada de estoque para outro produto sem o aviso do saldo negativo do
   produto que sai (`tests/estoque.test.js`).
 - Testes: `tests/financeiro.caixa.test.js` (novo, 15 testes), `tests/ui/fase4.caixa.test.js` (novo, 7 testes de navegador),
-  `tests/estoque.test.js` (o produto que sai na correção), `tests/estorno.test.js` (o avulso), `tests/events.test.js` e
-  `tests/api.test.js` (a fase, o catálogo e as rotas, ajustados ao que mudou de propósito), `tests/correcao.contrato.test.js`
+  `tests/estoque.test.js` (o produto que sai na correção), `tests/estorno.test.js` (o avulso), `tests/events.test.js`,
+  `tests/api.test.js` e `tests/ui/interface.test.js` (a fase, o catálogo, as rotas e o seletor de eventos com o lançamento
+  financeiro, ajustados ao que mudou de propósito), `tests/correcao.contrato.test.js`
   (a tabela B com `PARCELAS.baixa`: 24 valores, 13 COPIA), `tests/fase2.fuzz.test.js` (sementes fixas 445, 505 e 611; os
   oráculos novos precisam conferir de verdade).
 - Teste aleatório (`tests/apoio-fuzz.js`): o gerador do avulso e as ações de baixa, desfazer, divisão e plano de contas; os
@@ -2504,3 +2505,10 @@ cada comando, de cada passo do teste aleatório e na base de demonstração. Con
   20 desfeitas, 26 divisões e 11 baixas transportadas na correção conferidas pelo oráculo do efeito; 3.540 correções sem mudança
   aceitas e conferidas (2.134 pela entrada do servidor e 1.406 pela do gerador); a conciliação em 5.251 passos; a viagem no
   tempo comparou 675.006 unidades.
+- Executado com o código final: `npm test` 943 testes, 943 aprovados, 0 falhas (908,1 s; sementes fixas 903 aceitos, 495
+  recusados, 0 falhas); `npm run ui:check` 224 testes de navegador, 224 aprovados, 0 falhas, página inicial com 363 KB de 450 KB,
+  Financial 31 KB e Settings 40 KB sob demanda. Antes desta etapa, `npm test` dava 926 de 926.
+- Decisões (CONTRATOS, seção 56.7): o avulso sem rateio entre animais nesta etapa (o pasto fica no lançamento; o rateio é da
+  E4.3); a "conta ou caixa" da baixa é a forma de pagamento (caixa único); o pagamento depois do registro só pela baixa (a
+  correção transporta a baixa e não aceita "Já pago em" novo); baixa em parte e divisão só no título que a correção refaz parcela
+  a parcela. `docs/fase-0/` não mudou. Esta etapa não fez commit nem push.

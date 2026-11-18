@@ -87,11 +87,11 @@ test('navegação: menu lateral só com módulos ativos e telas instaladas; REGI
   await A.esperarTela(page, 'Registrar evento');
   assert.deepEqual(await textos(page, '[data-grupo] h2'), ['Movimentação', 'Manejo', 'Reprodução', 'Financeiro', 'Correções'], 'o estoque de insumos (Fase 3, E3.2) abre o grupo Financeiro');
   assert.deepEqual(await textos(page, '[data-tipo-evento]'), [
-    'Nascimento', 'Comprar animais', 'Vender animais', 'Transferir de pasto', 'Morte', 'Pesagem', 'Sanidade (vacina, vermífugo, tratamento)', 'Reprodução (monta, inseminação, diagnóstico)',
+    'Nascimento', 'Comprar animais', 'Vender animais', 'Transferir de pasto', 'Morte', 'Pesagem', 'Sanidade (vacina, vermífugo, tratamento)', 'Reprodução (monta, inseminação, diagnóstico)', 'Lançamento financeiro',
     'Rebanho inicial (marco zero)', 'Outra entrada (doação, permuta, achado)', 'Comprar animais', 'Vender animais', 'Transferir de pasto', 'Morte', 'Descarte (consumo, doação, sacrifício)',
     'Pesagem', 'Sanidade (vacina, vermífugo, tratamento)', 'Castração', 'Identificação (brinco)', 'Marcar para descarte ou não localizado', 'Ocorrência',
-    'Nascimento', 'Reprodução (monta, inseminação, diagnóstico)', 'Desmama', 'Estoque de insumos', 'Corrigir dados do animal',
-  ], 'os mais usados no alto; só os tipos entregues (a pesagem chega na Fase 3, E3.1; a sanidade e o estoque, na E3.2 e E3.3; a reprodução, a desmama, a castração e a ocorrência, na E3.4 e E3.5); estorno não entra no seletor');
+    'Nascimento', 'Reprodução (monta, inseminação, diagnóstico)', 'Desmama', 'Lançamento financeiro', 'Estoque de insumos', 'Corrigir dados do animal',
+  ], 'os mais usados no alto; só os tipos entregues (a pesagem chega na Fase 3, E3.1; a sanidade e o estoque, na E3.2 e E3.3; a reprodução, a desmama, a castração e a ocorrência, na E3.4 e E3.5; o lançamento financeiro avulso, na Fase 4, E4.1); estorno não entra no seletor');
   await page.click('[data-tipo-evento="OUTRA_ENTRADA"]');
   await A.esperarTela(page, 'Outra entrada');
   await page.goBack();
