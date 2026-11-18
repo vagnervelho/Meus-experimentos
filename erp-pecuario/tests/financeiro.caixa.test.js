@@ -115,6 +115,17 @@ test('avulso: correção sem mudança grava os mesmos fatos (também com a conta
   assert.equal(s.tabela('FINANCEIRO').filter((f) => f.status === 'ATIVO').length, 0);
 });
 
+test('avulso: a correção com o mesmo pedido, com duas parcelas iguais (o mesmo valor e vencimento) e só uma paga no ato, casa a baixa com a parcela paga do pedido e grava os mesmos fatos', () => {
+  const s = montar();
+  const pedido = avulso(s, { event_date: '2026-03-03', valor: 45000 }, [{ data_vencimento: '2026-06-01' }, { data_vencimento: '2026-03-03', pago_em: '2026-03-10' }, { data_vencimento: '2026-06-01', pago_em: '2026-03-03' }]);
+  const r = s.ok('evento.registrar', pedido);
+  const fatos = (eid) => s.parcelas(s.finDo(eid)[0].financial_id).map((p) => [p.data_vencimento, p.valor, p.status, p.data_pagamento || null]).sort();
+  const antes = fatos(r.event_id);
+  assert.deepEqual(antes, [['2026-03-03', 15000, 'LIQUIDADA', '2026-03-10'], ['2026-06-01', 15000, 'ABERTA', null], ['2026-06-01', 15000, 'LIQUIDADA', '2026-03-03']]);
+  const c = s.ok('evento.corrigir', Object.assign({}, pedido, { event_id: r.event_id, justificativa: 'Conferido de novo' }));
+  assert.deepEqual(fatos(c.event_id), antes);
+});
+
 // ------------------------------------------------------------------ plano de contas ----
 test('plano de contas: criar com a natureza (código pelo nome, tipo, grupo e classe que ela só permite de um jeito), renomear, reordenar, desativar e reativar; combinação, código e classificação depois do primeiro lançamento conferidos; conta do sistema não se desativa', () => {
   const s = montar();
@@ -221,6 +232,7 @@ test('a correção do evento depois da baixa em parte e do desdobramento: a entr
   assert.deepEqual(codigos(s.falha('parcela.desdobrar', { parcela_id: q1.parcela_id, quantas: 2, primeiro: '2026-07-01', justificativa: 'x' })), ['TITULO_EM_PARTES_IGUAIS']);
   const it = s.ok('financeiro.titulos', { situacao: 'ABERTOS' }).itens.find((x) => x.parcela_id === q1.parcela_id);
   assert.deepEqual([it.acoes.baixar, it.acoes.parcial, it.acoes.dividir], [true, false, false]);
+  assert.deepEqual([s.ok('financeiro.lancamento', { financial_id: frete.financial_id }).parcelas_livres, s.ok('financeiro.lancamento', { financial_id: principal().financial_id }).parcelas_livres], [false, true]);
   s.ok('parcela.baixar', { parcela_id: q1.parcela_id, data_pagamento: '2026-06-16' });
   atual = s.ok('evento.corrigir', { event_id: c.event_id, justificativa: 'De novo', mudanca: { campos: { notes: 'conferido de novo' } } }).event_id;
   assert.deepEqual(titulos(principal().financial_id), antes);
@@ -389,4 +401,17 @@ test('verificação de integridade (e a trava) conferem o que o avulso, a baixa,
   // Com a fonte mexida, o comando que a piora é recusado pela trava (o problema antigo não bloqueia o que não o piora).
   const outro = s.api('evento.registrar', avulso(s, { valor: 1000 }, [{ data_vencimento: '2026-03-01' }]));
   assert.equal(outro.ok, true, JSON.stringify(outro.error));
+  s.editar('PARCELAS', filha.parcela_id, 'valor', 200);
+  assert.deepEqual(achados('PARCELAS'), []);
+  // O frete da compra (parcelas iguais) dividido à mão na planilha: a parcela 2 "nasceu" da 1, cancelada, com o mesmo valor.
+  const tr = s.ok('parceiro.salvar', { campos: { nome: 'Frete', tipos: ['TRANSPORTADOR'] } }).partner_id;
+  const f = s.ok('parceiro.salvar', { campos: { nome: 'Fornecedor', tipos: ['FORNECEDOR'] } }).partner_id;
+  const c = s.ok('evento.registrar', { tipo: 'COMPRA', campos: { event_date: '2026-03-02', partner_id: f, pasto_destino_id: S.PASTOS.A, modalidade: 'CABECA', preco_unitario: 100000, valor_animais: 100000 },
+    animais: [{ brinco: '77', sexo: 'M', data_nascimento: '2024-06-01', data_nascimento_confianca: 'ESTIMADA', castrado: true, reprodutor: false }], parcelas: [{ data_vencimento: '2026-04-02' }], custos: [{ tipo: 'FRETE', valor: 6000, partner_id: tr, parcelas_qtd: 2 }] });
+  const [q1, q2] = s.parcelas(s.finDo(c.event_id).find((x) => x.valor === 6000).financial_id).sort((a, b) => a.parcela_num - b.parcela_num);
+  s.editar('PARCELAS', q1.parcela_id, 'status', 'CANCELADA');
+  s.editar('PARCELAS', q2.parcela_id, 'parcela_origem_id', q1.parcela_id);
+  s.editar('PARCELAS', q2.parcela_id, 'parcela_num', 1);
+  // (a soma também acusa: a parcela cancelada à mão saiu do lançamento sem as que a substituiriam)
+  assert.equal(achados('PARCELAS').filter((m) => /é em parcelas iguais .* tem parcela dividida/.test(m)).length, 1, JSON.stringify(achados('PARCELAS')));
 });

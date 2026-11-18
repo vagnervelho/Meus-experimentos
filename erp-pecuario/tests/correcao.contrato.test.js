@@ -93,8 +93,9 @@ test('a tabela B do contrato (CONTRATOS, 50.4) é a do código: cada valor que a
   const gas = createGas();
   const doCodigo = js(gas.G.Correcao.tabela()).map((d) => d.chave + ' ' + d.natureza).sort();
   // Segunda convergência, rodada 1 (achado 10): entrou REPRODUCAO.estacao (REGRA: a estação do original só com a mesma data).
-  assert.equal(doCodigo.length, 23);
+  // Fase 4, E4.2 (seção 56.3): entrou PARCELAS.baixa (COPIA: a baixa da parcela paga do original vai para a correspondente).
+  assert.equal(doCodigo.length, 24);
   assert.deepEqual(doContrato, doCodigo);
   const natureza = (n) => doCodigo.filter((x) => x.endsWith(' ' + n)).length;
-  assert.deepEqual([natureza('COPIA'), natureza('DERIVADO'), natureza('REGRA')], [12, 6, 5], 'as contagens que o contrato e o registro de alterações citam');
+  assert.deepEqual([natureza('COPIA'), natureza('DERIVADO'), natureza('REGRA')], [13, 6, 5], 'as contagens que o contrato e o registro de alterações citam');
 });

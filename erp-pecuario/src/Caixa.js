@@ -137,18 +137,10 @@ var Caixa = (function () {
     });
     return out;
   }
-  /**
-   * O título que a correção do evento de origem refaz parcela a parcela (o grupo `parcelas` do formulário): a compra (o valor dos
-   * animais), a receita da venda e o lançamento avulso. Os demais (o frete e os outros custos da compra, as deduções da venda, o
-   * custo da morte, a receita do descarte, a despesa do manejo, a compra de insumo) são em N parcelas iguais de mês em mês: a
-   * baixa é inteira e a parcela não se divide (a correção os refaria iguais; CONTRATOS, seção 56).
-   */
+  /** A baixa em parte e a divisão só no título que a correção do evento refaz parcela a parcela (FinancialService.tituloLivre). */
   function tituloLivre_(tx, fin, ev) {
-    if (ev.event_type === 'LANCAMENTO_FINANCEIRO') return true;
-    if (ev.event_type === 'VENDA') return fin.natureza === 'RECEITA_VENDA_ANIMAIS';
-    if (ev.event_type !== 'COMPRA') return false;
-    var c = tx.repo.porId('PLANO_CONTAS', fin.conta_id);
-    return !!c && c.codigo === FinancialService.CONTAS.COMPRA;
+    var c = tx.repo.porId('PLANO_CONTAS', fin.conta_id) || {};
+    return FinancialService.tituloLivre((ev || {}).event_type, fin, c.codigo);
   }
   var EM_PARTES_IGUAIS = 'é de um lançamento em parcelas iguais (o frete, o custo da morte, a compra do insumo…): dê a baixa da parcela inteira, ou corrija o lançamento de origem para mudar as parcelas.';
   function formasAtivas_(tx) {

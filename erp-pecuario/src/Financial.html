@@ -45,8 +45,9 @@ var Baixa = (function () {
       { id: 'data_pagamento', rotulo: 'Data do pagamento (ou do recebimento)', tipo: 'data', obrigatorio: true, default: 'HOJE' },
       { id: 'forma_pagamento', rotulo: 'Forma (caixa, PIX, transferência…)', tipo: 'lista', lista: 'FORMA_PAGAMENTO' },
     ];
+    // A baixa em parte só no título que o servidor diz que se divide (acoes.parcial, parcelas_livres); nos outros, a parcela inteira.
+    if (um && itens[0].parcial !== false) defs.push({ id: 'valor', rotulo: 'Valor baixado (vazio = a parcela inteira)', tipo: 'dinheiro', min: 0.01, ajuda: 'Menos que a parcela: a baixa é em parte, e o resto fica em aberto com o mesmo vencimento.' });
     if (um) {
-      defs.push({ id: 'valor', rotulo: 'Valor baixado (vazio = a parcela inteira)', tipo: 'dinheiro', min: 0.01, ajuda: 'Menos que a parcela: a baixa é em parte, e o resto fica em aberto com o mesmo vencimento.' });
       defs.push({ id: 'juros_multa', rotulo: 'Juros e multa', tipo: 'dinheiro', min: 0 });
       defs.push({ id: 'desconto', rotulo: 'Desconto', tipo: 'dinheiro', min: 0 });
     }
@@ -209,16 +210,16 @@ var TelaFinanceiro = (function () {
   function nomeAnimal(a) { return a.brinco || a.codigo_interno || 'animal'; }
   function linkEvento(e) { return e ? link('evento/' + e.event_id, e.rotulo + ' de ' + Fmt.data(e.event_date) + (e.vigente ? '' : ' (não vale mais)')) : null; }
   /** As ações de uma parcela no detalhe (só no lançamento que vale e fora da dedução retida, que vai com o recebimento). */
-  function acoesParcela(l, x, recarregar) {
+  function acoesParcela(l, x, recarregar, livres) {
     if (l.situacao !== 'ATIVO' || l.retida_pelo_comprador || !App.podeRegistrar()) return '—';
     var paga = x.situacao === 'PAGA' || x.situacao === 'RECEBIDA';
     var aberta = x.situacao === 'A_PAGAR' || x.situacao === 'A_RECEBER' || x.situacao === 'VENCIDA';
-    var item = { parcela_id: x.parcela_id, lancamento: nomeLancamento(l), valor: x.valor, data_vencimento: x.data_vencimento, tipo: l.tipo };
+    var item = { parcela_id: x.parcela_id, lancamento: nomeLancamento(l), valor: x.valor, data_vencimento: x.data_vencimento, tipo: l.tipo, parcial: livres === true };
     if (paga) return UI.botao('Desfazer baixa', { atributos: { 'data-desfazer': x.parcela_id }, aoClicar: function (ev) { Baixa.desfazer(item, ev.currentTarget, recarregar); } });
     if (!aberta) return '—';
     return h('div', { class: 'acoes', style: 'margin-top:0' },
       UI.botao(l.tipo === 'RECEITA' ? 'Receber' : 'Pagar', { atributos: { 'data-baixar': x.parcela_id }, aoClicar: function (ev) { Baixa.baixar([item], ev.currentTarget, recarregar); } }),
-      UI.botao('Dividir', { atributos: { 'data-dividir': x.parcela_id }, aoClicar: function (ev) { Baixa.dividir(item, ev.currentTarget, recarregar); } }));
+      livres ? UI.botao('Dividir', { atributos: { 'data-dividir': x.parcela_id }, aoClicar: function (ev) { Baixa.dividir(item, ev.currentTarget, recarregar); } }) : null);
   }
   function montarDetalhe(el, p) {
     var vivo = true;
@@ -253,7 +254,7 @@ var TelaFinanceiro = (function () {
           { id: 'data_pagamento', rotulo: 'Pagamento', formatar: function (x) { return x.data_pagamento ? Fmt.data(x.data_pagamento) : '—'; } },
           { id: 'valor_pago', rotulo: 'Valor pago', num: true, formatar: function (x) { return x.valor_pago === null ? '—' : Fmt.dinheiro(x.valor_pago); } },
           { id: 'forma_pagamento', rotulo: 'Forma', valor: function (x) { return x.forma_pagamento ? Store.rotuloLista('FORMA_PAGAMENTO', x.forma_pagamento) : '—'; } },
-          { id: 'acao', rotulo: 'Ação', ordenavel: false, formatar: function (x) { return acoesParcela(l, x, recarregar); } },
+          { id: 'acao', rotulo: 'Ação', ordenavel: false, formatar: function (x) { return acoesParcela(l, x, recarregar, o.parcelas_livres === true); } },
         ],
       }).el : h('p', { class: 'suave', text: 'Sem parcela: este lançamento não passa pelo caixa (consumo de insumo, saldo de abertura ou registro anterior ao marco zero).' }), { dado: 'parcelas' }));
       if (o.rateio || l.nao_alocado !== null) {
@@ -345,7 +346,7 @@ var TelaFinanceiro = (function () {
     }
     function acaoTitulo(x) {
       var a = x.acoes || {};
-      var item = { parcela_id: x.parcela_id, lancamento: x.lancamento, valor: x.valor, data_vencimento: x.data_vencimento, tipo: x.tipo, deposito: x.deposito_esperado };
+      var item = { parcela_id: x.parcela_id, lancamento: x.lancamento, valor: x.valor, data_vencimento: x.data_vencimento, tipo: x.tipo, deposito: x.deposito_esperado, parcial: a.parcial === true };
       if (a.motivo) return h('span', { class: 'suave', text: a.motivo });
       if (a.desfazer) return UI.botao('Desfazer baixa', { atributos: { 'data-desfazer': x.parcela_id }, aoClicar: function (ev) { Baixa.desfazer(item, ev.currentTarget, carregar); } });
       if (!a.baixar) return '—';

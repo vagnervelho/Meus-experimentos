@@ -210,7 +210,13 @@ Fase 3, RELATÓRIO DA SEGUNDA CONVERGÊNCIA: as seções 50 a 54 conferidas com 
 recusa e de integridade, as marcas do payload e as rotas citadas existem; a tabela B tem 23 valores — 12 COPIA, 6 DERIVADO e 5
 REGRA — como `Correcao.tabela()`); corrigidos o número de altos da rodada 2 (seção 54: 10, não 7) e o de rotas CONSULTA da seção
 46 (31, com `financeiro.vencimentos`). `Api.rotas()` tem 67 rotas: 51 canônicas (9 ainda de fase futura) e 16 extras. Sem
-mudança de contrato. Relatório: `docs/RELATORIO_FASE3.md`, seção 6.6.7.
+mudança de contrato. Relatório: `docs/RELATORIO_FASE3.md`, seção 6.6.7. Fase 4, etapa BASE: `FASE_ATUAL = 4`, Events e
+Settings sob demanda, a tela Financeiro e a identidade das três visões (`Conciliacao`; seção 55). Fase 4, E4.1 e E4.2: o
+lançamento avulso (LANCAMENTO_FINANCEIRO), o plano de contas (`conta.salvar`), a baixa inteira, parcial, em lote e o desfazer,
+o desdobramento, o encontro de contas da venda, o transporte da baixa na correção, o fluxo de caixa previsto e realizado numa
+data e os títulos a pagar e a receber (`Caixa`), as invariantes 21 a 24 e as telas (seção 56). `Api.rotas()` tem 73 rotas: 51
+canônicas (5 ainda de fase futura: `preco.salvar`, `financeiro.resultado`, `financeiro.custosAnimal`, `relatorio.obter`,
+`relatorio.exportar`) e 22 extras.
 
 ## 1. Regras que valem para todo arquivo de `src/`
 
@@ -1059,7 +1065,7 @@ achados_antes}` ou a recusa `VALIDATION`/`CONFLICT` com `INTEGRIDADE_<CHECAGEM>`
 Definição declarativa dos eventos (04, seção 7). Os 21 tipos estão no catálogo com `fase`; só passam pelo motor os
 entregues na fase corrente E com campos (`FASE_ATUAL = 4`, desde a etapa BASE da Fase 4 — seção 55; era 3 desde a etapa BASE da Fase 3; os tipos dela ficam inativos
 até terem campos — desde a E3.1, PESAGEM é ativa; desde a E3.2 e a E3.3, SANIDADE e ESTOQUE; REPRODUCAO, DESMAMA, CASTRACAO
-e OCORRENCIA seguem inativos): ENTRADA_INICIAL, OUTRA_ENTRADA, NASCIMENTO, COMPRA, VENDA, PESAGEM, SANIDADE (VACINACAO,
+e OCORRENCIA seguem inativos; desde a E4.1, LANCAMENTO_FINANCEIRO, seção 56): ENTRADA_INICIAL, OUTRA_ENTRADA, NASCIMENTO, COMPRA, VENDA, PESAGEM, SANIDADE (VACINACAO,
 VERMIFUGACAO, MEDICACAO, TRATAMENTO, EXAME, DOENCA), ESTOQUE (ENTRADA, AJUSTE),
 TRANSFERENCIA, MORTE, DESCARTE, IDENTIFICACAO (PRIMEIRA_IDENTIFICACAO, SUBSTITUICAO, REMOCAO), MARCACAO (DESCARTE,
 NAO_LOCALIZADO), AJUSTE_INVENTARIO (CORRECAO_CADASTRO, IDENTIFICACAO_INCORRETA, CORRECAO_LOCALIZACAO, RECLASSIFICACAO,
@@ -1456,7 +1462,8 @@ OUTRO, CUSTO, RECEITA, DEDUCAO), tipo_deducao?, retida?, parcelas: [{parcela_num
 forma_pagamento}]}], total, a_pagar, a_receber, por_animal: [{animal_id, codigo_interno, brinco, valor (na venda: a
 receita do animal), base?, deducoes?, liquido?}]} | null}`. Estorno e correção: os lançamentos do original deixam de valer pela vigência (FINANCEIRO `status` e
 `status_pagamento` CANCELADO na fase C; parcelas não são regravadas, desenho-base 16.11); parcela LIQUIDADA do original
-→ CONFLICT `PARCELA_LIQUIDADA` (o transporte da baixa chega com `parcela.baixar`, Fase 4); cancelar lançamento com
+→ CONFLICT `PARCELA_LIQUIDADA` no estorno; na correção, desde a E4.2, a baixa vai para a parcela correspondente do substituto
+(o transporte, seção 56.3), e só sem a correspondente é CONFLICT `PARCELA_LIQUIDADA`; cancelar lançamento com
 competência até `fin_bloqueio_ate` → aviso `PERIODO_BLOQUEADO` (um só por comando). Todo registro, correção e estorno confere
 também, para cada animal já cadastrado que toca, as sequências de identificação e de marcação antes e depois (problema na
 linha do comando → VALIDATION; o que quebra num evento gravado → CONFLICT com ele) e, no estorno e na correção, o que a
@@ -3602,7 +3609,8 @@ tabela são as do código (`Correcao.tabela()`), e `tests/correcao.contrato.test
   a baixa ser desfeita ou refeita noutra data, é recusado (`PAGAMENTO_NA_CORRECAO`, `PARCELA_JA_PAGA`); a entrada do servidor
   (`evento.obter`, `correcao`) não traz o "Já pago em" e é aceita. A conta, o pasto e a categoria desativados depois de usados pelo
   original continuam valendo. A correção refaz o título com as parcelas que valem (o valor, o vencimento e a baixa), numeradas
-  de novo e sem o vínculo da divisão, que fica no lançamento original.
+  de novo e sem o vínculo da divisão, que fica no lançamento original. Por isso a baixa parcial e a divisão só valem no título
+  que o formulário refaz parcela a parcela (a compra, a receita da venda e o avulso: `TITULO_EM_PARTES_IGUAIS`, seção 56.3).
 
 ### 50.7 O oráculo da correção (`tests/apoio-fuzz.js`, `oraculoCorrecao`)
 
@@ -4214,3 +4222,154 @@ fim de mês dos três anos, com o custo do rebanho ativo igual à soma da proje�
 falhas). `npm run ui:check`: 217 testes de navegador, 217 aprovados, 0 falhas (507 s); 14 arquivos .html dentro do orçamento — a
 página inicial montada com 371.434 bytes (363 KB) de 450 KB; sob demanda, Import 48 KB, Weights 64 KB, Health 24 KB, Reproduction
 67 KB, Financial 12 KB, Events 29 KB e Settings 36 KB, de 150 KB cada.
+
+## 56. Fase 4, E4.1 e E4.2: lançamento avulso, plano de contas, parcelas e fluxo de caixa — `EventCatalog` (LANCAMENTO_FINANCEIRO), `EventService` (`lancamentoAvulso_`, `transportarBaixas_`), `Correcao` (`entradaAvulso_`, `PARCELAS.baixa`, as parcelas que valem), `FinancialService` (`tituloLivre`, `parcelas_livres`, invariantes 21 a 24, "Já pago em"), `Caixa` (novo), `Config` (`conta.salvar`), `AuditService` (checagens das invariantes novas, `avisoDasBaixas_`), `Api` (rotas), `Financial` (lançar, a pagar e a receber, baixa em lote, fluxo de caixa), `Settings` (plano de contas), `JavaScript` (rótulos); `tests/financeiro.caixa.test.js`, `tests/ui/fase4.caixa.test.js`, `tests/apoio-fuzz.js`, `tests/estorno.test.js`, `tests/events.test.js`, `tests/api.test.js`
+
+**Fase.** LANCAMENTO_FINANCEIRO fica ativo (`tiposAtivos()` = os da Fase 3 + ele); RATEIO continua inativo (E4.3). As rotas
+`conta.salvar`, `parcela.baixar`, `parcela.desfazerBaixa` e `financeiro.fluxoCaixa` deixam de responder `NOT_FOUND`;
+`financeiro.resultado`, `financeiro.custosAnimal` e `preco.salvar` continuam de fase futura (`tests/api.test.js` usa
+`financeiro.resultado` como o exemplo).
+
+### 56.1 O lançamento avulso (03b, seções 10.2, 10.3 e 16.6; 04, seção 4.9; 07, seções 1.1 e 1.3)
+
+Tipo de evento `LANCAMENTO_FINANCEIRO` (grupo "Financeiro", `frequente`, sem animais, revisão pelo servidor), com o mesmo tratador
+no registro, na simulação, na correção e no estorno (`EventService`, ramo sem animais → `lancamentoAvulso_`). Campos
+(`EventCatalog.CAMPOS_LANCAMENTO`): `event_date` (a competência), `conta_id` (só contas de `NATUREZAS_AVULSO` = CUSTEIO,
+OUTRA_RECEITA, NAO_OPERACIONAL), `valor`, `descricao`, `partner_id`, `competencia_inicio` e `competencia_fim` (o período,
+opcional), `quantidade`, `pasture_id`, `categoria_animal_id`, `ref_event_id`, `documento`, `property_id`, `responsible`,
+`notes`; grupo repetível `parcelas` (`CAMPOS_PARCELA` + `pago_em`, "Já pago em"). Grava um evento e um lançamento (sem linha
+de animal e sem rateio: "aqui, sem rateio ou rateio direto a um pasto" — o pasto fica no lançamento, `pasture_id`; o rateio
+entre animais é da E4.3) com as parcelas; `EVENTOS.total_value` = valor.
+
+| Regra | Recusa |
+|---|---|
+| Conta inexistente; de outra natureza (compra e venda de animais, despesa de venda, insumo, saldo de abertura) | `NAO_ENCONTRADO`; `CONTA_INVALIDA`, com o caminho de cada natureza (`CAMINHO_DA_NATUREZA`: "Comprar animais", "Vender animais", a dedução da venda, a entrada de estoque) |
+| Conta, pasto ou categoria inativos | `CONTA_INATIVA`, `PASTO_INATIVO`, `CATEGORIA_INATIVA` — salvo o que o original corrigido já usava |
+| Período: os dois limites ou nenhum; fim ≥ início; início ≥ a data; no máximo 3.653 dias; só CUSTEIO e OUTRA_RECEITA | `CAMPO_OBRIGATORIO`, `PERIODO_INVERTIDO`, `PERIODO_ANTES_DA_DATA`, `VALOR_FORA_DA_FAIXA`, `CAMPO_NAO_SE_APLICA` |
+| Arrendamento de pasto (conta `ARRENDAMENTO_PASTO`): pasto e período obrigatórios | `CAMPO_OBRIGATORIO` |
+| `ref_event_id`: existe e não é estorno; não é o próprio original; vale (ou é o que o original já referia) | `NAO_ENCONTRADO`; `REFERENCIA_INVALIDA`; `JA_ANULADO` |
+| Parcelas: as regras de `FinancialService.resolverParcelas` (somam o valor, até `MAX_PARCELAS`, vencimento ≥ a data) | as de sempre (`PARCELAS_NAO_SOMAM`…) |
+| "Já pago em": não depois de hoje nem antes da competência (a premissa da identidade, seção 55) | `DATA_FUTURA`, `PAGAMENTO_ANTES_DA_COMPETENCIA` |
+
+A parcela com "Já pago em" nasce `LIQUIDADA`, com `data_pagamento` e `valor_pago` = valor (sem juros nem desconto: para isso, a
+baixa). Competência até `fin_bloqueio_ate` → aviso `PERIODO_BLOQUEADO` (o de sempre). As observações (`notes`) ficam no evento,
+não em `FINANCEIRO.observacoes` (a correção só da anotação não muda o lançamento). Anexos: os do evento e do lançamento, como na
+compra (seção 16). O resumo da revisão traz o lançamento com o papel `AVULSO`.
+
+### 56.2 Plano de contas: `conta.salvar` (03a, seção 4.13; `Config.comandoSalvarConta`)
+
+Comando sem evento (auditoria). Dados `{conta_id?, campos: {codigo, nome, grupo, natureza, tipo, classe_custo_animal, ordem,
+ativo}, justificativa?}`. Cria (o código pelo nome quando vem vazio; tipo, grupo e classe preenchidos quando a natureza só os
+permite de um jeito; `ordem` = maior + 10; `sistema` N), renomeia, reordena, desativa e reativa. A combinação natureza × tipo ×
+grupo × classe segue `COMBINACOES_CONTA` (`COMBINACAO_INVALIDA`); o código não muda (`CAMPO_IMUTAVEL`) nem repete
+(`CODIGO_REPETIDO`); grupo, natureza, tipo e classe travam depois do primeiro lançamento na conta, vigente ou não (`CONTA_EM_USO`:
+"crie outra conta e desative esta"); a conta do sistema não se desativa (`CONTA_DO_SISTEMA`). Conta não se apaga: a desativada sai
+dos formulários e os lançamentos antigos continuam valendo (a correção do evento que a usa continua aceita). Resposta `{conta,
+contas}`. Tela: Configurações → "Plano de contas".
+
+### 56.3 Títulos: baixa, desfazer, baixa parcial e desdobramento (03b, seção 11; RN-042, RN-046, RN-076, RN-081, RN-082) — `Caixa`
+
+Comandos sem evento (`AuditService.alteracao`/`criacao`; a fase C aplica), com um tratador cada, o mesmo no SIMULAR:
+
+| Rota | Contrato |
+|---|---|
+| `parcela.baixar` | `{parcela_id, data_pagamento, valor?, juros_multa?, desconto?, valor_pago?, forma_pagamento?, justificativa?}` ou em lote `{data_pagamento, forma_pagamento?, itens: [{parcela_id, valor?, juros_multa?, desconto?, valor_pago?, forma_pagamento?}] (até 200), justificativa?}`. A parcela vale e está em aberto (`PARCELA_JA_PAGA`); a data não é futura (`DATA_FUTURA`) nem antes da competência (`PAGAMENTO_ANTES_DA_COMPETENCIA`); juros ≥ 0, 0 ≤ desconto < valor (`VALOR_FORA_DA_FAIXA`); `valor_pago` informado = valor + juros − desconto (`VALOR_PAGO_DIVERGENTE`, RN-081); forma da lista `FORMA_PAGAMENTO` (a "conta ou caixa": caixa único, 07, seção 11). `valor` < o da parcela = baixa parcial: a parcela vira CANCELADA e nascem a paga e a que resta (o mesmo número e vencimento, `parcela_origem_id`). Encontro de contas da venda: a baixa do recebimento quita junto, na mesma data e pelo nominal, as deduções retidas pelo comprador que vencem nele (o depósito esperado = recebido − retido); a dedução retida não se baixa sozinha (`PARCELA_RETIDA`); recebimento com retenção não se baixa em parte (`BAIXA_PARCIAL_COM_RETENCAO`); dedução já quitada sem o recebimento → `ENCONTRO_DESFEITO`. Lote: tudo ou nada; `PARCELA_REPETIDA`. Resposta: as parcelas tocadas (`respostaParcelas_`); `impactos {itens: [{…, valor_pago, parcial, resta, encontro, deposito}], entradas, saidas, liquido}` |
+| `parcela.desfazerBaixa` | `{parcela_id, justificativa}` (obrigatória). Paga → ABERTA, as colunas da baixa vazias (data, valor pago, juros, desconto; a forma fica a última informada) (`PARCELA_EM_ABERTO`); a dedução retida volta junto com o recebimento do mesmo encontro e não se desfaz sozinha (`PARCELA_RETIDA`). É o caminho antes do estorno (RN-042) |
+| `parcela.desdobrar` (extra) | `{parcela_id, parcelas: [{data_vencimento, valor?, forma_pagamento?, documento?}] \| quantas, primeiro, intervalo?, justificativa}`. A parcela em aberto vira CANCELADA e nascem as novas, que somam o mesmo (`FinancialService.resolverParcelas`; com `quantas`, os vencimentos de `FinancialService.vencimentos`). Igual à de hoje → `VALOR_IGUAL`; mais que `MAX_PARCELAS` → `PARCELAS_DEMAIS`; com retenção → `PARCELA_RETIDA` |
+| `parcela.simular` (extra, consulta) | `{acao: baixar \| desfazerBaixa \| desdobrar, dados}` → a resposta do SIMULAR do comando (`simulacao: true`, `impactos`), sem gravar. A tela confere o valor pago e as parcelas novas por ela (o aparelho não soma) |
+
+**Título que se divide** (`FinancialService.tituloLivre(eventType, fin, contaCodigo)`): a baixa parcial e o desdobramento só valem
+no título que a correção do evento de origem refaz parcela a parcela — o valor dos animais da compra (conta `COMPRA_ANIMAIS`), a
+receita da venda e o avulso. Os demais (frete e outros custos da compra, deduções da venda, custo da morte, receita do descarte,
+despesa do manejo, compra de insumo) são em N parcelas iguais de mês em mês no formulário: a correção os refaria iguais, e a baixa
+de uma parcela desdobrada não teria correspondente. Neles, a baixa é da parcela inteira (`TITULO_EM_PARTES_IGUAIS`, com o caminho:
+"corrija o lançamento de origem para mudar as parcelas"); `financeiro.lancamento` traz `parcelas_livres` e `financeiro.titulos`,
+`acoes.parcial`/`acoes.dividir`, e a tela só mostra "Dividir" e o "Valor baixado" onde valem.
+
+**Período fechado.** A baixa e o desfazer que mudam um pagamento até `fin_bloqueio_ate` (o de antes ou o de depois) pedem o aviso
+`PERIODO_BLOQUEADO` e, aceito, a justificativa — pela trava única (`AuditService.avisoDasBaixas_`, no mesmo `avisosDaTrava` dos
+eventos), um caminho só para todo comando.
+
+**Transporte da baixa na correção** (RN-046; `EventService.transportarBaixas_`, em `fechar_`, para todo tipo de evento): cada
+parcela paga do original vai para a parcela do lançamento correspondente do substituto com o mesmo valor e o mesmo vencimento, que
+nasce paga com a mesma baixa (data, valor pago, juros, desconto, forma) — `Correcao.congelado('PARCELAS.baixa')` (tabela B da seção
+50.4, que passa a ter 24 valores: 13 COPIA, 6 DERIVADO e 5 REGRA). Entre parcelas iguais (o mesmo valor e vencimento), a baixa vai
+primeiro para a que o pedido já traz paga com a mesma baixa (o reenvio do pedido como foi aceito), depois para a em aberto. Sem a
+correspondente: `CONFLICT PARCELA_LIQUIDADA` ("desfaça a baixa antes"); a baixa antes da data nova: `CONFLICT
+PAGAMENTO_ANTES_DA_COMPETENCIA`. O "Já pago em" na correção só é aceito quando repete a baixa transportada (`PARCELA_JA_PAGA`,
+`PAGAMENTO_NA_CORRECAO`; seção 50.6). O estorno com parcela paga continua `CONFLICT PARCELA_LIQUIDADA` (desfaça a baixa antes).
+A entrada do servidor (`evento.obter`, `correcao.parcelas`) traz só as parcelas que valem — a dividida (CANCELADA) fica fora — na
+ordem do número, com o vencimento e o valor desempatando as que nasceram da mesma; a correção sem mudança grava os mesmos títulos.
+
+**Invariantes novas** (`FinancialService.conferir`, as mesmas na verificação e na trava; checagens `FINANCEIRO` e `PARCELAS`):
+21 — o avulso tem um lançamento, de natureza avulsa, competência = data, o período nas regras de 56.1, arrendamento com pasto e
+período, sem animal nem rateio; fora do avulso, nenhum lançamento tem período. 22 — parcela paga não antes da competência, não no
+futuro, desconto < valor. 23 — as parcelas de um desdobramento são do mesmo lançamento e número, a de origem CANCELADA, somam o
+valor dela, e só o título que se divide tem desdobramento. 24 — o encontro de contas: a dedução retida quitada junto com o
+recebimento em que vence (a mesma data, pelo nominal), e o recebimento quitado leva as retidas dele.
+
+### 56.4 Fluxo de caixa e títulos (07, seções 1.1 e 2.1; 08, seção 3) — consultas
+
+| Rota | Contrato |
+|---|---|
+| `financeiro.fluxoCaixa` | `Caixa.fluxoCaixa(ctx, {data?, de?, ate?, agrupar?})`: D = `data` (padrão hoje; depois de hoje → `DATA_FUTURA`); `agrupar` DIA, SEMANA (segunda a domingo) ou MES (padrão; outro → `VALOR_FORA_DA_LISTA`); período padrão em volta de D (12 meses, 13 semanas ou 30 dias); `de > ate` → `PERIODO_INVERTIDO`; mais de 400 linhas → `VALOR_FORA_DA_FAIXA`. `{data, de, ate, agrupar, saldo_inicial: {valor, data} \| null, movimento_antes_do_saldo, saldo: {valor \| null, motivo (DADOS_INSUFICIENTES), mensagem}, realizado: {entradas, saidas, liquido}, previsto, vencidos: {a_receber, a_pagar}, periodos: [{inicio, fim, rotulo, situacao (PASSADO, ATUAL, FUTURO), realizado, previsto, liquido, saldo_fim}]}`, em centavos. Realizado: Σ `valor_pago` das parcelas pagas até D, na data do pagamento. Previsto: o nominal das parcelas em aberto em D que vencem de D em diante; as vencidas antes de D vão a `vencidos`. Saldo: parte do saldo inicial informado (`caixa_saldo_inicial` no começo do dia `caixa_saldo_inicial_data`): no passado, o realizado até o fim do período; no futuro, o de D mais o previsto |
+| `financeiro.titulos` (extra) | `Caixa.listarTitulos(ctx, {data?, situacao? (ABERTOS — padrão —, VENCIDOS, A_VENCER, PAGOS), tipo? (RECEITA, DESPESA), de?, ate? (o vencimento; em PAGOS, o pagamento), partner_id?, busca?})`. `{data, hoje, situacao, totais: {a_receber, a_pagar, vencido_receber, vencido_pagar, recebido, pago}, total, soma_receitas, soma_despesas, itens: [{parcela_id, financial_id, event_id, event_type, lancamento, conta_nome, natureza, tipo, parceiro, partner_id, parcela_num, parcelas_do_lancamento, data_vencimento, valor, situacao (PAGA, RECEBIDA, VENCIDA, VENCE_HOJE, A_VENCER), dias_atraso, data_pagamento, valor_pago, juros_multa, desconto, forma_pagamento (só da paga), documento, retida_pelo_comprador, deducoes_retidas, deposito_esperado, acoes? (só quando D = hoje: {baixar, desfazer, dividir, parcial, motivo})}]}` |
+
+**Regra de tempo** (o número pedido numa data D; RELATORIO_FASE3, seção 6.6): só o lançamento com competência até D, a parcela paga
+até D e as parcelas como estavam em D (`Caixa.parcelasEm`): a desdobrada vale até o dia do desdobramento (o primeiro pagamento das
+que nasceram dela ou o dia em que ele foi registrado, no fuso da fazenda) e, depois, as que nasceram dela. O saldo inicial é uma
+observação do dono, um fato da data dela: numa D anterior à véspera dela não existe (o saldo fica `DADOS_INSUFICIENTES`); o
+pagamento lançado depois com data anterior a ela muda `movimento_antes_do_saldo`, nunca o saldo observado. Os nomes (conta,
+parceiro) são os de hoje (cadastro vigente). As `acoes` e o `hoje` só existem em D = hoje. A viagem no tempo confere os dois (grupos
+`fluxo` — MES e SEMANA — e `tit` — ABERTOS e PAGOS, sem `hoje`/`acoes`; seção 46), e o fluxo pedido sem a data é o pedido com
+D = hoje.
+
+### 56.5 Telas (`Financial`, sob demanda; `Settings`)
+
+Financeiro ganha o cabeçalho com "Novo lançamento" (`evento/novo/LANCAMENTO_FINANCEIRO`, o formulário do catálogo com a revisão do
+servidor) e três abas: Lançamentos, **A pagar e a receber** (`financeiro/titulos`: filtros pelo servidor, os totais e os
+indicadores a pagar/a receber/vencidos, a tabela com seleção e "Dar baixa nas N marcadas", e as ações por linha — Pagar ou Receber,
+Dividir, Desfazer baixa — que vêm do servidor) e **Fluxo de caixa** (`financeiro/fluxo`: data de referência, agrupamento, de/até;
+indicadores de saldo, realizado, previsto e vencidos; o gráfico de barras do líquido por período e, com o saldo, o de linha do
+saldo, ambos do kit `UI.grafico` com a tabela equivalente; a tabela por período). A folha da baixa confere o valor pago pela
+`parcela.simular` antes de gravar; a da divisão mostra as parcelas novas pelo servidor; o detalhe do lançamento ganha as ações de
+cada parcela. Configurações ganham "Plano de contas" (lista e formulário pela `conta.salvar`). O cliente só valida formato
+(`tests/cliente.naocalcula.test.js` vale).
+
+### 56.6 Teste aleatório (`tests/apoio-fuzz.js`)
+
+Gerador `LANCAMENTO_FINANCEIRO` (`registrarTipo`, peso 4: as três naturezas, período, arrendamento, pasto, categoria, referência,
+"Já pago em", às vezes inválidos) e as ações `baixa` (inteira, parcial — 85% no título que se divide —, com juros e desconto,
+valor pago errado, data antes da competência ou futura, em lote, a dedução retida sozinha), `desfazerBaixa`, `desdobrar` e `conta`
+(criar, renomear, desativar, reativar, mudar a classe de uma conta usada). Oráculos: `efeitoParcela` (pelas linhas cruas: o valor
+pago, a parcial com a paga e a que resta, o encontro de contas, o desfazer, a divisão; baixa em parte ou divisão aceita em título
+de parcelas iguais é falha), o efeito do avulso, a conta, a conciliação (seção 55) depois de cada passo, o período fechado
+(também nas baixas), o estorno imediato (aceita a recusa documentada com parcela paga), a correção (b1–b4 também do avulso, com a
+baixa transportada e as parcelas que valem; a mudança de cadastro `conta`) e a viagem no tempo (grupos `fluxo` e `tit`, com o
+saldo inicial como cadastro com data). A entrada do gerador no b1 (o pedido original reenviado) deixa de valer como "sem
+mudança" para o evento cujo título foi renegociado depois do registro (parcela dividida, baixa em parte ou desfeita: o pedido
+traz o vencimento, o valor ou a forma de antes, e reenviá-lo muda o título de propósito); a entrada do servidor continua
+conferida nesses eventos. As sementes fixas (`tests/fase2.fuzz.test.js`) ganharam 445 e 505 (o gerador novo mudou as sequências:
+445 devolve a primeira identificação; 505 dá o encontro de contas) e exigem que cada oráculo novo confira de verdade: o avulso, a
+baixa inteira, em parte e em lote, o encontro de contas, o desfazer, a divisão e a baixa transportada na correção.
+
+### 56.7 Decisões
+
+- O avulso desta etapa não tem rateio entre animais: o custo de pasto fica no lançamento (`pasture_id`), e a categoria é só
+  informativa; o rateio (e o 100% da aquisição avulsa, 07, 1.3) chega com o RATEIO na E4.3. Natureza de aquisição, venda,
+  despesa de venda e insumo não entram no avulso: nascem nos próprios eventos (um caminho por fato).
+- A "conta ou caixa" da baixa é a forma de pagamento (caixa único no MVP, 07, seção 11); o saldo inicial é o parâmetro com data.
+- O pagamento depois do registro tem um caminho: a baixa. A correção transporta a baixa e não aceita "Já pago em" novo.
+- Baixa parcial e desdobramento só no título que a correção refaz parcela a parcela (a compra, a receita da venda e o avulso):
+  sem isso, a correção sem mudança de um frete dividido mudaria os títulos (o fuzz achou: sementes 9100006 e 9100013).
+- As rotas `parcela.desdobrar`, `parcela.simular` e `financeiro.titulos` são extras (08, seção 16: a tela precisa da divisão,
+  da prévia do valor pago e da lista de títulos numa data); documentadas aqui.
+
+**Testes.** `tests/financeiro.caixa.test.js` (13 testes, pela api: o avulso por todo caminho — registro, retroativo, mesmo dia,
+recusas, correção sem mudança com conta/pasto/categoria desativados, transporte da baixa, estorno, estorno da correção, substituto
+do substituto, o reenvio do pedido com duas parcelas iguais e só uma paga —; o plano de contas; a baixa inteira, parcial, em lote, desfazer, dividir e o período fechado; a correção depois da
+baixa parcial e do desdobramento e o título em parcelas iguais; o encontro de contas da venda; o CT-15 inteiro; o fluxo com o
+saldo inicial como observação; a regra de tempo do fluxo e dos títulos; as rotas; a integridade adulterada),
+`tests/ui/fase4.caixa.test.js` (Playwright, 1280 e 360 px: lançar avulso pela tela, a pagar e a receber com baixa conferida,
+divisão, desfazer e lote, o fluxo com gráfico e tabela, o plano de contas), `tests/estorno.test.js` (o avulso no estorno de
+todo tipo ativo), `tests/events.test.js` e `tests/api.test.js` (fase, catálogo, rotas).

@@ -5322,7 +5322,7 @@ function entradasSemMudanca(sis, e) {
   if (r.ok && r.data.correcao) out.push({ origem: 'servidor', dados: sem(js(r.data.correcao), ['criados']) });
   else out.push({ origem: 'servidor', erro: r.ok ? 'evento.obter sem a entrada da correção' : r.error.code + ' ' + r.error.message });
   const memo = sis.specs.get(e.event_id);
-  if (memo) { try { out.push({ origem: 'gerador', dados: montarDados(sis, js(memo.spec)) }); } catch (x) { /* a especificação não monta mais: fica a do servidor */ } }
+  if (memo && !memo.tituloMexido) { try { out.push({ origem: 'gerador', dados: montarDados(sis, js(memo.spec)) }); } catch (x) { /* a especificação não monta mais: fica a do servidor */ } }
   return out;
 }
 /** Corrige com a chave dada, aceitando os avisos (e escrevendo a justificativa do período fechado quando pedida). */
@@ -5735,6 +5735,24 @@ const chaveDo = (k) => 'fz-' + k;
 /**
  * Executa um comando concreto (passo k) e roda os oráculos. Devolve {falhas, r}.
  */
+/**
+ * Fase 4, E4.2: o título renegociado depois do registro (a parcela dividida, a baixa em parte, a baixa desfeita, que deixa a
+ * forma do pagamento na parcela) não é mais o que o pedido original descreve: reenviá-lo como correção muda o título de
+ * propósito (volta o vencimento, o valor ou a forma do pedido). A entrada do gerador deixa de ser "sem mudança" para esse
+ * evento; a do servidor (evento.obter) continua conferida. Marcado logo depois do comando aceito, antes dos oráculos do passo.
+ */
+function marcarTituloMexido(sis, cmd, r, A, S) {
+  if (!r || !r.ok || !/^parcela\.(baixar|desfazerBaixa|desdobrar)$/.test(cmd.rota)) return;
+  const finsA = new Map(A.t.FINANCEIRO.map((f) => [f.financial_id, f]));
+  const antes = new Map(A.t.PARCELAS.map((p) => [p.parcela_id, p]));
+  S.t.PARCELAS.forEach((p) => {
+    const p0 = antes.get(p.parcela_id);
+    const mexeu = !p0 ? !!p.parcela_origem_id : (p0.status !== p.status && (p.status === 'CANCELADA' || p.status === 'ABERTA'));
+    const f = mexeu ? finsA.get(p.financial_id) : null;
+    const memo = f ? sis.specs.get(f.event_id) : null;
+    if (memo) memo.tituloMexido = true;
+  });
+}
 function executar(sis, k, cmd, antesT, opcoes) {
   const o = opcoes || {};
   const A = estado(antesT);
@@ -5781,6 +5799,7 @@ function executar(sis, k, cmd, antesT, opcoes) {
   }
   const S = estado(depoisT);
   const dv1 = sis.versao();
+  marcarTituloMexido(sis, cmd, r, A, S);
   if (!r.ok) {
     if (!conferida) falhas.push(...oraculoRecusa(sis, cmd, r, A, S, dv0, dv1, chave));
     if (cmd.dvVelha && r.error.code !== 'CONFLICT') falhas.push(falha('VERSAO', 'com a versão velha, ' + r.error.code + ' ' + r.error.message));

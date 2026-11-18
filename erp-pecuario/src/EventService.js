@@ -1958,7 +1958,11 @@ var EventService = (function () {
       var novas = novoId ? ctxEv.plano.PARCELAS.filter(function (q) { return q.financial_id === novoId; }) : [];
       pagas.forEach(function (p) {
         var b = Correcao.congelado(ctxEv.correcao, 'PARCELAS.baixa', { financial_id: fin.financial_id, valor: p.valor, data_vencimento: p.data_vencimento, parcela_id: p.parcela_id });
-        var q = b ? novas.filter(function (x) { return !usadas[x.parcela_id] && x.valor === p.valor && x.data_vencimento === p.data_vencimento; })[0] : null;
+        var iguais = function (x) { return ['data_pagamento', 'valor_pago', 'juros_multa', 'desconto'].every(function (k) { return nulo_(x[k]) === nulo_(b.v[k]); }); };
+        // Entre as parcelas do pedido com o mesmo valor e vencimento: primeiro a que já vem paga com esta mesma baixa (o reenvio do
+        // pedido como foi aceito), depois a em aberto; a paga com outra baixa só por último (PARCELA_JA_PAGA).
+        var candidatas = b ? novas.filter(function (x) { return !usadas[x.parcela_id] && x.valor === p.valor && x.data_vencimento === p.data_vencimento; }) : [];
+        var q = candidatas.filter(function (x) { return x.status === 'LIQUIDADA' && iguais(x); })[0] || candidatas.filter(function (x) { return x.status !== 'LIQUIDADA'; })[0] || candidatas[0] || null;
         var nome = '"' + (fin.descricao || EventCatalog.nomeEvento(original.event_type, original.event_subtype)) + '"';
         if (!q) {
           m.conflitos.push(Validation.detalhe({
@@ -1972,7 +1976,7 @@ var EventService = (function () {
         // "Já pago em" na parcela já paga (o reenvio do pedido como foi aceito): o mesmo pagamento é o mesmo fato e fica; outro
         // pagamento muda a baixa, que só se desfaz pela própria rota.
         if (q.status === 'LIQUIDADA') {
-          var mesmo = ['data_pagamento', 'valor_pago', 'juros_multa', 'desconto'].every(function (k) { return nulo_(q[k]) === nulo_(b.v[k]); });
+          var mesmo = iguais(q);
           if (!mesmo) erroGeral_(m, 'parcelas', 'PARCELA_JA_PAGA', 'A parcela de ' + Utils.formatarReais(p.valor) + ' com vencimento em ' + br_(p.data_vencimento) + ' já está paga (em ' + br_(b.v.data_pagamento) + '): para mudar o pagamento, desfaça a baixa antes; deixe "Já pago em" vazio e a correção mantém a baixa dela.');
           else mesmaBaixa[q.parcela_id] = true;
           return;

@@ -42,6 +42,10 @@
  * centavo no fim de cada mês e no período, e os termos de hoje batem com um modelo das linhas cruas (`oraculoConciliacao`); a
  * viagem no tempo confere a conciliação e a lista dos lançamentos numa data, e o oráculo da correção, a conciliação.
  *
+ * Fase 4, E4.1 e E4.2 (CONTRATOS, seção 56): o lançamento avulso, a baixa (inteira, em parte, em lote, o encontro de contas), o
+ * desfazer, a divisão da parcela e o plano de contas entram no gerador; o oráculo do efeito confere cada um pelas linhas cruas, e
+ * a viagem no tempo, o fluxo de caixa e os títulos numa data.
+ *
  * Em falha, o teste imprime a semente e a sequência mínima (encolhida automaticamente), pronta para virar um caso de
  * tests/fase2.fuzz.regressoes.test.js (ou de tests/fase3.fuzz.regressoes.test.js).
  *
@@ -67,7 +71,9 @@ const { createGas } = require('./harness');
 // A semente 262 entrou com o fuzz das Fases 1 a 3 (passada 1): com o gerador ampliado, nenhuma das anteriores chegava a
 // uma venda que entrasse na carência de uma aplicação (o oráculo da transição da carência).
 // Rodada 3 da revisão da Fase 3: com as interações novas do gerador, a 29 entra para a correção tardia com o cadastro mudado.
-const FIXAS = [20261115, 11, 47, 101, 2718, 3001, 3107, 3213, 3318, 9001, 9055, 1009, 1111, 1234, 4242, 777, 57, 8, 1, 31, 56, 262, 29];
+// Fase 4, E4.1 e E4.2: 445 (o gerador da baixa mudou as sequências; ela devolve a primeira identificação) e 505 (o encontro de
+// contas da venda na baixa do recebimento).
+const FIXAS = [20261115, 11, 47, 101, 2718, 3001, 3107, 3213, 3318, 9001, 9055, 1009, 1111, 1234, 4242, 777, 57, 8, 1, 31, 56, 262, 29, 445, 505];
 const PASSOS = Number(process.env.FUZZ_PASSOS || 60);
 const N = Number(process.env.FUZZ_SEMENTES || 0);
 const INICIO = process.env.FUZZ_INICIO !== undefined ? Number(process.env.FUZZ_INICIO) : Date.now() % 1000000000;
@@ -153,7 +159,11 @@ test('teste aleatório de todos os comandos da Fase 2 (' + (N ? N + ' sementes n
       // Fase 4, etapa BASE (CONTRATOS, seção 55): a identidade das três visões conferida depois dos passos que gravam, com o custo
       // do rebanho ativo contra a projeção, o saldo de abertura, os insumos em estoque e o custo de aquisição de quem saiu.
       'conciliação: conferida', 'conciliação: custo do rebanho ativo conferido com a projeção', 'conciliação: com saldo de abertura',
-      'conciliação: com insumos em estoque', 'conciliação: com custo de aquisição de quem saiu'].filter((k) => !F.COBERTURA[k]);
+      'conciliação: com insumos em estoque', 'conciliação: com custo de aquisição de quem saiu',
+      // Fase 4, E4.1 e E4.2 (CONTRATOS, seção 56): o avulso, a baixa inteira, em parte e em lote, o encontro de contas, o desfazer,
+      // a divisão e a baixa transportada na correção, cada um conferido pelo oráculo do efeito.
+      'avulso: aceito', 'baixa: aceita', 'baixa: parcial aceita', 'baixa: em lote', 'baixa: encontro de contas', 'baixa: desfeita',
+      'parcela: dividida', 'baixa transportada na correção'].filter((k) => !F.COBERTURA[k]);
     assert.deepEqual(semCobertura, [], 'oráculos novos sem nada conferido nas sementes fixas (' + JSON.stringify(F.COBERTURA) + ')');
   }
 });

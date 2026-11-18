@@ -777,7 +777,8 @@ var FinancialService = (function () {
    *  - 22: a parcela paga não é antes da competência do lançamento (a identidade das três visões; seção 55) nem no futuro, e o
    *    desconto é menor que o valor.
    *  - 23: as parcelas que nasceram de um desdobramento (baixa parcial ou parcela dividida) são do mesmo lançamento e do mesmo
-   *    número, a de origem está CANCELADA e elas somam o valor dela.
+   *    número, a de origem está CANCELADA e elas somam o valor dela; e só o título que a correção refaz parcela a parcela se
+   *    desdobra (tituloLivre: a compra, a receita da venda e o avulso).
    *  - 24: o encontro de contas da venda: a dedução descontada pelo comprador é quitada junto com o recebimento em que vence
    *    (a mesma data, pelo nominal), e o recebimento quitado leva as deduções retidas dele.
    */
@@ -822,6 +823,12 @@ var FinancialService = (function () {
         if (!o || o.financial_id !== fin.financial_id) achado(23, 'PARCELAS', p.parcela_id, 'A parcela ' + p.parcela_num + ' de ' + nome + ' diz que nasceu de outra parcela, que não é deste lançamento.');
         else if (o.status !== 'CANCELADA' || o.parcela_num !== p.parcela_num) achado(23, 'PARCELAS', p.parcela_id, 'A parcela ' + p.parcela_num + ' de ' + nome + ' nasceu do desdobramento de uma parcela que ' + (o.status !== 'CANCELADA' ? 'continua valendo' : 'tem outro número') + '.');
       });
+      var contaFin = temContas ? repo.porId('PLANO_CONTAS', fin.conta_id) : null;
+      // Sem o plano de contas lido, a compra fica de fora (o que a decide é o código da conta); os demais não dependem dele.
+      var decide = !!ev && (ev.event_type !== 'COMPRA' || !!contaFin);
+      if (decide && Object.keys(filhas).length && !tituloLivre(ev.event_type, fin, contaFin ? contaFin.codigo : null)) {
+        achado(23, 'PARCELAS', Object.keys(filhas)[0], 'O lançamento ' + nome + ' é em parcelas iguais (a correção do evento o refaria assim) e tem parcela dividida ou baixada em parte, o que só o título da compra, o recebimento da venda e o avulso aceitam.');
+      }
       Object.keys(filhas).forEach(function (oid) {
         var o = porId[oid];
         if (!o) return;
@@ -1131,6 +1138,17 @@ var FinancialService = (function () {
    * as parcelas (todas, com a situação de hoje), o rateio vigente com as alocações por animal (o brinco de hoje e o código
    * interno) e os anexos do lançamento. Lançamento inexistente, de operação que falhou ou de importação em curso → NOT_FOUND.
    */
+  /**
+   * O título que a correção do evento de origem refaz parcela a parcela (o grupo `parcelas` do formulário): o valor dos
+   * animais da compra, a receita da venda e o lançamento avulso. Os demais (o frete e os outros custos da compra, as deduções
+   * da venda, o custo da morte, a receita do descarte, a despesa do manejo, a compra de insumo) são em N parcelas iguais de mês
+   * em mês: a baixa é inteira e a parcela não se divide, porque a correção os refaria iguais (CONTRATOS, seção 56). Puro.
+   */
+  function tituloLivre(eventType, fin, contaCodigo) {
+    if (eventType === 'LANCAMENTO_FINANCEIRO') return true;
+    if (eventType === 'VENDA') return !!fin && fin.natureza === 'RECEITA_VENDA_ANIMAIS';
+    return eventType === 'COMPRA' && contaCodigo === CONTAS.COMPRA;
+  }
   function consultaLancamento(dados) {
     var o = dados || {};
     return {
@@ -1146,8 +1164,11 @@ var FinancialService = (function () {
           var an = tx.cru.cruPorId('ANIMAIS', a.animal_id) || {};
           return { animal_id: a.animal_id, codigo_interno: an.codigo_interno || null, brinco: nulo_(an.brinco), situacao_cadastral: an.situacao_cadastral || null, base_valor: a.base_valor, valor_alocado: a.valor_alocado || 0 };
         }), 'codigo_interno');
+        var conta = tx.cru.cruPorId('PLANO_CONTAS', fin.conta_id) || {};
         return {
           lancamento: semInterno_(item),
+          // A baixa em parte e a divisão valem só no título que a correção do evento refaz parcela a parcela (tituloLivre).
+          parcelas_livres: tituloLivre(ev ? ev.event_type : null, fin, conta.codigo),
           evento: resumo(ev),
           referencia: vazio_(fin.ref_event_id) ? null : resumo(tx.cru.cruPorId('EVENTOS', fin.ref_event_id)),
           anulado_por: item.cancelado_por_event_id ? resumo(tx.cru.cruPorId('EVENTOS', item.cancelado_por_event_id)) : null,
@@ -1172,6 +1193,7 @@ var FinancialService = (function () {
 
   return {
     CONTAS: CONTAS,
+    tituloLivre: tituloLivre,
     MODALIDADES: MODALIDADES,
     CRITERIOS_LOTE: CRITERIOS_LOTE,
     SEM_RATEIO: SEM_RATEIO,
