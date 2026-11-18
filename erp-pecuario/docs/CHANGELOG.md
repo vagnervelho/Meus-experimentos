@@ -2205,3 +2205,10 @@ terminou (7 altos). Esta etapa não mudou código.
 - Levas, com o código final: 152 sementes × 40 ações sem localStorage, 152 × 40 com localStorage, 32 × 100 sem e 32 × 100 com
   (4 processos): 368 sementes, 0 falhas, 7.216 linhas gravadas e 21.609 verificações do oráculo (os números por garantia estão na
   seção 52.7 do CONTRATOS). As levas de busca antes dela (160 sementes × 40) só acharam erros do modelo do teste.
+- Verificado em Node, com o código final e estes documentos: `npm test` com 890 testes, 890 passando (85 arquivos; o teste
+  aleatório das sementes fixas: 23 sementes × 60 passos, 831 aceitos, 440 recusados, 0 falhas); `npm run ui:check` verde duas
+  vezes seguidas: a conferência estática (13 arquivos .html, sem recurso externo; página inicial montada com 435.895 bytes de
+  460.800; sob demanda Import 48 KB, Weights 60 KB, Health 25 KB e Reproduction 63 KB, de 150 KB cada) e 190 testes de navegador,
+  190 passando, nas duas vezes.
+- Durante a etapa, o salvamento automático de fora dela gravou estados intermediários (os commits `8b6b4c3`, no reinício do
+  contêiner, e `c250a07` e seguintes). Esta etapa não fez commit nem push; `docs/fase-0/` não mudou.
