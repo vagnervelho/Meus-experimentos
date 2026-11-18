@@ -420,7 +420,10 @@ test('importação: o frete de uma compra importada re-rateado por cabeça; o de
   const des = s.tentar((ctx) => s.G.ImportService.desfazer(ctx, { avisosAceitos: [], dados: { import_id: c.import_id, justificativa: 'arquivo errado' } }));
   assert.equal(des.ok, false);
   assert.equal(des.erro.code, 'CONFLICT');
-  assert.ok(des.erro.details.some((d) => d.codigo === 'INTEGRIDADE_FINANCEIRO' && d.conflito && d.conflito.event_id === rr.event_id), JSON.stringify(des.erro.details).slice(0, 800));
+  // A conferência própria do desfazer (os animais da importação receberam valor de um rateio fora dela), com o link do rateio; a
+  // trava (invariante 25: o rateio de lançamento cancelado) é a rede de baixo do mesmo caminho.
+  assert.ok(des.erro.details.every((d) => d.codigo === 'DEPENDENTE' && d.conflito && d.conflito.event_id === rr.event_id), JSON.stringify(des.erro.details).slice(0, 800));
+  assert.match(des.erro.details[0].mensagem, /recebeu valor do rateio de custo de 01\/03\/2026, lançado fora da importação\. Estorne esse rateio antes\./);
   s.ok('evento.estornar', { event_id: rr.event_id, justificativa: 'Vou desfazer a importação' });
   const des2 = s.tentar((ctx) => s.G.ImportService.desfazer(ctx, { avisosAceitos: [], dados: { import_id: c.import_id, justificativa: 'arquivo errado' } }));
   assert.equal(des2.ok, true, JSON.stringify(des2.erro));
@@ -441,7 +444,7 @@ test('integridade: o rateio mexido à mão é acusado (invariante 25: o valor do
   const rel2 = s.integridade();
   assert.ok(rel2.achados.some((a) => a.checagem === 'FINANCEIRO' && /arrendamento .* se rateia pelos dias de permanência no pasto arrendado/.test(a.mensagem)));
   // A correção do rateio quebrado à mão: a trava vê o achado no escopo (não piora: continua) — a correção sem mudança o conserta.
-  const ent = s.ok('evento.obter', { event_id: r.event_id }).correcao;
+  const ent = s.api('evento.obter', { event_id: r.event_id }).data.correcao;
   ent.campos.pasture_id = S.PASTOS.B;
   const c = s.api('evento.corrigir', Object.assign({}, ent, { event_id: r.event_id, justificativa: 'Conserto' }), TODOS);
   assert.equal(c.ok, true, JSON.stringify(c.error));

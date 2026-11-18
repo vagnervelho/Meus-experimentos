@@ -221,6 +221,47 @@ var TelaFinanceiro = (function () {
       UI.botao(l.tipo === 'RECEITA' ? 'Receber' : 'Pagar', { atributos: { 'data-baixar': x.parcela_id }, aoClicar: function (ev) { Baixa.baixar([item], ev.currentTarget, recarregar); } }),
       livres ? UI.botao('Dividir', { atributos: { 'data-dividir': x.parcela_id }, aoClicar: function (ev) { Baixa.dividir(item, ev.currentTarget, recarregar); } }) : null);
   }
+  // ------------------------------------------------------------------ rateio (E4.3) ----
+  /**
+   * Ratear o lançamento entre os animais (Fase 4, E4.3; CONTRATOS, seção 57): abre o formulário do evento RATEIO com o que
+   * o servidor propôs (financeiro.lancamento → ratear.padrao: o escopo e o critério que o lançamento admite, o pasto e a
+   * categoria dele). A prévia e o valor de cada animal vêm da simulação do servidor; a tela não divide nada.
+   */
+  function botaoRatear(o) {
+    var r = o.ratear;
+    if (!r || !App.podeRegistrar() || !Store.tipoEvento('RATEIO')) return null;
+    if (!r.pode) return r.motivo ? h('p', { class: 'suave', dataset: { naoRateia: '1' }, text: 'Não se rateia: ' + r.motivo }) : null;
+    var l = o.lancamento, p = r.padrao;
+    return h('div', { class: 'acoes' }, UI.botao(r.ja_rateado ? 'Ratear de novo' : 'Ratear entre os animais', { icone: 'registrar', atributos: { 'data-ratear': l.financial_id }, aoClicar: function () {
+      var campos = { financial_id: l.financial_id };
+      ['escopo_tipo', 'criterio', 'pasture_id', 'category_id'].forEach(function (k) { if (p[k]) campos[k] = p[k]; });
+      var criterios = [];
+      p.escopos.forEach(function (e) { (p.criterios[e] || []).forEach(function (c) { if (criterios.indexOf(c) < 0) criterios.push(c); }); });
+      var rotulos = {};
+      rotulos[l.financial_id] = nomeLancamento(l) + ' · ' + Fmt.dinheiro(l.valor) + ' (' + competencia(l) + ')';
+      Registro.abrir('RATEIO', { campos: campos, rotulos: rotulos, opcoes: { escopo_tipo: p.escopos, criterio: criterios }, origem: 'financeiro/lancamento/' + l.financial_id });
+    } }));
+  }
+  /** O rateio desatualizado (a base refeita hoje muda; Rateio.desatualizado): quem muda e o que a base era e passa a ser. */
+  function avisoDesatualizado(d) {
+    var mudancas = d.diferencas.slice(0, 8).map(function (x) {
+      var nome = x.brinco || x.codigo_interno || 'animal';
+      return nome + (x.gravada === null ? ' entra' : x.hoje === null ? ' sai' : ' (' + Fmt.numero(x.gravada, Fmt.casas(x.gravada)) + ' → ' + Fmt.numero(x.hoje, Fmt.casas(x.hoje)) + ')');
+    });
+    var texto = 'Rateio desatualizado: refeita hoje, a base muda' + (mudancas.length ? ': ' + mudancas.join(', ') + (d.diferencas.length > 8 ? ' e mais ' + (d.diferencas.length - 8) : '') : '') + '. ' +
+      (d.problemas.length ? d.problemas.join(' ') + ' ' : '') + 'O valor de cada animal não muda sozinho: rateie de novo se quiser a base de hoje.';
+    var n = UI.nota(texto, 'aviso');
+    n.setAttribute('data-rateio-desatualizado', String(d.diferencas.length));
+    return n;
+  }
+  /** Os rateios do lançamento, do mais antigo ao que vale (o re-rateio substitui o anterior dali em diante). */
+  function historicoRateios(lista) {
+    if (!lista || lista.length < 2) return null;
+    return h('details', { class: 'detalhe', dataset: { rateios: String(lista.length) } }, h('summary', { text: 'Rateios deste lançamento (' + lista.length + ')' }),
+      h('ul', { class: 'lista-simples' }, lista.map(function (x) {
+        return h('li', { dataset: { rateioVigente: x.vigente ? '1' : '0' } }, link('evento/' + x.event_id, Fmt.data(x.event_date)), ' · ' + (x.descricao || Fmt.rotulo('CRITERIO_RATEIO', x.criterio)) + ' · ' + Fmt.dinheiro(x.total_alocado) + (x.vigente ? ' (vale hoje)' : ' (substituído)'));
+      })));
+  }
   function montarDetalhe(el, p) {
     var vivo = true;
     var titulo = h('h1', { text: 'Lançamento financeiro' });
@@ -260,12 +301,15 @@ var TelaFinanceiro = (function () {
       if (o.rateio || l.nao_alocado !== null) {
         var rat = o.rateio;
         corpo.appendChild(UI.secao('Divisão entre os animais', h('div', null,
+          rat && rat.desatualizado ? avisoDesatualizado(rat.desatualizado) : null,
           UI.pares([
             ['Critério', rat ? Fmt.rotulo('CRITERIO_RATEIO', rat.criterio) : 'sem rateio'],
+            rat && rat.descricao ? ['Como foi dividido', rat.descricao] : null,
             ['Distribuído', Fmt.dinheiro(l.alocado)], ['Sem alocar', Fmt.dinheiro(l.nao_alocado)],
             rat && !rat.vigente ? ['Rateio', 'sem efeito: o lançamento foi cancelado'] : null,
             rat && rat.justificativa ? ['Justificativa', rat.justificativa] : null,
           ].filter(Boolean)),
+          botaoRatear(o),
           o.alocacoes.length ? UI.tabela({
             id: 'alocacoes', rotulo: 'Valor por animal', linhas: o.alocacoes, chave: function (x) { return x.animal_id; },
             colunas: [
@@ -273,7 +317,7 @@ var TelaFinanceiro = (function () {
               { id: 'base_valor', rotulo: 'Base', num: true, formatar: function (x) { return Fmt.numero(x.base_valor, Fmt.casas(x.base_valor)); } },
               { id: 'valor_alocado', rotulo: 'Valor do animal', num: true, formatar: function (x) { return Fmt.dinheiro(x.valor_alocado); } },
             ],
-          }).el : null), { dado: 'rateio' }));
+          }).el : null, historicoRateios(o.rateios)), { dado: 'rateio' }));
       } else corpo.appendChild(UI.secao('Divisão entre os animais', h('p', { class: 'suave', text: 'Não se aplica: ' + Fmt.rotulo('NATUREZA', l.natureza).toLowerCase() + ' não é custo nem receita de animal.' }), { dado: 'rateio' }));
       if (o.anexos.length) corpo.appendChild(UI.secao('Documentos', h('ul', { class: 'lista-simples' }, o.anexos.map(function (a) { return h('li', { text: a.nome_arquivo + (a.descricao ? ' · ' + a.descricao : '') }); })), { dado: 'anexos' }));
     }, function (e) {

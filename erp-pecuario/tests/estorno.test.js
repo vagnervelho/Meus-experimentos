@@ -68,6 +68,14 @@ function estoque(subtipo, data, campos) {
   return { tipo: 'ESTOQUE', subtipo, campos: Object.assign({ event_date: data }, campos || {}) };
 }
 const conta = (x, codigo) => x.m.linhas.PLANO_CONTAS.find((c) => c.codigo === codigo).conta_id;
+/** Fase 4, E4.3: o lançamento avulso que o rateio distribui (criado uma vez por base). */
+function lancamentoParaRatear(x) {
+  if (!x.lancRateio) {
+    const ev = x.m.run('registrar', { tipo: 'LANCAMENTO_FINANCEIRO', campos: { event_date: '2026-03-01', conta_id: conta(x, 'OUTROS_GASTOS'), valor: 60000, descricao: 'Sal mineral do mês' }, parcelas: [{ data_vencimento: '2026-03-15' }] }).dados;
+    x.lancRateio = x.m.tabela('FINANCEIRO').find((f) => f.event_id === ev.event_id).financial_id;
+  }
+  return x.lancRateio;
+}
 /** Reprodução (Fase 3, E3.4): os animais por id ou por item ({animal_id, resultado...}). */
 function repro(subtipo, data, animais, campos) {
   return { tipo: 'REPRODUCAO', subtipo, campos: Object.assign({ event_date: data }, campos || {}), animais: animais.map((a) => (typeof a === 'string' ? { animal_id: a } : a)) };
@@ -233,6 +241,11 @@ const CASOS = [
   { tipo: 'LANCAMENTO_FINANCEIRO',
     registrar: (x) => ({ tipo: 'LANCAMENTO_FINANCEIRO', campos: { event_date: '2026-03-01', conta_id: conta(x, 'COMBUSTIVEL'), valor: 45000, descricao: 'Diesel' }, parcelas: [{ data_vencimento: '2026-03-15' }] }),
     corrigir: (x) => ({ tipo: 'LANCAMENTO_FINANCEIRO', campos: { event_date: '2026-03-02', conta_id: conta(x, 'ENERGIA'), valor: 47000, descricao: 'Luz' }, parcelas: [{ data_vencimento: '2026-03-20' }, { data_vencimento: '2026-04-20' }] }),
+    dependente: null },
+  // Fase 4, E4.3: o rateio de um lançamento avulso entre os animais (o rebanho por cabeça; corrigido para uma lista).
+  { tipo: 'RATEIO',
+    registrar: (x) => ({ tipo: 'RATEIO', campos: { event_date: '2026-03-10', financial_id: lancamentoParaRatear(x), criterio: 'CABECAS', escopo_tipo: 'REBANHO', data_base: '2026-03-10' } }),
+    corrigir: (x) => ({ tipo: 'RATEIO', campos: { event_date: '2026-03-11', financial_id: lancamentoParaRatear(x), criterio: 'CABECAS', escopo_tipo: 'LISTA', data_base: '2026-03-11' }, animais_rateio: [{ animal_id: x.ids.f1 }, { animal_id: x.ids.f2 }] }),
     dependente: null },
   { tipo: 'AJUSTE_INVENTARIO', subtipo: 'DIVERGENCIA_CONTAGEM',
     registrar: (x) => ajuste('DIVERGENCIA_CONTAGEM', '2026-06-15', [{ animal_id: x.ids.m5 }]),

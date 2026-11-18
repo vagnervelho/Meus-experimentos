@@ -621,15 +621,23 @@ var Campos = (function () {
 
   function rotuloDe(def) { return def.rotulo || Fmt.rotulo('', def.id); }
   function vazio(v) { return v === null || v === undefined || v === '' || (Array.isArray(v) && !v.length); }
-  /** Condição de visivel_se/obrigatorio_se: {campo, valores} ou {campo, preenchido}. */
+  /**
+   * Condição de visivel_se/obrigatorio_se/mostrar_se: {campo, valores} ou {campo, preenchido}; no mostrar_se, `e` (outra
+   * que também vale) e `ou` (outra que basta).
+   */
   function condicao(c, valores) {
     if (!c) return true;
     var v = valores[c.campo];
-    if (c.preenchido) return !vazio(v);
-    if (c.valores) return c.valores.some(function (x) { return x === v || String(x) === String(v); });
-    return true;
+    var ok = c.preenchido ? !vazio(v) : c.valores ? c.valores.some(function (x) { return x === v || String(x) === String(v); }) : true;
+    if (ok && c.e) ok = condicao(c.e, valores);
+    if (!ok && c.ou) ok = condicao(c.ou, valores);
+    return ok;
   }
-  function visivel(def, valores) { return !def.visivel_se || condicao(def.visivel_se, valores); }
+  /**
+   * O campo aparece? visivel_se pelos valores do mesmo escopo; mostrar_se (só da tela) pelos do cabeçalho do lançamento
+   * (`cabecalho`; sem ele, os próprios valores).
+   */
+  function visivel(def, valores, cabecalho) { return (!def.visivel_se || condicao(def.visivel_se, valores)) && (!def.mostrar_se || condicao(def.mostrar_se, cabecalho || valores)); }
   function obrigatorio(def, valores) { return !!def.obrigatorio || (!!def.obrigatorio_se && condicao(def.obrigatorio_se, valores)); }
   /** Valor padrão: literal, HOJE (no fuso da fazenda) ou {de: 'CONFIGURACOES.chave'}. */
   function padrao(def) {
@@ -755,7 +763,7 @@ var Campos = (function () {
         grupo.appendChild(h('label', { class: 'opcao', for: id + '-' + k }, r, h('span', { text: op.rotulo })));
       });
       focavel = function () { return controle.querySelector('input:checked') || controle.querySelector('input'); };
-    } else if (t === 'lista' || (ref && ref[1] !== 'ANIMAIS' && ref[1] !== 'EVENTOS')) {
+    } else if (t === 'lista' || (ref && ref[1] !== 'ANIMAIS' && ref[1] !== 'EVENTOS' && ref[1] !== 'FINANCEIRO')) {
       var sel = h('select', { id: id, 'aria-describedby': describedby });
       var preencher = function () {
         Util.limpar(sel);
@@ -780,6 +788,11 @@ var Campos = (function () {
     } else if (ref && ref[1] === 'EVENTOS') {
       var rot = o.rotulos && atual ? o.rotulos[atual] : null;
       controle = atual ? h('div', { class: 'escolhido', id: id }, h('span', { class: 'escolhido-texto', text: rot || 'Evento escolhido no histórico' })) : UI.nota('Abra o evento no histórico de eventos e use "Estornar" ou "Desfazer".', 'info');
+      focavel = function () { return null; };
+    } else if (ref && ref[1] === 'FINANCEIRO') {
+      // O rateio parte do lançamento (Fase 4, E4.3): ele vem escolhido do detalhe do lançamento e não se troca aqui.
+      var rotF = o.rotulos && atual ? o.rotulos[atual] : null;
+      controle = atual ? h('div', { class: 'escolhido', id: id }, h('span', { class: 'escolhido-texto', text: rotF || 'O lançamento deste rateio' })) : UI.nota('Abra o lançamento no Financeiro e use "Ratear entre os animais".', 'info');
       focavel = function () { return null; };
     } else if (t === 'anexo') {
       var arq = h('input', { type: 'file', id: id, 'aria-describedby': describedby, accept: 'image/*,application/pdf' });
@@ -961,8 +974,8 @@ var Formulario = (function () {
   var h = Util.h;
   /**
    * Bloco de campos com as condicionais do catálogo (mesmo escopo). defs: definições; valores: brutos (o bloco
-   * escreve neles); o: {idBase, aoMudar(id), extras (valores de outro escopo para condições), rotulos, aoNovo,
-   * principais (ids que ficam fora de "Mais dados"), tituloExtras}. Devolve {el, valores, converter() →
+   * escreve neles); o: {idBase, aoMudar(id), extras (valores de outro escopo para condições), cabecalho (função: os campos do
+   * cabeçalho para o mostrar_se do grupo), rotulos, aoNovo, principais (ids que ficam fora de "Mais dados"), tituloExtras}. Devolve {el, valores, converter() →
    * {valores (só visíveis), erros: [{campo, mensagem}]}, mostrarErros(details), focarPrimeiroErro(), campo(id)}.
    */
   function bloco(defs, valores, o) {
@@ -993,13 +1006,15 @@ var Formulario = (function () {
     });
     if (extras && gradeExtras.childNodes.length) el.appendChild(extras);
     function contexto() { return Object.assign({}, o.extras ? o.extras() : {}, valores); }
+    function cab() { return o.cabecalho ? o.cabecalho() : null; }
     function atualizar() {
       var v = contexto();
-      defs.forEach(function (d) { ctrls[d.id].mostrar(Campos.visivel(d, v)); ctrls[d.id].marcarObrigatorio(Campos.obrigatorio(d, v)); });
+      var c = cab();
+      defs.forEach(function (d) { ctrls[d.id].mostrar(Campos.visivel(d, v, c)); ctrls[d.id].marcarObrigatorio(Campos.obrigatorio(d, v)); });
     }
     atualizar();
     function converter() {
-      var r = converterValores(defs, valores, contexto());
+      var r = converterValores(defs, valores, contexto(), cab());
       r.erros.forEach(function (e) { ctrls[e.campo].erro(e.mensagem); });
       return r;
     }
@@ -1024,15 +1039,16 @@ var Formulario = (function () {
 
   /**
    * Conversão sem tela (mesma regra do bloco): só os campos visíveis entram; vazio vira null; obrigatório vazio e
-   * formato inválido viram erro {campo, mensagem}. `contexto` = valores para as condicionais (padrão: `valores`).
+   * formato inválido viram erro {campo, mensagem}. `contexto` = valores para as condicionais (padrão: `valores`);
+   * `cabecalho` = os campos do cabeçalho para o mostrar_se (padrão: o contexto).
    */
-  function converterValores(defs, valores, contexto) {
+  function converterValores(defs, valores, contexto, cabecalho) {
     var v = contexto || valores, out = {}, erros = [];
     defs.forEach(function (d) {
       if (valores[d.id] === undefined) { var p = Campos.padrao(d); if (p !== undefined) valores[d.id] = p; }
     });
     defs.forEach(function (d) {
-      if (!Campos.visivel(d, v)) return;
+      if (!Campos.visivel(d, v, cabecalho)) return;
       var r = Campos.converter(d, valores[d.id]);
       if (r.erro) { erros.push({ campo: d.id, mensagem: r.erro }); return; }
       if (r.valor === null && Campos.obrigatorio(d, v)) { erros.push({ campo: d.id, mensagem: d.tipo === 'lista' || d.tipo === 'bool' || /^ref:/.test(d.tipo) ? 'Escolha uma opção.' : 'Preencha este campo.' }); return; }
@@ -1649,7 +1665,7 @@ var Registro = (function () {
   function critico(s) { var sub = s.subtipo && s.def.subtipos ? s.def.subtipos[s.subtipo] : null; return !!(s.def.critico || (sub && sub.critico)); }
   /** Grupos repetíveis que começam com uma linha (o parto tem ao menos uma cria). */
   var GRUPO_COM_UMA_LINHA = { crias: true, parcelas: true };
-  var ROTULO_GRUPO = { crias: ['Crias', 'Cria'], parcelas: ['Parcelas do valor dos animais', 'Parcela'], deducoes: ['Deduções (frete, comissão, impostos)', 'Dedução'], custos: ['Frete e outros custos', 'Custo'] };
+  var ROTULO_GRUPO = { crias: ['Crias', 'Cria'], parcelas: ['Parcelas do valor dos animais', 'Parcela'], deducoes: ['Deduções (frete, comissão, impostos)', 'Dedução'], custos: ['Frete e outros custos', 'Custo'], animais_rateio: ['Animais do rateio', 'Animal'] };
   /** Rótulo do grupo que muda com o tipo: na venda, as parcelas são o recebimento. */
   var ROTULO_GRUPO_TIPO = { VENDA: { parcelas: ['Parcelas do recebimento', 'Parcela'] } };
   var ROTAS = { ESTORNO: 'evento.estornar' };
@@ -1672,7 +1688,7 @@ var Registro = (function () {
     var p = previa || {};
     var s = {
       tipo: tipo, def: def, chave: Util.uuid(), subtipo: p.subtipo || null, campos: Util.clonar(p.campos || {}), linhas: [], grupos: {},
-      rotulos: Util.clonar(p.rotulos || {}), origem: p.origem || null, estado: 'EDITANDO', alterado: !!previa, restaurado: null,
+      rotulos: Util.clonar(p.rotulos || {}), opcoes: p.opcoes ? Util.clonar(p.opcoes) : null, origem: p.origem || null, estado: 'EDITANDO', alterado: !!previa, restaurado: null,
       corrige: p.corrige ? Util.clonar(p.corrige) : null, justificativaCorrecao: p.justificativaCorrecao || '',
       erros: [], avisos: [], aceites: {}, justificativaAviso: '', simulacao: null, dvEsperada: null, resultado: null, envio: null, view: null, removidosComProblema: 0,
       anexos: [],
@@ -1696,13 +1712,13 @@ var Registro = (function () {
   }
   function paraRascunho(s) {
     return {
-      versao: 1, tipo: s.tipo, rotulo: s.def.rotulo, chave: s.chave, estado: s.estado, subtipo: s.subtipo, campos: s.campos, rotulos: s.rotulos, origem: s.origem,
+      versao: 1, tipo: s.tipo, rotulo: s.def.rotulo, chave: s.chave, estado: s.estado, subtipo: s.subtipo, campos: s.campos, rotulos: s.rotulos, opcoes: s.opcoes || undefined, origem: s.origem,
       linhas: s.linhas.map(function (l) { return { animal_id: l.animal_id, criado: l.criado || undefined, valores: l.valores }; }), grupos: s.grupos,
       data: s.campos.event_date || null, n: nAnimais(s.linhas), envio: s.envio, corrige: s.corrige || undefined, justificativaCorrecao: s.justificativaCorrecao || undefined,
     };
   }
   function deRascunho(def, r) {
-    var s = novaSessao(r.tipo, def, { subtipo: r.subtipo, campos: r.campos, rotulos: r.rotulos, origem: r.origem, linhas: r.linhas, corrige: r.corrige, justificativaCorrecao: r.justificativaCorrecao });
+    var s = novaSessao(r.tipo, def, { subtipo: r.subtipo, campos: r.campos, rotulos: r.rotulos, opcoes: r.opcoes, origem: r.origem, linhas: r.linhas, corrige: r.corrige, justificativaCorrecao: r.justificativaCorrecao });
     s.chave = r.chave;
     s.estado = r.estado || 'EDITANDO';
     s.grupos = r.grupos || s.grupos;
@@ -1816,13 +1832,23 @@ var Registro = (function () {
     }
     return base;
   }
-  /** Campos de cabeçalho: os do tipo e, depois, os do subtipo escolhido (EventCatalog.camposEvento(tipo, subtipo)). */
+  /**
+   * Campos de cabeçalho: os do tipo e, depois, os do subtipo escolhido (EventCatalog.camposEvento(tipo, subtipo)). As opções
+   * que o servidor deu para este lançamento (`s.opcoes`: no rateio, os escopos e critérios que o lançamento admite) limitam
+   * a lista; a regra continua do servidor.
+   */
   function camposEvento(s) {
     var sub = s.subtipo && s.def.subtipos ? s.def.subtipos[s.subtipo] : null;
     return (s.def.campos || []).map(function (d) {
       // O brinco do vendedor só se retira (o servidor recusa nos outros subtipos: TIPO_NAO_SE_APLICA).
-      return d.id === 'tipo_identificacao' && s.subtipo !== 'REMOCAO' ? Object.assign({}, d, { opcoes: d.opcoes.filter(function (o) { return o !== 'BRINCO_ORIGEM'; }) }) : d;
+      if (d.id === 'tipo_identificacao' && s.subtipo !== 'REMOCAO') return Object.assign({}, d, { opcoes: d.opcoes.filter(function (o) { return o !== 'BRINCO_ORIGEM'; }) });
+      var so = s.opcoes && s.opcoes[d.id];
+      return so && d.opcoes ? Object.assign({}, d, { opcoes: d.opcoes.filter(function (o) { return so.indexOf(o) >= 0 || o === s.campos[d.id]; }) }) : d;
     }).concat((sub && sub.campos) || []);
+  }
+  /** O grupo repetível aparece quando algum campo dele aparece pelos campos do cabeçalho (mostrar_se; no rateio, a lista). */
+  function grupoVisivel(s, g) {
+    return (s.def.grupos_repetiveis[g] || []).some(function (d) { return !d.mostrar_se || Campos.visivel({ mostrar_se: d.mostrar_se }, {}, s.campos); });
   }
   function temCamposPorAnimal(s) { return s.linhas.some(function (l) { return defsLinha(s, l).length > 0; }) || (s.def.campos_animal || []).length > 0; }
   /** Pedido do contrato (CONTRATOS, 14): {tipo, subtipo, campos, animais[, grupos]}; no estorno, {event_id, justificativa}. */
@@ -1850,10 +1876,12 @@ var Registro = (function () {
     var dados = { tipo: s.tipo, campos: cEv.valores, animais: animais };
     if (s.subtipo) dados.subtipo = s.subtipo;
     Object.keys(s.def.grupos_repetiveis || {}).forEach(function (g) {
+      // O grupo escondido pelo cabeçalho (mostrar_se) não vai ao servidor.
+      if (!grupoVisivel(s, g)) return;
       // Linha deixada toda em branco (custo ou parcela que não se usou) não vai ao servidor; a cria vai sempre.
       var linhasG = (s.grupos[g] || []).filter(function (row) { return g === 'crias' || row.animal_id || Object.keys(row.valores || {}).some(function (k) { return !Util.vazio(row.valores[k]); }); });
       dados[g] = linhasG.map(function (row, k) {
-        var c = Formulario.converterValores(s.def.grupos_repetiveis[g], row.valores);
+        var c = Formulario.converterValores(s.def.grupos_repetiveis[g], row.valores, null, s.campos);
         c.erros.forEach(function (e) { erros.push({ campo: e.campo, mensagem: e.mensagem, nivel: 'GRUPO', grupo: g, linha: row.uid }); });
         return row.animal_id ? Object.assign({ animal_id: row.animal_id }, c.valores) : c.valores;
       });
@@ -2132,6 +2160,7 @@ var Registro = (function () {
     var ultimo = cEv.filter(function (d) { return d.id === 'notes'; });
     v.opEv = { idBase: 'ev', rotulos: s.rotulos, dataEvento: function () { return s.campos.event_date || Fmt.hoje(); }, aoMudar: function (id) {
       tocar(s);
+      atualizarGrupos(s);
       if (preencherDoProduto_(s, id)) {
         desenharMeio(s);
         var cm = v.blocos.meio && v.blocos.meio.campo(id);
@@ -2374,16 +2403,26 @@ var Registro = (function () {
    */
   function problema_(d, tag) { return UI.problema(d, tag); }
   function rotuloGrupo(g, tipo) { return (ROTULO_GRUPO_TIPO[tipo] || {})[g] || ROTULO_GRUPO[g] || [Fmt.rotulo('', g), Fmt.rotulo('', g)]; }
+  /** O cabeçalho mudou: os grupos que dependem dele (mostrar_se) aparecem ou somem, e os campos deles também. */
+  function atualizarGrupos(s) {
+    var v = s.view;
+    if (!v || !v.secoesGrupo) return;
+    Object.keys(v.secoesGrupo).forEach(function (g) { v.secoesGrupo[g].hidden = !grupoVisivel(s, g); });
+    Object.keys(v.blocosGrupo || {}).forEach(function (k) { v.blocosGrupo[k].atualizar(); });
+  }
   function desenharGrupos(s) {
     var v = s.view;
     Util.limpar(v.grupos);
     v.blocosGrupo = {};
+    v.secoesGrupo = {};
     Object.keys(s.def.grupos_repetiveis || {}).forEach(function (g) {
       var defs = s.def.grupos_repetiveis[g];
       var rot = rotuloGrupo(g, s.tipo);
       var sec = h('section', { class: 'subgrupo', 'aria-label': rot[0], dataset: { grupo: g } }, h('h2', { text: rot[0] }));
+      sec.hidden = !grupoVisivel(s, g);
+      v.secoesGrupo[g] = sec;
       (s.grupos[g] || []).forEach(function (row, k) {
-        var b = Formulario.bloco(defs, row.valores, { idBase: g + row.uid, aoMudar: function () { tocar(s); } });
+        var b = Formulario.bloco(defs, row.valores, { idBase: g + row.uid, cabecalho: function () { return s.campos; }, aoMudar: function () { tocar(s); } });
         v.blocosGrupo[row.uid] = b;
         var errs = (s.errosGrupo || {})[row.uid] || [];
         if (errs.length && !b.mostrarErros(errs)) sec.appendChild(h('div', { class: 'problema-animal', role: 'alert' }, UI.icone('erro'), h('div', null, errs.map(function (d) { return problema_(d, 'div'); }))));
@@ -2391,7 +2430,7 @@ var Registro = (function () {
         sec.appendChild(h('div', { class: 'cartao-animal', dataset: { linhaGrupo: row.uid } }, h('div', { class: 'cartao-animal-cabecalho' }, h('span', { class: 'cartao-animal-titulo', text: rot[1] + ' ' + (k + 1) + (a ? ' · ' + Store.rotuloAnimal(a) : '') }),
           UI.botao('Tirar', { tipo: 'texto', icone: 'remover', rotulo: 'Tirar ' + rot[1].toLowerCase() + ' ' + (k + 1), aoClicar: function () { s.grupos[g].splice(k, 1); tocar(s); desenharGrupos(s); } })), b.el));
       });
-      var mais = UI.botao('+ ' + (g === 'crias' ? 'Outra cria (gêmeos)' : g === 'parcelas' ? 'Outra parcela' : g === 'custos' ? 'Frete ou outro custo' : g === 'deducoes' ? 'Frete, comissão ou imposto' : 'Adicionar'), { aoClicar: function () { (s.grupos[g] = s.grupos[g] || []).push({ uid: uid(), valores: {} }); tocar(s); desenharGrupos(s); } });
+      var mais = UI.botao('+ ' + (g === 'crias' ? 'Outra cria (gêmeos)' : g === 'parcelas' ? 'Outra parcela' : g === 'custos' ? 'Frete ou outro custo' : g === 'deducoes' ? 'Frete, comissão ou imposto' : g === 'animais_rateio' ? 'Outro animal' : 'Adicionar'), { aoClicar: function () { (s.grupos[g] = s.grupos[g] || []).push({ uid: uid(), valores: {} }); tocar(s); desenharGrupos(s); } });
       sec.appendChild(g === 'parcelas' ? h('div', { class: 'acoes', style: 'margin-top:0' }, mais, UI.botao('Dividir em parcelas', { atributos: { 'data-dividir': g }, aoClicar: function (ev) { dividirParcelas(s, g, ev.currentTarget); } })) : mais);
       v.grupos.appendChild(sec);
     });
@@ -2486,7 +2525,7 @@ var Registro = (function () {
     var data = d.campos ? d.campos.event_date : null;
     if (s.tipo === 'ENTRADA_INICIAL') data = data || Store.param('data_marco_zero');
     if (data) linhas.push(['Data', Fmt.data(data)]);
-    if (d.animais) {
+    if (d.animais && s.tipo !== 'RATEIO') {
       var novos = d.animais.filter(function (a) { return !a.animal_id; });
       linhas.push(['Animais', plural(nAnimais(d.animais), 'animal', 'animais') + (novos.length && novos.length < d.animais.length ? ' (' + novos.length + ' novos)' : '')]);
       var sexos = { M: 0, F: 0 };
@@ -2524,6 +2563,7 @@ var Registro = (function () {
       var val = d.campos[c.id];
       if (c.tipo === 'ref:PROPRIEDADES') { var p = Store.propriedade(val); val = p ? p.nome : val; }
       else if (c.tipo === 'ref:EVENTOS') val = s.rotulos[val] || 'evento escolhido';
+      else if (c.tipo === 'ref:FINANCEIRO') val = s.rotulos[val] || 'o lançamento deste rateio';
       else val = textoValor_(c, val);
       linhas.push([Campos.rotuloDe(c), String(val)]);
     });
@@ -2615,7 +2655,32 @@ var Registro = (function () {
     if (im.substitui && im.anexos) l.push(['Documentos e fotos do original', (im.anexos_nomes && im.anexos_nomes.length ? im.anexos_nomes.join(', ') : plural(im.anexos, 'documento', 'documentos')) + (im.anexos === 1 ? ' (passa' : ' (passam') + ' a esta correção)']);
     if (im.substitui && (im.anexos_soltos || []).length) l.push(['Ficam sem lançamento', im.anexos_soltos.join(', ') + ': o lançamento deles sai na correção, e eles ficam só no evento']);
     if (im.abertura && im.abertura.total !== undefined) l.push(['Valor de abertura', Fmt.dinheiro(im.abertura.total) + ' em ' + plural(im.abertura.animais, 'animal', 'animais')]);
-    return l.concat(linhasCompra(im.compra), linhasVenda(im.venda), linhasSanidade(im.sanidade), linhasEstoque(im.estoque), linhasFinanceiro(im.financeiro, im.event_type));
+    return l.concat(linhasCompra(im.compra), linhasVenda(im.venda), linhasSanidade(im.sanidade), linhasEstoque(im.estoque), linhasFinanceiro(im.financeiro, im.event_type), linhasRateio(im.rateio));
+  }
+  /**
+   * O rateio (Fase 4, E4.3; calculado no servidor pela mesma função que grava): como divide, o que vai aos animais, o que
+   * fica sem alocar, o rateio que ele substitui e a base zero. O valor de cada animal vai na lista (listaRateio).
+   */
+  function linhasRateio(r) {
+    if (!r) return [];
+    var l = [['Lançamento', r.lancamento + ' · ' + Fmt.dinheiro(r.valor_lancamento)], ['Como divide', r.descricao]];
+    if (r.criterio_pedido && r.criterio_pedido !== r.criterio) l.push(['Critério', Fmt.rotulo('CRITERIO_RATEIO', r.criterio) + ' (um animal só entrou: ' + Fmt.rotulo('CRITERIO_RATEIO', r.criterio_pedido).toLowerCase() + ' fica direto nele)']);
+    l.push(['Vai aos animais', Fmt.dinheiro(r.total_alocado) + (r.itens.length ? ' em ' + plural(r.itens.length, 'animal', 'animais') : '')]);
+    if (r.nao_alocado) l.push(['Fica sem alocar aos animais', Fmt.dinheiro(r.nao_alocado)]);
+    if (r.base_zero) l.push(['Base zero', r.motivo + ': nada é alocado']);
+    if (r.congelado) l.push(['Base', 'a gravada no rateio original (as entradas não mudaram)']);
+    if (r.anterior) l.push(['Substitui', 'o rateio de ' + Fmt.data(r.anterior.event_date) + ' (' + Fmt.rotulo('CRITERIO_RATEIO', r.anterior.criterio).toLowerCase() + ', ' + Fmt.dinheiro(r.anterior.total_alocado) + '), dali em diante']);
+    return l;
+  }
+  /** O valor de cada animal no rateio, como o servidor calculou (a base e o valor; a base estimada marcada). */
+  function listaRateio(r) {
+    var porPeso = r.criterio === 'PESO_VIVO' || r.criterio === 'PESO_CARCACA';
+    // Por cabeça e pelo valor, a base não diz nada a mais que o valor: só os dias e o peso aparecem.
+    var base = function (x) { return r.criterio === 'DIAS_PERMANENCIA' ? plural(x.base, 'dia', 'dias') : porPeso ? Fmt.peso(x.base) + (x.estimado ? ' (estimado)' : '') : null; };
+    return h('ul', { class: 'lista-simples' }, r.itens.slice(0, 200).map(function (x) {
+      var b = base(x);
+      return h('li', { dataset: { valorAnimal: String(x.valor) } }, h('span', { class: 'dado', text: x.brinco || x.codigo_interno || 'animal' }), ' · ' + Fmt.dinheiro(x.valor) + (b ? ' (' + b + ')' : ''));
+    }), r.itens.length > 200 ? h('li', { class: 'suave', text: 'e mais ' + (r.itens.length - 200) + '.' }) : null);
   }
   var SEM_CUSTO = 'sem custo: o produto não tem custo por unidade no cadastro, e o que foi pago na compra nunca vira custo dos animais. Preencha o custo por unidade no cadastro do produto.';
   /** Quantidade com as casas que ela usa (até 4) e a unidade do produto. */
@@ -2845,6 +2910,8 @@ var Registro = (function () {
           h('ul', { class: 'lista-simples' }, dif.map(function (t) { return h('li', { text: t }); })), h('p', null, h('span', { class: 'suave', text: 'Motivo: ' }), s.justificativaCorrecao)));
       }
       if (s.dados.animais && s.dados.animais.length) corpo.appendChild(h('details', { class: 'detalhe', open: s.dados.animais.length <= 5 }, h('summary', { text: 'Ver os animais' }), listaAnimaisRevisao(s)));
+      var rat = s.simulacao && s.simulacao.impactos ? s.simulacao.impactos.rateio : null;
+      if (rat && rat.itens.length) corpo.appendChild(h('details', { class: 'detalhe', open: rat.itens.length <= 12, dataset: { rateioAnimais: String(rat.itens.length) } }, h('summary', { text: 'Valor de cada animal (' + rat.itens.length + ')' }), listaRateio(rat)));
       var av = blocoAvisos(s, function () { atualizarPrincipal(); });
       if (av) corpo.appendChild(av);
       corpo.appendChild(status);

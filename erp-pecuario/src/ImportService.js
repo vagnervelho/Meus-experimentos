@@ -1130,7 +1130,10 @@ var ImportService = (function () {
         if (tx.repo.por('EVENTO_ANIMAIS', 'animal_id', id).some(function (l) { return l.event_id === evId; })) return;
         var ev = tx.repo.porId('EVENTOS', evId) || {};
         var nome = ev.event_type ? EventCatalog.nomeEvento(ev.event_type, ev.event_subtype) : 'um lançamento';
-        out.push(Validation.detalhe({ codigo: 'DEPENDENTE', animal_id: id, brinco: a.brinco || null, mensagem: quem + ' recebeu valor do financeiro de ' + nome + ' de ' + br_(ev.event_date) + ', lançado fora da importação. Estorne ou corrija esse lançamento antes.', conflito: { event_id: evId, tipo: ev.event_type || null, subtipo: ev.event_subtype || null, data: ev.event_date || null, nome: ev.event_type ? nome : null } }));
+        // O rateio de custo (Fase 4, E4.3) é um evento de rateio, não o financeiro de um registro: estorne o rateio.
+        var texto = ev.event_type === 'RATEIO' ? ' recebeu valor do rateio de custo de ' + br_(ev.event_date) + ', lançado fora da importação. Estorne esse rateio antes.'
+          : ' recebeu valor do financeiro ' + (/^(a|o) /.test(nome) ? 'd' + nome : 'de ' + nome) + ' de ' + br_(ev.event_date) + ', lançado fora da importação. Estorne ou corrija esse lançamento antes.';
+        out.push(Validation.detalhe({ codigo: 'DEPENDENTE', animal_id: id, brinco: a.brinco || null, mensagem: quem + texto, conflito: { event_id: evId, tipo: ev.event_type || null, subtipo: ev.event_subtype || null, data: ev.event_date || null, nome: ev.event_type ? nome : null } }));
       });
       tx.repo.por('ANEXOS', 'entity_id', id).forEach(function (x) {
         if (x.entidade === 'ANIMAIS' && x.status !== 'REMOVIDO') out.push(Validation.detalhe({ codigo: 'DEPENDENTE', animal_id: id, brinco: a.brinco || null, mensagem: quem + ' tem o arquivo anexado "' + x.nome_arquivo + '". Remova-o antes.' }));

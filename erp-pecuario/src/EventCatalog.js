@@ -4,10 +4,13 @@
  * a fase em que chegam; só os da fase corrente têm campos e passam pelo motor.
  *
  * Vocabulário (fechado). Tipo: rotulo, grupo_ui, ordem, frequente, selecao_animais, filtro_elegiveis, modo_entrada,
- * revisao, critico, reads, fase, campos, campos_animal, componentes, grupos_repetiveis, subtipos. Campo: id, rotulo,
- * tipo, obrigatorio, visivel_se, obrigatorio_se, default, escopo, unidade, min, max, casas, ajuda, opcoes (enum
- * fechado), lista (lista aberta de LISTAS) e naturezas (ref:PLANO_CONTAS: naturezas de conta aceitas). Condição de
- * visivel_se / obrigatorio_se: {campo, valores} ou {campo, preenchido: true}.
+ * revisao, critico, reads, fase, campos, campos_animal, componentes, grupos_repetiveis, subtipos, a_partir_de. Campo: id,
+ * rotulo, tipo, obrigatorio, visivel_se, obrigatorio_se, mostrar_se, default, escopo, unidade, min, max, casas, ajuda,
+ * opcoes (enum fechado), lista (lista aberta de LISTAS) e naturezas (ref:PLANO_CONTAS: naturezas de conta aceitas).
+ * Condição de visivel_se / obrigatorio_se: {campo, valores} ou {campo, preenchido: true}. `mostrar_se` é só da tela (o
+ * servidor não o lê; a regra é do tratador do tipo): esconde o campo pelos campos do cabeçalho, com {campo, valores} e,
+ * dentro dela, `e` (outra condição que também vale) ou `ou` (outra que basta); no grupo repetível, o grupo some quando
+ * nenhum campo dele aparece (Fase 4, E4.3: o rateio).
  */
 var EventCatalog = (function () {
   var FASE_ATUAL = 4;
@@ -624,20 +627,21 @@ var EventCatalog = (function () {
   var CAMPOS_RATEIO = [
     c_('event_date', 'Data do rateio', 'data', { obrigatorio: true, default: 'HOJE', ajuda: 'O dia em que este rateio passa a valer. Ratear de novo depois substitui este rateio dali em diante.' }),
     c_('financial_id', 'Lançamento', 'ref:FINANCEIRO', { obrigatorio: true }),
-    c_('criterio', 'Dividir', 'lista', { opcoes: CRITERIOS_RATEIO, ajuda: 'Por cabeça, pelo peso vivo, pelos dias de permanência ou pelo valor digitado de cada animal. No arrendamento de pasto, sempre pelos dias de permanência no pasto.' }),
     c_('escopo_tipo', 'Entre', 'lista', { opcoes: ESCOPOS_RATEIO, ajuda: 'Os animais do registro (compra, venda, manejo), do rebanho, de um pasto, de uma categoria ou os escolhidos.' }),
-    c_('pasture_id', 'Pasto', 'ref:PASTOS'),
-    c_('category_id', 'Categoria', 'ref:CATEGORIAS'),
-    c_('periodo_inicio', 'Período: de', 'data', { ajuda: 'Dias de permanência: vazio = o período do lançamento.' }),
-    c_('periodo_fim', 'Período: até', 'data'),
-    c_('data_base', 'Data-base', 'data', { ajuda: 'O dia em que se contam os animais e se toma o peso. Vazio = a data do lançamento.' }),
+    c_('criterio', 'Dividir', 'lista', { opcoes: CRITERIOS_RATEIO, ajuda: 'Por cabeça, pelo peso vivo, pelos dias de permanência ou pelo valor digitado de cada animal. No arrendamento de pasto, sempre pelos dias de permanência no pasto.' }),
+    c_('pasture_id', 'Pasto', 'ref:PASTOS', { mostrar_se: quando_('escopo_tipo', ['PASTO']) }),
+    c_('category_id', 'Categoria', 'ref:CATEGORIAS', { mostrar_se: quando_('escopo_tipo', ['CATEGORIA']) }),
+    c_('periodo_inicio', 'Período: de', 'data', { mostrar_se: quando_('criterio', ['DIAS_PERMANENCIA']), ajuda: 'Dias de permanência: vazio = o período do lançamento.' }),
+    c_('periodo_fim', 'Período: até', 'data', { mostrar_se: quando_('criterio', ['DIAS_PERMANENCIA']) }),
+    c_('data_base', 'Data-base', 'data', { mostrar_se: { campo: 'criterio', valores: ['CABECAS', 'PESO_VIVO', 'MANUAL'], e: { campo: 'escopo_tipo', valores: ['REBANHO', 'PASTO', 'CATEGORIA', 'LISTA'] } }, ajuda: 'O dia em que se contam os animais e se toma o peso. Vazio = a data do lançamento.' }),
     c_('valor', 'Valor a ratear (opcional)', 'dinheiro', { min: 0.01, ajuda: 'Vazio = o lançamento inteiro. Menor que ele, o resto fica "sem alocar aos animais".' }),
     c_('justificativa_rateio', 'Por que este rateio', 'texto', { ajuda: 'Obrigatória no rateio pelo valor digitado e quando o lançamento já estava rateado.' }),
+    c_('responsible', 'Responsável', 'texto'),
     c_('notes', 'Observações', 'texto'),
   ];
   var CAMPOS_ANIMAL_RATEIO = [
-    a_('animal_id', 'Animal', 'ref:ANIMAIS', { obrigatorio: true }),
-    a_('valor', 'Valor deste animal', 'dinheiro', { min: 0.01, ajuda: 'Só no rateio pelo valor digitado: os valores somam o valor a ratear.' }),
+    a_('animal_id', 'Animal', 'ref:ANIMAIS', { obrigatorio: true, mostrar_se: { campo: 'escopo_tipo', valores: ['LISTA'], ou: { campo: 'criterio', valores: ['MANUAL'] } } }),
+    a_('valor', 'Valor deste animal', 'dinheiro', { min: 0.01, mostrar_se: quando_('criterio', ['MANUAL']), ajuda: 'Só no rateio pelo valor digitado: os valores somam o valor a ratear.' }),
   ];
 
   /** Definições completas dos tipos da Fase 1. */

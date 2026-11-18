@@ -1100,21 +1100,23 @@ var FinancialService = (function () {
     };
   }
   /**
-   * O rateio do lançamento e as alocações dele: no que vale, o rateio vigente (o do último evento vigente; 03b, RATEIOS, pelo
-   * predicado único do Repository); no cancelado, o que o evento criador gravou (sem efeito, só para consulta).
+   * O rateio do lançamento e as alocações dele: no que vale, o rateio vigente na data (sem data, o de hoje; 03b, RATEIOS, pelo
+   * predicado único do Repository: o re-rateio de depois da data não muda o que valia nela); no cancelado, o que o evento
+   * criador gravou (sem efeito, só para consulta).
    */
-  function rateioDoLancamento_(tx, fin, ativo) {
-    var rat = ativo ? tx.repo.por('RATEIOS', 'financial_id', fin.financial_id)[0] || null
+  function rateioDoLancamento_(tx, fin, ativo, data) {
+    var rat = ativo ? tx.repo.rateioEm(fin.financial_id, data || null)
       : tx.cru.cruPor('RATEIOS', 'financial_id', fin.financial_id).filter(function (r) { return r.event_id === fin.event_id; })[0] || null;
     if (!rat) return { rateio: null, alocacoes: [] };
-    return { rateio: rat, alocacoes: ativo ? tx.repo.por('ALOCACOES_FINANCEIRAS', 'rateio_id', rat.rateio_id) : tx.cru.cruPor('ALOCACOES_FINANCEIRAS', 'rateio_id', rat.rateio_id) };
+    return { rateio: rat, alocacoes: tx.cru.cruPor('ALOCACOES_FINANCEIRAS', 'rateio_id', rat.rateio_id) };
   }
   /**
    * Um lançamento como a lista e o detalhe mostram: os campos gravados, a conta, o parceiro, o pasto, o produto e o evento
    * pelo nome, a situação (pelo predicado), a situação do pagamento pelas parcelas (a mesma conta da projeção), o que está
-   * em aberto e vencido hoje, o critério do rateio vigente e o que ficou sem alocar. Todo número vem pronto: a tela não soma.
+   * em aberto e vencido hoje, o critério do rateio vigente em `data` (sem data, o de hoje) e o que ficou sem alocar. Todo
+   * número vem pronto: a tela não soma.
    */
-  function lancamentoPublico_(tx, fin, hoje) {
+  function lancamentoPublico_(tx, fin, hoje, data) {
     var situacao = situacaoLancamento_(tx, fin);
     var conta = tx.repo.porId('PLANO_CONTAS', fin.conta_id);
     var parc = tx.repo.porId('PARCEIROS', fin.partner_id);
@@ -1134,7 +1136,7 @@ var FinancialService = (function () {
       if (!vazio_(hoje) && p.data_vencimento < hoje) vencido += p.valor;
       if (proximo === null || p.data_vencimento < proximo) proximo = p.data_vencimento;
     });
-    var r = rateioDoLancamento_(tx, fin, situacao === 'ATIVO');
+    var r = rateioDoLancamento_(tx, fin, situacao === 'ATIVO', data);
     var alocado = r.alocacoes.reduce(function (s, a) { return s + (a.valor_alocado || 0); }, 0);
     var semRateio = SEM_RATEIO.indexOf(fin.natureza) >= 0;
     return {
@@ -1166,7 +1168,8 @@ var FinancialService = (function () {
    * DESPESA), conta, parceiro, pasto, tipo do evento, `situacao` (ATIVO, o padrão; CANCELADO; TODOS), `status_pagamento` e
    * `busca` (descrição ou documento, sem acento); mais recentes primeiro (competência, depois o evento). {total, pagina,
    * por_pagina, paginas, totais: {receitas, despesas} (do filtro inteiro, centavos), itens: [lancamento]}. A situação do
-   * pagamento, o aberto e o vencido são os de hoje.
+   * pagamento, o aberto e o vencido são os de hoje; o critério, o alocado e o não alocado, os do rateio vigente em `ate`
+   * (Fase 4, E4.3: o re-rateio de depois de `ate` não muda a lista até `ate`).
    */
   function consultaLancamentos(filtros) {
     var o = filtros || {};
@@ -1193,7 +1196,7 @@ var FinancialService = (function () {
           if ((!vazio_(o.conta_id) && fin.conta_id !== o.conta_id) || (!vazio_(o.partner_id) && fin.partner_id !== o.partner_id) || (!vazio_(o.pasture_id) && fin.pasture_id !== o.pasture_id)) return;
           if (!vazio_(o.event_type) && (tx.cru.cruPorId('EVENTOS', fin.event_id) || {}).event_type !== o.event_type) return;
           if (busca && Utils.normalizarTexto([fin.descricao, fin.documento].filter(function (x) { return !vazio_(x); }).join(' ')).indexOf(busca) < 0) return;
-          var item = lancamentoPublico_(tx, fin, tx.hoje);
+          var item = lancamentoPublico_(tx, fin, tx.hoje, ate);
           if (pagamento && item.status_pagamento !== pagamento) return;
           itens.push(item);
           if (item.tipo === 'RECEITA') totais.receitas += item.valor; else totais.despesas += item.valor;

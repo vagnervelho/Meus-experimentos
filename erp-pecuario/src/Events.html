@@ -138,12 +138,17 @@ var TelaEventos = (function () {
     if (corr) antes.itens = linhas.map(function (l) { return { animal_id: l.animal_id, valores: Util.clonar(l.valores) }; });
     var grupos = {};
     Object.keys(def.grupos_repetiveis || {}).forEach(function (g) {
-      if (c[g]) grupos[g] = c[g].map(function (row) { var r = { valores: valoresForm_(def.grupos_repetiveis[g], row) }; if (row.animal_id) r.animal_id = row.animal_id; return r; });
+      // O animal escolhido no grupo (a lista do rateio) é um campo dele; o da cria é o cadastro que a linha reaproveita.
+      var comAnimal = def.grupos_repetiveis[g].some(function (d) { return d.id === 'animal_id'; });
+      if (c[g]) grupos[g] = c[g].map(function (row) { var r = { valores: valoresForm_(def.grupos_repetiveis[g], row) }; if (row.animal_id && comAnimal) r.valores.animal_id = row.animal_id; else if (row.animal_id) r.animal_id = row.animal_id; return r; });
     });
     if (Object.keys(grupos).length) antes.grupos = Util.clonar(grupos);
     var rotulo = REPRODUTIVOS.indexOf(ev.event_type) >= 0 ? Store.nomeEvento(ev.event_type, sub) + ' de ' + Fmt.data(ev.event_date) : rotuloEvento(ev);
     var anexos = (o.anexos || []).filter(function (a) { return a.status === undefined || a.status === 'ATIVO'; }).map(function (a) { return a.nome_arquivo; });
-    return { subtipo: sub || undefined, campos: campos, linhas: linhas, grupos: grupos, origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotulo, historico: ev.pre_marco_zero === true, antes: antes, anexos: anexos } };
+    // O rateio corrige-se no mesmo lançamento (o servidor recusa outro): ele aparece pela descrição gravada do rateio.
+    var rotulos = {};
+    if (ev.event_type === 'RATEIO' && c.campos.financial_id) rotulos[c.campos.financial_id] = ev.description;
+    return { subtipo: sub || undefined, campos: campos, linhas: linhas, grupos: grupos, rotulos: rotulos, origem: 'evento/' + ev.event_id, corrige: { event_id: ev.event_id, rotulo: rotulo, historico: ev.pre_marco_zero === true, antes: antes, anexos: anexos } };
   }
   var ROTULO_AJUSTE = { categoria_manual_id: 'Categoria', pasto_atual_id: 'Pasto', brinco: 'Brinco' };
   /** Valor gravado em AJUSTES (texto canônico) em palavras: categoria, pasto, mãe ou pai pelo nome; vazio = desconhecido. */
@@ -331,6 +336,18 @@ var TelaEventos = (function () {
       var anexos = o.anexos || [];
       var nomeDoAnimal = function (animalId) { return porId[animalId] ? nomeAnimal(porId[animalId]) : (Store.animal(animalId) ? Store.rotuloAnimal(Store.animal(animalId)) : 'animal'); };
       (payload.deducoes || []).forEach(function (x) { tipoDeducao[x.financial_id] = x.tipo; });
+      // Rateio (Fase 4, E4.3): o lançamento que ele divide, como divide e o que coube a cada animal.
+      var ratEv = ev.event_type === 'RATEIO' ? (det.RATEIOS || [])[0] : null;
+      if (ratEv) {
+        var semEfeito = !ev.vigente;
+        corpo.appendChild(UI.secao('Rateio', h('div', null, UI.pares([
+          ['Lançamento', h('a', { class: 'botao botao-texto', href: Roteador.href('financeiro/lancamento/' + ratEv.financial_id), dataset: { rota: 'financeiro/lancamento/' + ratEv.financial_id } }, 'ver o lançamento')],
+          ['Critério', Fmt.rotulo('CRITERIO_RATEIO', ratEv.criterio)], ['Entre', Fmt.rotulo('ESCOPO_RATEIO', ratEv.escopo_tipo)],
+          ratEv.periodo_inicio ? ['Período', Fmt.data(ratEv.periodo_inicio) + ' a ' + Fmt.data(ratEv.periodo_fim)] : null,
+          ratEv.data_base && ratEv.escopo_tipo !== 'EVENTO' ? ['Data-base', Fmt.data(ratEv.data_base)] : null,
+          [semEfeito ? 'Distribuído (sem efeito)' : 'Distribuído', Fmt.dinheiro(ratEv.total_alocado)], ratEv.justificativa ? ['Justificativa', ratEv.justificativa] : null,
+        ].filter(Boolean)), alocacoes_(det, ratEv, nomeDoAnimal, semEfeito)), { dado: 'rateio' }));
+      }
       if ((det.FINANCEIRO || []).length) corpo.appendChild(UI.secao('Lançamentos financeiros', h('ul', { class: 'lista-simples' }, det.FINANCEIRO.map(function (x) {
         var pa = Store.parceiro(x.partner_id);
         // Lançamento cancelado (estorno ou correção): as parcelas não são regravadas e deixam de valer pelo lançamento

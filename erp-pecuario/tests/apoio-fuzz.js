@@ -31,7 +31,7 @@ const D0 = '2026-01-01';
 const HOJE = '2026-11-13';
 const USUARIO = 'dono@gmail.com';
 const FORMATO = { delimitador: ';', codificacao: 'UTF-8', formato_data: 'dd/MM/yyyy', decimal: ',' };
-const AVISOS = ['POSSIVEL_DUPLICIDADE', 'LOTACAO_ACIMA_DA_CAPACIDADE', 'BRINCO_PARECIDO', 'IDADE_REPRODUTIVA', 'INTERVALO_PARTO_CURTO', 'VALOR_DIVERGENTE', 'RATEIO_SEM_PESO', 'CARENCIA_ATIVA', 'CATEGORIAS_SEM_COBERTURA', 'PESO_IMPLAUSIVEL', 'ESTOQUE_INSUFICIENTE', 'PRODUTO_VENCIDO'];
+const AVISOS = ['POSSIVEL_DUPLICIDADE', 'LOTACAO_ACIMA_DA_CAPACIDADE', 'BRINCO_PARECIDO', 'IDADE_REPRODUTIVA', 'INTERVALO_PARTO_CURTO', 'VALOR_DIVERGENTE', 'RATEIO_SEM_PESO', 'CARENCIA_ATIVA', 'CATEGORIAS_SEM_COBERTURA', 'PESO_IMPLAUSIVEL', 'ESTOQUE_INSUFICIENTE', 'PRODUTO_VENCIDO', 'RATEIO_BASE_ZERO'];
 const RECUSAS = ['VALIDATION', 'CONFLICT', 'NEEDS_CONFIRMATION', 'NOT_FOUND', 'CONFIG', 'IDEMPOTENCY_MISMATCH'];
 const SAIDA = { VENDA: 'VENDIDO', MORTE: 'MORTO', DESCARTE: 'DESCARTADO', AJUSTE_INVENTARIO: 'BAIXADO_AJUSTE' };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -2440,6 +2440,316 @@ registrarTipo('LANCAMENTO_FINANCEIRO', {
     contar('avulso: aceito');
   },
 });
+
+// --- RATEIO (Fase 4, E4.3; CONTRATOS, seção 57): o rateio de um lançamento que vale entre os animais — por cabeça, pelo peso, pelos
+// dias de permanência, pelo valor de cada um ou pelo valor digitado; no rebanho, num pasto, entre os animais do registro ou os
+// escolhidos; o arrendamento pelos padrões do servidor; o re-rateio (com e sem a justificativa), o valor em parte, a base zero e,
+// às vezes, o pedido inválido (escopo fora do registro, critério fora do escopo, a soma do valor digitado que não fecha, o
+// lançamento que não se rateia). O oráculo refaz a base e os centavos pelas linhas cruas, sem o código do servidor.
+const CEM_TIPOS = ['COMPRA', 'VENDA', 'ENTRADA_INICIAL', 'MORTE', 'DESCARTE', 'SANIDADE'];
+const NAO_RATEIA = ['ESTOQUE_INSUMOS', 'NAO_OPERACIONAL'];
+const rateaveis = (S) => S.t.FINANCEIRO.filter((f) => S.vig.get(f.event_id) && NAO_RATEIA.indexOf(f.natureza) < 0 && !(S.ev.get(f.event_id) || {}).pre_marco_zero);
+/** O rateio que vale no lançamento numa data D (sem D, hoje), pelas linhas cruas: o do evento vigente mais adiante na ordem da cadeia. */
+function rateioModelo(S, fid, D) {
+  const f = S.t.FINANCEIRO.find((x) => x.financial_id === fid);
+  if (!f || !S.vig.get(f.event_id)) return null;
+  let melhor = null;
+  S.t.RATEIOS.forEach((r) => {
+    if (r.financial_id !== fid || !S.vig.get(r.event_id)) return;
+    const e = S.ev.get(r.event_id);
+    if (D && e.event_date > D) return;
+    const o = [S.raiz(e), e.event_seq];
+    if (!melhor || o[0] > melhor.o[0] || (o[0] === melhor.o[0] && o[1] > melhor.o[1])) melhor = { r, o };
+  });
+  return melhor ? melhor.r : null;
+}
+/** Os animais do registro a que o lançamento se refere (as linhas de sujeito do evento de negócio). */
+function animaisDoRegistro(S, f) {
+  const anc = f.ref_event_id || f.event_id;
+  const vistos = new Set();
+  return S.t.EVENTO_ANIMAIS.filter((l) => l.event_id === anc && (!l.papel || l.papel === 'SUJEITO') && !vistos.has(l.animal_id) && vistos.add(l.animal_id));
+}
+/** Divide `total` centavos em n partes positivas (ou com a soma errada em 1 centavo, de propósito). */
+function partesManual(rnd, total, n, errar) {
+  const out = [];
+  let resto = total;
+  for (let i = 0; i < n; i++) {
+    const v = i === n - 1 ? resto : Math.max(1, Math.min(resto - (n - 1 - i), Math.floor(total / n * (0.5 + rnd()))));
+    out.push(v);
+    resto -= v;
+  }
+  if (errar) out[0] += rnd() < 0.5 ? 1 : -1;
+  return out.filter((v) => v > 0).length === out.length ? out : out.map((v) => Math.max(1, v));
+}
+function preencherRateio(S, rnd, s, f, P) {
+  const conta = S.t.PLANO_CONTAS.find((x) => x.conta_id === f.conta_id) || {};
+  const criador = S.ev.get(f.event_id) || {};
+  const cem = CEM_TIPOS.indexOf(criador.event_type) >= 0 || f.natureza === 'AQUISICAO_ANIMAIS';
+  const marco = S.marco || D0;
+  ['criterio', 'escopo', 'pasto', 'cat', 'ini', 'fim', 'base', 'valor', 'lista'].forEach((k) => { delete s[k]; });
+  if (conta.codigo === 'ARRENDAMENTO_PASTO' && rnd() < 0.85) {
+    // Os padrões do servidor: os dias no pasto arrendado, no período do lançamento; às vezes o período em parte.
+    if (rnd() < 0.25 && f.competencia_inicio) { s.ini = f.competencia_inicio; s.fim = somaDias(f.competencia_inicio, Math.floor(rnd() * 20)); s.criterio = 'DIAS_PERMANENCIA'; s.escopo = 'PASTO'; s.pasto = f.pasture_id; }
+    return;
+  }
+  const regs = animaisDoRegistro(S, f);
+  if (cem || (regs.length && rnd() < 0.3)) {
+    s.escopo = cem && rnd() < 0.05 ? 'REBANHO' : 'EVENTO';
+    // O critério que as linhas do registro permitem (o peso, o valor, a carcaça de cada um), e às vezes o que não permitem.
+    const temPeso = regs.length > 0 && regs.every((l) => l.peso > 0);
+    const temValor = regs.some((l) => l.valor_individual > 0);
+    const temCarcaca = regs.length > 0 && regs.every((l) => l.peso_carcaca_kg > 0);
+    s.criterio = pesado(rnd, [['CABECAS', 3], ['PESO_VIVO', temPeso ? 2 : 0.08], ['VALOR_INDIVIDUAL', temValor ? 1.5 : 0.08], ['MANUAL', 1.5], ['PESO_CARCACA', temCarcaca ? 1.5 : 0.04], ['DIAS_PERMANENCIA', 0.05]]);
+    if (s.criterio === 'MANUAL') {
+      const ids = alguns(rnd, regs.map((l) => l.animal_id), Math.max(1, regs.length));
+      const vs = partesManual(rnd, f.valor, ids.length, rnd() < 0.06);
+      s.lista = ids.map((id, i) => ({ id, valor: vs[i] }));
+    }
+    if (!cem && rnd() < 0.15) s.valor = Math.max(1, Math.floor(f.valor * rnd()));
+    if (s.escopo === 'REBANHO') s.base = s.data;
+    return;
+  }
+  s.escopo = pesado(rnd, [['REBANHO', 3], ['PASTO', 3], ['LISTA', 2.5], ['CATEGORIA', 0.6]]);
+  s.criterio = pesado(rnd, s.escopo === 'LISTA' ? [['CABECAS', 2], ['PESO_VIVO', 1], ['DIAS_PERMANENCIA', 2], ['MANUAL', 1.5]] : [['CABECAS', 2], ['PESO_VIVO', 1], ['DIAS_PERMANENCIA', 2.5], ['MANUAL', 0.05]]);
+  if (s.escopo === 'PASTO') s.pasto = f.pasture_id && rnd() < 0.5 ? f.pasture_id : sorteio(rnd, P);
+  if (s.escopo === 'CATEGORIA') s.cat = (sorteio(rnd, S.t.CATEGORIAS) || {}).category_id;
+  if (s.criterio === 'DIAS_PERMANENCIA') {
+    if (f.competencia_inicio && rnd() < 0.5) { if (rnd() < 0.3) { s.ini = f.competencia_inicio; s.fim = f.competencia_fim; } }
+    else {
+      const ini = rnd() < 0.1 ? somaDias(marco, -15) : somaDias(marco, Math.floor(rnd() * Math.max(1, Math.round((Date.parse(HOJE) - Date.parse(marco)) / 86400000))));
+      s.ini = ini;
+      s.fim = rnd() < 0.05 ? somaDias(ini, -1) : somaDias(ini, sorteio(rnd, [0, 9, 29, 59, 120]));
+    }
+  } else if (rnd() < 0.7) {
+    const dias = Math.max(0, Math.round((Date.parse(s.data) - Date.parse(f.data_competencia)) / 86400000));
+    s.base = rnd() < 0.04 ? somaDias(marco, -2) : somaDias(f.data_competencia, Math.floor(rnd() * (dias + 1)));
+  }
+  if (s.escopo === 'LISTA' || s.criterio === 'MANUAL') {
+    const D = s.base || f.data_competencia;
+    const presentes = MOVEIS(S).filter((id) => s.criterio === 'DIAS_PERMANENCIA' ? true : presenca(S, id, D).fim);
+    const ids = alguns(rnd, rnd() < 0.08 ? MOVEIS(S) : presentes.length ? presentes : MOVEIS(S), 1 + Math.floor(rnd() * 4));
+    if (!ids.length) return;
+    const T = f.valor;
+    const vs = s.criterio === 'MANUAL' ? partesManual(rnd, T, ids.length, rnd() < 0.06) : null;
+    s.lista = ids.map((id, i) => (vs ? { id, valor: vs[i] } : { id }));
+  }
+  if (s.criterio !== 'MANUAL' && rnd() < 0.15) s.valor = Math.max(1, Math.floor(f.valor * rnd()));
+}
+registrarTipo('RATEIO', {
+  peso: (S) => (rateaveis(S).length ? 8 : 0),
+  propor: (c) => {
+    const { S, rnd, P } = c;
+    const lista = rateaveis(S);
+    // Mais vezes o custo compartilhado (o avulso, o frete, o custo do manejo) que o lançamento do próprio registro (100%).
+    const livres = lista.filter((x) => CEM_TIPOS.indexOf((S.ev.get(x.event_id) || {}).event_type) < 0 && x.natureza !== 'AQUISICAO_ANIMAIS');
+    const f = rnd() < 0.04 ? sorteio(rnd, S.t.FINANCEIRO) : livres.length && rnd() < 0.65 ? sorteio(rnd, livres) : sorteio(rnd, lista);
+    if (!f) return null;
+    const marco = S.marco || D0;
+    const desde = f.data_competencia > marco ? f.data_competencia : marco;
+    const x = rnd();
+    const data = x < 0.03 ? somaDias(f.data_competencia, -1) : x < 0.25 ? desde : x < 0.45 ? HOJE : somaDias(desde, Math.floor(rnd() * (Math.max(0, Math.round((Date.parse(HOJE) - Date.parse(desde)) / 86400000)) + 1)));
+    const s = { tipo: 'RATEIO', data: data > HOJE ? HOJE : data, fin: f.financial_id };
+    preencherRateio(S, rnd, s, f, P);
+    const ja = !!rateioModelo(S, f.financial_id);
+    if ((ja || s.criterio === 'MANUAL') ? rnd() < 0.93 : rnd() < 0.2) s.just = sorteio(rnd, ['Rateio conferido com o vaqueiro', 'O custo é de todos', 'Corrigindo a divisão']);
+    return s;
+  },
+  montar: (sis, s) => {
+    const campos = { event_date: s.data, financial_id: s.fin };
+    if (s.criterio) campos.criterio = s.criterio;
+    if (s.escopo) campos.escopo_tipo = s.escopo;
+    if (s.pasto) campos.pasture_id = s.pasto;
+    if (s.cat) campos.category_id = s.cat;
+    if (s.ini) { campos.periodo_inicio = s.ini; campos.periodo_fim = s.fim; }
+    if (s.base) campos.data_base = s.base;
+    if (s.valor) campos.valor = s.valor;
+    if (s.just) campos.justificativa_rateio = s.just;
+    if (s.notas) campos.notes = s.notas;
+    const d = { tipo: 'RATEIO', campos };
+    if (s.lista && s.lista.length) d.animais_rateio = s.lista.map((x) => (x.valor !== undefined ? { animal_id: x.id, valor: x.valor } : { animal_id: x.id }));
+    return d;
+  },
+  animais: (s) => (s.lista || []).map((x) => x.id),
+  mudaData: true,
+  // A correção pelas linhas gravadas: o pedido do rateio (o critério pedido do payload, o escopo, o período, a data-base, os
+  // animais escolhidos e o valor de cada um no digitado).
+  doGravado: (c, e) => {
+    const { S, data } = c;
+    const r = S.t.RATEIOS.find((x) => x.event_id === e.event_id);
+    if (!r) return null;
+    const f = S.t.FINANCEIRO.find((x) => x.financial_id === r.financial_id) || {};
+    const crit = (e.payload_json && e.payload_json.criterio_pedido) || r.criterio;
+    const s = { tipo: 'RATEIO', data, fin: r.financial_id, criterio: crit, escopo: r.escopo_tipo };
+    if (r.escopo_tipo === 'PASTO') s.pasto = r.escopo_ref;
+    if (r.escopo_tipo === 'CATEGORIA') s.cat = r.escopo_ref;
+    if (r.periodo_inicio && !(r.periodo_inicio === f.competencia_inicio && r.periodo_fim === f.competencia_fim)) { s.ini = r.periodo_inicio; s.fim = r.periodo_fim; }
+    if (r.escopo_tipo !== 'EVENTO' && r.data_base && r.data_base !== f.data_competencia) s.base = r.data_base;
+    if (r.total_alocado > 0 && r.total_alocado !== f.valor) s.valor = r.total_alocado;
+    const j = (r.justificativa || '').replace(/^Base zero: .*?\.(?: |$)/, '');
+    if (j) s.just = j;
+    if (r.escopo_tipo === 'LISTA' || crit === 'MANUAL') s.lista = S.t.ALOCACOES_FINANCEIRAS.filter((a) => a.rateio_id === r.rateio_id).map((a) => (crit === 'MANUAL' ? { id: a.animal_id, valor: a.valor_alocado } : { id: a.animal_id }));
+    return s;
+  },
+  mutarValores: (c) => {
+    const { s, S, rnd, P } = c;
+    const f = S.t.FINANCEIRO.find((x) => x.financial_id === s.fin);
+    if (f) preencherRateio(S, rnd, s, f, P);
+  },
+  mutarAnimais: (c) => {
+    const { s, S, rnd } = c;
+    if (!s.lista || !s.lista.length) return;
+    if (rnd() < 0.5 && s.lista.length > 1) s.lista.pop();
+    else { const id = sorteio(rnd, MOVEIS(S)); if (id && !s.lista.some((x) => x.id === id)) s.lista.push(s.criterio === 'MANUAL' ? { id, valor: 1 } : { id }); }
+  },
+  mutarOutro: (c) => { const { s, rnd } = c; if (rnd() < 0.5) s.notas = 'Conferido no caderno'; else s.just = 'Divisão revista'; },
+  efeito: (c) => efeitoRateio(c),
+});
+/** O maior resto em centavos (05, seção 4.5), reescrito sem o código do servidor: bases em décimos de milésimo, BigInt. */
+function maiorResto(total, itens) {
+  const b = itens.map((x) => BigInt(Math.round(x.base * 10000)));
+  const B = b.reduce((t, v) => t + v, 0n);
+  if (B === 0n) return itens.map(() => 0);
+  const T = BigInt(total);
+  const q = b.map((v) => (T * v) / B);
+  const r = b.map((v, i) => T * v - q[i] * B);
+  let sobra = T - q.reduce((t, v) => t + v, 0n);
+  const ordem = itens.map((x, i) => i).sort((i, j) => (r[j] > r[i] ? 1 : r[j] < r[i] ? -1 : 0) || (b[j] > b[i] ? 1 : b[j] < b[i] ? -1 : 0) || cmp(itens[i].chave, itens[j].chave));
+  const out = q.map((v) => Number(v));
+  for (let k = 0; sobra > 0n; k++, sobra--) out[ordem[k]] += 1;
+  return out;
+}
+/** As estadas de um animal pelas linhas vigentes: [{ini, fim (exclusivo, null aberto), pasto}], o dia da entrada conta, o da saída não. */
+function estadasModelo(S, id) {
+  const out = [];
+  let atual = null;
+  S.linhasDe(id).forEach((l) => {
+    if (DE_FATO(l)) return;
+    if (l.efeito === -1) { if (atual) { atual.fim = l.data; atual = null; } return; }
+    if (l.efeito === 1 || l.destino) {
+      if (atual) atual.fim = l.data;
+      atual = { ini: l.data, fim: null, pasto: l.destino || (atual ? atual.pasto : null) };
+      out.push(atual);
+    }
+  });
+  return out.filter((x) => x.fim === null || x.fim > x.ini);
+}
+function diasModelo(S, id, ini, fim, pasto) {
+  const marco = S.marco || D0;
+  const de = ini > marco ? ini : marco;
+  const ate = somaDias(fim, 1);
+  return estadasModelo(S, id).reduce((t, x) => {
+    if (pasto && x.pasto !== pasto) return t;
+    const a = x.ini > de ? x.ini : de;
+    const b = x.fim === null || x.fim > ate ? ate : x.fim;
+    return t + (a < b ? Math.round((Date.parse(b) - Date.parse(a)) / 86400000) : 0);
+  }, 0);
+}
+/** O peso vigente na data, quando o modelo o sabe sem a categoria: a última pesagem pesada (balança, fita, média) dentro da validade. */
+function pesoModelo(S, id, D) {
+  const validade = Number(S.config.get('peso_validade_dias') || 180);
+  let ult = null;
+  S.t.PESAGENS.forEach((p) => {
+    if (p.animal_id !== id || !S.vig.get(p.event_id) || p.data_pesagem > D) return;
+    const e = S.ev.get(p.event_id);
+    const o = [p.data_pesagem, S.raiz(e), e.event_seq];
+    if (!ult || cmp(o[0], ult.o[0]) > 0 || (o[0] === ult.o[0] && (o[1] > ult.o[1] || (o[1] === ult.o[1] && o[2] >= ult.o[2])))) ult = { o, p };
+  });
+  if (!ult || ult.p.metodo === 'ESTIMATIVA_VISUAL') return null;
+  return Math.round((Date.parse(D) - Date.parse(ult.p.data_pesagem)) / 86400000) <= validade ? ult.p.peso_kg : null;
+}
+function efeitoRateio(c) {
+  const { d, S, A, E, eid, erro, lsE, cmd } = c;
+  const cp = d.campos;
+  if (lsE.length) erro('o rateio tem linhas de animal');
+  if (S.t.FINANCEIRO.some((f) => f.event_id === eid)) erro('o rateio gravou lançamento');
+  const rats = S.t.RATEIOS.filter((r) => r.event_id === eid);
+  if (rats.length !== 1) { erro(rats.length + ' linhas de rateio'); return; }
+  const r = rats[0];
+  const f = S.t.FINANCEIRO.find((x) => x.financial_id === cp.financial_id);
+  if (!f || r.financial_id !== cp.financial_id) { erro('rateio de outro lançamento'); return; }
+  const allocs = S.t.ALOCACOES_FINANCEIRAS.filter((a) => a.rateio_id === r.rateio_id);
+  const soma = allocs.reduce((t, a) => t + a.valor_alocado, 0);
+  if (soma !== r.total_alocado) erro('Σ alocado ' + soma + ' ≠ total ' + r.total_alocado);
+  if ((E.total_value === undefined ? null : E.total_value) !== (r.total_alocado > 0 ? r.total_alocado : null)) erro('valor do evento ' + E.total_value + ', distribuído ' + r.total_alocado);
+  const T = typeof cp.valor === 'number' ? cp.valor : f.valor;
+  if (allocs.length && r.total_alocado !== T) erro('distribuído ' + r.total_alocado + ', valor a ratear ' + T);
+  if (!allocs.length && !/^Base zero: /.test(r.justificativa || '')) erro('nada distribuído sem o motivo da base zero');
+  if (allocs.length === 1 !== (r.criterio === 'DIRETO')) erro('critério ' + r.criterio + ' com ' + allocs.length + ' animal(is)');
+  // O rateio novo vale hoje (o substituto de um rateio antigo fica no lugar dele: o re-rateio posterior continua valendo).
+  if (cmd.rota === 'evento.registrar' && (rateioModelo(S, f.financial_id) || {}).rateio_id !== r.rateio_id) erro('o rateio registrado não é o que vale no lançamento');
+  // Os padrões do servidor e a base refeita pelas linhas cruas.
+  const conta = S.t.PLANO_CONTAS.find((x) => x.conta_id === f.conta_id) || {};
+  const criador = S.ev.get(f.event_id) || {};
+  const cem = CEM_TIPOS.indexOf(criador.event_type) >= 0 || f.natureza === 'AQUISICAO_ANIMAIS';
+  const arrend = conta.codigo === 'ARRENDAMENTO_PASTO';
+  const crit = cp.criterio || (arrend ? 'DIAS_PERMANENCIA' : null);
+  const escopo = cp.escopo_tipo || (arrend ? 'PASTO' : cem ? 'EVENTO' : null);
+  const critGravado = (E.payload_json && E.payload_json.criterio_pedido) || r.criterio;
+  if (critGravado !== crit || r.escopo_tipo !== escopo) { erro('critério × escopo gravados ' + critGravado + '/' + r.escopo_tipo + ', pedidos ' + crit + '/' + escopo); return; }
+  if (arrend && (crit !== 'DIAS_PERMANENCIA' || escopo !== 'PASTO' || r.escopo_ref !== f.pasture_id)) erro('arrendamento rateado fora dos dias no pasto arrendado');
+  if (cem && (escopo !== 'EVENTO' || r.total_alocado !== f.valor)) erro('lançamento do próprio registro rateado fora dele ou em parte');
+  const anc = f.ref_event_id || f.event_id;
+  const ini = crit === 'DIAS_PERMANENCIA' ? cp.periodo_inicio || f.competencia_inicio : null;
+  const fim = crit === 'DIAS_PERMANENCIA' ? cp.periodo_fim || f.competencia_fim : null;
+  const D = escopo === 'EVENTO' ? (S.ev.get(anc) || {}).event_date : crit === 'DIAS_PERMANENCIA' ? null : cp.data_base || f.data_competencia;
+  if ((r.periodo_inicio || null) !== (ini || null) || (r.periodo_fim || null) !== (fim || null) || (r.data_base || null) !== (D || null)) erro('período ou data-base gravados ' + JSON.stringify([r.periodo_inicio, r.periodo_fim, r.data_base]) + ', esperados ' + JSON.stringify([ini, fim, D]));
+  const ref = escopo === 'EVENTO' ? anc : escopo === 'PASTO' ? cp.pasture_id || f.pasture_id : escopo === 'CATEGORIA' ? cp.category_id || f.categoria_animal_id : null;
+  if ((r.escopo_ref || null) !== (ref || null)) erro('referência do escopo ' + r.escopo_ref + ', esperada ' + ref);
+  // A base de cada animal: na correção com as mesmas entradas, a do original (CONTRATOS, seção 57); senão, a das linhas cruas.
+  let esperado = null;
+  const orig = cmd.rota === 'evento.corrigir' ? A.t.RATEIOS.find((x) => x.event_id === d.event_id) : null;
+  const lista = (d.animais_rateio || []).map((x) => x.animal_id).sort().join('|');
+  if (orig) {
+    const eo = A.ev.get(d.event_id) || {};
+    const critO = (eo.payload_json && eo.payload_json.criterio_pedido) || orig.criterio;
+    const listaO = A.t.ALOCACOES_FINANCEIRAS.filter((a) => a.rateio_id === orig.rateio_id).map((a) => a.animal_id).sort().join('|');
+    const mesmo = orig.financial_id === r.financial_id && critO === crit && orig.escopo_tipo === escopo && (orig.escopo_ref || null) === (ref || null) && (orig.periodo_inicio || null) === (ini || null) && (orig.periodo_fim || null) === (fim || null) && (orig.data_base || null) === (D || null) && (escopo !== 'LISTA' || listaO === lista);
+    if (mesmo && crit !== 'MANUAL') { esperado = new Map(A.t.ALOCACOES_FINANCEIRAS.filter((a) => a.rateio_id === orig.rateio_id).map((a) => [a.animal_id, a.base_valor])); contar('rateio: base congelada na correção'); }
+  }
+  if (!esperado) {
+    esperado = new Map();
+    const marco = S.marco || D0;
+    if (escopo === 'EVENTO') {
+      animaisDoRegistro(S, f).forEach((l) => {
+        const b = crit === 'CABECAS' ? 1 : crit === 'PESO_VIVO' ? l.peso : crit === 'PESO_CARCACA' ? l.peso_carcaca_kg : crit === 'VALOR_INDIVIDUAL' ? (l.valor_individual > 0 ? l.valor_individual / 100 : null) : crit === 'MANUAL' ? ((d.animais_rateio || []).find((x) => x.animal_id === l.animal_id) || {}).valor / 100 : null;
+        if (typeof b === 'number' && b > 0) esperado.set(l.animal_id, b);
+      });
+    } else if (crit === 'DIAS_PERMANENCIA') {
+      if (escopo === 'CATEGORIA') esperado = null;
+      else {
+        const ids = escopo === 'LISTA' ? (d.animais_rateio || []).map((x) => x.animal_id) : MOVEIS(S);
+        ids.forEach((id) => { const n = diasModelo(S, id, ini, fim, escopo === 'PASTO' ? ref : null); if (n > 0) esperado.set(id, n); });
+        if (fim < marco) esperado = null;
+      }
+    } else {
+      const ids = escopo === 'LISTA' || crit === 'MANUAL' ? (d.animais_rateio || []).map((x) => x.animal_id) : MOVEIS(S).filter((id) => { const p = presenca(S, id, D); return p.fim && (escopo !== 'PASTO' || p.pasto === ref); });
+      if (escopo === 'CATEGORIA') esperado = null;
+      else ids.forEach((id) => {
+        if (crit === 'CABECAS') esperado.set(id, 1);
+        else if (crit === 'MANUAL') esperado.set(id, ((d.animais_rateio || []).find((x) => x.animal_id === id) || {}).valor / 100);
+        else { const kg = pesoModelo(S, id, D); esperado.set(id, kg === null ? undefined : kg); }
+      });
+    }
+  }
+  if (!esperado) { contar('rateio: base da categoria (só as somas)'); return; }
+  const gravadas = new Map(allocs.map((a) => [a.animal_id, a.base_valor]));
+  const ids = Array.from(new Set(Array.from(esperado.keys()).concat(Array.from(gravadas.keys())))).sort();
+  if (Array.from(esperado.keys()).sort().join('|') !== Array.from(gravadas.keys()).sort().join('|')) { erro('animais do rateio ' + JSON.stringify(Array.from(gravadas.keys()).sort()) + ', esperados ' + JSON.stringify(Array.from(esperado.keys()).sort())); return; }
+  const direto = allocs.length === 1;
+  ids.forEach((id) => {
+    const e = esperado.get(id);
+    if (e === undefined || direto) return; // o peso estimado (a referência da categoria) e o direto (a base é o valor)
+    if (Math.abs(e - gravadas.get(id)) > 1e-9) erro('base de ' + (S.animais.get(id) || {}).codigo_interno + ' ' + gravadas.get(id) + ', esperada ' + e);
+  });
+  if (direto) { if (allocs[0].valor_alocado !== T) erro('o direto não recebeu o valor inteiro'); contar('rateio: direto conferido'); return; }
+  // Os centavos pelo maior resto, desempate maior base e menor código interno, com as bases gravadas.
+  const itens = allocs.map((a) => ({ id: a.animal_id, base: a.base_valor, chave: (S.animais.get(a.animal_id) || {}).codigo_interno || a.animal_id }));
+  const valores = maiorResto(T, itens);
+  itens.forEach((x, i) => { const a = allocs.find((y) => y.animal_id === x.id); if (a.valor_alocado !== valores[i]) erro('centavos de ' + x.chave + ' ' + a.valor_alocado + ', pelo maior resto ' + valores[i]); });
+  contar('rateio: aceito');
+  contar('rateio: ' + crit + ' ' + escopo);
+  if (!allocs.length) contar('rateio: base zero');
+}
 
 /**
  * O registro único dos arquivos de importação do teste aleatório: cada tipo de importação declara o arquivo que o gerador
@@ -5276,7 +5586,8 @@ function fatosDoEvento(S, eid) {
     // no lançamento original, que deixa de valer: a correção refaz o título com as parcelas que valem, numeradas de novo e sem o
     // vínculo da divisão (CONTRATOS, seção 56).
     const parcelas = S.t.PARCELAS.filter((p) => p.financial_id === f.financial_id && p.status !== 'CANCELADA').map((p) => sem(semMeta('PARCELAS', p), ['parcela_num', 'parcela_origem_id'])).sort(porJson);
-    const rateios = S.t.RATEIOS.filter((r) => r.financial_id === f.financial_id).map((r) => Object.assign(semMeta('RATEIOS', r), { alocacoes: S.t.ALOCACOES_FINANCEIRAS.filter((a) => a.rateio_id === r.rateio_id).map((a) => semMeta('ALOCACOES_FINANCEIRAS', a)).sort(porJson) }));
+    // O rateio que o próprio evento gravou (Fase 4, E4.3: o de um evento RATEIO sobre o lançamento é fato do RATEIO, não deste).
+    const rateios = S.t.RATEIOS.filter((r) => r.financial_id === f.financial_id && r.event_id === eid).map((r) => Object.assign(semMeta('RATEIOS', r), { alocacoes: S.t.ALOCACOES_FINANCEIRAS.filter((a) => a.rateio_id === r.rateio_id).map((a) => semMeta('ALOCACOES_FINANCEIRAS', a)).sort(porJson) }));
     return { id: f.financial_id, v: Object.assign(semMeta('FINANCEIRO', f), { parcelas, rateios }) };
   }).sort((a, b) => porJson(a.v, b.v));
   const mapa = new Map(fins.map((x, i) => [x.id, '@lancamento' + i]));
@@ -5285,6 +5596,8 @@ function fatosDoEvento(S, eid) {
   const pj = sem(ev.payload_json || {}, ['avisos_aceitos', 'justificativa']);
   cab.payload_json = Object.keys(pj).length ? trocarIds(pj, mapa) : null;
   const out = { EVENTOS: cab, FINANCEIRO: fins.map((x) => x.v) };
+  // O evento RATEIO (Fase 4, E4.3): o rateio dele e as alocações (a base e os centavos de cada animal).
+  if (ev.event_type === 'RATEIO') out.RATEIOS = S.t.RATEIOS.filter((r) => r.event_id === eid).map((r) => Object.assign(semMeta('RATEIOS', r), { lancamento: r.financial_id, alocacoes: S.t.ALOCACOES_FINANCEIRAS.filter((a) => a.rateio_id === r.rateio_id).map((a) => semMeta('ALOCACOES_FINANCEIRAS', a)).sort(porJson) }));
   // Os anexos removidos ficam no original, como histórico: passam ao substituto só os que valem (FileService.anexosDoSubstituto).
   TABELAS_DO_EVENTO.forEach((aba) => { out[aba] = (S.t[aba] || []).filter((r) => r.event_id === eid && (aba !== 'ANEXOS' || r.status === 'ATIVO')).map((r) => trocarIds(semMeta(aba, r), mapa)).sort(porJson); });
   return out;
@@ -5293,7 +5606,7 @@ function fatosDoEvento(S, eid) {
 function outrosRegistros(S, eids) {
   const de = new Set(eids);
   const fins = new Set(S.t.FINANCEIRO.filter((f) => de.has(f.event_id)).map((f) => f.financial_id));
-  const rats = new Set(S.t.RATEIOS.filter((r) => fins.has(r.financial_id)).map((r) => r.rateio_id));
+  const rats = new Set(S.t.RATEIOS.filter((r) => fins.has(r.financial_id) || de.has(r.event_id)).map((r) => r.rateio_id));
   const out = new Map();
   const pk = { EVENTOS: 'event_id', EVENTO_ANIMAIS: 'event_animal_id', IDENTIFICACOES: 'ident_id', PESAGENS: 'weight_id', REPRODUCAO: 'reproduction_id', BAIXAS: 'baixa_id', AJUSTES: 'ajuste_id', SANIDADE: 'health_id', MOVIMENTOS_ESTOQUE: 'mov_id', COMPRAS: 'purchase_id', VENDAS: 'sale_id', FINANCEIRO: 'financial_id', PARCELAS: 'parcela_id', RATEIOS: 'rateio_id', ALOCACOES_FINANCEIRAS: 'alloc_id', ANEXOS: 'anexo_id' };
   Object.keys(pk).forEach((aba) => (S.t[aba] || []).forEach((r) => {
@@ -5345,6 +5658,12 @@ function corrigirAceitando(sis, dados, chave) {
  * estoque do produto que deixou de controlar o estoque (PRODUTO_SEM_ESTOQUE, decisão da seção 45).
  */
 function recusaDocumentada(S, e, r) {
+  // Fase 4, E4.3 (CONTRATOS, seção 57): o lançamento do evento foi rateado depois por um evento RATEIO que vale — a correção (que
+  // grava outro lançamento) é recusada até o rateio ser estornado (RATEIO_DEPENDENTE), conferido pelo modelo.
+  if (r.error && r.error.code === 'CONFLICT' && (r.error.details || []).length && r.error.details.every((d) => d.codigo === 'RATEIO_DEPENDENTE')) {
+    const fins = new Set(S.t.FINANCEIRO.filter((f) => f.event_id === e.event_id).map((f) => f.financial_id));
+    return S.t.RATEIOS.some((x) => fins.has(x.financial_id) && x.event_id !== e.event_id && S.vig.get(x.event_id) && (S.ev.get(x.event_id) || {}).event_type === 'RATEIO');
+  }
   if (!r.error || r.error.code !== 'VALIDATION') return false;
   const pol = politicaDe(S);
   const codigos = (r.error.details || []).map((d) => d.codigo);
@@ -5594,6 +5913,13 @@ function congeladosNaData(S, e, a, b, nova, erro, ctx) {
         }
       }
     }
+  }
+  if (e.event_type === 'RATEIO') {
+    // A base do rateio não depende da data do rateio (depende da data-base e do período): a data nova grava as mesmas bases e
+    // os mesmos centavos (Correcao.congelado 'RATEIO.bases').
+    const al = (x) => (x.RATEIOS || []).map((r) => r.alocacoes.map((y) => [y.animal_id, y.base_valor, y.valor_alocado])).sort();
+    igual('as bases e os centavos do rateio', al(a), al(b));
+    contar('correção da data do rateio: bases conferidas');
   }
   if (e.event_type === 'VENDA') {
     const nomes = (x) => x.FINANCEIRO.map((f) => String(f.descricao || '').replace(/ da venda de \d\d\/\d\d\/\d{4}$/, '')).sort();
@@ -5961,6 +6287,18 @@ function oraculoPeriodo(cmd, A, S, pedidos) {
     const cancelou = a && a.status === 'ATIVO' && f.status !== 'ATIVO';
     if ((criou || cancelou) && ate && f.data_competencia && f.data_competencia <= ate) mexidos.push((criou ? 'criou ' : 'cancelou ') + (f.descricao || f.natureza) + ' de ' + f.data_competencia);
   });
+  // Fase 4, E4.3 (CONTRATOS, seção 57): o rateio que vale num lançamento na data do fechamento mudou (o rateio novo datado até ela, o
+  // estorno ou a correção de um rateio datado até ela).
+  if (ate && !mexidos.length) {
+    const fins = new Set();
+    S.t.RATEIOS.forEach((r) => { const e = S.ev.get(r.event_id); if (e && e.event_type === 'RATEIO') fins.add(r.financial_id); });
+    Array.from(fins).sort().forEach((fid) => {
+      if (mexidos.length) return;
+      const a = rateioModelo(A, fid, ate);
+      const b = rateioModelo(S, fid, ate);
+      if ((a ? a.rateio_id : null) !== (b ? b.rateio_id : null)) mexidos.push('rateio do lançamento ' + fid + ' em ' + ate);
+    });
+  }
   // Fase 4, E4.2 (RN-082; 03b, seção 11): a baixa dada, desfeita ou mudada com o pagamento (o de antes ou o de depois) até a
   // data do período fechado, de lançamento que já existia.
   if (ate && !mexidos.length) {

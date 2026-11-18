@@ -65,7 +65,7 @@ function replayCru(r) {
     const e = V.porId.get(l.event_id);
     return { animal: l.animal_id, ev: e.event_id, tipo: e.event_type, data: e.event_date, seq: e.event_seq, raiz: raiz(e), efeito: l.efeito_inventario, origem: l.pasto_origem_id || null, destino: l.pasto_destino_id || null, pre: e.pre_marco_zero === true };
   });
-  return { V, linhas, porAnimal: agrupar(linhas, 'animal') };
+  return { V, linhas, porAnimal: agrupar(linhas, 'animal'), raiz };
 }
 /** Inventário ao fim do dia D, por replay (sem Timeline): total = Σ efeitos; pasto = destino do último movimento. */
 function inventarioDe(linhas, D) {
@@ -139,8 +139,10 @@ function invariantesCruas(r) {
     ps.forEach((p) => { if (p.status === 'ABERTA' && (p.data_pagamento || p.valor_pago !== null || p.juros_multa !== null || p.desconto !== null)) out.push('5: parcela ABERTA com pagamento ' + p.parcela_id); });
     if (ps.length && ps.every((p) => p.status === 'ABERTA') && f.status_pagamento !== 'ABERTO') out.push('6: status_pagamento ' + f.status_pagamento + ' com parcelas abertas em ' + id);
     if (f.status !== 'ATIVO' || f.cancelado_por_event_id) out.push('20: lançamento vigente não está ATIVO: ' + id);
-    // 7: o rateio vigente é o do evento vigente de maior event_seq.
-    const rs = (rateios.get(id) || []).filter((x) => V.vig.get(x.event_id)).sort((a, b) => V.porId.get(b.event_id).event_seq - V.porId.get(a.event_id).event_seq);
+    // 7: o rateio vigente é o do evento vigente mais adiante na ordem: a posição da cadeia de substituição (desenho-base 16.1: a
+    // correção de um rateio fica no lugar dele; Fase 4, E4.3), depois o event_seq.
+    const ordem = (x) => { const e = V.porId.get(x.event_id); return [R.raiz(e), e.event_seq]; };
+    const rs = (rateios.get(id) || []).filter((x) => V.vig.get(x.event_id)).sort((a, b) => { const oa = ordem(a); const ob = ordem(b); return ob[0] - oa[0] || ob[1] - oa[1]; });
     const rv = rs[0] || null;
     rateioVigente.set(id, rv);
     const negocio = ev.event_type === 'COMPRA' || ev.event_type === 'VENDA';
