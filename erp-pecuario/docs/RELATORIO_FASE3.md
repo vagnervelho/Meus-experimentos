@@ -7,8 +7,8 @@ E3.7) e seção 8 (checklist). Relatório da fase anterior: `docs/RELATORIO_FASE
 
 - **O código da Fase 3 está completo no repositório** (`erp-pecuario/src/`: 26 arquivos `.js`, 13 `.html` e o
   manifesto; entraram o `WeightService`, o `Identificacao`, o `Correcao` e as telas `Weights`, `Health` e `Reproduction`) e
-  passou em todos os testes que rodam aqui, inclusive os das Fases 1 e 2: **`npm test` com «NT» testes, «NP» aprovados, «NF»
-  falhas** e **`npm run ui:check` com «UT» testes de navegador, «UP» aprovados, «UF» falhas** (execução desta etapa, 18/11/2026,
+  passou em todos os testes que rodam aqui, inclusive os das Fases 1 e 2: **`npm test` com 914 testes, 914 aprovados, 0
+  falhas** e **`npm run ui:check` com 212 testes de navegador, 212 aprovados, 0 falhas** (execução desta etapa, 18/11/2026,
   sobre o código final da segunda convergência; nesta etapa só mudaram documentos).
 - Pesagem, sanidade e reprodução são registradas no curral e viram indicadores: pesagem individual, coletiva e por lote,
   com o modo curral no celular; ganho médio diário (GMD), curva de peso e projeção rotulada; insumos com estoque
@@ -20,9 +20,9 @@ E3.7) e seção 8 (checklist). Relatório da fase anterior: `docs/RELATORIO_FASE
 - Cada tipo novo passa por **um tratador só** em todo caminho (registrar, simular, retroativo, mesmo dia, corrigir,
   corrigir o substituto, estornar, importar, desfazer, base de demonstração), e o que ele grava é conferido pela mesma
   função da verificação de integridade e da trava única (`AuditService.conferirDominio_`).
-- **Telas sob demanda (risco R-31).** A página inicial tem «PI_KB» de 450 KB («PI_B» bytes de 460.800: sobram «PI_SOBRA»;
+- **Telas sob demanda (risco R-31).** A página inicial tem 428 KB de 450 KB (438.227 bytes de 460.800: sobram 22.573;
   no fim da primeira convergência sobravam 45, e a segunda tirou da página inicial a prévia da correção montada no aparelho).
-  A importação e as três telas novas são pedidas ao servidor quando o menu as abre («SOB_DEMANDA», de 150 KB cada), e a Início
+  A importação e as três telas novas são pedidas ao servidor quando o menu as abre (Import 48 KB, Weights 64 KB, Health 24 KB e Reproduction 67 KB, de 150 KB cada), e a Início
   traz em segundo plano as do curral e do tronco. Que o quadro (iframe)
   do HtmlService rode a tela injetada é hipótese (NV): se não rodar, a contingência está pronta (seção 5, item 1).
 - **Nada foi implantado nem executado na conta Google do dono.** Continuam **PENDENTES NA CONTA DO DONO** os itens das
@@ -236,7 +236,7 @@ A soma confere com o total: 92 + 119 nos 15 novos + 1 em `movimentos` = 212.
 | Arquivo | Testes | Aprovados | Falhas | O que cobre |
 |---|---:|---:|---:|---|
 | `tests/ui/convergencia2.r1.test.js` | 11 | 11 | 0 | Rodada 1 da segunda convergência na tela: achados 5 (curral e tronco, sem `localStorage`), 6 (o formulário de registro), 12 e 12b (curral), 13 e 13b (curral e tronco), 14 e 17 (novo) |
-| `tests/ui/convergencia2.r2.test.js` | 11 | 11 | 0 | Rodada 2 da segunda convergência na tela: achados 7, 8, 14, 15 e 16 (curral e tronco), e os três do teste aleatório estendido (a semente 14 no curral e no tronco, a 95022) (novo) |
+| `tests/ui/convergencia2.r2.test.js` | 11 | 11 | 0 | Rodada 2 da segunda convergência na tela: achados 7 e 8; 14, 15 e 16 no curral e no tronco; e os defeitos que o teste aleatório estendido achou (a semente 14, no curral e no tronco, e a 95022, no tronco) (novo) |
 | `tests/ui/curral.fuzz.test.js` | 6 | 6 | 0 | Teste aleatório da tela do curral e do tronco (seções 6.6.4 e 6.6.7): as 6 sementes fixas (11 a 16) de 40 ações, com as falhas de rede decididas no Node, o oráculo a cada ação e, no fim, banco = modelo, integridade sem erro, projeção = reconstrução e nada no console; na segunda convergência, o gerador e o oráculo ampliados (o modo sem `localStorage`, o rascunho que falha ou chega atrasado, a recusa do servidor) |
 | `tests/ui/curral.fuzz.regressoes.test.js` | 11 | 11 | 0 | Os defeitos que o teste aleatório da tela achou: mudar a data com linha na fila (curral e tronco), a falha interna no reenvio de um bloco gravado, o "Está certo" com outro bloco no ar, sair e voltar com o envio no ar, a recusa da conferência no tronco e as pendentes do mesmo animal; na segunda convergência, as regressões 7 (o bloco só sai com a chave guardada) e 8 (a falha do rascunho avisa e vai de novo), no curral e no tronco (alterado: 7 → 11) |
 | `tests/ui/graficos.test.js` | 8 | 8 | 0 | Os gráficos a 360 e 1280 px: o componente, a ficha (aba Peso), o desempenho, a reprodução e a sanidade; SVG com título e descrição, os números do desenho iguais aos da tabela e do servidor, texto legível, sem rolagem horizontal, redesenho ao mudar a largura |
@@ -255,9 +255,10 @@ A soma confere com o total: 92 + 119 nos 15 novos + 1 em `movimentos` = 212.
 | `tests/ui/sobdemanda.test.js` | 4 | 4 | 0 | Importação sob demanda: pedida uma vez pelo menu, falha de rede com "Tentar de novo", endereço direto e menu da fase, outra versão do app no servidor (alterado na rodada 2: conta só os pedidos da tela Import, porque a Início traz as do curral e do tronco) |
 | **Soma dos 18 novos ou alterados** | **150** | **150** | **0** | |
 
-**Arquivos sem mudança desde a Fase 2**: `anexos` (1), `compra` (4), `eventos.fase2` (9), `importacao-periodo` (3), `importacao` (2), `lotacao` (4), `revisao1` (6), `revisao2` (6), `revisao3` (4), `revisao4` (4), `revisao5` (4), `telas` (12), `venda` (3) — soma 68. Conta: 118 + 68 = 186. Os apoios dos testes de navegador que
+**Arquivos sem mudança desde a Fase 2**: `anexos` (1), `compra` (4), `eventos.fase2` (9), `importacao-periodo` (3), `importacao` (2), `lotacao` (4), `revisao1` (6), `revisao2` (6), `revisao3` (4), `revisao4` (4), `revisao5` (4), `telas` (12), `venda` (3) — 13 arquivos, soma 62. Conta: 150 + 62 = 212. Os apoios dos testes de navegador que
 mudaram (`tests/ui/apoio.js`: `esperarServidor`, `enter` e a opção `servidor`; `tests/ui/mock-gas.js`: `emCurso`, `atrasar` e
-as respostas `{"__mock":"perdida"}` e `{"__mock":"transporte"}`) e o novo `tests/ui/apoio-curral.js` não declaram teste.
+as respostas `{"__mock":"perdida"}` e `{"__mock":"transporte"}`) e o `tests/ui/apoio-curral.js` (novo na primeira convergência,
+com a recusa na rede do teste e o rascunho que falha na segunda) não declaram teste.
 
 ### 2.3 Cenários da Fase 3 por nível
 
@@ -544,10 +545,11 @@ a 9, como cada uma diz.
    desmama e a identificação usam o formulário comum com o seletor, embora o catálogo ainda declare `modo_entrada: CURRAL`
    para elas (o cliente não usa esse campo). Dentro do curral não entraram "Colar brinco;peso" nem a grade "Todos do pasto"
    de 08, seção 5: o formulário comum da pesagem tem o seletor com "Todos do pasto", e a planilha entra pela importação.
-3. **Orçamento da página inicial**: 450 KB de 450 KB. Sobram **45 bytes** (eram 2.511 na entrega, 1.587 depois das
-   rodadas 2 e 3 e 41 depois do resolvedor). As telas das Fases 4 e 5 têm de nascer sob demanda, e o próximo conserto
-   que mexer na Início, nos eventos, nos pastos, na ficha ou nos componentes precisa liberar espaço antes, ou ir para uma
-   tela sob demanda.
+3. **Orçamento da página inicial**: 428 KB de 450 KB. Sobram **22.573 bytes**. Na entrega eram 2.511; depois das rodadas
+   2 e 3, 1.587; depois do resolvedor, 41; e depois da revisão final, 45. A segunda convergência tirou da página inicial a
+   prévia da correção montada no aparelho, porque a tela passou a só formatar a entrada do servidor. A margem deixou de ser
+   o aperto da fase, mas as telas das Fases 4 e 5 continuam tendo de nascer sob demanda: a página inicial guarda o que é
+   do uso diário.
 4. **Avisos e alertas que não existem**: `PESO_IMPLAUSIVEL` só na pesagem (os pesos da compra, da venda e do parto não são
    comparados com a pesagem anterior); nenhum alerta de animal sem pesagem há muito tempo (o peso vencido só aparece na
    lista e nas contas de lotação); a revisão do servidor no Registro mostra a reprodução, a desmama, a castração e a
