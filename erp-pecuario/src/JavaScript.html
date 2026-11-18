@@ -857,7 +857,7 @@ var Rascunhos = (function () {
     Object.keys(o || {}).forEach(function (k) { cfg[k] = o[k]; });
     modo = Util.armazem.disponivel() ? 'LOCAL' : 'SERVIDOR';
     gravarServidorAdiado = Util.adiar(function () { descarregarServidor_().catch(function (e) { Util.registrarFalha('rascunho no servidor', e); }); }, 1000);
-    tentarDeNovo = Util.adiar(function () { descarregarServidor_().catch(function (e) { Util.registrarFalha('rascunho no servidor, de novo', e); }); }, 5000);
+    tentarDeNovo = Util.adiar(function () { descarregarServidor_().catch(function (e) { Util.registrarFalha('rascunho no servidor', e); }); }, 5000);
     // Ao sair da página (recarga, aba em segundo plano), o que estiver pendente vai ao servidor na hora.
     var sair = function () {
       if (!Object.keys(pendentesServidor).length) return;

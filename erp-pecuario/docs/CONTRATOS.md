@@ -3663,3 +3663,133 @@ agora; o conserto está no ponto único (a linha da tabela B, ou a regra que só
   aceitos, 33.396 recusados e 0 falhas. O oráculo conferiu 36.975 correções sem mudança aceitas (21.907 pela entrada do servidor
   e 15.068 pela do gerador), 116 recusas da seção 50.6, 1.709.406 consultas comparadas antes e depois da correção sem mudança e
   19.320 correções de um campo aceitas (5.178 da data).
+
+## 51. O cliente não calcula (segunda convergência, etapa 2) — `tests/cliente.naocalcula.test.js`, `tests/apoio-naocalcula.js`; `FinancialService` (`vencimentos`), `Api` (`financeiro.vencimentos`), `Components` (`Registro`: "Dividir em parcelas"), `JavaScript` (`Fmt.instante`; `Fmt.diasEntre` saiu), `Animals`, `Import`, `Events` (a prévia da correção, seção 50), `Health` (a agenda pelo brinco da data)
+
+Desenho-base, seções 16 e 17: o aparelho não recalcula número nem data do rebanho — o servidor dá o número e a data prontos, num
+campo ou numa rota. A revisão final achava, rodada após rodada, uma tela que calculava no aparelho o que o servidor devia dar (a
+prévia da correção somando o intervalo para a próxima aplicação; a agenda trocando o brinco da data pelo de hoje). Esta seção
+troca o caso a caso por um teste que lê todo o código do aparelho.
+
+**O leitor (`tests/apoio-naocalcula.js`).** Os `<script>` de cada `src/*.html` viram tokens (textos, modelos, expressões
+regulares e comentários reconhecidos); cada token sabe a cadeia de funções nomeadas em que está. Duas regras:
+
+| Regra | Acusa | Não acusa |
+|---|---|---|
+| DATA | `Date.parse`, `Date.UTC`, `new Date(...)`, `getTime`, `setDate`/`getDate` e afins, o dia ou a hora em milissegundos (86400000, 3600000), as funções de dias (`diasEntre`, `somarDias`, `addDays`), o ano, o mês ou o dia tirados do texto da data para conta (`Number(d.slice(…))`) | o texto da data só remontado para mostrar (`v.slice(8, 10) + '/' + …`) |
+| NUMERO | a operação aritmética (`+ - * / %` e as compostas) em que um dos lados é número de domínio pelo nome: GMD, ganho, carência, UA, idade, dias, centavos, valor, total, peso, dose, custo, preço, quantidade, saldo, estoque, intervalo, prazo, lotação, área, taxa, média, cabeças, parcela, vencimento, arroba | a concatenação do rótulo (um dos lados é texto, modelo ou formatação `Fmt.*`), contar linhas (`.length`), a paginação (`por_pagina`) |
+
+**O que pode ficar** (a lista do teste, curta e com o porquê de cada entrada; o teste falha quando aparece conta fora dela E
+quando uma entrada deixa de ser usada): o desvio do relógio do aparelho para o do servidor (`Fmt.ajustarRelogio`: o "hoje" é o
+do servidor); a formatação de um instante no fuso da fazenda (`Fmt.partes_`, `Fmt.instante`); a leitura do que foi digitado (a
+data existe no calendário: `Fmt.ehData`); a formatação do peso na unidade escolhida (`Fmt.peso`, kg ou @) e dos centavos em reais
+(`Fmt.dinheiro`); o carimbo de quando o aparelho guardou a cópia local ou o rascunho (`Store.gravarCache_`, `Rascunhos.salvar`:
+metadado do aparelho); a ordenação das linhas da tabela (`UI.tabela`); e o desenho dos gráficos (`UI.barras_`, `UI.curvaPeso`:
+a posição no SVG pelos valores do servidor).
+
+**O que virou dado do servidor nesta etapa:**
+
+| Onde | Antes, no aparelho | Agora |
+|---|---|---|
+| "Dividir em parcelas" (compra, venda, lançamento financeiro) | `Registro.vencimentos`: somava 7, 15 ou 30 dias, ou um mês (o último dia do mês mais curto), à primeira parcela | rota `financeiro.vencimentos` (consulta): `{primeiro (yyyy-MM-dd), quantas (1 a 120), intervalo: MES \| D30 \| D15 \| D7}` → `{datas}`; MES = `Utils.somaMeses`, os demais `Utils.somaDias`; recusa VALIDATION com o campo (`primeiro`, `quantas`, `intervalo`); sem sinal, a folha diz que os vencimentos vêm do servidor e não divide |
+| `Fmt.diasEntre` | a diferença de datas (sem uso nas telas) | saiu |
+| "Dados de …" nos arquivos exportados e na faixa sem conexão | `new Date(ms).toISOString()` no aparelho para formatar | `Fmt.instante(ms)` (aceita milissegundos) |
+| A prévia da correção da sanidade (próxima aplicação) | somava o intervalo do protocolo à data da aplicação | seção 50: a prévia só formata a entrada do servidor (`evento.obter` → `correcao`) |
+| A agenda sanitária | o brinco de hoje do animal | o brinco da data, do servidor (`x.brinco`), com o de hoje entre parênteses (seção 49) |
+
+O teste também confere que o leitor acusa os casos que começaram a regra (a próxima aplicação somada, o GMD, o total em dinheiro, o
+ano tirado do texto, a carência, a UA) e não acusa o rótulo, a contagem de linhas, a paginação e o modelo de texto (autoteste), e
+que nenhuma tela de domínio (`Events`, `Health`, `Weights`, `Reproduction`, `Animals`, `Pastures`, `Dashboard`, `Import`,
+`Settings`) tem achado.
+
+**Limite do leitor.** Ele lê nomes: uma conta com variáveis de nome neutro (`a * b`) passa. Por isso a regra vale também na
+revisão (desenho-base, seção 17), e a lista do que pode ficar não cresce calada.
+
+## 52. Curral e tronco sem estado escondido (segunda convergência, etapa 2) — `Weights` (curral), `Reproduction` (tronco), `JavaScript` (`Rascunhos`: tentar de novo, `aoGuardar`; `App`: a faixa da falha do rascunho em qualquer tela); `tests/ui/curral.fuzz.test.js`, `tests/ui/apoio-curral.js`, `tests/ui/curral.fuzz.regressoes.test.js`
+
+A seção 48 pôs o curral e o tronco sob um teste aleatório contra um modelo. A revisão seguinte ainda achou estados que o gerador
+não criava. Esta etapa amplia o gerador e o oráculo para eles e conserta pela causa o que apareceu.
+
+### 52.1 A regra nova: o bloco só sai com a chave guardada
+
+A garantia "nada gravado duas vezes" (seção 48) supõe que a chave do bloco está no rascunho antes de o bloco sair. Com
+localStorage, a gravação é síncrona. Sem ele (o rascunho no servidor, SP-06), `guardar(c, {imediato: true})` pode falhar
+(transporte, falha interna, servidor ocupado, sem resposta). Antes, a falha só punha uma faixa e o bloco saía assim mesmo: se a
+página fosse embora antes de o rascunho chegar ao servidor, a página nova lia a linha sem a chave, e ela saía com outra chave —
+gravada duas vezes. Agora:
+
+- o bloco que ainda não saiu (NOVO, ou AVISO com o aviso aceito) e cuja chave não ficou guardada NÃO sai: volta a NOVO, com a
+  chave, as linhas na fila e o porquê na área de status (`[data-nao-guardado]`: "O envio de N pesagens não saiu: não foi
+  possível guardá-lo antes (…). Toque em "Enviar" de novo."), e o envio para ali (`SEM_SINAL`);
+- o bloco que já saiu antes (ENVIANDO ou SEM_SINAL: a chave foi guardada na primeira saída) sai de novo com ela, mesmo que a
+  gravação do rascunho falhe agora;
+- `guardar`/`guardarTronco` devolvem `{falhou: erro}` em vez de engolir a falha.
+
+### 52.2 O rascunho no servidor que falha avisa em qualquer tela e vai de novo sozinho
+
+Antes, a falha do envio ADIADO do rascunho ao servidor (1 s depois da mudança) só era ouvida pelo formulário de registro
+(`Registro`): no curral e no tronco ninguém avisava, e o rascunho só ia de novo na próxima mudança da tela (o servidor ficava com
+o rascunho velho, e a página que fosse embora perdia o que não chegou). Agora `App` ouve `Rascunhos.aoFalhar` em qualquer tela (a
+faixa `rascunho-falhou`) e `Rascunhos.aoGuardar` (a faixa sai quando nenhum rascunho ficou com falha); e `Rascunhos` tenta de
+novo sozinho 5 s depois de cada falha (`Util.adiar`, sem acumular).
+
+### 52.3 O gerador novo
+
+Além do que a seção 48 descreve:
+
+- **O modo do rascunho**: `FUZZ_MODO=semLS` (o rascunho no servidor) ou `comLS` fixa o modo em todas as sementes; sem ele, 25%
+  das sementes rodam sem localStorage (o sorteio de antes). Sem localStorage, a rede do teste também faz o rascunho falhar
+  (segurado, transporte, falha interna, servidor ocupado, a resposta perdida depois de gravar, o pedido perdido) e a página ir
+  embora de repente (`recarregarBrusco`: o envio do rascunho ao sair falha no transporte, e a página nova lê o rascunho do
+  servidor).
+- **A data passada com o brinco trocado ou reaproveitado depois**: as datas da sessão pesam mais nos dias das trocas do 0457
+  (11/11 e 12/11) e antes delas (04/11).
+- **"Substituir o peso" e o diagnóstico repetido com a linha anterior em qualquer estado** (`repetir`): o operador digita de novo o
+  brinco de uma linha da sessão — na fila, num bloco no ar, sem confirmação, gravado, com aviso ou recusado, ou a pendente sem
+  sinal.
+- **Brinco conferido no campo e ainda não lançado + "Mudar"**: metade das mudanças de sessão vem depois de um brinco conferido e
+  não lançado; às vezes a resposta da conferência fica no ar e chega na sessão nova; às vezes o mesmo brinco é lançado de novo na
+  sessão nova.
+- **A pendente sem sinal**: o sinal cai para várias conferências seguidas (`semSinal`); a pendente é resolvida depois pela
+  conferência do mesmo brinco (que pergunta junto as pendentes) ou por "Conferir os brincos pendentes", ou barrada por outra linha
+  do mesmo animal.
+
+### 52.4 O oráculo novo
+
+Além do da seção 48, a cada ação:
+
+- **Nenhuma ação na tela altera um bloco no ar ou gravado**: nenhuma linha dele oferece "Tirar", "Corrigir o peso", "Corrigir o
+  resultado", "Corrigir o brinco" ou "Está certo"; e as linhas dele (o animal e o valor) são as mesmas da hora em que saiu, até a
+  resposta do servidor. O bloco que volta sem resposta do servidor só é aceito quando nenhum pedido com a chave dele saiu (52.1),
+  e então a tela diz por quê.
+- **Tudo o que a tela mostra do animal é o que o servidor deu para a data da sessão**: cada linha começa pelo brinco daquele dia
+  (ou o código do animal sem brinco), com o de hoje entre parênteses; a mensagem do servidor na linha (o aviso, a recusa) nomeia o
+  animal pelo brinco daquele dia; a conferência depois do Enter mostra o brinco, a categoria e o pasto do servidor na data (o
+  estado vem de `animal.resolver` com `ids`, fora da rede da página; os animais em que outro usuário mexeu ficam de fora da
+  conferência, porque o aparelho guarda a resposta de antes); "Corrigir o resultado" põe no campo o texto digitado na linha.
+- **O aviso de substituição em todo caminho que substitui**: no tronco, o diagnóstico repetido ainda do aparelho e "Corrigir o
+  resultado" mostram "o novo resultado substituiu o anterior"; no curral, a pergunta do repetido diz "Substituir pelo peso novo".
+- **A pendente com resposta**: depois de "Conferir os brincos pendentes" com o servidor respondendo, só fica pendente a linha cujo
+  texto o servidor não acha (ou acha fora do rebanho na data) ou a barrada por outra linha do mesmo animal ainda do aparelho.
+- **Sem localStorage**: o rascunho do servidor é o estado da tela antes de recarregar, sair e terminar (lido fora da rede da
+  página); o rascunho que falhou tem a faixa na tela; a página que foi embora de repente recarrega exatamente o rascunho do
+  servidor (o modelo adota o que não chegou como perdido — e uma linha perdida assim nunca pode estar gravada).
+- A recusa que chega enquanto o rascunho assenta (antes de "Terminar") aparece antes de o operador decidir.
+
+### 52.5 Regressões (`tests/ui/curral.fuzz.regressoes.test.js`)
+
+Os testes 7 e 8 (curral e tronco, sem localStorage) falham com o `src/` de antes da etapa (commit `8b6b4c3`) e passam agora:
+
+- 7: com o rascunho no servidor falhando, "Enviar" não manda nada ao servidor (a linha volta à fila, com o porquê e a faixa); a
+  página vai embora de repente; a página nova tem a linha na fila; "Enviar" grava uma vez, com uma chave só;
+- 8: a falha do rascunho adiado põe a faixa no curral e no tronco; sem outra mudança na tela, o rascunho vai de novo sozinho, a
+  faixa sai e o rascunho do servidor é o da tela.
+
+### 52.6 Decisões
+
+- A pergunta da conferência leva junto as pendentes sem sinal (seção 49); sem resposta dela, a linha nova fica pendente mesmo
+  que o texto digitado já fosse conhecido do aparelho — a decisão do repetido (substituir ou outra pesagem) espera as pendentes,
+  para não depender de qual resposta chega primeiro. O modelo do teste segue a mesma regra.
+- Depois de a página ir embora de repente sem localStorage, a confirmação que não chegou ao rascunho do servidor volta a ser
+  incerta: o bloco gravado que o rascunho ainda diz "enviando" aparece "sem confirmação" e é conferido pela chave (nunca sai com
+  outra). O que foi digitado e não chegou ao servidor se perde — a faixa já pedia "não feche a tela antes de enviar".

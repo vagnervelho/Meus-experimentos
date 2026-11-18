@@ -31,8 +31,15 @@
  * Nada depende do tempo real (as sementes se repetem): a nova tentativa do servidor ocupado, o prazo de 45 s da resposta perdida e a
  * resposta segurada há 6 ações são andados pelo próprio teste (o relógio da página, `avancar`).
  *
+ * Segunda convergência, etapa 2 (CONTRATOS, seção 52): o modo sem localStorage com o rascunho no servidor falhando e a página
+ * que vai embora de repente; a data passada com o brinco trocado ou reaproveitado depois; o brinco repetido com a linha anterior
+ * em qualquer estado; o brinco conferido e não lançado antes de "Mudar" (com a resposta chegando na sessão nova); a pendente sem
+ * sinal resolvida depois ou barrada. O oráculo confere também que nenhuma ação altera um bloco que saiu e que tudo o que a tela
+ * mostra do animal (a linha, a mensagem do servidor, a conferência) é o que o servidor deu para a data da sessão.
+ *
  * `npm run ui:check` roda as sementes fixas (poucas). FUZZ_SEMENTES=N roda N sementes a partir de FUZZ_INICIO (padrão 1);
- * FUZZ_ACOES muda as ações por semente (padrão 40); FUZZ_TELA=curral|tronco fixa a tela; FUZZ_LOG=1 imprime cada ação.
+ * FUZZ_ACOES muda as ações por semente (padrão 40); FUZZ_TELA=curral|tronco fixa a tela; FUZZ_MODO=semLS|comLS fixa o modo do
+ * rascunho; FUZZ_LOG=1 imprime cada ação.
  */
 const test = require('node:test');
 const A = require('./apoio');
@@ -263,6 +270,10 @@ async function rodarSemente(semente, nAcoes, opcoes) {
         const rot = dom.texto.split(' · ')[1] || '';
         if (esperado && rot !== esperado && rot.indexOf(esperado + ' (hoje ') !== 0) e('a linha ' + l.uid + ' mostra o animal como "' + rot + '"; em ' + c.sessao.data + ' o servidor dá o brinco ' + esperado + ': "' + dom.texto + '"');
         else conta('rotulo:conferido');
+        // A mensagem do servidor na linha (o aviso, a recusa) nomeia o animal pelo brinco daquele dia (o de hoje entre parênteses).
+        const mm = (l.estado === 'AVISO' || l.estado === 'ERRO') && l.mensagem && !l.jaGravada ? /^(\S+)(?: \(hoje [^)]*\))?: /.exec(l.mensagem) : null;
+        if (mm && esperado && mm[1] !== esperado) e('a mensagem da linha ' + l.uid + ' nomeia o animal como ' + mm[1] + '; em ' + c.sessao.data + ' o brinco é ' + esperado + ': "' + l.mensagem + '"');
+        else if (mm) conta('mensagem:brincoDaData');
         if (est && est.brinco_hoje !== est.brinco && est.brinco && c.sessao.data !== HOJE) conta('rotulo:brincoTrocado');
       });
       // As linhas são as do modelo, na ordem e com o valor digitado.
@@ -485,7 +496,11 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     if (rec.length) falhar(rec.join('\n  - '));
     const D = M.sessao.data;
     // O que o servidor disse ao resolvedor nesta ação (ou a resposta guardada no aparelho).
-    const pedidos = rede.log.slice(nResolverAntes).filter((r) => r.rota === 'animal.resolver' && (r.textos || []).indexOf(texto.trim()) >= 0);
+    // A conferência pergunta o texto junto com as pendentes sem sinal (a resposta guardada no aparelho não vai de novo): sem a
+    // resposta dessa pergunta, a linha fica pendente — mesmo com o texto já conhecido, a decisão do repetido espera as pendentes.
+    const daAcao = rede.log.slice(nResolverAntes).filter((r) => r.rota === 'animal.resolver');
+    const doTexto = daAcao.filter((r) => (r.textos || []).indexOf(texto.trim()) >= 0);
+    const pedidos = doTexto.length ? doTexto : daAcao;
     const semResposta = pedidos.length && pedidos.every((r) => !r.entregue || !r.resposta.ok);
     const rr = resolverModelo(texto.trim(), D);
     let alvo = rr;
@@ -880,6 +895,9 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     await assentarRascunho();
     v = await lerTela(page, tela);
     anotarChaves(v.c);
+    // A resposta que chegou enquanto o rascunho assentava aparece antes de o operador decidir terminar.
+    const rec = recusasNaTela(v);
+    if (rec.length) falhar(rec.join('\n  - '));
     const c = v.c;
     const incertas = c.linhas.some((l) => l.estado === 'SEM_SINAL' || l.estado === 'ENVIANDO');
     const naoGravadas = c.linhas.filter((l) => l.estado !== 'GRAVADA');
@@ -1126,7 +1144,7 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     s.conferirProjecoes('semente ' + semente);
     // Sem localStorage, o aviso de que o armazenamento do aparelho não está disponível é esperado (o rascunho vai ao servidor).
     // E a falha registrada da gravação do rascunho no servidor que a rede do teste segurou além do prazo (a faixa avisa o operador).
-    const errosConsole = a.estado.erros.filter((x) => !(semLS && /armazenamento local indisponível|\[ERP\] rascunho no servidor(, de novo| ao sair)?: /.test(x)));
+    const errosConsole = a.estado.erros.filter((x) => !(semLS && /armazenamento local indisponível|\[ERP\] rascunho no servidor( ao sair)?: /.test(x)));
     if (errosConsole.length) falhar('erros no console: ' + errosConsole.join(' | '));
     cont.gravadas = (cont.gravadas || 0) + gravadas.size;
     cont.sementes = (cont.sementes || 0) + 1;

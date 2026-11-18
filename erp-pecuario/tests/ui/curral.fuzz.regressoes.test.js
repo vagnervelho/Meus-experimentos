@@ -15,6 +15,12 @@
  *     outra sair; agora ela continua esperando e entra na fila quando a outra é tirada. (Revisão final da Fase 3, achado 13: a
  *     sequência mudou para a de duas pendentes resolvidas juntas, a única em que a barreira ainda aparece — a conferência de um
  *     brinco resolve as pendentes na mesma pergunta, antes da decisão, e o resultado não depende mais da ordem das respostas.)
+ * Etapa 2 da segunda convergência (CONTRATOS, seção 52), sem localStorage (o rascunho no servidor, SP-06):
+ *  7. A chave do bloco não ficava guardada (o rascunho no servidor falhou) e o bloco saía assim mesmo: recarregada a página, a
+ *     linha voltava sem a chave, saía com outra e gravava duas vezes; agora o bloco só sai com a chave guardada (curral e tronco).
+ *  8. A falha do rascunho no servidor adiado não aparecia no curral nem no tronco (só o formulário de registro ouvia) e não ia de
+ *     novo sozinha: o rascunho do servidor ficava velho até a próxima mudança; agora a faixa avisa em qualquer tela e o envio
+ *     tenta de novo em 5 s.
  * Roda por `npm run ui:check`.
  */
 const test = require('node:test');
@@ -24,10 +30,10 @@ const { HOJE, RELOGIO, MSG_FALHA_INTERNA, T, montarSistema, novaRede, lerTela, e
 
 test.after(() => A.fecharBrowser());
 
-async function abrir(tela) {
+async function abrir(tela, o) {
   const sis = montarSistema();
   const rede = novaRede(sis.s);
-  const a = await A.abrir(sis.s, { largura: 360, hash: T[tela].hash, relogio: RELOGIO, servidor: rede.servidor });
+  const a = await A.abrir(sis.s, { largura: 360, hash: T[tela].hash, relogio: RELOGIO, servidor: rede.servidor, semLocalStorage: !!(o && o.semLocalStorage) });
   await A.esperarTela(a.page, T[tela].titulo);
   return Object.assign({ sis, rede, tela, cfg: T[tela] }, a);
 }
@@ -218,3 +224,67 @@ test('regressão 6 (tronco): a linha pendente barrada por outra do mesmo animal 
   assert.deepEqual(x.estado.erros, []);
   await x.fechar();
 });
+
+const rascunhoServidor = (x) => { const r = x.sis.s.api({ rota: 'rascunho.obter', dados: { chave: 'r.' + x.cfg.rascunho } }); return r.data.existe ? r.data.conteudo : null; };
+
+for (const tela of ['curral', 'tronco']) {
+  test('regressão 7 (' + tela + ', sem localStorage): o bloco só sai com a chave guardada no rascunho do servidor — a página que vai embora de repente não grava a linha duas vezes', async () => {
+    const x = await abrir(tela, { semLocalStorage: true });
+    const { page, rede } = x;
+    await comecar(x);
+    await lancar(x, '0520', tela === 'curral' ? '430' : 'p');
+    // O rascunho adiado (1 s) chega ao servidor com a linha na fila, ainda sem bloco.
+    await page.clock.fastForward(1500);
+    await parar(x);
+    assert.deepEqual(rascunhoServidor(x).linhas.map((l) => [l.estado, l.bloco || null]), [['FILA', null]]);
+    // O rascunho no servidor passa a falhar; o operador envia.
+    for (let i = 0; i < 3; i++) rede.falhas.push({ classe: 'rascunho', tipo: 'transporte' });
+    await page.click('[data-enviar]');
+    await parar(x);
+    let v = await lerTela(page, tela);
+    assert.equal(rede.log.filter((r) => r.rota === 'evento.registrar').length, 0, 'sem a chave guardada, nada sai para o servidor');
+    assert.deepEqual(v.c.linhas.map((l) => l.estado), ['FILA'], 'a linha volta à fila, com a chave do bloco');
+    assert.equal(v.naoGuardado.length, 1, 'a tela diz por que não saiu');
+    assert.ok(v.faixaRascunho, 'e avisa que o rascunho não foi guardado');
+    // A página vai embora de repente, com o rascunho ainda falhando: a página nova lê o rascunho do servidor.
+    rede.falhas = [];
+    rede.rascunhoBloqueado = true;
+    await page.reload();
+    await A.esperarTela(page, x.cfg.titulo);
+    rede.rascunhoBloqueado = false;
+    await parar(x);
+    v = await lerTela(page, tela);
+    assert.deepEqual(v.c.linhas.map((l) => l.estado), ['FILA']);
+    await page.click('[data-enviar]');
+    await page.waitForSelector('.curral-lista [data-estado="GRAVADA"]', { timeout: 15000 });
+    assert.equal(linhasDoBanco(x).length, 1, 'gravada uma vez');
+    assert.equal(new Set(rede.log.filter((r) => r.rota === 'evento.registrar').map((r) => r.chave)).size, 1, 'uma chave só');
+    assert.equal(x.sis.s.integridade().erros, 0);
+    await x.fechar();
+  });
+
+  test('regressão 8 (' + tela + ', sem localStorage): a falha do rascunho adiado no servidor aparece na tela e o rascunho vai de novo sozinho', async () => {
+    const x = await abrir(tela, { semLocalStorage: true });
+    const { page, rede } = x;
+    await comecar(x);
+    await page.clock.fastForward(1500);
+    await parar(x);
+    for (let i = 0; i < 3; i++) rede.falhas.push({ classe: 'rascunho', tipo: 'transporte' });
+    await lancar(x, '0520', tela === 'curral' ? '430' : 'p');
+    await page.clock.fastForward(1500);
+    await parar(x);
+    let v = await lerTela(page, tela);
+    assert.equal(v.situacaoRascunho && v.situacaoRascunho.estado, 'FALHOU');
+    assert.ok(v.faixaRascunho, 'a faixa avisa no ' + tela + ' (antes, só no formulário de registro)');
+    assert.deepEqual(rascunhoServidor(x).linhas, [], 'o servidor ainda tem o rascunho de antes');
+    // Sem outra mudança na tela, o rascunho vai de novo sozinho.
+    rede.falhas = [];
+    await page.clock.fastForward(6000);
+    await parar(x);
+    v = await lerTela(page, tela);
+    assert.equal(v.situacaoRascunho.estado, 'GUARDADO');
+    assert.ok(!v.faixaRascunho, 'guardado, a faixa sai');
+    assert.deepEqual(rascunhoServidor(x).linhas.map((l) => l.uid), v.c.linhas.map((l) => l.uid), 'o rascunho do servidor é o da tela');
+    await x.fechar();
+  });
+}
