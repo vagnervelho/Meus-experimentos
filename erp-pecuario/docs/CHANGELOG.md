@@ -2335,6 +2335,14 @@ terminou (7 altos). Esta etapa não mudou código.
 - Testes existentes ajustados ao contrato novo, sem afrouxar o que conferem: `tests/sanidade.test.js` (o payload com as marcas
   `quantidade_informada` e `carencia_informada`), `tests/pesagem.test.js` (a linha "média do lote" sem o lote também é o método
   diferente do das outras linhas: dois achados), `tests/correcao.regressoes.test.js` (a carência copiada do produto vem em branco na
-  entrada; a desmama do bezerro que já estava no pasto informado grava o pasto com origem = destino),
+  entrada; a desmama do bezerro que já estava no pasto informado grava o pasto com origem = destino), `tests/manejo.test.js` (a
+  mesma desmama: a linha com origem = destino, e o bezerro continua no pasto),
   `tests/ui/sanidade.test.js` (a aplicação dos pendentes deixa a carência em branco; a revisão mostra a do produto) e
   `tests/ui/reproducao.test.js` (sem o filtro da estação, o diagnóstico abre sem estação).
+- Levas com o código final: teste aleatório de domínio, 300 sementes novas × 100 passos (7700000 a 7700299): 18.273 aceitos,
+  9.577 recusados, 0 falhas (11.574 correções sem mudança e 4.401 mudanças de um campo conferidas; 206 conferências de
+  `INDICADORES:DONO`; 2.299.599 unidades da viagem no tempo; 185.786 textos do resolvedor). Teste aleatório do curral e do
+  tronco, 40 ações: 50 sementes sem localStorage (95000 a 95049) e 50 com (96000 a 96049), 0 falhas (36 recusas do servidor à
+  conferência geradas; 225 rótulos de recusada e 186 de barrada conferidos; 82 "Terminar" sem localStorage com o rascunho do
+  servidor apagado e 33 com a remoção sem confirmação, avisada). `npm test`: 914 testes, 0 falhas. `npm run ui:check`: 212
+  testes, 0 falhas; a página inicial com 428 KB de 450 KB.

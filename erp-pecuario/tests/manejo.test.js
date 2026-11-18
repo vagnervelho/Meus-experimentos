@@ -91,9 +91,12 @@ test('desmama (03b, 3.4 e 16.14): os bezerros com o peso e o pasto de destino �
   e = recusa(api(s, 'evento.registrar', desmama('2026-09-05', [n53]), 'x3'), 'VALIDATION');
   assert.deepEqual(cods(e), ['FORA_DA_PERMANENCIA', 'ANTES_DO_NASCIMENTO']);
   assert.equal(animal(s, ids['100']).cria_ao_pe, true, 'a cria nova está ao pé');
-  // O pasto de destino igual ao atual não move; pasto desativado não recebe.
+  // O pasto de destino igual ao atual não move (o bezerro continua no A); pasto desativado não recebe. O pasto informado fica
+  // gravado na linha, com origem = destino (CONTRATOS, seção 54, achado 4: a linha do tempo confere a origem, e o fato que o
+  // tiraria dele naquele dia é recusado).
   const d53 = ok(api(s, 'evento.registrar', desmama('2026-09-12', [n53], { pasto_destino_id: PASTOS.A }), 'd53'));
-  assert.deepEqual(tab(s, 'EVENTO_ANIMAIS', { event_id: d53.event_id, animal_id: n53 }).map((l) => [l.pasto_origem_id || null, l.pasto_destino_id || null]), [[null, null]]);
+  assert.deepEqual(tab(s, 'EVENTO_ANIMAIS', { event_id: d53.event_id, animal_id: n53 }).map((l) => [l.pasto_origem_id || null, l.pasto_destino_id || null]), [[PASTOS.A, PASTOS.A]]);
+  assert.equal(animal(s, n53).pasto_atual_id, PASTOS.A, 'o bezerro não mudou de pasto');
   semErro(s, 'desmama');
 });
 

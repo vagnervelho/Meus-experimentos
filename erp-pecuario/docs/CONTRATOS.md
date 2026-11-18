@@ -3958,7 +3958,7 @@ oráculo que deixou o defeito passar foi estendido (53.3).
   tempo comparou 2.031.536 unidades; o resolvedor conferiu 169.967 textos. A primeira tentativa (o mesmo intervalo, com o
   oráculo de antes) parou na semente 7600019 (53.3), refeita do começo.
 
-## 54. Conserto da rodada 2 da segunda convergência — `ReproductionService` (o dono do aborto, a exposição em curso na previsão, `abortos` nos indicadores), `AuditService` (o cabeçalho da aplicação e o método da pesagem e da desmama na mesma linha do lançamento, a dose × a base do rateio e a soma das doses, o lote da saída, o rateio × o modo; a trava recusa a correção sobre o que ela lê quebrado: `lidaPelaCorrecao`), `Correcao` (as marcas do digitado nos valores congelados; a certeza apagada junto fora da entrada; `MUDANCA_SEM_ITEM`; a venda por cabeça congelada; o pasto do parto só de natimorto), `EventService` (o payload `quantidade_informada`, `carencia_informada`, `fabricante_informado`, `proxima_informada` e `pasto_destino_id` do parto sem cria viva; o intervalo do protocolo congelado também com a próxima digitada; o pasto informado da desmama gravado com o bezerro já nele; a raça da ficha mantida na correção; as mensagens do par do dado e da certeza), `FinancialService` (`bases_congeladas` 'CABECAS'), `EventCatalog` (a ajuda da carência), `Components` (`preencherDoProduto_`: trocar o produto, o modo ou o protocolo troca o que veio do anterior; a carência fica com o servidor), `Health` (a aplicação dos pendentes sem a carência), `Reproduction` (a estação do diagnóstico pelo filtro; o tronco: a recusa do servidor, a barrada, o "Terminar"), `Weights` (o curral: o mesmo), `JavaScript` (`Rascunhos`: a falha só de remoção avisa a remoção); `tests/convergencia2.r2.test.js`, `tests/ui/convergencia2.r2.test.js`, `tests/apoio-fuzz.js`, `tests/ui/curral.fuzz.test.js`
+## 54. Conserto da rodada 2 da segunda convergência — `ReproductionService` (o dono do aborto, a exposição em curso na previsão, `abortos` nos indicadores), `AuditService` (o cabeçalho da aplicação e o método da pesagem e da desmama na mesma linha do lançamento, a dose × a base do rateio e a soma das doses, o lote da saída, o rateio × o modo; a trava recusa a correção sobre o que ela lê quebrado: `lidaPelaCorrecao`), `Correcao` (as marcas do digitado nos valores congelados; a certeza apagada junto fora da entrada; `MUDANCA_SEM_ITEM`; a venda por cabeça congelada; o pasto do parto só de natimorto), `EventService` (o payload `quantidade_informada`, `carencia_informada`, `fabricante_informado`, `proxima_informada` e `pasto_destino_id` do parto sem cria viva; o intervalo do protocolo congelado também com a próxima digitada; o pasto informado da desmama gravado com o bezerro já nele; a raça da ficha mantida na correção; as mensagens do par do dado e da certeza), `FinancialService` (`bases_congeladas` 'CABECAS'), `EventCatalog` (a ajuda da carência), `Components` (`preencherDoProduto_`: trocar o produto, o modo ou o protocolo troca o que veio do anterior; a carência fica com o servidor), `Health` (a aplicação dos pendentes sem a carência), `Reproduction` (a estação do diagnóstico pelo filtro; o tronco: a recusa do servidor, a barrada, o "Terminar", a volta à fila guardada, a marca `naoEntra` limpa), `Weights` (o curral: o mesmo, e o "Corrigir o brinco" recusado), `JavaScript` (`Rascunhos`: a falha só de remoção avisa a remoção); `tests/convergencia2.r2.test.js`, `tests/ui/convergencia2.r2.test.js`, `tests/apoio-fuzz.js`, `tests/ui/curral.fuzz.test.js`, `tests/ui/apoio-curral.js` (a recusa na rede do teste)
 
 Depois da rodada 1 da segunda convergência, a revisão achou 17 problemas (7 altos), das mesmas duas classes: o fato congelado na
 correção (o valor que o original copiou, derivou ou recebeu digitado, refeito pelo estado de hoje ou pela entrada errada) e
@@ -4058,3 +4058,35 @@ consumo): a verificação confere a cópia contra a fonte, e o dado que só exis
   mexida foi a base): o dono restaura o backup ou estorna e lança de novo.
 - A linha "recusada pelo servidor" do curral e do tronco sai da espera: o operador a tira, corrige o brinco ou muda a data (a
   conferência na data nova a refaz).
+
+### 54.5 As levas
+
+- Teste aleatório de domínio, com o código final (7700000 a 7700299, 300 sementes × 100 passos, 3 processos, ~37 min cada):
+  18.273 aceitos, 9.577 recusados, 0 falhas. O oráculo da correção aceitou 11.574 correções sem mudança (6.841 pela entrada do
+  servidor, 4.733 pela do gerador; 43 recusas documentadas) e 4.401 mudanças de um campo (1.603 da data; 12 da dose por kg; 7
+  dados tirados da correção de cadastro; 6 doses digitadas por peso; 112 pastos de crias na correção da data do parto, 47
+  digitados e 65 pela mãe na data nova; 7 aplicações pelo intervalo congelado do protocolo; 190 próximas aplicações conferidas
+  na correção tardia) e comparou 551.032 consultas; os indicadores contaram cada registro numa estação só em 206 conferências
+  (`INDICADORES:DONO`), com 4.800 estações conferidas; 22 desmamas gravaram o pasto informado com o bezerro já nele; a agenda
+  conferiu 118.323 vencimentos no início do protocolo e 254.627 pendências; a viagem no tempo comparou 2.299.599 unidades; o
+  resolvedor conferiu 185.786 textos.
+- Teste aleatório do curral e do tronco, com o código e o oráculo finais, 40 ações por semente (2 processos, em paralelo):
+  50 sementes sem localStorage (95000 a 95049) e 50 com localStorage (96000 a 96049), 0 falhas. Sem localStorage: 2.398
+  verificações, 762 linhas gravadas, 1.744 blocos conferidos intocados, 260 rascunhos do servidor conferidos com a tela, 82
+  "Terminar" com o rascunho do servidor apagado depois e 33 com a remoção sem confirmação (avisada, a sessão continua), 16 recusas
+  do servidor à conferência (10 no lançamento, 1 nas pendentes), 148 rótulos de recusada, 83 de barrada e 335 de pendente sem
+  sinal conferidos, 44 "Corrigir o brinco" (18 barrados, 6 com o aviso de pesar de novo), 2 blocos que não saíram por falta da
+  chave guardada, 39 páginas que foram embora de repente (15 perderam o que não tinha chegado ao servidor) e 5 recusadas tiradas
+  no fim. Com localStorage: 2.345 verificações, 811 linhas gravadas, 1.955 blocos conferidos intocados, 20 recusas à conferência
+  (14 no lançamento, 1 no "Corrigir o brinco"), 77 rótulos de recusada, 103 de barrada e 205 de pendente, 36 "Corrigir o brinco"
+  (18 barrados, 4 com o aviso) e 3 recusadas tiradas no fim. As 6 sementes fixas (11 a 16) passam com a sequência nova.
+- Paradas no caminho, todas refeitas do começo depois do conserto: a primeira leva sem localStorage (93000…) parou na semente 93000
+  (o oráculo do rótulo da barrada, 54.3); com a recusa gerada, as sementes fixas pararam na 14 (o bloco que não saiu, 54.1); a
+  leva seguinte sem localStorage parou na 95015 (o fim exigia resolver a recusada, 54.3) e na 95022 (a marca `naoEntra` velha,
+  54.1). As levas de antes da recusa gerada (93000 a 93049 sem localStorage, 50/50) não contam como as do código final.
+- `npm test` com o código final: 914 testes, 914 passam, 0 falhas (~18 min, em paralelo com o teste aleatório do curral).
+  `npm run ui:check`: 212 testes de navegador, 212 passam (~8,6 min); 13 arquivos .html dentro do orçamento — a página inicial
+  montada com 428 KB de 450 KB (as mudanças da tela da página inicial, em `Components` — a troca do produto na aplicação —, cabem
+  nela); sob demanda, Import 48 KB, Weights 64 KB, Health 24 KB e Reproduction 67 KB, de 150 KB cada. A primeira execução do
+  `ui:check`, em paralelo com o `npm test`, parou num teste de tempo da importação de pesagens (1280 px, "Buscando as linhas…" na
+  hora da leitura; nenhum arquivo dele mudou nesta rodada); sozinho ele passa, e a execução seguinte passou inteira.
