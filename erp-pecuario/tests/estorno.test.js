@@ -229,6 +229,11 @@ const CASOS = [
     registrar: (x) => ({ tipo: 'OCORRENCIA', campos: { event_date: '2026-03-01', tipo_ocorrencia: 'LESAO', description: 'Ferida na pata' }, animais: [{ animal_id: x.ids.f1 }] }),
     corrigir: (x) => ({ tipo: 'OCORRENCIA', campos: { event_date: '2026-03-01', tipo_ocorrencia: 'DESCORNA', description: 'Descorna' }, animais: [{ animal_id: x.ids.f1 }, { animal_id: x.ids.f2 }] }),
     dependente: null },
+  // Fase 4, E4.1: o lançamento avulso (sem animais; o estorno e a correção pelo mesmo mecanismo).
+  { tipo: 'LANCAMENTO_FINANCEIRO',
+    registrar: (x) => ({ tipo: 'LANCAMENTO_FINANCEIRO', campos: { event_date: '2026-03-01', conta_id: conta(x, 'COMBUSTIVEL'), valor: 45000, descricao: 'Diesel' }, parcelas: [{ data_vencimento: '2026-03-15' }] }),
+    corrigir: (x) => ({ tipo: 'LANCAMENTO_FINANCEIRO', campos: { event_date: '2026-03-02', conta_id: conta(x, 'ENERGIA'), valor: 47000, descricao: 'Luz' }, parcelas: [{ data_vencimento: '2026-03-20' }, { data_vencimento: '2026-04-20' }] }),
+    dependente: null },
   { tipo: 'AJUSTE_INVENTARIO', subtipo: 'DIVERGENCIA_CONTAGEM',
     registrar: (x) => ajuste('DIVERGENCIA_CONTAGEM', '2026-06-15', [{ animal_id: x.ids.m5 }]),
     corrigir: (x) => ajuste('DIVERGENCIA_CONTAGEM', '2026-06-16', [{ animal_id: x.ids.m5, observacoes: 'Contagem refeita' }]),

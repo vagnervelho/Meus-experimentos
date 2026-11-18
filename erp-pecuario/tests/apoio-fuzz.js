@@ -504,9 +504,10 @@ function oraculoEfeito(sis, cmd, resp, A, S) {
     Object.keys(d.valores || {}).forEach((k) => { if (norm(S.config.get(k)) !== norm(d.valores[k])) erro(k + ' gravado ' + S.config.get(k) + ', pedido ' + d.valores[k]); });
     return out;
   }
+  if (/^parcela\./.test(cmd.rota)) { efeitoParcela(cmd, A, S, erro); return out; }
   // Cadastros desativados e reativados no meio da sequência.
   // Passada 3: também criados e editados (todo campo pedido gravado; o novo é a única linha nova da aba).
-  const CADASTRO = { 'propriedade.salvar': ['PROPRIEDADES', 'property_id'], 'pasto.salvar': ['PASTOS', 'pasture_id'], 'parceiro.salvar': ['PARCEIROS', 'partner_id'], 'categoria.salvar': ['CATEGORIAS', 'category_id'], 'lista.salvar': ['LISTAS', 'lista_id'], 'animal.cadastrarExterno': ['ANIMAIS', 'animal_id'], 'produto.salvar': ['PRODUTOS', 'product_id'], 'protocolo.salvar': ['PROTOCOLOS_SANITARIOS', 'protocol_id'], 'estacao.salvar': ['ESTACOES_MONTA', 'estacao_id'] }[cmd.rota];
+  const CADASTRO = { 'propriedade.salvar': ['PROPRIEDADES', 'property_id'], 'pasto.salvar': ['PASTOS', 'pasture_id'], 'parceiro.salvar': ['PARCEIROS', 'partner_id'], 'categoria.salvar': ['CATEGORIAS', 'category_id'], 'lista.salvar': ['LISTAS', 'lista_id'], 'animal.cadastrarExterno': ['ANIMAIS', 'animal_id'], 'produto.salvar': ['PRODUTOS', 'product_id'], 'protocolo.salvar': ['PROTOCOLOS_SANITARIOS', 'protocol_id'], 'estacao.salvar': ['ESTACOES_MONTA', 'estacao_id'], 'conta.salvar': ['PLANO_CONTAS', 'conta_id'] }[cmd.rota];
   if (CADASTRO) {
     const [aba, pk] = CADASTRO;
     const lista = cmd.rota === 'lista.salvar' ? { [pk]: d.lista_id, campos: Object.fromEntries(['rotulo', 'ativo'].filter((c) => d[c] !== undefined).map((c) => [c, d[c]])) } : null;
@@ -2346,6 +2347,100 @@ registrarTipo('OCORRENCIA', {
   },
 });
 
+// --- Fase 4, E4.1 (CONTRATOS, seção 56): o lançamento financeiro avulso ---
+const NATUREZAS_AVULSO = ['CUSTEIO', 'OUTRA_RECEITA', 'NAO_OPERACIONAL'];
+/** As parcelas e o período do avulso: em aberto ou já pagas (às vezes antes da competência ou no futuro: recusadas). */
+function preencherAvulso(S, rnd, s, P) {
+  const conta = S.t.PLANO_CONTAS.find((x) => x.conta_id === s.conta) || {};
+  const n = 1 + Math.floor(rnd() * 3);
+  s.parcelas = [];
+  for (let i = 0; i < n; i++) {
+    const p = { venc: somaDias(s.data, sorteio(rnd, [0, 10, 31, 90, -3])) };
+    if (rnd() < 0.3) {
+      const x = rnd();
+      p.pago = x < 0.05 ? somaDias(s.data, -1) : x < 0.08 ? somaDias(HOJE, 1) : sorteio(rnd, [s.data, somaDias(s.data, 3), HOJE]);
+      if (p.pago > HOJE && x >= 0.08) p.pago = HOJE;
+    }
+    s.parcelas.push(p);
+  }
+  const arrend = conta.codigo === 'ARRENDAMENTO_PASTO';
+  delete s.ini; delete s.fim; delete s.pasto;
+  if ((arrend && rnd() < 0.9) || ((conta.natureza === 'CUSTEIO' || conta.natureza === 'OUTRA_RECEITA') && rnd() < 0.3) || rnd() < 0.03) {
+    s.ini = rnd() < 0.05 ? somaDias(s.data, -2) : somaDias(s.data, sorteio(rnd, [0, 0, 5]));
+    s.fim = somaDias(s.ini, sorteio(rnd, [0, 29, 89, 364]));
+  }
+  if ((arrend && rnd() < 0.9) || rnd() < 0.2) s.pasto = sorteio(rnd, P);
+}
+registrarTipo('LANCAMENTO_FINANCEIRO', {
+  peso: () => 4,
+  propor: (c) => {
+    const { sis, S, rnd, D, P } = c;
+    const marco = S.marco || D0;
+    const data = D < marco ? marco : D;
+    const boas = S.t.PLANO_CONTAS.filter((x) => x.ativo !== false && NATUREZAS_AVULSO.indexOf(x.natureza) >= 0);
+    const ruins = S.t.PLANO_CONTAS.filter((x) => NATUREZAS_AVULSO.indexOf(x.natureza) < 0);
+    const conta = rnd() < 0.05 ? sorteio(rnd, ruins) : rnd() < 0.15 ? S.t.PLANO_CONTAS.find((x) => x.codigo === 'ARRENDAMENTO_PASTO') : sorteio(rnd, boas);
+    if (!conta) return null;
+    const s = { tipo: 'LANCAMENTO_FINANCEIRO', data, conta: conta.conta_id, valor: sorteio(rnd, [1, 999, 45000, 123457]) };
+    if (rnd() < 0.4) s.parceiro = sorteio(rnd, Object.values(sis.parceiros));
+    if (rnd() < 0.3) s.descricao = sorteio(rnd, ['Diesel', 'Salário', 'Conta de luz', 'Aporte do sócio']);
+    preencherAvulso(S, rnd, s, P);
+    return s;
+  },
+  montar: (sis, s) => {
+    const campos = { event_date: s.data, conta_id: s.conta, valor: s.valor };
+    if (s.descricao) campos.descricao = s.descricao;
+    if (s.parceiro) campos.partner_id = s.parceiro;
+    if (s.ini) { campos.competencia_inicio = s.ini; campos.competencia_fim = s.fim; }
+    if (s.pasto) campos.pasture_id = s.pasto;
+    return { tipo: 'LANCAMENTO_FINANCEIRO', campos, parcelas: s.parcelas.map((p) => Object.assign({ data_vencimento: p.venc }, p.valor ? { valor: p.valor } : {}, p.pago ? { pago_em: p.pago } : {})) };
+  },
+  animais: () => [],
+  // A correção pelas linhas gravadas: o lançamento e as parcelas que valem (a baixa vai pelo transporte).
+  doGravado: (c, e) => {
+    const { S, data } = c;
+    const f = S.t.FINANCEIRO.find((x) => x.event_id === e.event_id);
+    if (!f) return null;
+    const ps = S.t.PARCELAS.filter((x) => x.financial_id === f.financial_id && x.status !== 'CANCELADA').sort((a, b) => a.parcela_num - b.parcela_num || cmp(a.data_vencimento, b.data_vencimento));
+    const s = { tipo: 'LANCAMENTO_FINANCEIRO', data, conta: f.conta_id, valor: f.valor, parcelas: ps.map((x) => ({ venc: x.data_vencimento, valor: ps.length > 1 ? x.valor : null })) };
+    if (f.descricao) s.descricao = f.descricao;
+    if (f.partner_id) s.parceiro = f.partner_id;
+    if (f.competencia_inicio) { s.ini = f.competencia_inicio; s.fim = f.competencia_fim; }
+    if (f.pasture_id) s.pasto = f.pasture_id;
+    return s;
+  },
+  mutarValores: (c) => { const { s, S, rnd, P } = c; s.valor = sorteio(rnd, [2, 1000, 45000, 99999]); preencherAvulso(S, rnd, s, P); },
+  mutarOutro: (c) => {
+    const { s, S, rnd } = c;
+    if (rnd() < 0.6) { const b = S.t.PLANO_CONTAS.filter((x) => NATUREZAS_AVULSO.indexOf(x.natureza) >= 0); s.conta = sorteio(rnd, b).conta_id; }
+    else if (s.ini) { delete s.ini; delete s.fim; } else { s.ini = s.data; s.fim = somaDias(s.data, 30); }
+  },
+  efeito: (c) => {
+    const { d, S, E, eid, erro, lsE, cmd } = c;
+    const cp = d.campos;
+    if (lsE.length) erro('o lançamento avulso tem linhas de animal');
+    const fins = S.t.FINANCEIRO.filter((f) => f.event_id === eid);
+    const f = fins[0];
+    const conta = S.t.PLANO_CONTAS.find((x) => x.conta_id === cp.conta_id) || {};
+    if (fins.length !== 1 || f.conta_id !== cp.conta_id || f.valor !== cp.valor || f.natureza !== conta.natureza || f.data_competencia !== E.event_date) { erro('lançamento avulso gravado ' + JSON.stringify(fins.map((x) => [x.conta_id, x.valor, x.natureza, x.data_competencia]))); return; }
+    if ((f.competencia_inicio || null) !== (cp.competencia_inicio || null) || (f.competencia_fim || null) !== (cp.competencia_fim || null) || (f.pasture_id || null) !== (cp.pasture_id || null)) erro('período ou pasto do avulso ' + JSON.stringify([f.competencia_inicio, f.competencia_fim, f.pasture_id]) + ', pedido ' + JSON.stringify([cp.competencia_inicio, cp.competencia_fim, cp.pasture_id]));
+    if (NATUREZAS_AVULSO.indexOf(f.natureza) < 0) erro('avulso aceito na natureza ' + f.natureza);
+    const ps = S.t.PARCELAS.filter((p) => p.financial_id === f.financial_id && p.status !== 'CANCELADA').sort((a, b) => a.parcela_num - b.parcela_num);
+    if (ps.length !== d.parcelas.length || ps.reduce((t, p) => t + p.valor, 0) !== f.valor) erro('parcelas do avulso ' + JSON.stringify(ps.map((p) => p.valor)) + ' para ' + f.valor);
+    d.parcelas.forEach((x, i) => {
+      const p = ps[i];
+      if (!p) return;
+      if (x.pago_em && (p.status !== 'LIQUIDADA' || p.data_pagamento !== x.pago_em || p.valor_pago !== p.valor)) erro('a parcela ' + (i + 1) + ' pedida paga em ' + x.pago_em + ' está ' + p.status + ' ' + p.data_pagamento);
+      if (p.status === 'LIQUIDADA' && p.data_pagamento < f.data_competencia) erro('parcela paga antes da competência');
+      // A parcela sem "Já pago em" nasce aberta; na correção, a paga do original vem pelo transporte da baixa.
+      if (!x.pago_em && p.status !== 'ABERTA' && cmd.rota !== 'evento.corrigir') erro('a parcela ' + (i + 1) + ' nasceu ' + p.status);
+    });
+    if (cmd.rota === 'evento.corrigir' && ps.some((p) => p.status === 'LIQUIDADA')) contar('baixa transportada na correção');
+    if (E.total_value !== cp.valor) erro('valor do evento ' + E.total_value + ', pedido ' + cp.valor);
+    contar('avulso: aceito');
+  },
+});
+
 /**
  * O registro único dos arquivos de importação do teste aleatório: cada tipo de importação declara o arquivo que o gerador
  * monta (`arquivo(c)` → {texto, mapa} | null, com c = {sis, S, rnd, P (nome de cada pasto), pastoNome(), ativos, comBrinco,
@@ -3808,6 +3903,9 @@ function gerar(sis, S, rnd, k) {
     // Fuzz das Fases 1 a 3, passada 2: mais interações (agora com o preparo do que falta para elas) e a correção sem mudança
     // de um lançamento de manejo, mais tarde.
     ['interacao', 6], ['correcaoTardia', 3.5],
+    // Fase 4, E4.1 e E4.2 (CONTRATOS, seção 56): a baixa (inteira, em parte, em lote, com juros e desconto, o encontro de
+    // contas), o desfazer, a divisão da parcela e o plano de contas.
+    ['baixa', 5], ['desfazerBaixa', 1.5], ['desdobrar', 1.2], ['conta', 0.8],
   ]);
   return gerarAcao(sis, S, rnd, k, acao, base);
 }
@@ -3993,6 +4091,8 @@ function gerarAcao(sis, S, rnd, k, acao, base) {
   // Passada 4: parâmetros de regra e de projeção (a idade da desmama refaz a cria ao pé; a gestação, a idade reprodutiva e
   // a tolerância do parto mudam os avisos; a arroba, o rendimento e a tolerância da conferência mudam a conta do negócio;
   // o brinco só de números recusa o brinco com letra).
+  if (acao === 'baixa' || acao === 'desfazerBaixa' || acao === 'desdobrar') return gerarParcela(sis, S, rnd, k, acao, base);
+  if (acao === 'conta') return gerarConta(sis, S, rnd, k, base);
   if (acao === 'parametro') {
     const [chave, op] = sorteio(rnd, [
       ['idade_desmama_padrao_meses', ['3', '8', '12', '30']], ['idade_min_reprodutiva_meses', ['12', '24', '40']], ['dias_gestacao', ['270', '290', '300']],
@@ -4118,6 +4218,153 @@ const CONDICOES = ['NENHUMA', 'CASTRADO', 'INTEIRO', 'REPRODUTOR', 'NAO_REPRODUT
  * prioridade de duas numa operação), item de lista desativado, reativado, renomeado ou criado, e o touro de referência
  * novo. undefined = a escolha não é daqui.
  */
+// ------------------------------------------------------------------ Fase 4, E4.2: parcelas e plano de contas ----
+/** As parcelas que valem (o lançamento vigente, a parcela não cancelada), com o lançamento. */
+function parcelasQueValem(S) {
+  const fins = new Map(S.t.FINANCEIRO.filter((f) => S.vig.get(f.event_id)).map((f) => [f.financial_id, f]));
+  return S.t.PARCELAS.filter((p) => fins.has(p.financial_id) && p.status !== 'CANCELADA').map((p) => ({ p, f: fins.get(p.financial_id) }));
+}
+/**
+ * O título que a correção do evento refaz parcela a parcela (CONTRATOS, seção 56): o valor dos animais da compra, a receita da
+ * venda e o avulso. Os outros (frete, deduções, custo da morte, despesa do manejo, compra de insumo…) são em N parcelas iguais
+ * de mês em mês: a baixa em parte e a divisão são recusadas (TITULO_EM_PARTES_IGUAIS). Pelas linhas cruas.
+ */
+function tituloLivre(S, f) {
+  const ev = S.t.EVENTOS.find((e) => e.event_id === f.event_id);
+  if (!ev) return false;
+  if (ev.event_type === 'LANCAMENTO_FINANCEIRO') return true;
+  if (ev.event_type === 'VENDA') return f.natureza === 'RECEITA_VENDA_ANIMAIS';
+  const c = S.t.PLANO_CONTAS.find((x) => x.conta_id === f.conta_id);
+  return ev.event_type === 'COMPRA' && !!c && c.codigo === 'COMPRA_ANIMAIS';
+}
+/**
+ * A baixa (às vezes em parte, com juros e desconto, com o valor pago errado, a data antes da competência ou no futuro, em lote,
+ * a dedução retida sozinha), o desfazer (às vezes sem a justificativa, da retida, da que não está paga) e a divisão (às vezes
+ * sem somar o mesmo) de parcelas sorteadas entre as que valem.
+ */
+function gerarParcela(sis, S, rnd, k, acao, base) {
+  const todas = parcelasQueValem(S);
+  const abertas = todas.filter((x) => x.p.status === 'ABERTA');
+  const pagas = todas.filter((x) => x.p.status === 'LIQUIDADA');
+  if (acao === 'desfazerBaixa') {
+    const x = rnd() < 0.9 ? sorteio(rnd, pagas) : sorteio(rnd, todas);
+    if (!x) return null;
+    return Object.assign(base, { rota: 'parcela.desfazerBaixa', dados: { parcela_id: x.p.parcela_id, justificativa: rnd() < 0.95 ? 'Pagamento lançado errado' : '' }, rotulo: 'desfazer baixa' });
+  }
+  const livres = abertas.filter((x) => tituloLivre(S, x.f));
+  if (acao === 'desdobrar') {
+    const y = rnd();
+    const x = y < 0.8 && livres.length ? sorteio(rnd, livres) : y < 0.93 ? sorteio(rnd, abertas) : sorteio(rnd, todas);
+    if (!x) return null;
+    const n = 1 + Math.floor(rnd() * 3);
+    const parcelas = Array.from({ length: n }, (_, i) => ({ data_vencimento: somaDias(x.p.data_vencimento, sorteio(rnd, [0, 15, 30]) + 30 * i) }));
+    if (rnd() < 0.1) parcelas[0].valor = 1;
+    const dados = rnd() < 0.3 ? { parcela_id: x.p.parcela_id, quantas: n, primeiro: parcelas[0].data_vencimento, intervalo: sorteio(rnd, ['MES', 'D15']) } : { parcela_id: x.p.parcela_id, parcelas };
+    dados.justificativa = 'Renegociado';
+    return Object.assign(base, { rota: 'parcela.desdobrar', dados, rotulo: 'dividir parcela' });
+  }
+  if (!abertas.length) return null;
+  const data = (x) => {
+    const y = rnd();
+    return y < 0.06 ? somaDias(x.f.data_competencia, -1) : y < 0.1 ? somaDias(HOJE, 1) : sorteio(rnd, [x.f.data_competencia, x.p.data_vencimento <= HOJE ? x.p.data_vencimento : HOJE, HOJE]);
+  };
+  if (rnd() < 0.2 && abertas.length > 1) {
+    const lote = alguns(rnd, abertas, 3);
+    const dp = lote.map((x) => x.f.data_competencia).sort().pop();
+    return Object.assign(base, { rota: 'parcela.baixar', dados: { data_pagamento: rnd() < 0.9 ? (dp <= HOJE ? dp : HOJE) : data(lote[0]), itens: lote.map((x) => ({ parcela_id: x.p.parcela_id })) }, rotulo: 'baixa em lote' });
+  }
+  const retidas = abertas.filter((x) => x.f.retida_pelo_comprador === true);
+  const emParte = rnd() < 0.25;
+  const x = retidas.length && rnd() < 0.1 ? sorteio(rnd, retidas) : emParte && livres.length && rnd() < 0.85 ? sorteio(rnd, livres) : sorteio(rnd, abertas);
+  const dados = { parcela_id: x.p.parcela_id, data_pagamento: data(x) };
+  if (emParte && x.p.valor > 1) dados.valor = Math.max(1, Math.floor(x.p.valor * sorteio(rnd, [0.3, 0.5, 0.99])));
+  if (rnd() < 0.2) dados.juros_multa = sorteio(rnd, [1, 450, 4500]);
+  if (rnd() < 0.15) dados.desconto = sorteio(rnd, [1, 100, x.p.valor]);
+  if (rnd() < 0.15) dados.valor_pago = rnd() < 0.5 ? (dados.valor || x.p.valor) + (dados.juros_multa || 0) - (dados.desconto || 0) : x.p.valor + 1;
+  if (rnd() < 0.3) dados.forma_pagamento = sorteio(rnd, ['PIX', 'DINHEIRO', 'BOLETO']);
+  return Object.assign(base, { rota: 'parcela.baixar', dados, rotulo: dados.valor ? 'baixa parcial' : 'baixa' });
+}
+/** O plano de contas: a conta nova, renomear, desativar e reativar, e mudar a classificação de uma conta já usada. */
+function gerarConta(sis, S, rnd, k, base) {
+  const minhas = S.t.PLANO_CONTAS.filter((c) => c.sistema !== true);
+  const x = rnd();
+  if (x < 0.3 || !minhas.length) {
+    const nat = sorteio(rnd, ['CUSTEIO', 'OUTRA_RECEITA', 'NAO_OPERACIONAL']);
+    const campos = { nome: 'Conta ' + k, natureza: nat };
+    if (nat === 'CUSTEIO') { campos.grupo = sorteio(rnd, ['CUSTO_DIRETO', 'CUSTO_OPERACIONAL', 'DESPESA_ADMINISTRATIVA']); campos.classe_custo_animal = sorteio(rnd, ['SANITARIO', 'ALIMENTACAO', 'OUTROS']); }
+    if (nat === 'NAO_OPERACIONAL') campos.tipo = sorteio(rnd, ['RECEITA', 'DESPESA']);
+    if (rnd() < 0.1) campos.grupo = 'RECEITA';
+    return Object.assign(base, { rota: 'conta.salvar', dados: { campos }, rotulo: 'conta nova' });
+  }
+  const c = sorteio(rnd, rnd() < 0.9 ? minhas : S.t.PLANO_CONTAS);
+  if (x < 0.55) return Object.assign(base, { rota: 'conta.salvar', dados: { conta_id: c.conta_id, campos: { nome: c.nome + ' (r)' } }, rotulo: 'conta renomeada' });
+  if (x < 0.85) return Object.assign(base, { rota: 'conta.salvar', dados: { conta_id: c.conta_id, campos: { ativo: c.ativo === false } }, rotulo: 'conta ' + (c.ativo === false ? 'reativada' : 'desativada') });
+  return Object.assign(base, { rota: 'conta.salvar', dados: { conta_id: c.conta_id, campos: { classe_custo_animal: c.classe_custo_animal === 'OUTROS' ? 'SANITARIO' : 'OUTROS' } }, rotulo: 'classe da conta' });
+}
+/**
+ * O efeito da baixa, do desfazer e da divisão (03b, seção 11), pelas linhas cruas e sem o código do servidor: a parcela paga
+ * pelo valor + juros − desconto na data pedida (a parcial vira CANCELADA, com a paga e a que resta, o mesmo número e o mesmo
+ * vencimento, somando ela); o recebimento da venda quita junto as deduções retidas que vencem nele, pelo nominal; o desfazer
+ * limpa a baixa (e a das retidas do mesmo recebimento); a divisão cancela a parcela e cria as que somam o mesmo.
+ */
+function efeitoParcela(cmd, A, S, erro) {
+  const d = cmd.dados || {};
+  const antes = new Map(A.t.PARCELAS.map((p) => [p.parcela_id, p]));
+  const agora = new Map(S.t.PARCELAS.map((p) => [p.parcela_id, p]));
+  const novas = S.t.PARCELAS.filter((p) => !antes.has(p.parcela_id));
+  const finsA = new Map(A.t.FINANCEIRO.map((f) => [f.financial_id, f]));
+  const retidasDe = (p0) => {
+    const f = finsA.get(p0.financial_id);
+    if (!f || f.natureza !== 'RECEITA_VENDA_ANIMAIS') return [];
+    const ret = new Set(A.t.FINANCEIRO.filter((x) => x.event_id === f.event_id && x.retida_pelo_comprador === true).map((x) => x.financial_id));
+    return A.t.PARCELAS.filter((q) => ret.has(q.financial_id) && q.status !== 'CANCELADA' && q.data_vencimento === p0.data_vencimento);
+  };
+  if (cmd.rota === 'parcela.baixar') {
+    const itens = d.itens || [{ parcela_id: d.parcela_id, valor: d.valor, juros_multa: d.juros_multa, desconto: d.desconto }];
+    itens.forEach((it) => {
+      const p0 = antes.get(it.parcela_id);
+      const p1 = agora.get(it.parcela_id);
+      const v = it.valor || p0.valor;
+      const pago = v + (it.juros_multa || 0) - (it.desconto || 0);
+      if (v < p0.valor) {
+        if (!tituloLivre(A, finsA.get(p0.financial_id))) erro('baixa em parte aceita num título em parcelas iguais (a correção do evento não o refaria): ' + p0.parcela_id);
+        const filhas = novas.filter((q) => q.parcela_origem_id === p0.parcela_id);
+        const paga = filhas.find((q) => q.status === 'LIQUIDADA');
+        const resta = filhas.find((q) => q.status === 'ABERTA');
+        if (p1.status !== 'CANCELADA' || filhas.length !== 2 || !paga || !resta || paga.valor !== v || resta.valor !== p0.valor - v || paga.valor_pago !== pago || paga.data_pagamento !== d.data_pagamento || filhas.some((q) => q.data_vencimento !== p0.data_vencimento || q.parcela_num !== p0.parcela_num)) erro('baixa parcial gravada ' + JSON.stringify(filhas.map((q) => [q.status, q.valor, q.valor_pago, q.data_vencimento])));
+        contar('baixa: parcial aceita');
+      } else {
+        if (p1.status !== 'LIQUIDADA' || p1.data_pagamento !== d.data_pagamento || p1.valor_pago !== pago) erro('baixa gravada ' + JSON.stringify([p1.status, p1.data_pagamento, p1.valor_pago]) + ', esperado ' + JSON.stringify(['LIQUIDADA', d.data_pagamento, pago]));
+        contar('baixa: aceita');
+      }
+      retidasDe(p0).forEach((q) => {
+        const q1 = agora.get(q.parcela_id);
+        if (q1.status !== 'LIQUIDADA' || q1.data_pagamento !== d.data_pagamento || q1.valor_pago !== q.valor) erro('a dedução retida do recebimento não foi quitada junto: ' + JSON.stringify([q1.status, q1.data_pagamento, q1.valor_pago]));
+        else contar('baixa: encontro de contas');
+      });
+    });
+    if (itens.length > 1) contar('baixa: em lote');
+    return;
+  }
+  if (cmd.rota === 'parcela.desfazerBaixa') {
+    const p0 = antes.get(d.parcela_id);
+    const p1 = agora.get(d.parcela_id);
+    if (p1.status !== 'ABERTA' || [p1.data_pagamento, p1.valor_pago, p1.juros_multa, p1.desconto].some((v) => v !== null && v !== undefined && v !== '')) erro('o desfazer deixou ' + JSON.stringify([p1.status, p1.data_pagamento, p1.valor_pago]));
+    retidasDe(p0).filter((q) => q.status === 'LIQUIDADA' && q.data_pagamento === p0.data_pagamento).forEach((q) => { if (agora.get(q.parcela_id).status !== 'ABERTA') erro('a dedução retida não voltou junto'); });
+    contar('baixa: desfeita');
+    return;
+  }
+  if (cmd.rota === 'parcela.desdobrar') {
+    const p0 = antes.get(d.parcela_id);
+    if (!tituloLivre(A, finsA.get(p0.financial_id))) erro('divisão aceita num título em parcelas iguais (a correção do evento não o refaria): ' + p0.parcela_id);
+    const filhas = novas.filter((q) => q.parcela_origem_id === p0.parcela_id);
+    const soma = filhas.reduce((t, q) => t + q.valor, 0);
+    if (agora.get(p0.parcela_id).status !== 'CANCELADA' || soma !== p0.valor || filhas.some((q) => q.status !== 'ABERTA' || q.parcela_num !== p0.parcela_num || q.financial_id !== p0.financial_id)) erro('divisão gravada ' + JSON.stringify(filhas.map((q) => [q.valor, q.status, q.data_vencimento])) + ' de ' + p0.valor);
+    if (d.parcelas && JSON.stringify(filhas.map((q) => q.data_vencimento).sort()) !== JSON.stringify(d.parcelas.map((x) => x.data_vencimento).sort())) erro('vencimentos da divisão ' + JSON.stringify(filhas.map((q) => q.data_vencimento)));
+    contar('parcela: dividida');
+  }
+}
+
 function gerarCadastro(sis, S, rnd, k, qual, base) {
   const com = (rota, dados, rotulo) => Object.assign(base, { rota, dados, rotulo });
   // Fase 3, E3.4: a estação de monta criada (às vezes com o nome repetido ou o fim antes do início: a recusa) e editada.
@@ -4341,6 +4588,10 @@ const CADASTROS_TEMPO = {
   // do parceiro, do pasto e do produto como estão hoje.
   conc: ['contas'],
   lanc: ['contas', 'pasto', 'prod'],
+  // Fase 4, E4.2: o fluxo de caixa lê o saldo inicial informado (a observação, com a data dela); os títulos, os nomes da conta e
+  // do parceiro.
+  fluxo: ['saldo'],
+  tit: ['contas', 'pasto'],
 };
 /** Índices do estado para as impressões digitais (uma vez por estado). */
 function indiceTempo(S) {
@@ -4431,6 +4682,8 @@ function digitalCadastros(S, grupo, D, semAtivoCat) {
     if (p === 'contas') return JSON.stringify(S.t.PLANO_CONTAS.map((r) => [r.conta_id, r.codigo, r.nome, r.classe_custo_animal, r.natureza, r.tipo]));
     if (p === 'est') return JSON.stringify((S.t.ESTACOES_MONTA || []).map(semCarimbo));
     if (p === 'listas') return JSON.stringify(S.t.LISTAS.map((r) => [r.lista_id, r.codigo, r.rotulo, r.ativo]));
+    // O saldo inicial informado é a observação do dia dela: só existe em D a partir da véspera da data (o começo do dia).
+    if (p === 'saldo') { const dd = S.config.get('caixa_saldo_inicial_data'); return dd && somaDias(dd, -1) <= D ? norm(S.config.get('caixa_saldo_inicial')) + '@' + dd : '-'; }
     throw new Error('cadastro desconhecido no oráculo do tempo: ' + p);
   }).join('#'));
 }
@@ -4440,12 +4693,35 @@ function digitalCadastros(S, grupo, D, semAtivoCat) {
  */
 function digitalUnidade(S, u, semAtivoCat) {
   const ref = u.grupo === 'ficha' ? '#' + ((S.animais.get(u.animal) || {}).situacao_cadastral || '') + '@' + ((S.animais.get(u.animal) || {}).data_saida || '') : '';
-  return (u.animal ? digitalAnimal(S, u.animal, u.D) : digitalFatos(S, u.D)) + '#' + digitalCadastros(S, u.grupo, u.D, semAtivoCat) + ref;
+  const pag = GRUPOS_DO_CAIXA.has(u.grupo) ? '#' + digitalPagamentos(S, u.D) : '';
+  return (u.animal ? digitalAnimal(S, u.animal, u.D) : digitalFatos(S, u.D)) + '#' + digitalCadastros(S, u.grupo, u.D, semAtivoCat) + ref + pag;
+}
+/** Os grupos que leem os pagamentos e as divisões de parcela (Fase 4, E4.2). */
+const GRUPOS_DO_CAIXA = new Set(['conc', 'lanc', 'fluxo', 'tit']);
+/**
+ * Os fatos do caixa até D (Fase 4, E4.2; CONTRATOS, seção 56): cada pagamento com data até D (a data, o valor pago, os juros, o
+ * desconto e a forma) e cada divisão de parcela com o dia até D (o primeiro pagamento das que nasceram dela, ou o dia do
+ * registro no fuso da fazenda). A baixa e a divisão não são eventos: sem elas, a impressão dos fatos não mudaria.
+ */
+function digitalPagamentos(S, D) {
+  return lembrarTempo(S, 'P|' + D, () => {
+    const filhas = new Map();
+    S.t.PARCELAS.forEach((p) => { if (p.parcela_origem_id) (filhas.get(p.parcela_origem_id) || filhas.set(p.parcela_origem_id, []).get(p.parcela_origem_id)).push(p); });
+    const dia = (ps) => ps.map((q) => [q.created_at ? diaNoFuso(q.created_at) : null, q.status === 'LIQUIDADA' ? q.data_pagamento : null]).reduce((a, b) => a.concat(b), []).filter(Boolean).sort()[0] || null;
+    const out = [];
+    S.t.PARCELAS.forEach((p) => {
+      if (p.status === 'LIQUIDADA' && p.data_pagamento && p.data_pagamento <= D) out.push(p.parcela_id + ':P:' + [p.data_pagamento, p.valor_pago, p.juros_multa || 0, p.desconto || 0, p.forma_pagamento || ''].join('/'));
+      const f = filhas.get(p.parcela_id);
+      const d = f && dia(f);
+      if (d && d <= D) out.push(p.parcela_id + ':D:' + f.map((q) => q.parcela_id + '/' + q.valor + '/' + q.data_vencimento).sort().join(','));
+    });
+    return out.sort().join('|');
+  });
 }
 const escolher = (o, campos) => { const x = {}; campos.forEach((c) => { x[c] = o && o[c] !== undefined ? o[c] : null; }); return x; };
 const sem = (o, campos) => { if (!o || typeof o !== 'object') return o; const x = Object.assign({}, o); campos.forEach((c) => { delete x[c]; }); return x; };
 /** Os campos da lista de lançamentos que são de hoje por desenho (o pagamento, o aberto, o vencido; quem cancelou). */
-const LANCAMENTO_DE_HOJE = ['status_pagamento', 'data_pagamento', 'em_aberto', 'vencido', 'proximo_vencimento', 'cancelado_por_event_id'];
+const LANCAMENTO_DE_HOJE = ['status_pagamento', 'data_pagamento', 'em_aberto', 'vencido', 'proximo_vencimento', 'cancelado_por_event_id', 'parcelas'];
 /**
  * As consultas numa data D, em unidades {grupo, chave, animal, D, valor}. T: {D, animais, amostra, pastos, estacoes,
  * categoria, fichas}. opcoes: {semData: o caminho padrão (sem a data: hoje), grupos: Set (só estes grupos)}.
@@ -4560,6 +4836,15 @@ function bateriaTempo(sis, T, opcoes) {
   if (quer('lanc')) {
     const r = chamar('financeiro.lancamentos', dd('ate', { situacao: 'TODOS', por_pagina: 500 }));
     add('lanc', 'lanc', r && r.recusa ? r : Object.assign(sem(r, ['itens']), { itens: (r.itens || []).map((x) => sem(x, LANCAMENTO_DE_HOJE)) }));
+  }
+  // 11. O caixa em D (Fase 4, E4.2; CONTRATOS, seção 56): o fluxo de caixa por mês e por semana, e os títulos em aberto e os
+  // pagos em D. Nos títulos, o que dá para fazer e a marca de hoje (`acoes`, `hoje`) são de hoje, por desenho.
+  if (quer('fluxo')) ['MES', 'SEMANA'].forEach((ag) => add('fluxo', 'fluxo:' + ag, chamar('financeiro.fluxoCaixa', dd('data', { agrupar: ag }))));
+  if (quer('tit')) {
+    ['ABERTOS', 'PAGOS'].forEach((sit) => {
+      const r = chamar('financeiro.titulos', dd('data', { situacao: sit }));
+      add('tit', 'tit:' + sit, r && r.recusa ? r : Object.assign(sem(r, ['hoje', 'itens']), { itens: (r.itens || []).map((x) => sem(x, ['acoes'])) }));
+    });
   }
   // 9. A ficha de quem saiu do rebanho: os cálculos dela são da data da saída (as listas de hoje ficam fora: as crias, os
   // eventos, a genealogia, os anexos, o financeiro, o touro dos registros das fêmeas).
@@ -4984,7 +5269,10 @@ function semIdsDeLinha(v) {
 function fatosDoEvento(S, eid) {
   const ev = S.ev.get(eid);
   const fins = S.t.FINANCEIRO.filter((f) => f.event_id === eid).map((f) => {
-    const parcelas = S.t.PARCELAS.filter((p) => p.financial_id === f.financial_id).map((p) => semMeta('PARCELAS', p)).sort(porJson);
+    // Fase 4, E4.2: o título que vale (as parcelas não canceladas, com o valor, o vencimento e a baixa). A divisão de parcela fica
+    // no lançamento original, que deixa de valer: a correção refaz o título com as parcelas que valem, numeradas de novo e sem o
+    // vínculo da divisão (CONTRATOS, seção 56).
+    const parcelas = S.t.PARCELAS.filter((p) => p.financial_id === f.financial_id && p.status !== 'CANCELADA').map((p) => sem(semMeta('PARCELAS', p), ['parcela_num', 'parcela_origem_id'])).sort(porJson);
     const rateios = S.t.RATEIOS.filter((r) => r.financial_id === f.financial_id).map((r) => Object.assign(semMeta('RATEIOS', r), { alocacoes: S.t.ALOCACOES_FINANCEIRAS.filter((a) => a.rateio_id === r.rateio_id).map((a) => semMeta('ALOCACOES_FINANCEIRAS', a)).sort(porJson) }));
     return { id: f.financial_id, v: Object.assign(semMeta('FINANCEIRO', f), { parcelas, rateios }) };
   }).sort((a, b) => porJson(a.v, b.v));
@@ -5057,7 +5345,10 @@ function recusaDocumentada(S, e, r) {
   if (!r.error || r.error.code !== 'VALIDATION') return false;
   const pol = politicaDe(S);
   const codigos = (r.error.details || []).map((d) => d.codigo);
-  return codigos.length > 0 && codigos.every((c) => (pol[c] || (c === 'CARENCIA_ATIVA' ? 'BLOQUEIA' : 'AVISA')) === 'BLOQUEIA' || (c === 'PRODUTO_SEM_ESTOQUE' && e.event_type === 'ESTOQUE' && e.event_subtype === 'AJUSTE'));
+  // Fase 4, E4.1 e E4.2 (CONTRATOS, seção 56): o "Já pago em" do pedido como foi aceito, depois de a baixa ser desfeita ou
+  // refeita noutra data, não paga a parcela na correção (o pagamento depois do registro vai pela baixa).
+  const pagamento = (c) => (c === 'PAGAMENTO_NA_CORRECAO' || c === 'PARCELA_JA_PAGA') && e.event_type === 'LANCAMENTO_FINANCEIRO';
+  return codigos.length > 0 && codigos.every((c) => (pol[c] || (c === 'CARENCIA_ATIVA' ? 'BLOQUEIA' : 'AVISA')) === 'BLOQUEIA' || (c === 'PRODUTO_SEM_ESTOQUE' && e.event_type === 'ESTOQUE' && e.event_subtype === 'AJUSTE') || pagamento(c));
 }
 /**
  * A recusa só porque uma contagem do estoque posterior já acertou o saldo de um dia que o comando mudaria (CONFLICT
@@ -5093,8 +5384,16 @@ function bateriaCorrecao(sis, S, D) {
  */
 function cadastroDaCorrecao(sis, S, rnd) {
   const usados = (aba, campo) => Array.from(new Set((S.t[aba] || []).filter((r) => S.vig.get(r.event_id) && r[campo]).map((r) => r[campo])));
-  const qual = pesado(rnd, [['produto', 5], ['protocolo', 2.5], ['parametro', 3], ['politica', 0.8], ['bloqueio', 0.8], ['categoria', 1.5], ['pasto', 1], ['parceiro', 1], ['lista', 1], ['estacao', 1], ['propriedade', 0.4]]);
+  const qual = pesado(rnd, [['produto', 5], ['protocolo', 2.5], ['parametro', 3], ['politica', 0.8], ['bloqueio', 0.8], ['categoria', 1.5], ['pasto', 1], ['parceiro', 1], ['lista', 1], ['estacao', 1], ['propriedade', 0.4], ['conta', 1.2]]);
   const c = (rota, dados, rotulo) => ({ rota, dados, rotulo });
+  // Fase 4, E4.1: a conta usada por um lançamento que vale, renomeada ou desativada (a correção sem mudança continua aceita e
+  // grava a mesma conta; a classificação da conta usada não muda: conta.salvar recusa).
+  if (qual === 'conta') {
+    const ids = usados('FINANCEIRO', 'conta_id');
+    const conta = S.t.PLANO_CONTAS.find((x) => x.conta_id === sorteio(rnd, ids) && x.sistema !== true);
+    if (!conta) return null;
+    return rnd() < 0.5 ? c('conta.salvar', { conta_id: conta.conta_id, campos: { nome: conta.nome + ' (revista)' } }, 'conta renomeada') : c('conta.salvar', { conta_id: conta.conta_id, campos: { ativo: false } }, 'conta desativada');
+  }
   if (qual === 'produto') {
     const ids = usados('SANIDADE', 'produto_id').concat(usados('MOVIMENTOS_ESTOQUE', 'product_id'), usados('FINANCEIRO', 'product_id'));
     const p = (S.t.PRODUTOS || []).find((x) => x.product_id === sorteio(rnd, ids)) || sorteio(rnd, S.t.PRODUTOS || []);
@@ -5640,6 +5939,19 @@ function oraculoPeriodo(cmd, A, S, pedidos) {
     const cancelou = a && a.status === 'ATIVO' && f.status !== 'ATIVO';
     if ((criou || cancelou) && ate && f.data_competencia && f.data_competencia <= ate) mexidos.push((criou ? 'criou ' : 'cancelou ') + (f.descricao || f.natureza) + ' de ' + f.data_competencia);
   });
+  // Fase 4, E4.2 (RN-082; 03b, seção 11): a baixa dada, desfeita ou mudada com o pagamento (o de antes ou o de depois) até a
+  // data do período fechado, de lançamento que já existia.
+  if (ate && !mexidos.length) {
+    const pa = new Map(A.t.PARCELAS.map((p) => [p.parcela_id, p]));
+    S.t.PARCELAS.forEach((p) => {
+      const v = pa.get(p.parcela_id);
+      if (!v && !antes.has(p.financial_id)) return;
+      const d0 = v && v.status === 'LIQUIDADA' ? v.data_pagamento : null;
+      const d1 = p.status === 'LIQUIDADA' ? p.data_pagamento : null;
+      if (d0 === d1 && (!v || v.valor_pago === p.valor_pago)) return;
+      if ((d0 && d0 <= ate) || (d1 && d1 <= ate)) mexidos.push('baixa da parcela ' + p.parcela_num + ' em ' + (d1 || d0));
+    });
+  }
   const pediu = pedidos.indexOf('PERIODO_BLOQUEADO') >= 0;
   const out = [];
   if (mexidos.length && pol === 'BLOQUEIA') out.push(falha('PERIODO:BLOQUEIA', cmd.rota + ' aceito com a política BLOQUEIA no período fechado até ' + ate + ': ' + mexidos.slice(0, 3).join('; ')));
@@ -5660,6 +5972,8 @@ function oraculoEstornoImediato(sis, cmd, r, S, dv0) {
   const snap = sis.snap;
   if (!snap || snap.eid !== cmd.dados.event_id || snap.dv !== dv0) return [];
   if (!r.ok && estornoBloqueadoPeloEstoque(S, snap.eid, r)) { contar('estorno imediato recusado pela política do estoque'); return []; }
+  // Fase 4, E4.1 (RN-042): o lançamento que nasceu com parcela paga ("Já pago em") só se estorna depois de desfazer a baixa.
+  if (!r.ok && r.error.code === 'CONFLICT' && (r.error.details || []).every((x) => x.codigo === 'PARCELA_LIQUIDADA') && comParcelaPaga(S, snap.eid)) { contar('estorno imediato recusado pela parcela paga'); return []; }
   if (!r.ok) return [falha('ESTORNO_IMEDIATO:RECUSADO', 'o estorno logo depois do registro (' + snap.tipo + ') foi recusado: ' + r.error.code + ' ' + r.error.message + ' ' + JSON.stringify((r.error.details || []).map((d) => d.codigo + ': ' + d.mensagem)).slice(0, 600))];
   const out = [];
   const antes = new Map(snap.animais.map((a) => [a.animal_id, a]));
@@ -5678,6 +5992,11 @@ function oraculoEstornoImediato(sis, cmd, r, S, dv0) {
  * já era negativo (o consumo aceito com a política AVISA, que depois mudou) —, a política de ESTOQUE_INSUFICIENTE é
  * BLOQUEIA, e a recusa traz só esse aviso. Confere pelo modelo: os movimentos vigentes com e sem os do lançamento.
  */
+/** O evento tem lançamento com parcela paga (as linhas cruas). */
+function comParcelaPaga(S, eid) {
+  const fins = new Set(S.t.FINANCEIRO.filter((f) => f.event_id === eid).map((f) => f.financial_id));
+  return S.t.PARCELAS.some((p) => fins.has(p.financial_id) && p.status === 'LIQUIDADA');
+}
 function estornoBloqueadoPeloEstoque(S, eid, r) {
   if (!r.error || r.error.code !== 'VALIDATION') return false;
   const cods = (r.error.details || []).map((d) => d.codigo);

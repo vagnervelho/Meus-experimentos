@@ -24,15 +24,18 @@ function falha(m, acao, dados, op) {
 }
 
 // ------------------------------------------------------------------ catálogo ----
-test('catálogo: 21 tipos; na Fase 4 (etapa BASE), os mesmos da Fase 3 (o lançamento financeiro e o rateio ainda sem campos); na Fase 3 (E3.1 a E3.5), os da Fase 2 — entradas, nascimento, compra, venda, transferência, morte, descarte, identificação, marcação, os cinco ajustes e estorno — mais a pesagem, a sanidade, a reprodução, a desmama, a castração, a ocorrência e o estoque; módulos por fase; serialização é só dado', () => {
+test('catálogo: 21 tipos; na Fase 4 (E4.1), os da Fase 3 mais o lançamento financeiro avulso (o rateio ainda sem campos); na Fase 3 (E3.1 a E3.5), os da Fase 2 — entradas, nascimento, compra, venda, transferência, morte, descarte, identificação, marcação, os cinco ajustes e estorno — mais a pesagem, a sanidade, a reprodução, a desmama, a castração, a ocorrência e o estoque; módulos por fase; serialização é só dado', () => {
   const G = createGas({ order: 'alpha' }).G;
   const C = G.EventCatalog;
   assert.equal(C.nomes().length, 21);
   assert.equal(C.FASE_ATUAL, 4);
-  assert.deepEqual(js(C.tiposAtivos()), js(C.tiposAtivos(3)), 'a etapa BASE da Fase 4 não muda os tipos: os da Fase 4 entram com os campos deles');
+  // Fase 4, E4.1 (CONTRATOS, seção 56): o lançamento avulso entra com os campos dele; o rateio, ainda não.
+  assert.deepEqual(js(C.tiposAtivos()), js(C.tiposAtivos(3)).filter((t) => t !== 'ESTORNO').concat(['LANCAMENTO_FINANCEIRO', 'ESTORNO']).sort((a, b) => C.tipo(a).ordem - C.tipo(b).ordem), 'os da Fase 3 mais o lançamento avulso');
   // Os tipos da Fase 3 ficam inativos até terem campos: a pesagem (E3.1), a sanidade e o estoque (E3.2 e E3.3), a reprodução,
   // a desmama, a castração e a ocorrência (E3.4 e E3.5) já têm.
-  assert.deepEqual(js(C.tiposAtivos()), ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'NASCIMENTO', 'COMPRA', 'VENDA', 'TRANSFERENCIA', 'MORTE', 'DESCARTE', 'PESAGEM', 'SANIDADE', 'REPRODUCAO', 'DESMAMA', 'CASTRACAO', 'IDENTIFICACAO', 'MARCACAO', 'AJUSTE_INVENTARIO', 'OCORRENCIA', 'ESTOQUE', 'ESTORNO']);
+  assert.deepEqual(js(C.tiposAtivos(3)), ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'NASCIMENTO', 'COMPRA', 'VENDA', 'TRANSFERENCIA', 'MORTE', 'DESCARTE', 'PESAGEM', 'SANIDADE', 'REPRODUCAO', 'DESMAMA', 'CASTRACAO', 'IDENTIFICACAO', 'MARCACAO', 'AJUSTE_INVENTARIO', 'OCORRENCIA', 'ESTOQUE', 'ESTORNO']);
+  assert.deepEqual(js(C.tiposAtivos()), ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'NASCIMENTO', 'COMPRA', 'VENDA', 'TRANSFERENCIA', 'MORTE', 'DESCARTE', 'PESAGEM', 'SANIDADE', 'REPRODUCAO', 'DESMAMA', 'CASTRACAO', 'IDENTIFICACAO', 'MARCACAO', 'AJUSTE_INVENTARIO', 'OCORRENCIA', 'LANCAMENTO_FINANCEIRO', 'ESTOQUE', 'ESTORNO']);
+  assert.deepEqual([C.ativo('LANCAMENTO_FINANCEIRO', null, 3), C.tipo('LANCAMENTO_FINANCEIRO').selecao_animais, C.tipo('LANCAMENTO_FINANCEIRO').revisao], [false, 'NENHUM', 'SERVIDOR'], 'o avulso chega na Fase 4, sem animais e com a revisão do servidor');
   assert.deepEqual(js(C.tiposAtivos(2)), ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'NASCIMENTO', 'COMPRA', 'VENDA', 'TRANSFERENCIA', 'MORTE', 'DESCARTE', 'IDENTIFICACAO', 'MARCACAO', 'AJUSTE_INVENTARIO', 'ESTORNO'], 'a Fase 2 continua a mesma');
   assert.deepEqual([C.ativo('PESAGEM', null, 3), C.ativo('PESAGEM', null, 2), C.tipo('PESAGEM').modo_entrada, C.tipo('PESAGEM').revisao], [true, false, 'CURRAL', 'LOCAL'], 'a pesagem chega na Fase 3, com o modo curral e a revisão no aparelho');
   for (const t of ['REPRODUCAO', 'DESMAMA', 'CASTRACAO', 'OCORRENCIA']) assert.deepEqual([C.ativo(t, null, 3), C.ativo(t, null, 2)], [true, false], t + ' chega na Fase 3 (E3.4 e E3.5)');
@@ -44,7 +47,7 @@ test('catálogo: 21 tipos; na Fase 4 (etapa BASE), os mesmos da Fase 3 (o lança
   assert.deepEqual(js(C.subtipos('ESTOQUE').filter((x) => C.ativo('ESTOQUE', x))), ['ENTRADA', 'AJUSTE'], 'o subtipo do tipo sem animais fica pronto pelos campos de cabeçalho');
   assert.equal(C.camposEvento('SANIDADE', 'DOENCA').some((c) => c.id === 'produto_id' || c.id === 'modo_dose'), false, 'o registro de doença não aplica produto');
   assert.deepEqual(js(C.tiposAtivos(1)), ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'AJUSTE_INVENTARIO', 'ESTORNO'], 'a Fase 1 continua a mesma');
-  for (const t of ['LANCAMENTO_FINANCEIRO', 'RATEIO']) assert.equal(C.ativo(t), false, t + ' ainda não entregue: inativo');
+  for (const t of ['RATEIO']) assert.equal(C.ativo(t), false, t + ' ainda não entregue: inativo');
   assert.deepEqual([C.ativo('AJUSTE_INVENTARIO', 'CORRECAO_LOCALIZACAO'), C.ativo('AJUSTE_INVENTARIO', 'RECLASSIFICACAO'), C.ativo('AJUSTE_INVENTARIO', 'DIVERGENCIA_CONTAGEM'), C.ativo('AJUSTE_INVENTARIO', 'RECLASSIFICACAO', 1), C.ativo('VENDA'), C.ativo('VENDA', null, 2), C.ativo('VENDA', null, 1)], [true, true, true, false, true, true, false]);
   assert.deepEqual([C.ativo('IDENTIFICACAO', 'REMOCAO'), C.ativo('IDENTIFICACAO', 'REMOCAO', 1), C.ativo('MARCACAO', 'NAO_LOCALIZADO'), C.ativo('MARCACAO', 'OUTRO')], [true, false, true, false]);
   assert.deepEqual(js(C.camposEvento('MARCACAO', 'DESCARTE').map((c) => c.id)), ['event_date', 'acao', 'property_id', 'responsible', 'notes', 'motivo_descarte'], 'campo de cabeçalho do subtipo');
@@ -143,7 +146,7 @@ test('ENTRADA_INICIAL: só na data do marco zero; sem marco zero é CONFIG; OUTR
   assert.deepEqual(codigos(falha(m, 'registrar', outraEntrada('2026-03-01', [bicho()], { description: '' }))), ['CAMPO_OBRIGATORIO']);
   assert.deepEqual(codigos(falha(m, 'registrar', outraEntrada('2026-03-01', [bicho({ pasto_destino_id: PASTOS.INATIVO })]))), ['PASTO_INATIVO']);
   assert.deepEqual(codigos(falha(m, 'registrar', outraEntrada('2026-03-01', [bicho({ pasto_destino_id: E.id(0xdead) })]))), ['NAO_ENCONTRADO']);
-  assert.deepEqual(codigos(falha(m, 'registrar', { tipo: 'LANCAMENTO_FINANCEIRO', campos: {}, animais: [{}] })), ['TIPO_INDISPONIVEL']);
+  assert.deepEqual(codigos(falha(m, 'registrar', { tipo: 'RATEIO', campos: {}, animais: [{}] })), ['TIPO_INDISPONIVEL']);
   assert.deepEqual(falha(m, 'registrar', { tipo: 'REPRODUCAO', campos: {}, animais: [{}] }).details.map((d) => [d.codigo, d.campo]), [['CAMPO_OBRIGATORIO', 'subtipo']], 'a reprodução exige o subtipo');
   assert.deepEqual(codigos(falha(m, 'registrar', { tipo: 'IDENTIFICACAO', subtipo: 'OUTRO', campos: {}, animais: [{}] })), ['TIPO_INDISPONIVEL']);
   const semSub = falha(m, 'registrar', { tipo: 'IDENTIFICACAO', campos: {}, animais: [{}] });

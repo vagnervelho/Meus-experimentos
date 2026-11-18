@@ -137,17 +137,26 @@ var Caixa = (function () {
     });
     return out;
   }
+  /**
+   * O título que a correção do evento de origem refaz parcela a parcela (o grupo `parcelas` do formulário): a compra (o valor dos
+   * animais), a receita da venda e o lançamento avulso. Os demais (o frete e os outros custos da compra, as deduções da venda, o
+   * custo da morte, a receita do descarte, a despesa do manejo, a compra de insumo) são em N parcelas iguais de mês em mês: a
+   * baixa é inteira e a parcela não se divide (a correção os refaria iguais; CONTRATOS, seção 56).
+   */
+  function tituloLivre_(tx, fin, ev) {
+    if (ev.event_type === 'LANCAMENTO_FINANCEIRO') return true;
+    if (ev.event_type === 'VENDA') return fin.natureza === 'RECEITA_VENDA_ANIMAIS';
+    if (ev.event_type !== 'COMPRA') return false;
+    var c = tx.repo.porId('PLANO_CONTAS', fin.conta_id);
+    return !!c && c.codigo === FinancialService.CONTAS.COMPRA;
+  }
+  var EM_PARTES_IGUAIS = 'é de um lançamento em parcelas iguais (o frete, o custo da morte, a compra do insumo…): dê a baixa da parcela inteira, ou corrija o lançamento de origem para mudar as parcelas.';
   function formasAtivas_(tx) {
     return tx.repo.vigentes('LISTAS').filter(function (l) { return l.lista === 'FORMA_PAGAMENTO' && l.ativo !== false; }).map(function (l) { return l.codigo; });
   }
   function conferirForma_(tx, col, forma, quem) {
     if (vazio_(forma)) return;
     if (formasAtivas_(tx).indexOf(forma) < 0) col.erro(det_('VALOR_FORA_DA_LISTA', 'forma_pagamento', quem + 'a forma de pagamento "' + forma + '" não está entre as ativas da lista.'));
-  }
-  /** O aviso do período financeiro fechado (RN-082) para a baixa que mexe num pagamento até `fin_bloqueio_ate`. */
-  function avisoDaBaixa_(params, data, oque) {
-    var a = FinancialService.avisoPeriodo(params, data, oque);
-    return a ? det_(a.codigo, 'justificativa_aviso', a.mensagem) : null;
   }
   /** Os dados do pedido: a justificativa vale também como a do aviso do período fechado (um campo só na tela). */
   function dadosDoPedido_(p) {
@@ -177,7 +186,6 @@ var Caixa = (function () {
   function tratadorBaixar_(tx) {
     var d = tx.dados || {};
     var col = Validation.coletor();
-    var params = Config.parametros(tx.repo);
     var itens = Array.isArray(d.itens) ? d.itens : [{ parcela_id: d.parcela_id, valor: d.valor, juros_multa: d.juros_multa, desconto: d.desconto, valor_pago: d.valor_pago, forma_pagamento: d.forma_pagamento }];
     if (!itens.length) return { erros: [det_('CAMPO_OBRIGATORIO', 'itens', 'Escolha ao menos uma parcela para dar baixa.')] };
     if (itens.length > MAX_ITENS) return { erros: [det_('VALOR_FORA_DA_FAIXA', 'itens', 'Uma baixa em lote vai até ' + MAX_ITENS + ' parcelas; divida em partes.')] };
@@ -216,6 +224,7 @@ var Caixa = (function () {
       if (!vazio_(x.forma_pagamento)) conferirForma_(tx, col, x.forma_pagamento, quem);
       var retidas = retidasDoRecebimento_(tx, alvo.fin, p);
       var parcial = valor < p.valor;
+      if (parcial && !tituloLivre_(tx, alvo.fin, alvo.ev)) { col.erro(det_('TITULO_EM_PARTES_IGUAIS', 'valor', quem + EM_PARTES_IGUAIS, { indice: i })); return; }
       if (parcial && retidas.length) { col.erro(det_('BAIXA_PARCIAL_COM_RETENCAO', 'valor', quem + 'tem dedução descontada pelo comprador no mesmo recebimento: dê a baixa no recebimento inteiro (o depósito esperado já vem líquido).', { indice: i })); return; }
       retidas.forEach(function (r) {
         if (r.p.status !== 'ABERTA') col.erro(det_('ENCONTRO_DESFEITO', 'parcela_id', quem + 'a dedução "' + nomeDoLancamento_(tx, r.fin) + '" deste recebimento já está quitada sem ele. Restaure o backup ou investigue a edição manual.', { indice: i }));
@@ -225,8 +234,6 @@ var Caixa = (function () {
     });
     if (col.temErros()) return { erros: col.erros };
     var avisos = [];
-    var aviso = avisoDaBaixa_(params, data, planos.length === 1 ? 'A baixa da ' + quemParcela_(tx, planos[0].alvo).replace(/^Parcela/, 'parcela') : 'A baixa de ' + planos.length + ' parcelas');
-    if (aviso) avisos.push(aviso);
     var ids = [];
     var eventos = {};
     var entradas = 0;
@@ -299,8 +306,6 @@ var Caixa = (function () {
     eventos[alvo.fin.event_id] = true;
     retidas.forEach(function (r) { AuditService.alteracao(tx, 'PARCELAS', r.p.parcela_id, limpa, d.justificativa); ids.push(r.p.parcela_id); eventos[r.fin.event_id] = true; });
     var avisos = [];
-    var aviso = avisoDaBaixa_(Config.parametros(tx.repo), p.data_pagamento, 'O desfazer da baixa da ' + quemParcela_(tx, alvo).replace(/^Parcela/, 'parcela') + ', paga em ' + br_(p.data_pagamento) + ',');
-    if (aviso) avisos.push(aviso);
     return {
       avisos: avisos,
       resumo: { acao: 'desfazerBaixa', parcelas: ids },
@@ -327,7 +332,11 @@ var Caixa = (function () {
     var quem = quemParcela_(tx, alvo) + ': ';
     if (p.status !== 'ABERTA') col.erro(det_('PARCELA_JA_PAGA', 'parcela_id', quem + 'já está paga; só a parcela em aberto se divide.'));
     if (alvo.fin.retida_pelo_comprador === true || retidasDoRecebimento_(tx, alvo.fin, p).length) col.erro(det_('PARCELA_RETIDA', 'parcela_id', quem + 'tem dedução descontada pelo comprador no mesmo vencimento (encontro de contas): não se divide.'));
+    else if (!tituloLivre_(tx, alvo.fin, alvo.ev)) col.erro(det_('TITULO_EM_PARTES_IGUAIS', 'parcela_id', quem + EM_PARTES_IGUAIS));
     var lista = Array.isArray(d.parcelas) ? d.parcelas : [];
+    // Em N parcelas iguais (a folha "Dividir" da tela): os vencimentos vêm do servidor (financeiro.vencimentos; o aparelho não
+    // soma dias), e o valor de cada uma, da divisão igual (FinancialService.resolverParcelas).
+    if (!lista.length && !vazio_(d.quantas)) lista = FinancialService.vencimentos({ primeiro: d.primeiro, quantas: d.quantas, intervalo: vazio_(d.intervalo) ? 'MES' : d.intervalo }).datas.map(function (dt) { return { data_vencimento: dt, forma_pagamento: nulo_(d.forma_pagamento) }; });
     lista.forEach(function (x, i) { if (x && typeof x === 'object' && !vazio_(x.forma_pagamento)) conferirForma_(tx, col, x.forma_pagamento, 'Parcela ' + (i + 1) + ': '); });
     var novas = FinancialService.resolverParcelas(p.valor, lista, col, { campo: 'parcelas', rotulo: 'a parcela', pagamento: 'será dividida' });
     if (novas && novas.length === 1 && novas[0].data_vencimento === p.data_vencimento) col.erro(det_('VALOR_IGUAL', 'parcelas', quem + 'a parcela nova é igual à de hoje (o mesmo valor e o mesmo vencimento): mude o vencimento ou divida em mais de uma.'));
@@ -359,6 +368,15 @@ var Caixa = (function () {
   }
   function comandoDesdobrar(pedido) {
     return comando_('parcela.desdobrar', pedido, tratadorDesdobrar_, function (tx, op) { return respostaParcelas_(tx, (op.resumo || {}).parcelas); });
+  }
+  var COMANDOS = { baixar: comandoBaixar, desfazerBaixa: comandoDesfazerBaixa, desdobrar: comandoDesdobrar };
+  /** A prévia (rota extra `parcela.simular`): pedido.acao = baixar | desfazerBaixa | desdobrar; o mesmo tratador, sem gravar. */
+  function simular(ctx, pedido) {
+    var p = pedido || {};
+    if (!COMANDOS[p.acao]) throw Validation.erro('VALIDATION', 'Escolha o que simular: baixar, desfazer a baixa ou dividir a parcela.', [det_('VALOR_FORA_DA_LISTA', 'acao', 'Ação desconhecida.')]);
+    var c = COMANDOS[p.acao]({ dados: p.dados, avisosAceitos: p.avisosAceitos, idempotencyKey: 'simulacao' });
+    c.modo = 'SIMULAR';
+    return UnitOfWork.run(ctx, c);
   }
   function baixar(ctx, pedido) { return UnitOfWork.run(ctx, comandoBaixar(pedido)); }
   function desfazerBaixa(ctx, pedido) { return UnitOfWork.run(ctx, comandoDesfazerBaixa(pedido)); }
@@ -396,7 +414,14 @@ var Caixa = (function () {
     if (agrupar === 'DIA') return { de: Utils.somaDias(D, -6), ate: Utils.somaDias(D, 23) };
     if (agrupar === 'SEMANA') { var s = inicioDaSemana_(D); return { de: Utils.somaDias(s, -28), ate: Utils.somaDias(s, 62) }; }
     var m0 = D.slice(0, 7) + '-01';
-    return { de: Utils.somaMeses(m0, -5), ate: fimDoMes_(Utils.somaMeses(m0, 6)) };
+    return { de: mesDeslocado_(m0, -5), ate: fimDoMes_(mesDeslocado_(m0, 6)) };
+  }
+  /** O primeiro dia do mês `n` meses depois (ou antes, com n negativo) do mês de `m0` (yyyy-MM-01). */
+  function mesDeslocado_(m0, n) {
+    var mo = Number(m0.slice(5, 7)) - 1 + n;
+    var y = Number(m0.slice(0, 4)) + Math.floor(mo / 12);
+    mo = ((mo % 12) + 12) % 12;
+    return String(y) + '-' + (mo < 9 ? '0' : '') + String(mo + 1) + '-01';
   }
 
   // ------------------------------------------------------------------ fluxo de caixa ----
@@ -454,6 +479,8 @@ var Caixa = (function () {
     var params = Config.parametros(tx.repo);
     var mv = movimentosEm_(tx, D);
     var si = saldoInicial_(params);
+    // A observação do saldo é um fato da data dela: numa data D anterior a ela, não existe (nem o valor, nem a data).
+    if (si && Utils.somaDias(si.data, -1) > D) si = null;
     var vespera = si ? Utils.somaDias(si.data, -1) : null;
     function saldoRealizado(d) {
       if (!si || d < vespera) return null;
@@ -469,10 +496,10 @@ var Caixa = (function () {
       var saldoFim = pp.fim < D ? saldoRealizado(pp.fim) : saldoD === null ? null : saldoD + somar_(previstos, D, pp.fim).liquido;
       return {
         inicio: pp.inicio, fim: pp.fim, rotulo: pp.rotulo, situacao: pp.fim < D ? 'PASSADO' : pp.inicio > D ? 'FUTURO' : 'ATUAL',
-        realizado: realizado, previsto: previsto, saldo_fim: saldoFim,
+        realizado: realizado, previsto: previsto, liquido: realizado.liquido + previsto.liquido, saldo_fim: saldoFim,
       };
     });
-    var semSaldo = si ? (D < vespera ? 'O saldo informado é do começo de ' + br_(si.data) + ': antes dele não há saldo.' : null) : 'Sem o saldo de caixa inicial nas configurações (valor e data), o fluxo mostra o movimento, sem o saldo.';
+    var semSaldo = si ? null : 'Sem o saldo de caixa inicial informado até esta data (o valor e a data, nas configurações), o fluxo mostra o movimento, sem o saldo.';
     return {
       data: D, de: de, ate: ate, agrupar: agrupar,
       saldo_inicial: si,
@@ -548,14 +575,16 @@ var Caixa = (function () {
           situacao: x.paga ? (receita ? 'RECEBIDA' : 'PAGA') : vencida ? 'VENCIDA' : p.data_vencimento === D ? 'VENCE_HOJE' : 'A_VENCER',
           dias_atraso: vencida ? Utils.diffDias(p.data_vencimento, D) : 0,
           data_pagamento: x.paga ? p.data_pagamento : null, valor_pago: x.paga ? p.valor_pago : null, juros_multa: x.paga ? nulo_(p.juros_multa) : null,
-          desconto: x.paga ? nulo_(p.desconto) : null, forma_pagamento: nulo_(p.forma_pagamento), documento: nulo_(p.documento),
+          // A forma da parcela em aberto em D não vem: a baixa posterior a regrava (a forma do pagamento é a da parcela paga).
+          desconto: x.paga ? nulo_(p.desconto) : null, forma_pagamento: x.paga ? nulo_(p.forma_pagamento) : null, documento: nulo_(p.documento),
           retida_pelo_comprador: fin.retida_pelo_comprador === true,
           deducoes_retidas: retido || null, deposito_esperado: retido ? p.valor - retido : null,
         };
         if (hoje) {
           var retida = fin.retida_pelo_comprador === true;
+          var livre = tituloLivre_(tx, fin, ev);
           item.acoes = {
-            baixar: !x.paga && !retida, desfazer: x.paga && !retida, dividir: !x.paga && !retida && !retidas.length, parcial: !x.paga && !retida && !retidas.length,
+            baixar: !x.paga && !retida, desfazer: x.paga && !retida, dividir: !x.paga && !retida && !retidas.length && livre, parcial: !x.paga && !retida && !retidas.length && livre,
             motivo: retida ? 'Descontada pelo comprador: é quitada junto com o recebimento da venda.' : null,
           };
         }
@@ -590,6 +619,7 @@ var Caixa = (function () {
     baixar: baixar,
     desfazerBaixa: desfazerBaixa,
     desdobrar: desdobrar,
+    simular: simular,
     fluxo: fluxo,
     consultaFluxo: consultaFluxo,
     fluxoCaixa: fluxoCaixa,

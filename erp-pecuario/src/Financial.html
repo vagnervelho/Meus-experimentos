@@ -11,6 +11,94 @@
  * vencido, a situação de cada parcela e os dias de atraso, o alocado e o não alocado. A tela só filtra, mostra e leva ao
  * lançamento de origem.
  */
+/**
+ * Baixa — as folhas da baixa (uma parcela ou várias, inteira ou em parte, com juros, multa e desconto), do desfazer e do
+ * "Dividir" (parcela.baixar, parcela.desfazerBaixa, parcela.desdobrar; CONTRATOS, seção 56). A conferência do valor pago, do
+ * depósito esperado e do que resta é do servidor (parcela.simular): a tela só mostra.
+ */
+var Baixa = (function () {
+  var h = Util.h;
+  /** A prévia do servidor (o mesmo tratador, sem gravar) num nó. */
+  async function previa(saida, acao, dados) {
+    Util.limpar(saida);
+    saida.appendChild(UI.carregando('Conferindo no servidor…'));
+    try {
+      var r = (await Cliente.consulta('parcela.simular', { acao: acao, dados: dados })).data.impactos;
+      Util.limpar(saida);
+      if (acao === 'baixar') {
+        saida.appendChild(UI.pares(r.itens.map(function (x) {
+          var t = Fmt.dinheiro(x.valor_pago) + (x.parcial ? ' (resta ' + Fmt.dinheiro(x.resta.valor) + ' para ' + Fmt.data(x.resta.data_vencimento) + ')' : '') + (x.encontro.length ? ' · depósito esperado ' + Fmt.dinheiro(x.deposito) : '');
+          return [x.lancamento + ' (' + x.parcela_num + ')', t];
+        }).concat([['Total', 'entradas ' + Fmt.dinheiro(r.entradas) + ' · saídas ' + Fmt.dinheiro(r.saidas)]]), 'resumo-revisao'));
+      } else if (acao === 'desdobrar') {
+        saida.appendChild(UI.pares(r.novas.map(function (x) { return [Fmt.data(x.data_vencimento), Fmt.dinheiro(x.valor)]; }), 'resumo-revisao'));
+      }
+    } catch (e) {
+      Util.limpar(saida);
+      saida.appendChild(UI.estadoErro(e, { detalhes: e.details || [] }));
+    }
+  }
+  /** Baixa de uma ou várias parcelas (a mesma data e a mesma forma). itens: [{parcela_id, lancamento, valor, data_vencimento, tipo}]. */
+  function baixar(itens, origem, aoFim) {
+    var um = itens.length === 1;
+    var defs = [
+      { id: 'data_pagamento', rotulo: 'Data do pagamento (ou do recebimento)', tipo: 'data', obrigatorio: true, default: 'HOJE' },
+      { id: 'forma_pagamento', rotulo: 'Forma (caixa, PIX, transferência…)', tipo: 'lista', lista: 'FORMA_PAGAMENTO' },
+    ];
+    if (um) {
+      defs.push({ id: 'valor', rotulo: 'Valor baixado (vazio = a parcela inteira)', tipo: 'dinheiro', min: 0.01, ajuda: 'Menos que a parcela: a baixa é em parte, e o resto fica em aberto com o mesmo vencimento.' });
+      defs.push({ id: 'juros_multa', rotulo: 'Juros e multa', tipo: 'dinheiro', min: 0 });
+      defs.push({ id: 'desconto', rotulo: 'Desconto', tipo: 'dinheiro', min: 0 });
+    }
+    defs.push({ id: 'justificativa', rotulo: 'Justificativa (só no período financeiro fechado)', tipo: 'texto' });
+    var saida = h('div', { dataset: { previaBaixa: '1' } });
+    var montar = function (v) {
+      var d = { data_pagamento: v.data_pagamento, forma_pagamento: v.forma_pagamento, justificativa: v.justificativa };
+      if (um) { d.parcela_id = itens[0].parcela_id; d.valor = v.valor; d.juros_multa = v.juros_multa; d.desconto = v.desconto; }
+      else d.itens = itens.map(function (x) { return { parcela_id: x.parcela_id }; });
+      return d;
+    };
+    var extra = h('div', null, h('p', { class: 'dado', text: um ? itens[0].lancamento + ' · vence em ' + Fmt.data(itens[0].data_vencimento) + ' · ' + Fmt.dinheiro(itens[0].valor) : itens.length + ' parcelas marcadas' }), saida);
+    var f = Cadastro.folha({ titulo: um ? (itens[0].tipo === 'RECEITA' ? 'Receber a parcela' : 'Pagar a parcela') : 'Dar baixa em ' + itens.length + ' parcelas', rota: 'parcela.baixar', origem: origem, idBase: 'bx', defs: defs, extra: extra, verbo: 'Dar baixa',
+      montar: montar, sucesso: function (d) { return (d && d.parcelas ? d.parcelas.length : itens.length) > 1 ? 'Baixas gravadas.' : 'Baixa gravada.'; }, aoSalvar: function () { if (aoFim) aoFim(); } });
+    extra.appendChild(h('div', { class: 'acoes' }, UI.botao('Conferir o valor pago', { atributos: { 'data-conferir-baixa': '1' }, aoClicar: function () {
+      var c = f.bloco.converter();
+      if (c.erros.length) { f.bloco.focarPrimeiroErro(); return; }
+      previa(saida, 'baixar', montar(c.valores));
+    } })));
+    return f;
+  }
+  /** Desfazer a baixa de uma parcela (com a justificativa; no recebimento da venda, a dedução retida volta junto). */
+  function desfazer(item, origem, aoFim) {
+    return Cadastro.folha({ titulo: 'Desfazer a baixa', rota: 'parcela.desfazerBaixa', origem: origem, idBase: 'dbx', perigo: true, verbo: 'Desfazer a baixa',
+      defs: [{ id: 'justificativa', rotulo: 'Por que desfazer', tipo: 'texto', obrigatorio: true }],
+      extra: UI.nota(item.lancamento + ' · ' + Fmt.dinheiro(item.valor) + ': a parcela volta a ficar em aberto.', 'aviso'),
+      montar: function (v) { return { parcela_id: item.parcela_id, justificativa: v.justificativa }; },
+      sucesso: function () { return 'Baixa desfeita.'; }, aoSalvar: function () { if (aoFim) aoFim(); } });
+  }
+  /** Dividir ou remarcar uma parcela em aberto: em N parcelas iguais, com os vencimentos que o servidor calcula. */
+  function dividir(item, origem, aoFim) {
+    var saida = h('div', { dataset: { previaDivisao: '1' } });
+    var defs = [
+      { id: 'quantas', rotulo: 'Em quantas parcelas', tipo: 'inteiro', obrigatorio: true, min: 1, max: 120, default: 2 },
+      { id: 'primeiro', rotulo: 'Vencimento da primeira', tipo: 'data', obrigatorio: true },
+      { id: 'intervalo', rotulo: 'As outras vencem', tipo: 'lista', obrigatorio: true, opcoes: ['MES', 'D30', 'D15', 'D7'], rotulos_opcoes: ['Todo mês, no mesmo dia', 'A cada 30 dias', 'A cada 15 dias', 'Toda semana'], default: 'MES' },
+      { id: 'justificativa', rotulo: 'Por que dividir ou remarcar', tipo: 'texto', obrigatorio: true },
+    ];
+    var montar = function (v) { return { parcela_id: item.parcela_id, quantas: v.quantas, primeiro: v.primeiro, intervalo: v.intervalo, justificativa: v.justificativa }; };
+    var extra = h('div', null, UI.nota(item.lancamento + ' · ' + Fmt.dinheiro(item.valor) + ' com vencimento em ' + Fmt.data(item.data_vencimento) + ': as parcelas novas somam o mesmo (o servidor divide em partes iguais).', 'info'), saida);
+    var f = Cadastro.folha({ titulo: 'Dividir a parcela', rota: 'parcela.desdobrar', origem: origem, idBase: 'dvp', defs: defs, extra: extra, verbo: 'Dividir',
+      montar: montar, sucesso: function () { return 'Parcela dividida.'; }, aoSalvar: function () { if (aoFim) aoFim(); } });
+    extra.appendChild(h('div', { class: 'acoes' }, UI.botao('Ver as parcelas novas', { atributos: { 'data-conferir-divisao': '1' }, aoClicar: function () {
+      var c = f.bloco.converter();
+      if (c.erros.length) { f.bloco.focarPrimeiroErro(); return; }
+      previa(saida, 'desdobrar', montar(c.valores));
+    } })));
+    return f;
+  }
+  return { baixar: baixar, desfazer: desfazer, dividir: dividir };
+})();
+
 var TelaFinanceiro = (function () {
   var h = Util.h;
   /** A parcela na linguagem do pecuarista (o servidor manda a situação de hoje; 03b, seção 10.4). */
@@ -41,10 +129,20 @@ var TelaFinanceiro = (function () {
   function nomeLancamento(l) { return l.descricao || l.conta_nome || Fmt.rotulo('NATUREZA', l.natureza); }
 
   // ------------------------------------------------------------------ lista ----
+  /** O cabeçalho do módulo: o título, "Novo lançamento" (o formulário do catálogo) e as abas das partes do Financeiro. */
+  function cabecalho(el, atual) {
+    var novo = App.podeRegistrar() && Store.tipoEvento('LANCAMENTO_FINANCEIRO') ? h('a', { class: 'botao botao-primario', href: Roteador.href('evento/novo/LANCAMENTO_FINANCEIRO'), dataset: { rota: 'evento/novo/LANCAMENTO_FINANCEIRO', novoLancamento: '1' } }, 'Novo lançamento') : null;
+    el.appendChild(h('div', { class: 'tela-cabecalho' }, h('h1', { text: 'Financeiro' }), novo));
+    el.appendChild(UI.abas('Partes do Financeiro', [
+      { rotulo: 'Lançamentos', rota: 'financeiro/lancamentos', atual: atual === 'lancamentos' },
+      { rotulo: 'A pagar e a receber', rota: 'financeiro/titulos', atual: atual === 'titulos' },
+      { rotulo: 'Fluxo de caixa', rota: 'financeiro/fluxo', atual: atual === 'fluxo' },
+    ]));
+  }
   function montarLista(el) {
     var vivo = true;
-    el.appendChild(h('div', { class: 'tela-cabecalho' }, h('h1', { text: 'Financeiro' })));
-    el.appendChild(UI.nota('Os lançamentos das compras, vendas, mortes, descartes, aberturas do rebanho, aplicações e entradas de estoque. Para mudar um deles, abra o lançamento de origem e corrija ou estorne.', 'info'));
+    cabecalho(el, 'lancamentos');
+    el.appendChild(UI.nota('Os lançamentos avulsos (combustível, salário, arrendamento, aporte) e os das compras, vendas, mortes, descartes, aberturas do rebanho, aplicações e entradas de estoque. Para mudar um deles, abra o lançamento de origem e corrija ou estorne.', 'info'));
     var de = h('input', { type: 'date', id: 'fin-de', value: filtros.de });
     var ate = h('input', { type: 'date', id: 'fin-ate', value: filtros.ate });
     var tipo = selecao('fin-tipo', [['', 'Receitas e despesas'], ['RECEITA', 'Só receitas'], ['DESPESA', 'Só despesas']], filtros.tipo);
@@ -110,12 +208,25 @@ var TelaFinanceiro = (function () {
   // ------------------------------------------------------------------ detalhe ----
   function nomeAnimal(a) { return a.brinco || a.codigo_interno || 'animal'; }
   function linkEvento(e) { return e ? link('evento/' + e.event_id, e.rotulo + ' de ' + Fmt.data(e.event_date) + (e.vigente ? '' : ' (não vale mais)')) : null; }
+  /** As ações de uma parcela no detalhe (só no lançamento que vale e fora da dedução retida, que vai com o recebimento). */
+  function acoesParcela(l, x, recarregar) {
+    if (l.situacao !== 'ATIVO' || l.retida_pelo_comprador || !App.podeRegistrar()) return '—';
+    var paga = x.situacao === 'PAGA' || x.situacao === 'RECEBIDA';
+    var aberta = x.situacao === 'A_PAGAR' || x.situacao === 'A_RECEBER' || x.situacao === 'VENCIDA';
+    var item = { parcela_id: x.parcela_id, lancamento: nomeLancamento(l), valor: x.valor, data_vencimento: x.data_vencimento, tipo: l.tipo };
+    if (paga) return UI.botao('Desfazer baixa', { atributos: { 'data-desfazer': x.parcela_id }, aoClicar: function (ev) { Baixa.desfazer(item, ev.currentTarget, recarregar); } });
+    if (!aberta) return '—';
+    return h('div', { class: 'acoes', style: 'margin-top:0' },
+      UI.botao(l.tipo === 'RECEITA' ? 'Receber' : 'Pagar', { atributos: { 'data-baixar': x.parcela_id }, aoClicar: function (ev) { Baixa.baixar([item], ev.currentTarget, recarregar); } }),
+      UI.botao('Dividir', { atributos: { 'data-dividir': x.parcela_id }, aoClicar: function (ev) { Baixa.dividir(item, ev.currentTarget, recarregar); } }));
+  }
   function montarDetalhe(el, p) {
     var vivo = true;
     var titulo = h('h1', { text: 'Lançamento financeiro' });
     var corpo = h('div', null, UI.carregando('Buscando o lançamento…'));
     el.appendChild(h('div', { class: 'tela-cabecalho' }, titulo, link('financeiro/lancamentos', 'Todos os lançamentos')));
     el.appendChild(corpo);
+    function recarregar() { if (vivo) Roteador.ir('financeiro/lancamento/' + p.id, { forcar: true, substituir: true }); }
     Cliente.consulta('financeiro.lancamento', { financial_id: p.id }).then(function (r) {
       if (!vivo) return;
       var o = r.data, l = o.lancamento;
@@ -142,6 +253,7 @@ var TelaFinanceiro = (function () {
           { id: 'data_pagamento', rotulo: 'Pagamento', formatar: function (x) { return x.data_pagamento ? Fmt.data(x.data_pagamento) : '—'; } },
           { id: 'valor_pago', rotulo: 'Valor pago', num: true, formatar: function (x) { return x.valor_pago === null ? '—' : Fmt.dinheiro(x.valor_pago); } },
           { id: 'forma_pagamento', rotulo: 'Forma', valor: function (x) { return x.forma_pagamento ? Store.rotuloLista('FORMA_PAGAMENTO', x.forma_pagamento) : '—'; } },
+          { id: 'acao', rotulo: 'Ação', ordenavel: false, formatar: function (x) { return acoesParcela(l, x, recarregar); } },
         ],
       }).el : h('p', { class: 'suave', text: 'Sem parcela: este lançamento não passa pelo caixa (consumo de insumo, saldo de abertura ou registro anterior ao marco zero).' }), { dado: 'parcelas' }));
       if (o.rateio || l.nao_alocado !== null) {
@@ -171,9 +283,165 @@ var TelaFinanceiro = (function () {
     return function () { vivo = false; };
   }
 
+  // ------------------------------------------------------------------ a pagar e a receber (E4.2) ----
+  var SITUACOES_TITULO = [['ABERTOS', 'Em aberto'], ['VENCIDOS', 'Vencidos'], ['A_VENCER', 'A vencer'], ['PAGOS', 'Pagos e recebidos']];
+  var ROTULO_TITULO = { VENCIDA: 'Vencida', A_VENCER: 'A vencer', VENCE_HOJE: 'Vence hoje', PAGA: 'Paga', RECEBIDA: 'Recebida' };
+  var filtrosTit = { situacao: 'ABERTOS', tipo: '', de: '', ate: '', busca: '' };
+  /**
+   * Os títulos a pagar e a receber de hoje (financeiro.titulos): os vencidos e a vencer, ou os pagos; os totais do servidor; o
+   * depósito esperado do recebimento com dedução retida; marcar vários e dar baixa de uma vez (a mesma data e a mesma forma).
+   */
+  function montarTitulos(el) {
+    var vivo = true;
+    cabecalho(el, 'titulos');
+    var sit = selecao('tit-situacao', SITUACOES_TITULO, filtrosTit.situacao);
+    var tipo = selecao('tit-tipo', [['', 'A pagar e a receber'], ['DESPESA', 'Só a pagar'], ['RECEITA', 'Só a receber']], filtrosTit.tipo);
+    var de = h('input', { type: 'date', id: 'tit-de', value: filtrosTit.de });
+    var ate = h('input', { type: 'date', id: 'tit-ate', value: filtrosTit.ate });
+    var busca = h('input', { type: 'search', id: 'tit-busca', value: filtrosTit.busca, autocomplete: 'off', placeholder: 'lançamento, conta ou documento' });
+    el.appendChild(h('form', { class: 'filtros', role: 'search', 'aria-label': 'Filtrar títulos', on: { submit: function (ev) { ev.preventDefault(); carregar(); } } },
+      campo('tit-situacao', 'Situação', sit), campo('tit-tipo', 'Tipo', tipo), campo('tit-de', 'Vencimento (ou pagamento) de', de), campo('tit-ate', 'até', ate), campo('tit-busca', 'Buscar', busca),
+      UI.botao('Filtrar', { tipo: 'primario', atributos: { type: 'submit' } })));
+    var resumo = h('div', { class: 'indicadores', role: 'list', dataset: { totaisTitulos: '1' } });
+    var acoes = h('div', { class: 'acoes' });
+    var corpo = h('div');
+    el.appendChild(resumo);
+    el.appendChild(acoes);
+    el.appendChild(corpo);
+    async function carregar() {
+      filtrosTit.situacao = sit.value; filtrosTit.tipo = tipo.value; filtrosTit.de = de.value; filtrosTit.ate = ate.value; filtrosTit.busca = busca.value.trim();
+      Util.limpar(corpo); Util.limpar(resumo); Util.limpar(acoes);
+      corpo.appendChild(UI.carregando('Buscando os títulos…'));
+      try {
+        var q = { situacao: filtrosTit.situacao };
+        ['tipo', 'de', 'ate', 'busca'].forEach(function (k) { if (filtrosTit[k]) q[k] = filtrosTit[k]; });
+        var r = (await Cliente.consulta('financeiro.titulos', q)).data;
+        if (!vivo) return;
+        Util.limpar(corpo);
+        var t = r.totais;
+        resumo.appendChild(UI.indicador('A pagar', Fmt.dinheiro(t.a_pagar), t.vencido_pagar ? 'vencido: ' + Fmt.dinheiro(t.vencido_pagar) : 'nada vencido', 'a_pagar'));
+        resumo.appendChild(UI.indicador('A receber', Fmt.dinheiro(t.a_receber), t.vencido_receber ? 'vencido: ' + Fmt.dinheiro(t.vencido_receber) : 'nada vencido', 'a_receber'));
+        var pagos = r.situacao === 'PAGOS';
+        var tab = UI.tabela({
+          id: 'titulos', rotulo: pagos ? 'Pagos e recebidos' : 'Títulos em aberto', linhas: r.itens, chave: function (x) { return x.parcela_id; }, semPaginacao: true,
+          selecao: pagos ? null : { aoMudar: function (ids) { desenharLote(ids, r.itens); } },
+          vazio: { texto: pagos ? 'Nada pago ou recebido com esses filtros.' : 'Nada a pagar nem a receber com esses filtros.' },
+          colunas: [
+            { id: 'data_vencimento', rotulo: pagos ? 'Pago em' : 'Vencimento', valor: function (x) { return pagos ? x.data_pagamento : x.data_vencimento; }, formatar: function (x) { return Fmt.data(pagos ? x.data_pagamento : x.data_vencimento); } },
+            { id: 'lancamento', rotulo: 'Lançamento', formatar: function (x) { return link('financeiro/lancamento/' + x.financial_id, x.lancamento + (x.parcelas_do_lancamento > 1 ? ' (' + x.parcela_num + ')' : '')); } },
+            { id: 'tipo', rotulo: 'Tipo', valor: function (x) { return x.tipo === 'RECEITA' ? 'A receber' : 'A pagar'; } },
+            { id: 'parceiro', rotulo: 'Parceiro' },
+            { id: 'valor', rotulo: pagos ? 'Valor pago' : 'Valor', num: true, valor: function (x) { return pagos ? x.valor_pago : x.valor; }, formatar: function (x) { return Fmt.dinheiro(pagos ? x.valor_pago : x.valor) + (x.deposito_esperado !== null && !pagos ? ' (depósito esperado ' + Fmt.dinheiro(x.deposito_esperado) + ')' : ''); } },
+            { id: 'situacao', rotulo: 'Situação', valor: function (x) { return (ROTULO_TITULO[x.situacao] || x.situacao) + (x.dias_atraso ? ' há ' + x.dias_atraso + (x.dias_atraso === 1 ? ' dia' : ' dias') : ''); } },
+            { id: 'acao', rotulo: 'Ação', ordenavel: false, formatar: function (x) { return acaoTitulo(x); } },
+          ],
+        });
+        corpo.appendChild(tab.el);
+      } catch (e) {
+        if (!vivo) return;
+        Util.limpar(corpo);
+        corpo.appendChild(UI.estadoErro(e, { acao: { texto: 'Tentar de novo', aoClicar: carregar } }));
+      }
+    }
+    function acaoTitulo(x) {
+      var a = x.acoes || {};
+      var item = { parcela_id: x.parcela_id, lancamento: x.lancamento, valor: x.valor, data_vencimento: x.data_vencimento, tipo: x.tipo, deposito: x.deposito_esperado };
+      if (a.motivo) return h('span', { class: 'suave', text: a.motivo });
+      if (a.desfazer) return UI.botao('Desfazer baixa', { atributos: { 'data-desfazer': x.parcela_id }, aoClicar: function (ev) { Baixa.desfazer(item, ev.currentTarget, carregar); } });
+      if (!a.baixar) return '—';
+      return h('div', { class: 'acoes', style: 'margin-top:0' },
+        UI.botao(x.tipo === 'RECEITA' ? 'Receber' : 'Pagar', { atributos: { 'data-baixar': x.parcela_id }, aoClicar: function (ev) { Baixa.baixar([item], ev.currentTarget, carregar); } }),
+        a.dividir ? UI.botao('Dividir', { atributos: { 'data-dividir': x.parcela_id }, aoClicar: function (ev) { Baixa.dividir(item, ev.currentTarget, carregar); } }) : null);
+    }
+    function desenharLote(ids, itens) {
+      Util.limpar(acoes);
+      var marcados = itens.filter(function (x) { return ids.indexOf(x.parcela_id) >= 0 && x.acoes && x.acoes.baixar; });
+      if (!marcados.length) return;
+      acoes.appendChild(UI.botao('Dar baixa nas ' + marcados.length + ' marcadas', { tipo: 'primario', atributos: { 'data-baixa-lote': String(marcados.length) }, aoClicar: function (ev) {
+        Baixa.baixar(marcados.map(function (x) { return { parcela_id: x.parcela_id, lancamento: x.lancamento, valor: x.valor, data_vencimento: x.data_vencimento, tipo: x.tipo }; }), ev.currentTarget, carregar);
+      } }));
+    }
+    carregar();
+    return function () { vivo = false; };
+  }
+
+  // ------------------------------------------------------------------ fluxo de caixa (E4.2) ----
+  var AGRUPAR = [['MES', 'Por mês'], ['SEMANA', 'Por semana'], ['DIA', 'Por dia']];
+  var filtrosFluxo = { data: '', agrupar: 'MES', de: '', ate: '' };
+  var SITUACAO_PERIODO = { PASSADO: 'realizado', ATUAL: 'em curso', FUTURO: 'previsto' };
+  /**
+   * O fluxo de caixa numa data de referência (financeiro.fluxoCaixa): por mês, semana ou dia, o realizado (os pagamentos até a
+   * data) e o previsto (as parcelas em aberto, pelo vencimento), o saldo no fim de cada período a partir do saldo inicial
+   * informado nas configurações, os vencidos à parte; o gráfico de barras do líquido e a linha do saldo (com a tabela
+   * equivalente). Todo número vem do servidor.
+   */
+  function montarFluxo(el) {
+    var vivo = true;
+    cabecalho(el, 'fluxo');
+    var data = h('input', { type: 'date', id: 'flx-data', value: filtrosFluxo.data });
+    var agrupar = selecao('flx-agrupar', AGRUPAR, filtrosFluxo.agrupar);
+    var de = h('input', { type: 'date', id: 'flx-de', value: filtrosFluxo.de });
+    var ate = h('input', { type: 'date', id: 'flx-ate', value: filtrosFluxo.ate });
+    el.appendChild(h('form', { class: 'filtros', 'aria-label': 'Fluxo de caixa', on: { submit: function (ev) { ev.preventDefault(); carregar(); } } },
+      campo('flx-data', 'Na data (vazio = hoje)', data), campo('flx-agrupar', 'Agrupar', agrupar), campo('flx-de', 'De (vazio = o padrão)', de), campo('flx-ate', 'até', ate),
+      UI.botao('Ver', { tipo: 'primario', atributos: { type: 'submit' } })));
+    var corpo = h('div');
+    el.appendChild(corpo);
+    async function carregar() {
+      filtrosFluxo.data = data.value; filtrosFluxo.agrupar = agrupar.value; filtrosFluxo.de = de.value; filtrosFluxo.ate = ate.value;
+      Util.limpar(corpo);
+      corpo.appendChild(UI.carregando('Montando o fluxo de caixa…'));
+      try {
+        var q = { agrupar: filtrosFluxo.agrupar };
+        ['data', 'de', 'ate'].forEach(function (k) { if (filtrosFluxo[k]) q[k] = filtrosFluxo[k]; });
+        var r = (await Cliente.consulta('financeiro.fluxoCaixa', q)).data;
+        if (!vivo) return;
+        Util.limpar(corpo);
+        var ind = h('div', { class: 'indicadores', role: 'list', dataset: { resumoFluxo: '1' } });
+        var saldo = UI.valorInd(r.saldo, Fmt.dinheiro);
+        ind.appendChild(UI.indicador('Saldo em ' + Fmt.data(r.data), saldo.texto, saldo.motivo ? r.saldo.mensagem : r.saldo_inicial ? 'a partir do saldo de ' + Fmt.data(r.saldo_inicial.data) : null, 'saldo'));
+        ind.appendChild(UI.indicador('Realizado no período', Fmt.dinheiro(r.realizado.liquido), 'entradas ' + Fmt.dinheiro(r.realizado.entradas) + ' · saídas ' + Fmt.dinheiro(r.realizado.saidas), 'realizado'));
+        ind.appendChild(UI.indicador('Previsto no período', Fmt.dinheiro(r.previsto.liquido), 'a receber ' + Fmt.dinheiro(r.previsto.entradas) + ' · a pagar ' + Fmt.dinheiro(r.previsto.saidas), 'previsto'));
+        ind.appendChild(UI.indicador('Vencidos em aberto', Fmt.dinheiro(r.vencidos.a_pagar), 'a pagar · a receber ' + Fmt.dinheiro(r.vencidos.a_receber), 'vencidos'));
+        corpo.appendChild(ind);
+        corpo.appendChild(UI.nota('De ' + Fmt.data(r.de) + ' a ' + Fmt.data(r.ate) + '. Realizado: o que foi pago ou recebido até ' + Fmt.data(r.data) + '. Previsto: as parcelas em aberto, pelo vencimento, de ' + Fmt.data(r.data) + ' em diante; as vencidas antes ficam em "Vencidos".', 'info'));
+        corpo.appendChild(UI.grafico({
+          tipo: 'barras', titulo: 'Líquido de cada período (realizado e previsto)', rotuloX: 'Período', rotuloValor: 'R$', dado: 'fluxo-liquido', zero: true,
+          series: [{ nome: 'Líquido', pontos: r.periodos.map(function (p) { return { x: p.rotulo, y: p.liquido }; }) }], formatar: Fmt.dinheiro, vazio: 'Sem movimento no período.',
+        }));
+        if (r.saldo_inicial) {
+          corpo.appendChild(UI.grafico({
+            tipo: 'linha', titulo: 'Saldo de caixa no fim de cada período', rotuloX: 'Período', rotuloValor: 'R$', dado: 'fluxo-saldo',
+            series: [{ nome: 'Saldo', pontos: r.periodos.map(function (p) { return { x: p.rotulo, y: p.saldo_fim, nota: p.saldo_fim === null ? 'antes do saldo informado' : null }; }) }], formatar: Fmt.dinheiro,
+          }));
+        }
+        corpo.appendChild(UI.tabela({
+          id: 'fluxo', rotulo: 'Fluxo de caixa por período', linhas: r.periodos, chave: function (p) { return p.inicio; }, semPaginacao: true,
+          colunas: [
+            { id: 'rotulo', rotulo: 'Período', valor: function (p) { return p.inicio; }, formatar: function (p) { return p.rotulo + ' (' + SITUACAO_PERIODO[p.situacao] + ')'; } },
+            { id: 'entradas_r', rotulo: 'Recebido', num: true, valor: function (p) { return p.realizado.entradas; }, formatar: function (p) { return Fmt.dinheiro(p.realizado.entradas); } },
+            { id: 'saidas_r', rotulo: 'Pago', num: true, valor: function (p) { return p.realizado.saidas; }, formatar: function (p) { return Fmt.dinheiro(p.realizado.saidas); } },
+            { id: 'entradas_p', rotulo: 'A receber', num: true, valor: function (p) { return p.previsto.entradas; }, formatar: function (p) { return Fmt.dinheiro(p.previsto.entradas); } },
+            { id: 'saidas_p', rotulo: 'A pagar', num: true, valor: function (p) { return p.previsto.saidas; }, formatar: function (p) { return Fmt.dinheiro(p.previsto.saidas); } },
+            { id: 'liquido', rotulo: 'Líquido', num: true, formatar: function (p) { return Fmt.dinheiro(p.liquido); } },
+            { id: 'saldo_fim', rotulo: 'Saldo no fim', num: true, formatar: function (p) { return p.saldo_fim === null ? '—' : Fmt.dinheiro(p.saldo_fim); } },
+          ],
+        }).el);
+      } catch (e) {
+        if (!vivo) return;
+        Util.limpar(corpo);
+        corpo.appendChild(UI.estadoErro(e, { acao: { texto: 'Tentar de novo', aoClicar: carregar } }));
+      }
+    }
+    carregar();
+    return function () { vivo = false; };
+  }
+
+  Telas.registrar('financeiro/titulos', { titulo: 'A pagar e a receber', modulo: 'FINANCEIRO', montar: montarTitulos });
+  Telas.registrar('financeiro/fluxo', { titulo: 'Fluxo de caixa', modulo: 'FINANCEIRO', montar: montarFluxo });
   Telas.registrar('financeiro', { titulo: 'Financeiro', modulo: 'FINANCEIRO', montar: montarLista });
   Telas.registrar('financeiro/lancamentos', { titulo: 'Financeiro', modulo: 'FINANCEIRO', montar: montarLista });
   Telas.registrar('financeiro/lancamento/:id', { titulo: 'Lançamento financeiro', modulo: 'FINANCEIRO', montar: montarDetalhe });
-  return { SITUACAO_PARCELA: SITUACAO_PARCELA };
+  return { SITUACAO_PARCELA: SITUACAO_PARCELA, montarTitulos: montarTitulos, montarFluxo: montarFluxo };
 })();
 </script>

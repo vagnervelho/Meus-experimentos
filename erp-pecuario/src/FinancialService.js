@@ -643,6 +643,7 @@ var FinancialService = (function () {
       if (allocs.length !== 1 && rat.criterio === 'DIRETO') achado(13, 'RATEIOS', rat.rateio_id, 'Rateio DIRETO precisa ter exatamente um animal (tem ' + allocs.length + ').');
     });
     conferirNegocios_(repo, lancs, rateioDe, achado, esc, achadoFonte);
+    conferirAvulsosETitulos_(tx, lancs, rateioDe, achado, esc);
     if (repo.carregada('SANIDADE')) {
       Utils.unicos(repo.vigentes('SANIDADE').map(function (x) { return x.event_id; })).forEach(function (eid) {
         if (esc && !(esc.eventos && esc.eventos[eid])) return;
@@ -764,6 +765,86 @@ var FinancialService = (function () {
       if (gravado !== esperado) {
         achado(16, 'EVENTOS', ev.event_id, 'O valor gravado no evento ' + rotuloEvento_(ev) + ' (' + (gravado === null ? 'vazio' : reais_(gravado)) + ') difere do que os lançamentos dele somam (' + (esperado === null ? 'nenhum lançamento' : reais_(esperado)) + ').');
       }
+    });
+  }
+  /**
+   * Fase 4, E4.1 e E4.2 (CONTRATOS, seção 56): o que o lançamento avulso, a baixa, o desdobramento e o encontro de contas
+   * gravam, conferido pela mesma função na verificação e na trava (uma regra, um lugar).
+   *  - 21: o avulso (LANCAMENTO_FINANCEIRO) tem um lançamento só, de custeio, outra receita ou não operacional, com a
+   *    competência = a data do evento; o período (os dois limites ou nenhum) só em custeio e outra receita, começando na
+   *    competência ou depois; o arrendamento de pasto com o pasto e o período; nenhuma linha de animal nem rateio (Fase 4,
+   *    E4.1). Fora do avulso, nenhum lançamento tem período.
+   *  - 22: a parcela paga não é antes da competência do lançamento (a identidade das três visões; seção 55) nem no futuro, e o
+   *    desconto é menor que o valor.
+   *  - 23: as parcelas que nasceram de um desdobramento (baixa parcial ou parcela dividida) são do mesmo lançamento e do mesmo
+   *    número, a de origem está CANCELADA e elas somam o valor dela.
+   *  - 24: o encontro de contas da venda: a dedução descontada pelo comprador é quitada junto com o recebimento em que vence
+   *    (a mesma data, pelo nominal), e o recebimento quitado leva as deduções retidas dele.
+   */
+  function conferirAvulsosETitulos_(tx, lancs, rateioDe, achado, esc) {
+    var repo = tx.repo;
+    var cru = tx.cru || null;
+    var hoje = vazio_(tx.hoje) ? null : tx.hoje;
+    var temContas = repo.carregada('PLANO_CONTAS');
+    var porEvento = Utils.agruparPor(lancs, 'event_id');
+    lancs.forEach(function (fin) {
+      var nome = '"' + (fin.descricao || fin.financial_id) + '"';
+      var ev = repo.porId('EVENTOS', fin.event_id);
+      var avulso = !!ev && ev.event_type === 'LANCAMENTO_FINANCEIRO';
+      var comPeriodo = !vazio_(fin.competencia_inicio) || !vazio_(fin.competencia_fim);
+      if (!avulso && comPeriodo) achado(21, 'FINANCEIRO', fin.financial_id, 'O lançamento ' + nome + ' tem período de competência, que só o lançamento avulso de custeio ou outra receita grava.');
+      if (avulso) {
+        if ((porEvento[fin.event_id] || []).length !== 1) achado(21, 'EVENTOS', fin.event_id, 'O lançamento avulso de ' + br_(ev.event_date) + ' tem ' + (porEvento[fin.event_id] || []).length + ' lançamentos; precisa ter um só.');
+        if (EventCatalog.NATUREZAS_AVULSO.indexOf(fin.natureza) < 0) achado(21, 'FINANCEIRO', fin.financial_id, 'O lançamento avulso ' + nome + ' é de ' + (NOME_NATUREZA[fin.natureza] || fin.natureza) + ', que nasce no próprio evento (compra, venda, entrada de estoque), não em lançamento avulso.');
+        if (fin.data_competencia !== ev.event_date) achado(21, 'FINANCEIRO', fin.financial_id, 'O lançamento avulso ' + nome + ' tem a competência em ' + br_(fin.data_competencia) + ', diferente da data do evento (' + br_(ev.event_date) + ').');
+        if (comPeriodo) {
+          if (vazio_(fin.competencia_inicio) || vazio_(fin.competencia_fim) || fin.competencia_fim < fin.competencia_inicio || fin.competencia_inicio < fin.data_competencia) achado(21, 'FINANCEIRO', fin.financial_id, 'O período do lançamento ' + nome + ' precisa ter início e fim, o fim depois do início e o início na competência (' + br_(fin.data_competencia) + ') ou depois.');
+          if (fin.natureza !== 'CUSTEIO' && fin.natureza !== 'OUTRA_RECEITA') achado(21, 'FINANCEIRO', fin.financial_id, 'O lançamento ' + nome + ' tem período, que só vale para custeio e outras receitas.');
+        }
+        var conta = temContas ? repo.porId('PLANO_CONTAS', fin.conta_id) : null;
+        if (conta && conta.codigo === 'ARRENDAMENTO_PASTO' && (vazio_(fin.pasture_id) || vazio_(fin.competencia_inicio))) achado(21, 'FINANCEIRO', fin.financial_id, 'O arrendamento ' + nome + ' precisa do pasto arrendado e do período.');
+        if (rateioDe[fin.financial_id]) achado(21, 'RATEIOS', rateioDe[fin.financial_id].rateio_id, 'O lançamento avulso ' + nome + ' tem rateio entre animais, que ele não grava nesta fase.');
+        if (repo.por('EVENTO_ANIMAIS', 'event_id', fin.event_id).length) achado(21, 'EVENTOS', fin.event_id, 'O lançamento avulso de ' + br_(ev.event_date) + ' tem linhas de animais, que ele não grava.');
+      }
+      var todas = cru ? cru.cruPor('PARCELAS', 'financial_id', fin.financial_id) : repo.por('PARCELAS', 'financial_id', fin.financial_id);
+      var porId = Utils.indexarPor(todas, 'parcela_id');
+      var filhas = {};
+      todas.forEach(function (p) {
+        if (!vazio_(p.parcela_origem_id)) (filhas[p.parcela_origem_id] = filhas[p.parcela_origem_id] || []).push(p);
+        if (p.status !== 'LIQUIDADA' || vazio_(p.data_pagamento)) return;
+        if (p.data_pagamento < fin.data_competencia) achado(22, 'PARCELAS', p.parcela_id, 'A parcela ' + p.parcela_num + ' de ' + nome + ' foi paga em ' + br_(p.data_pagamento) + ', antes da competência do lançamento (' + br_(fin.data_competencia) + ').');
+        if (hoje !== null && p.data_pagamento > hoje) achado(22, 'PARCELAS', p.parcela_id, 'A parcela ' + p.parcela_num + ' de ' + nome + ' está paga numa data que ainda não chegou (' + br_(p.data_pagamento) + ').');
+        if (typeof p.desconto === 'number' && p.desconto >= p.valor) achado(22, 'PARCELAS', p.parcela_id, 'A parcela ' + p.parcela_num + ' de ' + nome + ' tem desconto (' + reais_(p.desconto) + ') igual ou maior que o valor (' + reais_(p.valor) + ').');
+      });
+      todas.forEach(function (p) {
+        if (vazio_(p.parcela_origem_id)) return;
+        var o = porId[p.parcela_origem_id] || (cru ? cru.cruPorId('PARCELAS', p.parcela_origem_id) : null);
+        if (!o || o.financial_id !== fin.financial_id) achado(23, 'PARCELAS', p.parcela_id, 'A parcela ' + p.parcela_num + ' de ' + nome + ' diz que nasceu de outra parcela, que não é deste lançamento.');
+        else if (o.status !== 'CANCELADA' || o.parcela_num !== p.parcela_num) achado(23, 'PARCELAS', p.parcela_id, 'A parcela ' + p.parcela_num + ' de ' + nome + ' nasceu do desdobramento de uma parcela que ' + (o.status !== 'CANCELADA' ? 'continua valendo' : 'tem outro número') + '.');
+      });
+      Object.keys(filhas).forEach(function (oid) {
+        var o = porId[oid];
+        if (!o) return;
+        var soma = soma_(filhas[oid], 'valor');
+        if (soma !== o.valor) achado(23, 'PARCELAS', oid, 'As parcelas que nasceram da parcela ' + o.parcela_num + ' de ' + nome + ' somam ' + reais_(soma) + ', e ela valia ' + reais_(o.valor) + '.');
+      });
+    });
+    // 24: o encontro de contas, por venda.
+    Object.keys(porEvento).forEach(function (eid) {
+      var receita = porEvento[eid].filter(function (f) { return f.natureza === 'RECEITA_VENDA_ANIMAIS'; })[0];
+      if (!receita) return;
+      var recebimentos = repo.por('PARCELAS', 'financial_id', receita.financial_id);
+      porEvento[eid].forEach(function (f) {
+        if (f.retida_pelo_comprador !== true) return;
+        repo.por('PARCELAS', 'financial_id', f.financial_id).forEach(function (q) {
+          var rec = recebimentos.filter(function (r) { return r.data_vencimento === q.data_vencimento; });
+          var recPago = rec.filter(function (r) { return r.status === 'LIQUIDADA'; })[0] || null;
+          if (q.status === 'LIQUIDADA' && (!recPago || recPago.data_pagamento !== q.data_pagamento || q.valor_pago !== q.valor)) {
+            achado(24, 'PARCELAS', q.parcela_id, 'A dedução "' + (f.descricao || f.financial_id) + '", descontada pelo comprador, está quitada em ' + br_(q.data_pagamento) + (recPago ? ' com valor diferente do nominal ou noutra data que o recebimento (' + br_(recPago.data_pagamento) + ')' : ' sem o recebimento da venda em que ela vence') + ': ela só se quita junto com ele, pelo nominal.');
+          }
+          if (q.status === 'ABERTA' && recPago) achado(24, 'PARCELAS', recPago.parcela_id, 'O recebimento da venda de ' + br_(recPago.data_vencimento) + ' está quitado, e a dedução "' + (f.descricao || f.financial_id) + '", descontada pelo comprador nele, continua em aberto.');
+        });
+      });
     });
   }
   /**

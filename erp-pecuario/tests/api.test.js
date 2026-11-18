@@ -70,7 +70,8 @@ test('roteador: rota desconhecida e rota de fase futura → NOT_FOUND; pedido ma
   const ops = s.tabela('OPERACOES').length;
   const nf = chamar(s, { rota: 'animal.apagar', dados: {} });
   assert.deepEqual([nf.error.code, /desconhecida/.test(nf.error.message)], ['NOT_FOUND', true]);
-  const fut = chamar(s, { rota: 'parcela.baixar', dados: {}, idempotencyKey: 'k' });
+  // Fase 4, E4.1 e E4.2 (CONTRATOS, seção 56): a baixa da parcela foi entregue; o resultado gerencial ainda é de etapa futura.
+  const fut = chamar(s, { rota: 'financeiro.resultado', dados: {} });
   assert.equal(fut.error.code, 'NOT_FOUND');
   assert.match(fut.error.message, /Financeiro, que chega na fase 4/);
   for (const [pedido, campo] of [
@@ -200,8 +201,8 @@ test('carga inicial condicional: completa na primeira vez; {atual: true} com a v
   assert.deepEqual(d.pastos.map((p) => p.pasture_id).sort(), [PASTOS.A, PASTOS.B].sort());
   assert.deepEqual(d.modulos.map((m) => m.id), ['DASHBOARD', 'REBANHO', 'PASTOS', 'EVENTOS', 'PESAGENS', 'SANIDADE', 'REPRODUCAO', 'FINANCEIRO', 'CONFIGURACOES', 'IMPORTACAO'], 'só os módulos entregues (Pesagens, Sanidade e Reprodução, na Fase 3; Financeiro, na etapa BASE da Fase 4)');
   assert.deepEqual([d.produtos, d.protocolos], [[], []], 'os cadastros da sanidade vão no bootstrap (nenhum protocolo de fábrica)');
-  assert.deepEqual(d.catalogo.tipos.map((t) => t.tipo), ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'NASCIMENTO', 'COMPRA', 'VENDA', 'TRANSFERENCIA', 'MORTE', 'DESCARTE', 'PESAGEM', 'SANIDADE', 'REPRODUCAO', 'DESMAMA', 'CASTRACAO', 'IDENTIFICACAO', 'MARCACAO', 'AJUSTE_INVENTARIO', 'OCORRENCIA', 'ESTOQUE', 'ESTORNO'], 'os da Fase 2, a pesagem (Fase 3, E3.1), a sanidade e o estoque (E3.2 e E3.3), a reprodução, a desmama, a castração e a ocorrência (E3.4 e E3.5)');
-  assert.equal(d.catalogo.fase, 4, 'a Fase 4 começou (EventCatalog.FASE_ATUAL), com os tipos das Fases 2 e 3 até os dela terem campos');
+  assert.deepEqual(d.catalogo.tipos.map((t) => t.tipo), ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'NASCIMENTO', 'COMPRA', 'VENDA', 'TRANSFERENCIA', 'MORTE', 'DESCARTE', 'PESAGEM', 'SANIDADE', 'REPRODUCAO', 'DESMAMA', 'CASTRACAO', 'IDENTIFICACAO', 'MARCACAO', 'AJUSTE_INVENTARIO', 'OCORRENCIA', 'LANCAMENTO_FINANCEIRO', 'ESTOQUE', 'ESTORNO'], 'os da Fase 2, a pesagem (Fase 3, E3.1), a sanidade e o estoque (E3.2 e E3.3), a reprodução, a desmama, a castração e a ocorrência (E3.4 e E3.5) e o lançamento financeiro avulso (Fase 4, E4.1)');
+  assert.equal(d.catalogo.fase, 4, 'a Fase 4 (EventCatalog.FASE_ATUAL): o lançamento avulso tem campos; o rateio ainda não');
   assert.ok(Array.isArray(d.alertas.alertas));
   assert.equal(d.dataVersion, b1.meta.dataVersion);
   // Com a versão em cache e nada mudou: nada além da versão.

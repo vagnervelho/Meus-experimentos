@@ -1919,7 +1919,7 @@ var EventService = (function () {
     var tipoTxt = conta.tipo === 'RECEITA' ? 'a receita' : 'a despesa';
     var pl = FinancialService.planejar(m.tx, {
       evento: ev, conta: conta, naturezas: EventCatalog.NATUREZAS_AVULSO, valor: c.valor, descricao: nulo_(c.descricao),
-      partner_id: nulo_(c.partner_id), documento: nulo_(c.documento), observacoes: nulo_(c.notes), quantidade: typeof c.quantidade === 'number' ? c.quantidade : null,
+      partner_id: nulo_(c.partner_id), documento: nulo_(c.documento), quantidade: typeof c.quantidade === 'number' ? c.quantidade : null,
       pasture_id: nulo_(c.pasture_id), categoria_animal_id: nulo_(c.categoria_animal_id), ref_event_id: nulo_(c.ref_event_id),
       competencia_inicio: nulo_(c.competencia_inicio), competencia_fim: nulo_(c.competencia_fim),
       parcelas: lista, aceitaPago: true, pagamento: conta.tipo === 'RECEITA' ? 'será recebida' : 'será paga', rateio: null,
@@ -1946,6 +1946,9 @@ var EventService = (function () {
     var original = ctxEv.original;
     var corresp = lancamentosCorrespondentes_(m, ctxEv);
     var usadas = {};
+    var mesmaBaixa = {};
+    var pagasNoPedido = {};
+    ctxEv.plano.PARCELAS.forEach(function (q) { if (q.status === 'LIQUIDADA') pagasNoPedido[q.parcela_id] = true; });
     m.repo.por('FINANCEIRO', 'event_id', original.event_id).forEach(function (fin) {
       var pagas = m.repo.por('PARCELAS', 'financial_id', fin.financial_id).filter(function (p) { return p.status === 'LIQUIDADA'; })
         .sort(function (a, b) { return (a.parcela_num || 0) - (b.parcela_num || 0) || (a.data_vencimento < b.data_vencimento ? -1 : a.data_vencimento > b.data_vencimento ? 1 : 0); });
@@ -1966,7 +1969,14 @@ var EventService = (function () {
           return;
         }
         usadas[q.parcela_id] = true;
-        if (q.status === 'LIQUIDADA') { erroGeral_(m, 'parcelas', 'PARCELA_JA_PAGA', 'A parcela de ' + Utils.formatarReais(p.valor) + ' com vencimento em ' + br_(p.data_vencimento) + ' já está paga (em ' + br_(p.data_pagamento) + '): deixe "Já pago em" vazio; a correção mantém a baixa dela.'); return; }
+        // "Já pago em" na parcela já paga (o reenvio do pedido como foi aceito): o mesmo pagamento é o mesmo fato e fica; outro
+        // pagamento muda a baixa, que só se desfaz pela própria rota.
+        if (q.status === 'LIQUIDADA') {
+          var mesmo = ['data_pagamento', 'valor_pago', 'juros_multa', 'desconto'].every(function (k) { return nulo_(q[k]) === nulo_(b.v[k]); });
+          if (!mesmo) erroGeral_(m, 'parcelas', 'PARCELA_JA_PAGA', 'A parcela de ' + Utils.formatarReais(p.valor) + ' com vencimento em ' + br_(p.data_vencimento) + ' já está paga (em ' + br_(b.v.data_pagamento) + '): para mudar o pagamento, desfaça a baixa antes; deixe "Já pago em" vazio e a correção mantém a baixa dela.');
+          else mesmaBaixa[q.parcela_id] = true;
+          return;
+        }
         if (novoFin && b.v.data_pagamento < novoFin.data_competencia) {
           m.conflitos.push(Validation.detalhe({
             codigo: 'PAGAMENTO_ANTES_DA_COMPETENCIA', campo: 'event_date',
@@ -1977,6 +1987,13 @@ var EventService = (function () {
         }
         ['status', 'data_pagamento', 'valor_pago', 'juros_multa', 'desconto', 'forma_pagamento'].forEach(function (k) { q[k] = b.v[k]; });
       });
+    });
+    // Na correção, o pagamento vem da baixa do original (o transporte); a parcela que não estava paga se paga pela baixa ("A pagar
+    // e a receber"), não pelo "Já pago em" da correção (CONTRATOS, seção 56: um caminho só para o fato do pagamento depois do
+    // registro).
+    ctxEv.plano.PARCELAS.forEach(function (q) {
+      if (!pagasNoPedido[q.parcela_id] || mesmaBaixa[q.parcela_id]) return;
+      erroGeral_(m, 'parcelas', 'PAGAMENTO_NA_CORRECAO', 'A parcela de ' + Utils.formatarReais(q.valor) + ' com vencimento em ' + br_(q.data_vencimento) + ' não estava paga no lançamento corrigido: deixe "Já pago em" vazio e dê a baixa em "A pagar e a receber".');
     });
   }
 

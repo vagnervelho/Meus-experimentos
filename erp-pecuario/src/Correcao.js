@@ -35,7 +35,8 @@ var Correcao = (function () {
     return m;
   }
   function parcelasOrdem_(lista) {
-    return lista.slice().sort(function (a, b) { return (a.parcela_num || 0) - (b.parcela_num || 0); });
+    // As que nasceram de uma divisão têm o número da original: o vencimento e o valor desempatam (a ordem não depende da planilha).
+    return lista.slice().sort(function (a, b) { return (a.parcela_num || 0) - (b.parcela_num || 0) || (a.data_vencimento < b.data_vencimento ? -1 : a.data_vencimento > b.data_vencimento ? 1 : 0) || (b.valor || 0) - (a.valor || 0) || (a.parcela_id < b.parcela_id ? -1 : 1); });
   }
   /** O valor que o servidor propôs (igual à proposta) não é do usuário: vazio na entrada. */
   function proposto_(valor, proposta) {
@@ -316,7 +317,8 @@ var Correcao = (function () {
     var det = {};
     TABELAS_DETALHE.forEach(function (t) { det[t] = L.por(t, 'event_id', ev.event_id); });
     det.PARCELAS = [];
-    det.FINANCEIRO.forEach(function (f) { det.PARCELAS = det.PARCELAS.concat(L.por('PARCELAS', 'financial_id', f.financial_id)); });
+    // As parcelas que valem (a dividida numa baixa parcial ou num desdobramento fica CANCELADA: as que nasceram dela a substituem).
+    det.FINANCEIRO.forEach(function (f) { det.PARCELAS = det.PARCELAS.concat(L.por('PARCELAS', 'financial_id', f.financial_id).filter(function (p) { return p.status !== 'CANCELADA'; })); });
     det.ALOCACOES_FINANCEIRAS = [];
     det.RATEIOS.forEach(function (r) { det.ALOCACOES_FINANCEIRAS = det.ALOCACOES_FINANCEIRAS.concat(L.por('ALOCACOES_FINANCEIRAS', 'rateio_id', r.rateio_id)); });
     return det;

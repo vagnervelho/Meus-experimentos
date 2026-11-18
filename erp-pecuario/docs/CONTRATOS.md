@@ -3524,6 +3524,7 @@ marco zero) e a posição (`event_seq`, `ordem_seq`: metadados); copiada a propr
 | REPRODUCAO (5 subtipos) | estação, retirada (exposição), touro, sêmen, método; por fêmea o resultado, a idade da gestação, a previsão de parto, as observações; a despesa | o registro de cada fêmea; na exposição o papel de cada animal (o macho é touro) ← o sexo do cadastro, e o touro do registro (o único do lote) ← os touros; a despesa, como na sanidade | a faixa da idade da gestação (`dias_gestacao`) ← o animal e a idade → B `REPRODUCAO.idade_gestacional` (regra); o período da estação (FORA_DA_ESTACAO) ← a estação, o subtipo e a data → B `REPRODUCAO.estacao` (regra) |
 | DESMAMA | pasto de destino, método da pesagem; por bezerro o peso e as observações | a mãe de cada bezerro (a linha MATRIZ e o registro DESMAMA dela) ← o cadastro do bezerro e a presença da mãe no rebanho no dia → B `DESMAMA.maes`; a origem do bezerro que muda de pasto ← a linha do tempo; a pesagem de desmama ← o peso e a data | quem é cria ao pé (`idade_desmama_padrao_meses`) ← o animal → B `DESMAMA.cria` (regra) |
 | CASTRACAO, OCORRENCIA | o método (castração), o tipo e a descrição (ocorrência), a despesa, as observações | a despesa, como na sanidade; castrado e a categoria (projeção) | — |
+| LANCAMENTO_FINANCEIRO (Fase 4, E4.1) | a conta, o valor, a descrição, o parceiro, o período, a quantidade, o pasto, a categoria, o registro a que se refere, o documento; as parcelas (vencimento, valor, forma, documento e "Já pago em", só no registro: seção 56) | a natureza, o tipo e o grupo ← a conta (que não mudam depois do primeiro lançamento: `conta.salvar`); a competência ← a data; a parcela paga no ato ← "Já pago em"; a baixa das parcelas pagas do original → B `PARCELAS.baixa` (também em todo tipo com lançamento) | — |
 
 ### 50.4 Tabela B — o que a correção mantém do original (`Correcao.CONGELADOS`)
 
@@ -3556,6 +3557,7 @@ tabela são as do código (`Correcao.tabela()`), e `tests/correcao.contrato.test
 | `NASCIMENTO.raca_cria` | DERIVADO | a raça da mãe | a mãe e a cria | atributos_iniciais_json.raca; ANIMAIS.raca |
 | `AJUSTE.valor_anterior` | DERIVADO | o cadastro do animal antes do ajuste (e as regras que o cadastro de hoje quebraria: VALOR_IGUAL, as regras entre campos, o par do dado e da certeza; no brinco lançado errado, as conferências pelo brinco de hoje) | o animal, o campo, o valor novo e a data | AJUSTES.valor_anterior (também a certeza apagada junto) |
 | `VENDA.bases_estimadas` | DERIVADO | a última pesagem de cada animal até a data (ou a divisão por cabeça, quando algum não tinha pesagem: seção 54) | os animais, a data, a modalidade, o peso vivo total | RATEIOS e ALOCACOES_FINANCEIRAS; EVENTO_ANIMAIS.valor_individual |
+| `PARCELAS.baixa` | COPIA | a baixa da parcela paga do original (data, valor pago, juros e multa, desconto, forma) | o lançamento, o valor e o vencimento da parcela | PARCELAS (status, data_pagamento, valor_pago, juros_multa, desconto, forma_pagamento) |
 | `VENDA.rotulo_deducao` | COPIA | LISTAS (TIPO_DEDUCAO_VENDA).rotulo | o tipo da dedução | FINANCEIRO.descricao (dedução) |
 
 ### 50.5 Recalcular quando a entrada muda
@@ -3595,6 +3597,12 @@ tabela são as do código (`Correcao.tabela()`), e `tests/correcao.contrato.test
   cadastro posterior (o sexo, a certeza, o nascimento) não recusa a correção sem mudança da anterior.
 - Com outra data, as conferências pelo estado de hoje voltam a valer (o valor de antes do ajuste, o VALOR_IGUAL e as do brinco
   lançado errado são refeitos na posição nova).
+- (Fase 4, E4.1 e E4.2; seção 56) O pagamento depois do registro vai pela baixa: na correção, a parcela paga do original leva a
+  baixa (`PARCELAS.baixa`), e o "Já pago em" só é aceito quando repete essa baixa. O pedido como foi aceito, reenviado depois de
+  a baixa ser desfeita ou refeita noutra data, é recusado (`PAGAMENTO_NA_CORRECAO`, `PARCELA_JA_PAGA`); a entrada do servidor
+  (`evento.obter`, `correcao`) não traz o "Já pago em" e é aceita. A conta, o pasto e a categoria desativados depois de usados pelo
+  original continuam valendo. A correção refaz o título com as parcelas que valem (o valor, o vencimento e a baixa), numeradas
+  de novo e sem o vínculo da divisão, que fica no lançamento original.
 
 ### 50.7 O oráculo da correção (`tests/apoio-fuzz.js`, `oraculoCorrecao`)
 

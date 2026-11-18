@@ -130,13 +130,20 @@ var Api = (function () {
     'estacao.salvar': comando_(function (ctx, p) { return ReproductionService.salvarEstacao(ctx, p); }),
     'categoria.salvar': comando_(function (ctx, p) { return Config.salvarCategoria(ctx, p); }),
     'lista.salvar': comando_(function (ctx, p) { return Config.salvarLista(ctx, p); }),
-    'conta.salvar': futura_(4, 'Financeiro'),
+    // Fase 4, E4.1 (CONTRATOS, seção 56): o plano de contas (criar, renomear, reordenar, desativar).
+    'conta.salvar': comando_(function (ctx, p) { return Config.salvarConta(ctx, p); }),
     'preco.salvar': futura_(4, 'Financeiro'),
     'config.salvar': comando_(function (ctx, p) { return salvarConfig_(ctx, p); }),
     // Financeiro, manejo e gerencial
-    'parcela.baixar': futura_(4, 'Financeiro'),
-    'parcela.desfazerBaixa': futura_(4, 'Financeiro'),
-    'financeiro.fluxoCaixa': futura_(4, 'Financeiro'),
+    // Fase 4, E4.2 (CONTRATOS, seção 56): a baixa (inteira, parcial ou em lote, com o encontro de contas), o desfazer, o
+    // desdobramento (extra) e o fluxo de caixa previsto e realizado numa data; os títulos a pagar e a receber (extra).
+    'parcela.baixar': comando_(function (ctx, p) { return Caixa.baixar(ctx, p); }),
+    'parcela.desfazerBaixa': comando_(function (ctx, p) { return Caixa.desfazerBaixa(ctx, p); }),
+    'parcela.desdobrar': comando_(function (ctx, p) { return Caixa.desdobrar(ctx, p); }),
+    // A prévia do servidor (o valor pago, o depósito esperado, o que resta, as parcelas novas): o mesmo tratador, sem gravar.
+    'parcela.simular': consulta_(function (ctx, p) { var d = p.dados || {}; return Caixa.simular(ctx, { acao: d.acao, dados: d.dados || {}, avisosAceitos: p.avisosAceitos }); }),
+    'financeiro.fluxoCaixa': consulta_(function (ctx, p) { return Caixa.fluxoCaixa(ctx, p.dados); }),
+    'financeiro.titulos': consulta_(function (ctx, p) { return Caixa.listarTitulos(ctx, p.dados); }),
     'financeiro.resultado': futura_(4, 'Financeiro'),
     'financeiro.custosAnimal': futura_(4, 'Financeiro'),
     // Os vencimentos do "Dividir em parcelas" (o aparelho não soma dias; CONTRATOS, seção 51).

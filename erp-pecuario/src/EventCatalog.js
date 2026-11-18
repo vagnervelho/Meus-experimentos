@@ -603,6 +603,7 @@ var EventCatalog = (function () {
     c_('ref_event_id', 'Refere-se ao registro', 'ref:EVENTOS', { ajuda: 'Opcional: o registro de negócio a que este lançamento se refere (só informa; não muda o registro).' }),
     c_('documento', 'Nota, recibo ou contrato', 'texto'),
     c_('property_id', 'Propriedade', 'ref:PROPRIEDADES', { default: { de: 'CONFIGURACOES.propriedade_padrao_id' } }),
+    c_('responsible', 'Responsável', 'texto'),
     c_('notes', 'Observações', 'texto'),
   ];
   /** As parcelas do avulso: as do formulário de compra e venda mais "Já pago em" (a parcela nasce paga nessa data). */

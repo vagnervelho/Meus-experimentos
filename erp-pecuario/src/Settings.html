@@ -9,7 +9,7 @@
  */
 var TelaConfig = (function () {
   var h = Util.h;
-  var SECOES = [['parametros', 'Parâmetros'], ['listas', 'Listas'], ['categorias', 'Categorias'], ['propriedades', 'Propriedades'], ['parceiros', 'Parceiros'], ['sistema', 'Sistema'], ['auditoria', 'Auditoria']];
+  var SECOES = [['parametros', 'Parâmetros'], ['listas', 'Listas'], ['categorias', 'Categorias'], ['propriedades', 'Propriedades'], ['parceiros', 'Parceiros'], ['contas', 'Plano de contas'], ['sistema', 'Sistema'], ['auditoria', 'Auditoria']];
   var ROTULOS = {
     propriedade_padrao_id: 'Propriedade principal', fuso: 'Fuso horário da fazenda', data_marco_zero: 'Marco zero (data do rebanho inicial)', unidade_peso_exibicao: 'Mostrar os pesos em',
     itens_por_pagina: 'Itens por página nas listas', brinco_somente_numerico: 'Brinco só com números', brinco_ignora_zeros_esquerda: 'Achar o brinco sem os zeros à esquerda', brinco_permite_reuso: 'Permitir reusar brinco de outro animal',
@@ -245,6 +245,46 @@ var TelaConfig = (function () {
       sucesso: function (d) { return 'Parceiro "' + (d && d.nome) + '" salvo.'; }, aoSalvar: function () { recarregar('parceiros'); } });
   }
 
+  // ------------------------------------------------------------------ plano de contas (Fase 4, E4.1) ----
+  /**
+   * O plano de contas (03a, seção 4.13; conta.salvar): a lista por grupo e ordem, com a natureza (que decide o cálculo) e a
+   * marca das contas do sistema; criar (a natureza escolhe o resto, que o servidor completa e confere), renomear, reordenar,
+   * desativar e reativar. A classificação de uma conta já usada não muda (o servidor recusa e diz por quê).
+   */
+  var NATUREZAS_CONTA = ['OUTRA_RECEITA', 'CUSTEIO', 'NAO_OPERACIONAL', 'AQUISICAO_ANIMAIS', 'DESPESA_VENDA', 'ESTOQUE_INSUMOS', 'RECEITA_VENDA_ANIMAIS'];
+  function secaoContas(el) {
+    el.appendChild(UI.nota('A natureza decide como a conta entra no caixa, no resultado e no custo dos animais; o grupo só organiza a apresentação. Depois do primeiro lançamento, a classificação não muda: crie outra conta e desative a antiga. Conta desativada sai dos formulários e os lançamentos antigos continuam valendo.', 'info'));
+    el.appendChild(h('div', { class: 'acoes' }, UI.botao('Nova conta', { tipo: 'primario', icone: 'registrar', aoClicar: function (ev) { formConta(null, ev.currentTarget); } })));
+    var todas = (Store.dados().contas || []).slice();
+    el.appendChild(UI.tabela({ id: 'contas', rotulo: 'Plano de contas', linhas: todas, chave: function (c) { return c.conta_id; }, ordem: { coluna: 'ordem', direcao: 1 }, vazio: { texto: 'Nenhuma conta.' },
+      colunas: [
+        { id: 'ordem', rotulo: 'Ordem', num: true },
+        { id: 'nome', rotulo: 'Conta' },
+        { id: 'grupo', rotulo: 'Grupo', valor: function (c) { return Fmt.rotulo('GRUPO_CONTA', c.grupo); } },
+        { id: 'natureza', rotulo: 'Natureza', valor: function (c) { return Fmt.rotulo('NATUREZA', c.natureza); } },
+        { id: 'tipo', rotulo: 'Tipo', valor: function (c) { return c.tipo === 'RECEITA' ? 'Receita' : 'Despesa'; } },
+        { id: 'ativo', rotulo: 'Situação', valor: function (c) { return (c.ativo === false ? 'Inativa' : 'Ativa') + (c.sistema ? ' · do sistema' : ''); } },
+        { id: 'acao', rotulo: 'Ação', ordenavel: false, formatar: function (c) { return botaoEditar('Editar', function (ev) { formConta(c, ev.currentTarget); }); } },
+      ] }).el);
+  }
+  function formConta(c, origem) {
+    var novo = !c;
+    var defs = [{ id: 'nome', rotulo: 'Nome', tipo: 'texto', obrigatorio: true }];
+    if (novo) {
+      defs.push({ id: 'natureza', rotulo: 'Natureza', tipo: 'lista', obrigatorio: true, opcoes: NATUREZAS_CONTA, rotulos_opcoes: NATUREZAS_CONTA.map(function (n) { return Fmt.rotulo('NATUREZA', n); }), ajuda: 'Custeio: gasto do dia a dia (vira resultado e pode ir aos animais). Outra receita: entrada que não é venda de animais. Não operacional: aporte, retirada, empréstimo (fora do resultado).' });
+      defs.push({ id: 'tipo', rotulo: 'Receita ou despesa', tipo: 'lista', opcoes: ['RECEITA', 'DESPESA'], rotulos_opcoes: ['Receita', 'Despesa'], ajuda: 'Vazio: o servidor completa quando a natureza só permite um.' });
+      defs.push({ id: 'grupo', rotulo: 'Grupo', tipo: 'lista', opcoes: ['RECEITA', 'CUSTO_DIRETO', 'CUSTO_OPERACIONAL', 'DESPESA_ADMINISTRATIVA', 'NAO_OPERACIONAL'], rotulos_opcoes: ['RECEITA', 'CUSTO_DIRETO', 'CUSTO_OPERACIONAL', 'DESPESA_ADMINISTRATIVA', 'NAO_OPERACIONAL'].map(function (g) { return Fmt.rotulo('GRUPO_CONTA', g); }), ajuda: 'Vazio: o servidor completa quando a natureza só permite um.' });
+      defs.push({ id: 'classe_custo_animal', rotulo: 'Linha no custo do animal', tipo: 'lista', opcoes: ['SANITARIO', 'ALIMENTACAO', 'REPRODUCAO', 'OUTROS', 'AQUISICAO', 'NAO_SE_APLICA'], rotulos_opcoes: ['SANITARIO', 'ALIMENTACAO', 'REPRODUCAO', 'OUTROS', 'AQUISICAO', 'NAO_SE_APLICA'].map(function (x) { return Fmt.rotulo('CLASSE_CUSTO_ANIMAL', x); }), ajuda: 'Só no custeio: sanitário, alimentação (pasto e arrendamento também), reprodução ou outros.' });
+      defs.push({ id: 'codigo', rotulo: 'Código (opcional)', tipo: 'texto', ajuda: 'Letras maiúsculas sem acento e "_". Vazio: o servidor cria pelo nome. Não muda depois.' });
+    }
+    defs.push({ id: 'ordem', rotulo: 'Ordem', tipo: 'inteiro', min: 0, ajuda: 'Posição na lista (dentro do grupo). Vazio na conta nova: no fim.' });
+    if (!novo && !c.sistema) defs.push({ id: 'ativo', rotulo: 'Ativa', tipo: 'bool', obrigatorio: true });
+    Cadastro.folha({ titulo: novo ? 'Nova conta' : 'Editar ' + c.nome, rota: 'conta.salvar', origem: origem, idBase: 'cta', defs: defs,
+      valores: novo ? {} : { nome: c.nome, ordem: c.ordem, ativo: c.ativo !== false },
+      montar: function (v) { return novo ? { campos: v } : { conta_id: c.conta_id, campos: v }; },
+      sucesso: function (d) { return 'Conta "' + (d && d.conta && d.conta.nome) + '" salva.'; }, aoSalvar: function () { recarregar('contas'); } });
+  }
+
   // ------------------------------------------------------------------ sistema ----
   function rodar(botao, texto, saida, rota, dados, desenhar) {
     var destravar = UI.travar(botao, texto);
@@ -410,7 +450,7 @@ var TelaConfig = (function () {
     carregar();
   }
 
-  var MONTAR = { parametros: secaoParametros, listas: secaoListas, categorias: secaoCategorias, propriedades: secaoPropriedades, parceiros: secaoParceiros, sistema: secaoSistema, auditoria: secaoAuditoria };
+  var MONTAR = { parametros: secaoParametros, listas: secaoListas, categorias: secaoCategorias, propriedades: secaoPropriedades, parceiros: secaoParceiros, contas: secaoContas, sistema: secaoSistema, auditoria: secaoAuditoria };
   function montar(el, p) {
     var secao = MONTAR[p.secao] ? p.secao : 'parametros';
     el.appendChild(h('div', { class: 'tela-cabecalho' }, h('h1', { text: 'Configurações' })));

@@ -560,6 +560,97 @@ var Config = (function () {
     };
   }
 
+  // ------------------------------------------------------------------ conta.salvar (Fase 4, E4.1) ----
+  var CAMPOS_CONTA = ['codigo', 'nome', 'grupo', 'natureza', 'tipo', 'classe_custo_animal', 'ordem', 'ativo'];
+  /** As colunas que travam depois do primeiro lançamento na conta (03a, seção 4.13; DL-11): mudar reclassificaria o passado. */
+  var TRAVA_APOS_USO = ['grupo', 'natureza', 'tipo', 'classe_custo_animal'];
+  /** As combinações aceitas (03a, seção 4.13): por natureza, os tipos, os grupos e as classes de custo do animal. */
+  var COMBINACOES_CONTA = {
+    RECEITA_VENDA_ANIMAIS: { tipos: ['RECEITA'], grupos: ['RECEITA'], classes: ['NAO_SE_APLICA'] },
+    OUTRA_RECEITA: { tipos: ['RECEITA'], grupos: ['RECEITA'], classes: ['NAO_SE_APLICA'] },
+    AQUISICAO_ANIMAIS: { tipos: ['DESPESA'], grupos: ['CUSTO_DIRETO'], classes: ['AQUISICAO'] },
+    CUSTEIO: { tipos: ['DESPESA'], grupos: ['CUSTO_DIRETO', 'CUSTO_OPERACIONAL', 'DESPESA_ADMINISTRATIVA'], classes: ['SANITARIO', 'ALIMENTACAO', 'REPRODUCAO', 'OUTROS'] },
+    DESPESA_VENDA: { tipos: ['DESPESA'], grupos: ['CUSTO_DIRETO'], classes: ['NAO_SE_APLICA'] },
+    ESTOQUE_INSUMOS: { tipos: ['DESPESA'], grupos: ['CUSTO_DIRETO'], classes: ['NAO_SE_APLICA'] },
+    NAO_OPERACIONAL: { tipos: ['RECEITA', 'DESPESA'], grupos: ['NAO_OPERACIONAL'], classes: ['NAO_SE_APLICA'] },
+  };
+  var ROTULO_CAMPO_CONTA = { grupo: 'o grupo', natureza: 'a natureza', tipo: 'o tipo (receita ou despesa)', classe_custo_animal: 'a classe de custo do animal' };
+  /**
+   * Comando `conta.salvar` (03a, seção 4.13; 07, seção 1.3): dados {conta_id?, campos: {codigo, nome, grupo, natureza, tipo,
+   * classe_custo_animal, ordem, ativo}, justificativa?}. Cria (sistema N; o código pelo nome quando vem vazio; o tipo, o
+   * grupo e a classe que a natureza só permite de um jeito, quando vêm vazios), renomeia, reordena, desativa e reativa. O
+   * código não muda depois de criado; grupo, natureza, tipo e classe só mudam antes do primeiro lançamento na conta (qualquer
+   * um, também o cancelado: mudar reclassificaria o passado em silêncio); a combinação segue a tabela de 03a; a conta do
+   * sistema (a que o motor lança sozinho) não se desativa. Conta não se apaga (P7): a desativada sai dos formulários e os
+   * lançamentos antigos continuam valendo. Resposta: {conta, contas}.
+   */
+  function comandoSalvarConta(pedido) {
+    var p = pedido || {};
+    return {
+      rota: 'conta.salvar', idempotencyKey: p.idempotencyKey, dados: p.dados, avisosAceitos: p.avisosAceitos || [],
+      dataVersionEsperada: p.dataVersionEsperada, reads: ['PLANO_CONTAS', 'FINANCEIRO', 'CONFIGURACOES'], acessoCru: true,
+      tratador: function (tx) {
+        var d = tx.dados || {};
+        var col = Validation.coletor();
+        var id = d.conta_id;
+        var atual = vazio_(id) ? null : tx.repo.porId('PLANO_CONTAS', id);
+        if (!vazio_(id) && !atual) throw Validation.erro('NOT_FOUND', 'A conta não existe mais. Atualize a tela e tente de novo.');
+        var campos = {};
+        Object.keys(d.campos || {}).forEach(function (c) {
+          if (CAMPOS_CONTA.indexOf(c) < 0) { col.erro({ codigo: c === 'sistema' ? 'CAMPO_IMUTAVEL' : 'CAMPO_DESCONHECIDO', campo: c, mensagem: c === 'sistema' ? 'A marca de conta do sistema não se edita.' : 'A conta não tem o campo "' + c + '".' }); return; }
+          campos[c] = typeof d.campos[c] === 'string' ? Utils.aparar(d.campos[c]) : d.campos[c];
+        });
+        var quem = atual ? 'A conta ' + atual.nome + ': ' : vazio_(campos.nome) ? 'A conta nova: ' : 'A conta ' + campos.nome + ': ';
+        function erro(codigo, campo, mensagem) { col.erro({ codigo: codigo, campo: campo, mensagem: quem + mensagem }); }
+        var todas = tx.repo.vigentes('PLANO_CONTAS');
+        if (atual) {
+          if (campos.codigo !== undefined && campos.codigo !== atual.codigo) erro('CAMPO_IMUTAVEL', 'codigo', 'o código não muda depois de criado (é ele que os lançamentos e o sistema usam); mude só o nome.');
+          delete campos.codigo;
+          if (campos.nome !== undefined && vazio_(campos.nome)) erro('CAMPO_OBRIGATORIO', 'nome', 'informe o nome.');
+          // O primeiro lançamento trava a classificação: qualquer linha de FINANCEIRO na conta, também a cancelada ou pendente.
+          var usada = tx.cru.cruPor('FINANCEIRO', 'conta_id', atual.conta_id).length > 0;
+          if (usada) TRAVA_APOS_USO.forEach(function (c) { if (campos[c] !== undefined && campos[c] !== atual[c]) erro('CONTA_EM_USO', c, ROTULO_CAMPO_CONTA[c] + ' não muda depois do primeiro lançamento na conta (mudaria as contas do passado). Crie outra conta com a classificação nova e desative esta.'); });
+          if (atual.sistema === true && campos.ativo === false) erro('CONTA_DO_SISTEMA', 'ativo', 'é usada pelo sistema nos lançamentos automáticos (compra, venda, insumos): pode ser renomeada, não desativada.');
+        } else {
+          if (vazio_(campos.nome)) erro('CAMPO_OBRIGATORIO', 'nome', 'informe o nome.');
+          if (vazio_(campos.codigo) && !vazio_(campos.nome)) campos.codigo = codigoDe_(campos.nome);
+          if (vazio_(campos.codigo) || !/^[A-Z0-9_]+$/.test(campos.codigo)) erro('FORMATO_INVALIDO', 'codigo', 'o código usa só letras maiúsculas sem acento, números e "_" (exemplo: ALUGUEL_MAQUINAS).');
+          else if (todas.some(function (c) { return c.codigo === campos.codigo; })) erro('CODIGO_REPETIDO', 'codigo', 'já existe uma conta com o código ' + campos.codigo + '.');
+          if (vazio_(campos.natureza)) erro('CAMPO_OBRIGATORIO', 'natureza', 'escolha a natureza (é ela que decide como a conta entra no caixa, no resultado e no custo do animal).');
+          var cb = COMBINACOES_CONTA[campos.natureza];
+          if (cb) {
+            if (vazio_(campos.tipo) && cb.tipos.length === 1) campos.tipo = cb.tipos[0];
+            if (vazio_(campos.grupo) && cb.grupos.length === 1) campos.grupo = cb.grupos[0];
+            if (vazio_(campos.classe_custo_animal) && cb.classes.length === 1) campos.classe_custo_animal = cb.classes[0];
+          }
+          ['tipo', 'grupo', 'classe_custo_animal'].forEach(function (c) { if (vazio_(campos[c]) && !vazio_(campos.natureza)) erro('CAMPO_OBRIGATORIO', c, 'escolha ' + ROTULO_CAMPO_CONTA[c] + '.'); });
+          if (vazio_(campos.ordem)) campos.ordem = todas.reduce(function (m, c) { return typeof c.ordem === 'number' && c.ordem > m ? c.ordem : m; }, 0) + 10;
+          if (campos.ativo === undefined || campos.ativo === null) campos.ativo = true;
+          campos.sistema = false;
+        }
+        Validation.validarRegistro('PLANO_CONTAS', campos, { parcial: true }).forEach(function (x) { if (!(x.codigo === 'CAMPO_OBRIGATORIO' && vazio_(campos[x.campo]))) erro(x.codigo, x.campo, x.mensagem); });
+        if (typeof campos.ordem === 'number' && (Math.floor(campos.ordem) !== campos.ordem || campos.ordem < 0)) erro('VALOR_FORA_DA_FAIXA', 'ordem', 'a ordem é um número inteiro a partir de 0.');
+        var final = Utils.clonar(atual || {});
+        Object.keys(campos).forEach(function (c) { final[c] = nulo_(campos[c]); });
+        var comb = COMBINACOES_CONTA[final.natureza];
+        if (!col.temErros() && comb) {
+          if (comb.tipos.indexOf(final.tipo) < 0) erro('COMBINACAO_INVALIDA', 'tipo', 'uma conta de natureza ' + final.natureza + ' é de ' + comb.tipos.map(function (t) { return t === 'RECEITA' ? 'receita' : 'despesa'; }).join(' ou ') + '.');
+          if (comb.grupos.indexOf(final.grupo) < 0) erro('COMBINACAO_INVALIDA', 'grupo', 'uma conta de natureza ' + final.natureza + ' fica no grupo ' + comb.grupos.join(', ') + '.');
+          if (comb.classes.indexOf(final.classe_custo_animal) < 0) erro('COMBINACAO_INVALIDA', 'classe_custo_animal', 'a classe de custo do animal de uma conta de natureza ' + final.natureza + ' é ' + comb.classes.join(', ') + '.');
+        }
+        if (col.temErros()) return { erros: col.erros };
+        var novoId = atual ? id : tx.novoId();
+        if (atual) AuditService.alteracao(tx, 'PLANO_CONTAS', novoId, campos, d.justificativa);
+        else AuditService.criacao(tx, 'PLANO_CONTAS', novoId, campos, d.justificativa);
+        return { resumo: { conta_id: novoId }, resposta: function (t) { return respostaConta_(t.repo, novoId); } };
+      },
+      reconstruir: function (tx, op) { return respostaConta_(tx.repo, op.resumo.conta_id); },
+    };
+  }
+  function respostaConta_(repo, id) {
+    return { conta: Utils.clonar(repo.porId('PLANO_CONTAS', id)), contas: Utils.ordenarPor(repo.vigentes('PLANO_CONTAS'), ['ordem', 'codigo']).map(Utils.clonar) };
+  }
+
   // ------------------------------------------------------------------ cadastros do bootstrap ----
   /**
    * Cadastros pequenos que vão ao cliente na carga inicial (sistema.bootstrap): parâmetros, listas, categorias
@@ -582,6 +673,7 @@ var Config = (function () {
   function salvarLista(ctx, pedido) { return UnitOfWork.run(ctx, comandoSalvarLista(pedido)); }
   function salvarCategoria(ctx, pedido) { return UnitOfWork.run(ctx, comandoSalvarCategoria(pedido)); }
   function salvarParceiro(ctx, pedido) { return UnitOfWork.run(ctx, comandoSalvarParceiro(pedido)); }
+  function salvarConta(ctx, pedido) { return UnitOfWork.run(ctx, comandoSalvarConta(pedido)); }
 
   return {
     CODIGOS_AVISO: CODIGOS_AVISO,
@@ -598,9 +690,12 @@ var Config = (function () {
     comandoSalvarLista: comandoSalvarLista,
     comandoSalvarCategoria: comandoSalvarCategoria,
     comandoSalvarParceiro: comandoSalvarParceiro,
+    comandoSalvarConta: comandoSalvarConta,
+    COMBINACOES_CONTA: COMBINACOES_CONTA,
     salvar: salvar,
     salvarLista: salvarLista,
     salvarCategoria: salvarCategoria,
     salvarParceiro: salvarParceiro,
+    salvarConta: salvarConta,
   };
 })();

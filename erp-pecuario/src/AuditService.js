@@ -383,7 +383,7 @@ var AuditService = (function () {
   var CHECAGEM_DA_INVARIANTE = Object.freeze({
     1: 'FINANCEIRO', 2: 'FINANCEIRO', 3: 'PARCELAS', 4: 'FINANCEIRO', 5: 'FINANCEIRO', 6: null, 7: 'ALOCACOES', 8: 'ALOCACOES', 9: 'ALOCACOES',
     10: 'ALOCACOES', 11: 'ALOCACOES', 12: 'ALOCACAO_DIRETA', 13: 'ALOCACOES', 14: 'FINANCEIRO', 15: 'FINANCEIRO', 16: 'FINANCEIRO', 17: 'FINANCEIRO',
-    18: 'CUSTO_AQUISICAO', 19: 'FINANCEIRO', 20: 'FINANCEIRO',
+    18: 'CUSTO_AQUISICAO', 19: 'FINANCEIRO', 20: 'FINANCEIRO', 21: 'FINANCEIRO', 22: 'PARCELAS', 23: 'PARCELAS', 24: 'FINANCEIRO',
   });
   /** Campos da reconstrução que têm checagem própria (o resto da diferença fica em PROJECAO). */
   var CHECAGEM_DO_CAMPO = Object.freeze({ 'FINANCEIRO.animal_id': 'ALOCACAO_DIRETA', 'ANIMAIS.custo_aquisicao': 'CUSTO_AQUISICAO', 'ANIMAIS.custo_aquisicao_origem': 'CUSTO_AQUISICAO' });
@@ -2428,6 +2428,32 @@ var AuditService = (function () {
    * que já pediu o aviso (o motor de eventos, com a mensagem dele) não o recebe de novo (`jaPedidos`: {codigo: true}).
    * t: {antes, depois (tx com acesso cru), lote, jaPedidos}. Devolve os avisos, sem a política (a UnitOfWork a aplica).
    */
+  /**
+   * A baixa do período fechado (RN-082; 03b, seção 11: "mexer em baixa com data_pagamento até fin_bloqueio_ate"): o comando
+   * que dá, desfaz ou muda a baixa de uma parcela de lançamento que vale (a baixa, o desfazer, a parcela paga de um
+   * desdobramento) com o pagamento — o de antes ou o de depois — até `fin_bloqueio_ate` pede PERIODO_BLOQUEADO, um só.
+   */
+  function avisoDasBaixas_(t, params) {
+    if (!t.antes.repo.carregada('PARCELAS') || !t.depois.repo.carregada('PARCELAS')) return [];
+    var velhas = {};
+    t.antes.cru.cru('PARCELAS').forEach(function (p) { velhas[p.parcela_id] = p; });
+    var fechada = function (d) { return !vazio_(d) && d <= params.fin_bloqueio_ate; };
+    var achada = null;
+    t.depois.cru.cru('PARCELAS').forEach(function (p) {
+      if (achada) return;
+      var v = velhas[p.parcela_id] || null;
+      var antes = v && v.status === 'LIQUIDADA' ? v.data_pagamento : null;
+      var depois = p.status === 'LIQUIDADA' ? p.data_pagamento : null;
+      if (antes === depois && (!v || v.valor_pago === p.valor_pago)) return;
+      // A parcela nova de um lançamento novo (o evento que nasce pago) já pediu o aviso pela competência do lançamento.
+      if (!v && !t.antes.cru.cruPorId('FINANCEIRO', p.financial_id)) return;
+      if (fechada(antes) || fechada(depois)) achada = { p: p, data: fechada(antes) ? antes : depois };
+    });
+    if (!achada) return [];
+    var fin = t.depois.cru.cruPorId('FINANCEIRO', achada.p.financial_id) || {};
+    var a = FinancialService.avisoPeriodo(params, achada.data, 'A baixa da parcela ' + achada.p.parcela_num + ' de "' + (fin.descricao || fin.natureza || 'lançamento') + '", que este comando muda,');
+    return [Validation.detalhe({ codigo: a.codigo, campo: 'justificativa_aviso', mensagem: a.mensagem })];
+  }
   function avisosDaTrava(t) {
     var antes = t.antes.repo;
     var ja = t.jaPedidos || {};
@@ -2445,7 +2471,7 @@ var AuditService = (function () {
       var cancelou = !!v && v.status === 'ATIVO' && f.status === 'CANCELADO';
       if ((criou || cancelou) && !vazio_(f.data_competencia) && FinancialService.avisoPeriodo(params, f.data_competencia, '-')) mexidos.push({ f: f, criou: criou });
     });
-    if (!mexidos.length) return [];
+    if (!mexidos.length) return avisoDasBaixas_(t, params);
     mexidos.sort(function (a, b) { return a.f.data_competencia < b.f.data_competencia ? -1 : a.f.data_competencia > b.f.data_competencia ? 1 : 0; });
     var m = mexidos[0];
     var oque = 'O lançamento "' + (m.f.descricao || m.f.natureza) + '", que este comando ' + (m.criou ? 'cria' : 'cancela') + (mexidos.length > 1 ? ' (e mais ' + (mexidos.length - 1) + ')' : '') + ',';
