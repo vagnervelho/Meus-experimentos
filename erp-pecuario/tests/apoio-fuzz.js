@@ -2007,6 +2007,9 @@ function doseCongelada(c, animalId, cp, prod) {
   if (pj.modo_dose !== 'POR_PESO' || pj.dose_referencia !== cp.dose_referencia) return null;
   const r = c.A.t.SANIDADE.filter((x) => x.event_id === o.event_id && x.animal_id === animalId)[0];
   if (!r || typeof r.dose !== 'number') return null;
+  // A dose digitada no original (payload `doses_informadas`; CONTRATOS, seção 53) não veio do peso: apagada na correção, a
+  // dose se refaz pelo peso (Correcao, B `SANIDADE.dose_por_peso`), e a conta exata pelo peso da data vale abaixo.
+  if (Array.isArray(pj.doses_informadas) && pj.doses_informadas.indexOf(animalId) >= 0) return null;
   const nt = (v) => String(v || '').trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ');
   const mesmo = prod ? r.produto_id === prod.product_id : !r.produto_id && nt(r.nome_produto) === nt(cp.nome_produto);
   return mesmo ? r.dose : null;
@@ -2449,6 +2452,8 @@ registrarTipo('LANCAMENTO_FINANCEIRO', {
 const CEM_TIPOS = ['COMPRA', 'VENDA', 'ENTRADA_INICIAL', 'MORTE', 'DESCARTE', 'SANIDADE'];
 const NAO_RATEIA = ['ESTOQUE_INSUMOS', 'NAO_OPERACIONAL'];
 const rateaveis = (S) => S.t.FINANCEIRO.filter((f) => S.vig.get(f.event_id) && NAO_RATEIA.indexOf(f.natureza) < 0 && !(S.ev.get(f.event_id) || {}).pre_marco_zero);
+/** Os custos compartilhados (o avulso, o frete, o custo do manejo): os que não são 100% dos animais do próprio registro. */
+const livresParaRatear = (S) => rateaveis(S).filter((x) => CEM_TIPOS.indexOf((S.ev.get(x.event_id) || {}).event_type) < 0 && x.natureza !== 'AQUISICAO_ANIMAIS');
 /** O rateio que vale no lançamento numa data D (sem D, hoje), pelas linhas cruas: o do evento vigente mais adiante na ordem da cadeia. */
 function rateioModelo(S, fid, D) {
   const f = S.t.FINANCEIRO.find((x) => x.financial_id === fid);
@@ -2536,12 +2541,12 @@ function preencherRateio(S, rnd, s, f, P) {
   if (s.criterio !== 'MANUAL' && rnd() < 0.15) s.valor = Math.max(1, Math.floor(f.valor * rnd()));
 }
 registrarTipo('RATEIO', {
-  peso: (S) => (rateaveis(S).length ? 8 : 0),
+  peso: (S) => (livresParaRatear(S).length ? 12 : rateaveis(S).length ? 5 : 0),
   propor: (c) => {
     const { S, rnd, P } = c;
     const lista = rateaveis(S);
     // Mais vezes o custo compartilhado (o avulso, o frete, o custo do manejo) que o lançamento do próprio registro (100%).
-    const livres = lista.filter((x) => CEM_TIPOS.indexOf((S.ev.get(x.event_id) || {}).event_type) < 0 && x.natureza !== 'AQUISICAO_ANIMAIS');
+    const livres = livresParaRatear(S);
     const f = rnd() < 0.04 ? sorteio(rnd, S.t.FINANCEIRO) : livres.length && rnd() < 0.65 ? sorteio(rnd, livres) : sorteio(rnd, lista);
     if (!f) return null;
     const marco = S.marco || D0;
@@ -5657,13 +5662,17 @@ function corrigirAceitando(sis, dados, chave) {
  * hoje bloqueia (`avisos_politica`: vale para todo comando; a carência na venda para abate segue a política) e o acerto de
  * estoque do produto que deixou de controlar o estoque (PRODUTO_SEM_ESTOQUE, decisão da seção 45).
  */
+/**
+ * Fase 4, E4.3 (CONTRATOS, seção 57): o lançamento do evento foi rateado depois por um evento RATEIO que vale — a correção (que
+ * grava outro lançamento) e o estorno são recusados até o rateio ser estornado (RATEIO_DEPENDENTE), conferido pelo modelo.
+ */
+function rateioDependente(S, eventId, r) {
+  if (!r.error || r.error.code !== 'CONFLICT' || !(r.error.details || []).length || !r.error.details.every((d) => d.codigo === 'RATEIO_DEPENDENTE')) return false;
+  const fins = new Set(S.t.FINANCEIRO.filter((f) => f.event_id === eventId).map((f) => f.financial_id));
+  return S.t.RATEIOS.some((x) => fins.has(x.financial_id) && x.event_id !== eventId && S.vig.get(x.event_id) && (S.ev.get(x.event_id) || {}).event_type === 'RATEIO');
+}
 function recusaDocumentada(S, e, r) {
-  // Fase 4, E4.3 (CONTRATOS, seção 57): o lançamento do evento foi rateado depois por um evento RATEIO que vale — a correção (que
-  // grava outro lançamento) é recusada até o rateio ser estornado (RATEIO_DEPENDENTE), conferido pelo modelo.
-  if (r.error && r.error.code === 'CONFLICT' && (r.error.details || []).length && r.error.details.every((d) => d.codigo === 'RATEIO_DEPENDENTE')) {
-    const fins = new Set(S.t.FINANCEIRO.filter((f) => f.event_id === e.event_id).map((f) => f.financial_id));
-    return S.t.RATEIOS.some((x) => fins.has(x.financial_id) && x.event_id !== e.event_id && S.vig.get(x.event_id) && (S.ev.get(x.event_id) || {}).event_type === 'RATEIO');
-  }
+  if (r.error && r.error.code === 'CONFLICT' && (r.error.details || []).every((d) => d.codigo === 'RATEIO_DEPENDENTE')) return rateioDependente(S, e.event_id, r);
   if (!r.error || r.error.code !== 'VALIDATION') return false;
   const pol = politicaDe(S);
   const codigos = (r.error.details || []).map((d) => d.codigo);
@@ -6451,6 +6460,8 @@ function oraculoCorrecaoTardia(cmd, r, A) {
     return cobre;
   };
   if (codigos.length && codigos.every((c) => RECUSAS_DA_CORRECAO_TARDIA.indexOf(c) >= 0 || (c !== 'CARENCIA_ATIVA' && pol[c] === 'BLOQUEIA') || (c === 'CARENCIA_ATIVA' && (pol[c] || 'BLOQUEIA') === 'BLOQUEIA' && carenciaDoOriginal()))) return [];
+  // O lançamento do evento foi rateado por um RATEIO que vale: a correção gravaria outro lançamento (seção 57).
+  if (rateioDependente(A, cmd.dados.event_id, r)) { contar('correção tardia barrada pelo rateio do lançamento'); return []; }
   return [falha('CORRECAO_TARDIA:RECUSADA', 'a correção sem mudança, mais tarde, de ' + cmd.dados.tipo + (cmd.dados.subtipo ? '/' + cmd.dados.subtipo : '') + ' foi recusada: ' + r.error.code + ' ' + r.error.message + ' ' + JSON.stringify((r.error.details || []).map((d) => d.codigo + ': ' + d.mensagem)).slice(0, 700))];
 }
 /**

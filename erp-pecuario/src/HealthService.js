@@ -494,8 +494,9 @@ var HealthService = (function () {
       if (fin.data_competencia < periodo.inicio || fin.data_competencia > periodo.fim) return;
       var conta = repo.porId('PLANO_CONTAS', fin.conta_id);
       if (!conta || conta.classe_custo_animal !== 'SANITARIO') return;
+      // O que valia no fim do período (o re-rateio de depois não muda o custo pedido nele: regra de tempo; seção 57.2).
       var alocado = 0;
-      repo.por('RATEIOS', 'financial_id', fin.financial_id).forEach(function (r) { repo.por('ALOCACOES_FINANCEIRAS', 'rateio_id', r.rateio_id).forEach(function (a) { alocado += a.valor_alocado || 0; }); });
+      if (repo.carregada('RATEIOS') && repo.carregada('ALOCACOES_FINANCEIRAS')) repo.alocacoesEm(fin.financial_id, periodo.fim).forEach(function (a) { alocado += a.valor_alocado || 0; });
       var k = conta.conta_id;
       if (!porConta[k]) porConta[k] = { conta_id: k, codigo: conta.codigo, nome: conta.nome, total: 0, alocado: 0 };
       porConta[k].total += fin.valor;

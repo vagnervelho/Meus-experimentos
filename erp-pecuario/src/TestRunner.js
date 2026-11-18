@@ -998,9 +998,9 @@ var TestRunner = (function () {
       },
     },
     {
-      id: 'CT-13', titulo: 'Rateio com centavos na compra: maior resto, desempate pelo código, mesma saída com a entrada embaralhada',
+      id: 'CT-13', titulo: 'Rateio com centavos: maior resto, desempate pelo código, mesma saída com a entrada embaralhada; dias de permanência, base zero, valor digitado e re-rateio (evento RATEIO)',
       executar: function (t) {
-        var P = t.pastos('CT-13', ['Pasto']);
+        var P = t.pastos('CT-13', ['Pasto', 'Rateio', 'Vazio']);
         var f = t.parceiro('Vizinho (CT-13)', ['FORNECEDOR'], 'ct13-f');
         var compra = function (data, animais, campos, frete) {
           var c = { event_date: data, partner_id: f, pasto_destino_id: P.Pasto };
@@ -1008,9 +1008,18 @@ var TestRunner = (function () {
           return { tipo: 'COMPRA', campos: c, animais: animais, parcelas: [{ data_vencimento: Utils.somaDias(data, 30) }], custos: [{ tipo: 'FRETE', valor: frete }] };
         };
         var freteDe = function (ev) { return t.doEvento('FINANCEIRO', ev)[1]; };
+        // Fase 4, E4.3: o custo compartilhado (lançamento avulso) e o evento RATEIO que o divide.
+        var contaGastos = t.tabela('PLANO_CONTAS').filter(function (c) { return c.codigo === 'OUTROS_GASTOS'; })[0].conta_id;
+        var avulso = function (data, valor, descricao, nome) {
+          var ev = t.cmd('evento.registrar', { tipo: 'LANCAMENTO_FINANCEIRO', campos: { event_date: data, conta_id: contaGastos, valor: valor, descricao: descricao }, parcelas: [{ data_vencimento: data }] }, nome);
+          return t.doEvento('FINANCEIRO', ev.event_id)[0].financial_id;
+        };
+        var alocadoPor = function (ratId, nomes) { return mapa_(t.tabela('ALOCACOES_FINANCEIRAS').filter(function (x) { return x.rateio_id === ratId; }), function (x) { return nomes[x.animal_id]; }, 'valor_alocado'); };
+        var a;
         var b;
         t.passo('a', 'R$ 100,00 de frete por CABECAS entre 3: 33,34; 33,33; 33,33 (o centavo para o menor código interno)', function () {
           var r = t.cmd('evento.registrar', compra(t.dia(59), [garrote_('1301'), garrote_('1302'), garrote_('1303')], { modalidade: 'CABECA', preco_unitario: 300000, valor_animais: 900000 }, 10000), 'ct13-a');
+          a = r;
           var fr = freteDe(r.event_id);
           var cod = mapa_(r.animais, 'animal_id', 'codigo_interno');
           var aloc = t.tabela('ALOCACOES_FINANCEIRAS').filter(function (x) { return x.financial_id === fr.financial_id; });
@@ -1035,9 +1044,45 @@ var TestRunner = (function () {
           var custo = mapa_(b.animais, 'brinco', function (a) { return t.animal(a.animal_id).custo_aquisicao; });
           igual_(mapa_(sim.impactos.financeiro.por_animal, 'brinco', 'valor'), { 1314: custo['1304'], 1315: custo['1305'], 1316: custo['1306'] }, 'valor por animal igual com a entrada embaralhada');
         });
-        ['c', 'd', 'e', 'f'].forEach(function (k, i) {
-          t.naoSeAplica(k, ['Rateio por dias de permanência', 'Rateio com base zero', 'Rateio MANUAL somando 99,99 de 100,00', 'Re-rateio por evento RATEIO'][i],
-            'O rateio de custo compartilhado (evento RATEIO) chega com o módulo Financeiro (Fase 4); a regra do maior resto já é conferida no nível 1 (tests/financeiro.test.js).');
+        t.passo('c', 'R$ 900,00 por DIAS_PERMANENCIA no pasto do rateio (31, 16 e 10 dias): 489,47; 252,63; 157,90; base 57', function () {
+          var id = mapa_(a.animais, 'brinco', 'animal_id');
+          [['1301', 70], ['1302', 85], ['1303', 91]].forEach(function (x) {
+            t.cmd('evento.registrar', { tipo: 'TRANSFERENCIA', campos: { event_date: t.dia(x[1]), pasto_origem_id: P.Pasto, pasto_destino_id: P.Rateio }, animais: [{ animal_id: id[x[0]] }] }, 'ct13-c-' + x[0]);
+          });
+          var fid = avulso(t.dia(70), 90000, 'Custo do pasto do rateio (CT-13)', 'ct13-c-lanc');
+          var r = t.cmd('evento.registrar', { tipo: 'RATEIO', campos: { event_date: t.dia(101), financial_id: fid, criterio: 'DIAS_PERMANENCIA', escopo_tipo: 'PASTO', pasture_id: P.Rateio, periodo_inicio: t.dia(70), periodo_fim: t.dia(100) } }, 'ct13-c');
+          var rat = t.doEvento('RATEIOS', r.event_id)[0];
+          igual_([rat.criterio, rat.base_total, rat.total_alocado], ['DIAS_PERMANENCIA', 57, 90000], 'RATEIOS');
+          igual_(alocadoPor(rat.rateio_id, mapa_(a.animais, 'animal_id', 'brinco')), { 1301: 48947, 1302: 25263, 1303: 15790 }, 'por dias');
+        });
+        t.passo('d', 'Base zero (nenhum animal no pasto): pede o aceite; aceito, nada alocado e o motivo gravado', function () {
+          var fid = avulso(t.dia(102), 10000, 'Sal do pasto vazio (CT-13)', 'ct13-d-lanc');
+          var pedido = { tipo: 'RATEIO', campos: { event_date: t.dia(102), financial_id: fid, criterio: 'CABECAS', escopo_tipo: 'PASTO', pasture_id: P.Vazio, data_base: t.dia(102) } };
+          var e = t.recusa('evento.registrar', pedido, 'NEEDS_CONFIRMATION', 'ct13-d-sem-aceite');
+          igual_((e.details || []).map(function (x) { return x.codigo; }), ['RATEIO_BASE_ZERO'], 'o aviso da base zero');
+          var r = t.cmd('evento.registrar', pedido, 'ct13-d', { avisos: ['RATEIO_BASE_ZERO'] });
+          var rat = t.doEvento('RATEIOS', r.event_id)[0];
+          igual_([rat.total_alocado, t.tabela('ALOCACOES_FINANCEIRAS').filter(function (x) { return x.rateio_id === rat.rateio_id; }).length], [0, 0], 'nada alocado');
+          verificar_(/^Base zero: nenhum animal no pasto /.test(rat.justificativa || ''), 'o motivo gravado: ' + rat.justificativa);
+          return rat.justificativa;
+        });
+        t.passo('e', 'MANUAL somando 99,99 de 100,00 → VALIDATION (RATEIO_NAO_FECHA), sem gravar', function () {
+          var fid = avulso(t.dia(103), 10000, 'Vermífugo da compra (CT-13)', 'ct13-e-lanc');
+          var id = mapa_(b.animais, 'brinco', 'animal_id');
+          var e = t.recusa('evento.registrar', { tipo: 'RATEIO', campos: { event_date: t.dia(103), financial_id: fid, criterio: 'MANUAL', escopo_tipo: 'LISTA', justificativa_rateio: 'Dividido à mão' }, animais_rateio: [{ animal_id: id['1304'], valor: 5000 }, { animal_id: id['1305'], valor: 4999 }] }, 'VALIDATION', 'ct13-e');
+          igual_((e.details || []).map(function (x) { return x.codigo; }), ['RATEIO_NAO_FECHA'], 'a soma tem de fechar');
+        });
+        t.passo('f', 'Re-rateio de (a): novo evento RATEIO, que passa a valer; as linhas antigas ficam intactas', function () {
+          var fr = freteDe(a.event_id);
+          var id = mapa_(a.animais, 'brinco', 'animal_id');
+          var antigo = t.tabela('RATEIOS').filter(function (x) { return x.financial_id === fr.financial_id; })[0];
+          var antes = JSON.stringify([antigo, t.tabela('ALOCACOES_FINANCEIRAS').filter(function (x) { return x.rateio_id === antigo.rateio_id; })]);
+          var r = t.cmd('evento.registrar', { tipo: 'RATEIO', campos: { event_date: t.dia(104), financial_id: fr.financial_id, criterio: 'MANUAL', escopo_tipo: 'EVENTO', justificativa_rateio: 'O 1301 veio de mais longe' }, animais_rateio: [{ animal_id: id['1301'], valor: 5000 }, { animal_id: id['1302'], valor: 2500 }, { animal_id: id['1303'], valor: 2500 }] }, 'ct13-rerateio');
+          var novo = t.doEvento('RATEIOS', r.event_id)[0];
+          verificar_(novo && novo.rateio_id !== antigo.rateio_id && t.evento(r.event_id).event_type === 'RATEIO', 'o re-rateio é outro evento RATEIO');
+          igual_(JSON.stringify([t.tabela('RATEIOS').filter(function (x) { return x.rateio_id === antigo.rateio_id; })[0], t.tabela('ALOCACOES_FINANCEIRAS').filter(function (x) { return x.rateio_id === antigo.rateio_id; })]), antes, 'as linhas do rateio de (a) não mudam');
+          igual_(t.ok(t.api('financeiro.lancamento', { financial_id: fr.financial_id }), 'financeiro.lancamento').rateio.event_id, r.event_id, 'vale o re-rateio');
+          igual_(alocadoPor(novo.rateio_id, mapa_(a.animais, 'animal_id', 'brinco')), { 1301: 5000, 1302: 2500, 1303: 2500 }, 'o valor digitado de cada animal');
         });
         t.passo('fim', 'Projeção = reconstrução e financeiro sem divergência', function () { return t.integra('CT-13'); });
       },

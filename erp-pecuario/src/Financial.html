@@ -257,7 +257,7 @@ var TelaFinanceiro = (function () {
   /** Os rateios do lançamento, do mais antigo ao que vale (o re-rateio substitui o anterior dali em diante). */
   function historicoRateios(lista) {
     if (!lista || lista.length < 2) return null;
-    return h('details', { class: 'detalhe', dataset: { rateios: String(lista.length) } }, h('summary', { text: 'Rateios deste lançamento (' + lista.length + ')' }),
+    return h('details', { class: 'detalhe', style: 'margin-top:16px', dataset: { rateios: String(lista.length) } }, h('summary', { text: 'Rateios deste lançamento (' + lista.length + ')' }),
       h('ul', { class: 'lista-simples' }, lista.map(function (x) {
         return h('li', { dataset: { rateioVigente: x.vigente ? '1' : '0' } }, link('evento/' + x.event_id, Fmt.data(x.event_date)), ' · ' + (x.descricao || Fmt.rotulo('CRITERIO_RATEIO', x.criterio)) + ' · ' + Fmt.dinheiro(x.total_alocado) + (x.vigente ? ' (vale hoje)' : ' (substituído)'));
       })));

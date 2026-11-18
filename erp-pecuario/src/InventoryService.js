@@ -393,7 +393,7 @@ var InventoryService = (function () {
     var porEvento = {};
     function valor(l, tipo) {
       if (!COM_VALOR[tipo]) return null;
-      if (!porEvento[l.event_id]) porEvento[l.event_id] = valoresDoPrincipal_(L, l.event_id, tipo);
+      if (!porEvento[l.event_id]) porEvento[l.event_id] = valoresDoPrincipal_(L, l.event_id, tipo, periodo.fim);
       var v = porEvento[l.event_id][l.animal_id];
       return typeof v === 'number' ? v : null;
     }
@@ -419,9 +419,10 @@ var InventoryService = (function () {
   }
   /**
    * {animal_id: valor alocado} do lançamento principal do evento (conta COMPRA_ANIMAIS na compra, VENDA_ANIMAIS na
-   * venda), pelo rateio vigente dele: um re-rateio (Fase 4) muda o valor por animal sem estornar o evento.
+   * venda), pelo rateio que valia nele em `data` (o fim do período): o re-rateio (Fase 4, E4.3) muda o valor por animal sem
+   * estornar o evento, dali em diante.
    */
-  function valoresDoPrincipal_(L, eventId, tipo) {
+  function valoresDoPrincipal_(L, eventId, tipo, data) {
     var codigo = tipo === 'compras' ? FinancialService.CONTAS.COMPRA : FinancialService.CONTAS.VENDA;
     var conta = L.repo.carregada('PLANO_CONTAS') ? L.repo.vigentes('PLANO_CONTAS').filter(function (c) { return c.codigo === codigo; })[0] : null;
     var natureza = tipo === 'compras' ? 'AQUISICAO_ANIMAIS' : 'RECEITA_VENDA_ANIMAIS';
@@ -429,7 +430,7 @@ var InventoryService = (function () {
       return x.status !== 'CANCELADO' && (conta ? x.conta_id === conta.conta_id : x.natureza === natureza);
     })[0];
     var out = {};
-    if (fin) alocacoesVigentes_(L, fin.financial_id).forEach(function (a) { out[a.animal_id] = (out[a.animal_id] || 0) + (a.valor_alocado || 0); });
+    if (fin) alocacoesEm_(L, fin.financial_id, data).forEach(function (a) { out[a.animal_id] = (out[a.animal_id] || 0) + (a.valor_alocado || 0); });
     return out;
   }
   var TIPOS_FLUXO = ['nascimentos', 'compras', 'vendas', 'mortes', 'descartes', 'baixas_contagem'];
@@ -444,16 +445,12 @@ var InventoryService = (function () {
     });
     return out;
   }
-  /** Alocações do rateio vigente do lançamento: o do último evento vigente para o financial_id (03b, RATEIOS). */
-  function alocacoesVigentes_(L, financialId) {
-    var rateio = null;
-    var seq = -1;
-    L.repo.por('RATEIOS', 'financial_id', financialId).forEach(function (r) {
-      var ev = L.f.evento(r.event_id);
-      var s = ev ? ev.event_seq || 0 : 0;
-      if (s > seq) { seq = s; rateio = r; }
-    });
-    return rateio ? L.repo.por('ALOCACOES_FINANCEIRAS', 'rateio_id', rateio.rateio_id) : [];
+  /**
+   * Alocações do rateio que valia no lançamento na data (03b, RATEIOS; o predicado único do Repository: `alocacoesEm`, pela
+   * ordem da cadeia e pela data do rateio — regra de tempo, CONTRATOS, seção 57.2).
+   */
+  function alocacoesEm_(L, financialId, data) {
+    return L.repo.alocacoesEm(financialId, data);
   }
   /**
    * Receita de vendas do período (07, seção 9, item 12): Σ FINANCEIRO de natureza RECEITA_VENDA_ANIMAIS por
@@ -472,7 +469,7 @@ var InventoryService = (function () {
     var total = 0;
     var naoAtribuida = 0;
     lancs.forEach(function (fin) {
-      var alocs = alocacoesVigentes_(L, fin.financial_id);
+      var alocs = alocacoesEm_(L, fin.financial_id, periodo.fim);
       naoAtribuida += fin.valor - alocs.reduce(function (s, a) { return s + (a.valor_alocado || 0); }, 0);
       if (!porAnimal) { total += fin.valor; return; }
       if (!vazio_(f.pasture_id) && !vazio_(fin.pasture_id)) { if (fin.pasture_id === f.pasture_id) total += fin.valor; return; }

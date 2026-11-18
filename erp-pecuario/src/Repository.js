@@ -272,6 +272,14 @@ var Repository = (function () {
       lista.forEach(function (c) { if (vazio_(data) || (!vazio_(c.data) && c.data <= data)) achado = c.rateio; });
       return achado;
     }
+    /**
+     * As alocações do rateio que valia no lançamento numa data (`rateioEm`): o que coube a cada animal naquele dia — o re-rateio
+     * de depois não muda o número pedido nela (regra de tempo; CONTRATOS, seção 57.2). Sem data, as de hoje. [] sem rateio.
+     */
+    function alocacoesEm(financialId, data) {
+      var r = rateioEm(financialId, data);
+      return r ? cruPor('ALOCACOES_FINANCEIRAS', 'rateio_id', r.rateio_id) : [];
+    }
     /** Os rateios de evento vigente de um lançamento que vale, na ordem em que um substitui o outro (o histórico do rateio). */
     function rateiosDoLancamento(financialId) {
       var lista = vazio_(financialId) ? null : candidatosRateio_()[financialId];
@@ -427,7 +435,7 @@ var Repository = (function () {
       return {
         vigentes: vigentes, porId: porId, por: por, unico: unico, agrupados: agrupados,
         eventoVigente: eventoVigente, contador: contador, carregada: carregada,
-        rateioEm: rateioEm, rateiosDoLancamento: rateiosDoLancamento,
+        rateioEm: rateioEm, rateiosDoLancamento: rateiosDoLancamento, alocacoesEm: alocacoesEm,
       };
     }
     /**
@@ -452,7 +460,7 @@ var Repository = (function () {
       carregadas: function () { return Object.keys(dados); },
       vigentes: vigentes, porId: porId, por: por, unico: unico, agrupados: agrupados,
       eventoVigente: eventoVigente, avaliar: avaliar, contador: contador,
-      rateioEm: rateioEm, rateiosDoLancamento: rateiosDoLancamento,
+      rateioEm: rateioEm, rateiosDoLancamento: rateiosDoLancamento, alocacoesEm: alocacoesEm,
       cru: cru, cruPorId: cruPorId, cruPor: cruPor, linhaDe: linhaDe,
       cabecalho: function (tabela) { return tabela_(tabela).cabecalho.slice(); },
       operacoesOrfas: operacoesOrfas, celulaCoercida: celulaCoercida,

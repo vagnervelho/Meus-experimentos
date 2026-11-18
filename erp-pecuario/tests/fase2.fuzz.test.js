@@ -73,7 +73,8 @@ const { createGas } = require('./harness');
 // Rodada 3 da revisão da Fase 3: com as interações novas do gerador, a 29 entra para a correção tardia com o cadastro mudado.
 // Fase 4, E4.1 e E4.2: o gerador da baixa mudou as sequências; 445 devolve a primeira identificação, 611 a correção tardia com o
 // cadastro mudado, e 505 dá o encontro de contas da venda na baixa do recebimento.
-const FIXAS = [20261115, 11, 47, 101, 2718, 3001, 3107, 3213, 3318, 9001, 9055, 1009, 1111, 1234, 4242, 777, 57, 8, 1, 31, 56, 262, 29, 445, 505, 611];
+// Fase 4, E4.3: com o rateio no sorteio, nenhuma das anteriores chegava ao encontro de contas; a 503 chega.
+const FIXAS = [20261115, 11, 47, 101, 2718, 3001, 3107, 3213, 3318, 9001, 9055, 1009, 1111, 1234, 4242, 777, 57, 8, 1, 31, 56, 262, 29, 445, 505, 611, 503];
 const PASSOS = Number(process.env.FUZZ_PASSOS || 60);
 const N = Number(process.env.FUZZ_SEMENTES || 0);
 const INICIO = process.env.FUZZ_INICIO !== undefined ? Number(process.env.FUZZ_INICIO) : Date.now() % 1000000000;
@@ -163,7 +164,10 @@ test('teste aleatório de todos os comandos da Fase 2 (' + (N ? N + ' sementes n
       // Fase 4, E4.1 e E4.2 (CONTRATOS, seção 56): o avulso, a baixa inteira, em parte e em lote, o encontro de contas, o desfazer,
       // a divisão e a baixa transportada na correção, cada um conferido pelo oráculo do efeito.
       'avulso: aceito', 'baixa: aceita', 'baixa: parcial aceita', 'baixa: em lote', 'baixa: encontro de contas', 'baixa: desfeita',
-      'parcela: dividida', 'baixa transportada na correção'].filter((k) => !F.COBERTURA[k]);
+      'parcela: dividida', 'baixa transportada na correção',
+      // Fase 4, E4.3 (CONTRATOS, seção 57): o rateio aceito e conferido pelo modelo, o DIRETO, a base zero, a base congelada na
+      // correção sem mudança e a correção só da data do rateio.
+      'rateio: aceito', 'rateio: direto conferido', 'rateio: base zero', 'rateio: base congelada na correção', 'correção da data do rateio: bases conferidas'].filter((k) => !F.COBERTURA[k]);
     assert.deepEqual(semCobertura, [], 'oráculos novos sem nada conferido nas sementes fixas (' + JSON.stringify(F.COBERTURA) + ')');
   }
 });

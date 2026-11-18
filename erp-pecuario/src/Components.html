@@ -1656,7 +1656,7 @@ var Registro = (function () {
     ENTRADA_INICIAL: 'Gravar o rebanho inicial', OUTRA_ENTRADA: 'Gravar a entrada', AJUSTE_INVENTARIO: 'Gravar a correção', ESTORNO: 'Estornar',
     NASCIMENTO: 'Gravar o parto', TRANSFERENCIA: 'Transferir', MORTE: 'Registrar a morte', DESCARTE: 'Registrar o descarte', COMPRA: 'Gravar a compra',
     VENDA: 'Gravar a venda', IDENTIFICACAO: 'Gravar a identificação', MARCACAO: 'Gravar a marcação', PESAGEM: 'Gravar a pesagem',
-    SANIDADE: 'Gravar a aplicação', ESTOQUE: 'Gravar no estoque', REPRODUCAO: 'Gravar o registro', DESMAMA: 'Gravar a desmama', CASTRACAO: 'Gravar a castração', OCORRENCIA: 'Gravar a ocorrência',
+    SANIDADE: 'Gravar a aplicação', ESTOQUE: 'Gravar no estoque', RATEIO: 'Gravar o rateio', REPRODUCAO: 'Gravar o registro', DESMAMA: 'Gravar a desmama', CASTRACAO: 'Gravar a castração', OCORRENCIA: 'Gravar a ocorrência',
   };
   /** O subtipo é o primeiro campo do formulário (08, 4.2): a pergunta muda com o tipo. */
   var PERGUNTA_SUBTIPO = { IDENTIFICACAO: 'O que fazer', MARCACAO: 'Marcar como', SANIDADE: 'O que foi feito', ESTOQUE: 'O que lançar', REPRODUCAO: 'O que registrar' };
@@ -2663,8 +2663,8 @@ var Registro = (function () {
    */
   function linhasRateio(r) {
     if (!r) return [];
-    var l = [['Lançamento', r.lancamento + ' · ' + Fmt.dinheiro(r.valor_lancamento)], ['Como divide', r.descricao]];
-    if (r.criterio_pedido && r.criterio_pedido !== r.criterio) l.push(['Critério', Fmt.rotulo('CRITERIO_RATEIO', r.criterio) + ' (um animal só entrou: ' + Fmt.rotulo('CRITERIO_RATEIO', r.criterio_pedido).toLowerCase() + ' fica direto nele)']);
+    var l = [['Como divide', r.descricao]];
+    if (r.criterio_pedido && r.criterio_pedido !== r.criterio) l.push(['Critério', 'direto ao único animal que entrou (o pedido foi ' + Fmt.rotulo('CRITERIO_RATEIO', r.criterio_pedido).toLowerCase() + ')']);
     l.push(['Vai aos animais', Fmt.dinheiro(r.total_alocado) + (r.itens.length ? ' em ' + plural(r.itens.length, 'animal', 'animais') : '')]);
     if (r.nao_alocado) l.push(['Fica sem alocar aos animais', Fmt.dinheiro(r.nao_alocado)]);
     if (r.base_zero) l.push(['Base zero', r.motivo + ': nada é alocado']);

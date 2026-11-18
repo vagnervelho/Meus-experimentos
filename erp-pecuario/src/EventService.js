@@ -2135,7 +2135,7 @@ var EventService = (function () {
     if (!vazio_(fin.property_id)) ev.property_id = fin.property_id;
     ev.description = 'Rateio de "' + nomeLancamento_(m, fin) + '" ' + Rateio.descrever({ criterio: crit, escopo_tipo: escopo, escopo_ref: spec.escopo_ref, periodo_inicio: ini, periodo_fim: fim, data_base: dataBase }, nomes);
     ctxEv.criterioPedido = r.criterio !== crit ? crit : null;
-    var anteriorAnimais = anterior ? m.repo.por('ALOCACOES_FINANCEIRAS', 'rateio_id', anterior.rateio_id).map(function (a) { return a.animal_id; }) : [];
+    var anteriorAnimais = anterior ? cru.cruPor('ALOCACOES_FINANCEIRAS', 'rateio_id', anterior.rateio_id).map(function (a) { return a.animal_id; }) : [];
     if (original) cru.cruPor('RATEIOS', 'event_id', original.event_id).forEach(function (x) { cru.cruPor('ALOCACOES_FINANCEIRAS', 'rateio_id', x.rateio_id).forEach(function (a) { anteriorAnimais.push(a.animal_id); }); });
     ctxEv.derivadosExtra = { animais: Utils.unicos(r.itens.map(function (x) { return x.animal_id; }).concat(anteriorAnimais)), eventos: [fin.event_id] };
     var antEv = anterior ? cru.cruPorId('EVENTOS', anterior.event_id) || {} : null;
@@ -4531,7 +4531,8 @@ var EventService = (function () {
       cru.cruPor('ALOCACOES_FINANCEIRAS', 'rateio_id', r.rateio_id).forEach(function (a) { animais.push(a.animal_id); });
       var outros = m.repo.rateiosDoLancamento(fin.financial_id).filter(function (x) { return x.event_id !== alvo.event_id; });
       var volta = outros.length ? outros[outros.length - 1] : null;
-      if (volta) m.repo.por('ALOCACOES_FINANCEIRAS', 'rateio_id', volta.rateio_id).forEach(function (a) { animais.push(a.animal_id); });
+      // Os animais do rateio que volta a valer (ainda não vigente agora: pelas linhas cruas) têm a projeção refeita também.
+      if (volta) cru.cruPor('ALOCACOES_FINANCEIRAS', 'rateio_id', volta.rateio_id).forEach(function (a) { animais.push(a.animal_id); });
       var ve = volta ? cru.cruPorId('EVENTOS', volta.event_id) || {} : null;
       impacto = {
         financial_id: fin.financial_id, lancamento: nomeLancamento_(m, fin), total_alocado: r.total_alocado,

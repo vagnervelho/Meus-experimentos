@@ -124,6 +124,36 @@ test('CT-13 (a, b, f): 100,00 por cabeça entre 3 (o centavo para o menor códig
   assert.deepEqual(s.porCodigo(rat2.rateio_id), { 'A-000001': [200, 39474], 'A-000002': [250, 49342], 'A-000003': [310, 61184] });
 });
 
+test('regra do tempo: a lista dos lançamentos até D mostra o rateio que valia em D (o re-rateio de depois não muda o critério nem o alocado de D); sem data, o de hoje', () => {
+  const s = montar();
+  const ids = rebanho(s, 3);
+  const l = s.ok('evento.registrar', avulso(s, { event_date: '2026-06-01', valor: 9000, descricao: 'Vermífugo do lote' }));
+  const fin = s.finDo(l.event_id)[0];
+  s.ok('evento.registrar', rateio(fin.financial_id, { event_date: '2026-06-10', criterio: 'CABECAS', escopo_tipo: 'LISTA', data_base: '2026-06-01' }, [{ animal_id: ids[0] }, { animal_id: ids[1] }]));
+  s.ok('evento.registrar', rateio(fin.financial_id, { event_date: '2026-07-01', criterio: 'CABECAS', escopo_tipo: 'REBANHO', data_base: '2026-06-01', justificativa_rateio: 'Foi para o rebanho todo' }));
+  const item = (ate) => s.ok('financeiro.lancamentos', Object.assign({ situacao: 'TODOS' }, ate ? { ate } : {})).itens.find((x) => x.financial_id === fin.financial_id);
+  const ver = (x) => [x.criterio, x.alocado, x.nao_alocado, x.animais];
+  assert.deepEqual(ver(item('2026-06-05')), [null, 0, 9000, 0], 'antes do primeiro rateio, nada alocado');
+  assert.deepEqual(ver(item('2026-06-20')), ['CABECAS', 9000, 0, 2], 'em 20/06 valia o rateio entre os dois escolhidos');
+  assert.deepEqual(ver(item('2026-07-01')), ['CABECAS', 9000, 0, 3], 'no dia do re-rateio, o re-rateio');
+  assert.deepEqual(ver(item(null)), ['CABECAS', 9000, 0, 3], 'sem data, o de hoje');
+});
+
+test('regra do tempo no painel: a venda re-rateada depois de D não muda a receita nem o valor das vendas da fêmea pedidos em D (o filtro por sexo soma as alocações que valiam em D)', () => {
+  const s = montar();
+  const ids = rebanho(s, 2, (i) => (i ? { sexo: 'F' } : {}));
+  const comprador = s.ok('parceiro.salvar', { campos: { nome: 'Frigorífico', tipos: ['COMPRADOR'] } }).partner_id;
+  const v = s.ok('evento.registrar', { tipo: 'VENDA', campos: { event_date: '2026-06-10', partner_id: comprador, finalidade: 'RECRIA_ENGORDA', modalidade: 'CABECA', preco_unitario: 300000, valor_bruto: 600000 }, animais: ids.map((animal_id) => ({ animal_id })), parcelas: [{ data_vencimento: '2026-06-30' }] });
+  const receita = s.finDo(v.event_id).find((f) => f.natureza === 'RECEITA_VENDA_ANIMAIS');
+  const painel = () => { const d = s.ok('dashboard.obter', { data_inicio: '2026-06-01', data_fim: '2026-06-30', sexo: 'F' }); return [d.receita_vendas.valor, d.movimento.vendas.valor]; };
+  assert.deepEqual(painel(), [300000, 300000]);
+  // Em 05/07 a receita é re-rateada pelo valor digitado: a fêmea fica com 2.000,00. Pedido em 30/06, o painel não muda.
+  s.ok('evento.registrar', rateio(receita.financial_id, { event_date: '2026-07-05', criterio: 'MANUAL', escopo_tipo: 'EVENTO', justificativa_rateio: 'O macho pesava mais' }, [{ animal_id: ids[0], valor: 400000 }, { animal_id: ids[1], valor: 200000 }]));
+  assert.deepEqual(painel(), [300000, 300000], 'em 30/06 valia o rateio da venda');
+  const hoje = s.ok('dashboard.obter', { data_inicio: '2026-06-01', data_fim: '2026-07-10', sexo: 'F' });
+  assert.deepEqual([hoje.receita_vendas.valor, hoje.movimento.vendas.valor], [200000, 200000], 'pedido depois do re-rateio, o re-rateio');
+});
+
 test('CT-13 (c, d, e): 900,00 por dias de permanência (31, 16 e 10 dias; 05, seção 4.6); base zero só com o aceite e o motivo gravado; o valor digitado que soma 99,99 de 100,00 é recusado', () => {
   const s = montar('2026-04-10');
   const ids = rebanho(s, 3);
@@ -288,6 +318,26 @@ test('compra: o frete re-rateado por cabeça entre os animais da compra muda o c
   assert.equal(hojeC.fecha, true);
   assert.equal(hojeC.meses.find((m) => m.mes === '2026-03').resultado.custo_aquisicao.vendidos_descartados, 239474, 'pedido no fim de março, o rateio de março');
   assert.equal(hojeC.periodo.termos.custo_rebanho_ativo, 300000 + 360000);
+});
+
+test('estorno do re-rateio que deixou um animal de fora: o rateio de antes volta a valer, e o custo de aquisição do animal que voltou é refeito (a projeção de quem volta, não só de quem estava no re-rateio)', () => {
+  const s = montar('2026-05-10');
+  const f = s.ok('parceiro.salvar', { campos: { nome: 'Fornecedor', tipos: ['FORNECEDOR'] } }).partner_id;
+  const g = (b) => ({ brinco: b, sexo: 'M', data_nascimento: '2024-06-01', data_nascimento_confianca: 'ESTIMADA', castrado: true, reprodutor: false });
+  const c = s.ok('evento.registrar', {
+    tipo: 'COMPRA', campos: { event_date: '2026-02-05', partner_id: f, pasto_destino_id: S.PASTOS.A, modalidade: 'CABECA', preco_unitario: 100000, valor_animais: 300000 },
+    animais: [g('301'), g('302'), g('303')], parcelas: [{ data_vencimento: '2026-03-05' }],
+  });
+  const ids = c.animais.map((a) => a.animal_id);
+  const principal = s.finDo(c.event_id).find((x) => x.valor === 300000);
+  const custo = () => ids.map((id) => s.tabela('ANIMAIS').find((a) => a.animal_id === id).custo_aquisicao);
+  assert.deepEqual(custo(), [100000, 100000, 100000]);
+  // O re-rateio pelo valor digitado põe tudo nos dois primeiros: o terceiro fica sem custo de aquisição.
+  const r = s.ok('evento.registrar', rateio(principal.financial_id, { event_date: '2026-03-01', criterio: 'MANUAL', escopo_tipo: 'EVENTO', justificativa_rateio: 'Negociado em dois' }, [{ animal_id: ids[0], valor: 150000 }, { animal_id: ids[1], valor: 150000 }]));
+  assert.deepEqual(custo(), [150000, 150000, null]);
+  // Estornado o re-rateio, vale o rateio da compra de novo: os três com 1.000,00 (a trava confere a projeção de todos).
+  s.ok('evento.estornar', { event_id: r.event_id, justificativa: 'Voltar ao rateio da compra' });
+  assert.deepEqual(custo(), [100000, 100000, 100000]);
 });
 
 test('o animal vendido no meio do período recebe os dias em que esteve; a venda, a pesagem e a transferência lançadas depois deixam o rateio desatualizado (BASE_RATEIO), nunca refeito em silêncio', () => {
