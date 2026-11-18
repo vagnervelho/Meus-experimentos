@@ -474,6 +474,15 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     await page.click('[data-resolver-pendentes]');
     await assentar();
     const pedidos = rede.log.slice(n0).filter((x) => x.rota === 'animal.resolver');
+    if (pedidos.some((x) => x.perdidaAberta)) {
+      // A resposta perdida: até o prazo do aparelho (45 s), o toque já tem resposta na tela — o botão diz "Conferindo…" e fica
+      // travado (o toque repetido não pede de novo). Depois do prazo, vale a regra de baixo (sem resposta do servidor).
+      const w0 = await lerTela(page, tela);
+      if (w0.fase === 'sessao' && !/Conferindo os brincos pendentes no servidor/.test(w0.textoTodo)) falhar('"Conferir os brincos pendentes no servidor" à espera da resposta do servidor não disse nada na tela');
+      conta('pendentes:noAr');
+      await avancar(46000);
+      await assentar();
+    }
     if (pedidos.length && pedidos.every((x) => !x.entregue || !x.resposta.ok)) {
       // Segunda convergência, rodada 1 (achado 13): o toque sem resposta do servidor tem resposta na tela.
       const w = await lerTela(page, tela);

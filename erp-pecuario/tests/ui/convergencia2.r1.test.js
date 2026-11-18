@@ -9,7 +9,8 @@
  *     causa (achado pelo teste aleatório estendido), a linha que voltava de um bloco desfeito e a de "Pesar de novo" do mesmo
  *     animal saíam no mesmo bloco.
  * 13. A pendente sem sinal aparecia como "brinco não encontrado", e o toque em "Conferir os brincos pendentes" sem resposta do
- *     servidor não dizia nada.
+ *     servidor não dizia nada; e, pela mesma causa (achado pelo teste aleatório estendido), com a resposta perdida a tela ficava
+ *     muda até o prazo do aparelho (45 s).
  * 14. Sem localStorage, a falha só do índice dos rascunhos ficava para sempre (a nova tentativa não mandava nada).
  * 17. O contador do tronco contava as linhas que não entram no diagnóstico.
  * Roda por `npm run ui:check`.
@@ -210,6 +211,37 @@ for (const tela of ['curral', 'tronco']) {
       assert.match(macho.texto, /não entra no diagnóstico/);
       assert.doesNotMatch(macho.texto, /brinco não encontrado/);
     }
+    assert.deepEqual(inesperados(x), []);
+    await x.fechar();
+  });
+
+  test('achado 13, a resposta perdida (' + tela + '; achado pelo teste aleatório estendido, semente 80028): até o prazo do aparelho, "Conferir os brincos pendentes no servidor" diz "Conferindo…" e fica travado; depois do prazo, diz que as pendentes continuam à espera', async () => {
+    const x = await abrir(tela);
+    const { page, rede } = x;
+    const valor = tela === 'curral' ? '430' : 'p';
+    await comecar(x);
+    rede.falhas.push({ classe: 'resolver', tipo: 'transporte' });
+    await lancar(x, '0520', valor);
+    // A resposta do servidor se perde: o aparelho espera o prazo (45 s).
+    rede.falhas.push({ classe: 'resolver', tipo: 'perdeDepois' });
+    const n0 = rede.log.length;
+    await page.click('[data-resolver-pendentes]');
+    await parar(x);
+    const b = page.locator('[data-resolver-pendentes]');
+    assert.match(await b.textContent(), /Conferindo os brincos pendentes no servidor…/);
+    assert.equal(await b.isDisabled(), true, 'travado: o toque repetido não pede de novo');
+    assert.equal(rede.log.slice(n0).filter((r) => r.rota === 'animal.resolver').length, 1);
+    // Vencido o prazo, a tela diz que a pendente continua esperando, e o botão volta.
+    await andar(x, 46000);
+    assert.match(await page.textContent('#avisos'), /Sem resposta do servidor .*o brinco pendente continua à espera dele/);
+    assert.match(await b.textContent(), /^Conferir os brincos pendentes no servidor$/);
+    assert.equal(await b.isDisabled(), false);
+    const v = await lerTela(page, tela);
+    assert.deepEqual(v.c.linhas.map((l) => [l.estado, !!l.semPosicao]), [['NAO_ENCONTRADO', true]]);
+    // Com sinal, resolve.
+    await page.click('[data-resolver-pendentes]');
+    await parar(x);
+    assert.deepEqual((await lerTela(page, tela)).c.linhas.map((l) => l.estado), ['FILA']);
     assert.deepEqual(inesperados(x), []);
     await x.fechar();
   });

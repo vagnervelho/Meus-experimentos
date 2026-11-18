@@ -3845,6 +3845,7 @@ oráculo que deixou o defeito passar foi estendido (53.3).
 | 12 | Curral: "Corrigir o brinco" punha na fila uma segunda linha do mesmo animal (o servidor recusava o bloco inteiro: ANIMAL_REPETIDO) | MEDIA | uma função para todo caminho que dá o animal a uma linha (`darAnimal`: a pendente conferida e "Corrigir o brinco"): outra linha do mesmo animal ainda do aparelho barra; a que já saiu pede "Está certo" | `tests/ui/convergencia2.r1.test.js`, achado 12 |
 | 12b | (achado pelo teste aleatório estendido, semente 70005; a mesma causa do 12 por outro caminho) A linha que voltava de um bloco desfeito (o aviso e "Corrigir o peso" ou "Tirar" outra linha dele) e a de "Pesar de novo" do mesmo animal saíam no mesmo bloco: o servidor recusava o bloco inteiro (ANIMAL_REPETIDO) | MEDIA | a garantia no ponto único em que o bloco nasce (`uidsDoBloco`, curral e tronco): um lançamento leva cada animal uma vez só, e a segunda pesagem ou o segundo diagnóstico do mesmo dia sai no bloco seguinte, com a confirmação do servidor | `tests/ui/convergencia2.r1.test.js`, achado 12 (outro caminho) |
 | 13 | A pendente sem sinal aparecia "brinco não encontrado", sem o porquê, e "Conferir os brincos pendentes no servidor" sem resposta não dizia nada | MEDIA | o rótulo pelo porquê (`rotuloEstado`: "pendente: a conferir no servidor", "não entra na pesagem/no diagnóstico", "brinco não encontrado"), a mensagem da pendente e o status próprios; o toque sem resposta avisa que as pendentes continuam à espera | achado 13 (curral e tronco) |
+| 13b | (achado pelo teste aleatório estendido, semente 80028; a mesma causa do 13 por outro caminho) Com a resposta do servidor perdida, o toque em "Conferir os brincos pendentes no servidor" ficava sem resposta na tela até o prazo do aparelho (45 s), e o toque repetido pedia de novo | MEDIA | o botão tem o estado do pedido no ar (`ui.pendentesNoAr`, curral e tronco): "Conferindo os brincos pendentes no servidor…", travado e `aria-busy`, até a resposta ou o prazo; depois, o aviso do 13 | `tests/ui/convergencia2.r1.test.js`, achado 13, a resposta perdida (curral e tronco) |
 | 14 | Sem localStorage, com a falha só no índice dos rascunhos, a nova tentativa não mandava nada (a faixa ficava para sempre e o Início não listava o rascunho) | MEDIA | `Rascunhos`: o índice que falhou fica pendente (`indiceFalhou`) e vai de novo sozinho, também ao sair da página | achado 14 |
 | 15 | A previsão de parto só pela exposição (nível 3) era a janela sem a margem | BAIXA | `previsaoParto`: início + dias − tolerância a fim + dias + tolerância (CONTRATOS, seção 40), a mesma janela dos indicadores; o alerta de prenhez vencida conta do fim dela | achado 15 |
 | 16 | O comando que TIRA o movimento de um dia contado (desfazer a importação da sanidade; a correção para outro produto ou para o nome livre) só era barrado pela trava, com um texto que não servia | BAIXA | o motor confere também o produto que sai na correção (`produtosQueSaem_`) e o estoque sem os eventos desfeitos (`EventService.conferirEstoqueSem`, no desfazer), com CONTAGEM_POSTERIOR e o caminho certo de cada comando ("desfaça a importação", "estorne o lançamento", "grave este lançamento") | achado 16 |
@@ -3880,13 +3881,19 @@ oráculo que deixou o defeito passar foi estendido (53.3).
   na data nova. O modelo da agenda (`modeloAgenda`) vence o nunca aplicado no início do protocolo. O efeito da entrada de estoque
   confere o lote e a validade no movimento, e que a entrada sem movimento não aceitou lote. O gerador deixa o lote em branco no
   produto sem controle de estoque (quase sempre; às vezes manda e espera a recusa).
+- **O oráculo de tempo** (`tests/apoio-fuzz.js`, `protocolosEm`): a impressão digital do protocolo leva o início de vigência
+  (o cadastro, ou a primeira aplicação vigente, se antes). Com o achado 8, o vencimento do animal nunca aplicado depende desse
+  início, e a aplicação retroativa (ou o estorno dela) noutro animal o move: ela alcança a linha de cada animal do protocolo, por
+  desenho (05, RN-058). A leva achou a lacuna (sementes 720208, 720241 e 720043: a agenda de um animal mudava com a aplicação
+  ou o estorno noutro, e a impressão não mudava); a leva foi refeita com o oráculo estendido.
 - **O teste aleatório do curral e do tronco** (`tests/ui/curral.fuzz.test.js`, `tests/ui/apoio-curral.js`): o rascunho no
   servidor também chega atrasado (`segurarAntes`: depois dos mais novos) e falha só no índice (a falha mira `rota` e `chave`);
   "Corrigir o brinco" usa metade das vezes o brinco de outra linha da sessão; o oráculo confere, a cada ação, que nenhum bloco repete
   animal e que o servidor nunca recusa por ANIMAL_REPETIDO; que "Corrigir o brinco" para o animal de outra linha ainda do
   aparelho é barrado (e o de uma linha que já saiu pede "Está certo"); que a
   pendente sem sinal se lê "pendente: a conferir no servidor"; que o contador do tronco conta as fêmeas achadas; que o toque em
-  "Conferir os brincos pendentes" sem resposta do servidor diz na tela que elas continuam à espera; e, sem localStorage, que nada
+  "Conferir os brincos pendentes" sem resposta do servidor diz na tela que elas continuam à espera (com a resposta perdida, até
+  o prazo, o botão diz "Conferindo…"; depois, o aviso); e, sem localStorage, que nada
   fica preso depois de o servidor voltar (o rascunho sem falha) e que o índice do servidor lista a sessão.
 
 ### 53.4 Decisões
@@ -3898,6 +3905,9 @@ oráculo que deixou o defeito passar foi estendido (53.3).
   escolher um dos dois.
 - A versão do rascunho é o carimbo do aparelho (já usado no `salvo_em`; seção 51, lista do que pode ficar): o pedido atrasado é
   sempre de uma versão menor. O aparelho que recarrega lê a versão guardada e nunca dá uma menor que ela.
+- O início do protocolo é um fato do rebanho (o cadastro, ou a primeira aplicação vigente com ele, se antes; 05, RN-058): a
+  aplicação retroativa noutro animal, ou o estorno da primeira, move o vencimento de todo animal nunca aplicado do protocolo.
+  O oráculo de tempo o trata assim (53.3), em vez de esperar que a linha de cada outro animal fique igual.
 - As duas linhas do mesmo animal na fila (a que voltou de um bloco desfeito e a de "pesar de novo", as duas decididas pelo
   operador) continuam: o que não pode é o mesmo animal duas vezes no mesmo lançamento, e cada uma sai no seu bloco, com o aviso
   da pesagem (ou do diagnóstico) repetida do dia.

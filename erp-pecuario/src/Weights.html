@@ -624,10 +624,15 @@ var TelaPesagens = (function () {
     function resolverEsperando(doBotao) {
       var textos = textosEsperando();
       if (!textos.length) return Promise.resolve();
+      // O toque no botão sempre tem resposta (§20, regra 3): enquanto o servidor não responde (a resposta perdida espera o prazo),
+      // o botão diz "Conferindo…" e fica travado (o toque repetido não pede de novo); sem o servidor, a tela diz que as pendentes
+      // continuam esperando.
+      if (doBotao) { ui.pendentesNoAr = (ui.pendentesNoAr || 0) + 1; desenharStatus(); }
       return resolverNoServidor(textos).then(function (r) {
-        // O toque no botão sempre tem resposta (§20, regra 3): sem o servidor, a tela diz que as pendentes continuam esperando.
+        if (doBotao) ui.pendentesNoAr -= 1;
         if (r.erro && doBotao && vivo) UI.aviso('Sem resposta do servidor (' + r.erro.message + '): ' + (textos.length === 1 ? 'o brinco pendente continua' : 'os ' + textos.length + ' brincos pendentes continuam') + ' à espera dele. Toque de novo quando houver sinal.', { tipo: 'erro' });
         if (aplicarEsperando(r)) mudou();
+        else if (doBotao && vivo) desenharStatus();
       });
     }
     /**
@@ -719,7 +724,7 @@ var TelaPesagens = (function () {
       var esperam = pend.filter(function (l) { return l.semPosicao && l.estado === 'NAO_ENCONTRADO'; }).length;
       if (pend.length > esperam) ui.status.appendChild(UI.nota(pend.length - esperam === 1 ? '1 pendência impede o envio: corrija o peso ou o brinco, ou tire a linha.' : (pend.length - esperam) + ' pendências impedem o envio: corrija ou tire as linhas marcadas.', 'erro'));
       if (esperam) ui.status.appendChild(UI.nota((esperam === 1 ? '1 brinco espera' : esperam + ' brincos esperam') + ' a conferência do servidor (sem resposta na hora): com sinal, toque em "Conferir os brincos pendentes no servidor". O envio espera por ' + (esperam === 1 ? 'ele.' : 'eles.'), 'aviso'));
-      if (c.linhas.some(function (l) { return l.semPosicao && l.estado === 'NAO_ENCONTRADO'; })) ui.status.appendChild(h('div', { class: 'acoes' }, UI.botao('Conferir os brincos pendentes no servidor', { atributos: { 'data-resolver-pendentes': '1' }, aoClicar: function () { resolverEsperando(true); } })));
+      if (c.linhas.some(function (l) { return l.semPosicao && l.estado === 'NAO_ENCONTRADO'; })) ui.status.appendChild(h('div', { class: 'acoes' }, UI.botao(ui.pendentesNoAr ? 'Conferindo os brincos pendentes no servidor…' : 'Conferir os brincos pendentes no servidor', { desabilitado: !!ui.pendentesNoAr, atributos: { 'data-resolver-pendentes': '1', 'aria-busy': ui.pendentesNoAr ? 'true' : null }, aoClicar: function () { resolverEsperando(true); } })));
       avisos.forEach(function (b) {
         if (!b.gerais || !b.gerais.length || b.geralAceito) return;
         ui.status.appendChild(h('div', { dataset: { avisoGeral: b.chave } }, UI.nota(b.gerais.map(function (g) { return g.mensagem; }).join(' '), 'aviso'),

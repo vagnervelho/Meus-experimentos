@@ -675,10 +675,15 @@ var TelaReproducao = (function () {
     function resolverEsperando(doBotao) {
       var textos = textosEsperando();
       if (!textos.length) return Promise.resolve();
+      // O toque no botão sempre tem resposta (§20, regra 3): enquanto o servidor não responde (a resposta perdida espera o prazo),
+      // o botão diz "Conferindo…" e fica travado (o toque repetido não pede de novo); sem o servidor, a tela diz que as pendentes
+      // continuam esperando.
+      if (doBotao) { ui.pendentesNoAr = (ui.pendentesNoAr || 0) + 1; desenhar(); }
       return resolverNoServidor(textos).then(function (r) {
-        // O toque no botão sempre tem resposta (§20, regra 3): sem o servidor, a tela diz que as pendentes continuam esperando.
+        if (doBotao) ui.pendentesNoAr -= 1;
         if (r.erro && doBotao && vivo) UI.aviso('Sem resposta do servidor (' + r.erro.message + '): ' + (textos.length === 1 ? 'o brinco pendente continua' : 'os ' + textos.length + ' brincos pendentes continuam') + ' à espera dele. Toque de novo quando houver sinal.', { tipo: 'erro' });
         if (aplicarEsperando(r)) mudou();
+        else if (doBotao && vivo) desenhar();
       });
     }
     /**
@@ -895,7 +900,7 @@ var TelaReproducao = (function () {
       if (ui.posicao) ui.status.appendChild(ui.posicao.carregando ? UI.nota('Conferindo com o servidor a data ' + Fmt.data(ui.posicao.data) + '…', 'info') : ui.posicao.motivo ? UI.nota('Não há posição do rebanho em ' + Fmt.data(ui.posicao.data) + ' (' + ui.posicao.erro + '): o brinco é conferido pelo servidor nessa data, e ele decide se aceita a data.', 'aviso') : ui.posicao.erro ? h('div', { dataset: { posicaoErro: '1' } }, UI.nota('Sem resposta do servidor para ' + Fmt.data(ui.posicao.data) + ' (' + ui.posicao.erro + '): o brinco é conferido só pelo servidor, na data (o número pode ser de outra fêmea naquele dia). Sem sinal, os diagnósticos ficam pendentes.', 'aviso'),
         h('div', { class: 'acoes' }, UI.botao('Tentar de novo', { atributos: { 'data-posicao-tentar': '1' }, aoClicar: function () { carregarPosicao(); desenhar(); } })))
         : h('div', { dataset: { troncoPosicao: '1' } }, UI.nota('Fêmeas e brincos conferidos pelo servidor em ' + Fmt.data(ui.posicao.data) + '.', 'info')));
-      if (c.linhas.some(function (l) { return l.semPosicao && l.estado === 'NAO_ENCONTRADO'; })) ui.status.appendChild(h('div', { class: 'acoes' }, UI.botao('Conferir os brincos pendentes no servidor', { atributos: { 'data-resolver-pendentes': '1' }, aoClicar: function () { resolverEsperando(true); } })));
+      if (c.linhas.some(function (l) { return l.semPosicao && l.estado === 'NAO_ENCONTRADO'; })) ui.status.appendChild(h('div', { class: 'acoes' }, UI.botao(ui.pendentesNoAr ? 'Conferindo os brincos pendentes no servidor…' : 'Conferir os brincos pendentes no servidor', { desabilitado: !!ui.pendentesNoAr, atributos: { 'data-resolver-pendentes': '1', 'aria-busy': ui.pendentesNoAr ? 'true' : null }, aoClicar: function () { resolverEsperando(true); } })));
       var recusados = c.blocos.filter(function (b) { return b.estado === 'SEM_SINAL' && b.recusa; });
       if (c.blocos.some(function (b) { return b.estado === 'SEM_SINAL' && !b.recusa; })) ui.status.appendChild(UI.nota('Sem sinal ou sem resposta: o que foi digitado está guardado neste aparelho. Toque em "Enviar" quando o sinal voltar; nada será gravado duas vezes.', 'aviso'));
       recusados.forEach(function (b) { ui.status.appendChild(h('div', { role: 'alert', dataset: { recusaIncerta: b.chave } }, UI.nota('O servidor recusou o envio de ' + b.uids.length + (b.uids.length === 1 ? ' diagnóstico' : ' diagnósticos') + ': ' + b.recusa + ' Eles continuam guardados com a mesma chave e saem de novo no próximo envio; nada será gravado duas vezes.', 'erro'))); });
