@@ -294,7 +294,7 @@ var ReproductionService = (function () {
    * Previsão de parto (03b, seção 7.3), sempre estimativa salvo a informada, sobre o ciclo atual (os registros depois do
    * último parto ou aborto): nível 0 = `data_prevista_parto` informada no diagnóstico positivo (ou na prenhez declarada na
    * entrada); 1 = inseminação ou cobertura + `dias_gestacao`; 2 = diagnóstico positivo com a idade da gestação: data +
-   * (`dias_gestacao` − idade); 3 = só exposição: janela de início + dias a fim + dias. Um diagnóstico negativo encerra as
+   * (`dias_gestacao` − idade); 3 = só exposição: janela de início + dias − tolerância a fim + dias + tolerância. Um diagnóstico negativo encerra as
    * tentativas anteriores. Devolve {nivel, data, inicio, fim, base: {tipo, data, event_id}, prenhe, rotulo} ou null.
    * `inicio`/`fim`: a janela (prevista ± `parto_tolerancia_dias`; no nível 3, a da exposição; fim null = em aberto).
    */
@@ -327,7 +327,9 @@ var ReproductionService = (function () {
     if (dg && !vazio_(dg.data_prevista_parto)) { var j0 = janela(dg.data_prevista_parto); return { nivel: 0, data: dg.data_prevista_parto, inicio: j0.inicio, fim: j0.fim, base: base(dg), prenhe: prenhe, rotulo: 'Informada' }; }
     if (ia && (!dg || ia.data <= dg.data)) { var d1 = Utils.somaDias(ia.data, dias); var j1 = janela(d1); return { nivel: 1, data: d1, inicio: j1.inicio, fim: j1.fim, base: base(ia), prenhe: prenhe, rotulo: 'Estimativa' }; }
     if (dg && typeof dg.idade_gestacional_dias === 'number') { var d2 = Utils.somaDias(dg.data, dias - dg.idade_gestacional_dias); var j2 = janela(d2); return { nivel: 2, data: d2, inicio: j2.inicio, fim: j2.fim, base: base(dg), prenhe: prenhe, rotulo: 'Estimativa' }; }
-    if (expo) return { nivel: 3, data: null, inicio: Utils.somaDias(expo.inicio, dias), fim: expo.fim ? Utils.somaDias(expo.fim, dias) : null, base: base(expo.r), prenhe: prenhe, rotulo: 'Estimativa' };
+    // Nível 3: a janela da exposição com a margem (CONTRATOS, seção 40: início + dias − tolerância a fim + dias + tolerância) —
+    // a mesma janela que os indicadores usam para dar o parto à exposição e encerrar a perda (expostasDaEstacao_).
+    if (expo) return { nivel: 3, data: null, inicio: Utils.somaDias(expo.inicio, dias - tol), fim: expo.fim ? Utils.somaDias(expo.fim, dias + tol) : null, base: base(expo.r), prenhe: prenhe, rotulo: 'Estimativa' };
     if (dg) return { nivel: null, data: null, inicio: null, fim: null, base: base(dg), prenhe: true, rotulo: 'Sem data: diagnóstico positivo sem a idade da gestação nem cobertura registrada' };
     return null;
   }
@@ -547,10 +549,15 @@ var ReproductionService = (function () {
         });
         if (dono && dono.estacao_id === est.estacao_id) parto = r;
       });
+      // O diagnóstico com estação é dela; o sem estação (o padrão do tronco) é da exposição mais recente da fêmea antes dele, de
+      // qualquer estação ou sem estação — a mesma regra do parto: o diagnóstico do ciclo de outra estação não é de E.
       var dgs = regs.filter(function (r) {
         if (r.tipo_evento !== 'DIAGNOSTICO_GESTACAO' || r.resultado === 'INCONCLUSIVO') return false;
         if (r.estacao_id) return r.estacao_id === est.estacao_id;
-        return r.data >= inicio && r.data <= Utils.somaDias(fim, dias);
+        if (r.data < inicio || r.data > Utils.somaDias(fim, dias)) return false;
+        var dono = null;
+        expostos.forEach(function (x) { if (ordemRegistro_(x, r) < 0 && (!dono || ordemRegistro_(x, dono) > 0)) dono = x; });
+        return !!dono && dono.estacao_id === est.estacao_id;
       });
       var aborto = regs.filter(function (r) { return r.tipo_evento === 'ABORTO' && r.data >= inicio && r.data <= janela.fim; })[0] || null;
       var saida = saidas_(f, id).filter(function (s) { return s.data >= inicio; })[0] || null;

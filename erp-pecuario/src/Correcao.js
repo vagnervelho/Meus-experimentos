@@ -150,6 +150,17 @@ var Correcao = (function () {
       tipo: 'REPRODUCAO', natureza: 'REGRA', de: 'CONFIGURACOES.dias_gestacao (a faixa da idade da gestação)', depende: 'o animal, idade_gestacional_dias', grava: 'REPRODUCAO.idade_gestacional_dias',
       valor: function (c, n) { return linhas_(c, 'REPRODUCAO').some(function (x) { return x.animal_id === n.animal_id && x.idade_gestacional_dias === n.idade; }) ? { v: true } : null; },
     },
+    // A estação de monta do registro (03a, seção 4.10: mudar as datas da estação não mexe nos registros): o original que caía
+    // no período dela continua nela na correção com a mesma estação, o mesmo subtipo e a MESMA data; com outra data, a
+    // conferência pelo período de hoje da estação volta a valer (seção 50.6).
+    'REPRODUCAO.estacao': {
+      tipo: 'REPRODUCAO', natureza: 'REGRA', de: 'ESTACOES_MONTA.data_inicio e data_fim (FORA_DA_ESTACAO)', depende: 'estacao_id, o subtipo, event_date', grava: 'REPRODUCAO.estacao_id',
+      valor: function (c, n) {
+        var o = c.original;
+        if (o.event_type !== 'REPRODUCAO' || nulo_(o.event_subtype) !== n.subtipo || o.event_date !== n.data) return null;
+        return linhas_(c, 'REPRODUCAO').some(function (r) { return r.estacao_id === n.estacao_id; }) ? { v: true } : null;
+      },
+    },
     'DESMAMA.cria': {
       tipo: 'DESMAMA', natureza: 'REGRA', de: 'CONFIGURACOES.idade_desmama_padrao_meses (quem é cria ao pé, DL-06)', depende: 'o animal', grava: 'EVENTO_ANIMAIS (SUJEITO)',
       valor: function (c, n) { return c.original.event_type === 'DESMAMA' && linhas_(c, 'EVENTO_ANIMAIS').some(function (l) { return l.animal_id === n.animal_id && (vazio_(l.papel) || l.papel === 'SUJEITO'); }) ? { v: true } : null; },
@@ -438,7 +449,7 @@ var Correcao = (function () {
         data_vencimento: proposto_(t.data_vencimento, vencPadrao), forma_pagamento: t.forma_pagamento, documento: f.documento, descricao: proposta ? null : f.descricao });
     });
   }
-  function entradaMovimento_(L, ev, det, linhas, origem, out, propostas) {
+  function entradaMovimento_(L, ev, det, linhas, origem, out) {
     var tipo = ev.event_type;
     var payload = ev.payload_json || {};
     if (tipo === 'TRANSFERENCIA') {
@@ -456,11 +467,12 @@ var Correcao = (function () {
       var idents = agrupar_(det.IDENTIFICACOES);
       var crias = linhas.filter(function (l) { return l.papel === 'CRIA'; });
       var at0 = (crias[0] && crias[0].atributos_iniciais_json) || {};
-      // O pasto e a raça que o servidor tira da mãe quando o campo vem vazio (`propostas`: os da mãe, como evento.obter os
-      // calcula) ficam vazios, para acompanhar a mãe e a data corrigidas; vazios, a correção mantém os do original enquanto a
-      // mãe e a data não mudam (CONGELADOS). Os digitados diferentes vêm como foram gravados.
-      var pr = propostas || {};
-      origem.pasto_destino_id = crias[0] ? proposto_(nulo_(crias[0].pasto_destino_id), nulo_(pr.pasto_destino_id)) : null;
+      // O pasto e a raça que o servidor tirou da mãe (o campo veio vazio) ficam vazios, para acompanhar a mãe e a data
+      // corrigidas; vazios, a correção mantém os do original enquanto a mãe e a data não mudam (CONGELADOS). Os digitados
+      // (payload `pasto_crias_informado` e `racas_informadas`) vêm como foram gravados — nada se compara com o estado de hoje
+      // da mãe.
+      var racasDigitadas = Array.isArray(payload.racas_informadas) ? payload.racas_informadas : [];
+      origem.pasto_destino_id = crias[0] && payload.pasto_crias_informado === true ? nulo_(crias[0].pasto_destino_id) : null;
       // A certeza do pai está nas crias vivas; no parto só de natimorto, no evento (payload `pai_confianca`).
       origem.pai_id = rep.touro_id || at0.pai_id; origem.pai_confianca = at0.pai_confianca || payload.pai_confianca; origem.tipo_parto = rep.tipo_parto;
       out.animais = linhas.filter(function (l) { return l.papel === 'MATRIZ'; }).map(function (l) { return { animal_id: l.animal_id }; });
@@ -470,7 +482,7 @@ var Correcao = (function () {
         var br = (idents[l.animal_id] || []).filter(function (x) { return x.tipo === 'BRINCO'; })[0];
         var ps = (pesos[l.animal_id] || [])[0];
         out.criados.push(l.animal_id);
-        return limpo_({ animal_id: l.animal_id, situacao_nascimento: 'VIVO', sexo: at.sexo, brinco: br ? br.codigo : null, nome: a ? a.nome : null, raca: proposto_(nulo_(at.raca), nulo_(pr.raca)), peso: l.peso, metodo_pesagem: ps ? ps.metodo : null, observacoes: l.observacoes });
+        return limpo_({ animal_id: l.animal_id, situacao_nascimento: 'VIVO', sexo: at.sexo, brinco: br ? br.codigo : null, nome: a ? a.nome : null, raca: racasDigitadas.indexOf(l.animal_id) >= 0 ? nulo_(at.raca) : null, peso: l.peso, metodo_pesagem: ps ? ps.metodo : null, observacoes: l.observacoes });
       });
       for (var k = 0; k < (rep.qtd_natimortos || 0); k++) out.crias.push({ situacao_nascimento: 'NATIMORTO' });
     }
@@ -542,9 +554,14 @@ var Correcao = (function () {
     var iv = payload.intervalo_protocolo_dias;
     origem.data_proxima_aplicacao = typeof iv === 'number' && Utils.dataValida(ev.event_date) ? proposto_(r0.data_proxima_aplicacao, Utils.somaDias(ev.event_date, iv)) : r0.data_proxima_aplicacao;
     despesa_(det, origem, ev, /: serviço ou produto pago no ato$/);
+    // A dose de cada animal: por cabeça, a diferente da do lançamento; por peso, a digitada (payload `doses_informadas`) — a
+    // proposta pelo peso fica vazia, para acompanhar a data e a dose por kg corrigidas (CONGELADOS: SANIDADE.dose_por_peso).
+    var informadas = Array.isArray(payload.doses_informadas) ? payload.doses_informadas : [];
     out.animais = linhas.map(function (l) {
       var x = (porAnimal[l.animal_id] || [])[0] || {};
-      var dose = payload.modo_dose === 'POR_CABECA' && typeof x.dose === 'number' && x.dose !== payload.dose_referencia ? x.dose : null;
+      var dose = typeof x.dose !== 'number' ? null
+        : payload.modo_dose === 'POR_CABECA' ? (x.dose !== payload.dose_referencia ? x.dose : null)
+        : payload.modo_dose === 'POR_PESO' && informadas.indexOf(l.animal_id) >= 0 ? x.dose : null;
       return limpo_({ animal_id: l.animal_id, dose: dose, resultado_exame: x.resultado_exame, observacoes: x.observacoes || l.observacoes });
     });
   }
@@ -627,10 +644,9 @@ var Correcao = (function () {
    * A entrada sem mudança do evento `ev` (os dados de evento.corrigir, sem `event_id` e `justificativa`): {tipo, subtipo,
    * campos, animais, e os grupos do tipo (parcelas, custos, deducoes, crias)} e, à parte, `criados` (os animais que o
    * evento criou: na correção eles são reaproveitados com todos os atributos; os demais itens são os animais do lançamento).
-   * L: {por(tabela, coluna, valor), porId(tabela, id)} — o leitor das linhas gravadas. `propostas` (só no parto): o pasto e a
-   * raça que o servidor proporia pela mãe (EventService, evento.obter).
+   * L: {por(tabela, coluna, valor), porId(tabela, id)} — o leitor das linhas gravadas (nada do cadastro nem do estado de hoje).
    */
-  function entrada(L, ev, propostas) {
+  function entrada(L, ev) {
     var tipo = ev.event_type;
     var sub = nulo_(ev.event_subtype);
     var det = detalhes_(L, ev);
@@ -640,7 +656,7 @@ var Correcao = (function () {
     if (sub) out.subtipo = sub;
     if (tipo === 'COMPRA') entradaCompra_(L, ev, det, linhas, origem, out);
     else if (tipo === 'VENDA') entradaVenda_(L, ev, det, linhas, origem, out);
-    else if (['NASCIMENTO', 'TRANSFERENCIA', 'MORTE', 'DESCARTE'].indexOf(tipo) >= 0) entradaMovimento_(L, ev, det, linhas, origem, out, propostas);
+    else if (['NASCIMENTO', 'TRANSFERENCIA', 'MORTE', 'DESCARTE'].indexOf(tipo) >= 0) entradaMovimento_(L, ev, det, linhas, origem, out);
     else if (['IDENTIFICACAO', 'MARCACAO', 'AJUSTE_INVENTARIO'].indexOf(tipo) >= 0) entradaManejo_(L, ev, det, linhas, origem, out);
     else if (tipo === 'PESAGEM') entradaPesagem_(L, ev, det, linhas, origem, out);
     else if (tipo === 'SANIDADE') entradaSanidade_(L, ev, det, linhas, origem, out);
@@ -654,6 +670,24 @@ var Correcao = (function () {
   // ------------------------------------------------------------------ o evento corrigido pela mudança ----
   var GRUPOS = ['parcelas', 'custos', 'deducoes', 'crias'];
   /**
+   * O item da entrada que a mudança cita (índice, ou −1 = item novo). O item é o do animal; na correção de cadastro, que tem um
+   * item por dado do animal, o do animal E do campo (`campo`). Com mais de um item do animal e a mudança sem o campo, ela é
+   * ambígua: recusada dizendo o porquê, em vez de cair no primeiro.
+   */
+  function itemDaMudanca_(itens, x) {
+    if (vazio_(x.animal_id)) return -1;
+    var doAnimal = [];
+    itens.forEach(function (a, k) { if (a.animal_id === x.animal_id) doAnimal.push(k); });
+    var porCampo = doAnimal.some(function (k) { return !vazio_(itens[k].campo); });
+    if (!porCampo) return doAnimal.length ? doAnimal[0] : -1;
+    if (vazio_(x.campo)) {
+      if (doAnimal.length <= 1) return doAnimal.length ? doAnimal[0] : -1;
+      throw Validation.erro('VALIDATION', 'A mudança cita um animal com mais de um dado nesta correção de cadastro: diga qual dado (o campo) ela muda.', [{ codigo: 'MUDANCA_AMBIGUA', campo: 'campo', animal_id: x.animal_id, mensagem: 'Diga qual dado deste animal a mudança corrige (o campo): esta correção de cadastro tem ' + doAnimal.length + ' dados dele.' }]);
+    }
+    var k0 = doAnimal.filter(function (k) { return itens[k].campo === x.campo; })[0];
+    return k0 === undefined ? -1 : k0;
+  }
+  /**
    * O evento corrigido a partir da entrada sem mudança do vigente e da mudança: {campos: {campo: valor (null apaga)},
    * animais: [{animal_id, ...campos do animal (null apaga)} | {animal_id, remover: true} | item novo sem animal_id na lista],
    * e os grupos inteiros que mudam (parcelas, custos, deducoes, crias)}. O que a mudança não cita fica como no vigente.
@@ -665,7 +699,7 @@ var Correcao = (function () {
     Object.keys(mu.campos || {}).forEach(function (k) { if (vazio_(mu.campos[k])) delete d.campos[k]; else d.campos[k] = mu.campos[k]; });
     (Array.isArray(mu.animais) ? mu.animais : []).forEach(function (x) {
       if (!x || typeof x !== 'object') return;
-      var i = vazio_(x.animal_id) ? -1 : d.animais.map(function (a) { return a.animal_id; }).indexOf(x.animal_id);
+      var i = itemDaMudanca_(d.animais, x);
       if (x.remover === true) { if (i >= 0) d.animais.splice(i, 1); return; }
       var alvo = i >= 0 ? d.animais[i] : (d.animais[d.animais.length] = {});
       Object.keys(x).forEach(function (k) { if (k === 'remover') return; if (vazio_(x[k])) delete alvo[k]; else alvo[k] = x[k]; });

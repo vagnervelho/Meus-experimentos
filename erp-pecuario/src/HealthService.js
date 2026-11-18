@@ -258,13 +258,16 @@ var HealthService = (function () {
     var min = num_(p.idade_min_meses) ? p.idade_min_meses : null;
     var max = num_(p.idade_max_meses) ? p.idade_max_meses : null;
     var nasc = Utils.dataValida(a.data_nascimento) ? a.data_nascimento : null;
-    // O dia em que se tornou elegível: a entrada no rebanho, o dia em que completa a idade mínima e, no protocolo restrito a
-    // uma categoria, o dia em que entrou nela (o trecho na categoria que termina em D; 05, seção 4.7).
+    // O dia em que se tornou elegível: a entrada no rebanho, o dia em que completa a idade mínima, no protocolo restrito a uma
+    // categoria o dia em que entrou nela (o trecho na categoria que termina em D) e o dia em que o protocolo passou a valer
+    // (05, seção 4.7: elegível quando, ao mesmo tempo, está no rebanho e "o protocolo está ativo"): o animal nunca aplicado não
+    // vence antes de o protocolo existir.
     var cat = naCategoria_(p, a);
-    var elegivelDesde = [a.no_rebanho_desde, min !== null && nasc ? completaMeses_(nasc, min) : null, cat].filter(Boolean).sort().pop() || a.no_rebanho_desde || data;
+    var inicio = inicioProtocolo_(p);
+    var elegivelDesde = [a.no_rebanho_desde, min !== null && nasc ? completaMeses_(nasc, min) : null, cat, inicio].filter(Boolean).sort().pop() || a.no_rebanho_desde || data;
     if (p.recorrencia_tipo === 'UNICA') {
       var v = max !== null && nasc ? completaMeses_(nasc, max) : min !== null && nasc ? [completaMeses_(nasc, min), cat].filter(Boolean).sort().pop() : elegivelDesde;
-      return { vencimento: v, cumprida: apl.length > 0, ultima: ultima };
+      return { vencimento: [v, inicio].filter(Boolean).sort().pop() || v, cumprida: apl.length > 0, ultima: ultima };
     }
     if (p.recorrencia_tipo === 'INTERVALO_DIAS') {
       if (!ultima) return { vencimento: elegivelDesde, cumprida: false, ultima: null };
@@ -286,7 +289,7 @@ var HealthService = (function () {
       var ate = Utils.somaDias(c.fim, tol);
       return apl.some(function (x) { return x.data_aplicacao >= de && x.data_aplicacao <= ate; });
     };
-    var desde = [elegivelDesde, inicioProtocolo_(p)].filter(Boolean).sort().pop();
+    var desde = elegivelDesde;
     var passada = campanhas.filter(function (c) { return c.fim < data && (!desde || c.fim >= desde); }).pop() || null;
     var proxima = campanhas.filter(function (c) { return c.fim >= data; })[0];
     // A campanha perdida continua devida até abrir a janela da seguinte (o primeiro dia do mês dela − tolerância); daí em
@@ -621,9 +624,13 @@ var HealthService = (function () {
     Object.keys(campos).forEach(function (c) { if (campos[c] !== null) presentes[c] = campos[c]; });
     Validation.validarRegistro(tabela, presentes, { parcial: true }).forEach(function (x) { col.erro(x); });
   }
-  /** O produto já foi usado (aplicação ou movimento de estoque vigente): a unidade não muda mais (dose, estoque e custo falam a mesma língua). */
+  /**
+   * O produto já foi usado (aplicação, movimento de estoque ou lançamento com ele — a compra do insumo sem o controle de estoque
+   * também, que grava a quantidade na unidade dele): a unidade não muda mais (dose, estoque, compra e custo falam a mesma língua).
+   */
   function produtoEmUso_(repo, id) {
-    return (repo.carregada('MOVIMENTOS_ESTOQUE') && repo.por('MOVIMENTOS_ESTOQUE', 'product_id', id).length > 0) || (repo.carregada('SANIDADE') && repo.por('SANIDADE', 'produto_id', id).length > 0);
+    var usa = function (t, c) { return repo.carregada(t) && repo.por(t, c, id).length > 0; };
+    return usa('MOVIMENTOS_ESTOQUE', 'product_id') || usa('SANIDADE', 'produto_id') || usa('FINANCEIRO', 'product_id');
   }
   /**
    * Comando `produto.salvar` (03a, seções 4.6 e 6.4): dados {product_id?, campos: {...}, justificativa?}. Nome, categoria
@@ -635,7 +642,7 @@ var HealthService = (function () {
     var p = pedido || {};
     return {
       rota: 'produto.salvar', idempotencyKey: p.idempotencyKey, dados: p.dados, avisosAceitos: p.avisosAceitos || [],
-      dataVersionEsperada: p.dataVersionEsperada, reads: ['PRODUTOS', 'MOVIMENTOS_ESTOQUE', 'SANIDADE', 'EVENTOS'],
+      dataVersionEsperada: p.dataVersionEsperada, reads: ['PRODUTOS', 'MOVIMENTOS_ESTOQUE', 'SANIDADE', 'FINANCEIRO', 'EVENTOS'],
       tratador: function (tx) {
         var d = tx.dados || {};
         var col = Validation.coletor();
@@ -656,7 +663,7 @@ var HealthService = (function () {
         if (campos.ativo === null) col.erro(det_('CAMPO_OBRIGATORIO', 'ativo', 'Diga se o produto está ativo.'));
         validar_(col, 'PRODUTOS', campos);
         if (atual && campos.unidade !== undefined && campos.unidade !== atual.unidade && produtoEmUso_(tx.repo, id)) {
-          col.erro(det_('PRODUTO_EM_USO', 'unidade', 'O produto ' + atual.nome + ' já foi usado em aplicações ou no estoque com a unidade "' + atual.unidade + '": a unidade não muda mais. Cadastre outro produto para a outra unidade.'));
+          col.erro(det_('PRODUTO_EM_USO', 'unidade', 'O produto ' + atual.nome + ' já foi usado em aplicações, em compras ou no estoque com a unidade "' + atual.unidade + '": a unidade não muda mais. Cadastre outro produto para a outra unidade.'));
         }
         if (final.ativo !== false && !vazio_(final.nome)) {
           var igual = tx.repo.vigentes('PRODUTOS').filter(function (x) { return x.product_id !== id && x.ativo !== false && chaveNome_(x.nome) === chaveNome_(final.nome); })[0];

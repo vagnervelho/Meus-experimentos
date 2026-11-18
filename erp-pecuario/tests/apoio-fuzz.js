@@ -1940,6 +1940,11 @@ registrarTipo('ESTOQUE', {
       else if (S.t.PARCELAS.filter((p) => p.financial_id === f.financial_id).length !== (cp.parcelas_qtd || 1)) erro('parcelas da compra de insumo');
       const cu = Math.round(Number((cp.valor / 100 / q).toFixed(10)) * 10000) / 10000;
       if (comMovimento ? movs.length !== 1 || movs[0].tipo !== 'ENTRADA' || movs[0].quantidade !== q || Math.abs(movs[0].custo_unitario - cu) > 0.00011 : movs.length) erro('movimentos da entrada ' + JSON.stringify(movs.map((mv) => [mv.tipo, mv.quantidade, mv.custo_unitario])) + ', esperado ' + (comMovimento ? q : 'nenhum'));
+      // Segunda convergência, rodada 1 (achado 4): o lote e a validade informados ficam no movimento; sem ele, a entrada com eles
+      // não pode ter sido aceita (o campo aceito fica gravado ou é recusado).
+      const loteInf = typeof cp.lote === 'string' && cp.lote.trim() ? cp.lote.trim() : null;
+      if (comMovimento && movs.length === 1 && JSON.stringify([movs[0].lote || null, movs[0].validade || null]) !== JSON.stringify([loteInf, cp.validade || null])) erro('lote e validade do movimento ' + JSON.stringify([movs[0].lote, movs[0].validade]) + ', informados ' + JSON.stringify([loteInf, cp.validade || null]));
+      if (!comMovimento && (loteInf || cp.validade)) erro('a entrada sem movimento aceitou o lote ' + loteInf + ' e a validade ' + cp.validade + ', que não ficam gravados');
       if (E.total_value !== cp.valor) erro('valor do evento ' + E.total_value + ', pedido ' + cp.valor);
       return;
     }
@@ -2028,6 +2033,10 @@ function preencherEstoque(S, rnd, s) {
     else s.qtd = sorteio(rnd, [1, 2.5, 10]);
   }
   if (rnd() < 0.25) { s.lote = 'E' + Math.floor(rnd() * 90 + 10); s.validade = somaDias(s.data, sorteio(rnd, [400, 60])); }
+  // Segunda convergência, rodada 1 (achado 4): o lote e a validade só ficam no movimento; no produto sem o controle de estoque
+  // a entrada com eles é recusada (CAMPO_NAO_SE_APLICA). Quase sempre o gerador os deixa em branco aí (sem gastar sorteio).
+  const p = S.t.PRODUTOS.find((x) => x.product_id === s.prod);
+  if (s.lote && p && p.controla_estoque !== true && !/0$/.test(s.lote)) { s.lote = null; s.validade = null; }
 }
 
 // --- REPRODUCAO, DESMAMA, CASTRACAO e OCORRENCIA (Fase 3, E3.4 e E3.5) ---
@@ -3441,8 +3450,11 @@ function modeloAgenda(S, D, cats) {
       const doProt = apls.filter((x) => x.r.protocol_id === p.protocol_id);
       let venc;
       let cumprida;
+      // Segunda convergência, rodada 1 (achado 8): o nunca aplicado não vence antes de o protocolo valer (05, seção 4.7: elegível
+      // quando o protocolo está ativo) — o vencimento é o mais tarde entre o de sempre e o início do protocolo.
       if (p.recorrencia_tipo === 'UNICA') {
         venc = max !== null && nasc ? completaMesesEm(nasc, max) : min !== null && nasc ? [completaMesesEm(nasc, min), naCat].filter(Boolean).sort().pop() : [desde, naCat].filter(Boolean).sort().pop() || D;
+        if (inicio && venc && inicio > venc) { venc = inicio; contar('agenda: vencimento no início do protocolo'); }
         cumprida = doProt.length > 0;
       } else if (p.recorrencia_tipo === 'CAMPANHA_MESES') {
         // A campanha de cada mês vence no último dia dele e é cumprida pela aplicação entre o primeiro dia − tolerância e o
@@ -3466,6 +3478,7 @@ function modeloAgenda(S, D, cats) {
         }
       } else if (!doProt.length) {
         venc = [desde, min !== null && nasc ? completaMesesEm(nasc, min) : null, naCat].filter(Boolean).sort().pop() || desde || D;
+        if (inicio && inicio > venc) { venc = inicio; contar('agenda: vencimento no início do protocolo'); }
         cumprida = false;
       } else {
         const u = ultimo(doProt).r;
@@ -5122,6 +5135,13 @@ function mudancaDeUmCampo(S, e, ent, rnd) {
   op.push('notes', 'responsible');
   if ((d.animais || []).some((x) => x.animal_id) && ['TRANSFERENCIA', 'NASCIMENTO', 'IDENTIFICACAO', 'AJUSTE_INVENTARIO', 'ESTOQUE'].indexOf(e.event_type) < 0) op.push('obs');
   if (e.event_type !== 'ENTRADA_INICIAL' && e.pre_marco_zero !== true) op.push('data', 'data');
+  // Segunda convergência, rodada 1 (achados 2, 3 e 7): a dose por kg da aplicação por peso (a dose digitada de um animal fica)
+  // e, na correção de cadastro com mais de um dado do mesmo animal, a mudança de um dado pelo animal e pelo campo.
+  if (e.event_type === 'SANIDADE' && d.campos && d.campos.modo_dose === 'POR_PESO' && typeof d.campos.dose_referencia === 'number') op.push('doseKg');
+  const porAnimal = new Map();
+  if (e.event_type === 'AJUSTE_INVENTARIO' && e.event_subtype === 'CORRECAO_CADASTRO') (d.animais || []).forEach((x) => { if (x.animal_id && x.campo) porAnimal.set(x.animal_id, (porAnimal.get(x.animal_id) || []).concat([x])); });
+  const doisDados = Array.from(porAnimal.values()).filter((l) => l.length > 1);
+  if (doisDados.length) op.push('mesmoDado', 'tirarDado');
   const qual = sorteio(rnd, op);
   if (qual === 'notes') return { rotulo: 'a anotação', mudanca: { campos: { notes: 'Anotação corrigida' } }, pode: (aba, col) => (aba === 'EVENTOS' && col === 'notes') || (aba === 'MOVIMENTOS_ESTOQUE' && col === 'observacoes') };
   if (qual === 'responsible') return { rotulo: 'o responsável', mudanca: { campos: { responsible: 'Zé do curral' } }, pode: (aba, col) => (aba === 'EVENTOS' && col === 'responsible') || (aba === 'BAIXAS' && col === 'responsavel') };
@@ -5129,12 +5149,38 @@ function mudancaDeUmCampo(S, e, ent, rnd) {
     const alvo = sorteio(rnd, d.animais.filter((x) => x.animal_id)).animal_id;
     return { rotulo: 'a observação de um animal', mudanca: { animais: [{ animal_id: alvo, observacoes: 'Observação corrigida' }] }, pode: (aba, col, r) => col === 'observacoes' && r && r.animal_id === alvo && ['EVENTO_ANIMAIS', 'SANIDADE', 'PESAGENS', 'BAIXAS', 'REPRODUCAO'].indexOf(aba) >= 0 };
   }
+  if (qual === 'doseKg') {
+    const nova = d.campos.dose_referencia === 0.03 ? 0.01 : 0.03;
+    return { rotulo: 'a dose por kg (' + d.campos.dose_referencia + ' → ' + nova + ')', doseKg: nova, mudanca: { campos: { dose_referencia: nova } } };
+  }
+  if (qual === 'mesmoDado' || qual === 'tirarDado') {
+    const x = sorteio(rnd, sorteio(rnd, doisDados));
+    if (qual === 'mesmoDado') return { rotulo: 'o dado ' + x.campo + ' de um animal com dois dados, como está', mudanca: { animais: [{ animal_id: x.animal_id, campo: x.campo, valor_novo: x.valor_novo }] }, pode: () => false };
+    return { rotulo: 'tirar o dado ' + x.campo + ' de um animal com dois dados', tirar: { animal_id: x.animal_id, campo: x.campo }, mudanca: { animais: [{ animal_id: x.animal_id, campo: x.campo, remover: true }] } };
+  }
   const nova = somaDias(e.event_date, sorteio(rnd, [-1, 1, -7, -30]));
   if (nova > HOJE || nova < (S.marco || D0)) return null;
   return { rotulo: 'a data (' + e.event_date + ' → ' + nova + ')', data: nova, mudanca: { campos: { event_date: nova } } };
 }
+/**
+ * Segunda convergência, rodada 1 (achados 2 e 3): os animais da aplicação por peso cuja dose foi digitada, pelo pedido aceito
+ * do gerador (a especificação memorizada); null sem ela.
+ */
+function dosesDigitadas(sis, e) {
+  const memo = sis.specs.get(e.event_id);
+  if (!memo || memo.spec.tipo !== 'SANIDADE' || memo.spec.modo !== 'POR_PESO') return null;
+  return new Set((memo.spec.itens || []).filter((x) => typeof x.dose === 'number').map((x) => x.id));
+}
+/** A dose digitada de cada animal (por peso) não muda com a correção da data ou da dose por kg (b2, b3). */
+function dosesDigitadasFicam(sis, e, a, b, erro) {
+  const dig = dosesDigitadas(sis, e);
+  if (!dig || !dig.size) return;
+  contar('correção: dose digitada por peso conferida');
+  const de = (x) => x.SANIDADE.filter((r) => dig.has(r.animal_id)).map((r) => [r.animal_id, r.dose]).sort();
+  if (JSON.stringify(de(a)) !== JSON.stringify(de(b))) erro('a dose digitada ' + curto(de(a)) + ' → ' + curto(de(b)));
+}
 /** As cópias congeladas e o que não depende da data, que a correção da data não muda (b3). */
-function congeladosNaData(S, e, a, b, nova, erro) {
+function congeladosNaData(S, e, a, b, nova, erro, ctx) {
   const pj = (S.ev.get(e.event_id) || {}).payload_json || {};
   const igual = (oque, x, y) => { if (JSON.stringify(x) !== JSON.stringify(y)) erro(oque + ' ' + curto(x) + ' → ' + curto(y)); };
   // Na desmama, as mães (linhas MATRIZ) são derivadas do cadastro dos bezerros e da presença delas no rebanho no dia (tabela B,
@@ -5162,6 +5208,21 @@ function congeladosNaData(S, e, a, b, nova, erro) {
   if (e.event_type === 'NASCIMENTO') {
     const raca = (x) => x.EVENTO_ANIMAIS.filter((l) => l.papel === 'CRIA').map((l) => [l.animal_id, (l.atributos_iniciais_json || {}).raca || null]).sort();
     igual('a raça das crias', raca(a), raca(b));
+    // Segunda convergência, rodada 1 (achado 9): o pasto das crias digitado fica; o vazio segue o da mãe na data nova (tabela A,
+    // seção 50.5) — conferido quando a mãe não se move naquele dia (sem ambiguidade de ordem no dia).
+    const memo = ctx && ctx.sis ? ctx.sis.specs.get(e.event_id) : null;
+    const pastos = (x) => x.EVENTO_ANIMAIS.filter((l) => l.papel === 'CRIA' && Number(l.efeito_inventario) === 1).map((l) => l.pasto_destino_id || null);
+    if (memo && memo.spec.tipo === 'NASCIMENTO' && e.pre_marco_zero !== true && pastos(a).length) {
+      if (memo.spec.pasto) { igual('o pasto digitado das crias', pastos(a), pastos(b)); contar('correção da data do parto: pasto digitado conferido'); }
+      else if (ctx.S2) {
+        const mae = (b.EVENTO_ANIMAIS.find((l) => l.papel === 'MATRIZ') || {}).animal_id;
+        const doDia = mae ? ctx.S2.linhasDe(mae).filter((l) => l.data === nova && (l.destino || l.efeito !== 0)) : [];
+        if (mae && !doDia.length) {
+          const onde = presenca(ctx.S2, mae, nova).pasto;
+          if (onde) { pastos(b).forEach((x) => igual('o pasto das crias (o da mãe na data nova)', onde, x)); contar('correção da data do parto: pasto da mãe na data nova conferido'); }
+        }
+      }
+    }
   }
   if (e.event_type === 'VENDA') {
     const nomes = (x) => x.FINANCEIRO.map((f) => String(f.descricao || '').replace(/ da venda de \d\d\/\d\d\/\d{4}$/, '')).sort();
@@ -5251,7 +5312,9 @@ function oraculoCorrecao(sis, S0, k, plano) {
         if (r.error && r.error.code === 'INTERNAL') out.push(falha('CORRECAO:INTERNO', contexto + r.error.message));
         // A data nova pode valer menos que a de antes (o animal ainda não estava, a contagem do estoque, o período fechado):
         // a recusa com o motivo é do desenho. As demais mudanças de um campo não têm por que ser recusadas.
-        else if (!mu.data && !recusaDocumentada(S, e, r)) out.push(falha('CORRECAO:B2:RECUSA:' + tipoEChave(e), contexto + 'recusada: ' + r.error.code + ' ' + JSON.stringify((r.error.details || []).map((d) => d.codigo + ': ' + d.mensagem)).slice(0, 700)));
+        // Tirar um dos dados de um animal pode quebrar uma regra entre campos (o dado e a certeza dele): a recusa com o motivo
+        // é do desenho; a dose por kg nova pode pedir o peso que falta (SEM_PESO) ou estourar o estoque (o aviso que bloqueia).
+        else if (!mu.data && !(mu.tirar && r.error.code === 'VALIDATION') && !(mu.doseKg && r.error.code === 'VALIDATION') && !recusaDocumentada(S, e, r)) out.push(falha('CORRECAO:B2:RECUSA:' + tipoEChave(e), contexto + 'recusada: ' + r.error.code + ' ' + JSON.stringify((r.error.details || []).map((d) => d.codigo + ': ' + d.mensagem)).slice(0, 700)));
         sis.gas.estado.restaurar(foto1);
         return;
       }
@@ -5259,8 +5322,21 @@ function oraculoCorrecao(sis, S0, k, plano) {
       const S2 = estado(tabelas(sis));
       const a = fatosDoEvento(S, e.event_id);
       const b = fatosDoEvento(S2, r.data.event_id);
-      if (mu.data) congeladosNaData(S, e, a, b, mu.data, (m) => out.push(falha('CORRECAO:B3:' + tipoEChave(e), contexto + 'mudou ' + m)));
-      else {
+      const erroB = (m) => out.push(falha((mu.data ? 'CORRECAO:B3:' : 'CORRECAO:B2:') + tipoEChave(e), contexto + 'mudou ' + m));
+      if (mu.data) { congeladosNaData(S, e, a, b, mu.data, erroB, { sis, S2 }); dosesDigitadasFicam(sis, e, a, b, erroB); }
+      else if (mu.doseKg) {
+        // A dose por kg muda a dose proposta pelo peso (e a quantidade e o custo dela); a digitada e o resto da aplicação ficam.
+        dosesDigitadasFicam(sis, e, a, b, erroB);
+        const fixos = ['produto_id', 'protocol_id', 'tipo_procedimento', 'nome_produto', 'fabricante', 'periodo_carencia_dias', 'data_aplicacao', 'data_proxima_aplicacao', 'data_fim_carencia', 'lote', 'validade', 'via_aplicacao', 'veterinario', 'observacoes'];
+        const porA = (x) => x.SANIDADE.map((r0) => [r0.animal_id].concat(fixos.map((c0) => r0[c0]))).sort();
+        if (JSON.stringify(porA(a)) !== JSON.stringify(porA(b))) erroB('a aplicação (o que não depende da dose) ' + curto(porA(a)) + ' → ' + curto(porA(b)));
+        contar('correção: mudança da dose por kg aceita');
+      } else if (mu.tirar) {
+        // Fica a correção de cadastro sem o dado tirado: os outros dados, linha a linha, como estavam.
+        const chave = (x) => x.AJUSTES.filter((r0) => !(r0.animal_id === mu.tirar.animal_id && r0.campo === mu.tirar.campo)).map((r0) => [r0.animal_id, r0.campo, r0.valor_anterior, r0.valor_novo]).sort();
+        if (JSON.stringify(chave(a)) !== JSON.stringify(chave(b)) || b.AJUSTES.some((r0) => r0.animal_id === mu.tirar.animal_id && r0.campo === mu.tirar.campo)) erroB('os dados da correção de cadastro ' + curto(chave(a)) + ' → ' + curto(b.AJUSTES.map((r0) => [r0.animal_id, r0.campo, r0.valor_anterior, r0.valor_novo]).sort()));
+        contar('correção: um dado tirado da correção de cadastro');
+      } else {
         // Fora o campo e os derivados dele, nada muda (linha a linha, coluna a coluna).
         Object.keys(a).forEach((aba) => {
           const la = Array.isArray(a[aba]) ? a[aba] : [a[aba]];

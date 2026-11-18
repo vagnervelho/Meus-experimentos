@@ -92,12 +92,13 @@ test('exposição (PR-07, 03b 7.2): o lote de fêmeas com os touros da lista —
     [[ids['100'], 'EXPOSICAO', '2026-01-15', '2026-03-15', e.estacao_id, ids['900'], null], [ids['101'], 'EXPOSICAO', '2026-01-15', '2026-03-15', e.estacao_id, ids['900'], null]].sort());
   assert.deepEqual([animal(s, ids['100']).situacao_reprodutiva, animal(s, ids['101']).situacao_reprodutiva], ['EXPOSTA', 'EXPOSTA']);
   const prev = r.reproducao.animais.find((a) => a.animal_id === ids['100']).previsao_parto;
-  assert.deepEqual([prev.nivel, prev.data, prev.inicio, prev.fim, prev.rotulo], [3, null, '2026-11-01', '2026-12-30', 'Estimativa'], 'janela: 15/01 + 290 a 15/03 + 290');
+  // Segunda convergência, rodada 1 (achado 15): a janela da exposição com a margem do CONTRATOS, seção 40 (± 20 dias).
+  assert.deepEqual([prev.nivel, prev.data, prev.inicio, prev.fim, prev.rotulo], [3, null, '2026-10-12', '2027-01-19', 'Estimativa'], 'janela: 15/01 + 290 − 20 a 15/03 + 290 + 20');
   // Dois touros no lote: o registro fica sem touro (os dois estão nas linhas TOURO); sem retirada, a janela vai até o fim da estação.
   const r2 = ok(api(s, 'evento.registrar', repro('EXPOSICAO', '2026-01-20', [ids['102'], ids['900'], ids['902']], { estacao_id: e.estacao_id }), 'x2', ['IDADE_REPRODUTIVA']), 'dois touros');
   assert.deepEqual(tab(s, 'REPRODUCAO', { event_id: r2.event_id }).map((x) => [x.touro_id || null, x.data_fim || null]), [[null, null]]);
   assert.deepEqual(tab(s, 'EVENTO_ANIMAIS', { event_id: r2.event_id, papel: 'TOURO' }).length, 2);
-  assert.deepEqual(r2.reproducao.animais.find((a) => a.animal_id === ids['102']).previsao_parto.fim, '2027-01-15', 'fim da estação (31/03) + 290');
+  assert.deepEqual(r2.reproducao.animais.find((a) => a.animal_id === ids['102']).previsao_parto.fim, '2027-02-04', 'fim da estação (31/03) + 290 + 20');
   // Só touros: precisa de fêmea. Sem estação (touro o ano todo): aceito.
   assert.deepEqual(cods(recusa(api(s, 'evento.registrar', repro('EXPOSICAO', '2026-02-01', [ids['900']]), 'x3'), 'VALIDATION')), ['SEM_FEMEAS']);
   ok(api(s, 'evento.registrar', repro('EXPOSICAO', '2026-04-15', [ids['101']]), 'x4'), 'sem estação');

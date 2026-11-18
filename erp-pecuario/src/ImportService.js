@@ -1174,6 +1174,8 @@ var ImportService = (function () {
     EventService.conferirRestauracao(tx, ids, Object.keys(tocados).filter(function (id) { return !criados[id]; }), 'desfazer a importação').forEach(function (c) {
       out.push(Validation.detalhe({ codigo: 'DEPENDENTE', animal_id: c.animal_id, brinco: c.brinco, mensagem: c.mensagem + ' Desfaça esse registro antes de desfazer a importação.', conflito: c.conflito }));
     });
+    // O estoque sem as saídas das aplicações importadas: a contagem posterior que já acertou o saldo de um dia que mudaria.
+    EventService.conferirEstoqueSem(tx, ids, { oque: 'desfazer a importação', fazer: 'desfaça a importação' }).forEach(function (c) { out.push(c); });
     ids.forEach(function (id) {
       tx.repo.por('FINANCEIRO', 'event_id', id).forEach(function (f) {
         if (tx.repo.por('PARCELAS', 'financial_id', f.financial_id).some(function (pc) { return pc.status === 'LIQUIDADA'; })) {
