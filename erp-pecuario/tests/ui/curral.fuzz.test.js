@@ -44,8 +44,10 @@
 const test = require('node:test');
 const A = require('./apoio');
 const {
-  HOJE, RELOGIO, ROTULO_RES, LOTE, T, gerador, um, ponderado, esperarMs, fmt1, kg, montarSistema, novaRede, lerTela,
+  HOJE, RELOGIO, ROTULO_RES, LOTE, T, MSG_RECUSA_RESOLVEDOR, gerador, um, ponderado, esperarMs, fmt1, kg, montarSistema, novaRede, lerTela,
 } = require('./apoio-curral');
+/** A recusa do servidor (o código dele), não a falta de sinal (o transporte, o ocupado, a falha interna). */
+const recusaDoServidor = (r) => !!(r && r.entregue && !r.resposta.ok && ['LOCKED', 'INTERNAL'].indexOf(r.resposta.error.code) < 0);
 
 const { S } = A;
 test.after(() => A.fecharBrowser());
@@ -262,6 +264,9 @@ async function rodarSemente(semente, nAcoes, opcoes) {
           else conta('rotulo:barrada');
         } else if (l.semPosicao && (dom.texto.indexOf('brinco não encontrado') >= 0 || dom.texto.indexOf('a conferir no servidor') < 0)) e('a pendente ' + l.uid + ' (sem resposta do servidor) aparece como "' + dom.texto + '"');
         else if (l.semPosicao) conta('rotulo:pendente');
+        // Achado 15: a recusada pelo servidor se lê assim, com o porquê, e não espera sinal.
+        else if (l.recusada && (dom.texto.indexOf('recusada pelo servidor') < 0 || dom.texto.indexOf('O servidor recusou a conferência') < 0)) e('a linha ' + l.uid + ' recusada pelo servidor aparece como "' + dom.texto + '"');
+        else if (l.recusada) conta('rotulo:recusada');
       });
       // Achado 17: o contador do tronco conta as fêmeas achadas, não as linhas.
       if (tela === 'tronco' && v.contador !== null) {
@@ -494,8 +499,16 @@ async function rodarSemente(semente, nAcoes, opcoes) {
       await assentar();
     }
     if (pedidos.length && pedidos.every((x) => !x.entregue || !x.resposta.ok)) {
-      // Segunda convergência, rodada 1 (achado 13): o toque sem resposta do servidor tem resposta na tela.
       const w = await lerTela(page, tela);
+      // Segunda convergência, rodada 2 (achado 15): a recusa do servidor diz a recusa e o caminho, e tira as linhas da espera
+      // (o botão some: tocar de novo repetiria a mesma recusa).
+      if (pedidos.some(recusaDoServidor)) {
+        if (w.fase === 'sessao' && (w.textoTodo.indexOf('O servidor recusou a conferência') < 0 || w.textoTodo.indexOf('à espera dele') >= 0)) falhar('"Conferir os brincos pendentes no servidor" recusado pelo servidor não disse a recusa (ou disse "sem resposta")');
+        if (w.fase === 'sessao' && w.c.linhas.some((l) => l.estado === 'NAO_ENCONTRADO' && l.semPosicao)) falhar('depois da recusa do servidor, linhas continuam à espera de sinal: ' + JSON.stringify(w.c.linhas.filter((l) => l.semPosicao).map((l) => l.uid)));
+        conta('pendentes:recusado');
+        return;
+      }
+      // Segunda convergência, rodada 1 (achado 13): o toque sem resposta do servidor tem resposta na tela.
       if (w.fase === 'sessao' && w.textoTodo.indexOf('à espera dele') < 0) falhar('"Conferir os brincos pendentes no servidor" sem resposta do servidor não disse nada na tela');
       conta('pendentes:semResposta');
       return;
@@ -573,6 +586,18 @@ async function rodarSemente(semente, nAcoes, opcoes) {
       if (novas.length !== 1) falhar('lançar "' + texto + '" sem resposta do servidor devia criar uma linha pendente; novas: ' + JSON.stringify(novas.map((l) => [l.uid, l.estado])));
       if (novas[0].estado !== 'NAO_ENCONTRADO' && novas[0].estado !== 'FILA') falhar('a linha sem resposta do servidor está ' + novas[0].estado);
       add(novas[0].uid);
+      // Segunda convergência, rodada 2 (achado 15): a recusa do servidor à pergunta deste texto não é falta de sinal — a linha
+      // sai recusada (com o porquê do servidor), não fica à espera de um sinal que não resolve; as pendentes da mesma pergunta
+      // também.
+      if (doTexto.length && doTexto.some(recusaDoServidor)) {
+        const l = novas[0];
+        const dom = v.linhas.find((x) => x.uid === l.uid) || { texto: '' };
+        if (l.estado !== 'NAO_ENCONTRADO' || l.semPosicao || !l.recusada) falhar('lançar "' + texto + '" com a conferência recusada pelo servidor devia deixar a linha recusada, não à espera de sinal: ' + JSON.stringify([l.estado, !!l.semPosicao, !!l.recusada]));
+        if (dom.texto.indexOf('recusada pelo servidor') < 0 || dom.texto.indexOf(MSG_RECUSA_RESOLVEDOR) < 0) falhar('a linha recusada pelo servidor não diz a recusa: "' + dom.texto + '"');
+        const presas = v.c.linhas.filter((y) => y.estado === 'NAO_ENCONTRADO' && y.semPosicao && doTexto.some((r) => recusaDoServidor(r) && (r.textos || []).indexOf(String(y.texto || y.brinco).trim()) >= 0));
+        if (presas.length) falhar('as pendentes ' + presas.map((y) => y.uid).join(', ') + ' foram na pergunta recusada pelo servidor e continuam à espera de sinal');
+        conta('lancar:recusado');
+      }
       conta('lancar:semResposta');
       return;
     }
@@ -755,6 +780,12 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     const r = v.c.linhas.find((x) => x.uid === l.uid);
     const pedidos = rede.log.slice(n0).filter((x) => x.rota === 'animal.resolver');
     const semResposta = pedidos.length && pedidos.every((x) => !x.entregue || !x.resposta.ok);
+    // Segunda convergência, rodada 2 (achado 15): a recusa do servidor ao "Corrigir o brinco" se diz recusa, com o caminho.
+    if (pedidos.some(recusaDoServidor)) {
+      if (v.textoTodo.indexOf('O servidor recusou a conferência do brinco') < 0 || /Corrija com sinal/.test(v.textoTodo)) falhar('"Corrigir o brinco" recusado pelo servidor não disse a recusa (ou disse "sem resposta")');
+      if (r && r.estado !== 'NAO_ENCONTRADO') falhar('"Corrigir o brinco" recusado pelo servidor mudou a linha para ' + r.estado);
+      conta('corrigirBrinco:recusado');
+    }
     const rr = resolverModelo(t, M.sessao.data);
     // A mesma regra do repetido de todo caminho: outra linha do mesmo animal ainda do aparelho barra (a linha não muda); a que
     // já saiu deixa entrar com o aviso de pesar de novo.
@@ -1145,7 +1176,13 @@ async function rodarSemente(semente, nAcoes, opcoes) {
         else if (acao === 'outro') feito = await outroUsuario();
         else if (acao === 'repetir') feito = await repetir(v.c);
         else if (acao === 'recarregarBrusco') feito = await recarregarBrusco();
-        else if (acao === 'semSinal') { const n3 = 2 + Math.floor(rnd() * 3); for (let i = 0; i < n3; i++) rede.falhas.push({ classe: 'resolver', tipo: 'transporte' }); log('rede: o sinal cai para as próximas ' + n3 + ' conferências de brinco'); conta('rede:semSinal'); feito = true; }
+        else if (acao === 'semSinal') {
+          // Segunda convergência, rodada 2 (achado 15): às vezes não é o sinal que cai — o servidor recusa a conferência (a data
+          // que ele não aceita), e repetir não muda a resposta.
+          if (rnd() < 0.25) { rede.falhas.push({ classe: 'resolver', tipo: 'recusa' }); log('rede: o servidor recusa a próxima conferência de brinco'); conta('rede:recusaResolvedor'); }
+          else { const n3 = 2 + Math.floor(rnd() * 3); for (let i = 0; i < n3; i++) rede.falhas.push({ classe: 'resolver', tipo: 'transporte' }); log('rede: o sinal cai para as próximas ' + n3 + ' conferências de brinco'); conta('rede:semSinal'); }
+          feito = true;
+        }
         else if (acao === 'pendentes') {
           if (v.resolverPendentes) { log('conferir os brincos pendentes'); await conferirPendentes(); feito = true; conta('pendentes'); }
           else if (v.posicaoTentar) { log('tentar de novo (posição)'); await page.click('[data-posicao-tentar]'); feito = true; conta('posicaoTentar'); }
@@ -1174,7 +1211,12 @@ async function rodarSemente(semente, nAcoes, opcoes) {
         const m = M.linhas[pend.uid];
         const rr = resolverModelo(m.texto, c.sessao.data);
         const outra = rr.animal_id && c.linhas.some((l) => l.uid !== pend.uid && l.animal_id === rr.animal_id);
-        if (rr.situacao === 'ACHADO' && !rr.inelegivel && !outra) falhar('a linha ' + pend.uid + ' ("' + m.texto + '") ficou pendente, e em ' + c.sessao.data + ' o servidor acha o animal ' + rr.animal_id + ' no rebanho: ' + (pend.mensagem || ''));
+        // A recusada pelo servidor saiu da espera (achado 15): com a rede de volta, ela não se resolve sozinha — o operador a tira
+        // (ou corrige o brinco, ou muda a data). Só a recusa que aconteceu (a simulada) a explica.
+        const recusada = !!pend.recusada && (pend.mensagem || '').indexOf(MSG_RECUSA_RESOLVEDOR) >= 0;
+        if (pend.recusada && !recusada) falhar('a linha ' + pend.uid + ' ("' + m.texto + '") está "recusada pelo servidor" sem a recusa ter acontecido: ' + (pend.mensagem || ''));
+        if (rr.situacao === 'ACHADO' && !rr.inelegivel && !outra && !recusada) falhar('a linha ' + pend.uid + ' ("' + m.texto + '") ficou pendente, e em ' + c.sessao.data + ' o servidor acha o animal ' + rr.animal_id + ' no rebanho: ' + (pend.mensagem || ''));
+        if (recusada) conta('fim:recusadaTirada');
         log('fim: tirar a pendência ' + pend.uid + ' ("' + m.texto + '": ' + (pend.mensagem || rr.situacao) + ')');
         await page.click('[data-linha="' + pend.uid + '"] button:has-text("Tirar")');
         M.ordem = M.ordem.filter((u) => u !== pend.uid);

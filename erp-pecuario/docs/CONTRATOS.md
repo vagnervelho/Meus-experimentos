@@ -3982,9 +3982,22 @@ antes (commit `5e69ebf`) e passa agora; o conserto está na causa, e o oráculo 
 | 12 | Na correção de cadastro que apagou a mãe, o pai ou o nascimento, a certeza apagada junto vinha na entrada como digitada, e a mudança que a tirava era aceita sem efeito (o teste aleatório falhava: CORRECAO:B2) | MEDIA | a certeza apagada junto (a derivada) fica fora da entrada; tirar o que o lançamento não tem é VALIDATION `MUDANCA_SEM_ITEM`, com o porquê ("a certeza do pai sai junto com o pai") | achado 12 |
 | 13 | A correção que digitava a próxima aplicação apagava do payload o intervalo congelado; a seguinte, que voltava à proposta, usava o intervalo de hoje | MEDIA | o intervalo do protocolo fica no payload também com a próxima digitada, com a marca `proxima_informada`; a verificação e a entrada leem a marca | achado 13 |
 | 14 | Sem localStorage, "Terminar" com a remoção do rascunho do servidor sem chegar terminava a sessão (e a faixa dizia "não feche antes de enviar"); a que voltava do rascunho enviava o descartado | MEDIA | o "Terminar" só termina com o servidor confirmando a remoção: sem ela, a sessão continua, a tela diz por quê e o rascunho volta a ser o da tela; a faixa da falha só de remoção diz que é a remoção | `tests/ui/convergencia2.r2.test.js`, achado 14 (curral e tronco) |
-| 15 | A recusa do servidor ao resolvedor (a data futura, o limite, o acesso) aparecia como falta de sinal: as linhas ficavam pendentes para sempre, e "Tentar de novo" repetia a recusa | MEDIA | `recusou(e)`: a recusa (o código do servidor) não é falta de sinal — a nota da data, a conferência e a linha dizem o porquê e o caminho ("Mudar data"), e a linha sai da espera ("recusada pelo servidor") | achado 15 (curral e tronco) |
+| 15 | A recusa do servidor ao resolvedor (a data futura, o limite, o acesso) aparecia como falta de sinal: as linhas ficavam pendentes para sempre, e "Tentar de novo" repetia a recusa | MEDIA | `recusou(e)`: a recusa (o código do servidor) não é falta de sinal — a nota da data, a conferência, a linha e o "Corrigir o brinco" do curral dizem o porquê e o caminho ("Mudar data"), e a linha sai da espera ("recusada pelo servidor") | achado 15 (curral e tronco; o "Corrigir o brinco" achado pelo teste aleatório estendido) |
 | 16 | A pendente barrada por outra linha do mesmo animal, depois da resposta do servidor, aparecia "a conferir no servidor (sem resposta na hora)", com o botão que não resolvia | MEDIA | a marca própria (`barrada`): o rótulo "barrada: o animal já tem outra linha", o status "tire uma das duas" e o botão das pendentes só para as que esperam sinal | achado 16 (curral e tronco) |
 | 17 | As mensagens do par do dado e da certeza na correção de cadastro usavam o nome técnico do campo e mandavam "informar" o que o dono apagou | BAIXA | `PAR_CERTEZA`: em português do pecuarista, com o conselho que leva à solução ("o pai não fica sem a certeza: diga se ele é confirmado ou estimado, ou apague também o pai") | achado 17 |
+
+Achado pelo teste aleatório do curral estendido (a semente fixa 14 passou a gerar outra sequência, e o defeito vinha da etapa 2,
+seção 52): sem localStorage, o envio que não saía por falta da chave guardada — o rascunho chegava ao servidor com o bloco saindo e
+só o índice falhava — voltava à fila na tela e não era guardado de novo: o servidor ficava com o bloco "saindo" que a tela não tinha
+(recarregada a página, ele saía sozinho, depois de a tela dizer que não tinha saído). Conserto: a volta à fila também é guardada
+(`guardar`/`guardarTronco` no mesmo ponto, curral e tronco); teste: `tests/ui/convergencia2.r2.test.js`, "fuzz do curral
+estendido, semente 14" (curral e tronco), que falha com o `src/` de antes.
+
+Achado também pelo teste aleatório estendido (semente 95022, na leva sem localStorage): a linha da fêmea que não entra (morta na
+data), conferida de novo na data nova e recusada pelo servidor, se lia "não entra no diagnóstico" com a mensagem da recusa — a
+marca `naoEntra` da data antiga ficava. Conserto: a data nova e a recusa limpam a marca (curral e tronco); teste:
+`tests/ui/convergencia2.r2.test.js`, "fuzz do curral estendido, semente 95022", que falha sem o conserto. A leva foi refeita do
+começo.
 
 Do achado 6, ficam caladas por desenho as adulterações da própria fonte, sem cópia que as confira (a validade do movimento de
 entrada, a idade da gestação no diagnóstico, a dose de referência e o método da castração no payload, o texto da descrição do
@@ -4007,6 +4020,7 @@ consumo): a verificação confere a cópia contra a fonte, e o dado que só exis
 - **A carência fica com o servidor**: a tela não a preenche; trocar o produto, o modo ou o protocolo troca o que veio do anterior.
 - **O aparelho não escolhe a estação pela data**: a do filtro, ou nenhuma (a regra do servidor).
 - **"Terminar" só termina com o rascunho do servidor apagado**; e **a recusa do servidor não é falta de sinal** (curral e tronco).
+- **O que a tela desfaz também é guardado**: o bloco que volta à fila por falta da chave guardada vai ao rascunho do servidor.
 
 ### 54.3 Os oráculos estendidos
 
@@ -4023,7 +4037,13 @@ consumo): a verificação confere a cópia contra a fonte, e o dado que só exis
   "Terminar"); a pendente barrada por outra linha do mesmo animal se lê "barrada" (nunca "a conferir no servidor") e só é barrada
   quando o texto dela, na data da sessão, é de um animal com outra linha ainda do aparelho (o oráculo da rodada 1 exigia "a
   conferir no servidor" de toda pendente — o achado 16 estava escrito no oráculo; a primeira leva sem localStorage parou nisso na
-  semente 93000, refeita do começo).
+  semente 93000, refeita do começo); a recusa do servidor à conferência do brinco (`recusa` na rede do teste, um quarto das quedas
+  de sinal: nenhuma ação gerava a recusa — o achado 15 escapou por isso): o lançamento com a pergunta recusada deixa a linha
+  "recusada pelo servidor", com o porquê, e nenhuma pendente da mesma pergunta à espera de sinal; "Conferir os brincos pendentes"
+  recusado diz a recusa e tira as linhas da espera; o "Corrigir o brinco" recusado diz a recusa (não "corrija com sinal") e não
+  muda a linha; o rótulo da recusada é conferido em toda verificação; no fim, com a rede de volta, a recusada não se resolve
+  sozinha (54.4) e o operador a tira — só a que tem a recusa que aconteceu: "recusada" sem recusa é falha. A sequência das
+  sementes fixas mudou (um sorteio a mais na queda de sinal), e a semente 14 achou o defeito do bloco que não saiu (acima).
 
 ### 54.4 Decisões
 

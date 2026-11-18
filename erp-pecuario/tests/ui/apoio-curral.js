@@ -14,6 +14,7 @@ const PERDIDA = '{"__mock":"perdida"}';
 const TRANSPORTE = '{"__mock":"transporte"}';
 const MSG_FALHA_INTERNA = 'Falha interna simulada no servidor (teste).';
 const MSG_OCUPADO = 'O sistema está ocupado com outra gravação. Tente de novo.';
+const MSG_RECUSA_RESOLVEDOR = 'A data da conferência ainda não chegou no servidor (recusa simulada, teste).';
 
 // ------------------------------------------------------------------ sorteio ----
 function gerador(semente) {
@@ -119,6 +120,8 @@ function novaRede(s) {
       case 'transporteDepois': executar(); return entregar(TRANSPORTE);
       case 'ocupado': return entregar(JSON.stringify({ ok: false, error: { code: 'LOCKED', message: MSG_OCUPADO, details: [] }, meta: {} }));
       case 'interna': return entregar(JSON.stringify({ ok: false, error: { code: 'INTERNAL', message: MSG_FALHA_INTERNA, details: [] }, meta: {} }));
+      // A recusa do servidor (a conferência do brinco numa data que o servidor recusa): não é falta de sinal, e repetir não muda.
+      case 'recusa': return entregar(JSON.stringify({ ok: false, error: { code: 'VALIDATION', message: MSG_RECUSA_RESOLVEDOR, details: [{ codigo: 'DATA_FUTURA', campo: 'data', mensagem: 'Data futura.' }] }, meta: {} }));
       case 'segurar': { const json = executar(); return new Promise((res) => rede.segurados.push({ reg, soltar: () => res(entregar(json)), largar: () => res(PERDIDA) })); }
       case 'segurarAntes': return new Promise((res) => rede.segurados.push({ reg, soltar: () => res(entregar(executar())), largar: (chega) => { if (chega) executar(); res(PERDIDA); } }));
       default: throw new Error('falha desconhecida ' + f.tipo);
@@ -198,6 +201,6 @@ async function lerTela(page, tela) {
 }
 
 module.exports = {
-  HOJE, RELOGIO, PERDIDA, TRANSPORTE, MSG_FALHA_INTERNA, MSG_OCUPADO, ROTULO_RES, LOTE, T,
+  HOJE, RELOGIO, PERDIDA, TRANSPORTE, MSG_FALHA_INTERNA, MSG_OCUPADO, MSG_RECUSA_RESOLVEDOR, ROTULO_RES, LOTE, T,
   gerador, um, ponderado, esperarMs, fmt1, kg, montarSistema, novaRede, lerTela,
 };

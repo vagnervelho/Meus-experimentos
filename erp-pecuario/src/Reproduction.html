@@ -406,7 +406,7 @@ var TelaReproducao = (function () {
     c.linhas.forEach(function (l) {
       if (l.estado === 'GRAVADA') return;
       l.brinco = l.texto || l.brinco; l.animal_id = null; l.dataAnimal = null;
-      l.estado = 'NAO_ENCONTRADO'; l.semPosicao = true; l.barrada = false; l.recusada = false; l.mensagem = 'A data mudou: o brinco é conferido de novo pelo servidor em ' + Fmt.data(c.sessao.data) + '.';
+      l.estado = 'NAO_ENCONTRADO'; l.semPosicao = true; l.barrada = false; l.naoEntra = false; l.recusada = false; l.mensagem = 'A data mudou: o brinco é conferido de novo pelo servidor em ' + Fmt.data(c.sessao.data) + '.';
     });
   }
   function pendencias(c) { return c.linhas.filter(function (l) { return l.estado === 'NAO_ENCONTRADO' || l.estado === 'ERRO'; }); }
@@ -472,6 +472,9 @@ var TelaReproducao = (function () {
       b.estado = 'NOVO';
       b.naoGuardado = g.falhou.message;
       linhas.forEach(function (l) { l.estado = 'FILA'; });
+      // A volta à fila também é guardada: o rascunho pode ter chegado ao servidor com o bloco saindo (só o índice falhou), e o
+      // servidor não pode ficar com um estado que a tela não tem (vai com a próxima ida, ou na nova tentativa sozinha).
+      guardarTronco(c);
       aoMudar();
       return 'SEM_SINAL';
     }
@@ -705,7 +708,7 @@ var TelaReproducao = (function () {
       var mexeu = false;
       c.linhas.filter(function (l) { return l.semPosicao && l.estado === 'NAO_ENCONTRADO'; }).forEach(function (l) {
         // A recusa do servidor (a data, o limite): a linha sai da espera com o porquê; não é falta de sinal.
-        if (r.recusa) { mexeu = true; l.semPosicao = false; l.barrada = false; l.recusada = true; l.mensagem = 'O servidor recusou a conferência: ' + r.erro.message + CAMINHO_RECUSA; return; }
+        if (r.recusa) { mexeu = true; l.semPosicao = false; l.barrada = false; l.naoEntra = false; l.recusada = true; l.mensagem = 'O servidor recusou a conferência: ' + r.erro.message + CAMINHO_RECUSA; return; }
         var x = r.porTexto[String(l.texto || l.brinco).trim()];
         if (!x) return;
         mexeu = true;

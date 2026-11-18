@@ -207,6 +207,40 @@ for (const tela of ['curral', 'tronco']) {
     await x.fechar();
   });
 
+  // ------------------------------------------- o fuzz estendido (semente 14 fixa) ----
+  test('fuzz do curral estendido, semente 14 (' + tela + ', sem localStorage): o envio que não saiu por falta da chave guardada (o rascunho chegou, o índice não) volta à fila também no rascunho do servidor — o servidor não fica com o bloco "saindo" que a tela não tem', async () => {
+    const x = await abrir(tela, { semLocalStorage: true });
+    const { page } = x;
+    await comecar(x);
+    await lancar(x, '0520', tela === 'curral' ? '430' : 'p');
+    await page.clock.fastForward(1500);
+    await parar(x);
+    // O rascunho chega ao servidor com o bloco saindo; o índice, não: a chave não ficou guardada, e o bloco não sai.
+    x.regra.transporte = (p) => p.rota === 'rascunho.salvar' && p.dados && p.dados.chave === 'indice';
+    await page.click('[data-enviar]');
+    await parar(x);
+    let v = await lerTela(page, tela);
+    assert.equal(v.c.blocos.length, 1);
+    assert.equal(v.c.blocos[0].estado, 'NOVO', 'o bloco não saiu');
+    assert.equal(v.c.linhas[0].estado, 'FILA');
+    assert.deepEqual(v.naoGuardado, [v.c.blocos[0].chave], 'a tela diz que o envio não saiu');
+    // Com o servidor de volta: o rascunho do servidor é o da tela (o bloco na fila, não saindo).
+    x.regra.transporte = null;
+    await page.clock.fastForward(6000);
+    await parar(x);
+    await page.clock.fastForward(1500);
+    await parar(x);
+    v = await lerTela(page, tela);
+    const r = rascunhoServidor(x);
+    assert.ok(r, 'o rascunho está no servidor');
+    assert.deepEqual(r.blocos.map((b) => [b.chave, b.estado]), v.c.blocos.map((b) => [b.chave, b.estado]), 'os blocos do servidor são os da tela');
+    assert.deepEqual(r.linhas.map((l) => [l.uid, l.estado]), v.c.linhas.map((l) => [l.uid, l.estado]), 'as linhas do servidor são as da tela');
+    assert.equal(r.blocos[0].estado, 'NOVO');
+    assert.equal(x.rede.log.filter((p) => p.rota === 'evento.registrar').length, 0, 'nada saiu para o servidor');
+    assert.deepEqual(inesperados(x), []);
+    await x.fechar();
+  });
+
   // ---------------------------------------------------------------- achado 15 ----
   test('achado 15 (' + tela + '): a recusa do servidor ao resolvedor (a data futura) não é falta de sinal — a nota da data, a conferência e a linha dizem o porquê e o caminho ("Mudar data"), e nada fica pendente à espera de um sinal', async () => {
     const x = await abrir(tela);
@@ -226,6 +260,18 @@ for (const tela of ['curral', 'tronco']) {
     assert.match(v.linhas[0].texto, /O servidor recusou a conferência: A data 14\/11\/2026 ainda não chegou/);
     assert.equal(v.resolverPendentes, false, 'sem "Conferir os brincos pendentes", que nunca resolveria');
     assert.doesNotMatch(v.status, /espera a conferência do servidor/);
+    if (tela === 'curral') {
+      // "Corrigir o brinco" na data recusada: a mesma recusa, dita como recusa (não "sem resposta, corrija com sinal").
+      await page.click('[data-linha="' + v.c.linhas[0].uid + '"] button:has-text("Corrigir o brinco")');
+      await page.fill('#cur-corrige-brinco', '0611');
+      await page.click('[role=dialog] button:has-text("Corrigir")');
+      await parar(x);
+      const texto = await page.evaluate(() => document.body.innerText.replace(/\s+/g, ' '));
+      assert.match(texto, /O servidor recusou a conferência do brinco 0611: A data 14\/11\/2026 ainda não chegou/);
+      assert.match(texto, /toque em "Mudar data/);
+      assert.doesNotMatch(texto, /Corrija com sinal/);
+      await page.click('[role=dialog] button:has-text("Voltar")');
+    }
     assert.deepEqual(inesperados(x), []);
     await x.fechar();
   });
@@ -259,3 +305,31 @@ for (const tela of ['curral', 'tronco']) {
     await x.fechar();
   });
 }
+
+// ------------------------------------------- o fuzz estendido (semente 95022) ----
+test('fuzz do curral estendido, semente 95022 (tronco): a linha da fêmea que não entra (morta na data), conferida de novo na data nova e recusada pelo servidor, se lê "recusada pelo servidor" — o "não entra" da data antiga não fica', async () => {
+  const x = await abrir('tronco');
+  const { page, rede } = x;
+  await comecar(x, '2026-11-12');
+  await lancar(x, '0702', 'p');
+  let v = await lerTela(page, 'tronco');
+  assert.equal(v.c.linhas.length, 1);
+  assert.match(v.linhas[0].texto, /não entra no diagnóstico/, 'a 0702 morreu em 05/11: não entra em 12/11');
+  // A data nova: a linha é conferida de novo, e o servidor recusa a conferência.
+  rede.falhas.push({ classe: 'resolver', tipo: 'recusa' });
+  await page.click(x.cfg.mudar);
+  await page.waitForSelector(x.cfg.inicio);
+  await page.fill('#tr-data', '2026-11-13');
+  await page.click('button:has-text("' + x.cfg.comecar + '")');
+  await page.waitForSelector(x.cfg.brinco);
+  await parar(x);
+  v = await lerTela(page, 'tronco');
+  const l = v.c.linhas[0];
+  assert.ok(x.rede.log.some((p) => p.rota === 'animal.resolver' && p.falha === 'recusa'), 'a conferência na data nova foi recusada');
+  assert.equal(!!l.recusada, true, 'a linha saiu da espera, recusada');
+  assert.equal(!!l.naoEntra, false, 'o "não entra" era da data antiga');
+  assert.match(v.linhas[0].texto, /recusada pelo servidor/);
+  assert.doesNotMatch(v.linhas[0].texto, /não entra no diagnóstico/);
+  assert.deepEqual(inesperados(x), []);
+  await x.fechar();
+});

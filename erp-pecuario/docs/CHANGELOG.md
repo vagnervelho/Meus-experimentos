@@ -2297,8 +2297,8 @@ terminou (7 altos). Esta etapa não mudou código.
   original copiou, derivou ou recebeu digitado, refeito pelo estado de hoje ou pela entrada errada) e estados do curral e do
   tronco que o teste aleatório da interface não gerava. Cada um tem um teste que falha com o `src/` de antes (commit `5e69ebf`) e
   passa agora — `tests/convergencia2.r2.test.js` (novo, 12 testes: os achados do servidor) e `tests/ui/convergencia2.r2.test.js`
-  (novo, 8 testes de navegador: os da interface) —, o conserto pela causa e o oráculo que deixou passar, estendido (CONTRATOS,
-  seção 54, com a tabela dos achados).
+  (novo, 11 testes de navegador: os da interface e os 3 do teste aleatório estendido) —, o conserto pela causa e o oráculo que
+  deixou passar, estendido (CONTRATOS, seção 54, com a tabela dos achados).
 - ALTA: o aborto é do dono da prenhez que ele encerra (a regra do parto e do diagnóstico sem estação), e a exposição em curso no
   parto ou no aborto continua na previsão; a verificação confere a cópia na mesma linha do lançamento — o cabeçalho da aplicação
   (lote, fabricante, via, veterinário e os demais), a dose × a base do rateio do consumo, a soma das doses × a saída do frasco, o
@@ -2324,7 +2324,14 @@ terminou (7 altos). Esta etapa não mudou código.
   fixas não mudou — 831 aceitos e 440 recusados, como antes), o efeito da desmama exige o pasto informado gravado, o da sanidade
   lê as marcas da carência e do fabricante, e a correção da data mantém a próxima digitada; no do curral e do tronco
   (`tests/ui/curral.fuzz.test.js`), o "Terminar" com a remoção do rascunho que falha, o rascunho do servidor depois do "Terminar"
-  e o rótulo da pendente barrada (o oráculo de antes exigia "a conferir no servidor" também dela).
+  e o rótulo da pendente barrada (o oráculo de antes exigia "a conferir no servidor" também dela); e a rede do teste passou a
+  gerar a recusa do servidor à conferência do brinco (nenhuma ação a gerava), com o oráculo do lançamento, das pendentes, do
+  "Corrigir o brinco" e do rótulo. Com ele, dois defeitos a mais: o "Corrigir o brinco" do curral dizia "sem resposta, corrija com
+  sinal" diante da recusa (o achado 15 num caminho que o conserto não tinha coberto) e, sem localStorage, o envio que não saía por
+  falta da chave guardada (só o índice do rascunho falhou) voltava à fila na tela sem ser guardado de novo — o servidor ficava com o
+  bloco "saindo" (defeito da etapa 2, achado pela semente fixa 14 com a sequência nova); e a linha que não entrava na data antiga
+  (a fêmea morta), recusada na conferência da data nova, se lia "não entra" (a marca velha ficava; semente 95022). Os três
+  consertados, com teste que falha sem o conserto.
 - Testes existentes ajustados ao contrato novo, sem afrouxar o que conferem: `tests/sanidade.test.js` (o payload com as marcas
   `quantidade_informada` e `carencia_informada`), `tests/pesagem.test.js` (a linha "média do lote" sem o lote também é o método
   diferente do das outras linhas: dois achados), `tests/correcao.regressoes.test.js` (a carência copiada do produto vem em branco na
