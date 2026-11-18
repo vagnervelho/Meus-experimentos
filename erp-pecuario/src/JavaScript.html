@@ -835,6 +835,7 @@ var Rascunhos = (function () {
   var modo = null;
   var cfg = { ambiente: 'PRODUCAO' };
   var pendentesServidor = {};
+  var indiceFalhou = {};
   var gravarServidorAdiado = null;
   // No servidor o envio é adiado: quem gravou precisa saber se ele falhou (§20, regra 9: não esconder erro).
   var situacoes = {};
@@ -843,6 +844,11 @@ var Rascunhos = (function () {
   var emCurso = null;
   // O que falhou vai de novo sozinho (sem esperar outra mudança na tela): o rascunho não fica só na memória da página.
   var tentarDeNovo = null;
+  // Cada envio ao servidor leva uma versão crescente (o carimbo do aparelho, nunca menor que a última vista): o pedido que
+  // chega atrasado não apaga o que um envio mais novo guardou (CONTRATOS, seção 53).
+  var versao = 0;
+  function versao_() { versao = Math.max(versao + 1, Fmt.agoraMs()); return versao; }
+  function viu_(v) { if (typeof v === 'number' && v > versao) versao = v; }
   function avisar_(lista, a, b) { lista.forEach(function (fn) { try { fn(a, b); } catch (x) { Util.registrarFalha('aviso de rascunho', x); } }); }
   function falhou_(ids, e) {
     ids.forEach(function (id) { situacoes[id] = { estado: 'FALHOU', erro: e }; });
@@ -860,7 +866,7 @@ var Rascunhos = (function () {
     tentarDeNovo = Util.adiar(function () { descarregarServidor_().catch(function (e) { Util.registrarFalha('rascunho no servidor', e); }); }, 5000);
     // Ao sair da página (recarga, aba em segundo plano), o que estiver pendente vai ao servidor na hora.
     var sair = function () {
-      if (!Object.keys(pendentesServidor).length) return;
+      if (!Object.keys(pendentesServidor).length && !Object.keys(indiceFalhou).length) return;
       descarregarServidor_().catch(function (e) { Util.registrarFalha('rascunho no servidor ao sair', e); });
     };
     window.addEventListener('pagehide', sair);
@@ -876,12 +882,14 @@ var Rascunhos = (function () {
       return ids.map(function (id) { var r = Util.armazem.ler(prefixo_() + id); return r ? resumo_(id, r) : null; }).filter(Boolean);
     }
     var r = await Cliente.consulta('rascunho.obter', { chave: 'indice' });
+    viu_(r.data.versao);
     return r.data.existe && Array.isArray(r.data.conteudo) ? r.data.conteudo : [];
   }
   async function obter(id) {
     if (modo === 'LOCAL') return Util.armazem.ler(prefixo_() + id);
     if (pendentesServidor[id] !== undefined) return pendentesServidor[id];
     var r = await Cliente.consulta('rascunho.obter', { chave: 'r.' + id });
+    viu_(r.data.versao);
     return r.data.existe ? r.data.conteudo : null;
   }
   /**
@@ -919,28 +927,38 @@ var Rascunhos = (function () {
   }
   async function enviarPendentes_() {
     var ids = Object.keys(pendentesServidor);
-    if (!ids.length) return;
+    // O rascunho que chegou ao servidor sem o índice (a falha entre os dois pedidos): o índice vai de novo com ele, também sem
+    // outra mudança na tela — senão o Início não o lista e a faixa da falha nunca sai.
+    var soIndice = Object.keys(indiceFalhou).filter(function (id) { return pendentesServidor[id] === undefined; });
+    if (!ids.length && !soIndice.length) return;
     var lote = pendentesServidor;
+    var doIndice = indiceFalhou;
     pendentesServidor = {};
+    indiceFalhou = {};
     var feitos = [];
     try {
       var indice = await listar();
+      var noIndice = function (id, r) { indice = indice.filter(function (x) { return x.id !== id; }); if (r !== null) indice.push(resumo_(id, r)); };
+      soIndice.forEach(function (id) { noIndice(id, doIndice[id]); });
       for (var i = 0; i < ids.length; i++) {
         var id = ids[i], r = lote[id];
-        if (r === null) await Cliente.consulta('rascunho.remover', { chave: 'r.' + id });
-        else await Cliente.consulta('rascunho.salvar', { chave: 'r.' + id, conteudo: r });
+        if (r === null) await Cliente.consulta('rascunho.remover', { chave: 'r.' + id, versao: versao_() });
+        else await Cliente.consulta('rascunho.salvar', { chave: 'r.' + id, conteudo: r, versao: versao_() });
         feitos.push(id);
-        indice = indice.filter(function (x) { return x.id !== id; });
-        if (r !== null) indice.push(resumo_(id, r));
+        noIndice(id, r);
       }
-      await Cliente.consulta('rascunho.salvar', { chave: 'indice', conteudo: indice });
+      await Cliente.consulta('rascunho.salvar', { chave: 'indice', conteudo: indice, versao: versao_() });
     } catch (e) {
-      var falhos = ids.filter(function (id) { return feitos.indexOf(id) < 0; });
-      falhos.forEach(function (id) { if (pendentesServidor[id] === undefined) pendentesServidor[id] = lote[id]; });
-      falhou_(falhos.length ? falhos : ids, e);
+      ids.forEach(function (id) {
+        if (pendentesServidor[id] !== undefined) return;
+        if (feitos.indexOf(id) < 0) pendentesServidor[id] = lote[id];
+        else indiceFalhou[id] = lote[id];
+      });
+      soIndice.forEach(function (id) { if (pendentesServidor[id] === undefined && indiceFalhou[id] === undefined) indiceFalhou[id] = doIndice[id]; });
+      falhou_(ids.concat(soIndice), e);
       throw e;
     }
-    var guardados = ids.filter(function (id) { return pendentesServidor[id] === undefined; });
+    var guardados = ids.concat(soIndice).filter(function (id) { return pendentesServidor[id] === undefined; });
     guardados.forEach(function (id) { situacoes[id] = { estado: 'GUARDADO', erro: null }; });
     if (!Object.keys(situacoes).some(function (id) { return situacoes[id].estado === 'FALHOU'; })) avisar_(ouvintesGuardado, guardados);
   }

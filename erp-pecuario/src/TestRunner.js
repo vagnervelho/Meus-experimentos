@@ -749,11 +749,14 @@ var TestRunner = (function () {
           igual_(dela(agenda(Utils.somaDias(oito, -1))), [], 'aplicada dentro da faixa: cumprida');
           t.cmd('protocolo.salvar', { protocol_id: pr.protocol_id, campos: { ativo: false } }, 'san-47-fim');
         });
-        t.passo('058-059', 'Protocolo de aplicação única para machos a partir de 24 meses: antes do vencimento, em dia; a agenda e os alertas mostram a pendência vencida; aplicada, cumprida', function () {
+        t.passo('058-059', 'Protocolo de aplicação única para machos a partir de 24 meses, praticado desde D0+50 (a primeira aplicação com ele, no S1): a agenda e os alertas mostram a pendência vencida do S3 desde que o protocolo vale; aplicada, cumprida', function () {
           var pr = t.cmd('protocolo.salvar', { campos: { nome: 'Única (aceitação)', tipo_procedimento: 'VACINA', sexo_aplicavel: 'M', idade_min_meses: 24, recorrencia_tipo: 'UNICA' } }, 'san-unica');
+          // O nunca aplicado vence no dia em que o protocolo passou a valer (05, seção 4.7: elegível quando o protocolo está ativo;
+          // CONTRATOS, seção 53): o cadastro de hoje, ou a primeira aplicação com ele, se antes — a do S1 em D0+50.
+          t.cmd('evento.registrar', { tipo: 'SANIDADE', subtipo: 'VACINACAO', campos: { event_date: t.dia(50), protocol_id: pr.protocol_id, nome_produto: 'Vacina U', modo_dose: 'POR_CABECA', dose_referencia: 1, unidade_dose: 'dose' }, animais: [{ animal_id: ids.S1 }] }, 'san-unica-antes');
           var minhas = function (a) { return a.pendencias.filter(function (p) { return p.protocol_id === pr.protocol_id && p.animal_id === ids.S3; }); };
           var ag = t.ok(t.api('sanidade.agenda', {}), 'agenda');
-          igual_(minhas(ag).map(function (p) { return p.situacao; }), ['VENCIDA'], 'o S3 já tinha 24 meses: vencida desde então');
+          igual_(minhas(ag).map(function (p) { return [p.situacao, p.vencimento]; }), [['VENCIDA', t.dia(50)]], 'o S3 já tinha 24 meses: vencida desde que o protocolo vale');
           verificar_(t.ok(t.api('alerta.listar', {}), 'alertas').alertas.some(function (a) { return a.codigo === 'SANITARIO_VENCIDO'; }), 'alerta de procedimento vencido');
           t.cmd('evento.registrar', { tipo: 'SANIDADE', subtipo: 'VACINACAO', campos: { event_date: t.hoje(), protocol_id: pr.protocol_id, nome_produto: 'Vacina U', modo_dose: 'POR_CABECA', dose_referencia: 1, unidade_dose: 'dose' }, animais: [{ animal_id: ids.S3 }] }, 'san-unica-aplicada');
           igual_(minhas(t.ok(t.api('sanidade.agenda', {}), 'agenda')).length, 0, 'cumprida');

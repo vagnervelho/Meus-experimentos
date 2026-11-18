@@ -114,7 +114,12 @@ for (const largura of [1280, 360]) {
     const s = A.sistema();
     const sem = A.semear(s);
     const vac = ok(s, 'produto.salvar', { campos: { nome: 'Vacina Aftosa', categoria: 'VACINA', unidade: 'dose', custo_unitario: 1.85, dose_padrao_por_cabeca: 2, carencia_padrao_dias: 30, controla_estoque: true } }, 'p1').product_id;
+    // Segunda convergência, rodada 1 (achado 8): o nunca aplicado vence no dia em que o protocolo passou a valer (05, seção 4.7:
+    // elegível quando o protocolo está ativo) — o protocolo é cadastrado em 01/06, para os quatro estarem atrasados em 13/11.
+    const agora = s.gas.clock.now;
+    s.gas.clock.now = Date.parse('2026-06-01T15:00:00.000Z');
     const prot = ok(s, 'protocolo.salvar', { campos: { nome: 'Aftosa semestral', tipo_procedimento: 'VACINA', product_id: vac, sexo_aplicavel: 'AMBOS', recorrencia_tipo: 'INTERVALO_DIAS', intervalo_dias: 180 } }, 'q1').protocol_id;
+    s.gas.clock.now = agora;
     s.registrar({ tipo: 'ESTOQUE', subtipo: 'ENTRADA', campos: { event_date: '2026-11-01', product_id: vac, quantidade: 50, valor: 9250 }, animais: [] }, 'e1');
     const a = await A.abrir(s, { largura, hash: 'sanidade/agenda' });
     const { page } = a;

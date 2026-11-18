@@ -72,8 +72,10 @@ test('achado 1: a agenda do protocolo restrito a uma categoria vence no dia em q
   const ficha = ok(api(s, 'animal.ficha', { animal_id: id.N1 })).sanitario.proximas.filter((p) => p.situacao !== 'EM_DIA').map((p) => [p.nome, p.situacao, p.vencimento]).sort();
   assert.deepEqual(ficha, pend('N1', '2026-11-17').map((p) => [p[0], p[1], p[2]]));
   assert.ok(ficha.every((p) => p[2] >= '2026-06-15'), 'nada vencido antes de ela ser vaca: ' + JSON.stringify(ficha));
-  // A vaca de sempre continua vencendo desde a entrada no rebanho (sem regressão).
-  assert.deepEqual(pend('V1', '2026-03-01').filter((p) => p[0] === 'Marcação das vacas'), [['Marcação das vacas', 'VENCIDA', '2026-01-01', 59]]);
+  // A vaca de sempre continua vencendo desde que ficou elegível (sem regressão). Segunda convergência, rodada 1 (achado 8): o
+  // protocolo cadastrado em 02/01 passa a valer nesse dia — elegível quando o protocolo está ativo (05, seção 4.7) —, não na
+  // entrada no rebanho (o marco zero, 01/01).
+  assert.deepEqual(pend('V1', '2026-03-01').filter((p) => p[0] === 'Marcação das vacas'), [['Marcação das vacas', 'VENCIDA', '2026-01-02', 58]]);
 });
 
 test('achado 2: a correção de uma aplicação gravada sem carência não ganha a carência padrão de hoje do produto (a correção do veterinário é aceita mesmo com a venda para abate dentro da carência nova); pela API, o vazio mantém os 21 dias do original quando o cadastro mudou para 60', () => {

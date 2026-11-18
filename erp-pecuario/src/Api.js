@@ -455,6 +455,25 @@ var Api = (function () {
   }
   /** Chave da parte p (1, 2, …) de um rascunho guardado em partes. */
   function parteRascunho_(k, p) { return k + '#' + p; }
+  /**
+   * A versão do rascunho guardado em `k` (o número que o aparelho mandou ao guardar ou remover; o removido fica como marca com a
+   * versão), ou null (nada guardado, ou guardado sem versão).
+   */
+  function versaoGuardada_(store, k) {
+    var t = store.getProperty(k);
+    if (t === null) return null;
+    try {
+      var o = JSON.parse(t);
+      return typeof o.versao === 'number' && isFinite(o.versao) ? o.versao : null;
+    } catch (e) {
+      return null;
+    }
+  }
+  /** A resposta do rascunho com a versão guardada, quando há (o rascunho guardado sem versão responde como antes). */
+  function comVersao_(dados, o) {
+    if (o && typeof o.versao === 'number') dados.versao = o.versao;
+    return dados;
+  }
   /** Apaga o rascunho e as partes dele (as de uma gravação anterior maior também). */
   function apagarRascunho_(store, k, todos) {
     store.deleteProperty(k);
@@ -464,8 +483,12 @@ var Api = (function () {
    * Rascunho de formulário guardado no servidor quando o `localStorage` do iframe não serve (seção 17, SP-06):
    * propriedades do USUÁRIO (fora da planilha e do journal; não mudam a versão dos dados), chave
    * `RASCUNHO:<ambiente>:<chave>`; acima de um valor das propriedades, o texto vai em partes (`<chave>#1`, `#2`…) e a
-   * chave guarda só quantas são. dados: {chave (letras, números, . _ : -; até 100), conteudo (salvar)}.
-   * salvar → {chave, salvo_em, bytes, partes}; obter → {chave, existe, conteudo, salvo_em}; remover → {chave, removido}.
+   * chave guarda só quantas são. dados: {chave (letras, números, . _ : -; até 100), conteudo (salvar), versao (salvar e
+   * remover: o número crescente que o aparelho dá a cada envio)}. A versão mais nova vence, não o pedido que chega por último:
+   * o pedido atrasado com versão igual ou menor que a guardada não muda nada ({obsoleto: true}); o removido fica como marca
+   * com a versão, para o salvar atrasado não o ressuscitar (CONTRATOS, seção 53).
+   * salvar → {chave, salvo_em, bytes, partes} | {chave, obsoleto, versao}; obter → {chave, existe, conteudo, salvo_em,
+   * versao (quando guardada)}; remover → {chave, removido} | {chave, removido: false, obsoleto}.
    * Erros VALIDATION: chave inválida, sem conteúdo, acima de 96 KB, mais de 40 rascunhos guardados, rascunhos juntos
    * acima de 400 KB.
    */
@@ -475,12 +498,14 @@ var Api = (function () {
     var ambiente = info && info.ambiente ? info.ambiente : 'PRODUCAO';
     var k = RASCUNHO.prefixo + ambiente + ':' + d.chave;
     var store = PropertiesService.getUserProperties();
+    var versao = typeof d.versao === 'number' && isFinite(d.versao) ? d.versao : null;
     if (acao === 'obter') {
       var t = store.getProperty(k);
       if (t === null) return { dados: { chave: d.chave, existe: false, conteudo: null, salvo_em: null } };
       var o;
       try {
         o = JSON.parse(t);
+        if (o.removido === true) return { dados: comVersao_({ chave: d.chave, existe: false, conteudo: null, salvo_em: null }, o) };
         if (typeof o.partes === 'number') {
           var juntas = '';
           for (var p = 1; p <= o.partes; p++) {
@@ -493,17 +518,22 @@ var Api = (function () {
       } catch (e) {
         throw Validation.erro('INTERNAL', 'O rascunho guardado está ilegível. Descarte-o e preencha o formulário de novo.');
       }
-      return { dados: { chave: d.chave, existe: true, conteudo: o.conteudo, salvo_em: o.salvo_em } };
+      return { dados: comVersao_({ chave: d.chave, existe: true, conteudo: o.conteudo, salvo_em: o.salvo_em }, o) };
     }
+    var guardada = versaoGuardada_(store, k);
+    if (versao !== null && guardada !== null && versao <= guardada) return { dados: acao === 'remover' ? { chave: d.chave, removido: false, obsoleto: true } : { chave: d.chave, obsoleto: true, versao: guardada } };
     if (acao === 'remover') {
-      var existia = store.getProperty(k) !== null;
+      var antes = store.getProperty(k);
+      var existia = antes !== null;
+      try { existia = existia && JSON.parse(antes).removido !== true; } catch (e) { existia = antes !== null; }
       apagarRascunho_(store, k);
+      if (versao !== null) store.setProperty(k, JSON.stringify({ removido: true, salvo_em: Database.clock().agora(), versao: versao }));
       return { dados: { chave: d.chave, removido: existia } };
     }
     if (acao !== 'salvar') throw Validation.erro('INTERNAL', 'Ação de rascunho desconhecida: ' + acao + '.');
     if (d.conteudo === undefined || d.conteudo === null) throw validacao_('Não há nada para guardar no rascunho.', 'conteudo');
     var agora = Database.clock().agora();
-    var texto = JSON.stringify({ conteudo: d.conteudo, salvo_em: agora });
+    var texto = JSON.stringify(versao !== null ? { conteudo: d.conteudo, salvo_em: agora, versao: versao } : { conteudo: d.conteudo, salvo_em: agora });
     var bytes = bytesUtf8_(texto);
     if (bytes > RASCUNHO.maxBytes) throw validacao_('O rascunho ficou grande demais para guardar no servidor (' + Math.ceil(bytes / 1024) + ' KB; o limite é ' + Math.floor(RASCUNHO.maxBytes / 1000) + ' KB). Grave o lançamento em partes menores.', 'conteudo');
     var todos = store.getProperties();
@@ -513,12 +543,17 @@ var Api = (function () {
     Object.keys(todos).forEach(function (chave) {
       if (chave.indexOf(RASCUNHO.prefixo) !== 0 || chave === k || chave.indexOf(k + '#') === 0 || chave.indexOf('#') >= 0) return;
       var salvo = null;
+      var marca = false;
       try {
-        salvo = Date.parse(JSON.parse(todos[chave]).salvo_em);
+        var lido = JSON.parse(todos[chave]);
+        salvo = Date.parse(lido.salvo_em);
+        marca = lido.removido === true;
       } catch (e) {
         console.error('rascunho ilegível descartado (' + chave + '): ' + texto_(e));
       }
       if (!isFinite(salvo) || salvo < limite) { apagarRascunho_(store, chave, todos); return; }
+      // A marca do removido (só a versão) não é rascunho: não conta no limite.
+      if (marca) return;
       restantes += 1;
       ocupado += bytesUtf8_(todos[chave]);
       Object.keys(todos).forEach(function (x) { if (x.indexOf(chave + '#') === 0) ocupado += bytesUtf8_(todos[x]); });
@@ -530,7 +565,7 @@ var Api = (function () {
     if (!partes) store.setProperty(k, texto);
     else {
       partes.forEach(function (x, i) { store.setProperty(parteRascunho_(k, i + 1), x); });
-      store.setProperty(k, JSON.stringify({ partes: partes.length, salvo_em: agora }));
+      store.setProperty(k, JSON.stringify(versao !== null ? { partes: partes.length, salvo_em: agora, versao: versao } : { partes: partes.length, salvo_em: agora }));
     }
     return { dados: { chave: d.chave, salvo_em: agora, bytes: bytes, partes: partes ? partes.length : 1 } };
   }

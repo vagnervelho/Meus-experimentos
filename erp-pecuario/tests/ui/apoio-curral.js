@@ -90,7 +90,8 @@ function novaRede(s) {
     // A página vai embora de repente (`rascunhoBloqueado`): o envio do rascunho ao sair falha no transporte; a leitura do
     // rascunho pela página nova (rascunho.obter de um rascunho, não do índice) passa.
     const bloqueado = rede.rascunhoBloqueado && cl === 'rascunho' && !(pedido.rota === 'rascunho.obter' && pedido.dados && pedido.dados.chave !== 'indice');
-    const i = bloqueado ? -1 : rede.falhas.findIndex((f) => f.classe === cl);
+    // A falha pode mirar um pedido só (`rota` e `chave`: a gravação do índice), para cair entre os dois pedidos do mesmo envio.
+    const i = bloqueado ? -1 : rede.falhas.findIndex((f) => f.classe === cl && (!f.rota || pedido.rota === f.rota) && (!f.chave || (pedido.dados && pedido.dados.chave === f.chave)));
     const f = bloqueado ? { classe: cl, tipo: 'transporte' } : i >= 0 ? rede.falhas.splice(i, 1)[0] : null;
     const reg = { rota: pedido.rota, chave: pedido.idempotencyKey || null, falha: f ? f.tipo : null, textos: pedido.dados && pedido.dados.textos, entregue: false, resposta: null };
     // A nova tentativa da mesma chave fecha a espera do servidor ocupado.
@@ -188,6 +189,7 @@ async function lerTela(page, tela) {
       conferenciaTexto: ((document.querySelector(cfg.conferencia + ' [data-conferencia]') || {}).textContent || '').trim(),
       conferenciaTipo: ((document.querySelector(cfg.conferencia + ' [data-conferencia]') || { dataset: {} }).dataset.conferencia) || null,
       decisaoTexto: ((document.querySelector('[data-decisao-repetido]') || {}).textContent || '').trim(),
+      contador: ((document.querySelector('.curral-contador [data-contador]') || { dataset: {} }).dataset.contador) || null,
       textoTodo: tudo,
       titulo: ((document.querySelector('#conteudo h1') || {}).textContent || '').trim(),
       resultadoN: document.querySelector(cfg.resultado) ? Number(document.querySelector(cfg.resultado).getAttribute(cfg.tela === 'curral' ? 'data-resultado-curral' : 'data-resultado-tronco')) : null,

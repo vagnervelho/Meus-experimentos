@@ -346,3 +346,30 @@ test('achado 16: o comando que TIRA o movimento de um dia contado (desfazer a im
   assert.match(est.error.details[0].mensagem, /este estorno o mudaria .*estorne o lançamento e conte de novo/);
   semErro(s, 'contagem');
 });
+
+test('achado 5 (servidor): no rascunho guardado no servidor a versão mais nova vence — o pedido atrasado (versão menor) não muda nada, e o removido não volta pelo salvar atrasado', () => {
+  const s = S.sistema();
+  const chamar = (rota, dados) => js(s.gas.exec(() => s.G.api({ rota, dados })));
+  const r5 = chamar('rascunho.salvar', { chave: 'r.curral-pesagem', conteudo: { linhas: ['gravada'] }, versao: 5 });
+  assert.equal(r5.ok, true);
+  const r3 = chamar('rascunho.salvar', { chave: 'r.curral-pesagem', conteudo: { linhas: ['na fila'] }, versao: 3 });
+  assert.deepEqual([r3.ok, r3.data.obsoleto, r3.data.versao], [true, true, 5]);
+  let o = chamar('rascunho.obter', { chave: 'r.curral-pesagem' }).data;
+  assert.deepEqual([o.conteudo, o.versao], [{ linhas: ['gravada'] }, 5]);
+  // A mesma versão também não troca (o envio repetido do mesmo pedido).
+  assert.equal(chamar('rascunho.salvar', { chave: 'r.curral-pesagem', conteudo: { linhas: ['outra'] }, versao: 5 }).data.obsoleto, true);
+  // Removido (versão 7), o salvar atrasado (versão 6) não o ressuscita; o mais novo (8) guarda.
+  assert.deepEqual(chamar('rascunho.remover', { chave: 'r.curral-pesagem', versao: 7 }).data, { chave: 'r.curral-pesagem', removido: true });
+  assert.equal(chamar('rascunho.salvar', { chave: 'r.curral-pesagem', conteudo: { linhas: ['velho'] }, versao: 6 }).data.obsoleto, true);
+  o = chamar('rascunho.obter', { chave: 'r.curral-pesagem' }).data;
+  assert.deepEqual([o.existe, o.versao], [false, 7]);
+  assert.equal(chamar('rascunho.salvar', { chave: 'r.curral-pesagem', conteudo: { linhas: ['novo'] }, versao: 8 }).ok, true);
+  assert.deepEqual(chamar('rascunho.obter', { chave: 'r.curral-pesagem' }).data.conteudo, { linhas: ['novo'] });
+  // O remover atrasado (versão menor) também não apaga o mais novo.
+  assert.deepEqual(chamar('rascunho.remover', { chave: 'r.curral-pesagem', versao: 4 }).data, { chave: 'r.curral-pesagem', removido: false, obsoleto: true });
+  assert.equal(chamar('rascunho.obter', { chave: 'r.curral-pesagem' }).data.existe, true);
+  // Sem versão (o cliente de antes), como antes: o último a chegar vence.
+  assert.equal(chamar('rascunho.salvar', { chave: 'outro', conteudo: 1 }).ok, true);
+  assert.equal(chamar('rascunho.salvar', { chave: 'outro', conteudo: 2 }).ok, true);
+  assert.equal(chamar('rascunho.obter', { chave: 'outro' }).data.conteudo, 2);
+});

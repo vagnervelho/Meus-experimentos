@@ -233,6 +233,32 @@ async function rodarSemente(semente, nAcoes, opcoes) {
         const dom = v.linhas.find((x) => x.uid === l.uid) || { botoes: [] };
         if (saiu(b)) ['Tirar', 'Corrigir o peso', 'Corrigir o resultado', 'Corrigir o brinco', 'Está certo'].forEach((t) => { if (dom.botoes.indexOf(t) >= 0) e('a linha ' + l.uid + ' está num bloco que saiu (' + b.estado + ') e a tela oferece "' + t + '"'); });
       });
+      // Segunda convergência, rodada 1 (achado 12): duas linhas do mesmo animal nunca estão juntas no aparelho (todo caminho
+      // aplica a regra do repetido), e o servidor nunca recusa um bloco por animal repetido.
+      // Um bloco (um lançamento) nunca leva o mesmo animal duas vezes, por qualquer caminho que a linha tenha chegado à fila (a
+      // segunda pesagem do mesmo dia sai no bloco seguinte).
+      const doAnimal = {};
+      c.linhas.forEach((l) => {
+        if (!l.animal_id || !l.bloco) return;
+        const k = l.bloco + '|' + l.animal_id;
+        if (doAnimal[k]) e('as linhas ' + doAnimal[k].uid + ' (' + doAnimal[k].estado + ') e ' + l.uid + ' (' + l.estado + ') são do mesmo animal (' + l.animal_id + ') no bloco ' + l.bloco);
+        doAnimal[k] = l;
+      });
+      if (rede.log.some((x) => x.rota === 'evento.registrar' && x.entregue && !x.resposta.ok && (x.resposta.error.details || []).some((d) => d.codigo === 'ANIMAL_REPETIDO'))) e('o servidor recusou um bloco com o animal repetido (ANIMAL_REPETIDO)');
+      // Achado 13: a pendente que espera o servidor não se lê "brinco não encontrado"; o macho achado no tronco, também não.
+      c.linhas.forEach((l) => {
+        if (l.estado !== 'NAO_ENCONTRADO') return;
+        const dom = v.linhas.find((x) => x.uid === l.uid);
+        if (!dom) return;
+        if (l.semPosicao && (dom.texto.indexOf('brinco não encontrado') >= 0 || dom.texto.indexOf('a conferir no servidor') < 0)) e('a pendente ' + l.uid + ' (sem resposta do servidor) aparece como "' + dom.texto + '"');
+        else if (l.semPosicao) conta('rotulo:pendente');
+      });
+      // Achado 17: o contador do tronco conta as fêmeas achadas, não as linhas.
+      if (tela === 'tronco' && v.contador !== null) {
+        const femeas = new Set(c.linhas.filter((l) => l.animal_id).map((l) => l.animal_id)).size;
+        if (Number(v.contador) !== femeas) e('o contador do tronco diz ' + v.contador + ' diagnosticadas; a sessão tem ' + femeas + ' fêmeas achadas');
+        else conta('contador:conferido');
+      }
       const algumSaiu = c.blocos.some(saiu);
       if (v.mudar === algumSaiu) e('"Mudar" ' + (v.mudar ? 'aparece com' : 'some sem') + ' bloco que saiu: ' + JSON.stringify(c.blocos.map((b) => b.estado)));
       const fotoBloco = (b) => JSON.stringify(c.linhas.filter((l) => l.bloco === b.chave).map((l) => [l.uid, l.animal_id, tela === 'curral' ? l.peso : l.resultado, l.idade || null]));
@@ -448,7 +474,13 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     await page.click('[data-resolver-pendentes]');
     await assentar();
     const pedidos = rede.log.slice(n0).filter((x) => x.rota === 'animal.resolver');
-    if (pedidos.length && pedidos.every((x) => !x.entregue || !x.resposta.ok)) return;
+    if (pedidos.length && pedidos.every((x) => !x.entregue || !x.resposta.ok)) {
+      // Segunda convergência, rodada 1 (achado 13): o toque sem resposta do servidor tem resposta na tela.
+      const w = await lerTela(page, tela);
+      if (w.fase === 'sessao' && w.textoTodo.indexOf('à espera dele') < 0) falhar('"Conferir os brincos pendentes no servidor" sem resposta do servidor não disse nada na tela');
+      conta('pendentes:semResposta');
+      return;
+    }
     const v = await lerTela(page, tela);
     if (v.fase !== 'sessao') return;
     const c = v.c;
@@ -691,7 +723,9 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     const cands = c.linhas.filter((l) => l.estado === 'NAO_ENCONTRADO');
     if (!cands.length) return false;
     const l = um(rnd, cands);
-    const t = sortearTexto();
+    // Segunda convergência, rodada 1 (achado 12): metade das vezes, o brinco de outra linha da sessão (o mesmo animal duas vezes).
+    const outros = c.linhas.filter((y) => y.uid !== l.uid && y.animal_id && M.linhas[y.uid]).map((y) => M.linhas[y.uid].texto);
+    const t = outros.length && rnd() < 0.5 ? um(rnd, outros) : sortearTexto();
     log('corrigir o brinco de ' + l.uid + ' para "' + t + '"');
     const n0 = rede.log.length;
     await page.click('[data-linha="' + l.uid + '"] button:has-text("Corrigir o brinco")');
@@ -703,8 +737,17 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     const pedidos = rede.log.slice(n0).filter((x) => x.rota === 'animal.resolver');
     const semResposta = pedidos.length && pedidos.every((x) => !x.entregue || !x.resposta.ok);
     const rr = resolverModelo(t, M.sessao.data);
-    if (r && r.estado === 'FILA') M.linhas[l.uid].texto = t;
-    else if (!semResposta && rr.situacao === 'ACHADO' && !rr.inelegivel) falhar('"Corrigir o brinco" para "' + t + '" (achado e no rebanho) não pôs a linha na fila: ' + JSON.stringify(r));
+    // A mesma regra do repetido de todo caminho: outra linha do mesmo animal ainda do aparelho barra (a linha não muda); a que
+    // já saiu deixa entrar com o aviso de pesar de novo.
+    const outraMexivel = rr.situacao === 'ACHADO' && c.linhas.some((y) => y.uid !== l.uid && y.animal_id === rr.animal_id && mexivel(c, y));
+    const outraSaiu = rr.situacao === 'ACHADO' && c.linhas.some((y) => y.uid !== l.uid && y.animal_id === rr.animal_id && !mexivel(c, y));
+    if (outraMexivel) conta('corrigirBrinco:barrado');
+    if (r && (r.estado === 'FILA' || r.estado === 'AVISO')) {
+      if (outraMexivel) falhar('"Corrigir o brinco" para "' + t + '" pôs na fila uma segunda linha do animal ' + rr.animal_id + ', que já tem outra ainda do aparelho');
+      if (r.estado === 'AVISO' && !outraSaiu) falhar('"Corrigir o brinco" para "' + t + '" pôs a linha com aviso sem outra pesagem do animal que já saiu');
+      if (outraSaiu) conta('corrigirBrinco:pesarDeNovo');
+      M.linhas[l.uid].texto = t;
+    } else if (!semResposta && rr.situacao === 'ACHADO' && !rr.inelegivel && !outraMexivel) falhar('"Corrigir o brinco" para "' + t + '" (achado e no rebanho) não pôs a linha na fila: ' + JSON.stringify(r));
     if (v.dialogo) await page.click('[role=dialog] button:has-text("Voltar")');
     conta('corrigirBrinco');
     return true;
@@ -808,10 +851,15 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     // Sem localStorage, o rascunho no servidor é o estado da tela (recarregar não perde nada).
     const v = await lerTela(page, tela);
     anotarChaves(v.c);
+    // Segunda convergência, rodada 1 (achado 14): com o servidor de volta, nada fica preso — nem a falha só do índice.
+    if (v.situacaoRascunho && v.situacaoRascunho.estado === 'FALHOU') falhar('com o servidor de volta, o rascunho continua com a falha (' + ((v.situacaoRascunho.erro || {}).message || '') + ') e não vai de novo');
     if (v.fase === 'sessao' && v.c) {
       const r = rascunhoServidor();
       if (!r) falhar('sem localStorage, a sessão não está guardada no servidor');
       if (essencialRascunho(r) !== essencialRascunho(v.c)) falhar('o rascunho guardado no servidor não é o estado da tela:\n   servidor ' + essencialRascunho(r) + '\n   na tela  ' + essencialRascunho(v.c));
+      // O índice do servidor (o Início lista os rascunhos por ele) tem o rascunho da sessão.
+      const ix = s.api({ rota: 'rascunho.obter', dados: { chave: 'indice' } });
+      if (!ix.ok || !ix.data.existe || !(ix.data.conteudo || []).some((x) => x.id === cfg.rascunho)) falhar('o índice dos rascunhos no servidor não lista a sessão do ' + tela + ': ' + JSON.stringify(ix.ok ? ix.data.conteudo : ix.error).slice(0, 300));
       conta('rascunho:servidorConferido');
     }
   }
@@ -943,11 +991,15 @@ async function rodarSemente(semente, nAcoes, opcoes) {
     // Ou falha (o transporte, a falha interna, o servidor ocupado, a resposta perdida depois de gravar ou o pedido perdido): o
     // bloco que ia sair sem a chave guardada não sai (CONTRATOS, seção 52), e a tela avisa.
     if (classe === 'rascunho') {
-      const tr = ponderado(rnd, [[4, 'segurar'], [3, 'transporte'], [2, 'interna'], [1, 'ocupado'], [1, 'perdeDepois'], [1, 'perdeAntes']]);
+      // Segunda convergência, rodada 1 (achados 5 e 14): o pedido do rascunho que chega ao servidor DEPOIS dos mais novos
+      // (`segurarAntes`: o aparelho desiste dele aos 45 s e ele chega quando for solto) e a falha só no índice (entre os dois
+      // pedidos do mesmo envio).
+      const tr = ponderado(rnd, [[4, 'segurar'], [3, 'segurarAntes'], [3, 'transporte'], [2, 'interna'], [1, 'ocupado'], [1, 'perdeDepois'], [1, 'perdeAntes']]);
+      const soIndice = tr !== 'segurar' && tr !== 'segurarAntes' && rnd() < 0.3;
       const n2 = rnd() < 0.5 ? 1 : 3;
-      for (let i = 0; i < n2; i++) rede.falhas.push({ classe, tipo: tr });
-      log('rede: os próximos ' + n2 + ' rascunhos no servidor → ' + tr);
-      conta(tr === 'segurar' ? 'rede:rascunhoSegurado' : 'rede:rascunho:' + tr);
+      for (let i = 0; i < n2; i++) rede.falhas.push(soIndice ? { classe, tipo: tr, rota: 'rascunho.salvar', chave: 'indice' } : { classe, tipo: tr });
+      log('rede: os próximos ' + n2 + ' rascunhos ' + (soIndice ? '(só o índice) ' : '') + 'no servidor → ' + tr);
+      conta(tr === 'segurar' ? 'rede:rascunhoSegurado' : 'rede:rascunho:' + tr + (soIndice ? ':indice' : ''));
       return true;
     }
     const n = rnd() < 0.7 ? 1 : 2;

@@ -92,8 +92,9 @@ test('a tabela B do contrato (CONTRATOS, 50.4) é a do código: cada valor que a
   const doContrato = [...contratos.slice(ini, fim).matchAll(/^\| `([A-Z_]+\.[a-z_]+)` \| ([A-Z]+) \|/gm)].map((m) => m[1] + ' ' + m[2]).sort();
   const gas = createGas();
   const doCodigo = js(gas.G.Correcao.tabela()).map((d) => d.chave + ' ' + d.natureza).sort();
-  assert.equal(doCodigo.length, 22);
+  // Segunda convergência, rodada 1 (achado 10): entrou REPRODUCAO.estacao (REGRA: a estação do original só com a mesma data).
+  assert.equal(doCodigo.length, 23);
   assert.deepEqual(doContrato, doCodigo);
   const natureza = (n) => doCodigo.filter((x) => x.endsWith(' ' + n)).length;
-  assert.deepEqual([natureza('COPIA'), natureza('DERIVADO'), natureza('REGRA')], [12, 6, 4], 'as contagens que o contrato e o registro de alterações citam');
+  assert.deepEqual([natureza('COPIA'), natureza('DERIVADO'), natureza('REGRA')], [12, 6, 5], 'as contagens que o contrato e o registro de alterações citam');
 });

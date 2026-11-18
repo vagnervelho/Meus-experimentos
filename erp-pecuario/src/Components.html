@@ -2918,12 +2918,29 @@ var Registro = (function () {
     var rota = rotaDe(s);
     var o = { chave: s.chave, avisosAceitos: aceitos(s), dataVersionEsperada: revServidor(s) ? s.dvEsperada : null };
     if (s.justificativaAviso) s.dados.justificativa_aviso = s.justificativaAviso;
+    // O envio que já saiu antes (ENVIANDO) teve a chave guardada na primeira saída: sai de novo com ela. O que ainda não saiu só
+    // sai com a chave guardada no rascunho (CONTRATOS, seções 52.1 e 53): senão, se a página fosse embora, o formulário voltaria
+    // com outra chave e gravaria duas vezes.
+    var jaSaiu = s.estado === 'ENVIANDO';
     s.estado = 'ENVIANDO';
     s.envio = { rota: rota, dados: s.dados, avisosAceitos: o.avisosAceitos, dataVersionEsperada: o.dataVersionEsperada };
     try {
       await salvarRascunho(s, { imediato: true });
     } catch (e) {
       Util.registrarFalha('rascunho antes do envio', e);
+      if (!jaSaiu) {
+        s.enviando = false;
+        s.estado = 'EDITANDO';
+        s.envio = null;
+        destravar(s.avisos.length ? 'Confirmar mesmo assim' : textoVerbo(s));
+        Util.limpar(status);
+        var nota = UI.estadoErro({ code: 'TRANSPORTE', message: 'Nada foi enviado: não foi possível guardar o lançamento antes de enviar (' + e.message + '). Nada foi gravado. Toque em "' + textoVerbo(s) + '" de novo.' }, { acao: { texto: 'Enviar de novo', aoClicar: function () { enviar(s, botao, status); } } });
+        nota.setAttribute('data-nao-guardado', s.tipo);
+        status.appendChild(nota);
+        var alvoNota = status.querySelector('[role="alert"]');
+        if (alvoNota) { alvoNota.setAttribute('tabindex', '-1'); alvoNota.focus(); }
+        return;
+      }
     }
     o.aoEstado = function (e) {
       if (e.estado === 'ENVIANDO') { UI.definirTexto(botao, 'Enviando…'); status_(status, ''); }

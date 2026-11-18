@@ -2212,3 +2212,40 @@ terminou (7 altos). Esta etapa não mudou código.
   190 passando, nas duas vezes.
 - Durante a etapa, o salvamento automático de fora dela gravou estados intermediários (os commits `8b6b4c3`, no reinício do
   contêiner, e `c250a07` e seguintes). Esta etapa não fez commit nem push; `docs/fase-0/` não mudou.
+
+## 18/11/2026 — Fase 3, segunda convergência, conserto da rodada 1 da revisão
+
+- A revisão depois da primeira convergência achou 17 problemas (7 altos), de duas classes: o fato congelado na correção e
+  estados do curral, do tronco e do rascunho que o teste aleatório da interface não gerava. Cada um tem um teste que falha com o
+  `src/` de antes (commit `67ac9de`) e passa agora — `tests/convergencia2.r1.test.js` (novo, 12 testes: os achados do servidor)
+  e `tests/ui/convergencia2.r1.test.js` (novo, 9 testes de navegador: os da interface) —, o conserto pela causa e o oráculo que
+  deixou passar, estendido (CONTRATOS, seção 53, com a tabela dos achados).
+- ALTA: o diagnóstico sem estação (o padrão do tronco) é da exposição mais recente da fêmea antes dele, como o parto — não conta
+  mais para a estação anterior (prenhez e perda gestacional falsas); a dose de um animal digitada na aplicação por peso fica no
+  payload (`doses_informadas`) e vem na entrada da correção — a correção da data ou da dose por kg não a refaz pelo peso nem é
+  recusada por SEM_PESO; o lote e a validade na entrada de insumo sem controle de estoque são recusados (CAMPO_NAO_SE_APLICA), não
+  descartados; sem localStorage, o rascunho no servidor vale pela versão (o pedido atrasado não apaga a chave do bloco gravado; o
+  removido fica como marca); o formulário de registro só envia com a chave guardada (a regra 52.1 em todo caminho); a mudança da
+  correção de cadastro acha o item pelo animal e pelo campo (`MUDANCA_AMBIGUA` sem o campo).
+- MEDIA: a agenda vence o nunca aplicado no dia em que o protocolo passou a valer; a entrada da correção do parto lê do payload se
+  o pasto e a raça das crias foram digitados (`pasto_crias_informado`, `racas_informadas`) — `propostas` saiu do `evento.obter`; a
+  estação do original vale só com a mesma data (`REPRODUCAO.estacao` na tabela B: 23 chaves, 5 REGRA); a compra do insumo conta
+  como uso do produto (`PRODUTO_EM_USO`); "Corrigir o brinco" passa pela regra do repetido (`darAnimal`, a mesma da pendente
+  conferida); a pendente sem sinal se lê "pendente: a conferir no servidor", com o porquê, e o toque em "Conferir os brincos
+  pendentes no servidor" sem resposta avisa; o índice dos rascunhos que falhou sozinho vai de novo.
+- BAIXA: a previsão de parto só pela exposição tem a margem (a janela dos indicadores); o comando que tira o movimento de um dia
+  contado (o desfazer da importação, a correção para outro produto ou para o nome livre) é recusado pelo motor com
+  CONTAGEM_POSTERIOR e o caminho do comando; o contador do tronco conta as fêmeas achadas.
+- Achado pelo teste aleatório do curral estendido (semente 70005), a mesma causa do "Corrigir o brinco" por outro caminho: a linha
+  que voltava de um bloco desfeito e a de "Pesar de novo" do mesmo animal saíam no mesmo bloco (ANIMAL_REPETIDO). Consertado no
+  ponto em que o bloco nasce (`uidsDoBloco`, curral e tronco: um animal por lançamento), com a regressão.
+- Oráculos estendidos: no teste aleatório de domínio (`tests/apoio-fuzz.js`), a correção da dose por kg, a dose digitada por peso
+  e o pasto das crias na correção da data, a mudança de um dado (e tirar um dado) da correção de cadastro com dois dados do mesmo
+  animal, a agenda desde o início do protocolo e o lote da entrada de estoque; no do curral e do tronco
+  (`tests/ui/curral.fuzz.test.js`, `tests/ui/apoio-curral.js`), o rascunho que chega atrasado ao servidor (`segurarAntes`), a falha
+  só do índice (a falha mira rota e chave), "Corrigir o brinco" com o brinco de outra linha, nenhum bloco com o animal repetido, o
+  rótulo da pendente, o contador do tronco, a resposta do botão das pendentes, e nada preso depois de o servidor voltar.
+- Testes existentes ajustados ao contrato novo, sem afrouxar o que conferem: `tests/reproducao.test.js` (a janela do nível 3 com
+  a margem da seção 40), `tests/sanidade.agenda.test.js` e `tests/revisao.final.fase3.test.js` (o nunca aplicado vence no início
+  do protocolo), `tests/sanidade.test.js` (o payload com `doses_informadas`), `tests/correcao.contrato.test.js` (a tabela B com
+  23 chaves, 5 REGRA).

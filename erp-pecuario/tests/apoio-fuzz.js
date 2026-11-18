@@ -4357,13 +4357,18 @@ function digitalAnimal(S, id, D) {
     return [evsAte(ix.evsPor.get(id), D).join(','), crias.join(','), [a.sexo, a.data_nascimento, a.mae_id, a.pai_id, a.nome, a.raca, fixo].map((v) => (v === undefined || v === null ? '' : v)).join('/')].join('|');
   });
 }
-/** Desde quando o protocolo vale (05, RN-058): o dia do cadastro no fuso da fazenda ou, se antes, a primeira aplicação vigente. */
+/**
+ * Desde quando o protocolo vale (05, RN-058): o dia do cadastro no fuso da fazenda ou, se antes, a primeira aplicação vigente.
+ * O início entra na impressão do protocolo: o vencimento do animal nunca aplicado é o dia em que o protocolo passou a valer
+ * (CONTRATOS, seção 53, achado 8), então a aplicação retroativa noutro animal, que antecipa o início, alcança a linha de
+ * cada animal desse protocolo.
+ */
 function protocolosEm(S, D) {
   const primeira = {};
   vigentesDe(S, 'SANIDADE').forEach((r) => { if (r.protocol_id && (!primeira[r.protocol_id] || r.data_aplicacao < primeira[r.protocol_id])) primeira[r.protocol_id] = r.data_aplicacao; });
   return (S.t.PROTOCOLOS_SANITARIOS || []).map((p) => {
     const ini = [p.created_at ? diaNoFuso(p.created_at) : null, primeira[p.protocol_id] || null].filter(Boolean).sort()[0] || null;
-    return ini && ini > D ? null : semCarimbo(p);
+    return ini && ini > D ? null : Object.assign(semCarimbo(p), { inicio_vigencia: ini });
   }).filter(Boolean);
 }
 function semCarimbo(r) {
@@ -5129,7 +5134,7 @@ function mudarCadastros(sis, S, rnd, k) {
  *    descrição proposta de cada dedução; em todo tipo, os animais do lançamento e as observações deles (na desmama, os
  *    bezerros: as mães são derivadas da data, tabela B, DESMAMA.maes).
  */
-function mudancaDeUmCampo(S, e, ent, rnd) {
+function mudancaDeUmCampo(S, e, ent, rnd, sis) {
   const d = ent.dados;
   const op = [];
   op.push('notes', 'responsible');
@@ -5137,7 +5142,12 @@ function mudancaDeUmCampo(S, e, ent, rnd) {
   if (e.event_type !== 'ENTRADA_INICIAL' && e.pre_marco_zero !== true) op.push('data', 'data');
   // Segunda convergência, rodada 1 (achados 2, 3 e 7): a dose por kg da aplicação por peso (a dose digitada de um animal fica)
   // e, na correção de cadastro com mais de um dado do mesmo animal, a mudança de um dado pelo animal e pelo campo.
-  if (e.event_type === 'SANIDADE' && d.campos && d.campos.modo_dose === 'POR_PESO' && typeof d.campos.dose_referencia === 'number') op.push('doseKg');
+  if (e.event_type === 'SANIDADE' && d.campos && d.campos.modo_dose === 'POR_PESO' && typeof d.campos.dose_referencia === 'number') {
+    op.push('doseKg');
+    // Com a dose de um animal digitada, a data e a dose por kg mais vezes (é o caso que a entrada do servidor perdia).
+    const dig = sis ? dosesDigitadas(sis, e) : null;
+    if (dig && dig.size && e.pre_marco_zero !== true) op.push('doseKg', 'doseKg', 'data', 'data', 'data');
+  }
   const porAnimal = new Map();
   if (e.event_type === 'AJUSTE_INVENTARIO' && e.event_subtype === 'CORRECAO_CADASTRO') (d.animais || []).forEach((x) => { if (x.animal_id && x.campo) porAnimal.set(x.animal_id, (porAnimal.get(x.animal_id) || []).concat([x])); });
   const doisDados = Array.from(porAnimal.values()).filter((l) => l.length > 1);
@@ -5304,7 +5314,7 @@ function oraculoCorrecao(sis, S0, k, plano) {
     });
     // (b2, b3) A mudança de um campo, nos mesmos eventos, pela entrada do servidor (Correcao.montar).
     casos.filter((x) => x.ent.origem === 'servidor' && !x.ent.erro).forEach(({ e, ent }, i) => {
-      const mu = mudancaDeUmCampo(S, e, ent, rnd);
+      const mu = mudancaDeUmCampo(S, e, ent, rnd, sis);
       if (!mu) return;
       const contexto = 'a correção de ' + mu.rotulo + ' de ' + tipoEChave(e) + ' de ' + e.event_date + ' depois de: ' + (mudancas.join('; ') || 'nada') + ' — ';
       const r = corrigirAceitando(sis, { event_id: e.event_id, justificativa: 'Um campo corrigido', mudanca: mu.mudanca }, 'corr1-' + k + '-' + i);
