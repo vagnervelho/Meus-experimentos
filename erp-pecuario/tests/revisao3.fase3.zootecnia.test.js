@@ -55,7 +55,9 @@ test('achado 6: as próximas doses da ficha usam a entrada no rebanho da linha d
     const naFicha = ficha.sanitario.proximas.map((p) => [p.nome, p.vencimento, p.situacao, p.dias]).sort();
     const naAgenda = ag.pendencias.filter((p) => p.animal_id === id[b]).map((p) => [p.nome, p.vencimento, p.situacao, p.dias]).sort();
     assert.deepEqual(naFicha, naAgenda, 'animal ' + b);
-    assert.deepEqual(naFicha.map((x) => [x[1], x[2]]), [['2026-01-01', 'VENCIDA'], ['2026-01-01', 'VENCIDA']], 'vencidas desde o marco zero (a entrada no rebanho), animal ' + b);
+    // Elegível desde a entrada no rebanho da linha do tempo (o marco zero, 01/01) e desde que o protocolo vale (o cadastro, 01/03;
+    // CONTRATOS, seção 53, achado 8): vencidas desde 01/03, na ficha e na agenda — nunca pela data_entrada declarada (2025).
+    assert.deepEqual(naFicha.map((x) => [x[1], x[2], x[3]]), [['2026-03-01', 'VENCIDA', 92], ['2026-03-01', 'VENCIDA', 92]], 'vencidas desde que o protocolo passou a valer (depois da entrada no rebanho), animal ' + b);
   });
 });
 

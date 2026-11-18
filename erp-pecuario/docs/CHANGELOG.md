@@ -2258,4 +2258,35 @@ terminou (7 altos). Esta etapa não mudou código.
   do protocolo), `tests/sanidade.test.js` (o payload com `doses_informadas`), `tests/correcao.contrato.test.js` (a tabela B com
   23 chaves, 5 REGRA), `tests/ui/sanidade.test.js` (o protocolo da agenda cadastrado antes das doses atrasadas) e o cenário de
   aceitação da sanidade (`src/TestRunner.js`, passo 058-059: o protocolo de dose única praticado desde a primeira aplicação, no
-  S1, e a pendência do S3 vencida desde então, com a data conferida).
+  S1, e a pendência do S3 vencida desde então, com a data conferida). Na retomada depois do reinício do contêiner, o `npm test`
+  completo achou mais três testes do contrato de antes, ajustados sem afrouxar o que conferem: `tests/revisao2.fase3.motor.test.js`
+  (o desfazer da importação que mudaria o saldo de uma contagem posterior é recusado já pelo motor — CONFLICT CONTAGEM_POSTERIOR,
+  a contagem no conflito e "desfaça a importação e conte de novo" — e não só pela trava; achado 16),
+  `tests/revisao2.fase3.zootecnia.test.js` e `tests/revisao3.fase3.zootecnia.test.js` (o nunca aplicado vence no dia em que o
+  protocolo passou a valer: o cadastro, ou a primeira aplicação com ele, se antes; a ficha continua igual à agenda; achado 8).
+- Retomada depois do reinício do contêiner (cerca de 04:40 UTC): o que estava em disco foi salvo nos commits `c1387fc` e `198bb8f`;
+  cada achado foi conferido de novo — os 12 testes de `tests/convergencia2.r1.test.js` e os 11 de `tests/ui/convergencia2.r1.test.js`
+  falham todos com o `src/` de antes (`67ac9de`), cada um pelo motivo do achado, e passam com o de agora; os roteiros da revisão
+  (os do servidor) dão o resultado certo. As levas, que o reinício matou, foram rodadas de novo do começo.
+- Achado pela leva do teste aleatório de domínio (semente 7600019), uma lacuna do oráculo estendido nesta etapa, não do sistema: a
+  correção da dose por kg de uma medicação de 18/09 (0,01 → 0,03 mL/kg) mudaria o saldo do frasco num dia contado (13/11) e foi
+  recusada com CONFLICT CONTAGEM_POSTERIOR, como o desenho manda (CONTRATOS, seções 44 e 50.5); o oráculo só aceitava a recusa
+  VALIDATION. Agora aceita e conta essa recusa (`soContagemPosterior`), e a leva foi refeita do começo com o oráculo acertado.
+- Teste aleatório do curral e do tronco, com o código final (40 ações por semente, 2 processos): 50 sementes sem localStorage
+  (91000 a 91049) e 50 com localStorage (92000 a 92049), 100 aprovadas e 0 falhas; 4.722 verificações do oráculo e 1.603 linhas
+  gravadas; sem localStorage, 23 rascunhos que chegaram atrasados ao servidor, 12 falhas só do índice, 5 blocos que não saíram por
+  falta da chave guardada e 589 conferências de "nada preso depois de o servidor voltar"; 71 "Corrigir o brinco" (22 barrados por
+  outra linha do mesmo animal, 16 com o aviso de pesar de novo), 757 rótulos de pendente sem sinal e 1.982 contadores do tronco
+  conferidos (os números por modo estão na seção 53.5 do CONTRATOS).
+- Teste aleatório de domínio, com o código final e o oráculo acertado (7600000 a 7600299, 300 sementes × 100 passos, 4
+  processos): 17.395 aceitos, 9.949 recusados e 0 falhas; 11.342 correções sem mudança aceitas (6.714 pela entrada do servidor e
+  4.628 pela do gerador), 4.343 mudanças de um campo (1.588 da data), 508.977 consultas comparadas depois da correção, 96.831
+  vencimentos da agenda no início do protocolo e 2.031.536 unidades da viagem no tempo.
+- Verificado em Node, com o código final: `npm test` com 902 testes, 902 passando (86 arquivos; 696,3 s; o teste aleatório das
+  sementes fixas: 23 sementes × 60 passos, 831 aceitos, 440 recusados, 0 falhas); `npm run ui:check` verde: a conferência
+  estática (13 arquivos .html, sem recurso externo; página inicial montada com 437.393 bytes de 460.800; sob demanda Import 48 KB,
+  Weights 62 KB, Health 25 KB e Reproduction 64 KB, de 150 KB cada) e 201 testes de navegador, 201 passando (475,2 s).
+- `docs/CONTRATOS.md`: o estado ganhou a frase da segunda convergência; seção 53 com a tabela dos achados, as regras novas, os
+  oráculos estendidos (também a recusa da dose por kg pela contagem posterior), as decisões e as levas (53.5).
+- Durante a etapa, o salvamento automático de fora dela gravou estados intermediários (os commits `c1387fc`, `198bb8f`, no
+  reinício do contêiner, e `53fdbad`). Esta etapa não fez commit nem push; `docs/fase-0/` não mudou.

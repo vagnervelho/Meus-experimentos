@@ -114,7 +114,7 @@ test('achados 13 e 21: o GMD da resposta do registro (o modo curral) é o do int
   semErro(s, 'gmd do curral');
 });
 
-test('achado 10: a agenda numa data passada não conta o protocolo cadastrado depois dela (nem pendência, nem cobertura, também o de aplicação única); da data em que ele passou a valer em diante, o nunca aplicado deve desde que ficou elegível (03a, seção 4.9)', () => {
+test('achado 10: a agenda numa data passada não conta o protocolo cadastrado depois dela (nem pendência, nem cobertura, também o de aplicação única); da data em que ele passou a valer em diante, o nunca aplicado deve desde que ficou elegível — e só fica elegível com o protocolo valendo (03a, seção 4.9; 05, seção 4.7; CONTRATOS, seção 53, achado 8)', () => {
   const s = S.sistema();
   hoje(s, '2026-06-01');
   const bichos = [];
@@ -130,12 +130,14 @@ test('achado 10: a agenda numa data passada não conta o protocolo cadastrado de
   assert.deepEqual([passada.resumo.vencidas, passada.resumo.proximas, passada.protocolos.length], [0, 0, 0], 'em 01/06 os protocolos ainda não existiam');
   const dia = agenda('2026-10-01');
   const semestral = (a) => a.pendencias.filter((p) => p.nome === 'Semestral');
-  // No dia do cadastro, o nunca aplicado deve desde que ficou elegível (a entrada no rebanho; 03a, seção 4.9: a regra é a
-  // do animal, e o protocolo já vale nesse dia).
-  assert.deepEqual(Utils_unicos(semestral(dia).map((p) => [p.vencimento, p.situacao].join('|'))), ['2026-01-01|VENCIDA']);
+  // No dia do cadastro, o nunca aplicado deve desde que ficou elegível (03a, seção 4.9), e ele só fica elegível com o protocolo
+  // valendo (05, seção 4.7: "o protocolo está ativo"; CONTRATOS, seção 53, achado 8): vence no dia do cadastro, não na entrada
+  // no rebanho (01/01) — nenhum "dia de atraso" de antes de o protocolo existir.
+  assert.deepEqual(Utils_unicos(semestral(dia).map((p) => [p.vencimento, p.situacao, p.dias].join('|'))), ['2026-10-01|PROXIMA|0']);
   assert.equal(semestral(dia).length, 6);
-  // A de aplicação única sem faixa vence na entrada no rebanho (03a, seção 4.9: o vencimento é o do animal).
-  assert.deepEqual(Utils_unicos(dia.pendencias.filter((p) => p.nome === 'Única').map((p) => [p.vencimento, p.situacao].join('|'))), ['2026-01-01|VENCIDA']);
+  // A de aplicação única sem faixa vence no mesmo dia (o do animal, nunca antes de o protocolo valer).
+  assert.deepEqual(Utils_unicos(dia.pendencias.filter((p) => p.nome === 'Única').map((p) => [p.vencimento, p.situacao, p.dias].join('|'))), ['2026-10-01|PROXIMA|0']);
+  assert.equal(dia.pendencias.filter((p) => p.nome === 'Única').length, 6);
   hoje(s, '2026-10-20');
   const depois = agenda('2026-10-20');
   assert.equal(semestral(depois).filter((p) => p.situacao === 'VENCIDA').length, 6, 'passado o cadastro sem aplicação, vencem');
@@ -145,7 +147,7 @@ test('achado 10: a agenda numa data passada não conta o protocolo cadastrado de
   ok(api(s, 'evento.registrar', { tipo: 'SANIDADE', subtipo: 'VERMIFUGACAO', campos: { event_date: '2026-05-10', protocol_id: prot.protocol_id, nome_produto: 'Vermífugo', modo_dose: 'POR_CABECA', dose_referencia: 5, unidade_dose: 'mL' }, animais: [{ animal_id: umaBezerra }] }), 'aplicação de maio lançada agora');
   const junho2 = agenda('2026-06-01');
   assert.deepEqual(junho2.protocolos.map((p) => [p.nome, p.elegiveis]), [['Semestral', 6]], 'em 01/06 o protocolo já era praticado (a aplicação de 10/05)');
-  assert.deepEqual(Utils_unicos(junho2.pendencias.map((p) => [p.vencimento, p.situacao].join('|'))), ['2026-01-01|VENCIDA'], 'as outras cinco, nunca aplicadas, devem desde que ficaram elegíveis');
+  assert.deepEqual(Utils_unicos(junho2.pendencias.map((p) => [p.vencimento, p.situacao].join('|'))), ['2026-05-10|VENCIDA'], 'as outras cinco, nunca aplicadas, devem desde que o protocolo passou a valer (a primeira aplicação com ele, 10/05)');
   assert.equal(junho2.pendencias.length, 5);
 });
 function Utils_unicos(l) { return Array.from(new Set(l)); }

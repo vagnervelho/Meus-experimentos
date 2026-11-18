@@ -159,7 +159,7 @@ test('achados 2 e 5: o movimento anterior a uma contagem vigente do produto (a a
   semErro(s, 'caminho');
 });
 
-test('achados 2 e 5 (integridade e outros caminhos): a verificação confere o saldo do fim do dia contado com o saldo contado; o desfazer da importação que mudaria o saldo de uma contagem posterior é recusado pela trava; a importação da aplicação anterior à contagem fica com o motivo', () => {
+test('achados 2 e 5 (integridade e outros caminhos): a verificação confere o saldo do fim do dia contado com o saldo contado; o desfazer da importação que mudaria o saldo de uma contagem posterior é recusado (pelo motor, com CONTAGEM_POSTERIOR e o caminho do desfazer; CONTRATOS, seção 53, achado 16); a importação da aplicação anterior à contagem fica com o motivo', () => {
   const s = S.sistema();
   hoje(s, '2026-11-15');
   const ids = rebanho(s, ['101', '102', '103']);
@@ -184,10 +184,12 @@ test('achados 2 e 5 (integridade e outros caminhos): a verificação confere o s
   assert.equal(saldo(s, pid), 99);
   const cont = ok(api(s, 'evento.registrar', estoque('AJUSTE', '2026-04-01', { product_id: pid, motivo_ajuste: 'CONTAGEM', saldo_contado: 98 })), 'contagem');
   semErro(s, 'contagem');
-  // O desfazer da importação devolveria a dose ao saldo de 01/04, que a contagem já acertou: a trava recusa.
+  // O desfazer da importação devolveria a dose ao saldo de 01/04, que a contagem já acertou: recusado já pelo motor (antes, só a
+  // trava recusava, com o texto dela), com a contagem no conflito e o caminho certo (estornar a contagem, desfazer, contar de novo).
   const d = s.tentar((ctx) => s.G.ImportService.desfazer(ctx, { avisosAceitos: [], dados: { import_id: imp, justificativa: 'Arquivo errado' } }));
   assert.equal(d.ok, false, 'desfazer');
-  assert.ok(d.erro.details.some((x) => x.codigo === 'INTEGRIDADE_COPIAS' && /contagem/.test(x.mensagem) && x.conflito && x.conflito.event_id === cont.event_id), JSON.stringify(d.erro).slice(0, 900));
+  assert.equal(d.erro.code, 'CONFLICT', JSON.stringify(d.erro).slice(0, 900));
+  assert.ok(d.erro.details.some((x) => x.codigo === 'CONTAGEM_POSTERIOR' && /contagem do estoque de 01\/04\/2026 \(98 doses contados\).*de 98 doses para 99 doses.*desfaça a importação e conte de novo/.test(x.mensagem) && x.conflito && x.conflito.event_id === cont.event_id), JSON.stringify(d.erro).slice(0, 900));
   assert.equal(saldo(s, pid), 98);
   // A mesma aplicação, importada de novo com a data anterior à contagem: a linha fica com o motivo, nada entra.
   const imp2 = importar('2', csvDe('102'));

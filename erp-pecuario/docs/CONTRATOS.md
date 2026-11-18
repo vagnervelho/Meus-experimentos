@@ -3886,7 +3886,11 @@ oráculo que deixou o defeito passar foi estendido (53.3).
   digitada por peso fica (pelo pedido aceito do gerador) e o pasto das crias do parto — o digitado fica, o vazio segue o da mãe
   na data nova. O modelo da agenda (`modeloAgenda`) vence o nunca aplicado no início do protocolo. O efeito da entrada de estoque
   confere o lote e a validade no movimento, e que a entrada sem movimento não aceitou lote. O gerador deixa o lote em branco no
-  produto sem controle de estoque (quase sempre; às vezes manda e espera a recusa).
+  produto sem controle de estoque (quase sempre; às vezes manda e espera a recusa). A correção da dose por kg que muda a quantidade
+  que saiu do frasco antes de uma contagem do estoque é recusada com CONFLICT CONTAGEM_POSTERIOR, como manda o desenho (seções 44
+  e 50.5): o oráculo a aceita como recusa do desenho (`soContagemPosterior`) e a conta. A leva achou a lacuna (semente 7600019:
+  0,01 → 0,03 mL/kg numa medicação de 18/09, com a contagem de 13/11) — erro do modelo, não do sistema —, e foi refeita do começo
+  com o oráculo acertado.
 - **O oráculo de tempo** (`tests/apoio-fuzz.js`, `protocolosEm`): a impressão digital do protocolo leva o início de vigência
   (o cadastro, ou a primeira aplicação vigente, se antes). Com o achado 8, o vencimento do animal nunca aplicado depende desse
   início, e a aplicação retroativa (ou o estorno dela) noutro animal o move: ela alcança a linha de cada animal do protocolo, por
@@ -3920,3 +3924,27 @@ oráculo que deixou o defeito passar foi estendido (53.3).
 
 ### 53.5 As levas
 
+
+- Levas de antes do reinício do contêiner (com o código intermediário): a do domínio (a partir de 720000) achou a lacuna do
+  oráculo de tempo (53.3; sementes 720208, 720241 e 720043), e as do curral e do tronco (a partir de 70000 e 80000) acharam o 12b
+  (semente 70005) e o 13b (semente 80028), todos consertados pela causa com a regressão. O reinício matou as levas refeitas.
+- Teste aleatório do curral e do tronco, com o código final, 40 ações por semente (2 processos, em paralelo com o de domínio):
+  50 sementes sem localStorage (91000 a 91049) e 50 com localStorage (92000 a 92049), 0 falhas. Sem localStorage: 2.339
+  verificações do oráculo, 769 linhas gravadas, 1.870 blocos que saíram conferidos intocados, 262 rascunhos do servidor
+  conferidos com a tela, 23 rascunhos que chegaram atrasados (`segurarAntes`) e 12 falhas só do índice (transporte, falha
+  interna, ocupado, resposta e pedido perdidos), 50 falhas do rascunho avisadas, 5 blocos que não saíram por falta da chave
+  guardada, 36 páginas que foram embora de repente (12 perderam o que não tinha chegado ao servidor, sem nada gravado a mais),
+  589 conferências de "nada preso depois de o servidor voltar", 40 "Corrigir o brinco" (13 barrados por outra linha do mesmo
+  animal, 7 com o aviso de pesar de novo), 357 rótulos de pendente sem sinal, 936 contadores do tronco conferidos e 20 toques
+  em "Conferir os brincos pendentes" (11 sem resposta, avisados). Com localStorage: 2.383 verificações, 834 linhas gravadas,
+  2.147 blocos conferidos intocados, 31 "Corrigir o brinco" (9 barrados, 9 com o aviso), 400 rótulos de pendente, 1.046
+  contadores do tronco e 14 toques nas pendentes (7 sem resposta). Nas duas, nenhum bloco com animal repetido nem recusa
+  ANIMAL_REPETIDO.
+- Teste aleatório de domínio, com o código final e o oráculo acertado (7600000 a 7600299, 300 sementes × 100 passos, 4
+  processos): 17.395 aceitos, 9.949 recusados, 0 falhas. O oráculo da correção aceitou 11.342 correções sem mudança (6.714 pela
+  entrada do servidor, 4.628 pela do gerador; 41 recusas documentadas) e 4.343 mudanças de um campo (1.588 da data; 8 da dose
+  por kg aceitas e 1 recusada pela contagem posterior; 7 dados tirados da correção de cadastro com dois dados do animal; 3 doses
+  digitadas por peso conferidas; 96 pastos de crias na correção da data do parto, 40 digitados e 56 pela mãe na data nova) e
+  comparou 508.977 consultas; a agenda conferiu 96.831 vencimentos no início do protocolo e 213.565 pendências; a viagem no
+  tempo comparou 2.031.536 unidades; o resolvedor conferiu 169.967 textos. A primeira tentativa (o mesmo intervalo, com o
+  oráculo de antes) parou na semente 7600019 (53.3), refeita do começo.
