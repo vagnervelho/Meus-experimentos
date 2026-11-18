@@ -241,8 +241,9 @@ var Fmt = (function () {
   function ehData(v) { return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !isNaN(Date.parse(v + 'T00:00:00Z')) && new Date(v + 'T00:00:00Z').toISOString().slice(0, 10) === v; }
   function data(v) { return ehData(v) ? v.slice(8, 10) + '/' + v.slice(5, 7) + '/' + v.slice(0, 4) : '—'; }
   function dataCurta(v) { return ehData(v) ? v.slice(8, 10) + '/' + v.slice(5, 7) : '—'; }
+  /** Um instante (texto ISO ou milissegundos) no fuso da fazenda: dd/mm/aaaa hh:mm. */
   function instante(ts) {
-    var t = Date.parse(ts);
+    var t = typeof ts === 'number' ? ts : Date.parse(ts);
     if (!isFinite(t)) return '—';
     try {
       var p = partes_(t, cfg.fuso);
@@ -252,7 +253,6 @@ var Fmt = (function () {
       return new Date(t).toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
     }
   }
-  function diasEntre(a, b) { return Math.round((Date.parse(b + 'T00:00:00Z') - Date.parse(a + 'T00:00:00Z')) / 86400000); }
   function numero(n, casas) {
     if (n === null || n === undefined || n === '' || !isFinite(Number(n))) return '—';
     var c = casas === undefined ? 0 : casas;
@@ -329,7 +329,7 @@ var Fmt = (function () {
   }
   return {
     configurar: configurar, ajustarRelogio: ajustarRelogio, agoraMs: agoraMs, hoje: hoje, ehData: ehData, data: data, dataCurta: dataCurta,
-    instante: instante, diasEntre: diasEntre, numero: numero, peso: peso, dinheiro: dinheiro, idade: idade, rotulo: rotulo, rotuloOpcao: rotuloOpcao, casas: casas,
+    instante: instante, numero: numero, peso: peso, dinheiro: dinheiro, idade: idade, rotulo: rotulo, rotuloOpcao: rotuloOpcao, casas: casas,
     lerDecimal: lerDecimal, lerDinheiro: lerDinheiro, lerInteiro: lerInteiro, centavosParaTexto: centavosParaTexto, ROTULOS: ROTULOS, temDominio: temDominio,
     config: function () { return Util.clonar(cfg); },
   };
@@ -468,13 +468,13 @@ var Cliente = (function () {
     o = o || {};
     if (!o.chave) throw new ErroApi('INTERNAL', 'Formulário sem chave de envio.');
     var pedido = pedido_(rota, dados, o);
-    var ocupado = 0, prazos = 0, verificado = false;
+    var ocupado = 0, semResposta = 0, verificado = false;
     for (;;) {
       avisar_(o, { estado: 'ENVIANDO' });
       var r = await enviar_(pedido, TEMPO_LIMITE_MS);
       if (r.tipo === 'prazo') {
-        prazos += 1;
-        if (prazos > MAX_PRAZOS) throw new ErroApi('SEM_RESPOSTA', MSG.SEM_RESPOSTA);
+        semResposta += 1;
+        if (semResposta > MAX_PRAZOS) throw new ErroApi('SEM_RESPOSTA', MSG.SEM_RESPOSTA);
         await verificar(o.chave, o);
         verificado = true;
         continue;
@@ -1382,7 +1382,7 @@ var App = (function () {
       removerFaixa('sem-conexao');
       if (r.fonte === 'SERVIDOR') { renderizarCasca_(); faixasDoSistema_(); }
     } catch (e) {
-      faixa('sem-conexao', { tipo: 'aviso', texto: 'Sem conexão com o servidor. Os dados na tela são de ' + Fmt.instante(new Date(Store.atualizadoEm()).toISOString()) + '.', acoes: [{ texto: 'Tentar de novo', aoClicar: function () { ultimaConferencia = 0; conferirVersao_(); } }] });
+      faixa('sem-conexao', { tipo: 'aviso', texto: 'Sem conexão com o servidor. Os dados na tela são de ' + Fmt.instante(Store.atualizadoEm()) + '.', acoes: [{ texto: 'Tentar de novo', aoClicar: function () { ultimaConferencia = 0; conferirVersao_(); } }] });
     }
   }
 

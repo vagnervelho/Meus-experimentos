@@ -374,7 +374,7 @@ var TelaImportacao = (function () {
         linhas.forEach(function (l) { Object.keys(l.dados_originais || {}).forEach(function (k) { if (cab.indexOf(k) < 0) cab.push(k); }); });
         var cols = [{ rotulo: 'Linha', valor: function (l) { return l.linha_num; } }, { rotulo: 'Situação', valor: function (l) { return Fmt.rotulo('STATUS_LINHA', l.status); } }, { rotulo: 'Motivo', valor: function (l) { return (l.erros || []).map(function (e) { return e.mensagem; }).join(' / '); } }]
           .concat(cab.map(function (k) { return { rotulo: k, valor: function (l) { return (l.dados_originais || {})[k]; } }; }));
-        Exportar.baixar(Exportar.nome('erros-importacao'), Exportar.csv(cols, linhas, { preambulo: ['Erros da importação de ' + estado.importacao.arquivo_nome, 'Dados de ' + Fmt.instante(new Date(Fmt.agoraMs()).toISOString())] }));
+        Exportar.baixar(Exportar.nome('erros-importacao'), Exportar.csv(cols, linhas, { preambulo: ['Erros da importação de ' + estado.importacao.arquivo_nome, 'Dados de ' + Fmt.instante(Fmt.agoraMs())] }));
         UI.aviso(linhas.length + ' linhas no arquivo de erros.', { tipo: 'ok' });
       } catch (e) { UI.aviso('Não foi possível montar o arquivo: ' + e.message, { tipo: 'erro' }); }
       destravar();

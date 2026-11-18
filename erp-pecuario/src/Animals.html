@@ -92,7 +92,7 @@ var TelaRebanho = (function () {
   }
   function linhasCsv(linhas) {
     return Exportar.csv(COLUNAS.map(function (c) { return { rotulo: c.rotulo, valor: c.texto }; }), linhas, {
-      preambulo: ['Rebanho — ' + linhas.length + (linhas.length === 1 ? ' animal' : ' animais'), 'Filtros: ' + descreverFiltros(filtros), 'Dados de ' + Fmt.instante(new Date(Store.atualizadoEm()).toISOString())],
+      preambulo: ['Rebanho — ' + linhas.length + (linhas.length === 1 ? ' animal' : ' animais'), 'Filtros: ' + descreverFiltros(filtros), 'Dados de ' + Fmt.instante(Store.atualizadoEm())],
     });
   }
 

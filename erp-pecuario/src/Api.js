@@ -139,6 +139,8 @@ var Api = (function () {
     'financeiro.fluxoCaixa': futura_(4, 'Financeiro'),
     'financeiro.resultado': futura_(4, 'Financeiro'),
     'financeiro.custosAnimal': futura_(4, 'Financeiro'),
+    // Os vencimentos do "Dividir em parcelas" (o aparelho não soma dias; CONTRATOS, seção 51).
+    'financeiro.vencimentos': consulta_(function (ctx, p) { return semDados_(FinancialService.vencimentos(p.dados)); }),
     'sanidade.agenda': consulta_(function (ctx, p) { return HealthService.agenda(ctx, p.dados); }),
     'reproducao.indicadores': consulta_(function (ctx, p) { return ReproductionService.indicadores(ctx, p.dados); }),
     'reproducao.matrizes': consulta_(function (ctx, p) { return ReproductionService.matrizes(ctx, p.dados); }),

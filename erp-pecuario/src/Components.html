@@ -1966,23 +1966,6 @@ var Registro = (function () {
     });
     return { animais: out, problemas: problemas, cabecalho: cabecalho };
   }
-  /** Vencimentos de N parcelas a partir da primeira: MES (mesmo dia, ou o último do mês), D30, D15, D7. */
-  function vencimentos(primeiro, n, intervalo) {
-    if (!Fmt.ehData(primeiro)) return [];
-    var y = Number(primeiro.slice(0, 4)), mo = Number(primeiro.slice(5, 7)) - 1, d = Number(primeiro.slice(8, 10));
-    var dias = { D30: 30, D15: 15, D7: 7 }[intervalo];
-    var out = [];
-    for (var i = 0; i < n; i++) {
-      var t;
-      if (dias) t = new Date(Date.UTC(y, mo, d + dias * i));
-      else {
-        var ultimo = new Date(Date.UTC(y, mo + i + 1, 0)).getUTCDate();
-        t = new Date(Date.UTC(y, mo + i, Math.min(d, ultimo)));
-      }
-      out.push(t.toISOString().slice(0, 10));
-    }
-    return out;
-  }
   /** Campos que o "Preencher em série" aplica a todos (os do lote que mais se repetem), na ordem do catálogo. */
   var SERIE = ['sexo', 'castrado', 'reprodutor', 'raca', 'data_nascimento', 'data_nascimento_confianca', 'idade_meses', 'origem', 'pasto_destino_id', 'peso', 'valor_individual', 'valor_abertura'];
   /** Linha de animal novo ainda em branco (só com o que veio da linha anterior: pasto, origem, raça). */
@@ -2080,10 +2063,13 @@ var Registro = (function () {
     var b = Formulario.bloco(defs, valores, { idBase: 'divp' });
     var corpo = h('div', { class: 'formulario', dataset: { folhaParcelas: '1' } }, UI.nota('Substitui as parcelas já digitadas. O valor de cada uma fica em branco: o servidor divide o total em partes iguais (os centavos que sobram vão para as primeiras) e mostra cada parcela na revisão.', 'info'), b.el);
     var f = UI.folha({ titulo: 'Dividir em parcelas', conteudo: corpo, origem: origem });
-    var ok = UI.botao('Dividir', { tipo: 'primario', aoClicar: function () {
+    var ok = UI.botao('Dividir', { tipo: 'primario', aoClicar: async function () {
       var c = b.converter();
       if (c.erros.length) { b.focarPrimeiroErro(); return; }
-      s.grupos[g] = vencimentos(c.valores.primeiro, c.valores.quantas, c.valores.intervalo).map(function (d) {
+      // Os vencimentos vêm do servidor (o aparelho não soma dias nem meses; CONTRATOS, seção 51).
+      var r;
+      try { r = await Cliente.consulta('financeiro.vencimentos', { primeiro: c.valores.primeiro, quantas: c.valores.quantas, intervalo: c.valores.intervalo }); } catch (e) { UI.aviso('Os vencimentos vêm do servidor, que não respondeu (' + e.message + '). Tente de novo com sinal.', { tipo: 'erro' }); return; }
+      s.grupos[g] = r.data.datas.map(function (d) {
         var v = { data_vencimento: d };
         if (!Util.vazio(valores.forma_pagamento)) v.forma_pagamento = valores.forma_pagamento;
         return { uid: uid(), valores: v };
@@ -3298,7 +3284,7 @@ var Registro = (function () {
 
   return {
     abrir: abrir, conferirPendentes: conferirPendentes, descartar: descartar, descartarVerificando: descartarVerificando, montarDados: montarDados, mapearErros: mapearErros,
-    serieBrincos: serieBrincos, lerColagem: lerColagem, vencimentos: vencimentos, diferencas: diferencas, impactosServidor: impactosServidor, notaCorrecao: notaCorrecao,
+    serieBrincos: serieBrincos, lerColagem: lerColagem, diferencas: diferencas, impactosServidor: impactosServidor, notaCorrecao: notaCorrecao,
     sessao: function (tipo) { return sessoes[tipo] || null; }, descricaoRascunho: descricaoRascunho,
     PRINCIPAIS_ANIMAL: PRINCIPAIS_ANIMAL, PRINCIPAIS_COMPRA: PRINCIPAIS_COMPRA, CAMPOS_VOLTA: CAMPOS_VOLTA, CAMPOS_VOLTA_COMPRA: CAMPOS_VOLTA_COMPRA,
   };

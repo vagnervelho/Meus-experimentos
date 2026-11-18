@@ -75,11 +75,20 @@ test('grade de animais novos: brincos em série, linhas coladas de planilha (cab
   assert.match(r.problemas[2].mensagem, /mais de 5 colunas; peso "12,34": Use no máximo 1 casa decimal/);
   assert.match(r.problemas[3].mensagem, /idade ou nascimento "doze"/);
   assert.deepEqual(js(R.lerColagem('0001\tM')).cabecalho, false, 'sem cabeçalho, a primeira linha é animal');
-  assert.deepEqual(js(R.vencimentos('2026-01-31', 3, 'MES')), ['2026-01-31', '2026-02-28', '2026-03-31'], 'mesmo dia, ou o último do mês');
-  assert.deepEqual(js(R.vencimentos('2026-03-05', 2, 'MES')), ['2026-03-05', '2026-04-05']);
-  assert.deepEqual(js(R.vencimentos('2026-01-31', 3, 'D30')), ['2026-01-31', '2026-03-02', '2026-04-01']);
-  assert.deepEqual(js(R.vencimentos('2026-12-28', 2, 'D7')), ['2026-12-28', '2027-01-04']);
-  assert.deepEqual(js(R.vencimentos('31/01/2026', 2, 'MES')), [], 'data fora do formato: nada');
+  // Os vencimentos do "Dividir em parcelas" vêm do servidor (rota financeiro.vencimentos; o aparelho não soma dias — CONTRATOS,
+  // seção 51); a folha não tem mais a conta própria.
+  const venc = (primeiro, quantas, intervalo) => api(s, { rota: 'financeiro.vencimentos', dados: { primeiro, quantas, intervalo } });
+  assert.equal(R.vencimentos, undefined, 'o aparelho não calcula os vencimentos');
+  assert.deepEqual(venc('2026-01-31', 3, 'MES').data.datas, ['2026-01-31', '2026-02-28', '2026-03-31'], 'mesmo dia, ou o último do mês');
+  assert.deepEqual(venc('2026-03-05', 2, 'MES').data.datas, ['2026-03-05', '2026-04-05']);
+  assert.deepEqual(venc('2026-01-31', 3, 'D30').data.datas, ['2026-01-31', '2026-03-02', '2026-04-01']);
+  assert.deepEqual(venc('2026-12-28', 2, 'D7').data.datas, ['2026-12-28', '2027-01-04']);
+  assert.deepEqual(venc('2026-12-28', 3, 'D15').data.datas, ['2026-12-28', '2027-01-12', '2027-01-27']);
+  const fora = venc('31/01/2026', 2, 'MES');
+  assert.deepEqual([fora.ok, fora.error.code, fora.error.details[0].campo], [false, 'VALIDATION', 'primeiro'], 'data fora do formato: recusada');
+  assert.deepEqual(venc('2026-01-31', 0, 'MES').error.details[0].codigo, 'VALOR_FORA_DA_FAIXA');
+  assert.deepEqual(venc('2026-01-31', 121, 'MES').error.details[0].codigo, 'VALOR_FORA_DA_FAIXA');
+  assert.deepEqual(venc('2026-01-31', 2, 'D10').error.details[0].campo, 'intervalo');
   // O que a grade produz, convertido como o formulário converte, o servidor aceita; parcelas sem valor = divisão igual.
   const st = storeDe(s);
   const def = st.tipoEvento('COMPRA');
@@ -87,7 +96,7 @@ test('grade de animais novos: brincos em série, linhas coladas de planilha (cab
   const linhas = r.animais.map((a, i) => ({ uid: 'l' + i, animal_id: null, valores: Object.assign({ brinco: a.brinco, sexo: a.sexo, peso: a.peso || null, data_nascimento: a.data_nascimento || null, idade_meses: a.idade_meses || null }, a.sexo === 'M' ? { castrado: false, reprodutor: false } : {}, a.data_nascimento ? { data_nascimento_confianca: 'CONFIRMADA' } : {}), erros: [] }));
   const sess = { tipo: 'COMPRA', def, subtipo: null, linhas, justificativaAviso: '', corrige: null,
     campos: { event_date: '2026-02-05', partner_id: forn, modalidade: 'LOTE', criterio_rateio: 'CABECAS', valor_animais: '9.400,00', pasto_destino_id: PASTOS.B },
-    grupos: { parcelas: R.vencimentos('2026-03-05', 3, 'MES').map((d, i) => ({ uid: 'p' + i, valores: { data_vencimento: d } })), custos: [] } };
+    grupos: { parcelas: venc('2026-03-05', 3, 'MES').data.datas.map((d, i) => ({ uid: 'p' + i, valores: { data_vencimento: d } })), custos: [] } };
   const m = js(R.montarDados(sess));
   assert.deepEqual(m.erros, []);
   assert.deepEqual(m.dados.parcelas, [{ data_vencimento: '2026-03-05' }, { data_vencimento: '2026-04-05' }, { data_vencimento: '2026-05-05' }].map((p) => Object.assign(p, { valor: null, forma_pagamento: null, documento: null })));

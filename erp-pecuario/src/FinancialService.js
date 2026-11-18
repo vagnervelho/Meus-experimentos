@@ -166,6 +166,25 @@ var FinancialService = (function () {
     return partes.map(function (v, i) { return { data_vencimento: Utils.somaMeses(primeiro, i), valor: v, forma_pagamento: nulo_(x.forma_pagamento), documento: nulo_(x.documento) }; });
   }
 
+  /** Os intervalos do "Dividir em parcelas" (a folha do formulário): MES = todo mês no mesmo dia (ou o último do mês). */
+  var INTERVALOS_PARCELA = Object.freeze({ MES: null, D30: 30, D15: 15, D7: 7 });
+  /**
+   * Os vencimentos de `quantas` parcelas a partir da primeira (rota financeiro.vencimentos; CONTRATOS, seção 51): MES = todo
+   * mês no mesmo dia, ou o último dia do mês mais curto (Utils.somaMeses); D30, D15 e D7 = a cada 30, 15 ou 7 dias. O
+   * aparelho não soma dias: ele pede a lista e preenche as linhas. Devolve {datas}.
+   */
+  function vencimentos(dados) {
+    var d = dados || {};
+    var n = Number(d.quantas);
+    if (!Utils.dataValida(d.primeiro)) throw Validation.erro('VALIDATION', 'Escolha o vencimento da primeira parcela.', [{ codigo: 'FORMATO_INVALIDO', campo: 'primeiro', mensagem: 'Escolha o vencimento da primeira parcela.' }]);
+    if (!inteiroPositivo_(n) || n > MAX_PARCELAS) throw Validation.erro('VALIDATION', 'O número de parcelas vai de 1 a ' + MAX_PARCELAS + '.', [{ codigo: 'VALOR_FORA_DA_FAIXA', campo: 'quantas', mensagem: 'O número de parcelas vai de 1 a ' + MAX_PARCELAS + '.' }]);
+    if (!Object.prototype.hasOwnProperty.call(INTERVALOS_PARCELA, d.intervalo)) throw Validation.erro('VALIDATION', 'Escolha como as outras parcelas vencem.', [{ codigo: 'FORMATO_INVALIDO', campo: 'intervalo', mensagem: 'Escolha como as outras parcelas vencem.' }]);
+    var passo = INTERVALOS_PARCELA[d.intervalo];
+    var datas = [];
+    for (var i = 0; i < n; i++) datas.push(passo ? Utils.somaDias(d.primeiro, passo * i) : Utils.somaMeses(d.primeiro, i));
+    return { datas: datas };
+  }
+
   // ------------------------------------------------------------------ rateio ----
   /**
    * Rateio de `valor` centavos pelo maior resto (07, seção 3.2; 03b, seção 13.3; Utils.ratear), com o desempate
@@ -867,6 +886,7 @@ var FinancialService = (function () {
     dividirParcelas: dividirParcelas,
     resolverParcelas: resolverParcelas,
     parcelasMensais: parcelasMensais,
+    vencimentos: vencimentos,
     ratear: ratear,
     planejar: planejar,
     juntar: juntar,

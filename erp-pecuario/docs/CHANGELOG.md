@@ -2083,3 +2083,82 @@ terminou (7 altos). Esta etapa não mudou código.
 - Durante a etapa, o salvamento automático de fora dela gravou estados intermediários: o commit `752e06c`, com a entrada
   anterior deste arquivo (o conserto da revisão final), e o `b23e823`, com o `CONTRATOS.md` desta etapa. O `src/` e os testes
   não mudaram desde o `d0033b6`. Esta etapa não fez commit nem push.
+
+## 17/11/2026 — Fase 3, conserto pela garantia: a correção e o fato congelado
+
+- O contrato (CONTRATOS, seção 50): por tipo, o que é informado pelo usuário, o que o servidor deriva (e de quê) e o que o
+  registro copia do cadastro (tabela A); o que a correção mantém do original enquanto as entradas de que depende não mudam
+  (tabela B, `Correcao.CONGELADOS`: 22 valores — 12 cópias, 6 derivados e 4 regras); as garantias b1 a b4 e as regras de
+  desenho que valem também para a correção sem mudança.
+- `src/Correcao.js` (novo): o ponto único da correção. `entrada(L, ev, propostas)` monta, só das linhas gravadas, a entrada sem
+  mudança do evento que vale (o que o servidor propôs vem vazio; o digitado, como foi gravado); `montar(entrada, mudanca)`
+  monta o evento corrigido; `contexto`/`congelado` dão o valor do original a todo tratador do motor. As leituras próprias do
+  original no `EventService` saíram.
+- API: `evento.obter` devolve `correcao` (a entrada sem mudança) e `propostas`; `evento.corrigir` aceita `dados.mudanca` (só o
+  que muda), pelo mesmo caminho de validação e efeito do formulário inteiro.
+- Tela: a prévia da correção (`TelaEventos.previaCorrecao`) só formata a entrada do servidor pelo tipo do campo — não calcula
+  número nem data (a soma do intervalo da próxima aplicação saiu); a prévia própria da reprodução saiu. Página inicial montada:
+  de 460.759 para 435.471 bytes (orçamento 460.800).
+- Oráculo da correção no teste aleatório (`tests/apoio-fuzz.js`, `oraculoCorrecao`): num passo sorteado à parte, com o estado
+  guardado e devolvido (`gas.estado.salvar`/`restaurar` nos fakes), muda de 1 a 4 cadastros e corrige sem mudança até 4 eventos
+  de tipos diferentes pelas entradas do servidor e do gerador (b1), compara a bateria da viagem no tempo em hoje e na data do
+  evento e a lista dos lançamentos (b4), e corrige um campo só pela mudança (b2; com a data, b3). As sementes fixas exigem
+  cobertura do oráculo.
+- Defeitos achados e consertados pela causa, cada um com um teste em `tests/correcao.regressoes.test.js` que falha com o `src/`
+  de antes da etapa (`b8c513b`) e passa agora:
+  - ALTA: a aplicação refazia a conta e a descrição do consumo pela categoria de hoje do produto; o protocolo que deixou de ser
+    "a cada N dias" apagava a próxima aplicação proposta; o parto refazia o pasto das crias pela linha do tempo de hoje da mãe
+    (e era recusado quando a cria já tinha saído); a venda sem o peso de cada animal refazia a divisão estimada pela pesagem
+    retroativa lançada depois;
+  - MEDIA: a raça da cria pela raça de hoje da mãe; a correção de cadastro recusada (VALOR_IGUAL) pelo estado de hoje; a prévia
+    da correção montada no cliente; o parto só de natimorto sem a certeza do pai gravada (e com o pasto da mãe conferido); a
+    correção de cadastro para "não castrado" seguida de castração (CASTRACAO_REPETIDA: o castrado de origem depois do comando
+    não contava o próprio comando); a identificação recusada pela regra do número de hoje (reuso, só números); a certeza
+    apagada junto com o nascimento perdida; o acerto de brinco lançado errado recusado depois de uma troca posterior; o touro
+    de um lote com vários touros que virava fêmea pela correção de cadastro (agora a linha de touro é de um macho, na
+    verificação e na trava); a propriedade padrão de hoje no lançamento sem propriedade; a mãe que o bezerro só ganhou depois
+    entrando na desmama; a correção de cadastro do nascimento recusada pela certeza que uma correção posterior apagou, e as
+    regras entre campos (castrado, reprodutor, partos, a chegada) conferidas com o sexo ou o nascimento que uma correção
+    posterior mudou;
+  - BAIXA: o nome de hoje do produto na compra do insumo; o nome de hoje do tipo na dedução da venda; o pasto informado que
+    nenhum animal recebe (o do lote da compra, o do parto só de natimorto, o da desmama do bezerro que já estava nele)
+    conferido como se recebesse animais.
+- `tests/correcao.contrato.test.js` (novo): a correção que muda a entrada de que um valor congelado depende — a data refaz o
+  valor de antes da reclassificação na posição nova; outro produto copia o cadastro de hoje do produto novo e mantém a carência
+  informada —, e a tabela B do contrato é a do código (`Correcao.tabela()`: as 22 chaves, com a mesma natureza).
+- `tests/reproducao.test.js`: a correção de cadastro que tornaria castrado o touro de uma cobertura é recusada já pelo motor,
+  com o código da regra (`TOURO_CASTRADO`), e não só pela trava (`INTEGRIDADE_LINHA_DO_TEMPO`), com a mesma mensagem — efeito
+  do castrado de origem que conta o próprio comando.
+- Testes existentes ajustados ao contrato novo, sem afrouxar o que conferem: `tests/fase2.adversarial.test.js` (o modelo
+  independente: na correção do parto com a mesma mãe e a mesma data, o pasto vazio das crias é o do original, como a tabela B
+  manda); `tests/fase3.fuzz.regressoes.test.js` (a correção do rebanho que declara castrado o macho já castrado por uma
+  castração lançada é recusada já pelo motor, CONFLICT `CASTRACAO_REPETIDA`, antes de pedir a justificativa do período fechado
+  — a mesma resposta da simulação); `tests/revisao1.financeiro.test.js` (a tela lê `o.correcao`, com o tipo de cada dedução
+  vindo do servidor, em vez de remontar pelos papéis; a conferência ganhou a do tipo das deduções na entrada).
+- `tests/ui/pastos-importacao.test.js`: a leitura das linhas validadas e do relatório espera o servidor responder
+  (`esperarServidor`); sob carga, a seção ainda dizia "Buscando as linhas…" e o teste falhava por tempo, não por defeito.
+- Mudanças de contrato além do ponto único: o payload do parto só de natimorto grava `pai_confianca`; o da aplicação com
+  protocolo, `recorrencia_protocolo`; a verificação de integridade acusa a linha de touro de um animal que não é macho
+  (GENEALOGIA `TOURO_LINHA`; a trava recusa a correção de cadastro que a criaria); o pasto informado (o do lote da compra, o do
+  parto, o da desmama) só é conferido como desativado quando recebe animal; o parto sem cria viva não pede nem confere o pasto
+  da mãe; `ReproductionService.castradoDeOrigem(f, id, plano)` conta o que o comando grava.
+- Leva de busca do oráculo (610000 a 610999, 1.000 sementes × 100 passos, 4 processos): 59.078 aceitos, 32.921 recusados e 8
+  falhas, todas triadas e consertadas (os defeitos 11 a 18 da seção 50.8; o 19 veio da primeira leva de confirmação); 37.255
+  correções sem mudança aceitas (22.074 pela entrada do servidor, 15.181 pela do gerador), 170 recusas documentadas, 1.665.515
+  consultas comparadas, 19.484 correções de um campo (5.296 da data). Antes dela, as sementes fixas acharam o parto só de
+  natimorto.
+- Primeira leva de confirmação (a partir de 611000): parada na semente 611819 (o par do nascimento e da certeza), depois de 284
+  sementes; consertada pela causa, com a regressão, e pela mesma causa as regras entre campos da correção de cadastro. Segunda
+  leva de confirmação (a partir de 612000): parada na semente 612769 (o pasto informado do parto só de natimorto), depois de
+  108 sementes; consertada pela causa, com a regressão, e pela mesma causa o pasto da desmama.
+- Leva nova, limpa, com o código final (613000 a 613999, 1.000 sementes × 100 passos, 4 processos): 58.266 aceitos, 33.396
+  recusados e 0 falhas; 36.975 correções sem mudança aceitas (21.907 pela entrada do servidor, 15.068 pela do gerador), 116
+  recusas documentadas, 1.709.406 consultas comparadas, 19.320 correções de um campo (5.178 da data).
+- Verificado em Node, depois da leva limpa e com estes documentos: `npm test` com 887 testes, 887 passando (84 arquivos; o
+  teste aleatório das sementes fixas: 23 sementes × 60 passos, 831 aceitos, 440 recusados, 0 falhas); `npm run ui:check` verde:
+  a conferência estática (13 arquivos .html, sem recurso externo; página inicial montada com 435.471 bytes de 460.800; sob
+  demanda Import 48 KB, Weights 59 KB, Health 25 KB e Reproduction 62 KB, de 150 KB cada) e 186 testes de navegador, 186
+  passando.
+- Durante a etapa, o salvamento automático de fora dela gravou estados intermediários (os commits `1aae96d`, `db29996`,
+  `71ace1f`, `406cdb0`, `0df68a8`, `b25e4d4`, `9caac72` e `f74267a`, este com a seção 50.10 do `CONTRATOS.md`). Esta etapa não
+  fez commit nem push; `docs/fase-0/` não mudou.
