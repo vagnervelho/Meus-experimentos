@@ -3526,6 +3526,7 @@ tabela são as do código (`Correcao.tabela()`), e `tests/correcao.contrato.test
 | `ESTOQUE.nome_produto` | COPIA | PRODUTOS.nome | o produto | FINANCEIRO.descricao (compra do insumo) |
 | `IDENTIFICACAO.brinco` | REGRA | CONFIGURACOES.brinco_somente_numerico e brinco_permite_reuso (as regras do número novo) | o animal e o número | IDENTIFICACOES (BRINCO), em todo tipo que dá brinco |
 | `REPRODUCAO.idade_gestacional` | REGRA | CONFIGURACOES.dias_gestacao (a faixa) | o animal e a idade | REPRODUCAO.idade_gestacional_dias |
+| `REPRODUCAO.estacao` | REGRA | ESTACOES_MONTA.data_inicio e data_fim (FORA_DA_ESTACAO) | a estação, o subtipo e a data | REPRODUCAO.estacao_id |
 | `DESMAMA.cria` | REGRA | CONFIGURACOES.idade_desmama_padrao_meses (quem é cria ao pé) | o animal | EVENTO_ANIMAIS (SUJEITO) |
 | `DESMAMA.maes` | DERIVADO | a mãe de cada bezerro pelo cadastro, presente no rebanho no dia | os bezerros e a data | EVENTO_ANIMAIS (MATRIZ); REPRODUCAO (DESMAMA da mãe) |
 | `NASCIMENTO.pasto_crias` | DERIVADO | o pasto da mãe no dia do parto | a mãe e a data | EVENTO_ANIMAIS.pasto_destino_id (CRIA) |

@@ -69,7 +69,9 @@ test('INTERVALO_DIAS (03a, 4.9): aplicação em 10/05/2027 com 180 dias e antece
   const a = venc('2027-11-07');
   assert.deepEqual(situacoes(a, ids[0]), [['VENCIDA', '2027-11-06']]);
   assert.deepEqual(situacoes(a, ids[1]), [['VENCIDA', '2027-08-01']], 'a próxima informada vale sobre o intervalo');
-  assert.deepEqual(situacoes(a, ids[2]), [['VENCIDA', '2026-01-01']], 'nunca aplicado: vencido desde que ficou elegível (a entrada no rebanho)');
+  // Segunda convergência, rodada 1 (achado 8): elegível quando, ao mesmo tempo, está no rebanho e o protocolo está ativo (05,
+  // seção 4.7) — o protocolo vale desde a primeira aplicação com ele (10/05/2027, antes do cadastro), não desde a entrada.
+  assert.deepEqual(situacoes(a, ids[2]), [['VENCIDA', '2027-05-10']], 'nunca aplicado: vencido desde que ficou elegível (o mais tarde entre a entrada no rebanho e o início do protocolo)');
   assert.deepEqual(a.protocolos.map((x) => [x.elegiveis, x.em_dia, x.cobertura.valor]), [[3, 0, 0]]);
   // A aplicação posterior da mesma chave cumpre: o ciclo recomeça.
   vacina(s, '2027-11-07', [ids[0]], { protocol_id: p.protocol_id }, 'v3');

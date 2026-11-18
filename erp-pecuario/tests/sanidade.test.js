@@ -182,7 +182,9 @@ test('dose por peso (03a, seção 4.6): 0,02 mL/kg × o peso atual de cada anima
   const linhas = tab(s, 'SANIDADE', { event_id: r.event_id });
   assert.deepEqual([ids['201'], ids['202'], ids['203']].map((id) => linhas.find((x) => x.animal_id === id).dose), [8, 5, 7]);
   const ev = s.tabela('EVENTOS').find((e) => e.event_id === r.event_id);
-  assert.deepEqual(ev.payload_json, { modo_dose: 'POR_PESO', dose_referencia: 0.02, quantidade_consumida_total: 20 }, 'vazia = a soma das doses');
+  // Segunda convergência, rodada 1 (achados 2 e 3): o payload guarda de quem a dose foi digitada (o 203), para a correção a levar
+  // como foi gravada e refazer pelo peso só as propostas.
+  assert.deepEqual(ev.payload_json, { modo_dose: 'POR_PESO', dose_referencia: 0.02, quantidade_consumida_total: 20, doses_informadas: [ids['203']] }, 'vazia = a soma das doses');
   const f = tab(s, 'FINANCEIRO', { event_id: r.event_id })[0];
   assert.deepEqual([f.valor, f.conta_id, f.descricao], [70, conta(s, 'MEDICAMENTOS').conta_id, 'Consumo de vermífugo: 20 mL'], '20 mL × R$ 0,035 = R$ 0,70; vermífugo vai para Medicamentos');
   const rat = tab(s, 'RATEIOS', { financial_id: f.financial_id })[0];
