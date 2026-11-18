@@ -47,7 +47,7 @@ test('carga inicial: página do doGet, carga completa, casca com os módulos ati
   assert.deepEqual(boot[0].dados, {}, 'primeira abertura: sem versão guardada');
   assert.equal(boot[0].ambiente, undefined, 'produção não envia ambiente');
   assert.match(await page.textContent('.grade-cartoes'), /Cabeças\s*4/);
-  assert.deepEqual(await textos(page, '#menu .menu-item'), ['Visão geral', 'Rebanho', 'Pastos', 'Eventos', 'Pesagens', 'Sanidade', 'Reprodução', 'Configurações'], 'as telas instaladas (as da Fase 1 e as de Pesagens, Sanidade e Reprodução, sob demanda), cada uma com o seu módulo ativo');
+  assert.deepEqual(await textos(page, '#menu .menu-item'), ['Visão geral', 'Rebanho', 'Pastos', 'Eventos', 'Pesagens', 'Sanidade', 'Reprodução', 'Financeiro', 'Configurações'], 'as telas instaladas (as da Fase 1; as de Pesagens, Sanidade, Reprodução e Financeiro, sob demanda; desde a Fase 4, também Eventos e Configurações), cada uma com o seu módulo ativo');
   assert.ok(await page.isVisible('.topo-acoes a:has-text("REGISTRAR EVENTO")'));
   assert.equal(await page.$('[data-faixa="base-teste"]'), null, 'produção sem faixa de base de teste');
   assert.match(await page.textContent('[data-alerta="SEM_BRINCO"]'), /sem brinco/);
@@ -69,6 +69,7 @@ const TELAS_TESTE = [
   { padrao: 'eventos', modulo: 'EVENTOS', titulo: 'Eventos (tela de teste)' },
   { padrao: 'financeiro/lancamentos', modulo: 'FINANCEIRO', titulo: 'Financeiro (tela de teste)' },
   { padrao: 'config/parametros', modulo: 'CONFIGURACOES', titulo: 'Configurações (tela de teste)' },
+  { padrao: 'relatorios', modulo: 'RELATORIOS', titulo: 'Relatórios (tela de teste)' },
 ];
 
 test('navegação: menu lateral só com módulos ativos e telas instaladas; REGISTRAR; Voltar pelo google.script.history', async () => {
@@ -77,7 +78,7 @@ test('navegação: menu lateral só com módulos ativos e telas instaladas; REGI
   const a = await A.abrir(s, { largura: 1280, telasDeTeste: TELAS_TESTE });
   const { page } = a;
   assert.equal(await page.evaluate(() => window.Roteador.modo()), 'GAS');
-  assert.deepEqual(await textos(page, '#menu .menu-item'), ['Visão geral', 'Rebanho', 'Pastos', 'Eventos', 'Pesagens', 'Sanidade', 'Reprodução', 'Configurações'], 'Pesagens (E3.1), Sanidade (E3.2 e E3.3) e Reprodução (E3.4), sob demanda, aparecem; Financeiro (Fase 4, ainda sem tela entregue) não, mesmo com tela de teste');
+  assert.deepEqual(await textos(page, '#menu .menu-item'), ['Visão geral', 'Rebanho', 'Pastos', 'Eventos', 'Pesagens', 'Sanidade', 'Reprodução', 'Financeiro', 'Configurações'], 'Pesagens (E3.1), Sanidade (E3.2 e E3.3), Reprodução (E3.4) e Financeiro (Fase 4, etapa BASE), sob demanda, aparecem; Relatórios (Fase 5, ainda sem tela entregue) não, mesmo com tela de teste');
   await page.click('#menu .menu-item:has-text("Rebanho")');
   await A.esperarTela(page, 'Rebanho (tela de teste)');
   assert.match(page.url(), /#\/rebanho$/);
@@ -97,7 +98,7 @@ test('navegação: menu lateral só com módulos ativos e telas instaladas; REGI
   await A.esperarTela(page, 'Registrar evento');
   await page.goBack();
   await A.esperarTela(page, 'Rebanho (tela de teste)');
-  await A.ir(page, 'financeiro/lancamentos');
+  await A.ir(page, 'relatorios');
   assert.match(await page.textContent('#conteudo'), /ainda não foi entregue/, 'rota de módulo inativo não abre');
   await A.ir(page, 'nao/existe');
   assert.match(await page.textContent('#conteudo'), /não existe nesta versão/);
@@ -118,7 +119,7 @@ test('navegação no celular: barra inferior Início · Rebanho · Registrar · 
   await dlg.waitFor();
   assert.equal(await dlg.getAttribute('aria-modal'), 'true');
   assert.equal(await page.textContent('#' + await dlg.getAttribute('aria-labelledby')), 'Mais');
-  assert.deepEqual(await textos(page, '[role=dialog] .menu-item'), ['Eventos', 'Pesagens', 'Sanidade', 'Reprodução', 'Configurações']);
+  assert.deepEqual(await textos(page, '[role=dialog] .menu-item'), ['Eventos', 'Pesagens', 'Sanidade', 'Reprodução', 'Financeiro', 'Configurações']);
   assert.equal(await page.getAttribute('#app', 'aria-hidden'), 'true', 'fundo inerte enquanto a folha está aberta');
   await page.keyboard.press('Escape');
   await dlg.waitFor({ state: 'detached' });

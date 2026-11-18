@@ -97,9 +97,11 @@ function motor(amb, linhas) {
     },
     /** Projeção gravada = reconstrução (Timeline.conferir) e as invariantes financeiras de 03b, seção 14 (FinancialService.conferir). */
     conferirProjecoes(msg) {
-      const r = amb.read({ rota: 'teste.projecoes', reads: G.FinancialService.leituras(), acessoCru: true, tratador: (tx) => ({ proj: G.Timeline.conferir(tx), fin: G.FinancialService.conferir(tx) }) }).dados;
+      // Fase 4, etapa BASE: também a identidade das três visões (07, seção 2.1) no fim de cada mês até hoje (Conciliacao).
+      const r = amb.read({ rota: 'teste.projecoes', reads: G.FinancialService.leituras(), acessoCru: true, tratador: (tx) => ({ proj: G.Timeline.conferir(tx), fin: G.FinancialService.conferir(tx), conc: tx.hoje ? G.Conciliacao.conferir(G.Conciliacao.fatos(tx), tx.hoje).problemas : [] }) }).dados;
       assert.deepEqual(r.proj, [], 'projeção gravada = reconstrução pelos eventos vigentes (' + (msg || '') + ')');
       assert.deepEqual(r.fin, [], 'invariantes financeiras de 03b, seção 14 (' + (msg || '') + ')');
+      assert.deepEqual(r.conc, [], 'a identidade das três visões fecha ao centavo em todo fim de mês (' + (msg || '') + ')');
     },
     /** Só as invariantes financeiras (03b, seção 14): [{invariante, tabela, id, mensagem}]. */
     invariantes() {

@@ -10,7 +10,7 @@
  * visivel_se / obrigatorio_se: {campo, valores} ou {campo, preenchido: true}.
  */
 var EventCatalog = (function () {
-  var FASE_ATUAL = 3;
+  var FASE_ATUAL = 4;
   var TIPOS_CAMPO = ['texto', 'inteiro', 'decimal', 'dinheiro', 'data', 'lista', 'bool', 'anexo'];
   var PESO_MAX_KG = 2000;
 
@@ -20,19 +20,22 @@ var EventCatalog = (function () {
    * ainda não foi entregue, qualquer que seja a fase). `sob_demanda`: a tela não entra na página inicial e é pedida ao
    * servidor quando o menu abre o módulo (rota `sistema.tela`; 01, seção 6.2; risco R-31); `rotas` são as raízes de rota
    * dela (o primeiro trecho da rota), pelas quais o cliente sabe que módulo pedir. As telas das Fases 3 a 5 entram sob
-   * demanda; a importação, tarefa de desktop pouco usada na abertura, também.
+   * demanda; a importação, tarefa de desktop pouco usada na abertura, também. Desde a etapa BASE da Fase 4 (folga na página
+   * inicial; CONTRATOS, seção 55), também a lista e o detalhe dos eventos (com a correção e o estorno, que partem do detalhe)
+   * e as Configurações: a rota `evento/novo` (o registro) continua na página inicial, registrada pelo Components, e ganha
+   * da raiz `evento` do módulo (rota registrada vale antes da sob demanda).
    */
   var MODULOS = [
     { id: 'DASHBOARD', rotulo: 'Visão geral', ordem: 1, fase: 1, menu: true, tela: 'Dashboard' },
     { id: 'REBANHO', rotulo: 'Rebanho', ordem: 2, fase: 1, menu: true, tela: 'Animals' },
     { id: 'PASTOS', rotulo: 'Pastos', ordem: 3, fase: 1, menu: true, tela: 'Pastures' },
-    { id: 'EVENTOS', rotulo: 'Eventos', ordem: 4, fase: 1, menu: true, tela: 'Events' },
+    { id: 'EVENTOS', rotulo: 'Eventos', ordem: 4, fase: 1, menu: true, tela: 'Events', sob_demanda: true, rotas: ['eventos', 'evento'] },
     { id: 'PESAGENS', rotulo: 'Pesagens', ordem: 5, fase: 3, menu: true, tela: 'Weights', sob_demanda: true, rotas: ['pesagens'] },
     { id: 'SANIDADE', rotulo: 'Sanidade', ordem: 6, fase: 3, menu: true, tela: 'Health', sob_demanda: true, rotas: ['sanidade'] },
     { id: 'REPRODUCAO', rotulo: 'Reprodução', ordem: 7, fase: 3, menu: true, tela: 'Reproduction', sob_demanda: true, rotas: ['reproducao'] },
-    { id: 'FINANCEIRO', rotulo: 'Financeiro', ordem: 8, fase: 4, menu: true },
+    { id: 'FINANCEIRO', rotulo: 'Financeiro', ordem: 8, fase: 4, menu: true, tela: 'Financial', sob_demanda: true, rotas: ['financeiro'] },
     { id: 'RELATORIOS', rotulo: 'Relatórios', ordem: 9, fase: 5, menu: true },
-    { id: 'CONFIGURACOES', rotulo: 'Configurações', ordem: 10, fase: 1, menu: true, tela: 'Settings' },
+    { id: 'CONFIGURACOES', rotulo: 'Configurações', ordem: 10, fase: 1, menu: true, tela: 'Settings', sob_demanda: true, rotas: ['config'] },
     { id: 'IMPORTACAO', rotulo: 'Importação', ordem: 11, fase: 1, menu: false, tela: 'Import', sob_demanda: true, rotas: ['importar'] },
   ];
 

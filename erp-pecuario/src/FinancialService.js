@@ -876,6 +876,212 @@ var FinancialService = (function () {
     };
   }
 
+  // ------------------------------------------------------------------ lançamentos (tela Financeiro; Fase 4, etapa BASE) ----
+  var NATUREZAS = ['RECEITA_VENDA_ANIMAIS', 'OUTRA_RECEITA', 'AQUISICAO_ANIMAIS', 'CUSTEIO', 'DESPESA_VENDA', 'ESTOQUE_INSUMOS', 'NAO_OPERACIONAL'];
+  /** Situação do lançamento na lista: ATIVO (vale), CANCELADO (o evento criador foi estornado, corrigido ou desfeito), TODOS. */
+  var SITUACOES_LANCAMENTO = ['ATIVO', 'CANCELADO', 'TODOS'];
+  var PAGAMENTOS = ['SEM_CAIXA', 'ABERTO', 'PARCIAL', 'LIQUIDADO'];
+  var POR_PAGINA_MAX = 500;
+  /** Abas que as consultas de lançamentos leem (com acesso cru: a situação de cada lançamento vem do predicado do evento). */
+  function leiturasLancamentos() {
+    return Utils.unicos(Timeline.LEITURAS.concat(['PLANO_CONTAS', 'PARCEIROS', 'PRODUTOS', 'ANEXOS']));
+  }
+  function filtroData_(o, campo) {
+    var v = o[campo];
+    if (vazio_(v)) return null;
+    if (typeof v !== 'string' || !Utils.dataValida(v)) throw Validation.erro('VALIDATION', 'A data "' + v + '" não é válida: use dia, mês e ano.', [det_('FORMATO_INVALIDO', campo, 'Data inválida.')]);
+    return v;
+  }
+  function filtroLista_(o, campo, lista, rotulo) {
+    var v = o[campo];
+    if (vazio_(v)) return null;
+    if (lista.indexOf(v) < 0) throw Validation.erro('VALIDATION', rotulo + ' "' + v + '" não existe.', [det_('VALOR_FORA_DA_LISTA', campo, rotulo + ' desconhecido.')]);
+    return v;
+  }
+  /** A situação do lançamento pelo predicado do evento que o criou (P3): ATIVO, CANCELADO ou null (falhou, pendente). */
+  function situacaoLancamento_(tx, fin) {
+    var a = tx.cru.avaliar(fin.event_id);
+    if (!a) return null;
+    if (a.vigente) return 'ATIVO';
+    return a.status === 'ESTORNADO' || a.status === 'CANCELADO' ? 'CANCELADO' : null;
+  }
+  /**
+   * A parcela como a tela mostra (rótulos derivados, 03b, seção 10.4: "pago", "recebido" e "atrasado" não são gravados): a
+   * situação hoje — PAGA ou RECEBIDA, A_PAGAR ou A_RECEBER, VENCIDA (aberta com vencimento antes de hoje), SUBSTITUIDA
+   * (desdobrada numa baixa parcial) ou SEM_EFEITO (o lançamento foi cancelado; a parcela não é regravada).
+   */
+  function parcelaPublica_(p, fin, situacao, hoje) {
+    var receita = fin.tipo === 'RECEITA';
+    var rotulo;
+    if (situacao !== 'ATIVO') rotulo = 'SEM_EFEITO';
+    else if (p.status === 'CANCELADA') rotulo = 'SUBSTITUIDA';
+    else if (p.status === 'LIQUIDADA') rotulo = receita ? 'RECEBIDA' : 'PAGA';
+    else if (!vazio_(hoje) && p.data_vencimento < hoje) rotulo = 'VENCIDA';
+    else rotulo = receita ? 'A_RECEBER' : 'A_PAGAR';
+    return {
+      parcela_id: p.parcela_id, parcela_num: p.parcela_num, data_vencimento: p.data_vencimento, valor: p.valor, status: p.status,
+      data_pagamento: nulo_(p.data_pagamento), valor_pago: nulo_(p.valor_pago), juros_multa: nulo_(p.juros_multa), desconto: nulo_(p.desconto),
+      forma_pagamento: nulo_(p.forma_pagamento), documento: nulo_(p.documento), parcela_origem_id: nulo_(p.parcela_origem_id), situacao: rotulo,
+      dias_atraso: rotulo === 'VENCIDA' ? Utils.diffDias(p.data_vencimento, hoje) : null,
+    };
+  }
+  /**
+   * O rateio do lançamento e as alocações dele: no que vale, o rateio vigente (o do último evento vigente; 03b, RATEIOS, pelo
+   * predicado único do Repository); no cancelado, o que o evento criador gravou (sem efeito, só para consulta).
+   */
+  function rateioDoLancamento_(tx, fin, ativo) {
+    var rat = ativo ? tx.repo.por('RATEIOS', 'financial_id', fin.financial_id)[0] || null
+      : tx.cru.cruPor('RATEIOS', 'financial_id', fin.financial_id).filter(function (r) { return r.event_id === fin.event_id; })[0] || null;
+    if (!rat) return { rateio: null, alocacoes: [] };
+    return { rateio: rat, alocacoes: ativo ? tx.repo.por('ALOCACOES_FINANCEIRAS', 'rateio_id', rat.rateio_id) : tx.cru.cruPor('ALOCACOES_FINANCEIRAS', 'rateio_id', rat.rateio_id) };
+  }
+  /**
+   * Um lançamento como a lista e o detalhe mostram: os campos gravados, a conta, o parceiro, o pasto, o produto e o evento
+   * pelo nome, a situação (pelo predicado), a situação do pagamento pelas parcelas (a mesma conta da projeção), o que está
+   * em aberto e vencido hoje, o critério do rateio vigente e o que ficou sem alocar. Todo número vem pronto: a tela não soma.
+   */
+  function lancamentoPublico_(tx, fin, hoje) {
+    var situacao = situacaoLancamento_(tx, fin);
+    var conta = tx.repo.porId('PLANO_CONTAS', fin.conta_id);
+    var parc = tx.repo.porId('PARCEIROS', fin.partner_id);
+    var pasto = vazio_(fin.pasture_id) ? null : tx.repo.porId('PASTOS', fin.pasture_id);
+    var prod = vazio_(fin.product_id) || !tx.repo.carregada('PRODUTOS') ? null : tx.repo.porId('PRODUTOS', fin.product_id);
+    var ev = tx.cru.cruPorId('EVENTOS', fin.event_id) || {};
+    var def = EventCatalog.existe(ev.event_type) ? EventCatalog.tipo(ev.event_type) : null;
+    var todas = Utils.ordenarPor(tx.cru.cruPor('PARCELAS', 'financial_id', fin.financial_id), ['parcela_num', 'data_vencimento']);
+    var validas = todas.filter(function (p) { return p.status !== 'CANCELADA'; });
+    var sp = situacaoPagamento(validas, situacao === 'ATIVO');
+    var aberto = 0;
+    var vencido = 0;
+    var proximo = null;
+    if (situacao === 'ATIVO') validas.forEach(function (p) {
+      if (p.status !== 'ABERTA') return;
+      aberto += p.valor;
+      if (!vazio_(hoje) && p.data_vencimento < hoje) vencido += p.valor;
+      if (proximo === null || p.data_vencimento < proximo) proximo = p.data_vencimento;
+    });
+    var r = rateioDoLancamento_(tx, fin, situacao === 'ATIVO');
+    var alocado = r.alocacoes.reduce(function (s, a) { return s + (a.valor_alocado || 0); }, 0);
+    var semRateio = SEM_RATEIO.indexOf(fin.natureza) >= 0;
+    return {
+      financial_id: fin.financial_id, event_id: fin.event_id, event_type: ev.event_type || null, event_subtype: nulo_(ev.event_subtype),
+      rotulo_evento: def ? def.rotulo : ev.event_type || null, nome_evento: EventCatalog.nomeEvento(ev.event_type, nulo_(ev.event_subtype)),
+      event_date: ev.event_date || null, event_seq: ev.event_seq || null, ref_event_id: nulo_(fin.ref_event_id), pre_marco_zero: ev.pre_marco_zero === true,
+      data_competencia: fin.data_competencia, competencia_inicio: nulo_(fin.competencia_inicio), competencia_fim: nulo_(fin.competencia_fim),
+      conta_id: fin.conta_id, conta_codigo: conta ? conta.codigo : null, conta_nome: conta ? conta.nome : null, natureza: fin.natureza, tipo: fin.tipo,
+      grupo: nulo_(fin.categoria), descricao: nulo_(fin.descricao), documento: nulo_(fin.documento), observacoes: nulo_(fin.observacoes), valor: fin.valor,
+      quantidade: nulo_(fin.quantidade), product_id: nulo_(fin.product_id), produto: prod ? prod.nome : null,
+      partner_id: nulo_(fin.partner_id), parceiro: parc ? parc.nome : null, pasture_id: nulo_(fin.pasture_id), pasto: pasto ? pasto.nome : null,
+      property_id: nulo_(fin.property_id), retida_pelo_comprador: fin.retida_pelo_comprador === true,
+      situacao: situacao, cancelado_por_event_id: situacao === 'CANCELADO' ? tx.cru.avaliar(fin.event_id).anulador_id : null,
+      status_pagamento: sp.status_pagamento, data_pagamento: sp.data_pagamento,
+      parcelas: validas.length, em_aberto: aberto, vencido: vencido, proximo_vencimento: proximo,
+      criterio: r.rateio ? r.rateio.criterio : null, alocado: semRateio ? null : alocado,
+      nao_alocado: semRateio ? null : fin.valor - alocado, animais: r.alocacoes.length,
+      _todas: todas, _rateio: r,
+    };
+  }
+  function semInterno_(item) {
+    var o = {};
+    Object.keys(item).forEach(function (k) { if (k.charAt(0) !== '_') o[k] = item[k]; });
+    return o;
+  }
+  /**
+   * Consulta `financeiro.lancamentos` (a lista da tela Financeiro): os lançamentos de evento confirmado (os da operação que
+   * falhou e os da importação em curso ficam fora), filtrados por competência (`de`, `ate`), natureza, tipo (RECEITA,
+   * DESPESA), conta, parceiro, pasto, tipo do evento, `situacao` (ATIVO, o padrão; CANCELADO; TODOS), `status_pagamento` e
+   * `busca` (descrição ou documento, sem acento); mais recentes primeiro (competência, depois o evento). {total, pagina,
+   * por_pagina, paginas, totais: {receitas, despesas} (do filtro inteiro, centavos), itens: [lancamento]}. A situação do
+   * pagamento, o aberto e o vencido são os de hoje.
+   */
+  function consultaLancamentos(filtros) {
+    var o = filtros || {};
+    return {
+      rota: 'financeiro.lancamentos', dados: o, reads: leiturasLancamentos(), acessoCru: true,
+      tratador: function (tx) {
+        var de = filtroData_(o, 'de');
+        var ate = filtroData_(o, 'ate');
+        if (de && ate && de > ate) throw Validation.erro('VALIDATION', 'O começo do período (' + br_(de) + ') está depois do fim (' + br_(ate) + ').', [det_('PERIODO_INVERTIDO', 'de', 'Período invertido.')]);
+        var natureza = filtroLista_(o, 'natureza', NATUREZAS, 'A natureza');
+        var tipo = filtroLista_(o, 'tipo', ['RECEITA', 'DESPESA'], 'O tipo');
+        var situacao = filtroLista_(o, 'situacao', SITUACOES_LANCAMENTO, 'A situação') || 'ATIVO';
+        var pagamento = filtroLista_(o, 'status_pagamento', PAGAMENTOS, 'A situação do pagamento');
+        var busca = vazio_(o.busca) ? null : Utils.normalizarTexto(String(o.busca));
+        var porPagina = typeof o.por_pagina === 'number' && o.por_pagina > 0 ? Math.min(Math.floor(o.por_pagina), POR_PAGINA_MAX) : Timeline.parametros(tx.repo).itens_por_pagina || 50;
+        var pagina = typeof o.pagina === 'number' && o.pagina >= 1 ? Math.floor(o.pagina) : 1;
+        var itens = [];
+        var totais = { receitas: 0, despesas: 0 };
+        tx.cru.cru('FINANCEIRO').forEach(function (fin) {
+          var sit = situacaoLancamento_(tx, fin);
+          if (sit === null || (situacao !== 'TODOS' && sit !== situacao)) return;
+          if ((de && fin.data_competencia < de) || (ate && fin.data_competencia > ate)) return;
+          if ((natureza && fin.natureza !== natureza) || (tipo && fin.tipo !== tipo)) return;
+          if ((!vazio_(o.conta_id) && fin.conta_id !== o.conta_id) || (!vazio_(o.partner_id) && fin.partner_id !== o.partner_id) || (!vazio_(o.pasture_id) && fin.pasture_id !== o.pasture_id)) return;
+          if (!vazio_(o.event_type) && (tx.cru.cruPorId('EVENTOS', fin.event_id) || {}).event_type !== o.event_type) return;
+          if (busca && Utils.normalizarTexto([fin.descricao, fin.documento].filter(function (x) { return !vazio_(x); }).join(' ')).indexOf(busca) < 0) return;
+          var item = lancamentoPublico_(tx, fin, tx.hoje);
+          if (pagamento && item.status_pagamento !== pagamento) return;
+          itens.push(item);
+          if (item.tipo === 'RECEITA') totais.receitas += item.valor; else totais.despesas += item.valor;
+        });
+        // Mais recentes primeiro: a competência, o lançamento do evento mais recente, o maior valor (o principal antes do frete e
+        // da dedução), e o identificador para a ordem ser a mesma em toda leitura.
+        itens.sort(function (a, b) {
+          return (a.data_competencia < b.data_competencia ? 1 : a.data_competencia > b.data_competencia ? -1 : 0) ||
+            ((b.event_seq || 0) - (a.event_seq || 0)) || (b.valor - a.valor) || (a.financial_id < b.financial_id ? -1 : 1);
+        });
+        var inicio = (pagina - 1) * porPagina;
+        return {
+          total: itens.length, pagina: pagina, por_pagina: porPagina, paginas: Math.max(1, Math.ceil(itens.length / porPagina)), totais: totais,
+          itens: itens.slice(inicio, inicio + porPagina).map(semInterno_),
+        };
+      },
+    };
+  }
+  /**
+   * Consulta `financeiro.lancamento` (o detalhe): o lançamento (a forma da lista), o evento que o criou e o que o anulou,
+   * as parcelas (todas, com a situação de hoje), o rateio vigente com as alocações por animal (o brinco de hoje e o código
+   * interno) e os anexos do lançamento. Lançamento inexistente, de operação que falhou ou de importação em curso → NOT_FOUND.
+   */
+  function consultaLancamento(dados) {
+    var o = dados || {};
+    return {
+      rota: 'financeiro.lancamento', dados: o, reads: leiturasLancamentos(), acessoCru: true,
+      tratador: function (tx) {
+        var fin = vazio_(o.financial_id) ? null : tx.cru.cruPorId('FINANCEIRO', o.financial_id);
+        if (!fin || situacaoLancamento_(tx, fin) === null) throw Validation.erro('NOT_FOUND', 'Lançamento financeiro não encontrado.');
+        var item = lancamentoPublico_(tx, fin, tx.hoje);
+        var ev = tx.cru.cruPorId('EVENTOS', fin.event_id);
+        var resumo = function (e) { return e ? { event_id: e.event_id, event_type: e.event_type, event_subtype: nulo_(e.event_subtype), rotulo: EventCatalog.existe(e.event_type) ? EventCatalog.tipo(e.event_type).rotulo : e.event_type, event_date: e.event_date, vigente: tx.cru.avaliar(e.event_id).vigente } : null; };
+        var rat = item._rateio.rateio;
+        var alocs = Utils.ordenarPor(item._rateio.alocacoes.map(function (a) {
+          var an = tx.cru.cruPorId('ANIMAIS', a.animal_id) || {};
+          return { animal_id: a.animal_id, codigo_interno: an.codigo_interno || null, brinco: nulo_(an.brinco), situacao_cadastral: an.situacao_cadastral || null, base_valor: a.base_valor, valor_alocado: a.valor_alocado || 0 };
+        }), 'codigo_interno');
+        return {
+          lancamento: semInterno_(item),
+          evento: resumo(ev),
+          referencia: vazio_(fin.ref_event_id) ? null : resumo(tx.cru.cruPorId('EVENTOS', fin.ref_event_id)),
+          anulado_por: item.cancelado_por_event_id ? resumo(tx.cru.cruPorId('EVENTOS', item.cancelado_por_event_id)) : null,
+          parcelas: item._todas.map(function (p) { return parcelaPublica_(p, fin, item.situacao, tx.hoje); }),
+          rateio: rat ? {
+            rateio_id: rat.rateio_id, event_id: rat.event_id, criterio: rat.criterio, escopo_tipo: nulo_(rat.escopo_tipo), escopo_ref: nulo_(rat.escopo_ref),
+            periodo_inicio: nulo_(rat.periodo_inicio), periodo_fim: nulo_(rat.periodo_fim), data_base: nulo_(rat.data_base), base_total: rat.base_total,
+            total_alocado: rat.total_alocado, justificativa: nulo_(rat.justificativa), vigente: item.situacao === 'ATIVO',
+          } : null,
+          alocacoes: alocs,
+          anexos: FileService.anexosDoEvento(tx.cru, fin.event_id).filter(function (a) { return a.financial_id === fin.financial_id; }),
+        };
+      },
+    };
+  }
+  function listarLancamentos(ctx, filtros) {
+    return UnitOfWork.read(ctx, consultaLancamentos(filtros));
+  }
+  function obterLancamento(ctx, dados) {
+    return UnitOfWork.read(ctx, consultaLancamento(dados));
+  }
+
   return {
     CONTAS: CONTAS,
     MODALIDADES: MODALIDADES,
@@ -901,5 +1107,11 @@ var FinancialService = (function () {
     basesEstimadas: basesEstimadas,
     titulos: titulos,
     blocoFicha: blocoFicha,
+    NATUREZAS: NATUREZAS,
+    leiturasLancamentos: leiturasLancamentos,
+    consultaLancamentos: consultaLancamentos,
+    consultaLancamento: consultaLancamento,
+    listarLancamentos: listarLancamentos,
+    obterLancamento: obterLancamento,
   };
 })();

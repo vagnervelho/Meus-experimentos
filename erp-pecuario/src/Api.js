@@ -20,9 +20,9 @@ var Api = (function () {
   /**
    * Telas carregadas sob demanda (01, seção 6.2; risco R-31): não entram na página inicial e vão ao aparelho pela rota
    * `sistema.tela` quando o menu abre o módulo. Arquivo → módulo do EventCatalog (que declara `tela` e `sob_demanda`
-   * quando o módulo é entregue). As das Fases 3 a 5 e a importação.
+   * quando o módulo é entregue). As das Fases 3 a 5, a importação e, desde a Fase 4 (folga na página inicial), Eventos e Configurações.
    */
-  var TELAS_SOB_DEMANDA = Object.freeze({ Import: 'IMPORTACAO', Weights: 'PESAGENS', Health: 'SANIDADE', Reproduction: 'REPRODUCAO', Financial: 'FINANCEIRO', Reports: 'RELATORIOS' });
+  var TELAS_SOB_DEMANDA = Object.freeze({ Import: 'IMPORTACAO', Weights: 'PESAGENS', Health: 'SANIDADE', Reproduction: 'REPRODUCAO', Financial: 'FINANCEIRO', Reports: 'RELATORIOS', Events: 'EVENTOS', Settings: 'CONFIGURACOES' });
   var AMBIENTES = Object.freeze(['PRODUCAO', 'TESTE', 'DEMO']);
   var FAIXA_TESTE = 'BASE DE TESTE';
   var PROP_DONO = 'OWNER_EMAIL';
@@ -141,6 +141,11 @@ var Api = (function () {
     'financeiro.custosAnimal': futura_(4, 'Financeiro'),
     // Os vencimentos do "Dividir em parcelas" (o aparelho não soma dias; CONTRATOS, seção 51).
     'financeiro.vencimentos': consulta_(function (ctx, p) { return semDados_(FinancialService.vencimentos(p.dados)); }),
+    // Fase 4, etapa BASE (CONTRATOS, seção 55): a lista e o detalhe dos lançamentos (tela Financeiro) e a conciliação das três
+    // visões (07, seção 2.1; sem tela no MVP: o teste CT-19, o teste aleatório e a conferência do dono).
+    'financeiro.lancamentos': consulta_(function (ctx, p) { return FinancialService.listarLancamentos(ctx, p.dados); }),
+    'financeiro.lancamento': consulta_(function (ctx, p) { return FinancialService.obterLancamento(ctx, p.dados); }),
+    'financeiro.conciliacao': consulta_(function (ctx, p) { return Conciliacao.consultar(ctx, p.dados); }),
     'sanidade.agenda': consulta_(function (ctx, p) { return HealthService.agenda(ctx, p.dados); }),
     'reproducao.indicadores': consulta_(function (ctx, p) { return ReproductionService.indicadores(ctx, p.dados); }),
     'reproducao.matrizes': consulta_(function (ctx, p) { return ReproductionService.matrizes(ctx, p.dados); }),

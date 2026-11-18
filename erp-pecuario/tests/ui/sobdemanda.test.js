@@ -25,7 +25,8 @@ test('importação sob demanda: fora da página inicial, pedida uma vez pelo men
   const { page } = a;
   await A.esperarTela(page, 'Configurações');
   assert.equal(await page.evaluate(() => typeof window.TelaImportacao), 'undefined', 'a página inicial não traz a importação');
-  assert.equal(telas(a).length, 0, 'nada é pedido antes de abrir o módulo');
+  // Desde a etapa BASE da Fase 4, as Configurações também vêm sob demanda (o endereço direto as pede na primeira carga).
+  assert.deepEqual(telas(a).map((p) => p.dados.nome), ['Settings'], 'nada além das Configurações é pedido antes de abrir o módulo');
   // A aba "Importação" aparece antes de a tela vir (o módulo é entregue e sob demanda).
   const aba = page.locator('#conteudo a[data-rota="importar"]');
   assert.equal(await aba.count(), 1);
@@ -36,7 +37,7 @@ test('importação sob demanda: fora da página inicial, pedida uma vez pelo men
   await page.evaluate(() => { window.__gas.atrasoMs = 20; });
   await A.esperarTela(page, 'Importação');
   assert.equal(await page.evaluate(() => typeof window.TelaImportacao.planoConfirmacao), 'function');
-  assert.deepEqual(telas(a).map((p) => p.dados), [{ nome: 'Import' }], 'um pedido só, da importação');
+  assert.deepEqual(telas(a).map((p) => p.dados).filter((d) => d.nome !== 'Settings'), [{ nome: 'Import' }], 'um pedido só, da importação');
   assert.equal(await page.locator('script[data-modulo="Import"]').count(), 1, 'injetada uma vez');
   assert.equal(await page.evaluate(() => document.activeElement && document.activeElement.tagName), 'H1', 'o foco vai para o título da tela que chegou');
   // Ir para outra tela e voltar (pelo histórico e pelo link): a tela já está na memória.
@@ -48,7 +49,7 @@ test('importação sob demanda: fora da página inicial, pedida uma vez pelo men
   // Rodada 2 da revisão da Fase 3 (achado 18): a Início traz em segundo plano as telas do curral e do tronco; a da importação
   // não é pedida de novo.
   assert.equal(telas(a).filter((p) => p.dados.nome === 'Import').length, 1, 'ir e voltar não pede a tela de novo');
-  assert.ok(telas(a).every((p) => ['Import', 'Weights', 'Reproduction'].indexOf(p.dados.nome) >= 0), JSON.stringify(telas(a).map((p) => p.dados)));
+  assert.ok(telas(a).every((p) => ['Import', 'Weights', 'Reproduction', 'Settings'].indexOf(p.dados.nome) >= 0), JSON.stringify(telas(a).map((p) => p.dados)));
   assert.equal(await page.locator('script[data-modulo="Import"]').count(), 1);
   assert.deepEqual(a.estado.erros, [], 'nenhum erro no console');
   await a.fechar();
@@ -95,10 +96,10 @@ test('endereço direto da importação: a tela vem na primeira carga; os módulo
   await A.esperarTela(page, 'Importação');
   assert.deepEqual(telas(a).map((p) => p.dados.nome), ['Import']);
   const menu = await textoTela(page, '#menu');
-  for (const m of ['Visão geral', 'Rebanho', 'Pastos', 'Eventos', 'Pesagens', 'Sanidade', 'Reprodução', 'Configurações']) assert.ok(menu.includes(m), m + ' no menu');
-  for (const m of ['Financeiro', 'Relatórios']) assert.ok(!menu.includes(m), m + ' ainda não está pronto: fora do menu');
+  for (const m of ['Visão geral', 'Rebanho', 'Pastos', 'Eventos', 'Pesagens', 'Sanidade', 'Reprodução', 'Financeiro', 'Configurações']) assert.ok(menu.includes(m), m + ' no menu');
+  for (const m of ['Relatórios']) assert.ok(!menu.includes(m), m + ' ainda não está pronto: fora do menu');
   // Rota de um módulo que ainda não foi entregue: a tela diz que não está disponível, sem pedir nada ao servidor.
-  await A.ir(page, 'financeiro/lancamentos', 'Tela não encontrada');
+  await A.ir(page, 'relatorios', 'Tela não encontrada');
   assert.equal(telas(a).length, 1);
   assert.deepEqual(a.estado.erros, [], 'nenhum erro no console');
   await a.fechar();

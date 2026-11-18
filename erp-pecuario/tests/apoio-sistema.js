@@ -55,8 +55,13 @@ function sistema(opcoes) {
     evento: (acao, dados, chave, avisos) => s.exec((ctx) => G.EventService[acao](ctx, { idempotencyKey: chave || 'ev-' + Math.random(), dados, avisosAceitos: avisos || [] })),
     integridade: () => s.exec((ctx) => G.AuditService.verificarIntegridade(ctx)).dados,
     conferirProjecoes: (msg) => {
-      const dif = s.read({ rota: 'teste.projecoes', reads: G.Timeline.porta().reads, acessoCru: true, tratador: (tx) => G.Timeline.conferir(tx) });
-      assert.deepEqual(dif, [], 'projeção gravada = reconstrução (' + (msg || '') + ')');
+      // Fase 4, etapa BASE: também a identidade das três visões (07, seção 2.1) no fim de cada mês até hoje (Conciliacao).
+      const r = s.read({
+        rota: 'teste.projecoes', reads: G.Timeline.porta().reads.concat(G.Conciliacao.leituras()), acessoCru: true,
+        tratador: (tx) => ({ dif: G.Timeline.conferir(tx), conc: tx.hoje ? G.Conciliacao.conferir(G.Conciliacao.fatos(tx), tx.hoje).problemas : [] }),
+      });
+      assert.deepEqual(r.dif, [], 'projeção gravada = reconstrução (' + (msg || '') + ')');
+      assert.deepEqual(r.conc, [], 'a identidade das três visões fecha ao centavo em todo fim de mês (' + (msg || '') + ')');
     },
     /** Número da linha (planilha) do registro e o índice (1) da coluna, para editar à mão. */
     posicao: (aba, idReg, coluna) => {

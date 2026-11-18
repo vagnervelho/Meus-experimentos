@@ -4337,6 +4337,10 @@ const CADASTROS_TEMPO = {
   ind: ['est', 'cat', P_REPRO], mat: ['est', P_REPRO], matE: ['est', P_REPRO],
   eventos: [],
   ficha: ['cat', 'pasto', 'est', 'protTodos', 'listas', 'contas', P_INV.concat(P_GMD, P_AGENDA, P_REPRO)],
+  // Fase 4 (etapa BASE): a conciliação lê a conta do saldo de abertura pelo código; a lista dos lançamentos, os nomes da conta,
+  // do parceiro, do pasto e do produto como estão hoje.
+  conc: ['contas'],
+  lanc: ['contas', 'pasto', 'prod'],
 };
 /** Índices do estado para as impressões digitais (uma vez por estado). */
 function indiceTempo(S) {
@@ -4440,6 +4444,8 @@ function digitalUnidade(S, u, semAtivoCat) {
 }
 const escolher = (o, campos) => { const x = {}; campos.forEach((c) => { x[c] = o && o[c] !== undefined ? o[c] : null; }); return x; };
 const sem = (o, campos) => { if (!o || typeof o !== 'object') return o; const x = Object.assign({}, o); campos.forEach((c) => { delete x[c]; }); return x; };
+/** Os campos da lista de lançamentos que são de hoje por desenho (o pagamento, o aberto, o vencido; quem cancelou). */
+const LANCAMENTO_DE_HOJE = ['status_pagamento', 'data_pagamento', 'em_aberto', 'vencido', 'proximo_vencimento', 'cancelado_por_event_id'];
 /**
  * As consultas numa data D, em unidades {grupo, chave, animal, D, valor}. T: {D, animais, amostra, pastos, estacoes,
  * categoria, fichas}. opcoes: {semData: o caminho padrão (sem a data: hoje), grupos: Set (só estes grupos)}.
@@ -4547,6 +4553,14 @@ function bateriaTempo(sis, T, opcoes) {
   }
   // 8. Os lançamentos até D (com a situação de cada um).
   if (quer('eventos')) add('eventos', 'eventos', chamar('evento.listar', dd('ate', { por_pagina: 500 })));
+  // 10. O financeiro em D (Fase 4, etapa BASE; CONTRATOS, seção 55): a conciliação das três visões até D (os termos de cada fim
+  // de mês e do período) e a lista dos lançamentos com competência até D (os que valem e os cancelados). Na lista, a situação do
+  // pagamento, o valor em aberto, o vencido e o próximo vencimento são os de hoje, por desenho; o lançamento que cancelou também.
+  if (quer('conc')) add('conc', 'conc', chamar('financeiro.conciliacao', dd('ate', {})));
+  if (quer('lanc')) {
+    const r = chamar('financeiro.lancamentos', dd('ate', { situacao: 'TODOS', por_pagina: 500 }));
+    add('lanc', 'lanc', r && r.recusa ? r : Object.assign(sem(r, ['itens']), { itens: (r.itens || []).map((x) => sem(x, LANCAMENTO_DE_HOJE)) }));
+  }
   // 9. A ficha de quem saiu do rebanho: os cálculos dela são da data da saída (as listas de hoje ficam fora: as crias, os
   // eventos, a genealogia, os anexos, o financeiro, o touro dos registros das fêmeas).
   if (quer('ficha')) {
@@ -5054,7 +5068,7 @@ function soContagemPosterior(r) {
   return !!r.error && r.error.code === 'CONFLICT' && det.length > 0 && det.every((d) => d.codigo === 'CONTAGEM_POSTERIOR');
 }
 /** As consultas da bateria da viagem no tempo em D (sem a lista dos lançamentos, conferida à parte pela lista dos que valem). */
-const GRUPOS_B4 = new Set(['pos', 'posA', 'eleg', 'pasto', 'pastos', 'painel', 'perm', 'agenda', 'ind', 'mat', 'matE', 'desemp', 'dash', 'ficha']);
+const GRUPOS_B4 = new Set(['pos', 'posA', 'eleg', 'pasto', 'pastos', 'painel', 'perm', 'agenda', 'ind', 'mat', 'matE', 'desemp', 'dash', 'ficha', 'conc']);
 function bateriaCorrecao(sis, S, D) {
   const vivos = Array.from(S.animais.values()).filter((a) => a.situacao_cadastral !== 'EXTERNO').sort((a, b) => cmp(a.codigo_interno || '', b.codigo_interno || ''));
   const T = {
@@ -5526,6 +5540,9 @@ function executar(sis, k, cmd, antesT, opcoes) {
     if (datas.length && datas[0] !== HOJE) falhas.push(...oraculoAgenda(sis, S, datas[0]));
     falhas.push(...oraculoManejo(sis, S, r.ok && r.data && Array.isArray(r.data.animais) ? r.data.animais.map((a) => a.animal_id) : []));
   }
+  // Fase 4, etapa BASE: a identidade das três visões (07, seção 2.1) ao centavo, no fim de cada mês e no período inteiro, e os
+  // termos de hoje contra o modelo tirado das linhas cruas, depois de todo passo que gravou.
+  if (!o.semGlobal && (gravou || k === 0)) falhas.push(...oraculoConciliacao(sis, S));
   // Viagem no tempo (conserto da Fase 3 pela garantia, etapa 1): a comparação do retrato numa data D depois de cada passo que
   // gravou, e o retrato pedido neste passo.
   if (!o.semGlobal) falhas.push(...oraculoTempo(sis, cmd, A, S, k, gravou));
@@ -5533,6 +5550,48 @@ function executar(sis, k, cmd, antesT, opcoes) {
   // sobre o estado deste passo, que volta a ele no fim.
   if (!o.semGlobal && cmd.correcao) falhas.push(...oraculoCorrecao(sis, S, k, cmd.correcao));
   return { falhas, r, depoisT, S };
+}
+
+/**
+ * Fase 4, etapa BASE (CONTRATOS, seção 55): a conciliação das três visões até hoje (`financeiro.conciliacao`) fecha ao
+ * centavo no fim de cada mês e no período inteiro, a soma dos meses é a do período (o servidor confere e devolve `problemas`),
+ * e os termos de hoje batem com o modelo tirado das linhas cruas, sem o código do servidor: o caixa e o a receber e a pagar
+ * pelas parcelas dos lançamentos que valem (fora o histórico anterior ao marco zero), os insumos (compras − consumos), o saldo
+ * de abertura, o não operacional e o custo de aquisição do rebanho ativo = a soma da projeção `custo_aquisicao` dos animais no
+ * rebanho (a mesma conta por outro caminho: as alocações pela permanência × a projeção).
+ */
+const CONTA_ABERTURA = 'SALDO_ABERTURA_REBANHO';
+function oraculoConciliacao(sis, S) {
+  const r = sis.api('financeiro.conciliacao', { ate: HOJE });
+  if (!r.ok) return [falha('CONCILIACAO:RECUSA', 'a conciliação até ' + HOJE + ' foi recusada: ' + r.error.code + ' ' + r.error.message)];
+  const c = r.data;
+  contar('conciliação: conferida');
+  contar('conciliação: meses conferidos', c.meses.length);
+  const out = [];
+  if (!c.fecha) out.push(falha('CONCILIACAO:IDENTIDADE', c.problemas.slice(0, 3).join(' | ')));
+  const contas = new Map(S.t.PLANO_CONTAS.map((x) => [x.conta_id, x]));
+  const lancs = new Map(S.t.FINANCEIRO.filter((f) => S.vig.get(f.event_id) && !(S.ev.get(f.event_id) || {}).pre_marco_zero && f.data_competencia <= HOJE).map((f) => [f.financial_id, f]));
+  const m = { caixa_acumulado: 0, a_receber: 0, a_pagar: 0, insumos_estoque: 0, saldo_abertura: 0, nao_operacional: 0, custo_rebanho_ativo: 0 };
+  S.t.PARCELAS.forEach((p) => {
+    const f = lancs.get(p.financial_id);
+    if (!f || p.status === 'CANCELADA') return;
+    if (p.status === 'LIQUIDADA' && p.data_pagamento && p.data_pagamento <= HOJE) { m.caixa_acumulado += (f.tipo === 'RECEITA' ? 1 : -1) * p.valor_pago; return; }
+    if (f.tipo === 'RECEITA') m.a_receber += p.valor; else m.a_pagar += p.valor;
+  });
+  lancs.forEach((f) => {
+    if (f.natureza === 'ESTOQUE_INSUMOS') m.insumos_estoque += f.valor;
+    if (f.natureza === 'CUSTEIO' && f.product_id) m.insumos_estoque -= f.valor;
+    if ((contas.get(f.conta_id) || {}).codigo === CONTA_ABERTURA) m.saldo_abertura += f.valor;
+    if (f.natureza === 'NAO_OPERACIONAL') m.nao_operacional += f.tipo === 'RECEITA' ? f.valor : -f.valor;
+  });
+  S.animais.forEach((a) => { if (a.situacao_cadastral === 'ATIVO' && typeof a.custo_aquisicao === 'number') m.custo_rebanho_ativo += a.custo_aquisicao; });
+  const t = c.periodo.termos;
+  Object.keys(m).forEach((k) => { if (t[k] !== m[k] && out.length < 3) out.push(falha('CONCILIACAO:' + k.toUpperCase(), 'em ' + HOJE + ', o termo ' + k + ' da conciliação é ' + t[k] + ' e o modelo das linhas cruas dá ' + m[k])); });
+  if (m.custo_rebanho_ativo) contar('conciliação: custo do rebanho ativo conferido com a projeção');
+  if (t.saldo_abertura) contar('conciliação: com saldo de abertura');
+  if (t.insumos_estoque) contar('conciliação: com insumos em estoque');
+  if (c.periodo.resultado.custo_aquisicao.total) contar('conciliação: com custo de aquisição de quem saiu');
+  return out;
 }
 
 /** Passada 4: a política de avisos em vigor antes do comando ({código: BLOQUEIA|AVISA|IGNORA}). */

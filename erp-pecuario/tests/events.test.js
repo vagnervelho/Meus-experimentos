@@ -24,11 +24,12 @@ function falha(m, acao, dados, op) {
 }
 
 // ------------------------------------------------------------------ catálogo ----
-test('catálogo: 21 tipos; na Fase 3 (E3.1 a E3.5), os da Fase 2 — entradas, nascimento, compra, venda, transferência, morte, descarte, identificação, marcação, os cinco ajustes e estorno — mais a pesagem, a sanidade, a reprodução, a desmama, a castração, a ocorrência e o estoque; módulos por fase; serialização é só dado', () => {
+test('catálogo: 21 tipos; na Fase 4 (etapa BASE), os mesmos da Fase 3 (o lançamento financeiro e o rateio ainda sem campos); na Fase 3 (E3.1 a E3.5), os da Fase 2 — entradas, nascimento, compra, venda, transferência, morte, descarte, identificação, marcação, os cinco ajustes e estorno — mais a pesagem, a sanidade, a reprodução, a desmama, a castração, a ocorrência e o estoque; módulos por fase; serialização é só dado', () => {
   const G = createGas({ order: 'alpha' }).G;
   const C = G.EventCatalog;
   assert.equal(C.nomes().length, 21);
-  assert.equal(C.FASE_ATUAL, 3);
+  assert.equal(C.FASE_ATUAL, 4);
+  assert.deepEqual(js(C.tiposAtivos()), js(C.tiposAtivos(3)), 'a etapa BASE da Fase 4 não muda os tipos: os da Fase 4 entram com os campos deles');
   // Os tipos da Fase 3 ficam inativos até terem campos: a pesagem (E3.1), a sanidade e o estoque (E3.2 e E3.3), a reprodução,
   // a desmama, a castração e a ocorrência (E3.4 e E3.5) já têm.
   assert.deepEqual(js(C.tiposAtivos()), ['ENTRADA_INICIAL', 'OUTRA_ENTRADA', 'NASCIMENTO', 'COMPRA', 'VENDA', 'TRANSFERENCIA', 'MORTE', 'DESCARTE', 'PESAGEM', 'SANIDADE', 'REPRODUCAO', 'DESMAMA', 'CASTRACAO', 'IDENTIFICACAO', 'MARCACAO', 'AJUSTE_INVENTARIO', 'OCORRENCIA', 'ESTOQUE', 'ESTORNO']);
@@ -48,7 +49,8 @@ test('catálogo: 21 tipos; na Fase 3 (E3.1 a E3.5), os da Fase 2 — entradas, n
   assert.deepEqual([C.ativo('IDENTIFICACAO', 'REMOCAO'), C.ativo('IDENTIFICACAO', 'REMOCAO', 1), C.ativo('MARCACAO', 'NAO_LOCALIZADO'), C.ativo('MARCACAO', 'OUTRO')], [true, false, true, false]);
   assert.deepEqual(js(C.camposEvento('MARCACAO', 'DESCARTE').map((c) => c.id)), ['event_date', 'acao', 'property_id', 'responsible', 'notes', 'motivo_descarte'], 'campo de cabeçalho do subtipo');
   assert.deepEqual(js(C.camposEvento('MARCACAO', 'NAO_LOCALIZADO').map((c) => c.id)), ['event_date', 'acao', 'property_id', 'responsible', 'notes']);
-  assert.deepEqual(js(C.modulosAtivos().map((x) => x.id)), ['DASHBOARD', 'REBANHO', 'PASTOS', 'EVENTOS', 'PESAGENS', 'SANIDADE', 'REPRODUCAO', 'CONFIGURACOES', 'IMPORTACAO']);
+  assert.deepEqual(js(C.modulosAtivos().map((x) => x.id)), ['DASHBOARD', 'REBANHO', 'PASTOS', 'EVENTOS', 'PESAGENS', 'SANIDADE', 'REPRODUCAO', 'FINANCEIRO', 'CONFIGURACOES', 'IMPORTACAO']);
+  assert.deepEqual(js(C.modulosAtivos(3).map((x) => x.id)), ['DASHBOARD', 'REBANHO', 'PASTOS', 'EVENTOS', 'PESAGENS', 'SANIDADE', 'REPRODUCAO', 'CONFIGURACOES', 'IMPORTACAO'], 'a Fase 3 continua com os mesmos módulos');
   assert.deepEqual(js(C.modulosAtivos(2).map((x) => x.id)), ['DASHBOARD', 'REBANHO', 'PASTOS', 'EVENTOS', 'CONFIGURACOES', 'IMPORTACAO'], 'a Fase 2 continua com os mesmos módulos');
   // O menu chega aos 10 itens da §15 na Fase 5, cada um quando a tela dele é entregue: módulo da fase sem a tela
   // (Financeiro e Relatórios, até as fases deles) não fica ativo, como o tipo sem campos.
@@ -59,9 +61,10 @@ test('catálogo: 21 tipos; na Fase 3 (E3.1 a E3.5), os da Fase 2 — entradas, n
   assert.deepEqual(js(C.modulo('PESAGENS')), { id: 'PESAGENS', rotulo: 'Pesagens', ordem: 5, fase: 3, menu: true, tela: 'Weights', sob_demanda: true, rotas: ['pesagens'] });
   assert.deepEqual(js(C.modulo('SANIDADE')), { id: 'SANIDADE', rotulo: 'Sanidade', ordem: 6, fase: 3, menu: true, tela: 'Health', sob_demanda: true, rotas: ['sanidade'] }, 'Sanidade entregue na E3.3, sob demanda');
   assert.deepEqual(js(C.modulo('REPRODUCAO')), { id: 'REPRODUCAO', rotulo: 'Reprodução', ordem: 7, fase: 3, menu: true, tela: 'Reproduction', sob_demanda: true, rotas: ['reproducao'] }, 'Reprodução entregue na E3.4 e E3.5, sob demanda');
-  assert.deepEqual(js(C.modulo('FINANCEIRO')), { id: 'FINANCEIRO', rotulo: 'Financeiro', ordem: 8, fase: 4, menu: true }, 'Financeiro ainda sem tela');
+  assert.deepEqual(js(C.modulo('FINANCEIRO')), { id: 'FINANCEIRO', rotulo: 'Financeiro', ordem: 8, fase: 4, menu: true, tela: 'Financial', sob_demanda: true, rotas: ['financeiro'] }, 'Financeiro entregue na etapa BASE da Fase 4, sob demanda');
+  assert.deepEqual(js(C.modulo('RELATORIOS')), { id: 'RELATORIOS', rotulo: 'Relatórios', ordem: 9, fase: 5, menu: true }, 'Relatórios ainda sem tela');
   assert.equal(C.modulo('XPTO'), null);
-  assert.deepEqual(js(C.modulosAtivos().filter((x) => x.sob_demanda).map((x) => [x.id, x.tela, x.rotas])), [['PESAGENS', 'Weights', ['pesagens']], ['SANIDADE', 'Health', ['sanidade']], ['REPRODUCAO', 'Reproduction', ['reproducao']], ['IMPORTACAO', 'Import', ['importar']]], 'as pesagens, a sanidade, a reprodução e a importação são carregadas sob demanda');
+  assert.deepEqual(js(C.modulosAtivos().filter((x) => x.sob_demanda).map((x) => [x.id, x.tela, x.rotas])), [['EVENTOS', 'Events', ['eventos', 'evento']], ['PESAGENS', 'Weights', ['pesagens']], ['SANIDADE', 'Health', ['sanidade']], ['REPRODUCAO', 'Reproduction', ['reproducao']], ['FINANCEIRO', 'Financial', ['financeiro']], ['CONFIGURACOES', 'Settings', ['config']], ['IMPORTACAO', 'Import', ['importar']]], 'as pesagens, a sanidade, a reprodução, o financeiro e a importação são carregados sob demanda; desde a Fase 4, também os eventos e as configurações (folga na página inicial)');
   const s = C.serializar();
   const copia = JSON.parse(JSON.stringify(s));
   assert.deepEqual(js(s), copia, 'ida e volta por JSON sem perda (nada de função ou Date)');

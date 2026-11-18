@@ -83,7 +83,9 @@ test('página compactada (Api.compactar): sem recuo, linha vazia nem linha só d
   });
   // Página montada = includes compactados; o tamanho que vai ao aparelho cabe no orçamento de 450 KB.
   const html = doGet(s).getContent();
-  ['Components', 'Events'].forEach((n) => assert.ok(html.includes(c(ler(n + '.html'))), n + ' entra compactado'));
+  ['Components', 'Animals'].forEach((n) => assert.ok(html.includes(c(ler(n + '.html'))), n + ' entra compactado'));
+  // Desde a etapa BASE da Fase 4, Eventos e Configurações vêm sob demanda (CONTRATOS, seção 55): fora da página inicial.
+  ['Events', 'Settings', 'Financial'].forEach((n) => assert.ok(!html.includes(c(ler(n + '.html'))), n + ' fora da página inicial')); 
   assert.ok(Buffer.byteLength(html, 'utf8') <= 450 * 1024, 'página montada: ' + Math.round(Buffer.byteLength(html, 'utf8') / 1024) + ' KB');
 });
 

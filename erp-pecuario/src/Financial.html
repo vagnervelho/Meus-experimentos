@@ -1,0 +1,179 @@
+<script>
+'use strict';
+/*
+ * ERP Pecuário — Financeiro (Fase 4), carregado sob demanda (01, seção 6.2; CONTRATOS, seções 37 e 55). Etapa BASE: a lista
+ * dos lançamentos que já existem (os das compras, vendas, mortes, descartes, aberturas, sanidade e estoque, desde a Fase 2),
+ * com os filtros, e o detalhe de cada um: a conta e a natureza, a competência, as parcelas com a situação de hoje, o rateio
+ * entre os animais e o que ficou sem alocar, o lançamento que o criou e o que o anulou (08, seção 3, "Financeiro:
+ * lançamentos").
+ *
+ * Todo número vem pronto do servidor (P5; CONTRATOS, seção 51): os totais do filtro, as páginas, o valor em aberto e o
+ * vencido, a situação de cada parcela e os dias de atraso, o alocado e o não alocado. A tela só filtra, mostra e leva ao
+ * lançamento de origem.
+ */
+var TelaFinanceiro = (function () {
+  var h = Util.h;
+  /** A parcela na linguagem do pecuarista (o servidor manda a situação de hoje; 03b, seção 10.4). */
+  var SITUACAO_PARCELA = {
+    PAGA: 'Paga', RECEBIDA: 'Recebida', A_PAGAR: 'A pagar', A_RECEBER: 'A receber', VENCIDA: 'Vencida',
+    SUBSTITUIDA: 'Substituída (baixa em parte)', SEM_EFEITO: 'Sem efeito (lançamento cancelado)',
+  };
+  var SITUACOES = [['ATIVO', 'Os que valem'], ['CANCELADO', 'Os cancelados'], ['TODOS', 'Todos']];
+  var PAGAMENTOS = [['', 'Qualquer'], ['ABERTO', 'Em aberto'], ['PARCIAL', 'Pago em parte'], ['LIQUIDADO', 'Pago'], ['SEM_CAIXA', 'Sem pagamento (não é caixa)']];
+  var filtros = { de: '', ate: '', tipo: '', natureza: '', conta_id: '', partner_id: '', pasture_id: '', situacao: 'ATIVO', status_pagamento: '', busca: '', pagina: 1 };
+
+  function campo(id, rotulo, controle) {
+    return h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo', for: id, text: rotulo }), controle);
+  }
+  function link(rota, texto) { return h('a', { class: 'botao botao-texto', href: Roteador.href(rota), dataset: { rota: rota } }, texto); }
+  function selecao(id, opcoes, valor) {
+    return h('select', { id: id }, opcoes.map(function (o) { return h('option', { value: o[0], text: o[1], selected: o[0] === valor }); }));
+  }
+  function competencia(l) {
+    return l.competencia_inicio ? Fmt.data(l.competencia_inicio) + ' a ' + Fmt.data(l.competencia_fim) : Fmt.data(l.data_competencia);
+  }
+  function situacao(l) {
+    return l.situacao === 'CANCELADO' ? 'Cancelado' : Fmt.rotulo('STATUS_PAGAMENTO', l.status_pagamento);
+  }
+  function origem(l) {
+    return l.event_type ? l.rotulo_evento + ' de ' + Fmt.data(l.event_date) : '—';
+  }
+  function nomeLancamento(l) { return l.descricao || l.conta_nome || Fmt.rotulo('NATUREZA', l.natureza); }
+
+  // ------------------------------------------------------------------ lista ----
+  function montarLista(el) {
+    var vivo = true;
+    el.appendChild(h('div', { class: 'tela-cabecalho' }, h('h1', { text: 'Financeiro' })));
+    el.appendChild(UI.nota('Os lançamentos das compras, vendas, mortes, descartes, aberturas do rebanho, aplicações e entradas de estoque. Para mudar um deles, abra o lançamento de origem e corrija ou estorne.', 'info'));
+    var de = h('input', { type: 'date', id: 'fin-de', value: filtros.de });
+    var ate = h('input', { type: 'date', id: 'fin-ate', value: filtros.ate });
+    var tipo = selecao('fin-tipo', [['', 'Receitas e despesas'], ['RECEITA', 'Só receitas'], ['DESPESA', 'Só despesas']], filtros.tipo);
+    var natureza = selecao('fin-natureza', [['', 'Todas']].concat(Object.keys(Fmt.ROTULOS.NATUREZA).map(function (k) { return [k, Fmt.ROTULOS.NATUREZA[k]]; })), filtros.natureza);
+    var conta = selecao('fin-conta', [['', 'Todas']].concat(Store.contas().map(function (c) { return [c.conta_id, c.nome]; })), filtros.conta_id);
+    var parceiro = selecao('fin-parceiro', [['', 'Todos']].concat(Store.parceiros().map(function (p) { return [p.partner_id, p.nome]; })), filtros.partner_id);
+    var pasto = selecao('fin-pasto', [['', 'Todos']].concat(Store.pastos({ todos: true }).map(function (p) { return [p.pasture_id, p.nome]; })), filtros.pasture_id);
+    var sit = selecao('fin-situacao', SITUACOES, filtros.situacao);
+    var pag = selecao('fin-pagamento', PAGAMENTOS, filtros.status_pagamento);
+    var busca = h('input', { type: 'search', id: 'fin-busca', value: filtros.busca, autocomplete: 'off', placeholder: 'descrição ou documento' });
+    el.appendChild(h('form', { class: 'filtros', role: 'search', 'aria-label': 'Filtrar lançamentos', on: { submit: function (ev) { ev.preventDefault(); filtros.pagina = 1; carregar(); } } },
+      campo('fin-de', 'Competência de', de), campo('fin-ate', 'até', ate), campo('fin-tipo', 'Tipo', tipo), campo('fin-natureza', 'Natureza', natureza),
+      campo('fin-conta', 'Conta', conta), campo('fin-parceiro', 'Parceiro', parceiro), campo('fin-pasto', 'Pasto', pasto),
+      campo('fin-situacao', 'Situação', sit), campo('fin-pagamento', 'Pagamento', pag), campo('fin-busca', 'Buscar', busca),
+      UI.botao('Filtrar', { tipo: 'primario', atributos: { type: 'submit' } })));
+    var resumo = h('p', { class: 'dado', role: 'status', dataset: { resumoFinanceiro: '1' } });
+    var corpo = h('div');
+    el.appendChild(resumo);
+    el.appendChild(corpo);
+    async function carregar() {
+      filtros.de = de.value; filtros.ate = ate.value; filtros.tipo = tipo.value; filtros.natureza = natureza.value; filtros.conta_id = conta.value;
+      filtros.partner_id = parceiro.value; filtros.pasture_id = pasto.value; filtros.situacao = sit.value; filtros.status_pagamento = pag.value; filtros.busca = busca.value.trim();
+      Util.limpar(corpo);
+      resumo.textContent = '';
+      corpo.appendChild(UI.carregando('Buscando os lançamentos…'));
+      try {
+        var q = { pagina: filtros.pagina, situacao: filtros.situacao };
+        ['de', 'ate', 'tipo', 'natureza', 'conta_id', 'partner_id', 'pasture_id', 'status_pagamento', 'busca'].forEach(function (k) { if (filtros[k]) q[k] = filtros[k]; });
+        var r = (await Cliente.consulta('financeiro.lancamentos', q)).data;
+        if (!vivo) return;
+        Util.limpar(corpo);
+        resumo.textContent = r.total + (r.total === 1 ? ' lançamento' : ' lançamentos') + ' · receitas ' + Fmt.dinheiro(r.totais.receitas) + ' · despesas ' + Fmt.dinheiro(r.totais.despesas);
+        corpo.appendChild(UI.tabela({
+          id: 'lancamentos', rotulo: 'Lançamentos financeiros', linhas: r.itens, chave: function (l) { return l.financial_id; }, porPagina: r.por_pagina, semPaginacao: true,
+          vazio: { texto: 'Nenhum lançamento com esses filtros.' },
+          colunas: [
+            { id: 'data_competencia', rotulo: 'Competência', formatar: competencia },
+            { id: 'descricao', rotulo: 'Lançamento', valor: nomeLancamento, formatar: function (l) { return link('financeiro/lancamento/' + l.financial_id, nomeLancamento(l)); } },
+            { id: 'conta_nome', rotulo: 'Conta' },
+            { id: 'tipo', rotulo: 'Tipo', valor: function (l) { return l.tipo === 'RECEITA' ? 'Receita' : 'Despesa'; } },
+            { id: 'valor', rotulo: 'Valor', num: true, formatar: function (l) { return Fmt.dinheiro(l.valor); } },
+            { id: 'situacao', rotulo: 'Situação', valor: situacao },
+            { id: 'parceiro', rotulo: 'Parceiro' },
+            { id: 'origem', rotulo: 'Origem', valor: origem },
+            { id: 'nao_alocado', rotulo: 'Sem alocar aos animais', num: true, formatar: function (l) { return l.nao_alocado === null ? '—' : Fmt.dinheiro(l.nao_alocado); } },
+          ],
+        }).el);
+        if (r.paginas > 1) {
+          corpo.appendChild(h('div', { class: 'paginacao' }, h('span', { class: 'suave', text: 'Página ' + r.pagina + ' de ' + r.paginas }), h('div', { class: 'acoes', style: 'margin-top:0' },
+            UI.botao('Anterior', { desabilitado: r.pagina <= 1, aoClicar: function () { filtros.pagina = r.pagina - 1; carregar(); } }),
+            UI.botao('Próxima', { desabilitado: r.pagina >= r.paginas, aoClicar: function () { filtros.pagina = r.pagina + 1; carregar(); } }))));
+        }
+      } catch (e) {
+        if (!vivo) return;
+        Util.limpar(corpo);
+        corpo.appendChild(UI.estadoErro(e, { acao: { texto: 'Tentar de novo', aoClicar: carregar } }));
+      }
+    }
+    carregar();
+    return function () { vivo = false; };
+  }
+
+  // ------------------------------------------------------------------ detalhe ----
+  function nomeAnimal(a) { return a.brinco || a.codigo_interno || 'animal'; }
+  function linkEvento(e) { return e ? link('evento/' + e.event_id, e.rotulo + ' de ' + Fmt.data(e.event_date) + (e.vigente ? '' : ' (não vale mais)')) : null; }
+  function montarDetalhe(el, p) {
+    var vivo = true;
+    var titulo = h('h1', { text: 'Lançamento financeiro' });
+    var corpo = h('div', null, UI.carregando('Buscando o lançamento…'));
+    el.appendChild(h('div', { class: 'tela-cabecalho' }, titulo, link('financeiro/lancamentos', 'Todos os lançamentos')));
+    el.appendChild(corpo);
+    Cliente.consulta('financeiro.lancamento', { financial_id: p.id }).then(function (r) {
+      if (!vivo) return;
+      var o = r.data, l = o.lancamento;
+      titulo.textContent = nomeLancamento(l);
+      Util.limpar(corpo);
+      corpo.appendChild(UI.secao('Lançamento', UI.pares([
+        ['Valor', Fmt.dinheiro(l.valor)], ['Tipo', l.tipo === 'RECEITA' ? 'Receita' : 'Despesa'], ['Conta', l.conta_nome], ['Natureza', Fmt.rotulo('NATUREZA', l.natureza)],
+        ['Competência', competencia(l)], ['Situação', l.situacao === 'CANCELADO' ? 'Cancelado: não vale mais' : 'Vale'], ['Pagamento', situacao(l)],
+        l.em_aberto ? ['Em aberto hoje', Fmt.dinheiro(l.em_aberto) + (l.vencido ? ' (vencido: ' + Fmt.dinheiro(l.vencido) + ')' : '')] : null,
+        l.proximo_vencimento ? ['Próximo vencimento', Fmt.data(l.proximo_vencimento)] : null,
+        ['Parceiro', l.parceiro], l.pasto ? ['Pasto', l.pasto] : null, l.produto ? ['Produto', l.produto + (l.quantidade !== null ? ' · ' + Fmt.numero(l.quantidade, Fmt.casas(l.quantidade)) : '')] : null,
+        l.retida_pelo_comprador ? ['Retenção', 'descontada pelo comprador no recebimento da venda'] : null,
+        ['Documento', l.documento], ['Observações', l.observacoes],
+        ['Criado por', linkEvento(o.evento)], o.referencia ? ['Refere-se a', linkEvento(o.referencia)] : null, o.anulado_por ? ['Cancelado por', linkEvento(o.anulado_por)] : null,
+        l.pre_marco_zero ? ['Histórico', 'anterior ao marco zero: sem efeito no caixa'] : null,
+      ].filter(Boolean)), { dado: 'lancamento' }));
+      corpo.appendChild(UI.secao('Parcelas', o.parcelas.length ? UI.tabela({
+        id: 'parcelas', rotulo: 'Parcelas do lançamento', linhas: o.parcelas, chave: function (x) { return x.parcela_id; }, semPaginacao: true,
+        colunas: [
+          { id: 'parcela_num', rotulo: 'Nº', num: true },
+          { id: 'data_vencimento', rotulo: 'Vencimento', formatar: function (x) { return Fmt.data(x.data_vencimento); } },
+          { id: 'valor', rotulo: 'Valor', num: true, formatar: function (x) { return Fmt.dinheiro(x.valor); } },
+          { id: 'situacao', rotulo: 'Situação', valor: function (x) { return (SITUACAO_PARCELA[x.situacao] || Fmt.rotulo('', x.situacao)) + (x.dias_atraso ? ' há ' + x.dias_atraso + (x.dias_atraso === 1 ? ' dia' : ' dias') : ''); } },
+          { id: 'data_pagamento', rotulo: 'Pagamento', formatar: function (x) { return x.data_pagamento ? Fmt.data(x.data_pagamento) : '—'; } },
+          { id: 'valor_pago', rotulo: 'Valor pago', num: true, formatar: function (x) { return x.valor_pago === null ? '—' : Fmt.dinheiro(x.valor_pago); } },
+          { id: 'forma_pagamento', rotulo: 'Forma', valor: function (x) { return x.forma_pagamento ? Store.rotuloLista('FORMA_PAGAMENTO', x.forma_pagamento) : '—'; } },
+        ],
+      }).el : h('p', { class: 'suave', text: 'Sem parcela: este lançamento não passa pelo caixa (consumo de insumo, saldo de abertura ou registro anterior ao marco zero).' }), { dado: 'parcelas' }));
+      if (o.rateio || l.nao_alocado !== null) {
+        var rat = o.rateio;
+        corpo.appendChild(UI.secao('Divisão entre os animais', h('div', null,
+          UI.pares([
+            ['Critério', rat ? Fmt.rotulo('CRITERIO_RATEIO', rat.criterio) : 'sem rateio'],
+            ['Distribuído', Fmt.dinheiro(l.alocado)], ['Sem alocar', Fmt.dinheiro(l.nao_alocado)],
+            rat && !rat.vigente ? ['Rateio', 'sem efeito: o lançamento foi cancelado'] : null,
+            rat && rat.justificativa ? ['Justificativa', rat.justificativa] : null,
+          ].filter(Boolean)),
+          o.alocacoes.length ? UI.tabela({
+            id: 'alocacoes', rotulo: 'Valor por animal', linhas: o.alocacoes, chave: function (x) { return x.animal_id; },
+            colunas: [
+              { id: 'animal', rotulo: 'Animal', valor: nomeAnimal, formatar: function (x) { return link('animal/' + x.animal_id + '/financeiro', nomeAnimal(x)); } },
+              { id: 'base_valor', rotulo: 'Base', num: true, formatar: function (x) { return Fmt.numero(x.base_valor, Fmt.casas(x.base_valor)); } },
+              { id: 'valor_alocado', rotulo: 'Valor do animal', num: true, formatar: function (x) { return Fmt.dinheiro(x.valor_alocado); } },
+            ],
+          }).el : null), { dado: 'rateio' }));
+      } else corpo.appendChild(UI.secao('Divisão entre os animais', h('p', { class: 'suave', text: 'Não se aplica: ' + Fmt.rotulo('NATUREZA', l.natureza).toLowerCase() + ' não é custo nem receita de animal.' }), { dado: 'rateio' }));
+      if (o.anexos.length) corpo.appendChild(UI.secao('Documentos', h('ul', { class: 'lista-simples' }, o.anexos.map(function (a) { return h('li', { text: a.nome_arquivo + (a.descricao ? ' · ' + a.descricao : '') }); })), { dado: 'anexos' }));
+    }, function (e) {
+      if (!vivo) return;
+      Util.limpar(corpo);
+      corpo.appendChild(UI.estadoErro(e, { acao: { texto: 'Ver todos os lançamentos', aoClicar: function () { Roteador.ir('financeiro/lancamentos'); } } }));
+    });
+    return function () { vivo = false; };
+  }
+
+  Telas.registrar('financeiro', { titulo: 'Financeiro', modulo: 'FINANCEIRO', montar: montarLista });
+  Telas.registrar('financeiro/lancamentos', { titulo: 'Financeiro', modulo: 'FINANCEIRO', montar: montarLista });
+  Telas.registrar('financeiro/lancamento/:id', { titulo: 'Lançamento financeiro', modulo: 'FINANCEIRO', montar: montarDetalhe });
+  return { SITUACAO_PARCELA: SITUACAO_PARCELA };
+})();
+</script>

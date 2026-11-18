@@ -47,7 +47,7 @@ test('sistema.tela não depende da planilha-banco: sem o banco do ambiente, a co
   assert.equal(r.ok, true, JSON.stringify(r.error));
 });
 
-test('sistema.tela: tela fora da lista → VALIDATION (nome); módulo da Fase 4 e 5 ainda sem tela → NOT_FOUND com a fase; arquivo ausente do projeto → NOT_FOUND com a instrução; as pesagens (E3.1), a sanidade (E3.2 e E3.3) e a reprodução (E3.4 e E3.5) vêm', () => {
+test('sistema.tela: tela fora da lista → VALIDATION (nome); módulo da Fase 5 ainda sem tela → NOT_FOUND com a fase; o Financeiro (Fase 4), os Eventos e as Configurações vêm sob demanda; arquivo ausente do projeto → NOT_FOUND com a instrução; as pesagens (E3.1), a sanidade (E3.2 e E3.3) e a reprodução (E3.4 e E3.5) vêm', () => {
   const s = S.sistema({ semCadastro: true });
   for (const nome of ['Dashboard', 'Styles', 'JavaScript', 'Index', '', '../Import', 'import', null, 7]) {
     const r = chamar(s, { rota: 'sistema.tela', dados: { nome } });
@@ -70,7 +70,15 @@ test('sistema.tela: tela fora da lista → VALIDATION (nome); módulo da Fase 4 
   assert.deepEqual([rp.ok, rp.data && rp.data.modulo], [true, 'REPRODUCAO'], JSON.stringify(rp.error));
   assert.equal(rp.data.conteudo, s.G.Api.compactar(ler('Reproduction.html')));
   for (const r of ['reproducao/matrizes', 'reproducao/indicadores', 'reproducao/estacoes', 'reproducao/tronco']) assert.match(rp.data.conteudo, new RegExp("Telas\\.registrar\\('" + r.replace('/', '\\/') + "'"), r);
-  for (const [nome, modulo, fase] of [['Financial', 'Financeiro', 4], ['Reports', 'Relatórios', 5]]) {
+  // Fase 4, etapa BASE (CONTRATOS, seção 55): o Financeiro entregue sob demanda, com a lista e o detalhe dos lançamentos; os
+  // Eventos (lista, detalhe, correção e estorno a partir do detalhe) e as Configurações saíram da página inicial.
+  for (const [nome, modulo, rotas] of [['Financial', 'FINANCEIRO', ['financeiro', 'financeiro/lancamentos', 'financeiro/lancamento/:id']], ['Events', 'EVENTOS', ['eventos', 'evento/:id']], ['Settings', 'CONFIGURACOES', ['config/:secao']]]) {
+    const r = chamar(s, { rota: 'sistema.tela', dados: { nome } });
+    assert.deepEqual([r.ok, r.data && r.data.modulo], [true, modulo], nome + ': ' + JSON.stringify(r.error));
+    assert.equal(r.data.conteudo, s.G.Api.compactar(ler(nome + '.html')));
+    for (const x of rotas) assert.match(r.data.conteudo, new RegExp("Telas\\.registrar\\('" + x.replace(/\//g, '\\/') + "'"), nome + ' ' + x);
+  }
+  for (const [nome, modulo, fase] of [['Reports', 'Relatórios', 5]]) {
     const r = chamar(s, { rota: 'sistema.tela', dados: { nome } });
     assert.equal(r.error.code, 'NOT_FOUND', nome);
     assert.equal(r.error.message, 'Esta tela faz parte do módulo ' + modulo + ', que chega na fase ' + fase + ' e ainda não foi entregue.');
@@ -93,13 +101,20 @@ test('página inicial: sem as telas sob demanda, com o carregador (Modulos), den
   const paginas = UI.lerPaginas(SRC);
   const m = UI.conferirModulos(paginas, html);
   assert.deepEqual(m.problemas, []);
-  assert.deepEqual(m.modulos.map((x) => [x.nome, x.entregue]).sort(), [['Health', true], ['Import', true], ['Reproduction', true], ['Weights', true]]);
+  assert.deepEqual(m.modulos.map((x) => [x.nome, x.entregue]).sort(), [['Events', true], ['Financial', true], ['Health', true], ['Import', true], ['Reproduction', true], ['Settings', true], ['Weights', true]]);
+  // Folga da etapa BASE da Fase 4: a página inicial era de ~428 KB; com os Eventos e as Configurações sob demanda, fica até
+  // 380 KB (a meta da etapa), para as telas da Fase 4 que precisam da abertura não estourarem o orçamento de 450 KB.
+  assert.ok(kb <= 380 * 1024, 'página inicial acima da meta de 380 KB: ' + Math.round(kb / 1024) + ' KB');
+  assert.doesNotMatch(html, /var TelaEventos =/, 'os eventos não vêm na página inicial');
+  assert.doesNotMatch(html, /var TelaConfig =/, 'as configurações não vêm na página inicial');
+  assert.doesNotMatch(html, /var TelaFinanceiro =/, 'o financeiro não vem na página inicial');
+  assert.match(html, /var Registro =/, 'o registro de evento (botão global) continua na página inicial');
   assert.doesNotMatch(html, /var TelaPesagens =/, 'as pesagens não vêm na página inicial');
   assert.doesNotMatch(html, /var TelaReproducao =/, 'a reprodução não vem na página inicial');
   assert.doesNotMatch(html, /var TelaSanidade =/, 'a sanidade não vem na página inicial');
   assert.ok(m.modulos.every((x) => x.bytes <= UI.ORCAMENTO_MODULO_BYTES));
   // O conferidor acusa a tela sob demanda posta de volta no Index e o módulo acima do orçamento.
-  const comImport = Object.assign({}, paginas, { 'Index.html': paginas['Index.html'].replace("<?!= include_('Settings') ?>", "<?!= include_('Settings') ?>\n<?!= include_('Import') ?>") });
+  const comImport = Object.assign({}, paginas, { 'Index.html': paginas['Index.html'].replace("<?!= include_('Pastures') ?>", "<?!= include_('Pastures') ?>\n<?!= include_('Import') ?>") });
   assert.match(UI.conferirModulos(comImport, html).problemas.join('|'), /Import\.html: é tela sob demanda e não pode entrar na página inicial/);
   const grande = Object.assign({}, paginas, { 'Import.html': '<script>\nvar x = 1;\n' + 'var y = "' + 'a'.repeat(UI.ORCAMENTO_MODULO_BYTES) + '";\n</script>' });
   assert.match(UI.conferirModulos(grande, html).problemas.join('|'), /Import\.html: a tela sob demanda soma \d+ KB; o orçamento por módulo é de 150 KB/);
@@ -137,7 +152,11 @@ test('catálogo de módulos × arquivos × Index: toda tela de módulo existe; s
   assert.deepEqual([san.tela, san.sob_demanda, san.rotas], ['Health', true, ['sanidade']], 'a sanidade (E3.2 e E3.3) vai ao menu, sob demanda');
   const rep = b.data.modulos.find((m) => m.id === 'REPRODUCAO');
   assert.deepEqual([rep.tela, rep.sob_demanda, rep.rotas], ['Reproduction', true, ['reproducao']], 'a reprodução (E3.4 e E3.5) vai ao menu, sob demanda');
-  assert.equal(b.data.modulos.some((m) => ['FINANCEIRO', 'RELATORIOS'].includes(m.id)), false, 'módulo das Fases 4 e 5 sem tela não vai ao menu');
+  for (const [id, tela, rotas] of [['FINANCEIRO', 'Financial', ['financeiro']], ['EVENTOS', 'Events', ['eventos', 'evento']], ['CONFIGURACOES', 'Settings', ['config']]]) {
+    const x = b.data.modulos.find((m) => m.id === id);
+    assert.deepEqual([x.tela, x.sob_demanda, x.rotas], [tela, true, rotas], id + ' vai ao menu, sob demanda');
+  }
+  assert.equal(b.data.modulos.some((m) => m.id === 'RELATORIOS'), false, 'módulo da Fase 5 sem tela não vai ao menu');
 });
 
 test('cliente: a importação, as pesagens e a sanidade injetadas pela rota (como o menu as abre) registram as rotas delas; o include se separa em estilos e scripts', () => {
@@ -150,6 +169,8 @@ test('cliente: a importação, as pesagens e a sanidade injetadas pela rota (com
   assert.deepEqual(js(c.TelaSanidade.SUBTIPO_DO_PROCEDIMENTO), { VACINA: 'VACINACAO', VERMIFUGO: 'VERMIFUGACAO', MEDICAMENTO: 'MEDICACAO', TRATAMENTO: 'TRATAMENTO', EXAME: 'EXAME' });
   for (const r of ['sanidade/agenda', 'sanidade/aplicacoes', 'sanidade/produtos', 'sanidade/protocolos']) assert.ok(c.Telas.resolver(r), r);
   for (const r of ['reproducao/matrizes', 'reproducao/indicadores', 'reproducao/estacoes', 'reproducao/tronco']) assert.ok(c.Telas.resolver(r), r);
+  for (const r of ['financeiro', 'financeiro/lancamentos', 'financeiro/lancamento/abc', 'eventos', 'evento/abc', 'config/parametros']) assert.ok(c.Telas.resolver(r), r);
+  assert.equal(c.Telas.resolver('evento/novo').padrao, 'evento/novo', 'o registro (Components) ganha da raiz "evento" do módulo dos eventos');
   // O resultado do tronco: só o formato (p, v, d; a idade só na prenhe); as regras são do servidor.
   assert.deepEqual(['p90', 'P 120', 'v', 'd', 'x', 'v30'].map((t) => js(c.TelaReproducao.lerResultado(t))), [
     { resultado: 'POSITIVO', idade: 90 }, { resultado: 'POSITIVO', idade: 120 }, { resultado: 'NEGATIVO', idade: null }, { resultado: 'INCONCLUSIVO', idade: null },
