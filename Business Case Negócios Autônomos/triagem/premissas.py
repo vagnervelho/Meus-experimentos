@@ -1,0 +1,119 @@
+# -*- coding: utf-8 -*-
+"""Premissas da triagem. Fontes e confiança de cada número estão no relatório STRESS_TEST.md (seção de premissas)."""
+
+G = dict(
+    tma_real=0.15,      # Tesouro IPCA+ 2032 = IPCA + 7,68% (11/11/2026) + ~7 p.p. de prêmio de pequeno negócio ilíquido
+    taxa_reinv=0.095,   # reinvestimento da TIRM ~ CDI real (Prefixado 2029 = 14,59% a.a. em 10/11/2026)
+    ipca=0.045,         # só para traduzir TIR real em nominal
+    custo_hora=30.0,    # R$/h do tempo humano (operador terceirizado c/ encargos ou custo de oportunidade do dono)
+    desagio_vt=0.30,    # deságio de liquidez sobre o valor de continuidade no fim do ano 5
+)
+TARIFA_KWH = 1.00       # R$/kWh com impostos, Energisa RO baixa tensão — ESTIMATIVA, validar na conta
+AGUA_M3 = 12.0          # R$/m³ CAERD comercial — ESTIMATIVA, validar
+
+M = 12  # meses
+
+IDEIAS = {
+    "lav": dict(nome="Lavanderia self-service de rua, independente (4+4 máquinas)",
+        # 4 lavadoras x 4,5 lavagens/dia x 365 x R$ 17 x (1 + 0,9 secagem por lavagem)
+        capex=200e3, giro=10e3, preop=10e3,
+        receita_madura=4 * 4.5 * 365 * 17.0 * 1.9, rampa=[0.55, 0.90, 1.0, 1.0, 1.0],
+        custo_vol_pct=0.22, energia_share_vol=0.70, custo_rec_pct=0.02, anexo="III",
+        fixo_ano=M * 6630, fixo_energia=M * 300, horas_semana=7, manut_pct=0.03, residual_pct=0.22, vida_rest=5,
+        p_sinistro=0.10, custo_sinistro=10e3, demanda_faixa=(0.60, 1.15)),
+    "lvc": dict(nome="Lavanderia compartilhada em 4 condomínios (2+2 máquinas cada)",
+        # 280 ciclos/mês por condomínio x R$ 14
+        capex=4 * 60e3, giro=4e3, preop=8e3,
+        receita_madura=4 * 280 * 14.0 * M, rampa=[0.55, 0.90, 1.0, 1.0, 1.0],
+        custo_vol_pct=0.22, energia_share_vol=0.70, custo_rec_pct=0.02 + 0.05, anexo="III",
+        fixo_ano=M * 4 * 400 + 9e3, fixo_energia=0, horas_semana=6, manut_pct=0.03, residual_pct=0.30, vida_rest=5,
+        p_sinistro=0.08, custo_sinistro=8e3, demanda_faixa=(0.55, 1.15)),
+    "ljs": dict(nome="Lava-jato self-service coberto (4 boxes + aspiradores)",
+        # 4 boxes x 12 carros/dia x 365 x R$ 16 + aspiradores
+        capex=360e3, giro=5e3, preop=20e3,
+        receita_madura=4 * 12 * 365 * 16.0 + 15e3, rampa=[0.50, 0.80, 1.0, 1.0, 1.0],
+        custo_vol_pct=0.225, energia_share_vol=0.19, custo_rec_pct=0.03, anexo="III",
+        fixo_ano=M * 8400, fixo_energia=M * 300, horas_semana=8, manut_pct=0.04, residual_pct=0.30, vida_rest=5,
+        p_sinistro=0.15, custo_sinistro=15e3, demanda_faixa=(0.45, 1.20)),
+    "agg": dict(nome="Quiosque água purificada + gelo (produção própria)",
+        # água: 600 L/dia x R$ 0,35 ; gelo: 40 sacos de 5 kg/dia x R$ 10
+        capex=270e3, giro=5e3, preop=15e3,
+        receita_madura=600 * 365 * 0.35 + 40 * 365 * 10.0, rampa=[0.50, 0.80, 1.0, 1.0, 1.0],
+        custo_vol_pct=0.187, energia_share_vol=0.60, custo_rec_pct=0.015, anexo="II",
+        fixo_ano=M * 6550, fixo_energia=M * 400, horas_semana=8, manut_pct=0.04, residual_pct=0.30, vida_rest=5,
+        p_sinistro=0.15, custo_sinistro=20e3, demanda_faixa=(0.45, 1.25)),
+    "agm": dict(nome="MVP: estação de água + freezers revendendo gelo de fábrica",
+        # água: 600 L/dia x R$ 0,35 ; gelo revendido: 25 sacos/dia x R$ 10 (compra ~R$ 5,5)
+        capex=106e3, giro=3e3, preop=8e3,
+        receita_madura=600 * 365 * 0.35 + 25 * 365 * 10.0, rampa=[0.50, 0.80, 1.0, 1.0, 1.0],
+        custo_vol_pct=0.389, energia_share_vol=0.15, custo_rec_pct=0.015, anexo="II",
+        fixo_ano=M * 4950, fixo_energia=M * 250, horas_semana=9, manut_pct=0.04, residual_pct=0.30, vida_rest=5,
+        p_sinistro=0.15, custo_sinistro=10e3, demanda_faixa=(0.45, 1.25)),
+    "sst": dict(nome="Self storage: 24 contêineres de 40' divididos em 72 boxes",
+        # 72 boxes x R$ 420/mês x 85% de ocupação madura
+        capex=24 * 27.5e3 + 130e3, giro=0, preop=15e3,
+        receita_madura=72 * 420 * M * 0.85, rampa=[0.41, 0.76, 0.94, 1.0, 1.0],
+        custo_vol_pct=0.0, energia_share_vol=0.0, custo_rec_pct=0.05, anexo="III",
+        fixo_ano=95e3, fixo_energia=4.2e3, horas_semana=6, manut_pct=0.01, residual_pct=0.40, vida_rest=10,
+        p_sinistro=0.05, custo_sinistro=20e3, demanda_faixa=(0.60, 1.10)),
+    "sol": dict(nome="Usina solar GD 75 kWp (micro), aluguel a consumidores",
+        capex=75 * 2600 + 15e3, giro=0, preop=10e3,
+        receita_madura=75 * 1300 * 0.79 * 0.72, rampa=[1.0, 0.944, 0.902, 0.897, 0.893],
+        custo_vol_pct=0.0, energia_share_vol=0.0, custo_rec_pct=0.03, anexo="III_loc",
+        fixo_ano=75 * (45 + 80 + 64 + 32) + 0.004 * 75 * 2600, fixo_energia=0, horas_semana=1.5,
+        manut_pct=0.005, residual_pct=0.55, vida_rest=10,
+        p_sinistro=0.05, custo_sinistro=15e3, demanda_faixa=(0.88, 1.05), preco_faixa=(0.85, 1.03),
+        atraso_dist=[(0.0, 0.5), (0.5, 0.25), (1.0, 0.25)]),
+    "sol3": dict(nome="Usina solar GD 300 kWp (mini, <500 kW), aluguel a consumidores",
+        capex=300 * 2500 + 60e3, giro=0, preop=20e3,
+        receita_madura=300 * 1300 * 0.79 * 0.72, rampa=[1.0, 0.944, 0.902, 0.897, 0.893],
+        custo_vol_pct=0.0, energia_share_vol=0.0, custo_rec_pct=0.03, anexo="III_loc",
+        fixo_ano=300 * (35 + 50 + 20 + 15) + 0.004 * 300 * 2500, fixo_energia=0, horas_semana=2,
+        manut_pct=0.005, residual_pct=0.55, vida_rest=10,
+        p_sinistro=0.05, custo_sinistro=30e3, demanda_faixa=(0.88, 1.05), preco_faixa=(0.85, 1.03),
+        atraso_dist=[(0.0, 0.45), (0.5, 0.25), (1.0, 0.30)]),
+    "est": dict(nome="Sala de estudos 24h (50 cabines)",
+        capex=210e3, giro=0, preop=15e3,
+        receita_madura=(50 * 0.85 * 1.5 * 250 + 1000) * M, rampa=[0.5, 0.8, 1.0, 1.0, 1.0],
+        custo_vol_pct=0.05, energia_share_vol=0.0, custo_rec_pct=0.03, anexo="III",
+        fixo_ano=M * 11200, fixo_energia=M * 2200, horas_semana=6, manut_pct=0.02, residual_pct=0.20, vida_rest=5,
+        p_sinistro=0.05, custo_sinistro=10e3),
+    "qua": dict(nome="Arena com 2 quadras COBERTAS (beach/futevôlei), reserva por app",
+        capex=515e3, giro=0, preop=20e3,
+        receita_madura=2 * 52 * (50 * 0.65 * 90 + 40 * 0.15 * 50), rampa=[0.55, 0.85, 1.0, 1.0, 1.0],
+        custo_vol_pct=0.0, energia_share_vol=0.0, custo_rec_pct=0.07, anexo="III",
+        fixo_ano=121e3, fixo_energia=8.4e3, horas_semana=6, manut_pct=0.02, residual_pct=0.35, vida_rest=8,
+        p_sinistro=0.05, custo_sinistro=15e3, demanda_faixa=(0.5, 1.15)),
+    "qud": dict(nome="Arena com 2 quadras DESCOBERTAS (perde ~22% na chuva/fumaça)",
+        capex=215e3, giro=0, preop=15e3,
+        receita_madura=0.78 * 2 * 52 * (50 * 0.65 * 90 + 40 * 0.15 * 50), rampa=[0.55, 0.85, 1.0, 1.0, 1.0],
+        custo_vol_pct=0.0, energia_share_vol=0.0, custo_rec_pct=0.07, anexo="III",
+        fixo_ano=115e3, fixo_energia=8.4e3, horas_semana=6, manut_pct=0.03, residual_pct=0.25, vida_rest=6,
+        p_sinistro=0.05, custo_sinistro=10e3, demanda_faixa=(0.5, 1.15)),
+    "mkt": dict(nome="Minimercados autônomos em condomínios (rede própria de 4)",
+        # R$ 11 mil/mês por loja; margem bruta 35%, quebra 2%
+        capex=4 * 45e3, giro=4 * 12e3, preop=10e3,
+        receita_madura=4 * 11000 * M, rampa=[0.65, 0.95, 1.0, 1.0, 1.0],
+        custo_vol_pct=0.67, energia_share_vol=0.0, custo_rec_pct=0.05, anexo="I",
+        fixo_ano=M * 6900, fixo_energia=M * 2800, horas_semana=26, manut_pct=0.03, residual_pct=0.30, vida_rest=4,
+        p_sinistro=0.10, custo_sinistro=10e3),
+    "ven": dict(nome="Vending machines (rede de 10, com PIX e telemetria)",
+        # R$ 2,2 mil/mês por máquina; CMV 55% + perdas 3%; comissão do ponto 10%
+        capex=10 * 28e3, giro=10e3, preop=5e3,
+        receita_madura=10 * 2200 * M, rampa=[0.65, 0.95, 1.0, 1.0, 1.0],
+        custo_vol_pct=0.58, energia_share_vol=0.0, custo_rec_pct=0.125, anexo="I",
+        fixo_ano=M * 2300, fixo_energia=0, horas_semana=19, manut_pct=0.03, residual_pct=0.30, vida_rest=4,
+        p_sinistro=0.12, custo_sinistro=8e3),
+    "acd": dict(nome="Academia 24h enxuta (com RT do CREF em meio período)",
+        capex=400e3, giro=0, preop=25e3,
+        receita_madura=350 * 109 * M, rampa=[0.5, 0.8, 1.0, 1.0, 1.0],
+        custo_vol_pct=0.0, energia_share_vol=0.0, custo_rec_pct=0.04, anexo="III",
+        fixo_ano=M * 29200, fixo_energia=M * 7000, horas_semana=8, manut_pct=0.03, residual_pct=0.25, vida_rest=5,
+        p_sinistro=0.05, custo_sinistro=20e3),
+    "evc": dict(nome="Eletroposto DC 60 kW",
+        capex=310e3, giro=0, preop=10e3,
+        receita_madura=2 * 25 * 365 * 2.4, rampa=[0.6, 0.8, 1.0, 1.2, 1.4],
+        custo_vol_pct=0.35, energia_share_vol=1.0, custo_rec_pct=0.08, anexo="I",
+        fixo_ano=M * 2400 + 28.8e3, fixo_energia=28.8e3, horas_semana=2, manut_pct=0.03, residual_pct=0.30, vida_rest=5,
+        p_sinistro=0.05, custo_sinistro=15e3, demanda_faixa=(0.5, 1.5)),
+}
