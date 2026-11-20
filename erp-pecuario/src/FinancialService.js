@@ -1,0 +1,1318 @@
+/**
+ * FinancialService — o núcleo financeiro que todo evento com dinheiro usa (07, seções 1 e 3; 03b, seções 10 a 14).
+ * Puro: monta as linhas de FINANCEIRO (lançamento), PARCELAS (título), RATEIOS e ALOCACOES_FINANCEIRAS (a única fonte
+ * de valor por animal) dentro do tratador de um comando, sem gravar nada; a UnitOfWork grava. Também traz a conta da
+ * negociação de compra e venda (modalidade × base de peso, conferência, critério de rateio; 07, seção 4; 03b, 4.3 a
+ * 4.5), a conferência das invariantes de 03b, seção 14 (reutilizada pela integridade), os totais "a pagar" e "a
+ * receber" e o bloco financeiro da ficha do animal.
+ *
+ * Dinheiro sempre em centavos inteiros; bases de rateio na unidade do critério (R$, kg, cabeça, peso relativo).
+ */
+var FinancialService = (function () {
+  /** Contas do plano que o motor lança sozinho (03a, seção 4.13: `sistema` = S), pelo código. */
+  var CONTAS = Object.freeze({
+    COMPRA: 'COMPRA_ANIMAIS', FRETE_COMPRA: 'FRETE_DESPESAS_COMPRA', ABERTURA: 'SALDO_ABERTURA_REBANHO',
+    RECEITA_DESCARTE: 'OUTRAS_RECEITAS_OPERACIONAIS', VENDA: 'VENDA_ANIMAIS',
+    FRETE_VENDA: 'FRETE_VENDA', COMISSAO_VENDA: 'COMISSAO_VENDA', TAXAS_VENDA: 'TAXAS_RETENCOES_VENDA',
+    INSUMOS: 'COMPRA_INSUMOS',
+  });
+  /**
+   * Conta de cada dedução da venda pelo tipo (LISTAS.TIPO_DEDUCAO_VENDA; 03b, seção 2.6): FRETE e COMISSAO são códigos
+   * reservados, com conta e total próprios em VENDAS; qualquer outro tipo vai para "Taxas e retenções sobre venda".
+   */
+  var CONTA_DEDUCAO = Object.freeze({ FRETE: CONTAS.FRETE_VENDA, COMISSAO: CONTAS.COMISSAO_VENDA });
+  /** Coluna de VENDAS que soma a dedução do tipo: frete, comissao ou outras_deducoes. */
+  var TOTAL_DEDUCAO = Object.freeze({ FRETE: 'frete', COMISSAO: 'comissao' });
+  var MODALIDADES = ['CABECA', 'KG_VIVO', 'ARROBA', 'LOTE'];
+  /** Critérios que o operador escolhe numa compra ou venda por lote (03b, seção 4.3); DIAS_PERMANENCIA não cabe num evento. */
+  var CRITERIOS_LOTE = ['CABECAS', 'PESO_VIVO', 'PESO_CARCACA', 'VALOR_INDIVIDUAL', 'MANUAL'];
+  /** Naturezas que nunca são rateadas (invariante 14: o insumo vira custo no consumo; não operacional não é do animal). */
+  var SEM_RATEIO = ['ESTOQUE_INSUMOS', 'NAO_OPERACIONAL'];
+  /**
+   * Eventos cujos lançamentos são 100% alocados aos animais pelo rateio que o próprio evento grava (invariante 10; 03b,
+   * seção 10.3): compra e venda, principal e acessórios; a abertura (RN-070, VALOR_INDIVIDUAL dos animais com valor); o
+   * custo da morte e a receita do descarte (CABECAS sobre todos os animais do evento).
+   */
+  var CEM_POR_CENTO = { COMPRA: true, VENDA: true, ENTRADA_INICIAL: true, MORTE: true, DESCARTE: true, SANIDADE: true };
+  var MAX_PARCELAS = 120;
+  var NOME_NATUREZA = {
+    RECEITA_VENDA_ANIMAIS: 'venda de animais', OUTRA_RECEITA: 'outras receitas', AQUISICAO_ANIMAIS: 'aquisição de animais', CUSTEIO: 'custeio',
+    DESPESA_VENDA: 'despesa de venda', ESTOQUE_INSUMOS: 'compra de insumos', NAO_OPERACIONAL: 'não operacional',
+  };
+  var SAIDAS = ['VENDIDO', 'MORTO', 'DESCARTADO', 'BAIXADO_AJUSTE'];
+
+  function vazio_(v) {
+    return v === null || v === undefined || v === '';
+  }
+  function nulo_(v) {
+    return vazio_(v) ? null : v;
+  }
+  function reais_(c) {
+    return Utils.formatarReais(c || 0);
+  }
+  function br_(d) {
+    return vazio_(d) ? '' : String(d).slice(8, 10) + '/' + String(d).slice(5, 7) + '/' + String(d).slice(0, 4);
+  }
+  /** "compra de 05/02/2026": o evento na linguagem do pecuarista (o nome do tipo sem o complemento entre parênteses). */
+  function rotuloEvento_(ev) {
+    var nome = EventCatalog.existe(ev.event_type) ? EventCatalog.tipo(ev.event_type).rotulo.replace(/\s*\(.*\)\s*$/, '').toLowerCase() : String(ev.event_type).toLowerCase();
+    return nome + ' de ' + br_(ev.event_date);
+  }
+  function inteiroPositivo_(v) {
+    return typeof v === 'number' && isFinite(v) && Math.floor(v) === v && v > 0;
+  }
+  /** "de" contraído com o artigo do rótulo: "a compra" → "da compra", "o frete" → "do frete". */
+  function de_(rotulo) {
+    var m = /^(as|os|a|o) (.*)$/.exec(rotulo || '');
+    return m ? 'd' + m[1] + ' ' + m[2] : 'de ' + rotulo;
+  }
+  function det_(codigo, campo, mensagem, extra) {
+    var d = { codigo: codigo, campo: campo || null, mensagem: mensagem };
+    Object.keys(extra || {}).forEach(function (k) { d[k] = extra[k]; });
+    return d;
+  }
+  function soma_(lista, campo) {
+    return lista.reduce(function (s, x) { return s + (typeof x[campo] === 'number' ? x[campo] : 0); }, 0);
+  }
+
+  /**
+   * O lançamento é, pela natureza, sem efeito de caixa (03b, seção 11, "Lançamento sem parcela"; RELATORIO_FASE2, decisão
+   * 2): o consumo de insumo, o saldo de abertura e o lançamento de evento anterior ao marco zero. Sem o plano de contas
+   * lido não dá para saber a conta: conta como sem caixa (nada é acusado sem a fonte).
+   */
+  function semCaixaPorNatureza_(repo, fin, ev, temContas) {
+    if (ev && ev.pre_marco_zero === true) return true;
+    if (!vazio_(fin.product_id) && fin.natureza === 'CUSTEIO') return true;
+    if (!temContas) return true;
+    var c = repo.porId('PLANO_CONTAS', fin.conta_id);
+    return !c || c.codigo === CONTAS.ABERTURA;
+  }
+  /** Abas que a conferência das invariantes lê (a função cita Timeline só quando chamada: carga sem ordem). */
+  function leituras() {
+    // As abas de insumos: a 17 (custo copiado na sanidade) e o saldo dos produtos que a reconstrução confere.
+    return Utils.unicos(Timeline.LEITURAS.concat(['COMPRAS', 'VENDAS', 'PLANO_CONTAS', 'PARCEIROS'], EventCatalog.LEITURAS_INSUMOS));
+  }
+
+  // ------------------------------------------------------------------ contas e parcelas ----
+  /** Conta do plano pelo código; ausente ou inativa → CONFIG (o setup semeia as contas do sistema). */
+  function conta(repo, codigo) {
+    var c = repo.unico('PLANO_CONTAS', 'codigo', codigo);
+    if (!c || c.ativo === false) throw Validation.erro('CONFIG', 'A conta "' + codigo + '" não está ativa no plano de contas. Execute a configuração inicial.');
+    return c;
+  }
+  /**
+   * N parcelas iguais de `total` centavos (03b, seção 11): o quociente inteiro para cada uma e os centavos que sobram
+   * para as primeiras, na ordem. R$ 9.400,00 em 3 → 3.133,34 + 3.133,33 + 3.133,33.
+   */
+  function dividirParcelas(total, n) {
+    if (!inteiroPositivo_(total) || !inteiroPositivo_(n)) throw Validation.erro('INTERNAL', 'dividirParcelas espera total e número de parcelas inteiros positivos.');
+    var q = Math.floor(total / n);
+    var sobra = total - q * n;
+    var out = [];
+    for (var i = 0; i < n; i++) out.push(q + (i < sobra ? 1 : 0));
+    return out;
+  }
+  /**
+   * Resolve os títulos de um lançamento: cada parcela informada traz o vencimento; o valor vazio recebe a divisão
+   * igual do que falta (mesma regra de dividirParcelas). Devolve [{parcela_num, data_vencimento, valor,
+   * forma_pagamento, documento}] e põe no coletor os erros (vencimento, valor, soma ≠ valor do lançamento).
+   */
+  function resolverParcelas(valor, parcelas, col, o) {
+    var campo = o.campo;
+    var rotulo = o.rotulo;
+    var lista = Array.isArray(parcelas) ? parcelas : [];
+    if (!lista.length) { col.erro(det_('SEM_PARCELAS', campo, 'Informe como ' + rotulo + ' ' + (o.pagamento || (/^as? /.test(rotulo || '') ? 'será paga' : 'será pago')) + ': ao menos uma parcela, com o vencimento.')); return null; }
+    if (lista.length > MAX_PARCELAS) { col.erro(det_('PARCELAS_DEMAIS', campo, 'Um lançamento aceita até ' + MAX_PARCELAS + ' parcelas.')); return null; }
+    var ok = true;
+    var informado = 0;
+    var semValor = 0;
+    lista.forEach(function (p, i) {
+      var x = p && typeof p === 'object' ? p : {};
+      var quem = (lista.length > 1 ? 'Parcela ' + (i + 1) : 'A parcela') + (o.prefixo ? ' ' + o.prefixo : '');
+      if (vazio_(x.data_vencimento)) { col.erro(det_('CAMPO_OBRIGATORIO', campo, quem + ': informe o vencimento.', { indice: i })); ok = false; }
+      else if (typeof x.data_vencimento !== 'string' || !Utils.dataValida(x.data_vencimento)) { col.erro(det_('FORMATO_INVALIDO', campo, quem + ': o vencimento não é uma data válida.', { indice: i })); ok = false; }
+      if (vazio_(x.valor)) semValor++;
+      else if (!inteiroPositivo_(x.valor)) { col.erro(det_('VALOR_FORA_DA_FAIXA', campo, quem + ': o valor precisa ser maior que zero (em centavos inteiros).', { indice: i })); ok = false; }
+      else informado += x.valor;
+    });
+    if (!ok || !inteiroPositivo_(valor)) return null;
+    var falta = valor - informado;
+    if (semValor && falta < semValor) {
+      col.erro(det_('PARCELAS_NAO_SOMAM', campo, 'As parcelas informadas já somam ' + reais_(informado) + ' e ' + rotulo + ' vale ' + reais_(valor) + ': não sobra valor para as parcelas sem valor.'));
+      return null;
+    }
+    if (!semValor && falta !== 0) {
+      col.erro(det_('PARCELAS_NAO_SOMAM', campo, 'As parcelas somam ' + reais_(informado) + ' e ' + rotulo + ' vale ' + reais_(valor) + '. Acerte os valores ou deixe-os em branco para dividir em partes iguais.'));
+      return null;
+    }
+    var partes = semValor ? dividirParcelas(falta, semValor) : [];
+    var k = 0;
+    return lista.map(function (p, i) {
+      var v = vazio_(p.valor) ? partes[k++] : p.valor;
+      var out = { parcela_num: i + 1, data_vencimento: p.data_vencimento, valor: v, forma_pagamento: nulo_(p.forma_pagamento), documento: nulo_(p.documento) };
+      // O lançamento avulso aceita a parcela já paga ("Já pago em"; quem chama confere a data): nasce LIQUIDADA pelo nominal.
+      if (o.aceitaPago && !vazio_(p.pago_em)) out.pago_em = p.pago_em;
+      return out;
+    });
+  }
+
+  /**
+   * Parcelas de um título pago (ou recebido) em `qtd` vezes, de mês em mês a partir de `primeiro` (Utils.somaMeses),
+   * em partes iguais (dividirParcelas): a forma de "1 ou mais parcelas" dos custos da compra e do lançamento da
+   * morte e do descarte (03b, seção 10.3). qtd vazio = 1. Devolve a lista no formato de `resolverParcelas`.
+   */
+  function parcelasMensais(valor, primeiro, qtd, extra) {
+    var n = qtd === null || qtd === undefined || qtd === '' ? 1 : qtd;
+    var x = extra || {};
+    if (!inteiroPositivo_(valor) || !inteiroPositivo_(n) || n > MAX_PARCELAS || !Utils.dataValida(primeiro)) return [{ data_vencimento: primeiro, valor: valor, forma_pagamento: nulo_(x.forma_pagamento), documento: nulo_(x.documento) }];
+    var partes = dividirParcelas(valor, n);
+    return partes.map(function (v, i) { return { data_vencimento: Utils.somaMeses(primeiro, i), valor: v, forma_pagamento: nulo_(x.forma_pagamento), documento: nulo_(x.documento) }; });
+  }
+
+  /** Os intervalos do "Dividir em parcelas" (a folha do formulário): MES = todo mês no mesmo dia (ou o último do mês). */
+  var INTERVALOS_PARCELA = Object.freeze({ MES: null, D30: 30, D15: 15, D7: 7 });
+  /**
+   * Os vencimentos de `quantas` parcelas a partir da primeira (rota financeiro.vencimentos; CONTRATOS, seção 51): MES = todo
+   * mês no mesmo dia, ou o último dia do mês mais curto (Utils.somaMeses); D30, D15 e D7 = a cada 30, 15 ou 7 dias. O
+   * aparelho não soma dias: ele pede a lista e preenche as linhas. Devolve {datas}.
+   */
+  function vencimentos(dados) {
+    var d = dados || {};
+    var n = Number(d.quantas);
+    if (!Utils.dataValida(d.primeiro)) throw Validation.erro('VALIDATION', 'Escolha o vencimento da primeira parcela.', [{ codigo: 'FORMATO_INVALIDO', campo: 'primeiro', mensagem: 'Escolha o vencimento da primeira parcela.' }]);
+    if (!inteiroPositivo_(n) || n > MAX_PARCELAS) throw Validation.erro('VALIDATION', 'O número de parcelas vai de 1 a ' + MAX_PARCELAS + '.', [{ codigo: 'VALOR_FORA_DA_FAIXA', campo: 'quantas', mensagem: 'O número de parcelas vai de 1 a ' + MAX_PARCELAS + '.' }]);
+    if (!Object.prototype.hasOwnProperty.call(INTERVALOS_PARCELA, d.intervalo)) throw Validation.erro('VALIDATION', 'Escolha como as outras parcelas vencem.', [{ codigo: 'FORMATO_INVALIDO', campo: 'intervalo', mensagem: 'Escolha como as outras parcelas vencem.' }]);
+    var passo = INTERVALOS_PARCELA[d.intervalo];
+    var datas = [];
+    for (var i = 0; i < n; i++) datas.push(passo ? Utils.somaDias(d.primeiro, passo * i) : Utils.somaMeses(d.primeiro, i));
+    return { datas: datas };
+  }
+
+  // ------------------------------------------------------------------ rateio ----
+  /**
+   * Rateio de `valor` centavos pelo maior resto (07, seção 3.2; 03b, seção 13.3; Utils.ratear), com o desempate
+   * determinístico maior resto → maior base → menor `chave` (o codigo_interno). itens: [{animal_id, chave, base}],
+   * base na unidade do critério. Um único animal = DIRETO, com a base igual ao valor do lançamento (invariante 13).
+   * Devolve {criterio, baseTotal, totalAlocado, itens: [{animal_id, chave, base, valor}]}.
+   */
+  function ratear(valor, criterio, itens) {
+    var lista = itens || [];
+    var crit = lista.length === 1 ? 'DIRETO' : criterio;
+    var entrada = lista.map(function (it) { return { chave: it.chave, base: crit === 'DIRETO' ? valor / 100 : it.base }; });
+    var r = Utils.ratear(valor, entrada);
+    var porChave = Utils.indexarPor(r.itens, 'chave');
+    return {
+      criterio: crit, baseTotal: r.baseTotal, totalAlocado: r.totalAlocado,
+      itens: lista.map(function (it) { var x = porChave[it.chave]; return { animal_id: it.animal_id, chave: it.chave, base: x.base, valor: x.valor }; }),
+    };
+  }
+
+  /**
+   * Monta, no plano do evento, um lançamento completo: FINANCEIRO, as PARCELAS (ou nenhuma, em `semCaixa`), o RATEIOS
+   * do próprio evento (escopo EVENTO) e uma ALOCACOES_FINANCEIRAS por animal. spec: {evento: {event_id, event_date,
+   * property_id}, conta (linha de PLANO_CONTAS), naturezas (aceitas), valor, descricao, partner_id, documento,
+   * observacoes, quantidade, pasture_id, retida, semCaixa, pagamento ('será recebida': texto da falta de parcela), parcelas: [{data_vencimento, valor?, forma_pagamento,
+   * documento}], rateio: {criterio, itens: [{animal_id, chave, base}], cemPorCento, justificativa, estimado} | null, campo,
+   * rotulo, prefixo, financial_id (opcional: o identificador escolhido por quem chama, como os custos da compra)}. Erros
+   * vão para `col`; com erro devolve null. Devolve {linhas: {FINANCEIRO: [..], PARCELAS, RATEIOS, ALOCACOES_FINANCEIRAS},
+   * financial_id, rateio (o de `ratear`), parcelas}.
+   */
+  function planejar(tx, spec, col) {
+    var s = spec || {};
+    var c = s.conta;
+    var campo = s.campo || 'valor';
+    var rotulo = s.rotulo || 'o lançamento';
+    var antes = col.erros.length;
+    var campoJaRecusado = col.erros.some(function (e) { return e.campo === campo; });
+    if (!c) throw Validation.erro('INTERNAL', 'planejar: conta ausente.');
+    if (s.naturezas && s.naturezas.indexOf(c.natureza) < 0) col.erro(det_('CONTA_INVALIDA', campo, 'A conta "' + c.nome + '" não serve para ' + rotulo + ': escolha uma conta de ' + s.naturezas.map(function (n) { return NOME_NATUREZA[n] || n; }).join(' ou ') + '.'));
+    // A conta desativada depois de usada pelo original continua valendo na correção (quem chama diz: `inativaAceita`).
+    if (c.ativo === false && s.inativaAceita !== true) col.erro(det_('CONTA_INATIVA', campo, 'A conta "' + c.nome + '" está desativada.'));
+    if (!inteiroPositivo_(s.valor)) {
+      // Valor zero, negativo ou com fração de centavo: o catálogo já recusa o campo, com o rótulo dele. Uma causa, um
+      // erro: aqui só quando nada apontou o campo, e sem seguir para as parcelas e o rateio, que repetiriam a causa.
+      if (!campoJaRecusado) col.erro(det_('VALOR_FORA_DA_FAIXA', campo, 'O valor ' + de_(rotulo) + ' precisa ser maior que zero.'));
+      return null;
+    }
+    var parcelas = [];
+    if (s.semCaixa) {
+      if (Array.isArray(s.parcelas) && s.parcelas.length) throw Validation.erro('INTERNAL', 'Lançamento sem efeito de caixa não tem parcela (invariante 4).');
+    } else parcelas = resolverParcelas(s.valor, s.parcelas, col, { campo: s.campoParcelas || campo, rotulo: rotulo, prefixo: s.prefixo, pagamento: s.pagamento, aceitaPago: s.aceitaPago === true });
+    var rat = null;
+    if (s.rateio) {
+      if (SEM_RATEIO.indexOf(c.natureza) >= 0) throw Validation.erro('INTERNAL', 'Lançamento de natureza ' + c.natureza + ' não é rateado aos animais (invariante 14).');
+      var itens = s.rateio.itens || [];
+      if (!itens.length) throw Validation.erro('INTERNAL', 'Rateio sem animais.');
+      itens.forEach(function (it) {
+        if (typeof it.base !== 'number' || !isFinite(it.base) || it.base <= 0) col.erro(det_('BASE_INVALIDA', campo, (it.quem || it.chave) + ': a base do rateio precisa ser maior que zero.'));
+      });
+      var jaPediu = col.erros.some(function (e) { return e.campo === 'justificativa_rateio'; });
+      if (s.rateio.criterio === 'MANUAL' && vazio_(s.rateio.justificativa) && !jaPediu) col.erro(det_('CAMPO_OBRIGATORIO', 'justificativa_rateio', 'Explique o rateio manual (por que esses pesos).'));
+      if (col.erros.length === antes && inteiroPositivo_(s.valor)) {
+        try {
+          rat = ratear(s.valor, s.rateio.criterio, itens);
+        } catch (e) {
+          if (!Validation.ehAppError(e) || e.code !== 'VALIDATION') throw e;
+          col.erro(det_('RATEIO_INVALIDO', campo, e.message));
+        }
+        if (rat && s.rateio.cemPorCento && rat.totalAlocado !== s.valor) col.erro(det_('RATEIO_INCOMPLETO', campo, rotulo + ' precisa ser 100% distribuído entre os animais.'));
+      }
+    }
+    if (col.erros.length !== antes) return null;
+    var ev = s.evento;
+    var finId = vazio_(s.financial_id) ? tx.novoId() : s.financial_id;
+    var fin = {
+      financial_id: finId, event_id: ev.event_id, ref_event_id: nulo_(s.ref_event_id), conta_id: c.conta_id, natureza: c.natureza, tipo: c.tipo,
+      categoria: c.grupo, descricao: nulo_(s.descricao), data_competencia: s.data_competencia || ev.event_date, competencia_inicio: nulo_(s.competencia_inicio),
+      competencia_fim: nulo_(s.competencia_fim), valor: s.valor, quantidade: typeof s.quantidade === 'number' ? s.quantidade : null, product_id: nulo_(s.product_id),
+      pasture_id: nulo_(s.pasture_id), property_id: nulo_(ev.property_id), categoria_animal_id: nulo_(s.categoria_animal_id), partner_id: nulo_(s.partner_id),
+      retida_pelo_comprador: s.retida === true, documento: nulo_(s.documento), observacoes: nulo_(s.observacoes),
+    };
+    var linhas = { FINANCEIRO: [fin], PARCELAS: [], RATEIOS: [], ALOCACOES_FINANCEIRAS: [] };
+    (parcelas || []).forEach(function (p) {
+      var linha = {
+        parcela_id: tx.novoId(), financial_id: finId, parcela_num: p.parcela_num, data_vencimento: p.data_vencimento, valor: p.valor,
+        forma_pagamento: p.forma_pagamento, status: 'ABERTA', parcela_origem_id: null, documento: p.documento,
+      };
+      // Pago no ato (03b, seção 11, "Estado inicial"): nasce LIQUIDADA pelo nominal, sem juros nem desconto (invariante 5).
+      if (!vazio_(p.pago_em)) { linha.status = 'LIQUIDADA'; linha.data_pagamento = p.pago_em; linha.valor_pago = p.valor; }
+      linhas.PARCELAS.push(linha);
+    });
+    if (rat) {
+      var ratId = tx.novoId();
+      linhas.RATEIOS.push({
+        rateio_id: ratId, event_id: ev.event_id, financial_id: finId, criterio: rat.criterio, escopo_tipo: 'EVENTO', escopo_ref: ev.event_id,
+        periodo_inicio: null, periodo_fim: null, data_base: ev.event_date, base_total: rat.baseTotal, total_alocado: rat.totalAlocado,
+        // A justificativa explica o MANUAL e também a base estimada (venda só com o peso do lote: 03b, seção 4.3).
+        justificativa: rat.criterio === 'MANUAL' || s.rateio.estimado ? nulo_(s.rateio.justificativa) : null, created_by: tx.usuario,
+      });
+      rat.itens.forEach(function (it) {
+        linhas.ALOCACOES_FINANCEIRAS.push({ alloc_id: tx.novoId(), rateio_id: ratId, financial_id: finId, animal_id: it.animal_id, base_valor: it.base, valor_alocado: it.valor });
+      });
+    }
+    return { linhas: linhas, financial_id: finId, rateio: rat, parcelas: parcelas || [] };
+  }
+  /** Junta as linhas de um lançamento planejado ao plano do evento (dicionário {aba: [linhas]}). */
+  function juntar(plano, planejado) {
+    Object.keys(planejado.linhas).forEach(function (t) {
+      plano[t] = plano[t] || [];
+      planejado.linhas[t].forEach(function (r) { plano[t].push(r); });
+    });
+  }
+  /** Aviso PERIODO_BLOQUEADO (RN-082) quando a competência cai até `fin_bloqueio_ate`; null fora do período. */
+  function avisoPeriodo(params, data, oque) {
+    var ate = params && params.fin_bloqueio_ate;
+    if (vazio_(ate) || vazio_(data) || data > ate) return null;
+    return { codigo: 'PERIODO_BLOQUEADO', mensagem: oque + ' cai em ' + br_(data) + ', dentro do período financeiro fechado (até ' + br_(ate) + '). Confirme com uma justificativa.' };
+  }
+
+  // ------------------------------------------------------------------ negociação ----
+  function dec_(v) {
+    return Math.round(v * 10);
+  }
+  /**
+   * Base estimada do rateio da venda só com o peso do lote (03b, seção 4.3): a última pesagem de cada animal, escalada
+   * para o peso do lote em kg (sem ele, a própria pesagem), com 4 casas. A mesma conta na gravação e na verificação de
+   * integridade (BASE_RATEIO).
+   */
+  function basesEstimadas(pesagens, pesoLoteKg) {
+    var vivoDec = pesoLoteKg === null || pesoLoteKg === undefined ? null : dec_(pesoLoteKg);
+    var somaUlt = pesagens.reduce(function (t, x) { return t + x; }, 0);
+    return pesagens.map(function (x) { return Utils.arredondar(vivoDec === null ? x : x * vivoDec / 10 / somaUlt, 4); });
+  }
+  /** Peso para as mensagens: '1.234,5 kg'. */
+  function kg_(v) {
+    return Utils.formatarNumero(v) + ' kg';
+  }
+  var NOME_BASE = { peso: 'peso vivo', peso_carcaca_kg: 'peso de carcaça', base_manual: 'peso na divisão manual' };
+  /**
+   * Conta da negociação de compra ou venda (07, seções 4.1 e 4.2; 03b, seções 4.3 a 4.5; RN-067, RN-068, RN-073).
+   * spec: {modalidade, base_peso, rendimento_carcaca_pct, rendimento_tipo, preco_unitario (centavos), peso_total_kg,
+   * valor (centavos: valor dos animais ou receita), criterio_rateio (só LOTE), arroba_kg, tolerancia_pct,
+   * animais: [{chave, peso, peso_carcaca_kg, valor_individual, base_manual}]}. Puro. Na venda (03b, seções 4.2 e 4.3)
+   * também: peso_carcaca_total_kg (o total do romaneio, aceito na arroba de carcaça; com `carcacaTotal: true`),
+   * valor_conferencia (o bruto, contra o qual a conta pelo preço é conferida; padrão = valor), campo_valor e
+   * rotulo_valor (para as mensagens) e pesagens: [última pesagem individual de cada animal até a data, em kg, ou null]
+   * — sem o peso de cada animal, o rateio usa essas pesagens escaladas para o peso do lote (estimado) ou cai para
+   * CABECAS, com aviso nos dois casos —, e bases_congeladas: [base por animal] (a correção da venda que estimou a divisão,
+   * com os mesmos animais, data, modalidade e peso do lote: as bases que o original gravou; CONTRATOS, seção 50).
+   * Devolve {base_peso, rendimento_pct, rendimento_tipo, unidade_preco, preco_unitario, peso_vivo_total,
+   * peso_carcaca_total, arrobas, criterio, bases: [número por animal], estimado (base por pesagem anterior escalada),
+   * conferencia, desvio_pct, erros, avisos}; erros e avisos: [{codigo, campo, mensagem, indice?}] (indice = posição do
+   * animal).
+   */
+  function negociacao(spec) {
+    var s = spec || {};
+    var animais = s.animais || [];
+    var n = animais.length;
+    var erros = [];
+    var avisos = [];
+    var r = { base_peso: null, rendimento_pct: null, rendimento_tipo: null, unidade_preco: null, preco_unitario: nulo_(s.preco_unitario), peso_vivo_total: null,
+      peso_carcaca_total: null, arrobas: null, criterio: null, bases: [], estimado: false, conferencia: null, desvio_pct: null, erros: erros, avisos: avisos };
+    var campoValor = s.campo_valor || 'valor_animais';
+    var rotuloValor = s.rotulo_valor || 'o valor dos animais';
+    var campoVivo = s.carcacaTotal === true ? 'peso_vivo_total_kg' : 'peso_total_kg';
+    var arroba = typeof s.arroba_kg === 'number' && s.arroba_kg > 0 ? s.arroba_kg : 15;
+    var mod = s.modalidade;
+    if (MODALIDADES.indexOf(mod) < 0) { erros.push(det_('CAMPO_OBRIGATORIO', 'modalidade', 'Escolha como o preço foi feito: por cabeça, por kg vivo, por arroba ou lote fechado.')); return r; }
+    var temPeso = animais.filter(function (a) { return typeof a.peso === 'number'; }).length;
+    var temCarc = animais.filter(function (a) { return typeof a.peso_carcaca_kg === 'number'; }).length;
+    var temValor = animais.filter(function (a) { return typeof a.valor_individual === 'number'; }).length;
+    var temManual = animais.filter(function (a) { return typeof a.base_manual === 'number'; }).length;
+    // Base de peso (RN-067): KG_VIVO é sempre VIVO; ARROBA exige a base; CABECA e LOTE não têm base.
+    if (mod === 'KG_VIVO') {
+      if (!vazio_(s.base_peso) && s.base_peso !== 'VIVO') erros.push(det_('BASE_PESO_INVALIDA', 'base_peso', 'Preço por kg vivo é sempre sobre o peso vivo.'));
+      r.base_peso = 'VIVO';
+    } else if (mod === 'ARROBA') {
+      if (vazio_(s.base_peso)) erros.push(det_('CAMPO_OBRIGATORIO', 'base_peso', 'Diga se a arroba é de peso vivo (com rendimento) ou de carcaça (romaneio).'));
+      else r.base_peso = s.base_peso;
+    } else if (!vazio_(s.base_peso)) erros.push(det_('CAMPO_NAO_SE_APLICA', 'base_peso', 'A base de peso só se aplica a preço por kg ou por arroba.'));
+    // Rendimento: informado em arroba de base VIVO (NEGOCIADO ou ESTIMADO); derivado (APURADO) em base CARCACA.
+    var rend = typeof s.rendimento_carcaca_pct === 'number' ? s.rendimento_carcaca_pct : null;
+    if (r.base_peso === 'VIVO' && mod === 'ARROBA') {
+      if (rend === null) erros.push(det_('CAMPO_OBRIGATORIO', 'rendimento_carcaca_pct', 'Informe o rendimento de carcaça combinado (em %).'));
+      else if (!(rend > 0 && rend < 100)) erros.push(det_('VALOR_FORA_DA_FAIXA', 'rendimento_carcaca_pct', 'O rendimento precisa estar entre 0 e 100%.'));
+      if (s.rendimento_tipo !== 'NEGOCIADO' && s.rendimento_tipo !== 'ESTIMADO') erros.push(det_('CAMPO_OBRIGATORIO', 'rendimento_tipo', 'Diga se o rendimento foi negociado entre as partes ou é uma estimativa.'));
+      r.rendimento_pct = rend;
+      r.rendimento_tipo = s.rendimento_tipo || null;
+    } else {
+      if (rend !== null) erros.push(det_('CAMPO_NAO_SE_APLICA', 'rendimento_carcaca_pct', 'O rendimento só é informado na arroba de peso vivo; na carcaça ele é calculado.'));
+      if (!vazio_(s.rendimento_tipo)) erros.push(det_('CAMPO_NAO_SE_APLICA', 'rendimento_tipo', 'O tipo do rendimento só é informado na arroba de peso vivo.'));
+    }
+    // Pesos: vivo individual (ou o total do lote) e carcaça individual.
+    var somaVivo = animais.reduce(function (t, a) { return t + (typeof a.peso === 'number' ? dec_(a.peso) : 0); }, 0);
+    var somaCarc = animais.reduce(function (t, a) { return t + (typeof a.peso_carcaca_kg === 'number' ? dec_(a.peso_carcaca_kg) : 0); }, 0);
+    var vivoDec = null;
+    if (typeof s.peso_total_kg === 'number') {
+      vivoDec = dec_(s.peso_total_kg);
+      if (temPeso === n && n && vivoDec !== somaVivo) erros.push(det_('PESO_TOTAL_DIVERGENTE', campoVivo, 'O peso total do lote (' + kg_(s.peso_total_kg) + ') difere da soma dos pesos dos animais (' + kg_(somaVivo / 10) + '). Deixe o total em branco ou acerte os pesos.'));
+    } else if (temPeso === n && n) vivoDec = somaVivo;
+    r.peso_vivo_total = vivoDec === null ? null : vivoDec / 10;
+    var carcaca = r.base_peso === 'CARCACA' || (mod === 'LOTE' && s.criterio_rateio === 'PESO_CARCACA');
+    if (temCarc && !carcaca) animais.forEach(function (a, i) { if (typeof a.peso_carcaca_kg === 'number') erros.push(det_('CAMPO_NAO_SE_APLICA', 'peso_carcaca_kg', 'o peso de carcaça só se informa na arroba de carcaça ou no rateio por carcaça.', { indice: i })); });
+    animais.forEach(function (a, i) {
+      if (typeof a.peso_carcaca_kg === 'number' && typeof a.peso === 'number' && a.peso_carcaca_kg >= a.peso) erros.push(det_('CARCACA_MAIOR_QUE_VIVO', 'peso_carcaca_kg', 'o peso de carcaça (' + kg_(a.peso_carcaca_kg) + ') não pode passar do peso vivo (' + kg_(a.peso) + ').', { indice: i }));
+    });
+    // Carcaça: a de cada animal (romaneio) ou, na venda por arroba de carcaça, só o total do romaneio (03b, seção 4.3).
+    var totalCarc = s.carcacaTotal === true && typeof s.peso_carcaca_total_kg === 'number' ? dec_(s.peso_carcaca_total_kg) : null;
+    if (totalCarc !== null && r.base_peso !== 'CARCACA') erros.push(det_('CAMPO_NAO_SE_APLICA', 'peso_carcaca_total_kg', 'O peso de carcaça total (romaneio) só se informa na arroba de carcaça.'));
+    var carcDec = null;
+    if (carcaca && temCarc === n && n) {
+      carcDec = somaCarc;
+      if (totalCarc !== null && r.base_peso === 'CARCACA' && totalCarc !== somaCarc) erros.push(det_('PESO_TOTAL_DIVERGENTE', 'peso_carcaca_total_kg', 'O peso de carcaça total (' + kg_(s.peso_carcaca_total_kg) + ') difere da soma das carcaças dos animais (' + kg_(somaCarc / 10) + '). Deixe o total em branco ou acerte as carcaças.'));
+    } else if (carcaca && s.carcacaTotal === true && r.base_peso === 'CARCACA' && temCarc) {
+      erros.push(det_('PESO_INCOMPLETO', 'peso_carcaca_kg', 'Informe a carcaça de todos os animais ou de nenhum (só o total do romaneio).'));
+    } else if (carcaca && totalCarc !== null && r.base_peso === 'CARCACA') {
+      carcDec = totalCarc;
+    } else if (carcaca) {
+      erros.push(det_('PESO_OBRIGATORIO', 'peso_carcaca_kg', s.carcacaTotal === true && r.base_peso === 'CARCACA' ? 'Informe o peso de carcaça de cada animal ou o total do romaneio.' : 'Informe o peso de carcaça de cada animal (romaneio).'));
+    }
+    if (carcDec !== null) {
+      r.peso_carcaca_total = carcDec / 10;
+      if (vivoDec !== null && r.base_peso === 'CARCACA') {
+        var apurado = carcDec / vivoDec * 100;
+        r.rendimento_pct = Utils.arredondar(apurado, 1);
+        r.rendimento_tipo = 'APURADO';
+        // O rendimento gravado tem 1 casa e fica entre 0 e 100% (exclusivos): a carcaça igual ou acima do vivo é um erro; a
+        // que arredonda para 0% ou 100% (rendimento abaixo de 0,05% ou acima de 99,95%) é outro, e a mensagem diz qual.
+        if (carcDec >= vivoDec) erros.push(det_('VALOR_FORA_DA_FAIXA', campoVivo, 'A carcaça total não pode passar do peso vivo total.'));
+        else if (!(r.rendimento_pct > 0 && r.rendimento_pct < 100)) {
+          erros.push(det_('VALOR_FORA_DA_FAIXA', campoVivo, 'O rendimento de carcaça calculado (' + Utils.formatarNumero(apurado, 2) + '% da carcaça sobre o peso vivo) não é possível: confira o peso vivo e o de carcaça.'));
+        }
+      }
+    }
+    // Preço e valor por animal.
+    var preco = typeof s.preco_unitario === 'number' ? s.preco_unitario : null;
+    if (mod === 'LOTE') {
+      if (preco !== null) erros.push(det_('CAMPO_NAO_SE_APLICA', 'preco_unitario', 'No lote fechado não há preço unitário: informe só o valor total.'));
+    } else if (mod === 'CABECA') {
+      if (temValor && preco !== null) erros.push(det_('CONFLITO_DE_CAMPOS', 'preco_unitario', 'Informe o preço por cabeça OU o valor de cada animal, não os dois.'));
+      if (!temValor && preco === null) erros.push(det_('CAMPO_OBRIGATORIO', 'preco_unitario', 'Informe o preço por cabeça ou o valor de cada animal.'));
+    } else if (preco === null) erros.push(det_('CAMPO_OBRIGATORIO', 'preco_unitario', mod === 'KG_VIVO' ? 'Informe o preço por kg vivo.' : 'Informe o preço por arroba.'));
+    if (preco !== null && !(preco > 0)) erros.push(det_('VALOR_FORA_DA_FAIXA', 'preco_unitario', 'O preço precisa ser maior que zero.'));
+    r.unidade_preco = mod === 'LOTE' || preco === null ? null : mod === 'CABECA' ? 'CABECA' : mod;
+    var aceitaValor = mod === 'CABECA' || (mod === 'LOTE' && s.criterio_rateio === 'VALOR_INDIVIDUAL');
+    if (temValor && !aceitaValor) animais.forEach(function (a, i) { if (typeof a.valor_individual === 'number') erros.push(det_('CAMPO_NAO_SE_APLICA', 'valor_individual', 'o valor por animal só se informa no preço por cabeça ou no lote com rateio pelo valor de cada animal: nos demais o sistema calcula.', { indice: i })); });
+    if (aceitaValor && temValor && temValor !== n) erros.push(det_('VALORES_INCOMPLETOS', 'valor_individual', 'Informe o valor de todos os animais ou de nenhum.'));
+    if (aceitaValor && temValor === n && n && typeof s.valor === 'number' && soma_(animais, 'valor_individual') !== s.valor) {
+      erros.push(det_('VALOR_INDIVIDUAL_NAO_SOMA', 'valor_individual', 'A soma dos valores por animal (' + reais_(soma_(animais, 'valor_individual')) + ') difere d' + rotuloValor + ' (' + reais_(s.valor) + ').'));
+    }
+    animais.forEach(function (a, i) { if (typeof a.valor_individual === 'number' && !(a.valor_individual > 0)) erros.push(det_('VALOR_FORA_DA_FAIXA', 'valor_individual', 'o valor do animal precisa ser maior que zero.', { indice: i })); });
+    // Critério de rateio (03b, seção 4.5): um animal = DIRETO; LOTE = o escolhido; os demais derivam da modalidade.
+    var crit;
+    if (mod === 'LOTE') {
+      crit = s.criterio_rateio;
+      if (CRITERIOS_LOTE.indexOf(crit) < 0) erros.push(det_('CAMPO_OBRIGATORIO', 'criterio_rateio', 'No lote fechado, escolha como dividir o valor entre os animais.'));
+      if (crit === 'PESO_VIVO' && temPeso !== n) erros.push(det_('PESO_OBRIGATORIO', 'peso', 'Para dividir pelo peso vivo, informe o peso de cada animal.'));
+      if (crit === 'VALOR_INDIVIDUAL' && temValor !== n) erros.push(det_('VALORES_INCOMPLETOS', 'valor_individual', 'Para dividir pelo valor de cada animal, informe o valor de todos.'));
+    } else {
+      if (!vazio_(s.criterio_rateio)) erros.push(det_('CAMPO_NAO_SE_APLICA', 'criterio_rateio', 'O critério de rateio só se escolhe no lote fechado; nas demais formas ele vem da negociação.'));
+      // Sem o peso de cada animal (só o do lote, ou só o total do romaneio): a última pesagem de cada um, escalada para o
+      // peso do lote (estimado), quando todos têm; senão CABECAS. Aviso nos dois casos (03b, seção 4.3; RN-073).
+      // `bases_congeladas` 'CABECAS': a correção da venda que o original dividiu por cabeça (algum animal sem pesagem até a data).
+      var ult = s.bases_congeladas === 'CABECAS' ? null : Array.isArray(s.bases_congeladas) && s.bases_congeladas.length === n ? s.bases_congeladas : Array.isArray(s.pesagens) && s.pesagens.length === n ? s.pesagens : null;
+      var temUlt = ult && ult.every(function (x) { return typeof x === 'number' && x > 0; });
+      if (mod === 'CABECA') crit = temValor ? 'VALOR_INDIVIDUAL' : 'CABECAS';
+      else if (r.base_peso === 'CARCACA' && (temCarc === n || s.carcacaTotal !== true)) crit = 'PESO_CARCACA';
+      else if (temPeso === n && n) {
+        crit = 'PESO_VIVO';
+        if (r.base_peso === 'CARCACA' && n > 1) avisos.push(det_('RATEIO_SEM_PESO', 'peso_carcaca_kg', 'Sem a carcaça de cada animal, o valor e as deduções serão divididos pelo peso vivo de cada um.'));
+      } else if (temUlt && !temPeso && n > 1) {
+        crit = 'PESO_VIVO';
+        r.estimado = true;
+        avisos.push(det_('RATEIO_SEM_PESO', 'peso', 'Sem o peso de cada animal, o valor e as deduções serão divididos pela última pesagem de cada um, ajustada ao peso do lote (estimado).'));
+      } else {
+        crit = 'CABECAS';
+        if (n > 1) avisos.push(det_('RATEIO_SEM_PESO', 'peso', 'Sem o peso de cada animal, o valor e os custos serão divididos igualmente por cabeça.'));
+      }
+      if (temPeso && temPeso !== n && crit !== 'PESO_CARCACA' && mod !== 'CABECA') erros.push(det_('PESO_INCOMPLETO', 'peso', 'Informe o peso de todos os animais ou de nenhum (só o total do lote).'));
+    }
+    if (temManual && crit !== 'MANUAL') animais.forEach(function (a, i) { if (typeof a.base_manual === 'number') erros.push(det_('CAMPO_NAO_SE_APLICA', 'base_manual', 'o peso no rateio manual só se informa com o critério manual.', { indice: i })); });
+    if (crit === 'MANUAL' && temManual !== n) erros.push(det_('CAMPO_OBRIGATORIO', 'base_manual', 'No rateio manual, informe o peso de cada animal na divisão (percentual ou proporção).'));
+    // A base de cada animal no rateio (03b, seção 13.3) precisa ser maior que zero e ter até 4 casas: o erro vai para o
+    // campo do próprio animal, não para o valor do lançamento.
+    var campoBase = { PESO_VIVO: 'peso', PESO_CARCACA: 'peso_carcaca_kg', MANUAL: 'base_manual' }[crit];
+    if (campoBase && n > 1) {
+      animais.forEach(function (a, i) {
+        var b = a[campoBase];
+        if (typeof b !== 'number') return;
+        if (!(b > 0)) erros.push(det_('VALOR_FORA_DA_FAIXA', campoBase, 'o ' + NOME_BASE[campoBase] + ' precisa ser maior que zero para dividir o valor.', { indice: i }));
+        else if (Utils.casasDecimais(b) > 4) erros.push(det_('FORMATO_INVALIDO', campoBase, 'o ' + NOME_BASE[campoBase] + ' aceita no máximo 4 casas decimais.', { indice: i }));
+      });
+    }
+    if ((mod === 'KG_VIVO' || (mod === 'ARROBA' && r.base_peso === 'VIVO')) && vivoDec === null) erros.push(det_('PESO_OBRIGATORIO', campoVivo, 'Informe o peso vivo total do lote ou o peso de cada animal.'));
+    r.criterio = n === 1 ? 'DIRETO' : crit || null;
+    // As bases estimadas congeladas (a correção de uma venda que estimou a divisão: Correcao, seção 50 dos CONTRATOS) valem como
+    // foram gravadas; senão, a última pesagem de cada animal escalada para o peso do lote.
+    var escala = r.estimado ? (Array.isArray(s.bases_congeladas) && s.bases_congeladas.length === n ? s.bases_congeladas.slice() : basesEstimadas(ult, vivoDec === null ? null : vivoDec / 10)) : null;
+    r.bases = animais.map(function (a, i) {
+      switch (r.criterio) {
+        case 'DIRETO': return typeof s.valor === 'number' ? s.valor / 100 : null;
+        case 'VALOR_INDIVIDUAL': return typeof a.valor_individual === 'number' ? a.valor_individual / 100 : null;
+        case 'CABECAS': return 1;
+        case 'PESO_VIVO': return escala ? escala[i] : typeof a.peso === 'number' ? a.peso : null;
+        case 'PESO_CARCACA': return typeof a.peso_carcaca_kg === 'number' ? a.peso_carcaca_kg : null;
+        case 'MANUAL': return typeof a.base_manual === 'number' ? a.base_manual : null;
+        default: return null;
+      }
+    });
+    // Conferência (não gravada): quantidade × preço, peso × preço, arrobas × preço; o valor informado prevalece.
+    if (preco !== null && preco > 0) {
+      if (mod === 'CABECA') r.conferencia = n * preco;
+      else if (mod === 'KG_VIVO' && vivoDec !== null) r.conferencia = Math.round(vivoDec * preco / 10);
+      else if (mod === 'ARROBA' && r.base_peso === 'VIVO' && vivoDec !== null && rend !== null) {
+        r.arrobas = Utils.arredondar(vivoDec / 10 * rend / 100 / arroba, 2);
+        r.conferencia = Math.round(vivoDec * dec_(rend) * preco / (10000 * arroba));
+      } else if (mod === 'ARROBA' && r.base_peso === 'CARCACA' && carcDec !== null) {
+        r.arrobas = Utils.arredondar(carcDec / 10 / arroba, 2);
+        r.conferencia = Math.round(carcDec * preco / (10 * arroba));
+      }
+    } else if (mod === 'CABECA' && temValor === n && n) {
+      // Valor por animal: a soma já é conferida contra o valor distribuído; a conferência mostra o bruto que ela implica.
+      r.conferencia = soma_(animais, 'valor_individual') + (typeof s.valor_conferencia === 'number' && typeof s.valor === 'number' ? s.valor_conferencia - s.valor : 0);
+    }
+    if (r.arrobas === null && carcDec !== null) r.arrobas = Utils.arredondar(carcDec / 10 / arroba, 2);
+    // O valor informado (valor dos animais na compra, bruto na venda) prevalece; a conta pelo preço é só conferência.
+    var conferido = typeof s.valor_conferencia === 'number' ? s.valor_conferencia : s.valor;
+    if (r.conferencia !== null && r.conferencia > 0 && typeof conferido === 'number') {
+      r.desvio_pct = Utils.arredondar(Math.abs(conferido - r.conferencia) / r.conferencia * 100, 2);
+      var tol = typeof s.tolerancia_pct === 'number' ? s.tolerancia_pct : 1;
+      if (Math.abs(conferido - r.conferencia) * 100 > tol * r.conferencia) {
+        // O desvio é mostrado com 2 casas; no limite ele arredonda para a própria tolerância ("difere em 1%, acima de 1%"):
+        // aí a mensagem diz "mais de".
+        var desvio = r.desvio_pct > tol ? 'em ' + Utils.formatarNumero(r.desvio_pct) + '%' : 'em mais de ' + Utils.formatarNumero(tol) + '%';
+        avisos.push(det_('VALOR_DIVERGENTE', campoValor, 'O valor informado (' + reais_(conferido) + ') difere ' + desvio + ' da conta pela negociação (' + reais_(r.conferencia) + '), acima da tolerância de ' + Utils.formatarNumero(tol) + '%. Vale o valor informado: confira a nota.'));
+      }
+    }
+    return r;
+  }
+
+  /** Código da conta de uma dedução de venda pelo tipo (FRETE, COMISSAO; os demais tipos: taxas e retenções). */
+  function contaDeducao(tipo) {
+    return CONTA_DEDUCAO[tipo] || CONTAS.TAXAS_VENDA;
+  }
+  /**
+   * Totais da venda (03b, seção 4.2; 07, seção 4.2), em centavos: receita = bruto − desconto comercial; frete,
+   * comissão e outras deduções pelo tipo; resultado da negociação = receita − deduções; depósito esperado = receita −
+   * deduções retidas pelo comprador. spec: {valor_bruto, desconto_comercial, deducoes: [{tipo, valor, retida}]}.
+   */
+  function totaisVenda(spec) {
+    var s = spec || {};
+    var bruto = typeof s.valor_bruto === 'number' ? s.valor_bruto : 0;
+    var desconto = typeof s.desconto_comercial === 'number' ? s.desconto_comercial : 0;
+    var t = { valor_bruto: bruto, desconto_comercial: desconto, receita: bruto - desconto, frete: 0, comissao: 0, outras_deducoes: 0, deducoes: 0, retidas: 0 };
+    (s.deducoes || []).forEach(function (d) {
+      var v = typeof d.valor === 'number' ? d.valor : 0;
+      t[TOTAL_DEDUCAO[d.tipo] || 'outras_deducoes'] += v;
+      t.deducoes += v;
+      if (d.retida === true) t.retidas += v;
+    });
+    t.resultado_negociacao = t.receita - t.deducoes;
+    t.deposito_esperado = t.receita - t.retidas;
+    return t;
+  }
+
+  // ------------------------------------------------------------------ invariantes (03b, seção 14) ----
+  /**
+   * Confere as invariantes entre FINANCEIRO, PARCELAS, RATEIOS e ALOCACOES_FINANCEIRAS (03b, seção 14) sobre as linhas
+   * vigentes da unidade (tx.repo; tx.cru para o que é anulado). Reutilizável pela verificação de integridade: a
+   * consulta precisa ler `leituras()` com acesso cru. Aba não lida → as invariantes que dependem dela não rodam.
+   * `escopo` (trava de integridade): {lancamentos, eventos, animais: {id: true}} — só os lançamentos citados e os dos
+   * eventos citados, os rateios deles, os cabeçalhos de compra e venda e o valor desses eventos, e o custo de aquisição
+   * dos animais citados; ausente = tudo.
+   * Devolve [{invariante, tabela, id, mensagem}] (vazio = tudo fecha, ao centavo e sem tolerância).
+   */
+  function conferir(tx, escopo) {
+    var repo = tx.repo;
+    var cru = tx.cru || null;
+    var esc = escopo || null;
+    var out = [];
+    function achado(n, tabela, id, mensagem) { out.push({ invariante: n, tabela: tabela, id: id, mensagem: mensagem }); }
+    /** Achado de fato adulterado na fonte da reconstrução (a situação de pagamento sai das parcelas): o reparo não o desfaz. */
+    function achadoFonte(n, tabela, id, mensagem) { out.push({ invariante: n, tabela: tabela, id: id, mensagem: mensagem, fonte: true }); }
+    function doEscopo(fin) { return !esc || !!(esc.lancamentos && esc.lancamentos[fin.financial_id]) || !!(esc.eventos && esc.eventos[fin.event_id]); }
+    var base = ['FINANCEIRO', 'PARCELAS', 'RATEIOS', 'ALOCACOES_FINANCEIRAS', 'EVENTOS', 'EVENTO_ANIMAIS'];
+    if (!base.every(function (t) { return repo.carregada(t); })) return out;
+    var temContas = repo.carregada('PLANO_CONTAS');
+    var lancs = repo.vigentes('FINANCEIRO').filter(doEscopo);
+    var rateioDe = {};
+    lancs.forEach(function (fin) {
+      var nome = '"' + (fin.descricao || fin.financial_id) + '"';
+      if (!inteiroPositivo_(fin.valor)) achado(1, 'FINANCEIRO', fin.financial_id, 'O lançamento ' + nome + ' precisa ter valor positivo em centavos.');
+      if (temContas) {
+        var c = repo.porId('PLANO_CONTAS', fin.conta_id);
+        if (!c) achado(2, 'FINANCEIRO', fin.financial_id, 'O lançamento ' + nome + ' aponta para uma conta que não existe.');
+        else if (c.natureza !== fin.natureza || c.tipo !== fin.tipo || c.grupo !== fin.categoria) achado(2, 'FINANCEIRO', fin.financial_id, 'O lançamento ' + nome + ' tem natureza, tipo ou grupo diferentes da conta "' + c.nome + '".');
+        if (c && c.codigo === CONTAS.ABERTURA && repo.por('PARCELAS', 'financial_id', fin.financial_id).length) achado(4, 'FINANCEIRO', fin.financial_id, 'O saldo de abertura ' + nome + ' não pode ter parcela: não é caixa.');
+      }
+      // A parcela CANCELADA (substituída por desdobramento; desenho-base 16.11) não conta para a soma nem para o caixa.
+      var parcelas = repo.por('PARCELAS', 'financial_id', fin.financial_id).filter(function (p) { return p.status !== 'CANCELADA'; });
+      if (!vazio_(fin.product_id) && fin.natureza === 'CUSTEIO' && parcelas.length) achado(4, 'FINANCEIRO', fin.financial_id, 'O consumo de insumo ' + nome + ' não pode ter parcela.');
+      if (parcelas.length && soma_(parcelas, 'valor') !== fin.valor) achado(3, 'FINANCEIRO', fin.financial_id, 'As parcelas somam ' + reais_(soma_(parcelas, 'valor')) + ' e o lançamento vale ' + reais_(fin.valor) + ' (' + nome + ').');
+      parcelas.forEach(function (p) {
+        if (p.status === 'LIQUIDADA') {
+          var esperado = (p.valor || 0) + (p.juros_multa || 0) - (p.desconto || 0);
+          if (vazio_(p.data_pagamento) || p.valor_pago !== esperado) achado(5, 'PARCELAS', p.parcela_id, 'A parcela ' + p.parcela_num + ' de ' + nome + ' está paga sem data ou com valor pago diferente de valor + juros − desconto (' + reais_(esperado) + ').');
+        } else if (p.status === 'ABERTA' && [p.data_pagamento, p.valor_pago, p.juros_multa, p.desconto].some(function (v) { return !vazio_(v); })) {
+          achado(5, 'PARCELAS', p.parcela_id, 'A parcela ' + p.parcela_num + ' de ' + nome + ' está em aberto mas tem dados de pagamento.');
+        }
+      });
+      // Parcela CANCELADA só por desdobramento (03b, seção 11; desenho-base 16.11): as parcelas que nascem da baixa
+      // parcial apontam para ela. Sem elas, a parcela foi cancelada à mão e o título sumiu do caixa.
+      (cru ? cru.cruPor('PARCELAS', 'financial_id', fin.financial_id) : []).forEach(function (p) {
+        if (p.status !== 'CANCELADA' || cru.cruPor('PARCELAS', 'parcela_origem_id', p.parcela_id).length) return;
+        achadoFonte(3, 'PARCELAS', p.parcela_id, 'A parcela ' + p.parcela_num + ' de ' + nome + ' está cancelada sem as parcelas do desdobramento (a parcela só é cancelada quando uma baixa parcial a divide em duas): o título sumiu do caixa. Restaure o backup ou investigue a edição manual.');
+      });
+      var sp = situacaoPagamento(parcelas, true);
+      var ev0 = repo.porId('EVENTOS', fin.event_id);
+      // Todo lançamento com efeito de caixa tem ao menos uma parcela (03b, seções 10.3 e 11): sem parcela, só o consumo de
+      // insumo, o saldo de abertura e o evento anterior ao marco zero (pago antes do controle do sistema). A falta de
+      // parcela nos demais é linha apagada (ou cancelada) à mão: refazer o "sem caixa" pela reconstrução apagaria a dívida
+      // ou o recebível, então o achado é da fonte e continua depois do reparo (06, seções 9 e 12; RN-112).
+      if (!parcelas.length && !semCaixaPorNatureza_(repo, fin, ev0, temContas)) {
+        achadoFonte(4, 'FINANCEIRO', fin.financial_id, 'O lançamento ' + nome + (ev0 ? ', de ' + br_(ev0.event_date) + ',' : '') + ' está sem parcela: todo lançamento com efeito de caixa tem ao menos uma, e o título a pagar ou a receber sumiu. Restaure o backup ou investigue a edição manual.');
+      } else if (!parcelas.length && fin.status_pagamento !== 'SEM_CAIXA') achado(4, 'FINANCEIRO', fin.financial_id, 'O lançamento ' + nome + ' não tem parcela e precisa ficar "sem caixa".');
+      else if (fin.status_pagamento !== sp.status_pagamento || nulo_(fin.data_pagamento) !== sp.data_pagamento) achado(6, 'FINANCEIRO', fin.financial_id, 'O lançamento ' + nome + ' registra pagamento ' + fin.status_pagamento + ', mas pelas parcelas seria ' + sp.status_pagamento + '.');
+      var rats = repo.por('RATEIOS', 'financial_id', fin.financial_id);
+      if (rats.length > 1) achado(7, 'FINANCEIRO', fin.financial_id, 'O lançamento ' + nome + ' tem ' + rats.length + ' rateios valendo ao mesmo tempo.');
+      var rat = rats[0] || null;
+      rateioDe[fin.financial_id] = rat;
+      var ev = repo.porId('EVENTOS', fin.event_id);
+      if (rat && SEM_RATEIO.indexOf(fin.natureza) >= 0) achado(14, 'RATEIOS', rat.rateio_id, 'O lançamento ' + nome + ' é de ' + fin.natureza + ' e não pode ser rateado aos animais.');
+      if (rat && rat.total_alocado > fin.valor) achado(9, 'RATEIOS', rat.rateio_id, 'O rateio de ' + nome + ' distribui ' + reais_(rat.total_alocado) + ', mais que o lançamento (' + reais_(fin.valor) + ').');
+      if (ev && CEM_POR_CENTO[ev.event_type] && (!rat || rat.total_alocado !== fin.valor)) {
+        achado(10, 'FINANCEIRO', fin.financial_id, 'O lançamento ' + nome + ' (' + rotuloEvento_(ev) + ') precisa estar 100% alocado aos animais: ' + (rat ? 'alocados ' + reais_(rat.total_alocado) + ' de ' + reais_(fin.valor) : 'não tem rateio para os animais') + '.');
+      }
+      var allocs = rat ? repo.por('ALOCACOES_FINANCEIRAS', 'rateio_id', rat.rateio_id) : [];
+      var direta = rat && rat.criterio === 'DIRETO' && allocs.length === 1 && allocs[0].valor_alocado === fin.valor ? allocs[0].animal_id : null;
+      if (nulo_(fin.animal_id) !== direta) achado(12, 'FINANCEIRO', fin.financial_id, 'O animal do lançamento ' + nome + ' (' + (fin.animal_id || 'vazio') + ') não corresponde à alocação direta (' + (direta || 'nenhuma') + ').');
+    });
+    repo.vigentes('RATEIOS').forEach(function (rat) {
+      if (esc && !doEscopo({ financial_id: rat.financial_id, event_id: rat.event_id }) && !doEscopo(repo.porId('FINANCEIRO', rat.financial_id) || {})) return;
+      var allocs = repo.por('ALOCACOES_FINANCEIRAS', 'rateio_id', rat.rateio_id);
+      if (soma_(allocs, 'valor_alocado') !== rat.total_alocado) achado(8, 'RATEIOS', rat.rateio_id, 'O rateio soma ' + reais_(soma_(allocs, 'valor_alocado')) + ' nas alocações, mas registra ' + reais_(rat.total_alocado) + '.');
+      var bases = Utils.arredondar(allocs.reduce(function (t, a) { return t + (a.base_valor || 0); }, 0), 4);
+      if (Math.abs(bases - (rat.base_total || 0)) > 1e-9) achado(8, 'RATEIOS', rat.rateio_id, 'As bases das alocações somam ' + bases + ' e o rateio registra ' + rat.base_total + '.');
+      var vistos = {};
+      allocs.forEach(function (a) {
+        if (vistos[a.animal_id]) achado(11, 'ALOCACOES_FINANCEIRAS', a.alloc_id, 'O animal ' + a.animal_id + ' aparece duas vezes no mesmo rateio.');
+        vistos[a.animal_id] = true;
+        if (a.financial_id !== rat.financial_id) achado(11, 'ALOCACOES_FINANCEIRAS', a.alloc_id, 'A alocação aponta para outro lançamento que o do seu rateio.');
+      });
+      if (allocs.length === 1 && rat.criterio !== 'DIRETO') achado(13, 'RATEIOS', rat.rateio_id, 'Rateio com um único animal precisa ser DIRETO (está ' + rat.criterio + ').');
+      if (allocs.length !== 1 && rat.criterio === 'DIRETO') achado(13, 'RATEIOS', rat.rateio_id, 'Rateio DIRETO precisa ter exatamente um animal (tem ' + allocs.length + ').');
+    });
+    conferirNegocios_(repo, lancs, rateioDe, achado, esc, achadoFonte);
+    conferirAvulsosETitulos_(tx, lancs, rateioDe, achado, esc);
+    conferirRateios_(tx, achado, achadoFonte, esc);
+    if (repo.carregada('SANIDADE')) {
+      Utils.unicos(repo.vigentes('SANIDADE').map(function (x) { return x.event_id; })).forEach(function (eid) {
+        if (esc && !(esc.eventos && esc.eventos[eid])) return;
+        var copias = soma_(repo.por('SANIDADE', 'event_id', eid), 'custo');
+        var alocado = 0;
+        // O rateio que o próprio evento gravou (a cópia é dele: o re-rateio posterior, por evento RATEIO, não a muda; 02, seção
+        // 6.3; Fase 4, E4.3), lido cru porque o re-rateio o deixa de valer.
+        rateiosDoProprio_(tx, eid).forEach(function (r) { alocado += soma_(alocacoesDoRateio_(tx, r.rateio_id), 'valor_alocado'); });
+        if (copias !== alocado) achado(17, 'EVENTOS', eid, 'O custo copiado na sanidade (' + reais_(copias) + ') difere do alocado pelo evento (' + reais_(alocado) + ').');
+      });
+    }
+    if (repo.carregada('ANIMAIS')) conferirCustoAquisicao_(tx, achado, esc);
+    if (cru) {
+      cru.cru('FINANCEIRO').forEach(function (fin) {
+        if (!doEscopo(fin)) return;
+        var a = cru.avaliar(fin.event_id);
+        if (!a || a.vigente) return;
+        var anulador = a.anulador_id ? cru.cruPorId('EVENTOS', a.anulador_id) : null;
+        var liquidadas = cru.cruPor('PARCELAS', 'financial_id', fin.financial_id).filter(function (p) { return p.status === 'LIQUIDADA'; });
+        if (anulador && anulador.event_type === 'ESTORNO' && liquidadas.length) achado(19, 'FINANCEIRO', fin.financial_id, 'O lançamento "' + (fin.descricao || fin.financial_id) + '" foi estornado com parcela paga.');
+        var restos = repo.por('PARCELAS', 'financial_id', fin.financial_id).length + repo.por('RATEIOS', 'financial_id', fin.financial_id).length + repo.por('ALOCACOES_FINANCEIRAS', 'financial_id', fin.financial_id).length;
+        if (restos) achado(20, 'FINANCEIRO', fin.financial_id, 'O lançamento cancelado "' + (fin.descricao || fin.financial_id) + '" ainda tem parcela, rateio ou alocação valendo.');
+      });
+    }
+    return out;
+  }
+  /** Os rateios que o evento gravou (inclusive os que um re-rateio deixou de valer): pelas linhas cruas, quando há acesso cru. */
+  function rateiosDoProprio_(tx, eventId) {
+    return tx.cru ? tx.cru.cruPor('RATEIOS', 'event_id', eventId) : tx.repo.por('RATEIOS', 'event_id', eventId);
+  }
+  function alocacoesDoRateio_(tx, rateioId) {
+    return tx.cru ? tx.cru.cruPor('ALOCACOES_FINANCEIRAS', 'rateio_id', rateioId) : tx.repo.por('ALOCACOES_FINANCEIRAS', 'rateio_id', rateioId);
+  }
+  /**
+   * O lançamento que só se rateia por inteiro e entre os animais do próprio registro (invariante 10; 07, seções 1.3 e 3.1): o
+   * de compra, venda, rebanho inicial, morte, descarte e sanidade, e todo lançamento de aquisição de animais.
+   */
+  function exigeCemPorCento(ev, fin) {
+    return !!(ev && CEM_POR_CENTO[ev.event_type]) || !!(fin && fin.natureza === 'AQUISICAO_ANIMAIS');
+  }
+  /**
+   * Invariante 25 (Fase 4, E4.3; CONTRATOS, seção 57): o que o evento RATEIO grava, conferido pela mesma função na verificação e
+   * na trava. Todo RATEIO que vale tem exatamente um rateio (RATEIOS) e nenhum lançamento, parcela ou linha de animal; o
+   * lançamento dele existe e vale (o estorno ou a correção do registro que o criou cancelaria o rateio em silêncio), é de natureza
+   * que se rateia, não é anterior ao marco zero e tem competência até a data do rateio; `total_value` = o total alocado; o
+   * critério serve ao escopo; o escopo EVENTO é o registro do lançamento (o `ref_event_id` ou o criador); o lançamento do
+   * próprio registro (compra, venda, manejo, aquisição) só se rateia entre os animais dele e por inteiro; o arrendamento de
+   * pasto, pelos dias de permanência no pasto dele; os dias de permanência têm o período; a data-base, a contagem na data; a base
+   * zero, o motivo. `esc`: os RATEIO do escopo e os que rateiam um lançamento do escopo.
+   */
+  function conferirRateios_(tx, achado, achadoFonte, esc) {
+    var cru = tx.cru;
+    if (!cru) return;
+    var repo = tx.repo;
+    var temContas = repo.carregada('PLANO_CONTAS');
+    var porEvento = {};
+    cru.cru('RATEIOS').forEach(function (r) { (porEvento[r.event_id] = porEvento[r.event_id] || []).push(r); });
+    repo.vigentes('EVENTOS').forEach(function (ev) {
+      if (ev.event_type !== 'RATEIO') return;
+      var rats = porEvento[ev.event_id] || [];
+      var noEscopo = !esc || (esc.eventos && esc.eventos[ev.event_id]) || rats.some(function (r) { return esc.lancamentos && esc.lancamentos[r.financial_id]; });
+      if (!noEscopo) return;
+      var quando = br_(ev.event_date);
+      if (rats.length !== 1) { achadoFonte(25, 'EVENTOS', ev.event_id, 'O rateio de ' + quando + ' tem ' + rats.length + ' linhas de rateio; precisa ter uma só. Restaure o backup ou investigue a edição manual.'); return; }
+      ['FINANCEIRO', 'EVENTO_ANIMAIS'].forEach(function (t) { if (repo.carregada(t) && cru.cruPor(t, 'event_id', ev.event_id).length) achado(25, 'EVENTOS', ev.event_id, 'O rateio de ' + quando + ' tem linhas de ' + t + ', que ele não grava.'); });
+      var r = rats[0];
+      var fin = cru.cruPorId('FINANCEIRO', r.financial_id);
+      if (!fin) { achado(25, 'RATEIOS', r.rateio_id, 'O rateio de ' + quando + ' aponta para um lançamento que não existe.'); return; }
+      var nome = '"' + (fin.descricao || fin.financial_id) + '"';
+      if (!repo.porId('FINANCEIRO', fin.financial_id)) {
+        achado(25, 'RATEIOS', r.rateio_id, 'O rateio de ' + quando + ' distribui o lançamento ' + nome + ', que não vale mais (o registro dele foi estornado, corrigido ou desfeito): estorne o rateio antes de cancelar o lançamento.');
+        return;
+      }
+      var criador = cru.cruPorId('EVENTOS', fin.event_id) || {};
+      if (SEM_RATEIO.indexOf(fin.natureza) >= 0) achado(25, 'RATEIOS', r.rateio_id, 'O rateio de ' + quando + ' distribui o lançamento ' + nome + ', de ' + (NOME_NATUREZA[fin.natureza] || fin.natureza) + ', que não se rateia aos animais.');
+      if (criador.pre_marco_zero === true) achado(25, 'RATEIOS', r.rateio_id, 'O rateio de ' + quando + ' distribui o lançamento ' + nome + ', anterior ao marco zero.');
+      if (ev.event_date < fin.data_competencia) achado(25, 'EVENTOS', ev.event_id, 'O rateio de ' + quando + ' é anterior ao lançamento ' + nome + ' (' + br_(fin.data_competencia) + ').');
+      if (nulo_(ev.total_value) !== (r.total_alocado > 0 ? r.total_alocado : null)) achado(25, 'EVENTOS', ev.event_id, 'O valor gravado no rateio de ' + quando + ' (' + (vazio_(ev.total_value) ? 'vazio' : reais_(ev.total_value)) + ') difere do total distribuído (' + reais_(r.total_alocado) + ').');
+      var pj = ev.payload_json || {};
+      var crit = vazio_(pj.criterio_pedido) ? r.criterio : pj.criterio_pedido;
+      var allocs = cru.cruPor('ALOCACOES_FINANCEIRAS', 'rateio_id', r.rateio_id);
+      if (!vazio_(pj.criterio_pedido) && (r.criterio !== 'DIRETO' || allocs.length !== 1)) achado(25, 'EVENTOS', ev.event_id, 'O rateio de ' + quando + ' registra o critério pedido (' + pj.criterio_pedido + '), que só se guarda quando o rateio ficou com um animal só (DIRETO).');
+      var permitidos = Rateio.CRITERIOS_DO_ESCOPO[r.escopo_tipo];
+      if (!permitidos || (crit !== 'DIRETO' && permitidos.indexOf(crit) < 0)) achado(25, 'RATEIOS', r.rateio_id, 'O rateio de ' + quando + ' divide ' + (Rateio.NOME_CRITERIO[crit] || crit) + ' num escopo (' + r.escopo_tipo + ') que não aceita esse critério.');
+      var ancora = vazio_(fin.ref_event_id) ? fin.event_id : fin.ref_event_id;
+      if (r.escopo_tipo === 'EVENTO' && r.escopo_ref !== ancora) achado(25, 'RATEIOS', r.rateio_id, 'O rateio de ' + quando + ' divide entre os animais de outro registro, não o do lançamento ' + nome + '.');
+      if (r.escopo_tipo === 'PASTO' && (vazio_(r.escopo_ref) || !repo.porId('PASTOS', r.escopo_ref))) achado(25, 'RATEIOS', r.rateio_id, 'O rateio de ' + quando + ' é de um pasto que não existe.');
+      if ((r.escopo_tipo === 'REBANHO' || r.escopo_tipo === 'LISTA') && !vazio_(r.escopo_ref)) achado(25, 'RATEIOS', r.rateio_id, 'O rateio de ' + quando + ' (' + r.escopo_tipo + ') tem uma referência de escopo, que ele não grava.');
+      if (exigeCemPorCento(criador, fin) && (r.escopo_tipo !== 'EVENTO' || r.total_alocado !== fin.valor)) achado(25, 'RATEIOS', r.rateio_id, 'O lançamento ' + nome + ' (' + rotuloEvento_(criador) + ') só se rateia entre os animais do próprio registro e por inteiro.');
+      var conta = temContas ? repo.porId('PLANO_CONTAS', fin.conta_id) : null;
+      if (conta && conta.codigo === 'ARRENDAMENTO_PASTO' && (crit !== 'DIAS_PERMANENCIA' || r.escopo_tipo !== 'PASTO' || r.escopo_ref !== fin.pasture_id)) achado(25, 'RATEIOS', r.rateio_id, 'O arrendamento ' + nome + ' se rateia pelos dias de permanência no pasto arrendado.');
+      var porPeriodo = crit === 'DIAS_PERMANENCIA';
+      if (porPeriodo && (vazio_(r.periodo_inicio) || vazio_(r.periodo_fim) || r.periodo_fim < r.periodo_inicio)) achado(25, 'RATEIOS', r.rateio_id, 'O rateio de ' + quando + ' pelos dias de permanência precisa do período (início até o fim).');
+      if (!porPeriodo && (!vazio_(r.periodo_inicio) || !vazio_(r.periodo_fim))) achado(25, 'RATEIOS', r.rateio_id, 'O rateio de ' + quando + ' tem período, que só os dias de permanência gravam.');
+      if (!porPeriodo && vazio_(r.data_base)) achado(25, 'RATEIOS', r.rateio_id, 'O rateio de ' + quando + ' precisa da data-base (o dia em que os animais foram contados).');
+      if (r.total_alocado > fin.valor) achado(25, 'RATEIOS', r.rateio_id, 'O rateio de ' + quando + ' distribui mais que o lançamento ' + nome + '.');
+      var zero = r.total_alocado === 0;
+      if (zero !== (allocs.length === 0) || (zero && !/^Base zero: /.test(r.justificativa || ''))) achado(25, 'RATEIOS', r.rateio_id, 'O rateio de ' + quando + (zero ? ' não distribuiu nada e precisa do motivo (base zero) sem alocações.' : ' tem total e alocações que não combinam.'));
+    });
+  }
+  /** Invariantes 15 e 16: valor por animal × cabeçalho comercial × lançamentos do evento (COMPRA e VENDA). `esc`: só os eventos dele. */
+  function conferirNegocios_(repo, lancs, rateioDe, achado, esc, achadoFonte) {
+    var porEvento = Utils.agruparPor(lancs, 'event_id');
+    var doEscopo = function (eid) { return !esc || !!(esc.eventos && esc.eventos[eid]); };
+    var contas = repo.carregada('PLANO_CONTAS');
+    function principal(eid, codigo) {
+      return (porEvento[eid] || []).filter(function (f) { var c = contas ? repo.porId('PLANO_CONTAS', f.conta_id) : null; return c && c.codigo === codigo; })[0] || null;
+    }
+    function alocado(fin) {
+      var r = fin ? rateioDe[fin.financial_id] : null;
+      return r ? soma_(repo.por('ALOCACOES_FINANCEIRAS', 'rateio_id', r.rateio_id), 'valor_alocado') : 0;
+    }
+    // Cabeçalho comercial obrigatório (03b, seção 14, invariantes 15 e 16; 06, seção 12): toda compra e toda venda
+    // vigentes têm exatamente uma linha de COMPRAS ou VENDAS (apagada à mão, as conferências abaixo não teriam o que
+    // comparar e a falta passaria calada).
+    [['COMPRA', 'COMPRAS', 'A compra'], ['VENDA', 'VENDAS', 'A venda']].forEach(function (cfg) {
+      if (!repo.carregada(cfg[1])) return;
+      var linhas = {};
+      repo.vigentes(cfg[1]).forEach(function (x) { linhas[x.event_id] = (linhas[x.event_id] || 0) + 1; });
+      repo.vigentes('EVENTOS').forEach(function (ev) {
+        if (ev.event_type !== cfg[0] || linhas[ev.event_id] === 1 || !doEscopo(ev.event_id)) return;
+        achado(15, 'EVENTOS', ev.event_id, cfg[2] + ' de ' + br_(ev.event_date) + (linhas[ev.event_id] ? ' tem ' + linhas[ev.event_id] + ' linhas de ' + cfg[1] + '; precisa ter uma só.' : ' está sem a linha de ' + cfg[1] + ' (a negociação do evento). Restaure o backup ou investigue a edição manual.'));
+      });
+    });
+    if (repo.carregada('COMPRAS')) {
+      repo.vigentes('COMPRAS').forEach(function (c) {
+        if (!doEscopo(c.event_id)) return;
+        var ea = repo.por('EVENTO_ANIMAIS', 'event_id', c.event_id);
+        var ev = repo.porId('EVENTOS', c.event_id);
+        var individual = soma_(ea, 'valor_individual');
+        var fin = principal(c.event_id, CONTAS.COMPRA);
+        if (individual !== c.valor_animais || !fin || fin.valor !== c.valor_animais || alocado(fin) !== c.valor_animais) achado(15, 'COMPRAS', c.purchase_id, 'A compra de ' + br_(ev && ev.event_date) + ': valores por animal (' + reais_(individual) + '), valor dos animais (' + reais_(c.valor_animais) + ') e lançamento principal não fecham.');
+        var total = soma_(porEvento[c.event_id] || [], 'valor');
+        if (total !== c.valor_total || c.valor_total !== c.valor_animais + c.frete + c.outros_custos) achado(16, 'COMPRAS', c.purchase_id, 'A compra registra ' + reais_(c.valor_total) + ' no total e os lançamentos do evento somam ' + reais_(total) + '.');
+        if (ev && ev.total_value !== c.valor_total) achado(16, 'EVENTOS', c.event_id, 'O valor do evento de compra (' + reais_(ev.total_value) + ') difere do total da compra (' + reais_(c.valor_total) + ').');
+        // Os fretes têm os menores identificadores da compra: o frete é um prefixo dos lançamentos acessórios na ordem
+        // do financial_id (nunca na ordem física das linhas, que o dono pode classificar).
+        var acess = (porEvento[c.event_id] || []).filter(function (f) { return f !== fin; });
+        if (tiposDosCustos(acess, c.frete) === null || soma_(acess, 'valor') - c.frete !== c.outros_custos) achado(16, 'COMPRAS', c.purchase_id, 'O frete (' + reais_(c.frete) + ') e os outros custos (' + reais_(c.outros_custos) + ') da compra não conferem com os lançamentos de cada item.');
+        // Compra anterior ao marco zero (importação): os animais entram com efeito 0 (registro histórico).
+        var efeitoCompra = ev && ev.pre_marco_zero === true ? 0 : 1;
+        if (c.qtd_animais !== ea.filter(function (l) { return l.efeito_inventario === efeitoCompra; }).length) achado(16, 'COMPRAS', c.purchase_id, 'A quantidade de animais da compra não confere com os animais do evento.');
+      });
+    }
+    if (repo.carregada('VENDAS')) {
+      repo.vigentes('VENDAS').forEach(function (v) {
+        if (!doEscopo(v.event_id)) return;
+        var receita = v.valor_bruto - (v.desconto_comercial || 0);
+        var ea = repo.por('EVENTO_ANIMAIS', 'event_id', v.event_id);
+        var fin = principal(v.event_id, CONTAS.VENDA);
+        if (soma_(ea, 'valor_individual') !== receita || !fin || fin.valor !== receita || alocado(fin) !== receita) achado(15, 'VENDAS', v.sale_id, 'A venda: valores por animal, receita (' + reais_(receita) + ') e lançamento de receita não fecham.');
+        var lancs = porEvento[v.event_id] || [];
+        var deducoes = soma_(lancs.filter(function (f) { return f.natureza === 'DESPESA_VENDA'; }), 'valor');
+        if (deducoes !== (v.frete || 0) + (v.comissao || 0) + (v.outras_deducoes || 0)) achado(16, 'VENDAS', v.sale_id, 'As deduções da venda não conferem com os lançamentos de despesa de venda (' + reais_(deducoes) + ').');
+        if (lancs.some(function (f) { return f !== fin && f.natureza !== 'DESPESA_VENDA'; })) achado(16, 'VENDAS', v.sale_id, 'A venda tem um lançamento que não é a receita nem uma despesa de venda.');
+        // A dedução descontada pelo comprador sai num recebimento da venda (03b, 2.5: encontro de contas na baixa da
+        // receita): o título dela vence num dos vencimentos da receita.
+        if (fin) {
+          var recebimentos = repo.por('PARCELAS', 'financial_id', fin.financial_id).map(function (p) { return p.data_vencimento; });
+          var evHist = repo.porId('EVENTOS', v.event_id);
+          lancs.forEach(function (f) {
+            if (f === fin || f.retida_pelo_comprador !== true) return;
+            if (!recebimentos.length) {
+              // Sem recebimento não há onde descontar a dedução: a parcela da receita foi apagada (o histórico, anterior ao
+              // marco zero, não tem caixa nenhum).
+              if (!(evHist && evHist.pre_marco_zero === true)) achadoFonte(16, 'FINANCEIRO', f.financial_id, 'A dedução "' + (f.descricao || f.financial_id) + '", descontada pelo comprador, não tem recebimento da venda onde ser descontada (a receita está sem parcela). Restaure o backup ou investigue a edição manual.');
+              return;
+            }
+            repo.por('PARCELAS', 'financial_id', f.financial_id).forEach(function (p) {
+              if (recebimentos.indexOf(p.data_vencimento) < 0) achado(16, 'FINANCEIRO', f.financial_id, 'A dedução "' + (f.descricao || f.financial_id) + '", descontada pelo comprador, vence em ' + br_(p.data_vencimento) + ', fora dos recebimentos da venda (' + recebimentos.map(br_).join(', ') + ').');
+            });
+          });
+        }
+        if (contas) {
+          // Cada total de VENDAS é a soma dos lançamentos na conta própria (frete, comissão; o resto em taxas e retenções).
+          var porConta = function (codigo) { return soma_(lancs.filter(function (f) { var c = repo.porId('PLANO_CONTAS', f.conta_id); return c && c.codigo === codigo; }), 'valor'); };
+          if (porConta(CONTAS.FRETE_VENDA) !== (v.frete || 0) || porConta(CONTAS.COMISSAO_VENDA) !== (v.comissao || 0) || porConta(CONTAS.TAXAS_VENDA) !== (v.outras_deducoes || 0)) {
+            achado(16, 'VENDAS', v.sale_id, 'O frete, a comissão ou as outras deduções da venda não conferem com os lançamentos de cada conta.');
+          }
+        }
+        var evv = repo.porId('EVENTOS', v.event_id);
+        if (evv && evv.total_value !== v.valor_bruto) achado(16, 'EVENTOS', v.event_id, 'O valor do evento de venda (' + reais_(evv.total_value) + ') difere do valor bruto (' + reais_(v.valor_bruto) + ').');
+        var evVenda = repo.porId('EVENTOS', v.event_id);
+        var efeitoVenda = evVenda && evVenda.pre_marco_zero === true ? 0 : -1;
+        if (v.qtd_animais !== ea.filter(function (l) { return l.efeito_inventario === efeitoVenda; }).length) achado(16, 'VENDAS', v.sale_id, 'A quantidade de animais da venda não confere com os animais do evento.');
+      });
+    }
+    // EVENTOS.total_value dos demais tipos é cópia gravada na fase A e conferida contra a fonte (03b, 2.5): a soma dos
+    // lançamentos do evento (rebanho inicial = abertura; morte e descarte = o lançamento opcional); vazio sem lançamento.
+    repo.vigentes('EVENTOS').forEach(function (ev) {
+      // O RATEIO grava o total distribuído (03b, seção 2.5), conferido pela invariante 25.
+      if (ev.event_type === 'COMPRA' || ev.event_type === 'VENDA' || ev.event_type === 'RATEIO' || !doEscopo(ev.event_id)) return;
+      var doEvento = porEvento[ev.event_id] || [];
+      var esperado = doEvento.length ? soma_(doEvento, 'valor') : null;
+      var gravado = vazio_(ev.total_value) ? null : ev.total_value;
+      if (gravado !== esperado) {
+        achado(16, 'EVENTOS', ev.event_id, 'O valor gravado no evento ' + rotuloEvento_(ev) + ' (' + (gravado === null ? 'vazio' : reais_(gravado)) + ') difere do que os lançamentos dele somam (' + (esperado === null ? 'nenhum lançamento' : reais_(esperado)) + ').');
+      }
+    });
+  }
+  /**
+   * Fase 4, E4.1 e E4.2 (CONTRATOS, seção 56): o que o lançamento avulso, a baixa, o desdobramento e o encontro de contas
+   * gravam, conferido pela mesma função na verificação e na trava (uma regra, um lugar).
+   *  - 21: o avulso (LANCAMENTO_FINANCEIRO) tem um lançamento só, de custeio, outra receita ou não operacional, com a
+   *    competência = a data do evento; o período (os dois limites ou nenhum) só em custeio e outra receita, começando na
+   *    competência ou depois; o arrendamento de pasto com o pasto e o período; nenhuma linha de animal nem rateio (Fase 4,
+   *    E4.1). Fora do avulso, nenhum lançamento tem período.
+   *  - 22: a parcela paga não é antes da competência do lançamento (a identidade das três visões; seção 55) nem no futuro, e o
+   *    desconto é menor que o valor.
+   *  - 23: as parcelas que nasceram de um desdobramento (baixa parcial ou parcela dividida) são do mesmo lançamento e do mesmo
+   *    número, a de origem está CANCELADA e elas somam o valor dela; e só o título que a correção refaz parcela a parcela se
+   *    desdobra (tituloLivre: a compra, a receita da venda e o avulso).
+   *  - 24: o encontro de contas da venda: a dedução descontada pelo comprador é quitada junto com o recebimento em que vence
+   *    (a mesma data, pelo nominal), e o recebimento quitado leva as deduções retidas dele.
+   */
+  function conferirAvulsosETitulos_(tx, lancs, rateioDe, achado, esc) {
+    var repo = tx.repo;
+    var cru = tx.cru || null;
+    var hoje = vazio_(tx.hoje) ? null : tx.hoje;
+    var temContas = repo.carregada('PLANO_CONTAS');
+    var porEvento = Utils.agruparPor(lancs, 'event_id');
+    lancs.forEach(function (fin) {
+      var nome = '"' + (fin.descricao || fin.financial_id) + '"';
+      var ev = repo.porId('EVENTOS', fin.event_id);
+      var avulso = !!ev && ev.event_type === 'LANCAMENTO_FINANCEIRO';
+      var comPeriodo = !vazio_(fin.competencia_inicio) || !vazio_(fin.competencia_fim);
+      if (!avulso && comPeriodo) achado(21, 'FINANCEIRO', fin.financial_id, 'O lançamento ' + nome + ' tem período de competência, que só o lançamento avulso de custeio ou outra receita grava.');
+      if (avulso) {
+        if ((porEvento[fin.event_id] || []).length !== 1) achado(21, 'EVENTOS', fin.event_id, 'O lançamento avulso de ' + br_(ev.event_date) + ' tem ' + (porEvento[fin.event_id] || []).length + ' lançamentos; precisa ter um só.');
+        if (EventCatalog.NATUREZAS_AVULSO.indexOf(fin.natureza) < 0) achado(21, 'FINANCEIRO', fin.financial_id, 'O lançamento avulso ' + nome + ' é de ' + (NOME_NATUREZA[fin.natureza] || fin.natureza) + ', que nasce no próprio evento (compra, venda, entrada de estoque), não em lançamento avulso.');
+        if (fin.data_competencia !== ev.event_date) achado(21, 'FINANCEIRO', fin.financial_id, 'O lançamento avulso ' + nome + ' tem a competência em ' + br_(fin.data_competencia) + ', diferente da data do evento (' + br_(ev.event_date) + ').');
+        if (comPeriodo) {
+          if (vazio_(fin.competencia_inicio) || vazio_(fin.competencia_fim) || fin.competencia_fim < fin.competencia_inicio || fin.competencia_inicio < fin.data_competencia) achado(21, 'FINANCEIRO', fin.financial_id, 'O período do lançamento ' + nome + ' precisa ter início e fim, o fim depois do início e o início na competência (' + br_(fin.data_competencia) + ') ou depois.');
+          if (fin.natureza !== 'CUSTEIO' && fin.natureza !== 'OUTRA_RECEITA') achado(21, 'FINANCEIRO', fin.financial_id, 'O lançamento ' + nome + ' tem período, que só vale para custeio e outras receitas.');
+        }
+        var conta = temContas ? repo.porId('PLANO_CONTAS', fin.conta_id) : null;
+        if (conta && conta.codigo === 'ARRENDAMENTO_PASTO' && (vazio_(fin.pasture_id) || vazio_(fin.competencia_inicio))) achado(21, 'FINANCEIRO', fin.financial_id, 'O arrendamento ' + nome + ' precisa do pasto arrendado e do período.');
+        // O rateio do avulso entre os animais é sempre de um evento RATEIO (Fase 4, E4.3): o próprio avulso não grava rateio.
+        rateiosDoProprio_(tx, fin.event_id).forEach(function (r) { achado(21, 'RATEIOS', r.rateio_id, 'O lançamento avulso ' + nome + ' tem rateio gravado por ele mesmo: o rateio entre os animais é feito depois, por "Ratear custo entre animais".'); });
+        if (repo.por('EVENTO_ANIMAIS', 'event_id', fin.event_id).length) achado(21, 'EVENTOS', fin.event_id, 'O lançamento avulso de ' + br_(ev.event_date) + ' tem linhas de animais, que ele não grava.');
+      }
+      var todas = cru ? cru.cruPor('PARCELAS', 'financial_id', fin.financial_id) : repo.por('PARCELAS', 'financial_id', fin.financial_id);
+      var porId = Utils.indexarPor(todas, 'parcela_id');
+      var filhas = {};
+      todas.forEach(function (p) {
+        if (!vazio_(p.parcela_origem_id)) (filhas[p.parcela_origem_id] = filhas[p.parcela_origem_id] || []).push(p);
+        if (p.status !== 'LIQUIDADA' || vazio_(p.data_pagamento)) return;
+        if (p.data_pagamento < fin.data_competencia) achado(22, 'PARCELAS', p.parcela_id, 'A parcela ' + p.parcela_num + ' de ' + nome + ' foi paga em ' + br_(p.data_pagamento) + ', antes da competência do lançamento (' + br_(fin.data_competencia) + ').');
+        if (hoje !== null && p.data_pagamento > hoje) achado(22, 'PARCELAS', p.parcela_id, 'A parcela ' + p.parcela_num + ' de ' + nome + ' está paga numa data que ainda não chegou (' + br_(p.data_pagamento) + ').');
+        if (typeof p.desconto === 'number' && p.desconto >= p.valor) achado(22, 'PARCELAS', p.parcela_id, 'A parcela ' + p.parcela_num + ' de ' + nome + ' tem desconto (' + reais_(p.desconto) + ') igual ou maior que o valor (' + reais_(p.valor) + ').');
+      });
+      todas.forEach(function (p) {
+        if (vazio_(p.parcela_origem_id)) return;
+        var o = porId[p.parcela_origem_id] || (cru ? cru.cruPorId('PARCELAS', p.parcela_origem_id) : null);
+        if (!o || o.financial_id !== fin.financial_id) achado(23, 'PARCELAS', p.parcela_id, 'A parcela ' + p.parcela_num + ' de ' + nome + ' diz que nasceu de outra parcela, que não é deste lançamento.');
+        else if (o.status !== 'CANCELADA' || o.parcela_num !== p.parcela_num) achado(23, 'PARCELAS', p.parcela_id, 'A parcela ' + p.parcela_num + ' de ' + nome + ' nasceu do desdobramento de uma parcela que ' + (o.status !== 'CANCELADA' ? 'continua valendo' : 'tem outro número') + '.');
+      });
+      var contaFin = temContas ? repo.porId('PLANO_CONTAS', fin.conta_id) : null;
+      // Sem o plano de contas lido, a compra fica de fora (o que a decide é o código da conta); os demais não dependem dele.
+      var decide = !!ev && (ev.event_type !== 'COMPRA' || !!contaFin);
+      if (decide && Object.keys(filhas).length && !tituloLivre(ev.event_type, fin, contaFin ? contaFin.codigo : null)) {
+        achado(23, 'PARCELAS', Object.keys(filhas)[0], 'O lançamento ' + nome + ' é em parcelas iguais (a correção do evento o refaria assim) e tem parcela dividida ou baixada em parte, o que só o título da compra, o recebimento da venda e o avulso aceitam.');
+      }
+      Object.keys(filhas).forEach(function (oid) {
+        var o = porId[oid];
+        if (!o) return;
+        var soma = soma_(filhas[oid], 'valor');
+        if (soma !== o.valor) achado(23, 'PARCELAS', oid, 'As parcelas que nasceram da parcela ' + o.parcela_num + ' de ' + nome + ' somam ' + reais_(soma) + ', e ela valia ' + reais_(o.valor) + '.');
+      });
+    });
+    // 24: o encontro de contas, por venda.
+    Object.keys(porEvento).forEach(function (eid) {
+      var receita = porEvento[eid].filter(function (f) { return f.natureza === 'RECEITA_VENDA_ANIMAIS'; })[0];
+      if (!receita) return;
+      var recebimentos = repo.por('PARCELAS', 'financial_id', receita.financial_id);
+      porEvento[eid].forEach(function (f) {
+        if (f.retida_pelo_comprador !== true) return;
+        repo.por('PARCELAS', 'financial_id', f.financial_id).forEach(function (q) {
+          var rec = recebimentos.filter(function (r) { return r.data_vencimento === q.data_vencimento; });
+          var recPago = rec.filter(function (r) { return r.status === 'LIQUIDADA'; })[0] || null;
+          if (q.status === 'LIQUIDADA' && (!recPago || recPago.data_pagamento !== q.data_pagamento || q.valor_pago !== q.valor)) {
+            achado(24, 'PARCELAS', q.parcela_id, 'A dedução "' + (f.descricao || f.financial_id) + '", descontada pelo comprador, está quitada em ' + br_(q.data_pagamento) + (recPago ? ' com valor diferente do nominal ou noutra data que o recebimento (' + br_(recPago.data_pagamento) + ')' : ' sem o recebimento da venda em que ela vence') + ': ela só se quita junto com ele, pelo nominal.');
+          }
+          if (q.status === 'ABERTA' && recPago) achado(24, 'PARCELAS', recPago.parcela_id, 'O recebimento da venda de ' + br_(recPago.data_vencimento) + ' está quitado, e a dedução "' + (f.descricao || f.financial_id) + '", descontada pelo comprador nele, continua em aberto.');
+        });
+      });
+    });
+  }
+  /**
+   * Tipo de cada custo acessório da compra (FRETE ou OUTRO; 03b, seção 4.1: COMPRAS guarda só os dois totais e o
+   * payload da compra não tem chave para isso, seção 2.6). Os fretes são lançados com os menores `financial_id` da
+   * compra (EventService.financeiroCompra_), e o tipo se reconstrói na ordem do identificador — o prefixo que soma o
+   * frete —, nunca na ordem física das linhas (06, seção 12: classificar a aba não muda nenhum dado). Devolve os tipos na
+   * ordem de `lancamentos` (['FRETE'|'OUTRO']), ou null quando nenhum prefixo fecha o frete (cabeçalho que não confere).
+   */
+  function tiposDosCustos(lancamentos, frete) {
+    var ordenados = (lancamentos || []).map(function (f, i) { return { f: f, i: i }; })
+      .sort(function (a, b) { var x = String(a.f.financial_id || ''); var y = String(b.f.financial_id || ''); return x < y ? -1 : x > y ? 1 : a.i - b.i; });
+    var acum = 0;
+    var corte = frete === 0 ? 0 : -1;
+    for (var k = 0; k < ordenados.length && corte < 0; k++) {
+      acum += ordenados[k].f.valor || 0;
+      if (acum === frete) corte = k + 1;
+    }
+    if (corte < 0) return null;
+    var out = [];
+    ordenados.forEach(function (o, k) { out[o.i] = k < corte ? 'FRETE' : 'OUTRO'; });
+    return out;
+  }
+  /** Invariante 18: custo de aquisição do animal = Σ alocações vigentes AQUISICAO_ANIMAIS do período mais recente. `esc`: só os animais dele. */
+  function conferirCustoAquisicao_(tx, achado, esc) {
+    var f = Timeline.fonte(tx);
+    var lista = esc ? Object.keys(esc.animais || {}).map(function (id) { return tx.repo.porId('ANIMAIS', id); }).filter(Boolean) : tx.repo.vigentes('ANIMAIS');
+    lista.forEach(function (a) {
+      if (a.situacao_cadastral === 'EXTERNO') return;
+      // A mesma fronteira do projetor (03a, DL-08): a entrada vigente mais recente, ou a histórica do animal que só existe no histórico.
+      if (a.situacao_cadastral === 'ANULADO' || a.situacao_cadastral === 'PENDENTE') return;
+      var entrada = Timeline.entradaDoCusto(f.linhas(a.animal_id));
+      if (!entrada) return;
+      var alocs = f.aquisicoes(a.animal_id).filter(function (x) { return x.data_competencia >= entrada.event_date; });
+      var esperado = alocs.length ? soma_(alocs, 'valor') : entrada.event_type === 'NASCIMENTO' ? 0 : null;
+      if (nulo_(a.custo_aquisicao) !== esperado) achado(18, 'ANIMAIS', a.animal_id, 'O custo de aquisição de ' + (a.brinco || a.codigo_interno) + ' (' + (a.custo_aquisicao === null ? 'vazio' : reais_(a.custo_aquisicao)) + ') difere da soma das alocações (' + (esperado === null ? 'nenhuma' : reais_(esperado)) + ').');
+    });
+  }
+  /**
+   * `status_pagamento*` e `data_pagamento*` de um lançamento pelas parcelas (03b, seção 10.4): SEM_CAIXA sem parcela;
+   * CANCELADO com o lançamento anulado; LIQUIDADO com todas pagas (a maior data de pagamento); ABERTO sem nenhuma
+   * paga; PARCIAL nos demais. `parcelas` = as não canceladas.
+   */
+  function situacaoPagamento(parcelas, ativo) {
+    var ps = (parcelas || []).filter(function (p) { return p.status !== 'CANCELADA'; });
+    if (!ps.length) return { status_pagamento: 'SEM_CAIXA', data_pagamento: null };
+    if (!ativo) return { status_pagamento: 'CANCELADO', data_pagamento: null };
+    if (ps.every(function (p) { return p.status === 'LIQUIDADA'; })) {
+      var d = ps.reduce(function (m, p) { return vazio_(p.data_pagamento) || (m && m >= p.data_pagamento) ? m : p.data_pagamento; }, null);
+      return { status_pagamento: 'LIQUIDADO', data_pagamento: d };
+    }
+    return { status_pagamento: ps.some(function (p) { return p.status === 'LIQUIDADA'; }) ? 'PARCIAL' : 'ABERTO', data_pagamento: null };
+  }
+
+  // ------------------------------------------------------------------ leituras ----
+  /**
+   * Totais dos títulos vigentes em D (07, seção 2.1): a pagar e a receber = nominal das parcelas ainda não liquidadas
+   * em D, de lançamentos com competência até D; vencidos = os desses com vencimento antes de D. `data` vazia = sem
+   * corte. Lê FINANCEIRO e PARCELAS. Devolve {data, a_pagar, a_receber, vencido_pagar, vencido_receber, parcelas_abertas}.
+   */
+  function titulos(repo, data) {
+    var out = { data: nulo_(data), a_pagar: 0, a_receber: 0, vencido_pagar: 0, vencido_receber: 0, parcelas_abertas: 0 };
+    repo.vigentes('PARCELAS').forEach(function (p) {
+      var fin = repo.porId('FINANCEIRO', p.financial_id);
+      if (!fin || (!vazio_(data) && fin.data_competencia > data)) return;
+      var aberta = p.status === 'ABERTA' || (p.status === 'LIQUIDADA' && !vazio_(data) && p.data_pagamento > data);
+      if (!aberta) return;
+      var receita = fin.tipo === 'RECEITA';
+      out.parcelas_abertas++;
+      if (receita) out.a_receber += p.valor; else out.a_pagar += p.valor;
+      if (!vazio_(data) && p.data_vencimento < data) { if (receita) out.vencido_receber += p.valor; else out.vencido_pagar += p.valor; }
+    });
+    return out;
+  }
+  // ------------------------------------------------------------------ lançamentos (tela Financeiro; Fase 4, etapa BASE) ----
+  var NATUREZAS = ['RECEITA_VENDA_ANIMAIS', 'OUTRA_RECEITA', 'AQUISICAO_ANIMAIS', 'CUSTEIO', 'DESPESA_VENDA', 'ESTOQUE_INSUMOS', 'NAO_OPERACIONAL'];
+  /** Situação do lançamento na lista: ATIVO (vale), CANCELADO (o evento criador foi estornado, corrigido ou desfeito), TODOS. */
+  var SITUACOES_LANCAMENTO = ['ATIVO', 'CANCELADO', 'TODOS'];
+  var PAGAMENTOS = ['SEM_CAIXA', 'ABERTO', 'PARCIAL', 'LIQUIDADO'];
+  var POR_PAGINA_MAX = 500;
+  /** Abas que as consultas de lançamentos leem (com acesso cru: a situação de cada lançamento vem do predicado do evento). */
+  function leiturasLancamentos() {
+    return Utils.unicos(Timeline.LEITURAS.concat(['PLANO_CONTAS', 'PARCEIROS', 'PRODUTOS', 'ANEXOS']));
+  }
+  function filtroData_(o, campo) {
+    var v = o[campo];
+    if (vazio_(v)) return null;
+    if (typeof v !== 'string' || !Utils.dataValida(v)) throw Validation.erro('VALIDATION', 'A data "' + v + '" não é válida: use dia, mês e ano.', [det_('FORMATO_INVALIDO', campo, 'Data inválida.')]);
+    return v;
+  }
+  function filtroLista_(o, campo, lista, rotulo) {
+    var v = o[campo];
+    if (vazio_(v)) return null;
+    if (lista.indexOf(v) < 0) throw Validation.erro('VALIDATION', rotulo + ' "' + v + '" não existe.', [det_('VALOR_FORA_DA_LISTA', campo, rotulo + ' desconhecido.')]);
+    return v;
+  }
+  /** A situação do lançamento pelo predicado do evento que o criou (P3): ATIVO, CANCELADO ou null (falhou, pendente). */
+  function situacaoLancamento_(tx, fin) {
+    var a = tx.cru.avaliar(fin.event_id);
+    if (!a) return null;
+    if (a.vigente) return 'ATIVO';
+    return a.status === 'ESTORNADO' || a.status === 'CANCELADO' ? 'CANCELADO' : null;
+  }
+  /**
+   * A parcela como a tela mostra (rótulos derivados, 03b, seção 10.4: "pago", "recebido" e "atrasado" não são gravados): a
+   * situação hoje — PAGA ou RECEBIDA, A_PAGAR ou A_RECEBER, VENCIDA (aberta com vencimento antes de hoje), SUBSTITUIDA
+   * (desdobrada numa baixa parcial) ou SEM_EFEITO (o lançamento foi cancelado; a parcela não é regravada).
+   */
+  function parcelaPublica_(p, fin, situacao, hoje) {
+    var receita = fin.tipo === 'RECEITA';
+    var rotulo;
+    if (situacao !== 'ATIVO') rotulo = 'SEM_EFEITO';
+    else if (p.status === 'CANCELADA') rotulo = 'SUBSTITUIDA';
+    else if (p.status === 'LIQUIDADA') rotulo = receita ? 'RECEBIDA' : 'PAGA';
+    else if (!vazio_(hoje) && p.data_vencimento < hoje) rotulo = 'VENCIDA';
+    else rotulo = receita ? 'A_RECEBER' : 'A_PAGAR';
+    return {
+      parcela_id: p.parcela_id, parcela_num: p.parcela_num, data_vencimento: p.data_vencimento, valor: p.valor, status: p.status,
+      data_pagamento: nulo_(p.data_pagamento), valor_pago: nulo_(p.valor_pago), juros_multa: nulo_(p.juros_multa), desconto: nulo_(p.desconto),
+      forma_pagamento: nulo_(p.forma_pagamento), documento: nulo_(p.documento), parcela_origem_id: nulo_(p.parcela_origem_id), situacao: rotulo,
+      dias_atraso: rotulo === 'VENCIDA' ? Utils.diffDias(p.data_vencimento, hoje) : null,
+    };
+  }
+  /**
+   * O rateio do lançamento e as alocações dele: no que vale, o rateio vigente na data (sem data, o de hoje; 03b, RATEIOS, pelo
+   * predicado único do Repository: o re-rateio de depois da data não muda o que valia nela); no cancelado, o que o evento
+   * criador gravou (sem efeito, só para consulta).
+   */
+  function rateioDoLancamento_(tx, fin, ativo, data) {
+    var rat = ativo ? tx.repo.rateioEm(fin.financial_id, data || null)
+      : tx.cru.cruPor('RATEIOS', 'financial_id', fin.financial_id).filter(function (r) { return r.event_id === fin.event_id; })[0] || null;
+    if (!rat) return { rateio: null, alocacoes: [] };
+    return { rateio: rat, alocacoes: tx.cru.cruPor('ALOCACOES_FINANCEIRAS', 'rateio_id', rat.rateio_id) };
+  }
+  /**
+   * Um lançamento como a lista e o detalhe mostram: os campos gravados, a conta, o parceiro, o pasto, o produto e o evento
+   * pelo nome, a situação (pelo predicado), a situação do pagamento pelas parcelas (a mesma conta da projeção), o que está
+   * em aberto e vencido hoje, o critério do rateio vigente em `data` (sem data, o de hoje) e o que ficou sem alocar. Todo
+   * número vem pronto: a tela não soma.
+   */
+  function lancamentoPublico_(tx, fin, hoje, data) {
+    var situacao = situacaoLancamento_(tx, fin);
+    var conta = tx.repo.porId('PLANO_CONTAS', fin.conta_id);
+    var parc = tx.repo.porId('PARCEIROS', fin.partner_id);
+    var pasto = vazio_(fin.pasture_id) ? null : tx.repo.porId('PASTOS', fin.pasture_id);
+    var prod = vazio_(fin.product_id) || !tx.repo.carregada('PRODUTOS') ? null : tx.repo.porId('PRODUTOS', fin.product_id);
+    var ev = tx.cru.cruPorId('EVENTOS', fin.event_id) || {};
+    var def = EventCatalog.existe(ev.event_type) ? EventCatalog.tipo(ev.event_type) : null;
+    var todas = Utils.ordenarPor(tx.cru.cruPor('PARCELAS', 'financial_id', fin.financial_id), ['parcela_num', 'data_vencimento']);
+    var validas = todas.filter(function (p) { return p.status !== 'CANCELADA'; });
+    var sp = situacaoPagamento(validas, situacao === 'ATIVO');
+    var aberto = 0;
+    var vencido = 0;
+    var proximo = null;
+    if (situacao === 'ATIVO') validas.forEach(function (p) {
+      if (p.status !== 'ABERTA') return;
+      aberto += p.valor;
+      if (!vazio_(hoje) && p.data_vencimento < hoje) vencido += p.valor;
+      if (proximo === null || p.data_vencimento < proximo) proximo = p.data_vencimento;
+    });
+    var r = rateioDoLancamento_(tx, fin, situacao === 'ATIVO', data);
+    var alocado = r.alocacoes.reduce(function (s, a) { return s + (a.valor_alocado || 0); }, 0);
+    var semRateio = SEM_RATEIO.indexOf(fin.natureza) >= 0;
+    return {
+      financial_id: fin.financial_id, event_id: fin.event_id, event_type: ev.event_type || null, event_subtype: nulo_(ev.event_subtype),
+      rotulo_evento: def ? def.rotulo : ev.event_type || null, nome_evento: EventCatalog.nomeEvento(ev.event_type, nulo_(ev.event_subtype)),
+      event_date: ev.event_date || null, event_seq: ev.event_seq || null, ref_event_id: nulo_(fin.ref_event_id), pre_marco_zero: ev.pre_marco_zero === true,
+      data_competencia: fin.data_competencia, competencia_inicio: nulo_(fin.competencia_inicio), competencia_fim: nulo_(fin.competencia_fim),
+      conta_id: fin.conta_id, conta_codigo: conta ? conta.codigo : null, conta_nome: conta ? conta.nome : null, natureza: fin.natureza, tipo: fin.tipo,
+      grupo: nulo_(fin.categoria), descricao: nulo_(fin.descricao), documento: nulo_(fin.documento), observacoes: nulo_(fin.observacoes), valor: fin.valor,
+      quantidade: nulo_(fin.quantidade), product_id: nulo_(fin.product_id), produto: prod ? prod.nome : null,
+      partner_id: nulo_(fin.partner_id), parceiro: parc ? parc.nome : null, pasture_id: nulo_(fin.pasture_id), pasto: pasto ? pasto.nome : null,
+      property_id: nulo_(fin.property_id), retida_pelo_comprador: fin.retida_pelo_comprador === true,
+      situacao: situacao, cancelado_por_event_id: situacao === 'CANCELADO' ? tx.cru.avaliar(fin.event_id).anulador_id : null,
+      status_pagamento: sp.status_pagamento, data_pagamento: sp.data_pagamento,
+      parcelas: validas.length, em_aberto: aberto, vencido: vencido, proximo_vencimento: proximo,
+      criterio: r.rateio ? r.rateio.criterio : null, alocado: semRateio ? null : alocado,
+      nao_alocado: semRateio ? null : fin.valor - alocado, animais: r.alocacoes.length,
+      _todas: todas, _rateio: r,
+    };
+  }
+  function semInterno_(item) {
+    var o = {};
+    Object.keys(item).forEach(function (k) { if (k.charAt(0) !== '_') o[k] = item[k]; });
+    return o;
+  }
+  /**
+   * Consulta `financeiro.lancamentos` (a lista da tela Financeiro): os lançamentos de evento confirmado (os da operação que
+   * falhou e os da importação em curso ficam fora), filtrados por competência (`de`, `ate`), natureza, tipo (RECEITA,
+   * DESPESA), conta, parceiro, pasto, tipo do evento, `situacao` (ATIVO, o padrão; CANCELADO; TODOS), `status_pagamento` e
+   * `busca` (descrição ou documento, sem acento); mais recentes primeiro (competência, depois o evento). {total, pagina,
+   * por_pagina, paginas, totais: {receitas, despesas} (do filtro inteiro, centavos), itens: [lancamento]}. A situação do
+   * pagamento, o aberto e o vencido são os de hoje; o critério, o alocado e o não alocado, os do rateio vigente em `ate`
+   * (Fase 4, E4.3: o re-rateio de depois de `ate` não muda a lista até `ate`).
+   */
+  function consultaLancamentos(filtros) {
+    var o = filtros || {};
+    return {
+      rota: 'financeiro.lancamentos', dados: o, reads: leiturasLancamentos(), acessoCru: true,
+      tratador: function (tx) {
+        var de = filtroData_(o, 'de');
+        var ate = filtroData_(o, 'ate');
+        if (de && ate && de > ate) throw Validation.erro('VALIDATION', 'O começo do período (' + br_(de) + ') está depois do fim (' + br_(ate) + ').', [det_('PERIODO_INVERTIDO', 'de', 'Período invertido.')]);
+        var natureza = filtroLista_(o, 'natureza', NATUREZAS, 'A natureza');
+        var tipo = filtroLista_(o, 'tipo', ['RECEITA', 'DESPESA'], 'O tipo');
+        var situacao = filtroLista_(o, 'situacao', SITUACOES_LANCAMENTO, 'A situação') || 'ATIVO';
+        var pagamento = filtroLista_(o, 'status_pagamento', PAGAMENTOS, 'A situação do pagamento');
+        var busca = vazio_(o.busca) ? null : Utils.normalizarTexto(String(o.busca));
+        var porPagina = typeof o.por_pagina === 'number' && o.por_pagina > 0 ? Math.min(Math.floor(o.por_pagina), POR_PAGINA_MAX) : Timeline.parametros(tx.repo).itens_por_pagina || 50;
+        var pagina = typeof o.pagina === 'number' && o.pagina >= 1 ? Math.floor(o.pagina) : 1;
+        var itens = [];
+        var totais = { receitas: 0, despesas: 0 };
+        tx.cru.cru('FINANCEIRO').forEach(function (fin) {
+          var sit = situacaoLancamento_(tx, fin);
+          if (sit === null || (situacao !== 'TODOS' && sit !== situacao)) return;
+          if ((de && fin.data_competencia < de) || (ate && fin.data_competencia > ate)) return;
+          if ((natureza && fin.natureza !== natureza) || (tipo && fin.tipo !== tipo)) return;
+          if ((!vazio_(o.conta_id) && fin.conta_id !== o.conta_id) || (!vazio_(o.partner_id) && fin.partner_id !== o.partner_id) || (!vazio_(o.pasture_id) && fin.pasture_id !== o.pasture_id)) return;
+          if (!vazio_(o.event_type) && (tx.cru.cruPorId('EVENTOS', fin.event_id) || {}).event_type !== o.event_type) return;
+          if (busca && Utils.normalizarTexto([fin.descricao, fin.documento].filter(function (x) { return !vazio_(x); }).join(' ')).indexOf(busca) < 0) return;
+          var item = lancamentoPublico_(tx, fin, tx.hoje, ate);
+          if (pagamento && item.status_pagamento !== pagamento) return;
+          itens.push(item);
+          if (item.tipo === 'RECEITA') totais.receitas += item.valor; else totais.despesas += item.valor;
+        });
+        // Mais recentes primeiro: a competência, o lançamento do evento mais recente, o maior valor (o principal antes do frete e
+        // da dedução), e o identificador para a ordem ser a mesma em toda leitura.
+        itens.sort(function (a, b) {
+          return (a.data_competencia < b.data_competencia ? 1 : a.data_competencia > b.data_competencia ? -1 : 0) ||
+            ((b.event_seq || 0) - (a.event_seq || 0)) || (b.valor - a.valor) || (a.financial_id < b.financial_id ? -1 : 1);
+        });
+        var inicio = (pagina - 1) * porPagina;
+        return {
+          total: itens.length, pagina: pagina, por_pagina: porPagina, paginas: Math.max(1, Math.ceil(itens.length / porPagina)), totais: totais,
+          itens: itens.slice(inicio, inicio + porPagina).map(semInterno_),
+        };
+      },
+    };
+  }
+  /**
+   * Consulta `financeiro.lancamento` (o detalhe): o lançamento (a forma da lista), o evento que o criou e o que o anulou,
+   * as parcelas (todas, com a situação de hoje), o rateio vigente com as alocações por animal (o brinco de hoje e o código
+   * interno) e os anexos do lançamento. Lançamento inexistente, de operação que falhou ou de importação em curso → NOT_FOUND.
+   */
+  /**
+   * O título que a correção do evento de origem refaz parcela a parcela (o grupo `parcelas` do formulário): o valor dos
+   * animais da compra, a receita da venda e o lançamento avulso. Os demais (o frete e os outros custos da compra, as deduções
+   * da venda, o custo da morte, a receita do descarte, a despesa do manejo, a compra de insumo) são em N parcelas iguais de mês
+   * em mês: a baixa é inteira e a parcela não se divide, porque a correção os refaria iguais (CONTRATOS, seção 56). Puro.
+   */
+  function tituloLivre(eventType, fin, contaCodigo) {
+    if (eventType === 'LANCAMENTO_FINANCEIRO') return true;
+    if (eventType === 'VENDA') return !!fin && fin.natureza === 'RECEITA_VENDA_ANIMAIS';
+    return eventType === 'COMPRA' && contaCodigo === CONTAS.COMPRA;
+  }
+  /**
+   * O que a tela precisa para ratear o lançamento (Fase 4, E4.3; CONTRATOS, seção 57): se ele se rateia (e por que não), os
+   * padrões que o servidor propõe (o arrendamento pelos dias no pasto dele e no período dele; o lançamento do próprio registro
+   * entre os animais do registro, por inteiro), os critérios de cada escopo e o histórico dos rateios, com o vigente e o
+   * "rateio desatualizado" (a base refeita hoje pela mesma conta: Rateio.desatualizado). A tela não decide nada disso.
+   */
+  function rateioParaTela_(tx, fin, ativo) {
+    var ev = tx.cru.cruPorId('EVENTOS', fin.event_id) || {};
+    var conta = tx.repo.porId('PLANO_CONTAS', fin.conta_id) || {};
+    var arrend = conta.codigo === 'ARRENDAMENTO_PASTO';
+    var cem = exigeCemPorCento(ev, fin);
+    var motivo = !ativo ? 'O lançamento não vale mais (o registro dele foi estornado ou corrigido).'
+      : SEM_RATEIO.indexOf(fin.natureza) >= 0 ? (fin.natureza === 'ESTOQUE_INSUMOS' ? 'A compra de insumo vira custo do animal na aplicação (o consumo), não na compra.' : 'O não operacional não é custo nem receita de animal.')
+        : ev.pre_marco_zero === true ? 'O lançamento é anterior ao marco zero.' : null;
+    var ancora = vazio_(fin.ref_event_id) ? fin.event_id : fin.ref_event_id;
+    var temAnimais = tx.cru.cruPor('EVENTO_ANIMAIS', 'event_id', ancora).length > 0;
+    var escopos = Object.keys(Rateio.CRITERIOS_DO_ESCOPO).filter(function (e) { return (e !== 'EVENTO' || temAnimais) && (!cem || e === 'EVENTO') && (!arrend || e === 'PASTO'); });
+    var criterios = {};
+    escopos.forEach(function (e) { criterios[e] = Rateio.CRITERIOS_DO_ESCOPO[e].filter(function (c) { return !arrend || c === 'DIAS_PERMANENCIA'; }); });
+    var historico = ativo ? tx.repo.rateiosDoLancamento(fin.financial_id) : [];
+    var vig = historico.length ? historico[historico.length - 1] : null;
+    var L = null;
+    var lista = historico.map(function (r) {
+      var er = tx.cru.cruPorId('EVENTOS', r.event_id) || {};
+      var item = {
+        rateio_id: r.rateio_id, event_id: r.event_id, event_type: er.event_type || null, event_date: er.event_date || null, descricao: er.event_type === 'RATEIO' ? nulo_(er.description) : null,
+        criterio: r.criterio, escopo_tipo: nulo_(r.escopo_tipo), base_total: r.base_total, total_alocado: r.total_alocado, justificativa: nulo_(r.justificativa), vigente: r === vig, desatualizado: null,
+      };
+      // O alerta só do rateio que vale e de um evento RATEIO (o do próprio registro tem o da verificação: BASE_RATEIO).
+      if (r === vig && er.event_type === 'RATEIO') {
+        if (!L) L = AnimalService.leitor(tx);
+        var cmp = Rateio.desatualizado(L, tx.cru, r);
+        item.desatualizado = cmp.desatualizado ? {
+          refazivel: cmp.refazivel, problemas: cmp.problemas.map(function (p) { return p.mensagem; }),
+          diferencas: cmp.diferencas.map(function (x) { var a = tx.cru.cruPorId('ANIMAIS', x.animal_id) || {}; return { animal_id: x.animal_id, codigo_interno: a.codigo_interno || null, brinco: nulo_(a.brinco), gravada: x.gravada, hoje: x.hoje }; }),
+        } : null;
+      }
+      return item;
+    });
+    return {
+      acao: { pode: motivo === null, motivo: motivo, ja_rateado: !!vig },
+      padrao: motivo ? null : {
+        criterio: arrend ? 'DIAS_PERMANENCIA' : null, escopo_tipo: arrend ? 'PASTO' : cem ? 'EVENTO' : null, pasture_id: nulo_(fin.pasture_id), category_id: nulo_(fin.categoria_animal_id),
+        periodo_inicio: nulo_(fin.competencia_inicio), periodo_fim: nulo_(fin.competencia_fim), data_base: fin.data_competencia, valor: fin.valor, por_inteiro: cem,
+        escopos: escopos, criterios: criterios, data_minima: fin.data_competencia,
+      },
+      rateios: lista,
+    };
+  }
+  function consultaLancamento(dados) {
+    var o = dados || {};
+    return {
+      rota: 'financeiro.lancamento', dados: o, reads: Utils.unicos(leiturasLancamentos().concat(Rateio.leituras())), acessoCru: true,
+      tratador: function (tx) {
+        var fin = vazio_(o.financial_id) ? null : tx.cru.cruPorId('FINANCEIRO', o.financial_id);
+        if (!fin || situacaoLancamento_(tx, fin) === null) throw Validation.erro('NOT_FOUND', 'Lançamento financeiro não encontrado.');
+        var item = lancamentoPublico_(tx, fin, tx.hoje);
+        var ev = tx.cru.cruPorId('EVENTOS', fin.event_id);
+        var resumo = function (e) { return e ? { event_id: e.event_id, event_type: e.event_type, event_subtype: nulo_(e.event_subtype), rotulo: EventCatalog.existe(e.event_type) ? EventCatalog.tipo(e.event_type).rotulo : e.event_type, event_date: e.event_date, vigente: tx.cru.avaliar(e.event_id).vigente } : null; };
+        var rat = item._rateio.rateio;
+        var alocs = Utils.ordenarPor(item._rateio.alocacoes.map(function (a) {
+          var an = tx.cru.cruPorId('ANIMAIS', a.animal_id) || {};
+          return { animal_id: a.animal_id, codigo_interno: an.codigo_interno || null, brinco: nulo_(an.brinco), situacao_cadastral: an.situacao_cadastral || null, base_valor: a.base_valor, valor_alocado: a.valor_alocado || 0 };
+        }), 'codigo_interno');
+        var conta = tx.cru.cruPorId('PLANO_CONTAS', fin.conta_id) || {};
+        var paraRatear = rateioParaTela_(tx, fin, item.situacao === 'ATIVO');
+        var vigItem = paraRatear.rateios.filter(function (x) { return x.vigente; })[0] || null;
+        return {
+          lancamento: semInterno_(item),
+          ratear: { pode: paraRatear.acao.pode, motivo: paraRatear.acao.motivo, ja_rateado: paraRatear.acao.ja_rateado, padrao: paraRatear.padrao },
+          rateios: paraRatear.rateios,
+          // A baixa em parte e a divisão valem só no título que a correção do evento refaz parcela a parcela (tituloLivre).
+          parcelas_livres: tituloLivre(ev ? ev.event_type : null, fin, conta.codigo),
+          evento: resumo(ev),
+          referencia: vazio_(fin.ref_event_id) ? null : resumo(tx.cru.cruPorId('EVENTOS', fin.ref_event_id)),
+          anulado_por: item.cancelado_por_event_id ? resumo(tx.cru.cruPorId('EVENTOS', item.cancelado_por_event_id)) : null,
+          parcelas: item._todas.map(function (p) { return parcelaPublica_(p, fin, item.situacao, tx.hoje); }),
+          rateio: rat ? {
+            rateio_id: rat.rateio_id, event_id: rat.event_id, criterio: rat.criterio, escopo_tipo: nulo_(rat.escopo_tipo), escopo_ref: nulo_(rat.escopo_ref),
+            periodo_inicio: nulo_(rat.periodo_inicio), periodo_fim: nulo_(rat.periodo_fim), data_base: nulo_(rat.data_base), base_total: rat.base_total,
+            total_alocado: rat.total_alocado, justificativa: nulo_(rat.justificativa), vigente: item.situacao === 'ATIVO',
+            descricao: vigItem ? vigItem.descricao : null, desatualizado: vigItem ? vigItem.desatualizado : null,
+          } : null,
+          alocacoes: alocs,
+          anexos: FileService.anexosDoEvento(tx.cru, fin.event_id).filter(function (a) { return a.financial_id === fin.financial_id; }),
+        };
+      },
+    };
+  }
+  function listarLancamentos(ctx, filtros) {
+    return UnitOfWork.read(ctx, consultaLancamentos(filtros));
+  }
+  function obterLancamento(ctx, dados) {
+    return UnitOfWork.read(ctx, consultaLancamento(dados));
+  }
+
+  return {
+    CONTAS: CONTAS,
+    tituloLivre: tituloLivre,
+    MODALIDADES: MODALIDADES,
+    CRITERIOS_LOTE: CRITERIOS_LOTE,
+    SEM_RATEIO: SEM_RATEIO,
+    exigeCemPorCento: exigeCemPorCento,
+    MAX_PARCELAS: MAX_PARCELAS,
+    leituras: leituras,
+    conta: conta,
+    dividirParcelas: dividirParcelas,
+    resolverParcelas: resolverParcelas,
+    parcelasMensais: parcelasMensais,
+    vencimentos: vencimentos,
+    ratear: ratear,
+    planejar: planejar,
+    juntar: juntar,
+    avisoPeriodo: avisoPeriodo,
+    negociacao: negociacao,
+    contaDeducao: contaDeducao,
+    totaisVenda: totaisVenda,
+    conferir: conferir,
+    situacaoPagamento: situacaoPagamento,
+    tiposDosCustos: tiposDosCustos,
+    basesEstimadas: basesEstimadas,
+    titulos: titulos,
+    NATUREZAS: NATUREZAS,
+    leiturasLancamentos: leiturasLancamentos,
+    consultaLancamentos: consultaLancamentos,
+    consultaLancamento: consultaLancamento,
+    listarLancamentos: listarLancamentos,
+    obterLancamento: obterLancamento,
+  };
+})();

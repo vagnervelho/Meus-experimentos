@@ -1,0 +1,26 @@
+{
+  "_nota": "Corpus de ida e volta (06-persistencia-e-integridade.md, seção 2). 'geral' é o que uma célula de formato Geral devolve em getValues() depois de setValues() com o texto de 'entrada', numa planilha pt_BR. É HIPÓTESE do fake até o diagnóstico na conta real (SP-01, runDiagnostics) devolver este mesmo JSON: divergência corrige tests/fakes/planilha.js. Com formato de texto (@) aplicado antes, com stringValue tipado ou com entrada RAW, toda entrada volta idêntica.",
+  "confirmado_na_conta_real": false,
+  "locale": "pt_BR",
+  "casos": [
+    { "entrada": "=1+1", "geral": { "tipo": "formula", "valor": 2 } },
+    { "entrada": "+55 69 99999-0000", "geral": { "tipo": "formula", "valor": "#ERROR!" } },
+    { "entrada": "-10 kg", "geral": { "tipo": "formula", "valor": "#ERROR!" } },
+    { "entrada": "@lote", "geral": { "tipo": "texto", "valor": "@lote" } },
+    { "entrada": "0012", "geral": { "tipo": "numero", "valor": 12 } },
+    { "entrada": "1E5", "geral": { "tipo": "numero", "valor": 100000 } },
+    { "entrada": "2026-11-13", "geral": { "tipo": "data", "valor": "2026-11-13" } },
+    { "entrada": "13/11/2026", "geral": { "tipo": "data", "valor": "2026-11-13" } },
+    { "entrada": "12:30", "geral": { "tipo": "hora", "valor": "12:30:00" } },
+    { "entrada": "TRUE", "geral": { "tipo": "booleano", "valor": true } },
+    { "entrada": "FALSE", "geral": { "tipo": "booleano", "valor": false } },
+    { "entrada": "1.234,56", "geral": { "tipo": "numero", "valor": 1234.56 } },
+    { "entrada": "50%", "geral": { "tipo": "numero", "valor": 0.5 } },
+    { "entrada": "'0012", "geral": { "tipo": "texto", "valor": "0012" } },
+    { "entrada": "  texto com espaços nas pontas  ", "geral": { "tipo": "texto", "valor": "  texto com espaços nas pontas  " } },
+    { "entrada": "2026-11-14T01:30:00.000Z", "geral": { "tipo": "texto", "valor": "2026-11-14T01:30:00.000Z" } },
+    { "entrada": "3f2b8c1e-7a4d-4e9b-9c55-0d6a1f2e8b47", "geral": { "tipo": "texto", "valor": "3f2b8c1e-7a4d-4e9b-9c55-0d6a1f2e8b47" } },
+    { "entrada": "S", "geral": { "tipo": "texto", "valor": "S" } },
+    { "entrada": "A-000123", "geral": { "tipo": "texto", "valor": "A-000123" } }
+  ]
+}

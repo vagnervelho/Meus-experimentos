@@ -1,0 +1,236 @@
+<script>
+'use strict';
+/*
+ * ERP Pecuário — tela Início, a "Visão geral" (08-ux-ui.md, seções 3 e 11; 07, seção 9, no recorte da Fase 2):
+ * período (padrão: os últimos 12 meses), a posição do rebanho no fim dele (cabeças, machos, fêmeas, peso vivo, peso
+ * médio, UA, por pasto e por categoria), o movimento do período (nascimentos, compras, vendas, mortes, com a receita
+ * de vendas), as séries mensais (evolução do rebanho; nascimentos e mortes; compras e vendas), pendências pela
+ * alerta.listar (cada uma com a sua ação), registros não concluídos (rascunhos) e a marca "dados de dd/mm hh:mm"
+ * (geradoEm, no fuso da fazenda). Tudo vem de dashboard.obter, calculado no servidor pelo replay dos eventos vigentes.
+ * A resposta fica guardada por (dataVersion, período); "Atualizar" pede de novo. Sem dado: "—" com o motivo (P9).
+ */
+var TelaInicio = (function () {
+  var h = Util.h;
+  var cache = { versao: null, chave: null, visao: null, alertas: null };
+  /** Período escolhido na tela ({data_inicio, data_fim}); vazio = o padrão do servidor (últimos 12 meses). */
+  var periodo = {};
+  /** Ação de cada alerta (lista fechada de InventoryService.ALERTAS). */
+  var ACOES = {
+    ATIVO_SEM_PASTO: { texto: 'Ver os animais sem pasto', atalho: 'SEM_PASTO' },
+    SEM_BRINCO: { texto: 'Ver os animais sem brinco', atalho: 'SEM_BRINCO' },
+    SEM_CATEGORIA: { texto: 'Ver os animais sem categoria', atalho: 'SEM_CATEGORIA' },
+    BACKUP_ATRASADO: { texto: 'Fazer backup agora', rota: 'config/sistema' },
+    INTEGRIDADE_COM_ERRO: { texto: 'Ver a verificação', rota: 'config/sistema' },
+    IMPORTACAO_INCOMPLETA: { texto: 'Ver a importação', rota: 'importar' },
+  };
+  async function carregar(forcar) {
+    var chave = (periodo.data_inicio || '') + '|' + (periodo.data_fim || '');
+    if (!forcar && cache.visao && cache.versao === Store.versao() && cache.chave === chave) return cache;
+    var r = await Promise.all([Cliente.consulta('dashboard.obter', Util.clonar(periodo)), Cliente.consulta('alerta.listar', {})]);
+    cache = { versao: Store.versao(), chave: chave, visao: r[0].data, alertas: r[1].data };
+    return cache;
+  }
+  function mes(m) { return m ? m.slice(5, 7) + '/' + m.slice(0, 4) : ''; }
+  /** Movimento do período (07, seção 9, itens 4 a 7 e 12): cartões de fluxo; zero é informação, ausência é "—". */
+  function desenharMovimento(el, v) {
+    var p = v.periodo || {};
+    var mv = v.movimento || {};
+    var nota = p.motivo ? Fmt.rotulo('MOTIVO', p.motivo) : 'de ' + Fmt.data(p.inicio_efetivo) + ' a ' + Fmt.data(p.fim);
+    var cab = function (x) { return !x || x.cabecas === null || x.cabecas === undefined ? '—' : Fmt.numero(x.cabecas); };
+    var comValor = function (x) { return !x || x.cabecas === null || x.cabecas === undefined ? '—' : Fmt.numero(x.cabecas) + ' · ' + Fmt.dinheiro(x.valor || 0); };
+    var rec = UI.valorInd(v.receita_vendas, function (x) { return Fmt.dinheiro(x); });
+    var cartoes = h('div', { class: 'grade-cartoes', role: 'list', 'aria-label': 'Movimento ' + nota },
+      UI.indicador('Nascimentos', cab(mv.nascimentos), nota, 'nascimentos'),
+      UI.indicador('Compras', comValor(mv.compras), nota, 'compras'),
+      UI.indicador('Vendas', comValor(mv.vendas), nota, 'vendas'),
+      UI.indicador('Mortes', cab(mv.mortes), nota, 'mortes'),
+      UI.indicador('Receita de vendas', rec.texto, rec.motivo || nota, 'receita-vendas'));
+    var extras = [];
+    if (mv.descartes && mv.descartes.cabecas) extras.push(Fmt.numero(mv.descartes.cabecas) + ' descartado(s)');
+    if (mv.baixas_contagem && mv.baixas_contagem.cabecas) extras.push(Fmt.numero(mv.baixas_contagem.cabecas) + ' baixado(s) na contagem');
+    var conteudo = h('div', null, cartoes,
+      p.parcial ? UI.nota('O período começa antes do marco zero (' + Fmt.data(v.marco_zero) + '): o movimento conta a partir dele.', 'info') : null,
+      extras.length ? h('p', { class: 'suave', text: 'Outras saídas no período: ' + extras.join(' e ') + '.' }) : null);
+    el.appendChild(UI.secao('Movimento no período', conteudo, { dado: 'movimento' }));
+  }
+  /** Séries mensais (G1, G6 e G7): linha para a evolução do rebanho; barras para nascimentos × mortes e compras × vendas. */
+  function desenharSeries(el, v) {
+    var sr = v.series || {};
+    if (!sr.rebanho || !sr.rebanho.length) return;
+    el.appendChild(UI.grafico({ tipo: 'linha', titulo: 'Evolução do rebanho (cabeças no fim de cada mês)', rotuloX: 'Mês', rotuloValor: 'Cabeças', series: [{ nome: 'Cabeças', pontos: sr.rebanho.map(function (x) { return { x: mes(x.mes), y: x.cabecas }; }) }] }));
+    el.appendChild(UI.grafico({ tipo: 'barras', titulo: 'Nascimentos e mortes por mês', rotuloX: 'Mês', rotuloValor: 'Cabeças', series: [
+      { nome: 'Nascimentos', pontos: (sr.nascimentos_mortes || []).map(function (x) { return { x: mes(x.mes), y: x.nascimentos }; }) },
+      { nome: 'Mortes', pontos: (sr.nascimentos_mortes || []).map(function (x) { return { x: mes(x.mes), y: x.mortes }; }) },
+    ] }));
+    el.appendChild(UI.grafico({ tipo: 'barras', titulo: 'Compras e vendas por mês (cabeças)', rotuloX: 'Mês', rotuloValor: 'Cabeças', series: [
+      { nome: 'Compras', pontos: (sr.compras_vendas || []).map(function (x) { return { x: mes(x.mes), y: x.compras }; }) },
+      { nome: 'Vendas', pontos: (sr.compras_vendas || []).map(function (x) { return { x: mes(x.mes), y: x.vendas }; }) },
+    ] }));
+  }
+  function acaoDoAlerta(a) {
+    var def = ACOES[a.codigo];
+    if (!def) return null;
+    if (def.atalho) {
+      if (typeof TelaRebanho === 'undefined' || !Telas.existe('rebanho')) return null;
+      return UI.botao(def.texto, { aoClicar: function () { TelaRebanho.abrirCom({ atalho: def.atalho }); } });
+    }
+    var rota = def.rota === 'importar' && a.ids && a.ids[0] ? 'importar/' + a.ids[0] : def.rota;
+    if (!Telas.existe(rota)) return null;
+    return h('a', { class: 'botao botao-secundario', href: Roteador.href(rota), dataset: { rota: rota } }, def.texto);
+  }
+  function desenharPendencias(lista, alertas) {
+    (alertas.alertas || []).forEach(function (a) {
+      lista.appendChild(h('li', { class: 'linha-acao', dataset: { alerta: a.codigo } }, h('span', { class: 'campo-linha' }, UI.icone(a.nivel === 'ERRO' ? 'erro' : 'aviso'), h('span', { text: a.mensagem })), acaoDoAlerta(a)));
+    });
+    (alertas.nao_avaliados || []).forEach(function (a) {
+      lista.appendChild(h('li', { class: 'linha-acao suave', dataset: { naoAvaliado: a.codigo } }, h('span', { class: 'campo-linha' }, UI.icone('info'), h('span', { text: 'Não avaliado: ' + a.mensagem }))));
+    });
+  }
+  function desenharRascunhos(el, lista) {
+    return Rascunhos.listar().then(function (rs) {
+      if (!el.isConnected) return;
+      // A pesagem no curral e o diagnóstico no tronco (Fase 3) têm rascunho próprio, com os blocos já enviados: continuam na
+      // tela deles (08, seção 9: a tela Início lista os pendentes; o rascunho ENVIANDO tem algo sem confirmação).
+      var MODO_CURRAL = {
+        CURRAL_PESAGEM: { rota: 'pesagens/curral', texto: function (r) { return 'Pesagem no curral de ' + Fmt.data(r.data) + ' não concluída (' + (r.n || 0) + ((r.n || 0) === 1 ? ' animal)' : ' animais)') + (r.estado === 'ENVIANDO' ? ' · há pesagens sem confirmação' : ''); } },
+        TRONCO_DIAGNOSTICO: { rota: 'reproducao/tronco', texto: function (r) { return 'Diagnóstico no tronco de ' + Fmt.data(r.data) + ' não concluído (' + (r.n || 0) + ((r.n || 0) === 1 ? ' fêmea)' : ' fêmeas)') + (r.estado === 'ENVIANDO' ? ' · há diagnósticos sem confirmação' : ''); } },
+      };
+      rs.filter(function (r) { return MODO_CURRAL[r.tipo] && Telas.existe(MODO_CURRAL[r.tipo].rota); }).forEach(function (r) {
+        var m = MODO_CURRAL[r.tipo];
+        lista.appendChild(h('li', { class: 'linha-acao', dataset: { rascunho: r.tipo, estado: r.estado || 'EDITANDO' } }, h('span', { class: 'campo-linha' }, UI.icone(r.estado === 'ENVIANDO' ? 'aviso' : 'editar'),
+          h('span', { text: m.texto(r) })),
+          h('div', { class: 'acoes', style: 'margin-top:0' }, h('a', { class: 'botao botao-secundario', href: Roteador.href(m.rota), dataset: { rota: m.rota } }, 'Continuar'))));
+      });
+      // O curral e o tronco servem ao lugar de sinal fraco (08, seção 9): com a Início aberta (com sinal), as telas deles vêm
+      // em segundo plano e abrem depois sem sinal. Sem sinal agora, a Início avisa antes de ir ao curral.
+      Modulos.sobDemanda().filter(function (m) { return m.tela === 'Weights' || m.tela === 'Reproduction'; }).forEach(function (m) {
+        Modulos.carregar(m.tela).catch(function (e) {
+          if (lista.isConnected) lista.appendChild(h('li', { class: 'linha-acao', dataset: { preCarga: m.tela } }, h('span', { class: 'campo-linha' }, UI.icone('aviso'), h('span', { text: 'A tela ' + m.rotulo + ' ainda não veio para este aparelho (' + e.message + '): abra-a uma vez com sinal antes de ir ao curral.' }))));
+        });
+      });
+      rs.filter(function (r) { return Store.tipoEvento(r.tipo); }).forEach(function (r) {
+        var enviando = r.estado === 'ENVIANDO';
+        var descricao = Registro.descricaoRascunho(r);
+        lista.appendChild(h('li', { class: 'linha-acao', dataset: { rascunho: r.tipo, estado: r.estado || 'EDITANDO' } }, h('span', { class: 'campo-linha' }, UI.icone(enviando ? 'aviso' : 'editar'), h('span', { text: descricao + (enviando ? ' · verificando se gravou' : '') })),
+          h('div', { class: 'acoes', style: 'margin-top:0' },
+            h('a', { class: 'botao botao-secundario', href: Roteador.href('evento/novo/' + r.tipo), dataset: { rota: 'evento/novo/' + r.tipo } }, enviando ? 'Verificar se gravou' : 'Continuar'),
+            UI.botao('Descartar', { tipo: 'texto', aoClicar: async function () {
+              var ok = await UI.confirmar({ titulo: 'Descartar o rascunho?', texto: descricao + (enviando ? '. Antes de apagar, o sistema pergunta ao servidor se ele foi gravado; se foi, nada é apagado.' : '. O que foi digitado será apagado.'), verbo: 'Descartar o rascunho', cancelar: 'Manter', perigo: true });
+              if (!ok) return;
+              var res;
+              try {
+                res = await Registro.descartarVerificando(r.tipo);
+              } catch (e) {
+                UI.aviso('Ainda não sabemos se o registro foi gravado (' + e.message + '). O rascunho foi mantido; tente de novo em instantes.', { tipo: 'erro', duracaoMs: 12000 });
+                return;
+              }
+              App.removerFaixa('rascunho-' + r.tipo);
+              if (res === 'CONFIRMADA') {
+                UI.aviso('Este registro já estava gravado no servidor: nada foi apagado. Confira o resultado.', { tipo: 'aviso' });
+                Roteador.ir('evento/novo/' + r.tipo + '/resultado');
+                return;
+              }
+              Roteador.ir('inicio', { forcar: true, substituir: true });
+            } }))));
+      });
+    }, function (e) {
+      lista.appendChild(h('li', null, UI.nota('Não foi possível ler os rascunhos: ' + e.message, 'aviso')));
+    });
+  }
+  function desenhar(el, c) {
+    var v = c.visao;
+    var dia = Fmt.dataCurta(v.data);
+    var nota = v.motivo ? Fmt.rotulo('MOTIVO', v.motivo) : 'em ' + dia;
+    var num = function (x) { return v.motivo || x === null || x === undefined ? '—' : Fmt.numero(x); };
+    var peso = UI.valorInd(v.peso_vivo_total, function (x) { return Fmt.peso(x); });
+    var medio = UI.valorInd(v.peso_medio, function (x) { return Fmt.peso(x); });
+    var ua = UI.valorInd(v.ua, function (x) { return Fmt.numero(x, 1) + ' UA'; });
+    var cartoes = h('div', { class: 'grade-cartoes', role: 'list', 'aria-label': 'Rebanho em ' + Fmt.data(v.data) },
+      UI.indicador('Cabeças', num(v.cabecas), nota, 'cabecas'),
+      UI.indicador('Machos', num(v.por_sexo ? v.por_sexo.M : null), nota, 'machos'),
+      UI.indicador('Fêmeas', num(v.por_sexo ? v.por_sexo.F : null), nota, 'femeas'),
+      UI.indicador('Sem pasto', num(v.sem_pasto), nota, 'sem-pasto'),
+      UI.indicador('Peso vivo total', peso.texto, peso.motivo || nota, 'peso'),
+      UI.indicador('Peso médio', medio.texto, medio.motivo || nota, 'peso-medio'),
+      UI.indicador('Unidades animais', ua.texto, ua.motivo || nota, 'ua'));
+    el.appendChild(cartoes);
+    desenharMovimento(el, v);
+    // Títulos das compras e dos lançamentos dos eventos (a baixa e o fluxo de caixa chegam com o módulo Financeiro).
+    var t = v.titulos;
+    if (t && (t.a_pagar || t.a_receber)) {
+      var venc = function (x) { return x ? ' (' + Fmt.dinheiro(x) + ' vencidos)' : ''; };
+      el.appendChild(UI.secao('Contas a pagar e a receber', UI.pares([['A pagar', Fmt.dinheiro(t.a_pagar) + venc(t.vencido_pagar)], ['A receber', Fmt.dinheiro(t.a_receber) + venc(t.vencido_receber)]]), { dado: 'titulos' }));
+    }
+
+    var lista = h('ul', { class: 'lista-simples', dataset: { pendencias: '1' } });
+    el.appendChild(UI.secao('Pendências', lista, { dado: 'pendencias' }));
+    desenharPendencias(lista, c.alertas);
+    desenharRascunhos(el, lista).then(function () { if (el.isConnected && !lista.children.length) lista.appendChild(h('li', { class: 'suave', text: 'Nenhuma pendência.' })); });
+
+    if (v.motivo) return;
+    if (!v.cabecas) {
+      var ir = App.podeRegistrar() ? { texto: 'Registrar o rebanho', aoClicar: function () { Roteador.ir('evento/novo'); } } : null;
+      el.appendChild(UI.vazio({ texto: 'Nenhum animal no rebanho ainda.', acao: ir }));
+      return;
+    }
+    var pontosPasto = (v.por_pasto || []).map(function (p) { return { x: p.nome || 'Pasto', y: p.cabecas }; });
+    if (v.sem_pasto) pontosPasto.push({ x: 'Sem pasto', y: v.sem_pasto });
+    el.appendChild(UI.grafico({ tipo: 'barras', titulo: 'Cabeças por pasto em ' + Fmt.data(v.data), rotuloX: 'Pasto', rotuloValor: 'Cabeças', series: [{ nome: 'Cabeças', pontos: pontosPasto }] }));
+    var pontosCat = (v.por_categoria || []).map(function (x) { return { x: x.nome, y: x.cabecas }; });
+    if (v.sem_categoria) pontosCat.push({ x: 'Sem categoria', y: v.sem_categoria });
+    el.appendChild(UI.grafico({ tipo: 'barras', titulo: 'Cabeças por categoria em ' + Fmt.data(v.data), rotuloX: 'Categoria', rotuloValor: 'Cabeças', series: [{ nome: 'Cabeças', pontos: pontosCat }] }));
+    desenharSeries(el, v);
+  }
+  function montar(el) {
+    var vivo = true;
+    var marca = h('span', { class: 'suave', dataset: { geradoEm: '1' }, text: 'Carregando…' });
+    var corpo = h('div');
+    var atualizar = UI.botao('Atualizar', { aoClicar: function () { abrir(true); } });
+    el.appendChild(h('div', { class: 'tela-cabecalho' }, h('h1', { text: 'Início' }), marca, atualizar));
+    el.appendChild(h('p', { class: 'suave', text: 'Visão geral do rebanho' }));
+    if (!Store.param('data_marco_zero') || !Store.propriedades().length) {
+      var links = [];
+      if (Telas.existe('config/propriedades')) links.push(h('a', { class: 'botao botao-secundario', href: Roteador.href('config/propriedades'), dataset: { rota: 'config/propriedades' } }, 'Cadastrar propriedade e marco zero'));
+      if (Telas.existe('importar')) links.push(h('a', { class: 'botao botao-secundario', href: Roteador.href('importar'), dataset: { rota: 'importar' } }, 'Importar a planilha dos animais'));
+      el.appendChild(UI.nota('Para começar: cadastre a propriedade e os pastos, defina a data do marco zero nas configurações e registre o rebanho inicial (ou importe a planilha dos animais).', 'info', links.length ? h('div', { class: 'acoes' }, links) : null));
+    }
+    var hoje = Fmt.hoje();
+    var deIn = h('input', { type: 'date', id: 'ini-de', max: hoje, value: periodo.data_inicio || '' });
+    var ateIn = h('input', { type: 'date', id: 'ini-ate', max: hoje, value: periodo.data_fim || '' });
+    el.appendChild(h('div', { class: 'busca-linha', dataset: { periodo: '1' } },
+      h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo', for: 'ini-de', text: 'De' }), deIn),
+      h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo', for: 'ini-ate', text: 'Até' }), ateIn),
+      UI.botao('Ver', { aoClicar: function () {
+        periodo = {};
+        if (deIn.value) periodo.data_inicio = deIn.value;
+        if (ateIn.value) periodo.data_fim = ateIn.value;
+        abrir(false);
+      } })));
+    el.appendChild(corpo);
+    async function abrir(forcar) {
+      Util.limpar(corpo);
+      corpo.appendChild(UI.carregando('Calculando a posição do rebanho…'));
+      var destravar = UI.travar(atualizar, 'Atualizando…');
+      try {
+        var c = await carregar(forcar);
+        if (!vivo) return;
+        Util.limpar(corpo);
+        marca.textContent = 'Dados de ' + Fmt.instante(c.visao.geradoEm);
+        if (c.visao.periodo) { deIn.value = c.visao.periodo.inicio; ateIn.value = c.visao.periodo.fim; }
+        desenhar(corpo, c);
+      } catch (e) {
+        if (!vivo) return;
+        Util.limpar(corpo);
+        marca.textContent = '';
+        corpo.appendChild(UI.estadoErro(e, { acao: { texto: 'Tentar de novo', aoClicar: function () { abrir(true); } } }));
+      } finally {
+        destravar('Atualizar');
+      }
+    }
+    abrir(false);
+    return function () { vivo = false; };
+  }
+  Telas.registrar('inicio', { titulo: 'Início', modulo: 'DASHBOARD', montar: montar });
+  return { montar: montar, carregar: carregar };
+})();
+</script>

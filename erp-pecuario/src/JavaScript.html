@@ -1,0 +1,1466 @@
+<script>
+'use strict';
+/*
+ * ERP Pecuário — núcleo do cliente (01-arquitetura.md, seção 7; 08-ux-ui.md, seções 2, 8 e 9).
+ * Namespaces: Util (ids, armazém local, DOM), Fmt (formatação pt-BR e "hoje" no fuso da fazenda), Cliente (única
+ * parte que conhece google.script.run: Promise, 45 s, LOCKED, NEEDS_CONFIRMATION, consulta ao estado da operação),
+ * Store (carga inicial condicional por dataVersion e delta), Rascunhos (localStorage com alternativa no servidor),
+ * Roteador (hash com google.script.history/url e alternativa), Telas (registro das telas) e App (casca).
+ * Nada roda na carga: App.iniciar() é chamado no fim do Index, depois de todos os includes.
+ */
+
+var Util = (function () {
+  function registrarFalha(contexto, erro) {
+    if (window.console && console.error) console.error('[ERP] ' + contexto + ':', erro && erro.message ? erro.message : erro);
+  }
+  function uuid() {
+    var c = window.crypto;
+    if (c && typeof c.randomUUID === 'function') return c.randomUUID();
+    if (c && typeof c.getRandomValues === 'function') {
+      var b = new Uint8Array(16);
+      c.getRandomValues(b);
+      b[6] = (b[6] & 0x0f) | 0x40;
+      b[8] = (b[8] & 0x3f) | 0x80;
+      var hx = Array.prototype.map.call(b, function (x) { return (x + 0x100).toString(16).slice(1); }).join('');
+      return hx.slice(0, 8) + '-' + hx.slice(8, 12) + '-' + hx.slice(12, 16) + '-' + hx.slice(16, 20) + '-' + hx.slice(20);
+    }
+    throw new Error('Este navegador não gera identificadores seguros. Atualize o navegador para usar o app.');
+  }
+  function clonar(v) { return v === undefined ? undefined : JSON.parse(JSON.stringify(v)); }
+  function vazio(v) { return v === null || v === undefined || (typeof v === 'string' && v.trim() === ''); }
+  function esperar(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  /** Função adiada: chama fn ms depois da última chamada; `.agora()` executa já o que estiver pendente. */
+  function adiar(fn, ms) {
+    var t = null, args = null;
+    function f() { args = arguments; if (t) clearTimeout(t); t = setTimeout(executar, ms); }
+    function executar() { t = null; var a = args; args = null; if (a) fn.apply(null, a); }
+    f.agora = function () { if (t) { clearTimeout(t); executar(); } };
+    f.pendente = function () { return t !== null; };
+    return f;
+  }
+
+  /**
+   * localStorage com tratamento de falha (SP-06): no iframe do HtmlService ele pode faltar, estar cheio ou bloqueado.
+   * Toda leitura e gravação passam por aqui; quem chama recebe null/false e decide a alternativa.
+   */
+  var armazemOk = null;
+  var armazem = {
+    /** Sonda uma vez (com registro da causa); depois disso, sem armazenamento, ler/gravar só devolvem null/false. */
+    disponivel: function () {
+      if (armazemOk !== null) return armazemOk;
+      try {
+        var k = '__erp_teste__';
+        window.localStorage.setItem(k, '1');
+        var ok = window.localStorage.getItem(k) === '1';
+        window.localStorage.removeItem(k);
+        armazemOk = ok;
+      } catch (e) {
+        registrarFalha('armazenamento local indisponível', e);
+        armazemOk = false;
+      }
+      return armazemOk;
+    },
+    ler: function (k) {
+      if (!armazem.disponivel()) return null;
+      try {
+        var t = window.localStorage.getItem(k);
+        return t === null ? null : JSON.parse(t);
+      } catch (e) {
+        registrarFalha('leitura local de ' + k, e);
+        return null;
+      }
+    },
+    gravar: function (k, v) {
+      if (!armazem.disponivel()) return false;
+      try {
+        window.localStorage.setItem(k, JSON.stringify(v));
+        return true;
+      } catch (e) {
+        registrarFalha('gravação local de ' + k, e);
+        return false;
+      }
+    },
+    remover: function (k) {
+      if (!armazem.disponivel()) return false;
+      try {
+        window.localStorage.removeItem(k);
+        return true;
+      } catch (e) {
+        registrarFalha('remoção local de ' + k, e);
+        return false;
+      }
+    },
+  };
+
+  var SVG = 'http://www.w3.org/2000/svg';
+  /**
+   * h(tag, atributos, ...filhos): cria elemento sem innerHTML (texto vira nó de texto). Atributos: class, text,
+   * on: {evento: fn}, dataset, e qualquer outro (aria-*, type...). `false`/`null` omite; `true` vira atributo vazio.
+   */
+  function h(tag, atributos) {
+    var el = document.createElement(tag);
+    aplicar_(el, atributos);
+    for (var i = 2; i < arguments.length; i++) anexar_(el, arguments[i]);
+    return el;
+  }
+  function s(tag, atributos) {
+    var el = document.createElementNS(SVG, tag);
+    aplicar_(el, atributos);
+    for (var i = 2; i < arguments.length; i++) anexar_(el, arguments[i]);
+    return el;
+  }
+  function aplicar_(el, a) {
+    if (!a) return;
+    Object.keys(a).forEach(function (k) {
+      var v = a[k];
+      if (v === null || v === undefined || v === false) return;
+      if (k === 'on') { Object.keys(v).forEach(function (ev) { el.addEventListener(ev, v[ev]); }); return; }
+      if (k === 'text') { el.textContent = String(v); return; }
+      if (k === 'dataset') { Object.keys(v).forEach(function (d) { if (v[d] !== null && v[d] !== undefined) el.dataset[d] = String(v[d]); }); return; }
+      if (k === 'value' && 'value' in el && el.namespaceURI !== SVG) { el.value = v; return; }
+      if (k === 'checked' || k === 'selected' || k === 'disabled' || k === 'readOnly' || k === 'multiple') { el[k] = !!v; return; }
+      el.setAttribute(k === 'className' ? 'class' : k, v === true ? '' : String(v));
+    });
+  }
+  function anexar_(el, filho) {
+    if (filho === null || filho === undefined || filho === false) return;
+    if (Array.isArray(filho)) { filho.forEach(function (f) { anexar_(el, f); }); return; }
+    el.appendChild(typeof filho === 'object' && filho.nodeType ? filho : document.createTextNode(String(filho)));
+  }
+  function limpar(el) { while (el.firstChild) el.removeChild(el.firstChild); return el; }
+  function focaveis(raiz) {
+    return Array.prototype.filter.call(raiz.querySelectorAll('a[href], button, input, select, textarea, summary, [tabindex]:not([tabindex="-1"])'), function (el) {
+      return !el.disabled && el.getAttribute('aria-hidden') !== 'true' && (el.offsetWidth > 0 || el.offsetHeight > 0 || el === document.activeElement);
+    });
+  }
+  return { registrarFalha: registrarFalha, uuid: uuid, clonar: clonar, vazio: vazio, esperar: esperar, adiar: adiar, armazem: armazem, h: h, s: s, limpar: limpar, focaveis: focaveis };
+})();
+
+var Fmt = (function () {
+  var cfg = { fuso: 'America/Porto_Velho', unidadePeso: 'KG', arrobaKg: 15, desvioMs: 0, hojeServidor: null };
+  var cache = {};
+  var ROTULOS = {
+    SEXO: { M: 'Macho', F: 'Fêmea' },
+    CONFIANCA: { CONFIRMADA: 'Confirmada', ESTIMADA: 'Estimada', DESCONHECIDA: 'Não se sabe' },
+    ORIGEM: { NASCIDO: 'Nasceu na fazenda', COMPRADO: 'Comprado', DESCONHECIDA: 'Não se sabe' },
+    SITUACAO_REPRODUTIVA: { NAO_APTA: 'Não apta', SEM_INFORMACAO: 'Sem informação', VAZIA: 'Vazia', EXPOSTA: 'Exposta (com touro)', INSEMINADA: 'Inseminada', PRENHA: 'Prenha' },
+    METODO_PESAGEM: { BALANCA: 'Balança', FITA: 'Fita', ESTIMATIVA_VISUAL: 'Estimativa visual', MEDIA_LOTE: 'Média do lote' },
+    TIPO_PESAGEM: { ROTINA: 'Rotina', ENTRADA: 'Chegada à fazenda', DESMAMA: 'Desmama', VENDA: 'Saída (venda ou embarque)', NASCIMENTO: 'Ao nascer', COMPRA: 'Na compra' },
+    SITUACAO_CADASTRAL: { PENDENTE: 'Pendente', ATIVO: 'Ativo', VENDIDO: 'Vendido', MORTO: 'Morto', DESCARTADO: 'Descartado', BAIXADO_AJUSTE: 'Baixado por ajuste', HISTORICO: 'Histórico', EXTERNO: 'De fora do rebanho', ANULADO: 'Anulado' },
+    IDENTIFICACAO: { BRINCO: 'Brinco da fazenda', BRINCO_ORIGEM: 'Brinco de origem (do vendedor)', RFID: 'RFID (chip)', SISBOV: 'SISBOV', TATUAGEM: 'Tatuagem', OUTRO: 'Outra' },
+    ACAO_MARCACAO: { MARCAR: 'Marcar', DESMARCAR: 'Tirar a marca' },
+    TIPO_PARCEIRO: { FORNECEDOR: 'Fornecedor', COMPRADOR: 'Comprador', VETERINARIO: 'Veterinário', TRANSPORTADOR: 'Transportador', ARRENDADOR: 'Arrendador (pasto alugado)', OUTRO: 'Outro' },
+    POSSE: { PROPRIO: 'Próprio', ARRENDADO: 'Arrendado (alugado)' },
+    STATUS: { ATIVO: 'Ativo', INATIVO: 'Inativo' },
+    SEXO_APLICAVEL: { M: 'Machos', F: 'Fêmeas', AMBOS: 'Machos e fêmeas' },
+    CONDICAO: { NENHUMA: 'Nenhuma', CASTRADO: 'Castrado', INTEIRO: 'Inteiro (não castrado)', REPRODUTOR: 'Reprodutor', NAO_REPRODUTOR: 'Não reprodutor', PARIDA: 'Já pariu', NAO_PARIDA: 'Ainda não pariu' },
+    TIPO_ANEXO: { FOTO: 'Foto', DOCUMENTO: 'Documento ou laudo', GTA: 'GTA', NOTA_FISCAL: 'Nota fiscal', OUTRO: 'Outro' },
+    POLITICA_AVISO: { BLOQUEIA: 'Bloqueia', AVISA: 'Avisa e pede confirmação', IGNORA: 'Não avisa' },
+    STATUS_EVENTO: { CONFIRMADO: 'Vale', ESTORNADO: 'Estornado', PENDENTE: 'Pendente', FALHOU: 'Falhou', CANCELADO: 'Cancelado' },
+    STATUS_IMPORTACAO: { RASCUNHO: 'Arquivo lido', VALIDADO: 'Validada', IMPORTANDO: 'Importação incompleta', IMPORTADO: 'Importada', CANCELADO: 'Desfeita' },
+    STATUS_LINHA: { VALIDA: 'Válida', ERRO: 'Com erro', DUPLICADA: 'Duplicada', IMPORTADA: 'Importada', IGNORADA: 'Deixada de fora' },
+    GRUPO_CONFIG: { geral: 'Geral', identificacao: 'Identificação', pecuaria: 'Pecuária', sanidade: 'Sanidade', financeiro: 'Financeiro', alertas: 'Alertas', avisos: 'Avisos', sistema: 'Sistema' },
+    PAPEL: { SUJEITO: 'Animal', CRIA: 'Cria', MATRIZ: 'Matriz', TOURO: 'Touro' },
+    MOTIVO: { DADOS_INSUFICIENTES: 'dados insuficientes', ANTERIOR_AO_MARCO_ZERO: 'data anterior ao marco zero', FILTRO_NAO_APLICAVEL: 'o filtro não se aplica', SEM_VALOR_DE_REFERENCIA: 'sem valor de referência' },
+    FONTE: { APP: 'Lançado no app', IMPORTACAO: 'Importação', SISTEMA: 'Sistema' },
+    SITUACAO_NASCIMENTO: { VIVO: 'Vivo', NATIMORTO: 'Natimorto (nasceu morto)' },
+    TIPO_BAIXA: { MORTE: 'Morte', DESCARTE: 'Descarte', DIVERGENCIA_CONTAGEM: 'Não encontrado na contagem' },
+    MODALIDADE: { CABECA: 'Por cabeça', KG_VIVO: 'Por kg vivo', ARROBA: 'Por arroba', LOTE: 'Lote fechado (valor total)' },
+    BASE_PESO: { VIVO: 'Peso vivo (com rendimento)', CARCACA: 'Carcaça (romaneio)' },
+    RENDIMENTO_TIPO: { APURADO: 'Apurado (carcaça ÷ peso vivo)', NEGOCIADO: 'Negociado entre as partes', ESTIMADO: 'Estimado' },
+    CRITERIO_RATEIO: { DIRETO: 'Direto (um animal)', VALOR_INDIVIDUAL: 'Pelo valor de cada animal', CABECAS: 'Igual por cabeça', PESO_VIVO: 'Pelo peso vivo', PESO_CARCACA: 'Pelo peso de carcaça', DIAS_PERMANENCIA: 'Pelos dias de permanência', MANUAL: 'Pelo valor digitado de cada animal' },
+    ESCOPO_RATEIO: { EVENTO: 'Os animais do registro', REBANHO: 'O rebanho todo', PASTO: 'Os animais de um pasto', CATEGORIA: 'Os animais de uma categoria', LISTA: 'Os animais escolhidos' },
+    STATUS_LANCAMENTO: { ATIVO: 'Vale', CANCELADO: 'Cancelado' },
+    STATUS_PAGAMENTO: { SEM_CAIXA: 'Sem pagamento (não é caixa)', ABERTO: 'A pagar ou receber', PARCIAL: 'Pago em parte', LIQUIDADO: 'Pago', CANCELADO: 'Cancelado' },
+    STATUS_PARCELA: { ABERTA: 'Em aberto', LIQUIDADA: 'Paga', CANCELADA: 'Cancelada' },
+    // Sanidade e insumos (Fase 3, E3.2 e E3.3).
+    PROCEDIMENTO: { VACINA: 'Vacinação', VERMIFUGO: 'Vermifugação', MEDICAMENTO: 'Medicação', TRATAMENTO: 'Tratamento', EXAME: 'Exame', DOENCA: 'Doença' },
+    CATEGORIA_PRODUTO: { VACINA: 'Vacina', VERMIFUGO: 'Vermífugo', MEDICAMENTO: 'Medicamento', SUPLEMENTO: 'Suplemento', OUTRO: 'Outro' },
+    MODO_DOSE: { POR_CABECA: 'Por cabeça (a mesma dose)', POR_PESO: 'Por peso (dose por kg)', TOTAL: 'Só o total do frasco' },
+    RECORRENCIA: { UNICA: 'Uma vez na vida', INTERVALO_DIAS: 'A cada N dias', CAMPANHA_MESES: 'Campanha (meses do ano)' },
+    MOTIVO_AJUSTE_ESTOQUE: { CONTAGEM: 'Contagem (acertar o saldo)', PERDA: 'Perda', VENCIMENTO: 'Vencimento' },
+    SITUACAO_AGENDA: { VENCIDA: 'Atrasada', PROXIMA: 'Próxima', EM_DIA: 'Em dia' },
+    // Reprodução (Fase 3, E3.4 e E3.5).
+    RESULTADO_DG: { POSITIVO: 'Prenhe', NEGATIVO: 'Vazia', INCONCLUSIVO: 'Duvidoso (inconclusivo)' },
+    METODO_REPRODUCAO: { MONTA_NATURAL: 'Monta natural', MONTA_CONTROLADA: 'Monta controlada', IA: 'Inseminação artificial', IATF: 'Inseminação em tempo fixo (IATF)', PALPACAO: 'Palpação', ULTRASSOM: 'Ultrassom', OBSERVACAO: 'Observação', INFORMADO: 'Informado (sem exame)' },
+    TIPO_EVENTO_REPRODUTIVO: { EXPOSICAO: 'Exposição ao touro', COBERTURA: 'Cobertura', INSEMINACAO: 'Inseminação', DIAGNOSTICO_GESTACAO: 'Diagnóstico de gestação', PARTO: 'Parto', ABORTO: 'Aborto', DESMAMA: 'Desmama da cria' },
+    GRUPO_CONTA: { RECEITA: 'Receitas', CUSTO_DIRETO: 'Custos diretos', CUSTO_OPERACIONAL: 'Custos operacionais', DESPESA_ADMINISTRATIVA: 'Despesas administrativas', NAO_OPERACIONAL: 'Não operacional' },
+    CLASSE_CUSTO_ANIMAL: { AQUISICAO: 'Aquisição', SANITARIO: 'Sanitário', ALIMENTACAO: 'Alimentação', REPRODUCAO: 'Reprodução', OUTROS: 'Outros', NAO_SE_APLICA: 'Não se aplica' },
+    NATUREZA: { RECEITA_VENDA_ANIMAIS: 'Venda de animais', OUTRA_RECEITA: 'Outra receita', AQUISICAO_ANIMAIS: 'Aquisição de animais', CUSTEIO: 'Custeio', DESPESA_VENDA: 'Despesa de venda', ESTOQUE_INSUMOS: 'Compra de insumos', NAO_OPERACIONAL: 'Não operacional' },
+    /** Os 13 códigos de aviso (05, seção 1; desenho-base 16.12): configuração, detalhe do evento e revisão. */
+    AVISO: {
+      CARENCIA_ATIVA: 'Animal em carência (venda para abate)', POSSIVEL_DUPLICIDADE: 'Lançamento possivelmente repetido', BRINCO_PARECIDO: 'Brinco parecido com o de outro animal', LOTACAO_ACIMA_DA_CAPACIDADE: 'Pasto acima da capacidade',
+      PESO_IMPLAUSIVEL: 'Peso fora do esperado', IDADE_REPRODUTIVA: 'Fêmea abaixo da idade reprodutiva', PERIODO_BLOQUEADO: 'Período financeiro fechado', VALOR_DIVERGENTE: 'Valor diferente da conta',
+      RATEIO_SEM_PESO: 'Rateio por peso sem pesagem', INTERVALO_PARTO_CURTO: 'Intervalo entre partos curto', PRODUTO_VENCIDO: 'Produto vencido', ESTOQUE_INSUFICIENTE: 'Estoque insuficiente', CATEGORIAS_SEM_COBERTURA: 'Categorias com lacuna',
+    },
+    CAMPO_CORRIGIVEL: {
+      sexo: 'Sexo', data_nascimento: 'Data de nascimento', data_nascimento_confianca: 'Certeza do nascimento', mae_id: 'Mãe', mae_confianca: 'Certeza da mãe',
+      pai_id: 'Pai', pai_confianca: 'Certeza do pai', castrado: 'Castrado', reprodutor: 'Reprodutor (touro)', partos_previos: 'Partos anteriores',
+      origem: 'Origem', data_entrada: 'Chegada na fazenda', data_entrada_confianca: 'Certeza da chegada',
+      pasto_atual_id: 'Pasto', categoria_manual_id: 'Categoria', brinco: 'Brinco', situacao_cadastral: 'Situação no rebanho',
+    },
+    /** Colunas de cadastro que aparecem na trilha de auditoria (Configurações › Auditoria). */
+    CAMPO_CADASTRO: {
+      nome: 'Nome', status: 'Situação', property_id: 'Propriedade', area_ha: 'Área (ha)', capacidade_estimada_cabecas: 'Capacidade (cabeças)', posse: 'Posse',
+      identificacao: 'Identificação', observacoes: 'Observações', tipos: 'Tipos', documento: 'Documento', telefone: 'Telefone', email: 'E-mail', cidade: 'Cidade', uf: 'UF',
+      ativo: 'Em uso', rotulo: 'Nome na lista', ordem: 'Ordem', codigo: 'Código', valor: 'Valor', raca: 'Raça', nome_arquivo: 'Arquivo', municipio: 'Município',
+      idade_min_meses: 'Idade mínima (meses)', idade_max_meses: 'Idade máxima (meses)', sexo_aplicavel: 'Sexo', condicao: 'Condição', prioridade: 'Prioridade', ua_fator: 'UA por cabeça',
+    },
+  };
+  var DOMINIO_DO_CAMPO = {
+    sexo: 'SEXO', data_nascimento_confianca: 'CONFIANCA', mae_confianca: 'CONFIANCA', pai_confianca: 'CONFIANCA', data_entrada_confianca: 'CONFIANCA',
+    origem: 'ORIGEM', situacao_reprodutiva: 'SITUACAO_REPRODUTIVA', metodo_pesagem: 'METODO_PESAGEM', campo: 'CAMPO_CORRIGIVEL', situacao_cadastral: 'SITUACAO_CADASTRAL',
+    tipos: 'TIPO_PARCEIRO', posse: 'POSSE', status: 'STATUS', sexo_aplicavel: 'SEXO_APLICAVEL', condicao: 'CONDICAO', tipo_anexo: 'TIPO_ANEXO', politica: 'POLITICA_AVISO',
+    situacao_nascimento: 'SITUACAO_NASCIMENTO', pai_confianca_parto: 'CONFIANCA',
+    modalidade: 'MODALIDADE', base_peso: 'BASE_PESO', rendimento_tipo: 'RENDIMENTO_TIPO', criterio_rateio: 'CRITERIO_RATEIO', criterio: 'CRITERIO_RATEIO', escopo_tipo: 'ESCOPO_RATEIO',
+    tipo_identificacao: 'IDENTIFICACAO', acao: 'ACAO_MARCACAO', tipo_pesagem: 'TIPO_PESAGEM',
+    modo_dose: 'MODO_DOSE', motivo_ajuste: 'MOTIVO_AJUSTE_ESTOQUE', tipo_procedimento: 'PROCEDIMENTO', recorrencia_tipo: 'RECORRENCIA', categoria_produto: 'CATEGORIA_PRODUTO',
+    resultado: 'RESULTADO_DG', metodo: 'METODO_REPRODUCAO', tipo_evento: 'TIPO_EVENTO_REPRODUTIVO',
+  };
+
+  function configurar(o) { Object.keys(o || {}).forEach(function (k) { if (o[k] !== undefined && o[k] !== null) cfg[k] = o[k]; }); cache = {}; }
+  function ajustarRelogio(serverTime) {
+    var t = Date.parse(serverTime);
+    if (isFinite(t)) cfg.desvioMs = t - Date.now();
+  }
+  /** Agora (ms) corrigido pelo relógio do servidor: o "hoje" não depende do relógio do aparelho. */
+  function agoraMs() { return Date.now() + cfg.desvioMs; }
+  function partes_(ms, fuso) {
+    var f = cache[fuso] || (cache[fuso] = new Intl.DateTimeFormat('en-CA', { timeZone: fuso, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }));
+    var p = {};
+    f.formatToParts(new Date(ms)).forEach(function (x) { p[x.type] = x.value; });
+    return p;
+  }
+  /** Data de hoje (yyyy-MM-dd) no fuso da fazenda — nunca pelo relógio UTC nem pelo fuso do aparelho (08, 4.3). */
+  function hoje() {
+    try {
+      var p = partes_(agoraMs(), cfg.fuso);
+      return p.year + '-' + p.month + '-' + p.day;
+    } catch (e) {
+      Util.registrarFalha('fuso ' + cfg.fuso + ' não reconhecido pelo navegador; usando a data do servidor', e);
+      return cfg.hojeServidor;
+    }
+  }
+  function ehData(v) { return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !isNaN(Date.parse(v + 'T00:00:00Z')) && new Date(v + 'T00:00:00Z').toISOString().slice(0, 10) === v; }
+  function data(v) { return ehData(v) ? v.slice(8, 10) + '/' + v.slice(5, 7) + '/' + v.slice(0, 4) : '—'; }
+  function dataCurta(v) { return ehData(v) ? v.slice(8, 10) + '/' + v.slice(5, 7) : '—'; }
+  /** Um instante (texto ISO ou milissegundos) no fuso da fazenda: dd/mm/aaaa hh:mm. */
+  function instante(ts) {
+    var t = typeof ts === 'number' ? ts : Date.parse(ts);
+    if (!isFinite(t)) return '—';
+    try {
+      var p = partes_(t, cfg.fuso);
+      return p.day + '/' + p.month + '/' + p.year + ' ' + p.hour + ':' + p.minute;
+    } catch (e) {
+      Util.registrarFalha('formatação de instante', e);
+      return new Date(t).toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+    }
+  }
+  function numero(n, casas) {
+    if (n === null || n === undefined || n === '' || !isFinite(Number(n))) return '—';
+    var c = casas === undefined ? 0 : casas;
+    var k = 'n' + c;
+    var f = cache[k] || (cache[k] = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: c, maximumFractionDigits: c }));
+    return f.format(Number(n));
+  }
+  function peso(kg) {
+    if (kg === null || kg === undefined || kg === '') return '—';
+    if (cfg.unidadePeso === 'ARROBA') return numero(Number(kg) / cfg.arrobaKg, 2) + ' @';
+    return numero(kg, 1) + ' kg';
+  }
+  function dinheiro(centavos) {
+    if (centavos === null || centavos === undefined || centavos === '' || !isFinite(Number(centavos))) return '—';
+    var f = cache.brl || (cache.brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }));
+    return f.format(Number(centavos) / 100);
+  }
+  /** Casas decimais que o número usa (até 4): 12,5 → 1; 0,0125 → 4; 30 → 0. As quantidades de insumo têm até 4 casas. */
+  function casas(n) {
+    if (typeof n !== 'number' || !isFinite(n)) return 0;
+    for (var c = 0; c < 4; c++) if (Math.abs(Math.round(n * Math.pow(10, c)) - n * Math.pow(10, c)) < 1e-7) return c;
+    return 4;
+  }
+  function idade(meses, estimada) {
+    if (meses === null || meses === undefined || meses === '') return '—';
+    var m = Number(meses);
+    var t = m < 12 ? m + 'm' : Math.floor(m / 12) + 'a' + (m % 12 ? ' ' + (m % 12) + 'm' : '');
+    return (estimada ? '≈ ' : '') + t;
+  }
+  function rotulo(dominio, codigo) {
+    if (codigo === null || codigo === undefined || codigo === '') return '—';
+    var d = ROTULOS[dominio];
+    if (d && d[codigo]) return d[codigo];
+    var t = String(codigo).replace(/_/g, ' ').toLowerCase();
+    return t.charAt(0).toUpperCase() + t.slice(1);
+  }
+  function rotuloOpcao(campoId, codigo) { return rotulo(DOMINIO_DO_CAMPO[campoId] || '', codigo); }
+  function temDominio(campoId) { return !!DOMINIO_DO_CAMPO[campoId]; }
+
+  /** Decimal digitado (vírgula decimal; ponto como milhar em "1.500"). {valor} | {erro}. Vazio → {valor: null}. */
+  function lerDecimal(texto, casas) {
+    var s = String(texto === null || texto === undefined ? '' : texto).trim().replace(/\s+/g, '');
+    if (s === '') return { valor: null };
+    if (s.indexOf(',') >= 0) s = s.replace(/\./g, '').replace(',', '.');
+    else if (/^-?\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, '');
+    if (!/^-?\d+(\.\d+)?$/.test(s)) return { erro: 'Use só números, com vírgula para os decimais (ex.: 412,5).' };
+    var dec = (s.split('.')[1] || '').length;
+    if (casas !== undefined && casas !== null && dec > casas) return { erro: casas === 0 ? 'Use um número inteiro.' : 'Use no máximo ' + casas + (casas === 1 ? ' casa decimal.' : ' casas decimais.') };
+    return { valor: Number(s) };
+  }
+  /** Dinheiro digitado ("1.234,56", "R$ 10") → centavos inteiros, sem conta em ponto flutuante. */
+  function lerDinheiro(texto) {
+    var s = String(texto === null || texto === undefined ? '' : texto).replace(/R\$/i, '').trim();
+    if (s === '') return { valor: null };
+    var r = lerDecimal(s, 2);
+    if (r.erro) return { erro: r.erro.indexOf('casa') >= 0 ? 'Use no máximo 2 casas para os centavos.' : 'Use só números, com vírgula para os centavos (ex.: 1.234,56).' };
+    var neg = r.valor < 0;
+    var partes = Math.abs(r.valor).toFixed(2).split('.');
+    var c = Number(partes[0]) * 100 + Number(partes[1]);
+    return { valor: neg ? -c : c };
+  }
+  function lerInteiro(texto) {
+    var s = String(texto === null || texto === undefined ? '' : texto).trim();
+    if (s === '') return { valor: null };
+    if (!/^-?\d+$/.test(s)) return { erro: 'Use um número inteiro, sem vírgula.' };
+    return { valor: Number(s) };
+  }
+  /** Centavos → texto editável ("1234,56"). */
+  function centavosParaTexto(c) {
+    if (c === null || c === undefined || c === '') return '';
+    var n = Number(c);
+    var a = Math.abs(n);
+    return (n < 0 ? '-' : '') + Math.floor(a / 100) + ',' + String(a % 100).padStart(2, '0');
+  }
+  return {
+    configurar: configurar, ajustarRelogio: ajustarRelogio, agoraMs: agoraMs, hoje: hoje, ehData: ehData, data: data, dataCurta: dataCurta,
+    instante: instante, numero: numero, peso: peso, dinheiro: dinheiro, idade: idade, rotulo: rotulo, rotuloOpcao: rotuloOpcao, casas: casas,
+    lerDecimal: lerDecimal, lerDinheiro: lerDinheiro, lerInteiro: lerInteiro, centavosParaTexto: centavosParaTexto, ROTULOS: ROTULOS, temDominio: temDominio,
+    config: function () { return Util.clonar(cfg); },
+  };
+})();
+
+var Cliente = (function () {
+  var TEMPO_LIMITE_MS = 45000;
+  var ESPERAS_OCUPADO = [2000, 5000, 10000];
+  var ESPERA_VERIFICACAO_MS = 5000;
+  var MAX_VERIFICACOES = 6;
+  var MAX_PRAZOS = 2;
+  var cfg = { ambiente: 'PRODUCAO', appVersion: null, aoMeta: null, aoNovaVersao: null };
+  var falhasSeguidas = 0;
+
+  function ErroApi(code, message, details, extra) {
+    this.name = 'ErroApi';
+    this.code = code;
+    this.message = message;
+    this.details = details || [];
+    var e = extra || {};
+    Object.keys(e).forEach(function (k) { this[k] = e[k]; }, this);
+  }
+  ErroApi.prototype = Object.create(Error.prototype);
+  ErroApi.prototype.constructor = ErroApi;
+
+  var MSG = {
+    TRANSPORTE: 'Sem conexão. O que você digitou está guardado neste aparelho.',
+    TRANSPORTE_SEM_ARMAZEM: 'Sem conexão. O que você digitou continua nesta tela, mas não pôde ser guardado: não feche nem recarregue a página e tente gravar de novo quando o sinal voltar.',
+    TRANSPORTE_CONSULTA: 'Sem conexão com o servidor. Confira o sinal e tente de novo.',
+    ACESSO: 'Não foi possível confirmar seu acesso. Entre de novo; o que você digitou fica guardado.',
+    SEM_RESPOSTA: 'O servidor não respondeu a tempo e ainda não sabemos se gravou. A verificação se repete quando você abrir este formulário de novo.',
+    SEM_RESPOSTA_CONSULTA: 'O servidor demorou demais para responder. Confira o sinal e tente de novo.',
+    RESPOSTA_ESTRANHA: 'O servidor respondeu de um jeito inesperado. Recarregue a página e tente de novo.',
+  };
+
+  function configurar(o) { Object.keys(o || {}).forEach(function (k) { cfg[k] = o[k]; }); }
+  function run_() {
+    var g = window.google;
+    return g && g.script && g.script.run ? g.script.run : null;
+  }
+  /** Uma ida ao servidor. Resolve {tipo: 'resposta', env} | {tipo: 'prazo'} | {tipo: 'transporte', erro}; nunca rejeita. */
+  function enviar_(pedido, prazoMs) {
+    return new Promise(function (resolve) {
+      var feito = false;
+      var t = null;
+      function fim(r) { if (feito) return; feito = true; if (t) clearTimeout(t); resolve(r); }
+      if (prazoMs) t = setTimeout(function () { fim({ tipo: 'prazo' }); }, prazoMs);
+      var run = run_();
+      if (!run) { fim({ tipo: 'transporte', erro: new Error('google.script.run indisponível: a página não está dentro do Apps Script.') }); return; }
+      try {
+        run.withSuccessHandler(function (env) { fim({ tipo: 'resposta', env: env }); })
+          .withFailureHandler(function (e) { fim({ tipo: 'transporte', erro: e }); })
+          .api(pedido);
+      } catch (e) {
+        fim({ tipo: 'transporte', erro: e });
+      }
+    });
+  }
+  function pedido_(rota, dados, o) {
+    var p = { rota: rota, dados: dados || {} };
+    if (o.chave) p.idempotencyKey = o.chave;
+    if (o.avisosAceitos && o.avisosAceitos.length) p.avisosAceitos = o.avisosAceitos.slice();
+    if (o.dataVersionEsperada !== undefined && o.dataVersionEsperada !== null) p.dataVersionEsperada = o.dataVersionEsperada;
+    if (cfg.ambiente && cfg.ambiente !== 'PRODUCAO') p.ambiente = cfg.ambiente;
+    return p;
+  }
+  function meta_(meta) {
+    if (!meta) return;
+    if (meta.serverTime) Fmt.ajustarRelogio(meta.serverTime);
+    if (meta.appVersion && cfg.appVersion && meta.appVersion !== cfg.appVersion && cfg.aoNovaVersao) cfg.aoNovaVersao(meta.appVersion);
+    if (cfg.aoMeta) cfg.aoMeta(meta);
+  }
+  function valido_(env) { return env && typeof env === 'object' && typeof env.ok === 'boolean' && (env.ok || (env.error && typeof env.error.code === 'string')); }
+  function erroDoEnvelope_(env) {
+    var e = env.error;
+    return new ErroApi(e.code, e.message || 'Algo deu errado no servidor.', e.details || [], { meta: env.meta || null });
+  }
+  function erroTransporte_(r, consulta) {
+    falhasSeguidas += 1;
+    var repetida = falhasSeguidas >= 3;
+    // Sem o localStorage, o rascunho fica no servidor, que não responde: o que foi digitado só está na tela (SP-06).
+    var semArmazem = typeof Rascunhos !== 'undefined' && Rascunhos.modo() === 'SERVIDOR';
+    return new ErroApi('TRANSPORTE', repetida ? MSG.ACESSO : consulta ? MSG.TRANSPORTE_CONSULTA : semArmazem ? MSG.TRANSPORTE_SEM_ARMAZEM : MSG.TRANSPORTE, [], { repetida: repetida, causa: String(r.erro && r.erro.message ? r.erro.message : r.erro) });
+  }
+  function avisar_(o, estado) { if (o && typeof o.aoEstado === 'function') o.aoEstado(estado); }
+
+  /** Consulta (ou manutenção sem chave): LOCKED retentado em 2, 5 e 10 s; sem resposta em 45 s → SEM_RESPOSTA. */
+  async function consulta(rota, dados, o) {
+    o = o || {};
+    var pedido = pedido_(rota, dados, {});
+    for (var tentativa = 0; ; tentativa++) {
+      var r = await enviar_(pedido, o.semPrazo ? 0 : TEMPO_LIMITE_MS);
+      if (r.tipo === 'prazo') throw new ErroApi('SEM_RESPOSTA', MSG.SEM_RESPOSTA_CONSULTA);
+      if (r.tipo === 'transporte') throw erroTransporte_(r, true);
+      falhasSeguidas = 0;
+      if (!valido_(r.env)) throw new ErroApi('INTERNAL', MSG.RESPOSTA_ESTRANHA);
+      meta_(r.env.meta);
+      if (r.env.ok) return { data: r.env.data, meta: r.env.meta };
+      if (r.env.error.code === 'LOCKED' && tentativa < ESPERAS_OCUPADO.length) {
+        avisar_(o, { estado: 'OCUPADO', tentativa: tentativa + 1, de: ESPERAS_OCUPADO.length, esperaMs: ESPERAS_OCUPADO[tentativa] });
+        await Util.esperar(ESPERAS_OCUPADO[tentativa]);
+        continue;
+      }
+      throw erroDoEnvelope_(r.env);
+    }
+  }
+
+  /**
+   * "Verificando se gravou" (08, seção 9): operacao.status até sair de EM_ANDAMENTO. Devolve a situação
+   * (CONFIRMADA | FALHOU | INEXISTENTE) ou lança SEM_RESPOSTA (a verificação se repete na próxima abertura).
+   */
+  async function verificar(chave, o) {
+    for (var i = 0; i < MAX_VERIFICACOES; i++) {
+      avisar_(o, { estado: 'VERIFICANDO', tentativa: i + 1 });
+      var s;
+      try {
+        s = await consulta('operacao.status', { chave: chave });
+      } catch (e) {
+        if (e.code === 'SEM_RESPOSTA' || e.code === 'TRANSPORTE') throw new ErroApi('SEM_RESPOSTA', MSG.SEM_RESPOSTA, [], { causa: e.message });
+        throw e;
+      }
+      if (s.data.situacao !== 'EM_ANDAMENTO') return s.data;
+      await Util.esperar(ESPERA_VERIFICACAO_MS);
+    }
+    throw new ErroApi('SEM_RESPOSTA', MSG.SEM_RESPOSTA);
+  }
+
+  /**
+   * Comando com chave de idempotência (01, seção 3.5). o: {chave (obrigatória), avisosAceitos, dataVersionEsperada,
+   * aoEstado({estado: ENVIANDO | OCUPADO | VERIFICANDO, tentativa, de})}. Resolve {data, meta, duplicado, verificado}.
+   * LOCKED: nova tentativa sozinha em 2, 5 e 10 s com a mesma chave; esgotadas → ErroApi LOCKED com `esgotado`.
+   * Sem resposta em 45 s: operacao.status; CONFIRMADA → reenvio com a mesma chave (o servidor devolve o resultado
+   * gravado, `duplicado`); FALHOU/INEXISTENTE → reenvio; EM_ANDAMENTO → consulta de novo. Demais erros: ErroApi.
+   */
+  async function comando(rota, dados, o) {
+    o = o || {};
+    if (!o.chave) throw new ErroApi('INTERNAL', 'Formulário sem chave de envio.');
+    var pedido = pedido_(rota, dados, o);
+    var ocupado = 0, semResposta = 0, verificado = false;
+    for (;;) {
+      avisar_(o, { estado: 'ENVIANDO' });
+      var r = await enviar_(pedido, TEMPO_LIMITE_MS);
+      if (r.tipo === 'prazo') {
+        semResposta += 1;
+        if (semResposta > MAX_PRAZOS) throw new ErroApi('SEM_RESPOSTA', MSG.SEM_RESPOSTA);
+        await verificar(o.chave, o);
+        verificado = true;
+        continue;
+      }
+      if (r.tipo === 'transporte') throw erroTransporte_(r, false);
+      falhasSeguidas = 0;
+      if (!valido_(r.env)) throw new ErroApi('INTERNAL', MSG.RESPOSTA_ESTRANHA);
+      meta_(r.env.meta);
+      if (r.env.ok) return { data: r.env.data, meta: r.env.meta, duplicado: !!(r.env.meta && r.env.meta.duplicado), verificado: verificado };
+      var code = r.env.error.code;
+      if (code === 'LOCKED' && ocupado < ESPERAS_OCUPADO.length) {
+        avisar_(o, { estado: 'OCUPADO', tentativa: ocupado + 1, de: ESPERAS_OCUPADO.length, esperaMs: ESPERAS_OCUPADO[ocupado] });
+        await Util.esperar(ESPERAS_OCUPADO[ocupado]);
+        ocupado += 1;
+        continue;
+      }
+      var erro = erroDoEnvelope_(r.env);
+      if (code === 'LOCKED') erro.esgotado = true;
+      throw erro;
+    }
+  }
+  return {
+    configurar: configurar, consulta: consulta, comando: comando, verificar: verificar, ErroApi: ErroApi, MSG: MSG,
+    TEMPO_LIMITE_MS: TEMPO_LIMITE_MS, ESPERAS_OCUPADO: ESPERAS_OCUPADO,
+    ambiente: function () { return cfg.ambiente; },
+  };
+})();
+
+var Store = (function () {
+  var FORMATO_CACHE = 1;
+  var est = { dados: null, params: {}, listas: {}, animais: null, porId: null, filhos: null, baixados: null, atualizadoEm: null };
+  var ouvintes = [];
+  var cfg = { ambiente: 'PRODUCAO', appVersion: null };
+
+  function configurar(o) { Object.keys(o || {}).forEach(function (k) { cfg[k] = o[k]; }); }
+  function chaveCache_() { return 'erp:' + cfg.ambiente + ':carga'; }
+  function lerCache_() {
+    var c = Util.armazem.ler(chaveCache_());
+    if (!c || c.formato !== FORMATO_CACHE || c.appVersion !== cfg.appVersion || !c.dados || typeof c.dados.dataVersion !== 'number') return null;
+    return c.dados;
+  }
+  function gravarCache_() {
+    if (!est.dados) return;
+    Util.armazem.gravar(chaveCache_(), { formato: FORMATO_CACHE, appVersion: cfg.appVersion, salvo_em: new Date(Fmt.agoraMs()).toISOString(), dados: est.dados });
+  }
+  function avisar_(motivo) { ouvintes.slice().forEach(function (f) { f(motivo); }); }
+  function assinar(fn) { ouvintes.push(fn); return function () { ouvintes = ouvintes.filter(function (x) { return x !== fn; }); }; }
+
+  function normalizarBrinco(texto, manterZeros) {
+    var v = String(texto === null || texto === undefined ? '' : texto).trim().toUpperCase().replace(/\s+/g, '');
+    if (!manterZeros && /^\d+$/.test(v)) v = v.replace(/^0+(?=\d)/, '');
+    return v;
+  }
+  function indexar_() {
+    est.animais = null; est.porId = null; est.filhos = null;
+  }
+  function materializar_(col) {
+    if (!col || !col.colunas) return [];
+    var out = [];
+    for (var i = 0; i < col.n; i++) {
+      var o = {};
+      for (var j = 0; j < col.colunas.length; j++) o[col.colunas[j]] = col.valores[col.colunas[j]][i];
+      out.push(o);
+    }
+    return out;
+  }
+  function garantirIndices_() {
+    if (est.animais) return;
+    est.animais = materializar_(est.dados && est.dados.animais);
+    reindexar_();
+  }
+  function reindexar_() {
+    est.porId = {}; est.filhos = {};
+    todosConhecidos_().forEach(function (a) {
+      est.porId[a.animal_id] = a;
+      if (a.mae_id) (est.filhos[a.mae_id] = est.filhos[a.mae_id] || []).push(a);
+    });
+  }
+  function todosConhecidos_() { return (est.animais || []).concat(est.baixados || []); }
+
+  function aplicar_(dados) {
+    est.dados = dados;
+    est.params = {};
+    ((dados.configuracoes && dados.configuracoes.itens) || []).forEach(function (i) { est.params[i.chave] = i.valor; });
+    est.listas = {};
+    (dados.listas || []).forEach(function (l) { (est.listas[l.lista] = est.listas[l.lista] || []).push(l); });
+    Object.keys(est.listas).forEach(function (k) { est.listas[k].sort(function (a, b) { return (a.ordem || 0) - (b.ordem || 0); }); });
+    est.baixados = null;
+    indexar_();
+    est.atualizadoEm = Fmt.agoraMs();
+    Fmt.configurar({ fuso: est.params.fuso || undefined, unidadePeso: est.params.unidade_peso_exibicao || undefined, arrobaKg: est.params.arroba_kg || undefined, hojeServidor: dados.animais ? dados.animais.data : null });
+  }
+
+  /**
+   * Carga inicial condicional (08, seção 9): envia a dataVersion da carga guardada; {atual: true} → usa a guardada.
+   * o.forcar: pede a carga inteira. Resolve {fonte: SERVIDOR | GUARDADA, dataVersion}. Erros: os do Cliente.
+   */
+  async function carregar(o) {
+    o = o || {};
+    var guardada = o.forcar ? null : (est.dados || lerCache_());
+    var r = await Cliente.consulta('sistema.bootstrap', guardada ? { dataVersion: guardada.dataVersion } : {}, { aoEstado: o.aoEstado });
+    if (r.data.atual) {
+      if (!guardada) return carregar({ forcar: true, aoEstado: o.aoEstado });
+      if (guardada !== est.dados) aplicar_(guardada);
+      est.dados.ambiente = r.data.ambiente || est.dados.ambiente;
+      est.atualizadoEm = Fmt.agoraMs();
+      avisar_('carga');
+      return { fonte: 'GUARDADA', dataVersion: est.dados.dataVersion };
+    }
+    aplicar_(r.data);
+    gravarCache_();
+    avisar_('carga');
+    return { fonte: 'SERVIDOR', dataVersion: est.dados.dataVersion };
+  }
+
+  // Deltas: só rotas cuja resposta traz a linha completa do store. Qualquer outra muda a carga por inteiro.
+  var DELTAS = {
+    'animal.cadastrarExterno': function (d) { return d && d.animal ? substituirAnimal_(d.animal) : false; },
+    'animal.editar': function (d) { return d && d.animal && !d.event_id ? substituirAnimal_(d.animal) : false; },
+    'pasto.salvar': function (d) { return d && d.pasture_id ? mesclarEm_('pastos', 'pasture_id', d) : false; },
+    'propriedade.salvar': function (d) { return d && d.property_id && !Util.vazio(est.params.propriedade_padrao_id) ? mesclarEm_('propriedades', 'property_id', d) : false; },
+    'lista.salvar': function (d) { return d && d.lista_id ? mesclarEm_('listas', 'lista_id', d) && (aplicarListas_(), true) : false; },
+    'parceiro.salvar': function (d) { return d && d.partner_id ? mesclarEm_('parceiros', 'partner_id', d) : false; },
+    // Sanidade (Fase 3): o cadastro do produto (com o saldo, que é projeção) e do protocolo volta inteiro na resposta.
+    'produto.salvar': function (d) { return d && d.product_id ? mesclarEm_('produtos', 'product_id', d) : false; },
+    'protocolo.salvar': function (d) { return d && d.protocol_id ? mesclarEm_('protocolos', 'protocol_id', d) : false; },
+    'estacao.salvar': function (d) { return d && d.estacao_id ? mesclarEm_('estacoes', 'estacao_id', d) : false; },
+    // Pesagem (Fase 3): o servidor devolve o peso atual de cada animal pesado (a projeção gravada); a lista do aparelho
+    // se atualiza sem recarregar o rebanho inteiro (o curral manda blocos seguidos com sinal fraco).
+    'evento.registrar': function (d) { return d && d.event_type === 'PESAGEM' && d.pesagem ? atualizarPesos_(d.pesagem.animais) : false; },
+  };
+  function atualizarPesos_(lista) {
+    var col = est.dados.animais;
+    if (!col || !col.colunas || !Array.isArray(lista) || !lista.length) return false;
+    var ids = col.valores.animal_id;
+    if (lista.some(function (x) { return ids.indexOf(x.animal_id) < 0; })) return false;
+    lista.forEach(function (x) {
+      var i = ids.indexOf(x.animal_id);
+      ['peso_atual', 'data_ultima_pesagem', 'peso_vencido'].forEach(function (c) { if (col.valores[c]) col.valores[c][i] = x[c] === undefined ? null : x[c]; });
+    });
+    indexar_();
+    return true;
+  }
+  function aplicarListas_() {
+    est.listas = {};
+    (est.dados.listas || []).forEach(function (l) { (est.listas[l.lista] = est.listas[l.lista] || []).push(l); });
+    Object.keys(est.listas).forEach(function (k) { est.listas[k].sort(function (a, b) { return (a.ordem || 0) - (b.ordem || 0); }); });
+  }
+  function mesclarEm_(colecao, pk, item) {
+    var lista = est.dados[colecao] = est.dados[colecao] || [];
+    var i = lista.findIndex(function (x) { return x[pk] === item[pk]; });
+    if (i >= 0) lista[i] = Object.assign({}, lista[i], item);
+    else lista.push(Object.assign({}, item));
+    return true;
+  }
+  function substituirAnimal_(linha) {
+    var col = est.dados.animais;
+    if (!col || !col.colunas) return false;
+    var ids = col.valores.animal_id;
+    var i = ids.indexOf(linha.animal_id);
+    if (i < 0) { i = col.n; col.n += 1; }
+    col.colunas.forEach(function (c) { col.valores[c][i] = linha[c] === undefined ? null : linha[c]; });
+    indexar_();
+    return true;
+  }
+  /**
+   * Depois de um comando: versão igual → nada; versão = local + 1 e rota com delta → aplica; senão → nova carga
+   * (condicional). Resolve {aplicado: NADA | DELTA | CARGA}.
+   */
+  async function aplicarResultado(rota, data, meta) {
+    var nova = meta && typeof meta.dataVersion === 'number' ? meta.dataVersion : null;
+    if (!est.dados || nova === null || nova === est.dados.dataVersion) return { aplicado: 'NADA' };
+    var delta = DELTAS[rota];
+    if (nova === est.dados.dataVersion + 1 && delta && delta(data)) {
+      est.dados.dataVersion = nova;
+      gravarCache_();
+      avisar_('delta');
+      return { aplicado: 'DELTA' };
+    }
+    await carregar();
+    return { aplicado: 'CARGA' };
+  }
+
+  function carregado() { return !!est.dados; }
+  function versao() { return est.dados ? est.dados.dataVersion : null; }
+  function param(chave) { return est.params[chave] === undefined ? null : est.params[chave]; }
+  function lista(nome) { return (est.listas[nome] || []).filter(function (l) { return l.ativo !== false; }); }
+  /** Item da lista pelo código, inclusive desativado (o lançamento antigo e a correção dele o mostram pelo nome). */
+  function itemLista(nome, codigo) { return (est.listas[nome] || []).filter(function (x) { return x.codigo === codigo; })[0] || null; }
+  function rotuloLista(nome, codigo) {
+    var l = (est.listas[nome] || []).filter(function (x) { return x.codigo === codigo; })[0];
+    return l ? l.rotulo : Fmt.rotulo('', codigo);
+  }
+  function pastos(o) { var t = (est.dados && est.dados.pastos) || []; return o && o.todos ? t : t.filter(function (p) { return p.status !== 'INATIVO'; }); }
+  function pasto(id) { return ((est.dados && est.dados.pastos) || []).filter(function (p) { return p.pasture_id === id; })[0] || null; }
+  function propriedades(o) { var t = (est.dados && est.dados.propriedades) || []; return o && o.todas ? t : t.filter(function (p) { return p.status !== 'INATIVO'; }); }
+  function propriedade(id) { return ((est.dados && est.dados.propriedades) || []).filter(function (p) { return p.property_id === id; })[0] || null; }
+  function parceiros() { return ((est.dados && est.dados.parceiros) || []).filter(function (p) { return p.ativo !== false; }); }
+  /** Nome do parceiro (inclusive inativo, para mostrar lançamentos antigos). */
+  function parceiro(id) { return ((est.dados && est.dados.parceiros) || []).filter(function (p) { return p.partner_id === id; })[0] || null; }
+  /** Contas ativas do plano de contas (bootstrap); `naturezas` filtra as que servem a um campo (ex.: CUSTEIO). */
+  function contas(naturezas) { return ((est.dados && est.dados.contas) || []).filter(function (c) { return c.ativo !== false && (!naturezas || naturezas.indexOf(c.natureza) >= 0); }); }
+  function conta(id) { return ((est.dados && est.dados.contas) || []).filter(function (c) { return c.conta_id === id; })[0] || null; }
+  function categorias() { return (est.dados && est.dados.categorias) || []; }
+  /** Produtos e protocolos sanitários (Fase 3): os ativos; com {todos: true}, também os desativados. */
+  function produtos(o) { var t = (est.dados && est.dados.produtos) || []; return o && o.todos ? t : t.filter(function (p) { return p.ativo !== false; }); }
+  function produto(id) { return ((est.dados && est.dados.produtos) || []).filter(function (p) { return p.product_id === id; })[0] || null; }
+  function protocolos(o) { var t = (est.dados && est.dados.protocolos) || []; return o && o.todos ? t : t.filter(function (p) { return p.ativo !== false; }); }
+  function protocolo(id) { return ((est.dados && est.dados.protocolos) || []).filter(function (p) { return p.protocol_id === id; })[0] || null; }
+  /** Estações de monta (Fase 3), da mais recente para a mais antiga. */
+  function estacoes() { return ((est.dados && est.dados.estacoes) || []).slice().sort(function (a, b) { return a.data_inicio < b.data_inicio ? 1 : -1; }); }
+  function estacao(id) { return estacoes().filter(function (e) { return e.estacao_id === id; })[0] || null; }
+  function categoria(id) { return categorias().filter(function (c) { return c.category_id === id; })[0] || null; }
+  function animais() { garantirIndices_(); return est.animais; }
+  function animal(id) { garantirIndices_(); return est.porId[id] || null; }
+  function filhosDe(id) { garantirIndices_(); return est.filhos[id] || []; }
+  function modulos() { return (est.dados && est.dados.modulos) || []; }
+  function modulo(id) { return modulos().filter(function (m) { return m.id === id; })[0] || null; }
+  function catalogo() { return (est.dados && est.dados.catalogo) || { tipos: [] }; }
+  function tipoEvento(nome) { return (catalogo().tipos || []).filter(function (t) { return t.tipo === nome; })[0] || null; }
+
+  /** Nome curto do animal: brinco; sem brinco, "A-000123 · cria da 0231 · 12/09/2026" (08, seção 7). */
+  /** O lançamento como substantivo com artigo ("a transferência", "a marcação para descarte"): do servidor ou do catálogo. */
+  function nomeEvento(tipo, subtipo, pronto) {
+    if (pronto) return pronto;
+    var t = tipoEvento(tipo);
+    var sub = t && subtipo && t.subtipos ? t.subtipos[subtipo] : null;
+    return (sub && sub.nome) || (t && t.nome) || 'o lançamento';
+  }
+  var RE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  /** Nome de um registro de cadastro pelo identificador (pasto, propriedade, categoria, parceiro, conta, animal); null se não achar. */
+  function nomeDeReferencia(id) {
+    var p = pasto(id); if (p) return p.nome;
+    var pr = propriedade(id); if (pr) return pr.nome;
+    var c = categoria(id); if (c) return c.nome;
+    var pa = parceiro(id); if (pa) return pa.nome;
+    var ct = conta(id); if (ct) return ct.nome;
+    var pd = produto(id); if (pd) return pd.nome;
+    var pt = protocolo(id); if (pt) return pt.nome;
+    var es = estacao(id); if (es) return es.nome;
+    var a = animal(id); if (a) return rotuloAnimal(a);
+    return null;
+  }
+  /**
+   * Valor de um campo em palavras, para a trilha e o detalhe dos ajustes: identificador vira o nome do registro (nunca
+   * o código cru), S/N vira sim/não, data vira dd/mm/aaaa, opção de lista vira o rótulo.
+   */
+  function valorLegivel(campo, v) {
+    if (v === null || v === undefined || v === '') return campo === 'categoria_manual_id' ? 'automática' : '—';
+    if (typeof v === 'string' && RE_UUID.test(v)) return nomeDeReferencia(v) || (campo === 'pasto_atual_id' ? 'outro pasto' : campo === 'categoria_manual_id' ? 'outra categoria' : campo === 'mae_id' || campo === 'pai_id' ? 'outro animal' : 'outro registro');
+    if (v === 'S' || v === 'N' || v === true || v === false) return v === 'S' || v === true ? 'sim' : 'não';
+    if (Fmt.ehData(v)) return Fmt.data(v);
+    return Fmt.temDominio(campo) ? Fmt.rotuloOpcao(campo, v) : String(v);
+  }
+  function rotuloAnimal(a) {
+    if (!a) return '—';
+    if (a.brinco) return a.brinco;
+    var p = [a.codigo_interno || 'sem código'];
+    var mae = a.mae_id ? animal(a.mae_id) : null;
+    if (mae) p.push('cria da ' + (mae.brinco || mae.codigo_interno));
+    if (a.data_nascimento) p.push(Fmt.data(a.data_nascimento));
+    return p.join(' · ');
+  }
+  function descricaoAnimal(a) {
+    if (!a) return '';
+    var p = [];
+    var c = a.categoria_id ? categoria(a.categoria_id) : null;
+    p.push(c ? c.nome : Fmt.rotulo('SEXO', a.sexo));
+    var ps = a.pasto_atual_id ? pasto(a.pasto_atual_id) : null;
+    if (a.situacao_cadastral === 'ATIVO') p.push(ps ? ps.nome : 'sem pasto');
+    else p.push(Fmt.rotulo('SITUACAO_CADASTRAL', a.situacao_cadastral));
+    if (a.peso_atual) p.push(Fmt.peso(a.peso_atual) + (a.data_ultima_pesagem ? ' em ' + Fmt.dataCurta(a.data_ultima_pesagem) : ''));
+    // Carência (RN-072): o último dia em que o animal ainda não pode ser abatido, calculado no servidor (lista leve).
+    if (a.carencia_ate) p.push('em carência até ' + Fmt.data(a.carencia_ate));
+    if (a.brinco && a.codigo_interno) p.push(a.codigo_interno);
+    return p.join(' · ');
+  }
+  /**
+   * O resolvedor único (animal.resolver; CONTRATOS, seção 47): o cliente nunca resolve brinco. Os textos digitados (brinco,
+   * código interno, nome do animal de referência) vão ao servidor com a data; cada um volta achado, com mais de um animal
+   * ou recusado com o porquê, e cada animal citado vem descrito NAQUELE dia. Sem sinal, a promessa falha: quem chama deixa a
+   * linha pendente, nunca a resolve pela lista do aparelho. A resposta fica guardada por versão dos dados, data e tipo.
+   * o: {tipo, sexo, ids}. Resolve {data, motivo, porTexto: {texto: r}, animais: {id: estado}}.
+   */
+  var resolvidos = { v: null, g: {} };
+  async function resolver(textos, data, o) {
+    o = o || {};
+    if (resolvidos.v !== versao()) resolvidos = { v: versao(), g: {} };
+    var k = data + '|' + (o.tipo || '') + '|' + (o.sexo || '');
+    var g = resolvidos.g[k] = resolvidos.g[k] || { porTexto: {}, animais: {}, motivo: null };
+    var ts = textos.map(function (t) { return String(t || '').trim(); });
+    var faltam = ts.filter(function (t, i) { return !g.porTexto[t] && ts.indexOf(t) === i; });
+    var ids = (o.ids || []).filter(function (id) { return !g.animais[id]; });
+    if (faltam.length || ids.length) {
+      var r = (await Cliente.consulta('animal.resolver', { data: data, textos: faltam, ids: ids, tipo: o.tipo || null, sexo: o.sexo || null })).data;
+      r.textos.forEach(function (x, i) { g.porTexto[faltam[i]] = x; });
+      Object.assign(g.animais, r.animais);
+      g.motivo = r.motivo;
+    }
+    var porTexto = {};
+    ts.forEach(function (t) { porTexto[t] = g.porTexto[t]; });
+    return { data: data, motivo: g.motivo, porTexto: porTexto, animais: g.animais };
+  }
+  /** O animal do aparelho, ou o descrito pelo servidor (o que saiu do rebanho e não está na lista). */
+  function doEstado(e) {
+    return e && (animal(e.animal_id) || { animal_id: e.animal_id, codigo_interno: e.codigo_interno, brinco: e.brinco_hoje, sexo: e.sexo, situacao_cadastral: e.situacao_hoje });
+  }
+  function semResposta(e) { return 'O animal é achado pelo servidor, que não respondeu: ' + e.message; }
+  /**
+   * Busca de um texto (a do topo, a do campo de animal, a do seletor, a da curva): o texto pelo resolvedor único na data;
+   * sem animal com o texto, os nomes da lista do aparelho (o nome não é brinco). `filtro` marca os candidatos que servem; a
+   * fêmea achada que não serve dá as crias dela sem brinco. Resolve {modo: EXATO | SEM_ZEROS | VARIOS | CRIAS | NENHUM,
+   * candidatos, mae, mensagem}.
+   */
+  async function buscar(texto, data, filtro, o) {
+    var t = String(texto || '').trim();
+    if (!t) return { modo: 'NENHUM', candidatos: [] };
+    var f = filtro || function () { return true; };
+    var res = await resolver([t], data || Fmt.hoje(), o);
+    var x = res.porTexto[t];
+    var de = function (id) { return doEstado(res.animais[id]); };
+    if (x.situacao === 'ACHADO') {
+      var a = de(x.animal_id);
+      var crias = (x.crias || []).map(de).filter(f);
+      if (!f(a)) return { modo: crias.length ? 'CRIAS' : 'NENHUM', candidatos: crias, mae: a, mensagem: rotuloAnimal(a) + ': ' + (res.animais[a.animal_id].inelegivel || 'não serve aqui') + '.' };
+      return { modo: x.como === 'SEM_ZEROS' ? 'SEM_ZEROS' : 'EXATO', candidatos: [a].concat(crias), mae: crias.length ? a : null };
+    }
+    if (x.situacao === 'VARIOS') return { modo: 'VARIOS', candidatos: x.candidatos.map(de).filter(f), mensagem: x.mensagem };
+    var tn = t.toLowerCase();
+    var nomes = x.codigo === 'NAO_ENCONTRADO' ? todosConhecidos_().filter(function (a) { return f(a) && a.nome && a.nome.toLowerCase().indexOf(tn) >= 0; }) : [];
+    return { modo: nomes.length === 1 ? 'EXATO' : nomes.length ? 'VARIOS' : 'NENHUM', candidatos: nomes, mensagem: nomes.length ? null : x.mensagem };
+  }
+  /** Animais que saíram do rebanho (animal.listar), trazidos sob demanda e guardados até a próxima carga. */
+  async function carregarBaixados() {
+    if (est.baixados) return est.baixados;
+    var r = await Cliente.consulta('animal.listar', {});
+    est.baixados = materializar_(r.data);
+    garantirIndices_();
+    reindexar_();
+    return est.baixados;
+  }
+  return {
+    configurar: configurar, carregar: carregar, aplicarResultado: aplicarResultado, assinar: assinar, carregado: carregado, versao: versao,
+    param: param, lista: lista, itemLista: itemLista, rotuloLista: rotuloLista, pastos: pastos, pasto: pasto, propriedades: propriedades, propriedade: propriedade,
+    parceiros: parceiros, parceiro: parceiro, contas: contas, conta: conta, categorias: categorias, categoria: categoria, animais: animais, animal: animal, filhosDe: filhosDe,
+    produtos: produtos, produto: produto, protocolos: protocolos, protocolo: protocolo, estacoes: estacoes, estacao: estacao,
+    modulos: modulos, modulo: modulo, catalogo: catalogo, tipoEvento: tipoEvento, nomeEvento: nomeEvento, nomeDeReferencia: nomeDeReferencia, valorLegivel: valorLegivel, rotuloAnimal: rotuloAnimal, descricaoAnimal: descricaoAnimal,
+    resolver: resolver, doEstado: doEstado, semResposta: semResposta, buscar: buscar, carregarBaixados: carregarBaixados, normalizarBrinco: normalizarBrinco,
+    baixados: function () { return est.baixados; },
+    dados: function () { return est.dados; },
+    ambiente: function () { return (est.dados && est.dados.ambiente) || { codigo: cfg.ambiente, base_de_teste: cfg.ambiente !== 'PRODUCAO', faixa: null }; },
+    alertas: function () { return (est.dados && est.dados.alertas) || { alertas: [] }; },
+    atualizadoEm: function () { return est.atualizadoEm; },
+  };
+})();
+
+var Rascunhos = (function () {
+  var modo = null;
+  var cfg = { ambiente: 'PRODUCAO' };
+  var pendentesServidor = {};
+  var indiceFalhou = {};
+  var gravarServidorAdiado = null;
+  // No servidor o envio é adiado: quem gravou precisa saber se ele falhou (§20, regra 9: não esconder erro).
+  var situacoes = {};
+  var ouvintesFalha = [];
+  var ouvintesGuardado = [];
+  var emCurso = null;
+  // O que falhou vai de novo sozinho (sem esperar outra mudança na tela): o rascunho não fica só na memória da página.
+  var tentarDeNovo = null;
+  // Cada envio ao servidor leva uma versão crescente (o carimbo do aparelho, nunca menor que a última vista): o pedido que
+  // chega atrasado não apaga o que um envio mais novo guardou (CONTRATOS, seção 53).
+  var versao = 0;
+  function versao_() { versao = Math.max(versao + 1, Fmt.agoraMs()); return versao; }
+  function viu_(v) { if (typeof v === 'number' && v > versao) versao = v; }
+  function avisar_(lista, a, b) { lista.forEach(function (fn) { try { fn(a, b); } catch (x) { Util.registrarFalha('aviso de rascunho', x); } }); }
+  function falhou_(ids, e, soRemocao) {
+    ids.forEach(function (id) { situacoes[id] = { estado: 'FALHOU', erro: e }; });
+    avisar_(ouvintesFalha, e, { ids: ids, soRemocao: !!soRemocao });
+    if (tentarDeNovo) tentarDeNovo();
+  }
+
+  function prefixo_() { return 'erp:' + cfg.ambiente + ':rascunho:'; }
+  function indiceLocal_() { return 'erp:' + cfg.ambiente + ':rascunhos'; }
+  /** Escolhe onde guardar: localStorage se ele responde; senão as propriedades do usuário no servidor (SP-06). */
+  function iniciar(o) {
+    Object.keys(o || {}).forEach(function (k) { cfg[k] = o[k]; });
+    modo = Util.armazem.disponivel() ? 'LOCAL' : 'SERVIDOR';
+    gravarServidorAdiado = Util.adiar(function () { descarregarServidor_().catch(function (e) { Util.registrarFalha('rascunho no servidor', e); }); }, 1000);
+    tentarDeNovo = Util.adiar(function () { descarregarServidor_().catch(function (e) { Util.registrarFalha('rascunho no servidor', e); }); }, 5000);
+    // Ao sair da página (recarga, aba em segundo plano), o que estiver pendente vai ao servidor na hora.
+    var sair = function () {
+      if (!Object.keys(pendentesServidor).length && !Object.keys(indiceFalhou).length) return;
+      descarregarServidor_().catch(function (e) { Util.registrarFalha('rascunho no servidor ao sair', e); });
+    };
+    window.addEventListener('pagehide', sair);
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') sair(); });
+    return modo;
+  }
+  function resumo_(id, r) {
+    return { id: id, tipo: r.tipo, rotulo: r.rotulo, estado: r.estado, data: r.data || null, n: r.n || 0, salvo_em: r.salvo_em };
+  }
+  async function listar() {
+    if (modo === 'LOCAL') {
+      var ids = Util.armazem.ler(indiceLocal_()) || [];
+      return ids.map(function (id) { var r = Util.armazem.ler(prefixo_() + id); return r ? resumo_(id, r) : null; }).filter(Boolean);
+    }
+    var r = await Cliente.consulta('rascunho.obter', { chave: 'indice' });
+    viu_(r.data.versao);
+    return r.data.existe && Array.isArray(r.data.conteudo) ? r.data.conteudo : [];
+  }
+  async function obter(id) {
+    if (modo === 'LOCAL') return Util.armazem.ler(prefixo_() + id);
+    if (pendentesServidor[id] !== undefined) return pendentesServidor[id];
+    var r = await Cliente.consulta('rascunho.obter', { chave: 'r.' + id });
+    viu_(r.data.versao);
+    return r.data.existe ? r.data.conteudo : null;
+  }
+  /**
+   * Guarda o rascunho (objeto JSON simples). Local: na hora; servidor: agrupado (1 s) para poupar idas.
+   * `imediato` descarrega já (antes de enviar). Resolve {onde: LOCAL | SERVIDOR}. Falha local vira guarda no servidor.
+   */
+  async function salvar(id, r, o) {
+    r.salvo_em = new Date(Fmt.agoraMs()).toISOString();
+    if (modo === 'LOCAL') {
+      var ok = Util.armazem.gravar(prefixo_() + id, r);
+      if (ok) {
+        var ids = Util.armazem.ler(indiceLocal_()) || [];
+        if (ids.indexOf(id) < 0) { ids.push(id); ok = Util.armazem.gravar(indiceLocal_(), ids); }
+      }
+      if (ok) return { onde: 'LOCAL' };
+      modo = 'SERVIDOR';
+    }
+    pendentesServidor[id] = r;
+    situacoes[id] = { estado: 'PENDENTE', erro: null };
+    if (o && o.imediato) { await descarregarServidor_(); return { onde: 'SERVIDOR' }; }
+    gravarServidorAdiado();
+    return { onde: 'SERVIDOR', pendente: true };
+  }
+  /**
+   * Envia ao servidor o que está pendente, depois do envio que já estiver em curso (um de cada vez): resolve só quando o
+   * servidor confirmou; a falha (sem conexão, rascunho grande demais) volta a quem chamou e aos ouvintes de falha.
+   */
+  function descarregarServidor_() {
+    var antes = emCurso || Promise.resolve();
+    var p = antes.catch(function () { return null; }).then(enviarPendentes_);
+    emCurso = p;
+    var fim = function () { if (emCurso === p) emCurso = null; };
+    p.then(fim, fim);
+    return p;
+  }
+  async function enviarPendentes_() {
+    var ids = Object.keys(pendentesServidor);
+    // O rascunho que chegou ao servidor sem o índice (a falha entre os dois pedidos): o índice vai de novo com ele, também sem
+    // outra mudança na tela — senão o Início não o lista e a faixa da falha nunca sai.
+    var soIndice = Object.keys(indiceFalhou).filter(function (id) { return pendentesServidor[id] === undefined; });
+    if (!ids.length && !soIndice.length) return;
+    var lote = pendentesServidor;
+    var doIndice = indiceFalhou;
+    pendentesServidor = {};
+    indiceFalhou = {};
+    var feitos = [];
+    try {
+      var indice = await listar();
+      var noIndice = function (id, r) { indice = indice.filter(function (x) { return x.id !== id; }); if (r !== null) indice.push(resumo_(id, r)); };
+      soIndice.forEach(function (id) { noIndice(id, doIndice[id]); });
+      for (var i = 0; i < ids.length; i++) {
+        var id = ids[i], r = lote[id];
+        if (r === null) await Cliente.consulta('rascunho.remover', { chave: 'r.' + id, versao: versao_() });
+        else await Cliente.consulta('rascunho.salvar', { chave: 'r.' + id, conteudo: r, versao: versao_() });
+        feitos.push(id);
+        noIndice(id, r);
+      }
+      await Cliente.consulta('rascunho.salvar', { chave: 'indice', conteudo: indice, versao: versao_() });
+    } catch (e) {
+      ids.forEach(function (id) {
+        if (pendentesServidor[id] !== undefined) return;
+        if (feitos.indexOf(id) < 0) pendentesServidor[id] = lote[id];
+        else indiceFalhou[id] = lote[id];
+      });
+      soIndice.forEach(function (id) { if (pendentesServidor[id] === undefined && indiceFalhou[id] === undefined) indiceFalhou[id] = doIndice[id]; });
+      falhou_(ids.concat(soIndice), e, ids.concat(soIndice).every(function (id) { return lote[id] === null || (lote[id] === undefined && doIndice[id] === null); }));
+      throw e;
+    }
+    var guardados = ids.concat(soIndice).filter(function (id) { return pendentesServidor[id] === undefined; });
+    guardados.forEach(function (id) { situacoes[id] = { estado: 'GUARDADO', erro: null }; });
+    if (!Object.keys(situacoes).some(function (id) { return situacoes[id].estado === 'FALHOU'; })) avisar_(ouvintesGuardado, guardados);
+  }
+  async function remover(id) {
+    if (modo === 'LOCAL') {
+      Util.armazem.remover(prefixo_() + id);
+      var ids = (Util.armazem.ler(indiceLocal_()) || []).filter(function (x) { return x !== id; });
+      Util.armazem.gravar(indiceLocal_(), ids);
+      return;
+    }
+    pendentesServidor[id] = null;
+    await descarregarServidor_();
+  }
+  return {
+    iniciar: iniciar, listar: listar, obter: obter, salvar: salvar, remover: remover,
+    descarregar: function () { return descarregarServidor_(); },
+    modo: function () { return modo; },
+    /** {estado: PENDENTE | GUARDADO | FALHOU, erro} do rascunho no servidor (null no aparelho ou nunca guardado). */
+    situacao: function (id) { return situacoes[id] || null; },
+    /** fn(erro, ids) quando um envio ao servidor falha (o adiado também; ele vai de novo sozinho em 5 s). */
+    aoFalhar: function (fn) { ouvintesFalha.push(fn); },
+    /** fn(ids) quando o servidor confirma o envio e nenhum rascunho ficou com falha. */
+    aoGuardar: function (fn) { ouvintesGuardado.push(fn); },
+  };
+})();
+
+var Roteador = (function () {
+  var modo = null, atual = '', ouvinte = null, pilha = [], ouvindoHash = false;
+  function gas_(parte) {
+    var g = window.google;
+    return g && g.script && g.script[parte] ? g.script[parte] : null;
+  }
+  function normalizar(h) { return String(h || '').replace(/^#/, '').replace(/^\/+/, '').replace(/\/+$/, '').split('?')[0]; }
+  function mudar_(rota, origem) {
+    if (pilha.length >= 2 && pilha[pilha.length - 2] === rota && origem === 'voltar') pilha.pop();
+    else if (origem === 'voltar') pilha = [rota];
+    atual = rota;
+    if (ouvinte) ouvinte(rota);
+  }
+  function ouvirHash_() {
+    if (ouvindoHash) return;
+    ouvindoHash = true;
+    window.addEventListener('hashchange', function () {
+      var r = normalizar(location.hash);
+      if (r !== atual) mudar_(r, 'voltar');
+    });
+  }
+  /**
+   * Escolhe o modo: GAS (google.script.history + google.script.url — espelha a rota na URL da janela de cima),
+   * HASH (location.hash do próprio quadro) ou MEMORIA. Resolve a rota inicial.
+   */
+  function iniciar(fn) {
+    ouvinte = fn;
+    var hist = gas_('history');
+    if (hist && typeof hist.push === 'function' && typeof hist.replace === 'function' && typeof hist.setChangeHandler === 'function') {
+      try {
+        hist.setChangeHandler(function (e) { mudar_(normalizar(e && e.location ? e.location.hash : ''), 'voltar'); });
+        modo = 'GAS';
+      } catch (e) {
+        Util.registrarFalha('google.script.history indisponível; usando o endereço do quadro', e);
+      }
+    }
+    if (!modo) {
+      try {
+        ouvirHash_();
+        modo = 'HASH';
+      } catch (e) {
+        Util.registrarFalha('navegação por endereço indisponível; navegação só em memória', e);
+        modo = 'MEMORIA';
+      }
+    }
+    return inicial_().then(function (r) { atual = r; pilha = [r]; return r; });
+  }
+  function inicial_() {
+    var url = gas_('url');
+    if (modo === 'GAS' && url && typeof url.getLocation === 'function') {
+      return new Promise(function (res) {
+        var feito = false;
+        var t = setTimeout(function () { if (!feito) { feito = true; res(normalizar(location.hash)); } }, 3000);
+        try {
+          url.getLocation(function (loc) { if (feito) return; feito = true; clearTimeout(t); res(normalizar(loc && loc.hash)); });
+        } catch (e) {
+          Util.registrarFalha('google.script.url.getLocation', e);
+          feito = true;
+          clearTimeout(t);
+          res(normalizar(location.hash));
+        }
+      });
+    }
+    return Promise.resolve(modo === 'HASH' ? normalizar(location.hash) : '');
+  }
+  /** Navega para a rota ("rebanho", "evento/novo/PESAGEM"). o: {substituir}. A rota leva só tela e ID opaco (§17). */
+  function ir(rota, o) {
+    var r = normalizar(rota);
+    o = o || {};
+    if (r === atual && !o.forcar) return;
+    if (o.substituir) pilha[pilha.length - 1] = r;
+    else pilha.push(r);
+    if (modo === 'GAS') {
+      try {
+        gas_('history')[o.substituir ? 'replace' : 'push'](null, null, '/' + r);
+      } catch (e) {
+        Util.registrarFalha('google.script.history.push', e);
+        modo = 'MEMORIA';
+      }
+    } else if (modo === 'HASH') {
+      try {
+        if (o.substituir) history.replaceState(history.state, '', '#/' + r);
+        else history.pushState(history.state, '', '#/' + r);
+      } catch (e) {
+        Util.registrarFalha('history.pushState', e);
+        modo = 'MEMORIA';
+      }
+    }
+    atual = r;
+    if (ouvinte) ouvinte(r);
+  }
+  /** Volta uma etapa: usa o histórico do navegador quando a etapa anterior foi aberta nesta sessão; senão vai a `padrao`. */
+  function voltar(padrao) {
+    if (pilha.length >= 2 && modo !== 'MEMORIA') { history.back(); return; }
+    if (pilha.length >= 2) { pilha.pop(); var r = pilha[pilha.length - 1]; atual = r; if (ouvinte) ouvinte(r); return; }
+    ir(padrao || 'inicio', { substituir: true });
+  }
+  return {
+    iniciar: iniciar, ir: ir, voltar: voltar, normalizar: normalizar,
+    atual: function () { return atual; },
+    modo: function () { return modo; },
+    href: function (rota) { return '#/' + normalizar(rota); },
+    anterior: function () { return pilha.length >= 2 ? pilha[pilha.length - 2] : null; },
+  };
+})();
+
+var Telas = (function () {
+  var defs = [];
+  /**
+   * Registra uma tela: padrao "rebanho", "animal/:id/:aba?". def: {titulo, modulo, telaCheia, montar(el, params) →
+   * função de limpeza opcional}. Registrar o mesmo padrão de novo substitui a tela.
+   */
+  function registrar(padrao, def) {
+    var nomes = [];
+    var re = '^' + padrao.split('/').map(function (p, i) {
+      var opcional = /\?$/.test(p);
+      if (p.charAt(0) === ':') { nomes.push(p.replace(/^:|\?$/g, '')); return (i ? (opcional ? '(?:/([^/]+))?' : '/([^/]+)') : '([^/]+)'); }
+      return (i ? '/' : '') + p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }).join('') + '$';
+    defs = defs.filter(function (d) { return d.padrao !== padrao; });
+    defs.push({ padrao: padrao, re: new RegExp(re), nomes: nomes, def: def });
+  }
+  /** Rota → tela. Padrão literal ("evento/novo") vale antes de padrão com parâmetro ("evento/:id"), em qualquer ordem de registro. */
+  function resolver(rota) {
+    var ordem = defs.filter(function (d) { return !d.nomes.length; }).concat(defs.filter(function (d) { return d.nomes.length; }));
+    for (var i = 0; i < ordem.length; i++) {
+      var m = ordem[i].re.exec(rota);
+      if (m) {
+        var params = {};
+        ordem[i].nomes.forEach(function (n, k) { params[n] = m[k + 1] === undefined ? null : decodeURIComponent(m[k + 1]); });
+        return { padrao: ordem[i].padrao, def: ordem[i].def, params: params };
+      }
+    }
+    return null;
+  }
+  /** A rota abre uma tela: registrada, ou de um módulo sob demanda que ainda não veio do servidor (Modulos). */
+  function existe(rota) {
+    if (resolver(rota)) return true;
+    var m = typeof Modulos !== 'undefined' ? Modulos.daRota(rota) : null;
+    return !!m && !Modulos.carregado(m.tela);
+  }
+  return { registrar: registrar, resolver: resolver, existe: existe };
+})();
+
+/**
+ * Telas carregadas sob demanda (01, seção 6.2; risco R-31). As das Fases 3 a 5 e a importação não entram na página inicial:
+ * o módulo entregue que o servidor declara `sob_demanda` (catálogo: `tela`, `rotas`) é pedido por `sistema.tela` quando a
+ * rota dele abre, injetado (o `<script>` da tela roda e registra as rotas com Telas.registrar) e guardado em memória, sem
+ * novo pedido nesta página. O conteúdo vem compactado como o doGet entrega os includes; nada de innerHTML: o texto vira nó.
+ */
+var Modulos = (function () {
+  var MSG_FALHA = 'A tela não pôde ser aberta. Recarregue a página; se continuar, avise o suporte.';
+  var MSG_VERSAO = 'Há uma versão nova do app no servidor. Recarregue a página para abrir esta tela; o que você digitou fica guardado.';
+  var carregados = {};
+  var emCurso = {};
+  function sobDemanda() { return Store.modulos().filter(function (m) { return m.sob_demanda === true && !!m.tela; }); }
+  /** O módulo sob demanda dono da rota (pelo primeiro trecho dela), ou null. */
+  function daRota(rota) {
+    var raiz = String(rota || '').split('/')[0];
+    if (!raiz) return null;
+    return sobDemanda().filter(function (m) { return (m.rotas || []).indexOf(raiz) >= 0; })[0] || null;
+  }
+  function carregado(tela) { return carregados[tela] === true; }
+  /** O include compactado em estilos e scripts. */
+  function partes(html) {
+    var out = { estilos: [], scripts: [] };
+    var re = /<(style|script)>([\s\S]*?)<\/\1>/g;
+    var m;
+    while ((m = re.exec(String(html)))) (m[1] === 'style' ? out.estilos : out.scripts).push(m[2]);
+    return out;
+  }
+  function versaoDaPagina_() {
+    var raiz = document.getElementById('app');
+    return raiz ? raiz.getAttribute('data-app-version') : null;
+  }
+  /** Põe a tela na página. O erro de execução do script dela chega pelo evento `error` da janela, na mesma hora. */
+  function injetar_(tela, conteudo) {
+    var p = partes(conteudo);
+    if (!p.scripts.length) throw new Cliente.ErroApi('INTERNAL', MSG_FALHA, [], { causa: 'a tela ' + tela + ' veio sem script' });
+    p.estilos.forEach(function (css) {
+      var s = document.createElement('style');
+      s.setAttribute('data-modulo', tela);
+      s.textContent = css;
+      document.head.appendChild(s);
+    });
+    var falha = null;
+    function aoErro(ev) { if (!falha) falha = ev.error || new Error(ev.message); }
+    window.addEventListener('error', aoErro);
+    try {
+      p.scripts.forEach(function (js) {
+        var s = document.createElement('script');
+        s.setAttribute('data-modulo', tela);
+        s.text = js;
+        document.body.appendChild(s);
+      });
+    } finally {
+      window.removeEventListener('error', aoErro);
+    }
+    if (falha) throw new Cliente.ErroApi('INTERNAL', MSG_FALHA, [], { causa: String(falha && falha.message ? falha.message : falha) });
+  }
+  /**
+   * Pede, injeta e guarda a tela. Promise: true quando veio agora, false quando já estava. Pedidos ao mesmo tempo da mesma
+   * tela viram um só. Erro: Cliente.ErroApi (TRANSPORTE, SEM_RESPOSTA, NOT_FOUND; NOVA_VERSAO com `recarregar` quando o
+   * servidor já tem outra versão do app, cuja tela não serve à página aberta; INTERNAL quando a tela não roda).
+   */
+  function carregar(tela) {
+    if (carregados[tela]) return Promise.resolve(false);
+    if (emCurso[tela]) return emCurso[tela];
+    var p = Cliente.consulta('sistema.tela', { nome: tela }).then(function (r) {
+      var d = r.data || {};
+      if (d.nome !== tela || typeof d.conteudo !== 'string') throw new Cliente.ErroApi('INTERNAL', Cliente.MSG.RESPOSTA_ESTRANHA);
+      var versao = versaoDaPagina_();
+      if (r.meta && r.meta.appVersion && versao && r.meta.appVersion !== versao) throw new Cliente.ErroApi('NOVA_VERSAO', MSG_VERSAO, [], { recarregar: true });
+      injetar_(tela, d.conteudo);
+      carregados[tela] = true;
+      return true;
+    });
+    emCurso[tela] = p;
+    p.then(function () { delete emCurso[tela]; }, function () { delete emCurso[tela]; });
+    return p;
+  }
+  return { daRota: daRota, carregado: carregado, carregar: carregar, sobDemanda: sobDemanda, partes: partes };
+})();
+
+var App = (function () {
+  /** Os 10 itens da §15, na ordem dela; cada um aparece só se o módulo está ativo no servidor e a tela existe. */
+  var MENU = [
+    { modulo: 'DASHBOARD', rota: 'inicio', icone: 'inicio', curto: 'Início' },
+    { modulo: 'REBANHO', rota: 'rebanho', icone: 'rebanho', curto: 'Rebanho' },
+    { modulo: 'PASTOS', rota: 'pastos', icone: 'pasto', curto: 'Pastos' },
+    { modulo: 'EVENTOS', rota: 'eventos', icone: 'eventos', curto: 'Eventos' },
+    { modulo: 'PESAGENS', rota: 'pesagens', icone: 'peso', curto: 'Pesagens' },
+    { modulo: 'SANIDADE', rota: 'sanidade/agenda', icone: 'sanidade', curto: 'Sanidade' },
+    { modulo: 'REPRODUCAO', rota: 'reproducao/matrizes', icone: 'reproducao', curto: 'Reprodução' },
+    { modulo: 'FINANCEIRO', rota: 'financeiro/lancamentos', icone: 'financeiro', curto: 'Financeiro' },
+    { modulo: 'RELATORIOS', rota: 'relatorios', icone: 'relatorios', curto: 'Relatórios' },
+    { modulo: 'CONFIGURACOES', rota: 'config/parametros', icone: 'config', curto: 'Configurações' },
+  ];
+  var ROTA_REGISTRAR = 'evento/novo';
+  var cfg = { appVersion: null, ambiente: 'PRODUCAO', urlApp: '' };
+  var montada = null, limpeza = null, iniciado = false, ultimaConferencia = 0, vezDaRota = 0;
+  var el = {};
+
+  function lerPagina_() {
+    var raiz = document.getElementById('app');
+    cfg.appVersion = raiz.getAttribute('data-app-version') || null;
+    cfg.ambiente = raiz.getAttribute('data-ambiente') || 'PRODUCAO';
+    cfg.urlApp = raiz.getAttribute('data-url-app') || '';
+    ['topo', 'faixas', 'menu', 'conteudo', 'barra', 'camada', 'avisos'].forEach(function (id) { el[id] = document.getElementById(id); });
+  }
+  function itensMenu() {
+    return MENU.map(function (m, i) {
+      var mod = Store.modulo(m.modulo);
+      if (!mod || mod.menu === false || !Telas.existe(m.rota)) return null;
+      return { modulo: m.modulo, rota: m.rota, icone: m.icone, rotulo: mod.rotulo || m.curto, curto: m.curto, ordem: i + 1 };
+    }).filter(Boolean);
+  }
+  function podeRegistrar() { return Telas.existe(ROTA_REGISTRAR) && (Store.catalogo().tipos || []).some(function (t) { return t.tipo !== 'ESTORNO'; }); }
+  function rotaInicial_() { var m = itensMenu(); return m.length ? m[0].rota : ROTA_REGISTRAR; }
+
+  function renderizarCasca_() {
+    var h = Util.h;
+    Util.limpar(el.topo);
+    el.topo.appendChild(h('button', { type: 'button', class: 'botao botao-texto botao-icone topo-voltar', 'aria-label': 'Voltar', on: { click: function () { Roteador.voltar(rotaInicial_()); } } }, UI.icone('voltar')));
+    el.topo.appendChild(h('div', { class: 'topo-marca' }, UI.icone('rebanho'), h('span', { text: 'ERP Pecuário' })));
+    var acoes = h('div', { class: 'topo-acoes' });
+    if (Telas.existe('animal/x/resumo')) acoes.appendChild(UI.buscaBrinco());
+    if (podeRegistrar()) acoes.appendChild(h('a', { class: 'botao botao-primario', href: Roteador.href(ROTA_REGISTRAR), dataset: { rota: ROTA_REGISTRAR } }, UI.icone('registrar'), 'REGISTRAR EVENTO'));
+    el.topo.appendChild(acoes);
+
+    Util.limpar(el.menu);
+    var ul = h('ul', { class: 'menu-lista' });
+    itensMenu().forEach(function (m) {
+      ul.appendChild(h('li', null, h('a', { class: 'menu-item', href: Roteador.href(m.rota), dataset: { rota: m.rota, modulo: m.modulo } }, UI.icone(m.icone), m.rotulo)));
+    });
+    el.menu.appendChild(ul);
+
+    Util.limpar(el.barra);
+    var itens = itensMenu();
+    var porModulo = {};
+    itens.forEach(function (m) { porModulo[m.modulo] = m; });
+    var barra = [];
+    if (porModulo.DASHBOARD) barra.push(itemBarra_(porModulo.DASHBOARD));
+    if (porModulo.REBANHO) barra.push(itemBarra_(porModulo.REBANHO));
+    if (podeRegistrar()) barra.push(h('a', { class: 'barra-item barra-registrar', href: Roteador.href(ROTA_REGISTRAR), dataset: { rota: ROTA_REGISTRAR } }, UI.icone('registrar'), 'Registrar'));
+    if (porModulo.PASTOS) barra.push(itemBarra_(porModulo.PASTOS));
+    var mais = itens.filter(function (m) { return m.ordem >= 4; });
+    if (mais.length) barra.push(h('button', { type: 'button', class: 'barra-item', 'aria-haspopup': 'dialog', dataset: { mais: '1' }, on: { click: function (ev) { abrirMais_(mais, ev.currentTarget); } } }, UI.icone('mais'), 'Mais'));
+    barra.forEach(function (b) { el.barra.appendChild(b); });
+    el.barra.hidden = barra.length === 0;
+    marcarAtual_();
+  }
+  function itemBarra_(m) {
+    return Util.h('a', { class: 'barra-item', href: Roteador.href(m.rota), dataset: { rota: m.rota, modulo: m.modulo } }, UI.icone(m.icone), m.curto);
+  }
+  function abrirMais_(itens, origem) {
+    var h = Util.h;
+    var lista = h('ul', { class: 'menu-lista' });
+    var folha;
+    itens.forEach(function (m) {
+      lista.appendChild(h('li', null, h('a', { class: 'menu-item', href: Roteador.href(m.rota), dataset: { rota: m.rota }, on: { click: function () { folha.fechar(); } } }, UI.icone(m.icone), m.rotulo)));
+    });
+    folha = UI.folha({ titulo: 'Mais', conteudo: lista, origem: origem });
+  }
+  function marcarAtual_() {
+    var r = Roteador.atual();
+    var raiz = r.split('/')[0];
+    [el.menu, el.barra, el.topo].forEach(function (c) {
+      if (!c) return;
+      Array.prototype.forEach.call(c.querySelectorAll('[data-rota]'), function (a) {
+        var alvo = a.getAttribute('data-rota');
+        var ativo = alvo === r || (alvo.split('/')[0] === raiz && raiz !== 'evento') || (alvo === ROTA_REGISTRAR && r.indexOf(ROTA_REGISTRAR) === 0);
+        if (ativo) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+      });
+    });
+  }
+  function aoClicar_(ev) {
+    if (ev.defaultPrevented || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+    var a = ev.target.closest ? ev.target.closest('a[data-rota]') : null;
+    if (!a) return;
+    ev.preventDefault();
+    Roteador.ir(a.getAttribute('data-rota'));
+  }
+
+  function renderizarRota_(rota) {
+    if (!rota) { Roteador.ir(rotaInicial_(), { substituir: true }); return; }
+    vezDaRota += 1;
+    var alvo = Telas.resolver(rota);
+    // Rota de um módulo sob demanda que ainda não veio: pede a tela ao servidor e abre quando chegar.
+    var sob = alvo ? null : Modulos.daRota(rota);
+    if (sob && Modulos.carregado(sob.tela)) sob = null;
+    if (typeof limpeza === 'function') {
+      try { limpeza(); } catch (e) { Util.registrarFalha('ao sair da tela ' + montada, e); }
+    }
+    limpeza = null;
+    UI.fecharTudo();
+    Util.limpar(el.conteudo);
+    document.body.classList.toggle('tela-cheia', !!(alvo && alvo.def.telaCheia));
+    marcarAtual_();
+    if (sob) { abrirSobDemanda_(rota, sob); return; }
+    if (!alvo || (alvo.def.modulo && !Store.modulo(alvo.def.modulo))) {
+      montada = null;
+      el.conteudo.appendChild(Util.h('h1', { class: 'tela-titulo', text: alvo ? 'Ainda não disponível' : 'Tela não encontrada' }));
+      el.conteudo.appendChild(UI.estadoErro({ code: 'NOT_FOUND', message: alvo ? 'Esta parte do sistema ainda não foi entregue.' : 'Esta tela não existe nesta versão do app.' }, { acao: { texto: 'Ir para o início', aoClicar: function () { Roteador.ir(rotaInicial_()); } } }));
+      return;
+    }
+    montada = alvo.padrao;
+    var caixa = Util.h('div', { class: 'tela', dataset: { tela: alvo.padrao } });
+    el.conteudo.appendChild(caixa);
+    try {
+      limpeza = alvo.def.montar(caixa, alvo.params) || null;
+    } catch (e) {
+      Util.registrarFalha('ao abrir a tela ' + alvo.padrao, e);
+      Util.limpar(caixa);
+      caixa.appendChild(UI.estadoErro({ code: 'INTERNAL', message: 'A tela não pôde ser aberta. Recarregue a página; se continuar, avise o suporte.' }, { detalhe: String(e && e.message) }));
+    }
+    var titulo = caixa.querySelector('h1');
+    if (titulo && iniciado) { titulo.setAttribute('tabindex', '-1'); titulo.classList.add('tela-titulo'); titulo.focus({ preventScroll: false }); }
+    window.scrollTo(0, 0);
+  }
+
+  /**
+   * A tela de um módulo sob demanda (Modulos): o esqueleto enquanto ela vem; chegando, a rota abre de novo, já com a tela
+   * registrada (se o usuário não foi para outra rota no meio: a tela que veio fica guardada para a próxima vez). Sem rede,
+   * o erro com "Tentar de novo"; com outra versão do app no servidor, "Recarregar a página".
+   */
+  function abrirSobDemanda_(rota, mod) {
+    montada = null;
+    var vez = vezDaRota;
+    var caixa = Util.h('div', { class: 'tela', dataset: { telaSobDemanda: mod.tela } }, UI.carregando('Abrindo ' + mod.rotulo + '…'));
+    el.conteudo.appendChild(caixa);
+    Modulos.carregar(mod.tela).then(function () {
+      if (vez === vezDaRota) renderizarRota_(rota);
+    }, function (e) {
+      if (vez !== vezDaRota) return;
+      if (e.code === 'INTERNAL') Util.registrarFalha('ao carregar a tela ' + mod.tela, e.causa || e);
+      Util.limpar(caixa);
+      var titulo = Util.h('h1', { class: 'tela-titulo', tabindex: '-1', text: 'Não foi possível abrir ' + mod.rotulo });
+      caixa.appendChild(titulo);
+      caixa.appendChild(UI.estadoErro(e, { acao: e.recarregar ? acaoRecarregar('Recarregar a página') : { texto: 'Tentar de novo', aoClicar: function () { renderizarRota_(rota); } } }));
+      if (iniciado) titulo.focus();
+    });
+  }
+
+  // ------------------------------------------------------------------ faixas ----
+  /** Faixa persistente no alto (id único; repetir o id substitui). def: {tipo: info|aviso|erro|ok|teste, texto, acoes: [{texto, aoClicar, href}]}. */
+  function faixa(id, def) {
+    removerFaixa(id);
+    var f = UI.faixa(def);
+    f.setAttribute('data-faixa', id);
+    if (def.tipo === 'teste') el.faixas.insertBefore(f, el.faixas.firstChild);
+    else el.faixas.appendChild(f);
+    return f;
+  }
+  function removerFaixa(id) {
+    var f = el.faixas && el.faixas.querySelector('[data-faixa="' + id + '"]');
+    if (f) f.parentNode.removeChild(f);
+  }
+  function temFaixa(id) { return !!(el.faixas && el.faixas.querySelector('[data-faixa="' + id + '"]')); }
+  /** Recarregar a janela inteira: link para o app (target=_top) quando o endereço é conhecido; senão o próprio quadro. */
+  function acaoRecarregar(texto) {
+    if (cfg.urlApp) return { texto: texto, href: cfg.urlApp, alvo: '_top' };
+    return { texto: texto, aoClicar: function () { location.reload(); } };
+  }
+  function faixasDoSistema_() {
+    var amb = Store.ambiente();
+    if (amb.base_de_teste) faixa('base-teste', { tipo: 'teste', texto: (amb.faixa || 'BASE DE TESTE') + ' — estes dados não são os da fazenda' });
+    else removerFaixa('base-teste');
+    var imp = (Store.alertas().alertas || []).filter(function (a) { return a.codigo === 'IMPORTACAO_INCOMPLETA'; })[0];
+    if (imp) faixa('importacao', { tipo: 'erro', texto: imp.mensagem + ' Os registros ficam bloqueados até terminar ou desfazer.', acoes: Telas.existe('importar/x') ? [{ texto: 'Ver importação', aoClicar: function () { Roteador.ir('importar/' + (imp.ids && imp.ids[0] ? imp.ids[0] : '')); } }] : [] });
+    else removerFaixa('importacao');
+  }
+  function novaVersao_() {
+    if (temFaixa('nova-versao')) return;
+    faixa('nova-versao', { tipo: 'info', texto: 'Nova versão disponível. O que você digitou fica guardado.', acoes: [acaoRecarregar('Recarregar')] });
+  }
+  async function conferirVersao_() {
+    if (document.visibilityState !== 'visible' || !Store.carregado()) return;
+    if (Fmt.agoraMs() - ultimaConferencia < 60000) return;
+    ultimaConferencia = Fmt.agoraMs();
+    try {
+      var r = await Store.carregar();
+      removerFaixa('sem-conexao');
+      if (r.fonte === 'SERVIDOR') { renderizarCasca_(); faixasDoSistema_(); }
+    } catch (e) {
+      faixa('sem-conexao', { tipo: 'aviso', texto: 'Sem conexão com o servidor. Os dados na tela são de ' + Fmt.instante(Store.atualizadoEm()) + '.', acoes: [{ texto: 'Tentar de novo', aoClicar: function () { ultimaConferencia = 0; conferirVersao_(); } }] });
+    }
+  }
+
+  async function carregarInicial_() {
+    Util.limpar(el.conteudo);
+    el.conteudo.appendChild(UI.carregando('Carregando o rebanho…'));
+    try {
+      await Store.carregar({ aoEstado: function (s) { if (s.estado === 'OCUPADO') { Util.limpar(el.conteudo); el.conteudo.appendChild(UI.carregando('Sistema ocupado, tentando de novo (' + s.tentativa + ' de ' + s.de + ')…')); } } });
+      return true;
+    } catch (e) {
+      Util.limpar(el.conteudo);
+      var acao = e.code === 'DENIED' || e.repetida ? acaoRecarregar('Entrar de novo') : { texto: 'Tentar de novo', aoClicar: function () { carregarInicial_().then(function (ok) { if (ok) continuar_(); }); } };
+      el.conteudo.appendChild(UI.estadoErro(e, { acao: acao }));
+      return false;
+    }
+  }
+  function continuar_() {
+    renderizarCasca_();
+    faixasDoSistema_();
+    return Roteador.iniciar(renderizarRota_).then(function (rota) {
+      renderizarRota_(rota);
+      iniciado = true;
+      if (typeof Registro !== 'undefined' && Registro.conferirPendentes) Registro.conferirPendentes();
+    });
+  }
+  /** Ponto de entrada (fim do Index): configura, carrega o store, monta a casca e a rota. */
+  async function iniciar() {
+    lerPagina_();
+    Fmt.configurar({});
+    Cliente.configurar({ ambiente: cfg.ambiente, appVersion: cfg.appVersion, aoNovaVersao: novaVersao_ });
+    Store.configurar({ ambiente: cfg.ambiente, appVersion: cfg.appVersion });
+    Rascunhos.iniciar({ ambiente: cfg.ambiente });
+    // Sem localStorage (SP-06), a falha do rascunho no servidor avisa em qualquer tela (§20, regra 9), não só no formulário.
+    Rascunhos.aoFalhar(function (e, x) { faixa('rascunho-falhou', { tipo: 'aviso', texto: x && x.soRemocao ? 'Não foi possível apagar o rascunho no servidor (' + e.message + '): o pedido vai de novo sozinho, e até lá o rascunho continua guardado lá.' : 'Não foi possível guardar o rascunho no servidor (' + e.message + '). O que foi digitado continua nesta tela e vai de novo sozinho; não feche a tela antes de enviar.' }); });
+    Rascunhos.aoGuardar(function () { removerFaixa('rascunho-falhou'); });
+    document.addEventListener('click', aoClicar_);
+    document.addEventListener('visibilitychange', conferirVersao_);
+    var pular = document.getElementById('pular');
+    if (pular) pular.addEventListener('click', function () { var t = el.conteudo.querySelector('h1') || el.conteudo; t.setAttribute('tabindex', '-1'); t.focus(); });
+    ultimaConferencia = Fmt.agoraMs();
+    if (await carregarInicial_()) await continuar_();
+  }
+  return {
+    iniciar: iniciar, faixa: faixa, removerFaixa: removerFaixa, temFaixa: temFaixa, itensMenu: itensMenu, podeRegistrar: podeRegistrar,
+    acaoRecarregar: acaoRecarregar, recasca: function () { renderizarCasca_(); faixasDoSistema_(); },
+    rotaInicial: rotaInicial_, MENU: MENU, ROTA_REGISTRAR: ROTA_REGISTRAR,
+    camada: function () { return el.camada; }, regiaoAvisos: function () { return el.avisos; }, raiz: function () { return document.getElementById('app'); },
+  };
+})();
+</script>

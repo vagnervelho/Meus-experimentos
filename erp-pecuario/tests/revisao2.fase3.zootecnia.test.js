@@ -1,0 +1,217 @@
+'use strict';
+/**
+ * Revisão da Fase 3, rodada 2 (conserto), achados de zootecnia e de regras: a cria ao pé das fêmeas numa data passada (pela
+ * regra da projeção, só com os fatos até a data), a agenda sanitária numa data passada só com os protocolos que já existiam,
+ * a estimativa visual marcada como estimada no peso médio e na UA, o GMD da resposta do registro igual ao da ficha, a
+ * correção da desmama legítima depois de mudar a idade de desmama, o produto do cadastro sem custo unitário e as pesagens de
+ * lote da tela de desempenho dentro do filtro.
+ */
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const S = require('./apoio-sistema');
+
+const { js, PASTOS } = S;
+
+function api(s, rota, dados, chave, avisos) {
+  return js(s.gas.exec(() => s.G.api({ rota, dados: dados || {}, idempotencyKey: chave || 'k-' + Math.random(), avisosAceitos: avisos || [] })));
+}
+function ok(r, onde) {
+  assert.equal(r.ok, true, (onde || '') + ': ' + String(JSON.stringify(r.error)).slice(0, 1500));
+  return r.data;
+}
+function recusa(r, code, onde) {
+  assert.equal(r.ok, false, (onde || '') + ': esperava ' + code);
+  assert.equal(r.error.code, code, (onde || '') + ': ' + JSON.stringify(r.error).slice(0, 900));
+  return r.error;
+}
+const hoje = (s, iso) => { s.gas.clock.now = Date.parse(iso + 'T15:00:00.000Z'); };
+function rebanho(s, bichos) {
+  const r = ok(api(s, 'evento.registrar', S.entradaInicial(bichos)), 'rebanho');
+  const ids = {};
+  r.animais.forEach((a) => { ids[a.brinco] = a.animal_id; });
+  return ids;
+}
+const tab = (s, aba) => s.tabela(aba);
+function semErro(s, onde) {
+  const rel = s.integridade();
+  assert.equal(rel.ok, true, onde + ': ' + JSON.stringify(rel.achados.filter((a) => a.severidade === 'ERRO').slice(0, 3)));
+  s.conferirProjecoes(onde);
+}
+const vaca = (brinco, extra) => S.bicho(Object.assign({ brinco, data_nascimento: '2021-01-01', data_nascimento_confianca: 'CONFIRMADA', partos_previos: 1 }, extra || {}));
+const pesar = (s, data, itens, campos) => api(s, 'evento.registrar', { tipo: 'PESAGEM', campos: Object.assign({ event_date: data, tipo_pesagem: 'ROTINA', metodo_pesagem: 'BALANCA' }, campos || {}), animais: itens }, null, ['PESO_IMPLAUSIVEL', 'POSSIVEL_DUPLICIDADE']);
+
+test('achados 6 e 11: a lista de fêmeas numa data passada diz quem tinha cria ao pé naquela data (a regra da projeção, só com os fatos até ela) e conta o resumo; hoje, o mesmo que a projeção', () => {
+  const s = S.sistema();
+  hoje(s, '2026-11-15');
+  const id = rebanho(s, [vaca('100'), vaca('101')]);
+  const parto = (mae, data) => ok(api(s, 'evento.registrar', { tipo: 'NASCIMENTO', campos: { event_date: data }, animais: [{ animal_id: id[mae] }], crias: [{ situacao_nascimento: 'VIVO', sexo: 'M', brinco: 'C' + mae }] }), 'parto ' + mae).animais;
+  parto('100', '2026-02-01');
+  parto('101', '2026-03-01');
+  const cria100 = s.tabela('ANIMAIS').find((a) => a.brinco === 'C100').animal_id;
+  ok(api(s, 'evento.registrar', { tipo: 'DESMAMA', campos: { event_date: '2026-10-01' }, animais: [{ animal_id: cria100, peso: 180 }] }), 'desmama');
+  const matrizes = (data) => ok(api(s, 'reproducao.matrizes', { data }));
+  const aoPe = (r) => Object.fromEntries(r.itens.map((x) => [x.brinco, x.cria_ao_pe]));
+  const maio = matrizes('2026-05-01');
+  assert.deepEqual([aoPe(maio), maio.resumo.cria_ao_pe], [{ 100: true, 101: true }, 2], 'em 01/05 as duas tinham cria ao pé');
+  const out = matrizes('2026-10-15');
+  assert.deepEqual([aoPe(out), out.resumo.cria_ao_pe], [{ 100: false, 101: true }, 1], 'depois da desmama da cria da 100');
+  const jan = matrizes('2026-01-15');
+  assert.deepEqual([aoPe(jan), jan.resumo.cria_ao_pe], [{ 100: false, 101: false }, 0], 'antes dos partos');
+  const h = matrizes('2026-11-15');
+  const proj = Object.fromEntries(s.tabela('ANIMAIS').filter((a) => a.brinco === '100' || a.brinco === '101').map((a) => [a.brinco, a.cria_ao_pe]));
+  assert.deepEqual(aoPe(h), proj, 'hoje: o mesmo que a projeção');
+  assert.equal(h.resumo.cria_ao_pe, 1);
+  semErro(s, 'cria ao pé');
+});
+
+test('achados 7, 16 e 22 (servidor): inventario.elegiveis numa data passada devolve o brinco em uso NAQUELA data (e o de hoje à parte) — o número trocado e reaproveitado depois é de outro animal no dia; a pesagem daquele dia vai para o animal certo', () => {
+  const s = S.sistema({ config: { brinco_permite_reuso: 'S' } });
+  hoje(s, '2026-11-13');
+  const id = rebanho(s, [vaca('0457'), vaca('0391')]);
+  const A = id['0457'];
+  const B = id['0391'];
+  const ident = (data, itens) => ok(api(s, 'evento.registrar', { tipo: 'IDENTIFICACAO', subtipo: 'SUBSTITUICAO', campos: { event_date: data, tipo_identificacao: 'BRINCO' }, animais: itens }), 'troca ' + data);
+  ident('2026-11-11', [{ animal_id: A, codigo: '1457', motivo: 'PERDA' }]);
+  ident('2026-11-12', [{ animal_id: B, codigo: '0457', motivo: 'RENUMERACAO' }]);
+  const el = (data) => Object.fromEntries(ok(api(s, 'inventario.elegiveis', { tipo: 'PESAGEM', data })).itens.map((x) => [x.animal_id === A ? 'A' : 'B', [x.brinco, x.brinco_hoje]]));
+  assert.deepEqual(el('2026-11-10'), { A: ['0457', '1457'], B: ['0391', '0457'] }, 'em 10/11, o 0457 é da vaca A');
+  assert.deepEqual(el('2026-11-11'), { A: ['1457', '1457'], B: ['0391', '0457'] });
+  assert.deepEqual(el('2026-11-13'), { A: ['1457', '1457'], B: ['0457', '0457'] }, 'hoje, o brinco de hoje');
+  const rep = Object.fromEntries(ok(api(s, 'inventario.elegiveis', { tipo: 'REPRODUCAO', data: '2026-11-10' })).itens.map((x) => [x.animal_id === A ? 'A' : 'B', x.brinco]));
+  assert.deepEqual(rep, { A: '0457', B: '0391' }, 'o tronco usa a mesma posição');
+  semErro(s, 'brinco na data');
+});
+
+test('achados 13 e 21: o GMD da resposta do registro (o modo curral) é o do intervalo da ficha que termina nesta pesagem — a média do lote no meio não esconde o GMD contra a balança anterior; a segunda pesagem do dia (a que a ficha usa) tem o GMD; a primeira do dia diz o porquê verdadeiro', () => {
+  const s = S.sistema();
+  hoje(s, '2026-11-13');
+  const boi = (b) => S.bicho({ brinco: b, sexo: 'M', castrado: true, data_nascimento: '2024-05-01', data_nascimento_confianca: 'CONFIRMADA' });
+  const r = rebanho(s, [boi('1'), boi('2'), boi('3')]);
+  ok(pesar(s, '2026-03-01', [{ animal_id: r['1'], peso: 300 }, { animal_id: r['3'], peso: 300 }]));
+  ok(pesar(s, '2026-04-01', [{ animal_id: r['1'] }, { animal_id: r['2'] }], { peso_total_lote_kg: 660, qtd_cabecas_lote: 2 }), 'lote');
+  const a1 = ok(pesar(s, '2026-05-01', [{ animal_id: r['1'], peso: 360 }])).pesagem.animais[0];
+  const ficha1 = ok(api(s, 'animal.ficha', { animal_id: r['1'] })).peso;
+  const ult = ficha1.intervalos[ficha1.intervalos.length - 1];
+  assert.equal(typeof ult.gmd_kg_dia, 'number');
+  assert.deepEqual([a1.gmd_kg_dia, a1.gmd_explicacao], [ult.gmd_kg_dia, null], 'o GMD do intervalo 01/03 → 01/05 da ficha');
+  assert.deepEqual([a1.ganho_kg, a1.dias, a1.anterior.estimado], [30, 30, true], 'o ganho e os dias contra a anterior (a média do lote), marcada como estimada');
+  // Duas pesagens no mesmo dia: a ficha usa a última do dia.
+  const p1 = ok(pesar(s, '2026-05-01', [{ animal_id: r['3'], peso: 358 }])).pesagem.animais[0];
+  const p2 = ok(pesar(s, '2026-05-01', [{ animal_id: r['3'], peso: 360 }])).pesagem.animais[0];
+  const ficha3 = ok(api(s, 'animal.ficha', { animal_id: r['3'] })).peso;
+  const u3 = ficha3.intervalos[ficha3.intervalos.length - 1];
+  assert.deepEqual([p2.gmd_kg_dia, p2.gmd_explicacao], [u3.gmd_kg_dia, null], 'a segunda do dia tem o GMD da ficha');
+  assert.equal(typeof p2.gmd_kg_dia, 'number');
+  // A primeira do dia, relida agora (o reenvio devolve o resultado de hoje): vazia, com o porquê verdadeiro.
+  const rel = s.exec((ctx) => s.G.UnitOfWork.read(ctx, { rota: 't', reads: s.G.Timeline.porta().reads.concat(['CONFIGURACOES', 'PESAGENS']), acessoCru: true, tratador: (tx) => s.G.WeightService.resultadoDoEvento(tx, tab(s, 'PESAGENS').find((x) => x.peso_kg === 358).event_id) })).dados.animais[0];
+  assert.equal(rel.gmd_kg_dia, null);
+  assert.match(rel.gmd_explicacao, /outra pesagem no mesmo dia, depois desta/);
+  assert.equal(typeof p1.gmd_kg_dia, 'number', 'na hora em que foi a única do dia, a primeira tinha o GMD');
+  // Só estimadas antes: o porquê diz que as anteriores são estimadas (e não "a primeira").
+  const e = ok(pesar(s, '2026-06-01', [{ animal_id: r['2'], peso: 340 }])).pesagem.animais[0];
+  assert.equal(e.gmd_kg_dia, null);
+  assert.match(e.gmd_explicacao, /As pesagens anteriores são estimadas/);
+  semErro(s, 'gmd do curral');
+});
+
+test('achado 10: a agenda numa data passada não conta o protocolo cadastrado depois dela (nem pendência, nem cobertura, também o de aplicação única); da data em que ele passou a valer em diante, o nunca aplicado deve desde que ficou elegível — e só fica elegível com o protocolo valendo (03a, seção 4.9; 05, seção 4.7; CONTRATOS, seção 53, achado 8)', () => {
+  const s = S.sistema();
+  hoje(s, '2026-06-01');
+  const bichos = [];
+  for (let i = 0; i < 6; i++) bichos.push(S.bicho({ brinco: 'B' + i, data_nascimento: '2025-10-01', data_nascimento_confianca: 'CONFIRMADA' }));
+  rebanho(s, bichos);
+  const agenda = (data) => ok(api(s, 'sanidade.agenda', { data }));
+  const junho = agenda('2026-06-01');
+  assert.deepEqual([junho.resumo.vencidas, junho.protocolos.length], [0, 0]);
+  hoje(s, '2026-10-01');
+  ok(api(s, 'protocolo.salvar', { campos: { nome: 'Semestral', tipo_procedimento: 'VERMIFUGO', sexo_aplicavel: 'AMBOS', recorrencia_tipo: 'INTERVALO_DIAS', intervalo_dias: 180 } }), 'protocolo a cada 180 dias');
+  ok(api(s, 'protocolo.salvar', { campos: { nome: 'Única', tipo_procedimento: 'VACINA', sexo_aplicavel: 'AMBOS', recorrencia_tipo: 'UNICA' } }), 'protocolo de aplicação única');
+  const passada = agenda('2026-06-01');
+  assert.deepEqual([passada.resumo.vencidas, passada.resumo.proximas, passada.protocolos.length], [0, 0, 0], 'em 01/06 os protocolos ainda não existiam');
+  const dia = agenda('2026-10-01');
+  const semestral = (a) => a.pendencias.filter((p) => p.nome === 'Semestral');
+  // No dia do cadastro, o nunca aplicado deve desde que ficou elegível (03a, seção 4.9), e ele só fica elegível com o protocolo
+  // valendo (05, seção 4.7: "o protocolo está ativo"; CONTRATOS, seção 53, achado 8): vence no dia do cadastro, não na entrada
+  // no rebanho (01/01) — nenhum "dia de atraso" de antes de o protocolo existir.
+  assert.deepEqual(Utils_unicos(semestral(dia).map((p) => [p.vencimento, p.situacao, p.dias].join('|'))), ['2026-10-01|PROXIMA|0']);
+  assert.equal(semestral(dia).length, 6);
+  // A de aplicação única sem faixa vence no mesmo dia (o do animal, nunca antes de o protocolo valer).
+  assert.deepEqual(Utils_unicos(dia.pendencias.filter((p) => p.nome === 'Única').map((p) => [p.vencimento, p.situacao, p.dias].join('|'))), ['2026-10-01|PROXIMA|0']);
+  assert.equal(dia.pendencias.filter((p) => p.nome === 'Única').length, 6);
+  hoje(s, '2026-10-20');
+  const depois = agenda('2026-10-20');
+  assert.equal(semestral(depois).filter((p) => p.situacao === 'VENCIDA').length, 6, 'passado o cadastro sem aplicação, vencem');
+  // O protocolo praticado antes do cadastro (a aplicação lançada em atraso) vale desde a primeira aplicação com ele.
+  const prot = s.tabela('PROTOCOLOS_SANITARIOS').find((p) => p.nome === 'Semestral');
+  const umaBezerra = s.tabela('ANIMAIS').find((a) => a.brinco === 'B0').animal_id;
+  ok(api(s, 'evento.registrar', { tipo: 'SANIDADE', subtipo: 'VERMIFUGACAO', campos: { event_date: '2026-05-10', protocol_id: prot.protocol_id, nome_produto: 'Vermífugo', modo_dose: 'POR_CABECA', dose_referencia: 5, unidade_dose: 'mL' }, animais: [{ animal_id: umaBezerra }] }), 'aplicação de maio lançada agora');
+  const junho2 = agenda('2026-06-01');
+  assert.deepEqual(junho2.protocolos.map((p) => [p.nome, p.elegiveis]), [['Semestral', 6]], 'em 01/06 o protocolo já era praticado (a aplicação de 10/05)');
+  assert.deepEqual(Utils_unicos(junho2.pendencias.map((p) => [p.vencimento, p.situacao].join('|'))), ['2026-05-10|VENCIDA'], 'as outras cinco, nunca aplicadas, devem desde que o protocolo passou a valer (a primeira aplicação com ele, 10/05)');
+  assert.equal(junho2.pendencias.length, 5);
+});
+function Utils_unicos(l) { return Array.from(new Set(l)); }
+
+test('achado 12: a estimativa visual vale para o peso médio e a UA, mas marcada como estimada (100% estimado; a parte "estimativa visual" da UA, com o rótulo); a ficha diz "estimado"; a média do lote segue pesada', () => {
+  const s = S.sistema();
+  hoje(s, '2026-10-15');
+  const bois = [];
+  for (let i = 0; i < 5; i++) bois.push(S.bicho({ brinco: 'B' + i, sexo: 'M', castrado: true, data_nascimento: '2024-05-01', data_nascimento_confianca: 'CONFIRMADA' }));
+  const id = rebanho(s, bois);
+  const ids = bois.map((b) => id[b.brinco]);
+  ok(pesar(s, '2026-09-01', ids.map((animal_id) => ({ animal_id, peso: 420 }))), 'balança');
+  const antes = ok(api(s, 'peso.desempenho', { ate: '2026-09-30' })).geral.peso_medio;
+  assert.deepEqual([antes.valor, antes.estimado, antes.pct_estimado], [420, false, 0]);
+  ok(pesar(s, '2026-09-20', ids.map((animal_id) => ({ animal_id, peso: 500 })), { metodo_pesagem: 'ESTIMATIVA_VISUAL' }), 'estimativa visual');
+  const pm = ok(api(s, 'peso.desempenho', { ate: '2026-09-30' })).geral.peso_medio;
+  assert.deepEqual([pm.valor, pm.estimado, pm.pct_estimado], [500, true, 100], 'o peso médio sai 100% estimado');
+  const painel = ok(api(s, 'pasto.painel', { pasture_id: PASTOS.A, data: '2026-09-30' }));
+  assert.deepEqual([painel.ua.partes.estimativa_visual.cabecas, painel.ua.partes.pesada.cabecas, painel.ua.estimado], [5, 0, true]);
+  assert.match(painel.ua.rotulo, /5 cabeça\(s\) por estimativa visual/);
+  const ficha = ok(api(s, 'animal.ficha', { animal_id: ids[0] })).geral.peso_vigente;
+  assert.deepEqual([ficha.kg, ficha.situacao, ficha.estimado], [500, 'ESTIMATIVA_VISUAL', true]);
+  // A média do lote é peso de balança (o total do lote): fica na parte pesada.
+  ok(pesar(s, '2026-10-01', ids.map((animal_id) => ({ animal_id })), { peso_total_lote_kg: 2600, qtd_cabecas_lote: 5 }), 'lote');
+  const p2 = ok(api(s, 'pasto.painel', { pasture_id: PASTOS.A, data: '2026-10-05' }));
+  assert.deepEqual([p2.ua.partes.pesada.cabecas, p2.ua.partes.estimativa_visual.cabecas], [5, 0]);
+  semErro(s, 'estimativa visual');
+});
+
+test('achado 14: depois de mudar a idade de desmama de referência, a correção da desmama legítima (só o peso) é aceita; o bezerro novo na correção segue a regra do parâmetro de hoje', () => {
+  const s = S.sistema({ config: { idade_desmama_padrao_meses: '8' } });
+  hoje(s, '2026-11-13');
+  const id = rebanho(s, [S.bicho({ brinco: '300', sexo: 'M', castrado: false, reprodutor: false, data_nascimento: '2025-06-01', data_nascimento_confianca: 'CONFIRMADA' }), S.bicho({ brinco: '301', sexo: 'M', castrado: false, reprodutor: false, data_nascimento: '2025-06-01', data_nascimento_confianca: 'CONFIRMADA' })]);
+  const desmama = (extra, animais) => ({ tipo: 'DESMAMA', campos: Object.assign({ event_date: '2026-03-01' }, extra || {}), animais: animais || [{ animal_id: id['300'], peso: 180 }] });
+  const d = ok(api(s, 'evento.registrar', desmama()), 'desmama do 300 (7 meses na entrada: cria pela regra de 8)');
+  ok(api(s, 'config.salvar', { valores: { idade_desmama_padrao_meses: '6' } }), 'parâmetro');
+  semErro(s, 'parâmetro mudado');
+  const c = ok(api(s, 'evento.corrigir', Object.assign({ event_id: d.event_id, justificativa: 'peso' }, desmama(null, [{ animal_id: id['300'], peso: 185 }]))), 'correção só do peso');
+  assert.deepEqual(s.tabela('PESAGENS').filter((p) => p.event_id === c.event_id).map((p) => p.peso_kg), [185]);
+  // O 301 entra na correção: para ele vale a regra de hoje (6 meses), e ele entrou com 7.
+  const e = api(s, 'evento.corrigir', Object.assign({ event_id: c.event_id, justificativa: 'mais um' }, desmama(null, [{ animal_id: id['300'], peso: 185 }, { animal_id: id['301'], peso: 170 }])));
+  assert.equal(e.ok, false);
+  assert.deepEqual(e.error.details.map((x) => [x.codigo, x.animal_id]), [['NAO_E_CRIA', id['301']]]);
+  semErro(s, 'desmama corrigida');
+});
+
+test('achado 19: as pesagens e o ganho de lote da tela de desempenho seguem os filtros (pasto e categoria na data da pesagem, sexo e raça): o filtro sem nenhum animal pesado não mostra os lotes dos outros', () => {
+  const s = S.sistema();
+  hoje(s, '2026-11-13');
+  const bichos = [];
+  for (let i = 0; i < 6; i++) bichos.push(S.bicho({ brinco: 'M' + i, sexo: 'M', castrado: true, data_nascimento: '2024-05-01', data_nascimento_confianca: 'CONFIRMADA' }));
+  for (let i = 0; i < 6; i++) bichos.push(S.bicho({ brinco: 'F' + i, sexo: 'F', pasto_destino_id: PASTOS.B, data_nascimento: '2024-05-01', data_nascimento_confianca: 'CONFIRMADA' }));
+  const id = rebanho(s, bichos);
+  const machos = bichos.slice(0, 6).map((b) => id[b.brinco]);
+  ok(pesar(s, '2026-08-01', machos.map((animal_id) => ({ animal_id, peso: 300 }))));
+  ok(pesar(s, '2026-09-30', machos.map((animal_id) => ({ animal_id, peso: 360 }))));
+  const desemp = (f) => ok(api(s, 'peso.desempenho', f));
+  const femeas = desemp({ pasture_id: PASTOS.B, sexo: 'F' });
+  assert.deepEqual([femeas.geral.gmd.valor, femeas.animais.length, femeas.pesagens.length], [null, 0, 0], 'nenhum lote de outro pasto e sexo');
+  const doA = desemp({ pasture_id: PASTOS.A, sexo: 'M' });
+  assert.deepEqual(doA.pesagens.map((p) => [p.data, p.n, p.media_kg, p.gmd_lote.valor]), [['2026-09-30', 6, 360, 1], ['2026-08-01', 6, 300, null]]);
+  // Parte do lote no filtro (três machos mudam para o Pasto B antes da segunda pesagem): conta só os do filtro na data.
+  ok(api(s, 'evento.registrar', { tipo: 'TRANSFERENCIA', campos: { event_date: '2026-09-01', pasto_origem_id: PASTOS.A, pasto_destino_id: PASTOS.B }, animais: machos.slice(0, 3).map((animal_id) => ({ animal_id })) }), 'transferência');
+  const soA = desemp({ pasture_id: PASTOS.A });
+  assert.deepEqual(soA.pesagens.map((p) => [p.data, p.n]), [['2026-09-30', 3], ['2026-08-01', 6]]);
+  semErro(s, 'filtros das pesagens');
+});

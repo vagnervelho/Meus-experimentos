@@ -1,0 +1,662 @@
+<script>
+'use strict';
+/*
+ * ERP Pecuário — Importação de planilha (§14; 08-ux-ui.md, seção 12): o rebanho do marco zero (ANIMAIS) e os eventos
+ * históricos (COMPRAS, VENDAS, TRANSFERENCIAS, NASCIMENTOS, MORTES) e de manejo (PESAGENS, SANIDADE, REPRODUCAO,
+ * OCORRENCIAS; Fase 3, E3.6), num assistente de 5 telas para os 10 passos; o
+ * modelo de colunas de cada tipo vem do servidor (importacao.modelo) e o relatório final traz a reconciliação.
+ * 1 Tipo e arquivo (modelo para baixar, arquivo CSV ou colagem, formato; importacao.criar: leitura e primeiras linhas
+ * como texto) · 2 Mapeamento (coluna → campo, confiança padrão, valores padrão; validação em blocos com progresso) ·
+ * 3 Validação (válidas, com erro, duplicadas; filtro; texto original ao lado do interpretado, com as linhas de cada
+ * lançamento; CSV dos erros; "Deixar de fora" em linha válida, o lançamento inteiro junto — ignorar_linhas) ·
+ * 4 Confirmação (totais, marco zero, propriedade; havendo reprovadas ou deixadas de fora, só importa com a caixa
+ * "importar só as N válidas e ignorar M") · 5 Execução (blocos com progresso real, conclusão, Retomar e Desfazer,
+ * relatório final com a reconciliação em tabela; a mesma reconciliação abre na lista de importações). Tarefa de
+ * desktop; no celular, acompanhamento. O estado vem sempre do servidor (importacao.obter); a tela só guarda na memória
+ * o que o dono está escolhendo.
+ */
+var TelaImportacao = (function () {
+  var h = Util.h;
+  var modelo = null;
+  var modelos = {};
+  var sessao = {};
+  var TIPOS = {
+    ANIMAIS: 'Animais (rebanho atual)', COMPRAS: 'Compras de animais', VENDAS: 'Vendas de animais', TRANSFERENCIAS: 'Transferências entre pastos', NASCIMENTOS: 'Nascimentos (partos)', MORTES: 'Mortes',
+    PESAGENS: 'Pesagens', SANIDADE: 'Sanidade (vacinas, vermífugos, tratamentos, exames, doenças)', REPRODUCAO: 'Reprodução (exposição, inseminação, diagnóstico)', OCORRENCIAS: 'Ocorrências',
+  };
+  // Manejo (Fase 3, E3.6): os importadores que registram fatos sobre animais que já estão no cadastro (não criam animal).
+  var MANEJO = { PESAGENS: 'pesagens', SANIDADE: 'sanidade/aplicacoes', REPRODUCAO: 'reproducao/matrizes', OCORRENCIAS: 'eventos' };
+  // A opção lida de cada campo, em palavras: pelo domínio dos rótulos do aparelho, ou pelo subtipo do catálogo.
+  var DOMINIO_OPCAO = { momento: 'TIPO_PESAGEM', modo_dose: 'MODO_DOSE', resultado: 'RESULTADO_DG', metodo: 'METODO_REPRODUCAO', situacao: 'SITUACAO_NASCIMENTO', modalidade: 'MODALIDADE', base_peso: 'BASE_PESO', rendimento_tipo: 'RENDIMENTO_TIPO', criterio_rateio: 'CRITERIO_RATEIO' };
+  var SUBTIPO_DO_CAMPO = { procedimento: 'SANIDADE', registro: 'REPRODUCAO' };
+  function rotuloOpcao(campo, v) {
+    if (SUBTIPO_DO_CAMPO[campo]) {
+      var t = (Store.catalogo().tipos || []).filter(function (x) { return x.tipo === SUBTIPO_DO_CAMPO[campo]; })[0];
+      var sub = t && t.subtipos ? t.subtipos[v] : null;
+      if (sub && sub.rotulo) return sub.rotulo;
+    }
+    return Fmt.rotulo(DOMINIO_OPCAO[campo] || campo.toUpperCase(), v);
+  }
+  var CODIGOS_RECONCILIACAO = { SAIDA_HISTORICA_NA_FOTOGRAFIA: 'Saída antiga, mas está no marco zero', PASTO_DIVERGENTE: 'Pasto diferente', FORA_DA_FOTOGRAFIA: 'No histórico, mas fora do marco zero' };
+  var ETAPAS = [['arquivo', '1 Arquivo'], ['mapeamento', '2 Colunas'], ['validacao', '3 Validação'], ['confirmacao', '4 Confirmação'], ['execucao', '5 Importação']];
+  var PADROES = { castrado: 'Castrado', reprodutor: 'Reprodutor', origem: 'Origem', pasto: 'Pasto', metodo_pesagem: 'Como foi pesado' };
+  function chave(prefixo) { return prefixo + ':' + Util.uuid(); }
+  async function obterModelo(tipo) {
+    var t = tipo || 'ANIMAIS';
+    if (!modelos[t]) modelos[t] = (await Cliente.consulta('importacao.modelo', { tipo: t })).data;
+    modelo = modelos[t];
+    return modelo;
+  }
+  function eventos(tipo) { return !!tipo && tipo !== 'ANIMAIS'; }
+  function tituloTipo(tipo) { return eventos(tipo) ? 'Importar ' + (TIPOS[tipo] || tipo).toLowerCase() : 'Importar animais'; }
+  function etapaDoStatus(st) { return st === 'RASCUNHO' ? 'mapeamento' : st === 'VALIDADO' ? 'validacao' : 'execucao'; }
+  function rotuloCampo(c) { var x = (modelo && modelo.campos || []).filter(function (y) { return y.campo === c; })[0]; return x ? x.rotulo : c; }
+  function textoOriginal(v) { if (!v) return ''; return Array.isArray(v) ? v.join(' | ') : Object.keys(v).map(function (k) { return k + ': ' + v[k]; }).join(' | '); }
+  function cabecalhoEtapas(el, id, atual) {
+    el.appendChild(h('div', { class: 'tela-cabecalho' }, h('h1', { text: 'Importar animais', dataset: { tituloImportacao: '1' } })));
+    el.appendChild(h('nav', { class: 'abas', 'aria-label': 'Etapas da importação' }, h('ol', null, ETAPAS.map(function (e) { return h('li', null, h('span', { class: 'aba', 'aria-current': e[0] === atual ? 'step' : null, text: e[1] })); }))));
+    if (window.matchMedia && !window.matchMedia('(min-width: 900px)').matches) el.appendChild(UI.nota('A importação é mais confortável no computador; aqui dá para acompanhar e concluir.', 'info'));
+  }
+  function progresso(feito, total, texto) {
+    return h('div', { class: 'campo', role: 'status', 'aria-live': 'polite', dataset: { progresso: feito + '/' + total } }, h('progress', { class: 'progresso', max: String(total || 1), value: String(feito) }), h('span', { class: 'dado', text: texto }));
+  }
+  function erro(el, e, acao) { el.appendChild(UI.estadoErro(e, acao ? { acao: acao } : null)); }
+
+  // ------------------------------------------------------------------ reconciliação ----
+  function lado(x) { return !x ? '—' : x.no_rebanho ? 'no rebanho, ' + (x.pasto || 'sem pasto') : 'fora do rebanho'; }
+  function linkRota(rota, texto) { return Telas.existe(rota) ? h('a', { class: 'botao botao-texto', href: Roteador.href(rota), dataset: { rota: rota } }, texto) : texto; }
+  /**
+   * Reconciliação do histórico com a fotografia do marco zero (RN-095; importacao.reconciliacao ou o relatório final),
+   * para o pecuarista ler: o resumo, cada animal que não bate (o que diz a fotografia, o que diz o histórico, o que fazer
+   * e o registro que explica), os pastos com contagem diferente e os brincos do histórico sem animal. Nada bloqueia.
+   */
+  function blocoReconciliacao(rec) {
+    var r = rec.resumo || {};
+    var caixa = h('div');
+    if (!rec.animais.length && !rec.pastos.length && !rec.sem_animal.length) {
+      caixa.appendChild(UI.nota(r.com_historico ? 'O histórico bate com a fotografia do rebanho em ' + Fmt.data(rec.marco_zero) + ' (' + Fmt.numero(r.com_historico) + ' animais com histórico conferidos).' : 'Ainda não há histórico anterior ao marco zero para conferir.', 'ok'));
+      return caixa;
+    }
+    caixa.appendChild(UI.nota('O histórico importado e a fotografia do rebanho em ' + Fmt.data(rec.marco_zero) + ' não batem em ' + Fmt.numero(rec.animais.length + rec.sem_animal.length) + ' ponto(s). Nada foi bloqueado: vale a fotografia até você decidir. Para mudar, use os lançamentos de correção (pasto, baixa na contagem) ou estorne o registro antigo.', 'info'));
+    caixa.appendChild(UI.pares([['Animais na fotografia do marco zero', Fmt.numero(r.na_fotografia)], ['Animais com histórico antes dele', Fmt.numero(r.com_historico)], ['Animais que não batem', Fmt.numero(rec.animais.length)],
+      ['Pastos com contagem diferente', Fmt.numero(rec.pastos.length)], ['Brincos do histórico sem animal', Fmt.numero(rec.sem_animal.length)]]));
+    if (rec.animais.length) caixa.appendChild(h('div', { dataset: { reconciliacao: 'animais' } }, h('h3', { text: 'Animais que não batem' }), UI.tabela({ id: 'rec-animais', rotulo: 'Animais que não batem com o marco zero', linhas: rec.animais, chave: function (x) { return x.animal_id; },
+      colunas: [
+        { id: 'animal', rotulo: 'Animal', valor: function (x) { return x.brinco || x.codigo_interno; }, formatar: function (x) { return linkRota('animal/' + x.animal_id + '/resumo', x.brinco ? 'Brinco ' + x.brinco : x.codigo_interno); } },
+        { id: 'codigo', rotulo: 'O que não bate', valor: function (x) { return (CODIGOS_RECONCILIACAO[x.codigo] || x.codigo) + ': ' + x.explicacao; } },
+        { id: 'declarado', rotulo: 'No marco zero', valor: function (x) { return lado(x.declarado); } },
+        { id: 'recalculado', rotulo: 'Pelo histórico', valor: function (x) { return lado(x.recalculado); } },
+        { id: 'acao', rotulo: 'O que fazer', ordenavel: false, valor: function (x) { return x.acao; } },
+        { id: 'evento', rotulo: 'Registro', ordenavel: false, formatar: function (x) { var e = x.evento; return e ? linkRota('evento/' + e.event_id, 'Abrir ' + (e.nome || Store.nomeEvento(e.tipo, e.subtipo)) + ' de ' + Fmt.data(e.data)) : '—'; } },
+      ] }).el));
+    if (rec.pastos.length) caixa.appendChild(h('div', { dataset: { reconciliacao: 'pastos' } }, h('h3', { text: 'Pastos com contagem diferente' }), UI.tabela({ id: 'rec-pastos', rotulo: 'Pastos com contagem diferente no marco zero', linhas: rec.pastos, chave: function (x) { return x.pasture_id || 'sem'; },
+      colunas: [
+        { id: 'pasto', rotulo: 'Pasto' }, { id: 'declarado', rotulo: 'No marco zero', num: true }, { id: 'recalculado', rotulo: 'Pelo histórico', num: true },
+        { id: 'diferenca', rotulo: 'Diferença', num: true, formatar: function (x) { return (x.diferenca > 0 ? '+' : '') + x.diferenca; } },
+        { id: 'animais', rotulo: 'Animais', ordenavel: false, valor: function (x) { return x.animais.join(', '); } },
+      ] }).el));
+    if (rec.sem_animal.length) caixa.appendChild(h('div', null, h('h3', { text: 'Brincos do histórico sem animal no rebanho' }), h('ul', { class: 'lista-simples', dataset: { reconciliacao: 'sem-animal' } }, rec.sem_animal.map(function (x) { return h('li', { text: x.arquivo_nome + ', linha ' + x.linha_num + ': ' + x.mensagem }); }))));
+    return caixa;
+  }
+
+  // ------------------------------------------------------------------ lista ----
+  function montarLista(el) {
+    el.appendChild(h('div', { class: 'tela-cabecalho' }, h('h1', { text: 'Importação' }), h('a', { class: 'botao botao-primario', href: Roteador.href('importar/novo'), dataset: { rota: 'importar/novo' } }, 'Nova importação')));
+    el.appendChild(h('p', { class: 'suave', text: 'Traga o rebanho que já existe a partir de uma planilha. Nada é gravado sem a sua confirmação, e a importação pode ser desfeita.' }));
+    var corpo = h('div', null, UI.carregando('Buscando as importações…'));
+    el.appendChild(corpo);
+    Cliente.consulta('importacao.listar', {}).then(function (r) {
+      Util.limpar(corpo);
+      if (r.data.em_curso) corpo.appendChild(UI.nota('Há uma importação incompleta (' + r.data.em_curso.arquivo_nome + '): os registros ficam bloqueados até terminar ou desfazer.', 'erro'));
+      corpo.appendChild(UI.tabela({ id: 'importacoes', rotulo: 'Importações', linhas: r.data.itens, chave: function (i) { return i.import_id; }, vazio: { texto: 'Nenhuma importação ainda.' },
+        colunas: [
+          { id: 'created_at', rotulo: 'Quando', formatar: function (i) { return Fmt.instante(i.created_at); } }, { id: 'arquivo_nome', rotulo: 'Arquivo' },
+          { id: 'status', rotulo: 'Situação', valor: function (i) { return Fmt.rotulo('STATUS_IMPORTACAO', i.status); } },
+          { id: 'linhas', rotulo: 'Linhas', num: true, valor: function (i) { return i.total_linhas; } }, { id: 'importadas', rotulo: 'Importadas', num: true, valor: function (i) { return i.linhas_importadas; } },
+          { id: 'acao', rotulo: 'Ação', ordenavel: false, formatar: function (i) { var rr = 'importar/' + i.import_id + '/' + etapaDoStatus(i.status); return h('a', { class: 'botao botao-secundario', href: Roteador.href(rr), dataset: { rota: rr } }, i.status === 'IMPORTANDO' ? 'Retomar' : 'Abrir'); } },
+        ] }).el);
+      if (!r.data.itens.length) return;
+      var rec = h('div');
+      var conferirB = UI.botao('Conferir agora', { aoClicar: function () {
+        var destravar = UI.travar(conferirB, 'Conferindo…');
+        Util.limpar(rec);
+        rec.appendChild(UI.carregando('Comparando o histórico com o marco zero…'));
+        Cliente.consulta('importacao.reconciliacao', {}).then(function (x) { Util.limpar(rec); rec.appendChild(blocoReconciliacao(x.data)); destravar('Conferir de novo'); },
+          function (e) { Util.limpar(rec); erro(rec, e); destravar('Conferir agora'); });
+      } });
+      corpo.appendChild(UI.secao('Reconciliação com o marco zero', h('div', null, h('p', { class: 'suave', text: 'Compara o histórico importado (antes do marco zero) com a fotografia do rebanho no marco zero, sem gravar nada.' }), h('div', { class: 'acoes' }, conferirB), rec), { dado: 'reconciliacao' }));
+    }, function (e) { Util.limpar(corpo); erro(corpo, e); });
+  }
+
+  // ------------------------------------------------------------------ 1 arquivo ----
+  function lerBase64(arquivo) {
+    return new Promise(function (resolve, reject) {
+      var fr = new FileReader();
+      fr.onload = function () { resolve(String(fr.result).split(',')[1] || ''); };
+      fr.onerror = function () { reject(new Error('Não foi possível ler o arquivo. Escolha de novo.')); };
+      fr.readAsDataURL(arquivo);
+    });
+  }
+  function telaArquivo(el, m) {
+    var defs = [
+      { id: 'tipo', rotulo: 'O que importar', tipo: 'lista', opcoes: m.tipos, obrigatorio: true, default: m.tipos[0] },
+      { id: 'fonte', rotulo: 'Como trazer os dados', tipo: 'lista', opcoes: ['ARQUIVO', 'COLAR'], obrigatorio: true, default: 'ARQUIVO' },
+      { id: 'texto', rotulo: 'Cole aqui as linhas copiadas da planilha (com o cabeçalho)', tipo: 'texto', visivel_se: { campo: 'fonte', valores: ['COLAR'] }, obrigatorio_se: { campo: 'fonte', valores: ['COLAR'] } },
+      { id: 'delimitador', rotulo: 'Separador das colunas', tipo: 'lista', opcoes: m.delimitadores, obrigatorio: true, default: ';' },
+      { id: 'codificacao', rotulo: 'Codificação do arquivo', tipo: 'lista', opcoes: m.codificacoes, obrigatorio: true, default: 'UTF-8', visivel_se: { campo: 'fonte', valores: ['ARQUIVO'] } },
+      { id: 'formato_data', rotulo: 'Formato das datas', tipo: 'lista', opcoes: m.formatos_data, obrigatorio: true, default: 'dd/MM/yyyy' },
+      { id: 'decimal', rotulo: 'Separador decimal', tipo: 'lista', opcoes: [',', '.'], obrigatorio: true, default: ',' },
+    ];
+    var rot = Object.assign({}, TIPOS, { ARQUIVO: 'Arquivo CSV', COLAR: 'Colar da planilha', ';': 'Ponto e vírgula (;)', ',': 'Vírgula (,)', TAB: 'Tabulação (colado do Excel)', '|': 'Barra vertical (|)', '.': 'Ponto (.)' });
+    var valores = {};
+    var arq = h('input', { type: 'file', id: 'imp-arquivo', accept: '.csv,.txt,text/csv,text/plain' });
+    var campoArq = h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo', for: 'imp-arquivo', text: 'Arquivo CSV (no Excel: Salvar como › CSV)' }), arq, h('div', { class: 'campo-erro', hidden: true }));
+    var bloco = Formulario.bloco(defs, valores, { idBase: 'imp', aoMudar: function (id) {
+      if (id === 'tipo') { trocarTipo(valores.tipo); return; }
+      if (id !== 'fonte') return;
+      campoArq.hidden = valores.fonte !== 'ARQUIVO';
+      var sd = bloco.campo('delimitador').el.querySelector('select');
+      valores.delimitador = valores.fonte === 'COLAR' ? 'TAB' : ';';
+      if (sd) sd.value = valores.delimitador;
+    } });
+    rotularOpcoes(bloco.el, rot);
+    var status = h('div', { role: 'status', 'aria-live': 'polite' });
+    var lerB = UI.botao('Ler o arquivo', { tipo: 'primario' });
+    var env = Cadastro.envio({ rota: 'importacao.criar', botao: lerB, rotuloBotao: 'Ler o arquivo', status: status, bloco: bloco, aoSucesso: function (r) {
+      sessao[r.data.import_id] = { previa: r.data };
+      Roteador.ir('importar/' + r.data.import_id + '/mapeamento');
+    } });
+    lerB.addEventListener('click', async function () {
+      Util.limpar(status);
+      var c = bloco.converter();
+      var semArq = c.valores.fonte === 'ARQUIVO' && !(arq.files && arq.files[0]);
+      var errArq = campoArq.querySelector('.campo-erro');
+      errArq.hidden = !semArq;
+      Util.limpar(errArq);
+      if (semArq) errArq.appendChild(h('span', { text: 'Escolha o arquivo.' }));
+      if (c.erros.length || semArq) { if (semArq) arq.focus(); else bloco.focarPrimeiroErro(); return; }
+      var dados = { tipo: c.valores.tipo, formato: { delimitador: c.valores.delimitador, codificacao: c.valores.codificacao || 'UTF-8', formato_data: c.valores.formato_data, decimal: c.valores.decimal } };
+      if (c.valores.fonte === 'COLAR') { dados.texto = valores.texto; dados.arquivo_nome = 'colado-' + Fmt.hoje() + '.txt'; }
+      else {
+        var f = arq.files[0];
+        try { dados.conteudo_base64 = await lerBase64(f); } catch (e) { status.appendChild(UI.estadoErro({ code: 'VALIDATION', message: e.message })); return; }
+        dados.arquivo_nome = f.name;
+      }
+      env.enviar(dados);
+    });
+    var atual = m;
+    var baixarModelo = UI.botao('Baixar o modelo da planilha', { aoClicar: function () {
+      Exportar.baixar('modelo-importacao-' + (atual.tipo === 'ANIMAIS' ? 'animais' : atual.tipo.toLowerCase()) + '.csv', Exportar.csv(atual.cabecalho_modelo.map(function (c) { return { rotulo: c, valor: function () { return ''; } }; }), []));
+      UI.aviso(atual.tipo === 'ANIMAIS' ? 'Modelo baixado: preencha uma linha por animal, a partir da segunda linha.' : 'Modelo baixado: uma linha por animal (no parto, por cria' + (atual.tipo === 'REPRODUCAO' ? '; na exposição, também uma por touro do lote' : '') + '). ' + atual.agrupamento.ajuda, { tipo: 'ok' });
+    } });
+    var listaAjuda = h('ul', { class: 'lista-simples' });
+    var ajuda = h('details', { class: 'detalhe' }, h('summary', { text: 'O que cada coluna significa' }), listaAjuda);
+    function preencherAjuda(md) {
+      Util.limpar(listaAjuda);
+      md.campos.forEach(function (c) { listaAjuda.appendChild(h('li', { text: c.rotulo + (c.obrigatorio ? ' (obrigatória ou escolhida para todos)' : '') + (c.so_femea ? ' — só fêmeas' : c.so_macho ? ' — só machos' : '') + (c.escopo === 'EVENTO' ? ' — do lançamento (basta numa linha dele)' : '') })); });
+      if (md.agrupamento) listaAjuda.appendChild(h('li', { text: md.agrupamento.ajuda }));
+    }
+    function trocarTipo(tipo) {
+      var t = document.querySelector('[data-titulo-importacao]');
+      if (t) t.textContent = tituloTipo(tipo);
+      obterModelo(tipo).then(function (md) { atual = md; preencherAjuda(md); }, function (e) { UI.aviso('Não foi possível buscar o modelo: ' + e.message, { tipo: 'erro' }); });
+    }
+    preencherAjuda(m);
+    el.appendChild(UI.secao('Tipo e arquivo', h('div', { class: 'formulario' }, h('div', { class: 'acoes' }, baixarModelo), ajuda, bloco.el, campoArq, h('div', { class: 'acoes' }, lerB), status), { dado: 'arquivo' }));
+    el.appendChild(UI.nota('Até ' + Fmt.numero(m.max_linhas) + ' linhas por arquivo. O original fica guardado junto da importação.', 'info'));
+  }
+  function rotularOpcoes(raiz, rot) {
+    Array.prototype.forEach.call(raiz.querySelectorAll('option, label.opcao'), function (o) {
+      var v = o.tagName === 'OPTION' ? o.value : (o.querySelector('input') || {}).value;
+      if (rot[v] === undefined) return;
+      if (o.tagName === 'OPTION') o.textContent = rot[v]; else o.querySelector('span').textContent = rot[v];
+    });
+  }
+
+  // ------------------------------------------------------------------ 2 mapeamento ----
+  function telaMapeamento(el, id, estado, previa, m) {
+    var imp = estado.importacao;
+    var gravado = imp.mapeamento || previa.mapeamento || null;
+    var colunas = Util.clonar((gravado && gravado.colunas) || previa.sugestao || {});
+    var conf = Util.clonar((gravado && gravado.confiancas) || {});
+    var pad = Util.clonar((gravado && gravado.padroes) || {});
+    el.appendChild(UI.secao('Arquivo lido', h('div', null, UI.pares([['Arquivo', imp.arquivo_nome], ['Linhas', Fmt.numero(previa.total_linhas)], ['Colunas', String(previa.cabecalho.length)]]),
+      h('details', { class: 'detalhe', open: true }, h('summary', { text: 'Primeiras linhas, como estão no arquivo' }), h('pre', { class: 'pre-bruto', text: [previa.cabecalho.join(' | ')].concat((previa.amostra || []).map(function (l) { return 'Linha ' + l.linha_num + ': ' + textoOriginal(l.valores); })).join('\n') }))), { dado: 'previa' }));
+    var exemplo = function (c) { var l = (previa.amostra || []).filter(function (x) { return x.valores && !Util.vazio(x.valores[c]); })[0]; return l ? 'ex.: ' + l.valores[c] : 'vazia nas primeiras linhas'; };
+    var opcoesCampo = [['', 'Não importar']].concat(m.campos.map(function (c) { return [c.campo, c.rotulo]; }));
+    var grade = h('div', { class: 'mapeamento', dataset: { mapeamento: '1' } });
+    previa.cabecalho.forEach(function (c, i) {
+      var idc = 'map-' + i;
+      var sel = h('select', { id: idc, dataset: { coluna: c } }, opcoesCampo.map(function (o) { return h('option', { value: o[0], text: o[1], selected: (colunas[c] || '') === o[0] }); }));
+      sel.addEventListener('change', function () { if (sel.value) colunas[c] = sel.value; else delete colunas[c]; });
+      grade.appendChild(h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo', for: idc, text: 'Coluna "' + c + '"' }), sel, h('div', { class: 'campo-ajuda', text: exemplo(c) })));
+    });
+    var selectDe = function (id, rotulo, ops, atual, aoMudar) {
+      var s = h('select', { id: id }, [h('option', { value: '', text: '—' })].concat(ops.map(function (o) { return h('option', { value: o[0], text: o[1], selected: String(atual) === String(o[0]) }); })));
+      s.addEventListener('change', function () { aoMudar(s.value); });
+      return h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo', for: id, text: rotulo }), s);
+    };
+    var gConf = h('div', { class: 'grade-campos' }, Object.keys(m.confiancas).map(function (k) {
+      return selectDe('conf-' + k, rotuloCampo(k) + ': a informação do arquivo é', m.confiancas[k].map(function (v) { return [v, Fmt.rotulo('CONFIANCA', v)]; }), conf[k] || '', function (v) { if (v) conf[k] = v; else delete conf[k]; });
+    }));
+    // Opções do valor padrão pelo tipo que o modelo declara (sim/não, origem, pasto, método, opção fixa, lista de LISTAS).
+    var opcoesPadrao = function (k) {
+      var t = m.padroes[k];
+      var campo = (m.campos || []).filter(function (c) { return c.campo === k; })[0] || {};
+      if (t === 'bool') return [['true', 'Sim'], ['false', 'Não']];
+      if (t === 'origem') return ['NASCIDO', 'COMPRADO', 'DESCONHECIDA'].map(function (v) { return [v, Fmt.rotulo('ORIGEM', v)]; });
+      if (t === 'pasto' || t === 'pasto_id') return Store.pastos().map(function (p) { return [p.pasture_id, p.nome]; });
+      if (t === 'metodo') return ['BALANCA', 'FITA', 'ESTIMATIVA_VISUAL'].map(function (v) { return [v, Fmt.rotulo('METODO_PESAGEM', v)]; });
+      if (t === 'lista' && campo.lista) return Store.lista(campo.lista).map(function (l) { return [l.codigo, l.rotulo || l.codigo]; });
+      return (campo.opcoes || []).map(function (v) { return [v, rotuloOpcao(k, v)]; });
+    };
+    var gPad = h('div', { class: 'grade-campos' }, Object.keys(m.padroes).map(function (k) {
+      return selectDe('pad-' + k, (PADROES[k] || rotuloCampo(k)) + ' para todos (quando o arquivo não traz)', opcoesPadrao(k), pad[k] === undefined ? '' : pad[k], function (v) { if (v === '') delete pad[k]; else pad[k] = v === 'true' ? true : v === 'false' ? false : v; });
+    }));
+    var deEventos = eventos(m.tipo);
+    var obrigatorias = deEventos ? 'Obrigatórias: ' + m.obrigatorios.map(function (o) { return o.map(rotuloCampo).join(' ou '); }).join(', ') + '. ' + m.agrupamento.ajuda + ' Datas antes do marco zero entram como histórico, sem mexer no rebanho' + (m.tipo === 'SANIDADE' ? ' nem no estoque de insumos' : '') + '.' + (MANEJO[m.tipo] ? ' O animal é achado pelo brinco que ele usava na data de cada linha (ou pelo código A-000…).' : '') : 'Sexo e pasto são obrigatórios (o pasto pode ser escolhido para todos). Colunas reconhecidas pelo nome já vêm escolhidas.';
+    var status = h('div', { role: 'status', 'aria-live': 'polite' });
+    var validarB = UI.botao('Validar o arquivo', { tipo: 'primario', aoClicar: validar });
+    el.appendChild(UI.secao('Para onde vai cada coluna', h('div', { class: 'formulario' }, h('p', { class: 'suave', text: obrigatorias }), grade), { dado: 'colunas' }));
+    if (Object.keys(m.confiancas).length) el.appendChild(UI.secao('Confiança da informação', h('div', null, h('p', { class: 'suave', text: 'Obrigatória quando o arquivo traz ' + Object.keys(m.confiancas).map(function (k) { return rotuloCampo(k).toLowerCase(); }).join(', ') + ' sem a coluna que diz se é confirmado ou estimado.' }), gConf), { dado: 'confiancas' }));
+    if (Object.keys(m.padroes).length) el.appendChild(UI.secao(deEventos ? 'Valores para todas as linhas' : 'Valores para todos os animais', gPad, { dado: 'padroes' }));
+    el.appendChild(h('div', { class: 'acao-final' }, validarB, status));
+    async function validar() {
+      Util.limpar(status);
+      var mapa = { colunas: colunas, confiancas: conf, padroes: pad };
+      var destravar = UI.travar(validarB, 'Validando…');
+      var execucao = Util.uuid();
+      try {
+        for (var b = 1; b < 100000; b++) {
+          var r = await Cliente.comando('importacao.validarBloco', { import_id: id, bloco: b, mapeamento: mapa }, { chave: 'val:' + execucao + ':' + b });
+          var e = r.data;
+          Util.limpar(status);
+          status.appendChild(progresso(e.validacao.conferidas, e.importacao.total_linhas, Fmt.numero(e.validacao.conferidas) + ' de ' + Fmt.numero(e.importacao.total_linhas) + ' linhas conferidas'));
+          if (e.importacao.status === 'VALIDADO') { destravar(); if (sessao[id]) delete sessao[id].ignorar; Roteador.ir('importar/' + id + '/validacao'); return; }
+        }
+      } catch (e2) {
+        destravar();
+        Util.limpar(status);
+        var lista = (e2.details || []).map(function (d) { return h('li', { text: d.mensagem }); });
+        var caixa = UI.estadoErro(e2, e2.code === 'CONFLICT' ? { acao: { texto: 'Validar de novo', aoClicar: validar } } : null);
+        if (lista.length) caixa.insertBefore(h('ul', null, lista), caixa.querySelector('details'));
+        status.appendChild(caixa);
+        var alvo = status.querySelector('[role="alert"]');
+        if (alvo) { alvo.setAttribute('tabindex', '-1'); alvo.focus(); }
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------ 3 validação ----
+  /** Valor lido de uma linha de evento, em palavras, pelo tipo do campo no modelo (dinheiro em centavos). */
+  function valorLido(c, v) {
+    var t = c.tipo;
+    if (v === true || v === false) return v ? 'sim' : 'não';
+    if (t === 'data') return Fmt.data(v);
+    if (t === 'dinheiro') return Fmt.dinheiro(v);
+    if (t === 'decimal') return Fmt.numero(v, 2).replace(/,?0+$/, '');
+    if (t === 'parceiro') return (Store.parceiro(v) || { nome: v }).nome;
+    if (t === 'pasto_evento' || t === 'pasto') return (Store.pasto(v) || { nome: v }).nome;
+    if (t === 'lista' || t === 'raca') return Store.rotuloLista(c.lista || 'RACA', v);
+    if (t === 'confianca' || t === 'confianca_vinculo') return Fmt.rotulo('CONFIANCA', v);
+    if (t === 'metodo') return Fmt.rotulo('METODO_PESAGEM', v);
+    // Cadastros do manejo, pelo nome (o servidor achou pelo nome da planilha).
+    if (t === 'produto') return (Store.produto(v) || { nome: v }).nome;
+    if (t === 'protocolo') return (Store.protocolo(v) || { nome: v }).nome;
+    if (t === 'estacao') return (Store.estacao(v) || { nome: v }).nome;
+    return t === 'texto' || t === 'inteiro' ? String(v) : rotuloOpcao(c.campo, v);
+  }
+  function interpretado(i) {
+    var x = i.interpretado;
+    if (!x) return '—';
+    if (modelo && eventos(modelo.tipo)) {
+      var t = modelo.campos.filter(function (c) { return !Util.vazio(x[c.campo]); }).map(function (c) { return c.rotulo + ': ' + valorLido(c, x[c.campo]); }).join(' · ');
+      return (t || '—') + (i.lancamento && i.lancamento.length > 1 ? ' (lançamento das linhas ' + i.lancamento.join(', ') + ')' : '');
+    }
+    var p = x.pasto_destino_id ? Store.pasto(x.pasto_destino_id) : null;
+    return [x.brinco ? 'brinco ' + x.brinco : 'sem brinco', x.sexo ? Fmt.rotulo('SEXO', x.sexo) : null, x.data_nascimento ? 'nasc. ' + Fmt.data(x.data_nascimento) : null, p ? p.nome : null].filter(Boolean).join(' · ');
+  }
+  async function todasAsLinhas(id, status) {
+    var out = [];
+    for (var pg = 1; pg < 1000; pg++) {
+      var r = (await Cliente.consulta('importacao.linhas', { import_id: id, status: status, pagina: pg, por_pagina: 500 })).data;
+      out = out.concat(r.itens);
+      if (pg * r.por_pagina >= r.total) break;
+    }
+    return out;
+  }
+  /** Linhas válidas que o dono deixou de fora (memória da tela até importar; nova validação limpa). */
+  function deixadas(id) { var x = sessao[id] = sessao[id] || {}; x.ignorar = x.ignorar || {}; return x.ignorar; }
+  function telaValidacao(el, id, estado) {
+    var c = estado.contadores;
+    var reprov = c.erro + c.duplicadas;
+    var ign = deixadas(id);
+    var podeTirar = estado.importacao.status === 'VALIDADO';
+    var resumoFora = h('div', { dataset: { deixadas: '0' } });
+    function atualizarFora() {
+      var nums = Object.keys(ign).map(Number).sort(function (a, b) { return a - b; });
+      resumoFora.dataset.deixadas = String(nums.length);
+      Util.limpar(resumoFora);
+      if (!nums.length) return;
+      resumoFora.appendChild(UI.nota('Deixadas de fora por você: ' + nums.length + (nums.length === 1 ? ' linha (' : ' linhas (') + nums.join(', ') + '). Elas não entram e ficam registradas como ignoradas.', 'info',
+        UI.botao('Trazer todas de volta', { tipo: 'texto', aoClicar: function () { Object.keys(ign).forEach(function (k) { delete ign[k]; }); atualizarFora(); carregar(); } })));
+    }
+    el.appendChild(UI.secao('Resultado da validação', h('div', null, UI.pares([['Linhas no arquivo', Fmt.numero(c.total)], ['Válidas', Fmt.numero(c.validas)], ['Com erro', Fmt.numero(c.erro)], ['Duplicadas', Fmt.numero(c.duplicadas)]]),
+      reprov ? UI.nota(reprov + (reprov === 1 ? ' linha não pode entrar' : ' linhas não podem entrar') + ' como está. Corrija o arquivo e importe de novo, ou siga e importe só as válidas.', 'aviso') : UI.nota('Todas as linhas estão prontas para entrar.', 'ok'),
+      podeTirar && c.validas ? h('p', { class: 'suave', text: 'Para não importar uma linha válida, marque "Deixar de fora" nela' + (eventos(estado.importacao.tipo) ? ' (as linhas do mesmo lançamento saem juntas).' : '.') }) : null, resumoFora), { dado: 'resultado' }));
+    /** Caixa "Deixar de fora" da linha válida; marca e desmarca o lançamento inteiro (as linhas que o servidor agrupou). */
+    function caixaFora(l) {
+      if (!podeTirar || l.status !== 'VALIDA') return '';
+      var grupo = l.lancamento && l.lancamento.length ? l.lancamento : [l.linha_num];
+      var cx = h('input', { type: 'checkbox', id: 'fora-' + l.linha_num, checked: !!ign[l.linha_num], dataset: { fora: grupo.join(',') } });
+      cx.addEventListener('change', function () {
+        grupo.forEach(function (n) { if (cx.checked) ign[n] = true; else delete ign[n]; });
+        Array.prototype.forEach.call(corpo.querySelectorAll('input[data-fora]'), function (o) { o.checked = !!ign[o.id.slice(5)]; });
+        atualizarFora();
+      });
+      return h('label', { class: 'marca', for: cx.id }, cx, h('span', { text: grupo.length > 1 ? 'Deixar de fora (as ' + grupo.length + ' linhas do lançamento)' : 'Deixar de fora' }));
+    }
+    var filtro = '';
+    var barra = h('div', { class: 'acoes', role: 'group', 'aria-label': 'Mostrar' });
+    var corpo = h('div');
+    var pagina = 1;
+    [['', 'Todas'], ['VALIDA', 'Válidas'], ['ERRO', 'Com erro'], ['DUPLICADA', 'Duplicadas']].forEach(function (f) {
+      var b = UI.botao(f[1], { aoClicar: function () { filtro = f[0]; pagina = 1; Array.prototype.forEach.call(barra.children, function (x) { x.setAttribute('aria-pressed', x === b ? 'true' : 'false'); }); carregar(); } });
+      b.setAttribute('aria-pressed', f[0] === '' ? 'true' : 'false');
+      b.setAttribute('data-filtro', f[0] || 'TODAS');
+      barra.appendChild(b);
+    });
+    var csvB = UI.botao('Baixar CSV dos erros', { desabilitado: !reprov, aoClicar: async function () {
+      var destravar = UI.travar(csvB, 'Preparando…');
+      try {
+        var linhas = (await todasAsLinhas(id, 'ERRO')).concat(await todasAsLinhas(id, 'DUPLICADA')).sort(function (a, b) { return a.linha_num - b.linha_num; });
+        var cab = [];
+        linhas.forEach(function (l) { Object.keys(l.dados_originais || {}).forEach(function (k) { if (cab.indexOf(k) < 0) cab.push(k); }); });
+        var cols = [{ rotulo: 'Linha', valor: function (l) { return l.linha_num; } }, { rotulo: 'Situação', valor: function (l) { return Fmt.rotulo('STATUS_LINHA', l.status); } }, { rotulo: 'Motivo', valor: function (l) { return (l.erros || []).map(function (e) { return e.mensagem; }).join(' / '); } }]
+          .concat(cab.map(function (k) { return { rotulo: k, valor: function (l) { return (l.dados_originais || {})[k]; } }; }));
+        Exportar.baixar(Exportar.nome('erros-importacao'), Exportar.csv(cols, linhas, { preambulo: ['Erros da importação de ' + estado.importacao.arquivo_nome, 'Dados de ' + Fmt.instante(Fmt.agoraMs())] }));
+        UI.aviso(linhas.length + ' linhas no arquivo de erros.', { tipo: 'ok' });
+      } catch (e) { UI.aviso('Não foi possível montar o arquivo: ' + e.message, { tipo: 'erro' }); }
+      destravar();
+    } });
+    el.appendChild(UI.secao('Linhas', h('div', null, barra, h('div', { class: 'acoes' }, csvB), corpo), { dado: 'linhas' }));
+    el.appendChild(h('div', { class: 'acao-final' },
+      h('a', { class: 'botao botao-secundario', href: Roteador.href('importar/' + id + '/mapeamento'), dataset: { rota: 'importar/' + id + '/mapeamento' } }, 'Voltar às colunas'),
+      c.validas ? h('a', { class: 'botao botao-primario', href: Roteador.href('importar/' + id + '/confirmacao'), dataset: { rota: 'importar/' + id + '/confirmacao' } }, 'Continuar para a confirmação') : UI.nota('Nenhuma linha válida: corrija o arquivo e comece uma nova importação.', 'erro')));
+    function carregar() {
+      Util.limpar(corpo);
+      corpo.appendChild(UI.carregando('Buscando as linhas…'));
+      var q = { import_id: id, pagina: pagina, por_pagina: 50 };
+      if (filtro) q.status = filtro;
+      Cliente.consulta('importacao.linhas', q).then(function (r) {
+        var d = r.data;
+        Util.limpar(corpo);
+        corpo.appendChild(UI.tabela({ id: 'imp-linhas', rotulo: 'Linhas do arquivo', linhas: d.itens, chave: function (l) { return String(l.linha_num); }, porPagina: d.por_pagina, semPaginacao: true, vazio: { texto: 'Nenhuma linha com esse filtro.' },
+          colunas: [
+            { id: 'linha_num', rotulo: 'Linha', num: true }, { id: 'status', rotulo: 'Situação', valor: function (l) { return Fmt.rotulo('STATUS_LINHA', l.status); } },
+            { id: 'motivo', rotulo: 'Motivo', valor: function (l) { return (l.erros || []).map(function (e) { return e.mensagem; }).join(' / ') || '—'; } },
+            { id: 'original', rotulo: 'Como está no arquivo', valor: function (l) { return textoOriginal(l.dados_originais); } },
+            { id: 'interpretado', rotulo: 'Como o sistema entendeu', valor: interpretado },
+          ].concat(podeTirar && c.validas ? [{ id: 'fora', rotulo: 'Escolha', ordenavel: false, formatar: caixaFora }] : []) }).el);
+        var paginas = Math.max(1, Math.ceil(d.total / d.por_pagina));
+        if (paginas > 1) corpo.appendChild(h('div', { class: 'paginacao' }, h('span', { class: 'suave', text: 'Página ' + d.pagina + ' de ' + paginas + ' · ' + d.total + ' linhas' }), h('div', { class: 'acoes', style: 'margin-top:0' },
+          UI.botao('Anterior', { desabilitado: d.pagina <= 1, aoClicar: function () { pagina -= 1; carregar(); } }), UI.botao('Próxima', { desabilitado: d.pagina >= paginas, aoClicar: function () { pagina += 1; carregar(); } }))));
+      }, function (e) { Util.limpar(corpo); erro(corpo, e, { texto: 'Tentar de novo', aoClicar: carregar }); });
+    }
+    atualizarFora();
+    carregar();
+  }
+
+  // ------------------------------------------------------------------ 4 confirmação ----
+  /**
+   * O que a confirmação envia (RN-089), pelos números da validação e as linhas que o dono deixou de fora:
+   * {importar, fora, reprovadas, ignorar_linhas (crescente), modo (TOTAL só sem nada de fora), aprovacao {importar, ignorar}}.
+   */
+  function planoConfirmacao(c, ignorar) {
+    var ign = (ignorar || []).map(Number).filter(function (n, i, l) { return l.indexOf(n) === i; }).sort(function (a, b) { return a - b; });
+    var reprov = c.erro + c.duplicadas;
+    var importar = c.validas - ign.length;
+    var fora = reprov + ign.length;
+    return { importar: importar, fora: fora, reprovadas: reprov, ignorar_linhas: ign, modo: fora ? 'PARCIAL_APROVADO' : 'TOTAL', aprovacao: fora ? { importar: importar, ignorar: fora } : null };
+  }
+  function telaConfirmacao(el, id, estado) {
+    var c = estado.contadores;
+    var pl = planoConfirmacao(c, Object.keys(deixadas(id)));
+    var nIgn = pl.ignorar_linhas.length;
+    var d0 = Store.param('data_marco_zero');
+    var deEventos = eventos(estado.importacao.tipo);
+    el.appendChild(UI.secao('Confira antes de importar', UI.pares([
+      ['Arquivo', estado.importacao.arquivo_nome], [deEventos ? 'Linhas que vão entrar' : 'Animais que vão entrar', Fmt.numero(pl.importar)],
+      ['Linhas que ficam de fora', Fmt.numero(pl.fora) + (nIgn ? ' (' + pl.reprovadas + ' com problema; ' + nIgn + ' deixada' + (nIgn === 1 ? '' : 's') + ' de fora por você: linha' + (nIgn === 1 ? ' ' : 's ') + pl.ignorar_linhas.join(', ') + ')' : '')],
+      ['Data do rebanho inicial (marco zero)', d0 ? Fmt.data(d0) : 'não definida — defina em Configurações antes de importar'],
+    ]), { dado: 'totais' }));
+    var props = Store.propriedades();
+    var selP = h('select', { id: 'imp-prop' }, props.map(function (p) { return h('option', { value: p.property_id, text: p.nome, selected: p.property_id === Store.param('propriedade_padrao_id') }); }));
+    var cx = h('input', { type: 'checkbox', id: 'imp-parcial' });
+    var importarB = UI.botao('Importar ' + pl.importar + (deEventos ? (pl.importar === 1 ? ' linha' : ' linhas') : pl.importar === 1 ? ' animal' : ' animais'), { tipo: 'primario', desabilitado: !!pl.fora || !d0 || pl.importar < 1, aoClicar: function () {
+      sessao[id] = Object.assign(sessao[id] || {}, { confirmacao: { modo: pl.modo, aprovacao: pl.aprovacao, ignorar_linhas: pl.ignorar_linhas, importar: pl.importar, property_id: selP.value || null } });
+      Roteador.ir('importar/' + id + '/execucao');
+    } });
+    var caixa = h('div', { class: 'formulario' }, props.length > 1 ? h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo', for: 'imp-prop', text: 'Propriedade' }), selP) : null);
+    if (pl.importar < 1) caixa.appendChild(UI.nota('Nada a importar: todas as linhas ficaram de fora. Volte à validação e traga alguma de volta.', 'erro'));
+    else if (pl.fora) {
+      cx.addEventListener('change', function () { importarB.disabled = !cx.checked || !d0; });
+      caixa.appendChild(UI.nota((pl.reprovadas ? 'Importação total recusada: há ' + pl.reprovadas + (pl.reprovadas === 1 ? ' linha com problema' : ' linhas com problema') + (nIgn ? ' e ' + nIgn + ' deixada' + (nIgn === 1 ? '' : 's') + ' de fora por você.' : '.') : 'Você deixou de fora ' + nIgn + (nIgn === 1 ? ' linha válida.' : ' linhas válidas.')) + ' Para seguir, aprove a importação parcial abaixo (fica registrado quem aprovou).', pl.reprovadas ? 'erro' : 'aviso'));
+      caixa.appendChild(h('label', { class: 'marca', for: 'imp-parcial' }, cx, h('span', { text: 'Importar só as ' + pl.importar + ' válidas e ignorar ' + pl.fora })));
+    }
+    caixa.appendChild(UI.nota('Antes de concluir, o sistema faz um backup automático. Enquanto a importação estiver em andamento, os outros registros ficam bloqueados.', 'info'));
+    caixa.appendChild(h('div', { class: 'acao-final' }, h('a', { class: 'botao botao-secundario', href: Roteador.href('importar/' + id + '/validacao'), dataset: { rota: 'importar/' + id + '/validacao' } }, 'Voltar à validação'), importarB));
+    el.appendChild(UI.secao('Confirmação', caixa, { dado: 'confirmacao' }));
+  }
+
+  // ------------------------------------------------------------------ 5 execução e relatório ----
+  function telaExecucao(el, id, estado) {
+    var corpo = h('div');
+    el.appendChild(corpo);
+    var conf = (sessao[id] || {}).confirmacao;
+    var st = estado.importacao.status;
+    if (st === 'VALIDADO' && conf) return executar(corpo, id, estado, conf, []);
+    if (st === 'VALIDADO') { Roteador.ir('importar/' + id + '/confirmacao', { substituir: true }); return null; }
+    if (st === 'IMPORTANDO') return incompleta(corpo, id, estado);
+    return relatorio(corpo, id);
+  }
+  function incompleta(corpo, id, estado) {
+    Util.limpar(corpo);
+    var b = estado.blocos;
+    corpo.appendChild(UI.nota('Importação incompleta: ' + b.importados + ' de ' + b.total + ' blocos gravados (' + Fmt.numero(estado.contadores.importadas) + ' animais). Nada vale até concluir.', 'erro'));
+    corpo.appendChild(h('div', { class: 'acoes' }, UI.botao('Retomar', { tipo: 'primario', aoClicar: function () { executar(corpo, id, estado, {}, []); } }), UI.botao('Desfazer', { tipo: 'perigo', aoClicar: function (ev) { desfazer(id, ev.currentTarget, { tipo: estado.importacao.tipo, status: estado.importacao.status }); } })));
+  }
+  async function executar(corpo, id, estado, conf, aceitos) {
+    Util.limpar(corpo);
+    var total = (estado.importacao.status === 'VALIDADO' ? conf.importar || estado.contadores.validas : estado.contadores.validas + estado.contadores.importadas) || 1;
+    var mostrar = function (feitas, texto) { Util.limpar(corpo); corpo.appendChild(progresso(feitas, total, texto || Fmt.numero(feitas) + ' de ' + Fmt.numero(total) + ' linhas importadas')); };
+    mostrar(estado.contadores.importadas || 0);
+    var e = estado;
+    try {
+      var b = e.importacao.status === 'VALIDADO' ? 1 : e.blocos.proximo;
+      while (b) {
+        var dados = { import_id: id, bloco: b };
+        if (b === 1) { dados.modo = conf.modo; dados.aprovacao = conf.aprovacao; if (conf.property_id) dados.property_id = conf.property_id; if ((conf.ignorar_linhas || []).length) dados.ignorar_linhas = conf.ignorar_linhas; }
+        // Lançamento no período financeiro fechado: a justificativa vai em todo bloco (cada bloco é um comando).
+        if (conf.justificativa_aviso) dados.justificativa_aviso = conf.justificativa_aviso;
+        e = (await Cliente.comando('importacao.importarBloco', dados, { chave: 'imp-ui:' + id + ':' + b, avisosAceitos: aceitos })).data;
+        mostrar(e.contadores.importadas);
+        b = e.blocos.proximo;
+      }
+      mostrar(e.contadores.importadas, 'Concluindo: backup e cálculo da situação de cada animal…');
+      await Cliente.comando('importacao.concluir', { import_id: id }, { chave: 'imp-ui:' + id + ':concluir' });
+      try { await Store.carregar({ forcar: true }); App.recasca(); } catch (e3) { UI.aviso('Importação concluída. A lista deste aparelho se atualiza na próxima abertura (' + e3.message + ').', { tipo: 'info' }); }
+      delete sessao[id];
+      relatorio(corpo, id);
+    } catch (e2) {
+      Util.limpar(corpo);
+      if (e2.code === 'NEEDS_CONFIRMATION') return avisos(corpo, id, estado, conf, e2.details || []);
+      corpo.appendChild(UI.estadoErro(e2, { detalhes: e2.details }));
+      try {
+        var atual = (await Cliente.consulta('importacao.obter', { import_id: id })).data;
+        if (atual.importacao.status === 'IMPORTANDO') corpo.appendChild(h('div', { class: 'acoes' }, UI.botao('Retomar', { tipo: 'primario', aoClicar: function () { executar(corpo, id, atual, conf, aceitos); } }), UI.botao('Desfazer', { tipo: 'perigo', aoClicar: function (ev) { desfazer(id, ev.currentTarget, { tipo: atual.importacao.tipo, status: atual.importacao.status }); } })));
+        else if (atual.importacao.status === 'VALIDADO') corpo.appendChild(h('div', { class: 'acoes' }, h('a', { class: 'botao botao-secundario', href: Roteador.href('importar/' + id + '/validacao'), dataset: { rota: 'importar/' + id + '/validacao' } }, 'Voltar à validação')));
+      } catch (e4) { corpo.appendChild(UI.nota('Não foi possível ler a situação da importação agora: ' + e4.message, 'aviso')); }
+    }
+    return null;
+  }
+  /**
+   * Avisos a confirmar (um "Vi e confirmo" por aviso). O período financeiro fechado (PERIODO_BLOQUEADO) pede também a
+   * justificativa, que segue no comando como `justificativa_aviso` (RN-082). Devolve {el, pronto(), aceitos(),
+   * justificativa()}; `aoMudar` é chamado a cada marca ou letra.
+   */
+  function caixaAvisos(lista, prefixo, aoMudar) {
+    var marcas = {};
+    var just = null;
+    var ul = h('ul', { class: 'lista-avisos' }, lista.map(function (a, i) {
+      var cx = h('input', { type: 'checkbox', id: prefixo + '-av-' + i });
+      cx.addEventListener('change', function () { marcas[i] = cx.checked; aoMudar(); });
+      return h('li', { dataset: { aviso: a.codigo } }, h('div', { class: 'campo-linha' }, UI.icone('aviso'), h('span', { text: a.mensagem })), h('label', { class: 'marca', for: prefixo + '-av-' + i }, cx, h('span', { text: 'Vi e confirmo' })));
+    }));
+    var el = h('div', null, ul);
+    if (lista.some(function (a) { return a.codigo === 'PERIODO_BLOQUEADO'; })) {
+      just = h('textarea', { id: prefixo + '-just-aviso' });
+      just.addEventListener('input', aoMudar);
+      el.appendChild(h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo campo-obrigatorio', for: prefixo + '-just-aviso', text: 'Justificativa (período financeiro fechado)' }), just));
+    }
+    return {
+      el: el,
+      pronto: function () { return lista.every(function (x, k) { return marcas[k]; }) && (!just || !!just.value.trim()); },
+      aceitos: function () { return lista.map(function (a) { return a.codigo; }).filter(function (c, i, l) { return l.indexOf(c) === i; }); },
+      justificativa: function () { return just ? just.value.trim() : null; },
+    };
+  }
+  function avisos(corpo, id, estado, conf, lista) {
+    var cx = caixaAvisos(lista, 'imp', function () { seguir.disabled = !cx.pronto(); });
+    var seguir = UI.botao('Confirmar mesmo assim', { tipo: 'primario', desabilitado: true, aoClicar: function () {
+      var c = Object.assign({}, conf);
+      if (cx.justificativa()) c.justificativa_aviso = cx.justificativa();
+      executar(corpo, id, estado, c, cx.aceitos());
+    } });
+    corpo.appendChild(h('div', { class: 'formulario' }, h('h2', { text: 'Confira os avisos antes de seguir' }), cx.el, seguir));
+  }
+  function relatorio(corpo, id) {
+    Util.limpar(corpo);
+    corpo.appendChild(UI.carregando('Montando o relatório final…'));
+    Cliente.consulta('importacao.relatorio', { import_id: id }).then(function (r) {
+      var d = r.data, c = d.contadores, imp = d.importacao;
+      Util.limpar(corpo);
+      var desfeita = imp.status === 'CANCELADO';
+      var deEventos = eventos(imp.tipo);
+      var frase = desfeita ? (deEventos ? 'Nenhum lançamento desta importação vale mais.' : 'Nenhum animal desta importação vale mais.')
+        : deEventos ? Fmt.numero(d.criados.eventos) + (d.criados.eventos === 1 ? ' lançamento entrou' : ' lançamentos entraram') + (d.criados.animais ? ', com ' + Fmt.numero(d.criados.animais) + (d.criados.animais === 1 ? ' animal novo.' : ' animais novos.') : '.')
+          : Fmt.numero(d.criados.animais) + (d.criados.animais === 1 ? ' animal entrou' : ' animais entraram') + ' no rebanho.';
+      corpo.appendChild(h('div', { class: 'estado ' + (desfeita ? 'estado-erro' : 'estado-ok'), dataset: { relatorio: imp.status } }, h('div', { class: 'estado-titulo' }, UI.icone(desfeita ? 'info' : 'ok'), h('h2', { style: 'margin:0', text: desfeita ? 'Importação desfeita' : 'Importação concluída' })),
+        h('p', { class: 'resultado-numero', text: frase })));
+      corpo.appendChild(UI.secao('Relatório final', UI.pares([
+        ['Arquivo', imp.arquivo_nome], ['Linhas no arquivo', Fmt.numero(c.total)], ['Importadas', Fmt.numero(c.importadas)], ['Com erro', Fmt.numero(c.erro)], ['Duplicadas', Fmt.numero(c.duplicadas)], ['Deixadas de fora', Fmt.numero(c.ignoradas)],
+        ['Modo', imp.modo === 'PARCIAL_APROVADO' ? 'parcial, aprovada' + (d.aprovacao ? ' por ' + d.aprovacao.por + ' em ' + Fmt.instante(d.aprovacao.em) : '') : imp.modo === 'TOTAL' ? 'total' : '—'],
+      ].concat(MANEJO[imp.tipo] ? [] : [['Animais ativos hoje', Fmt.numero(d.criados.ativos)], ['Sem brinco', Fmt.numero(d.pendencias.sem_brinco)], ['Sem nascimento', Fmt.numero(d.pendencias.sem_nascimento)]])), { dado: 'relatorio' }));
+      var rec = d.reconciliacao;
+      if (rec && (rec.animais.length || rec.pastos.length || rec.sem_animal.length)) corpo.appendChild(UI.secao('Reconciliação com o marco zero', blocoReconciliacao(rec), { dado: 'reconciliacao' }));
+      if ((d.reprovadas || []).length) corpo.appendChild(UI.secao('Linhas que ficaram de fora', h('ul', { class: 'lista-simples' }, d.reprovadas.map(function (l) { return h('li', { text: 'Linha ' + l.linha_num + ' (' + Fmt.rotulo('STATUS_LINHA', l.status).toLowerCase() + '): ' + (l.erros || []).map(function (e) { return e.mensagem; }).join(' / ') }); })), { dado: 'reprovadas' }));
+      var acoes = h('div', { class: 'acoes' });
+      // O manejo importado se vê no módulo dele (as pesagens, as aplicações, as fêmeas, os lançamentos).
+      var verOnde = MANEJO[imp.tipo] || 'rebanho';
+      if (!desfeita) acoes.appendChild(h('a', { class: 'botao botao-primario', href: Roteador.href(verOnde), dataset: { rota: verOnde } }, MANEJO[imp.tipo] ? 'Ver ' + { PESAGENS: 'as pesagens', SANIDADE: 'as aplicações', REPRODUCAO: 'as fêmeas', OCORRENCIAS: 'os lançamentos' }[imp.tipo] : 'Ver o rebanho'));
+      if (!desfeita) acoes.appendChild(UI.botao('Desfazer importação', { tipo: 'perigo', aoClicar: function (ev) { desfazer(id, ev.currentTarget, { tipo: imp.tipo, status: imp.status, eventos: d.criados.eventos, animais: d.criados.animais }); } }));
+      acoes.appendChild(h('a', { class: 'botao botao-secundario', href: Roteador.href('importar'), dataset: { rota: 'importar' } }, 'Ver as importações'));
+      corpo.appendChild(acoes);
+    }, function (e) { Util.limpar(corpo); erro(corpo, e, { texto: 'Tentar de novo', aoClicar: function () { relatorio(corpo, id); } }); });
+  }
+  /**
+   * A consequência do desfazer em palavras (08, seção 4.6), pelo tipo e pela situação da importação: na de animais, os
+   * animais deixam de valer; na de eventos, os lançamentos (e os animais que eles cadastraram: compra, cria) deixam de
+   * valer, sem mexer nos animais que eles só tocaram; em curso, nada dela chegou a valer.
+   */
+  function consequenciaDesfazer(info) {
+    var x = info || {};
+    var registrado = ' (nada é apagado; fica registrado).';
+    if (x.status === 'IMPORTANDO' || x.status === 'VALIDADO' || x.status === 'RASCUNHO') return 'Nada desta importação chegou a valer: os blocos já importados ficam sem efeito' + registrado;
+    if (!eventos(x.tipo)) return 'Os animais desta importação deixam de valer' + registrado + ' Lançamentos feitos depois sobre eles impedem desfazer.';
+    var n = typeof x.eventos === 'number' ? x.eventos : null;
+    var a = typeof x.animais === 'number' ? x.animais : 0;
+    var lanc = n === null ? 'Os lançamentos desta importação deixam de valer' : n === 1 ? 'O lançamento desta importação deixa de valer' : 'Os ' + Fmt.numero(n) + ' lançamentos desta importação deixam de valer';
+    var anim = a ? '; ' + (a === 1 ? 'o animal que ela cadastrou é anulado' : 'os ' + Fmt.numero(a) + ' animais que ela cadastrou são anulados') : '';
+    return lanc + anim + registrado + ' Os animais que eles só movimentaram voltam a como estavam sem eles; lançamentos feitos depois que dependem deles impedem desfazer.';
+  }
+  function desfazer(id, origem, info) {
+    var just = Campos.criar({ id: 'justificativa', rotulo: 'Por que desfazer', tipo: 'texto', obrigatorio: true }, { idBase: 'desf' });
+    just.marcarObrigatorio(true);
+    var st = h('div', { role: 'status', 'aria-live': 'polite' });
+    // Os avisos que o servidor pediu (o período financeiro fechado, por exemplo), com o aceite de cada um.
+    var conf = null;
+    var f = UI.folha({ titulo: 'Desfazer a importação', origem: origem, conteudo: h('div', { class: 'formulario' }, UI.nota(consequenciaDesfazer(info), 'aviso'), just.el, st) });
+    var b = UI.botao('Desfazer a importação', { tipo: 'perigo', aoClicar: async function () {
+      if (Util.vazio(just.ler())) { just.erro('Diga por que desfazer.'); just.focar(); return; }
+      if (conf && !conf.pronto()) { UI.aviso('Marque "Vi e confirmo" em cada aviso' + (conf.justificativa() === '' ? ' e escreva a justificativa' : '') + '.', { tipo: 'erro' }); return; }
+      var dados = { import_id: id, justificativa: String(just.ler()).trim() };
+      if (conf && conf.justificativa()) dados.justificativa_aviso = conf.justificativa();
+      var aceitos = conf ? conf.aceitos() : [];
+      Util.limpar(st);
+      conf = null;
+      var destravar = UI.travar(b, 'Desfazendo…');
+      try {
+        await Cliente.comando('importacao.desfazer', dados, { chave: 'imp-ui:' + id + ':desfazer', avisosAceitos: aceitos });
+        f.fechar({ forcar: true });
+        UI.aviso('Importação desfeita.', { tipo: 'ok' });
+        try { await Store.carregar({ forcar: true }); App.recasca(); } catch (e2) { Util.registrarFalha('carga depois de desfazer', e2); }
+        Roteador.ir('importar/' + id + '/execucao', { forcar: true, substituir: true });
+      } catch (e) {
+        destravar();
+        if (e.code === 'NEEDS_CONFIRMATION') {
+          conf = caixaAvisos(e.details || [], 'desf', function () {});
+          st.appendChild(h('div', { dataset: { avisos: 'desfazer' } }, h('h3', { text: 'Confira antes de desfazer' }), conf.el));
+          return;
+        }
+        st.appendChild(UI.estadoErro(e, { detalhes: e.details }));
+      }
+    } });
+    f.definirAcoes([UI.botao('Cancelar', { aoClicar: function () { f.fechar(); } }), b]);
+  }
+
+  function montarAssistente(el, p) {
+    var id = p.id, etapa = p.etapa;
+    var vivo = true;
+    var caixa = h('div', null, UI.carregando('Abrindo a importação…'));
+    cabecalhoEtapas(el, id, id === 'novo' ? 'arquivo' : etapa || 'mapeamento');
+    el.appendChild(caixa);
+    (async function () {
+      try {
+        var m = await obterModelo();
+        if (!vivo) return;
+        if (id === 'novo') { Util.limpar(caixa); telaArquivo(caixa, m); return; }
+        var estado = (await Cliente.consulta('importacao.obter', { import_id: id })).data;
+        if (!vivo) return;
+        m = await obterModelo(estado.importacao.tipo);
+        if (!vivo) return;
+        var titulo = el.querySelector('[data-titulo-importacao]');
+        if (titulo) titulo.textContent = tituloTipo(estado.importacao.tipo);
+        var st = estado.importacao.status;
+        var certa = etapa || etapaDoStatus(st);
+        if ((certa === 'mapeamento' || certa === 'validacao' || certa === 'confirmacao') && !estado.pode.validar) certa = 'execucao';
+        if ((certa === 'validacao' || certa === 'confirmacao') && st !== 'VALIDADO') certa = 'mapeamento';
+        if (certa === 'execucao' && st === 'RASCUNHO') certa = 'mapeamento';
+        if (certa !== etapa) { Roteador.ir('importar/' + id + '/' + certa, { substituir: true }); return; }
+        Util.limpar(caixa);
+        if (certa === 'mapeamento') {
+          var previa = (sessao[id] && sessao[id].previa) || (await Cliente.consulta('importacao.previa', { import_id: id })).data;
+          if (!vivo) return;
+          sessao[id] = Object.assign(sessao[id] || {}, { previa: previa });
+          telaMapeamento(caixa, id, estado, previa, m);
+        } else if (certa === 'validacao') telaValidacao(caixa, id, estado);
+        else if (certa === 'confirmacao') telaConfirmacao(caixa, id, estado);
+        else telaExecucao(caixa, id, estado);
+      } catch (e) {
+        if (!vivo) return;
+        Util.limpar(caixa);
+        erro(caixa, e, { texto: 'Ver as importações', aoClicar: function () { Roteador.ir('importar'); } });
+      }
+    })();
+    return function () { vivo = false; };
+  }
+  Telas.registrar('importar', { titulo: 'Importação', modulo: 'IMPORTACAO', montar: montarLista });
+  Telas.registrar('importar/:id/:etapa?', { titulo: 'Importação', modulo: 'IMPORTACAO', telaCheia: false, montar: montarAssistente });
+  return { etapaDoStatus: etapaDoStatus, planoConfirmacao: planoConfirmacao, valorLido: valorLido, consequenciaDesfazer: consequenciaDesfazer };
+})();
+</script>

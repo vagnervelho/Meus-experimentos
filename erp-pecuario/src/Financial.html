@@ -1,0 +1,783 @@
+<script>
+'use strict';
+/*
+ * ERP Pecuário — Financeiro (Fase 4), carregado sob demanda (01, seção 6.2; CONTRATOS, seções 37 e 55). Etapa BASE: a lista
+ * dos lançamentos que já existem (os das compras, vendas, mortes, descartes, aberturas, sanidade e estoque, desde a Fase 2),
+ * com os filtros, e o detalhe de cada um: a conta e a natureza, a competência, as parcelas com a situação de hoje, o rateio
+ * entre os animais e o que ficou sem alocar, o lançamento que o criou e o que o anulou (08, seção 3, "Financeiro:
+ * lançamentos").
+ *
+ * Todo número vem pronto do servidor (P5; CONTRATOS, seção 51): os totais do filtro, as páginas, o valor em aberto e o
+ * vencido, a situação de cada parcela e os dias de atraso, o alocado e o não alocado. A tela só filtra, mostra e leva ao
+ * lançamento de origem.
+ */
+/**
+ * Baixa — as folhas da baixa (uma parcela ou várias, inteira ou em parte, com juros, multa e desconto), do desfazer e do
+ * "Dividir" (parcela.baixar, parcela.desfazerBaixa, parcela.desdobrar; CONTRATOS, seção 56). A conferência do valor pago, do
+ * depósito esperado e do que resta é do servidor (parcela.simular): a tela só mostra.
+ */
+var Baixa = (function () {
+  var h = Util.h;
+  /** A prévia do servidor (o mesmo tratador, sem gravar) num nó. */
+  async function previa(saida, acao, dados) {
+    Util.limpar(saida);
+    saida.appendChild(UI.carregando('Conferindo no servidor…'));
+    try {
+      var r = (await Cliente.consulta('parcela.simular', { acao: acao, dados: dados })).data.impactos;
+      Util.limpar(saida);
+      if (acao === 'baixar') {
+        saida.appendChild(UI.pares(r.itens.map(function (x) {
+          var t = Fmt.dinheiro(x.valor_pago) + (x.parcial ? ' (resta ' + Fmt.dinheiro(x.resta.valor) + ' para ' + Fmt.data(x.resta.data_vencimento) + ')' : '') + (x.encontro.length ? ' · depósito esperado ' + Fmt.dinheiro(x.deposito) : '');
+          return [x.lancamento + ' (' + x.parcela_num + ')', t];
+        }).concat([['Total', 'entradas ' + Fmt.dinheiro(r.entradas) + ' · saídas ' + Fmt.dinheiro(r.saidas)]]), 'resumo-revisao'));
+      } else if (acao === 'desdobrar') {
+        saida.appendChild(UI.pares(r.novas.map(function (x) { return [Fmt.data(x.data_vencimento), Fmt.dinheiro(x.valor)]; }), 'resumo-revisao'));
+      }
+    } catch (e) {
+      Util.limpar(saida);
+      saida.appendChild(UI.estadoErro(e, { detalhes: e.details || [] }));
+    }
+  }
+  /** Baixa de uma ou várias parcelas (a mesma data e a mesma forma). itens: [{parcela_id, lancamento, valor, data_vencimento, tipo}]. */
+  function baixar(itens, origem, aoFim) {
+    var um = itens.length === 1;
+    var defs = [
+      { id: 'data_pagamento', rotulo: 'Data do pagamento (ou do recebimento)', tipo: 'data', obrigatorio: true, default: 'HOJE' },
+      { id: 'forma_pagamento', rotulo: 'Forma (caixa, PIX, transferência…)', tipo: 'lista', lista: 'FORMA_PAGAMENTO' },
+    ];
+    // A baixa em parte só no título que o servidor diz que se divide (acoes.parcial, parcelas_livres); nos outros, a parcela inteira.
+    if (um && itens[0].parcial !== false) defs.push({ id: 'valor', rotulo: 'Valor baixado (vazio = a parcela inteira)', tipo: 'dinheiro', min: 0.01, ajuda: 'Menos que a parcela: a baixa é em parte, e o resto fica em aberto com o mesmo vencimento.' });
+    if (um) {
+      defs.push({ id: 'juros_multa', rotulo: 'Juros e multa', tipo: 'dinheiro', min: 0 });
+      defs.push({ id: 'desconto', rotulo: 'Desconto', tipo: 'dinheiro', min: 0 });
+    }
+    defs.push({ id: 'justificativa', rotulo: 'Justificativa (só no período financeiro fechado)', tipo: 'texto' });
+    var saida = h('div', { dataset: { previaBaixa: '1' } });
+    var montar = function (v) {
+      var d = { data_pagamento: v.data_pagamento, forma_pagamento: v.forma_pagamento, justificativa: v.justificativa };
+      if (um) { d.parcela_id = itens[0].parcela_id; d.valor = v.valor; d.juros_multa = v.juros_multa; d.desconto = v.desconto; }
+      else d.itens = itens.map(function (x) { return { parcela_id: x.parcela_id }; });
+      return d;
+    };
+    var extra = h('div', null, h('p', { class: 'dado', text: um ? itens[0].lancamento + ' · vence em ' + Fmt.data(itens[0].data_vencimento) + ' · ' + Fmt.dinheiro(itens[0].valor) : itens.length + ' parcelas marcadas' }), saida);
+    var f = Cadastro.folha({ titulo: um ? (itens[0].tipo === 'RECEITA' ? 'Receber a parcela' : 'Pagar a parcela') : 'Dar baixa em ' + itens.length + ' parcelas', rota: 'parcela.baixar', origem: origem, idBase: 'bx', defs: defs, extra: extra, verbo: 'Dar baixa',
+      montar: montar, sucesso: function (d) { return (d && d.parcelas ? d.parcelas.length : itens.length) > 1 ? 'Baixas gravadas.' : 'Baixa gravada.'; }, aoSalvar: function () { if (aoFim) aoFim(); } });
+    extra.appendChild(h('div', { class: 'acoes' }, UI.botao('Conferir o valor pago', { atributos: { 'data-conferir-baixa': '1' }, aoClicar: function () {
+      var c = f.bloco.converter();
+      if (c.erros.length) { f.bloco.focarPrimeiroErro(); return; }
+      previa(saida, 'baixar', montar(c.valores));
+    } })));
+    return f;
+  }
+  /** Desfazer a baixa de uma parcela (com a justificativa; no recebimento da venda, a dedução retida volta junto). */
+  function desfazer(item, origem, aoFim) {
+    return Cadastro.folha({ titulo: 'Desfazer a baixa', rota: 'parcela.desfazerBaixa', origem: origem, idBase: 'dbx', perigo: true, verbo: 'Desfazer a baixa',
+      defs: [{ id: 'justificativa', rotulo: 'Por que desfazer', tipo: 'texto', obrigatorio: true }],
+      extra: UI.nota(item.lancamento + ' · ' + Fmt.dinheiro(item.valor) + ': a parcela volta a ficar em aberto.', 'aviso'),
+      montar: function (v) { return { parcela_id: item.parcela_id, justificativa: v.justificativa }; },
+      sucesso: function () { return 'Baixa desfeita.'; }, aoSalvar: function () { if (aoFim) aoFim(); } });
+  }
+  /** Dividir ou remarcar uma parcela em aberto: em N parcelas iguais, com os vencimentos que o servidor calcula. */
+  function dividir(item, origem, aoFim) {
+    var saida = h('div', { dataset: { previaDivisao: '1' } });
+    var defs = [
+      { id: 'quantas', rotulo: 'Em quantas parcelas', tipo: 'inteiro', obrigatorio: true, min: 1, max: 120, default: 2 },
+      { id: 'primeiro', rotulo: 'Vencimento da primeira', tipo: 'data', obrigatorio: true },
+      { id: 'intervalo', rotulo: 'As outras vencem', tipo: 'lista', obrigatorio: true, opcoes: ['MES', 'D30', 'D15', 'D7'], rotulos_opcoes: ['Todo mês, no mesmo dia', 'A cada 30 dias', 'A cada 15 dias', 'Toda semana'], default: 'MES' },
+      { id: 'justificativa', rotulo: 'Por que dividir ou remarcar', tipo: 'texto', obrigatorio: true },
+    ];
+    var montar = function (v) { return { parcela_id: item.parcela_id, quantas: v.quantas, primeiro: v.primeiro, intervalo: v.intervalo, justificativa: v.justificativa }; };
+    var extra = h('div', null, UI.nota(item.lancamento + ' · ' + Fmt.dinheiro(item.valor) + ' com vencimento em ' + Fmt.data(item.data_vencimento) + ': as parcelas novas somam o mesmo (o servidor divide em partes iguais).', 'info'), saida);
+    var f = Cadastro.folha({ titulo: 'Dividir a parcela', rota: 'parcela.desdobrar', origem: origem, idBase: 'dvp', defs: defs, extra: extra, verbo: 'Dividir',
+      montar: montar, sucesso: function () { return 'Parcela dividida.'; }, aoSalvar: function () { if (aoFim) aoFim(); } });
+    extra.appendChild(h('div', { class: 'acoes' }, UI.botao('Ver as parcelas novas', { atributos: { 'data-conferir-divisao': '1' }, aoClicar: function () {
+      var c = f.bloco.converter();
+      if (c.erros.length) { f.bloco.focarPrimeiroErro(); return; }
+      previa(saida, 'desdobrar', montar(c.valores));
+    } })));
+    return f;
+  }
+  return { baixar: baixar, desfazer: desfazer, dividir: dividir };
+})();
+
+var TelaFinanceiro = (function () {
+  var h = Util.h;
+  /** A parcela na linguagem do pecuarista (o servidor manda a situação de hoje; 03b, seção 10.4). */
+  var SITUACAO_PARCELA = {
+    PAGA: 'Paga', RECEBIDA: 'Recebida', A_PAGAR: 'A pagar', A_RECEBER: 'A receber', VENCIDA: 'Vencida',
+    SUBSTITUIDA: 'Substituída (baixa em parte)', SEM_EFEITO: 'Sem efeito (lançamento cancelado)',
+  };
+  var SITUACOES = [['ATIVO', 'Os que valem'], ['CANCELADO', 'Os cancelados'], ['TODOS', 'Todos']];
+  var PAGAMENTOS = [['', 'Qualquer'], ['ABERTO', 'Em aberto'], ['PARCIAL', 'Pago em parte'], ['LIQUIDADO', 'Pago'], ['SEM_CAIXA', 'Sem pagamento (não é caixa)']];
+  var filtros = { de: '', ate: '', tipo: '', natureza: '', conta_id: '', partner_id: '', pasture_id: '', situacao: 'ATIVO', status_pagamento: '', busca: '', pagina: 1 };
+
+  function campo(id, rotulo, controle) {
+    return h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo', for: id, text: rotulo }), controle);
+  }
+  function link(rota, texto) { return h('a', { class: 'botao botao-texto', href: Roteador.href(rota), dataset: { rota: rota } }, texto); }
+  function selecao(id, opcoes, valor) {
+    return h('select', { id: id }, opcoes.map(function (o) { return h('option', { value: o[0], text: o[1], selected: o[0] === valor }); }));
+  }
+  function competencia(l) {
+    return l.competencia_inicio ? Fmt.data(l.competencia_inicio) + ' a ' + Fmt.data(l.competencia_fim) : Fmt.data(l.data_competencia);
+  }
+  function situacao(l) {
+    return l.situacao === 'CANCELADO' ? 'Cancelado' : Fmt.rotulo('STATUS_PAGAMENTO', l.status_pagamento);
+  }
+  function origem(l) {
+    return l.event_type ? l.rotulo_evento + ' de ' + Fmt.data(l.event_date) : '—';
+  }
+  function nomeLancamento(l) { return l.descricao || l.conta_nome || Fmt.rotulo('NATUREZA', l.natureza); }
+
+  // ------------------------------------------------------------------ lista ----
+  /** O cabeçalho do módulo: o título, "Novo lançamento" (o formulário do catálogo) e as abas das partes do Financeiro. */
+  function cabecalho(el, atual) {
+    var novo = App.podeRegistrar() && Store.tipoEvento('LANCAMENTO_FINANCEIRO') ? h('a', { class: 'botao botao-primario', href: Roteador.href('evento/novo/LANCAMENTO_FINANCEIRO'), dataset: { rota: 'evento/novo/LANCAMENTO_FINANCEIRO', novoLancamento: '1' } }, 'Novo lançamento') : null;
+    el.appendChild(h('div', { class: 'tela-cabecalho' }, h('h1', { text: 'Financeiro' }), novo));
+    el.appendChild(UI.abas('Partes do Financeiro', [
+      { rotulo: 'Lançamentos', rota: 'financeiro/lancamentos', atual: atual === 'lancamentos' },
+      { rotulo: 'A pagar e a receber', rota: 'financeiro/titulos', atual: atual === 'titulos' },
+      { rotulo: 'Fluxo de caixa', rota: 'financeiro/fluxo', atual: atual === 'fluxo' },
+      { rotulo: 'Resultado', rota: 'financeiro/resultado', atual: atual === 'resultado' },
+      { rotulo: 'Custos', rota: 'financeiro/custos', atual: atual === 'custos' },
+    ]));
+  }
+  function montarLista(el) {
+    var vivo = true;
+    cabecalho(el, 'lancamentos');
+    el.appendChild(UI.nota('Os lançamentos avulsos (combustível, salário, arrendamento, aporte) e os das compras, vendas, mortes, descartes, aberturas do rebanho, aplicações e entradas de estoque. Para mudar um deles, abra o lançamento de origem e corrija ou estorne.', 'info'));
+    var de = h('input', { type: 'date', id: 'fin-de', value: filtros.de });
+    var ate = h('input', { type: 'date', id: 'fin-ate', value: filtros.ate });
+    var tipo = selecao('fin-tipo', [['', 'Receitas e despesas'], ['RECEITA', 'Só receitas'], ['DESPESA', 'Só despesas']], filtros.tipo);
+    var natureza = selecao('fin-natureza', [['', 'Todas']].concat(Object.keys(Fmt.ROTULOS.NATUREZA).map(function (k) { return [k, Fmt.ROTULOS.NATUREZA[k]]; })), filtros.natureza);
+    var conta = selecao('fin-conta', [['', 'Todas']].concat(Store.contas().map(function (c) { return [c.conta_id, c.nome]; })), filtros.conta_id);
+    var parceiro = selecao('fin-parceiro', [['', 'Todos']].concat(Store.parceiros().map(function (p) { return [p.partner_id, p.nome]; })), filtros.partner_id);
+    var pasto = selecao('fin-pasto', [['', 'Todos']].concat(Store.pastos({ todos: true }).map(function (p) { return [p.pasture_id, p.nome]; })), filtros.pasture_id);
+    var sit = selecao('fin-situacao', SITUACOES, filtros.situacao);
+    var pag = selecao('fin-pagamento', PAGAMENTOS, filtros.status_pagamento);
+    var busca = h('input', { type: 'search', id: 'fin-busca', value: filtros.busca, autocomplete: 'off', placeholder: 'descrição ou documento' });
+    el.appendChild(h('form', { class: 'filtros', role: 'search', 'aria-label': 'Filtrar lançamentos', on: { submit: function (ev) { ev.preventDefault(); filtros.pagina = 1; carregar(); } } },
+      campo('fin-de', 'Competência de', de), campo('fin-ate', 'até', ate), campo('fin-tipo', 'Tipo', tipo), campo('fin-natureza', 'Natureza', natureza),
+      campo('fin-conta', 'Conta', conta), campo('fin-parceiro', 'Parceiro', parceiro), campo('fin-pasto', 'Pasto', pasto),
+      campo('fin-situacao', 'Situação', sit), campo('fin-pagamento', 'Pagamento', pag), campo('fin-busca', 'Buscar', busca),
+      UI.botao('Filtrar', { tipo: 'primario', atributos: { type: 'submit' } })));
+    var resumo = h('p', { class: 'dado', role: 'status', dataset: { resumoFinanceiro: '1' } });
+    var corpo = h('div');
+    el.appendChild(resumo);
+    el.appendChild(corpo);
+    async function carregar() {
+      filtros.de = de.value; filtros.ate = ate.value; filtros.tipo = tipo.value; filtros.natureza = natureza.value; filtros.conta_id = conta.value;
+      filtros.partner_id = parceiro.value; filtros.pasture_id = pasto.value; filtros.situacao = sit.value; filtros.status_pagamento = pag.value; filtros.busca = busca.value.trim();
+      Util.limpar(corpo);
+      resumo.textContent = '';
+      corpo.appendChild(UI.carregando('Buscando os lançamentos…'));
+      try {
+        var q = { pagina: filtros.pagina, situacao: filtros.situacao };
+        ['de', 'ate', 'tipo', 'natureza', 'conta_id', 'partner_id', 'pasture_id', 'status_pagamento', 'busca'].forEach(function (k) { if (filtros[k]) q[k] = filtros[k]; });
+        var r = (await Cliente.consulta('financeiro.lancamentos', q)).data;
+        if (!vivo) return;
+        Util.limpar(corpo);
+        resumo.textContent = r.total + (r.total === 1 ? ' lançamento' : ' lançamentos') + ' · receitas ' + Fmt.dinheiro(r.totais.receitas) + ' · despesas ' + Fmt.dinheiro(r.totais.despesas);
+        corpo.appendChild(UI.tabela({
+          id: 'lancamentos', rotulo: 'Lançamentos financeiros', linhas: r.itens, chave: function (l) { return l.financial_id; }, porPagina: r.por_pagina, semPaginacao: true,
+          vazio: { texto: 'Nenhum lançamento com esses filtros.' },
+          colunas: [
+            { id: 'data_competencia', rotulo: 'Competência', formatar: competencia },
+            { id: 'descricao', rotulo: 'Lançamento', valor: nomeLancamento, formatar: function (l) { return link('financeiro/lancamento/' + l.financial_id, nomeLancamento(l)); } },
+            { id: 'conta_nome', rotulo: 'Conta' },
+            { id: 'tipo', rotulo: 'Tipo', valor: function (l) { return l.tipo === 'RECEITA' ? 'Receita' : 'Despesa'; } },
+            { id: 'valor', rotulo: 'Valor', num: true, formatar: function (l) { return Fmt.dinheiro(l.valor); } },
+            { id: 'situacao', rotulo: 'Situação', valor: situacao },
+            { id: 'parceiro', rotulo: 'Parceiro' },
+            { id: 'origem', rotulo: 'Origem', valor: origem },
+            { id: 'nao_alocado', rotulo: 'Sem alocar aos animais', num: true, formatar: function (l) { return l.nao_alocado === null ? '—' : Fmt.dinheiro(l.nao_alocado); } },
+          ],
+        }).el);
+        if (r.paginas > 1) {
+          corpo.appendChild(h('div', { class: 'paginacao' }, h('span', { class: 'suave', text: 'Página ' + r.pagina + ' de ' + r.paginas }), h('div', { class: 'acoes', style: 'margin-top:0' },
+            UI.botao('Anterior', { desabilitado: r.pagina <= 1, aoClicar: function () { filtros.pagina = r.pagina - 1; carregar(); } }),
+            UI.botao('Próxima', { desabilitado: r.pagina >= r.paginas, aoClicar: function () { filtros.pagina = r.pagina + 1; carregar(); } }))));
+        }
+      } catch (e) {
+        if (!vivo) return;
+        Util.limpar(corpo);
+        corpo.appendChild(UI.estadoErro(e, { acao: { texto: 'Tentar de novo', aoClicar: carregar } }));
+      }
+    }
+    carregar();
+    return function () { vivo = false; };
+  }
+
+  // ------------------------------------------------------------------ detalhe ----
+  function nomeAnimal(a) { return a.brinco || a.codigo_interno || 'animal'; }
+  function linkEvento(e) { return e ? link('evento/' + e.event_id, e.rotulo + ' de ' + Fmt.data(e.event_date) + (e.vigente ? '' : ' (não vale mais)')) : null; }
+  /** As ações de uma parcela no detalhe (só no lançamento que vale e fora da dedução retida, que vai com o recebimento). */
+  function acoesParcela(l, x, recarregar, livres) {
+    if (l.situacao !== 'ATIVO' || l.retida_pelo_comprador || !App.podeRegistrar()) return '—';
+    var paga = x.situacao === 'PAGA' || x.situacao === 'RECEBIDA';
+    var aberta = x.situacao === 'A_PAGAR' || x.situacao === 'A_RECEBER' || x.situacao === 'VENCIDA';
+    var item = { parcela_id: x.parcela_id, lancamento: nomeLancamento(l), valor: x.valor, data_vencimento: x.data_vencimento, tipo: l.tipo, parcial: livres === true };
+    if (paga) return UI.botao('Desfazer baixa', { atributos: { 'data-desfazer': x.parcela_id }, aoClicar: function (ev) { Baixa.desfazer(item, ev.currentTarget, recarregar); } });
+    if (!aberta) return '—';
+    return h('div', { class: 'acoes', style: 'margin-top:0' },
+      UI.botao(l.tipo === 'RECEITA' ? 'Receber' : 'Pagar', { atributos: { 'data-baixar': x.parcela_id }, aoClicar: function (ev) { Baixa.baixar([item], ev.currentTarget, recarregar); } }),
+      livres ? UI.botao('Dividir', { atributos: { 'data-dividir': x.parcela_id }, aoClicar: function (ev) { Baixa.dividir(item, ev.currentTarget, recarregar); } }) : null);
+  }
+  // ------------------------------------------------------------------ rateio (E4.3) ----
+  /**
+   * Ratear o lançamento entre os animais (Fase 4, E4.3; CONTRATOS, seção 57): abre o formulário do evento RATEIO com o que
+   * o servidor propôs (financeiro.lancamento → ratear.padrao: o escopo e o critério que o lançamento admite, o pasto e a
+   * categoria dele). A prévia e o valor de cada animal vêm da simulação do servidor; a tela não divide nada.
+   */
+  function botaoRatear(o) {
+    var r = o.ratear;
+    if (!r || !App.podeRegistrar() || !Store.tipoEvento('RATEIO')) return null;
+    if (!r.pode) return r.motivo ? h('p', { class: 'suave', dataset: { naoRateia: '1' }, text: 'Não se rateia: ' + r.motivo }) : null;
+    var l = o.lancamento, p = r.padrao;
+    return h('div', { class: 'acoes' }, UI.botao(r.ja_rateado ? 'Ratear de novo' : 'Ratear entre os animais', { icone: 'registrar', atributos: { 'data-ratear': l.financial_id }, aoClicar: function () {
+      var campos = { financial_id: l.financial_id };
+      ['escopo_tipo', 'criterio', 'pasture_id', 'category_id'].forEach(function (k) { if (p[k]) campos[k] = p[k]; });
+      var criterios = [];
+      p.escopos.forEach(function (e) { (p.criterios[e] || []).forEach(function (c) { if (criterios.indexOf(c) < 0) criterios.push(c); }); });
+      var rotulos = {};
+      rotulos[l.financial_id] = nomeLancamento(l) + ' · ' + Fmt.dinheiro(l.valor) + ' (' + competencia(l) + ')';
+      Registro.abrir('RATEIO', { campos: campos, rotulos: rotulos, opcoes: { escopo_tipo: p.escopos, criterio: criterios }, origem: 'financeiro/lancamento/' + l.financial_id });
+    } }));
+  }
+  /** O rateio desatualizado (a base refeita hoje muda; Rateio.desatualizado): quem muda e o que a base era e passa a ser. */
+  function avisoDesatualizado(d) {
+    var mudancas = d.diferencas.slice(0, 8).map(function (x) {
+      var nome = x.brinco || x.codigo_interno || 'animal';
+      return nome + (x.gravada === null ? ' entra' : x.hoje === null ? ' sai' : ' (' + Fmt.numero(x.gravada, Fmt.casas(x.gravada)) + ' → ' + Fmt.numero(x.hoje, Fmt.casas(x.hoje)) + ')');
+    });
+    var texto = 'Rateio desatualizado: refeita hoje, a base muda' + (mudancas.length ? ': ' + mudancas.join(', ') + (d.diferencas.length > 8 ? ' e mais ' + (d.diferencas.length - 8) : '') : '') + '. ' +
+      (d.problemas.length ? d.problemas.join(' ') + ' ' : '') + 'O valor de cada animal não muda sozinho: rateie de novo se quiser a base de hoje.';
+    var n = UI.nota(texto, 'aviso');
+    n.setAttribute('data-rateio-desatualizado', String(d.diferencas.length));
+    return n;
+  }
+  /** Os rateios do lançamento, do mais antigo ao que vale (o re-rateio substitui o anterior dali em diante). */
+  function historicoRateios(lista) {
+    if (!lista || lista.length < 2) return null;
+    return h('details', { class: 'detalhe', style: 'margin-top:16px', dataset: { rateios: String(lista.length) } }, h('summary', { text: 'Rateios deste lançamento (' + lista.length + ')' }),
+      h('ul', { class: 'lista-simples' }, lista.map(function (x) {
+        return h('li', { dataset: { rateioVigente: x.vigente ? '1' : '0' } }, link('evento/' + x.event_id, Fmt.data(x.event_date)), ' · ' + (x.descricao || Fmt.rotulo('CRITERIO_RATEIO', x.criterio)) + ' · ' + Fmt.dinheiro(x.total_alocado) + (x.vigente ? ' (vale hoje)' : ' (substituído)'));
+      })));
+  }
+  function montarDetalhe(el, p) {
+    var vivo = true;
+    var titulo = h('h1', { text: 'Lançamento financeiro' });
+    var corpo = h('div', null, UI.carregando('Buscando o lançamento…'));
+    el.appendChild(h('div', { class: 'tela-cabecalho' }, titulo, link('financeiro/lancamentos', 'Todos os lançamentos')));
+    el.appendChild(corpo);
+    function recarregar() { if (vivo) Roteador.ir('financeiro/lancamento/' + p.id, { forcar: true, substituir: true }); }
+    Cliente.consulta('financeiro.lancamento', { financial_id: p.id }).then(function (r) {
+      if (!vivo) return;
+      var o = r.data, l = o.lancamento;
+      titulo.textContent = nomeLancamento(l);
+      Util.limpar(corpo);
+      corpo.appendChild(UI.secao('Lançamento', UI.pares([
+        ['Valor', Fmt.dinheiro(l.valor)], ['Tipo', l.tipo === 'RECEITA' ? 'Receita' : 'Despesa'], ['Conta', l.conta_nome], ['Natureza', Fmt.rotulo('NATUREZA', l.natureza)],
+        ['Competência', competencia(l)], ['Situação', l.situacao === 'CANCELADO' ? 'Cancelado: não vale mais' : 'Vale'], ['Pagamento', situacao(l)],
+        l.em_aberto ? ['Em aberto hoje', Fmt.dinheiro(l.em_aberto) + (l.vencido ? ' (vencido: ' + Fmt.dinheiro(l.vencido) + ')' : '')] : null,
+        l.proximo_vencimento ? ['Próximo vencimento', Fmt.data(l.proximo_vencimento)] : null,
+        ['Parceiro', l.parceiro], l.pasto ? ['Pasto', l.pasto] : null, l.produto ? ['Produto', l.produto + (l.quantidade !== null ? ' · ' + Fmt.numero(l.quantidade, Fmt.casas(l.quantidade)) : '')] : null,
+        l.retida_pelo_comprador ? ['Retenção', 'descontada pelo comprador no recebimento da venda'] : null,
+        ['Documento', l.documento], ['Observações', l.observacoes],
+        ['Criado por', linkEvento(o.evento)], o.referencia ? ['Refere-se a', linkEvento(o.referencia)] : null, o.anulado_por ? ['Cancelado por', linkEvento(o.anulado_por)] : null,
+        l.pre_marco_zero ? ['Histórico', 'anterior ao marco zero: sem efeito no caixa'] : null,
+      ].filter(Boolean)), { dado: 'lancamento' }));
+      corpo.appendChild(UI.secao('Parcelas', o.parcelas.length ? UI.tabela({
+        id: 'parcelas', rotulo: 'Parcelas do lançamento', linhas: o.parcelas, chave: function (x) { return x.parcela_id; }, semPaginacao: true,
+        colunas: [
+          { id: 'parcela_num', rotulo: 'Nº', num: true },
+          { id: 'data_vencimento', rotulo: 'Vencimento', formatar: function (x) { return Fmt.data(x.data_vencimento); } },
+          { id: 'valor', rotulo: 'Valor', num: true, formatar: function (x) { return Fmt.dinheiro(x.valor); } },
+          { id: 'situacao', rotulo: 'Situação', valor: function (x) { return (SITUACAO_PARCELA[x.situacao] || Fmt.rotulo('', x.situacao)) + (x.dias_atraso ? ' há ' + x.dias_atraso + (x.dias_atraso === 1 ? ' dia' : ' dias') : ''); } },
+          { id: 'data_pagamento', rotulo: 'Pagamento', formatar: function (x) { return x.data_pagamento ? Fmt.data(x.data_pagamento) : '—'; } },
+          { id: 'valor_pago', rotulo: 'Valor pago', num: true, formatar: function (x) { return x.valor_pago === null ? '—' : Fmt.dinheiro(x.valor_pago); } },
+          { id: 'forma_pagamento', rotulo: 'Forma', valor: function (x) { return x.forma_pagamento ? Store.rotuloLista('FORMA_PAGAMENTO', x.forma_pagamento) : '—'; } },
+          { id: 'acao', rotulo: 'Ação', ordenavel: false, formatar: function (x) { return acoesParcela(l, x, recarregar, o.parcelas_livres === true); } },
+        ],
+      }).el : h('p', { class: 'suave', text: 'Sem parcela: este lançamento não passa pelo caixa (consumo de insumo, saldo de abertura ou registro anterior ao marco zero).' }), { dado: 'parcelas' }));
+      if (o.rateio || l.nao_alocado !== null) {
+        var rat = o.rateio;
+        corpo.appendChild(UI.secao('Divisão entre os animais', h('div', null,
+          rat && rat.desatualizado ? avisoDesatualizado(rat.desatualizado) : null,
+          UI.pares([
+            ['Critério', rat ? Fmt.rotulo('CRITERIO_RATEIO', rat.criterio) : 'sem rateio'],
+            rat && rat.descricao ? ['Como foi dividido', rat.descricao] : null,
+            ['Distribuído', Fmt.dinheiro(l.alocado)], ['Sem alocar', Fmt.dinheiro(l.nao_alocado)],
+            rat && !rat.vigente ? ['Rateio', 'sem efeito: o lançamento foi cancelado'] : null,
+            rat && rat.justificativa ? ['Justificativa', rat.justificativa] : null,
+          ].filter(Boolean)),
+          botaoRatear(o),
+          o.alocacoes.length ? UI.tabela({
+            id: 'alocacoes', rotulo: 'Valor por animal', linhas: o.alocacoes, chave: function (x) { return x.animal_id; },
+            colunas: [
+              { id: 'animal', rotulo: 'Animal', valor: nomeAnimal, formatar: function (x) { return link('animal/' + x.animal_id + '/financeiro', nomeAnimal(x)); } },
+              { id: 'base_valor', rotulo: 'Base', num: true, formatar: function (x) { return Fmt.numero(x.base_valor, Fmt.casas(x.base_valor)); } },
+              { id: 'valor_alocado', rotulo: 'Valor do animal', num: true, formatar: function (x) { return Fmt.dinheiro(x.valor_alocado); } },
+            ],
+          }).el : null, historicoRateios(o.rateios)), { dado: 'rateio' }));
+      } else corpo.appendChild(UI.secao('Divisão entre os animais', h('p', { class: 'suave', text: 'Não se aplica: ' + Fmt.rotulo('NATUREZA', l.natureza).toLowerCase() + ' não é custo nem receita de animal.' }), { dado: 'rateio' }));
+      if (o.anexos.length) corpo.appendChild(UI.secao('Documentos', h('ul', { class: 'lista-simples' }, o.anexos.map(function (a) { return h('li', { text: a.nome_arquivo + (a.descricao ? ' · ' + a.descricao : '') }); })), { dado: 'anexos' }));
+    }, function (e) {
+      if (!vivo) return;
+      Util.limpar(corpo);
+      corpo.appendChild(UI.estadoErro(e, { acao: { texto: 'Ver todos os lançamentos', aoClicar: function () { Roteador.ir('financeiro/lancamentos'); } } }));
+    });
+    return function () { vivo = false; };
+  }
+
+  // ------------------------------------------------------------------ a pagar e a receber (E4.2) ----
+  var SITUACOES_TITULO = [['ABERTOS', 'Em aberto'], ['VENCIDOS', 'Vencidos'], ['A_VENCER', 'A vencer'], ['PAGOS', 'Pagos e recebidos']];
+  var ROTULO_TITULO = { VENCIDA: 'Vencida', A_VENCER: 'A vencer', VENCE_HOJE: 'Vence hoje', PAGA: 'Paga', RECEBIDA: 'Recebida' };
+  var filtrosTit = { situacao: 'ABERTOS', tipo: '', de: '', ate: '', busca: '' };
+  /**
+   * Os títulos a pagar e a receber de hoje (financeiro.titulos): os vencidos e a vencer, ou os pagos; os totais do servidor; o
+   * depósito esperado do recebimento com dedução retida; marcar vários e dar baixa de uma vez (a mesma data e a mesma forma).
+   */
+  function montarTitulos(el) {
+    var vivo = true;
+    cabecalho(el, 'titulos');
+    var sit = selecao('tit-situacao', SITUACOES_TITULO, filtrosTit.situacao);
+    var tipo = selecao('tit-tipo', [['', 'A pagar e a receber'], ['DESPESA', 'Só a pagar'], ['RECEITA', 'Só a receber']], filtrosTit.tipo);
+    var de = h('input', { type: 'date', id: 'tit-de', value: filtrosTit.de });
+    var ate = h('input', { type: 'date', id: 'tit-ate', value: filtrosTit.ate });
+    var busca = h('input', { type: 'search', id: 'tit-busca', value: filtrosTit.busca, autocomplete: 'off', placeholder: 'lançamento, conta ou documento' });
+    el.appendChild(h('form', { class: 'filtros', role: 'search', 'aria-label': 'Filtrar títulos', on: { submit: function (ev) { ev.preventDefault(); carregar(); } } },
+      campo('tit-situacao', 'Situação', sit), campo('tit-tipo', 'Tipo', tipo), campo('tit-de', 'Vencimento (ou pagamento) de', de), campo('tit-ate', 'até', ate), campo('tit-busca', 'Buscar', busca),
+      UI.botao('Filtrar', { tipo: 'primario', atributos: { type: 'submit' } })));
+    var resumo = h('div', { class: 'indicadores', role: 'list', dataset: { totaisTitulos: '1' } });
+    var acoes = h('div', { class: 'acoes' });
+    var corpo = h('div');
+    el.appendChild(resumo);
+    el.appendChild(acoes);
+    el.appendChild(corpo);
+    async function carregar() {
+      filtrosTit.situacao = sit.value; filtrosTit.tipo = tipo.value; filtrosTit.de = de.value; filtrosTit.ate = ate.value; filtrosTit.busca = busca.value.trim();
+      Util.limpar(corpo); Util.limpar(resumo); Util.limpar(acoes);
+      corpo.appendChild(UI.carregando('Buscando os títulos…'));
+      try {
+        var q = { situacao: filtrosTit.situacao };
+        ['tipo', 'de', 'ate', 'busca'].forEach(function (k) { if (filtrosTit[k]) q[k] = filtrosTit[k]; });
+        var r = (await Cliente.consulta('financeiro.titulos', q)).data;
+        if (!vivo) return;
+        Util.limpar(corpo);
+        var t = r.totais;
+        resumo.appendChild(UI.indicador('A pagar', Fmt.dinheiro(t.a_pagar), t.vencido_pagar ? 'vencido: ' + Fmt.dinheiro(t.vencido_pagar) : 'nada vencido', 'a_pagar'));
+        resumo.appendChild(UI.indicador('A receber', Fmt.dinheiro(t.a_receber), t.vencido_receber ? 'vencido: ' + Fmt.dinheiro(t.vencido_receber) : 'nada vencido', 'a_receber'));
+        var pagos = r.situacao === 'PAGOS';
+        var tab = UI.tabela({
+          id: 'titulos', rotulo: pagos ? 'Pagos e recebidos' : 'Títulos em aberto', linhas: r.itens, chave: function (x) { return x.parcela_id; }, semPaginacao: true,
+          selecao: pagos ? null : { aoMudar: function (ids) { desenharLote(ids, r.itens); } },
+          vazio: { texto: pagos ? 'Nada pago ou recebido com esses filtros.' : 'Nada a pagar nem a receber com esses filtros.' },
+          colunas: [
+            { id: 'data_vencimento', rotulo: pagos ? 'Pago em' : 'Vencimento', valor: function (x) { return pagos ? x.data_pagamento : x.data_vencimento; }, formatar: function (x) { return Fmt.data(pagos ? x.data_pagamento : x.data_vencimento); } },
+            { id: 'lancamento', rotulo: 'Lançamento', formatar: function (x) { return link('financeiro/lancamento/' + x.financial_id, x.lancamento + (x.parcelas_do_lancamento > 1 ? ' (' + x.parcela_num + ')' : '')); } },
+            { id: 'tipo', rotulo: 'Tipo', valor: function (x) { return x.tipo === 'RECEITA' ? 'A receber' : 'A pagar'; } },
+            { id: 'parceiro', rotulo: 'Parceiro' },
+            { id: 'valor', rotulo: pagos ? 'Valor pago' : 'Valor', num: true, valor: function (x) { return pagos ? x.valor_pago : x.valor; }, formatar: function (x) { return Fmt.dinheiro(pagos ? x.valor_pago : x.valor) + (x.deposito_esperado !== null && !pagos ? ' (depósito esperado ' + Fmt.dinheiro(x.deposito_esperado) + ')' : ''); } },
+            { id: 'situacao', rotulo: 'Situação', valor: function (x) { return (ROTULO_TITULO[x.situacao] || x.situacao) + (x.dias_atraso ? ' há ' + x.dias_atraso + (x.dias_atraso === 1 ? ' dia' : ' dias') : ''); } },
+            { id: 'acao', rotulo: 'Ação', ordenavel: false, formatar: function (x) { return acaoTitulo(x); } },
+          ],
+        });
+        corpo.appendChild(tab.el);
+      } catch (e) {
+        if (!vivo) return;
+        Util.limpar(corpo);
+        corpo.appendChild(UI.estadoErro(e, { acao: { texto: 'Tentar de novo', aoClicar: carregar } }));
+      }
+    }
+    function acaoTitulo(x) {
+      var a = x.acoes || {};
+      var item = { parcela_id: x.parcela_id, lancamento: x.lancamento, valor: x.valor, data_vencimento: x.data_vencimento, tipo: x.tipo, deposito: x.deposito_esperado, parcial: a.parcial === true };
+      if (a.motivo) return h('span', { class: 'suave', text: a.motivo });
+      if (a.desfazer) return UI.botao('Desfazer baixa', { atributos: { 'data-desfazer': x.parcela_id }, aoClicar: function (ev) { Baixa.desfazer(item, ev.currentTarget, carregar); } });
+      if (!a.baixar) return '—';
+      return h('div', { class: 'acoes', style: 'margin-top:0' },
+        UI.botao(x.tipo === 'RECEITA' ? 'Receber' : 'Pagar', { atributos: { 'data-baixar': x.parcela_id }, aoClicar: function (ev) { Baixa.baixar([item], ev.currentTarget, carregar); } }),
+        a.dividir ? UI.botao('Dividir', { atributos: { 'data-dividir': x.parcela_id }, aoClicar: function (ev) { Baixa.dividir(item, ev.currentTarget, carregar); } }) : null);
+    }
+    function desenharLote(ids, itens) {
+      Util.limpar(acoes);
+      var marcados = itens.filter(function (x) { return ids.indexOf(x.parcela_id) >= 0 && x.acoes && x.acoes.baixar; });
+      if (!marcados.length) return;
+      acoes.appendChild(UI.botao('Dar baixa nas ' + marcados.length + ' marcadas', { tipo: 'primario', atributos: { 'data-baixa-lote': String(marcados.length) }, aoClicar: function (ev) {
+        Baixa.baixar(marcados.map(function (x) { return { parcela_id: x.parcela_id, lancamento: x.lancamento, valor: x.valor, data_vencimento: x.data_vencimento, tipo: x.tipo }; }), ev.currentTarget, carregar);
+      } }));
+    }
+    carregar();
+    return function () { vivo = false; };
+  }
+
+  // ------------------------------------------------------------------ fluxo de caixa (E4.2) ----
+  var AGRUPAR = [['MES', 'Por mês'], ['SEMANA', 'Por semana'], ['DIA', 'Por dia']];
+  var filtrosFluxo = { data: '', agrupar: 'MES', de: '', ate: '' };
+  var SITUACAO_PERIODO = { PASSADO: 'realizado', ATUAL: 'em curso', FUTURO: 'previsto' };
+  /**
+   * O fluxo de caixa numa data de referência (financeiro.fluxoCaixa): por mês, semana ou dia, o realizado (os pagamentos até a
+   * data) e o previsto (as parcelas em aberto, pelo vencimento), o saldo no fim de cada período a partir do saldo inicial
+   * informado nas configurações, os vencidos à parte; o gráfico de barras do líquido e a linha do saldo (com a tabela
+   * equivalente). Todo número vem do servidor.
+   */
+  function montarFluxo(el) {
+    var vivo = true;
+    cabecalho(el, 'fluxo');
+    var data = h('input', { type: 'date', id: 'flx-data', value: filtrosFluxo.data });
+    var agrupar = selecao('flx-agrupar', AGRUPAR, filtrosFluxo.agrupar);
+    var de = h('input', { type: 'date', id: 'flx-de', value: filtrosFluxo.de });
+    var ate = h('input', { type: 'date', id: 'flx-ate', value: filtrosFluxo.ate });
+    el.appendChild(h('form', { class: 'filtros', 'aria-label': 'Fluxo de caixa', on: { submit: function (ev) { ev.preventDefault(); carregar(); } } },
+      campo('flx-data', 'Na data (vazio = hoje)', data), campo('flx-agrupar', 'Agrupar', agrupar), campo('flx-de', 'De (vazio = o padrão)', de), campo('flx-ate', 'até', ate),
+      UI.botao('Ver', { tipo: 'primario', atributos: { type: 'submit' } })));
+    var corpo = h('div');
+    el.appendChild(corpo);
+    async function carregar() {
+      filtrosFluxo.data = data.value; filtrosFluxo.agrupar = agrupar.value; filtrosFluxo.de = de.value; filtrosFluxo.ate = ate.value;
+      Util.limpar(corpo);
+      corpo.appendChild(UI.carregando('Montando o fluxo de caixa…'));
+      try {
+        var q = { agrupar: filtrosFluxo.agrupar };
+        ['data', 'de', 'ate'].forEach(function (k) { if (filtrosFluxo[k]) q[k] = filtrosFluxo[k]; });
+        var r = (await Cliente.consulta('financeiro.fluxoCaixa', q)).data;
+        if (!vivo) return;
+        Util.limpar(corpo);
+        var ind = h('div', { class: 'indicadores', role: 'list', dataset: { resumoFluxo: '1' } });
+        var saldo = UI.valorInd(r.saldo, Fmt.dinheiro);
+        ind.appendChild(UI.indicador('Saldo em ' + Fmt.data(r.data), saldo.texto, saldo.motivo ? r.saldo.mensagem : r.saldo_inicial ? 'a partir do saldo de ' + Fmt.data(r.saldo_inicial.data) : null, 'saldo'));
+        ind.appendChild(UI.indicador('Realizado no período', Fmt.dinheiro(r.realizado.liquido), 'entradas ' + Fmt.dinheiro(r.realizado.entradas) + ' · saídas ' + Fmt.dinheiro(r.realizado.saidas), 'realizado'));
+        ind.appendChild(UI.indicador('Previsto no período', Fmt.dinheiro(r.previsto.liquido), 'a receber ' + Fmt.dinheiro(r.previsto.entradas) + ' · a pagar ' + Fmt.dinheiro(r.previsto.saidas), 'previsto'));
+        ind.appendChild(UI.indicador('Vencidos em aberto', Fmt.dinheiro(r.vencidos.a_pagar), 'a pagar · a receber ' + Fmt.dinheiro(r.vencidos.a_receber), 'vencidos'));
+        corpo.appendChild(ind);
+        corpo.appendChild(UI.nota('De ' + Fmt.data(r.de) + ' a ' + Fmt.data(r.ate) + '. Realizado: o que foi pago ou recebido até ' + Fmt.data(r.data) + '. Previsto: as parcelas em aberto, pelo vencimento, de ' + Fmt.data(r.data) + ' em diante; as vencidas antes ficam em "Vencidos".', 'info'));
+        corpo.appendChild(UI.grafico({
+          tipo: 'barras', titulo: 'Líquido de cada período (realizado e previsto)', rotuloX: 'Período', rotuloValor: 'R$', dado: 'fluxo-liquido', zero: true,
+          series: [{ nome: 'Líquido', pontos: r.periodos.map(function (p) { return { x: p.rotulo, y: p.liquido }; }) }], formatar: Fmt.dinheiro, vazio: 'Sem movimento no período.',
+        }));
+        if (r.saldo_inicial) {
+          corpo.appendChild(UI.grafico({
+            tipo: 'linha', titulo: 'Saldo de caixa no fim de cada período', rotuloX: 'Período', rotuloValor: 'R$', dado: 'fluxo-saldo',
+            series: [{ nome: 'Saldo', pontos: r.periodos.map(function (p) { return { x: p.rotulo, y: p.saldo_fim, nota: p.saldo_fim === null ? 'antes do saldo informado' : null }; }) }], formatar: Fmt.dinheiro,
+          }));
+        }
+        corpo.appendChild(UI.tabela({
+          id: 'fluxo', rotulo: 'Fluxo de caixa por período', linhas: r.periodos, chave: function (p) { return p.inicio; }, semPaginacao: true,
+          colunas: [
+            { id: 'rotulo', rotulo: 'Período', valor: function (p) { return p.inicio; }, formatar: function (p) { return p.rotulo + ' (' + SITUACAO_PERIODO[p.situacao] + ')'; } },
+            { id: 'entradas_r', rotulo: 'Recebido', num: true, valor: function (p) { return p.realizado.entradas; }, formatar: function (p) { return Fmt.dinheiro(p.realizado.entradas); } },
+            { id: 'saidas_r', rotulo: 'Pago', num: true, valor: function (p) { return p.realizado.saidas; }, formatar: function (p) { return Fmt.dinheiro(p.realizado.saidas); } },
+            { id: 'entradas_p', rotulo: 'A receber', num: true, valor: function (p) { return p.previsto.entradas; }, formatar: function (p) { return Fmt.dinheiro(p.previsto.entradas); } },
+            { id: 'saidas_p', rotulo: 'A pagar', num: true, valor: function (p) { return p.previsto.saidas; }, formatar: function (p) { return Fmt.dinheiro(p.previsto.saidas); } },
+            { id: 'liquido', rotulo: 'Líquido', num: true, formatar: function (p) { return Fmt.dinheiro(p.liquido); } },
+            { id: 'saldo_fim', rotulo: 'Saldo no fim', num: true, formatar: function (p) { return p.saldo_fim === null ? '—' : Fmt.dinheiro(p.saldo_fim); } },
+          ],
+        }).el);
+      } catch (e) {
+        if (!vivo) return;
+        Util.limpar(corpo);
+        corpo.appendChild(UI.estadoErro(e, { acao: { texto: 'Tentar de novo', aoClicar: carregar } }));
+      }
+    }
+    carregar();
+    return function () { vivo = false; };
+  }
+
+  // ------------------------------------------------------------------ resultado gerencial (Fase 4, E4.5) ----
+  var filtrosResultado = { ano: '', mes: '' };
+  /** O sinal de cada linha na conta do resultado (07, 2.1): o servidor manda o valor positivo e o sinal da seção. */
+  var SINAL = { '1': '(+) ', '-1': '(−) ' };
+  var SAIDA_TEXTO = { VENDA: 'venda', MORTE: 'morte', DESCARTE: 'descarte' };
+  /** As linhas da ponte (a conciliação linha a linha; 07, 2.1), na ordem da fórmula, com o sinal de cada termo. */
+  var PONTE = [
+    ['caixa', 'Caixa do período (pago e recebido)'], ['a_receber', '(+) Variação do a receber'], ['a_pagar', '(−) Variação do a pagar'],
+    ['custo_rebanho_ativo', '(+) Variação do estoque de rebanho (custo de aquisição dos animais no rebanho)'], ['insumos_estoque', '(+) Variação do estoque de insumos'],
+    ['despesa_antecipada', '(+) Variação da despesa antecipada (líquida da receita antecipada)'], ['saldo_abertura', '(−) Variação do saldo de abertura do rebanho'],
+    ['nao_operacional', '(−) Variação do não operacional (aportes, retiradas, empréstimos)'],
+  ];
+  var IDENTIDADE = [
+    ['caixa_acumulado', 'Caixa acumulado'], ['a_receber', '(+) A receber'], ['a_pagar', '(−) A pagar'], ['custo_rebanho_ativo', '(+) Custo de aquisição do rebanho ativo'],
+    ['insumos_estoque', '(+) Insumos em estoque'], ['despesa_antecipada', '(+) Despesa antecipada (líquida)'], ['saldo_abertura', '(−) Saldo de abertura lançado'],
+    ['nao_operacional', '(−) Entradas líquidas não operacionais'],
+  ];
+  /** As linhas do demonstrativo numa lista só (seção, grupo do custeio, conta), cada uma com o nível para o recuo. */
+  function linhasDre(r) {
+    var out = [];
+    r.secoes.forEach(function (s) {
+      out.push({ chave: s.chave, rotulo: (SINAL[String(s.sinal)] || '') + s.rotulo, valores: s.valores, total: s.total, nivel: 0 });
+      (s.contas || []).forEach(function (c) { out.push({ chave: s.chave + ':' + c.chave, rotulo: c.rotulo, valores: c.valores, total: c.total, nivel: 1, lancamentos: c.lancamentos }); });
+      (s.linhas || []).forEach(function (c) { if (c.total) out.push({ chave: s.chave + ':' + c.chave, rotulo: c.rotulo, valores: c.valores, total: c.total, nivel: 1, animais: c.animais }); });
+      (s.grupos || []).forEach(function (g) {
+        out.push({ chave: s.chave + ':' + g.chave, rotulo: g.rotulo, valores: g.valores, total: g.total, nivel: 1 });
+        g.contas.forEach(function (c) { out.push({ chave: s.chave + ':' + g.chave + ':' + c.chave, rotulo: c.rotulo, valores: c.valores, total: c.total, nivel: 2, lancamentos: c.lancamentos }); });
+      });
+    });
+    out.push({ chave: 'RESULTADO', rotulo: '(=) Resultado', valores: r.resultado.valores, total: r.resultado.total, nivel: 0, resultado: true });
+    return out;
+  }
+  /** Uma tabela por colunas de mês: a primeira coluna é o rótulo da linha, as outras os meses e o total do período. */
+  function tabelaMeses(id, rotulo, colunas, linhas, valorDe, totalDe) {
+    var cols = [{ id: 'rotulo', rotulo: 'Linha', ordenavel: false, formatar: function (l) { return h('span', { class: l.resultado ? 'dado' : null, style: l.nivel ? 'padding-left:' + (l.nivel === 2 ? '2em' : '1em') : null, text: l.rotulo }); } }];
+    colunas.forEach(function (c, k) { cols.push({ id: 'c' + k, rotulo: c.rotulo, num: true, ordenavel: false, formatar: function (l) { return valorDe(l, k); } }); });
+    cols.push({ id: 'total', rotulo: 'Período', num: true, ordenavel: false, formatar: function (l) { return totalDe(l); } });
+    return UI.tabela({ id: id, rotulo: rotulo, linhas: linhas, chave: function (l) { return l.chave; }, semPaginacao: true, colunas: cols }).el;
+  }
+  /**
+   * O resultado gerencial (financeiro.resultado): o ano (vazio = o deste ano) ou um mês, por competência, com as receitas e as
+   * despesas por natureza e por conta, o custo de aquisição de quem saiu, o custeio por grupo e por conta, os juros e os
+   * descontos; ao lado, o caixa líquido, o custeio não alocado, o que ficou fora do resultado, os estoques no custo e a
+   * conciliação linha a linha (a ponte de cada mês e a identidade acumulada). Todo número vem do servidor (07, seção 2.1).
+   */
+  function montarResultado(el) {
+    var vivo = true;
+    cabecalho(el, 'resultado');
+    var ano = h('input', { type: 'number', id: 'res-ano', min: '2000', max: '2100', step: '1', inputmode: 'numeric', value: filtrosResultado.ano, placeholder: 'este ano' });
+    var mes = h('input', { type: 'month', id: 'res-mes', value: filtrosResultado.mes });
+    el.appendChild(h('form', { class: 'filtros', 'aria-label': 'Resultado', on: { submit: function (ev) { ev.preventDefault(); carregar(); } } },
+      campo('res-ano', 'Ano (vazio = este ano)', ano), campo('res-mes', 'Ou um mês (com os lançamentos)', mes),
+      UI.botao('Ver', { tipo: 'primario', atributos: { type: 'submit' } })));
+    var corpo = h('div');
+    el.appendChild(corpo);
+    async function carregar() {
+      filtrosResultado.ano = ano.value; filtrosResultado.mes = mes.value;
+      Util.limpar(corpo);
+      corpo.appendChild(UI.carregando('Montando o resultado…'));
+      try {
+        var q = filtrosResultado.mes ? { mes: filtrosResultado.mes, detalhe: true } : filtrosResultado.ano ? { ano: filtrosResultado.ano } : {};
+        var r = (await Cliente.consulta('financeiro.resultado', q)).data;
+        if (!vivo) return;
+        Util.limpar(corpo);
+        if (r.motivo) { corpo.appendChild(UI.nota(r.mensagem, 'info')); return; }
+        var ind = h('div', { class: 'indicadores', role: 'list', dataset: { resumoResultado: '1' } });
+        ind.appendChild(UI.indicador('Resultado do período', Fmt.dinheiro(r.resultado.total), 'por competência, de ' + Fmt.data(r.de) + ' a ' + Fmt.data(r.ate), 'resultado'));
+        ind.appendChild(UI.indicador('Caixa líquido do período', Fmt.dinheiro(r.caixa.periodo.liquido), 'recebido ' + Fmt.dinheiro(r.caixa.periodo.entradas) + ' · pago ' + Fmt.dinheiro(r.caixa.periodo.saidas), 'caixa'));
+        ind.appendChild(UI.indicador('Custeio não alocado aos animais', Fmt.dinheiro(r.custeio_nao_alocado.total), 'do período, sem rateio', 'nao-alocado'));
+        ind.appendChild(UI.indicador('Conciliação', r.fecha ? 'Fecha ao centavo' : 'Não fecha', r.fecha ? 'caixa, resultado e estoques batem' : r.problemas[0], 'conciliacao'));
+        corpo.appendChild(ind);
+        if (r.parcial) corpo.appendChild(UI.nota(r.parcial.mensagem, 'aviso'));
+        if (r.antes_do_marco_zero) corpo.appendChild(UI.nota('O período começa antes do marco zero (' + Fmt.data(r.marco_zero) + '): as contas começam nele.', 'info'));
+        corpo.appendChild(UI.nota('Resultado por competência (o mês do fato): a compra de animais e de insumos não é despesa — o custo do animal entra quando ele sai (venda, morte, descarte) e o do insumo quando é aplicado. Juros e descontos entram no mês do pagamento.', 'info'));
+        var dre = linhasDre(r);
+        corpo.appendChild(UI.secao('Resultado por mês', tabelaMeses('resultado', 'Resultado gerencial por mês', r.colunas, dre,
+          function (l, k) { return Fmt.dinheiro(l.valores[k]); }, function (l) { return Fmt.dinheiro(l.total); }), { dado: 'dre' }));
+        var lado = [
+          { chave: 'CAIXA', rotulo: 'Caixa líquido (pago e recebido)', valores: r.caixa.colunas, total: r.caixa.periodo, caixa: true },
+          { chave: 'NAO_ALOCADO', rotulo: r.custeio_nao_alocado.rotulo, valores: r.custeio_nao_alocado.valores, total: r.custeio_nao_alocado.total },
+        ].concat(r.fora_do_resultado.map(function (x) { return { chave: x.chave, rotulo: x.rotulo, valores: x.valores, total: x.total }; }));
+        corpo.appendChild(UI.secao('Ao lado do resultado', tabelaMeses('ao-lado', 'Caixa e o que ficou fora do resultado', r.colunas, lado,
+          function (l, k) { return Fmt.dinheiro(l.caixa ? l.valores[k].liquido : l.valores[k]); }, function (l) { return Fmt.dinheiro(l.caixa ? l.total.liquido : l.total); }), { dado: 'ao-lado' }));
+        // Os estoques no custo (07, 2.1: a variação do estoque de rebanho e de insumos) e a conciliação linha a linha.
+        var est = r.estoques.periodo;
+        corpo.appendChild(UI.secao('Estoques no custo', UI.pares([
+          ['Rebanho (custo de aquisição dos animais no rebanho)', 'início ' + Fmt.dinheiro(est.rebanho.inicio) + ' · entradas ' + Fmt.dinheiro(est.rebanho.entradas) + ' · saídas (o custo de quem saiu) ' + Fmt.dinheiro(est.rebanho.saidas) + ' · fim ' + Fmt.dinheiro(est.rebanho.fim)],
+          ['Insumos (compras menos aplicações)', 'início ' + Fmt.dinheiro(est.insumos.inicio) + ' · compras ' + Fmt.dinheiro(est.insumos.entradas) + ' · aplicados ' + Fmt.dinheiro(est.insumos.saidas) + ' · fim ' + Fmt.dinheiro(est.insumos.fim)],
+        ]), { dado: 'estoques' }));
+        var ponte = [{ chave: 'resultado', rotulo: 'Resultado do período', resultado: true }].concat(PONTE.map(function (p) { return { chave: p[0], rotulo: p[1] }; }))
+          .concat([{ chave: 'fecha', rotulo: 'Fecha?' }]);
+        var celulaPonte = function (l, p) {
+          if (l.chave === 'fecha') return p.fecha ? 'Sim' : 'Não (diferença de ' + Fmt.dinheiro(p.diferenca) + ')';
+          return Fmt.dinheiro(p[l.chave]);
+        };
+        var conc = h('div', null,
+          UI.nota('Cada mês: o resultado = o caixa do mês + a variação do a receber − a do a pagar + a variação dos estoques no custo (rebanho e insumos) + a da despesa antecipada − a do saldo de abertura − a do não operacional.', 'info'),
+          tabelaMeses('ponte', 'Conciliação linha a linha', r.colunas, ponte, function (l, k) { return celulaPonte(l, r.ponte.colunas[k]); }, function (l) { return celulaPonte(l, r.ponte.periodo); }),
+          h('h3', { text: 'Acumulado até ' + Fmt.data(r.ate) }),
+          UI.pares([['Resultado acumulado', Fmt.dinheiro(r.identidade.resultado_acumulado)]].concat(IDENTIDADE.map(function (t) { return [t[1], Fmt.dinheiro(r.identidade[t[0]])]; }))
+            .concat([['(=) Pelo caixa e pela posição', Fmt.dinheiro(r.identidade.direita)], ['Fecha?', r.identidade.fecha ? 'Sim, ao centavo' : 'Não (diferença de ' + Fmt.dinheiro(r.identidade.diferenca) + ')']]), 'resumo-revisao'));
+        corpo.appendChild(UI.secao('Conciliação: caixa × resultado', conc, { dado: 'conciliacao' }));
+        // O mês com os lançamentos de cada conta e os animais do custo de aquisição.
+        if (filtrosResultado.mes) {
+          var det = [];
+          dre.forEach(function (l) {
+            (l.lancamentos || []).forEach(function (x) { det.push({ chave: x.financial_id, linha: l.rotulo, nome: x.descricao || l.rotulo, rota: 'financeiro/lancamento/' + x.financial_id, data: x.data_competencia, valor: x.valor }); });
+            (l.animais || []).forEach(function (a) { det.push({ chave: l.chave + ':' + a.animal_id + ':' + a.financial_id, linha: l.rotulo, nome: (a.brinco || a.codigo_interno) + ' (' + (SAIDA_TEXTO[a.tipo_saida] || 'baixa') + ')', rota: 'animal/' + a.animal_id, data: a.data_saida, valor: a.valor }); });
+          });
+          corpo.appendChild(UI.secao('O que compõe o mês', UI.tabela({ id: 'resultado-detalhe', rotulo: 'Lançamentos e animais do mês', linhas: det, chave: function (x) { return x.chave; },
+            colunas: [
+              { id: 'linha', rotulo: 'Linha' },
+              { id: 'nome', rotulo: 'Lançamento ou animal', formatar: function (x) { return link(x.rota, x.nome); } },
+              { id: 'data', rotulo: 'Data', formatar: function (x) { return Fmt.data(x.data); } },
+              { id: 'valor', rotulo: 'Valor no mês', num: true, formatar: function (x) { return Fmt.dinheiro(x.valor); } },
+            ], vazio: { texto: 'Nada no mês.' } }).el, { dado: 'detalhe' }));
+        }
+      } catch (e) {
+        if (!vivo) return;
+        Util.limpar(corpo);
+        corpo.appendChild(UI.estadoErro(e, { acao: { texto: 'Tentar de novo', aoClicar: carregar } }));
+      }
+    }
+    carregar();
+    return function () { vivo = false; };
+  }
+
+  // ------------------------------------------------------------------ custos por animal e por pasto (Fase 4, E4.4) ----
+  var filtrosCustos = { data: '', de: '', situacao: 'TODOS', pasture_id: '', category_id: '', sexo: '', busca: '' };
+  var filtrosPastos = { de: '', data: '' };
+  var SITUACAO_CUSTO = { NO_REBANHO: 'No rebanho', VENDIDO: 'Vendido', MORTO: 'Morto', DESCARTADO: 'Descartado', BAIXADO_AJUSTE: 'Baixado por ajuste' };
+  function abasCustos(atual) {
+    return UI.abas('Custos', [{ rotulo: 'Por animal', rota: 'financeiro/custos', atual: atual === 'animais' }, { rotulo: 'Por pasto', rota: 'financeiro/custos/pastos', atual: atual === 'pastos' }]);
+  }
+  function resultadoTexto(r) {
+    return r.valor === null ? '— (' + (r.mensagem || Fmt.rotulo('MOTIVO', r.motivo)) + ')' : Fmt.dinheiro(r.valor);
+  }
+  /**
+   * O custo por animal numa data (financeiro.custosAnimal; 07, seção 6): cada passagem pela fazenda aberta na data ou fechada no
+   * período, com o custo de aquisição, as classes do custeio (sanitário, alimentação e adicionais), o custo acumulado, o custo
+   * por dia, a receita, as despesas de venda, o resultado e a margem por arroba de quem saiu; os totais, o custeio não alocado
+   * do período e o resultado parcial. O pasto e a categoria são os do animal na data (de quem saiu, os do dia da saída).
+   */
+  function montarCustos(el) {
+    var vivo = true;
+    cabecalho(el, 'custos');
+    el.appendChild(abasCustos('animais'));
+    var data = h('input', { type: 'date', id: 'cus-data', value: filtrosCustos.data });
+    var de = h('input', { type: 'date', id: 'cus-de', value: filtrosCustos.de });
+    var sit = selecao('cus-situacao', [['TODOS', 'No rebanho e os que saíram'], ['NO_REBANHO', 'Só os do rebanho'], ['SAIRAM', 'Só os que saíram no período']], filtrosCustos.situacao);
+    var pasto = selecao('cus-pasto', [['', 'Todos']].concat(Store.pastos({ todos: true }).map(function (p) { return [p.pasture_id, p.nome]; })), filtrosCustos.pasture_id);
+    var cat = selecao('cus-categoria', [['', 'Todas']].concat(Store.categorias().map(function (c) { return [c.category_id, c.nome]; })), filtrosCustos.category_id);
+    var sexo = selecao('cus-sexo', [['', 'Machos e fêmeas'], ['M', 'Machos'], ['F', 'Fêmeas']], filtrosCustos.sexo);
+    var busca = h('input', { type: 'search', id: 'cus-busca', value: filtrosCustos.busca, autocomplete: 'off', placeholder: 'brinco ou código' });
+    el.appendChild(h('form', { class: 'filtros', role: 'search', 'aria-label': 'Custo por animal', on: { submit: function (ev) { ev.preventDefault(); carregar(); } } },
+      campo('cus-data', 'Na data (vazio = hoje)', data), campo('cus-de', 'Saídas desde (vazio = 1º de janeiro)', de), campo('cus-situacao', 'Animais', sit),
+      campo('cus-pasto', 'Pasto', pasto), campo('cus-categoria', 'Categoria', cat), campo('cus-sexo', 'Sexo', sexo), campo('cus-busca', 'Buscar', busca),
+      UI.botao('Ver', { tipo: 'primario', atributos: { type: 'submit' } })));
+    var corpo = h('div');
+    el.appendChild(corpo);
+    async function carregar() {
+      filtrosCustos.data = data.value; filtrosCustos.de = de.value; filtrosCustos.situacao = sit.value; filtrosCustos.pasture_id = pasto.value;
+      filtrosCustos.category_id = cat.value; filtrosCustos.sexo = sexo.value; filtrosCustos.busca = busca.value;
+      Util.limpar(corpo);
+      corpo.appendChild(UI.carregando('Somando os custos dos animais…'));
+      try {
+        var q = {};
+        Object.keys(filtrosCustos).forEach(function (k) { if (filtrosCustos[k]) q[k] = filtrosCustos[k]; });
+        var r = (await Cliente.consulta('financeiro.custosAnimal', q)).data;
+        if (!vivo) return;
+        Util.limpar(corpo);
+        if (r.motivo) { corpo.appendChild(UI.nota(r.mensagem, 'info')); return; }
+        var t = r.totais;
+        var ind = h('div', { class: 'indicadores', role: 'list', dataset: { resumoCustos: '1' } });
+        ind.appendChild(UI.indicador('Animais', String(t.animais), t.no_rebanho + ' no rebanho · ' + t.sairam + (t.sairam === 1 ? ' saiu' : ' saíram') + ' no período', 'animais'));
+        ind.appendChild(UI.indicador('Custo acumulado', Fmt.dinheiro(t.custo_acumulado), 'aquisição ' + Fmt.dinheiro(t.aquisicao) + ' · custeio ' + Fmt.dinheiro(t.custeio), 'custo'));
+        ind.appendChild(UI.indicador('Resultado de quem saiu', Fmt.dinheiro(t.resultado), t.com_resultado + (t.com_resultado === 1 ? ' animal' : ' animais') + ' com resultado', 'resultado'));
+        ind.appendChild(UI.indicador('Custeio não alocado', Fmt.dinheiro(r.custeio_nao_alocado.valor), 'de ' + Fmt.data(r.custeio_nao_alocado.de) + ' a ' + Fmt.data(r.custeio_nao_alocado.ate) + ', sem rateio', 'nao-alocado'));
+        corpo.appendChild(ind);
+        if (r.parcial) corpo.appendChild(UI.nota(r.parcial.mensagem, 'aviso'));
+        corpo.appendChild(UI.nota('Custo de cada animal na passagem pela fazenda: o que coube a ele de cada lançamento pelo rateio (sanitário: vacinas, remédios e serviço veterinário; alimentação: sal, ração, manutenção e arrendamento de pasto; adicionais: reprodução e outros). Toque no animal para ver cada valor e o critério de divisão.', 'info'));
+        corpo.appendChild(UI.tabela({
+          id: 'custos-animais', rotulo: 'Custo por animal', linhas: r.itens, chave: function (x) { return x.chave; },
+          colunas: [
+            { id: 'animal', rotulo: 'Animal', valor: function (x) { return x.brinco || x.codigo_interno; }, formatar: function (x) { return link('animal/' + x.animal_id + '/financeiro', x.brinco || x.codigo_interno); } },
+            { id: 'situacao', rotulo: 'Situação', valor: function (x) { return SITUACAO_CUSTO[x.situacao] + (x.saida ? ' em ' + Fmt.data(x.saida.data) : ''); } },
+            { id: 'pasto', rotulo: 'Pasto', valor: function (x) { return x.pasto_nome || '—'; } },
+            { id: 'categoria', rotulo: 'Categoria', valor: function (x) { return x.categoria ? x.categoria.nome : '—'; } },
+            { id: 'dias', rotulo: 'Dias', num: true },
+            { id: 'aquisicao', rotulo: 'Aquisição', num: true, formatar: function (x) { return x.aquisicao === null ? '— (sem valor)' : Fmt.dinheiro(x.aquisicao); } },
+            { id: 'sanitario', rotulo: 'Sanitário', num: true, formatar: function (x) { return Fmt.dinheiro(x.sanitario); } },
+            { id: 'alimentacao', rotulo: 'Alimentação', num: true, formatar: function (x) { return Fmt.dinheiro(x.alimentacao); } },
+            { id: 'adicionais', rotulo: 'Adicionais', num: true, formatar: function (x) { return Fmt.dinheiro(x.adicionais); } },
+            { id: 'custo_acumulado', rotulo: 'Custo acumulado', num: true, formatar: function (x) { return x.custo_acumulado === null ? '—' : Fmt.dinheiro(x.custo_acumulado); } },
+            { id: 'custo_diario', rotulo: 'Custeio por dia', num: true, valor: function (x) { return x.custo_diario.valor; }, formatar: function (x) { return UI.valorInd(x.custo_diario, Fmt.dinheiro).texto; } },
+            { id: 'receitas', rotulo: 'Receita', num: true, formatar: function (x) { return Fmt.dinheiro(x.receitas); } },
+            { id: 'despesas_venda', rotulo: 'Despesas de venda', num: true, formatar: function (x) { return Fmt.dinheiro(x.despesas_venda); } },
+            { id: 'resultado', rotulo: 'Resultado', num: true, valor: function (x) { return x.resultado.valor; }, formatar: function (x) { return x.resultado.valor === null ? '—' : Fmt.dinheiro(x.resultado.valor); } },
+            { id: 'margem', rotulo: 'Margem por @', num: true, valor: function (x) { return x.margem_arroba.valor; }, formatar: function (x) { return x.margem_arroba.valor === null ? '—' : Fmt.dinheiro(x.margem_arroba.valor) + (x.margem_arroba.estimado ? ' (estimada)' : ''); } },
+          ], vazio: { texto: 'Nenhum animal com esses filtros.' },
+        }).el);
+      } catch (e) {
+        if (!vivo) return;
+        Util.limpar(corpo);
+        corpo.appendChild(UI.estadoErro(e, { acao: { texto: 'Tentar de novo', aoClicar: carregar } }));
+      }
+    }
+    carregar();
+    return function () { vivo = false; };
+  }
+  /**
+   * O custo por pasto no período (financeiro.custosAnimal com visao PASTOS; 07, seção 10, relatório 15): os lançamentos de custeio
+   * com o pasto (a manutenção, o arrendamento), pela parte da competência no período, o que foi e o que não foi alocado aos
+   * animais, os animais-dia, o R$ por hectare e por animal-dia, e os totais dos pastos próprios e dos arrendados.
+   */
+  function montarCustosPastos(el) {
+    var vivo = true;
+    cabecalho(el, 'custos');
+    el.appendChild(abasCustos('pastos'));
+    var de = h('input', { type: 'date', id: 'cup-de', value: filtrosPastos.de });
+    var ate = h('input', { type: 'date', id: 'cup-ate', value: filtrosPastos.data });
+    el.appendChild(h('form', { class: 'filtros', 'aria-label': 'Custo por pasto', on: { submit: function (ev) { ev.preventDefault(); carregar(); } } },
+      campo('cup-de', 'De (vazio = 1º de janeiro)', de), campo('cup-ate', 'Até (vazio = hoje)', ate), UI.botao('Ver', { tipo: 'primario', atributos: { type: 'submit' } })));
+    var corpo = h('div');
+    el.appendChild(corpo);
+    async function carregar() {
+      filtrosPastos.de = de.value; filtrosPastos.data = ate.value;
+      Util.limpar(corpo);
+      corpo.appendChild(UI.carregando('Somando os custos dos pastos…'));
+      try {
+        var q = { visao: 'PASTOS' };
+        if (filtrosPastos.de) q.de = filtrosPastos.de;
+        if (filtrosPastos.data) q.data = filtrosPastos.data;
+        var r = (await Cliente.consulta('financeiro.custosAnimal', q)).data;
+        if (!vivo) return;
+        Util.limpar(corpo);
+        if (r.motivo) { corpo.appendChild(UI.nota(r.mensagem, 'info')); return; }
+        var ind = h('div', { class: 'indicadores', role: 'list', dataset: { resumoPastos: '1' } });
+        r.por_posse.forEach(function (p) {
+          ind.appendChild(UI.indicador('Pastos ' + (p.posse === 'ARRENDADO' ? 'arrendados' : 'próprios'), Fmt.dinheiro(p.custo), p.pastos + (p.pastos === 1 ? ' pasto' : ' pastos') + ' · ' + p.animais_dia + ' animais-dia' + (p.custo_animal_dia === null ? '' : ' · ' + Fmt.dinheiro(p.custo_animal_dia) + ' por animal-dia'), 'posse-' + p.posse));
+        });
+        ind.appendChild(UI.indicador('Custeio sem pasto', Fmt.dinheiro(r.custeio_sem_pasto), 'os outros gastos do período (fora dos pastos)', 'sem-pasto'));
+        corpo.appendChild(ind);
+        corpo.appendChild(UI.nota('De ' + Fmt.data(r.de) + ' a ' + Fmt.data(r.ate) + '. O custo de cada pasto são os lançamentos com o pasto (manutenção, arrendamento), pela parte do período; "alocado" é o que já foi rateado entre os animais. Animais-dia: o dia da entrada conta, o da saída não.', 'info'));
+        if (r.antes_do_marco_zero) corpo.appendChild(UI.nota('O período começa antes do marco zero: as contas começam nele.', 'info'));
+        corpo.appendChild(UI.tabela({
+          id: 'custos-pastos', rotulo: 'Custo por pasto', linhas: r.pastos, chave: function (p) { return p.pasture_id; },
+          colunas: [
+            { id: 'nome', rotulo: 'Pasto', formatar: function (p) { return link('pasto/' + p.pasture_id, p.nome); } },
+            { id: 'posse', rotulo: 'Posse', valor: function (p) { return Fmt.rotulo('POSSE', p.posse) + (p.arrendador_nome ? ' de ' + p.arrendador_nome : ''); } },
+            { id: 'area_hectares', rotulo: 'Área (ha)', num: true, formatar: function (p) { return p.area_hectares === null ? '—' : Fmt.numero(p.area_hectares, Fmt.casas(p.area_hectares)); } },
+            { id: 'custo', rotulo: 'Custo no período', num: true, formatar: function (p) { return Fmt.dinheiro(p.custo); } },
+            { id: 'alocado', rotulo: 'Alocado aos animais', num: true, formatar: function (p) { return Fmt.dinheiro(p.alocado); } },
+            { id: 'nao_alocado', rotulo: 'Sem alocar', num: true, formatar: function (p) { return Fmt.dinheiro(p.nao_alocado); } },
+            { id: 'animais_dia', rotulo: 'Animais-dia', num: true },
+            { id: 'custo_ha', rotulo: 'Por hectare', num: true, valor: function (p) { return p.custo_ha.valor; }, formatar: function (p) { return UI.valorInd(p.custo_ha, Fmt.dinheiro).texto; } },
+            { id: 'custo_animal_dia', rotulo: 'Por animal-dia', num: true, valor: function (p) { return p.custo_animal_dia.valor; }, formatar: function (p) { return UI.valorInd(p.custo_animal_dia, Fmt.dinheiro).texto; } },
+          ], vazio: { texto: 'Nenhum pasto com custo ou animal no período.' },
+        }).el);
+        var lancs = [];
+        r.pastos.forEach(function (p) { p.lancamentos.forEach(function (x) { lancs.push({ chave: p.pasture_id + ':' + x.financial_id, pasto: p.nome, x: x }); }); });
+        if (lancs.length) {
+          corpo.appendChild(UI.secao('Lançamentos dos pastos', UI.tabela({
+            id: 'custos-pastos-lancamentos', rotulo: 'Lançamentos dos pastos no período', linhas: lancs, chave: function (l) { return l.chave; },
+            colunas: [
+              { id: 'pasto', rotulo: 'Pasto' },
+              { id: 'lancamento', rotulo: 'Lançamento', valor: function (l) { return l.x.descricao || l.x.conta_nome; }, formatar: function (l) { return link('financeiro/lancamento/' + l.x.financial_id, l.x.descricao || l.x.conta_nome || 'lançamento'); } },
+              { id: 'conta', rotulo: 'Conta', valor: function (l) { return l.x.conta_nome; } },
+              { id: 'competencia', rotulo: 'Competência', valor: function (l) { return l.x.competencia_inicio ? Fmt.data(l.x.competencia_inicio) + ' a ' + Fmt.data(l.x.competencia_fim) : Fmt.data(l.x.data_competencia); } },
+              { id: 'valor', rotulo: 'Valor do lançamento', num: true, valor: function (l) { return l.x.valor_lancamento; }, formatar: function (l) { return Fmt.dinheiro(l.x.valor_lancamento); } },
+              { id: 'periodo', rotulo: 'No período', num: true, valor: function (l) { return l.x.valor_periodo; }, formatar: function (l) { return Fmt.dinheiro(l.x.valor_periodo); } },
+              { id: 'alocado', rotulo: 'Alocado', num: true, valor: function (l) { return l.x.alocado_periodo; }, formatar: function (l) { return Fmt.dinheiro(l.x.alocado_periodo); } },
+              { id: 'criterio', rotulo: 'Divisão', valor: function (l) { return l.x.criterio ? Fmt.rotulo('CRITERIO_RATEIO', l.x.criterio) + ' (' + Fmt.data(l.x.rateio_data) + ')' : 'sem rateio'; } },
+            ],
+          }).el, { dado: 'lancamentos-pastos' }));
+        }
+      } catch (e) {
+        if (!vivo) return;
+        Util.limpar(corpo);
+        corpo.appendChild(UI.estadoErro(e, { acao: { texto: 'Tentar de novo', aoClicar: carregar } }));
+      }
+    }
+    carregar();
+    return function () { vivo = false; };
+  }
+
+  Telas.registrar('financeiro/titulos', { titulo: 'A pagar e a receber', modulo: 'FINANCEIRO', montar: montarTitulos });
+  Telas.registrar('financeiro/resultado', { titulo: 'Resultado', modulo: 'FINANCEIRO', montar: montarResultado });
+  Telas.registrar('financeiro/custos', { titulo: 'Custo por animal', modulo: 'FINANCEIRO', montar: montarCustos });
+  Telas.registrar('financeiro/custos/pastos', { titulo: 'Custo por pasto', modulo: 'FINANCEIRO', montar: montarCustosPastos });
+  Telas.registrar('financeiro/fluxo', { titulo: 'Fluxo de caixa', modulo: 'FINANCEIRO', montar: montarFluxo });
+  Telas.registrar('financeiro', { titulo: 'Financeiro', modulo: 'FINANCEIRO', montar: montarLista });
+  Telas.registrar('financeiro/lancamentos', { titulo: 'Financeiro', modulo: 'FINANCEIRO', montar: montarLista });
+  Telas.registrar('financeiro/lancamento/:id', { titulo: 'Lançamento financeiro', modulo: 'FINANCEIRO', montar: montarDetalhe });
+  return { SITUACAO_PARCELA: SITUACAO_PARCELA, montarTitulos: montarTitulos, montarFluxo: montarFluxo, montarResultado: montarResultado, montarCustos: montarCustos, montarCustosPastos: montarCustosPastos };
+})();
+</script>

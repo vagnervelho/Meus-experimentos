@@ -1,0 +1,656 @@
+<script>
+'use strict';
+/*
+ * ERP Pecuário — Rebanho (§5; 08-ux-ui.md, seções 3, 7 e 10). Listagem com as 10 colunas da §5 (tabela no desktop,
+ * cartões abaixo de 900 px), busca por brinco (com a regra dos zeros à esquerda), nome ou código; filtros por pasto,
+ * sexo, categoria, situação e faixa etária (cortes de faixas_etarias_meses) e os atalhos "sem pasto", "sem brinco" e
+ * "sem categoria"; ordenação, paginação, seleção múltipla ("Registrar evento com N selecionados") e CSV do conjunto
+ * filtrado. "Cadastrar animal" pergunta como o animal entrou e abre o evento certo (ou o cadastro de animal de fora
+ * do rebanho). Ficha (animal.ficha) com os blocos A a J em abas, linha do tempo e árvore genealógica; edição num
+ * formulário só (cadastro direto com auditoria; campo sensível pede justificativa e vira evento de ajuste no
+ * servidor); fotos e documentos reduzidos no aparelho. Filtros ficam na memória (§17: nada de dado na rota).
+ */
+var TelaRebanho = (function () {
+  var h = Util.h;
+  var BAIXADOS = ['VENDIDO', 'MORTO', 'DESCARTADO', 'BAIXADO_AJUSTE', 'HISTORICO'];
+  var SITUACOES = [['ATIVO', 'Ativos'], ['EXTERNO', 'De fora do rebanho'], ['SAIRAM', 'Todos que saíram'], ['VENDIDO', 'Vendidos'], ['MORTO', 'Mortos'], ['DESCARTADO', 'Descartados'], ['BAIXADO_AJUSTE', 'Baixados por ajuste'], ['HISTORICO', 'Do histórico'], ['', 'Todas as situações']];
+  var ATALHOS = [['SEM_PASTO', 'Sem pasto'], ['SEM_BRINCO', 'Sem brinco'], ['SEM_CATEGORIA', 'Sem categoria']];
+  var SEM = '__SEM__';
+  var filtros = { texto: '', pasto: '', sexo: '', categoria: '', situacao: 'ATIVO', faixa: '', atalho: '' };
+
+  // ------------------------------------------------------------------ regras da listagem (puras) ----
+  function semAcento(t) { return String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim(); }
+  /** Faixas etárias pelos cortes (meses): [12,24,36] → 0–12, 12–24, 24–36, 36+ (mínima inclusiva, máxima exclusiva). */
+  function faixas(cortes) {
+    var c = (Array.isArray(cortes) && cortes.length ? cortes : [12, 24, 36]).slice().sort(function (a, b) { return a - b; });
+    var out = [];
+    var de = 0;
+    c.forEach(function (x) { out.push({ id: de + '-' + x, rotulo: de + ' a ' + x + ' meses', de: de, ate: x }); de = x; });
+    out.push({ id: de + '+', rotulo: 'Mais de ' + de + ' meses', de: de, ate: null });
+    out.push({ id: SEM, rotulo: 'Sem nascimento informado', de: null, ate: null });
+    return out;
+  }
+  function casaTexto(a, t, ignoraZeros) {
+    if (!t) return true;
+    if (a.brinco) {
+      if (Store.normalizarBrinco(a.brinco, true) === Store.normalizarBrinco(t, true)) return true;
+      if (ignoraZeros && /^\d+$/.test(String(t).trim()) && Store.normalizarBrinco(a.brinco, false) === Store.normalizarBrinco(t, false)) return true;
+    }
+    var cod = /^(?:A-?)?0*(\d{1,9})$/i.exec(String(t).trim());
+    if (cod && a.codigo_interno === 'A-' + cod[1].padStart(6, '0')) return true;
+    return !!(a.nome && semAcento(a.nome).indexOf(semAcento(t)) >= 0);
+  }
+  /**
+   * Filtra as linhas leves do store. f: {texto, pasto (id | __SEM__), sexo, categoria (id | __SEM__), situacao (código,
+   * SAIRAM ou vazio = todas), faixa (id de `faixas`), atalho (SEM_PASTO | SEM_BRINCO | SEM_CATEGORIA)}. ctx: {cortes, ignoraZeros}.
+   */
+  function filtrar(animais, f, ctx) {
+    var fx = f.faixa ? faixas(ctx.cortes).filter(function (x) { return x.id === f.faixa; })[0] : null;
+    return animais.filter(function (a) {
+      var sit = a.situacao_cadastral;
+      if (sit === 'ANULADO' || sit === 'PENDENTE') return false;
+      if (f.situacao === 'SAIRAM' ? BAIXADOS.indexOf(sit) < 0 : f.situacao && sit !== f.situacao) return false;
+      if (!casaTexto(a, f.texto, ctx.ignoraZeros)) return false;
+      if (f.pasto === SEM ? !(sit === 'ATIVO' && !a.pasto_atual_id) : f.pasto && a.pasto_atual_id !== f.pasto) return false;
+      if (f.sexo && a.sexo !== f.sexo) return false;
+      if (f.categoria === SEM ? !!a.categoria_id || sit === 'EXTERNO' : f.categoria && a.categoria_id !== f.categoria) return false;
+      if (fx) {
+        var m = a.idade_meses;
+        if (fx.id === SEM ? m !== null && m !== undefined : m === null || m === undefined || m < fx.de || (fx.ate !== null && m >= fx.ate)) return false;
+      }
+      if (f.atalho === 'SEM_PASTO' && !(sit === 'ATIVO' && !a.pasto_atual_id)) return false;
+      if (f.atalho === 'SEM_BRINCO' && (sit !== 'ATIVO' || a.brinco)) return false;
+      if (f.atalho === 'SEM_CATEGORIA' && (sit !== 'ATIVO' || a.categoria_id)) return false;
+      return true;
+    });
+  }
+  function precisaBaixados(f) { return f.situacao === '' || f.situacao === 'SAIRAM' || BAIXADOS.indexOf(f.situacao) >= 0; }
+  /** As 10 colunas da §5: texto da tela (= texto do CSV) e chave de ordenação. */
+  var COLUNAS = [
+    { id: 'brinco', rotulo: 'Brinco', valor: function (a) { return a.brinco || null; }, texto: function (a) { return a.brinco || 'sem brinco'; } },
+    { id: 'codigo_interno', rotulo: 'ID', texto: function (a) { return a.codigo_interno || '—'; } },
+    { id: 'sexo', rotulo: 'Sexo', texto: function (a) { return Fmt.rotulo('SEXO', a.sexo); } },
+    { id: 'raca', rotulo: 'Raça', texto: function (a) { return a.raca ? Store.rotuloLista('RACA', a.raca) : '—'; } },
+    { id: 'idade_meses', rotulo: 'Idade', num: true, valor: function (a) { return a.idade_meses; }, texto: function (a) { return Fmt.idade(a.idade_meses, a.data_nascimento_confianca === 'ESTIMADA'); } },
+    { id: 'categoria', rotulo: 'Categoria', texto: function (a) { var c = a.categoria_id ? Store.categoria(a.categoria_id) : null; return c ? c.nome + (a.categoria_manual ? ' (manual)' : '') : a.situacao_cadastral === 'ATIVO' ? 'Sem categoria' : '—'; } },
+    { id: 'peso_atual', rotulo: 'Peso atual', num: true, valor: function (a) { return a.peso_atual; }, texto: function (a) { return a.peso_atual ? Fmt.peso(a.peso_atual) + (a.data_ultima_pesagem ? ' em ' + Fmt.data(a.data_ultima_pesagem) : '') + (a.peso_vencido ? ' (vencido)' : '') : '—'; } },
+    { id: 'pasto', rotulo: 'Pasto atual', texto: function (a) { var p = a.pasto_atual_id ? Store.pasto(a.pasto_atual_id) : null; return p ? p.nome : a.situacao_cadastral === 'ATIVO' ? 'sem pasto' : '—'; } },
+    { id: 'situacao', rotulo: 'Situação', texto: function (a) { return Fmt.rotulo('SITUACAO_CADASTRAL', a.situacao_cadastral); } },
+    { id: 'data_nascimento', rotulo: 'Nascimento', valor: function (a) { return a.data_nascimento; }, texto: function (a) { return a.data_nascimento ? Fmt.data(a.data_nascimento) + (a.data_nascimento_confianca === 'ESTIMADA' ? ' (estimada)' : '') : '—'; } },
+  ];
+  function descreverFiltros(f) {
+    var p = [];
+    var sit = SITUACOES.filter(function (x) { return x[0] === f.situacao; })[0];
+    p.push('situação: ' + (sit ? sit[1] : f.situacao));
+    if (f.texto) p.push('busca: "' + f.texto + '"');
+    if (f.pasto) p.push('pasto: ' + (f.pasto === SEM ? 'sem pasto' : (Store.pasto(f.pasto) || {}).nome));
+    if (f.sexo) p.push('sexo: ' + Fmt.rotulo('SEXO', f.sexo));
+    if (f.categoria) p.push('categoria: ' + (f.categoria === SEM ? 'sem categoria' : (Store.categoria(f.categoria) || {}).nome));
+    if (f.faixa) p.push('idade: ' + (faixas(Store.param('faixas_etarias_meses')).filter(function (x) { return x.id === f.faixa; })[0] || {}).rotulo);
+    if (f.atalho) p.push((ATALHOS.filter(function (x) { return x[0] === f.atalho; })[0] || [0, f.atalho])[1].toLowerCase());
+    return p.join(' · ');
+  }
+  function linhasCsv(linhas) {
+    return Exportar.csv(COLUNAS.map(function (c) { return { rotulo: c.rotulo, valor: c.texto }; }), linhas, {
+      preambulo: ['Rebanho — ' + linhas.length + (linhas.length === 1 ? ' animal' : ' animais'), 'Filtros: ' + descreverFiltros(filtros), 'Dados de ' + Fmt.instante(Store.atualizadoEm())],
+    });
+  }
+
+  // ------------------------------------------------------------------ listagem ----
+  function linkFicha(a, texto, classe) {
+    var r = 'animal/' + a.animal_id + '/resumo';
+    return h('a', { class: 'botao botao-texto' + (classe ? ' ' + classe : ''), href: Roteador.href(r), dataset: { rota: r } }, texto);
+  }
+  function cartao(a) {
+    var cat = COLUNAS[5].texto(a), pasto = COLUNAS[7].texto(a);
+    return h('div', { class: 'cartao-linha-corpo', dataset: { animal: a.animal_id } },
+      h('div', { class: 'cartao-linha-topo' }, h('span', { class: 'cartao-linha-titulo brinco', text: a.brinco || 'sem brinco' }), h('span', { text: cat + ' · ' + (a.sexo || '?') })),
+      h('div', { text: [COLUNAS[3].texto(a), COLUNAS[4].texto(a), 'nasc. ' + COLUNAS[9].texto(a)].join(' · ') }),
+      h('div', { class: pasto === 'sem pasto' ? 'destaque-erro' : null, text: pasto + ' · ' + COLUNAS[6].texto(a) }),
+      h('div', { class: 'cartao-linha-topo' }, h('span', { text: COLUNAS[8].texto(a) }), h('span', { class: 'suave', text: a.codigo_interno })),
+      linkFicha(a, 'Abrir ficha'));
+  }
+  function selectFiltro(id, rotulo, opcoes, valor, aoMudar) {
+    var sel = h('select', { id: id }, opcoes.map(function (o) { return h('option', { value: o[0], text: o[1], selected: o[0] === valor }); }));
+    sel.addEventListener('change', function () { aoMudar(sel.value); });
+    return h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo', for: id, text: rotulo }), sel);
+  }
+  function tiposParaSelecao(n) {
+    var out = [];
+    (Store.catalogo().tipos || []).forEach(function (t) {
+      if (t.tipo === 'ESTORNO' || (t.selecao_animais !== 'VARIOS' && !(t.selecao_animais === 'UM' && n === 1))) return;
+      if (t.subtipos) Object.keys(t.subtipos).forEach(function (k) { out.push({ tipo: t.tipo, subtipo: k, rotulo: t.rotulo + ': ' + t.subtipos[k].rotulo }); });
+      else out.push({ tipo: t.tipo, rotulo: t.rotulo });
+    });
+    return out;
+  }
+  function registrarSelecionados(ids, origem) {
+    var tipos = tiposParaSelecao(ids.length);
+    var lista = h('ul', { class: 'lista-simples' });
+    var f = UI.folha({ titulo: 'Registrar com ' + ids.length + (ids.length === 1 ? ' animal' : ' animais'), conteudo: lista, origem: origem });
+    if (!tipos.length) lista.appendChild(h('li', { class: 'suave', text: 'Nenhum registro com vários animais disponível nesta fase.' }));
+    tipos.forEach(function (t) {
+      lista.appendChild(h('li', null, UI.botao(t.rotulo, { bloco: true, aoClicar: function () {
+        f.fechar({ forcar: true });
+        Registro.abrir(t.tipo, { subtipo: t.subtipo || null, linhas: ids.map(function (id) { return { animal_id: id }; }), origem: 'rebanho' });
+      } })));
+    });
+  }
+  function defsAnimal(ids, ajustes) {
+    var base = (Store.tipoEvento('ENTRADA_INICIAL') || Store.tipoEvento('OUTRA_ENTRADA') || {}).campos_animal || [];
+    return ids.map(function (id) {
+      var d = base.filter(function (x) { return x.id === id; })[0] || { id: id, tipo: 'texto', rotulo: Fmt.rotulo('', id) };
+      return Object.assign({}, d, (ajustes || {})[id] || {});
+    });
+  }
+  function cadastrarExterno(origem) {
+    Cadastro.folha({
+      titulo: 'Animal de fora do rebanho', rota: 'animal.cadastrarExterno', origem: origem, idBase: 'ext', verbo: 'Cadastrar',
+      defs: defsAnimal(['nome', 'sexo', 'raca', 'data_nascimento', 'data_nascimento_confianca', 'observacoes'], { nome: { obrigatorio: true, rotulo: 'Nome ou identificação (ex.: touro de sêmen)' } }),
+      extra: UI.nota('Touro de sêmen ou progenitor que não é do rebanho: fica como referência para a genealogia e não entra no inventário.', 'info'),
+      montar: function (c) { return { campos: c }; },
+      sucesso: function () { return 'Animal de fora do rebanho cadastrado.'; },
+      aoSalvar: function (r) { Roteador.ir('animal/' + r.data.animal_id + '/resumo'); },
+    });
+  }
+  /**
+   * "Cadastrar animal": como entrou? Só as opções cujo evento já foi entregue (08, seção 3). `pastoId` (o painel do
+   * pasto vazio): o formulário escolhido já vem com o pasto de destino.
+   */
+  function comoEntrou(origem, pastoId) {
+    var opcoes = [
+      { tipo: 'NASCIMENTO', rotulo: 'Nasceu aqui', ajuda: 'Parto de uma vaca do rebanho.' },
+      { tipo: 'COMPRA', rotulo: 'Foi comprado', ajuda: 'Compra com valor e vendedor.' },
+      { tipo: 'ENTRADA_INICIAL', rotulo: 'Já estava no rebanho', ajuda: 'Animal que já estava na fazenda no marco zero (rebanho inicial).' },
+      { tipo: 'OUTRA_ENTRADA', rotulo: 'Outra entrada', ajuda: 'Doação, permuta, animal achado ou que volta sem compra.' },
+    ].filter(function (o) { return Store.tipoEvento(o.tipo); });
+    var lista = h('ul', { class: 'lista-simples', dataset: { comoEntrou: '1' } });
+    var f = UI.folha({ titulo: 'Como o animal entrou?', conteudo: lista, origem: origem });
+    opcoes.forEach(function (o) {
+      lista.appendChild(h('li', { class: 'linha-acao' }, h('div', null, h('div', { class: 'dado', text: o.rotulo }), h('div', { class: 'suave', text: o.ajuda })),
+        UI.botao('Escolher', { rotulo: o.rotulo, atributos: { 'data-entrada': o.tipo }, aoClicar: function () {
+          f.fechar({ forcar: true });
+          if (!pastoId) { Roteador.ir('evento/novo/' + o.tipo); return; }
+          // Compra e parto levam o pasto no cabeçalho; o rebanho inicial e a outra entrada, em cada animal.
+          var noCabecalho = o.tipo === 'COMPRA' || o.tipo === 'NASCIMENTO';
+          Registro.abrir(o.tipo, noCabecalho ? { campos: { pasto_destino_id: pastoId }, origem: 'pasto/' + pastoId } : { linhas: [{ valores: { pasto_destino_id: pastoId } }], origem: 'pasto/' + pastoId });
+        } })));
+    });
+    lista.appendChild(h('li', { class: 'linha-acao' }, h('div', null, h('div', { class: 'dado', text: 'É de fora do rebanho' }), h('div', { class: 'suave', text: 'Touro de sêmen ou progenitor de outra fazenda.' })),
+      UI.botao('Escolher', { rotulo: 'É de fora do rebanho', atributos: { 'data-entrada': 'EXTERNO' }, aoClicar: function () { f.fechar({ forcar: true }); cadastrarExterno(origem); } })));
+  }
+  function montarLista(el) {
+    var vivo = true;
+    var cortes = Store.param('faixas_etarias_meses');
+    var ctx = { cortes: cortes, ignoraZeros: Store.param('brinco_ignora_zeros_esquerda') !== false };
+    var cab = h('div', { class: 'tela-cabecalho' }, h('h1', { text: 'Rebanho' }));
+    var acoes = h('div', { class: 'acoes', style: 'margin-top:0' });
+    if (App.podeRegistrar()) acoes.appendChild(UI.botao('Cadastrar animal', { tipo: 'primario', icone: 'registrar', aoClicar: function (ev) { comoEntrou(ev.currentTarget); } }));
+    var exportarB = UI.botao('Exportar CSV', { aoClicar: function () {
+      var linhas = tabela.ordenadas();
+      var nome = Exportar.baixar(Exportar.nome('rebanho'), linhasCsv(linhas));
+      UI.aviso('Arquivo ' + nome + ' com ' + linhas.length + (linhas.length === 1 ? ' animal.' : ' animais.'), { tipo: 'ok' });
+    } });
+    acoes.appendChild(exportarB);
+    cab.appendChild(acoes);
+    el.appendChild(cab);
+    var idb = 'reb-' + Util.uuid().slice(0, 6);
+    var busca = h('input', { type: 'search', id: idb + 'q', value: filtros.texto, autocomplete: 'off', inputmode: Store.param('brinco_somente_numerico') === true ? 'numeric' : null });
+    busca.addEventListener('input', Util.adiar(function () { filtros.texto = busca.value.trim(); aplicar(); }, 250));
+    var pastos = [['', 'Todos'], [SEM, 'Sem pasto']].concat(Store.pastos({ todos: true }).map(function (p) { return [p.pasture_id, p.nome + (p.status === 'INATIVO' ? ' (inativo)' : '')]; }));
+    var cats = [['', 'Todas'], [SEM, 'Sem categoria']].concat(Store.categorias().map(function (c) { return [c.category_id, c.nome]; }));
+    var fx = [['', 'Todas']].concat(faixas(cortes).map(function (x) { return [x.id, x.rotulo]; }));
+    var mudar = function (k) { return function (v) { filtros[k] = v; aplicar(); }; };
+    var grade = h('div', { class: 'filtros', role: 'search', 'aria-label': 'Filtrar o rebanho' },
+      h('div', { class: 'campo' }, h('label', { class: 'campo-rotulo', for: idb + 'q', text: 'Brinco, nome ou código' }), busca),
+      selectFiltro(idb + 'p', 'Pasto', pastos, filtros.pasto, mudar('pasto')),
+      selectFiltro(idb + 's', 'Sexo', [['', 'Todos'], ['M', 'Macho'], ['F', 'Fêmea']], filtros.sexo, mudar('sexo')),
+      selectFiltro(idb + 'c', 'Categoria', cats, filtros.categoria, mudar('categoria')),
+      selectFiltro(idb + 'x', 'Situação', SITUACOES, filtros.situacao, mudar('situacao')),
+      selectFiltro(idb + 'f', 'Faixa etária', fx, filtros.faixa, mudar('faixa')));
+    el.appendChild(grade);
+    var atalhos = h('div', { class: 'acoes', role: 'group', 'aria-label': 'Atalhos' });
+    ATALHOS.forEach(function (x) {
+      var b = UI.botao(x[1], { aoClicar: function () { filtros.atalho = filtros.atalho === x[0] ? '' : x[0]; if (filtros.atalho) filtros.situacao = 'ATIVO'; Roteador.ir('rebanho', { forcar: true, substituir: true }); } });
+      b.setAttribute('aria-pressed', filtros.atalho === x[0] ? 'true' : 'false');
+      b.setAttribute('data-atalho', x[0]);
+      atalhos.appendChild(b);
+    });
+    el.appendChild(atalhos);
+    var resumo = h('p', { class: 'dado', role: 'status', dataset: { contagem: '1' } });
+    var barraSel = h('div', { class: 'acoes', dataset: { barraSelecao: '1' } });
+    el.appendChild(resumo);
+    el.appendChild(barraSel);
+    var corpo = h('div');
+    el.appendChild(corpo);
+    var tabela = UI.tabela({
+      id: 'rebanho', rotulo: 'Animais do rebanho', chave: function (a) { return a.animal_id; }, rotuloLinha: function (a) { return Store.rotuloAnimal(a); },
+      colunas: COLUNAS.map(function (c, i) {
+        return { id: c.id, rotulo: c.rotulo, num: c.num, valor: c.valor || c.texto, formatar: i === 0 ? function (a) { return linkFicha(a, c.texto(a), a.brinco ? 'brinco' : 'suave'); } : i === 7 ? function (a) { var t = c.texto(a); return t === 'sem pasto' ? h('span', { class: 'destaque-erro', text: t }) : t; } : c.texto };
+      }),
+      linhas: [], cartao: cartao, vazio: { texto: 'Nenhum animal com esses filtros.' },
+      selecao: { aoMudar: function (ids) { desenharSelecao(ids); } },
+    });
+    corpo.appendChild(tabela.el);
+    function desenharSelecao(ids) {
+      Util.limpar(barraSel);
+      if (!ids.length) return;
+      var ativos = ids.filter(function (id) { var a = Store.animal(id); return a && a.situacao_cadastral !== 'EXTERNO'; });
+      barraSel.appendChild(UI.botao('Registrar evento com ' + ids.length + (ids.length === 1 ? ' selecionado' : ' selecionados'), { tipo: 'primario', aoClicar: function (ev) { registrarSelecionados(ativos.length ? ativos : ids, ev.currentTarget); } }));
+    }
+    async function aplicar() {
+      if (precisaBaixados(filtros) && !Store.baixados()) {
+        resumo.textContent = 'Buscando os animais que saíram do rebanho…';
+        try {
+          await Store.carregarBaixados();
+        } catch (e) {
+          if (!vivo) return;
+          Util.limpar(corpo);
+          corpo.appendChild(UI.estadoErro(e, { acao: { texto: 'Tentar de novo', aoClicar: function () { Roteador.ir('rebanho', { forcar: true, substituir: true }); } } }));
+          return;
+        }
+        if (!vivo) return;
+      }
+      var base = Store.animais().concat(precisaBaixados(filtros) ? (Store.baixados() || []) : []);
+      var linhas = filtrar(base, filtros, ctx);
+      resumo.textContent = linhas.length + (linhas.length === 1 ? ' animal' : ' animais') + ' · ' + descreverFiltros(filtros);
+      exportarB.disabled = !linhas.length;
+      tabela.atualizar(linhas);
+    }
+    aplicar();
+    return function () { vivo = false; };
+  }
+
+  // ------------------------------------------------------------------ ficha ----
+  var ABAS = [['resumo', 'Resumo'], ['genealogia', 'Genealogia'], ['pastos', 'Pastos'], ['peso', 'Peso'], ['sanidade', 'Sanidade'], ['reproducao', 'Reprodução'], ['financeiro', 'Financeiro'], ['eventos', 'Linha do tempo'], ['anexos', 'Fotos e documentos']];
+  var BLOCO_DA_ABA = { peso: 'peso', sanidade: 'sanitario', reproducao: 'reprodutivo', financeiro: 'financeiro' };
+  /** Atalhos da ficha (08, seção 4.1): os mais usados à vista; os demais em "Mais registros". Só aparece tipo ativo no catálogo. */
+  var ATALHOS_FICHA = [
+    { tipo: 'PESAGEM', rotulo: 'Pesar' }, { tipo: 'SANIDADE', rotulo: 'Vacinar ou tratar' }, { tipo: 'TRANSFERENCIA', rotulo: 'Transferir' },
+    { tipo: 'VENDA', rotulo: 'Vender' }, { tipo: 'MORTE', rotulo: 'Registrar morte' },
+    { tipo: 'NASCIMENTO', rotulo: 'Registrar parto', filtro: true }, { tipo: 'OUTRA_ENTRADA', rotulo: 'Voltar ao rebanho', volta: true },
+  ];
+  var MAIS_FICHA = [
+    { tipo: 'DESCARTE', rotulo: 'Descartar (consumo, doação, sacrifício)' },
+    { tipo: 'IDENTIFICACAO', subtipo: 'PRIMEIRA_IDENTIFICACAO', rotulo: 'Pôr brinco', se: function (a) { return !a.brinco; } },
+    { tipo: 'IDENTIFICACAO', subtipo: 'SUBSTITUICAO', rotulo: 'Trocar o brinco', se: function (a) { return !!a.brinco; } },
+    { tipo: 'IDENTIFICACAO', subtipo: 'REMOCAO', rotulo: 'Tirar o brinco sem pôr outro', se: function (a) { return !!a.brinco; } },
+    { tipo: 'MARCACAO', subtipo: 'DESCARTE', rotulo: function (a) { return a.marcado_descarte ? 'Tirar a marca de descarte' : 'Marcar para descarte'; }, campos: function (a) { return { acao: a.marcado_descarte ? 'DESMARCAR' : 'MARCAR' }; } },
+    { tipo: 'MARCACAO', subtipo: 'NAO_LOCALIZADO', rotulo: function (a) { return a.nao_localizado ? 'Foi encontrado (tirar a marca de não localizado)' : 'Marcar como não localizado'; }, campos: function (a) { return { acao: a.nao_localizado ? 'DESMARCAR' : 'MARCAR' }; } },
+    { tipo: 'AJUSTE_INVENTARIO', subtipo: 'RECLASSIFICACAO', rotulo: 'Mudar a categoria' },
+    { tipo: 'AJUSTE_INVENTARIO', subtipo: 'DIVERGENCIA_CONTAGEM', rotulo: 'Não encontrado na contagem (baixa)' },
+    { tipo: 'AJUSTE_INVENTARIO', subtipo: 'IDENTIFICACAO_INCORRETA', rotulo: 'Corrigir brinco lançado errado' },
+    { tipo: 'AJUSTE_INVENTARIO', subtipo: 'CORRECAO_LOCALIZACAO', rotulo: 'Corrigir o pasto' },
+  ];
+  var fichas = {};
+  async function ficha(id, forcar) {
+    var k = fichas[id];
+    if (!forcar && k && k.versao === Store.versao()) return k.dados;
+    var r = await Cliente.consulta('animal.ficha', { animal_id: id });
+    fichas[id] = { versao: Store.versao(), dados: r.data };
+    return r.data;
+  }
+  function nomeNo(n) { return n ? (n.brinco || n.rotulo || n.codigo_interno || 'animal') : '—'; }
+  function atalhoDisponivel_(x, a) {
+    var def = Store.tipoEvento(x.tipo);
+    if (!def || (x.subtipo && !(def.subtipos && def.subtipos[x.subtipo]))) return null;
+    if (x.volta || x.filtro ? Seletor.motivoInelegivel(a, def.filtro_elegiveis) !== null : a.situacao_cadastral !== 'ATIVO') return null;
+    if (x.se && !x.se(a)) return null;
+    return def;
+  }
+  function abrirAtalho_(x, a, id) {
+    Registro.abrir(x.tipo, { subtipo: x.subtipo || null, campos: x.campos ? x.campos(a) : {}, linhas: [{ animal_id: id }], origem: 'animal/' + id + '/resumo' });
+  }
+  function atalhosFicha(a, id) {
+    var out = [];
+    ATALHOS_FICHA.forEach(function (x) {
+      if (!atalhoDisponivel_(x, a)) return;
+      out.push(UI.botao(x.rotulo, { atributos: { 'data-atalho-ficha': x.subtipo || x.tipo }, aoClicar: function () { abrirAtalho_(x, a, id); } }));
+    });
+    var mais = MAIS_FICHA.filter(function (x) { return atalhoDisponivel_(x, a); });
+    if (mais.length) out.push(UI.botao('Mais registros', { atributos: { 'data-atalho-ficha': 'MAIS' }, aoClicar: function (ev) {
+      var lista = h('ul', { class: 'lista-simples' });
+      var f = UI.folha({ titulo: 'Registrar para ' + Store.rotuloAnimal(a), conteudo: lista, origem: ev.currentTarget });
+      mais.forEach(function (x) {
+        lista.appendChild(h('li', null, UI.botao(typeof x.rotulo === 'function' ? x.rotulo(a) : x.rotulo, { bloco: true, atributos: { 'data-atalho-ficha': x.subtipo ? x.tipo + '.' + x.subtipo : x.tipo }, aoClicar: function () { f.fechar({ forcar: true }); abrirAtalho_(x, a, id); } })));
+      });
+    } }));
+    return out;
+  }
+  /** Edição num formulário só (DV-07): cadastro direto com auditoria; campo sensível pede justificativa e vira ajuste. */
+  function editar(f, origem) {
+    var g = f.geral, gen = f.genealogia || {};
+    var externo = g.situacao_cadastral === 'EXTERNO';
+    var sensiveis = Object.keys(Fmt.ROTULOS.CAMPO_CORRIGIVEL);
+    var ids = externo ? ['nome', 'sexo', 'raca', 'data_nascimento', 'data_nascimento_confianca', 'observacoes']
+      : ['nome', 'raca', 'sexo', 'data_nascimento', 'data_nascimento_confianca', 'mae_id', 'mae_confianca', 'pai_id', 'pai_confianca', 'castrado', 'reprodutor', 'partos_previos', 'origem', 'data_entrada', 'data_entrada_confianca', 'observacoes'];
+    var ajustes = { mae_confianca: { visivel_se: { campo: 'mae_id', preenchido: true }, obrigatorio_se: { campo: 'mae_id', preenchido: true } }, pai_confianca: { visivel_se: { campo: 'pai_id', preenchido: true }, obrigatorio_se: { campo: 'pai_id', preenchido: true } }, origem: { obrigatorio: false } };
+    var defs = defsAnimal(ids, ajustes).concat([{ id: 'justificativa', rotulo: 'Justificativa da correção', tipo: 'texto', ajuda: 'Obrigatória quando muda sexo, nascimento, mãe, pai, castração ou origem: vira um lançamento de ajuste.' }]);
+    var str = function (v) { return v === null || v === undefined ? null : typeof v === 'number' ? String(v) : v; };
+    var bruto = {
+      nome: g.nome, raca: g.raca, sexo: g.sexo, data_nascimento: g.data_nascimento, data_nascimento_confianca: g.data_nascimento_confianca,
+      mae_id: gen.mae ? gen.mae.animal_id : null, mae_confianca: gen.mae ? gen.mae.confianca : null, pai_id: gen.pai ? gen.pai.animal_id : null, pai_confianca: gen.pai ? gen.pai.confianca : null,
+      castrado: g.castrado, reprodutor: g.reprodutor, partos_previos: str(g.partos_previos), origem: g.origem, data_entrada: g.data_entrada, data_entrada_confianca: g.data_entrada_confianca, observacoes: g.observacoes,
+    };
+    var antes = Formulario.converterValores(defs, Util.clonar(bruto)).valores;
+    function mudancas(c) {
+      var out = {};
+      ids.forEach(function (k) { var a = antes[k] === undefined ? null : antes[k], n = c[k] === undefined ? null : c[k]; if (JSON.stringify(a) !== JSON.stringify(n)) out[k] = n; });
+      return out;
+    }
+    function temSensivel(m) { return !externo && Object.keys(m).some(function (k) { return sensiveis.indexOf(k) >= 0; }); }
+    var form = Cadastro.folha({
+      titulo: 'Editar ' + (g.brinco || g.codigo_interno), rota: 'animal.editar', origem: origem, idBase: 'edit', verbo: 'Salvar', defs: defs, valores: Util.clonar(bruto),
+      aoMudar: function (id, v, bloco) {
+        var c = Formulario.converterValores(defs, Util.clonar(v)).valores;
+        var sens = temSensivel(mudancas(c));
+        bloco.campo('justificativa').mostrar(sens);
+        bloco.campo('justificativa').marcarObrigatorio(sens);
+      },
+      validar: function (c) {
+        var m = mudancas(c);
+        if (!Object.keys(m).length) return [{ campo: 'nome', mensagem: 'Nada mudou no cadastro.' }];
+        if (temSensivel(m) && Util.vazio(c.justificativa)) return [{ campo: 'justificativa', mensagem: 'Diga por que o dado está sendo corrigido.' }];
+        return [];
+      },
+      montar: function (c) {
+        var m = mudancas(c);
+        var d = { animal_id: f.animal_id, campos: m };
+        if (temSensivel(m)) d.justificativa = c.justificativa;
+        return d;
+      },
+      sucesso: function (d) { return d && d.event_id ? 'Correção gravada com a justificativa (lançamento de ajuste).' : 'Cadastro atualizado.'; },
+      aoSalvar: function () { delete fichas[f.animal_id]; Roteador.ir(Roteador.atual(), { forcar: true, substituir: true }); },
+    });
+    form.bloco.campo('justificativa').mostrar(false);
+    return form;
+  }
+  function blocoResumo(f, a) {
+    var g = f.geral, loc = f.localizacao;
+    var cat = g.categoria ? g.categoria.nome + (g.categoria.manual ? ' (manual)' : '') : g.sem_categoria ? 'Sem categoria' : '—';
+    var pv = g.peso_vigente;
+    var ids = (g.identificacoes || []).filter(function (x) { return !x.data_fim; }).map(function (x) { return Fmt.rotulo('IDENTIFICACAO', x.tipo) + ': ' + x.codigo; });
+    return h('div', null,
+      UI.secao('Informações gerais', UI.pares([
+        ['Brinco', g.brinco || 'sem brinco'], ['Código', g.codigo_interno], ['Nome', g.nome], ['Sexo', Fmt.rotulo('SEXO', g.sexo)], ['Raça', g.raca_rotulo || g.raca],
+        ['Nascimento', g.data_nascimento ? Fmt.data(g.data_nascimento) + ' (' + Fmt.rotulo('CONFIANCA', g.data_nascimento_confianca).toLowerCase() + ')' : 'não informado'],
+        ['Idade', Fmt.idade(g.idade_meses, g.data_nascimento_confianca === 'ESTIMADA')], ['Categoria', cat], ['Situação', Fmt.rotulo('SITUACAO_CADASTRAL', g.situacao_cadastral)],
+        ['Origem', Fmt.rotulo('ORIGEM', g.origem)], g.sexo === 'M' ? ['Castrado', g.castrado === null ? '—' : g.castrado ? 'Sim' : 'Não'] : null, g.sexo === 'M' ? ['Reprodutor', g.reprodutor === null ? '—' : g.reprodutor ? 'Sim' : 'Não'] : null,
+        g.sexo === 'F' ? ['Partos anteriores', g.partos_previos === null ? '—' : String(g.partos_previos)] : null, g.sexo === 'F' ? ['Situação reprodutiva', Fmt.rotulo('SITUACAO_REPRODUTIVA', g.situacao_reprodutiva)] : null,
+        ['Chegou na fazenda', g.data_entrada ? Fmt.data(g.data_entrada) + (g.data_entrada_confianca ? ' (' + Fmt.rotulo('CONFIANCA', g.data_entrada_confianca).toLowerCase() + ')' : '') : '—'],
+        ['Peso', pv && pv.kg ? Fmt.peso(pv.kg) + (pv.data_pesagem ? ' em ' + Fmt.data(pv.data_pesagem) : '') + (pv.estimado ? ' (estimado)' : '') : '—'],
+        ['Outras identificações', ids.join(' · ')], ['Observações', g.observacoes],
+      ]), { dado: 'geral' }),
+      UI.secao('Localização atual', UI.pares([
+        ['Pasto', loc.sem_pasto ? h('span', { class: 'destaque-erro', text: 'sem pasto' }) : loc.pasto_nome], ['Propriedade', loc.propriedade_nome], ['Desde', loc.desde ? Fmt.data(loc.desde) : null],
+      ]), { dado: 'localizacao' }));
+  }
+  function noArvore(n, papel, id) {
+    if (!n) return h('div', { class: 'no-arvore desconhecido' }, h('span', { class: 'suave', text: papel }), h('span', { text: 'desconhecido' }));
+    var classe = 'no-arvore' + (n.confirmado ? '' : ' nao-confirmado') + (n.disponivel === false ? ' desconhecido' : '');
+    var corpo = [h('span', { class: 'suave', text: papel }), h('span', { class: 'dado brinco', text: nomeNo(n) })];
+    if (n.data_nascimento) corpo.push(h('span', { text: 'nasc. ' + Fmt.data(n.data_nascimento) }));
+    corpo.push(h('span', { class: 'suave', text: n.disponivel === false ? 'registro indisponível' : n.confirmado ? 'confirmado' : 'não confirmado (' + Fmt.rotulo('CONFIANCA', n.confianca || 'DESCONHECIDA').toLowerCase() + ')' }));
+    if (n.disponivel !== false && n.animal_id !== id) { var r = 'animal/' + n.animal_id + '/genealogia'; corpo.push(h('a', { class: 'botao botao-texto', href: Roteador.href(r), dataset: { rota: r } }, 'Abrir')); }
+    return h('div', { class: classe, dataset: { no: papel } }, corpo);
+  }
+  function blocoGenealogia(f, aoEditar) {
+    var gen = f.genealogia;
+    var caixa = h('div');
+    var edit = aoEditar ? UI.botao('Informar mãe ou pai', { aoClicar: aoEditar }) : null;
+    if (gen.sem_genealogia) caixa.appendChild(UI.secao('Árvore genealógica', h('div', null, UI.nota('Sem genealogia registrada.', 'info'), edit), { dado: 'arvore' }));
+    else {
+      var geracoes = [['Pais', [[gen.arvore.mae, 'Mãe'], [gen.arvore.pai, 'Pai']]]];
+      var proxima = function (nivel) {
+        var out = [];
+        nivel.forEach(function (p) {
+          var n = p[0], base = p[1];
+          var sufixo = base === 'Mãe' ? ' materna' : base === 'Pai' ? ' paterna' : ' (' + base.toLowerCase() + ')';
+          out.push([n ? n.mae : null, (base === 'Mãe' || base === 'Pai' ? 'Avó' : 'Bisavó') + sufixo], [n ? n.pai : null, (base === 'Mãe' || base === 'Pai' ? 'Avô' : 'Bisavô') + (base === 'Mãe' ? ' materno' : base === 'Pai' ? ' paterno' : ' (' + base.toLowerCase() + ')')]);
+        });
+        return out;
+      };
+      if ((gen.geracoes || 3) >= 2) geracoes.push(['Avós', proxima(geracoes[0][1])]);
+      if ((gen.geracoes || 3) >= 3) geracoes.push(['Bisavós', proxima(geracoes[1][1])]);
+      var arvore = h('div', { class: 'arvore', dataset: { arvore: '1' } }, geracoes.map(function (g) {
+        if (!g[1].some(function (p) { return p[0]; }) && g[0] !== 'Pais') return null;
+        return h('div', null, h('h3', { text: g[0] }), h('div', { class: 'arvore-ramo' }, g[1].map(function (p) { return noArvore(p[0], p[1], f.animal_id); })));
+      }));
+      caixa.appendChild(UI.secao('Árvore genealógica', h('div', null, arvore, h('p', { class: 'suave', text: 'Borda tracejada: parentesco não confirmado.' }), edit), { dado: 'arvore' }));
+    }
+    var filhos = gen.filhos || [];
+    caixa.appendChild(UI.secao('Crias (' + filhos.length + ')', filhos.length ? UI.tabela({
+      id: 'crias', rotulo: 'Crias', linhas: filhos, chave: function (c) { return c.animal_id; },
+      colunas: [
+        { id: 'brinco', rotulo: 'Cria', valor: function (c) { return c.brinco || c.codigo_interno; }, formatar: function (c) { var r = 'animal/' + c.animal_id + '/resumo'; return h('a', { class: 'botao botao-texto', href: Roteador.href(r), dataset: { rota: r } }, c.brinco || c.rotulo || c.codigo_interno); } },
+        { id: 'sexo', rotulo: 'Sexo', formatar: function (c) { return Fmt.rotulo('SEXO', c.sexo); } },
+        { id: 'data_nascimento', rotulo: 'Nascimento', formatar: function (c) { return Fmt.data(c.data_nascimento); } },
+        { id: 'papel', rotulo: 'Parentesco', formatar: function (c) { return (c.papel === 'MAE' ? 'mãe' : 'pai') + ' · ' + (c.confianca === 'CONFIRMADA' ? 'confirmado' : 'não confirmado'); } },
+        { id: 'situacao_cadastral', rotulo: 'Situação', formatar: function (c) { return Fmt.rotulo('SITUACAO_CADASTRAL', c.situacao_cadastral); } },
+      ],
+    }).el : h('p', { class: 'suave', text: 'Nenhuma cria registrada.' }), { dado: 'crias' }));
+    return caixa;
+  }
+  function rotuloMovimento(r) { if (!r) return ''; var t = Store.tipoEvento(r.event_type); return t ? t.rotulo : Fmt.rotulo('', r.event_type); }
+  function blocoPastos(f) {
+    var per = (f.pastos && f.pastos.periodos) || [];
+    if (!per.length) return UI.nota('Nenhum período em pasto registrado.', 'info');
+    var caixa = h('div');
+    caixa.appendChild(UI.tabela({ id: 'periodos', rotulo: 'Períodos em cada pasto', linhas: per.slice().reverse(), chave: function (p) { return p.inicio + p.pasture_id; },
+      colunas: [
+        { id: 'pasto_nome', rotulo: 'Pasto', formatar: function (p) { return p.pasto_nome || 'sem pasto'; } },
+        { id: 'inicio', rotulo: 'Entrou em', formatar: function (p) { return Fmt.data(p.inicio) + (p.entrada ? ' · ' + rotuloMovimento(p.entrada).toLowerCase() : ''); } },
+        { id: 'fim', rotulo: 'Saiu em', formatar: function (p) { return p.em_andamento ? 'está lá' : Fmt.data(p.fim) + (p.saida ? ' · ' + rotuloMovimento(p.saida).toLowerCase() : ''); } },
+        { id: 'dias', rotulo: 'Dias', num: true },
+      ] }).el);
+    var tot = (f.pastos && f.pastos.por_pasto) || [];
+    if (tot.length > 1) caixa.appendChild(UI.secao('Dias em cada pasto', UI.pares(tot.map(function (p) { return [p.pasto_nome || 'sem pasto', p.dias + (p.dias === 1 ? ' dia' : ' dias') + (p.atual ? ' (está lá)' : '')]; })), { dado: 'dias-por-pasto' }));
+    return caixa;
+  }
+  /** Bloco G (reprodução): na Fase 2, a parte de partos; o que chega depois aparece como aviso. */
+  var ORIGEM_CUSTO = { NEGOCIADO: 'preço da compra', ABERTURA_INFORMADA: 'valor de abertura informado', ABERTURA_ESTIMADA: 'valor de abertura pela tabela de preços', NAO_SE_APLICA: 'nasceu na fazenda', DESCONHECIDO: 'não informado' };
+  /** Bloco H (§11.2): custo de aquisição e lançamentos do animal, sempre pelas alocações (o que coube a ele de cada lançamento). */
+  function blocoFinanceiro(f) {
+    var b = f.financeiro || {};
+    var caixa = h('div', { dataset: { blocoFinanceiro: '1' } });
+    if (b.entregue === false) { caixa.appendChild(UI.nota(b.mensagem, 'info')); return caixa; }
+    var custo = b.custo_aquisicao === null || b.custo_aquisicao === undefined ? '— (sem valor de aquisição)' : Fmt.dinheiro(b.custo_aquisicao) + (b.custo_aquisicao_origem ? ' · ' + (ORIGEM_CUSTO[b.custo_aquisicao_origem] || b.custo_aquisicao_origem) : '');
+    var cl = b.classes || {};
+    var ma = b.margem_arroba || {};
+    caixa.appendChild(UI.pares([
+      ['Custo de aquisição', custo], ['Custeio alocado', Fmt.dinheiro(b.custeio) + ' (sanitário ' + Fmt.dinheiro(cl.sanitario || 0) + ' · alimentação ' + Fmt.dinheiro(cl.alimentacao || 0) + ' · adicionais ' + Fmt.dinheiro(cl.adicionais || 0) + ')'],
+      ['Custo acumulado', b.custo_acumulado === null ? '—' : Fmt.dinheiro(b.custo_acumulado)],
+      b.dias ? ['Dias no rebanho · custeio por dia', b.dias + ' · ' + UI.valorInd(b.custo_diario, Fmt.dinheiro).texto] : null,
+      b.receitas ? ['Receitas', Fmt.dinheiro(b.receitas)] : null, b.despesas_venda ? ['Despesas de venda', Fmt.dinheiro(b.despesas_venda)] : null,
+      ['Resultado', b.resultado && b.resultado.valor !== null ? Fmt.dinheiro(b.resultado.valor) : '— (' + ((b.resultado && b.resultado.mensagem) || Fmt.rotulo('MOTIVO', 'DADOS_INSUFICIENTES')) + ')'],
+      ma.valor !== null && ma.valor !== undefined ? ['Margem por arroba', Fmt.dinheiro(ma.valor) + ' (' + Fmt.numero(ma.arrobas, 2) + ' @' + (ma.estimado ? ', estimada' : '') + ')'] : null,
+    ].filter(Boolean)));
+    caixa.appendChild((b.lancamentos || []).length ? UI.tabela({ id: 'lancamentos-animal', rotulo: 'Lançamentos do animal', linhas: b.lancamentos, chave: function (x) { return x.financial_id; },
+      colunas: [
+        { id: 'event_date', rotulo: 'Data', formatar: function (x) { return Fmt.data(x.event_date); } },
+        { id: 'descricao', rotulo: 'Lançamento', formatar: function (x) { var r = 'evento/' + x.event_id; return x.event_id ? h('a', { class: 'botao botao-texto', href: Roteador.href(r), dataset: { rota: r } }, x.descricao || x.conta_nome || 'lançamento') : (x.descricao || '—'); } },
+        { id: 'natureza', rotulo: 'Natureza', valor: function (x) { return Fmt.rotulo('NATUREZA', x.natureza); } },
+        { id: 'criterio', rotulo: 'Divisão', valor: function (x) { return Fmt.rotulo('CRITERIO_RATEIO', x.criterio); } },
+        { id: 'valor_lancamento', rotulo: 'Valor do lançamento', num: true, formatar: function (x) { return Fmt.dinheiro(x.valor_lancamento); } },
+        { id: 'valor_alocado', rotulo: 'Deste animal', num: true, formatar: function (x) { return Fmt.dinheiro(x.valor_alocado); } },
+      ] }).el : UI.nota('Nenhum lançamento atribuído a este animal.', 'info'));
+    if (b.lancamentos_anteriores && b.desde) caixa.appendChild(UI.nota('Os totais e o resultado são desta passagem pela fazenda, desde ' + Fmt.data(b.desde) + '. Os lançamentos de passagens anteriores aparecem na lista, mas ficam fora das contas.', 'info'));
+    if (Store.modulo('FINANCEIRO')) caixa.appendChild(h('p', null, h('a', { class: 'botao botao-texto', href: Roteador.href('financeiro/custos'), dataset: { rota: 'financeiro/custos' } }, 'Ver o custo de todos os animais')));
+    return caixa;
+  }
+  /**
+   * Bloco F (08, seção 3): a carência de hoje, as próximas doses (atrasadas, próximas e em dia, pela agenda do servidor) e
+   * todos os registros sanitários, do mais recente ao mais antigo, com o custo que coube ao animal pelas alocações.
+   */
+  function blocoSanitario(f, a) {
+    var b = f.sanitario || {};
+    var caixa = h('div', { dataset: { blocoSanitario: '1' } });
+    if (b.entregue === false) { caixa.appendChild(UI.nota(b.mensagem, 'info')); return caixa; }
+    if (b.carencia) caixa.appendChild(UI.nota('Em carência até ' + Fmt.data(b.carencia.fim) + (b.carencia.nome_produto ? ' (' + b.carencia.nome_produto + ', aplicado em ' + Fmt.data(b.carencia.data_aplicacao) + ')' : '') + ': não pode ir para abate antes disso.', 'aviso', null));
+    var prox = b.proximas || [];
+    if (prox.length) caixa.appendChild(h('ul', { class: 'lista-simples', 'aria-label': 'Próximas doses', dataset: { proximasDoses: String(prox.length) } }, prox.map(function (p) {
+      var quando = p.situacao === 'VENCIDA' ? 'atrasada desde ' + Fmt.data(p.vencimento) : (p.situacao === 'PROXIMA' ? 'vence em ' : 'prevista para ') + Fmt.data(p.vencimento);
+      return h('li', { dataset: { situacao: p.situacao } }, h('span', { class: 'dado', text: p.nome || Fmt.rotulo('PROCEDIMENTO', p.tipo_procedimento) }), ' · ' + Fmt.rotulo('SITUACAO_AGENDA', p.situacao) + ': ' + quando);
+    })));
+    var itens = b.itens || [];
+    if (!itens.length) { caixa.appendChild(UI.nota('Nenhum registro sanitário.', 'info')); return caixa; }
+    caixa.appendChild(UI.tabela({ id: 'sanidade-animal', rotulo: 'Registros sanitários do animal', linhas: itens, chave: function (x) { return x.event_id; },
+      colunas: [
+        { id: 'data', rotulo: 'Data', valor: function (x) { return x.data; }, formatar: function (x) { var r = 'evento/' + x.event_id; return h('a', { class: 'botao botao-texto', href: Roteador.href(r), dataset: { rota: r } }, Fmt.data(x.data)); } },
+        { id: 'procedimento', rotulo: 'O que foi feito', valor: function (x) { return Fmt.rotulo('PROCEDIMENTO', x.tipo_procedimento) + (x.protocolo_nome ? ' · ' + x.protocolo_nome : ''); } },
+        { id: 'produto', rotulo: 'Produto ou diagnóstico', valor: function (x) { return [x.nome_produto, x.diagnostico, x.motivo, x.resultado_exame ? 'resultado: ' + x.resultado_exame : null].filter(Boolean).join(' · ') || '—'; } },
+        { id: 'dose', rotulo: 'Dose', num: true, valor: function (x) { return x.dose; }, formatar: function (x) { return x.dose === null ? '—' : Fmt.numero(x.dose, Fmt.casas(x.dose)) + ' ' + (x.unidade_dose || ''); } },
+        { id: 'carencia', rotulo: 'Carência até', valor: function (x) { return x.data_fim_carencia; }, formatar: function (x) { return x.data_fim_carencia ? Fmt.data(x.data_fim_carencia) : '—'; } },
+        { id: 'proxima', rotulo: 'Próxima', valor: function (x) { return x.data_proxima_aplicacao; }, formatar: function (x) { return x.data_proxima_aplicacao ? Fmt.data(x.data_proxima_aplicacao) : '—'; } },
+        { id: 'custo', rotulo: 'Custo deste animal', num: true, valor: function (x) { return x.custo; }, formatar: function (x) { return x.custo === null ? '—' : Fmt.dinheiro(x.custo); } },
+      ] }).el);
+    if (b.custo_total !== null && b.custo_total !== undefined) caixa.appendChild(UI.pares([['Custo sanitário do animal', Fmt.dinheiro(b.custo_total)]]));
+    return caixa;
+  }
+  /** Bloco G (08, seção 3): a ficha reprodutiva vem da tela de reprodução, pedida sob demanda (o servidor já calculou tudo). */
+  function blocoReproducao(f) {
+    var caixa = h('div', { dataset: { blocoReproducao: '1' } }, UI.carregando('Abrindo a ficha reprodutiva…'));
+    function abrir() {
+      Modulos.carregar('Reproduction').then(function () { Util.limpar(caixa); caixa.appendChild(TelaReproducao.blocoFicha(f)); },
+        // Outra versão do app no servidor: pedir a tela de novo dá o mesmo erro; o caminho é recarregar a página.
+        function (e) { Util.limpar(caixa); caixa.appendChild(UI.estadoErro(e, { acao: e.recarregar ? App.acaoRecarregar('Recarregar a página') : { texto: 'Tentar de novo', aoClicar: abrir } })); });
+    }
+    abrir();
+    return caixa;
+  }
+  /**
+   * Bloco E (08, seção 3): a curva em SVG próprio (pesos medidos cheios, estimados vazios, projeção tracejada "Estimativa")
+   * e a tabela com ganho, dias, GMD e variação de cada pesagem contra a individual anterior. Tudo calculado no servidor
+   * (WeightService): a tela só mostra.
+   */
+  function blocoPeso(f) {
+    var b = f.peso || {};
+    var caixa = h('div', { dataset: { blocoPeso: '1' } });
+    if (b.entregue === false) { caixa.appendChild(UI.nota(b.mensagem, 'info')); return caixa; }
+    if (b.externo) { caixa.appendChild(UI.nota('Animal de fora do rebanho: não tem pesagens.', 'info')); return caixa; }
+    var motivo = function (ind) { return '— (' + ((ind && ind.explicacao) || Fmt.rotulo('MOTIVO', (ind && ind.motivo) || 'DADOS_INSUFICIENTES')) + ')'; };
+    var comData = function (ind) { return ind && ind.valor !== null && ind.valor !== undefined ? Fmt.peso(ind.valor) + (ind.data ? ' em ' + Fmt.data(ind.data) : '') : motivo(ind); };
+    var pa = b.peso_atual || {};
+    var p = b.projecao || {};
+    caixa.appendChild(UI.pares([
+      ['Peso atual', pa.valor !== null && pa.valor !== undefined ? Fmt.peso(pa.valor) + ' em ' + Fmt.data(pa.data) + ' (' + Fmt.rotulo('METODO_PESAGEM', pa.metodo).toLowerCase() + (pa.estimado ? ', estimado' : '') + ')' : '— (nunca pesado)'],
+      ['Peso ao nascer', comData(b.peso_ao_nascer)], ['Peso à desmama', comData(b.peso_desmama)],
+      ['Ganho no período', b.ganho_acumulado && b.ganho_acumulado.valor !== null ? Fmt.numero(b.ganho_acumulado.valor, 1) + ' kg em ' + b.ganho_acumulado.dias + ' dias' : motivo(b.ganho_acumulado)],
+      ['Ganho médio diário', b.gmd_periodo && b.gmd_periodo.valor !== null ? Fmt.numero(b.gmd_periodo.valor, 3) + ' kg/dia' : motivo(b.gmd_periodo)],
+      ['Peso estimado hoje', p.hoje ? Fmt.peso(p.hoje.peso_kg) + ' (estimativa: ' + Fmt.numero(p.gmd_referencia_kg_dia, 3) + ' kg/dia desde ' + Fmt.data(p.base.data) + ')' : '— (' + (p.explicacao_hoje || p.explicacao || 'sem estimativa') + ')'],
+    ]));
+    var serie = b.serie || [];
+    if (!serie.length) { caixa.appendChild(UI.nota('Nenhuma pesagem registrada.', 'info')); return caixa; }
+    caixa.appendChild(UI.curvaPeso({ titulo: 'Curva de peso', series: [{ nome: 'Peso', pontos: serie.map(function (x) { return { data: x.data, peso_kg: x.peso_kg, estimado: x.estimado }; }), nascer: b.ponto_nascer_estimado, projecao: p.valor ? p : null }] }));
+    var porAte = {};
+    (b.intervalos || []).forEach(function (v) { porAte[v.weight_ate] = v; });
+    caixa.appendChild(UI.tabela({ id: 'pesagens-animal', rotulo: 'Pesagens do animal', linhas: serie.slice().reverse(), chave: function (x) { return x.weight_id; },
+      colunas: [
+        { id: 'data', rotulo: 'Data', valor: function (x) { return x.data; }, formatar: function (x) { var r = 'evento/' + x.event_id; return h('a', { class: 'botao botao-texto', href: Roteador.href(r), dataset: { rota: r } }, Fmt.data(x.data)); } },
+        { id: 'peso', rotulo: 'Peso', num: true, valor: function (x) { return x.peso_kg; }, formatar: function (x) { return Fmt.peso(x.peso_kg); } },
+        { id: 'como', rotulo: 'Como', valor: function (x) { return Fmt.rotulo('METODO_PESAGEM', x.metodo) + ' · ' + Fmt.rotulo('TIPO_PESAGEM', x.tipo) + (x.jejum ? ' · jejum' : '') + (x.estimado ? ' (estimado)' : ''); } },
+        { id: 'ganho', rotulo: 'Ganho', num: true, valor: function (x) { var v = porAte[x.weight_id]; return v ? v.ganho_kg : null; }, formatar: function (x) { var v = porAte[x.weight_id]; return v ? (v.ganho_kg > 0 ? '+' : '') + Fmt.numero(v.ganho_kg, 1) + ' kg' : x.individual ? '—' : 'fora do ganho'; } },
+        { id: 'dias', rotulo: 'Dias', num: true, valor: function (x) { var v = porAte[x.weight_id]; return v ? v.dias : null; } },
+        { id: 'gmd', rotulo: 'Ganho médio diário', num: true, valor: function (x) { var v = porAte[x.weight_id]; return v ? v.gmd_kg_dia : null; }, formatar: function (x) { var v = porAte[x.weight_id]; return v && v.gmd_kg_dia !== null ? Fmt.numero(v.gmd_kg_dia, 3) + ' kg/dia' : '—'; } },
+        { id: 'variacao', rotulo: 'Variação', num: true, valor: function (x) { var v = porAte[x.weight_id]; return v ? v.variacao_pct : null; }, formatar: function (x) { var v = porAte[x.weight_id]; return v && v.variacao_pct !== null ? Fmt.numero(v.variacao_pct, 2) + '%' : '—'; } },
+      ] }).el);
+    var porque = (b.intervalos || []).filter(function (v) { return v.explicacao; });
+    if (porque.length) caixa.appendChild(h('ul', { class: 'lista-simples suave', dataset: { porqueSemGmd: String(porque.length) } }, porque.map(function (v) { return h('li', { text: 'De ' + Fmt.data(v.de) + ' a ' + Fmt.data(v.ate) + ': sem ganho médio diário. ' + v.explicacao }); })));
+    if (serie.some(function (x) { return !x.individual; })) caixa.appendChild(UI.nota('Pesos estimados (estimativa visual, média do lote' + (b.parametros && !b.parametros.aceita_fita ? ', fita' : '') + ') aparecem na curva, mas ficam fora do ganho médio diário.', 'info'));
+    return caixa;
+  }
+  function blocoEventos(f) {
+    var itens = (f.eventos && f.eventos.itens) || [];
+    if (!itens.length) return UI.nota('Nenhum lançamento.', 'info');
+    var ul = h('ol', { class: 'linha-tempo', 'aria-label': 'Linha do tempo' });
+    itens.slice().reverse().forEach(function (e) {
+      var pasto = e.pasto_destino_id ? (Store.pasto(e.pasto_destino_id) || {}).nome : null;
+      var sit = !e.vigente ? (e.anulado_por ? 'não vale mais (estornado ou corrigido)' : Fmt.rotulo('STATUS_EVENTO', e.status).toLowerCase()) : 'vale';
+      var r = 'evento/' + e.event_id;
+      ul.appendChild(h('li', { class: e.vigente ? null : 'riscado', dataset: { evento: e.event_id } },
+        h('div', { class: 'linha-tempo-titulo dado', text: Fmt.data(e.event_date) + ' · ' + e.rotulo + (e.rotulo_subtipo ? ' · ' + e.rotulo_subtipo : '') }),
+        h('div', { class: 'suave', text: [pasto ? 'pasto: ' + pasto : null, e.pre_marco_zero ? 'histórico (antes do marco zero)' : null, sit].filter(Boolean).join(' · ') }),
+        // O que mudou em palavras (Store.valorLegivel, como no detalhe do evento e na trilha): nunca o código cru nem o identificador.
+        (e.ajustes || []).map(function (x) { return h('div', { text: rotuloCampoAjuste_(x.campo) + ': ' + Store.valorLegivel(x.campo, x.valor_anterior) + ' → ' + Store.valorLegivel(x.campo, x.valor_novo) + (x.justificativa ? ' (' + x.justificativa + ')' : '') }); }),
+        Telas.existe(r) ? h('a', { class: 'botao botao-texto', href: Roteador.href(r), dataset: { rota: r } }, 'Ver lançamento') : null));
+    });
+    return ul;
+  }
+  var ROTULO_CAMPO_AJUSTE = { categoria_manual_id: 'Categoria', pasto_atual_id: 'Pasto', brinco: 'Brinco' };
+  function rotuloCampoAjuste_(campo) { return ROTULO_CAMPO_AJUSTE[campo] || Fmt.rotuloOpcao('campo', campo); }
+  function blocoAnexos(f) {
+    var caixa = h('div');
+    var itens = (f.anexos && f.anexos.itens) || [];
+    var recarregar = function () { delete fichas[f.animal_id]; Roteador.ir('animal/' + f.animal_id + '/anexos', { forcar: true, substituir: true }); };
+    caixa.appendChild(h('div', { class: 'acoes' }, UI.botao('Adicionar foto ou documento', { tipo: 'primario', icone: 'registrar', aoClicar: function (ev) {
+      Anexos.enviar({ titulo: 'Foto ou documento', origem: ev.currentTarget, entidade: 'ANIMAIS', entity_id: f.animal_id, tipoPadrao: 'FOTO', fotoPrincipal: true, aoSalvar: recarregar });
+    } })));
+    if (!itens.length) { caixa.appendChild(UI.nota('Nenhuma foto ou documento.', 'info')); return caixa; }
+    caixa.appendChild(Anexos.lista(itens, {
+      podeRemover: true, aoMudar: recarregar, aviso: 'O arquivo sai da ficha e vai para a lixeira do Drive; o registro de que existiu fica na auditoria.',
+      detalhe: function (x) { return x.principal ? 'foto principal' : null; },
+      acoes: function (x) { return /^image\//.test(x.mime_type) && !x.principal ? [UI.botao('Usar como foto principal', { aoClicar: function (ev) { definirFoto(f.animal_id, x, ev.currentTarget, recarregar); } })] : []; },
+    }));
+    return caixa;
+  }
+  function definirFoto(animalId, x, botao, depois) {
+    var status = h('div');
+    botao.parentNode.appendChild(status);
+    Cadastro.envio({ rota: 'animal.editar', botao: botao, rotuloBotao: 'Usar como foto principal', status: status, aoSucesso: function () { UI.aviso('Foto principal trocada.', { tipo: 'ok' }); depois(); } })
+      .enviar({ animal_id: animalId, campos: { foto_anexo_id: x.anexo_id } });
+  }
+  function montarFicha(el, p) {
+    var id = p.id, aba = p.aba || 'resumo';
+    var vivo = true;
+    var a = Store.animal(id);
+    var titulo = h('h1', { class: 'brinco', text: a ? Store.rotuloAnimal(a) : 'Animal' });
+    var foto = h('div');
+    var sub = h('p', { class: 'suave', text: a ? Store.descricaoAnimal(a) : '' });
+    var acoes = h('div', { class: 'acoes', dataset: { acoesFicha: '1' } });
+    el.appendChild(h('div', { class: 'ficha-cabecalho' }, foto, h('div', null, titulo, sub)));
+    el.appendChild(acoes);
+    el.appendChild(UI.abas('Partes da ficha', ABAS.map(function (x) { return { rotulo: x[1], rota: 'animal/' + id + '/' + x[0], atual: x[0] === aba }; })));
+    var corpo = h('div', { dataset: { aba: aba } }, UI.carregando('Abrindo a ficha…'));
+    el.appendChild(corpo);
+    ficha(id, false).then(function (f) {
+      if (!vivo) return;
+      var g = f.geral;
+      var linha = a || { animal_id: id, situacao_cadastral: g.situacao_cadastral, brinco: g.brinco, codigo_interno: g.codigo_interno };
+      titulo.textContent = g.brinco || Store.rotuloAnimal(linha);
+      sub.textContent = [g.categoria ? g.categoria.nome : Fmt.rotulo('SEXO', g.sexo), Fmt.rotulo('SITUACAO_CADASTRAL', g.situacao_cadastral), g.codigo_interno].join(' · ');
+      if (g.foto_anexo_id) { var img = h('img', { class: 'ficha-foto', alt: 'Foto de ' + (g.brinco || g.codigo_interno) }); foto.appendChild(img); Anexos.carregarImagem(img, g.foto_anexo_id, true); }
+      var abrirEdicao = g.situacao_cadastral === 'ANULADO' ? null : function (ev) { editar(f, ev && ev.currentTarget); };
+      if (abrirEdicao) acoes.appendChild(UI.botao('Editar cadastro', { icone: 'editar', aoClicar: abrirEdicao }));
+      atalhosFicha(linha, id).forEach(function (b) { acoes.appendChild(b); });
+      Util.limpar(corpo);
+      if (aba === 'resumo') corpo.appendChild(blocoResumo(f, linha));
+      else if (aba === 'genealogia') corpo.appendChild(blocoGenealogia(f, abrirEdicao));
+      else if (aba === 'pastos') corpo.appendChild(UI.secao('Histórico de pastos', blocoPastos(f)));
+      else if (aba === 'peso') corpo.appendChild(UI.secao('Peso', blocoPeso(f), { dado: 'peso' }));
+      else if (aba === 'sanidade') corpo.appendChild(UI.secao('Sanidade', blocoSanitario(f, linha), { dado: 'sanidade' }));
+      else if (aba === 'reproducao') corpo.appendChild(UI.secao('Reprodução', blocoReproducao(f), { dado: 'reproducao' }));
+      else if (aba === 'financeiro') corpo.appendChild(UI.secao('Financeiro', blocoFinanceiro(f), { dado: 'financeiro' }));
+      else if (aba === 'eventos') corpo.appendChild(UI.secao('Linha do tempo', blocoEventos(f), { dado: 'linha-tempo' }));
+      else if (aba === 'anexos') corpo.appendChild(UI.secao('Fotos e documentos', blocoAnexos(f)));
+      else if (BLOCO_DA_ABA[aba]) {
+        var b = f[BLOCO_DA_ABA[aba]];
+        corpo.appendChild(UI.secao(ABAS.filter(function (x) { return x[0] === aba; })[0][1], b && b.entregue === false ? UI.nota(b.mensagem, 'info') : UI.nota('Sem registros.', 'info')));
+      } else corpo.appendChild(UI.estadoErro({ code: 'NOT_FOUND', message: 'Esta parte da ficha não existe.' }));
+    }, function (e) {
+      if (!vivo) return;
+      Util.limpar(corpo);
+      corpo.appendChild(UI.estadoErro(e, { acao: { texto: 'Voltar ao rebanho', aoClicar: function () { Roteador.ir('rebanho'); } } }));
+    });
+    return function () { vivo = false; };
+  }
+  /** Abre a listagem com um filtro (atalho do início: "sem brinco", "sem pasto", "sem categoria"). */
+  function abrirCom(f) {
+    filtros = { texto: '', pasto: '', sexo: '', categoria: '', situacao: 'ATIVO', faixa: '', atalho: '' };
+    Object.keys(f || {}).forEach(function (k) { filtros[k] = f[k]; });
+    Roteador.ir('rebanho', { forcar: true });
+  }
+  Telas.registrar('rebanho', { titulo: 'Rebanho', modulo: 'REBANHO', montar: montarLista });
+  Telas.registrar('animal/:id/:aba?', { titulo: 'Ficha do animal', modulo: 'REBANHO', montar: montarFicha });
+  return { filtrar: filtrar, faixas: faixas, COLUNAS: COLUNAS, linhasCsv: linhasCsv, abrirCom: abrirCom, filtros: function () { return Util.clonar(filtros); }, editar: editar, ficha: ficha, comoEntrou: comoEntrou };
+})();
+</script>
